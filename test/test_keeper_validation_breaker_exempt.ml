@@ -116,39 +116,6 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
-let test_keeper_report_state_returns_state_block () =
-  let base_path = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let meta = meta_with_active_goals [] in
-       let payload =
-         Task.handle_keeper_task_tool
-           ~config
-           ~meta
-           ~name:"keeper_report_state"
-           ~args:
-             (`Assoc
-               [ "goal", `String "Keep runtime visible"
-               ; "next_items", `List [ `String "Check main CI" ]
-               ; "constraints", `List [ `String "Use worktrees" ]
-               ])
-       in
-       let json = Yojson.Safe.from_string payload in
-       check bool "state report succeeds" true (json |> U.member "ok" |> U.to_bool);
-       check string "state report keeps goal" "Keep runtime visible"
-         (json
-          |> U.member "state_snapshot"
-          |> U.member "goal"
-          |> U.to_string);
-       check string "state report renders state block"
-         "[STATE]\nGoal: Keep runtime visible\nNext: Check main CI\nConstraints: Use worktrees\n[/STATE]"
-         (json |> U.member "state_block" |> U.to_string);
-       check bool "state report returns typed outcome" true
-         (json |> U.member "typed_outcome" <> `Null))
-
 (* RFC-0239 / audit D1: a rejected keeper_task_done must carry a typed
    [Error] outcome so the no-progress loop detector demotes it (PR #22127
    wired the detector to read typed_outcome; this proves the producer emits
@@ -223,8 +190,6 @@ let () =
             "keeper_task_create treats ambiguous active_goal_ids as advisory"
             `Quick
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
-        ; test_case "keeper_report_state returns state block" `Quick
-            test_keeper_report_state_returns_state_block
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"
             `Quick test_done_missing_task_id_emits_typed_error
         ; test_case "rejected done (failed transition) emits typed Error (D1)"

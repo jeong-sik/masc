@@ -21,6 +21,16 @@ let with_isolated_runtime_env f =
   with_env "MASC_BASE_PATH" None (fun () ->
     with_env "MASC_BASE_PATH_INPUT" None f)
 
+let with_default_runtime_id_hook f =
+  let previous = Atomic.get Workspace_hooks.get_default_runtime_id_fn in
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.get_default_runtime_id_fn previous)
+    (fun () ->
+      Atomic.set Workspace_hooks.get_default_runtime_id_fn
+        (fun () -> "test-evaluator-runtime");
+      f ())
+
 let make_ctx base_path =
   let config = Workspace.default_config base_path in
   let agent_name = "telemetry-agent" in
@@ -53,6 +63,7 @@ let event_exists predicate config =
 let test_masc_transition_claim_done_emits_task_lifecycle () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_default_runtime_id_hook (fun () ->
   with_isolated_runtime_env (fun () ->
     let base_path =
       Filename.concat
@@ -99,7 +110,7 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
         ctx.config
     in
     Alcotest.(check bool) "claim emits Task_started" true started;
-    Alcotest.(check bool) "done/approve emits Task_completed" true completed)
+    Alcotest.(check bool) "done/approve emits Task_completed" true completed))
 
 let () =
   Alcotest.run "Telemetry_task_transition_10358"

@@ -103,6 +103,13 @@ val repository_resolution_of_path :
     resolution for [path]. Use this for access decisions so identity mismatches
     and repository-store load failures stay explicit and fail closed. *)
 
+val repository_resolution_of_path_from_catalog :
+  base_path:string -> path:string -> repository list -> repository_resolution
+(** [repository_resolution_of_path_from_catalog ~base_path ~path repos] is the
+    same resolver using a caller-supplied repository catalog. Use this for
+    display paths that resolve many sibling repositories in one request so they
+    do not reload [repositories.toml] once per row. *)
+
 val repository_id_of_path :
   base_path:string -> path:string -> repository_id option
 (** [repository_id_of_path ~base_path ~path] returns the repository ID whose

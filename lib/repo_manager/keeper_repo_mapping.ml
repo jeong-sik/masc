@@ -762,28 +762,16 @@ let unresolved_repository_segment_resolution ?repo_root ~segment repos =
   | Some mismatch -> Repository_identity_mismatch mismatch
   | None -> Repository segment
 
-let resolve_repository_id_segment ~base_path ?repo_root segment =
-  match Repo_store.load_all ~base_path with
-  | Error msg ->
-      Log.Misc.warn
-        "[KeeperRepoMapping] resolve_repository_id_segment: repo store load \
-         failed for segment %s — access denied fail-closed (error: %s)"
-        segment msg;
-      Repository_store_error msg
-  | Ok repos -> (
-      match
-        List.find_opt
-          (repository_matches_token ~base_path segment)
-          repos
-      with
-      | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
-      | None -> (
-          match Option.bind repo_root remote_origin_url_of_repo_root with
-          | None -> unresolved_repository_segment_resolution ?repo_root ~segment repos
-          | Some remote_url -> (
-              match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
-              | Some repo -> Repository repo.id
-              | None -> (
+let resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment repos =
+  match List.find_opt (repository_matches_token ~base_path segment) repos with
+  | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
+  | None -> (
+      match Option.bind repo_root remote_origin_url_of_repo_root with
+      | None -> unresolved_repository_segment_resolution ?repo_root ~segment repos
+      | Some remote_url -> (
+          match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
+          | Some repo -> Repository repo.id
+          | None -> (
               match List.find_opt (repository_matches_remote_url ~remote_url) repos with
               | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
               | None -> (
@@ -794,8 +782,20 @@ let resolve_repository_id_segment ~base_path ?repo_root segment =
                   with
                   | Some mismatch -> Repository_identity_mismatch mismatch
                   | None ->
-                      unresolved_repository_segment_resolution ?repo_root
-                        ~segment repos)))))
+                    unresolved_repository_segment_resolution ?repo_root
+                      ~segment repos))))
+;;
+
+let resolve_repository_id_segment ~base_path ?repo_root segment =
+  match Repo_store.load_all ~base_path with
+  | Error msg ->
+    Log.Misc.warn
+      "[KeeperRepoMapping] resolve_repository_id_segment: repo store load \
+       failed for segment %s — access denied fail-closed (error: %s)"
+      segment msg;
+    Repository_store_error msg
+  | Ok repos ->
+    resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment repos
 
 (** [path_under_repo ~base_path repo path] returns [true] when [path]
     is equal to or strictly under [repo]'s resolved local_path. *)
@@ -811,25 +811,31 @@ let path_under_repo ~base_path repo path =
     declared repository whose URL basename contradicts its declared identity.
     Repository store load failures remain explicit so access callers can deny
     instead of treating an unknown repository catalog as "not a repository". *)
+let repository_resolution_of_path_from_catalog ~base_path ~path repos =
+  match playground_path_of_path ~base_path ~path with
+  | Some Playground_internal | Some Playground_repos_root -> No_repository
+  | Some (Playground_repo { segment; repo_root }) ->
+    resolve_repository_id_segment_from_catalog ~base_path ~repo_root segment repos
+  | None -> (
+    match List.find_opt (fun repo -> path_under_repo ~base_path repo path) repos with
+    | Some repo -> repository_resolution_of_repo ~segment:repo.id repo
+    | None -> No_repository)
+;;
+
 let repository_resolution_of_path ~base_path ~path =
   match playground_path_of_path ~base_path ~path with
   | Some Playground_internal | Some Playground_repos_root -> No_repository
   | Some (Playground_repo { segment; repo_root }) ->
-      resolve_repository_id_segment ~base_path ~repo_root segment
+    resolve_repository_id_segment ~base_path ~repo_root segment
   | None -> (
-  match Repo_store.load_all ~base_path with
-  | Error msg ->
+    match Repo_store.load_all ~base_path with
+    | Error msg ->
       Log.Misc.warn
         "[KeeperRepoMapping] repository_resolution_of_path: repo store load \
          failed for path %s — access denied fail-closed (error: %s)"
         path msg;
       Repository_store_error msg
-  | Ok repos -> (
-      match
-        List.find_opt (fun repo -> path_under_repo ~base_path repo path) repos
-      with
-      | Some repo -> repository_resolution_of_repo ~segment:repo.id repo
-      | None -> No_repository))
+    | Ok repos -> repository_resolution_of_path_from_catalog ~base_path ~path repos)
 
 (** [repository_id_of_path ~base_path ~path] returns the ID of the
     registered repository whose [local_path] contains [path], or [None]

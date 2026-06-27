@@ -349,9 +349,14 @@ let playground_repo_policy ~(base_path : string) ~(keeper_name : string) =
     r
   | r -> r
 
-let playground_repo_policy_repository_id ~base_path ~repo_name ~repo_path =
+let playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
+    ~repo_path =
+  match repo_catalog with
+  | Error msg -> Error (`Store_error msg)
+  | Ok repos -> (
   match
-    Keeper_repo_mapping.repository_resolution_of_path ~base_path ~path:repo_path
+    Keeper_repo_mapping.repository_resolution_of_path_from_catalog ~base_path
+      ~path:repo_path repos
   with
   | Keeper_repo_mapping.Repository repository_id -> Ok repository_id
   | Keeper_repo_mapping.No_repository -> Ok repo_name
@@ -359,10 +364,10 @@ let playground_repo_policy_repository_id ~base_path ~repo_name ~repo_path =
     Error
       (`Identity_mismatch
         "repository identity mismatch; access is denied fail-closed")
-  | Keeper_repo_mapping.Repository_store_error msg -> Error (`Store_error msg)
+  | Keeper_repo_mapping.Repository_store_error msg -> Error (`Store_error msg))
 
-let playground_repo_policy_fields ~base_path ~keeper_id policy ~repo_name
-      ~repo_path =
+let playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
+      ~repo_name ~repo_path =
   let field status allowed ?repository_id ?error () =
     let status_text = playground_policy_status_to_string status in
     let reason_fields =
@@ -397,7 +402,8 @@ let playground_repo_policy_fields ~base_path ~keeper_id policy ~repo_name
       field Policy_denied_missing_mapping false ()
   | Keeper_repo_mapping.Mapping_found mapping ->
       (match
-       playground_repo_policy_repository_id ~base_path ~repo_name ~repo_path
+       playground_repo_policy_repository_id ~base_path ~repo_catalog ~repo_name
+         ~repo_path
        with
        | Error (`Identity_mismatch msg) ->
          Keeper_repo_mapping.record_policy_decision ~keeper_id
@@ -421,11 +427,11 @@ let playground_repo_policy_fields ~base_path ~keeper_id policy ~repo_name
              Keeper_repo_mapping.Policy_decision_not_in_mapping;
            field Policy_denied_not_in_mapping false ~repository_id ()))
 
-let with_playground_repo_policy_fields ~base_path ~keeper_id policy ~repo_name
-      ~repo_path = function
+let with_playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
+      ~repo_name ~repo_path = function
   | `Assoc fields ->
-      playground_repo_policy_fields ~base_path ~keeper_id policy ~repo_name
-        ~repo_path
+      playground_repo_policy_fields ~base_path ~repo_catalog ~keeper_id policy
+        ~repo_name ~repo_path
       |> List.fold_left
            (fun fields (key, value) -> upsert_assoc key value fields)
            fields
@@ -554,6 +560,7 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
   let policy =
     playground_repo_policy ~base_path:config.base_path ~keeper_name:meta.name
   in
+  let repo_catalog = Repo_store.load_all ~base_path:config.base_path in
   let live_enriched_count = ref 0 in
   let cached =
     cached_playground_repo_entries playground_abs
@@ -569,11 +576,13 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
             enrich_playground_repo_from_git ~source:"git" ~repo_name:name
               ~repo_path repo
             |> with_playground_repo_policy_fields ~base_path:config.base_path
-                 ~keeper_id:meta.name policy ~repo_name:name ~repo_path)
+                 ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
+                 ~repo_path)
           else
             playground_repo_entry_json ~source:"cache" ~repo_name:name repo
             |> with_playground_repo_policy_fields ~base_path:config.base_path
-                 ~keeper_id:meta.name policy ~repo_name:name ~repo_path
+                 ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
+                 ~repo_path
       | None -> repo)
   in
   let cached_names = List.filter_map repo_name_of_json cached in
@@ -584,7 +593,7 @@ let playground_repos_json ~(config : Workspace.config) ~(meta : keeper_meta) =
       playground_repo_entry_json ~source:"filesystem" ~repo_name:name
         (`Assoc [])
       |> with_playground_repo_policy_fields ~base_path:config.base_path
-           ~keeper_id:meta.name policy ~repo_name:name
+           ~repo_catalog ~keeper_id:meta.name policy ~repo_name:name
            ~repo_path:(Filename.concat repos_dir name))
   in
   `List (cached @ fs_entries)

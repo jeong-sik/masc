@@ -619,7 +619,12 @@ let compaction_snapshot_of_manifest_row ~keeper_id (row : Keeper_runtime_manifes
 ;;
 
 let compaction_snapshot_manifest_sort_value (row : Keeper_runtime_manifest.t) =
-  Option.value ~default:0.0 (Masc_domain.parse_iso8601_opt row.ts)
+  match Masc_domain.parse_iso8601_opt row.ts with
+  | Some ts -> ts
+  (* DET-OK: dashboard projection only. A malformed manifest timestamp is not
+     used for keeper policy; sorting it last keeps the response deterministic
+     while the row-level read_errors surface malformed JSON/shape issues. *)
+  | None -> 0.0
 ;;
 
 let keeper_meta_compaction_snapshot_json ~config ~keeper_id =

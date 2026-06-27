@@ -811,6 +811,22 @@ let paused_keeper_last_blocker_json paused_keepers_json name =
     | Some _ | None -> `Null)
   | _ -> `Null
 
+let redact_workspace_base_path ~base_path text =
+  match base_path with
+  | Some base_path when not (String.equal base_path "") ->
+      String_util.replace_substring ~needle:base_path ~by:"<workspace>" text
+  | Some _ | None -> text
+
+let public_health_failure_reason ~base_path ~keeper_name text =
+  let text = redact_workspace_base_path ~base_path text in
+  match base_path with
+  | Some base_path ->
+      let redaction =
+        Keeper_secret_redaction.snapshot ~base_path ~keeper_name
+      in
+      Keeper_secret_redaction.redact_text redaction text
+  | None -> Observability_redact.redact_text text
+
 let blocked_keeper_detail_json
     ?base_path
     ?phase
@@ -845,15 +861,18 @@ let blocked_keeper_detail_json
     | None -> phase
   in
   let registry_last_failure_reason =
-    match registry_entry with
-    | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
-        Some (Keeper_registry.failure_reason_to_string reason)
-    | Some { Keeper_registry.last_failure_reason = None; crash_log; _ }
-      when Option.value
-             ~default:false
-             (Option.map phase_supports_crash_log_failure_reason phase) ->
-        latest_crash_log_reason crash_log
-    | Some { Keeper_registry.last_failure_reason = None; _ } | None -> None
+    let raw =
+      match registry_entry with
+      | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
+          Some (Keeper_registry.failure_reason_to_string reason)
+      | Some { Keeper_registry.last_failure_reason = None; crash_log; _ }
+        when Option.value
+               ~default:false
+               (Option.map phase_supports_crash_log_failure_reason phase) ->
+          latest_crash_log_reason crash_log
+      | Some { Keeper_registry.last_failure_reason = None; _ } | None -> None
+    in
+    Option.map (public_health_failure_reason ~base_path ~keeper_name:name) raw
   in
   let reason =
     if is_paused then Durable_paused_autoboot_enabled

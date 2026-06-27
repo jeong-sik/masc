@@ -266,10 +266,13 @@ let backend_config_for base_path =
     Backend_types.pubsub_max_messages = Backend_types.pubsub_max_messages;
   }
 
+let memory_backend_fallback (cfg : Backend_types.config) =
+  Memory (Backend.Memory.get_or_create ~base_path:cfg.Backend_types.base_path)
+
 let create_backend cfg =
   let filesystem_fallback reason =
     Log.Backend.warn "%s Falling back to Memory backend." reason;
-    Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.Backend_types.base_path))
+    Ok (memory_backend_fallback cfg)
   in
   let fs_usable fs =
     try
@@ -354,7 +357,7 @@ let build_default_config base_path =
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to Memory."
           (Backend_types.show_error e);
-        Memory (Backend.Memory.get_or_create ~base_path:backend_config.base_path)
+        memory_backend_fallback backend_config
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)
@@ -393,7 +396,7 @@ let default_config_eio ~sw ?(on_backend_ready = fun _backend -> ()) base_path =
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to Memory."
           (Backend_types.show_error e);
-        Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)
+        memory_backend_fallback backend_config
   in
   {
     base_path = resolved_path;

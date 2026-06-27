@@ -2190,6 +2190,81 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
               true
               (row |> member "operator_action_confirm_required" |> to_bool))))
 
+let test_health_json_redacts_registry_failure_reason () =
+  with_temp_dir "health-redacts-registry-failure-reason" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "secret-failing";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let failing =
+          make_keeper_meta ~name:"secret-failing" ~trace_id:"trace-secret" ()
+        in
+        write_keeper_meta_exn config failing;
+        with_running_keeper_metas config [ failing ] (fun () ->
+          let base_path = config.Workspace.base_path in
+          let keeper_secret = "keeper-secret-value" in
+          let secret_env_dir =
+            Filename.concat
+              (Keeper_secret_projection.secret_root ~base_path ~keeper_name:failing.name)
+              "env"
+          in
+          mkdir_p secret_env_dir;
+          write_file (Filename.concat secret_env_dir "TOKEN") keeper_secret;
+          mark_keeper_failing config failing;
+          Keeper_registry.set_failure_reason
+            ~base_path
+            failing.name
+            (Some
+               (Keeper_registry.Provider_runtime_error
+                  {
+                    code = "provider_failed";
+                    detail =
+                      Printf.sprintf
+                        "Bearer ghp_healthsecret %s path=%s"
+                        keeper_secret
+                        (Filename.concat base_path "private/token.txt");
+                    provider_id = Some "provider-internal";
+                    http_status = Some 500;
+                    runtime_id = Some "runtime-internal";
+                    reason = None;
+                  }));
+          terminate_keeper_fiber config failing;
+          exhaust_keeper_restart_budget config failing;
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          let failing_row =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find_opt (fun row ->
+                 String.equal
+                   "secret-failing"
+                   (row |> member "keeper" |> to_string))
+          in
+          match failing_row with
+          | None -> Alcotest.fail "missing secret-failing blocked row"
+          | Some row ->
+              let reason = row |> member "last_failure_reason" |> to_string in
+              Alcotest.(check bool) "redacts bearer token" false
+                (contains_substring reason "ghp_healthsecret");
+              Alcotest.(check bool) "redacts exact keeper secret" false
+                (contains_substring reason keeper_secret);
+              Alcotest.(check bool) "redacts workspace base path" false
+                (contains_substring reason base_path);
+              Alcotest.(check bool) "retains explicit redaction marker" true
+                (contains_substring reason "[REDACTED]");
+              Alcotest.(check bool) "retains workspace placeholder" true
+                (contains_substring reason "<workspace>"))))
+
 let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
   with_temp_dir "health-restored-crash-log-keeper" (fun dir ->
     let config_root = make_config_root dir in
@@ -3830,6 +3905,9 @@ let () =
           Alcotest.test_case
             "health json explains nonrecoverable failing keeper"
             `Quick test_health_json_explains_nonrecoverable_failing_keeper;
+          Alcotest.test_case
+            "health json redacts registry failure reason"
+            `Quick test_health_json_redacts_registry_failure_reason;
           Alcotest.test_case
             "health json restores crash-log failure reason"
             `Quick

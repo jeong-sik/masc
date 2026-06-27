@@ -579,6 +579,41 @@ let test_default_config_memory_fallback_isolated_by_base_path () =
         []
         (Workspace_utils.list_dir cfg_second second_workers))
 
+let test_memory_backend_fallback_keys_by_backend_base_path () =
+  let first = Filename.temp_dir "workspace-utils-memory-fallback-first" "" in
+  let second = Filename.temp_dir "workspace-utils-memory-fallback-second" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      rm_rf first;
+      rm_rf second)
+    (fun () ->
+      let first_backend =
+        Workspace_utils.memory_backend_fallback
+          (Workspace_utils.backend_config_for first)
+      in
+      let second_backend =
+        Workspace_utils.memory_backend_fallback
+          (Workspace_utils.backend_config_for second)
+      in
+      match first_backend, second_backend with
+      | Workspace_utils.Memory first_memory, Workspace_utils.Memory second_memory ->
+          let key = "raw-shared-key" in
+          (match Backend.Memory.set first_memory key "first" with
+           | Ok () -> ()
+           | Error err ->
+               fail
+                 ("first memory set failed: " ^ Backend_types.show_error err));
+          (match Backend.Memory.get second_memory key with
+           | Error (Backend_types.NotFound _) -> ()
+           | Ok value ->
+               fail
+                 ("second fallback backend leaked raw key with value: " ^ value)
+           | Error err ->
+               fail
+                 ("second memory get failed: " ^ Backend_types.show_error err))
+      | FileSystem _, _ | _, FileSystem _ ->
+          fail "memory_backend_fallback returned filesystem backend")
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -695,5 +730,7 @@ let () =
         test_list_dir_prefers_backend_for_memory_keys;
       test_case "memory fallback isolated by base path" `Quick
         test_default_config_memory_fallback_isolated_by_base_path;
+      test_case "memory fallback keys by backend base path" `Quick
+        test_memory_backend_fallback_keys_by_backend_base_path;
     ];
   ]

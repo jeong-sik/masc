@@ -5,6 +5,9 @@ open Keeper_memory_os_types
 type gc_report =
   { total_input : int
   ; ttl_expired : int
+  ; ttl_expired_ephemeral : int
+  ; ttl_expired_non_ephemeral : int
+  ; ttl_expired_by_category : (string * int) list
   ; dedup_removed : int
   ; written : int
   ; dry_run : bool

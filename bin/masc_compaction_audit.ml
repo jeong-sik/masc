@@ -15,7 +15,7 @@ Options:
   --keeper NAME        filter to a single keeper/agent name
   --orphans-only       show only Orphan_start / Orphan_complete rows
   --prune              run retention sweep (default 14 days) and exit
-  --retention-days N   days to retain (used by --prune; default 14,
+  --retention-days N   days to retain, 1..3650 (used by --prune; default 14,
                        env override: MASC_COMPACTION_AUDIT_RETENTION_DAYS)
   -h, --help           print this help
 
@@ -23,6 +23,8 @@ Exit codes:
   0  listing succeeded (rows may be empty)
   1  invalid argument / IO error
 |}
+
+module KCA = Masc.Keeper_compact_audit
 
 let error msg =
   prerr_endline msg;
@@ -32,9 +34,9 @@ let parse_date_arg name s =
   match String.length s with
   | 10 ->
     (match
-       int_of_string_opt (String.sub s 0 4),
-       int_of_string_opt (String.sub s 5 2),
-       int_of_string_opt (String.sub s 8 2)
+       ( int_of_string_opt (String.sub s 0 4),
+         int_of_string_opt (String.sub s 5 2),
+         int_of_string_opt (String.sub s 8 2) )
      with
      | Some year, Some mon, Some day ->
        let tm : Unix.tm = {
@@ -47,20 +49,15 @@ let parse_date_arg name s =
      | _ -> error (Printf.sprintf "invalid %s: %S (expected YYYY-MM-DD)" name s))
   | _ -> error (Printf.sprintf "invalid %s: %S (expected YYYY-MM-DD)" name s)
 
-let base_path () =
-  (* sb/main_eio uses Masc.Env_config.base_path.
-     Replicating the env lookup avoids pulling heavy deps into this CLI. *)
-  match Sys.getenv_opt "MASC_BASE_PATH" with
-  | Some p when String.trim p <> "" -> p
-  | _ -> Sys.getcwd ()
+let base_path = Config_dir_resolver.base_path_or_cwd
 
 let retention_from_env default =
-  match Sys.getenv_opt "MASC_COMPACTION_AUDIT_RETENTION_DAYS" with
-  | Some s ->
-    (match int_of_string_opt s with
-     | Some n when n >= 1 && n <= 365 -> n
-     | _ -> default)
-  | None -> default
+  KCA.resolve_retention_outcome ~default |> KCA.effective_days_of_outcome
+
+let parse_retention_days_arg raw =
+  match int_of_string_opt (String.trim raw) with
+  | Some n when n >= KCA.retention_min_days && n <= KCA.retention_max_days -> n
+  | _ -> error (Printf.sprintf "invalid --retention-days: %s" raw)
 
 (* ── Argument parsing ─────────────────────────────────────────── *)
 
@@ -94,10 +91,8 @@ let rec parse_args argv i cfg =
     | "--prune" ->
       parse_args argv (i + 1) { cfg with prune = true }
     | "--retention-days" when i + 1 < Array.length argv ->
-      (match int_of_string_opt argv.(i+1) with
-       | Some n when n >= 1 && n <= 365 ->
-         parse_args argv (i + 2) { cfg with retention_days = n }
-       | _ -> error (Printf.sprintf "invalid --retention-days: %s" argv.(i+1)))
+      parse_args argv (i + 2)
+        { cfg with retention_days = parse_retention_days_arg argv.(i+1) }
     | arg -> error (Printf.sprintf "unknown argument: %S\n\n%s" arg usage)
 
 let initial_cfg () = {
@@ -116,8 +111,6 @@ let format_ts ts =
   Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
     (tm.tm_year + 1900) (tm.tm_mon + 1) tm.tm_mday
     tm.tm_hour tm.tm_min tm.tm_sec
-
-module KCA = Masc.Keeper_compact_audit
 
 let print_paired ~(pre : KCA.start_record) ~(post : KCA.complete_record) =
   let delta = post.before_tokens - post.after_tokens in

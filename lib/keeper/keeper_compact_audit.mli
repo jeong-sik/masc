@@ -81,6 +81,22 @@ val persist_complete
 
 (** {1 Retention} *)
 
+(** Accepted retention-day bounds for
+    [MASC_COMPACTION_AUDIT_RETENTION_DAYS] and manual prune arguments. *)
+val retention_min_days : int
+val retention_max_days : int
+
+(** Resolve [MASC_COMPACTION_AUDIT_RETENTION_DAYS] without side effects,
+    returning the typed outcome. Reads from process env at call time. *)
+val resolve_retention_outcome
+  :  default:int
+  -> Keeper_compact_audit_retention_outcome.t
+
+(** Extract the effective day count from a retention resolution outcome. *)
+val effective_days_of_outcome
+  :  Keeper_compact_audit_retention_outcome.t
+  -> int
+
 (** Delete [.jsonl] day-files in [{base_path}/data/harness-compact/]
     whose date is older than [retention_days] days ago. Thin wrapper
     over {!Dated_jsonl.prune}; returns the count of files deleted. *)

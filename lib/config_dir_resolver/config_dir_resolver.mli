@@ -57,6 +57,9 @@ val current_working_dir : unit -> string
 (** Current working directory, falling back to an absolute host root when the
     process cwd has been deleted. *)
 
+val base_path_or_cwd : unit -> string
+(** [MASC_BASE_PATH] from host config, or {!current_working_dir} when unset. *)
+
 val resolve : unit -> resolution
 (** Cached resolution. First call evaluates, subsequent calls return the cache. *)
 

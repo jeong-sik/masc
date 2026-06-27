@@ -356,6 +356,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 1,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 2,
       totalRuntimes: 2,
@@ -388,6 +389,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 0,
       pausedKeepers: 1,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
       totalRuntimes: 1,
@@ -418,6 +420,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
       totalRuntimes: 1,
@@ -449,6 +452,7 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 1,
       pausedKeepers: 0,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
       totalRuntimes: 1,
@@ -476,6 +480,7 @@ describe('countRuntimeKinds', () => {
       agents: 1,
       keepers: 1,
       pausedKeepers: 0,
+      transientKeepers: 0,
       offlineKeepers: 0,
       keeperRows: 1,
       totalRuntimes: 2,
@@ -513,9 +518,95 @@ describe('countRuntimeKinds', () => {
       agents: 0,
       keepers: 2,
       pausedKeepers: 6,
+      transientKeepers: 0,
       offlineKeepers: 9,
       keeperRows: 17,
       totalRuntimes: 17,
+    })
+  })
+
+  it('does not absorb transient keeper rows into offline counts', () => {
+    const result = countRuntimeKinds(
+      [],
+      [
+        {
+          name: 'runner',
+          status: 'active',
+          phase: 'Running',
+          pipeline_stage: 'idle',
+          keepalive_running: true,
+        } as Keeper,
+        {
+          name: 'compact',
+          status: 'busy',
+          phase: 'Compacting',
+          pipeline_stage: 'compacting',
+          keepalive_running: true,
+        } as Keeper,
+        {
+          name: 'handoff',
+          status: 'busy',
+          phase: 'HandingOff',
+          pipeline_stage: 'handoff',
+          keepalive_running: true,
+        } as Keeper,
+        {
+          name: 'paused',
+          status: 'paused',
+          phase: 'Paused',
+          pipeline_stage: 'paused',
+          paused: true,
+          keepalive_running: false,
+        } as Keeper,
+        {
+          name: 'offline',
+          status: 'offline',
+          phase: 'Offline',
+          pipeline_stage: 'offline',
+          keepalive_running: false,
+        } as Keeper,
+      ],
+    )
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 1,
+      pausedKeepers: 1,
+      transientKeepers: 2,
+      offlineKeepers: 1,
+      keeperRows: 5,
+      totalRuntimes: 5,
+    })
+  })
+
+  it('uses composite snapshots when counting transient keeper rows', () => {
+    const composite = makeCompositeSnapshot({
+      keeper: 'compact',
+      correlation_id: 'keeper:compact:1',
+      phase: 'compacting',
+    })
+    const result = countRuntimeKinds(
+      [],
+      [
+        {
+          name: 'compact',
+          status: 'active',
+          phase: 'Running',
+          pipeline_stage: 'idle',
+          keepalive_running: true,
+        } as Keeper,
+      ],
+      new Map([['compact', composite]]),
+    )
+
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 0,
+      pausedKeepers: 0,
+      transientKeepers: 1,
+      offlineKeepers: 0,
+      keeperRows: 1,
+      totalRuntimes: 1,
     })
   })
 })
@@ -712,6 +803,22 @@ describe('AgentRoster live-only cards', () => {
         name: 'gone', agent_name: 'keeper-gone-agent', status: 'offline',
         phase: 'Offline', pipeline_stage: 'offline', keepalive_running: false,
       } as Keeper,
+      {
+        name: 'compact', agent_name: 'keeper-compact-agent', status: 'busy',
+        phase: 'Compacting', pipeline_stage: 'compacting', keepalive_running: true,
+      } as Keeper,
+      {
+        name: 'handoff', agent_name: 'keeper-handoff-agent', status: 'busy',
+        phase: 'HandingOff', pipeline_stage: 'handoff', keepalive_running: true,
+      } as Keeper,
+      {
+        name: 'drain', agent_name: 'keeper-drain-agent', status: 'busy',
+        phase: 'Draining', pipeline_stage: 'draining', keepalive_running: true,
+      } as Keeper,
+      {
+        name: 'restart', agent_name: 'keeper-restart-agent', status: 'busy',
+        phase: 'Restarting', pipeline_stage: 'restarting', keepalive_running: true,
+      } as Keeper,
     ]
     agents.value = []
 
@@ -723,15 +830,26 @@ describe('AgentRoster live-only cards', () => {
     const rows = Array.from(
       container.querySelectorAll('[data-testid="keeper-operations-row"]'),
     ) as HTMLElement[]
-    expect(rows.length).toBe(3)
+    expect(rows.length).toBe(7)
     // every row carries a tone the rail CSS can paint
-    const valid = new Set(['ok', 'warn', 'bad', 'idle'])
+    // RFC-0295: `busy` joins the valid set after the RuntimeBand 5th-value
+    // extension; the CSS `[data-tone="busy"]` selectors in fleet.css are now
+    // reachable from a transient-phase keeper.
+    const valid = new Set(['ok', 'warn', 'bad', 'idle', 'busy'])
     expect(rows.every(r => valid.has(r.getAttribute('data-tone') ?? ''))).toBe(true)
     const toneByName = (name: string) =>
       rows.find(r => r.textContent?.includes(name))?.getAttribute('data-tone')
     // band → tone: paused=warn, offline=idle (the unambiguous bands)
     expect(toneByName('rester')).toBe('warn')
     expect(toneByName('gone')).toBe('idle')
+    for (const name of ['compact', 'handoff', 'drain', 'restart']) {
+      expect(toneByName(name)).toBe('busy')
+    }
+    const text = container.textContent ?? ''
+    expect(text).toContain('전이 중 · 4')
+    expect(text).toContain('전이 4')
+    expect(text).toContain('transient')
+    expect(text).toContain('오프라인 1')
   })
 
   it('does not show keeper boot hints on offline non-keeper agent rows', async () => {

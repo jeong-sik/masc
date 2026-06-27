@@ -46,7 +46,9 @@ val validate_paths :
   workdir:string ->
   Masc_exec.Shell_ir.t ->
   (unit, string) result
-(** Validate Shell IR path arguments through the keeper Shell IR facade. *)
+(** Validate Shell IR path arguments through the keeper Shell IR facade.
+    Direct Shell IR dispatch and Docker sandbox host-path validation share this
+    seam so both routes apply the same path jail. *)
 
 val tool_execute_command_context :
   ?allow_pipes:bool ->

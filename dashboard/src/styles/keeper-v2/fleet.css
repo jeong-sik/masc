@@ -44,6 +44,8 @@
 .fl-hpill b { font-family: var(--font-mono); font-weight: 600; color: var(--text-bright); }
 .fl-hpill.ok b { color: var(--status-ok); }
 .fl-hpill.warn b { color: var(--status-warn); }
+.fl-hpill.busy { border-color: color-mix(in oklab, var(--info) 38%, transparent); background: color-mix(in oklab, var(--info) 10%, var(--bg-card)); color: var(--info); }
+.fl-hpill.busy b { color: var(--info); }
 .fl-hpill.bad { border-color: color-mix(in oklab, var(--status-bad) 38%, transparent); background: color-mix(in oklab, var(--status-bad) 10%, var(--bg-card)); color: var(--status-bad); }
 .fl-hpill.bad b { color: var(--status-bad); }
 .fl-spacer { flex: 1; }

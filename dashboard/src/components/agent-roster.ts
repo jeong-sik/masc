@@ -73,7 +73,7 @@ import {
 import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
-import { fleetCompositeSnapshot } from '../composite-signals'
+import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
 
 type StatusFilter = 'all' | RuntimeBand
 
@@ -86,6 +86,7 @@ function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
     case 'attention': return '확인 필요'
     case 'paused': return '재개 대기'
     case 'offline': return isKeeper ? '기동 필요' : '연결 없음'
+    case 'transient': return '전이'
   }
 }
 
@@ -93,12 +94,15 @@ function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
 // Tone for the scannable per-row rail (keeper-v2 Fleet design: a left edge
 // keyed to runtime band so keeper state reads down a single column instead of
 // every row looking identical). Maps masc's RuntimeBand onto the v2 tone
-// vocabulary (ok/warn/bad/idle); the CSS in v2-monitoring.css paints the edge.
-const ROSTER_BAND_TONE: Record<RuntimeBand, 'ok' | 'warn' | 'bad' | 'idle'> = {
+// vocabulary (ok/warn/bad/busy/idle); the CSS in v2-monitoring.css paints the
+// edge. RFC-0295: `transient` resolves to `busy`, activating the previously
+// dead `[data-tone="busy"]` selectors in fleet.css.
+const ROSTER_BAND_TONE: Record<RuntimeBand, 'ok' | 'warn' | 'bad' | 'busy' | 'idle'> = {
   active: 'ok',
   attention: 'bad',
   paused: 'warn',
   offline: 'idle',
+  transient: 'busy',
 }
 
 // Legacy `tool_use` / `scheduled_autonomous` / `thinking` removed — the
@@ -305,9 +309,10 @@ export function rosterBlockerDisplay(
 
 // keeper-v2 Fleet skin (fleet.css .fl-*) helpers. The prototype keys every
 // chip / rail / aside-state on a 5-value tone vocabulary
-// (ok/warn/bad/busy/idle). masc's RuntimeBand collapses onto 4 of those via
-// ROSTER_BAND_TONE; the Korean tone label below is the same `FL_TONE_LABEL`
-// the prototype shipped, used for the aside "selected runtime" state line.
+// (ok/warn/bad/busy/idle). RFC-0295 brings masc's RuntimeBand to the same 5
+// values via ROSTER_BAND_TONE (transient → busy); the Korean tone label
+// below is the same `FL_TONE_LABEL` the prototype shipped, used for the
+// aside "selected runtime" state line.
 type FleetTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'
 
 const FL_TONE_LABEL: Record<FleetTone, string> = {
@@ -476,7 +481,19 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
   attention: { label: runtimeBandMeta('attention').label, description: runtimeBandMeta('attention').description },
   paused: { label: runtimeBandMeta('paused').label, description: runtimeBandMeta('paused').description },
   offline: { label: runtimeBandMeta('offline').label, description: runtimeBandMeta('offline').description },
+  // RFC-0295: `transient` joins the filter facets so the operator can drill
+  // into mid-compaction / mid-handoff keepers without losing the busy rail.
+  transient: { label: runtimeBandMeta('transient').label, description: runtimeBandMeta('transient').description },
 }
+
+const STATUS_CHIP_KEYS = [
+  'all',
+  'attention',
+  'transient',
+  'active',
+  'paused',
+  'offline',
+] as const satisfies readonly StatusFilter[]
 
 /**
  * Pure filter for agent roster rows.
@@ -650,19 +667,17 @@ function countAgentsByStatus(
     attention: 0,
     paused: 0,
     offline: 0,
+    // RFC-0295: keep parity with the 5-band facet so transient keepers
+    // appear under their own filter rather than being silently absorbed by
+    // `active`.
+    transient: 0,
   }
 
   for (const agent of agentList) {
     const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperLookup)
     // RFC-0135 PR-12: pass composite to band derivation so stale
     // blockers are demoted via SSOT instead of inflating attention.
-    const composite =
-      keeperRuntime && compositeByKeeperKey
-        ? compositeByKeeperKey.get(keeperRuntime.name)
-          ?? (typeof keeperRuntime.keeper_id === 'string'
-            ? compositeByKeeperKey.get(keeperRuntime.keeper_id) ?? null
-            : null)
-        : null
+    const composite = compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const band = runtimeBandMetaForAgent(agent, keeperRuntime, composite).key
     counts[band] += 1
   }
@@ -670,13 +685,35 @@ function countAgentsByStatus(
   return counts
 }
 
+function compositeSnapshotForKeeper(
+  keeper: Keeper | null | undefined,
+  compositeByKeeperKey: ReadonlyMap<string, KeeperCompositeSnapshot> | null,
+): KeeperCompositeSnapshot | null {
+  if (!keeper || !compositeByKeeperKey) return null
+  return compositeByKeeperKey.get(keeper.name)
+    ?? (typeof keeper.keeper_id === 'string'
+      ? compositeByKeeperKey.get(keeper.keeper_id) ?? null
+      : null)
+}
+
 export function countRuntimeKinds(
   agentList: Agent[],
   keeperList: Keeper[],
+  // RFC-0295: pass the fleet-wide composite snapshot map so the breakdown
+  // agrees with the per-row band computation (`liveRuntimeCounts`,
+  // `bandByAgent`). Without this, countRuntimeKinds and the chip/footer math
+  // would disagree on transient/attention whenever composite gates shift
+  // the band — a silent operator-visible count inconsistency.
+  compositeByKeeperKey?: ReadonlyMap<string, KeeperCompositeSnapshot> | null,
 ): {
   agents: number
   keepers: number
   pausedKeepers: number
+  // RFC-0295: transient band rows (Compacting/HandingOff/Draining/Restarting)
+  // are now part of the breakdown. Exposed so consumers can reconcile
+  // `keepers + pausedKeepers + transientKeepers + offlineKeepers` against
+  // `keeperRows` without guessing where the missing rows went.
+  transientKeepers: number
   offlineKeepers: number
   keeperRows: number
   totalRuntimes: number
@@ -691,9 +728,14 @@ export function countRuntimeKinds(
   // returned false, leaving the paused count stuck at 0.
   let pausedKeepers = 0
   let runningKeepers = 0
+  let transientKeepers = 0
   for (const row of allKeepers) {
     const keeper = findKeeperRuntimeForAgent(row, keeperLookup)
-    if (keeper && isKeeperPaused(keeper)) {
+    const composite = compositeSnapshotForKeeper(keeper, compositeByKeeperKey ?? null)
+    const band = keeper ? runtimeBandMetaForAgent(row, keeper, composite).key : null
+    if (band === 'transient') {
+      transientKeepers += 1
+    } else if (keeper && isKeeperPaused(keeper)) {
       pausedKeepers += 1
     } else if (keeperRowLooksRunning(keeper)) {
       runningKeepers += 1
@@ -706,7 +748,8 @@ export function countRuntimeKinds(
     agents: agentCount,
     keepers: runningKeepers,
     pausedKeepers,
-    offlineKeepers: Math.max(0, keeperRows - runningKeepers - pausedKeepers),
+    transientKeepers,
+    offlineKeepers: Math.max(0, keeperRows - runningKeepers - pausedKeepers - transientKeepers),
     keeperRows,
     totalRuntimes: rosterAgents.length,
   }
@@ -742,19 +785,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   // panel already uses. `.value` access here auto-subscribes the
   // component to SSE-driven updates from `hydrateFleetCompositeSnapshot`.
   const fleetSnapshot = fleetCompositeSnapshot.value
-  const compositeByKeeperKey = useMemo(() => {
-    const map = new Map<string, KeeperCompositeSnapshot>()
-    if (!fleetSnapshot) return map
-    for (const snap of fleetSnapshot.snapshots) {
-      const identityKeys = [snap.keeper, snap.correlation_id]
-      for (const candidate of identityKeys) {
-        if (typeof candidate === 'string' && candidate !== '' && !map.has(candidate)) {
-          map.set(candidate, snap)
-        }
-      }
-    }
-    return map
-  }, [fleetSnapshot])
+  const compositeByKeeperKey = useMemo(() => buildCompositeByKeeperKey(fleetSnapshot), [fleetSnapshot])
 
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
@@ -763,9 +794,15 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     // `a.keeper` is undefined and isKeeperPaused needs the hydrated Keeper.
     let pausedCount = 0
     let runningCount = 0
+    let transientCount = 0
     for (const row of allKeepers) {
       const keeper = findKeeperRuntimeForAgent(row, keeperRuntimeLookup)
-      if (keeper && isKeeperPaused(keeper)) {
+      const band = keeper
+        ? runtimeBandMetaForAgent(row, keeper, compositeSnapshotForKeeper(keeper, compositeByKeeperKey)).key
+        : null
+      if (band === 'transient') {
+        transientCount += 1
+      } else if (keeper && isKeeperPaused(keeper)) {
         pausedCount += 1
       } else if (keeperRowLooksRunning(keeper)) {
         runningCount += 1
@@ -777,17 +814,19 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       agents: agentCount,
       keepers: runningCount,
       pausedKeepers: pausedCount,
-      offlineKeepers: Math.max(0, keeperRows - runningCount - pausedCount),
+      transientKeepers: transientCount,
+      offlineKeepers: Math.max(0, keeperRows - runningCount - pausedCount - transientCount),
       keeperRows,
       totalRuntimes: rosterAgents.length,
     }
-  }, [rosterAgents, runtimeKeeperList, keeperRuntimeLookup])
+  }, [rosterAgents, runtimeKeeperList, keeperRuntimeLookup, compositeByKeeperKey])
 
   const runtimeCounts = resolveRuntimeCounts({
     executionLoaded: executionLoaded.value,
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
     pausedKeepersCount: liveRuntimeCounts.pausedKeepers,
+    transientKeepersCount: liveRuntimeCounts.transientKeepers,
     offlineKeepersCount: liveRuntimeCounts.offlineKeepers,
     keeperRowsCount: liveRuntimeCounts.keeperRows,
     namespaceTruthCounts: namespaceTruth.value?.root.counts,
@@ -815,13 +854,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         // RFC-0135 PR-12: thread composite snapshot through band
         // derivation so stale-blocker demotion in the typed SSOT
         // applies to the badge color too.
-        const composite =
-          keeperRuntime
-            ? compositeByKeeperKey.get(keeperRuntime.name)
-              ?? (typeof keeperRuntime.keeper_id === 'string'
-                ? compositeByKeeperKey.get(keeperRuntime.keeper_id) ?? null
-                : null)
-            : null
+        const composite = compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
         return [agent.name, runtimeBandMetaForAgent(agent, keeperRuntime, composite)] as const
       }),
     ),
@@ -861,12 +894,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       return true
     })
     .sort((a: Agent, b: Agent) => {
+      // RFC-0295: transient sits between active and paused on the sort
+      // axis — the prototype groups "what is currently moving" above the
+      // healthy steady-state rows so the operator's first scan reads as
+      // "attention → transient → active → paused → offline" instead of
+      // burying a mid-compaction keeper under the active rows.
       const order: Record<StatusFilter, number> = {
         all: 0,
         attention: 0,
-        active: 1,
-        paused: 2,
-        offline: 3,
+        transient: 1,
+        active: 2,
+        paused: 3,
+        offline: 4,
       }
       const aOrder = order[bandByAgent.get(a.name)?.key ?? 'attention']
       const bOrder = order[bandByAgent.get(b.name)?.key ?? 'attention']
@@ -896,7 +935,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ? `항목 ${filtered.length}개 표시 중`
             : `항목 ${filtered.length} / ${scopedAgents.length}개 표시 중`
         )
-  const statusChips = (['all', 'attention', 'active', 'paused', 'offline'] as StatusFilter[]).map(key => ({
+  const statusChips = STATUS_CHIP_KEYS.map(key => ({
     key,
     label: FILTER_META[key].label,
     count: executionLoaded.value || scopedAgents.length > 0 ? counts[key] : null,
@@ -914,6 +953,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ? formatKeeperCountBreakdown({
         liveKeepers,
         pausedKeepers: livePausedKeepers,
+        transientKeepers: liveRuntimeCounts.transientKeepers,
         offlineKeepers: liveOfflineKeepers,
         configuredKeepers,
       })
@@ -957,12 +997,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       ?? findKeeperRuntime(agent.name, runtimeKeeperList)
     const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
     const compositeForMonitoring: KeeperCompositeSnapshot | null =
-      keeperRuntime
-        ? compositeByKeeperKey.get(keeperRuntime.name)
-          ?? (typeof keeperRuntime.keeper_id === 'string'
-            ? compositeByKeeperKey.get(keeperRuntime.keeper_id) ?? null
-            : null)
-        : null
+      compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime, compositeForMonitoring) : null
     const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
     const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime, compositeForMonitoring) : null
@@ -979,13 +1014,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const contextMeta = rosterContextMeta(keeperRuntime ?? null)
     const workPreview = trimText(currentWork, 140) ?? '최근 활동 요약 없음'
     const summaryText = workPreview
-    const compositeForKeeper: KeeperCompositeSnapshot | null = keeperRuntime
-      ? compositeByKeeperKey.get(keeperRuntime.name)
-        ?? (keeperRuntime.keeper_id != null
-          ? compositeByKeeperKey.get(keeperRuntime.keeper_id)
-          : undefined)
-        ?? null
-      : null
+    const compositeForKeeper: KeeperCompositeSnapshot | null =
+      compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const stateNote =
       keeperRuntime
         ? rosterStateNote(
@@ -1059,18 +1089,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ? rosterBlockerDisplay(selectedRow.stateNote, selectedRow.keeperRuntime)
     : null
 
-  // keeper-v2 Fleet skin: partition the (already sorted) rows into an
-  // "attention" group and the steady remainder so the roster renders the
-  // prototype's `fl-group attn` / `fl-group` dividers + tone-rail rows.
-  // Sorting already pushes attention band to the top (see `filtered` order),
-  // so partitioning preserves order within each group.
+  // keeper-v2 Fleet skin: partition the (already sorted) rows into attention,
+  // transient, and steady groups so transitional keepers do not appear under
+  // the normal-state divider.
   const attentionRows = rosterRows.filter(row => row.band.key === 'attention')
-  const steadyRows = rosterRows.filter(row => row.band.key !== 'attention')
+  const transientRows = rosterRows.filter(row => row.band.key === 'transient')
+  const steadyRows = rosterRows.filter(row => row.band.key !== 'attention' && row.band.key !== 'transient')
 
   // Health pills (fl-hpill) read from the same band counts the status filter
   // chips already compute. No title here — the shell's SurfaceLead owns the
   // "Keeper Fleet" header for this surface (dashboard-shell SURFACE_OWN_LEAD).
   const healthRun = counts.active
+  const healthTransient = counts.transient
   const healthPaused = counts.paused
   const healthOffline = counts.offline
   const healthAttention = counts.attention
@@ -1210,6 +1240,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="flex min-w-0 flex-col gap-2.5">
               <div class="fl-health">
                 <span class="fl-hpill ok">런타임 가동 <b>${healthRun}</b></span>
+                ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 <b>${healthTransient}</b></span>` : null}
                 <span class="fl-hpill warn">일시정지 <b>${healthPaused}</b></span>
                 <span class="fl-hpill">오프라인 <b>${healthOffline}</b></span>
                 ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
@@ -1289,6 +1320,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           <div class="fl-roster">
             ${attentionRows.length > 0 ? html`<div class="fl-group attn">주의 필요 · ${attentionRows.length}</div>` : null}
             ${attentionRows.map(renderFleetRow)}
+            ${transientRows.length > 0 ? html`<div class="fl-group">전이 중 · ${transientRows.length}</div>` : null}
+            ${transientRows.map(renderFleetRow)}
             ${steadyRows.length > 0 ? html`<div class="fl-group">정상 · ${steadyRows.length}</div>` : null}
             ${steadyRows.map(renderFleetRow)}
 
@@ -1473,6 +1506,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
       <div class="fl-foot">
         <span class="fl-tick"><span class="k">keepers</span><span class="v">fresh ${healthRun}/${rosterRows.length}</span></span>
+        <span class="fl-tick"><span class="k">transient</span><span class="v">${healthTransient}</span></span>
         <span class="fl-tick"><span class="k">paused</span><span class="v">${healthPaused}</span></span>
         <span class="fl-tick"><span class="k">offline</span><span class="v">${healthOffline}</span></span>
         <span class="fl-tick"><span class="k">attention</span><span class="v ${healthAttention ? 'warn' : 'ok'}">${healthAttention}</span></span>

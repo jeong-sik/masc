@@ -25,6 +25,13 @@ val keeper_metrics_path : Workspace.config -> string -> string
     Cached per keeper name so all callers share the same Eio.Mutex. *)
 val keeper_metrics_store : Workspace.config -> string -> Dated_jsonl.t
 
+val execution_receipts_dirname : string
+(** Runtime subdirectory under each keeper directory for date-split execution
+    receipt JSONL. *)
+
+val execution_receipt_schema : string
+(** JSONL schema tag for execution receipt rows. *)
+
 (** Date-split execution-receipt store:
     [.masc/keepers/<name>/execution-receipts/YYYY-MM/DD.jsonl]. *)
 val keeper_execution_receipt_store : Workspace.config -> string -> Dated_jsonl.t

@@ -12,6 +12,7 @@ import { AgentRoster, countRuntimeKinds } from './agent-roster'
 import { AgentProfile } from './agent-profile'
 import { KeeperDetailPage } from './keeper-detail-page'
 import { namespaceTruth } from '../namespace-truth-store'
+import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
 import {
   formatKeeperRosterCount,
   formatRuntimeRosterCount,
@@ -56,9 +57,14 @@ export function AgentsUnified() {
   // param this component renders a detail page, but navigating back to the
   // fleet view re-enters this branch. Keeping the hook sequence stable prevents
   // Preact hook-order failures during detail-to-list navigation.
+  // RFC-0295: pass the same fleet-wide composite snapshot map AgentRoster
+  // uses (and reads from `fleetCompositeSnapshot`) so countRuntimeKinds and
+  // the per-row band derivation agree on transient/attention membership.
+  const fleetSnapshot = fleetCompositeSnapshot.value
+  const compositeByKeeperKey = useMemo(() => buildCompositeByKeeperKey(fleetSnapshot), [fleetSnapshot])
   const liveRuntimeCounts = useMemo(
-    () => countRuntimeKinds(agents.value, keepers.value),
-    [agents.value, keepers.value],
+    () => countRuntimeKinds(agents.value, keepers.value, compositeByKeeperKey),
+    [agents.value, keepers.value, compositeByKeeperKey],
   )
 
   if (keeperParam) {
@@ -75,6 +81,7 @@ export function AgentsUnified() {
     agentsCount: liveRuntimeCounts.agents,
     keepersCount: liveRuntimeCounts.keepers,
     pausedKeepersCount: liveRuntimeCounts.pausedKeepers,
+    transientKeepersCount: liveRuntimeCounts.transientKeepers,
     offlineKeepersCount: liveRuntimeCounts.offlineKeepers,
     keeperRowsCount: liveRuntimeCounts.keeperRows,
     namespaceTruthCounts: namespaceTruth.value?.root.counts,

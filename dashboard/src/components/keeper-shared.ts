@@ -18,6 +18,13 @@ import {
   hydrateKeeperStatus,
   hydrateKeeperChatHistory,
   loadFullKeeperHistory,
+  isKeeperThreadMessageSendInFlight,
+  probeKeeperRuntime,
+  recoverKeeperRuntime,
+  resumePendingKeeperChatRequests,
+  sendKeeperThreadMessage,
+} from '../keeper-actions'
+import {
   keeperActionErrors,
   keeperHydrating,
   keeperProbing,
@@ -27,12 +34,7 @@ import {
   keeperStreamStartedAt,
   keeperStreamLastEventAt,
   keeperThreads,
-  isKeeperThreadMessageSendInFlight,
-  probeKeeperRuntime,
-  recoverKeeperRuntime,
-  resumePendingKeeperChatRequests,
-  sendKeeperThreadMessage,
-} from '../keeper-runtime'
+} from '../keeper-state'
 import { isDefaultVisibleConversationEntry } from '../keeper-state'
 import {
   enqueueInput,

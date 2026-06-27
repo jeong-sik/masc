@@ -12,6 +12,10 @@ vi.mock('./api/dashboard', () => ({
   fetchDashboardMemory: apiMocks.fetchDashboardMemory,
 }))
 
+vi.mock('./api/dashboard-execution', () => ({
+  fetchDashboardMemory: apiMocks.fetchDashboardMemory,
+}))
+
 vi.mock('./api/dashboard-hot', () => ({
   fetchDashboardShell: vi.fn(),
 }))

@@ -3,12 +3,14 @@
 
 import { html } from 'htm/preact'
 import { useComputed, useSignal } from '@preact/signals'
+import { useEffect } from 'preact/hooks'
 import { oasHealthSummary, oasAgentEvents, oasKeeperSnapshots } from '../store'
-import { loadMoreOasEvents } from '../oas-runtime-store'
+import { ensureOasRuntimeReplay, loadMoreOasEvents } from '../oas-runtime-store'
 import { SectionCard } from './common/card'
 import { StatTile } from './common/stat-tile'
 import { EmptyState } from './common/feedback-state'
 import { formatRelativeAgeMs } from '../lib/format-time'
+import { OAS_OPENTELEMETRY_UI_URL } from '../config/constants'
 import type { OasAgentEvent, OasHealthSummary, OasKeeperSnapshot } from '../types/oas'
 
 const STALE_MS = 60_000
@@ -107,6 +109,21 @@ export function OasHealthChip() {
     return tick == null || Date.now() - tick > STALE_MS
   })
   const isLoadingMore = useSignal(false)
+  const replayError = useSignal<string | null>(null)
+
+  useEffect(() => {
+    let disposed = false
+    replayError.value = null
+    void ensureOasRuntimeReplay().catch(err => {
+      if (disposed) return
+      const message = err instanceof Error ? err.message : String(err)
+      replayError.value = message
+      console.warn('[OAS] runtime replay failed', message)
+    })
+    return () => {
+      disposed = true
+    }
+  }, [])
 
   async function handleLoadMore() {
     if (isLoadingMore.value) return
@@ -121,7 +138,11 @@ export function OasHealthChip() {
   if (summary.value.replayTotalMatchingEvents === 0) {
     return html`
       <${SectionCard} label="OAS 런타임">
-        <${EmptyState} message="아직 OAS 이벤트가 수신되지 않았습니다." />
+        <${EmptyState}
+          message=${replayError.value
+            ? `OAS 리플레이를 불러오지 못했습니다: ${replayError.value}`
+            : '아직 OAS 이벤트가 수신되지 않았습니다.'}
+        />
       <//>
     `
   }
@@ -142,6 +163,14 @@ export function OasHealthChip() {
   return html`
     <${SectionCard} label="OAS 런타임">
       <div class="v2-shell-panel grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-2">
+        ${replayError.value ? html`
+          <${StatTile}
+            label="Replay"
+            value="실패"
+            status="crit"
+            delta=${{ direction: 'down', text: replayError.value }}
+          />
+        ` : null}
         <${StatTile}
           label="총 이벤트"
           value=${String(summary.value.replayTotalMatchingEvents)}
@@ -236,16 +265,16 @@ export function OasHealthChip() {
           ` : null}
         </div>
       ` : null}
-      <div class="mt-2 text-right">
+      ${OAS_OPENTELEMETRY_UI_URL ? html`<div class="mt-2 text-right">
         <a
-          href="http://127.0.0.1:16686"
+          href=${OAS_OPENTELEMETRY_UI_URL}
           target="_blank"
           rel="noopener noreferrer"
           class="v2-shell-action text-3xs text-[var(--color-fg-muted)] hover:text-[var(--color-fg-primary)] underline"
         >
           OpenTelemetry에서 보기 →
         </a>
-      </div>
+      </div>` : null}
     <//>
   `
 }

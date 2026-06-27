@@ -1,10 +1,10 @@
 import { signal } from '@preact/signals'
 import { navigate, route } from '../router'
 import type { Keeper, TabId } from '../types'
-import { hydrateKeeperStatus, selectKeeper } from '../keeper-runtime'
+import { hydrateKeeperStatus, selectKeeper } from '../keeper-actions'
 import { activeKeeperName } from '../keeper-state'
 import { registerKeeperTurnRefresh } from '../sse-store'
-import { loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
+import { loadKeeperConfig, resetKeeperConfig } from './keeper-config-state'
 import { keeperMobilePane } from './keeper-mobile-pane-state'
 export { keeperMobilePane, type KeeperMobilePane } from './keeper-mobile-pane-state'
 

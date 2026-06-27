@@ -2,17 +2,13 @@ import { showToast } from './common/toast'
 import {
   deleteGovernanceApprovalRule,
   decideGovernanceExecutionOrder,
-  fetchDashboardGovernance,
-  fetchGovernanceCaseStatus,
   resolveGovernanceApproval,
   submitGovernanceCaseBrief,
   submitGovernancePetition,
-} from '../api'
-import { registerGovernanceRefresh } from '../sse-store'
-import type { GovernanceDecisionItem } from '../types'
-import { filteredItemsByFilter, getSelectedDecision, itemKey } from './governance-utils'
+} from '../api/dashboard-governance'
+import { getSelectedDecision } from './governance-utils'
+import { refreshGovernance, selectDecision } from './governance-refresh'
 import {
-  governanceResource,
   governanceStarting,
   governanceActing,
   governanceBriefSubmitting,
@@ -21,50 +17,11 @@ import {
   governanceTopicInput,
   governanceBriefInput,
   governanceBriefStance,
-  governanceFilter,
   governanceData,
   selectedDecisionKey,
   selectedCaseDetail,
-  detailLoading,
 } from './governance-signals'
-
-async function loadDecisionDetail(item: GovernanceDecisionItem | null) {
-  selectedCaseDetail.value = null
-  if (!item) return
-  detailLoading.value = true
-  governanceError.value = ''
-  try {
-    selectedCaseDetail.value = await fetchGovernanceCaseStatus(item.id)
-  } catch (err) {
-    governanceError.value = err instanceof Error ? err.message : '거버넌스 상세를 불러오지 못했습니다'
-  } finally {
-    detailLoading.value = false
-  }
-}
-
-export async function selectDecision(item: GovernanceDecisionItem) {
-  selectedDecisionKey.value = itemKey(item)
-  await loadDecisionDetail(item)
-}
-
-export async function refreshGovernance() {
-  governanceError.value = ''
-  await governanceResource.load(async () => {
-    const data = await fetchDashboardGovernance()
-    const items = filteredItemsByFilter(governanceFilter.value, data.items ?? [])
-    const current = selectedDecisionKey.value
-    const next = items.find(item => itemKey(item) === current) ?? items[0] ?? null
-    selectedDecisionKey.value = next ? itemKey(next) : null
-    await loadDecisionDetail(next)
-    return data
-  })
-  const s = governanceResource.state.value
-  if (s.error) {
-    governanceError.value = s.error
-  }
-}
-
-registerGovernanceRefresh(refreshGovernance)
+export { refreshGovernance, selectDecision }
 
 export async function submitPetition() {
   const title = governanceTopicInput.value.trim()

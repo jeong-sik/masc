@@ -655,9 +655,38 @@ let normalized_path_opt path =
     Some normalized
 ;;
 
-let same_normalized_path path expected =
-  match normalized_path_opt expected with
-  | Some expected -> String.equal path expected
+let normalized_path_segments path =
+  let normalized = Env_config_core.normalize_path_lexically path in
+  if String.equal normalized "/" || String.equal normalized "."
+  then []
+  else normalized |> String.split_on_char '/' |> List.filter (fun segment -> segment <> "")
+;;
+
+let rec segment_prefix ~prefix path =
+  match prefix, path with
+  | [], _ -> true
+  | _ :: _, [] -> false
+  | p :: ps, x :: xs -> String.equal p x && segment_prefix ~prefix:ps xs
+;;
+
+let same_or_descendant_normalized_path path expected =
+  match normalized_path_opt path, normalized_path_opt expected with
+  | Some path, Some expected ->
+    segment_prefix
+      ~prefix:(normalized_path_segments expected)
+      (normalized_path_segments path)
+  | _ -> false
+;;
+
+let server_workspace_mismatch ~server_repo_path (config : Workspace.config) =
+  not
+    (same_or_descendant_normalized_path server_repo_path config.workspace_path
+     || same_or_descendant_normalized_path server_repo_path config.base_path)
+;;
+
+let server_workspace_mismatch_for_tests ~server_repo_path (config : Workspace.config) =
+  match normalized_path_opt server_repo_path with
+  | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
   | None -> false
 ;;
 
@@ -1616,9 +1645,7 @@ let runtime_resolution_json (config : Workspace.config) =
   let server_workspace_mismatch =
     match Option.bind server_repo_path normalized_path_opt with
     | None -> false
-    | Some server_repo_path ->
-      (not (same_normalized_path server_repo_path config.workspace_path))
-      && not (same_normalized_path server_repo_path config.base_path)
+    | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
   in
   let diagnostics, signal_count, repair_count, agent_issue_count =
     runtime_diagnostics_json ()
@@ -1843,11 +1870,8 @@ let light_runtime_resolution_json (config : Workspace.config) =
   in
   let server_repo_path = Build_identity.repo_root () in
   let server_workspace_mismatch =
-    match server_repo_path with
-    | Some path ->
-      not
-        (same_normalized_path path config.workspace_path
-         || same_normalized_path path config.base_path)
+    match Option.bind server_repo_path normalized_path_opt with
+    | Some server_repo_path -> server_workspace_mismatch ~server_repo_path config
     | None -> false
   in
   let fleet_fields =

@@ -64,6 +64,8 @@ describe('computeBeaconView', () => {
     }))
     expect(view.state).toBe('yellow')
     expect(view.label).toContain('silent')
+    expect(view.title).toContain('has not received route events yet')
+    expect(view.title).not.toContain(String(Math.floor(NOW / 1000)))
   })
 
   it('returns yellow when wsOnly, ready, but the last event is older than the silent threshold', () => {

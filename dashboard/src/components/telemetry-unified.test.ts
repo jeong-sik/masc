@@ -119,6 +119,9 @@ async function loadPanel(
     fetchDashboardNamespaceTruth: opts?.fetchDashboardNamespaceTruth ?? vi.fn().mockResolvedValue({ execution: { summary: { active_operations: 3, blocked_operations: 1, continuity_alerts: 0 } } }),
     fetchDashboardCacheStats: opts?.fetchDashboardCacheStats ?? vi.fn().mockResolvedValue(baseCacheStats),
   }))
+  vi.doMock('./oas-health-chip', () => ({
+    OasHealthChip: () => null,
+  }))
   return import('./telemetry-unified')
 }
 
@@ -143,6 +146,7 @@ describe('TelemetryUnified', () => {
     vi.clearAllMocks()
     vi.resetModules()
     vi.doUnmock('../api/dashboard')
+    vi.doUnmock('./oas-health-chip')
     vi.useRealTimers()
     if (originalVisibility) {
       Object.defineProperty(document, 'visibilityState', originalVisibility)

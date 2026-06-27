@@ -25,6 +25,13 @@ describe('keeper attention labels', () => {
     expect(warn).not.toHaveBeenCalled()
   })
 
+  it('labels transient runtime retry without warning', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+
+    expect(attentionReasonLabel('transient_runtime_retry', false)).toBe('일시적 런타임 재시도')
+    expect(warn).not.toHaveBeenCalled()
+  })
+
   it('keeps unknown completion-contract composite reasons visible and warned', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 

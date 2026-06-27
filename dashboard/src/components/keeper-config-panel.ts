@@ -3,17 +3,15 @@
 // Redesigned: clean section headers, consistent row styling, proper form controls.
 
 import { html } from 'htm/preact'
-import { useState } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchDashboardGoalsTree,
-  fetchKeeperConfig,
   patchKeeperConfig,
   setKeeperToolPolicy,
 } from '../api/dashboard'
 import type { KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode, SharedMemoryScope } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
-import type { KeeperConfigLoadStatus } from './keeper-detail-source'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
 import { MISSING_DATA_DASH } from '../lib/format-string'
@@ -22,11 +20,29 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { ExpandableTextarea } from './common/expandable-textarea'
 import { KeeperToolAccessSummary } from './keeper-tool-access'
-import { createAsyncResource, loaded } from '../lib/async-state'
+import { createAsyncResource } from '../lib/async-state'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
 import { StatusDot } from './common/status-dot'
 import { KeeperBadge } from './keeper-badge'
+import {
+  applyKeeperConfigUpdate,
+  configKeeperName,
+  configState,
+  loadKeeperConfig,
+  registerKeeperConfigResetHandler,
+  registerKeeperConfigUpdateHandler,
+} from './keeper-config-state'
+
+export {
+  applyKeeperConfigUpdate,
+  configState,
+  keeperConfigSubscriptionCountsForTests,
+  loadKeeperConfig,
+  peekKeeperConfigLoadStatus,
+  peekLoadedKeeperConfig,
+  resetKeeperConfig,
+} from './keeper-config-state'
 
 // ── v2 prototype config modal: left rail tabs (keeper-config.css .kcf-*) ──
 // The full keeper config redesign (keeper-v2/keeper-config.jsx) presents the
@@ -58,12 +74,6 @@ const kcfTab = signal<KcfTabId>('identity')
 
 // ── State ────────────────────────────────────────────────
 
-const configResource = createAsyncResource<KeeperConfig>()
-// Exported so sibling surfaces (e.g. the runtime-model editor in the
-// 진단/운영 section) subscribe to the SAME loaded config instead of issuing
-// a second fetch and drifting. Single source of truth for a keeper's config.
-export const configState = configResource.state
-const configKeeperName = signal<string>('')
 const goalOptionsResource = createAsyncResource<GoalTreeNode[]>()
 const goalOptionsState = goalOptionsResource.state
 const editMode = signal(false)
@@ -197,6 +207,48 @@ const runtimeSaving = signal(false)
 const denylistDraftText = signal<string | null>(null)
 const denylistSaving = signal(false)
 
+function resetKeeperConfigPanelDrafts(): void {
+  goalOptionsResource.reset()
+  editMode.value = false
+  editDraft.value = null
+  saveError.value = null
+  lastSavedAt.value = null
+  promptPreviewTab.value = 'blocks'
+  runtimeDraft.value = null
+  runtimeSaving.value = false
+  denylistDraftText.value = null
+  denylistSaving.value = false
+  hookFilterQuery.value = ''
+  globalArchExpanded.value = false
+  kcfTab.value = 'identity'
+}
+
+function syncRuntimeDraftFromConfig(_name: string, updated: KeeperConfig): void {
+  runtimeDraft.value = initRuntimeDraftFromConfig(updated)
+}
+
+let panelSubscriptionRefs = 0
+let unregisterPanelReset: (() => void) | null = null
+let unregisterPanelUpdate: (() => void) | null = null
+
+function retainKeeperConfigPanelSubscriptions(): () => void {
+  if (panelSubscriptionRefs === 0) {
+    unregisterPanelReset = registerKeeperConfigResetHandler(resetKeeperConfigPanelDrafts)
+    unregisterPanelUpdate = registerKeeperConfigUpdateHandler(syncRuntimeDraftFromConfig)
+  }
+  panelSubscriptionRefs += 1
+
+  return () => {
+    panelSubscriptionRefs = Math.max(0, panelSubscriptionRefs - 1)
+    if (panelSubscriptionRefs > 0) return
+    resetKeeperConfigPanelDrafts()
+    unregisterPanelReset?.()
+    unregisterPanelUpdate?.()
+    unregisterPanelReset = null
+    unregisterPanelUpdate = null
+  }
+}
+
 export function coerceSandboxProfile(raw: string | undefined): SandboxProfile {
   return raw === 'docker' ? 'docker' : 'local'
 }
@@ -328,65 +380,6 @@ function toggleRuntimeActiveGoal(goalId: string, checked: boolean) {
     ? [...d.active_goal_ids, goalId]
     : d.active_goal_ids.filter((id) => id !== goalId)
   updateRuntimeActiveGoalIds(next)
-}
-
-export async function loadKeeperConfig(
-  name: string,
-  options?: { force?: boolean },
-): Promise<void> {
-  const force = options?.force === true
-  if (!force && configKeeperName.value === name && configState.value.status === 'loaded') return
-  if (configKeeperName.value !== name || force) {
-    configResource.reset()
-  }
-  configKeeperName.value = name
-  await configResource.load(() => fetchKeeperConfig(name))
-}
-
-export function resetKeeperConfig(): void {
-  configResource.reset()
-  goalOptionsResource.reset()
-  configKeeperName.value = ''
-  editMode.value = false
-  editDraft.value = null
-  saveError.value = null
-  lastSavedAt.value = null
-  promptPreviewTab.value = 'blocks'
-  runtimeDraft.value = null
-  runtimeSaving.value = false
-  denylistDraftText.value = null
-  denylistSaving.value = false
-  hookFilterQuery.value = ''
-  globalArchExpanded.value = false
-  kcfTab.value = 'identity'
-}
-
-/**
- * Replace the shared loaded config for [name] with a freshly-patched value.
- *
- * Used by sibling editors (e.g. the runtime-model card) after a successful
- * [patchKeeperConfig] so both this panel and the card reflect the same
- * server-confirmed state without a second fetch. No-op semantics match the
- * panel's own post-save update (`configState.value = loaded(updated)`).
- */
-export function applyKeeperConfigUpdate(name: string, updated: KeeperConfig): void {
-  configKeeperName.value = name
-  configState.value = loaded(updated)
-  runtimeDraft.value = initRuntimeDraftFromConfig(updated)
-}
-
-export function peekLoadedKeeperConfig(name: string): KeeperConfig | null {
-  const state = configState.value
-  if (configKeeperName.value !== name || state.status !== 'loaded') return null
-  return state.data
-}
-
-export function peekKeeperConfigLoadStatus(
-  name: string,
-): KeeperConfigLoadStatus {
-  const state = configState.value
-  if (configKeeperName.value !== name) return 'other'
-  return state.status
 }
 
 function flattenGoalTree(nodes: readonly GoalTreeNode[]): GoalTreeNode[] {
@@ -784,6 +777,8 @@ function runtimeSelectionSummary(c: KeeperConfig): string {
 export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) {
   const state = configState.value
 
+  useEffect(() => retainKeeperConfigPanelSubscriptions(), [])
+
   // Trigger load on first render or name change
   if (configKeeperName.value !== keeperName || state.status === 'idle') {
     void loadKeeperConfig(keeperName)
@@ -855,8 +850,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtimeSaving.value = true
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
-      configState.value = loaded(updated)
-      runtimeDraft.value = initRuntimeDraftFromConfig(updated)
+      applyKeeperConfigUpdate(keeperName, updated)
       showToast('런타임 설정 저장 완료', 'success')
     } catch (err) {
       const msg = err instanceof Error ? err.message : '저장 실패'
@@ -891,7 +885,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         tool_access: c.tools.tool_access,
         deny,
       })
-      configState.value = loaded(updated)
+      applyKeeperConfigUpdate(keeperName, updated)
       denylistDraftText.value = null
       showToast('도구 거부 목록 저장 완료', 'success')
     } catch (err) {
@@ -926,7 +920,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     saveError.value = null
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
-      configState.value = loaded(updated)
+      applyKeeperConfigUpdate(keeperName, updated)
       editMode.value = false
       editDraft.value = null
       lastSavedAt.value = new Date().toISOString()

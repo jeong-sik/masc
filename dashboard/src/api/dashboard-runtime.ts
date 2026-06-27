@@ -5,7 +5,7 @@
 import { get, post, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asRecordArray, asString, asStringArray } from '../components/common/normalize'
 import { ensureDevToken } from './dev-token'
-import { parseRuntimeDefaultsResponse, type RuntimeDefaultsResponse } from './schemas/runtime-defaults'
+import type { RuntimeDefaultsResponse } from './schemas/runtime-defaults'
 
 interface DashboardRuntimeProviderDiscovery {
   healthy?: boolean
@@ -466,6 +466,7 @@ export async function fetchRuntimeDefaults(
   opts?: AbortableRequestOptions,
 ): Promise<RuntimeDefaultsResponse> {
   const raw = await get<unknown>('/api/v1/dashboard/runtime-defaults', { signal: opts?.signal })
+  const { parseRuntimeDefaultsResponse } = await import('./schemas/runtime-defaults')
   return parseRuntimeDefaultsResponse(raw)
 }
 

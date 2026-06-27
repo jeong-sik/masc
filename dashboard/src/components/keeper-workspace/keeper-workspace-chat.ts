@@ -4,6 +4,7 @@
 // header; the panel reuses the full chat engine unchanged.
 
 import { html } from 'htm/preact'
+import { lazy, Suspense } from 'preact/compat'
 import {
   Archive,
   ChevronLeft,
@@ -23,8 +24,6 @@ import { KeeperConversationPanel } from '../keeper-shared'
 import { navigate } from '../../router'
 import type { ChatComposerCommand } from '../chat/primitives'
 import { keeperMobilePane } from '../keeper-detail-state'
-import { TurnInspectorDrawer as SharedTurnInspectorDrawer } from '../keeper-turn-inspector-drawer'
-import { ChatArtifactPanel } from '../chat/artifact-panel'
 import { keeperThreads } from '../../keeper-state'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
@@ -38,6 +37,14 @@ import {
   keeperPhaseLabel,
   statePillTone,
 } from './keeper-workspace-shared'
+
+const LazySharedTurnInspectorDrawer = lazy(async () => ({
+  default: (await import('../keeper-turn-inspector-drawer')).TurnInspectorDrawer,
+}))
+
+const LazyChatArtifactPanel = lazy(async () => ({
+  default: (await import('../chat/artifact-panel')).ChatArtifactPanel,
+}))
 
 type WorkspaceUtilityAction = 'turn' | 'artifacts' | 'detail' | 'config'
 type WorkspaceCommandId = KeeperActionKey | WorkspaceUtilityAction
@@ -392,18 +399,22 @@ function TurnInspectorDrawer({
   // header label. The shared component owns the overlay markup so the board
   // surface (post-detail) reuses the identical drawer. testId is preserved so
   // existing chat tests keep their `kw-chat-turn-inspector-*` selectors.
+  if (!open) return null
+
   return html`
-    <${SharedTurnInspectorDrawer}
-      testId="kw-chat-turn-inspector"
-      keeperName=${keeperName}
-      subtitle=${triggerEntry
-        ? `메시지 ${triggerEntry.label} · ${triggerEntry.timestamp ?? triggerEntry.id}`
-        : null}
-      initialTurnRef=${triggerEntry?.turnRef ?? null}
-      initialTurnTimestamp=${triggerEntry?.timestamp ?? null}
-      open=${open}
-      onClose=${onClose}
-    />
+    <${Suspense} fallback=${html`<div class="fixed inset-0 z-50 flex justify-end bg-black/40" role="dialog" aria-modal="true" aria-label="턴 검사">턴 검사 로딩…</div>`}>
+      <${LazySharedTurnInspectorDrawer}
+        testId="kw-chat-turn-inspector"
+        keeperName=${keeperName}
+        subtitle=${triggerEntry
+          ? `메시지 ${triggerEntry.label} · ${triggerEntry.timestamp ?? triggerEntry.id}`
+          : null}
+        initialTurnRef=${triggerEntry?.turnRef ?? null}
+        initialTurnTimestamp=${triggerEntry?.timestamp ?? null}
+        open=${true}
+        onClose=${onClose}
+      />
+    <//>
   `
 }
 
@@ -517,7 +528,11 @@ export function KeeperWorkspaceChat({
           onInspectTurn=${openTurnInspector}
         />
         ${artifactsOpen
-          ? html`<${ChatArtifactPanel} entries=${entries} />`
+          ? html`
+              <${Suspense} fallback=${html`<aside class="kw-artifacts v2-monitoring-surface">아티팩트 로딩…</aside>`}>
+                <${LazyChatArtifactPanel} entries=${entries} />
+              <//>
+            `
           : null}
       </div>
       <${TurnInspectorDrawer}

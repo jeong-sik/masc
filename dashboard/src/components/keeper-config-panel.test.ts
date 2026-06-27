@@ -601,7 +601,12 @@ vi.mock('../api/dashboard', () => ({
   setKeeperToolPolicy: mocks.setKeeperToolPolicy,
 }))
 
-import { KeeperConfigPanel, loadKeeperConfig, resetKeeperConfig } from './keeper-config-panel'
+import {
+  KeeperConfigPanel,
+  keeperConfigSubscriptionCountsForTests,
+  loadKeeperConfig,
+  resetKeeperConfig,
+} from './keeper-config-panel'
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -699,6 +704,20 @@ describe('KeeperConfigPanel', () => {
     const textareas = Array.from(container.querySelectorAll('textarea'))
     expect(textareas.length).toBeGreaterThan(0)
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
+  })
+
+  it('unsubscribes shared keeper config handlers on unmount', async () => {
+    expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+
+    expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 1, update: 1 })
+
+    render(null, container)
+    await flush()
+
+    expect(keeperConfigSubscriptionCountsForTests()).toEqual({ reset: 0, update: 0 })
   })
 
   it('renders the compaction token gate as an editable number input (not a read-only row)', async () => {

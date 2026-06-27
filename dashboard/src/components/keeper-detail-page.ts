@@ -1,12 +1,12 @@
 import { html } from 'htm/preact'
-import { memo } from 'preact/compat'
+import { lazy, memo, Suspense } from 'preact/compat'
 import { useState, useRef, useEffect } from 'preact/hooks'
 import { ChevronLeft, ChevronRight } from 'lucide-preact'
 import type { Keeper } from '../types'
 import { route } from '../router'
 import { keepers } from '../store'
-import { selectKeeper } from '../keeper-runtime'
-import { KeeperConfigPanel, loadKeeperConfig } from './keeper-config-panel'
+import { selectKeeper } from '../keeper-actions'
+import { loadKeeperConfig } from './keeper-config-state'
 import { findKeeper } from '../lib/keeper-utils'
 import { resolveKeeperForDetail } from '../lib/keeper-detail-resolution'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
@@ -36,7 +36,6 @@ import {
   KeeperDetailMissingState,
   activeKeeperDetailSection,
 } from './keeper-detail-shell'
-import { KeeperDetailBody } from './keeper-detail-body'
 import { KeeperWorkspaceRoster } from './keeper-workspace/keeper-workspace-roster'
 import { KeeperWorkspaceChat } from './keeper-workspace/keeper-workspace-chat'
 import { KeeperWorkspaceRail } from './keeper-workspace/keeper-workspace-rail'
@@ -56,6 +55,14 @@ const CLOSE_BUTTON_FOCUS_CLASS = ringFocusClasses({
   offset: 2,
   offsetSurface: 'page',
 })
+
+const LazyKeeperDetailBody = lazy(async () => ({
+  default: (await import('./keeper-detail-body')).KeeperDetailBody,
+}))
+
+const LazyKeeperConfigPanel = lazy(async () => ({
+  default: (await import('./keeper-config-panel')).KeeperConfigPanel,
+}))
 
 // Removed `KeeperRouteFocusPanel` (2026-05-19): the panel duplicated the
 // sticky page header (`KeeperDetailHeaderInfo`) — same keeper name and
@@ -360,28 +367,30 @@ const KeeperDetailContent = memo(function KeeperDetailContent({
         </div>
       </div>
 
-      <${KeeperDetailBody}
-        keeper=${keeper}
-        compositeSnapshot=${compositeSnapshot}
-        runtimeTrace=${runtimeTrace}
-        compositeEvidence=${compositeEvidence}
-        runtimeTraceEvidence=${runtimeTraceEvidence}
-        diagOpen=${diagOpen}
-        onDiagToggle=${setDiagOpen}
-        checkpointRefreshToken=${checkpointRefreshToken}
-        clearDialogOpen=${clearDialogOpen}
-        clearPending=${clearPending}
-        clearReason=${clearReason}
-        preserveSystemPrompt=${preserveSystemPrompt}
-        onClearClose=${() => {
-          if (clearPending) return
-          setClearDialogOpen(false)
-        }}
-        onClearReasonInput=${setClearReason}
-        onPreserveToggle=${setPreserveSystemPrompt}
-        onClearSubmit=${submitClearContext}
-        onSocialSweep=${() => { void runSocialSweep() }}
-      />
+      <${Suspense} fallback=${html`<div class="rounded-[var(--r-2)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] p-4 text-sm text-[var(--color-fg-muted)]">상세 로딩…</div>`}>
+        <${LazyKeeperDetailBody}
+          keeper=${keeper}
+          compositeSnapshot=${compositeSnapshot}
+          runtimeTrace=${runtimeTrace}
+          compositeEvidence=${compositeEvidence}
+          runtimeTraceEvidence=${runtimeTraceEvidence}
+          diagOpen=${diagOpen}
+          onDiagToggle=${setDiagOpen}
+          checkpointRefreshToken=${checkpointRefreshToken}
+          clearDialogOpen=${clearDialogOpen}
+          clearPending=${clearPending}
+          clearReason=${clearReason}
+          preserveSystemPrompt=${preserveSystemPrompt}
+          onClearClose=${() => {
+            if (clearPending) return
+            setClearDialogOpen(false)
+          }}
+          onClearReasonInput=${setClearReason}
+          onPreserveToggle=${setPreserveSystemPrompt}
+          onClearSubmit=${submitClearContext}
+          onSocialSweep=${() => { void runSocialSweep() }}
+        />
+      <//>
     </div>
   `
   const openKeeperConfig = (name = keeper.name) => {
@@ -573,5 +582,9 @@ function KeeperConfigOverlay({
   // footer close), so the host is a thin wrapper that only supplies the ESC
   // keybinding and the onClose callback. (Backdrop click + the footer/top 닫기
   // buttons are rendered by the panel itself.)
-  return html`<${KeeperConfigPanel} keeperName=${keeperName} onClose=${onClose} />`
+  return html`
+    <${Suspense} fallback=${html`<div class="kcf-overlay" data-testid="kw-config-overlay"><div class="kcf v2-monitoring-surface">설정 로딩…</div></div>`}>
+      <${LazyKeeperConfigPanel} keeperName=${keeperName} onClose=${onClose} />
+    <//>
+  `
 }

@@ -4,13 +4,11 @@
 
 import { get } from './core'
 import { ensureDevToken } from './dev-token'
-import { parseDashboardConfigResponse, type DashboardConfigResponse } from './schemas/dashboard-config'
-import { parseLogsResponse, type LogsResponse } from './schemas/logs'
-import {
-  parseProviderLogTailResponse,
-  parseProviderLogsCatalogResponse,
-  type ProviderLogsCatalogResponse,
-  type ProviderLogTailResponse,
+import type { DashboardConfigResponse } from './schemas/dashboard-config'
+import type { LogsResponse } from './schemas/logs'
+import type {
+  ProviderLogsCatalogResponse,
+  ProviderLogTailResponse,
 } from './schemas/provider-logs'
 
 export async function fetchLogs(opts?: {
@@ -36,11 +34,13 @@ export async function fetchLogs(opts?: {
   if (opts?.exclude_category) params.set('exclude_category', opts.exclude_category)
   const qs = params.toString()
   const raw = await get<unknown>(`/api/v1/dashboard/logs${qs ? `?${qs}` : ''}`)
+  const { parseLogsResponse } = await import('./schemas/logs')
   return parseLogsResponse(raw)
 }
 
 export async function fetchProviderLogsCatalog(): Promise<ProviderLogsCatalogResponse> {
   const raw = await get<unknown>('/api/v1/dashboard/provider-logs')
+  const { parseProviderLogsCatalogResponse } = await import('./schemas/provider-logs')
   return parseProviderLogsCatalogResponse(raw)
 }
 
@@ -52,12 +52,15 @@ export async function fetchProviderLogTail(
   params.set('provider', provider)
   if (opts?.lines) params.set('lines', String(opts.lines))
   const raw = await get<unknown>(`/api/v1/dashboard/provider-logs/tail?${params.toString()}`)
+  const { parseProviderLogTailResponse } = await import('./schemas/provider-logs')
   return parseProviderLogTailResponse(raw)
 }
 
 export async function fetchDashboardConfig(): Promise<DashboardConfigResponse> {
   await ensureDevToken()
-  return get<unknown>('/api/v1/dashboard/config').then(parseDashboardConfigResponse)
+  const raw = await get<unknown>('/api/v1/dashboard/config')
+  const { parseDashboardConfigResponse } = await import('./schemas/dashboard-config')
+  return parseDashboardConfigResponse(raw)
 }
 
 /** Parse runtime context-ratio thresholds from the dashboard config response.

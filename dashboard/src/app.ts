@@ -16,16 +16,12 @@ import { lazy, Suspense } from 'preact/compat'
 import { signal } from '@preact/signals'
 import { persistentSignal } from './lib/persistent-signal'
 import { route, initRouter } from './router'
-import {
-  pauseQueuedOasRuntimeIngress,
-  resumeQueuedOasRuntimeIngress,
-} from './sse'
 import { requestNamespaceTruthNow, disposeNamespaceTruthScheduler } from './namespace-truth-store'
 import { cancelPendingSSERefreshes, registerGovernanceRefresh, registerMissionRefresh, setupSSEReaction, startPeriodicRefresh, stopPeriodicRefresh } from './sse-store'
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/dev-token'
-import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
+import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard-logs'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
 import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'
@@ -179,23 +175,8 @@ export function App() {
           .catch(err => {
             console.warn('[app] dashboard config fetch failed', err instanceof Error ? err.message : err)
           })
-      })
 
-    // Replay durable OAS state before opening the live SSE tail.
-    pauseQueuedOasRuntimeIngress()
-    void import('./oas-runtime-store')
-      .then(({ replayOasRuntimeTelemetry }) => replayOasRuntimeTelemetry())
-      .catch(err => {
-        console.warn('[app] OAS runtime replay failed', err instanceof Error ? err.message : err)
-      })
-      .finally(() => {
-        if (cancelled) return
-        void ensureLoopbackAuth()
-          .finally(() => {
-            if (cancelled) return
-            void connectDashboardWS(route.value)
-            resumeQueuedOasRuntimeIngress()
-          })
+        void connectDashboardWS(route.value)
       })
 
     registerMissionRefresh(() => {
@@ -208,18 +189,11 @@ export function App() {
 
     // Governance/HITL approvals feed the always-visible nav-rail approvals
     // badge and topbar attention indicator (see approvalsBadge below), so the
-    // governance resource must refresh globally — not only while the
-    // governance/approvals surface is mounted (those surfaces are the only
-    // importers of governance-actions, which is what registers this refresh).
-    // Without an eager registration a pending HITL approval emits its
-    // `approval:pending` SSE event into a null handler and the badge stays 0
-    // until the operator manually opens the approvals surface. Register the
-    // refresh eagerly; governance-actions is dynamically imported but the boot
-    // call below eagerly triggers that chunk load (its components still render
-    // only on surface mount). Loading once at boot shows an approval already
-    // pending at open.
+    // governance resource must refresh globally. Keep boot on the read-only
+    // refresh module instead of governance-actions: first paint should not load
+    // toast/action write handlers just to count pending approvals.
     const refreshGovernanceLazy = () => {
-      void import('./components/governance-actions')
+      void import('./components/governance-refresh')
         .then(({ refreshGovernance }) => refreshGovernance())
         .catch(err => {
           console.warn('[app] governance refresh unavailable', err instanceof Error ? err.message : err)

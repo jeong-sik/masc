@@ -52,6 +52,15 @@ async function loadSurface(approval_queue: KeeperApprovalQueueItem[]) {
     submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
     submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
   }))
+  vi.doMock('../../api/dashboard-governance', () => ({
+    decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue)),
+    fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
+    resolveGovernanceApproval,
+    deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+    submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
+    submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+  }))
   vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
   // Preserve the real router (route signal etc.) but capture navigate() so the
   // "open keeper conversation" wiring can be asserted without a real route change.
@@ -78,6 +87,7 @@ describe('ApprovalsSurface', () => {
     vi.resetModules()
     vi.clearAllMocks()
     vi.doUnmock('../../api')
+    vi.doUnmock('../../api/dashboard-governance')
     vi.doUnmock('../../sse-store')
   })
 
@@ -299,6 +309,15 @@ describe('ApprovalsSurface', () => {
       submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
       submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
     }))
+    vi.doMock('../../api/dashboard-governance', () => ({
+      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance,
+      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
+      resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
+      deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
+      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+    }))
     vi.doMock('../../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
     const { ApprovalsSurface } = await import('./approvals-surface')
 
@@ -326,6 +345,15 @@ describe('ApprovalsSurface', () => {
     vi.resetModules()
     const fetchDashboardGovernance = vi.fn().mockRejectedValue(new Error('승인 큐 로드 실패'))
     vi.doMock('../../api', () => ({
+      decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+      fetchDashboardGovernance,
+      fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
+      resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
+      deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+      submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
+      submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+    }))
+    vi.doMock('../../api/dashboard-governance', () => ({
       decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
       fetchDashboardGovernance,
       fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),

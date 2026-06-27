@@ -1,14 +1,12 @@
 // MASC Dashboard — Entry point
 // Mounts the root <App /> component into the DOM
 
-// Foundation styles (load first)
+// Foundation and global styles
 // Keeper-v2 design-system tokens are loaded earliest so the v2 vocabulary is
-// available to the dashboard token ladder; dashboard-specific tokens loaded
-// below override any name collisions.
+// available to the dashboard token ladder; global.css owns the legacy/global
+// CSS bundle, and tokens.css follows it so dashboard-specific root variables
+// keep override priority over generated/legacy foundations.
 import './styles/ds-theme-tokens.css'
-import './styles/tokens.generated.css'
-import './styles/tokens.css'
-import './styles/variables.css'
 import './styles/primitives.css'
 import './styles/layout.css'
 import './styles/layers.css'
@@ -18,8 +16,6 @@ import './styles/deck.css'
 import './styles/drawer.css'
 import './styles/swimlanes.css'
 import './styles/code.css'
-import './styles/base.css'
-import './styles/keyframes.css'
 
 /*
  * EXPERIMENTAL: StyleSeed light theme — opt-in via data-theme='styleseed' on html
@@ -32,23 +28,15 @@ import './styles/styleseed-base.css'
 
 // Global utilities and layout
 import './styles/global.css'
-import './styles/chat.css'
+import './styles/tokens.css'
 // chat-blocks-v2.css / surfaces-v2.css / cockpit-v2.css load via the *-v2.css
 // glob below (see ordering note there) — no per-surface import line here.
 
-// Component-specific styles
-import './styles/ui.css'
-import './styles/board.css'
-import './styles/dashboard.css'
-import './styles/governance.css'
-import './styles/governance-agent.css'
-import './styles/ops.css'
-import './styles/tools.css'
+// Surface-specific styles not owned by global.css
 import './styles/paper-theme.css'
 
 import './styles/keeper-workspace.css'
 import './styles/copilot-dock.css'
-import './styles/keeper-turn-inspector.css'
 import './styles/states.css'
 // ide-v2.css / work-v2.css / connectors-v2.css / telemetry-v2.css /
 // craft-v2.css load via the *-v2.css glob below.

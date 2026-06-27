@@ -320,7 +320,7 @@ export const workspaceFsmSnapshot = signal<DashboardWorkspaceFsmSnapshot | null>
 
 // --- Fusion run registry state (RFC-0266 §7 Phase 4) ---
 
-import type { FusionRunRecord } from './api/dashboard'
+import type { FusionRunRecord } from './api/dashboard-fusion'
 
 // In-progress + recently completed fusion deliberations from the in-memory
 // registry endpoint. Distinct from `boardPosts` (the board-derived detail the
@@ -1058,7 +1058,7 @@ async function doFetchExecution(): Promise<void> {
   executionLoading.value = true
   executionError.value = null
   try {
-    const { fetchDashboardExecution } = await import('./api/dashboard')
+    const { fetchDashboardExecution } = await import('./api/dashboard-execution')
     const data = await fetchDashboardExecution({ force })
     hydrateExecutionSnapshot(data)
   } catch (err) {
@@ -1180,7 +1180,7 @@ function boardPageSize(): number {
 export async function refreshBoard(): Promise<void> {
   boardLoading.value = true
   try {
-    const { fetchDashboardMemory } = await import('./api/dashboard')
+    const { fetchDashboardMemory } = await import('./api/dashboard-execution')
     const limit = boardPageSize()
     const data = await timeBoardRequest('list', () => fetchDashboardMemory(boardSortMode.value, {
       excludeSystem: boardExcludeSystem.value,
@@ -1226,7 +1226,7 @@ export async function loadMoreBoardPosts(): Promise<void> {
   if (!boardHasMore.value) return
   boardLoadingMore.value = true
   try {
-    const { fetchDashboardMemory } = await import('./api/dashboard')
+    const { fetchDashboardMemory } = await import('./api/dashboard-execution')
     const limit = boardPageSize()
     const offset = boardOffset.value
     const data = await timeBoardRequest('list_more', () => fetchDashboardMemory(boardSortMode.value, {
@@ -1260,7 +1260,13 @@ export async function refreshGoals(): Promise<void> {
   goalTreeLoading.value = true
   goalTreeError.value = null
   try {
-    const { fetchDashboardPlanning, fetchDashboardGoalsTree } = await import('./api/dashboard')
+    const [
+      { fetchDashboardPlanning },
+      { fetchDashboardGoalsTree },
+    ] = await Promise.all([
+      import('./api/dashboard-mission'),
+      import('./api/dashboard-goals'),
+    ])
     const [planning, tree] = await Promise.allSettled([
       fetchDashboardPlanning(),
       fetchDashboardGoalsTree(),
@@ -1321,7 +1327,7 @@ export async function refreshGoals(): Promise<void> {
 export async function refreshFusionBoard(): Promise<void> {
   fusionBoardLoading.value = true
   try {
-    const { fetchDashboardMemory } = await import('./api/dashboard')
+    const { fetchDashboardMemory } = await import('./api/dashboard-execution')
     const data = await timeBoardRequest('fusion_list', () => fetchDashboardMemory('recent', {
       limit: 500,
       offset: 0,
@@ -1341,7 +1347,7 @@ export async function refreshFusionBoard(): Promise<void> {
 export async function refreshFusionRuns(): Promise<void> {
   fusionRunsLoading.value = true
   try {
-    const { fetchFusionRuns } = await import('./api/dashboard')
+    const { fetchFusionRuns } = await import('./api/dashboard-fusion')
     const data = await fetchFusionRuns()
     fusionRuns.value = data.runs
   } catch (err) {

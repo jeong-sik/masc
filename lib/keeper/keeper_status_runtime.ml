@@ -186,9 +186,9 @@ let agent_runtime_has_live_work agent_status =
 
 let string_contains_ci = String_util.contains_substring_ci
 
-let quiet_hours_active () =
+let quiet_hours_active ~now_ts =
   let current_hour =
-    let tm = Unix.gmtime (Time_compat.now ()) in
+    let tm = Unix.gmtime now_ts in
     (* KST = UTC+9; must use gmtime, not localtime *)
     (tm.Unix.tm_hour + 9) mod 24
   in
@@ -313,7 +313,7 @@ let live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~met
   end
 
 let classify_keeper_quiet_reason ~meta ~keepalive_running ~agent_status ~now_ts =
-  let quiet_active = quiet_hours_active () in
+  let quiet_active = quiet_hours_active ~now_ts in
   let error_hint =
     if live_signal_supersedes_persisted_error ~keepalive_running ~agent_status ~meta
     then None

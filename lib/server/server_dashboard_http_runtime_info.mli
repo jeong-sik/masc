@@ -64,6 +64,12 @@ val light_runtime_resolution_json : Workspace.config -> Yojson.Safe.t
     aligned with [/health] fleet safety without running git probes or other
     heavy runtime-resolution checks on the header hot path. *)
 
+val server_workspace_mismatch_for_tests :
+  server_repo_path:string -> Workspace.config -> bool
+(** Test-only pure seam for the server-checkout/base-path relation used by
+    {!runtime_resolution_json} and {!light_runtime_resolution_json}. It mirrors
+    production normalization without touching fleet or runtime-health state. *)
+
 (** {1 Dashboard HTTP routes} *)
 
 val dashboard_runtime_probe_http_json :

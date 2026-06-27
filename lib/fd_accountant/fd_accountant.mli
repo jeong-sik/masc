@@ -160,8 +160,7 @@ val all_kinds : kind list
     (over-decrement, hidden by a [max 0 (... - 1)] clamp) or
     never fire (stuck positive).  The typed state machine is
     the only writer of [holding_state] and admits exactly two
-    transitions, both performed under
-    [Eio.Mutex.use_rw ~protect:true]:
+    transitions, both performed under the per-slot mutex:
 
     - [Idle] -> [In_flight { acquired_at ; hold_id }] by
       {!mark_acquire}  (allocates the next [hold_id])
@@ -193,7 +192,7 @@ val read_holding : kind:kind -> int
 (** [read_holding ~kind] returns the current holding count
     as a pure projection of [kind]'s [holding_state]:
     [Idle] -> [0], [In_flight _] -> [1].  Does not mutate
-    state.  Thread-safe under [Eio.Mutex.use_rw ~protect:true]. *)
+    state.  Thread-safe under the per-slot mutex. *)
 
 val mark_acquire : kind:kind -> int
 (** Transitions [kind]'s [holding_state] from [Idle] to

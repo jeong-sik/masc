@@ -3,8 +3,8 @@
 // from dashboard.ts so existing consumers (`from './api/dashboard'`) are unchanged.
 
 import { get } from './core'
-import { parseAgentTimelineResponse, type AgentTimelineResponse } from './schemas/agent-timeline'
-import { parseAgentRelationsResponse, type AgentRelationsResponse } from './schemas/agent-relations'
+import type { AgentTimelineResponse } from './schemas/agent-timeline'
+import type { AgentRelationsResponse } from './schemas/agent-relations'
 
 export async function fetchAgentTimeline(
   agentName: string,
@@ -14,10 +14,12 @@ export async function fetchAgentTimeline(
   const raw = await get<unknown>(
     `/api/v1/agent-timeline?agent_name=${encodeURIComponent(agentName)}&since_hours=${sinceHours}&limit=${limit}`,
   )
+  const { parseAgentTimelineResponse } = await import('./schemas/agent-timeline')
   return parseAgentTimelineResponse(raw)
 }
 
 export async function fetchAgentRelations(agentName: string): Promise<AgentRelationsResponse> {
   const raw = await get<unknown>(`/api/v1/agent-relations?agent_name=${encodeURIComponent(agentName)}`)
+  const { parseAgentRelationsResponse } = await import('./schemas/agent-relations')
   return parseAgentRelationsResponse(raw)
 }

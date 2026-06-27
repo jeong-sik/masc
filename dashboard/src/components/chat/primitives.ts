@@ -658,6 +658,13 @@ function codeBlockText(htmlContent: string, source?: string): string {
   return htmlContent
 }
 
+function codeBlockLanguage(cap?: string): string {
+  const label = cap?.trim()
+  if (!label) return 'text'
+  const extension = label.match(/(?:^|[./\\])([a-zA-Z0-9_+-]+)$/)?.[1]
+  return extension ?? label
+}
+
 // Reuse the canonical clipboard helper (common/copyable-code) — it carries the
 // execCommand fallback for non-secure contexts — and just layer the toast on its
 // boolean result so the message text matches what was copied.
@@ -669,18 +676,23 @@ async function copyWithToast(text: string, successMessage: string): Promise<void
 function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
   const [highlighted, setHighlighted] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
+  const [containerRef, shouldHighlight] = useMermaidInView<HTMLDivElement>('300px')
   const codeId = useId()
 
   useEffect(() => {
+    if (!shouldHighlight) {
+      setHighlighted(null)
+      setFailed(false)
+      return undefined
+    }
     let cancelled = false
     const run = async () => {
       try {
-        const shiki = await import('shiki')
+        setHighlighted(null)
+        setFailed(false)
         const text = codeBlockText(htmlContent, source)
-        const next = await shiki.codeToHtml(text, {
-          lang: cap && cap.trim() ? cap.trim() : 'text',
-          theme: 'github-dark',
-        })
+        const { highlightCodeHtml } = await import('../common/shiki-highlighter')
+        const next = await highlightCodeHtml(text, codeBlockLanguage(cap))
         if (!cancelled) setHighlighted(next)
       } catch {
         if (!cancelled) setFailed(true)
@@ -688,12 +700,12 @@ function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html:
     }
     void run()
     return () => { cancelled = true }
-  }, [htmlContent, cap, source])
+  }, [htmlContent, cap, source, shouldHighlight])
 
   const plain = codeBlockText(htmlContent, source)
 
   return html`
-    <div class="chat-block-code ${failed ? 'chat-block-code-fallback' : ''}" data-chat-block="code">
+    <div class="chat-block-code ${failed ? 'chat-block-code-fallback' : ''}" data-chat-block="code" ref=${containerRef}>
       <div class="chat-block-code-hd">
         ${cap ? html`<span class="chat-block-code-cap">${cap}</span>` : html`<span class="chat-block-code-cap" />`}
         <button

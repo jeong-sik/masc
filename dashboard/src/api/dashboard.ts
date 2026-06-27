@@ -37,7 +37,6 @@ export type {
   GoalVerificationVote,
 } from '../types'
 export { fetchDashboardGoalsTree, fetchDashboardGoalDetail } from './dashboard-goals'
-export { DashboardConfigSchemaDriftError } from './schemas/dashboard-config'
 export type {
   ConfigEntry,
   ConfigEntryProvenance,
@@ -57,8 +56,6 @@ export { decodeDashboardFeedMetadata } from './dashboard-shared'
 // --- System logs ---
 
 export type { LogEntry, LogsResponse }
-export { LogsSchemaDriftError } from './schemas/logs'
-export { RuntimeDefaultsSchemaDriftError } from './schemas/runtime-defaults'
 export type { RuntimeDefaultsResponse, RuntimeEntry, KeeperAssignment, ModelRouting }
 export type {
   ProviderLogCatalogEntry,
@@ -66,7 +63,6 @@ export type {
   ProviderLogTailLine,
   ProviderLogTailResponse,
 }
-export { ProviderLogsSchemaDriftError } from './schemas/provider-logs'
 
 export {
   fetchLogs,
@@ -77,7 +73,6 @@ export {
 } from './dashboard-logs'
 
 export type { AgentTimelineEvent, AgentTimelineResponse }
-export { AgentTimelineSchemaDriftError } from './schemas/agent-timeline'
 
 export { fetchAgentTimeline } from './dashboard-agent'
 
@@ -85,7 +80,6 @@ export type {
   AgentRelation,
   AgentRelationsResponse,
 } from './schemas/agent-relations'
-export { AgentRelationsSchemaDriftError } from './schemas/agent-relations'
 export { fetchAgentRelations } from './dashboard-agent'
 
 // Re-export from the hot-path API barrel where the SSOT definition lives

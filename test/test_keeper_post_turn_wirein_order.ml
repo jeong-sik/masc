@@ -19,12 +19,10 @@
  * pinned invariant.
  *
  * Approach: read the source file as text, locate the function
- * definition by header line, then within a window of lines below
- * that header look up the first occurrence of each of the four
- * literal call markers and assert the line numbers are strictly
- * increasing. The window size is generous (300 lines) because the
- * function body is long; the four markers occur exactly once each
- * inside the body, so the window can safely overshoot.
+ * definition by header line, then scan until the next top-level [let]
+ * binding. Within that function body, look up the first occurrence of
+ * each of the four literal call markers and assert the line numbers are
+ * strictly increasing.
  *)
 
 open Alcotest
@@ -42,8 +40,6 @@ let wirein_markers =
     "apply_tool_emission_wirein";
     "apply_multimodal_wirein" ]
 
-let window_lines = 300
-
 let read_source_lines () =
   let root = Masc_test_deps.find_project_root () in
   let path = Filename.concat root source_relpath in
@@ -57,6 +53,10 @@ let read_source_lines () =
         | exception End_of_file -> List.rev acc
       in
       loop [])
+
+let has_prefix ~prefix hay =
+  let nlen = String.length prefix in
+  String.length hay >= nlen && String.sub hay 0 nlen = prefix
 
 let substring_present ~needle hay =
   let nlen = String.length needle in
@@ -95,6 +95,16 @@ let find_function_header_line ~lines =
   in
   scan 1
 
+let find_next_top_level_let_line ~lines ~from =
+  let arr = Array.of_list lines in
+  let n = Array.length arr in
+  let rec scan i =
+    if i > n then None
+    else if has_prefix ~prefix:"let " arr.(i - 1) then Some i
+    else scan (i + 1)
+  in
+  scan from
+
 let test_wirein_order_strictly_increasing () =
   let lines = read_source_lines () in
   let header_line =
@@ -109,7 +119,11 @@ let test_wirein_order_strictly_increasing () =
              function_header source_relpath)
   in
   let from = header_line + 1 in
-  let to_ = header_line + window_lines in
+  let to_ =
+    match find_next_top_level_let_line ~lines ~from with
+    | Some line -> line - 1
+    | None -> List.length lines
+  in
   let located =
     List.map
       (fun marker ->
@@ -118,11 +132,10 @@ let test_wirein_order_strictly_increasing () =
         | None ->
             failwith
               (Printf.sprintf
-                 "WireinOrderPinned: marker %S not found within %d \
-                  lines below %S (line %d) in %s — RFC-0065 §3.2.3 \
-                  wirein call appears to be missing."
-                 marker window_lines function_header header_line
-                 source_relpath))
+                 "WireinOrderPinned: marker %S not found in body of \
+                  %S (lines %d-%d) in %s — RFC-0065 §3.2.3 wirein \
+                  call appears to be missing."
+                 marker function_header from to_ source_relpath))
       wirein_markers
   in
   let rec check prev_line = function

@@ -306,6 +306,20 @@ let test_dashboard_shell_http_json_prefers_preserved_base_path_input () =
     (json |> member "runtime_resolution" |> member "base_path" |> member "path"
    |> to_string)
 
+let test_runtime_resolution_accepts_server_repo_inside_base_path () =
+  match Lib.Build_identity.repo_root () with
+  | None -> fail "Build_identity.repo_root unavailable; cannot test server/base path relation"
+  | Some repo_root ->
+    let repo_root =
+      try Unix.realpath repo_root with
+      | Unix.Unix_error _ -> repo_root
+    in
+    let config = Workspace.default_config (Filename.dirname repo_root) in
+    check bool "runtime accepts nested server repo" false
+      (Server_dashboard_http_runtime_info.server_workspace_mismatch_for_tests
+         ~server_repo_path:repo_root
+         config)
+
 let test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->
   let original_warmed = Atomic.get Server_dashboard_http.shell_warmed in
@@ -1479,6 +1493,8 @@ let () =
             test_dashboard_shell_http_json_includes_paths;
           test_case "shell runtime base_path prefers preserved input" `Quick
             test_dashboard_shell_http_json_prefers_preserved_base_path_input;
+          test_case "runtime resolution accepts server repo under base path" `Quick
+            test_runtime_resolution_accepts_server_repo_inside_base_path;
           test_case "shell bootstrap payload while prewarming" `Quick
             test_dashboard_shell_http_json_uses_bootstrap_payload_while_prewarming;
           test_case "shell reuses last good payload while prewarming" `Quick

@@ -6,6 +6,8 @@ import { OAS_TELEMETRY_REPLAY_LIMIT, OAS_EVENT_PREFIX } from './config/constants
 import {
   oasTotalEvents,
   oasAgentEvents,
+  oasReplayLoadedEvents,
+  oasReplayTotalMatchingEvents,
   noteOasReplayWindow,
   pushOasAgentEvent,
   recordOasError,
@@ -41,6 +43,7 @@ type EvidenceRefSets = {
 
 const seenOasEventKeys = new Set<string>()
 let replayGeneration = 0
+let initialReplayPromise: Promise<void> | null = null
 
 function emptyEvidenceRefSets(): EvidenceRefSets {
   return {
@@ -632,6 +635,18 @@ export async function replayOasRuntimeTelemetry(signal?: AbortSignal): Promise<v
     totalMatchingEvents: response.total_matching_entries ?? response.count,
     truncated: response.has_more ?? response.truncated ?? false,
   })
+}
+
+export function ensureOasRuntimeReplay(): Promise<void> {
+  if (oasReplayLoadedEvents.value > 0 || oasReplayTotalMatchingEvents.value > 0) {
+    return Promise.resolve()
+  }
+  if (initialReplayPromise) return initialReplayPromise
+  initialReplayPromise = replayOasRuntimeTelemetry()
+    .finally(() => {
+      initialReplayPromise = null
+    })
+  return initialReplayPromise
 }
 
 export async function loadMoreOasEvents(signal?: AbortSignal): Promise<void> {

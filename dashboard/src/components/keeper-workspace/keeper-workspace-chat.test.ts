@@ -2,7 +2,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { signal } from '@preact/signals'
-import { act } from '@testing-library/preact'
+import { act, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { Keeper } from '../../types'
 
@@ -234,6 +234,9 @@ describe('KeeperWorkspaceChat', () => {
       action.click()
     })
 
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')).not.toBeNull()
+    })
     const drawer = container.querySelector('[data-testid="kw-chat-turn-inspector-drawer"]')
     expect(drawer).not.toBeNull()
     expect(drawer?.textContent).toContain('메시지 sangsu')

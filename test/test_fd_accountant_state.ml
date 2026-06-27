@@ -33,14 +33,9 @@ open Alcotest
 module FA = Fd_accountant
 
 let test_idle_projects_to_zero () =
-  (* Eio.Mutex.use_rw ~protect:true installs a Cancel.protect that
-     performs [Cancel.Get_context].  Eio.Switch.run is the only
-     handler for that effect, so even Idle reads must run inside a
-     switch.  Eio_main.run is needed to provide the underlying
-     event-loop fiber; the inner Eio.Switch.run gives Cancel.protect
-     a cancellation context to read.  This mirrors PR-B's
-     dashboard_governance_judge tests, which use the same wrap
-     pattern. *)
+  (* Keep the Eio wrapper because the black-box slot API still uses
+     Eio semaphores; the direct state reads are now guarded by a
+     plain per-slot mutex. *)
   Eio_main.run @@ fun _env ->
   Eio.Switch.run @@ fun _sw ->
   List.iter

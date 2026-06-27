@@ -158,15 +158,20 @@ let request_fingerprint (input : Yojson.Safe.t) =
 ;;
 
 let request_fingerprint_preview fingerprint =
-  String.sub fingerprint 0 (min 12 (String.length fingerprint))
+  String.sub
+    fingerprint
+    0
+    (min fingerprint_preview_length (String.length fingerprint))
 ;;
 
 let sandbox_profile_of_runtime_contract runtime_contract =
-  Option.bind runtime_contract (string_opt_member "sandbox_profile")
+  Option.bind runtime_contract (fun json ->
+    Json_util.get_string_nonempty json "sandbox_profile")
 ;;
 
 let backend_of_runtime_contract runtime_contract =
-  Option.bind runtime_contract (string_opt_member "backend")
+  Option.bind runtime_contract (fun json ->
+    Json_util.get_string_nonempty json "backend")
 ;;
 
 let nonempty_string_opt = function
@@ -191,16 +196,17 @@ let load_rules_unlocked ~base_path () =
   let rec parse_entries index acc = function
     | [] -> List.rev acc
     | entry :: rest ->
-      (match approval_rule_of_yojson entry with
-       | Some rule -> parse_entries (index + 1) (rule :: acc) rest
-       | None ->
+      (match approval_rule_of_yojson_with_error entry with
+       | Ok rule -> parse_entries (index + 1) (rule :: acc) rest
+       | Error reason ->
          report_rules_read_drop
            ~reason:Safe_ops.persistence_read_drop_reason_invalid_payload
            ~path
            ~detail:
              (Printf.sprintf
-                "approval rule entry %d rejected: %s"
+                "approval rule entry %d rejected (%s): %s"
                 index
+                reason
                 (rule_json_preview entry));
          parse_entries (index + 1) acc rest)
   in

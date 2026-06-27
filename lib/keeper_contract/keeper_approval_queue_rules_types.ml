@@ -72,6 +72,12 @@ let risk_level_to_string = function
   | Critical -> "critical"
 ;;
 
+let allowed_risk_levels = [ Low; Medium; High; Critical ]
+
+let allowed_risk_level_values = List.map risk_level_to_string allowed_risk_levels
+
+let allowed_risk_level_values_label = String.concat "/" allowed_risk_level_values
+
 let risk_level_to_int = function
   | Low -> 1
   | Medium -> 2
@@ -98,17 +104,14 @@ let approval_audit_decision_to_string = function
   | Approval_expired reason -> "reject:" ^ reason
 ;;
 
+let fingerprint_preview_length = 12
+;;
+
 let string_opt_of_json = function
   | `String value ->
     let trimmed = String.trim value in
     if trimmed = "" then None else Some trimmed
   | _ -> None
-;;
-
-let string_opt_member key json =
-  match Json_util.assoc_member_opt key json with
-  | Some value -> string_opt_of_json value
-  | None -> None
 ;;
 
 let bool_member key json ~default =
@@ -150,33 +153,55 @@ let approval_rule_to_yojson (rule : approval_rule) =
     ]
 ;;
 
-let approval_rule_of_yojson json =
+let approval_rule_of_yojson_with_error json =
   match json with
   | `Assoc _ ->
-    let ( let* ) = Option.bind in
-    let* id = string_opt_member "id" json in
-    let* keeper_name = string_opt_member "keeper_name" json in
-    let* tool_name = string_opt_member "tool_name" json in
+    let ( let* ) = Result.bind in
+    let require field json =
+      match Json_util.get_string_nonempty json field with
+      | Some value -> Ok value
+      | None -> Error (Printf.sprintf "%s must be a non-blank string" field)
+    in
+    let* id = require "id" json in
+    let* keeper_name = require "keeper_name" json in
+    let* tool_name = require "tool_name" json in
     let sandbox_profile = Json_util.get_string json "sandbox_profile" in
     let backend = Json_util.get_string json "backend" in
-    let* request_fingerprint = string_opt_member "request_fingerprint" json in
+    let* request_fingerprint = require "request_fingerprint" json in
     let request_fingerprint_preview =
-      string_opt_member "request_fingerprint_preview" json
+      Json_util.get_string_nonempty json "request_fingerprint_preview"
       |> Option.value
            ~default:
              (String.sub
                 request_fingerprint
                 0
-                (min 12 (String.length request_fingerprint)))
+                (min fingerprint_preview_length (String.length request_fingerprint)))
     in
-    let* max_risk_raw = string_opt_member "max_risk" json in
-    let* max_risk = risk_level_of_string max_risk_raw in
-    let* created_at = Json_util.get_float json "created_at" in
+    let* max_risk_raw = require "max_risk" json in
+    let* max_risk =
+      match risk_level_of_string max_risk_raw with
+      | Some level -> Ok level
+      | None ->
+        Error
+          (Printf.sprintf
+             "max_risk %S is not %s"
+             max_risk_raw
+             allowed_risk_level_values_label)
+    in
+    let* created_at =
+      match Json_util.get_float json "created_at" with
+      | Some value -> Ok value
+      | None -> Error "created_at must be a number"
+    in
     let created_by = Json_util.get_string json "created_by" in
     let last_matched_at = Json_util.get_float json "last_matched_at" in
-    let* match_count = non_negative_int_member "match_count" json in
+    let* match_count =
+      match non_negative_int_member "match_count" json with
+      | Some value -> Ok value
+      | None -> Error "match_count must be a non-negative integer"
+    in
     let source_approval_id = Json_util.get_string json "source_approval_id" in
-    Some
+    Ok
       { id
       ; keeper_name
       ; tool_name
@@ -191,5 +216,11 @@ let approval_rule_of_yojson json =
       ; match_count
       ; source_approval_id
       }
-  | _ -> None
+  | _ -> Error "approval rule must be a JSON object"
+;;
+
+let approval_rule_of_yojson json =
+  match approval_rule_of_yojson_with_error json with
+  | Ok rule -> Some rule
+  | Error _ -> None
 ;;

@@ -123,7 +123,126 @@ let test_approval_rule_rejects_malformed_object_json () =
            ; "max_risk", `String "high"
            ; "created_at", `Float 1780587600.0
            ; "match_count", `Int (-1)
+           ]));
+  check
+    (option reject)
+    "blank tool name"
+    None
+    (Q.approval_rule_of_yojson
+       (`Assoc
+           [ "id", `String "rule-1"
+           ; "keeper_name", `String "keeper"
+           ; "tool_name", `String " "
+           ; "request_fingerprint", `String "abcdef"
+           ; "max_risk", `String "high"
+           ; "created_at", `Float 1780587600.0
+           ; "match_count", `Int 0
+           ]));
+  check
+    (option reject)
+    "blank request fingerprint"
+    None
+    (Q.approval_rule_of_yojson
+       (`Assoc
+           [ "id", `String "rule-1"
+           ; "keeper_name", `String "keeper"
+           ; "tool_name", `String "tool_execute"
+           ; "request_fingerprint", `String "  "
+           ; "max_risk", `String "high"
+           ; "created_at", `Float 1780587600.0
+           ; "match_count", `Int 0
+           ]));
+  check
+    (option reject)
+    "missing created_at"
+    None
+    (Q.approval_rule_of_yojson
+       (`Assoc
+           [ "id", `String "rule-1"
+           ; "keeper_name", `String "keeper"
+           ; "tool_name", `String "tool_execute"
+           ; "request_fingerprint", `String "abcdef"
+           ; "max_risk", `String "high"
+           ; "match_count", `Int 0
+           ]));
+  check
+    (option reject)
+    "missing match_count"
+    None
+    (Q.approval_rule_of_yojson
+       (`Assoc
+           [ "id", `String "rule-1"
+           ; "keeper_name", `String "keeper"
+           ; "tool_name", `String "tool_execute"
+           ; "request_fingerprint", `String "abcdef"
+           ; "max_risk", `String "high"
+           ; "created_at", `Float 1780587600.0
            ]))
+;;
+
+let valid_rule_json ?(max_risk = `String "high") ?(created_at = `Float 1780587600.0)
+    ?(match_count = `Int 0) ?request_fingerprint_preview () =
+  let fields =
+    [ "id", `String "rule-1"
+    ; "keeper_name", `String "keeper"
+    ; "tool_name", `String "tool_execute"
+    ; "request_fingerprint", `String "abcdef1234567890"
+    ; "max_risk", max_risk
+    ; "created_at", created_at
+    ; "match_count", match_count
+    ]
+  in
+  let fields =
+    match request_fingerprint_preview with
+    | None -> fields
+    | Some value -> ("request_fingerprint_preview", value) :: fields
+  in
+  `Assoc fields
+;;
+
+let without_field field json =
+  match json with
+  | `Assoc fields -> `Assoc (List.remove_assoc field fields)
+  | json -> json
+;;
+
+let check_parse_error name expected json =
+  match Q.approval_rule_of_yojson_with_error json with
+  | Ok _ -> fail (name ^ ": expected parse error")
+  | Error actual -> check string name expected actual
+;;
+
+let test_approval_rule_error_reasons () =
+  check_parse_error
+    "max_risk reason"
+    (Printf.sprintf "max_risk %S is not %s" "god-mode" Q.allowed_risk_level_values_label)
+    (valid_rule_json ~max_risk:(`String "god-mode") ());
+  check_parse_error
+    "created_at reason"
+    "created_at must be a number"
+    (without_field "created_at" (valid_rule_json ()));
+  check_parse_error
+    "match_count reason"
+    "match_count must be a non-negative integer"
+    (valid_rule_json ~match_count:(`Int (-1)) ());
+  check_parse_error
+    "blank id reason"
+    "id must be a non-blank string"
+    (valid_rule_json () |> without_field "id")
+;;
+
+let test_request_fingerprint_preview_fallback () =
+  match
+    Q.approval_rule_of_yojson_with_error
+      (valid_rule_json ~request_fingerprint_preview:(`String " ") ())
+  with
+  | Error reason -> fail ("expected approval rule to parse: " ^ reason)
+  | Ok parsed ->
+    check
+      string
+      "preview fallback"
+      "abcdef123456"
+      parsed.Q.request_fingerprint_preview
 ;;
 
 let test_blank_string_json_is_none () =
@@ -145,6 +264,14 @@ let () =
             "approval rule rejects malformed object json"
             `Quick
             test_approval_rule_rejects_malformed_object_json
+        ; test_case
+            "approval rule error reasons"
+            `Quick
+            test_approval_rule_error_reasons
+        ; test_case
+            "request fingerprint preview fallback"
+            `Quick
+            test_request_fingerprint_preview_fallback
         ; test_case "blank string is none" `Quick test_blank_string_json_is_none
         ] )
     ]

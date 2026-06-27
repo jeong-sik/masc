@@ -238,6 +238,27 @@ let test_normalize_masc_base_path_input_canonicalizes_explicit_path () =
   in
   check string "canonical explicit base path" "/Users/dancer/me" actual
 
+let test_base_path_or_cwd_uses_host_base_path_env () =
+  with_temp_dir "config-dir-base-path-or-cwd-env" @@ fun root ->
+  let base = Filename.concat root "workspace" in
+  Unix.mkdir base 0o755;
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "MASC_BASE_PATH" (Some (Filename.concat base Common.masc_dirname)) @@ fun () ->
+  check string "normalized env base path" base
+    (Config_dir_resolver.base_path_or_cwd ())
+
+let test_base_path_or_cwd_falls_back_to_current_working_dir () =
+  with_temp_dir "config-dir-base-path-or-cwd-cwd" @@ fun cwd ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  let saved_cwd = Sys.getcwd () in
+  Unix.chdir cwd;
+  Fun.protect
+    ~finally:(fun () -> Unix.chdir saved_cwd)
+    (fun () ->
+      check string "cwd fallback" (Sys.getcwd ())
+        (Config_dir_resolver.base_path_or_cwd ()))
+
 let test_env_override_valid () =
   with_temp_dir "config-dir-env" @@ fun root ->
   let config = make_config_root root in
@@ -564,6 +585,10 @@ let () =
             test_inputs_from_env_survives_deleted_cwd;
           test_case "canonicalizes explicit base path" `Quick
             test_normalize_masc_base_path_input_canonicalizes_explicit_path;
+          test_case "base_path_or_cwd uses env base path" `Quick
+            test_base_path_or_cwd_uses_host_base_path_env;
+          test_case "base_path_or_cwd falls back to cwd" `Quick
+            test_base_path_or_cwd_falls_back_to_current_working_dir;
         ] );
       ( "rfc_0121_accessors",
         [

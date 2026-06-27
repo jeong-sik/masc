@@ -407,7 +407,16 @@ let () = test "masc_oas_bridge_rejects_without_eio_env" (fun () ->
         Ok "ok")
     with
     | Ok _ -> failwith "expected failure when no Eio clock is available"
-    | Error _ -> Alcotest.(check bool) "fn was not called" false !called
+    | Error err ->
+      (match Keeper_internal_error.classify_masc_internal_error err with
+       | Some (Keeper_internal_error.Internal_contract_rejected _) ->
+         Alcotest.(check bool) "fn was not called" false !called
+       | Some other ->
+         failwith
+           ("expected Internal_contract_rejected, got "
+            ^ Keeper_internal_error.kind_of_masc_internal_error other)
+       | None ->
+         failwith ("expected typed keeper error, got " ^ Agent_sdk.Error.to_string err))
 )
 
 (* Test dispatch transition claim *)

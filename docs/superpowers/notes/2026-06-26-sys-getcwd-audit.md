@@ -59,4 +59,4 @@ Fallback uses anchor relative paths or default base paths to the process current
 
 ## Deferral Note
 
-The **fallback-to-fix** call sites are intentionally not refactored in this PR. They are tracked for Phase 4 path-hardening work so the current changeset remains small and reviewable.
+The **fallback-to-fix** call sites are intentionally not refactored in this PR. They are tracked for Phase 4 path-hardening work in <https://github.com/jeong-sik/masc/issues/22444> so the current changeset remains small and reviewable.

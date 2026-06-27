@@ -175,7 +175,8 @@ Replace the comment block with:
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
-    Raises [Invalid_argument] when [timeout_s] is not positive and finite. *)
+    Raises [Invalid_argument] when [timeout_s] is non-positive or [nan].
+    [Float.infinity] is accepted as no-fire. *)
 ```
 
 ---
@@ -185,7 +186,6 @@ Replace the comment block with:
 - [ ] **Step 1: Build the timeout guard test**
 
 ```bash
-cd /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feat/masc-oas-p0-infra-hardening-20260626
 scripts/dune-local.sh build test_masc_oas_bridge_timeout_guard
 ```
 

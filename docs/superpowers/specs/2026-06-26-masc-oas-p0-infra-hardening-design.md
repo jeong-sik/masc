@@ -1,9 +1,9 @@
 # MASC/OAS P0 Infrastructure Hardening — Design Spec
 
-**Date:** 2026-06-26  
-**Status:** Draft (pending implementation)  
-**Worktree:** `~/me/workspace/yousleepwhen/masc/.worktrees/feat/masc-oas-p0-infra-hardening-20260626`  
-**Target repos:** `~/me/workspace/yousleepwhen/masc`, `~/me/workspace/yousleepwhen/oas`  
+**Date:** 2026-06-26
+**Status:** Draft (MASC-side implementation slice)
+**Worktree:** `masc/.worktrees/feat/masc-oas-p0-infra-hardening-20260626`
+**Target repo:** `masc`
 **Evaluated against:** OCaml 5.4 official semantics, Eio 1.x ecosystem, Jane Street / large-scale OCaml best practices.
 
 ---
@@ -16,7 +16,7 @@ The downloaded audit documents identify multiple P0 defects in MASC and OAS:
 - **Path / env SSOT drift**: implicit `Sys.getcwd ()` fallbacks, split `.masc/config` concatenation, duplicated env parsers.
 - **Goal/verification, board, task, Memory OS, FUSION** defects were also flagged, but many are already fixed on `main` or require larger architectural work.
 
-This spec scopes the first implementable slice: fail-closed OAS bridge timeout + path/env SSOT hardening. These are prerequisites for the larger safety and isolation work because they eliminate silent degradation and cwd-relative drift.
+This spec scopes the first implementable MASC-side slice: fail-closed OAS bridge timeout + MASC path/env hardening. Cross-repo OAS env parser consolidation is tracked separately and is not implemented by this branch.
 
 ### Design Principles
 
@@ -25,7 +25,7 @@ All changes in this spec follow the user's requirements:
 - **No silent failure.** A missing clock or failed write must surface as a typed error, not a log-and-continue path.
 - **No string matching.** Timeout presence is enforced by the type system (`clock` non-optional in the bridge path), not by substring checks.
 - **No hardcoded local paths.** Paths are resolved through `Config_dir_resolver` / explicit `base_path`; cwd fallbacks are removed or documented.
-- **SSOT.** Env parsing is consolidated into one typed helper per repo; path construction uses one set of helpers.
+- **SSOT.** MASC bridge env parsing and path construction use typed helpers instead of local ad hoc parsing or string-built paths.
 - **Immutable where possible.** Env helper results and path records are pure functions of input config.
 - **Production-level.** Changes include tests and telemetry; build verification happens in CI.
 
@@ -36,10 +36,10 @@ All changes in this spec follow the user's requirements:
 | Audit claim | Current `main` status | Action in this spec |
 |-------------|----------------------|---------------------|
 | OAS bridge falls back to `Unix.gettimeofday` and runs without timeout | **Unfixed**. A fix exists on `codex/oas-bridge-clock-fail-closed-20260626` but is not merged. | Implement fail-closed behavior. |
-| Path hardcoded to `/Users/dancer/me` | **Not found** in production runtime code. | No action. |
+| Path hardcoded to a host-local workspace path | **Not found** in production runtime code. | No action. |
 | `Sys.getcwd ()` used as implicit base-path fallback | **Present** in 36 call sites across 23 MASC `lib/` files. | Thread explicit base path; remove fallback where feasible. |
 | Split `.masc/config` literal concatenation | **Present** in `bin/main_eio.ml`. | Use `Common.masc_dirname` / `Config_dir_resolver`. |
-| Duplicated env parsers (OAS) | **Present** in `lib/base/util.ml`, `lib/defaults.ml`, `lib/llm_provider/cli_common_env.ml`, `lib/tool_result_store.ml`. | Consolidate behind one typed helper. |
+| Duplicated env parsers (OAS) | **Present** in the OAS repo. | Out of scope for this MASC branch; track in the OAS cross-repo backlog. |
 | Board lock-order inversion | **Already fixed** by commit `509a94ee533`. | Out of scope. |
 | Goal operator auth / principal binding / request-id-goal-id check | **Already present** in `workspace_goals.ml` and `goal_verification.ml`. | Out of scope; note cross-file lock order for future RFC. |
 
@@ -51,7 +51,7 @@ The full set of improvements is too large for one implementation plan. We decomp
 
 **Phase 1 — Infrastructure Hardening (this spec)**
 - P1.1 OAS Bridge Clock/Timeout fail-closed.
-- P1.2 Path/Env SSOT hardening.
+- P1.2 MASC path/env SSOT hardening.
 
 **Phase 2 — Security & Correctness**
 - P2.1 Goal verification cross-file transaction safety (lock-order invariant + compensation audit).
@@ -146,38 +146,28 @@ let do_timeout fn =
 
 ### 5.2 P1.2 — Path/Env SSOT Hardening
 
-**Goal:** Remove implicit cwd-relative path resolution and consolidate duplicated env parsing. Paths come from explicit base-path config; env parsing follows one typed policy per repo.
+**Goal:** Remove MASC init-path duplication and keep the OAS bridge timeout env policy behind one typed helper. Deeper cwd fallback cleanup and OAS repo parser consolidation are follow-up work.
 
 **5.2.1 Path SSOT**
 
-- Replace the literal `.masc/config` concatenation in `bin/main_eio.ml:933–936` with `Common.masc_dirname` / `Config_dir_resolver`.
+- Replace the `.masc/config` concatenation in `bin/main_eio.ml:933–936` with `Config_dir_resolver.base_path_config_root`.
 - Audit the 36 `Sys.getcwd` call sites in MASC `lib/` and thread explicit `base_path` where the module already has config context.
 - Document remaining legitimate uses (e.g., diagnostics scripts, tests).
 
-**5.2.2 Env Parsing SSOT (OAS)**
+**5.2.2 Env Parsing SSOT**
 
-- Consolidate `int_env_or` / `float_env_or` / `bool_env_or` helpers into a single module (`Oas_env` or extend `Util`).
-- Policy:
-  - Invalid non-empty value: log warning, use default.
-  - Missing value: use default silently.
-  - Empty string: treat as missing.
-- Update callers:
-  - `lib/base/util.ml`
-  - `lib/defaults.ml`
-  - `lib/llm_provider/cli_common_env.ml`
-  - `lib/tool_result_store.ml`
+- MASC: keep OAS bridge timeout parsing in `Env_config_oas_bridge`; document that non-positive and `nan` fall back while `infinity` is accepted as no-fire.
+- OAS repo: deferred cross-repo task. This branch does not modify `oas/lib/base/util.ml`, `oas/lib/defaults.ml`, `oas/lib/llm_provider/cli_common_env.ml`, or `oas/lib/tool_result_store.ml`.
 
 **Files to change:**
 
 - `bin/main_eio.ml`
-- `lib/config_dir_resolver/config_dir_resolver.ml` (if new helper needed)
-- `lib/base/util.ml` or new `lib/base/env.ml` (OAS)
-- `lib/defaults.ml`, `lib/llm_provider/cli_common_env.ml`, `lib/tool_result_store.ml`
+- `lib/config_dir_resolver/config_dir_resolver.ml` / `.mli`
+- `lib/config/env_config_oas_bridge.ml` / `.mli`
 
 **Verification:**
 
-- Add unit tests for invalid/missing/empty env values.
-- Run affected OAS tests.
+- Add unit tests for invalid and infinity MASC bridge timeout env values.
 - Full CI build/test before merge.
 
 ---
@@ -196,7 +186,7 @@ let do_timeout fn =
 |------|------------|
 | `run_safe` fail-closed breaks tests that rely on no-clock execution | Update tests to initialize `Masc_eio_env` or expect `Internal_contract_rejected`. |
 | Path SSOT changes break sandbox / voice modules that lack config context | Limit changes to modules that already accept `base_path`; leave deep refactor for Phase 4. |
-| OAS env-parser consolidation changes observable warning behavior | Add tests for negative/empty/non-numeric inputs before merging. |
+| OAS env-parser consolidation changes observable warning behavior | Deferred to a dedicated OAS PR so warning-behavior tests can live with the OAS parser changes. |
 | Scope creep into larger Memory OS / FUSION refactor | Strictly gate each phase; create issues for deferred items. |
 
 ---
@@ -204,6 +194,5 @@ let do_timeout fn =
 ## 8. Next Steps
 
 1. Review this spec.
-2. Invoke `writing-plans` skill to produce the implementation plan for Phase 1.
-3. Create implementation PRs from the worktree, one per P1 sub-task.
-4. Verify via CI, not local full build.
+2. Keep cross-repo OAS parser consolidation in the OAS backlog or a dedicated OAS PR.
+3. Verify via CI, not local full build.

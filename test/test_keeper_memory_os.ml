@@ -3114,14 +3114,15 @@ let mk_shared_fixture ~now ?(category = "fact") claim =
   }
 ;;
 
-(* Two distinct keepers holding the same whitelisted claim are promoted into one
-   shared fact whose observed_by is the sorted keeper set. RFC-0247: corroboration
-   is structural (distinct-keeper count); there is no confidence aggregation. *)
+(* Two distinct keepers holding the same outcome-positive claim are promoted into
+   one shared fact whose observed_by is the sorted keeper set. RFC-0247:
+   corroboration is structural (distinct-keeper count); there is no confidence
+   aggregation. *)
 let test_consolidator_promotes_corroborated () =
   let now = 1_000_000.0 in
   let keeper_facts =
-    [ "beta", [ mk_shared_fixture ~now "shared system invariant" ]
-    ; "alpha", [ mk_shared_fixture ~now "shared system invariant" ]
+    [ "beta", [ mk_shared_fixture ~now ~category:"validated_approach" "shared system invariant" ]
+    ; "alpha", [ mk_shared_fixture ~now ~category:"validated_approach" "shared system invariant" ]
     ]
   in
   let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
@@ -3137,8 +3138,8 @@ let test_consolidator_promotes_corroborated () =
       (Some now)
       f.Types.last_verified_at;
     Alcotest.(check string)
-      "whitelisted category carried"
-      "fact"
+      "outcome-positive category carried"
+      "validated_approach"
       (Types.category_to_string f.Types.category)
   | _ -> Alcotest.fail "expected one shared fact"
 ;;
@@ -3151,7 +3152,9 @@ let test_consolidator_promotes_corroborated () =
 let test_consolidator_promotes_carries_claim_id () =
   let now = 1_000_000.0 in
   let with_id claim =
-    { (mk_shared_fixture ~now claim) with Types.claim_id = Some "pr-321-merged" }
+    { (mk_shared_fixture ~now ~category:"lesson" claim) with
+      Types.claim_id = Some "pr-321-merged"
+    }
   in
   let keeper_facts =
     [ "beta", [ with_id "PR #321 merged" ]
@@ -3175,7 +3178,9 @@ let test_consolidator_promotes_carries_claim_id () =
 (* A claim held by a single keeper is never shared (below min_keepers). *)
 let test_consolidator_solo_not_promoted () =
   let now = 1_000_000.0 in
-  let keeper_facts = [ "alpha", [ mk_shared_fixture ~now "solo only claim" ] ] in
+  let keeper_facts =
+    [ "alpha", [ mk_shared_fixture ~now ~category:"lesson" "solo only claim" ] ]
+  in
   let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
   Alcotest.(check int) "solo claim not promoted" 0 (List.length shared)
 ;;
@@ -3186,8 +3191,8 @@ let test_consolidator_same_keeper_repeat_no_inflate () =
   let now = 1_000_000.0 in
   let keeper_facts =
     [ ( "alpha"
-      , [ mk_shared_fixture ~now "repeated claim"
-        ; mk_shared_fixture ~now "repeated claim"
+      , [ mk_shared_fixture ~now ~category:"lesson" "repeated claim"
+        ; mk_shared_fixture ~now ~category:"lesson" "repeated claim"
         ] )
     ]
   in
@@ -3206,6 +3211,27 @@ let test_consolidator_category_default_deny () =
   in
   let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
   Alcotest.(check int) "non-whitelisted category not shared" 0 (List.length shared)
+;;
+
+(* Audit 2026-06-26: `_shared` should not amplify repeated facts before outcome
+   evaluation proves they helped. Fact/Constraint remain keeper-local even when
+   structurally corroborated; outcome-derived categories are the only current
+   structural positive signal. *)
+let test_consolidator_fact_constraint_wait_for_outcome_positive () =
+  let now = 1_000_000.0 in
+  let keeper_facts =
+    [ ( "alpha"
+      , [ mk_shared_fixture ~now ~category:"fact" "plain fact repeated"
+        ; mk_shared_fixture ~now ~category:"constraint" "plain constraint repeated"
+        ] )
+    ; ( "beta"
+      , [ mk_shared_fixture ~now ~category:"fact" "plain fact repeated"
+        ; mk_shared_fixture ~now ~category:"constraint" "plain constraint repeated"
+        ] )
+    ]
+  in
+  let _considered, shared = Consolidator.promote_facts ~now ~keeper_facts () in
+  Alcotest.(check int) "fact/constraint wait for outcome-positive evidence" 0 (List.length shared)
 ;;
 
 (* RFC-0247 §6: outcome-derived knowledge crosses keepers. A validated_approach
@@ -3358,8 +3384,14 @@ let test_consolidator_ephemeral_not_promoted () =
 let test_consolidator_deterministic () =
   let now = 1_000_000.0 in
   let forward =
-    [ "alpha", [ mk_shared_fixture ~now "zulu claim"; mk_shared_fixture ~now "alpha claim" ]
-    ; "beta", [ mk_shared_fixture ~now "zulu claim"; mk_shared_fixture ~now "alpha claim" ]
+    [ ( "alpha"
+      , [ mk_shared_fixture ~now ~category:"lesson" "zulu claim"
+        ; mk_shared_fixture ~now ~category:"lesson" "alpha claim"
+        ] )
+    ; ( "beta"
+      , [ mk_shared_fixture ~now ~category:"lesson" "zulu claim"
+        ; mk_shared_fixture ~now ~category:"lesson" "alpha claim"
+        ] )
     ]
   in
   let reversed = List.rev forward in
@@ -3380,8 +3412,12 @@ let test_recall_surfaces_shared_after_consolidation () =
       with_temp_keepers_dir (fun _keepers_dir ->
         let now = 1_000_000.0 in
         let shared_claim = "deployment uses blue green rollout" in
-        Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now shared_claim);
-        Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now shared_claim);
+        Memory_io.append_fact
+          ~keeper_id:"alpha"
+          (mk_shared_fixture ~now ~category:"validated_approach" shared_claim);
+        Memory_io.append_fact
+          ~keeper_id:"beta"
+          (mk_shared_fixture ~now ~category:"validated_approach" shared_claim);
         let report = Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now () in
         Alcotest.(check int) "one claim promoted to shared store" 1 report.Consolidator.promoted;
         Memory_io.append_fact
@@ -3477,8 +3513,12 @@ let test_consolidator_waits_for_shared_store_lock () =
     with_eio_guard (fun () ->
       with_temp_keepers_dir (fun _keepers_dir ->
         let now = 1_000_000.0 in
-        Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now "locked shared claim");
-        Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now "locked shared claim");
+        Memory_io.append_fact
+          ~keeper_id:"alpha"
+          (mk_shared_fixture ~now ~category:"lesson" "locked shared claim");
+        Memory_io.append_fact
+          ~keeper_id:"beta"
+          (mk_shared_fixture ~now ~category:"lesson" "locked shared claim");
         let result = ref None in
         let started, resolve_started = Eio.Promise.create () in
         File_lock_eio.with_lock
@@ -3722,7 +3762,7 @@ let test_self_observation_not_promoted () =
   let durable marker =
     { (fact_fixture ~now ()) with
       Types.claim = "merging requires two approvals (" ^ marker ^ ")"
-    ; Types.category = Types.Constraint
+    ; Types.category = Types.Lesson
     ; Types.claim_kind = Some Types.Durable_knowledge
     ; Types.claim_id = Some "two-approvals-rule"
     }
@@ -3740,7 +3780,7 @@ let test_self_observation_not_promoted () =
        (fun (f : Types.fact) -> f.Types.claim_kind = Some Types.Self_observation)
        shared);
   Alcotest.(check bool)
-    "durable knowledge with two keepers IS promoted"
+    "outcome-positive durable knowledge with two keepers IS promoted"
     true
     (List.exists
        (fun (f : Types.fact) -> f.Types.claim_id = Some "two-approvals-rule")
@@ -4954,6 +4994,10 @@ let () =
             "non-whitelisted category default-denied"
             `Quick
             test_consolidator_category_default_deny
+        ; Alcotest.test_case
+            "fact/constraint wait for outcome-positive promotion evidence"
+            `Quick
+            test_consolidator_fact_constraint_wait_for_outcome_positive
         ; Alcotest.test_case
             "unknown category default-denied (#21241)"
             `Quick

@@ -74,6 +74,12 @@ let read_persisted_meta config keeper_name =
   | Ok None -> fail "meta should exist"
   | Ok (Some meta) -> meta
 
+let overlay_drift_counter_value ~keeper ~field =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string KeeperMetaOverlayDrift)
+    ~labels:[("keeper", keeper); ("field", field)]
+    ()
+
 (** Regression test: ensure_keeper_meta must overlay a TOML-owned
     tool_denylist at runtime without writing the TOML-owned value into
     the runtime JSON file on every reconcile tick.
@@ -125,6 +131,9 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
   let initial_persisted_version =
     (read_persisted_meta config keeper_name).Keeper_meta_contract.meta_version
   in
+  let before_overlay_drift =
+    overlay_drift_counter_value ~keeper:keeper_name ~field:"tool_denylist"
+  in
   (* 3. Call ensure_keeper_meta — should overlay denylist from TOML *)
   (match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
@@ -147,7 +156,12 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
             []
             persisted.Keeper_meta_contract.tool_denylist;
           check int "no TOML-only write bump" initial_persisted_version
-            persisted.Keeper_meta_contract.meta_version))
+            persisted.Keeper_meta_contract.meta_version);
+      check
+        (float 0.0001)
+        "TOML-only denylist drift is observable"
+        (before_overlay_drift +. 1.0)
+        (overlay_drift_counter_value ~keeper:keeper_name ~field:"tool_denylist"))
 
 let test_ensure_keeper_meta_overlays_active_goal_ids_and_persists () =
   with_runtime_default @@ fun () ->

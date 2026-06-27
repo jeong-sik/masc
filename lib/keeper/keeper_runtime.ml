@@ -343,6 +343,52 @@ let keeper_meta_persistent_drift_categories
       drift_if "oas_env" (current.oas_env <> target.oas_env);
     ]
 
+let keeper_meta_overlay_drift_categories
+    ~(defaults : Keeper_types_profile.keeper_profile_defaults)
+    ~(current : keeper_meta)
+    ~(target : keeper_meta) =
+  List.filter_map Fun.id
+    [
+      drift_if "proactive" (current.proactive <> target.proactive);
+      drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
+      drift_if "goal" (not (goal_horizon_text_equal current.goal target.goal));
+      drift_if "autoboot_enabled"
+        (current.autoboot_enabled <> target.autoboot_enabled);
+      drift_if "mention_targets"
+        (current.mention_targets <> target.mention_targets);
+      drift_if "sandbox_profile"
+        (current.sandbox_profile <> target.sandbox_profile);
+      drift_if "sandbox_image" (current.sandbox_image <> target.sandbox_image);
+      drift_if "network_mode" (current.network_mode <> target.network_mode);
+      drift_if "allowed_paths"
+        (Option.is_some defaults.allowed_paths
+         && current.allowed_paths <> target.allowed_paths);
+      drift_if "telemetry_feedback_enabled"
+        (current.telemetry_feedback_enabled <> target.telemetry_feedback_enabled);
+      drift_if "telemetry_feedback_window_hours"
+        (current.telemetry_feedback_window_hours
+         <> target.telemetry_feedback_window_hours);
+      drift_if "always_approve"
+        (current.always_approve <> target.always_approve);
+    ]
+
+let emit_keeper_meta_overlay_drift ~keeper_name categories =
+  match categories with
+  | [] -> ()
+  | cats ->
+    Log.Keeper.info
+      "ensure_keeper_meta: overlaying TOML-only [%s] for %s without writing \
+       runtime meta JSON"
+      (String.concat "," cats)
+      keeper_name;
+    List.iter
+      (fun field ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string KeeperMetaOverlayDrift)
+           ~labels:[("keeper", keeper_name); ("field", field)]
+           ())
+      cats
+
 let ensure_keeper_meta_with_cause config name =
   match read_meta config name with
   | Ok (Some meta) ->
@@ -471,6 +517,13 @@ let ensure_keeper_meta_with_cause config name =
        (goal, sandbox policy, denylist, cadence, etc.) remain overlay-only; if
        they triggered writes here, [meta_to_json]/scrub would drop them from disk
        and the next reconcile tick would see the same drift again. *)
+    let overlay_cats =
+      keeper_meta_overlay_drift_categories
+        ~defaults
+        ~current:meta
+        ~target:overlayed
+    in
+    emit_keeper_meta_overlay_drift ~keeper_name:meta.name overlay_cats;
     let cats =
       keeper_meta_persistent_drift_categories
         ~defaults

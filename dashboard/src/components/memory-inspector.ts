@@ -12,8 +12,8 @@
 //   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance, TTL)
 //   압축 유지·요약        ← real memory_os.episodes.items (summary + terminal_marker)
 //   핀 고정 사실          ⓘ Phase 2 (operator pins — no backend source yet)
-//   최근 회상·주입        ⓘ Phase 3 (per-op timeline — no event feed yet)
-// The two ⓘ sections render an honest "연결 예정" disclosure, never fabricated
+//   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
+// The remaining ⓘ sections render an honest "연결 예정" disclosure, never fabricated
 // rows (no-stub): they DISCLOSE absence rather than fake presence.
 
 import { Fragment } from 'preact'
@@ -131,6 +131,34 @@ export function latestEntryWithBlocks(rows: readonly TurnRecordRow[]): TurnRecor
     if (row && row.record.blocks.length > 0) return row
   }
   return null
+}
+
+export interface MemoryRecallInjection {
+  readonly traceId: string
+  readonly turn: number
+  readonly ts: number
+  readonly bytes: number
+  readonly digest: string
+}
+
+export function recentMemoryRecallInjections(
+  rows: readonly TurnRecordRow[],
+  limit = 5,
+): readonly MemoryRecallInjection[] {
+  const injections: MemoryRecallInjection[] = []
+  for (let i = rows.length - 1; i >= 0 && injections.length < limit; i--) {
+    const row = rows[i]
+    const block = row?.record.blocks.find(b => b.block === 'memory_os_recall' && b.bytes > 0)
+    if (!row || !block) continue
+    injections.push({
+      traceId: row.record.trace_id,
+      turn: row.record.absolute_turn,
+      ts: row.record.ts,
+      bytes: block.bytes,
+      digest: block.digest,
+    })
+  }
+  return injections
 }
 
 // ── fact category meta (real, exhaustive over the typed union) ──
@@ -373,6 +401,28 @@ function MemoryPromptEvidence({
   `
 }
 
+function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
+  const injections = recentMemoryRecallInjections(rows)
+  if (injections.length === 0) {
+    return html`<div class="mem-empty">최근 memory_os_recall 주입 없음.</div>`
+  }
+  return html`
+    <div class="mem-store">
+      ${injections.map(inj => html`
+        <div class="mem-tl-row" key=${`${inj.traceId}:${inj.turn}:${inj.digest}`}>
+          <span class="mem-kind">회상</span>
+          <span class="mem-tl-at">${formatTimeAgo(inj.ts)}</span>
+          <span class="mem-tl-text">
+            <span class="mono">${inj.traceId}#${inj.turn}</span>
+            <span class="mono"> · ${inj.digest}</span>
+          </span>
+          <span class="mem-tl-tok">${memFmtBytes(inj.bytes)}</span>
+        </div>
+      `)}
+    </div>
+  `
+}
+
 function FactRow({ fact }: { fact: MemoryOsFact }) {
   const meta = factCategoryMeta(fact.category)
   const provenance = `${fact.source.trace_id}#${fact.source.turn}`
@@ -547,7 +597,7 @@ function OneKeeperMemoryReal({
 
       <div class="turn-sec">
         <h4>최근 회상 · 주입</h4>
-        <${DisclosureNote} text="회상·주입 op 타임라인은 Phase 3에서 연결 예정 — 현재 event feed 없음." />
+        <${RecentRecallTimeline} rows=${rows} />
       </div>
 
       <div class="turn-sec">

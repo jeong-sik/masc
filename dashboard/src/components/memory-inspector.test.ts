@@ -13,6 +13,7 @@ import {
   memFmtBytes,
   memFmtTok,
   promptBlockMeta,
+  recentMemoryRecallInjections,
   sortMemoryFactsForReview,
   type MemoryKeeper,
 } from './memory-inspector'
@@ -28,8 +29,8 @@ afterEach(() => {
 })
 
 // A turn-records payload exercising the two real-data sections (composition,
-// facts), the episode-backed 압축 section, and read_errors. The unbacked
-// sections (핀 / 회상) render disclosures regardless of payload.
+// facts), the episode-backed 압축 section, recall-block timeline, and read_errors.
+// The unbacked pin section renders a disclosure regardless of payload.
 function turnRecordsPayload() {
   return {
     keeper: 'masc-improver',
@@ -285,19 +286,29 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('cccc2222dddd')
   })
 
-  it('surfaces read_errors and renders honest disclosures for the unbacked sections', async () => {
+  it('renders recent recall injection rows from real memory_os_recall prompt blocks', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-tl-row')).toBeTruthy())
+    expect(container.textContent).toContain('trace-a#7')
+    expect(container.textContent).toContain('cccc2222dddd')
+    expect(container.textContent).toContain('800B')
+    const recallSection = [...container.querySelectorAll('.turn-sec')].find(sec => (sec.querySelector('h4')?.textContent ?? '') === '최근 회상 · 주입')
+    expect(recallSection?.querySelector('.mem-tl-row')?.textContent).toContain('cccc2222dddd')
+    expect(recallSection?.querySelector('.mem-disclosure')).toBeFalsy()
+  })
+
+  it('surfaces read_errors and renders honest disclosures for the unbacked pin section', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     // read_errors visible (no silent failure)
     expect(container.querySelector('.mem-read-error')?.textContent).toContain('one malformed row skipped')
-    // pins → Phase 2 disclosure, timeline → Phase 3 disclosure (no fabricated rows)
+    // pins → Phase 2 disclosure (no fabricated pin rows)
     const disclosures = [...container.querySelectorAll('.mem-disclosure')].map(d => d.textContent ?? '')
     expect(disclosures.some(t => t.includes('Phase 2'))).toBe(true)
-    expect(disclosures.some(t => t.includes('Phase 3'))).toBe(true)
     // no prototype fixture leakage
     expect(container.querySelector('.mem-pin')).toBeFalsy()
-    expect(container.querySelector('.mem-tl-row')).toBeFalsy()
   })
 
   it('renders the compaction section from real episodes (summary + terminal marker)', async () => {
@@ -414,6 +425,30 @@ describe('memory view-model helpers', () => {
     // empty input → null, not a fabricated row
     expect(latestEntryWithBlocks([])).toBeNull()
     expect(latestEntryWithBlocks([errorTail])).toBeNull()
+  })
+
+  it('recentMemoryRecallInjections returns newest real memory_os_recall blocks only', () => {
+    const mkRow = (turn: number, block: string, bytes: number): TurnRecordRow => ({
+      record: {
+        keeper: 'k',
+        trace_id: `trace-${turn}`,
+        absolute_turn: turn,
+        ts: turn,
+        runtime_profile: 'local',
+        blocks: [{ block, bytes, digest: `digest-${turn}` }],
+        execution_ids: [],
+      },
+      diff_vs_prev: null,
+    })
+    expect(recentMemoryRecallInjections([
+      mkRow(1, 'memory_os_recall', 100),
+      mkRow(2, 'persona', 200),
+      mkRow(3, 'memory_os_recall', 0),
+      mkRow(4, 'memory_os_recall', 400),
+    ])).toEqual([
+      { traceId: 'trace-4', turn: 4, ts: 4, bytes: 400, digest: 'digest-4' },
+      { traceId: 'trace-1', turn: 1, ts: 1, bytes: 100, digest: 'digest-1' },
+    ])
   })
 
   it('promptBlockMeta maps known Prompt_block_id tokens and keeps unknown tokens raw', () => {

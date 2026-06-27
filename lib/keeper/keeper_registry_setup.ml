@@ -127,7 +127,7 @@ let record_invalid_registry_entry ~operation ~name reason =
 let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
   match validate_registry_meta ~base_path name meta with
   | Ok () -> meta
-  | Error (Name_mismatch _ | Meta_validation_failed _) as original_error ->
+  | Error ((Name_mismatch _ | Meta_validation_failed _) as reason) ->
       let expected_name = String.trim name in
       let expected_agent_name = Keeper_identity.keeper_agent_name expected_name in
       let repaired =
@@ -139,7 +139,7 @@ let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
              else meta.agent_name)
         }
       in
-      record_invalid_registry_entry ~operation ~name original_error;
+      record_invalid_registry_entry ~operation ~name reason;
       (match validate_registry_meta ~base_path name repaired with
        | Ok () -> repaired
        | Error repair_reason ->

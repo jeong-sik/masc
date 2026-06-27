@@ -195,7 +195,7 @@ let persisted_claim_kind_of_json fields =
 let legacy_external_state_category = claim_kind_to_string External_state
 
 let category_and_claim_kind_of_persisted_row ~category_str ~claim_kind =
-  match String.lowercase_ascii (String.trim category_str) with
+  match category_str with
   | s when String.equal s legacy_external_state_category ->
     (match claim_kind with
      | Persisted_claim_kind_absent

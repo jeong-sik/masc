@@ -3816,6 +3816,34 @@ let test_fact_of_json_migrates_legacy_external_state_category () =
       (string_field "claim_kind")
 ;;
 
+let test_fact_of_json_does_not_normalize_legacy_external_state_category () =
+  let first_seen = 1_000_000.0 in
+  let category = " External_State " in
+  let legacy =
+    `Assoc
+      [ "claim", `String "PR #21363 is OPEN, MERGEABLE, and BLOCKED"
+      ; "category", `String category
+      ; "source", `Assoc [ "trace_id", `String "t"; "turn", `Int 1 ]
+      ; "first_seen", `Float first_seen
+      ; "schema_version", `String "rfc0231-v2"
+      ]
+  in
+  match Types.fact_of_json legacy with
+  | None -> Alcotest.fail "legacy row with non-exact external_state category failed"
+  | Some f ->
+    (match f.Types.category with
+     | Types.Unknown raw ->
+       Alcotest.(check string)
+         "non-exact legacy external_state stays unknown"
+         category
+         raw
+     | _ -> Alcotest.fail "non-exact legacy external_state category migrated");
+    Alcotest.(check (option string))
+      "non-exact legacy external_state does not set claim_kind"
+      None
+      (Option.map Types.claim_kind_to_string f.Types.claim_kind)
+;;
+
 let test_fact_of_json_rejects_invalid_external_state_claim_kind () =
   let first_seen = 1_000_000.0 in
   let legacy =
@@ -5018,6 +5046,10 @@ let () =
             "fact_of_json migrates legacy external_state category"
             `Quick
             test_fact_of_json_migrates_legacy_external_state_category
+        ; Alcotest.test_case
+            "fact_of_json keeps non-exact external_state category unknown"
+            `Quick
+            test_fact_of_json_does_not_normalize_legacy_external_state_category
         ; Alcotest.test_case
             "fact_of_json rejects invalid legacy external_state claim_kind"
             `Quick

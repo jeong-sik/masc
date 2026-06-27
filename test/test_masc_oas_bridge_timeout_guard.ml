@@ -7,30 +7,30 @@ let expected_invalid_timeout timeout_s =
        timeout_s)
 ;;
 
-let check_internal_contract_rejected label err =
+let check_internal_bridge_exception ~label ~caller err =
   match Keeper_internal_error.classify_masc_internal_error err with
-  | Some (Keeper_internal_error.Internal_contract_rejected _) -> ()
+  | Some (Keeper_internal_error.Internal_bridge_exception { caller = actual; _ }) ->
+    Alcotest.(check string) (label ^ " caller") caller actual
   | Some other ->
     Alcotest.failf
-      "%s: expected Internal_contract_rejected, got %s"
+      "%s: expected Internal_bridge_exception, got %s"
       label
       (Keeper_internal_error.kind_of_masc_internal_error other)
   | None ->
     Alcotest.failf "%s: expected structured MASC internal error" label
 ;;
 
-let with_masc_eio_env f =
+let with_masc_eio_env ?(clock = true) f =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       Masc_eio_env.reset_for_test ();
       Fun.protect
         ~finally:Masc_eio_env.reset_for_test
         (fun () ->
-          Masc_eio_env.init
-            ~sw
-            ~net:(Eio.Stdenv.net env)
-            ~clock:(Eio.Stdenv.clock env)
-            ();
+          let net = Eio.Stdenv.net env in
+          if clock
+          then Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ()
+          else Masc_eio_env.init ~sw ~net ();
           f ())))
 ;;
 
@@ -71,23 +71,44 @@ let test_accepts_infinite_timeout_with_eio_clock () =
     | Error err -> failwith (Agent_sdk.Error.to_string err))
 ;;
 
-let test_rejects_positive_timeout_without_eio_clock () =
-  match Masc_eio_env.get_opt () with
-  | Some _ ->
-    failwith
-      "test_rejects_positive_timeout_without_eio_clock requires Masc_eio_env.get_opt () = \
-       None before calling run_safe"
-  | None ->
-    let called = ref false in
-    (match
-       Masc_oas_bridge.run_safe ~caller:"test_timeout_guard" ~timeout_s:0.1 (fun () ->
-         called := true;
-         Ok "ok")
-     with
-     | Error err ->
-       Alcotest.(check bool) "fn was not called" false !called;
-       check_internal_contract_rejected "missing clock" err
-     | Ok value -> failwith ("unexpected success: " ^ value))
+let test_rejects_positive_timeout_without_eio_env () =
+  Masc_eio_env.reset_for_test ();
+  Fun.protect
+    ~finally:Masc_eio_env.reset_for_test
+    (fun () ->
+      match Masc_eio_env.get_opt () with
+      | Some _ -> failwith "expected reset Masc_eio_env"
+      | None ->
+        let caller = "test_timeout_guard" in
+        let called = ref false in
+        (match
+           Masc_oas_bridge.run_safe ~caller ~timeout_s:0.1 (fun () ->
+             called := true;
+             Ok "ok")
+         with
+         | Error err ->
+           Alcotest.(check bool) "fn was not called" false !called;
+           check_internal_bridge_exception ~label:"missing env" ~caller err
+         | Ok value -> failwith ("unexpected success: " ^ value)))
+;;
+
+let test_rejects_positive_timeout_with_missing_clock () =
+  with_masc_eio_env ~clock:false (fun () ->
+    match Masc_eio_env.get_opt () with
+    | None -> failwith "expected initialized Masc_eio_env"
+    | Some { clock = Some _; _ } -> failwith "expected Masc_eio_env without clock"
+    | Some { clock = None; _ } ->
+      let caller = "test_timeout_guard" in
+      let called = ref false in
+      (match
+         Masc_oas_bridge.run_safe ~caller ~timeout_s:0.1 (fun () ->
+           called := true;
+           Ok "ok")
+       with
+       | Error err ->
+         Alcotest.(check bool) "fn was not called" false !called;
+         check_internal_bridge_exception ~label:"missing clock" ~caller err
+       | Ok value -> failwith ("unexpected success: " ^ value)))
 ;;
 
 let with_env name value f =
@@ -143,9 +164,13 @@ let () =
             `Quick
             test_accepts_infinite_timeout_with_eio_clock
         ; Alcotest.test_case
-            "rejects positive timeout without eio clock"
+            "rejects positive timeout without eio env"
             `Quick
-            test_rejects_positive_timeout_without_eio_clock
+            test_rejects_positive_timeout_without_eio_env
+        ; Alcotest.test_case
+            "rejects positive timeout with missing eio clock"
+            `Quick
+            test_rejects_positive_timeout_with_missing_clock
         ; Alcotest.test_case
             "run_with_caller falls back for invalid env timeouts"
             `Quick

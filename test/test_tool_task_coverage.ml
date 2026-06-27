@@ -395,28 +395,26 @@ let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () 
   | _ -> failwith "task history payload must be a JSON list"
 )
 let () = test "masc_oas_bridge_rejects_missing_eio_clock" (fun () ->
-  match Masc_eio_env.get_opt () with
-  | Some _ ->
-    failwith
-      "masc_oas_bridge_rejects_missing_eio_clock requires Masc_eio_env.get_opt () = \
-       None before calling run_safe"
-  | None ->
+  Masc_eio_env.reset_for_test ();
+  Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
     let called = ref false in
+    let caller = "test_tool_task_coverage" in
     match
-      Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
+      Masc_oas_bridge.run_safe ~caller ~timeout_s:0.1 (fun () ->
         called := true;
         Ok "ok")
     with
     | Error err ->
       Alcotest.(check bool) "fn was not called" false !called;
       (match Keeper_internal_error.classify_masc_internal_error err with
-       | Some (Keeper_internal_error.Internal_contract_rejected _) -> ()
+       | Some (Keeper_internal_error.Internal_bridge_exception { caller = actual; _ }) ->
+         Alcotest.(check string) "caller" caller actual
        | Some other ->
          Alcotest.failf
-           "expected Internal_contract_rejected, got %s"
+           "expected Internal_bridge_exception, got %s"
            (Keeper_internal_error.kind_of_masc_internal_error other)
        | None -> Alcotest.fail "expected structured MASC internal error")
-    | Ok other -> failwith ("unexpected success: " ^ other)
+    | Ok other -> failwith ("unexpected success: " ^ other))
 )
 
 (* Test dispatch transition claim *)

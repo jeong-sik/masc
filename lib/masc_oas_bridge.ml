@@ -17,7 +17,10 @@
 let min_timeout_s = 0.0
 
 let run_safe ~caller ~timeout_s fn =
-  if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0 then
+  if
+    Float.classify_float timeout_s = FP_nan
+    || Float.compare timeout_s min_timeout_s <= 0
+  then
     invalid_arg
       (Printf.sprintf
          "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
@@ -35,7 +38,7 @@ let run_safe ~caller ~timeout_s fn =
     Log.Misc.error "%s" detail;
     Error
       (Keeper_internal_error.sdk_error_of_masc_internal_error
-         (Keeper_internal_error.Internal_contract_rejected { reason = detail }))
+         (Keeper_internal_error.Internal_bridge_exception { caller; exn_repr = detail }))
   in
   let clock =
     match Masc_eio_env.get_opt () with
@@ -49,7 +52,11 @@ let run_safe ~caller ~timeout_s fn =
   | Ok clock ->
   let t0 = Eio.Time.now clock in
   let elapsed () = Eio.Time.now clock -. t0 in
-  let do_timeout fn = Eio.Time.with_timeout_exn clock timeout_s fn in
+  let do_timeout fn =
+    if Float.classify_float timeout_s = FP_infinite
+    then fn ()
+    else Eio.Time.with_timeout_exn clock timeout_s fn
+  in
   try
     do_timeout fn
   with

@@ -381,7 +381,8 @@ let () =
   let net = Eio.Stdenv.net env in
   (* Capture the Eio handles the OAS/fusion call path reads via
      [Masc_eio_env.get_opt]. Without this, [Masc_oas_bridge.run_safe] finds no
-     clock and runs the panel/judge calls without timeout enforcement. *)
+     clock and rejects panel/judge calls instead of silently bypassing timeout
+     enforcement. *)
   Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   (match Runtime.init_default_strict ~config_path with

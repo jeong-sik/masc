@@ -10,8 +10,9 @@
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
     Raises [Invalid_argument] when [timeout_s] is not positive or is [nan].
-    [Float.infinity] is accepted for advisory callers whose wrapper timeout is
-    intentionally disabled by [Env_config_oas_bridge]. *)
+    [Float.infinity] is accepted as an explicit no-wrapper timeout for advisory
+    callers whose wrapper timeout is intentionally disabled by
+    [Env_config_oas_bridge]. *)
 val run_safe
   :  caller:string
   -> timeout_s:float

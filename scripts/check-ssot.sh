@@ -100,6 +100,11 @@ check_rule "R5-health-path" 0 \
 
 # SSOT-R6 — no home-anchored MASC runtime root. Runtime state must resolve
 # from an explicit base path and then append .masc.
+#
+# The baseline count of 3 is intentional: all matches are in docs that
+# explicitly warn against bare home-anchored .masc roots (e.g. tilde or
+# HOME env expansion). See KEEPER-USER-MANUAL.md and
+# BOOT-ENV-STATE-INVENTORY.md. No code or script uses such a root.
 check_rule "R6-home-masc-root" 3 \
   "<base-path>/.masc with explicit MASC_BASE_PATH or --base-path" \
   '(\$HOME|\$\{HOME[^}]*\}|~)/[^[:space:]`'\''"]*\.masc([/[:space:]`'\''".,)]|$)' \

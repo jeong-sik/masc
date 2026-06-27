@@ -15,7 +15,10 @@ module Spawn_slots = Keeper_registry_spawn_slots
 module Error_tracking = Keeper_registry_error_tracking
 
 type registry_entry_validation_error =
-  | Registry_key_malformed of { key : string }
+  | Registry_key_malformed of
+      { key : string
+      ; reason : string
+      }
   | Registry_base_path_mismatch of
       { expected : string
       ; actual : string
@@ -38,8 +41,8 @@ let registry_entry_validation_error_label = function
   | Registry_meta_agent_name_empty -> "meta_agent_name_empty"
 
 let registry_entry_validation_error_to_string = function
-  | Registry_key_malformed { key } ->
-      Printf.sprintf "registry key %S is malformed" key
+  | Registry_key_malformed { key; reason } ->
+      Printf.sprintf "registry key %S is malformed: %s" key reason
   | Registry_base_path_mismatch { expected; actual } ->
       Printf.sprintf
         "registry entry base_path mismatch: expected %S, got %S"
@@ -58,14 +61,7 @@ let registry_entry_validation_error_to_string = function
   | Registry_meta_agent_name_empty ->
       "registry entry meta.agent_name is empty"
 
-let registry_key_parts key =
-  match String.rindex_opt key '\x1f' with
-  | None -> Error (Registry_key_malformed { key })
-  | Some idx ->
-      let key_len = String.length key in
-      let base_path = String.sub key 0 idx in
-      let name = String.sub key (idx + 1) (key_len - idx - 1) in
-      Ok (base_path, name)
+let registry_key_parts = Keeper_registry_types.registry_key_parts
 
 let validate_registry_entry ~base_path name (entry : registry_entry) =
   let expected_name = String.trim name in
@@ -86,7 +82,7 @@ let validate_registry_entry ~base_path name (entry : registry_entry) =
   then Error Registry_meta_agent_name_empty
   else Ok ()
 
-let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
+let validate_registry_meta name (meta : keeper_meta) =
   let expected_name = String.trim name in
   if not (String.equal meta.name expected_name)
   then
@@ -112,7 +108,7 @@ let record_invalid_registry_entry ~operation ~name reason =
     (registry_entry_validation_error_to_string reason)
 
 let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
-  match validate_registry_meta ~base_path name meta with
+  match validate_registry_meta name meta with
   | Ok () -> meta
   | Error reason ->
       let expected_name = String.trim name in
@@ -127,7 +123,7 @@ let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
         }
       in
       record_invalid_registry_entry ~operation ~name reason;
-      (match validate_registry_meta ~base_path name repaired with
+      (match validate_registry_meta name repaired with
        | Ok () -> repaired
        | Error repair_reason ->
            record_invalid_registry_entry ~operation ~name repair_reason;
@@ -201,12 +197,18 @@ let update_entry_if_registered ~base_path name f =
   let rec loop () =
     let current = Atomic.get registry in
     match StringMap.find_opt key current with
-    | None -> ()
+    | None -> false
     | Some entry ->
-      let updated = StringMap.add key (f entry) current in
-      if Atomic.compare_and_set registry current updated
-      then Orphan_drops.clear ~base_path name
-      else loop ()
+      let new_entry, changed = f entry in
+      if not changed
+      then false
+      else (
+        let updated = StringMap.add key new_entry current in
+        if Atomic.compare_and_set registry current updated
+        then (
+          Orphan_drops.clear ~base_path name;
+          true)
+        else loop ())
   in
   loop ()
 ;;
@@ -479,7 +481,10 @@ let all ?base_path () =
     (fun key v acc ->
        match registry_key_parts key with
        | Error reason ->
-           record_invalid_registry_entry ~operation:"all" ~name:v.name reason;
+           record_invalid_registry_entry
+             ~operation:"all"
+             ~name:v.name
+             (Registry_key_malformed { key; reason });
            acc
        | Ok (key_base_path, key_name) ->
            (match base_path with
@@ -495,7 +500,7 @@ let all ?base_path () =
 ;;
 
 let update_meta ~base_path name meta =
-  match validate_registry_meta ~base_path name meta with
+  match validate_registry_meta name meta with
   | Error reason ->
       record_invalid_registry_entry ~operation:"update_meta" ~name reason
   | Ok () ->
@@ -512,24 +517,22 @@ let reload_meta_from_disk ~base_path name =
       match effective_meta_of_profile_defaults defaults meta with
       | Error msg -> Error msg
       | Ok effective_meta -> (
-          match validate_registry_meta ~base_path name effective_meta with
+          match validate_registry_meta name effective_meta with
           | Error reason ->
               record_invalid_registry_entry ~operation:"reload_meta_from_disk" ~name reason;
               Error (registry_entry_validation_error_to_string reason)
           | Ok () ->
-              let changed = ref false in
-              update_entry_if_registered ~base_path name (fun e ->
-                changed := true;
-                { e with base_path; name; meta = effective_meta });
-              if not !changed
-              then Ok None
-              else Ok (get ~base_path name)))
+              let updated =
+                update_entry_if_registered ~base_path name (fun e ->
+                  { e with base_path; name; meta = effective_meta }, true)
+              in
+              if updated then Ok (get ~base_path name) else Ok None))
 ;;
 
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
-  match validate_registry_meta ~base_path name meta with
+  match validate_registry_meta name meta with
   | Error reason ->
       record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
   | Ok () ->
@@ -588,12 +591,11 @@ let broadcast_composite_changed = Keeper_registry_broadcast.composite_changed
 let record_phase_broadcast_failure = Keeper_registry_broadcast.record_phase_failure
 
 let update_current_turn e f =
-  let current_turn_observation =
-    match e.current_turn_observation with
-    | None -> None
-    | Some obs -> Some (f obs)
-  in
-  { e with current_turn_observation }
+  match e.current_turn_observation with
+  | None -> e, false
+  | Some obs ->
+    let obs' = f obs in
+    if obs == obs' then e, false else { e with current_turn_observation = Some obs' }, true
 ;;
 
 let stamp_turn_progress ~now ~event_kind obs =
@@ -604,35 +606,38 @@ let stamp_turn_progress ~now ~event_kind obs =
 ;;
 
 let mark_turn_started ~base_path name =
-  let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    let turn_id = e.meta.runtime.usage.total_turns + 1 in
-    let obs =
-      { turn_id
-      ; started_at = now
-      ; last_progress_at = now
-      ; last_progress_kind = Some "turn_started"
-      ; active_tool_count = 0
-      ; turn_phase = Packed Turn_prompting
-      ; decision_stage = Packed Decision_undecided
-      ; measurement = None
-      ; measurement_bind_count = 0
-      ; selected_model = None
-      }
-    in
-    changed := true;
-    { e with
-      current_turn_observation = Some obs
-    ; compaction_stage = Packed Compaction_accumulating
-    });
-  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      let turn_id = e.meta.runtime.usage.total_turns + 1 in
+      let obs =
+        { turn_id
+        ; started_at = now
+        ; last_progress_at = now
+        ; last_progress_kind = Some "turn_started"
+        ; active_tool_count = 0
+        ; turn_phase = Packed Turn_prompting
+        ; decision_stage = Packed Decision_undecided
+        ; measurement = None
+        ; measurement_bind_count = 0
+        ; selected_model = None
+        }
+      in
+      { e with
+        current_turn_observation = Some obs
+      ; compaction_stage = Packed Compaction_accumulating
+      }, true)
+  in
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let record_turn_progress ~base_path name ~event_kind =
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (stamp_turn_progress ~now ~event_kind))
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (stamp_turn_progress ~now ~event_kind))
+  in
+  ()
 ;;
 
 (* RFC-0197 (P1-4a): write-through mirror of the turn event bus
@@ -645,54 +650,57 @@ let record_turn_progress ~base_path name ~event_kind =
    [current_turn_observation] (turn already ended) is a no-op, so a late
    background-drain callback after [mark_turn_finished] cannot leak. *)
 let record_turn_tool_inflight ~base_path name ~count =
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs -> { obs with active_tool_count = count }))
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (fun obs -> { obs with active_tool_count = count }))
+  in
+  ()
 ;;
 
 (* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without touching keeper-turn-scoped data ([turn_id], [started_at], [selected_model], [measurement], [measurement_bind_count]).  Bypasse... *)
 let mark_sdk_turn_started ~base_path name =
-  let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    match e.current_turn_observation with
-    | None -> e
-    | Some obs ->
-      if
-        obs.turn_phase = Packed Turn_prompting
-        && obs.decision_stage = Packed Decision_undecided
-      then e
-      else (
-        changed := true;
-        let new_obs =
-          { (stamp_turn_progress ~now ~event_kind:"sdk_turn_started" obs) with
-            turn_phase = Packed Turn_prompting
-          ; decision_stage = Packed Decision_undecided
-          }
-        in
-        { e with current_turn_observation = Some new_obs }));
-  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      match e.current_turn_observation with
+      | None -> e, false
+      | Some obs ->
+        if
+          obs.turn_phase = Packed Turn_prompting
+          && obs.decision_stage = Packed Decision_undecided
+        then e, false
+        else (
+          let new_obs =
+            { (stamp_turn_progress ~now ~event_kind:"sdk_turn_started" obs) with
+              turn_phase = Packed Turn_prompting
+            ; decision_stage = Packed Decision_undecided
+            }
+          in
+          { e with current_turn_observation = Some new_obs }, true))
+  in
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let mark_turn_measurement ~base_path name =
-  let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    match e.current_turn_observation, e.pending_turn_measurement with
-    | Some obs, Some measurement ->
-      changed := true;
-      { e with
-        current_turn_observation =
-          Some
-            { obs with
-              measurement = Some measurement
-            ; measurement_bind_count = obs.measurement_bind_count + 1
-            ; last_progress_at = now
-            ; last_progress_kind = Some "turn_measurement"
-            }
-      ; pending_turn_measurement = None
-      }
-    | _ -> e);
-  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      match e.current_turn_observation, e.pending_turn_measurement with
+      | Some obs, Some measurement ->
+        { e with
+          current_turn_observation =
+            Some
+              { obs with
+                measurement = Some measurement
+              ; measurement_bind_count = obs.measurement_bind_count + 1
+              ; last_progress_at = now
+              ; last_progress_kind = Some "turn_measurement"
+              }
+        ; pending_turn_measurement = None
+        }, true
+      | _ -> e, false)
+  in
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 (* FSM transition validators moved to Keeper_registry_fsm_validators. *)
@@ -701,44 +709,47 @@ let validate_turn_phase_transition = Keeper_registry_fsm_validators.turn_phase_t
 let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_active) =
 (* Spec invariant: the 3 [<active>_to_undecided] transitions are forbidden within a turn.  Previously enforced at runtime via [invalid_arg] inside a 16-pair match; now unrepresentable through the [dec... *)
   let target_packed = decision_stage_active_to_packed decision_stage in
-  let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      if obs.decision_stage = target_packed
-      then obs
-      else (
-        changed := true;
-        { (stamp_turn_progress ~now ~event_kind:"decision_stage" obs) with
-          decision_stage = target_packed
-        })));
-  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (fun obs ->
+        if obs.decision_stage = target_packed
+        then obs
+        else (
+          { (stamp_turn_progress ~now ~event_kind:"decision_stage" obs) with
+            decision_stage = target_packed
+          })))
+  in
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let set_turn_phase_direct ~base_path name ~event_kind (turn_phase : packed_turn_phase) =
-  let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
-      | Resolved_turn_idempotent -> obs
-      | Resolved_turn_transition _ ->
-        changed := true;
-        { (stamp_turn_progress ~now ~event_kind obs) with
-          turn_phase
-        }
-      | Resolved_turn_violation violation ->
-        Keeper_fsm_guard_runtime.wrap_unit
-          ~action:"turn_phase_transition"
-          ~stage:"guard"
-          (fun () ->
-             raise_turn_phase_transition_violation
-               ~where:event_kind
-               ~from:obs.turn_phase
-               ~to_:turn_phase
-               ~violation);
-        obs));
-  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      let e', changed =
+        update_current_turn e (fun obs ->
+          match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
+          | Resolved_turn_idempotent -> obs
+          | Resolved_turn_transition _ ->
+            { (stamp_turn_progress ~now ~event_kind obs) with
+              turn_phase
+            }
+          | Resolved_turn_violation violation ->
+            Keeper_fsm_guard_runtime.wrap_unit
+              ~action:"turn_phase_transition"
+              ~stage:"guard"
+              (fun () ->
+                 raise_turn_phase_transition_violation
+                   ~where:event_kind
+                   ~from:obs.turn_phase
+                   ~to_:turn_phase
+                   ~violation);
+            obs)
+      in
+      e', changed)
+  in
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let set_turn_phase_with ~base_path name ~event_kind ~target ~update_obs =
@@ -751,30 +762,33 @@ let set_turn_phase_with ~base_path name ~event_kind ~target ~update_obs =
      no-ops and do not emit a broadcast, matching [set_turn_phase].  The
      [event_kind] label is forwarded to [raise_turn_phase_transition_violation]
      via [wrap_unit] so guard metrics name the actual caller. *)
-  let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      match resolve_turn_phase_transition ~from:obs.turn_phase ~target with
-      | Resolved_turn_idempotent -> obs
-      | Resolved_turn_transition _ ->
-        changed := true;
-        let obs' =
-          { (stamp_turn_progress ~now ~event_kind obs) with turn_phase = target }
-        in
-        update_obs obs'
-      | Resolved_turn_violation violation ->
-        Keeper_fsm_guard_runtime.wrap_unit
-          ~action:"turn_phase_transition"
-          ~stage:"guard"
-          (fun () ->
-             raise_turn_phase_transition_violation
-               ~where:event_kind
-               ~from:obs.turn_phase
-               ~to_:target
-               ~violation);
-        obs));
-  if !changed then broadcast_composite_changed ~name ~ts_unix:now
+  let changed =
+    update_entry_if_registered ~base_path name (fun e ->
+      let e', changed =
+        update_current_turn e (fun obs ->
+          match resolve_turn_phase_transition ~from:obs.turn_phase ~target with
+          | Resolved_turn_idempotent -> obs
+          | Resolved_turn_transition _ ->
+            let obs' =
+              { (stamp_turn_progress ~now ~event_kind obs) with turn_phase = target }
+            in
+            update_obs obs'
+          | Resolved_turn_violation violation ->
+            Keeper_fsm_guard_runtime.wrap_unit
+              ~action:"turn_phase_transition"
+              ~stage:"guard"
+              (fun () ->
+                 raise_turn_phase_transition_violation
+                   ~where:event_kind
+                   ~from:obs.turn_phase
+                   ~to_:target
+                   ~violation);
+            obs)
+      in
+      e', changed)
+  in
+  if changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let mark_turn_runtime_exhausted ~base_path name =

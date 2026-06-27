@@ -64,7 +64,21 @@ gh_preflight_shared_repo_root() {
 }
 
 gh_preflight_cache_root() {
-  printf '%s/.masc/cache/gh-pr-audit\n' "$(gh_preflight_shared_repo_root)"
+  # Allow CI runners or local multi-repo setups to redirect the audit cache.
+  if [ -n "${MASC_GH_PR_AUDIT_CACHE_ROOT:-}" ]; then
+    printf '%s\n' "$MASC_GH_PR_AUDIT_CACHE_ROOT"
+  else
+    printf '%s/.masc/cache/gh-pr-audit\n' "$(gh_preflight_shared_repo_root)"
+  fi
+}
+
+gh_preflight_cache_ttl_sec() {
+  local default_ttl="${1:-3600}"
+  local ttl="${MASC_GH_PR_AUDIT_CACHE_TTL_SEC:-$default_ttl}"
+  if [[ ! "$ttl" =~ ^[0-9]+$ ]]; then
+    gh_preflight_die "MASC_GH_PR_AUDIT_CACHE_TTL_SEC must be a non-negative integer, got: $ttl"
+  fi
+  printf '%s\n' "$ttl"
 }
 
 gh_preflight_cache_segment() {

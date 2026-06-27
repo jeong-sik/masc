@@ -32,7 +32,8 @@ let cleanup_dir dir =
   try rm dir with _ -> ()
 
 let write_lines path lines =
-  let (_ : string) = KFS.ensure_dir (Filename.dirname path) in
+  let dir = KFS.ensure_dir (Filename.dirname path) in
+  let path = Filename.concat dir (Filename.basename path) in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
@@ -44,7 +45,8 @@ let write_lines path lines =
         lines)
 
 let write_json path json =
-  let (_ : string) = KFS.ensure_dir (Filename.dirname path) in
+  let dir = KFS.ensure_dir (Filename.dirname path) in
+  let path = Filename.concat dir (Filename.basename path) in
   let oc = open_out path in
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)

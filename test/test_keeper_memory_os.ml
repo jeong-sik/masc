@@ -879,13 +879,9 @@ let find_config_env env entries =
 
 let test_memory_os_config_snapshot_surfaces_effective_envs () =
   let timeout_env = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
-  let float_default_to_display value =
-    let raw = string_of_float value in
-    let len = String.length raw in
-    if len > 0 && Char.equal raw.[len - 1] '.' then raw ^ "0" else raw
-  in
   let timeout_default =
-    float_default_to_display Env_config.KeeperMemoryOs.librarian_timeout_sec_default
+    Env_config.KeeperMemoryOs.float_default_to_display
+      Env_config.KeeperMemoryOs.librarian_timeout_sec_default
   in
   with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "" (fun () ->
     with_memory_os_env timeout_env "123.5" (fun () ->

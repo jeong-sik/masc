@@ -40,8 +40,12 @@ export const compactionSnapshots: Signal<PerKeeperSnapshots> = signal({})
 
 let fallbackIdSeq = 0
 
+function formatHmUTC(d: Date): string {
+  return `${String(d.getUTCHours()).padStart(2, '0')}:${String(d.getUTCMinutes()).padStart(2, '0')}Z`
+}
+
 function hmLabel(d: Date): string {
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return formatHmUTC(d)
 }
 
 function nextId(prefix: string): string {
@@ -75,8 +79,7 @@ export function pushCompactionSnapshot(
 function labelFromIso(iso: string): string {
   const ts = Date.parse(iso)
   if (!Number.isFinite(ts)) return iso
-  const d = new Date(ts)
-  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  return formatHmUTC(new Date(ts))
 }
 
 function backendSnapshotToLocal(snapshot: BackendCompactionSnapshot): CompactionSnapshot {

@@ -201,10 +201,10 @@ module KeeperMemoryOs = struct
   let consolidation_enabled_default = false
   let consolidation_runtime_id_default = None
 
-  let optional_string_default = function
-    | Some value -> value
-    | None -> ""
+  let optional_string_default value = Option.value value ~default:""
   ;;
+
+  let float_default_to_display value = Printf.sprintf "%.1f" value ;;
 
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged

@@ -593,12 +593,6 @@ let optional_default_to_display = function
   | Some value -> value
 ;;
 
-let float_default_to_display value =
-  let raw = string_of_float value in
-  let len = String.length raw in
-  if len > 0 && Char.equal raw.[len - 1] '.' then raw ^ "0" else raw
-;;
-
 let memory_entries =
   [
     entry
@@ -619,7 +613,7 @@ let memory_entries =
       "Recent-message window for librarian extraction (floor 1)";
     entry
       ~default:
-        (float_default_to_display Memory_os_defaults.librarian_timeout_sec_default)
+        (Memory_os_defaults.float_default_to_display Memory_os_defaults.librarian_timeout_sec_default)
       "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
       "Provider timeout for librarian extraction in seconds";
     entry

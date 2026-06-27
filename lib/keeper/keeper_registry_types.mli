@@ -562,6 +562,11 @@ val resolve_done :
     after the intra-library split; not intended for external callers. *)
 val registry_key : base_path:string -> string -> string
 
+(** Internal: inverse of [registry_key]. Returns the [base_path] and
+    keeper [name] embedded in a registry key, or an error if the key
+    contains no unit separator. *)
+val registry_key_parts : string -> (string * string, string) result
+
 (** Classify a live turn_observation into a completed_turn_outcome
     using exhaustive pattern matching on (decision_stage, turn_phase).
     Pure function, no state access. *)

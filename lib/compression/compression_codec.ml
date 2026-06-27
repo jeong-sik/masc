@@ -53,6 +53,11 @@ let compress ?(level = 3) (data : string) : compress_result =
       Log.Misc.error "compression failed: %s" msg;
       Unchanged data
 
+let legacy_standard_result ~original = function
+  | Unchanged payload -> payload, false
+  | Compressed { payload; encoding = Standard } -> payload, true
+  | Compressed { encoding = Dictionary; _ } -> original, false
+
 let decompress ~(orig_size : int) ~encoding (data : string) : (string, string) Stdlib.result =
   let _ = encoding in
   try

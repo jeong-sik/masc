@@ -57,6 +57,11 @@ val compress : ?level:int -> string -> compress_result
     compression does not reduce the size. Zstd failures are logged and
     surfaced as [Unchanged]. *)
 
+val legacy_standard_result : original:string -> compress_result -> string * bool
+(** [legacy_standard_result ~original result] adapts the shared codec result to
+    the legacy standard-zstd HTTP surface. Dictionary-compressed results cannot
+    be advertised as plain [zstd], so they return [original, false]. *)
+
 val decompress :
   orig_size:int ->
   encoding:encoding ->

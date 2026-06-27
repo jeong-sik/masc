@@ -119,7 +119,7 @@ let test_compress_zstd_dictionary_result_returns_original () =
   let original = String.make Compression_codec.legacy_min_size 'd' in
   let dictionary_payload = "dictionary-compressed-bytes" in
   let result, compressed =
-    Compression.compress_zstd_result ~original
+    Compression_codec.legacy_standard_result ~original
       (Compression_codec.Compressed
          { payload = dictionary_payload; encoding = Compression_codec.Dictionary })
   in

@@ -1211,6 +1211,58 @@ let test_librarian_runtime_appends_episode_bundle () =
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 
+let test_librarian_runtime_requires_clock_for_provider_call () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock:_ ->
+        let keeper_id = "runtime-librarian-no-clock-keeper" in
+        let called = ref false in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          called := true;
+          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-runtime-no-clock"
+          ; generation = 7
+          ; messages = [ text_message "Please remember the timeout boundary." ]
+          }
+        in
+        let generation_counter =
+          Filename.concat
+            (Memory_io.episodes_dir ~keeper_id)
+            (Printf.sprintf "%s.generation" inp.Librarian.trace_id)
+        in
+        (match
+           Librarian_runtime.extract_and_append_with_provider_classified
+             ~complete
+             ~timeout_sec:1.0
+             ~sw
+             ~net
+             ~keeper_id
+             ~provider_cfg:(test_provider_cfg ())
+             inp
+         with
+         | Ok _ -> Alcotest.fail "expected missing clock to fail closed"
+         | Error msg ->
+           Alcotest.(check string)
+             "explicit missing clock error"
+             Librarian_runtime.librarian_provider_clock_unavailable_error
+             msg);
+        Alcotest.(check bool) "provider not called without clock" false !called;
+        Alcotest.(check bool)
+          "generation counter not created without clock"
+          false
+          (Sys.file_exists generation_counter);
+        Alcotest.(check int)
+          "no event persisted"
+          0
+          (List.length (Memory_io.read_events_tail ~keeper_id ~n:1));
+        Alcotest.(check int)
+          "no fact persisted"
+          0
+          (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
+;;
+
 let test_librarian_runtime_preserves_unstructured_fallback () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -4305,6 +4357,10 @@ let () =
             "librarian runtime appends episode bundle"
             `Quick
             test_librarian_runtime_appends_episode_bundle
+        ; Alcotest.test_case
+            "librarian runtime requires clock for provider call"
+            `Quick
+            test_librarian_runtime_requires_clock_for_provider_call
         ; Alcotest.test_case
             "librarian runtime reports fact upsert failure"
             `Quick

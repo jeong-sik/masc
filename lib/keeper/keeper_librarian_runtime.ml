@@ -58,24 +58,19 @@ let provider_slot_for_capacity capacity =
       slot)
 ;;
 
-let with_provider_slot ?clock f =
+let with_provider_slot ~clock f =
   let capacity = global_slot_capacity () in
   match provider_slot_for_capacity capacity with
   | None -> Some (f ())
   | Some sem ->
     let acquired = ref false in
     (try
-       match clock with
-       | None ->
-         Eio.Semaphore.acquire sem;
+       (try
+          Eio.Time.with_timeout_exn clock provider_slot_wait_sec (fun () ->
+            Eio.Semaphore.acquire sem);
          acquired := true
-       | Some clock ->
-         (try
-            Eio.Time.with_timeout_exn clock provider_slot_wait_sec (fun () ->
-              Eio.Semaphore.acquire sem);
-            acquired := true
-          with
-          | Eio.Time.Timeout -> ())
+        with
+        | Eio.Time.Timeout -> ())
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -363,18 +358,13 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
 (* http_error_message moved to Provider_http_error.to_message (SSOT,
    2026-06-24): four byte-for-output-identical copies unified. *)
 
-let with_timeout ?clock ~timeout_sec f =
-  match clock with
-  | None -> Some (f ())
-  | Some clock ->
-    (try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
-     | Eio.Time.Timeout -> None)
+let with_timeout ~clock ~timeout_sec f =
+  try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
+  | Eio.Time.Timeout -> None
 ;;
 
-let now_from_clock ?clock () =
-  match clock with
-  | Some clock -> Eio.Time.now clock
-  | None -> Time_compat.now ()
+let librarian_provider_clock_unavailable_error =
+  "memory os librarian provider clock unavailable"
 ;;
 
 let unstructured_note_max_chars = 900
@@ -463,6 +453,9 @@ let extract_with_provider_classified
     ~generation
     (inp : Keeper_librarian.input)
   =
+  match clock with
+  | None -> Error librarian_provider_clock_unavailable_error
+  | Some clock -> (
   match messages_for_librarian inp with
   | Error _ as e -> e
   | Ok messages ->
@@ -470,8 +463,8 @@ let extract_with_provider_classified
     let last_unparseable_raw = ref None in
     let attempt messages =
       match
-        with_timeout ?clock ~timeout_sec (fun () ->
-          complete ~sw ~net ?clock ~config:provider_cfg ~messages ())
+        with_timeout ~clock ~timeout_sec (fun () ->
+          complete ~sw ~net ~clock ~config:provider_cfg ~messages ())
       with
       | None -> Transport_failed "librarian provider timed out"
       | Some (Error err) -> Transport_failed (Provider_http_error.to_message err)
@@ -502,7 +495,7 @@ let extract_with_provider_classified
          | Some raw -> raw
          | None -> ""
        in
-       let now = now_from_clock ?clock () in
+       let now = Eio.Time.now clock in
        Log.Keeper.warn
          "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
          inp.trace_id
@@ -511,7 +504,7 @@ let extract_with_provider_classified
        Ok
          { episode = unstructured_episode ~now ~generation inp ~reason:msg ~raw
          ; kind = Unstructured_fallback
-         })
+         }))
 ;;
 
 let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp =
@@ -540,23 +533,26 @@ let extract_and_append_with_provider_classified
     ~provider_cfg
     inp
   =
-  let generation =
-    Keeper_memory_os_io.next_generation_with_floor
-      ~floor:inp.Keeper_librarian.generation
-      ~keeper_id
-      ~trace_id:inp.Keeper_librarian.trace_id
-  in
-  match
-    extract_with_provider_classified
-      ?complete
-      ?clock
-      ?timeout_sec
-      ~sw
-      ~net
-      ~provider_cfg
-      ~generation
-      inp
-  with
+  match clock with
+  | None -> Error librarian_provider_clock_unavailable_error
+  | Some _ ->
+    let generation =
+      Keeper_memory_os_io.next_generation_with_floor
+        ~floor:inp.Keeper_librarian.generation
+        ~keeper_id
+        ~trace_id:inp.Keeper_librarian.trace_id
+    in
+    (match
+       extract_with_provider_classified
+         ?complete
+         ?clock
+         ?timeout_sec
+         ~sw
+         ~net
+         ~provider_cfg
+         ~generation
+         inp
+     with
   | Error _ as e -> e
   | Ok ({ episode; kind = _ } as extraction) ->
     let now = episode.Keeper_memory_os_types.created_at in
@@ -614,7 +610,7 @@ let extract_and_append_with_provider_classified
            (dark-by-default, no recall consumer), so the fact upsert above is the only
            post-merge work. *)
         Ok extraction
-      | Error message -> Error ("memory os fact upsert failed: " ^ message))
+      | Error message -> Error ("memory os fact upsert failed: " ^ message)))
 ;;
 
 let extract_and_append_with_provider
@@ -681,11 +677,22 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
              let timeout_sec =
                Option.value timeout_sec ~default:(default_timeout_sec ())
              in
+             match clock with
+             | None ->
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string EpisodeCreateFailures)
+                 ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
+                 ();
+               Log.Keeper.warn ~keeper_name:keeper_id
+                 "memory os librarian failed runtime=%s: %s"
+                 runtime_id
+                 librarian_provider_clock_unavailable_error
+             | Some clock -> (
              match
-               with_provider_slot ?clock (fun () ->
+               with_provider_slot ~clock (fun () ->
                  extract_and_append_with_provider_classified
                    ?complete
-                   ?clock
+                   ~clock
                    ~timeout_sec
                    ~sw
                    ~net
@@ -729,7 +736,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                Log.Keeper.warn ~keeper_name:keeper_id
                  "memory os librarian failed runtime=%s: %s"
                  runtime_id
-                 err))
+                 err)))
       | _ ->
         Log.Keeper.warn ~keeper_name:keeper_id
           "memory os librarian skipped: Eio context unavailable runtime=%s"

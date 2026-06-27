@@ -684,8 +684,8 @@ let compaction_stage_after_event entry event =
 ;;
 
 (** Registry mutation is still non-yielding (StringMap lookup + put,
-    Atomic.set). Entry actions run only after [put_entry], so any
-    observability or follow-up state transitions happen after the registry
+    Atomic.set). Transition side effects run only after [put_entry], so
+    observability and follow-up state transitions happen after the registry
     state is consistent. *)
 let rec dispatch_event_with_audit
           ~base_path

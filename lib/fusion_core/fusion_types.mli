@@ -236,9 +236,7 @@ type judge_failure =
   | Parse_error of string  (** Fusion_judge_parse.of_string 파싱 실패 *)
   | Budget_exceeded of string  (** wave budget 초과로 심판 실행 전 SKIP *)
   | Internal_error of string  (** all_fail_error fallback / 미분류 *)
-[@@deriving to_yojson, show, eq]
-
-val judge_failure_of_yojson : Yojson.Safe.t -> (judge_failure, string) result
+[@@deriving yojson, show, eq]
 
 (** [Timeout] 변형인가. {!judge_error_node}의 [timed_out] 파생처럼, 분류는 variant 자체로
     충분하므로 별도 bool 필드를 두지 않는다. *)

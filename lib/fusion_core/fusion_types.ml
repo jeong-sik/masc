@@ -231,21 +231,7 @@ type judge_failure =
   | Parse_error of string
   | Budget_exceeded of string
   | Internal_error of string
-[@@deriving to_yojson, show, eq]
-
-let judge_failure_of_yojson = function
-  | `String "Timeout" -> Ok Timeout
-  | `String "Empty_result" -> Ok Empty_result
-  | `List [ `String "Provider_error"; `String detail ] -> Ok (Provider_error detail)
-  | `List [ `String "Empty_response"; `String detail ] -> Ok (Empty_response detail)
-  | `List [ `String "Build_error"; `String detail ] -> Ok (Build_error detail)
-  | `List [ `String "Parse_error"; `String detail ] -> Ok (Parse_error detail)
-  | `List [ `String "Budget_exceeded"; `String detail ] -> Ok (Budget_exceeded detail)
-  | `List [ `String "Internal_error"; `String detail ] -> Ok (Internal_error detail)
-  | json ->
-    Error
-      (Printf.sprintf "Fusion_types.judge_failure_of_yojson: unsupported shape %s"
-         (Yojson.Safe.to_string json))
+[@@deriving yojson, show, eq]
 
 let judge_failure_is_timeout = function Timeout -> true | _ -> false
 

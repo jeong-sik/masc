@@ -16,6 +16,8 @@ open Masc
 (* Economy moved to the masc_agent_economy leaf lib (wrapped false);
    the bare module resolves via masc_test_deps, no mega-lib alias needed. *)
 
+let () = Workspace_metric_hooks.install ()
+
 let () = Mirage_crypto_rng_unix.use_default ()
 let () = Workspace_metric_hooks.install ()
 

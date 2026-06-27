@@ -23,37 +23,39 @@ let set_turn_phase ~base_path name (turn_phase : packed_turn_phase) =
      arm below. *)
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
-      | Resolved_turn_idempotent -> obs
-      | Resolved_turn_transition _ ->
-        changed := true;
-        { (stamp_turn_progress ~now ~event_kind:"turn_phase" obs) with
-          turn_phase
-        }
-      | Resolved_turn_violation violation ->
-        (* #14926: route the violation raise through [wrap_unit] so the
-           guard's Otel_metric_store counter [metric_fsm_guard_violation]
-           (action=turn_phase_transition, stage=guard) keeps firing for
-           forbidden transitions reached via this setter — prior to
-           RFC-0072 Phase 4b (#14918) the instrumentation was transitive
-           through [validate_turn_phase_transition], and the resolver swap
-           dropped it.  Phase 5: the inner raise is now the typed
-           [Turn_phase_transition_violation]; [wrap_unit]'s catch was
-           widened to all exceptions so it still bumps the counter.  The
-           trailing [obs] is unreachable (a no-op transition is the
-           correct fallback should [wrap_unit] ever return). *)
-        Keeper_fsm_guard_runtime.wrap_unit
-          ~action:"turn_phase_transition"
-          ~stage:"guard"
-          (fun () ->
-             raise_turn_phase_transition_violation
-               ~where:"set_turn_phase"
-               ~from:obs.turn_phase
-               ~to_:turn_phase
-               ~violation);
-        obs));
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (fun obs ->
+        match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
+        | Resolved_turn_idempotent -> obs
+        | Resolved_turn_transition _ ->
+          changed := true;
+          { (stamp_turn_progress ~now ~event_kind:"turn_phase" obs) with
+            turn_phase
+          }
+        | Resolved_turn_violation violation ->
+          (* #14926: route the violation raise through [wrap_unit] so the
+             guard's Otel_metric_store counter [metric_fsm_guard_violation]
+             (action=turn_phase_transition, stage=guard) keeps firing for
+             forbidden transitions reached via this setter — prior to
+             RFC-0072 Phase 4b (#14918) the instrumentation was transitive
+             through [validate_turn_phase_transition], and the resolver swap
+             dropped it.  Phase 5: the inner raise is now the typed
+             [Turn_phase_transition_violation]; [wrap_unit]'s catch was
+             widened to all exceptions so it still bumps the counter.  The
+             trailing [obs] is unreachable (a no-op transition is the
+             correct fallback should [wrap_unit] ever return). *)
+          Keeper_fsm_guard_runtime.wrap_unit
+            ~action:"turn_phase_transition"
+            ~stage:"guard"
+            (fun () ->
+               raise_turn_phase_transition_violation
+                 ~where:"set_turn_phase"
+                 ~from:obs.turn_phase
+                 ~to_:turn_phase
+                 ~violation);
+          obs))
+  in
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -71,12 +73,14 @@ let mark_turn_provider_attempt_started ~base_path name =
 let set_turn_selected_model ~base_path name selected_model =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      changed := true;
-      { (stamp_turn_progress ~now ~event_kind:"selected_model" obs) with
-        selected_model
-      }));
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (fun obs ->
+        changed := true;
+        { (stamp_turn_progress ~now ~event_kind:"selected_model" obs) with
+          selected_model
+        }))
+  in
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -131,45 +135,47 @@ let mark_turn_finished ~base_path name =
   let completed_turn_to_record = ref None in
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    let had_live_turn =
-      match e.current_turn_observation with
-      | Some _ -> true
-      | None -> false
-    in
-    let last_completed_turn =
-      match e.current_turn_observation with
-      | Some obs ->
-        let ended_at = now in
-        changed := true;
-        completed_turn_to_record
-        := Some
-             { Keeper_transition_audit.turn_id = obs.turn_id
-             ; started_at = obs.started_at
-             ; ended_at
-             ; outcome = completed_turn_outcome_of_observation obs
-             };
-        Some
-          { ct_turn_id = obs.turn_id
-          ; ct_started_at = obs.started_at
-          ; ct_ended_at = ended_at
-          ; ct_decision_stage = obs.decision_stage
-          ; ct_selected_model = obs.selected_model
-          }
-      | None -> e.last_completed_turn (* no live turn → preserve previous *)
-    in
-    let meta =
-      if had_live_turn
-      then
-        { e.meta with
-          runtime =
-            { e.meta.runtime with
-              usage = { e.meta.runtime.usage with last_turn_ts = now }
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      let had_live_turn =
+        match e.current_turn_observation with
+        | Some _ -> true
+        | None -> false
+      in
+      let last_completed_turn =
+        match e.current_turn_observation with
+        | Some obs ->
+          let ended_at = now in
+          changed := true;
+          completed_turn_to_record
+          := Some
+               { Keeper_transition_audit.turn_id = obs.turn_id
+               ; started_at = obs.started_at
+               ; ended_at
+               ; outcome = completed_turn_outcome_of_observation obs
+               };
+          Some
+            { ct_turn_id = obs.turn_id
+            ; ct_started_at = obs.started_at
+            ; ct_ended_at = ended_at
+            ; ct_decision_stage = obs.decision_stage
+            ; ct_selected_model = obs.selected_model
             }
-        }
-      else e.meta
-    in
-    { e with meta; current_turn_observation = None; last_completed_turn });
+        | None -> e.last_completed_turn (* no live turn → preserve previous *)
+      in
+      let meta =
+        if had_live_turn
+        then
+          { e.meta with
+            runtime =
+              { e.meta.runtime with
+                usage = { e.meta.runtime.usage with last_turn_ts = now }
+              }
+          }
+        else e.meta
+      in
+      { e with meta; current_turn_observation = None; last_completed_turn })
+  in
   Option.iter
     (Keeper_transition_audit.record_completed_turn ~keeper_name:name)
     !completed_turn_to_record;

@@ -295,9 +295,12 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                seen_response_format := Some config.Llm_provider.Provider_config.response_format;
                let rendered_prompt =
                  messages
-                 |> List.filter_map (function
-                   | Atypes.Text s -> Some s
-                   | _ -> None)
+                 |> List.map (fun message ->
+                   message.Atypes.content
+                   |> List.filter_map (function
+                     | Atypes.Text s -> Some s
+                     | _ -> None)
+                   |> String.concat "\n")
                  |> String.concat "\n"
                  |> String.trim
                in

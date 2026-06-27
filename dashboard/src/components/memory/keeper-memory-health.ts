@@ -18,6 +18,7 @@ import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefre
 
 const EVENT_RATIO_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'events_to_facts_ratio'
 const TTL_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'ttl_expired_on_disk'
+const NEAR_DUPLICATE_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'near_duplicate'
 const PROVIDER_SLOT_BUSY_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'provider_slot_busy'
 
 function formatBytes(bytes: number): string {
@@ -48,6 +49,7 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const warn = isRowWarning(entry)
   const ratioWarn = hasTargetAlert(alerts, EVENT_RATIO_ALERT_TARGET)
   const ttlWarn = hasTargetAlert(alerts, TTL_ALERT_TARGET)
+  const nearDuplicateWarn = hasTargetAlert(alerts, NEAR_DUPLICATE_ALERT_TARGET)
   const providerSlotBusyWarn = hasTargetAlert(alerts, PROVIDER_SLOT_BUSY_ALERT_TARGET)
   const providerSlotBusyCount = providerSlotBusy(entry)
 
@@ -66,7 +68,11 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
           ? html`<span class="kmh-badge kmh-badge--warn">${entry.ttl_expired_on_disk}</span>`
           : html`<span class="kmh-badge kmh-badge--ok">${entry.ttl_expired_on_disk}</span>`}
       </td>
-      <td>${entry.near_duplicate}</td>
+      <td>
+        ${nearDuplicateWarn
+          ? html`<span class="kmh-badge kmh-badge--warn">${entry.near_duplicate}</span>`
+          : html`<span class="kmh-badge kmh-badge--ok">${entry.near_duplicate}</span>`}
+      </td>
       <td>
         ${providerSlotBusyWarn
           ? html`<span class="kmh-badge kmh-badge--warn">${providerSlotBusyCount}</span>`

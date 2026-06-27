@@ -3,7 +3,12 @@
 let normalize_path ?base_dir path =
   let abs =
     if Filename.is_relative path then
-      Filename.concat (Option.value ~default:(Config_dir_resolver.current_working_dir ()) base_dir) path
+      let base =
+        match base_dir with
+        | Some dir -> dir
+        | None -> Config_dir_resolver.current_working_dir ()
+      in
+      Filename.concat base path
     else
       path
   in

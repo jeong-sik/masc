@@ -38,7 +38,12 @@ let test_labels () =
   check string "outcome failed" "failed"
     (Fusion_metrics.judge_outcome_label
        (Fusion_types.Judge_failed
-          { Fusion_types.failed_role = Meta; error = "boom"; usage = sample_usage }))
+          { Fusion_types.failed_role = Meta
+          ; error = "boom"
+          ; usage = sample_usage
+          ; elapsed_s = 0.0
+          ; timed_out = false
+          }))
 
 let test_record_judge_execution_emits () =
   let before =

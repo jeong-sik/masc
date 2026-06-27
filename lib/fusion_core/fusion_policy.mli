@@ -36,6 +36,8 @@ type judge_spec =
   ; jmax_output_tokens : int option
       (** 출력 토큰 예산 override. [None]이면 Runtime_agent 기본값. *)
   ; jtimeout_s : float  (** 호출 구조적 타임아웃 (초). *)
+  ; jmax_timeout_s : float option
+      (** 적응형 타임아웃 확장 상한. None이면 예산 내에서 factor만큼 확장. *)
   }
 [@@deriving show, eq]
 
@@ -53,6 +55,8 @@ type preset =
   ; judge_timeout_s : float  (** 심판 호출 구조적 타임아웃 (초). *)
   ; judge_max_output_tokens : int option
       (** 단일/refine/meta 심판 출력 토큰 예산 override. [None]이면 기본값. *)
+  ; meta_timeout_s : float
+      (** meta/stage-meta/final-meta 호출 구조적 타임아웃 (초). *)
   ; judges : judge_spec list
       (** JOJ 1차 심판들 (RFC-0283). 기본 []; simple/refine/conditional은 무시한다.
           JOJ 위상은 런타임에 >= 2 를 요구한다. *)
@@ -62,6 +66,12 @@ type preset =
           [judge = Error]로 완료한다 (빈 패널 종합 날조 방지).
           허용 범위는 [1]부터 패널 모델 총합까지; full-panel quorum([총합])도
           명시적으로 설정할 수 있다. *)
+  ; judge_wave_budget_s : float
+      (** 1차 심판 wave 전체 wall-clock 예산 (초). 0=비활성(legacy). *)
+  ; adaptive_timeout_factor : float
+      (** 1차 심판 타임아웃 적응형 확장 계수. 1.0=확장 안 함. *)
+  ; fallback_judge_model : string option
+      (** 전원 타임아웃/예산 실패 시 단일 fallback 심판 모델. *)
   }
 [@@deriving show, eq]
 
@@ -176,6 +186,19 @@ val judge_web_tools_of : req_web_tools:bool -> panel_group list -> bool
     단일 그룹이면 그 그룹 [max_tool_calls] (오늘과 byte-identical). *)
 val judge_tool_budget_of : panel_group list -> int
 
+(** 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
+    [factor = 1.0]이면 [base_s]를 wave 예산에 맞춰 반환하고, [already_timed_out]이고
+    [factor > 1.0]이면 [base_s *. factor]를 [max_s]로 상한·남은 예산으로 하한해
+    확장한다. 결과가 0.001초 미만이면 [None]. *)
+val adjust_judge_timeout
+  :  base_s:float
+  -> max_s:float option
+  -> factor:float
+  -> wave_budget_s:float
+  -> elapsed_s:float
+  -> already_timed_out:bool
+  -> float option
+
 (** RFC-0280: 검증을 통과한 preset (Parse, don't validate). [t = private preset]이라
     필드는 자유롭게 읽되([preset] 또는 coercion [(vp :> preset)]) 검증 없이 생성할 수
     없다 → invalid preset이 게이트·orchestrator로 흐를 수 없다. 검증 SSOT는
@@ -199,11 +222,18 @@ module Validated_preset : sig
         (** [min_answered]가 하한 [min_answered_floor] 미만. *)
     | Min_answered_above_max of int
         (** [min_answered]가 패널 모델 총합을 초과. *)
+    | Bad_meta_timeout of float
+        (** [meta_timeout_s]가 양수 유한수가 아님. *)
+    | Bad_judge_wave_budget of float
+        (** [judge_wave_budget_s]가 0 미만이거나, 양수 유한인데 최장 1차 심판
+            타임아웃 또는 [meta_timeout_s]보다 작음. *)
+    | Bad_adaptive_factor of float
+        (** [adaptive_timeout_factor]가 1.0 미만. *)
 
   (** 검증 순서: size → prompt → judge → 정체성 중복 → max_tool_calls →
-      max_output_tokens → 1차 심판 prompt/정체성/max_tool_calls/max_output_tokens
-      → min_answered. 통과 시 [Ok vp], 첫 위반에서
-      [Error invalid]. config 로드의 검증 순서와 동일. *)
+      max_output_tokens → 1차 심판 prompt/정체성/max_tool_calls/max_output_tokens →
+      min_answered → timeout 예산/계수. 통과 시 [Ok vp], 첫 위반에서 [Error invalid].
+      config 로드의 검증 순서와 동일. *)
   val of_preset : preset -> (t, invalid) result
 
   (** 검증된 preset을 raw [preset]으로 (read-only coercion). *)

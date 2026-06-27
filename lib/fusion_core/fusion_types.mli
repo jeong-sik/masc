@@ -229,7 +229,11 @@ type judge_error_node =
   { failed_role : judge_role
   ; error : string
   ; usage : usage
-      (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
+      (** 실패필도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E). *)
+  ; elapsed_s : float
+      (** Wave start부터 실패까지 경과한 시간(초). 타임아웃/예산 원인 분석용. *)
+  ; timed_out : bool
+      (** 구조적 타임아웃("Execution timed out after")으로 분류되는 실패인가. *)
   }
 [@@deriving yojson, show, eq]
 

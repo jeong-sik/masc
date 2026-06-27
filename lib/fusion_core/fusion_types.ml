@@ -222,6 +222,11 @@ type judge_error_node =
   ; usage : usage
       (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E).
           [panel_error]와 달리 심판 실패는 토큰 소비 후일 수 있어 usage를 동반한다. *)
+  ; elapsed_s : float
+      (** 이 심판 노드가 시작된 시점부터 실패까지 경과한 시간(초). 예산/타임아웃
+          분석에 쓰인다(RFC-0284-FUSION-P0). *)
+  ; timed_out : bool
+      (** 에러 메시지가 구조적 타임아웃("Execution timed out after")을 나타내는가. *)
   }
 [@@deriving yojson, show, eq]
 

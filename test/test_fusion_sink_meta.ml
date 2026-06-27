@@ -258,6 +258,8 @@ let test_node_failed_keeps_identity () =
       { failed_role = First "a (m)"
       ; error = "boom"
       ; usage = { input_tokens = 7; output_tokens = 8 }
+      ; elapsed_s = 1.5
+      ; timed_out = false
       }
   in
   let a = assoc_of (Masc.Fusion_sink.judge_node_meta o) in

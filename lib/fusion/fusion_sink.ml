@@ -229,13 +229,15 @@ let judge_node_meta (o : Fusion_types.judge_outcome) : Yojson.Safe.t =
        @ [ ("input_tokens", `Int usage.Fusion_types.input_tokens)
          ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
          ])
-  | Fusion_types.Judge_failed { failed_role; error; usage } ->
+  | Fusion_types.Judge_failed { failed_role; error; usage; elapsed_s; timed_out } ->
     `Assoc
       (judge_role_fields failed_role
        @ [ ("status", `String "failed")
          ; ("error", `String error)
          ; ("input_tokens", `Int usage.Fusion_types.input_tokens)
          ; ("output_tokens", `Int usage.Fusion_types.output_tokens)
+         ; ("elapsed_s", `Float elapsed_s)
+         ; ("timed_out", `Bool timed_out)
          ])
 
 (* RFC-0266: 심의 완료 시 호출 키퍼를 typed [Fusion_completed] stimulus로 깨운다.

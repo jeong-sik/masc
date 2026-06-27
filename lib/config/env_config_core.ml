@@ -275,6 +275,19 @@ let get_port ~default name =
       | _ -> default)
   | None -> default
 
+(** {1 Host pressure integration} *)
+
+let host_fd_pressure_state_file_env_key = "MASC_HOST_FD_PRESSURE_STATE_FILE"
+let default_host_fd_pressure_state_file_path = "/tmp/masc-host-pressure.state"
+
+let host_fd_pressure_state_file_path_opt () =
+  raw_value_opt host_fd_pressure_state_file_env_key |> trim_opt
+
+let host_fd_pressure_state_file_path () =
+  match host_fd_pressure_state_file_path_opt () with
+  | Some path -> path
+  | None -> default_host_fd_pressure_state_file_path
+
 (** {1 Core Path / Storage} *)
 
 (** Env var names exposed as SSOT constants so out-of-process callers

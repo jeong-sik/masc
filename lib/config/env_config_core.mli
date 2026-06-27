@@ -130,6 +130,13 @@ val get_port : default:int -> string -> int
     Returns [default] on missing, empty, out-of-range, or
     non-integer values. *)
 
+(** {1 Host pressure integration} *)
+
+val host_fd_pressure_state_file_env_key : string
+val default_host_fd_pressure_state_file_path : string
+val host_fd_pressure_state_file_path_opt : unit -> string option
+val host_fd_pressure_state_file_path : unit -> string
+
 (** {1 Base path / storage} *)
 
 val base_path_env_key : string

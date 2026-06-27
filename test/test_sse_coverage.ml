@@ -335,7 +335,7 @@ let test_buffer_event_caps_replay_buffer () =
     ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
     (fun () ->
       Atomic.set Sse.event_buffer [];
-      let base = 804_000 in
+      let base = Sse.current_id () + Sse.max_buffer_size + 1 in
       for index = 0 to Sse.max_buffer_size + 4 do
         Sse.buffer_event (base + index) (Printf.sprintf "event-%d" index)
       done;

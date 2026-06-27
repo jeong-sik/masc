@@ -48,19 +48,20 @@ let parse_date_arg name s =
   | _ -> error (Printf.sprintf "invalid %s: %S (expected YYYY-MM-DD)" name s)
 
 let base_path () =
-  (* sb/main_eio uses Masc.Env_config.base_path.
-     Replicating the env lookup avoids pulling heavy deps into this CLI. *)
-  match Sys.getenv_opt "MASC_BASE_PATH" with
-  | Some p when String.trim p <> "" -> p
-  | _ -> Sys.getcwd ()
+  (* Route env-derived base path through Host_config SSOT, and fall back to
+     Config_dir_resolver's cwd helper when it is unset/empty. *)
+  match (Host_config.from_env ()).base_path with
+  | Some p -> p
+  | None ->
+      (* MASC_BASE_PATH is unset or empty; fall back to the cwd resolver
+         SSOT, which handles a deleted working directory gracefully. *)
+      Config_dir_resolver.current_working_dir ()
 
 let retention_from_env default =
-  match Sys.getenv_opt "MASC_COMPACTION_AUDIT_RETENTION_DAYS" with
-  | Some s ->
-    (match int_of_string_opt s with
-     | Some n when n >= 1 && n <= 365 -> n
-     | _ -> default)
-  | None -> default
+  (* Parse through Env_config_core SSOT, then clamp to the documented
+     1..365 day retention range. *)
+  let raw = Env_config_core.get_int ~default "MASC_COMPACTION_AUDIT_RETENTION_DAYS" in
+  max 1 (min 365 raw)
 
 (* ── Argument parsing ─────────────────────────────────────────── *)
 

@@ -1,3 +1,7 @@
+(* Mirrors [Env_config_core.get_bool ~default:false], which lives in
+   [masc.config].  [masc_core] cannot depend on [masc.config] because
+   [masc.config] already depends on [masc_core], so the helper is kept
+   here as a thin alias for the boolean-env parsing logic. *)
 let env_true name =
   match Sys.getenv_opt name with
   | None -> false

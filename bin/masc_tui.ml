@@ -116,9 +116,12 @@ let parse_args () =
   let base =
     if !base_path <> "" then !base_path
     else
-      match Sys.getenv_opt "MASC_BASE_PATH" with
-      | Some p when String.trim p <> "" -> p
-      | _ -> Sys.getcwd ()
+      match (Host_config.from_env ()).base_path with
+      | Some p -> p
+      | None ->
+          (* MASC_BASE_PATH is unset or empty; fall back to the cwd resolver
+             SSOT, which handles a deleted working directory gracefully. *)
+          Config_dir_resolver.current_working_dir ()
   in
 
   (* Resolve workspace *)

@@ -199,6 +199,9 @@ let record_pre_dispatch_terminal_observation
       ~(trajectory_outcome : Trajectory.trajectory_outcome)
       ?error_kind
       ?error_message
+      ?degraded_retry_runtime
+      ?fallback_reason
+      ?(runtime_rotation_attempts = [])
       ?keeper_turn_id
       ()
   : unit
@@ -214,6 +217,11 @@ let record_pre_dispatch_terminal_observation
   in
   finalize_trajectory_acc ~config ~keeper_name:meta.name trajectory_acc trajectory_outcome;
   let ended_at = now_iso () in
+  let degraded_retry_applied =
+    match degraded_retry_runtime, fallback_reason, runtime_rotation_attempts with
+    | None, None, [] -> false
+    | _ -> true
+  in
   let receipt : Keeper_execution_receipt.t =
     { keeper_name = meta.name
     ; agent_name = meta.agent_name
@@ -242,10 +250,10 @@ let record_pre_dispatch_terminal_observation
     ; runtime_attempt_count = 0
     ; runtime_fallback_applied = false
     ; runtime_outcome = Keeper_execution_receipt.Runtime_not_dispatched
-    ; degraded_retry_applied = false
-    ; degraded_retry_runtime = None
-    ; fallback_reason = None
-    ; runtime_rotation_attempts = []
+    ; degraded_retry_applied
+    ; degraded_retry_runtime
+    ; fallback_reason
+    ; runtime_rotation_attempts
     ; stop_reason = None
     ; error_kind
     ; error_message

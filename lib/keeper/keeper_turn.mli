@@ -47,6 +47,18 @@ module For_testing : sig
     Agent_sdk.Error.sdk_error -> Keeper_error_classify.degraded_retry_reason option
   (** Return [Some Empty_no_progress] only for direct-message accept rejections
       that are safe to rotate before surfacing an error. *)
+
+  val direct_empty_no_progress_retry_decision :
+    base_runtime:string ->
+    effective_runtime:string ->
+    attempted_runtimes:string list ->
+    estimated_input_tokens:int ->
+    ?time_spent_in_turn_s:float ->
+    remaining_turn_budget_s:float ->
+    Agent_sdk.Error.sdk_error ->
+    Keeper_turn_runtime_budget.degraded_retry_budget_decision
+  (** Shared-budget retry decision for direct-message empty no-progress accept
+      rejections. Non-empty/read-only accept rejections remain terminal here. *)
 end
 
 (** Format a dashboard co-view context object ({ label, route, scene, fields })

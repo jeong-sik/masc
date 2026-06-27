@@ -466,44 +466,50 @@ let compaction_snapshot_display_runtime ~source ~runtime_id ~compaction_source =
      | Some _ | None -> source)
 ;;
 
-let compaction_snapshot_item_json
-      ~id
-      ~keeper_id
-      ~ts_iso
-      ~ts_unix
-      ~trace_id
-      ~keeper_turn_id
-      ~source
-      ~trigger
-      ~runtime_id
-      ~before_tokens
-      ~after_tokens
-      ~saved_tokens
-      ~compaction_id
-      ~compaction_source
-      ~status
-      ~links
-  =
+type compaction_snapshot_item =
+  { id : string
+  ; keeper_id : string
+  ; ts_iso : string
+  ; ts_unix : float option
+  ; trace_id : string option
+  ; keeper_turn_id : int option
+  ; source : string
+  ; trigger : string
+  ; runtime_id : string option
+  ; before_tokens : int option
+  ; after_tokens : int option
+  ; saved_tokens : int option
+  ; compaction_id : string option
+  ; compaction_source : string option
+  ; status : string
+  ; links : Yojson.Safe.t
+  }
+
+let compaction_snapshot_item_json (item : compaction_snapshot_item) =
   `Assoc
-    [ "id", `String id
-    ; "keeper", `String keeper_id
-    ; "ts_iso", `String ts_iso
-    ; "ts_unix", Json_util.float_opt_to_json ts_unix
-    ; "trace_id", Json_util.string_opt_to_json trace_id
-    ; "keeper_turn_id", Json_util.int_opt_to_json keeper_turn_id
-    ; "source", `String source
-    ; "trigger", `String trigger
-    ; "runtime_id", Json_util.string_opt_to_json runtime_id
+    [ "id", `String item.id
+    ; "keeper", `String item.keeper_id
+    ; "ts_iso", `String item.ts_iso
+    ; "ts_unix", Json_util.float_opt_to_json item.ts_unix
+    ; "trace_id", Json_util.string_opt_to_json item.trace_id
+    ; "keeper_turn_id", Json_util.int_opt_to_json item.keeper_turn_id
+    ; "source", `String item.source
+    ; "trigger", `String item.trigger
+    ; "runtime_id", Json_util.string_opt_to_json item.runtime_id
     ; ( "display_runtime"
-      , `String (compaction_snapshot_display_runtime ~source ~runtime_id ~compaction_source)
+      , `String
+          (compaction_snapshot_display_runtime
+             ~source:item.source
+             ~runtime_id:item.runtime_id
+             ~compaction_source:item.compaction_source)
       )
-    ; "before_tokens", Json_util.int_opt_to_json before_tokens
-    ; "after_tokens", Json_util.int_opt_to_json after_tokens
-    ; "saved_tokens", Json_util.int_opt_to_json saved_tokens
-    ; "compaction_id", Json_util.string_opt_to_json compaction_id
-    ; "compaction_source", Json_util.string_opt_to_json compaction_source
-    ; "status", `String status
-    ; "links", links
+    ; "before_tokens", Json_util.int_opt_to_json item.before_tokens
+    ; "after_tokens", Json_util.int_opt_to_json item.after_tokens
+    ; "saved_tokens", Json_util.int_opt_to_json item.saved_tokens
+    ; "compaction_id", Json_util.string_opt_to_json item.compaction_id
+    ; "compaction_source", Json_util.string_opt_to_json item.compaction_source
+    ; "status", `String item.status
+    ; "links", item.links
     ]
 ;;
 
@@ -531,25 +537,27 @@ let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest
     in
     Some
       (compaction_snapshot_item_json
-         ~id:
-           (Printf.sprintf "manifest:%s:%s:%s" row.trace_id
-              (Keeper_runtime_manifest.event_kind_to_string row.event)
-              row.ts)
-         ~keeper_id
-         ~ts_iso:row.ts
-         ~ts_unix:(Masc_domain.parse_iso8601_opt row.ts)
-         ~trace_id:(Some row.trace_id)
-         ~keeper_turn_id:row.keeper_turn_id
-         ~source:"runtime_manifest"
-         ~trigger
-         ~runtime_id:row.runtime_id
-         ~before_tokens
-         ~after_tokens
-         ~saved_tokens
-         ~compaction_id:(compaction_snapshot_clock_string row.decision "compaction_id")
-         ~compaction_source:(compaction_snapshot_clock_string row.decision "compaction_source")
-         ~status:row.status
-         ~links:(compaction_snapshot_links_json row.links))
+         { id =
+             Printf.sprintf "manifest:%s:%s:%s" row.trace_id
+               (Keeper_runtime_manifest.event_kind_to_string row.event)
+               row.ts
+         ; keeper_id
+         ; ts_iso = row.ts
+         ; ts_unix = Masc_domain.parse_iso8601_opt row.ts
+         ; trace_id = Some row.trace_id
+         ; keeper_turn_id = row.keeper_turn_id
+         ; source = "runtime_manifest"
+         ; trigger
+         ; runtime_id = row.runtime_id
+         ; before_tokens
+         ; after_tokens
+         ; saved_tokens
+         ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
+         ; compaction_source =
+             compaction_snapshot_clock_string row.decision "compaction_source"
+         ; status = row.status
+         ; links = compaction_snapshot_links_json row.links
+         })
   | _ -> None
 ;;
 
@@ -577,27 +585,28 @@ let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t
     in
     Some
       (compaction_snapshot_item_json
-         ~id:
-           (Printf.sprintf "manifest:%s:%s:%s" row.trace_id
-              (Keeper_runtime_manifest.event_kind_to_string row.event)
-              row.ts)
-         ~keeper_id
-         ~ts_iso:row.ts
-         ~ts_unix:(Masc_domain.parse_iso8601_opt row.ts)
-         ~trace_id:(Some row.trace_id)
-         ~keeper_turn_id:row.keeper_turn_id
-         ~source:"runtime_manifest"
+         { id =
+             Printf.sprintf "manifest:%s:%s:%s" row.trace_id
+               (Keeper_runtime_manifest.event_kind_to_string row.event)
+               row.ts
+         ; keeper_id
+         ; ts_iso = row.ts
+         ; ts_unix = Masc_domain.parse_iso8601_opt row.ts
+         ; trace_id = Some row.trace_id
+         ; keeper_turn_id = row.keeper_turn_id
+         ; source = "runtime_manifest"
          (* DET-OK: manifest projection fallback only; a missing source maps to
             a stable UI label and does not drive keeper policy. *)
-         ~trigger:(Option.value ~default:"pre_dispatch_hygiene" compaction_source)
-         ~runtime_id:row.runtime_id
-         ~before_tokens
-         ~after_tokens
-         ~saved_tokens:(compaction_saved_tokens before_tokens after_tokens)
-         ~compaction_id:(compaction_snapshot_clock_string row.decision "compaction_id")
-         ~compaction_source
-         ~status:row.status
-         ~links:(compaction_snapshot_links_json row.links))
+         ; trigger = Option.value ~default:"pre_dispatch_hygiene" compaction_source
+         ; runtime_id = row.runtime_id
+         ; before_tokens
+         ; after_tokens
+         ; saved_tokens = compaction_saved_tokens before_tokens after_tokens
+         ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
+         ; compaction_source
+         ; status = row.status
+         ; links = compaction_snapshot_links_json row.links
+         })
 ;;
 
 let compaction_snapshot_of_manifest_row ~keeper_id (row : Keeper_runtime_manifest.t) =
@@ -624,24 +633,25 @@ let keeper_meta_compaction_snapshot_json ~config ~keeper_id =
       let after_tokens = Some rt.last_after_tokens in
       ( Some
           (compaction_snapshot_item_json
-             ~id:"keeper_meta:last_compaction"
-             ~keeper_id
-             ~ts_iso:(Masc_domain.iso8601_of_unix_seconds rt.last_ts)
-             ~ts_unix:(Some rt.last_ts)
-             ~trace_id:None
-             ~keeper_turn_id:None
-             ~source:"keeper_meta"
-             ~trigger:
-               (Keeper_meta_contract.compaction_runtime_decision_to_string
-                  rt.last_decision)
-             ~runtime_id:None
-             ~before_tokens
-             ~after_tokens
-             ~saved_tokens:(compaction_saved_tokens before_tokens after_tokens)
-             ~compaction_id:None
-             ~compaction_source:None
-             ~status:"latest"
-             ~links:(`Assoc []))
+             { id = "keeper_meta:last_compaction"
+             ; keeper_id
+             ; ts_iso = Masc_domain.iso8601_of_unix_seconds rt.last_ts
+             ; ts_unix = Some rt.last_ts
+             ; trace_id = None
+             ; keeper_turn_id = None
+             ; source = "keeper_meta"
+             ; trigger =
+                 Keeper_meta_contract.compaction_runtime_decision_to_string
+                   rt.last_decision
+             ; runtime_id = None
+             ; before_tokens
+             ; after_tokens
+             ; saved_tokens = compaction_saved_tokens before_tokens after_tokens
+             ; compaction_id = None
+             ; compaction_source = None
+             ; status = "latest"
+             ; links = `Assoc []
+             })
       , [] )
   | Ok None -> None, []
   | Error msg ->

@@ -87,6 +87,7 @@ val manifest_file_suffix : string
 val safe_segment : string -> string
 
 val status_of_string : string -> status
+val status_to_string : status -> string
 val status_is_skipped : t -> bool
 
 val clock_refs :

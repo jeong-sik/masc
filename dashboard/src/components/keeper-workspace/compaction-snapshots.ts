@@ -36,9 +36,6 @@ export interface CompactionSnapshot {
 
 type PerKeeperSnapshots = Record<string, CompactionSnapshot[]>
 
-export const COMPACTION_SNAPSHOT_DEFAULT_LIMIT = 25
-export const COMPACTION_SNAPSHOT_MAX_ITEMS = 100
-
 export const compactionSnapshots: Signal<PerKeeperSnapshots> = signal({})
 
 let fallbackIdSeq = 0
@@ -136,9 +133,7 @@ export function hydrateCompactionSnapshots(
   for (const snapshot of optimistic) {
     if (!byId.has(snapshot.id)) byId.set(snapshot.id, snapshot)
   }
-  const next = [...byId.values()]
-    .sort(compareCompactionSnapshots)
-    .slice(0, COMPACTION_SNAPSHOT_MAX_ITEMS)
+  const next = [...byId.values()].sort(compareCompactionSnapshots)
   compactionSnapshots.value = {
     ...compactionSnapshots.value,
     [keeperName]: next,

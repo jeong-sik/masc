@@ -70,9 +70,15 @@ type status =
   | Skipped
   | Other of string
 
-let status_of_string = function
-  | "skipped" -> Skipped
-  | value -> Other value
+let skipped_status = "skipped"
+
+let status_of_string value =
+  if String.equal value skipped_status then Skipped else Other value
+;;
+
+let status_to_string = function
+  | Skipped -> skipped_status
+  | Other value -> value
 ;;
 
 let status_is_skipped manifest =

@@ -11,7 +11,6 @@ import type { VNode } from 'preact'
 import type { Keeper } from '../../types'
 import { fetchKeeperCompactionSnapshots } from '../../api/dashboard'
 import {
-  COMPACTION_SNAPSHOT_DEFAULT_LIMIT,
   hydrateCompactionSnapshots,
   keeperCompactionSnapshots,
   type CompactionSnapshot,
@@ -110,7 +109,7 @@ export function CompactionInspectorOverlay({
     const controller = new AbortController()
     let active = true
     setLoadState({ loading: true, error: null })
-    void fetchKeeperCompactionSnapshots(keeper.name, COMPACTION_SNAPSHOT_DEFAULT_LIMIT, { signal: controller.signal })
+    void fetchKeeperCompactionSnapshots(keeper.name, undefined, { signal: controller.signal })
       .then((payload) => {
         if (!active) return
         hydrateCompactionSnapshots(keeper.name, payload.items)

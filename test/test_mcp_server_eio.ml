@@ -16,7 +16,12 @@ module Keeper_identity = Masc.Keeper_identity
 module Keeper_registry = Masc.Keeper_registry
 module Masc_log = Log
 
-let () = Mirage_crypto_rng_unix.use_default ()
+let () =
+  Mirage_crypto_rng_unix.use_default ();
+  ignore Operator_tool.force_link;
+  ignore (Server_mcp_transport_ws.session_count ());
+  Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test.local");
+  Atomic.set Workspace_hooks.get_cross_verifier_runtime_id_fn (fun () -> None)
 
 (* ===== Test Helpers ===== *)
 
@@ -1229,9 +1234,17 @@ let test_handle_request_tools_call_transition_done_guidance () =
   let response =
     Mcp_eio.handle_request ~clock ~sw ~mcp_session_id:sid state request
   in
+  let envelope = result_envelope_exn response in
+  Alcotest.(check string) "done result status" "ok"
+    (match List.assoc_opt "status" envelope with
+     | Some (`String status) -> status
+     | _ -> Alcotest.fail "status missing");
+  Alcotest.(check bool) "done result summary" true
+    (match List.assoc_opt "summary" envelope with
+     | Some (`String summary) ->
+       contains_substring summary "claimed" && contains_substring summary "done"
+     | _ -> false);
   let steps = workflow_next_step_names response in
-  Alcotest.(check bool) "done guidance includes status" true
-    (List.mem "masc_status" steps);
   Alcotest.(check bool) "done guidance omits plan_set_task" false
     (List.mem "masc_plan_set_task" steps);
   cleanup_dir base_path

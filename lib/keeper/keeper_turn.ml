@@ -1033,9 +1033,15 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 	                Keeper_context_runtime.messages_of_context ctx
 	                |> Keeper_context_core.repair_broken_tool_call_pairs
 	            in
+	            let direct_base_system_prompt =
+	              Keeper_run_context.build_base_system_prompt
+	                ~config:ctx.config
+	                ~profile_defaults
+	                ~meta
+	            in
 	            let direct_prompt_for_estimate =
 	              build_turn_prompt
-	                ~base_system_prompt
+	                ~base_system_prompt:direct_base_system_prompt
 	                ~messages:direct_history_messages
 	            in
 	            let direct_dynamic_context =

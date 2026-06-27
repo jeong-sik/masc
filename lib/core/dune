@@ -29,6 +29,7 @@
   list_util
   set_util
   atomic_util
+  executable_path
   read_drop_reason
   tool_name_alias_axis
   eval_tool_selector)

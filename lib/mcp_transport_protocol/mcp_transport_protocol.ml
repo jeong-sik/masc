@@ -149,14 +149,88 @@ module Http_negotiation = struct
             (type_ = "application" && subtype = "json")
             || (type_ = "*" && subtype = "*"))
 
+  (* Content-Type is a single media type (no comma-separated list, no q
+     parameter). Parse it locally rather than reusing the Accept-list parser,
+     which splits on commas and understands quality values. *)
+  type parsed_content_type =
+    { type_ : string
+    ; subtype : string
+    }
+
+  let split_content_type_segments s =
+    let len = String.length s in
+    let segment start stop = String.sub s start (stop - start) in
+    let rec loop i start in_quote escaped acc =
+      if i >= len
+      then if in_quote then None else Some (List.rev (segment start len :: acc))
+      else
+        match s.[i], in_quote, escaped with
+        | _, _, true -> loop (i + 1) start in_quote false acc
+        | '\\', true, false -> loop (i + 1) start in_quote true acc
+        | '"', _, false -> loop (i + 1) start (not in_quote) false acc
+        | ';', false, false ->
+          loop (i + 1) (i + 1) false false (segment start i :: acc)
+        | ',', false, false -> None
+        | _ -> loop (i + 1) start in_quote false acc
+    in
+    loop 0 0 false false []
+
+  let parse_media_type media =
+    let media = String.trim media in
+    match String.index_opt media '/' with
+    | None -> None
+    | Some slash -> (
+      if slash + 1 >= String.length media
+         || (String.index_from_opt media (slash + 1) '/' |> Option.is_some)
+      then None
+      else
+        let type_ =
+          String.sub media 0 slash |> String.trim |> String.lowercase_ascii
+        in
+        let subtype =
+          String.sub media (slash + 1) (String.length media - slash - 1)
+          |> String.trim
+          |> String.lowercase_ascii
+        in
+        if String.equal type_ "" || String.equal subtype ""
+        then None
+        else Some { type_; subtype })
+
+  let valid_content_type_parameter param =
+    let param = String.trim param in
+    if String.equal param ""
+    then true
+    else
+      match String.index_opt param '=' with
+      | None -> false
+      | Some eq ->
+        let name =
+          String.sub param 0 eq |> String.trim |> String.lowercase_ascii
+        in
+        let value =
+          String.sub param (eq + 1) (String.length param - eq - 1)
+          |> String.trim
+        in
+        (not (String.equal name ""))
+        && (not (String.equal name "q"))
+        && not (String.equal value "")
+
+  let parse_content_type s =
+    let s = String.trim s in
+    if String.equal s ""
+    then None
+    else
+      match split_content_type_segments s with
+      | Some (media :: params) when List.for_all valid_content_type_parameter params ->
+        parse_media_type media
+      | Some _ | None -> None
+
   let is_json_content_type = function
     | None -> false
     | Some h ->
-        (match Mcp_protocol.Http_negotiation.parse_accept_header h with
-         | [ mt ] ->
-             String.equal (String.lowercase_ascii mt.type_) "application"
-             && String.equal (String.lowercase_ascii mt.subtype) "json"
-         | [] | _ :: _ :: _ -> false)
+        (match parse_content_type h with
+         | Some { type_ = "application"; subtype = "json" } -> true
+         | Some _ | None -> false)
 
   let accepts_streamable_mcp = function
     | None -> false

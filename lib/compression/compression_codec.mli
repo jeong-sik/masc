@@ -24,6 +24,11 @@ type compress_result =
 val min_size : int
 (** Minimum payload size (bytes) below which compression is skipped. *)
 
+val legacy_min_size : int
+(** Minimum payload size (bytes) for the legacy standard-zstd path.
+    The main {!min_size} floor is used by the dictionary-aware path; the
+    legacy path keeps its own higher floor to avoid tiny-response overhead. *)
+
 val max_dict_size : int
 (** Upper bound reserved for dictionary payloads. *)
 

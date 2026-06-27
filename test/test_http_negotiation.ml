@@ -44,6 +44,27 @@ let test_classify_mcp_accept () =
     (classify_mcp_accept (Some "text/event-stream"));
   ()
 
+let test_is_json_content_type () =
+  let open Mcp_transport_protocol.Http_negotiation in
+  let check_json label expected value =
+    check bool label expected (is_json_content_type (Some value))
+  in
+  check bool "missing content-type" false (is_json_content_type None);
+  check_json "exact" true "application/json";
+  check_json "with charset" true "application/json; charset=utf-8";
+  check_json "case-insensitive" true "Application/JSON";
+  check_json "quoted param with comma" true "application/json; boundary=\"a,b\"";
+  check_json "quoted param with semicolon" true "application/json; boundary=\"a;b\"";
+  check_json "reject q param" false "application/json;q=0.5";
+  check_json "reject malformed q param" false "application/json; q";
+  check_json "reject malformed param" false "application/json; boundary";
+  check_json "reject comma list" false "application/json, text/plain";
+  check_json "reject json-seq suffix" false "application/json-seq";
+  check_json "reject json5 suffix" false "application/json5";
+  check_json "reject ld+json suffix" false "application/ld+json";
+  check_json "reject text/plain" false "text/plain";
+  ()
+
 let test_protocol_continuity_allows_missing_header () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -290,6 +311,7 @@ let () =
       ("accepts_sse_header", [test_case "parses Accept" `Quick test_accepts_sse_header]);
       ("accepts_streamable_mcp", [test_case "requires json+sse" `Quick test_accepts_streamable_mcp]);
       ("classify_mcp_accept", [test_case "strict classification" `Quick test_classify_mcp_accept]);
+      ("is_json_content_type", [test_case "content-type contract" `Quick test_is_json_content_type]);
       ("protocol_continuity", [
         test_case "missing header falls back to session" `Quick test_protocol_continuity_allows_missing_header;
         test_case "remembered session version is reused" `Quick test_protocol_version_for_session_falls_back_to_negotiated_version;

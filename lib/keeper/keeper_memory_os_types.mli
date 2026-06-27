@@ -134,9 +134,11 @@ val claim_kind_of_string : string -> claim_kind option
     {!category}; a future durable kind must be classified here at compile time. *)
 val is_promotable : category -> bool
 
-(** Whether a category is outcome-positive enough to cross keepers into the
-    shared semantic tier. Plain [Fact] and [Constraint] remain keeper-local until
-    outcome evaluation turns them into [Validated_approach] or [Lesson]. *)
+(** Category proxy for whether a fact is outcome-positive enough to cross
+    keepers into the shared semantic tier. Plain [Fact] and [Constraint] remain
+    keeper-local until outcome evaluation turns them into [Validated_approach] or
+    [Lesson]. TODO(#22447): replace this proxy with explicit recall-outcome
+    metadata once the local evaluator is joined into fact metadata. *)
 val is_outcome_positive_for_shared_promotion : category -> bool
 
 (** Historical RFC-0259 external-ref kind. Kept as a closed sum for source

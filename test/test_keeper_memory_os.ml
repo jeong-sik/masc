@@ -3338,6 +3338,9 @@ let test_is_promotable_durable_kinds () =
     blocked
 ;;
 
+(* TODO(#22447): this test pins the temporary category proxy. Replace it with
+   explicit outcome-eval metadata coverage when recall outcome rows are joined
+   into fact metadata. *)
 let test_shared_promotion_outcome_positive_kinds () =
   let outcome_positive = [ Types.Validated_approach; Types.Lesson ] in
   let blocked =
@@ -5066,7 +5069,7 @@ let () =
             `Quick
             test_category_codec_roundtrip
         ; Alcotest.test_case
-            "durable kinds promote incl. validated_approach/lesson (RFC-0247 §6)"
+            "durable categories are promotable incl. validated_approach/lesson (RFC-0247 §6)"
             `Quick
             test_is_promotable_durable_kinds
         ; Alcotest.test_case

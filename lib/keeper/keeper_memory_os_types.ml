@@ -228,7 +228,9 @@ let is_promotable = function
 
 (* Shared Tier-2 promotion is stricter than generic category promotability:
    repeated plain facts/constraints stay keeper-local until outcome evaluation
-   turns them into a validated approach or lesson. *)
+   turns them into a validated approach or lesson.
+   TODO(#22447): replace this category proxy with explicit recall-outcome
+   metadata once the local outcome evaluator is joined into fact metadata. *)
 let is_outcome_positive_for_shared_promotion = function
   | Validated_approach | Lesson -> true
   | Code_change | Fact | Preference | Blocker | Goal | Constraint | Ephemeral | Unknown _ ->

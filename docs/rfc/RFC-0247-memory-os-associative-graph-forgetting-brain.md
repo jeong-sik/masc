@@ -263,7 +263,9 @@ Once re-enabled, extend the consolidator's single sweep to do the brain's three
 nightly jobs:
 
 1. **Promote** (already in #21237): claims held by ≥2 distinct keepers → `_shared`,
-   noisy-OR confidence — now over a closed-sum, promotable-only category set.
+   noisy-OR confidence — now over a closed-sum, promotable-only category set plus
+   the stricter `is_outcome_positive_for_shared_promotion` gate. That gate is a
+   temporary category proxy until #22447 outcome-eval metadata replaces it.
 2. **Link**: run the deterministic edge producers (§2.1) over the batch, so links
    are built off the hot path.
 3. **Forget**: run the lifecycle/GC pass (§2.3).
@@ -353,9 +355,11 @@ offline/no-embedding tenet and slot onto the organs above (full extract:
 
 - **Earned promotion, not declared confidence** (OpenClaw `minRecallCount=3 /
   minUniqueQueries=2`; Hermes trust-on-reobserve). A fact becomes `_shared` canon
-  only after demonstrated re-retrieval — gate #21237 promotion on the recall/access
-  counters (RFC-0243 already mutates them) instead of trusting the producer's
-  confidence. Directly kills the uniform-0.988 confidence-inversion failure mode.
+  only after demonstrated re-retrieval/outcome usefulness. Current code gates
+  #21237 promotion with `is_promotable` plus the stricter
+  `is_outcome_positive_for_shared_promotion` category proxy until #22447 supplies
+  explicit outcome-eval metadata. Directly kills the uniform-0.988
+  confidence-inversion failure mode.
 - **Read-time age + staleness reminder, not write-time confidence mutation**
   (claude-code `memoryAge` + freshness `<system-reminder>`; OpenClaw read-time
   `exp(-ln2/halfLife·age)` multiplier with evergreen exemption). An alternative/

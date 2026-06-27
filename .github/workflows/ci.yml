@@ -453,7 +453,6 @@ jobs:
           bash scripts/ci/check-telemetry-coverage.sh
           bash scripts/ci/check-determinism-contract.sh
           bash scripts/audit-hardcoding-truth.sh --fail-on-confirmed
-          bash scripts/hardening-ratchet.sh --check
           bash scripts/ci/check-credential-audits.sh
           bash scripts/ci/check-persona-profile-placeholders.sh
           bash scripts/ci/check-accept-fd-lifecycle.sh
@@ -461,6 +460,10 @@ jobs:
           bash scripts/ci/check-log-severity-anti-patterns.sh
           bash scripts/ci/check-stream-create-bounded.sh
           bash scripts/ci/check-drain-loop-yields.sh
+
+      - name: Hardening ratchet (advisory)
+        run: |
+          bash scripts/hardening-ratchet.sh --check --advisory
 
   health:
     name: Health

@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Production hardening ratchet for MASC.
 #
-# This is intentionally a monotone-decrease gate, not a broad style linter:
-# current debt is captured in .ci/hardening-baseline.json, and PRs may hold or
-# reduce each metric. Increases fail CI.
+# This is intentionally a monotone-decrease measurement, not an SSOT bug-class
+# gate. While the implementation is regex-based, CI must run it in advisory
+# mode so repo-owned blocking gates remain the source of truth.
 #
 # Metrics:
 #   local_workspace_path_literals
@@ -22,7 +22,7 @@
 #
 # Usage:
 #   scripts/hardening-ratchet.sh --measure
-#   scripts/hardening-ratchet.sh --check
+#   scripts/hardening-ratchet.sh --check [--advisory]
 #   scripts/hardening-ratchet.sh --rebaseline
 #
 # Rebaseline policy:
@@ -32,7 +32,10 @@
 
 set -euo pipefail
 
-REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
+if ! REPO_ROOT="$(git rev-parse --show-toplevel)"; then
+  echo "[hardening-ratchet] must run inside a git repository" >&2
+  exit 2
+fi
 BASELINE_FILE="${REPO_ROOT}/.ci/hardening-baseline.json"
 cd "$REPO_ROOT"
 
@@ -139,7 +142,7 @@ def uncomment_lines(text: str):
         yield "".join(out), raw
 
 for path in runtime_files:
-    text = (repo / path).read_text(errors="replace")
+    text = (repo / path).read_text(encoding="utf-8")
     for lineno, (line, raw_line) in enumerate(uncomment_lines(text), 1):
         env_matches = list(env_read_re.finditer(line))
         if env_matches:
@@ -173,11 +176,16 @@ import json, sys
 path, metric = sys.argv[1], sys.argv[2]
 with open(path) as f:
     data = json.load(f)
-print(data["metrics"].get(metric, 0))
+try:
+    print(data["metrics"][metric])
+except KeyError:
+    print(f"[hardening-ratchet] missing baseline metric: {metric}", file=sys.stderr)
+    raise SystemExit(2)
 PYEOF
 }
 
 do_check() {
+  local mode="${1:-blocking}"
   if [ ! -f "$BASELINE_FILE" ]; then
     echo "[hardening-ratchet] missing baseline: $BASELINE_FILE" >&2
     exit 2
@@ -215,7 +223,11 @@ do_check() {
 
   if [ "$failed" -ne 0 ]; then
     echo
-    echo "[hardening-ratchet] FAIL - one or more hardening metrics increased."
+    if [ "$mode" = "advisory" ]; then
+      echo "[hardening-ratchet] ADVISORY - one or more hardening metrics increased."
+    else
+      echo "[hardening-ratchet] FAIL - one or more hardening metrics increased."
+    fi
     echo "$current_json" | python3 -c 'import json,sys
 data=json.load(sys.stdin)
 for metric, items in data["examples"].items():
@@ -224,6 +236,9 @@ for metric, items in data["examples"].items():
         for item in items:
             print(item)
 '
+    if [ "$mode" = "advisory" ]; then
+      return 0
+    fi
     exit 1
   fi
 
@@ -258,11 +273,24 @@ print(f"[hardening-ratchet] wrote {path}")
 
 case "${1:---check}" in
   --measure) measure ;;
-  --check) do_check ;;
+  --check)
+    case "${2:-}" in
+      "")
+        do_check blocking
+        ;;
+      --advisory)
+        do_check advisory
+        ;;
+      *)
+        echo "usage: $0 [--measure | --check [--advisory] | --rebaseline]" >&2
+        exit 2
+        ;;
+    esac
+    ;;
   --rebaseline) do_rebaseline ;;
   -h|--help) sed -n '2,30p' "$0" ;;
   *)
-    echo "usage: $0 [--measure | --check | --rebaseline]" >&2
+    echo "usage: $0 [--measure | --check [--advisory] | --rebaseline]" >&2
     exit 2
     ;;
 esac

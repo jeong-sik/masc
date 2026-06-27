@@ -422,31 +422,52 @@ let parse_keeper_state
   }
 ;;
 
+type removed_keeper_meta_field =
+  | Initiative_enabled
+  | Persona_profile_path
+  | Last_blocker
+
+let removed_keeper_meta_field_of_key = function
+  | "initiative_enabled" -> Some Initiative_enabled
+  | "persona_profile_path" -> Some Persona_profile_path
+  | "last_blocker" -> Some Last_blocker
+  | _ -> None
+;;
+
+let removed_keeper_meta_field_to_wire = function
+  | Initiative_enabled -> "initiative_enabled"
+  | Persona_profile_path -> "persona_profile_path"
+  | Last_blocker -> "last_blocker"
+;;
+
 let reject_removed_keeper_meta_shapes (json : Yojson.Safe.t) =
   let rec duplicate_key seen = function
     | [] -> None
     | (k, _) :: rest ->
       if List.exists (String.equal k) seen then Some k else duplicate_key (k :: seen) rest
   in
+  let rec removed_field_error = function
+    | [] -> Ok ()
+    | (key, value) :: rest ->
+      (match removed_keeper_meta_field_of_key key with
+       | Some (Initiative_enabled as field) | Some (Persona_profile_path as field) ->
+         Error
+           ( "removed keeper meta field is no longer supported: "
+             ^ removed_keeper_meta_field_to_wire field )
+       | Some Last_blocker ->
+         (match value with
+          | `String _ ->
+            Error
+              "removed keeper meta field shape is no longer supported: \
+               last_blocker:string. Use structured last_blocker object."
+          | _ -> removed_field_error rest)
+       | None -> removed_field_error rest)
+  in
   match json with
   | `Assoc fields ->
     (match duplicate_key [] fields with
      | Some k -> Error ("duplicate keeper meta field is not supported: " ^ k)
-     | None ->
-       (match
-          List.find_opt
-            (fun (k, _) -> List.mem k [ "initiative_enabled"; "persona_profile_path" ])
-            fields
-        with
-        | Some (k, _) ->
-          Error ("removed keeper meta field is no longer supported: " ^ k)
-        | None ->
-          (match List.assoc_opt "last_blocker" fields with
-           | Some (`String _) ->
-             Error
-               "removed keeper meta field shape is no longer supported: \
-                last_blocker:string. Use structured last_blocker object."
-           | Some _ | None -> Ok ())))
+     | None -> removed_field_error fields)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> Ok ()
 ;;
 

@@ -35,6 +35,7 @@ let register name =
 ;;
 
 let health_to_string = KR.registry_entry_validation_error_to_string
+let invalid_trace_id = Masc.Keeper_id.For_testing.unsafe_trace_id_of_string ""
 
 let test_put_entry_rejects_meta_name_mismatch () =
   KR.clear ();
@@ -70,7 +71,7 @@ let test_get_filters_corrupted_entry () =
     { entry with
       meta =
         { entry.meta with
-          runtime = { entry.meta.runtime with trace_id = "" }
+          runtime = { entry.meta.runtime with trace_id = invalid_trace_id }
         }
     }
   in

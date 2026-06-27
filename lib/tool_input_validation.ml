@@ -91,6 +91,132 @@ let schema_property_names schema =
   | _ -> []
 ;;
 
+type schema_shape =
+  { properties : string list
+  ; required : string list
+  ; one_of_required : string list list
+  ; errors : string list
+  }
+
+let validated_property_names schema =
+  match Json_util.assoc_member_opt "properties" schema with
+  | None -> [], []
+  | Some (`Assoc properties) -> List.map fst properties, []
+  | Some other ->
+    ( []
+    , [ Printf.sprintf
+          "properties: expected object, got %s"
+          (Json_util.kind_name other)
+      ] )
+;;
+
+let validated_required_names ?(path = "required") schema =
+  match Json_util.assoc_member_opt "required" schema with
+  | None -> [], []
+  | Some (`List values) ->
+    List.fold_right
+      (fun value (names, errors) ->
+         match value with
+         | `String name ->
+           let name = String.trim name in
+           if String.equal name ""
+           then
+             ( names
+             , Printf.sprintf "%s: expected non-empty string, got string" path
+               :: errors )
+           else name :: names, errors
+         | other ->
+           ( names
+           , Printf.sprintf
+               "%s: expected non-empty string, got %s"
+               path
+               (Json_util.kind_name other)
+             :: errors ))
+      values
+      ([], [])
+  | Some other ->
+    ( []
+    , [ Printf.sprintf
+          "%s: expected string array, got %s"
+          path
+          (Json_util.kind_name other)
+      ] )
+;;
+
+let validated_one_of_required_names schema =
+  match Json_util.assoc_member_opt "oneOf" schema with
+  | None -> [], []
+  | Some (`List cases) ->
+    let mapped_cases =
+      List.mapi
+        (fun index case ->
+           match case with
+           | `Assoc _ ->
+             let required, errors =
+               validated_required_names
+                 ~path:(Printf.sprintf "oneOf[%d].required" index)
+                 case
+             in
+             Some required, errors
+           | other ->
+             ( None
+             , [ Printf.sprintf
+                   "oneOf[%d]: expected object, got %s"
+                   index
+                   (Json_util.kind_name other)
+               ] ))
+        cases
+    in
+    List.fold_right
+      (fun (required, errors) (required_acc, error_acc) ->
+         ( match required with
+           | Some required -> required :: required_acc
+           | None -> required_acc )
+         , errors @ error_acc)
+      mapped_cases
+      ([], [])
+  | Some other ->
+    ( []
+    , [ Printf.sprintf
+          "oneOf: expected object array, got %s"
+          (Json_util.kind_name other)
+      ] )
+;;
+
+let schema_shape schema =
+  let properties, property_errors = validated_property_names schema in
+  let required, required_errors = validated_required_names schema in
+  let one_of_required, one_of_errors = validated_one_of_required_names schema in
+  { properties
+  ; required
+  ; one_of_required
+  ; errors = property_errors @ required_errors @ one_of_errors
+  }
+;;
+
+let schema_shape_json schema =
+  let shape = schema_shape schema in
+  let base =
+    [ "properties", Json_util.json_string_list shape.properties
+    ; "required", Json_util.json_string_list shape.required
+    ]
+  in
+  let fields =
+    if shape.one_of_required = []
+    then base
+    else
+      ( "one_of_required"
+      , `List (List.map Json_util.json_string_list shape.one_of_required) )
+      :: base
+  in
+  let fields =
+    if shape.errors = []
+    then fields
+    else ("schema_errors", Json_util.json_string_list shape.errors) :: fields
+  in
+  `Assoc fields
+;;
+
 let schema_has_property_name schema name = List.mem name (schema_property_names schema)
 
 let is_execute_typed_argv_schema schema =

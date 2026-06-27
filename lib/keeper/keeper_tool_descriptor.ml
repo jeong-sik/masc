@@ -89,6 +89,7 @@ type t =
   ; validate_translated_input : bool
   ; receipt_labels : (string * string) list
   ; eval_tags : string list
+  ; examples : Yojson.Safe.t list
   }
 
 let executor_to_string = function
@@ -153,6 +154,20 @@ let runtime_handler_to_string = function
   | Tool_masc_fusion_dispatch -> "tool_masc_fusion_dispatch"
   | Tool_masc_fusion_status -> "tool_masc_fusion_status"
   | Tool_analyze_image -> "tool_analyze_image"
+;;
+
+let discovery_example ~label ?cwd ~executable ~argv () =
+  let input =
+    `Assoc
+      ([ "executable", `String executable
+       ; "argv", Json_util.json_string_list argv
+       ]
+       @
+       match cwd with
+       | Some cwd -> [ "cwd", `String cwd ]
+       | None -> [])
+  in
+  `Assoc [ "label", `String label; "input", input ]
 ;;
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
@@ -439,6 +454,7 @@ let translate_search_files input =
 let search_files_readonly_of_input _input = Some true
 
 let descriptor_with_public_aliases
+      ?(examples = [])
       ~validate_translated_input
       ~public_aliases
       ~id
@@ -452,6 +468,7 @@ let descriptor_with_public_aliases
       ~sandbox
       ~runtime_handler
       ~translate
+      ()
   =
   let receipt_labels =
     [ "descriptor_id", id
@@ -478,10 +495,12 @@ let descriptor_with_public_aliases
   ; validate_translated_input
   ; receipt_labels
   ; eval_tags = []
+  ; examples
   }
 ;;
 
 let descriptor
+      ?(examples = [])
       ~validate_translated_input
       ~id
       ~public_name
@@ -494,8 +513,10 @@ let descriptor
       ~sandbox
       ~runtime_handler
       ~translate
+      ()
   =
   descriptor_with_public_aliases
+    ~examples
     ~validate_translated_input
     ~public_aliases:[]
     ~id
@@ -509,6 +530,7 @@ let descriptor
     ~sandbox
     ~runtime_handler
     ~translate
+    ()
 ;;
 
 let with_eval_tags eval_tags descriptor =
@@ -537,8 +559,35 @@ let public_descriptors =
       ~backend:Sandbox_process
       ~sandbox:Backend_selected
       ~runtime_handler:Tool_execute
+      ~examples:
+        [ discovery_example
+            ~label:"Inspect pull request metadata"
+            ~cwd:"<repository-root>"
+            ~executable:"gh"
+            ~argv:
+              [ "pr"
+              ; "view"
+              ; "<pull-request-number>"
+              ; "--json"
+              ; "number,state,headRefOid"
+              ]
+            ()
+        ; discovery_example
+            ~label:"Read repository status"
+            ~cwd:"<repository-root>"
+            ~executable:"git"
+            ~argv:[ "status"; "--short" ]
+            ()
+        ; discovery_example
+            ~label:"Search source text"
+            ~cwd:"<repository-root>"
+            ~executable:"rg"
+            ~argv:[ "--line-number"; "<pattern>"; "<path>" ]
+            ()
+        ]
       ~validate_translated_input:true
       ~translate:translate_identity
+      ()
   ; descriptor_with_public_aliases
       ~id:"agent.search_files"
       ~public_name:"Grep"
@@ -564,6 +613,7 @@ let public_descriptors =
       ~runtime_handler:Tool_search_files
       ~validate_translated_input:true
       ~translate:translate_search_files
+      ()
   ; descriptor
       ~id:"agent.read_file"
       ~public_name:"Read"
@@ -587,6 +637,7 @@ let public_descriptors =
       ~runtime_handler:Tool_read_file
       ~validate_translated_input:false
       ~translate:translate_read_file
+      ()
   ; descriptor
       ~id:"agent.edit_file"
       ~public_name:"Edit"
@@ -605,6 +656,7 @@ let public_descriptors =
       ~runtime_handler:Tool_edit_file
       ~validate_translated_input:false
       ~translate:translate_edit_file
+      ()
   ; descriptor
       ~id:"agent.write_file"
       ~public_name:"Write"
@@ -623,6 +675,7 @@ let public_descriptors =
       ~runtime_handler:Tool_write_file
       ~validate_translated_input:false
       ~translate:translate_write_file
+      ()
   ; descriptor
       ~id:"agent.search_web"
       ~public_name:"WebSearch"
@@ -647,6 +700,7 @@ let public_descriptors =
       ~runtime_handler:Tool_masc_misc_dispatch
       ~validate_translated_input:true
       ~translate:translate_identity
+      ()
   ; descriptor
       ~id:"agent.fetch_web"
       ~public_name:"WebFetch"
@@ -671,6 +725,7 @@ let public_descriptors =
       ~runtime_handler:Tool_masc_misc_dispatch
       ~validate_translated_input:true
       ~translate:translate_identity
+      ()
   ]
 ;;
 
@@ -1007,6 +1062,7 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
     ~runtime_handler:handler
     ~validate_translated_input:true
     ~translate:translate_identity
+    ()
 ;;
 
 (* Cluster-dispatched tools (board / voice / task) share a single
@@ -1771,32 +1827,72 @@ let eval_tags_json d =
   `List (List.map (fun tag -> `String tag) d.eval_tags)
 ;;
 
+let effect_domain_json = function
+  | Some effect_domain -> `String (Tool_catalog.effect_domain_to_string effect_domain)
+  | None -> `Null
+;;
+
+let effect_domain_fields = function
+  | Some domain ->
+    [ "effect_domain", `String (Tool_catalog.effect_domain_to_string domain) ]
+  | None -> []
+;;
+
+let common_policy_json_fields ~readonly_key policy =
+  [ "visibility", `String (Tool_catalog.visibility_to_string policy.visibility)
+  ; readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
+  ; "approval", `String (approval_to_string policy.approval)
+  ; "retryable", `Bool policy.retryable
+  ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
+  ; "inline_safe", `Bool policy.inline_safe
+  ; "maintenance_only", `Bool policy.maintenance_only
+  ]
+;;
+
+(* Route evidence consumers must read fields by key; object field order is not a
+   compatibility contract. *)
 let route_evidence_json d =
   let policy = d.policy in
-  let policy_fields =
-    match policy.effect_domain with
-    | Some domain ->
-      [ "effect_domain", `String (Tool_catalog.effect_domain_to_string domain) ]
-    | None -> []
-  in
   `Assoc
     ([ "descriptor_id", `String d.id
      ; "public_name", `String d.public_name
      ; "canonical_name", `String d.internal_name
      ; "description", `String d.description
-     ; "visibility", `String (Tool_catalog.visibility_to_string policy.visibility)
-     ; "readonly", Json_util.bool_opt_to_json policy.readonly_hint
      ; "executor", `String (executor_to_string d.executor)
      ; "backend", `String (backend_to_string d.backend)
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "receipt_labels", receipt_labels_json d
      ; "eval_tags", eval_tags_json d
-     ; "approval", `String (approval_to_string policy.approval)
-     ; "retryable", `Bool policy.retryable
-     ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
-     ; "inline_safe", `Bool policy.inline_safe
-     ; "maintenance_only", `Bool policy.maintenance_only
      ]
-     @ policy_fields)
+     @ common_policy_json_fields ~readonly_key:"readonly" policy
+     @ effect_domain_fields policy.effect_domain)
+;;
+
+let discovery_policy_json policy =
+  `Assoc
+    (common_policy_json_fields ~readonly_key:"readonly_hint" policy
+     @ [ "effect_domain", effect_domain_json policy.effect_domain ])
+;;
+
+let discovery_json d =
+  let examples_field =
+    match d.examples with
+    | [] -> []
+    | examples -> [ "examples", `List examples ]
+  in
+  `Assoc
+    ([ "id", `String d.id
+     ; "public_name", `String d.public_name
+     ; "public_aliases", Json_util.json_string_list d.public_aliases
+     ; "internal_name", `String d.internal_name
+     ; "description", `String d.description
+     ; "executor", `String (executor_to_string d.executor)
+     ; "backend", `String (backend_to_string d.backend)
+     ; "sandbox", `String (sandbox_to_string d.sandbox)
+     ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+     ; "policy", discovery_policy_json d.policy
+     ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
+     ]
+     @ examples_field)
 ;;

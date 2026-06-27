@@ -3,6 +3,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 open Keeper_alerting
 module StringMap = Set_util.StringMap
+module StringSet = Set_util.StringSet
 
 let count_context_tokens (ctx : working_context) = Keeper_context_runtime.token_count ctx
 
@@ -751,8 +752,37 @@ let tag_dispatch_fn
   ref (fun ~config:_ ~agent_name:_ ~tag:_ ~name:_ ~args:_ -> None)
 ;;
 
+let descriptor_active_names active_name_set descriptor =
+  let descriptor_names =
+    Keeper_tool_descriptor.public_names_of_descriptor descriptor
+    @ Keeper_tool_descriptor.internal_names descriptor
+  in
+  List.filter (fun name -> StringSet.mem name active_name_set) descriptor_names
+;;
+
+let descriptor_discovery_json active_name_set descriptor =
+  match Keeper_tool_descriptor.discovery_json descriptor with
+  | `Assoc fields ->
+    `Assoc
+      (fields
+       @ [ ( "active_names"
+         , Json_util.json_string_list
+             (descriptor_active_names active_name_set descriptor) )
+       ])
+  | _ ->
+    (* [discovery_json] is specified as an object projection; this branch is an
+       internal invariant breach, not user input. *)
+    assert false
+;;
+
 let keeper_tools_list_json ~(meta : keeper_meta) =
   let names = Keeper_tool_policy.keeper_allowed_tool_names meta in
+  let active_name_set =
+    List.fold_left
+      (fun acc name -> StringSet.add name acc)
+      StringSet.empty
+      names
+  in
   let has_prefix prefix name = String.starts_with ~prefix name in
   (* Display-only grouping for the keeper tools list. The typed [tool_group]
      classifier was deleted in the surface-cut refactor; this prefix categorizer
@@ -784,5 +814,10 @@ let keeper_tools_list_json ~(meta : keeper_meta) =
       map
       []
   in
-  Yojson.Safe.to_string (`Assoc assoc)
+  let descriptor_surface =
+    Keeper_tool_descriptor_resolution.descriptors_for_tool_names names
+    |> List.map (descriptor_discovery_json active_name_set)
+  in
+  Yojson.Safe.to_string
+    (`Assoc (assoc @ [ "descriptor_surface", `List descriptor_surface ]))
 ;;

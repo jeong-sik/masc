@@ -100,6 +100,9 @@ type t =
   (** Evaluation-only semantic tags emitted in route evidence. These tags
       support replay/harness scoring and are not runtime selection policy. *)
   ; eval_tags : string list
+  ; examples : Yojson.Safe.t list
+  (** Descriptor-owned discovery examples. Empty means the discovery projection
+      omits the [examples] field. *)
   }
 
 val executor_to_string : executor -> string
@@ -160,3 +163,10 @@ val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t
 val receipt_labels_json : t -> Yojson.Safe.t
 val route_evidence_json : t -> Yojson.Safe.t
+
+(** Read-only discovery projection for capability introspection surfaces.
+    Keeps executor, policy, schema-shape, and curated typed examples attached
+    to the descriptor that owns the runtime route. The policy [effect_domain] is
+    [null] when a descriptor has no static effect domain; no fallback sentinel
+    string is emitted. *)
+val discovery_json : t -> Yojson.Safe.t

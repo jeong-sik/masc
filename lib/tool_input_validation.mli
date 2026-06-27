@@ -23,3 +23,19 @@ val validate_args :
   args:Yojson.Safe.t ->
   unit ->
   (Yojson.Safe.t, Tool_result.result) result
+
+type schema_shape =
+  { properties : string list
+  ; required : string list
+  ; one_of_required : string list list
+  ; errors : string list
+  }
+
+val schema_shape : Yojson.Safe.t -> schema_shape
+(** Validated JSON-schema shape projection used by dispatch diagnostics and
+    descriptor discovery. Unexpected [properties], [required], or [oneOf]
+    shapes are reported in [errors] instead of silently flattening to [[]]. *)
+
+val schema_shape_json : Yojson.Safe.t -> Yojson.Safe.t
+(** JSON form of {!schema_shape}. Omits [one_of_required] and [schema_errors]
+    when empty. *)

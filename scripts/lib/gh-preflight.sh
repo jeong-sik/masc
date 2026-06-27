@@ -64,7 +64,12 @@ gh_preflight_shared_repo_root() {
 }
 
 gh_preflight_cache_root() {
-  printf '%s/.masc/cache/gh-pr-audit\n' "$(gh_preflight_shared_repo_root)"
+  # Allow CI runners or local multi-repo setups to redirect the audit cache.
+  if [ -n "${MASC_GH_PR_AUDIT_CACHE_ROOT:-}" ]; then
+    printf '%s\n' "$MASC_GH_PR_AUDIT_CACHE_ROOT"
+  else
+    printf '%s/.masc/cache/gh-pr-audit\n' "$(gh_preflight_shared_repo_root)"
+  fi
 }
 
 gh_preflight_cache_segment() {

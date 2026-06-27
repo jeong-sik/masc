@@ -6,7 +6,9 @@
     - the [crash_pause_resume_policy] knob ([Manual_resume_required] vs
       [Auto_resume_with_backoff]);
     - the unified entrypoint [handle_crash_auto_pause] used by both
-      stale-termination-storm and OAS-timeout-budget-loop pause paths;
+      stale-termination-storm and OAS-timeout-budget-loop pause paths,
+      including release of backlog ownership that can no longer make
+      progress while the keeper is paused;
     - thin per-cause wrappers [handle_stale_storm_pause] and
       [handle_provider_timeout_pause] (legacy registry input,
       surfaced as a provider-timeout loop);
@@ -35,6 +37,62 @@ let auto_resume_after_sec_for_policy meta = function
     let initial_sec = Env_config.KeeperSupervisor.auto_resume_initial_sec in
     let max_sec = Env_config.KeeperSupervisor.auto_resume_max_sec in
     next_auto_resume_after_sec ~initial_sec ~max_sec meta.auto_resume_after_sec
+;;
+
+let auto_pause_handoff_context ~meta ~reason_tag =
+  {
+    Masc_domain.summary =
+      Printf.sprintf
+        "Released by keeper supervisor after %s auto-pause for %s"
+        reason_tag
+        meta.name;
+    reason = Some "keeper_auto_pause";
+    next_step = Some "Reclaim only after checking the keeper pause blocker.";
+    failure_mode = Some reason_tag;
+    reclaim_policy = Some Masc_domain.Allow_reclaim;
+    evidence_refs = [];
+    updated_at = Some (now_iso ());
+    updated_by = Some Keeper_supervisor_actor.supervisor_agent_name;
+  }
+;;
+
+let release_owned_active_tasks_after_pause ~config ~meta ~reason_tag =
+  let owned_tasks =
+    Keeper_current_task_reconcile.owned_active_tasks_for_meta ~config ~meta
+  in
+  List.iter
+    (fun (owned : Keeper_current_task_reconcile.owned_active_task) ->
+      let task_id = Keeper_id.Task_id.to_string owned.task_id in
+      let handoff_context = auto_pause_handoff_context ~meta ~reason_tag in
+      match
+        Workspace.force_release_task_r
+          config
+          ~agent_name:Keeper_supervisor_actor.supervisor_agent_name
+          ~task_id
+          ~handoff_context
+          ()
+      with
+      | Ok msg ->
+        Log.Keeper.warn
+          "%s: released active task %s from auto-paused owner %s (%s): %s"
+          meta.name
+          task_id
+          meta.agent_name
+          reason_tag
+          msg
+      | Error err ->
+        Otel_metric_store.inc_counter
+          Keeper_metrics.(to_string ReconcileFailures)
+          ~labels:[ "keeper", meta.name; "phase", "auto_pause_task_release" ]
+          ();
+        Log.Keeper.error
+          "%s: failed to release active task %s from auto-paused owner %s (%s): %s"
+          meta.name
+          task_id
+          meta.agent_name
+          reason_tag
+          (Masc_domain.masc_error_to_string err))
+    owned_tasks
 ;;
 
 let handle_crash_auto_pause
@@ -102,7 +160,7 @@ let handle_crash_auto_pause
           ; runtime = { meta.runtime with last_blocker = blocker_info_opt }
           }
       with
-      | Ok () -> ()
+      | Ok () -> release_owned_active_tasks_after_pause ~config:ctx.config ~meta ~reason_tag
       | Error err ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
@@ -302,6 +360,7 @@ let handle_auto_pause_from_meta
       paused = true
     ; auto_resume_after_sec
     ; updated_at = now_iso ()
+    ; current_task_id = None
     ; runtime = { meta.runtime with last_blocker = blocker_info_opt }
     }
   in
@@ -322,6 +381,7 @@ let handle_auto_pause_from_meta
       ~keeper_name:meta.name
       ~side_effect:(Printf.sprintf "%s auto-pause" reason_tag)
       Keeper_state_machine.Operator_pause;
+    release_owned_active_tasks_after_pause ~config ~meta ~reason_tag;
     Log.Keeper.error "%s: %s" meta.name log_message;
     Ok paused_meta
   | Error err ->

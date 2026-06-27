@@ -1649,6 +1649,97 @@ let test_stale_storm_pause_skips_restart () =
       check bool "registry entry unregistered after storm pause"
         false (Reg.is_registered ~base_path:config.base_path name))
 
+let test_stale_storm_pause_releases_owned_task () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "stale-storm-task-owner" in
+      let base_meta = make_meta name in
+      let created =
+        match
+          Masc.Workspace.add_task_with_result
+            config
+            ~title:"auto-pause release regression"
+            ~priority:1
+            ~description:"task must be released when keeper auto-pauses"
+        with
+        | Ok created -> created
+        | Error err -> fail (Masc.Workspace.add_task_error_to_string err)
+      in
+      (match
+         Masc.Workspace.claim_task_r
+           config
+           ~agent_name:base_meta.agent_name
+           ~task_id:created.task_id
+           ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      (match
+         Masc.Workspace.transition_task_r
+           config
+           ~agent_name:base_meta.agent_name
+           ~task_id:created.task_id
+           ~action:Masc_domain.Start
+           ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      let task_id =
+        match Keeper_id.Task_id.of_string created.task_id with
+        | Ok task_id -> task_id
+        | Error err -> fail err
+      in
+      let meta = { base_meta with current_task_id = Some task_id } in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      resolve_done_for_test reg (`Crashed "synthetic stale storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      let task =
+        Masc.Workspace.get_tasks_raw config
+        |> List.find (fun (task : Masc_domain.task) ->
+          String.equal task.id created.task_id)
+      in
+      (match task.task_status with
+       | Masc_domain.Todo -> ()
+       | status ->
+         fail
+           (Printf.sprintf
+              "expected auto-paused owner task to be todo, got %s"
+              (Masc_domain.task_status_to_string status)));
+      (match Keeper_meta_store.read_meta config name with
+       | Ok (Some persisted) ->
+         check bool "auto-paused meta.paused=true" true persisted.paused;
+         check (option string) "auto-paused current_task_id cleared" None
+           (Option.map Keeper_id.Task_id.to_string persisted.current_task_id)
+       | Ok None -> fail "expected persisted keeper meta"
+       | Error err -> fail err))
+
 let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -2883,6 +2974,8 @@ let () =
         test_max_restarts_exhaustion_emits_dead_alert;
       test_case "max_restarts exhaustion releases owned task" `Quick
         test_max_restarts_exhaustion_releases_owned_task;
+      test_case "stale storm auto-pause releases owned task" `Quick
+        test_stale_storm_pause_releases_owned_task;
       test_case "sweep cleanup fires Tombstone_reaped hook" `Quick
         test_sweep_and_recover_fires_tombstone_reaped_hook;
       test_case "failing Tombstone_reaped hook is swallowed" `Quick

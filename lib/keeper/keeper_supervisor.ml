@@ -15,7 +15,7 @@ open Keeper_execution
 
 include Keeper_supervisor_launch
 
-let supervisor_agent_name = "keeper-supervisor"
+let supervisor_agent_name = Keeper_supervisor_actor.supervisor_agent_name
 
 (** RFC-0250: pure stale-run assessment for the no-turn-produced case.
 

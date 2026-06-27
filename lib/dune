@@ -134,6 +134,7 @@
   keeper_supervisor_startup_helpers
   keeper_supervisor_restart_noop
   keeper_supervisor_self_preservation
+  keeper_supervisor_actor
   ;; keeper_event_queue: promoted to lib/keeper_event_queue/ sub-library
   ;; (RFC-0056 Phase 1I) — listed in (libraries) below.
   keeper_relevance_check

@@ -35,11 +35,49 @@ let tmpdir prefix =
   dir
 ;;
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests base_dir =
+  let path = Filename.concat base_dir "runtime.toml" in
+  write_file path runtime_toml;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+;;
+
 let with_config f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_dir = tmpdir "dashboard_k2_feeds" in
+  init_runtime_default_for_tests base_dir;
   let config = Workspace.default_config base_dir in
   f config
 ;;
@@ -262,6 +300,9 @@ let memory_row ~ts text =
   `Assoc
     [ "schema_version", `Int 2
     ; "kind", `String "goal"
+    ; "horizon", `String "mid_term"
+    ; "source", `String "tool_result"
+    ; "trace_id", `String "trace-memory-row"
     ; "text", `String text
     ; "priority", `Int 10
     ; "ts_unix", `Float ts
@@ -296,6 +337,9 @@ let test_memory_log_kind_mapping () =
     (`Assoc
         [ "schema_version", `Int 2
         ; "kind", `String "progress"
+        ; "horizon", `String "short_term"
+        ; "source", `String "tool_result"
+        ; "trace_id", `String "trace-memory-progress"
         ; "text", `String "p1"
         ; "priority", `Int 10
         ; "ts_unix", `Float 3_000.0
@@ -306,16 +350,22 @@ let test_memory_log_kind_mapping () =
     (`Assoc
         [ "schema_version", `Int 2
         ; "kind", `String "goal"
+        ; "horizon", `String "mid_term"
+        ; "source", `String "tool_result"
+        ; "trace_id", `String "trace-memory-goal"
         ; "text", `String "g1"
         ; "priority", `Int 10
         ; "ts_unix", `Float 3_001.0
         ]);
-  (* belief -> fact *)
+  (* long_term -> fact *)
   append_jsonl
     path
     (`Assoc
         [ "schema_version", `Int 2
-        ; "kind", `String "belief"
+        ; "kind", `String "long_term"
+        ; "horizon", `String "long_term"
+        ; "source", `String "tool_result"
+        ; "trace_id", `String "trace-memory-fact"
         ; "text", `String "b1"
         ; "priority", `Int 10
         ; "ts_unix", `Float 3_002.0
@@ -324,7 +374,7 @@ let test_memory_log_kind_mapping () =
   let entries = Json.(json |> member "entries" |> to_list) in
   check int "entries" 3 (List.length entries);
   let kinds = List.map (fun e -> Json.(e |> member "kind" |> to_string)) entries in
-  (* sorted newest-first: belief(3_002), goal(3_001), progress(3_000) *)
+  (* sorted newest-first: long_term(3_002), goal(3_001), progress(3_000) *)
   check (list string) "kind mapping" [ "fact"; "plan"; "episode" ] kinds
 ;;
 

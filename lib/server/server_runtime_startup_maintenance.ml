@@ -16,9 +16,17 @@ let startup_prune_jsonl (state : Mcp_server.server_state) =
        else 0
      in
      let prune_recall_injections () =
-       Keeper_recall_injection_ledger.prune_older_than
-         ~masc_root:masc
-         ~retention_days:days
+       match
+         Keeper_recall_injection_ledger.prune_older_than
+           ~masc_root:masc
+           ~retention_days:days
+       with
+       | Ok count -> count
+       | Error label ->
+         Log.Misc.warn
+           "startup prune: recall_injections failed label=%s"
+           (Keeper_recall_injection_ledger.string_of_prune_error label);
+         0
      in
      let tool_metrics_dir =
        Filename.concat (Mcp_server.workspace_config state).base_path "data/tool-metrics"

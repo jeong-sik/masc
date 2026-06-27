@@ -91,8 +91,12 @@ let test_prune_older_than_removes_old_day_file () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let retention_days = 30 in
   let old_file = write_old_recall_file ~masc_root ~retention_days in
-  let deleted = Ledger.prune_older_than ~masc_root ~retention_days in
-  check "manual retention reports prune count" (deleted >= 1);
+  (match Ledger.prune_older_than ~masc_root ~retention_days with
+   | Ok deleted -> check "manual retention reports prune count" (deleted >= 1)
+   | Error label ->
+     check
+       ("manual retention should not fail: " ^ Ledger.string_of_prune_error label)
+       false);
   check "manual retention removes old recall file" (not (Sys.file_exists old_file))
 
 let () =

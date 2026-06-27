@@ -55,13 +55,22 @@ val append
     [Eio.Cancel.Cancelled]. Retention is intentionally handled by server
     maintenance, not by append. *)
 
+type prune_error =
+  [ `Sys_error
+  | `Unix_error
+  | `Unexpected_exception
+  ]
+(** Bounded failure label for recall-ledger prune setup failures. *)
+
+val string_of_prune_error : prune_error -> string
+
 val prune_older_than
   :  masc_root:string
   -> retention_days:int
-  -> int
+  -> (int, prune_error) result
 (** Best-effort maintenance hook for deleting recall injection day-files older
-    than [retention_days] days. Returns the prune count reported by
+    than [retention_days] days. [Ok count] returns the prune count reported by
     {!Dated_jsonl.prune}; this is the store-level maintenance count, not a
-    filesystem guarantee that every matched unlink succeeded. Logs filesystem
-    errors with a bounded label and returns [0], except [Eio.Cancel.Cancelled]
-    which is re-raised. *)
+    filesystem guarantee that every matched unlink succeeded. [Error label]
+    makes prune setup failures visible to maintenance callers after logging
+    with a bounded label. [Eio.Cancel.Cancelled] is re-raised. *)

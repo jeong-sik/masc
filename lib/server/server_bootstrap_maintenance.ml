@@ -485,9 +485,17 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                else 0
              in
              let prune_recall_injections () =
-               Keeper_recall_injection_ledger.prune_older_than
-                 ~masc_root:masc
-                 ~retention_days:days
+               match
+                 Keeper_recall_injection_ledger.prune_older_than
+                   ~masc_root:masc
+                   ~retention_days:days
+               with
+               | Ok count -> count
+               | Error label ->
+                 Log.Server.warn
+                   "periodic JSONL prune: recall_injections failed label=%s"
+                   (Keeper_recall_injection_ledger.string_of_prune_error label);
+                 0
              in
              let total =
                prune_dir (Filename.concat masc "audit")

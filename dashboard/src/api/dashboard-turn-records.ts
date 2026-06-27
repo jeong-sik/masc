@@ -698,7 +698,7 @@ function decodeKeeperCompactionSnapshot(raw: unknown): KeeperCompactionSnapshot 
     source,
     trigger,
     runtime_id: runtimeId,
-    display_runtime: asString(raw.display_runtime) || runtimeId || compactionSource || source,
+    display_runtime: asString(raw.display_runtime),
     before_tokens: nullableNumber(raw.before_tokens),
     after_tokens: nullableNumber(raw.after_tokens),
     saved_tokens: nullableNumber(raw.saved_tokens),

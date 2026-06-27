@@ -289,7 +289,7 @@ describe('KeeperDetailPage', () => {
     })))
   })
 
-  it('renders a live keeper detail route without tripping the monitoring error boundary', () => {
+  it('renders a live keeper detail route without tripping the monitoring error boundary', async () => {
     const analyst = {
       name: 'analyst',
       status: 'active',
@@ -371,13 +371,13 @@ describe('KeeperDetailPage', () => {
 
     // "상세" flips to the full tabbed detail (KeeperDetailBody is reused).
     fireEvent.click(screen.getByRole('button', { name: '상세' }))
-    const statusTab = screen.getByRole('tab', { name: '상태' })
+    const statusTab = await screen.findByRole('tab', { name: '상태' })
     fireEvent.click(statusTab)
     expect(statusTab.getAttribute('aria-selected')).toBe('true')
     expect(screen.getByText('운영 상태 개요')).toBeTruthy()
   })
 
-  it('opens target keeper config as an overlay from the roster row menu after a keeper route change', () => {
+  it('opens target keeper config as an overlay from the roster row menu after a keeper route change', async () => {
     keepers.value = [
       {
         name: 'analyst',
@@ -414,7 +414,7 @@ describe('KeeperDetailPage', () => {
     expect(grid?.getAttribute('data-detail')).toBe('closed')
     expect(activeKeeperDetailSection.value).toBe('keeper-config')
     expect(screen.getByTestId('kw-config-overlay')).toBeTruthy()
-    expect(screen.getByTestId('keeper-config-panel').getAttribute('data-keeper')).toBe('executor')
+    expect((await screen.findByTestId('keeper-config-panel')).getAttribute('data-keeper')).toBe('executor')
 
     fireEvent.click(screen.getByTestId('kw-config-close'))
 

@@ -7,6 +7,7 @@
 // inspectors) are MARKED, never faked.
 
 import { html } from 'htm/preact'
+import { lazy, Suspense } from 'preact/compat'
 import { useEffect, useState } from 'preact/hooks'
 import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
@@ -37,13 +38,17 @@ import {
   loadRuntimeCatalog,
   runtimeCatalogState,
 } from '../../lib/runtime-catalog-resource'
-import { CompactionInspectorOverlay } from './compaction-inspector-overlay'
 import { recordManualCompaction } from './compaction-snapshots'
-import {
-  MemoryInspector,
-  type MemoryKeeper,
-} from '../memory-inspector'
+import type { MemoryKeeper } from '../memory-inspector'
 import { keepers } from '../../store'
+
+const LazyCompactionInspectorOverlay = lazy(async () => ({
+  default: (await import('./compaction-inspector-overlay')).CompactionInspectorOverlay,
+}))
+
+const LazyMemoryInspector = lazy(async () => ({
+  default: (await import('../memory-inspector')).MemoryInspector,
+}))
 
 function contextRatio(keeper: Keeper): number | null {
   const ratio = keeper.context_ratio ?? keeper.context?.context_ratio
@@ -545,14 +550,22 @@ export function KeeperWorkspaceRail({
     </aside>
 
     ${overlay === 'compaction'
-      ? html`<${CompactionInspectorOverlay} keeper=${keeper} onClose=${() => setOverlay(null)} />`
+      ? html`
+          <${Suspense} fallback=${html`<div class="turn-overlay" role="dialog" aria-modal="true">컴팩션 스냅샷 로딩…</div>`}>
+            <${LazyCompactionInspectorOverlay} keeper=${keeper} onClose=${() => setOverlay(null)} />
+          <//>
+        `
       : null}
     ${overlay === 'memory'
-      ? html`<${MemoryInspector}
-          keeper=${memoryKeeper}
-          keepers=${memoryKeepers}
-          onClose=${() => setOverlay(null)}
-        />`
+      ? html`
+          <${Suspense} fallback=${html`<div class="turn-overlay" role="dialog" aria-modal="true">Keeper 메모리 로딩…</div>`}>
+            <${LazyMemoryInspector}
+              keeper=${memoryKeeper}
+              keepers=${memoryKeepers}
+              onClose=${() => setOverlay(null)}
+            />
+          <//>
+        `
       : null}
   `
 }

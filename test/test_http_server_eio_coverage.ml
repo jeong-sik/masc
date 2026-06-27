@@ -115,6 +115,18 @@ let test_compress_zstd_level () =
   check bool "level 19 result exists" true (String.length result9 > 0)
 ;;
 
+let test_compress_zstd_dictionary_result_returns_original () =
+  let original = String.make Masc.Compression_codec.legacy_min_size 'd' in
+  let dictionary_payload = "dictionary-compressed-bytes" in
+  let result, compressed =
+    Compression.compress_zstd_result ~original
+      (Masc.Compression_codec.Compressed
+         { payload = dictionary_payload; encoding = Masc.Compression_codec.Dictionary })
+  in
+  check bool "dictionary not advertised as zstd" false compressed;
+  check string "dictionary payload not leaked" original result
+;;
+
 let test_compress_wrapper_small_data () =
   let small_data = "hello" in
   let result, encoding = Compression.compress small_data in
@@ -158,6 +170,8 @@ let () =
         ; test_case "empty" `Quick test_compress_zstd_empty
         ; test_case "below threshold" `Quick test_compress_zstd_below_threshold
         ; test_case "level" `Quick test_compress_zstd_level
+        ; test_case "dictionary result returns original" `Quick
+            test_compress_zstd_dictionary_result_returns_original
         ] )
     ; ( "compress"
       , [ test_case "small data" `Quick test_compress_wrapper_small_data

@@ -58,10 +58,7 @@ let registry_entry_validation_error_to_string = function
   | Registry_meta_agent_name_empty ->
       "registry entry meta.agent_name is empty"
 
-let registry_key_parts key =
-  match Keeper_registry_types.registry_key_parts key with
-  | Ok parts -> Ok parts
-  | Error _ -> Error (Registry_key_malformed { key })
+let registry_key_parts = Keeper_registry_types.registry_key_parts
 
 let validate_registry_entry ~base_path name (entry : registry_entry) =
   let expected_name = String.trim name in
@@ -476,8 +473,11 @@ let all ?base_path () =
   StringMap.fold
     (fun key v acc ->
        match registry_key_parts key with
-       | Error reason ->
-           record_invalid_registry_entry ~operation:"all" ~name:v.name reason;
+       | Error _ ->
+           record_invalid_registry_entry
+             ~operation:"all"
+             ~name:v.name
+             (Registry_key_malformed { key });
            acc
        | Ok (key_base_path, key_name) ->
            (match base_path with

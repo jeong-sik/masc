@@ -293,7 +293,9 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('trace-a#7')
     expect(container.textContent).toContain('cccc2222dddd')
     expect(container.textContent).toContain('800B')
-    expect([...container.querySelectorAll('.mem-disclosure')].some(d => (d.textContent ?? '').includes('Phase 3'))).toBe(false)
+    const recallSection = [...container.querySelectorAll('.turn-sec')].find(sec => (sec.querySelector('h4')?.textContent ?? '') === '최근 회상 · 주입')
+    expect(recallSection?.querySelector('.mem-tl-row')?.textContent).toContain('cccc2222dddd')
+    expect(recallSection?.querySelector('.mem-disclosure')).toBeFalsy()
   })
 
   it('surfaces read_errors and renders honest disclosures for the unbacked pin section', async () => {

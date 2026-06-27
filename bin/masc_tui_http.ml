@@ -2,13 +2,19 @@
 
 let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 let default_timeout_sec = 10.0
+let timeout_env = "MASC_TUI_HTTP_TIMEOUT_SEC"
+
+let request_timeout_sec () =
+  Env_config_core.get_float_nonneg ~default:default_timeout_sec timeout_env
 
 let trim_nonempty value =
   let trimmed = String.trim value in
   if trimmed = "" then None else Some trimmed
 
 let first_nonempty_env names =
-  List.find_map (fun name -> Option.bind (Sys.getenv_opt name) trim_nonempty) names
+  List.find_map
+    (fun name -> Option.bind (Env_config_core.raw_value_opt name) trim_nonempty)
+    names
 
 let sanitize_header_value value =
   value
@@ -40,74 +46,56 @@ let host_for_url host =
 let url_of ~(host : string) ~(port : int) ~(path : string) =
   Printf.sprintf "http://%s:%d%s" (host_for_url host) port path
 
-let is_unreserved_path_char = function
-  | 'A' .. 'Z' | 'a' .. 'z' | '0' .. '9' | '-' | '.' | '_' | '~' -> true
-  | _ -> false
-
-let percent_encode_path_segment value =
-  let buf = Buffer.create (String.length value) in
-  String.iter
-    (fun c ->
-      if is_unreserved_path_char c then Buffer.add_char buf c
-      else Buffer.add_string buf (Printf.sprintf "%%%02X" (Char.code c)))
-    value;
-  Buffer.contents buf
-
-let raw_response ~status ~body = Printf.sprintf "HTTP/1.1 %d\r\n\r\n%s" status body
+let percent_encode_path_segment value = Uri.pct_encode value
 
 let request_clock () = Eio_context.get_clock_opt ()
 
-(** Send an HTTP GET request and return the raw response. *)
-let http_get ~(host : string) ~(port : int) ~(path : string) : (string, string) result =
+(** Send an HTTP GET request and return the structured status/body pair. *)
+let http_get ~(host : string) ~(port : int) ~(path : string) :
+    (int * string, string) result =
   let url = url_of ~host ~port ~path in
   match
-    Masc_http_client.get_sync ?clock:(request_clock ()) ~timeout_sec:default_timeout_sec
-      ~url ~headers:(auth_headers ()) ()
+    Masc_http_client.get_sync ?clock:(request_clock ())
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(auth_headers ()) ()
   with
-  | Ok (status, body) ->
-      if Masc.Tui_decode.is_success_http_status status then
-        Ok (raw_response ~status ~body)
-      else Error (Printf.sprintf "HTTP error %d: %s" status body)
+  | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "GET failed" e)
 
-(** Send an HTTP POST request with a JSON body and return the raw response. *)
+(** Send an HTTP POST request with a JSON body and return the structured status/body pair. *)
 let http_post ~headers ~(host : string) ~(port : int) ~(path : string)
-    ~(body : string) : (string, string) result =
+    ~(body : string) : (int * string, string) result =
   let url = url_of ~host ~port ~path in
   match
     Masc_http_client.post_sync ?clock:(request_clock ())
-      ~timeout_sec:default_timeout_sec ~url ~headers:(json_headers headers) ~body
-      ()
+      ~timeout_sec:(request_timeout_sec ()) ~url ~headers:(json_headers headers)
+      ~body ()
   with
-  | Ok (status, body) ->
-      if Masc.Tui_decode.is_success_http_status status then
-        Ok (raw_response ~status ~body)
-      else Error (Printf.sprintf "HTTP error %d: %s" status body)
+  | Ok (status, body) -> Ok (status, body)
   | Error e -> Error (report_err "POST failed" e)
 
 (** GET a JSON response from a dashboard endpoint. *)
 let get_json ~(host : string) ~(port : int) ~(path : string) : (Yojson.Safe.t, string) result =
   match http_get ~host ~port ~path with
   | Error e -> Error e
-  | Ok raw -> Masc.Tui_decode.decode_json_http_response ~allow_empty:false raw
+  | Ok (status_code, body) ->
+      Masc.Tui_decode.decode_json_response_body ~allow_empty:false ~status_code
+        ~body
 
 (** POST a JSON body and parse the JSON response. *)
 let post_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) : (Yojson.Safe.t, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
-  | Ok raw -> Masc.Tui_decode.decode_json_http_response ~allow_empty:true raw
+  | Ok (status_code, body) ->
+      Masc.Tui_decode.decode_json_response_body ~allow_empty:true ~status_code
+        ~body
 
 let post_raw_json ~(host : string) ~(port : int) ~(path : string) ~(body : string) :
     (string, string) result =
   match http_post ~headers:(auth_headers ()) ~host ~port ~path ~body with
   | Error e -> Error e
-  | Ok raw -> (
-      match Masc.Tui_decode.parse_http_response raw with
-      | Error e -> Error e
-      | Ok response
-        when Masc.Tui_decode.is_success_http_status response.status_code ->
-          Ok raw
-      | Ok response -> Error (Masc.Tui_decode.http_status_error response))
+  | Ok (status_code, body) ->
+      if Masc.Tui_decode.is_success_http_status status_code then Ok body
+      else Error (Masc.Tui_decode.http_status_error { status_code; body })
 
 (** Fetch /api/v1/dashboard/briefing (Mission / Overview snapshot). *)
 let fetch_dashboard_briefing ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
@@ -136,12 +124,3 @@ let fetch_board_post ~(host : string) ~(port : int) ~(post_id : string) : (Yojso
 (** Fetch /api/v1/dashboard/planning (goals + rollup + task backlog). *)
 let fetch_dashboard_planning ~(host : string) ~(port : int) : (Yojson.Safe.t, string) result =
   get_json ~host ~port ~path:"/api/v1/dashboard/planning"
-
-(** Check if a server is reachable on the configured host/port. *)
-let server_reachable ~(host : string) ~(port : int) : bool =
-  match http_get ~host ~port ~path:"/api/v1/dashboard/shell" with
-  | Ok raw -> (
-      match Masc.Tui_decode.parse_http_response raw with
-      | Ok response -> Masc.Tui_decode.is_success_http_status response.status_code
-      | Error _ -> false)
-  | Error _ -> false

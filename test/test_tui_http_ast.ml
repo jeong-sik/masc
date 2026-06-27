@@ -6,9 +6,9 @@ let test_is_success_http_status_called () =
       ~module_path:"bin/masc_tui_http.ml"
       ~callee:"Masc.Tui_decode.is_success_http_status"
   in
-  if n < 4 then
+  if n < 1 then
     failf
-      "bin/masc_tui_http.ml must call Masc.Tui_decode.is_success_http_status >= 4 (http_get, http_post, post_raw_json, server_reachable); got %d"
+      "bin/masc_tui_http.ml must call Masc.Tui_decode.is_success_http_status for raw body responses; got %d"
       n
 ;;
 

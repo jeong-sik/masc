@@ -201,6 +201,12 @@ let test_parse_keeper_chat_response_sse_delta () =
   | Ok text -> Alcotest.(check string) "delta text" "hello world" text
   | Error err -> Alcotest.fail err
 
+let test_parse_keeper_chat_response_body_json () =
+  let response = "{\"result\":{\"text\":\"hello body\"}}" in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.(check string) "body text" "hello body" text
+  | Error err -> Alcotest.fail err
+
 let test_parse_keeper_chat_response_json_error () =
   let response =
     "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n\
@@ -228,6 +234,16 @@ let test_decode_json_http_response_allows_empty_success_post () =
   | Ok json ->
       Alcotest.failf "expected empty object, got %s" (Yojson.Safe.to_string json)
   | Error err -> Alcotest.fail err
+
+let test_decode_json_response_body_rejects_error_status () =
+  match
+    Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:400
+      ~body:"{\"error\":\"bad confirm\"}"
+  with
+  | Ok _ -> Alcotest.fail "expected HTTP 400 to fail"
+  | Error err ->
+      Alcotest.(check string)
+        "http error" "HTTP 400: {\"error\":\"bad confirm\"}" err
 
 type parent_node = {
   node_id : string;
@@ -287,6 +303,8 @@ let () =
       [
         Alcotest.test_case "sse delta" `Quick
           test_parse_keeper_chat_response_sse_delta;
+        Alcotest.test_case "body json" `Quick
+          test_parse_keeper_chat_response_body_json;
         Alcotest.test_case "json error" `Quick
           test_parse_keeper_chat_response_json_error;
       ] );
@@ -296,6 +314,8 @@ let () =
           test_decode_json_http_response_rejects_error_status;
         Alcotest.test_case "allows empty success post" `Quick
           test_decode_json_http_response_allows_empty_success_post;
+        Alcotest.test_case "body rejects error status" `Quick
+          test_decode_json_response_body_rejects_error_status;
       ] );
     ( "bounded_parent_depth",
       [

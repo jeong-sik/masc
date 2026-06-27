@@ -36,10 +36,10 @@ let send_keeper_message (state : state) (keeper_name : string) (message : string
   | exn ->
     Printf.sprintf "(error: %s)" (Printexc.to_string exn)
 
-(** Read a single byte from stdin, returning Some char or None *)
-let read_byte () : char option =
-  let ready, _, _ = Unix.select [Unix.stdin] [] [] 0.1 in
-  if List.length ready > 0 then begin
+(** Read a single byte from stdin, returning Some char or None. *)
+let read_byte_unix ?(timeout = 0.1) () : char option =
+  let ready, _, _ = Unix.select [Unix.stdin] [] [] timeout in
+  if ready <> [] then begin
     let buf = Bytes.create 1 in
     let n = Unix.read Unix.stdin buf 0 1 in
     if n > 0 then Some (Bytes.get buf 0)
@@ -47,30 +47,27 @@ let read_byte () : char option =
   end else
     None
 
+(** Read a single byte from stdin, returning Some char or None. *)
+let read_byte () : char option =
+  Eio_guard.run_in_systhread (fun () -> read_byte_unix ())
+
 (** Try to read an escape sequence. Returns a key description. *)
 let read_key () : string option =
-  match read_byte () with
-  | None -> None
-  | Some '\027' ->
-    (* Escape sequence: try to read [ and then the code *)
-    let ready2, _, _ = Unix.select [Unix.stdin] [] [] 0.05 in
-    if List.length ready2 > 0 then begin
-      let buf2 = Bytes.create 1 in
-      let _ = Unix.read Unix.stdin buf2 0 1 in
-      if Bytes.get buf2 0 = '[' then begin
-        let ready3, _, _ = Unix.select [Unix.stdin] [] [] 0.05 in
-        if List.length ready3 > 0 then begin
-          let buf3 = Bytes.create 1 in
-          let _ = Unix.read Unix.stdin buf3 0 1 in
-          match Bytes.get buf3 0 with
-          | 'A' -> Some "up"
-          | 'B' -> Some "down"
-          | 'Z' -> Some "shift-tab"
-          | _ -> Some "unknown-esc"
-        end else Some "esc"
-      end else Some "esc"
-    end else Some "esc"
-  | Some c -> Some (String.make 1 c)
+  Eio_guard.run_in_systhread (fun () ->
+      match read_byte_unix () with
+      | None -> None
+      | Some '\027' -> (
+          (* Escape sequence: try to read [ and then the code. *)
+          match read_byte_unix ~timeout:0.05 () with
+          | Some '[' -> (
+              match read_byte_unix ~timeout:0.05 () with
+              | Some 'A' -> Some "up"
+              | Some 'B' -> Some "down"
+              | Some 'Z' -> Some "shift-tab"
+              | Some _ -> Some "unknown-esc"
+              | None -> Some "esc")
+          | Some _ | None -> Some "esc")
+      | Some c -> Some (String.make 1 c))
 
 (** Parse command line arguments *)
 let parse_args () =
@@ -206,6 +203,26 @@ let pending_approval_matches pending approval decision =
       String.equal p.paa_token approval.ap_token && p.paa_decision = decision
   | None -> false
 
+type http_surface_results = {
+  http_overview: (overview_snapshot, string) result;
+  http_board: (board_post list, string) result;
+  http_planning: (planning_snapshot, string) result;
+}
+
+type async_msg =
+  | Http_refresh_done of http_surface_results
+  | Http_refresh_failed of string
+  | Board_post_refresh_done of string * (board_post * board_comment list, string) result
+  | Board_post_refresh_failed of string * string
+  | Approval_decision_done of
+      approval_item
+      * approval_decision
+      * (Yojson.Safe.t, string) result
+      * (overview_snapshot, string) result option
+  | Approval_decision_failed of approval_item * approval_decision * string
+
+let enqueue_async mailbox msg = Eio.Stream.add mailbox msg
+
 let remember_surface_error state ~surface ~current_error ~set_error err =
   let changed =
     match current_error with
@@ -270,22 +287,29 @@ let refresh_status results =
   | n, total when n = total -> "connected"
   | _ -> "degraded"
 
-let refresh_http_surfaces state ~host ~port =
-  let overview = load_overview ~host ~port in
-  let board = load_board_list ~host ~port in
-  let planning = load_planning ~host ~port in
-  apply_overview_load state overview;
-  apply_board_list_load state board;
-  apply_planning_load state planning;
+let load_http_surfaces ~host ~port =
+  {
+    http_overview = load_overview ~host ~port;
+    http_board = load_board_list ~host ~port;
+    http_planning = load_planning ~host ~port;
+  }
+
+let apply_http_surfaces state results =
+  apply_overview_load state results.http_overview;
+  apply_board_list_load state results.http_board;
+  apply_planning_load state results.http_planning;
   state.connection_status <-
     refresh_status
       [
-        Result.map (fun _ -> ()) overview |> Result.map_error (fun _ -> ());
-        Result.map (fun _ -> ()) board |> Result.map_error (fun _ -> ());
-        Result.map (fun _ -> ()) planning |> Result.map_error (fun _ -> ());
+        Result.map (fun _ -> ()) results.http_overview
+        |> Result.map_error (fun _ -> ());
+        Result.map (fun _ -> ()) results.http_board
+        |> Result.map_error (fun _ -> ());
+        Result.map (fun _ -> ()) results.http_planning
+        |> Result.map_error (fun _ -> ());
       ]
 
-let start_http_refresh state ~host ~port ~refresh_inflight =
+let start_http_refresh state ~host ~port ~refresh_inflight ~mailbox =
   if not !refresh_inflight then begin
     refresh_inflight := true;
     state.connection_status <-
@@ -293,20 +317,20 @@ let start_http_refresh state ~host ~port ~refresh_inflight =
       | "connected" | "degraded" -> "reconnecting"
       | _ -> "connecting");
     let run_refresh () =
-      try refresh_http_surfaces state ~host ~port
-      with exn ->
-        state.connection_status <- "disconnected";
-        add_event state "error"
-          (Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn))
+      try enqueue_async mailbox (Http_refresh_done (load_http_surfaces ~host ~port)) with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        enqueue_async mailbox
+          (Http_refresh_failed
+             (Printf.sprintf "HTTP refresh failed: %s" (Printexc.to_string exn)))
     in
     match Eio_context.get_switch_opt () with
     | Some sw ->
-        Eio.Fiber.fork ~sw (fun () ->
-            run_refresh ();
-            refresh_inflight := false)
+        Eio.Fiber.fork ~sw run_refresh
     | None ->
-        run_refresh ();
-        refresh_inflight := false
+        Fun.protect
+          ~finally:(fun () -> refresh_inflight := false)
+          (fun () -> apply_http_surfaces state (load_http_surfaces ~host ~port))
   end
 
 let board_detail_still_current state post_id =
@@ -333,7 +357,8 @@ let same_inflight_post inflight post_id =
   | Some current -> String.equal current post_id
   | None -> false
 
-let start_board_post_refresh state ~host ~port ~post_id ~refresh_inflight =
+let start_board_post_refresh state ~host ~port ~post_id ~refresh_inflight
+    ~mailbox =
   if not (same_inflight_post !refresh_inflight post_id) then begin
     refresh_inflight := Some post_id;
     let clear_inflight () =
@@ -341,36 +366,38 @@ let start_board_post_refresh state ~host ~port ~post_id ~refresh_inflight =
     in
     let run_refresh () =
       try
-        apply_board_post_load state ~post_id
-          (load_board_post ~host ~port ~post_id)
-      with exn ->
-        if board_detail_still_current state post_id then
-          remember_surface_error state ~surface:"board"
-            ~current_error:state.board_error
-            ~set_error:(fun value -> state.board_error <- value)
-            (Printf.sprintf "board post refresh failed: %s"
-               (Printexc.to_string exn))
+        enqueue_async mailbox
+          (Board_post_refresh_done
+             (post_id, load_board_post ~host ~port ~post_id))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        enqueue_async mailbox
+          (Board_post_refresh_failed
+             ( post_id,
+               Printf.sprintf "board post refresh failed: %s"
+                 (Printexc.to_string exn) ))
     in
     match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork ~sw (fun () ->
-            Fun.protect ~finally:clear_inflight run_refresh)
+    | Some sw -> Eio.Fiber.fork ~sw run_refresh
     | None ->
-        Fun.protect ~finally:clear_inflight run_refresh
+        Fun.protect ~finally:clear_inflight (fun () ->
+            apply_board_post_load state ~post_id
+              (load_board_post ~host ~port ~post_id))
   end
 
-let apply_approval_decision_result state approval decision ~host ~port = function
+let apply_approval_decision_result state approval decision overview = function
   | Ok _ ->
       add_event state "system"
         (Printf.sprintf "%s: %s" (approval_decision_done decision)
            approval.ap_summary);
-      apply_overview_load state (load_overview ~host ~port);
+      Option.iter (apply_overview_load state) overview;
       state.approval_cursor <- 0
   | Error err ->
       add_event state "error"
         (Printf.sprintf "%s: %s" (approval_decision_failed decision) err)
 
-let start_approval_decision state approval decision ~action_inflight =
+let start_approval_decision state approval decision ~action_inflight ~mailbox =
   if !action_inflight then
     add_event state "system" "Approval action already in progress"
   else
@@ -382,26 +409,44 @@ let start_approval_decision state approval decision ~action_inflight =
     let clear_inflight () = action_inflight := false in
     let run_action () =
       try
-        Masc_tui_http.post_operator_confirm ~host ~port ~token:approval.ap_token
-          ~decision:decision_wire
-        |> apply_approval_decision_result state approval decision ~host ~port
-      with exn ->
-        add_event state "error"
-          (Printf.sprintf "%s: %s" (approval_decision_failed decision)
-             (Printexc.to_string exn))
+        let result =
+          Masc_tui_http.post_operator_confirm ~host ~port ~token:approval.ap_token
+            ~decision:decision_wire
+        in
+        let overview =
+          match result with
+          | Ok _ -> Some (load_overview ~host ~port)
+          | Error _ -> None
+        in
+        enqueue_async mailbox
+          (Approval_decision_done (approval, decision, result, overview))
+      with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        enqueue_async mailbox
+          (Approval_decision_failed
+             (approval, decision, Printexc.to_string exn))
     in
     match Eio_context.get_switch_opt () with
-    | Some sw ->
-        Eio.Fiber.fork ~sw (fun () ->
-            Fun.protect ~finally:clear_inflight run_action)
+    | Some sw -> Eio.Fiber.fork ~sw run_action
     | None ->
-        Fun.protect ~finally:clear_inflight run_action
+        Fun.protect ~finally:clear_inflight (fun () ->
+            let result =
+              Masc_tui_http.post_operator_confirm ~host ~port
+                ~token:approval.ap_token ~decision:decision_wire
+            in
+            let overview =
+              match result with
+              | Ok _ -> Some (load_overview ~host ~port)
+              | Error _ -> None
+            in
+            apply_approval_decision_result state approval decision overview result)
 
 (* TEL-OK: TUI-local confirmation gate emits user-visible events here; the
    operator confirmation endpoint owns durable approval telemetry. *)
-let handle_approval_decision state approval decision ~action_inflight =
+let handle_approval_decision state approval decision ~action_inflight ~mailbox =
   if pending_approval_matches state.pending_approval_action approval decision then
-    start_approval_decision state approval decision ~action_inflight
+    start_approval_decision state approval decision ~action_inflight ~mailbox
   else begin
     state.pending_approval_action <-
       Some { paa_token = approval.ap_token; paa_decision = decision };
@@ -410,6 +455,47 @@ let handle_approval_decision state approval decision ~action_inflight =
          (approval_decision_key decision)
          approval.ap_summary)
   end
+
+let apply_async_message state ~http_refresh_inflight
+    ~board_post_refresh_inflight ~approval_action_inflight = function
+  | Http_refresh_done results ->
+      http_refresh_inflight := false;
+      apply_http_surfaces state results
+  | Http_refresh_failed err ->
+      http_refresh_inflight := false;
+      state.connection_status <- "disconnected";
+      add_event state "error" err
+  | Board_post_refresh_done (post_id, result) ->
+      if same_inflight_post !board_post_refresh_inflight post_id then
+        board_post_refresh_inflight := None;
+      apply_board_post_load state ~post_id result
+  | Board_post_refresh_failed (post_id, err) ->
+      if same_inflight_post !board_post_refresh_inflight post_id then
+        board_post_refresh_inflight := None;
+      if board_detail_still_current state post_id then
+        remember_surface_error state ~surface:"board"
+          ~current_error:state.board_error
+          ~set_error:(fun value -> state.board_error <- value)
+          err
+  | Approval_decision_done (approval, decision, result, overview) ->
+      approval_action_inflight := false;
+      apply_approval_decision_result state approval decision overview result
+  | Approval_decision_failed (approval, decision, err) ->
+      approval_action_inflight := false;
+      add_event state "error"
+        (Printf.sprintf "%s: %s" (approval_decision_failed decision) err)
+
+let drain_async_messages state ~http_refresh_inflight
+    ~board_post_refresh_inflight ~approval_action_inflight mailbox =
+  let rec loop () =
+    match Eio.Stream.take_nonblocking mailbox with
+    | None -> ()
+    | Some msg ->
+        apply_async_message state ~http_refresh_inflight
+          ~board_post_refresh_inflight ~approval_action_inflight msg;
+        loop ()
+  in
+  loop ()
 
 (** Main loop *)
 let main () =
@@ -439,13 +525,17 @@ let main () =
   let http_refresh_inflight = ref false in
   let board_post_refresh_inflight = ref None in
   let approval_action_inflight = ref false in
-  start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight;
+  let async_messages = Eio.Stream.create 32 in
+  start_http_refresh state ~host ~port ~refresh_inflight:http_refresh_inflight
+    ~mailbox:async_messages;
   add_event state "system" "TUI started";
 
   (* Main loop *)
   let last_check = ref (Unix.gettimeofday ()) in
   try
     while true do
+      drain_async_messages state ~http_refresh_inflight
+        ~board_post_refresh_inflight ~approval_action_inflight async_messages;
       (* Check for input *)
       let key = read_key () in
       (match key with
@@ -463,6 +553,7 @@ let main () =
                       | Some a ->
                           handle_approval_decision state a Confirm
                             ~action_inflight:approval_action_inflight
+                            ~mailbox:async_messages
                       | None -> ()))
             | _ -> ())
        | Some "n" | Some "N" ->
@@ -475,6 +566,7 @@ let main () =
                       | Some a ->
                           handle_approval_decision state a Deny
                             ~action_inflight:approval_action_inflight
+                            ~mailbox:async_messages
                       | None -> ()))
             | _ -> ())
        | Some "r" | Some "R" ->
@@ -483,7 +575,7 @@ let main () =
            let host = Env_config_core.masc_host () in
            let port = state.port in
            start_http_refresh state ~host ~port
-             ~refresh_inflight:http_refresh_inflight;
+             ~refresh_inflight:http_refresh_inflight ~mailbox:async_messages;
            (* Also reload logs / board / planning detail if viewing them *)
            (match state.view with
             | Keepers Keeper_logs ->
@@ -496,6 +588,7 @@ let main () =
                  | Board_read post_id ->
                      start_board_post_refresh state ~host ~port ~post_id
                        ~refresh_inflight:board_post_refresh_inflight
+                       ~mailbox:async_messages
                  | Board_list -> ())
             | Planning ->
                 (match state.planning_mode with
@@ -643,6 +736,7 @@ let main () =
                           start_board_post_refresh state ~host ~port
                             ~post_id:p.bp_id
                             ~refresh_inflight:board_post_refresh_inflight
+                            ~mailbox:async_messages
                       | None -> ())
                  | Board_read _ -> ())
             | Planning ->
@@ -680,6 +774,8 @@ let main () =
       | _ -> ());
 
       Eio.Fiber.yield ();
+      drain_async_messages state ~http_refresh_inflight
+        ~board_post_refresh_inflight ~approval_action_inflight async_messages;
 
       (* Periodic refresh *)
       let now = Unix.gettimeofday () in
@@ -689,7 +785,7 @@ let main () =
         let host = Env_config_core.masc_host () in
         let port = state.port in
         start_http_refresh state ~host ~port
-          ~refresh_inflight:http_refresh_inflight;
+          ~refresh_inflight:http_refresh_inflight ~mailbox:async_messages;
         (* Also refresh logs / board / planning detail if viewing them *)
         (match state.view with
          | Keepers Keeper_logs ->
@@ -702,6 +798,7 @@ let main () =
               | Board_read post_id ->
                   start_board_post_refresh state ~host ~port ~post_id
                     ~refresh_inflight:board_post_refresh_inflight
+                    ~mailbox:async_messages
               | Board_list -> ())
          | Planning ->
              (match state.planning_mode with
@@ -726,6 +823,8 @@ let main () =
 let run_with_eio_context f =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
+  Eio_guard.enable ();
+  Eio.Switch.on_release sw Eio_guard.disable;
   Eio_context.set_env env;
   Eio_context.set_switch sw;
   Eio_context.set_net (Eio.Stdenv.net env);

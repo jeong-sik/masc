@@ -380,16 +380,141 @@ let http_status_error response =
   in
   Printf.sprintf "HTTP %d: %s" response.status_code detail
 
+let decode_json_response_body ~allow_empty ~status_code ~body :
+    (Yojson.Safe.t, string) result =
+  if not (is_success_http_status status_code) then
+    Error (http_status_error { status_code; body })
+  else if String.length (String.trim body) = 0 then
+    if allow_empty then Ok (`Assoc []) else Error "empty response body"
+  else
+    try Ok (Yojson.Safe.from_string body)
+    with Yojson.Json_error e -> Error (Printf.sprintf "(JSON parse: %s)" e)
+
 let decode_json_http_response ~allow_empty (raw : string) :
     (Yojson.Safe.t, string) result =
   let* response = parse_http_response raw in
-  if not (is_success_http_status response.status_code) then
-    Error (http_status_error response)
-  else if String.length (String.trim response.body) = 0 then
-    if allow_empty then Ok (`Assoc []) else Error "empty response body"
-  else
-    try Ok (Yojson.Safe.from_string response.body)
-    with Yojson.Json_error e -> Error (Printf.sprintf "(JSON parse: %s)" e)
+  decode_json_response_body ~allow_empty ~status_code:response.status_code
+    ~body:response.body
+
+let missing_field key =
+  Error (Printf.sprintf "missing required field '%s'" key)
+
+let field_type_error key expected value =
+  Error
+    (Printf.sprintf "field '%s' must be %s (received %s)" key expected
+       (Json_util.kind_name value))
+
+let required_string_field json key =
+  match member key json with
+  | `String value -> Ok value
+  | `Null -> missing_field key
+  | bad -> field_type_error key "a string" bad
+
+let optional_string_field json key =
+  match member key json with
+  | `String value -> Ok (Some value)
+  | `Null -> Ok None
+  | bad -> field_type_error key "a string or null" bad
+
+let required_int_field json key =
+  match member key json with
+  | `Int value -> Ok value
+  | `Intlit raw -> (
+      match int_of_string_opt raw with
+      | Some value -> Ok value
+      | None -> Error (Printf.sprintf "field '%s' has invalid int %S" key raw))
+  | `Null -> missing_field key
+  | bad -> field_type_error key "an int" bad
+
+let required_int_any_field json keys =
+  let rec loop = function
+    | [] ->
+        Error
+          (Printf.sprintf "missing required field '%s'"
+             (String.concat "' or '" keys))
+    | key :: rest -> (
+        match member key json with
+        | `Null -> loop rest
+        | _ -> required_int_field json key)
+  in
+  loop keys
+
+let int_field_or json key ~default =
+  match member key json with
+  | `Null -> Ok default
+  | _ -> required_int_field json key
+
+let required_display_field json key =
+  match member key json with
+  | `String value -> Ok value
+  | `Int value -> Ok (string_of_int value)
+  | `Intlit value -> Ok value
+  | `Float value -> Ok (Printf.sprintf "%.0f" value)
+  | `Null -> missing_field key
+  | bad -> field_type_error key "a scalar display value" bad
+
+let required_display_any_field json keys =
+  let rec loop = function
+    | [] ->
+        Error
+          (Printf.sprintf "missing required field '%s'"
+             (String.concat "' or '" keys))
+    | key :: rest -> (
+        match member key json with
+        | `Null -> loop rest
+        | _ -> required_display_field json key)
+  in
+  loop keys
+
+let optional_body_field json =
+  match member "body" json with
+  | `String value -> Ok value
+  | `Null -> (
+      match member "content" json with
+      | `String value -> Ok value
+      | `Null -> Ok ""
+      | bad -> field_type_error "content" "a string" bad)
+  | bad -> field_type_error "body" "a string" bad
+
+let required_body_field json =
+  match member "body" json with
+  | `String value -> Ok value
+  | `Null -> required_string_field json "content"
+  | bad -> field_type_error "body" "a string" bad
+
+let required_list_field json key =
+  match member key json with
+  | `List items -> Ok items
+  | `Null -> missing_field key
+  | bad -> field_type_error key "an array" bad
+
+let optional_list_field json key =
+  match member key json with
+  | `List items -> Ok items
+  | `Null -> Ok []
+  | bad -> field_type_error key "an array" bad
+
+let required_object_field json key =
+  match member key json with
+  | `Assoc _ as obj -> Ok obj
+  | `Null -> missing_field key
+  | bad -> field_type_error key "an object" bad
+
+let optional_object_field json key =
+  match member key json with
+  | `Assoc _ as obj -> Ok (Some obj)
+  | `Null -> Ok None
+  | bad -> field_type_error key "an object" bad
+
+let decode_list label decode items =
+  let rec loop idx acc = function
+    | [] -> Ok (List.rev acc)
+    | item :: rest -> (
+        match decode item with
+        | Ok decoded -> loop (idx + 1) (decoded :: acc) rest
+        | Error err -> Error (Printf.sprintf "%s[%d]: %s" label idx err))
+  in
+  loop 0 [] items
 
 let bounded_parent_depth ?(max_depth = 64) ~(id_of : 'a -> string)
     ~(parent_id_of : 'a -> string option) (items : 'a list) (item : 'a) : int =
@@ -466,9 +591,11 @@ let parse_keeper_chat_response response =
     match !completion_text with
     | Some text when text <> "" -> Ok text
     | _ -> (
-        match split_headers_body response with
-        | None -> Error "empty response body"
-        | Some body ->
+        let body =
+          match split_headers_body response with
+          | Some body -> body
+          | None -> response
+        in
             let* json =
               try Ok (Yojson.Safe.from_string (trim body))
               with Yojson.Json_error msg ->

@@ -272,6 +272,7 @@
   masc_process
   masc_eio_context
   masc.http_client
+  uri
   fmt
   str
   eio_main

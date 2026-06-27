@@ -77,6 +77,8 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
   ensure_dir current;
   ensure_dir (Filename.concat legacy "alpha");
   ensure_dir (Filename.concat legacy "alpha/metrics");
+  write_file (Filename.concat legacy "alpha.json") "{}\n";
+  write_file (Filename.concat legacy "alpha.dataset.json") "{}\n";
   write_file (Filename.concat legacy "alpha/.atomic_dead.tmp") "orphan";
   write_file (Filename.concat legacy "PYEOF") "marker";
   write_file (Filename.concat legacy "alpha/old.backup") "backup";
@@ -109,6 +111,14 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
   Alcotest.(check int) "orphaned count" 0 (class_count "orphaned" json);
   Alcotest.(check int) "backup count" 0 (class_count "backup" json);
   Alcotest.(check int) "migrated count" 1 (class_count "migrated" json);
+  Alcotest.(check bool)
+    "keeper meta json classified"
+    true
+    (List.mem ("alpha.json", "live") (entry_classes json));
+  Alcotest.(check bool)
+    "keeper meta sidecar stays unknown"
+    true
+    (List.mem ("alpha.dataset.json", "unknown") (entry_classes json));
   Alcotest.(check bool)
     "live metric classified"
     true

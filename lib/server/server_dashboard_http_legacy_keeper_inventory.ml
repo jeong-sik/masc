@@ -47,33 +47,41 @@ let class_to_string = function
   | Unknown -> "unknown"
 ;;
 
+let normalize_path path =
+  path
+  |> Env_config_core.normalize_path_lexically
+  |> Env_config_core.strip_path_trailing_slashes
+;;
+
+let path_components_under_root ~root path =
+  let root = normalize_path root in
+  let path = normalize_path path in
+  let rec loop acc current =
+    if String.equal current root
+    then Some acc
+    else (
+      let parent = Filename.dirname current in
+      if String.equal parent current
+      then None
+      else loop (Filename.basename current :: acc) parent)
+  in
+  loop [] path
+;;
+
+let path_of_components = function
+  | [] -> "."
+  | first :: rest -> List.fold_left Filename.concat first rest
+;;
+
 let relative_path ~root path =
-  let root_prefix = if String.ends_with ~suffix:"/" root then root else root ^ "/" in
-  if String.starts_with ~prefix:root_prefix path
-  then String.sub path (String.length root_prefix) (String.length path - String.length root_prefix)
-  else path
+  match path_components_under_root ~root path with
+  | Some parts -> path_of_components parts
+  | None -> path
 ;;
 
-let split_relative rel =
-  rel
-  |> String.split_on_char '/'
-  |> List.filter (fun part -> not (String.equal part ""))
+let is_runtime_store_dir name =
+  Option.is_some (Config_dir_resolver.keeper_runtime_store_of_dirname name)
 ;;
-
-let has_suffix name suffix = String.ends_with ~suffix name
-
-let live_runtime_store_dirs =
-  [ "tool_usage"
-  ; "runtime-manifests"
-  ; "metrics"
-  ; "execution-receipts"
-  ; "turn-records"
-  ; "reaction-ledger"
-  ; "trajectories"
-  ]
-;;
-
-let member name names = List.exists (String.equal name) names
 
 let regular_path_exists_no_follow path =
   try
@@ -110,17 +118,16 @@ let migrated_memory_path_exists ~current_keepers_dir parts =
   | _ -> false
 ;;
 
-let classify ~current_keepers_dir ~rel ~kind =
-  let parts = split_relative rel in
+let classify ~current_keepers_dir ~parts ~kind =
   if migrated_memory_path_exists ~current_keepers_dir parts
   then Migrated, "memory_os_file_already_present_under_config_keepers"
   else (
     match parts with
-    | [ top ] when String.equal kind "file" && has_suffix top ".json" ->
+    | [ top ] when String.equal kind "file" && Keeper_meta_store.is_keeper_meta_file top ->
       Live, "legacy_keeper_meta_json"
-    | top :: _ when member top live_runtime_store_dirs ->
+    | top :: _ when is_runtime_store_dir top ->
       Live, "known_top_level_runtime_store"
-    | _keeper :: child :: _ when member child live_runtime_store_dirs ->
+    | _keeper :: child :: _ when is_runtime_store_dir child ->
       Live, "known_keeper_runtime_store"
     | _ -> Unknown, "unclassified_legacy_path")
 ;;
@@ -139,7 +146,9 @@ let stat_kind st =
 let error_message = function
   | Unix.Unix_error (err, _, _) -> Unix.error_message err
   | Sys_error msg -> msg
-  | exn -> Printexc.to_string exn
+  | Invalid_argument _ -> "invalid_argument"
+  | Failure _ -> "failure"
+  | _ -> "unexpected_exception"
 ;;
 
 let display_path ~root path =
@@ -186,8 +195,12 @@ let scan_entries ~legacy_dir ~current_keepers_dir ~max_depth ~max_entries =
       | Ok st ->
         incr visited;
         let kind = stat_kind st in
-        let rel = relative_path ~root:legacy_dir path in
-        let classification, reason = classify ~current_keepers_dir ~rel ~kind in
+        let parts =
+          path_components_under_root ~root:legacy_dir path
+          |> Option.value ~default:[ path ]
+        in
+        let rel = path_of_components parts in
+        let classification, reason = classify ~current_keepers_dir ~parts ~kind in
         entries
         := { path = rel
            ; depth
@@ -288,17 +301,12 @@ let cleanup_plan_json () =
 ;;
 
 let redacted_workspace_path ~base_path path =
-  let base_prefix =
-    if String.ends_with ~suffix:"/" base_path then base_path else base_path ^ "/"
-  in
-  if String.equal path base_path
-  then "."
-  else if String.starts_with ~prefix:base_prefix path
-  then
-    String.sub path (String.length base_prefix) (String.length path - String.length base_prefix)
-  else if String.equal (Filename.basename path) Common.keepers_runtime_dirname
-  then Filename.concat "<config>" Common.keepers_runtime_dirname
-  else "<external>"
+  match path_components_under_root ~root:base_path path with
+  | Some parts -> path_of_components parts
+  | None ->
+    if String.equal (Filename.basename path) Common.keepers_runtime_dirname
+    then Filename.concat "<config>" Common.keepers_runtime_dirname
+    else "<external>"
 ;;
 
 let legacy_keeper_inventory_http_json ~base_path ?(max_depth = default_max_depth)

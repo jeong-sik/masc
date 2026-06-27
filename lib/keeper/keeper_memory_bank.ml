@@ -155,6 +155,27 @@ let parse_memory_bank_content content =
   List.rev parsed_rev, invalid
 ;;
 
+(* Detect schema-mismatch rows among the invalid lines. A row is a schema mismatch
+   when it parses as JSON and carries an explicit [schema_version] that differs
+   from the current version. Rows without [schema_version] or non-JSON garbage are
+   ordinary parse failures, not schema mismatches. *)
+let has_schema_mismatch content =
+  let current = keeper_memory_schema_version in
+  content
+  |> String.split_on_char '\n'
+  |> List.exists (fun raw ->
+    let line = String.trim raw in
+    if String.equal line ""
+    then false
+    else (
+      match Yojson.Safe.from_string line with
+      | `Assoc fields ->
+        (match Safe_ops.json_int_opt "schema_version" (`Assoc fields) with
+         | Some v when v <> current -> true
+         | _ -> false)
+      | _ -> false))
+;;
+
 (* ── Memory Consolidation ───────────────────────────────── *)
 
 (** Extract trace_id from a memory row's JSON. *)
@@ -553,7 +574,21 @@ let compact_memory_bank_if_needed
     | Ok content ->
       let parsed, invalid = parse_memory_bank_content content in
       let before_notes = List.length parsed in
-      if size_bytes < trigger_bytes && before_notes <= target_notes && invalid = 0
+      if invalid > 0 && has_schema_mismatch content
+      then (
+        Log.Keeper.warn
+          "memory_bank_compaction: keeper=%s schema mismatch detected; refusing compaction"
+          meta.name;
+        { no_memory_bank_compaction with
+          performed = true;
+          target_notes;
+          before_notes;
+          after_notes = before_notes;
+          invalid_dropped = invalid;
+          source = Some Memory_bank;
+          error = Some Schema_mismatch;
+        })
+      else if size_bytes < trigger_bytes && before_notes <= target_notes && invalid = 0
       then
         { no_memory_bank_compaction with
           target_notes;
@@ -689,18 +724,28 @@ let compact_memory_bank_if_needed
                 ~base_rows:parsed
                 selected
             with
-            | Error _ ->
+            | Error msg ->
               record_memory_consolidation_metrics
                 ~keeper_name:meta.name
                 ~outcome:"write_failed"
                 generated_consolidated;
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string MemoryBankCompactionFailures)
+                ~labels:[ "keeper", meta.name; "reason", "write_error" ]
+                ();
+              Log.Keeper.warn
+                "memory_bank_compaction: keeper=%s write failed: %s"
+                meta.name
+                msg;
               { no_memory_bank_compaction with
+                performed = true;
                 target_notes;
                 before_notes;
                 after_notes = before_notes;
                 dedup_dropped;
                 invalid_dropped = invalid;
-                source = None;
+                source = Some Memory_bank;
+                error = Some (Write_error msg);
               }
             | Ok () ->
               let retained =
@@ -727,6 +772,7 @@ let compact_memory_bank_if_needed
                 dedup_dropped;
                 invalid_dropped = invalid;
                 dropped_by_kind;
+                error = None;
               }
 
 let append_memory_notes_from_reply

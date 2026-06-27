@@ -95,11 +95,55 @@ let of_json (json : Yojson.Safe.t) : procedure option =
 (* File I/O                                                         *)
 (* ================================================================ *)
 
+type load_error =
+  { path : string
+  ; line_number : int
+  ; message : string
+  }
+
+type load_result = (procedure list, load_error list) result
+
 let load_procedures ?base_path ~agent_name () : procedure list =
   with_procedures_lock ?base_path ~agent_name (fun () ->
     let path = procedures_path ?base_path ~agent_name () in
     Fs_compat.load_jsonl path
     |> List.filter_map of_json)
+
+let load_procedures_strict ?base_path ~agent_name () : load_result =
+  with_procedures_lock ?base_path ~agent_name (fun () ->
+    let path = procedures_path ?base_path ~agent_name () in
+    if not (Fs_compat.file_exists path)
+    then Ok []
+    else (
+      let content = Fs_compat.load_file path in
+      let lines = String.split_on_char '\n' content in
+      let line_no = ref 0 in
+      let errors = ref [] in
+      let procedures = ref [] in
+      List.iter
+        (fun raw ->
+           let line = String.trim raw in
+           if String.equal line ""
+           then ()
+           else (
+             incr line_no;
+             match Yojson.Safe.from_string line with
+             | exception Yojson.Json_error msg ->
+               errors := { path; line_number = !line_no; message = msg } :: !errors
+             | json ->
+               (match of_json json with
+                | None ->
+                  errors :=
+                    { path
+                    ; line_number = !line_no
+                    ; message = "procedure schema mismatch"
+                    }
+                    :: !errors
+                | Some p -> procedures := p :: !procedures)))
+        lines;
+      match List.rev !errors with
+      | [] -> Ok (List.rev !procedures)
+      | errs -> Error errs))
 
 let save_procedure ?base_path ~agent_name (p : procedure) =
   with_procedures_lock ?base_path ~agent_name (fun () ->
@@ -116,8 +160,8 @@ let rewrite_procedures ?base_path ~agent_name (procs : procedure list) =
       |> fun s -> if s = "" then "" else s ^ "\n"
     in
     match Fs_compat.save_file_atomic path content with
-    | Ok () -> ()
-    | Error msg -> Log.Config.warn "procedural_memory save: %s" msg)
+    | Ok () -> Ok ()
+    | Error msg -> Error msg)
 
 (** Minimum evidence count required for crystallization.
     Configurable via MASC_PROC_MIN_EVIDENCE (default: 3).

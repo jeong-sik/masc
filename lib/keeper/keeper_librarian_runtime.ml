@@ -23,14 +23,12 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 ;;
 
-(* RFC-0257 adversarial review: the previous process-global slot was removed in
-   favor of per-keeper lanes, but measured production data showed that an
-   unbounded shared flash/glm provider pool can spike empty-response rates.
-   Re-introduce an optional fleet-wide concurrency gate around librarian provider
-   calls only. Per-keeper lanes still serialize ordering and fairness; this slot
-   only caps simultaneous provider round-trips. Default 1 preserves the prior
-   #21230 protection; 0 disables the gate. *)
-let global_slot_capacity () =
+(* RFC-0257 / P0-4 adversarial hardening: per-keeper librarian provider slot.
+   The previous process-global slot allowed one slow keeper to starve the fleet.
+   Capacity is still read from [MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT]
+   (default 1), but the semaphore is now keyed by [keeper_id] so each keeper
+   gets its own concurrency budget. A capacity of 0 disables the gate entirely. *)
+let per_keeper_slot_capacity () =
   Env_config.KeeperMemoryOs.librarian_global_slot ()
 ;;
 
@@ -38,31 +36,35 @@ let memory_os_librarian_provider_slot_site = "memory_os_librarian_provider_slot"
 
 let provider_slot_wait_sec = 0.25
 
-type provider_slot_state =
+type provider_slot =
   { capacity : int
-  ; slot : Eio.Semaphore.t option
+  ; sem : Eio.Semaphore.t option
   }
 
-let provider_slot_mu = Stdlib.Mutex.create ()
-let provider_slot_state : provider_slot_state option ref = ref None
+let provider_slots_mu = Stdlib.Mutex.create ()
+let provider_slots : (string, provider_slot) Hashtbl.t = Hashtbl.create 64
 
-let provider_slot_for_capacity capacity =
-  Stdlib.Mutex.protect provider_slot_mu (fun () ->
-    match !provider_slot_state with
-    | Some state when state.capacity = capacity -> state.slot
+let provider_slot_for_keeper ~keeper_id capacity =
+  Stdlib.Mutex.protect provider_slots_mu (fun () ->
+    match Hashtbl.find_opt provider_slots keeper_id with
+    | Some slot when slot.capacity = capacity -> slot
     | _ ->
       let slot =
-        match capacity with
-        | 0 -> None
-        | n -> Some (Eio.Semaphore.make n)
+        { capacity
+        ; sem =
+            (match capacity with
+             | 0 -> None
+             | n -> Some (Eio.Semaphore.make n))
+        }
       in
-      provider_slot_state := Some { capacity; slot };
+      Hashtbl.replace provider_slots keeper_id slot;
       slot)
 ;;
 
-let with_provider_slot ~clock f =
-  let capacity = global_slot_capacity () in
-  match provider_slot_for_capacity capacity with
+let with_provider_slot ~keeper_id ~clock f =
+  let capacity = per_keeper_slot_capacity () in
+  let slot = provider_slot_for_keeper ~keeper_id capacity in
+  match slot.sem with
   | None -> Some (f ())
   | Some sem ->
     let acquired = ref false in
@@ -77,7 +79,8 @@ let with_provider_slot ~clock f =
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
        Log.Keeper.warn
-         "librarian provider slot acquisition failed: %s"
+         "librarian provider slot acquisition failed keeper=%s: %s"
+         keeper_id
          (Printexc.to_string exn));
     if !acquired
     then
@@ -769,7 +772,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  librarian_provider_clock_unavailable_error
              | Some clock -> (
              match
-               with_provider_slot ~clock (fun () ->
+               with_provider_slot ~keeper_id ~clock (fun () ->
                  extract_and_append_with_provider_classified
                    ?complete
                    ~clock
@@ -787,9 +790,9 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                   [ "keeper", keeper_id; "site", memory_os_librarian_provider_slot_site ]
                  ();
                Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian skipped runtime=%s: global provider slot busy (capacity=%d)"
+                 "memory os librarian skipped runtime=%s: per-keeper provider slot busy (capacity=%d)"
                  runtime_id
-                 (global_slot_capacity ())
+                 (per_keeper_slot_capacity ())
              | Some (Ok { episode; kind }) ->
                if should_record_cadence_success kind
                then (

@@ -578,6 +578,55 @@ let test_skill_candidate_store_sanitizes_candidate_id_path () =
        (Filename.concat (Filename.concat base_path ".masc") "Escape Candidate"))
 ;;
 
+let test_load_procedures_strict_ok () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let p = procedure ~id:"strict-ok" ~evidence:[ "a"; "b"; "c" ]
+    ~success_count:3 ~failure_count:0 ~confidence:1.0 () in
+  (match P.rewrite_procedures ~base_path ~agent_name:"keeper" [ p ] with
+   | Ok () -> ()
+   | Error msg -> fail msg);
+  match P.load_procedures_strict ~base_path ~agent_name:"keeper" () with
+  | Ok procs -> check int "one procedure loaded" 1 (List.length procs)
+  | Error errs -> failf "unexpected strict errors: %d" (List.length errs)
+;;
+
+let test_load_procedures_strict_rejects_bad_json () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let path = P.procedures_path ~base_path ~agent_name:"keeper" () in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  write_file_or_fail path "this is not json\n";
+  match P.load_procedures_strict ~base_path ~agent_name:"keeper" () with
+  | Ok _ -> fail "expected strict load to reject bad json"
+  | Error errs ->
+    check int "one error" 1 (List.length errs);
+    let err = List.hd errs in
+    check string "error path" path err.P.path;
+    check int "error line" 1 err.P.line_number
+;;
+
+let test_load_procedures_strict_rejects_schema_mismatch () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let path = P.procedures_path ~base_path ~agent_name:"keeper" () in
+  Fs_compat.mkdir_p (Filename.dirname path);
+  write_file_or_fail path {|{"unknown_field":"x"}|};
+  match P.load_procedures_strict ~base_path ~agent_name:"keeper" () with
+  | Ok _ -> fail "expected strict load to reject schema mismatch"
+  | Error errs -> check int "one error" 1 (List.length errs)
+;;
+
+let test_rewrite_procedures_returns_error_on_bad_path () =
+  (* Use a path that is a file, not a directory, so the atomic write fails. *)
+  let marker = Filename.temp_file "proc-bad-path-" ".tmp" in
+  let base_path = marker ^ "_not_a_dir" in
+  let p = procedure ~id:"bad-path" () in
+  match P.rewrite_procedures ~base_path ~agent_name:"keeper" [ p ] with
+  | Ok () -> fail "expected rewrite to fail on bad path"
+  | Error _ -> check bool "rewrite failed" true true
+;;
+
 let () =
   run "procedural_memory"
     [
@@ -592,6 +641,17 @@ let () =
             test_rare_near_perfect_does_not_crystallize;
           test_case "single perfect does not crystallize" `Quick
             test_single_perfect_does_not_crystallize;
+        ] );
+      ( "io",
+        [
+          test_case "strict loader accepts valid file" `Quick
+            test_load_procedures_strict_ok;
+          test_case "strict loader rejects malformed json" `Quick
+            test_load_procedures_strict_rejects_bad_json;
+          test_case "strict loader rejects schema mismatch" `Quick
+            test_load_procedures_strict_rejects_schema_mismatch;
+          test_case "rewrite returns error on bad path" `Quick
+            test_rewrite_procedures_returns_error_on_bad_path;
         ] );
       ( "skill candidates",
         [

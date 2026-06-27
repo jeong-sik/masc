@@ -34,10 +34,30 @@ let provider_cfg_for_memory_os_consolidation () =
        default_cfg ())
 ;;
 
+(* P0-3: per-keeper maintenance timeout. One slow/corrupt keeper must not starve
+   the rest of the fleet. Each keeper fiber gets a bounded time budget; on
+   timeout we log the keeper and increment a metric so operators can see which
+   stores are stalling maintenance. *)
+let run_with_keeper_timeout ~clock ~timeout_sec ~keeper_id ~on_timeout f =
+  match clock with
+  | None -> f ()
+  | Some clock ->
+    (try Eio.Time.with_timeout_exn clock timeout_sec f with
+     | Eio.Time.Timeout ->
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string MemoryOsMaintenanceKeeperTimeout)
+         ~labels:[ "keeper", keeper_id ]
+         ();
+       on_timeout ())
+;;
+
 (* Run one consolidation pass over every keeper that currently has a fact store.
-   The optional [complete] injection lets tests drive the loop with a fake model. *)
+   The optional [complete] injection lets tests drive the loop with a fake model.
+   The optional [timeout_sec] lets tests exercise the per-keeper timeout without
+   waiting for the production default (300s). *)
 let run_memory_os_consolidation_tick
       ?(complete = Keeper_memory_os_consolidation_runtime.default_complete)
+      ?(timeout_sec = 300.0)
       ~sw
       ~net
       ?clock
@@ -45,55 +65,69 @@ let run_memory_os_consolidation_tick
       ~now
       ()
   =
-  List.iter
-    (fun keeper_id ->
-       try
-         match
-           Keeper_memory_os_consolidation_runtime.consolidate_keeper
-             ~complete
-             ~sw
-             ~net
-             ?clock
-             ~provider_cfg
-             ~now
-             ~keeper_id
-             ()
-         with
-         | Keeper_memory_os_consolidation_runtime.Consolidated { before; after } ->
-           Log.Server.info
-             "memory_os_keeper_consolidation: keeper=%s before=%d after=%d"
-             keeper_id
-             before
-             after
-         | Skipped_too_few n ->
-           Log.Server.info
-             "memory_os_keeper_consolidation: keeper=%s skipped_too_few=%d"
-             keeper_id
-             n
-         | Transport_failed msg ->
-           Log.Server.warn
-             "memory_os_keeper_consolidation: keeper=%s transport_failed: %s"
-             keeper_id
-             msg
-         | Unparseable msg ->
-           Log.Server.warn
-             "memory_os_keeper_consolidation: keeper=%s unparseable: %s"
-             keeper_id
-             msg
-         | Snapshot_changed { before; current } ->
-           Log.Server.info
-             "memory_os_keeper_consolidation: keeper=%s snapshot_changed before=%d current=%d"
-             keeper_id
-             before
-             current
-       with
-       | Eio.Cancel.Cancelled _ as e -> raise e
-       | exn ->
-         Log.Server.warn
-           "memory_os_keeper_consolidation: keeper=%s tick crashed: %s"
-           keeper_id
-           (Printexc.to_string exn))
-    (Keeper_memory_os_io.list_fact_store_keeper_ids ())
+  let keeper_ids = Keeper_memory_os_io.list_fact_store_keeper_ids () in
+  let consolidate_one keeper_id () =
+    try
+      match
+        Keeper_memory_os_consolidation_runtime.consolidate_keeper
+          ~complete
+          ~sw
+          ~net
+          ?clock
+          ~provider_cfg
+          ~now
+          ~keeper_id
+          ()
+      with
+      | Keeper_memory_os_consolidation_runtime.Consolidated { before; after } ->
+        Log.Server.info
+          "memory_os_keeper_consolidation: keeper=%s before=%d after=%d"
+          keeper_id
+          before
+          after
+      | Skipped_too_few n ->
+        Log.Server.info
+          "memory_os_keeper_consolidation: keeper=%s skipped_too_few=%d"
+          keeper_id
+          n
+      | Transport_failed msg ->
+        Log.Server.warn
+          "memory_os_keeper_consolidation: keeper=%s transport_failed: %s"
+          keeper_id
+          msg
+      | Unparseable msg ->
+        Log.Server.warn
+          "memory_os_keeper_consolidation: keeper=%s unparseable: %s"
+          keeper_id
+          msg
+      | Snapshot_changed { before; current } ->
+        Log.Server.info
+          "memory_os_keeper_consolidation: keeper=%s snapshot_changed before=%d current=%d"
+          keeper_id
+          before
+          current
+    with
+    | Eio.Cancel.Cancelled _ as e -> raise e
+    | exn ->
+      Log.Server.warn
+        "memory_os_keeper_consolidation: keeper=%s tick crashed: %s"
+        keeper_id
+        (Printexc.to_string exn)
+  in
+  Eio.Fiber.all
+    (List.map
+       (fun keeper_id () ->
+          run_with_keeper_timeout
+            ~clock
+            ~timeout_sec
+            ~keeper_id
+            ~on_timeout:(fun () ->
+              Log.Server.warn
+                "memory_os_keeper_consolidation: keeper=%s timeout after %.0fs"
+                keeper_id
+                timeout_sec)
+            (consolidate_one keeper_id))
+       keeper_ids)
 ;;
 
 let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_state) =
@@ -226,9 +260,9 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      it the TTL/lifetime machinery (now produced per-category at librarian write
      time) is unreachable. The shared store is skipped — the consolidator
      reconstructs it wholesale each sweep, so GC-ing it would just be undone.
-     Default OFF (mirrors the consolidation gate): enable via the env once a live
-     dry-run confirms what it would prune. Per-keeper failures are caught so one
-     corrupt store cannot cancel siblings. *)
+     Default ON; env var [MASC_KEEPER_MEMORY_OS_GC] is the kill switch. Per-keeper
+     fibers run in parallel with a bounded timeout so one slow/corrupt store
+     cannot starve the fleet. *)
   if Env_config.KeeperMemoryOs.gc_enabled () then
     fork_logged_fiber
       ~sw
@@ -237,37 +271,94 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
       (* Coarser than consolidation (300s): GC rewrites stores, so a 10-minute
          cadence is ample off the hot path. *)
       let interval = 600.0 in
+      let gc_one keeper_id () =
+        try
+          let report =
+            Keeper_memory_os_gc.run_gc ~keeper_id ~now:(Time_compat.now ()) ()
+          in
+          if
+            report.Keeper_memory_os_gc.ttl_expired > 0
+            || report.dedup_removed > 0
+          then
+            Log.Server.info
+              "memory_os_gc: keeper=%s ttl_expired=%d dedup=%d written=%d"
+              keeper_id
+              report.ttl_expired
+              report.dedup_removed
+              report.written
+        with
+        | Eio.Cancel.Cancelled _ as e -> raise e
+        | exn ->
+          Log.Server.warn
+            "memory_os_gc: keeper=%s tick crashed: %s"
+            keeper_id
+            (Printexc.to_string exn)
+      in
       let rec loop () =
-        List.iter
-          (fun keeper_id ->
-             try
-               let report =
-                 Keeper_memory_os_gc.run_gc ~keeper_id ~now:(Time_compat.now ()) ()
-               in
-               if
-                 report.Keeper_memory_os_gc.ttl_expired > 0
-                 || report.dedup_removed > 0
-               then
-                 Log.Server.info
-                   "memory_os_gc: keeper=%s ttl_expired=%d dedup=%d written=%d"
-                   keeper_id
-                   report.ttl_expired
-                   report.dedup_removed
-                   report.written
-             with
-             | Eio.Cancel.Cancelled _ as e -> raise e
-             | exn ->
-               Log.Server.warn
-                 "memory_os_gc: keeper=%s tick crashed: %s"
-                 keeper_id
-                 (Printexc.to_string exn))
-          (List.filter
-             (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
-             (Keeper_memory_os_io.list_fact_store_keeper_ids ()));
+        let keeper_ids =
+          List.filter
+            (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
+            (Keeper_memory_os_io.list_fact_store_keeper_ids ())
+        in
+        Eio.Fiber.all
+          (List.map
+             (fun keeper_id () ->
+                run_with_keeper_timeout
+                  ~clock:(Some clock)
+                  ~timeout_sec:120.0
+                  ~keeper_id
+                  ~on_timeout:(fun () ->
+                    Log.Server.warn
+                      "memory_os_gc: keeper=%s timeout after 120s"
+                      keeper_id)
+                  (gc_one keeper_id))
+             keeper_ids);
         Eio.Time.sleep clock interval;
         loop ()
       in
       loop ());
+  (* P0-1: per-keeper Memory OS reconcile. Runs after GC at the same coarse
+     cadence. Degrades gracefully when [Keeper_memory_os_reconcile] is only a
+     stub; each keeper is wrapped in try/with so one failure does not cancel
+     siblings. Gated by [MASC_KEEPER_MEMORY_OS_RECONCILE] (default true). *)
+  if Env_config.KeeperMemoryOs.reconcile_enabled () then
+    fork_logged_fiber
+      ~sw
+      ~on_error:(log_server_fiber_crash "memory_os_reconcile")
+      (fun () ->
+        let interval = 600.0 in
+        let reconcile_one keeper_id () =
+          try Keeper_memory_os_reconcile.reconcile_keeper ~keeper_id () with
+          | Eio.Cancel.Cancelled _ as e -> raise e
+          | exn ->
+            Log.Server.warn
+              "memory_os_reconcile: keeper=%s tick crashed: %s"
+              keeper_id
+              (Printexc.to_string exn)
+        in
+        let rec loop () =
+          let keeper_ids =
+            List.filter
+              (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
+              (Keeper_memory_os_io.list_fact_store_keeper_ids ())
+          in
+          Eio.Fiber.all
+            (List.map
+               (fun keeper_id () ->
+                  run_with_keeper_timeout
+                    ~clock:(Some clock)
+                    ~timeout_sec:120.0
+                    ~keeper_id
+                    ~on_timeout:(fun () ->
+                      Log.Server.warn
+                        "memory_os_reconcile: keeper=%s timeout after 120s"
+                        keeper_id)
+                    (reconcile_one keeper_id))
+               keeper_ids);
+          Eio.Time.sleep clock interval;
+          loop ()
+        in
+        loop ());
   (* RFC-0247 §2.3: per-keeper Memory OS consolidation. The librarian writes
      facts every cadence turn; without this pass a keeper's Tier-1 store only
      grows. Off the hot path: every [interval]s it asks the model to merge

@@ -118,6 +118,17 @@ type keeper_memory_summary = {
 }
 (** Aggregated view of the memory bank for the dashboard. *)
 
+type compaction_error =
+  | Read_error
+  | Write_error of string
+  | Schema_mismatch
+(** Typed compaction failure. [Read_error] covers unreadable files;
+    [Write_error msg] propagates the atomic rewrite failure;
+    [Schema_mismatch] reports rows with a non-current schema_version. *)
+
+val compaction_error_to_string : compaction_error -> string
+(** Human-readable error label for logging/metrics. *)
+
 type memory_bank_compaction = {
   performed : bool;
   source : compaction_source option;
@@ -128,8 +139,10 @@ type memory_bank_compaction = {
   dedup_dropped : int;
   invalid_dropped : int;
   dropped_by_kind : (string * int) list;
+  error : compaction_error option;
 }
-(** Result of a memory-bank compaction pass. *)
+(** Result of a memory-bank compaction pass. [error] is [Some _] when
+    the pass detected a schema mismatch or failed to rewrite the bank. *)
 
 val no_memory_bank_compaction : memory_bank_compaction
 (** [performed=false] zero value when no compaction was attempted. *)

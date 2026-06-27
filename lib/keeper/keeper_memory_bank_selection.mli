@@ -57,6 +57,11 @@ type keeper_memory_summary =
   kind_counts : (string * int) list;
   recent_notes : keeper_memory_line list;
 }
+type compaction_error = Keeper_memory_policy.compaction_error =
+  | Read_error
+  | Write_error of string
+  | Schema_mismatch
+
 type memory_bank_compaction =
   Keeper_memory_policy.memory_bank_compaction = {
   performed : bool;
@@ -68,6 +73,7 @@ type memory_bank_compaction =
   dedup_dropped : int;
   invalid_dropped : int;
   dropped_by_kind : (string * int) list;
+  error : compaction_error option;
 }
 val no_memory_bank_compaction : memory_bank_compaction
 val keeper_memory_schema_version : int

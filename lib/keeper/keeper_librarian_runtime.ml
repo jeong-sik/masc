@@ -6,7 +6,9 @@ let librarian_max_tokens = 1024
    window and is not constrained by the generic inference API budget (30s).
    600s aligns with the keeper turn budget so that provider cold starts or
    model loading do not silently drop episodes. *)
-let librarian_default_timeout_sec = 600.0
+let librarian_default_timeout_sec =
+  Env_config.KeeperMemoryOs.librarian_timeout_sec_default
+;;
 
 type complete_fn =
   sw:Eio.Switch.t ->

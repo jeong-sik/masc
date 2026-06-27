@@ -586,7 +586,66 @@ let lock_entries =
       "Default lock timeout (seconds, 2 min)";
   ]
 
-let memory_entries = []
+module Memory_os_defaults = Env_config_keeper.KeeperMemoryOs
+
+let optional_default_to_display = function
+  | None -> "(none)"
+  | Some value -> value
+;;
+
+let float_default_to_display value =
+  let raw = string_of_float value in
+  let len = String.length raw in
+  if len > 0 && Char.equal raw.[len - 1] '.' then raw ^ "0" else raw
+;;
+
+let memory_entries =
+  [
+    entry
+      ~default:(string_of_bool Memory_os_defaults.recall_enabled_default)
+      "MASC_KEEPER_MEMORY_OS_RECALL"
+      "Memory OS recall prompt injection enabled; invalid values fail closed";
+    entry
+      ~default:(string_of_bool Memory_os_defaults.librarian_enabled_default)
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+      "Memory OS post-turn librarian extraction enabled; invalid values fail closed";
+    entry
+      ~default:(string_of_int Memory_os_defaults.librarian_cadence_turns_default)
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
+      "Turns between librarian extraction attempts per keeper (floor 1)";
+    entry
+      ~default:(string_of_int Memory_os_defaults.librarian_max_messages_default)
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
+      "Recent-message window for librarian extraction (floor 1)";
+    entry
+      ~default:
+        (float_default_to_display Memory_os_defaults.librarian_timeout_sec_default)
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
+      "Provider timeout for librarian extraction in seconds";
+    entry
+      ~default:
+        (optional_default_to_display Memory_os_defaults.librarian_runtime_id_default)
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+      "Optional runtime id override for librarian extraction; (none) displays the empty default";
+    entry
+      ~default:(string_of_int Memory_os_defaults.librarian_global_slot_default)
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+      "Fleet-wide concurrency gate for librarian provider calls; 0 disables";
+    entry
+      ~default:(string_of_bool Memory_os_defaults.gc_enabled_default)
+      "MASC_KEEPER_MEMORY_OS_GC"
+      "Per-keeper Memory OS GC maintenance fiber kill switch; invalid values fail closed";
+    entry
+      ~default:(string_of_bool Memory_os_defaults.consolidation_enabled_default)
+      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+      "Per-keeper Memory OS consolidation maintenance fiber kill switch; invalid values fail closed";
+    entry
+      ~default:
+        (optional_default_to_display
+           Memory_os_defaults.consolidation_runtime_id_default)
+      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
+      "Optional runtime id override for Memory OS consolidation; (none) displays the empty default";
+  ]
 
 let message_gc_entries =
   [

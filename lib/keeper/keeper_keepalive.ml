@@ -39,19 +39,25 @@ let get_bus () = Keeper_event_bus.get ()
 
 (* ── gRPC directive processing ── *)
 
-let with_keeper_entry_by_identity ~identity ~on_missing f =
+let keeper_entry_by_identity_opt identity =
   match Keeper_registry_lookup.find_by_agent_name identity with
-  | Some entry -> f entry
+  | Some entry -> Some entry
   | None ->
     (match Keeper_registry_lookup.find_by_name identity with
-     | Some entry -> f entry
+     | Some entry -> Some entry
      | None ->
        (match Keeper_identity.canonical_keeper_name_from_agent_name identity with
         | Some keeper_name ->
           (match Keeper_registry_lookup.find_by_name keeper_name with
-           | Some entry -> f entry
-           | None -> on_missing ())
-        | None -> on_missing ()))
+           | Some entry -> Some entry
+           | None -> None)
+        | None -> None))
+;;
+
+let with_keeper_entry_by_identity ~identity ~on_missing f =
+  match keeper_entry_by_identity_opt identity with
+  | Some entry -> f entry
+  | None -> on_missing ()
 ;;
 
 let persist_directive_meta_update
@@ -265,7 +271,7 @@ let process_directive ~agent_name directive =
        guard fires.  In both cases a wakeup should start from a fresh counter
        instead of immediately re-blocking the same turn. *)
     let entry_paused =
-      match Keeper_registry_lookup.find_by_agent_name agent_name with
+      match keeper_entry_by_identity_opt agent_name with
       | Some e -> e.meta.paused
       | None ->
         (match Keeper_tool_shared_runtime.find_registry_meta
@@ -275,12 +281,12 @@ let process_directive ~agent_name directive =
          | Some meta -> meta.paused
          | None -> false)
     in
-    (match Keeper_registry_lookup.find_by_agent_name agent_name with
+    (match keeper_entry_by_identity_opt agent_name with
      | Some e ->
        Keeper_turn_livelock.reset_keeper_livelock
          ~base_path:e.base_path
-         ~keeper:agent_name;
-       let _updated_meta = clear_no_progress_loop_for_operator_resume e in
+         ~keeper:e.name;
+       let (_ : keeper_meta) = clear_no_progress_loop_for_operator_resume e in
        ()
      | None -> ());
     if entry_paused

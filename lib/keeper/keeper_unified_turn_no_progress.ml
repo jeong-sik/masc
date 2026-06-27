@@ -1,5 +1,7 @@
 (** No-progress loop recovery helpers for the unified keeper turn. *)
 
+let failure_reason_code = "no_progress_loop"
+
 (* RFC-0020: the no-progress recovery stimulus carries no data — the consumer
    only branches on the kind. streak/threshold are recorded in the failure
    reason / blocker detail by the caller, not in the stimulus payload. *)
@@ -20,7 +22,7 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   in
   let failure_reason =
     Keeper_registry.Provider_runtime_error
-      { code = "no_progress_loop"
+      { code = failure_reason_code
       ; detail
       ; provider_id = None
       ; http_status = None
@@ -103,7 +105,7 @@ let clear_if_recovered ~(config : Workspace.config) meta ~previous_streak ~was_l
                Some (Keeper_registry.Provider_runtime_error { code; _ })
            ; _
            }
-      when String.equal code "no_progress_loop" ->
+      when String.equal code failure_reason_code ->
       Keeper_registry.set_failure_reason
         ~base_path:config.base_path
         meta.name
@@ -131,7 +133,7 @@ let clear_for_operator_resume ~base_path meta =
                Some (Keeper_registry.Provider_runtime_error { code; _ })
            ; _
            }
-      when String.equal code "no_progress_loop" ->
+      when String.equal code failure_reason_code ->
       Keeper_registry.set_failure_reason ~base_path keeper_name None;
       true
     | _ -> false

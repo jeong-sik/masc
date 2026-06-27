@@ -504,8 +504,15 @@ let summarize_list ?(empty = "none") values =
   | [] -> empty
   | _ -> String.concat ", " values
 
+let accept_rejection_summary_max_bytes = 180
+
 let short_accept_rejection_reason reason =
-  String_util.utf8_safe ~max_bytes:180 ~suffix:"..." (String.trim reason)
+  (* Keep accept-rejection summaries below the 200-byte narrative blocker cap
+     so the full summary fits when it is embedded in blocker detail. *)
+  String_util.utf8_safe
+    ~max_bytes:accept_rejection_summary_max_bytes
+    ~suffix:"..."
+    (String.trim reason)
   |> String_util.to_string
 
 let nonempty_or_unknown value =
@@ -519,6 +526,30 @@ let accept_rejection_kind_display = function
 let accept_response_shape_display = function
   | Some shape -> accept_response_shape_to_string shape
   | None -> "unknown"
+
+let accept_rejection_is_empty_no_progress
+    ~reason_kind
+    ~response_shape
+    ~last_tool_effect
+    ~any_mutating_tool
+    ~tool_effects_seen =
+  reason_kind = Some Accept_no_usable_progress
+  && response_shape = Some Accept_response_empty
+  && Option.is_none last_tool_effect
+  && Option.is_none any_mutating_tool
+  && tool_effects_seen = []
+
+let accept_rejection_is_read_only_no_progress
+    ~reason_kind
+    ~response_shape
+    ~last_tool_effect
+    ~any_mutating_tool
+    ~tool_effects_seen =
+  reason_kind = Some Accept_no_usable_progress
+  && response_shape = Some Accept_response_thinking_only
+  && last_tool_effect = Some Tool_effect_read_only
+  && any_mutating_tool = Some false
+  && tool_effects_seen <> []
 
 let summary_of_masc_internal_error = function
   | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
@@ -568,13 +599,19 @@ let summary_of_masc_internal_error = function
   | Accept_rejected
       {
         scope;
-        reason_kind = Some Accept_no_usable_progress;
-        response_shape = Some Accept_response_empty;
-        last_tool_effect = None;
-        any_mutating_tool = None;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
         tool_effects_seen = [];
         _;
-      } ->
+      }
+    when accept_rejection_is_empty_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen:[] ->
     Some
       (Printf.sprintf
          "Provider returned an empty assistant turn for runtime %s; no text or tool progress was produced."
@@ -582,14 +619,19 @@ let summary_of_masc_internal_error = function
   | Accept_rejected
       {
         scope;
-        reason_kind = Some Accept_no_usable_progress;
-        response_shape = Some Accept_response_thinking_only;
-        last_tool_effect = Some Tool_effect_read_only;
-        any_mutating_tool = Some false;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
         tool_effects_seen;
         _;
       }
-    when tool_effects_seen <> [] ->
+    when accept_rejection_is_read_only_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen ->
     Some
       (Printf.sprintf
          "Provider produced only read-only tool activity for runtime %s; no mutating keeper progress was accepted."
@@ -666,24 +708,36 @@ let runtime_id_of_masc_internal_error = function
 let accept_no_progress_retry_kind = function
   | Accept_rejected
       {
-        reason_kind = Some Accept_no_usable_progress;
-        response_shape = Some Accept_response_empty;
-        last_tool_effect = None;
-        any_mutating_tool = None;
-        tool_effects_seen = [];
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
+        tool_effects_seen;
         _;
-      } ->
+      }
+    when accept_rejection_is_empty_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen ->
     Some `Empty_no_progress
   | Accept_rejected
       {
-        reason_kind = Some Accept_no_usable_progress;
-        response_shape = Some Accept_response_thinking_only;
-        last_tool_effect = Some Tool_effect_read_only;
-        any_mutating_tool = Some false;
         tool_effects_seen;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
         _;
-      } ->
-    if tool_effects_seen = [] then None else Some `Read_only_no_progress
+      }
+    when accept_rejection_is_read_only_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen ->
+    Some `Read_only_no_progress
   | Accept_rejected _
   | Runtime_exhausted _
   | Capacity_backpressure _

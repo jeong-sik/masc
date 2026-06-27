@@ -1,5 +1,7 @@
 (** No-progress loop recovery helpers for the unified keeper turn. *)
 
+val failure_reason_code : string
+
 val mark_loop_detected
   :  config:Workspace.config
   -> Keeper_meta_contract.keeper_meta

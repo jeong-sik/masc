@@ -145,6 +145,11 @@ let current_working_dir () =
   try Sys.getcwd () with
   | Sys_error _ -> fallback_cwd_from_env ()
 
+let base_path_or_cwd () =
+  match (Host_config.from_env ()).base_path with
+  | Some path -> path
+  | None -> current_working_dir ()
+
 let absolute_path path =
   if Filename.is_relative path then Filename.concat (current_working_dir ()) path
   else path

@@ -1,3 +1,6 @@
+(* Local boolean-env helper for [masc_core]. It intentionally treats only
+   1/true/yes/on as true and every other value as false; it does not mirror
+   the richer [Env_config_core.get_bool] surface in [masc.config]. *)
 let env_true name =
   match Sys.getenv_opt name with
   | None -> false

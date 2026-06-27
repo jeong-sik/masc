@@ -91,6 +91,8 @@
  (libraries
   masc
   masc_core
+  masc.host_config
+  masc.config_dir_resolver
   unix
   yojson
   masc_types
@@ -138,7 +140,13 @@
  (modules masc_compaction_audit)
  (public_name masc-compaction-audit)
  (package masc)
- (libraries masc masc_core unix eio eio_main))
+ (libraries
+  masc
+  masc_core
+  masc.config_dir_resolver
+  unix
+  eio
+  eio_main))
 
 ;; Completion-trust audit CLI (RFC-0262 §9): fold .masc/events/ transition log
 ;; for foreign-task completions. Pure auditor only — no masc runtime link.
@@ -240,6 +248,8 @@
   masc.dashboard
   masc.server
   masc.config
+  masc.host_config
+  masc.config_dir_resolver
   unix
   yojson
   masc_core

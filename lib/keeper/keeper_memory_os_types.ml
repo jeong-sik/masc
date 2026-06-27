@@ -15,6 +15,55 @@ let schema_version = "rfc0259-v1"
    consolidator additionally filters this id out of its source keeper list. *)
 let shared_store_id = "_shared"
 
+(* Canonical JSON wire keys for Memory OS persistence and librarian ingestion.
+   The schema module owns these strings so the parser, retry prompt, persistence
+   codec, and tests cannot drift by maintaining parallel literal sets. *)
+let wire_field_trace_id = "trace_id"
+let wire_field_turn = "turn"
+let wire_field_tool_call_id = "tool_call_id"
+let wire_field_claim = "claim"
+let wire_field_category = "category"
+let wire_field_source = "source"
+let wire_field_first_seen = "first_seen"
+let wire_field_valid_until = "valid_until"
+let wire_field_last_verified_at = "last_verified_at"
+let wire_field_observed_by = "observed_by"
+let wire_field_claim_id = "claim_id"
+let wire_field_claim_kind = "claim_kind"
+let wire_field_schema_version = "schema_version"
+let wire_field_generation = "generation"
+let wire_field_episode_summary = "episode_summary"
+let wire_field_claims = "claims"
+let wire_field_open_items = "open_items"
+let wire_field_constraints = "constraints"
+let wire_field_preserved_tool_refs = "preserved_tool_refs"
+let wire_field_source_turn = "source_turn"
+let wire_field_source_tool_call_id = "source_tool_call_id"
+let wire_field_source_turn_range = "source_turn_range"
+let wire_field_lo = "lo"
+let wire_field_hi = "hi"
+let wire_field_created_at = "created_at"
+let wire_field_terminal_marker = "terminal_marker"
+
+let wire_librarian_episode_fields =
+  [ wire_field_episode_summary
+  ; wire_field_claims
+  ; wire_field_open_items
+  ; wire_field_constraints
+  ; wire_field_preserved_tool_refs
+  ]
+;;
+
+let wire_librarian_claim_fields =
+  [ wire_field_claim
+  ; wire_field_category
+  ; wire_field_source_turn
+  ; wire_field_source_tool_call_id
+  ; wire_field_claim_id
+  ; wire_field_claim_kind
+  ]
+;;
+
 type provenance_event =
   { trace_id : string
   ; turn : int
@@ -62,6 +111,21 @@ let category_to_string = function
   | Unknown s -> s
 ;;
 
+let all_categories =
+  (* Prompt-significant order: keep durable/common tokens first so retry nudges
+     bias toward normal memory facts before narrower bookkeeping categories. *)
+  [ Fact
+  ; Preference
+  ; Blocker
+  ; Goal
+  ; Constraint
+  ; Ephemeral
+  ; Validated_approach
+  ; Lesson
+  ; Code_change
+  ]
+;;
+
 let category_of_string s =
   match String.lowercase_ascii (String.trim s) with
   | "code_change" -> Code_change
@@ -92,6 +156,14 @@ let claim_kind_to_string = function
   | External_state -> "external_state"
   | Durable_knowledge -> "durable_knowledge"
   | Diagnostic -> "diagnostic"
+;;
+
+let all_claim_kinds =
+  [ Self_observation; External_state; Durable_knowledge; Diagnostic ]
+;;
+
+let librarian_claim_kinds =
+  [ Self_observation; External_state; Durable_knowledge ]
 ;;
 
 let claim_kind_of_string s =
@@ -343,13 +415,13 @@ let json_string_list_field key (fields : (string * Yojson.Safe.t) list) =
 
 let provenance_event_to_json (e : provenance_event) =
   let base =
-    [ "trace_id", `String e.trace_id
-    ; "turn", `Int e.turn
+    [ wire_field_trace_id, `String e.trace_id
+    ; wire_field_turn, `Int e.turn
     ]
   in
   let tool =
     match e.tool_call_id with
-    | Some id -> [ "tool_call_id", `String id ]
+    | Some id -> [ wire_field_tool_call_id, `String id ]
     | None -> []
   in
   `Assoc (base @ tool)
@@ -358,9 +430,11 @@ let provenance_event_to_json (e : provenance_event) =
 let provenance_event_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
-    (match json_string_field "trace_id" fields, json_int_field "turn" fields with
+    (match
+       json_string_field wire_field_trace_id fields, json_int_field wire_field_turn fields
+     with
      | Some trace_id, Some turn ->
-       let tool_call_id = json_string_field "tool_call_id" fields in
+       let tool_call_id = json_string_field wire_field_tool_call_id fields in
        Some { trace_id; turn; tool_call_id }
      | (Some _, None) | (None, Some _) | (None, None) -> None)
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
@@ -444,31 +518,32 @@ let optional_float_field key = function
 
 let fact_to_json f =
   let fields =
-    [ "claim", `String f.claim
-    ; "category", `String (category_to_string f.category)
-    ; "source", provenance_event_to_json f.source
-    ; "first_seen", `Float f.first_seen
+    [ wire_field_claim, `String f.claim
+    ; wire_field_category, `String (category_to_string f.category)
+    ; wire_field_source, provenance_event_to_json f.source
+    ; wire_field_first_seen, `Float f.first_seen
 
-    ; "schema_version", `String f.schema_version
+    ; wire_field_schema_version, `String f.schema_version
     ]
-    @ optional_float_field "valid_until" f.valid_until
-    @ optional_float_field "last_verified_at" f.last_verified_at
+    @ optional_float_field wire_field_valid_until f.valid_until
+    @ optional_float_field wire_field_last_verified_at f.last_verified_at
     (* Tier-1 facts carry [], which is omitted so per-keeper stores stay
        byte-identical to pre-RFC-0244; only Tier-2 shared facts emit it. *)
     @ (match f.observed_by with
        | [] -> []
-       | keepers -> [ "observed_by", `List (List.map (fun k -> `String k) keepers) ])
+       | keepers ->
+         [ wire_field_observed_by, `List (List.map (fun k -> `String k) keepers) ])
     (* RFC-0259 §3.7 (P6): the producer-emitted conclusion slug. Omitted when
        [None] so legacy / id-less rows stay byte-identical, and appended LAST to
        keep the prior key order stable for the snapshot fingerprint. *)
     @ (match Option.bind f.claim_id normalize_claim_id with
-       | Some id -> [ "claim_id", `String id ]
+       | Some id -> [ wire_field_claim_id, `String id ]
        | None -> [])
     (* RFC-0285 §3.1: the producer-emitted origin tag. Omitted when [None] so legacy
        rows stay byte-identical, appended LAST to keep the prior key order stable for
        the snapshot fingerprint. *)
     @ (match f.claim_kind with
-       | Some k -> [ "claim_kind", `String (claim_kind_to_string k) ]
+       | Some k -> [ wire_field_claim_kind, `String (claim_kind_to_string k) ]
        | None -> [])
   in
   `Assoc fields
@@ -485,33 +560,39 @@ let fact_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
     (match
-       ( json_string_field "claim" fields
-       , json_string_field "category" fields
-       , List.assoc_opt "source" fields )
+       ( json_string_field wire_field_claim fields
+       , json_string_field wire_field_category fields
+       , List.assoc_opt wire_field_source fields )
      with
      | Some claim, Some category_str, Some source_json ->
        (match provenance_event_of_json source_json with
         | Some source ->
           (* DET-OK: absent first_seen defaults to epoch for migration safety. *)
-          let first_seen = Option.value (json_float_field "first_seen" fields) ~default:0.0 in
-          let last_verified_at = json_float_field "last_verified_at" fields in
+          let first_seen =
+            Option.value (json_float_field wire_field_first_seen fields) ~default:0.0
+          in
+          let last_verified_at = json_float_field wire_field_last_verified_at fields in
           (* Ignore persisted external_ref metadata. Older rows may carry refs that
              were inferred from prose; preserving them would keep the old forced
              classifier alive. The claim remains model context. *)
           let external_ref = None in
-          let valid_until = json_float_field "valid_until" fields in
+          let valid_until = json_float_field wire_field_valid_until fields in
           (* DET-OK: absent observed_by defaults to empty (Tier-1 / legacy facts). *)
           let observed_by =
-            Option.value (json_string_list_field "observed_by" fields) ~default:[]
+            Option.value (json_string_list_field wire_field_observed_by fields) ~default:[]
           in
           (* RFC-0259 §3.7 (P6): absent on legacy / id-less rows, defaulting to
              [None] so [claim_identity] falls back to [normalize_claim] for them. *)
-          let claim_id = Option.bind (json_string_field "claim_id" fields) normalize_claim_id in
+          let claim_id =
+            Option.bind (json_string_field wire_field_claim_id fields) normalize_claim_id
+          in
           (* RFC-0285 §3.1: absent on legacy rows -> [None] (durable path). Closed sum,
              so an unrecognized string also yields [None] (graceful-degrade). The
              write-side [valid_until] is preserved as-is above; legacy self-observation
              rows are not retrofitted a horizon (RFC §5 non-goal). *)
-          let claim_kind = Option.bind (json_string_field "claim_kind" fields) claim_kind_of_string in
+          let claim_kind =
+            Option.bind (json_string_field wire_field_claim_kind fields) claim_kind_of_string
+          in
           Some
             { claim
             ; (* Parse-once at the read boundary; legacy free-string categories
@@ -526,7 +607,9 @@ let fact_of_json (json : Yojson.Safe.t) =
             ; last_verified_at
             ; schema_version =
                 (* DET-OK: default to current schema for forward compatibility. *)
-                Option.value (json_string_field "schema_version" fields) ~default:schema_version
+                Option.value
+                  (json_string_field wire_field_schema_version fields)
+                  ~default:schema_version
             ; claim_id
             }
         | None -> None)
@@ -540,24 +623,27 @@ let episode_to_json e =
   let range_json =
     match e.source_turn_range with
     | Some (lo, hi) ->
-      [ "source_turn_range", `Assoc [ "lo", `Int lo; "hi", `Int hi ] ]
+      [ wire_field_source_turn_range
+      , `Assoc [ wire_field_lo, `Int lo; wire_field_hi, `Int hi ]
+      ]
     | None -> []
   in
   `Assoc
-    ([ "trace_id", `String e.trace_id
-     ; "generation", `Int e.generation
-     ; "episode_summary", `String e.episode_summary
-     ; "claims", `List (List.map fact_to_json e.claims)
-     ; "open_items", `List (List.map (fun s -> `String s) e.open_items)
-     ; "constraints", `List (List.map (fun s -> `String s) e.constraints)
-     ; "preserved_tool_refs", `List (List.map (fun s -> `String s) e.preserved_tool_refs)
-     ; "created_at", `Float e.created_at
-     ; "schema_version", `String e.schema_version
+    ([ wire_field_trace_id, `String e.trace_id
+     ; wire_field_generation, `Int e.generation
+     ; wire_field_episode_summary, `String e.episode_summary
+     ; wire_field_claims, `List (List.map fact_to_json e.claims)
+     ; wire_field_open_items, `List (List.map (fun s -> `String s) e.open_items)
+     ; wire_field_constraints, `List (List.map (fun s -> `String s) e.constraints)
+     ; ( wire_field_preserved_tool_refs
+       , `List (List.map (fun s -> `String s) e.preserved_tool_refs) )
+     ; wire_field_created_at, `Float e.created_at
+     ; wire_field_schema_version, `String e.schema_version
      ]
      @ range_json
-     @ optional_float_field "valid_until" e.valid_until
+     @ optional_float_field wire_field_valid_until e.valid_until
      @ (match e.terminal_marker with
-        | Some marker -> [ "terminal_marker", `String marker ]
+        | Some marker -> [ wire_field_terminal_marker, `String marker ]
         | None -> []))
 ;;
 
@@ -565,25 +651,31 @@ let episode_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc fields ->
     (match
-       ( json_string_field "trace_id" fields
-       , json_int_field "generation" fields
-       , json_string_field "episode_summary" fields
-       , List.assoc_opt "claims" fields )
+       ( json_string_field wire_field_trace_id fields
+       , json_int_field wire_field_generation fields
+       , json_string_field wire_field_episode_summary fields
+       , List.assoc_opt wire_field_claims fields )
      with
      | Some trace_id, Some generation, Some episode_summary, Some (`List claim_items) ->
        let claims = List.filter_map fact_of_json claim_items in
        (* DET-OK: optional list fields default to empty. *)
-       let open_items = Option.value (json_string_list_field "open_items" fields) ~default:[] in
+       let open_items =
+         Option.value (json_string_list_field wire_field_open_items fields) ~default:[]
+       in
        (* DET-OK: optional list fields default to empty. *)
-       let constraints = Option.value (json_string_list_field "constraints" fields) ~default:[] in
+       let constraints =
+         Option.value (json_string_list_field wire_field_constraints fields) ~default:[]
+       in
        (* DET-OK: optional list fields default to empty. *)
        let preserved_tool_refs =
-         Option.value (json_string_list_field "preserved_tool_refs" fields) ~default:[]
+         Option.value
+           (json_string_list_field wire_field_preserved_tool_refs fields)
+           ~default:[]
        in
        let source_turn_range =
-         match List.assoc_opt "source_turn_range" fields with
+         match List.assoc_opt wire_field_source_turn_range fields with
          | Some (`Assoc r) ->
-           (match json_int_field "lo" r, json_int_field "hi" r with
+           (match json_int_field wire_field_lo r, json_int_field wire_field_hi r with
             | Some lo, Some hi -> Some (lo, hi)
             | (Some _, None) | (None, Some _) | (None, None) -> None)
          | Some (`Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _)
@@ -591,10 +683,12 @@ let episode_of_json (json : Yojson.Safe.t) =
            None
        in
        (* DET-OK: absent created_at defaults to epoch for migration safety. *)
-       let created_at = Option.value (json_float_field "created_at" fields) ~default:0.0 in
+       let created_at =
+         Option.value (json_float_field wire_field_created_at fields) ~default:0.0
+       in
        (* DET-OK: legacy episodes had no TTL or terminal marker. *)
-       let valid_until = json_float_field "valid_until" fields in
-       let terminal_marker = json_string_field "terminal_marker" fields in
+       let valid_until = json_float_field wire_field_valid_until fields in
+       let terminal_marker = json_string_field wire_field_terminal_marker fields in
        Some
          { trace_id
          ; generation
@@ -609,7 +703,9 @@ let episode_of_json (json : Yojson.Safe.t) =
          ; terminal_marker
          ; schema_version =
              (* DET-OK: default to current schema for forward compatibility. *)
-             Option.value (json_string_field "schema_version" fields) ~default:schema_version
+             Option.value
+               (json_string_field wire_field_schema_version fields)
+               ~default:schema_version
          }
      | ( Some _
        , Some _

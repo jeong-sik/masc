@@ -507,12 +507,11 @@ let test_librarian_prompt_omits_private_blocks () =
 
 let valid_librarian_output () =
   `Assoc
-    [ "episode_summary", `String "Integer confidence should still persist"
+    [ "episode_summary", `String "Strict librarian output should persist"
     ; ( "claims"
       , `List
           [ `Assoc
-              [ "claim", `String "Integer confidence survives parsing"
-              ; "confidence", `Int 1
+              [ "claim", `String "Strict librarian claim survives parsing"
               ; "category", `String "test"
               ; "source_turn", `Int 0
               ]
@@ -523,30 +522,45 @@ let valid_librarian_output () =
     ]
 ;;
 
-let test_librarian_accepts_integer_confidence () =
+let test_librarian_rejects_extra_confidence_field () =
   let inp : Librarian.input =
-    { Librarian.trace_id = "trace-int-confidence"
+    { Librarian.trace_id = "trace-extra-confidence"
     ; generation = 4
     ; messages = [ text_message "turn-indexed memory" ]
     }
   in
-  let raw = valid_librarian_output () |> Yojson.Safe.to_string in
-  match Librarian.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
-  | Some episode ->
-    (match episode.Types.claims with
-     | [ fact ] ->
-       Alcotest.(check string)
-         "claim parsed"
-         "Integer confidence survives parsing"
-         fact.Types.claim;
-       Alcotest.(check int) "source turn parsed" 0 fact.Types.source.turn;
-       Alcotest.(check (float 0.001)) "created_at deterministic" 1_000_000.0 episode.created_at;
-       Alcotest.(check (option (pair int int)))
-         "source range parsed"
-         (Some (0, 0))
-         episode.Types.source_turn_range
-     | claims -> Alcotest.failf "expected one claim, got %d" (List.length claims))
-  | None -> Alcotest.fail "expected librarian output to parse"
+  let raw =
+    `Assoc
+      [ "episode_summary", `String "summary"
+      ; ( "claims"
+        , `List
+            [ `Assoc
+                [ "claim", `String "claim with deprecated confidence"
+                ; "confidence", `Int 1
+                ; "category", `String "fact"
+                ; "source_turn", `Int 0
+                ]
+            ] )
+      ; "open_items", `List []
+      ; "constraints", `List []
+      ; "preserved_tool_refs", `List []
+      ]
+    |> Yojson.Safe.to_string
+  in
+  match
+    Librarian.episode_of_output_result
+      ~now:1_000_000.0
+      ~generation:inp.generation
+      inp
+      raw
+  with
+  | Error (Librarian.Unexpected_field field) ->
+    Alcotest.(check string) "unexpected field" "confidence" field
+  | Error error ->
+    Alcotest.failf
+      "expected Unexpected_field, got %s"
+      (Librarian.parse_error_to_string error)
+  | Ok _ -> Alcotest.fail "expected deprecated confidence field to be rejected"
 ;;
 
 let test_librarian_generation_override () =
@@ -580,13 +594,11 @@ let test_librarian_ephemeral_fact_has_ttl () =
         , `List
             [ `Assoc
                 [ "claim", `String "checkpoint saved for task T-1"
-                ; "confidence", `Float 0.9
                 ; "category", `String "ephemeral"
                 ; "source_turn", `Int 0
                 ]
             ; `Assoc
                 [ "claim", `String "the build uses dune 3.x"
-                ; "confidence", `Float 0.9
                 ; "category", `String "fact"
                 ; "source_turn", `Int 1
                 ]
@@ -628,9 +640,7 @@ let test_librarian_accepts_wrapped_json_output () =
   in
   let json = valid_librarian_output () |> Yojson.Safe.to_string in
   let cases =
-    [ "fenced", Printf.sprintf "```json\n%s\n```" json
-    ; "prefixed", Printf.sprintf "Here is the extracted JSON:\n%s" json
-    ]
+    [ "json string", Yojson.Safe.to_string (`String json) ]
   in
   List.iter
     (fun (name, raw) ->
@@ -644,6 +654,34 @@ let test_librarian_accepts_wrapped_json_output () =
     cases
 ;;
 
+let test_librarian_rejects_prose_wrapped_json_output () =
+  let inp : Librarian.input =
+    { Librarian.trace_id = "trace-prose-wrapped-json"
+    ; generation = 6
+    ; messages = [ text_message "prose wrapped JSON memory" ]
+    }
+  in
+  let json = valid_librarian_output () |> Yojson.Safe.to_string in
+  let cases =
+    [ "prose before", "Here is the JSON:\n" ^ json
+    ; "prose after", json ^ "\nDone."
+    ; "markdown fenced", Printf.sprintf "```json\n%s\n```" json
+    ]
+  in
+  List.iter
+    (fun (name, raw) ->
+       Alcotest.(check bool)
+         (name ^ " rejected")
+         true
+         (Option.is_none
+            (Librarian.episode_of_output
+               ~now:1_000_000.0
+               ~generation:inp.generation
+               inp
+               raw)))
+    cases
+;;
+
 let test_librarian_defaults_missing_optional_lists () =
   let inp : Librarian.input =
     { Librarian.trace_id = "trace-missing-lists"
@@ -653,14 +691,14 @@ let test_librarian_defaults_missing_optional_lists () =
   in
   let raw =
     `Assoc
-      [ "episode_summary", `String "Minimal valid librarian output"
-      ; ( "claims"
+      [ Librarian.wire_field_episode_summary, `String "Minimal valid librarian output"
+      ; ( Librarian.wire_field_claims
         , `List
             [ `Assoc
-                [ "claim", `String "Minimal output still records a fact."
-                ; "confidence", `Float 0.9
-                ; "category", `String "fact"
-                ; "source_turn", `Int 0
+                [ Librarian.wire_field_claim
+                , `String "Minimal output still records a fact."
+                ; Librarian.wire_field_category, `String "fact"
+                ; Librarian.wire_field_source_turn, `Int 0
                 ]
             ] )
       ]
@@ -953,7 +991,6 @@ let test_librarian_preserves_admission_memory_text () =
         , `List
             [ `Assoc
                 [ "claim", `String "Goal cap is 3/3, blocking new task claims."
-                ; "confidence", `Float 0.95
                 ; "category", `String "constraint"
                 ; "source_turn", `Int 3
                 ]
@@ -962,7 +999,6 @@ let test_librarian_preserves_admission_memory_text () =
                   , `String
                       "Memory OS holds stale goal_cap information that incorrectly suggests task claiming is blocked."
                   )
-                ; "confidence", `Float 0.9
                 ; "category", `String "fact"
                 ; "source_turn", `Int 4
                 ]
@@ -1030,7 +1066,6 @@ let test_librarian_preserves_pure_admission_episode () =
         , `List
             [ `Assoc
                 [ "claim", `String "Goal cap is 3/3, blocking new task claims."
-                ; "confidence", `Float 0.95
                 ; "category", `String "constraint"
                 ; "source_turn", `Int 3
                 ]
@@ -1080,7 +1115,6 @@ let test_librarian_rejects_invalid_claims () =
          , `List
              [ `Assoc
                  [ "claim", `String ""
-                 ; "confidence", `Float 0.7
                  ; "category", `String "fact"
                  ; "source_turn", `Int 0
                  ]
@@ -1100,7 +1134,6 @@ let test_librarian_rejects_invalid_claims () =
          , `List
              [ `Assoc
                  [ "claim", `String "valid text"
-                 ; "confidence", `Float 0.7
                  ; "category", `String "fact"
                  ]
              ] )
@@ -1213,16 +1246,16 @@ let test_librarian_runtime_appends_episode_bundle () =
           (json_episode_file_count ~keeper_id);
         (match Memory_io.read_events_tail ~keeper_id ~n:1 with
          | [ episode ] ->
-           Alcotest.(check string)
-             "event persisted"
-             "Integer confidence should still persist"
-             episode.Types.episode_summary
+          Alcotest.(check string)
+            "event persisted"
+            "Strict librarian output should persist"
+            episode.Types.episode_summary
          | events -> Alcotest.failf "expected one event, got %d" (List.length events));
         match Memory_io.read_facts_tail ~keeper_id ~n:1 with
         | [ fact ] ->
           Alcotest.(check string)
             "fact persisted"
-            "Integer confidence survives parsing"
+            "Strict librarian claim survives parsing"
             fact.Types.claim
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
@@ -4512,9 +4545,9 @@ let () =
             `Quick
             test_librarian_prompt_omits_private_blocks
         ; Alcotest.test_case
-            "librarian accepts integer confidence"
+            "librarian rejects extra confidence field"
             `Quick
-            test_librarian_accepts_integer_confidence
+            test_librarian_rejects_extra_confidence_field
         ; Alcotest.test_case
             "librarian generation override"
             `Quick
@@ -4527,6 +4560,10 @@ let () =
             "librarian accepts wrapped json output"
             `Quick
             test_librarian_accepts_wrapped_json_output
+        ; Alcotest.test_case
+            "librarian rejects prose wrapped json output"
+            `Quick
+            test_librarian_rejects_prose_wrapped_json_output
         ; Alcotest.test_case
             "librarian defaults missing optional lists"
             `Quick

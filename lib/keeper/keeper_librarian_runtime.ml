@@ -277,17 +277,91 @@ let message role text =
    problem, not the model-output problem this bound addresses. *)
 let librarian_max_parse_retries = 2
 
+type retry_field_shape =
+  { name : string
+  ; shape : string
+  }
+
+let parse_retry_claim_categories =
+  Keeper_memory_os_types.all_categories
+  |> List.map Keeper_memory_os_types.category_to_string
+;;
+
+let parse_retry_claim_kinds =
+  Keeper_memory_os_types.librarian_claim_kinds
+  |> List.map Keeper_memory_os_types.claim_kind_to_string
+;;
+
+let quoted value = Printf.sprintf "\"%s\"" value
+let union_shape values = values |> String.concat "|" |> quoted
+let render_retry_field field = Printf.sprintf "\"%s\": %s" field.name field.shape
+
+let retry_shape_string = quoted "string"
+let retry_shape_integer = quoted "integer"
+let retry_shape_optional_string = quoted "optional-string"
+let retry_shape_string_list = Printf.sprintf "[%s]" retry_shape_string
+
+let parse_retry_claim_field_shapes =
+  [ { name = Keeper_librarian.wire_field_claim; shape = retry_shape_string }
+  ; { name = Keeper_librarian.wire_field_category
+    ; shape = union_shape parse_retry_claim_categories
+    }
+  ; { name = Keeper_librarian.wire_field_source_turn; shape = retry_shape_integer }
+  ; { name = Keeper_librarian.wire_field_source_tool_call_id
+    ; shape = retry_shape_optional_string
+    }
+  ; { name = Keeper_librarian.wire_field_claim_id; shape = retry_shape_optional_string }
+  ; { name = Keeper_librarian.wire_field_claim_kind
+    ; shape = union_shape parse_retry_claim_kinds
+    }
+  ]
+;;
+
+let parse_retry_claim_fields =
+  List.map (fun field -> field.name) parse_retry_claim_field_shapes
+;;
+
+let parse_retry_claim_shape =
+  parse_retry_claim_field_shapes
+  |> List.map render_retry_field
+  |> String.concat ", "
+  |> Printf.sprintf "{%s}"
+;;
+
+let parse_retry_episode_field_shapes =
+  [ { name = Keeper_librarian.wire_field_episode_summary; shape = retry_shape_string }
+  ; { name = Keeper_librarian.wire_field_claims
+    ; shape = Printf.sprintf "[%s]" parse_retry_claim_shape
+    }
+  ; { name = Keeper_librarian.wire_field_open_items; shape = retry_shape_string_list }
+  ; { name = Keeper_librarian.wire_field_constraints; shape = retry_shape_string_list }
+  ; { name = Keeper_librarian.wire_field_preserved_tool_refs
+    ; shape = retry_shape_string_list
+    }
+  ]
+;;
+
+let parse_retry_episode_fields =
+  List.map (fun field -> field.name) parse_retry_episode_field_shapes
+;;
+
+let parse_retry_episode_shape =
+  parse_retry_episode_field_shapes
+  |> List.map render_retry_field
+  |> String.concat ",\n"
+  |> Printf.sprintf "{%s}"
+;;
+
 let parse_retry_nudge =
-  "Your previous response could not be parsed as the required JSON episode \
-   object. Respond with ONLY a single JSON object — no markdown fences, no \
-   prose. Required shape:\n\
-   {\"episode_summary\": \"string\",\n\
-   \"claims\": [{\"claim\": \"string\", \"category\": \"fact|preference|blocker|goal|constraint|ephemeral|validated_approach|lesson|code_change\", \"source_turn\": 0, \"source_tool_call_id\": \"optional-string\", \"claim_kind\": \"self_observation|external_state|durable_knowledge\"}],\n\
-   \"open_items\": [\"string\"],\n\
-   \"constraints\": [\"string\"],\n\
-   \"preserved_tool_refs\": [\"string\"]}\n\
-   source_turn must be an integer. Do not include a confidence field and do not \
-   add any fields not shown above."
+  String.concat
+    "\n"
+    [ "Your previous response could not be parsed as the required JSON episode object. Respond with ONLY a single JSON object — no markdown fences, no prose."
+    ; "Required shape:"
+    ; parse_retry_episode_shape
+    ; Printf.sprintf
+        "%s must be an integer. Do not include a confidence field and do not add any fields not shown above."
+        Keeper_librarian.wire_field_source_turn
+    ]
 
 type attempt_outcome =
   | Parsed of Keeper_memory_os_types.episode
@@ -478,11 +552,14 @@ let extract_with_provider_classified
           last_unparseable_raw := Some raw;
           Unparseable "librarian provider returned empty response")
         else (
-          match Keeper_librarian.episode_of_output ~generation inp raw with
-          | Some episode -> Parsed episode
-          | None ->
+          match Keeper_librarian.episode_of_output_result ~generation inp raw with
+          | Ok episode -> Parsed episode
+          | Error error ->
             last_unparseable_raw := Some raw;
-            Unparseable "librarian provider returned invalid episode JSON")
+            Unparseable
+              (Printf.sprintf
+                 "librarian provider returned invalid episode JSON (%s)"
+                 (Keeper_librarian.parse_error_to_string error)))
     in
     (match
        run_with_parse_retries

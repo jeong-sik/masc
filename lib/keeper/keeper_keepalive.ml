@@ -39,19 +39,25 @@ let get_bus () = Keeper_event_bus.get ()
 
 (* ── gRPC directive processing ── *)
 
-let with_keeper_entry_by_identity ~identity ~on_missing f =
+let keeper_entry_by_identity_opt identity =
   match Keeper_registry_lookup.find_by_agent_name identity with
-  | Some entry -> f entry
+  | Some entry -> Some entry
   | None ->
     (match Keeper_registry_lookup.find_by_name identity with
-     | Some entry -> f entry
+     | Some entry -> Some entry
      | None ->
        (match Keeper_identity.canonical_keeper_name_from_agent_name identity with
         | Some keeper_name ->
           (match Keeper_registry_lookup.find_by_name keeper_name with
-           | Some entry -> f entry
-           | None -> on_missing ())
-        | None -> on_missing ()))
+           | Some entry -> Some entry
+           | None -> None)
+        | None -> None))
+;;
+
+let with_keeper_entry_by_identity ~identity ~on_missing f =
+  match keeper_entry_by_identity_opt identity with
+  | Some entry -> f entry
+  | None -> on_missing ()
 ;;
 
 let persist_directive_meta_update
@@ -119,6 +125,17 @@ let directive_paused_meta (meta : keeper_meta) paused =
   }
 ;;
 
+let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry_entry) =
+  let updated_meta =
+    Keeper_unified_turn_no_progress.clear_for_operator_resume
+      ~base_path:entry.base_path
+      entry.meta
+  in
+  if not (updated_meta == entry.meta) then
+    persist_directive_meta_update entry ~updated_meta;
+  updated_meta
+;;
+
 let log_directive_agent_not_in_registry ~agent_name ~action =
   let known_keeper () =
     match Keeper_tool_shared_runtime.find_registry_meta ~keeper_name:agent_name ~source_layer:"directive" with
@@ -163,7 +180,10 @@ let set_keeper_paused_state ~agent_name paused =
         ();
       log_directive_agent_not_in_registry ~agent_name ~action)
     (fun entry ->
-       let updated_meta = directive_paused_meta entry.meta paused in
+       let directive_source_meta =
+         if paused then entry.meta else clear_no_progress_loop_for_operator_resume entry
+       in
+       let updated_meta = directive_paused_meta directive_source_meta paused in
        persist_directive_meta_update entry ~updated_meta;
        Keeper_registry.dispatch_event_unit
          ~base_path:entry.base_path
@@ -251,7 +271,7 @@ let process_directive ~agent_name directive =
        guard fires.  In both cases a wakeup should start from a fresh counter
        instead of immediately re-blocking the same turn. *)
     let entry_paused =
-      match Keeper_registry_lookup.find_by_agent_name agent_name with
+      match keeper_entry_by_identity_opt agent_name with
       | Some e -> e.meta.paused
       | None ->
         (match Keeper_tool_shared_runtime.find_registry_meta
@@ -261,11 +281,13 @@ let process_directive ~agent_name directive =
          | Some meta -> meta.paused
          | None -> false)
     in
-    (match Keeper_registry_lookup.find_by_agent_name agent_name with
+    (match keeper_entry_by_identity_opt agent_name with
      | Some e ->
        Keeper_turn_livelock.reset_keeper_livelock
          ~base_path:e.base_path
-         ~keeper:agent_name
+         ~keeper:e.name;
+       let (_ : keeper_meta) = clear_no_progress_loop_for_operator_resume e in
+       ()
      | None -> ());
     if entry_paused
     then (

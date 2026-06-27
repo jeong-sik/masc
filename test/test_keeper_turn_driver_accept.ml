@@ -857,7 +857,29 @@ let test_empty_non_end_turn_response_is_rejected () =
     (Some "empty_no_progress")
     (Option.map
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err));
+  (match Masc.Keeper_turn_driver.classify_masc_internal_error err with
+   | Some internal_error ->
+     Alcotest.(check string)
+       "accept rejection runtime id uses scope"
+       "runtime.empty-stop-sequence"
+       (Masc.Keeper_turn_driver.runtime_id_of_masc_internal_error internal_error);
+     Alcotest.(check bool)
+       "summary describes provider empty turn"
+       true
+       (Option.value
+          ~default:false
+          (Option.map
+             (contains ~needle:"empty assistant turn")
+             (Masc.Keeper_turn_driver.summary_of_masc_internal_error internal_error)))
+   | None -> Alcotest.fail "expected typed accept rejection");
+  (match Masc.Keeper_status_bridge.blocker_class_of_sdk_error err with
+   | Some Masc.Keeper_meta_contract.Completion_contract_violation -> ()
+   | Some other ->
+     Alcotest.failf
+       "expected completion_contract_violation blocker, got %s"
+       (Masc.Keeper_meta_contract.blocker_class_to_string other)
+   | None -> Alcotest.fail "expected accept rejection blocker class")
 
 let test_empty_after_workspace_mutation_stays_terminal () =
   let checkpoint =

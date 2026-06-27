@@ -4,8 +4,9 @@
     module mirrors the post-CAS queue snapshot to disk so a keeper restart can
     replay pending stimuli instead of resetting to [Keeper_event_queue.empty].
 
-    Writes are serialized with an Eio mutex in runtime fibers. Setup/tests that
-    reach this module without an Eio context fall back to a Stdlib mutex. *)
+    Reads and writes over the pending/inflight snapshot pair are serialized with
+    an Eio mutex in runtime fibers. Setup/tests that reach this module without
+    an Eio context fall back to a Stdlib mutex. *)
 
 let eio_write_mu = Eio.Mutex.create ()
 let fallback_write_mu = Stdlib.Mutex.create ()
@@ -108,7 +109,7 @@ let load_from_path ~keeper_name path =
              keeper_name;
          queue))
 
-let load ~base_path ~keeper_name =
+let load_unlocked ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
   | Error msg, _ | _, Error msg ->
     Log.Keeper.warn "event_queue_snapshot: %s" msg;
@@ -118,15 +119,24 @@ let load ~base_path ~keeper_name =
     let inflight = load_from_path ~keeper_name inflight_path in
     prepend_missing pending (Keeper_event_queue.to_list inflight)
 
-let persist_to_path ~keeper_name path queue =
+let load ~base_path ~keeper_name =
+  with_write_lock (fun () -> load_unlocked ~base_path ~keeper_name)
+
+let persist_to_path_result ~keeper_name path queue =
   match save_json_atomic path (Keeper_event_queue.queue_to_yojson queue) with
-  | Ok () -> ()
+  | Ok () -> Ok ()
   | Error msg ->
-    Log.Keeper.warn
-      "event_queue_snapshot: failed to persist keeper=%s path=%s: %s"
-      keeper_name
-      path
-      msg
+    Error
+      (Printf.sprintf
+         "failed to persist keeper=%s path=%s: %s"
+         keeper_name
+         path
+         msg)
+
+let persist_to_path ~keeper_name path queue =
+  match persist_to_path_result ~keeper_name path queue with
+  | Ok () -> ()
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
 
 let persist ~base_path ~keeper_name queue =
   match snapshot_path ~base_path ~keeper_name with
@@ -196,13 +206,10 @@ let record_inflight ~base_path ~keeper_name stimuli =
          (Printexc.to_string exn)))
 
 let ack_inflight ~base_path ~keeper_name stimuli =
-  (* [ack_inflight] clears the inflight file ONLY. It is shared by the genuine
-     ack path ([Keeper_registry_event_queue.ack_consumed]) AND by [requeue_front]
-     — whose contract is "put the lease back", i.e. the stimulus MUST remain in
-     the pending snapshot. Draining the pending snapshot here would break
-     [requeue_front] (regression caught by the requeue-front integration test).
-     Pending-snapshot drain for a consumed stimulus lives in
-     [drain_pending_snapshot], called only by [ack_consumed]. *)
+  (* [ack_inflight] clears the inflight file ONLY. It is used after
+     [requeue_front] has put the lease back into the pending snapshot, so the
+     stimulus MUST remain pending. Genuine consumed-ack uses [ack_consumed],
+     which updates pending and inflight under one lock. *)
   match stimuli with
   | [] -> ()
   | _ -> (
@@ -222,33 +229,32 @@ let ack_inflight ~base_path ~keeper_name stimuli =
          path
          (Printexc.to_string exn)))
 
-(* A-fix (RFC: keeper-orphan-stimulus-persistence): a *consumed* stimulus — one
-   whose turn completed and was acknowledged via
-   [Keeper_registry_event_queue.ack_consumed] — must also be drained from the
-   pending snapshot, not only the inflight file. A race between dequeue
-   (record_inflight) and load (prepend_missing, which folds inflight back into
-   the pending snapshot) can otherwise re-materialize an acknowledged stimulus in
-   the pending snapshot, where it accumulates across restarts — verified
-   2026-06-27: 8–70 bootstrap copies per keeper's event-queue.json while
-   event-queue-inflight.json stayed empty. This is the genuine-ack path only;
-   [requeue_front] does not call it. *)
-let drain_pending_snapshot ~base_path ~keeper_name stimuli =
+let ack_consumed ~base_path ~keeper_name stimuli =
+  (* Genuine consumed-ack must remove stimuli from both durable snapshots as one
+     synchronized transition. Public [load] takes the same lock, so it cannot
+     observe "inflight cleared, pending not drained" or the reverse. *)
   match stimuli with
-  | [] -> ()
+  | [] -> Ok ()
   | _ -> (
-  match snapshot_path ~base_path ~keeper_name with
-  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
-  | Ok path ->
+  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
+  | Error msg, _ | _, Error msg -> Error msg
+  | Ok pending_path, Ok inflight_path ->
     (try
        with_write_lock (fun () ->
-         let cur = load_from_path ~keeper_name path in
-         persist_to_path ~keeper_name path (remove_stimuli cur stimuli))
+         let pending = load_from_path ~keeper_name pending_path in
+         let inflight = load_from_path ~keeper_name inflight_path in
+         let pending' = remove_stimuli pending stimuli in
+         let inflight' = remove_stimuli inflight stimuli in
+         match persist_to_path_result ~keeper_name pending_path pending' with
+         | Error _ as err -> err
+         | Ok () -> persist_to_path_result ~keeper_name inflight_path inflight')
      with
      | Eio.Cancel.Cancelled _ as exn -> raise exn
      | exn ->
-       Log.Keeper.warn
-         "event_queue_snapshot: drain_pending_snapshot raised keeper=%s path=%s: \
-          %s"
-         keeper_name
-         path
-         (Printexc.to_string exn)))
+       Error
+         (Printf.sprintf
+            "ack_consumed raised keeper=%s pending=%s inflight=%s: %s"
+            keeper_name
+            pending_path
+            inflight_path
+            (Printexc.to_string exn))))

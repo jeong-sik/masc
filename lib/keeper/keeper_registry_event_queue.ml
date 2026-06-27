@@ -94,13 +94,13 @@ let requeue_front ~base_path name stimuli =
 ;;
 
 let ack_consumed ~base_path name stimuli =
-  Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli;
-  (* A-fix (RFC: keeper-orphan-stimulus-persistence): a genuinely consumed
-     stimulus must also be drained from the pending snapshot, not only the
-     inflight file. [ack_inflight] stays inflight-only because [requeue_front]
-     shares it and must leave the requeued stimulus in pending. *)
-  Keeper_event_queue_persistence.drain_pending_snapshot
-    ~base_path ~keeper_name:name stimuli
+  match
+    Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
+  with
+  | Ok () -> ()
+  | Error msg ->
+    Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg;
+    failwith ("keeper event queue ack_consumed failed: " ^ msg)
 ;;
 
 let snapshot ~base_path name =

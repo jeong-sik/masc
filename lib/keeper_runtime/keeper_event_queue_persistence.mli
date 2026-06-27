@@ -5,7 +5,9 @@
 
 val load : base_path:string -> keeper_name:string -> Keeper_event_queue.t
 (** Restore a keeper queue snapshot, returning [Keeper_event_queue.empty] when
-    no snapshot exists or the snapshot cannot be parsed. *)
+    no snapshot exists or the snapshot cannot be parsed. [load] is synchronized
+    with pending/inflight writes so callers cannot observe a split snapshot
+    transition. *)
 
 val persist :
   base_path:string -> keeper_name:string -> Keeper_event_queue.t -> unit
@@ -36,13 +38,14 @@ val record_inflight :
 val ack_inflight :
   base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
 (** Remove acknowledged stimuli from the in-flight lease after the heartbeat
-    turn has completed or after those stimuli have been requeued into the
-    pending snapshot. *)
+    stimuli have been requeued into the pending snapshot. Genuine turn-complete
+    acknowledgement uses {!ack_consumed} instead. *)
 
-val drain_pending_snapshot :
-  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
-(** Remove consumed stimuli from the pending snapshot (event-queue.json). Called
-   only on the genuine-ack path ([Keeper_registry_event_queue.ack_consumed]) so
-   a stimulus whose turn completed is gone from the next [load]; otherwise a
-   race between [record_inflight] and [load]'s prepend re-materializes it and it
-   accumulates across restarts. See RFC: keeper-orphan-stimulus-persistence. *)
+val ack_consumed :
+  base_path:string
+  -> keeper_name:string
+  -> Keeper_event_queue.stimulus list
+  -> (unit, string) result
+(** Remove consumed stimuli from pending and in-flight snapshots under one
+    persistence lock. Returns [Error _] when durable acknowledgement fails so
+    the caller can avoid treating the stimuli as acknowledged. *)

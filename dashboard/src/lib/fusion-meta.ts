@@ -22,8 +22,10 @@ function normalizeProviderAttribution(model: string, reason: string): string {
 }
 
 /**
- * Unwrap OCaml `Fusion_types.Provider_error / Timeout / Empty_response`
- * literals and re-attribute `Provider 'unknown'` failures to the real model id.
+ * Normalize panel failure reasons. Current `fusion_sink.ml` emits structured
+ * `reason_code`/`reason_detail`; the OCaml constructor parsing below is a
+ * legacy fallback for older board/meta payloads and direct show-derived
+ * fixtures.
  */
 export function normalizeFusionPanelReason(model: string, reason: string | undefined): string | undefined {
   if (!reason) return undefined

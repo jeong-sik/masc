@@ -108,6 +108,10 @@ let test_empty_response_detail_summarizes_shape () =
     (String_util.string_contains_substring ~needle:"stop_reason=max_tokens" detail);
   Alcotest.(check bool) "thinking block counted" true
     (String_util.string_contains_substring ~needle:"thinking_blocks=1" detail);
+  Alcotest.(check bool) "thinking kind summarized" true
+    (String_util.string_contains_substring ~needle:"thinking_kind=thinking" detail);
+  Alcotest.(check bool) "thinking chars summarized" true
+    (String_util.string_contains_substring ~needle:"thinking_chars=12" detail);
   Alcotest.(check bool) "output tokens included" true
     (String_util.string_contains_substring ~needle:"output_tokens=32" detail);
   Alcotest.(check bool) "reasoning body not leaked" false

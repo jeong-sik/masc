@@ -98,7 +98,7 @@ let test_resolve_masc_base_path_ignores_inherited_env_in_test_by_default () =
   write_file (Filename.concat worktree_path ".git")
     (Printf.sprintf "gitdir: %s\n" branch_gitdir);
   with_envs
-    [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+    [ ("MASC_BASE_PATH", Some "/tmp/ignored-inherited-masc-base");
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "requested git root wins in tests" repo_root
@@ -109,7 +109,7 @@ let test_resolve_masc_base_path_prefers_requested_path_in_test () =
     Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-requested"
   in
   with_envs
-    [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+    [ ("MASC_BASE_PATH", Some "/tmp/ignored-inherited-masc-base");
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "requested path wins in tests" requested
@@ -127,7 +127,7 @@ let test_resolve_masc_base_path_relative_request_ignores_inherited_env () =
       let requested = "tmp-fixture" in
       let expected = Filename.concat scratch requested in
       with_envs
-        [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+        [ ("MASC_BASE_PATH", Some "/tmp/ignored-inherited-masc-base");
           ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
         (fun () ->
           check string "relative requested path anchors to cwd in tests"
@@ -175,7 +175,7 @@ let test_resolve_masc_base_path_ignores_base_path_override_without_opt_in () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-opt-in"
   in
-  let explicit = "/Users/dancer/me" in
+  let explicit = "/tmp/ignored-inherited-masc-base" in
   with_envs
     [ ("MASC_BASE_PATH", Some explicit);
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]

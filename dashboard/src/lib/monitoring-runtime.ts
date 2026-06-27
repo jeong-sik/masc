@@ -1,4 +1,4 @@
-import type { Agent, Keeper, PipelineStage } from '../types'
+import type { Agent, Keeper, KeeperPhase, PipelineStage } from '../types'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { parseAgentStatus } from './agent-status'
 import { UNKNOWN_STATUS_LABEL } from './format-string'
@@ -96,6 +96,8 @@ const DEFAULT_PHASE_BY_BAND: Partial<Record<RuntimeBand, string>> = {
   active: 'Running',
   paused: 'Paused',
   offline: 'Offline',
+  // No transient default: the band intentionally preserves the concrete
+  // Compacting / HandingOff / Draining / Restarting phase as evidence.
 }
 
 const STAGE_PHASE_EQUIVALENTS: Record<string, string> = {
@@ -154,16 +156,28 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
 }
 
 // Transient FSM phases — KeeperPhase SSOT (PascalCase, `types/core.ts:1083`)
-// plus their lowercase pipeline_stage wire equivalents (`types/core.ts:945`).
+// plus their PipelineStage equivalents (`types/core.ts:945`).
 // These signal a *transition* (compacting/handoff/draining/restarting) rather
 // than steady-state, so they route to the dedicated `transient` band instead
 // of `active` (which would silently re-merge them with healthy keepers mid-
 // transition) or `attention` (which is reserved for failure/stall signals).
+const TRANSIENT_KEEPER_PHASES: readonly KeeperPhase[] = [
+  'Compacting',
+  'HandingOff',
+  'Draining',
+  'Restarting',
+]
+
+const TRANSIENT_PIPELINE_STAGES: readonly PipelineStage[] = [
+  'compacting',
+  'handoff',
+  'draining',
+  'restarting',
+]
+
 const TRANSIENT_PHASE_KEYS: ReadonlySet<string> = new Set<string>([
-  'Compacting', 'compacting',
-  'HandingOff', 'handoff',
-  'Draining', 'draining',
-  'Restarting', 'restarting',
+  ...TRANSIENT_KEEPER_PHASES,
+  ...TRANSIENT_PIPELINE_STAGES,
 ])
 
 export function isTransientPhase(phase: string | null | undefined): boolean {

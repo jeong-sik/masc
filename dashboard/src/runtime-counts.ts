@@ -36,6 +36,7 @@ export interface RuntimeCounts {
 export interface KeeperCountBreakdownInput {
   liveKeepers: number
   pausedKeepers?: number
+  transientKeepers?: number
   offlineKeepers?: number
   configuredKeepers: number
 }
@@ -47,6 +48,7 @@ interface ResolveRuntimeCountsOptions {
   agentsCount: number
   keepersCount: number
   pausedKeepersCount?: number
+  transientKeepersCount?: number
   offlineKeepersCount?: number
   keeperRowsCount?: number
   tasksCount?: number
@@ -240,6 +242,7 @@ export function resolveRuntimeCounts({
   agentsCount,
   keepersCount,
   pausedKeepersCount = 0,
+  transientKeepersCount = 0,
   offlineKeepersCount,
   keeperRowsCount,
   tasksCount = 0,
@@ -262,12 +265,13 @@ export function resolveRuntimeCounts({
   const livePausedKeepers = runtimeHealthAvailable
     ? runtimeHealthCounts.pausedKeepers
     : normalizeCount(pausedKeepersCount)
+  const liveTransientKeepers = runtimeHealthAvailable ? 0 : normalizeCount(transientKeepersCount)
   const liveOfflineKeepers = runtimeHealthAvailable ? 0 : normalizeCount(offlineKeepersCount)
   const liveKeeperRows = runtimeHealthAvailable
     ? liveKeepers + livePausedKeepers
     : Math.max(
         normalizeCount(keeperRowsCount),
-        liveKeepers + livePausedKeepers + liveOfflineKeepers,
+        liveKeepers + livePausedKeepers + liveTransientKeepers + liveOfflineKeepers,
       )
   const liveTasks = normalizeCount(tasksCount)
   const live: LiveRuntimeView = {
@@ -276,7 +280,7 @@ export function resolveRuntimeCounts({
     pausedKeepers: livePausedKeepers,
     offlineKeepers: runtimeHealthAvailable
       ? 0
-      : Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers),
+      : Math.max(0, liveKeeperRows - liveKeepers - livePausedKeepers - liveTransientKeepers),
     keeperRows: liveKeeperRows,
     tasks: liveTasks,
     totalRuntimes: liveAgents + liveKeepers,
@@ -373,13 +377,16 @@ export function expectedRuntimeDetailRows(counts: Pick<RuntimeCounts, 'live' | '
 export function formatKeeperCountBreakdown({
   liveKeepers,
   pausedKeepers = 0,
+  transientKeepers = 0,
   offlineKeepers = 0,
   configuredKeepers,
 }: KeeperCountBreakdownInput): string {
   const parts = [`키퍼 런타임 가동 ${normalizeCount(liveKeepers)}`]
   const paused = normalizeCount(pausedKeepers)
+  const transient = normalizeCount(transientKeepers)
   const offline = normalizeCount(offlineKeepers)
   if (paused > 0) parts.push(`일시정지 ${paused}`)
+  if (transient > 0) parts.push(`전이 ${transient}`)
   if (offline > 0) parts.push(`오프라인 ${offline}`)
   parts.push(`설정 ${normalizeCount(configuredKeepers)}`)
   return parts.join(' / ')

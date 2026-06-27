@@ -171,6 +171,24 @@ describe('resolveRuntimeCounts', () => {
     })
   })
 
+  it('subtracts transient detail rows from offline keeper math', () => {
+    expect(resolveRuntimeCounts({
+      executionLoaded: true,
+      agentsCount: 0,
+      keepersCount: 1,
+      pausedKeepersCount: 1,
+      transientKeepersCount: 2,
+      offlineKeepersCount: 0,
+      keeperRowsCount: 4,
+      namespaceTruthCounts: { agents: 0, keepers: 4, tasks: 0 },
+      namespaceTruthConfiguredKeepers: 4,
+    })).toEqual({
+      live: { agents: 0, keepers: 1, pausedKeepers: 1, offlineKeepers: 0, keeperRows: 4, tasks: 0, totalRuntimes: 1, available: true },
+      configured: { keepers: 4, totalRuntimes: 4, source: 'namespace-truth' },
+      source: 'execution',
+    })
+  })
+
   it('returns configured.source=none and source=unknown when every source is missing', () => {
     expect(resolveRuntimeCounts({
       executionLoaded: false,
@@ -448,6 +466,16 @@ describe('runtime count role helpers', () => {
       pausedKeepers: 12,
       configuredKeepers: 16,
     })).toBe('키퍼 런타임 가동 4 / 일시정지 12 / 설정 16')
+  })
+
+  it('formats transient keeper rows separately from offline inventory', () => {
+    expect(formatKeeperCountBreakdown({
+      liveKeepers: 4,
+      pausedKeepers: 1,
+      transientKeepers: 2,
+      offlineKeepers: 3,
+      configuredKeepers: 10,
+    })).toBe('키퍼 런타임 가동 4 / 일시정지 1 / 전이 2 / 오프라인 3 / 설정 10')
   })
 
   it('formats roster chips with detail rows, running runtimes, and configured inventory', () => {

@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import type { ComponentChildren, RefObject, VNode } from 'preact'
+import type { ComponentChildren, VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
@@ -26,6 +26,8 @@ import { lookupToolCallOutput, toolCallIdFromToolEntryId, toolCallOutputsById, t
 import { Sigil } from '../common/sigil-chip'
 import { SuggestionChip } from '../common/suggestion-chip'
 import { StatusDot } from '../common/status-dot'
+import { useInViewOnce } from '../common/use-in-view'
+import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
 import { navigate } from '../../router'
 import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
@@ -524,7 +526,7 @@ function AsyncMarkdownDiv({
 }) {
   const [rendered, setRendered] = useState<string | null>(null)
 
-  useLayoutEffect(() => {
+  useEffect(() => {
     let active = true
     setRendered(null)
     void (async () => {
@@ -707,36 +709,10 @@ async function copyWithToast(text: string, successMessage: string): Promise<void
   showToast(ok ? successMessage : '복사하지 못했습니다', ok ? 'success' : 'error')
 }
 
-function useLazyInView<T extends HTMLElement>(
-  rootMargin = '200px',
-): [RefObject<T>, boolean] {
-  const ref = useRef<T>(null)
-  const [inView, setInView] = useState(() => typeof IntersectionObserver === 'undefined')
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el || inView) return undefined
-    if (typeof IntersectionObserver === 'undefined') {
-      setInView(true)
-      return undefined
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) setInView(true)
-      },
-      { rootMargin },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [inView, rootMargin])
-
-  return [ref, inView]
-}
-
 function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
   const [highlighted, setHighlighted] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
-  const [containerRef, shouldHighlight] = useLazyInView<HTMLDivElement>('300px')
+  const [containerRef, shouldHighlight] = useInViewOnce<HTMLDivElement>('300px')
   const codeId = useId()
 
   useEffect(() => {
@@ -1191,7 +1167,7 @@ function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
 
 function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   const id = useId()
-  const [containerRef, shouldRender] = useLazyInView<HTMLElement>('200px')
+  const [containerRef, shouldRender] = useInViewOnce<HTMLElement>('200px')
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState(false)
 
@@ -1901,25 +1877,6 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'shell',
 ])
 
-function hasRichBlockMarkdownCue(text: string): boolean {
-  const trimmed = text.trim()
-  if (!trimmed) return false
-  return (
-    /^ {0,3}(```|~~~)/m.test(text)
-    || /^ {0,3}#{1,6}\s+\S/m.test(text)
-    || /^ {0,3}>/m.test(text)
-    || /^ {0,3}(?:[-*+]\s+|\d+[.)]\s+)/m.test(text)
-    || /^ {0,3}([-*_])(?:\s*\1){2,}\s*$/m.test(text)
-    || (/^\s*\|.+\|\s*$/m.test(text) && /^\s*\|?\s*:?-{3,}:?\s*\|/m.test(text))
-    || /!?\[[^\]]+]\([^)]+\)/.test(text)
-    || /`[^`\n]+`/.test(text)
-    || /(?:\*\*|__)\S[\s\S]*?\S(?:\*\*|__)/.test(text)
-    || /(^|[\s(])(?:\*|_)\S[^\n]*?\S(?:\*|_)(?=$|[\s).,!?;:])/.test(text)
-    || /^https?:\/\/\S+$/im.test(text)
-    || /^<svg\b[\s\S]*<\/svg>$/i.test(trimmed)
-  )
-}
-
 // Memoized message bubble. A streaming reply re-renders the conversation panel
 // on every SSE event; the transcript reconcile preserves the entry reference of
 // every settled message (keeper-state.ts), and KeeperConversationPanel hoists
@@ -1953,7 +1910,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
-  const [bubbleRef, bubbleInView] = useLazyInView<HTMLElement>('300px')
+  const [bubbleRef, bubbleInView] = useInViewOnce<HTMLElement>('300px')
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
@@ -1969,7 +1926,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
     && hasRealText
     && !hasCardBlock
     && bubbleInView
-    && hasRichBlockMarkdownCue(entry.text ?? '')
+    && hasMarkdownRenderCue(entry.text ?? '')
   // Re-parse assistant/system prose so markdown (code fences, tables, callouts)
   // renders as structured blocks. The backend persists only a line-based parse
   // (lib/keeper/keeper_chat_blocks.ml -> escaped <p>), so without this the rich

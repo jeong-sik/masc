@@ -32,5 +32,9 @@ module Uid : sig
   val compare : t -> t -> int
 end
 
+module For_testing : sig
+  val unsafe_trace_id_of_string : string -> Trace_id.t
+end
+
 val uid_to_yojson : Uid.t -> [> `String of string ]
 val uid_of_yojson : [ `String of string | `Null ] -> (Uid.t, string) result

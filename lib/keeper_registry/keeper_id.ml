@@ -112,6 +112,10 @@ module Uid = struct
              (Json_util.kind_name other))
 end
 
+module For_testing = struct
+  let unsafe_trace_id_of_string s = s
+end
+
 (** Polymorphic variants for use in keeper_meta without depending on a
     specific JSON library.  Callers wrap/unwrap at the boundary. *)
 let uid_to_yojson s = `String s

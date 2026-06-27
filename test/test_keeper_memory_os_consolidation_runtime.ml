@@ -36,6 +36,10 @@ let fake_response canned =
   }
 ;;
 
+let text_of_response (response : Atypes.api_response) =
+  Atypes.text_of_content response.content
+;;
+
 let fake_complete canned : Runtime.complete_fn =
   fun ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () -> Ok (fake_response canned)
 ;;
@@ -295,7 +299,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                seen_response_format := Some config.Llm_provider.Provider_config.response_format;
                let rendered_prompt =
                  messages
-                 |> List.map Agent_sdk_response.text_of_response
+                 |> List.map text_of_response
                  |> String.concat "\n"
                  |> String.trim
                in

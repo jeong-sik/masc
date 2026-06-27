@@ -38,3 +38,11 @@ val ack_inflight :
 (** Remove acknowledged stimuli from the in-flight lease after the heartbeat
     turn has completed or after those stimuli have been requeued into the
     pending snapshot. *)
+
+val drain_pending_snapshot :
+  base_path:string -> keeper_name:string -> Keeper_event_queue.stimulus list -> unit
+(** Remove consumed stimuli from the pending snapshot (event-queue.json). Called
+   only on the genuine-ack path ([Keeper_registry_event_queue.ack_consumed]) so
+   a stimulus whose turn completed is gone from the next [load]; otherwise a
+   race between [record_inflight] and [load]'s prepend re-materializes it and it
+   accumulates across restarts. See RFC: keeper-orphan-stimulus-persistence. *)

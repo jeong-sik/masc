@@ -289,6 +289,32 @@ let () =
       assert (String.equal remaining.post_id "bootstrap");
       assert (is_empty rest));
 
+  (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
+         is drained from the pending snapshot on the genuine-ack path.
+         [ack_inflight] clears the inflight file only (it is shared with
+         [requeue_front], which must leave the requeued stimulus in pending —
+         covered by the requeue-front test below). [drain_pending_snapshot] is
+         the pending-side drain, called by [ack_consumed]. Here the stimulus
+         lives in the pending snapshot (event-queue.json), mirroring a bootstrap
+         enqueued by supervisor launch; after draining, [load] must be empty.
+         Without the A-fix this returns length 1 and accumulates across restarts
+         (observed 2026-06-27: 8–70 bootstrap copies per keeper while inflight
+         stayed empty). --- *)
+  let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-ack-drains-pending-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path ~keeper_name (enqueue empty bootstrap_stim);
+      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 1);
+      (* Genuine-ack path: ack_consumed drains inflight AND pending snapshot. *)
+      Masc.Keeper_registry_event_queue.ack_consumed
+        ~base_path keeper_name [ bootstrap_stim ];
+      (* Before the A-fix this returned length 1 (pending snapshot untouched);
+         after the fix the pending snapshot is drained. *)
+      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
   let meta_for_keeper keeper_name trace_id =
     match
       Masc.Keeper_meta_json_parse.meta_of_json

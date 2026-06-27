@@ -196,6 +196,13 @@ let record_inflight ~base_path ~keeper_name stimuli =
          (Printexc.to_string exn)))
 
 let ack_inflight ~base_path ~keeper_name stimuli =
+  (* [ack_inflight] clears the inflight file ONLY. It is shared by the genuine
+     ack path ([Keeper_registry_event_queue.ack_consumed]) AND by [requeue_front]
+     — whose contract is "put the lease back", i.e. the stimulus MUST remain in
+     the pending snapshot. Draining the pending snapshot here would break
+     [requeue_front] (regression caught by the requeue-front integration test).
+     Pending-snapshot drain for a consumed stimulus lives in
+     [drain_pending_snapshot], called only by [ack_consumed]. *)
   match stimuli with
   | [] -> ()
   | _ -> (
@@ -211,6 +218,37 @@ let ack_inflight ~base_path ~keeper_name stimuli =
      | exn ->
        Log.Keeper.warn
          "event_queue_snapshot: ack_inflight raised keeper=%s path=%s: %s"
+         keeper_name
+         path
+         (Printexc.to_string exn)))
+
+(* A-fix (RFC: keeper-orphan-stimulus-persistence): a *consumed* stimulus — one
+   whose turn completed and was acknowledged via
+   [Keeper_registry_event_queue.ack_consumed] — must also be drained from the
+   pending snapshot, not only the inflight file. A race between dequeue
+   (record_inflight) and load (prepend_missing, which folds inflight back into
+   the pending snapshot) can otherwise re-materialize an acknowledged stimulus in
+   the pending snapshot, where it accumulates across restarts — verified
+   2026-06-27: 8–70 bootstrap copies per keeper's event-queue.json while
+   event-queue-inflight.json stayed empty. This is the genuine-ack path only;
+   [requeue_front] does not call it. *)
+let drain_pending_snapshot ~base_path ~keeper_name stimuli =
+  match stimuli with
+  | [] -> ()
+  | _ -> (
+  match snapshot_path ~base_path ~keeper_name with
+  | Error msg -> Log.Keeper.warn "event_queue_snapshot: %s" msg
+  | Ok path ->
+    (try
+       with_write_lock (fun () ->
+         let cur = load_from_path ~keeper_name path in
+         persist_to_path ~keeper_name path (remove_stimuli cur stimuli))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Log.Keeper.warn
+         "event_queue_snapshot: drain_pending_snapshot raised keeper=%s path=%s: \
+          %s"
          keeper_name
          path
          (Printexc.to_string exn)))

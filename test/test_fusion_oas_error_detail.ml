@@ -136,13 +136,23 @@ let test_empty_response_detail_uses_canonical_unknown_stop_reason () =
 ;;
 
 let test_panel_failure_yojson_accepts_legacy_empty_response () =
-  match Fusion_types.panel_failure_of_yojson (`String "Empty_response") with
-  | Ok (Fusion_types.Empty_response detail) ->
-    Alcotest.(check string) "legacy detail" "empty response" detail
-  | Ok other ->
-    Alcotest.failf "unexpected panel failure: %s"
-      (Fusion_types.show_panel_failure other)
-  | Error err -> Alcotest.fail err
+  let decode json =
+    match Fusion_types.panel_failure_of_yojson json with
+    | Ok failure -> failure
+    | Error err -> Alcotest.fail err
+  in
+  let legacy_detail =
+    match decode (`String "Empty_response") with
+    | Fusion_types.Empty_response detail -> detail
+    | other ->
+      Alcotest.failf "unexpected panel failure: %s"
+        (Fusion_types.show_panel_failure other)
+  in
+  Alcotest.(check string) "legacy detail" "empty response" legacy_detail;
+  Alcotest.(check string)
+    "legacy timeout"
+    (Fusion_types.show_panel_failure Fusion_types.Timeout)
+    (Fusion_types.show_panel_failure (decode (`String "Timeout")))
 ;;
 
 let test_panel_failure_yojson_round_trips_current_shapes () =

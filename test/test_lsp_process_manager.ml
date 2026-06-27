@@ -1,5 +1,68 @@
 open Alcotest
 
+let temp_dir prefix =
+  let path = Filename.temp_file prefix "" in
+  Sys.remove path;
+  Unix.mkdir path 0o700;
+  path
+;;
+
+let with_path path f =
+  let prior = Sys.getenv_opt "PATH" in
+  Unix.putenv "PATH" path;
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some value -> Unix.putenv "PATH" value
+      | None -> Unix.putenv "PATH" "")
+    f
+;;
+
+let check_ocamllsp_command_not_found ~path =
+  Eio_main.run @@ fun env ->
+  Eio.Switch.run @@ fun sw ->
+  with_path path (fun () ->
+    match
+      Lsp_process_manager.spawn
+        ~sw
+        ~lang_id:"ocaml"
+        ~workspace_root:path
+        (Eio.Stdenv.process_mgr env)
+    with
+    | Error (Lsp_process_manager.Command_not_found "ocamllsp") -> ()
+    | Error err ->
+      failf
+        "expected Command_not_found ocamllsp, got %s"
+        (Format.asprintf "%a" Lsp_process_manager.pp_spawn_error err)
+    | Ok proc ->
+      Lsp_process_manager.shutdown proc;
+      fail "expected non-executable PATH entry to be rejected before spawn")
+;;
+
+let test_spawn_rejects_non_executable_path_entry () =
+  let dir = temp_dir "lsp-path-nonexec-" in
+  let cmd = Filename.concat dir "ocamllsp" in
+  let oc = open_out cmd in
+  close_out oc;
+  Unix.chmod cmd 0o600;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove cmd with Sys_error _ -> ());
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () -> check_ocamllsp_command_not_found ~path:dir)
+;;
+
+let test_spawn_rejects_directory_path_entry () =
+  let dir = temp_dir "lsp-path-dir-" in
+  let cmd_dir = Filename.concat dir "ocamllsp" in
+  Unix.mkdir cmd_dir 0o700;
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.rmdir cmd_dir with Unix.Unix_error _ -> ());
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () -> check_ocamllsp_command_not_found ~path:dir)
+;;
+
 (* [shutdown] must close ALL THREE held pipe FDs (stdin_w, stdout_r, stderr_r),
    not just two. RFC-0261 / #21546: a missing [stderr_r] close leaks 1 FD per
    failed init, still climbing monotonically and tripping the FD admission gate.
@@ -78,7 +141,17 @@ let test_shutdown_signals_child_and_closes_held_pipes () =
 let () =
   run
     "lsp_process_manager"
-    [ ( "shutdown"
+    [ ( "path-resolution"
+      , [ test_case
+            "rejects non-executable PATH file before spawn"
+            `Quick
+            test_spawn_rejects_non_executable_path_entry
+        ; test_case
+            "rejects PATH directory before spawn"
+            `Quick
+            test_spawn_rejects_directory_path_entry
+        ] )
+    ; ( "shutdown"
       , [ test_case
             "signals child and closes held pipes"
             `Quick

@@ -97,6 +97,7 @@
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
   test_keeper_user_model
+  test_keeper_recall_outcome_eval
   test_keeper_memory_os_consolidation
   test_keeper_memory_os_consolidation_runtime
   test_server_bootstrap_maintenance_memory_os

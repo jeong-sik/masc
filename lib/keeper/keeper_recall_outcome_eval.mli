@@ -1,0 +1,70 @@
+(** Offline, read-only join from recall-injection ledger rows to local execution
+    receipt outcomes.
+
+    This is the deterministic local substrate for RFC-0264 P3. It intentionally
+    does not query forge/CI/human-feedback state; those outcome sources are a
+    later layer over the trace rows produced here. *)
+
+type recall_record =
+  { keeper_id : string
+  ; trace_id : string
+  ; turn : int
+  ; injected_fact_key_count : int
+  ; injected_episode_key_count : int
+  ; failure_reason : string option
+  ; ts : float option
+  }
+
+type receipt_record =
+  { keeper_name : string
+  ; trace_id : string
+  ; outcome : string
+  ; terminal_reason_code : string
+  ; current_task_id : string option
+  ; ended_at : string option
+  }
+
+type outcome_bucket =
+  | Outcome_ok
+  | Outcome_skipped
+  | Outcome_error
+  | Outcome_cancelled
+  | Outcome_unknown
+  | Outcome_missing_receipt
+
+type trace_row =
+  { trace_id : string
+  ; keeper_id : string option
+  ; recall_records : int
+  ; injected_fact_keys : int
+  ; recall_failure_records : int
+  ; receipt : receipt_record option
+  ; outcome_bucket : outcome_bucket
+  }
+
+type t =
+  { masc_root : string
+  ; recall_dir : string
+  ; receipts_dir : string
+  ; recall_records : int
+  ; recall_traces : int
+  ; traces_with_receipt : int
+  ; traces_without_receipt : int
+  ; injected_fact_keys : int
+  ; recall_failure_records : int
+  ; outcome_ok : int
+  ; outcome_skipped : int
+  ; outcome_error : int
+  ; outcome_cancelled : int
+  ; outcome_unknown : int
+  ; traces : trace_row list
+  }
+
+val evaluate : masc_root:string -> t
+(** Read [masc_root/recall_injections/**/*.jsonl] and
+    [masc_root/keepers/*/execution-receipts/**/*.jsonl], joining on [trace_id].
+    Malformed JSONL rows are skipped rather than failing the whole report. *)
+
+val outcome_bucket_to_string : outcome_bucket -> string
+val to_json : ?trace_limit:int -> t -> Yojson.Safe.t
+val render_text : ?trace_limit:int -> t -> string

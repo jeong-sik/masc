@@ -117,8 +117,10 @@ let record_execution_receipt_gap
       ~producer:"keeper_unified_turn.pre_dispatch"
       ~durable_store:
         (Filename.concat
-           (Filename.concat (Filename.concat masc_root "keepers") meta.name)
-           "execution-receipts")
+           (Filename.concat
+              (Filename.concat masc_root Common.keepers_runtime_dirname)
+              meta.name)
+           Keeper_types_support.execution_receipts_dirname)
       ~dashboard_surface:"/api/v1/dashboard/execution-trust"
       ~stale_reason
       ~keeper_name:meta.name

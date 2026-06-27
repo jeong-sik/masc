@@ -23,6 +23,7 @@ type receipt_record =
   ; terminal_reason_code : string
   ; current_task_id : string option
   ; ended_at : string option
+  ; ended_at_unix : float option
   }
 
 type outcome_bucket =
@@ -62,6 +63,11 @@ type t =
   { masc_root : string
   ; recall_dir : string
   ; receipts_dir : string
+  ; read_error_count : int
+  ; malformed_jsonl_rows : int
+  ; invalid_recall_rows : int
+  ; invalid_receipt_rows : int
+  ; load_errors : string list
   ; recall_records : int
   ; recall_traces : int
   ; traces_with_receipt : int
@@ -80,7 +86,8 @@ type t =
 val evaluate : masc_root:string -> t
 (** Read [masc_root/recall_injections/**/*.jsonl] and
     [masc_root/keepers/*/execution-receipts/**/*.jsonl], joining on [trace_id].
-    Malformed JSONL rows are skipped rather than failing the whole report. *)
+    Malformed/unreadable/invalid rows are excluded from aggregation and surfaced
+    through the load-diagnostic counters and [load_errors]. *)
 
 val outcome_bucket_to_string : outcome_bucket -> string
 val to_json : ?trace_limit:int -> ?fact_key_limit:int -> t -> Yojson.Safe.t

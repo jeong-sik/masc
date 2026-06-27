@@ -29,8 +29,10 @@ let append_with_coverage_gap
          ~producer:"keeper_agent_run.execution_receipt"
          ~durable_store:
            (Filename.concat
-              (Filename.concat (Filename.concat masc_root "keepers") keeper_name)
-              "execution-receipts")
+              (Filename.concat
+                 (Filename.concat masc_root Common.keepers_runtime_dirname)
+                 keeper_name)
+              Keeper_types_support.execution_receipts_dirname)
          ~dashboard_surface:"/api/v1/dashboard/execution-trust"
          ~stale_reason:"execution_receipt_append_failed"
          ~keeper_name

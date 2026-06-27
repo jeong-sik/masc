@@ -1,10 +1,8 @@
-let default_base_path () =
-  match Sys.getenv_opt "MASC_BASE_PATH" with
-  | Some path when String.trim path <> "" -> path
-  | _ -> Sys.getcwd ()
+let default_base_path_opt () =
+  Config_dir_resolver.current_env_base_path_opt ()
 ;;
 
-let base_path = ref (default_base_path ())
+let base_path = ref (Option.value (default_base_path_opt ()) ~default:"")
 let json = ref false
 let trace_limit = ref 50
 let fact_key_limit = ref 50
@@ -25,8 +23,17 @@ let specs =
 
 let () =
   Arg.parse specs (fun arg -> raise (Arg.Bad ("unexpected argument: " ^ arg)))
-    "masc-recall-outcome-eval [--base-path PATH] [--json] [--trace-limit N]";
-  let base_path = Env_config.normalize_masc_base_path_input !base_path in
+    "masc-recall-outcome-eval [--base-path PATH] [--json] [--trace-limit N] \
+     [--fact-key-limit N] [--summary-index-path PATH]";
+  let base_path =
+    match String.trim !base_path with
+    | "" ->
+      prerr_endline
+        "masc-recall-outcome-eval: --base-path is required when \
+         MASC_BASE_PATH_INPUT/MASC_BASE_PATH is unset";
+      exit 2
+    | value -> Env_config.normalize_masc_base_path_input value
+  in
   let masc_root = Common.masc_dir_from_base_path ~base_path in
   let trace_limit = max 0 !trace_limit in
   let fact_key_limit = max 0 !fact_key_limit in

@@ -22,6 +22,7 @@ type receipt_record =
   ; terminal_reason_code : string
   ; current_task_id : string option
   ; ended_at : string option
+  ; ended_at_unix : float option
   }
 
 type outcome_bucket =
@@ -61,6 +62,11 @@ type t =
   { masc_root : string
   ; recall_dir : string
   ; receipts_dir : string
+  ; read_error_count : int
+  ; malformed_jsonl_rows : int
+  ; invalid_recall_rows : int
+  ; invalid_receipt_rows : int
+  ; load_errors : string list
   ; recall_records : int
   ; recall_traces : int
   ; traces_with_receipt : int
@@ -76,6 +82,27 @@ type t =
   ; traces : trace_row list
   }
 
+type load_stats =
+  { read_error_count : int
+  ; malformed_jsonl_rows : int
+  ; invalid_rows : int
+  ; errors : string list
+  }
+
+let empty_load_stats =
+  { read_error_count = 0; malformed_jsonl_rows = 0; invalid_rows = 0; errors = [] }
+;;
+
+let merge_load_stats a b =
+  { read_error_count = a.read_error_count + b.read_error_count
+  ; malformed_jsonl_rows = a.malformed_jsonl_rows + b.malformed_jsonl_rows
+  ; invalid_rows = a.invalid_rows + b.invalid_rows
+  ; errors = a.errors @ b.errors
+  }
+;;
+
+let jsonl_suffix = ".jsonl"
+
 let is_dir path = try Sys.is_directory path with Sys_error _ -> false
 
 let rec find_jsonl dir =
@@ -88,8 +115,26 @@ let rec find_jsonl dir =
       let path = Filename.concat dir name in
       if is_dir path
       then find_jsonl path
-      else if Filename.check_suffix path ".jsonl"
+      else if Filename.check_suffix path jsonl_suffix
       then [ path ]
+      else [])
+  else []
+;;
+
+let find_receipt_jsonl keepers_dir =
+  if Sys.file_exists keepers_dir && is_dir keepers_dir
+  then
+    Sys.readdir keepers_dir
+    |> Array.to_list
+    |> List.sort String.compare
+    |> List.concat_map (fun keeper_name ->
+      let keeper_dir = Filename.concat keepers_dir keeper_name in
+      if is_dir keeper_dir
+      then
+        find_jsonl
+          (Filename.concat
+             keeper_dir
+             Keeper_types_support.execution_receipts_dirname)
       else [])
   else []
 ;;
@@ -105,94 +150,141 @@ let read_lines path =
            | line -> loop (line :: acc)
            | exception End_of_file -> List.rev acc
          in
-         loop [])
+         Ok (loop []))
   with
-  | Sys_error _ -> []
+  | Sys_error msg ->
+    Error (Printf.sprintf "%s: %s" path msg)
 ;;
 
-let assoc_string fields key =
-  match List.assoc_opt key fields with
-  | Some (`String s) when String.trim s <> "" -> Some s
-  | _ -> None
-;;
-
-let assoc_int fields key =
-  match List.assoc_opt key fields with
-  | Some (`Int i) -> Some i
-  | Some (`Float f) -> Some (int_of_float f)
-  | _ -> None
-;;
-
-let assoc_float fields key =
-  match List.assoc_opt key fields with
-  | Some (`Float f) -> Some f
-  | Some (`Int i) -> Some (float_of_int i)
-  | _ -> None
-;;
-
-let assoc_string_list fields key =
-  match List.assoc_opt key fields with
-  | Some (`List items) ->
-    List.filter_map (function
-      | `String s when String.trim s <> "" -> Some s
-      | _ -> None)
-      items
-  | _ -> []
-;;
-
-let parse_json_line line =
+let parse_json_line ~path ~line_no line =
   match Yojson.Safe.from_string line with
-  | json -> Some json
-  | exception Yojson.Json_error _ -> None
+  | json -> Ok json
+  | exception Yojson.Json_error msg ->
+    Error (Printf.sprintf "%s:%d: malformed JSONL row: %s" path line_no msg)
 ;;
 
 let parse_recall_json = function
-  | `Assoc fields ->
-    (match assoc_string fields "keeper_id", assoc_string fields "trace_id" with
-     | Some keeper_id, Some trace_id ->
-       let injected_fact_keys = assoc_string_list fields "injected_fact_keys" in
+  | `Assoc _ as json ->
+    (match
+       ( Json_util.get_string_nonempty json "keeper_id"
+       , Json_util.get_string_nonempty json "trace_id"
+       , Json_util.get_int json "turn" )
+     with
+     | Some keeper_id, Some trace_id, Some turn ->
+       let injected_fact_keys = Json_util.get_string_list json "injected_fact_keys" in
+       let injected_episode_keys =
+         Json_util.get_string_list json "injected_episode_keys"
+       in
        Some
          { keeper_id
          ; trace_id
-         ; turn = Option.value (assoc_int fields "turn") ~default:0
+         ; turn
          ; injected_fact_keys
-         ; injected_fact_key_count = List.length injected_fact_keys
+         ; injected_fact_key_count =
+             Option.value
+               (Json_util.get_int json "injected_fact_key_count")
+               ~default:(List.length injected_fact_keys)
          ; injected_episode_key_count =
-             List.length (assoc_string_list fields "injected_episode_keys")
-         ; failure_reason = assoc_string fields "failure_reason"
-         ; ts = assoc_float fields "ts"
+             Option.value
+               (Json_util.get_int json "injected_episode_key_count")
+               ~default:(List.length injected_episode_keys)
+         ; failure_reason = Json_util.get_string_nonempty json "failure_reason"
+         ; ts = Json_util.get_float json "ts"
          }
      | _ -> None)
   | _ -> None
 ;;
 
-let parse_receipt_json = function
-  | `Assoc fields ->
-    (match assoc_string fields "trace_id" with
-     | Some trace_id ->
-       Some
-         { keeper_name = Option.value (assoc_string fields "keeper_name") ~default:""
-         ; trace_id
-         ; outcome = Option.value (assoc_string fields "outcome") ~default:""
-         ; terminal_reason_code =
-             Option.value (assoc_string fields "terminal_reason_code") ~default:""
-         ; current_task_id = assoc_string fields "current_task_id"
-         ; ended_at = assoc_string fields "ended_at"
-         }
+let parse_ended_at json =
+  match Json_util.get_string json "ended_at" with
+  | None -> Some (None, None)
+  | Some raw when String.trim raw = "" -> Some (Some raw, None)
+  | Some raw ->
+    (match Masc_domain.parse_iso8601_opt raw with
+     | Some ts -> Some (Some raw, Some ts)
      | None -> None)
+;;
+
+let parse_receipt_json = function
+  | `Assoc _ as json ->
+    (match
+       ( Json_util.get_string_nonempty json "schema"
+       , Json_util.get_string_nonempty json "keeper_name"
+       , Json_util.get_string_nonempty json "trace_id"
+       , Json_util.get_string_nonempty json "outcome"
+       , Json_util.get_string_nonempty json "terminal_reason_code"
+       , parse_ended_at json )
+     with
+     | ( Some schema
+       , Some keeper_name
+       , Some trace_id
+       , Some outcome
+       , Some terminal_reason_code
+       , Some (ended_at, ended_at_unix) )
+       when String.equal schema Keeper_types_support.execution_receipt_schema ->
+       Some
+         { keeper_name
+         ; trace_id
+         ; outcome
+         ; terminal_reason_code
+         ; current_task_id = Json_util.get_string json "current_task_id"
+         ; ended_at
+         ; ended_at_unix
+         }
+     | _ -> None)
   | _ -> None
 ;;
 
-let load_records dir parse =
-  find_jsonl dir
-  |> List.concat_map read_lines
-  |> List.filter_map parse_json_line
-  |> List.filter_map parse
+let load_records_from_files files parse =
+  let load_line path line_no (records, stats) line =
+    match parse_json_line ~path ~line_no line with
+    | Error error ->
+      ( records
+      , { stats with
+          malformed_jsonl_rows = stats.malformed_jsonl_rows + 1
+        ; errors = stats.errors @ [ error ]
+        } )
+    | Ok json ->
+      (match parse json with
+       | Some record -> record :: records, stats
+       | None ->
+         ( records
+         , { stats with
+             invalid_rows = stats.invalid_rows + 1
+           ; errors =
+               stats.errors
+               @ [ Printf.sprintf "%s:%d: invalid row schema" path line_no ]
+           } ))
+  in
+  let load_file (records, stats) path =
+    match read_lines path with
+    | Error error ->
+      ( records
+      , { stats with
+          read_error_count = stats.read_error_count + 1
+        ; errors = stats.errors @ [ error ]
+        } )
+    | Ok lines ->
+      let records, line_stats =
+        lines
+        |> List.mapi (fun idx line -> idx + 1, line)
+        |> List.fold_left
+             (fun acc (line_no, line) -> load_line path line_no acc line)
+             (records, empty_load_stats)
+      in
+      records, merge_load_stats stats line_stats
+  in
+  let records, stats =
+    files |> List.fold_left load_file ([], empty_load_stats)
+  in
+  List.rev records, stats
 ;;
 
+let load_records dir parse = load_records_from_files (find_jsonl dir) parse
+
 let newer_receipt candidate existing =
-  match candidate.ended_at, existing.ended_at with
-  | Some a, Some b -> String.compare a b > 0
+  match candidate.ended_at_unix, existing.ended_at_unix with
+  | Some a, Some b -> Float.compare a b > 0
   | Some _, None -> true
   | None, Some _ -> false
   | None, None -> String.compare candidate.keeper_name existing.keeper_name < 0
@@ -213,7 +305,11 @@ let receipt_map (receipts : receipt_record list) : receipt_record String_map.t =
 let recall_groups (records : recall_record list) : recall_record list String_map.t =
   List.fold_left
     (fun acc (record : recall_record) ->
-       let existing = Option.value (String_map.find_opt record.trace_id acc) ~default:[] in
+       let existing =
+         match String_map.find_opt record.trace_id acc with
+         | Some records -> records
+         | None -> []
+       in
        String_map.add record.trace_id (record :: existing) acc)
     String_map.empty
     records
@@ -222,12 +318,12 @@ let recall_groups (records : recall_record list) : recall_record list String_map
 let outcome_bucket_of_receipt = function
   | None -> Outcome_missing_receipt
   | Some receipt ->
-    (match String.lowercase_ascii receipt.outcome with
-     | "receipt_done" | "ok" -> Outcome_ok
-     | "receipt_skipped" | "skipped" -> Outcome_skipped
-     | "receipt_failed" | "error" -> Outcome_error
-     | "receipt_cancelled" | "cancelled" -> Outcome_cancelled
-     | _ -> Outcome_unknown)
+    (match Keeper_execution_receipt.outcome_kind_of_string receipt.outcome with
+     | Some `Ok -> Outcome_ok
+     | Some `Skipped -> Outcome_skipped
+     | Some `Error -> Outcome_error
+     | Some `Cancelled -> Outcome_cancelled
+     | None -> Outcome_unknown)
 ;;
 
 let outcome_bucket_to_string = function
@@ -252,7 +348,18 @@ let trace_row_of_group
       trace_id
       (records : recall_record list)
   =
-  let records = List.rev records in
+  let compare_record (a : recall_record) (b : recall_record) =
+    match a.ts, b.ts with
+    | Some a, Some b ->
+      let by_ts = Float.compare a b in
+      if by_ts <> 0 then by_ts else compare a.turn b.turn
+    | Some _, None -> 1
+    | None, Some _ -> -1
+    | None, None ->
+      let by_turn = compare a.turn b.turn in
+      if by_turn <> 0 then by_turn else String.compare a.keeper_id b.keeper_id
+  in
+  let records = List.sort compare_record records in
   let receipt = String_map.find_opt trace_id receipts in
   let outcome_bucket = outcome_bucket_of_receipt receipt in
   let fact_keys =
@@ -261,7 +368,10 @@ let trace_row_of_group
     |> unique_sorted
   in
   { trace_id
-  ; keeper_id = (match records with r :: _ -> Some r.keeper_id | [] -> None)
+  ; keeper_id =
+      (match List.rev records with
+       | r :: _ -> Some r.keeper_id
+       | [] -> None)
   ; recall_records = List.length records
   ; fact_keys
   ; injected_fact_keys =
@@ -303,7 +413,11 @@ let update_fact_key_summary fact_key f acc =
 let key_counts keys =
   List.fold_left
     (fun acc key ->
-       let current = Option.value (String_map.find_opt key acc) ~default:0 in
+       let current =
+         match String_map.find_opt key acc with
+         | Some count -> count
+         | None -> 0
+       in
        String_map.add key (current + 1) acc)
     String_map.empty
     keys
@@ -373,10 +487,12 @@ let fact_key_summaries recall_records traces =
 ;;
 
 let evaluate ~masc_root =
-  let recall_dir = Filename.concat masc_root "recall_injections" in
-  let receipts_dir = Filename.concat masc_root "keepers" in
-  let recall_records = load_records recall_dir parse_recall_json in
-  let receipts = load_records receipts_dir parse_receipt_json in
+  let recall_dir = Keeper_recall_injection_ledger.base_dir ~masc_root in
+  let receipts_dir = Filename.concat masc_root Common.keepers_runtime_dirname in
+  let recall_records, recall_stats = load_records recall_dir parse_recall_json in
+  let receipts, receipt_stats =
+    load_records_from_files (find_receipt_jsonl receipts_dir) parse_receipt_json
+  in
   let receipts_by_trace = receipt_map receipts in
   let traces =
     recall_groups recall_records
@@ -396,6 +512,12 @@ let evaluate ~masc_root =
   { masc_root
   ; recall_dir
   ; receipts_dir
+  ; read_error_count = recall_stats.read_error_count + receipt_stats.read_error_count
+  ; malformed_jsonl_rows =
+      recall_stats.malformed_jsonl_rows + receipt_stats.malformed_jsonl_rows
+  ; invalid_recall_rows = recall_stats.invalid_rows
+  ; invalid_receipt_rows = receipt_stats.invalid_rows
+  ; load_errors = recall_stats.errors @ receipt_stats.errors
   ; recall_records = List.length recall_records
   ; recall_traces = List.length traces
   ; traces_with_receipt =
@@ -438,6 +560,7 @@ let receipt_to_json receipt =
     ; "terminal_reason_code", `String receipt.terminal_reason_code
     ; "current_task_id", string_opt_to_json receipt.current_task_id
     ; "ended_at", string_opt_to_json receipt.ended_at
+    ; "ended_at_unix", (match receipt.ended_at_unix with Some ts -> `Float ts | None -> `Null)
     ]
 ;;
 
@@ -476,20 +599,21 @@ let fact_key_summary_to_json row =
     ]
 ;;
 
-let take n xs =
-  let rec loop remaining acc = function
-    | _ when remaining <= 0 -> List.rev acc
-    | [] -> List.rev acc
-    | x :: rest -> loop (remaining - 1) (x :: acc) rest
-  in
-  loop n [] xs
-;;
+let take n xs = if n <= 0 then [] else List.take n xs
 
 let to_json ?(trace_limit = 50) ?(fact_key_limit = 50) report =
   `Assoc
     [ "masc_root", `String report.masc_root
     ; "recall_dir", `String report.recall_dir
     ; "receipts_dir", `String report.receipts_dir
+    ; ( "load_diagnostics"
+      , `Assoc
+          [ "read_error_count", `Int report.read_error_count
+          ; "malformed_jsonl_rows", `Int report.malformed_jsonl_rows
+          ; "invalid_recall_rows", `Int report.invalid_recall_rows
+          ; "invalid_receipt_rows", `Int report.invalid_receipt_rows
+          ; "errors", `List (List.map (fun error -> `String error) report.load_errors)
+          ] )
     ; "recall_records", `Int report.recall_records
     ; "recall_traces", `Int report.recall_traces
     ; "traces_with_receipt", `Int report.traces_with_receipt
@@ -574,6 +698,7 @@ let render_text ?(trace_limit = 50) ?(fact_key_limit = 50) report =
   Printf.sprintf
     "Memory OS recall outcome eval (local receipts only)\n\
      masc_root: %s\n\
+     load_diagnostics: read_errors=%d malformed_jsonl_rows=%d invalid_recall_rows=%d invalid_receipt_rows=%d\n\
      recall_records: %d, recall_traces: %d\n\
      joined: with_receipt=%d without_receipt=%d\n\
      injected_fact_keys=%d recall_failure_records=%d\n\
@@ -583,6 +708,10 @@ let render_text ?(trace_limit = 50) ?(fact_key_limit = 50) report =
      trace_limit=%d\n\
      %s"
     report.masc_root
+    report.read_error_count
+    report.malformed_jsonl_rows
+    report.invalid_recall_rows
+    report.invalid_receipt_rows
     report.recall_records
     report.recall_traces
     report.traces_with_receipt
@@ -602,27 +731,26 @@ let render_text ?(trace_limit = 50) ?(fact_key_limit = 50) report =
     trace_lines
 ;;
 
-let rec mkdir_p path =
-  if path = "" || path = Filename.current_dir_name
-  then ()
-  else if Sys.file_exists path
-  then ()
-  else (
-    let parent = Filename.dirname path in
-    if not (String.equal parent path) then mkdir_p parent;
-    Unix.mkdir path 0o755)
-;;
-
 let write_summary_index ~path report =
-  mkdir_p (Filename.dirname path);
+  Fs_compat.mkdir_p (Filename.dirname path);
   let oc = open_out_bin path in
+  let closed = ref false in
+  let close_propagating () =
+    try
+      close_out oc;
+      closed := true
+    with exn ->
+      close_out_noerr oc;
+      closed := true;
+      raise exn
+  in
   Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
+    ~finally:(fun () -> if not !closed then close_out_noerr oc)
     (fun () ->
        List.iter
          (fun row ->
             output_string oc (Yojson.Safe.to_string (fact_key_summary_to_json row));
             output_char oc '\n')
          report.fact_key_summaries;
-       close_out oc)
+       close_propagating ())
 ;;

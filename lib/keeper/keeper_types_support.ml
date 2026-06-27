@@ -50,9 +50,12 @@ let execution_receipt_store_cache : (string, Dated_jsonl.t) Hashtbl.t =
 
 let execution_receipt_store_mu = Eio.Mutex.create ()
 
+let execution_receipt_schema = "keeper.execution_receipt.v1"
+let execution_receipts_dirname = "execution-receipts"
+
 let keeper_execution_receipt_store config name : Dated_jsonl.t =
   let dir =
-    Filename.concat (keeper_dir_ config) (name ^ "/execution-receipts")
+    Filename.concat (Filename.concat (keeper_dir_ config) name) execution_receipts_dirname
   in
   let lookup () =
     match Hashtbl.find_opt execution_receipt_store_cache dir with

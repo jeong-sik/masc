@@ -12,7 +12,9 @@ and timeout =
   ; stderr : string
   }
 
-let seconds_of_span span = Mtime.Span.to_float_ns span /. 1_000_000_000.0
+let ns_per_s = 1_000_000_000.0
+
+let seconds_of_span span = Mtime.Span.to_float_ns span /. ns_per_s
 
 let timeout_payload ~mono_clock ~start ~argv ~timeout_s ~stdout_buf ~stderr_buf =
   { argv

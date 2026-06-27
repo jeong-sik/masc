@@ -71,7 +71,7 @@ let test_timeout_kills_process () =
   in
   (match outcome with
    | Bounded_proc.Timeout timeout ->
-     check (float 1.0) "timeout fired near requested budget" 0.5 timeout.elapsed_s;
+     check (float 0.2) "timeout fired near requested budget" 0.5 timeout.elapsed_s;
      check (float 0.0) "timeout budget preserved" 0.5 timeout.timeout_s;
      check (list string) "argv preserved" argv timeout.argv;
      check string "partial stdout preserved" "partial-out" timeout.stdout;

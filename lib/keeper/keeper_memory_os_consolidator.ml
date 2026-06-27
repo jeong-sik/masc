@@ -11,24 +11,22 @@
     Determinism (the memory-os offline/reproducible tenet): the output is a pure
     function of the input facts, emitted in normalized-claim order, so a test can
     assert exact output and a re-run on an unchanged fleet rewrites the same file.
-    RFC-0247 (purge): corroboration is structural — a claim is shared when
-    [>= min_keepers] DISTINCT keepers hold it on a promotable category. The prior
-    confidence floor and noisy-OR aggregation were removed with the score; there
-    is no confidence number to recompute. *)
+    RFC-0247 (purge): corroboration is structural. The prior confidence floor and
+    noisy-OR aggregation were removed with the score; there is no confidence
+    number to recompute. Shared promotion is additionally limited to categories
+    that already encode outcome-derived knowledge, so `_shared` does not amplify
+    merely repeated facts before the outcome evaluator can prove usefulness. *)
 
 open Keeper_memory_os_types
 
 module Io = Keeper_memory_os_io
 
-(* Which categories are objective enough to share across keepers is a
-   compile-time property of the closed [category] taxonomy
-   (Keeper_memory_os_types.is_promotable: only Fact/Constraint), not a runtime
-   list. Default-deny is structural: a new arm (e.g. the [Ephemeral]
-   coordination-boilerplate kind, RFC-0247 §2.5 / #21244) cannot leak into the
-   shared tier unless it is classified promotable at the type level. This
-   strengthens #21241's typed [category list] into an exhaustive predicate, so a
-   future arm forces a compile-time promotability decision rather than silently
-   defaulting out of a list. *)
+(* Which categories are durable enough to consider, and which are
+   outcome-positive enough to cross keepers, are compile-time properties of the
+   closed [category] taxonomy. Default-deny is structural: a new arm (e.g. the
+   [Ephemeral] coordination-boilerplate kind, RFC-0247 §2.5 / #21244) cannot leak
+   into the shared tier unless it is classified both promotable and
+   outcome-positive at the type level. *)
 
 (* Minimum distinct keepers that must hold a claim before it is shared. Two is
    the smallest set that distinguishes corroboration from a single keeper's echo
@@ -48,19 +46,21 @@ type contribution =
   ; fact : fact
   }
 
-(* RFC-0247 (purge): eligibility is purely structural — a promotable category.
-   The prior confidence floor (only claims above 0.5 count as corroboration) was
-   a score gate and is gone. *)
+(* RFC-0247 (purge): eligibility is structural — a promotable, outcome-positive
+   category. The prior confidence floor (only claims above 0.5 count as
+   corroboration) was a score gate and is gone. *)
 (* RFC-0285 §3.5: only objective claim kinds cross keepers. [Self_observation] is
-   transient keeper-local state, and [Diagnostic] is system-authored evidence for
-   operators, not shared semantic memory. Keep this exhaustive so a future
-   [claim_kind] cannot promote by accident. *)
+   transient keeper-local state, [External_state] is time-sensitive world state,
+   and [Diagnostic] is system-authored evidence for operators, not shared semantic
+   memory. Keep this exhaustive so a future [claim_kind] cannot promote by
+   accident. *)
 let eligible fact =
   is_promotable fact.category
+  && is_outcome_positive_for_shared_promotion fact.category
   &&
   match fact.claim_kind with
-  | Some External_state | Some Durable_knowledge | None -> true
-  | Some Self_observation | Some Diagnostic -> false
+  | Some Durable_knowledge | None -> true
+  | Some Self_observation | Some External_state | Some Diagnostic -> false
 
 (* Pick the representative fact for a claim group by a structural total order:
    earliest first_seen, then lexically smallest claim, then keeper id — so

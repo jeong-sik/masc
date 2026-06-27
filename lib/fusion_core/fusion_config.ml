@@ -13,6 +13,7 @@ type config_error =
   | Invalid_max_concurrent_judges of int
   | Invalid_staged_judge_group_size of int
   | Invalid_max_tool_calls of string * int
+  | Invalid_max_output_tokens of string * int
   | Missing_default_preset of string
   | Judge_panel_prompt_missing of string  (** preset 이름; JOJ 1차 심판 prompt 누락 (RFC-0283) *)
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
@@ -44,6 +45,8 @@ let parse_group (tbl : Otoml.t) : Fusion_policy.panel_group =
   ; web_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
   ; max_tool_calls =
       Otoml.find_or ~default:0 tbl Otoml.get_integer [ "max_tool_calls_per_panel" ]
+  ; max_output_tokens =
+      Otoml.find_opt tbl Otoml.get_integer [ "max_output_tokens_per_panel" ]
   ; timeout_s =
       Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
         [ "panel_timeout_s" ]
@@ -61,6 +64,7 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
   ; jweb_tools = Otoml.find_or ~default:false tbl Otoml.get_boolean [ "web_tools" ]
   ; jmax_tool_calls =
       Otoml.find_or ~default:0 tbl Otoml.get_integer [ "max_tool_calls" ]
+  ; jmax_output_tokens = Otoml.find_opt tbl Otoml.get_integer [ "max_output_tokens" ]
   ; jtimeout_s =
       Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
         [ "timeout_s" ]
@@ -88,6 +92,9 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
     Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
       [ "judge_timeout_s" ]
   in
+  let judge_max_output_tokens =
+    Otoml.find_opt tbl Otoml.get_integer [ "judge_max_output_tokens" ]
+  in
   let judges =
     match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "judges" ] with
     | Some entries -> List.map parse_judge_spec entries
@@ -97,7 +104,15 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
      허용 범위는 1 이상 패널 모델 총합 이하; 검증 SSOT는 Validated_preset.of_preset. *)
   Result.bind (parse_min_answered name tbl) (fun min_answered ->
     let p : Fusion_policy.preset =
-      { name; panels; judge; judge_system_prompt; judge_timeout_s; judges; min_answered }
+      { name
+      ; panels
+      ; judge
+      ; judge_system_prompt
+      ; judge_timeout_s
+      ; judge_max_output_tokens
+      ; judges
+      ; min_answered
+      }
     in
     (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
      이름을 붙여 자기 [config_error]로 매핑만 한다 (운영자에게 어느 preset인지 알림).
@@ -115,6 +130,8 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Duplicate_panelist (name, id)
          | Fusion_policy.Validated_preset.Bad_max_tool_calls v ->
            Invalid_max_tool_calls (name, v)
+         | Fusion_policy.Validated_preset.Bad_max_output_tokens v ->
+           Invalid_max_output_tokens (name, v)
          | Fusion_policy.Validated_preset.Judge_panel_prompt_missing ->
            Judge_panel_prompt_missing name
          | Fusion_policy.Validated_preset.Duplicate_judge id ->

@@ -357,6 +357,31 @@ runtime authoring surface에서 모델 binding, preset, 동시성 cap을 함께 
 | `max_concurrent_judges` | int >= 1 | `3` | `judge_of_judges` 계열 judge wave fan-out 상한. 패널 backpressure와 독립 |
 | `staged_judge_group_size` | int >= 2 | `3` | `staged_judge_of_judges`가 1차 심판을 묶는 고정 reducer group 크기 |
 
+Legacy flat preset-level keys:
+
+| TOML key | Type | Default | 의미 |
+|----------|------|---------|------|
+| `panel` | string[] | required | legacy flat panel model list |
+| `judge` | string | required | simple/refine/conditional judge and JOJ meta judge runtime id |
+| `panel_system_prompt` | string | required | legacy flat panel system prompt |
+| `judge_system_prompt` | string | required | judge system prompt |
+| `panel_timeout_s` | float | `300.0` | legacy flat panel structural timeout |
+| `judge_timeout_s` | float | `300.0` | judge structural timeout |
+| `max_tool_calls_per_panel` | int 0..16 | `0` | panel tool-call budget; `0` means unlimited |
+| `max_output_tokens_per_panel` | int > 0 | runtime default | panel output token budget override |
+| `judge_max_output_tokens` | int > 0 | runtime default | simple/refine/meta judge output token budget override |
+| `min_answered` | int 1..panel count | `1` | judge 실행에 필요한 answered panel quorum |
+
+Heterogeneous presets move model lists into group tables:
+
+- `[[fusion.presets.<name>.panels]]`: each group owns `models`,
+  `system_prompt`, `max_tool_calls_per_panel`, `max_output_tokens_per_panel`,
+  and optional routing labels.
+- `[[fusion.presets.<name>.judges]]`: each judge owns `model`,
+  `system_prompt`, `max_tool_calls`, and `max_output_tokens`.
+
+Omitted output-token keys preserve the Runtime_agent default.
+
 `max_concurrent_judges`는 topology를 늘리는 값이 아니라 독립 judge 호출을 동시에 몇 개까지
 실행할지 정하는 cap이다. Topology는 `masc_fusion.topology` 문자열로 선택한다.
 

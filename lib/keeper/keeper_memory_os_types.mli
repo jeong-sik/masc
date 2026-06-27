@@ -128,12 +128,18 @@ val librarian_claim_kinds : claim_kind list
     (safe), never to wrong-volatile. *)
 val claim_kind_of_string : string -> claim_kind option
 
-(** Whether a category may be promoted into the shared semantic tier. Exhaustive
-    over {!category}; [Fact], [Constraint], [Validated_approach], and [Lesson]
-    promote. Everything else stays keeper-local, so a new or typo'd category
-    cannot silently join the shared tier — a future durable kind must be
-    classified here at compile time. *)
+(** Whether a category may participate in durable promotion decisions. This is
+    necessary but not sufficient for the shared semantic tier: the consolidator
+    also requires {!is_outcome_positive_for_shared_promotion}. Exhaustive over
+    {!category}; a future durable kind must be classified here at compile time. *)
 val is_promotable : category -> bool
+
+(** Category proxy for whether a fact is outcome-positive enough to cross
+    keepers into the shared semantic tier. Plain [Fact] and [Constraint] remain
+    keeper-local until outcome evaluation turns them into [Validated_approach] or
+    [Lesson]. TODO(#22447): replace this proxy with explicit recall-outcome
+    metadata once the local evaluator is joined into fact metadata. *)
+val is_outcome_positive_for_shared_promotion : category -> bool
 
 (** Historical RFC-0259 external-ref kind. Kept as a closed sum for source
     compatibility; current Memory OS code does not infer or act on it. *)

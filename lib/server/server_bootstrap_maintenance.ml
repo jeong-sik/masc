@@ -177,8 +177,10 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      dead-code-with-a-switch -- an unproven fiber should not run, a proven one
      needs no switch. The noise the #21244 dry-run found (ephemeral boilerplate
      promoted into shared recall) predates the fixes built to stop it: the typed
-     [Ephemeral] category + [is_promotable] gate (#21241) -- the consolidator now
-     structurally skips non-promotable facts -- and the durability-gate
+     [Ephemeral] category + [is_promotable] gate (#21241) plus the stricter
+     [is_outcome_positive_for_shared_promotion] shared-tier proxy -- the
+     consolidator now structurally skips non-promotable and not-yet-outcome-positive
+     facts -- and the durability-gate
      librarian prompt (#21257) that labels coordination boilerplate "ephemeral",
      both merged after that dry-run. Off the keeper hot path: each [interval]s it
      reads each keeper's Tier-1 store and rewrites the shared semantic store

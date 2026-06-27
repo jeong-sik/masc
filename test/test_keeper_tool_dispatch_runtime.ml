@@ -2,6 +2,7 @@ open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KES = Masc.Keeper_tool_shared_runtime
+module KTD = Masc.Keeper_tool_descriptor
 module Workspace = Masc.Workspace
 
 let tool_ok ?(tool_name = "") message =
@@ -56,7 +57,13 @@ let read_file path =
   Fun.protect ~finally:(fun () -> close_in ic) @@ fun () ->
   really_input_string ic (in_channel_length ic)
 
-let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?tool_access () =
+let make_meta
+      ?(name = "keeper-exec-tools")
+      ?(policy_voice_enabled = false)
+      ?tool_access
+      ?(tool_denylist = [])
+      ()
+  =
   let tool_access =
     match tool_access with
     | Some value -> value
@@ -74,6 +81,8 @@ let make_meta ?(name = "keeper-exec-tools") ?(policy_voice_enabled = false) ?too
           ("policy_voice_enabled", `Bool policy_voice_enabled);
           ( "tool_access",
             Json_util.json_string_list tool_access );
+          ( "tool_denylist",
+            Json_util.json_string_list tool_denylist );
         ])
   with
   | Ok meta -> meta
@@ -464,7 +473,188 @@ let test_keeper_tools_list_json_uses_typed_groups () =
   check bool "fs tool grouped" true
     (member "fs" "tool_read_file");
   check bool "memory tool grouped" true
-    (member "memory" "keeper_memory_search")
+    (member "memory" "keeper_memory_search");
+  let descriptor_surface =
+    Yojson.Safe.Util.(member "descriptor_surface" json |> to_list)
+  in
+  let string_member field obj =
+    Yojson.Safe.Util.(member field obj |> to_string)
+  in
+  let list_member_contains field expected obj =
+    json_list_contains expected Yojson.Safe.Util.(member field obj)
+  in
+  let find_descriptor_in descriptor_surface internal_name =
+    match
+      List.find_opt
+        (fun descriptor ->
+           String.equal internal_name (string_member "internal_name" descriptor))
+        descriptor_surface
+    with
+    | Some descriptor -> descriptor
+    | None -> fail ("missing descriptor_surface entry for " ^ internal_name)
+  in
+  let find_descriptor = find_descriptor_in descriptor_surface in
+  let descriptor_for_internal internal_name =
+    match KTD.descriptors_for_internal internal_name with
+    | descriptor :: _ -> descriptor
+    | [] -> fail ("missing registered descriptor for " ^ internal_name)
+  in
+  let execute = find_descriptor "tool_execute" in
+  check string "Execute public alias" "Execute"
+    (string_member "public_name" execute);
+  check string "Execute executor" "shell_ir"
+    (string_member "executor" execute);
+  check bool "Execute active internal name listed" true
+    (list_member_contains "active_names" "tool_execute" execute);
+  check bool "Execute active public name listed" true
+    (list_member_contains "active_names" "Execute" execute);
+  let policy = Yojson.Safe.Util.member "policy" execute in
+  check string "Execute effect domain" "playground_write"
+    (string_member "effect_domain" policy);
+  check bool "Execute policy group omitted" true
+    (Yojson.Safe.Util.member "policy_group" policy = `Null);
+  let schema_shape = Yojson.Safe.Util.member "schema_shape" execute in
+  check bool "Execute schema properties include executable" true
+    (list_member_contains "properties" "executable" schema_shape);
+  check bool "Execute schema properties include pipeline" true
+    (list_member_contains "properties" "pipeline" schema_shape);
+  check bool "Execute schema has no shape errors" true
+    (Yojson.Safe.Util.member "schema_errors" schema_shape = `Null);
+  let examples = Yojson.Safe.Util.(member "examples" execute |> to_list) in
+  let execute_properties =
+    Yojson.Safe.Util.(member "properties" schema_shape |> to_list)
+    |> List.map Yojson.Safe.Util.to_string
+  in
+  List.iter
+    (fun example ->
+       Yojson.Safe.Util.(member "input" example |> to_assoc)
+       |> List.iter (fun (key, _) ->
+         check bool ("example input property is declared: " ^ key) true
+           (List.mem key execute_properties)))
+    examples;
+  let example_with_executable executable =
+    List.exists
+      (fun example ->
+         String.equal
+           executable
+           Yojson.Safe.Util.(member "input" example |> member "executable" |> to_string))
+      examples
+  in
+  check bool "Execute examples include typed gh argv" true
+    (example_with_executable "gh");
+  check bool "Execute examples include typed git argv" true
+    (example_with_executable "git");
+  check bool "Execute examples include search argv" true
+    (example_with_executable "rg");
+  check bool "Execute examples use neutral cwd placeholders" true
+    (List.for_all
+       (fun example ->
+          String.equal
+            "<repository-root>"
+            Yojson.Safe.Util.(member "input" example |> member "cwd" |> to_string))
+       examples);
+  let grep = find_descriptor "tool_search_files" in
+  check bool "non-execute descriptor omits examples field" true
+    (Yojson.Safe.Util.member "examples" grep = `Null);
+  let grep_policy = Yojson.Safe.Util.member "policy" grep in
+  check string "Grep effect domain" "read_only"
+    (string_member "effect_domain" grep_policy);
+  check bool "Grep policy group omitted" true
+    (Yojson.Safe.Util.member "policy_group" grep_policy = `Null);
+  check bool "Grep active internal name listed" true
+    (list_member_contains "active_names" "tool_search_files" grep);
+  let malformed_execute =
+    { (descriptor_for_internal "tool_execute") with
+      KTD.input_schema =
+        `Assoc
+          [ "properties", `String "not-an-object"
+          ; "required", `List [ `String "ok"; `Int 1; `String "  " ]
+          ; "oneOf", `List [ `String "not-an-object"; `Assoc [ "required", `String "bad" ] ]
+          ]
+    }
+  in
+  let malformed_shape =
+    Yojson.Safe.Util.(
+      KTD.discovery_json malformed_execute |> member "schema_shape")
+  in
+  check bool "malformed schema surfaces property error" true
+    (list_member_contains
+       "schema_errors"
+       "properties: expected object, got string"
+       malformed_shape);
+  check bool "malformed schema surfaces required error" true
+    (list_member_contains
+       "schema_errors"
+       "required: expected non-empty string, got int"
+       malformed_shape);
+  check bool "malformed schema surfaces whitespace required error" true
+    (list_member_contains
+       "schema_errors"
+       "required: expected non-empty string, got string"
+       malformed_shape);
+  check bool "malformed schema surfaces oneOf case error" true
+    (list_member_contains
+       "schema_errors"
+       "oneOf[0]: expected object, got string"
+       malformed_shape);
+  check bool "malformed schema surfaces oneOf required-shape error" true
+    (list_member_contains
+       "schema_errors"
+       "oneOf[1].required: expected string array, got string"
+       malformed_shape);
+  let one_of_execute =
+    { (descriptor_for_internal "tool_execute") with
+      KTD.input_schema =
+        `Assoc
+          [ "properties", `Assoc [ "executable", `Assoc []; "pipeline", `Assoc [] ]
+          ; "oneOf"
+          , `List
+              [ `Assoc [ "required", `List [ `String "executable" ] ]
+              ; `Assoc [ "required", `List [] ]
+              ]
+          ]
+    }
+  in
+  let one_of_shape =
+    Yojson.Safe.Util.(KTD.discovery_json one_of_execute |> member "schema_shape")
+  in
+  let one_of_required =
+    Yojson.Safe.Util.(member "one_of_required" one_of_shape |> to_list)
+  in
+  check int "oneOf shape keeps both branches" 2 (List.length one_of_required);
+  (match one_of_required with
+   | [ executable_branch; empty_branch ] ->
+     check bool "oneOf executable branch retained" true
+       (json_list_contains "executable" executable_branch);
+     check int "oneOf empty-required branch retained" 0
+       Yojson.Safe.Util.(empty_branch |> to_list |> List.length)
+   | _ -> fail "expected exactly two oneOf required branches");
+  let empty_shape =
+    Yojson.Safe.Util.(
+      KTD.discovery_json
+        { (descriptor_for_internal "tool_execute") with
+          KTD.input_schema = `Assoc []
+        }
+      |> member "schema_shape")
+  in
+  check int "empty schema has no properties" 0
+    Yojson.Safe.Util.(member "properties" empty_shape |> to_list |> List.length);
+  check int "empty schema has no required names" 0
+    Yojson.Safe.Util.(member "required" empty_shape |> to_list |> List.length);
+  check bool "empty schema has no shape errors" true
+    (Yojson.Safe.Util.member "schema_errors" empty_shape = `Null);
+  let denied_meta = make_meta ~tool_denylist:[ "tool_search_files" ] () in
+  let denied_json =
+    Yojson.Safe.from_string (KES.keeper_tools_list_json ~meta:denied_meta)
+  in
+  let denied_surface =
+    Yojson.Safe.Util.(member "descriptor_surface" denied_json |> to_list)
+  in
+  check bool "denied grep descriptor omitted from discovery surface" true
+    (List.for_all
+       (fun descriptor ->
+          not (String.equal "tool_search_files" (string_member "internal_name" descriptor)))
+       denied_surface)
 
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"

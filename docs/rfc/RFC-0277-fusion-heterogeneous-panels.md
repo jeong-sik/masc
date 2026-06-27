@@ -79,6 +79,7 @@ web_tools = false
 panel = ["careful1"]
 web_tools = true
 max_tool_calls_per_panel = 4
+max_output_tokens_per_panel = 4096
 panel_timeout_s = 180.0
 ```
 
@@ -112,6 +113,7 @@ RFC-0252 §6은 비용을 예측 가능하게 통제하려고 `per_hour_budget`(
 - `panel_outer_timeout_of groups` = 그룹 timeout 중 max (단일이면 그 그룹 timeout = `panel_timeout_s`).
 - `judge_web_tools_of ~req_web_tools groups` = `req || (어느 그룹이든 web_tools)` (단일이면 `req || group.web_tools` = 오늘).
 - `judge_tool_budget_of groups` = 0(무제한)이 흡수자, 그 외 그룹 max (단일이면 그 그룹 값 = 오늘).
+- `max_output_tokens_per_panel`은 group-local이다. 심판 출력 예산은 `judge_max_output_tokens`와 `[[...judges]].max_output_tokens`가 소유하므로, 그룹별 패널 예산이 심판 호출에 암묵 전파되지 않는다.
 
 검증: `test/fusion_core/test_fusion.ml`의 `config/panels_golden`(flat == 단일 그룹 `equal_preset`)과 `judge_args/single_group_identity`(derive 함수 == 오늘 매핑)가 이 불변식을 핀한다.
 

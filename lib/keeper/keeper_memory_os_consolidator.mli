@@ -1,12 +1,14 @@
 (** Keeper_memory_os_consolidator — RFC-0244 Tier 2 cross-keeper consolidation.
 
     Reads per-keeper Tier-1 stores read-only and promotes claims corroborated by
-    [>= min_keepers] distinct keepers on a [Keeper_memory_os_types.is_promotable]
-    category into the shared Tier-2 store
-    ([Keeper_memory_os_types.shared_store_id]). Additive: it never mutates a
-    keeper's own store. Pure and deterministic — [promote_facts] is a function of
-    its inputs, emitted in normalized-claim order. RFC-0247 removed the confidence
-    floor and the noisy-OR confidence aggregation: corroboration is structural. *)
+    [>= min_keepers] distinct keepers only when the category is both promotable
+    and outcome-positive ([Validated_approach] or [Lesson]) and the claim kind is
+    objective ([Durable_knowledge] or legacy [None]). Promoted facts are written
+    into the shared Tier-2 store ([Keeper_memory_os_types.shared_store_id]).
+    Additive: it never mutates a keeper's own store. Pure and deterministic —
+    [promote_facts] is a function of its inputs, emitted in normalized-claim
+    order. RFC-0247 removed the confidence floor and the noisy-OR confidence
+    aggregation: corroboration is structural. *)
 
 open Keeper_memory_os_types
 

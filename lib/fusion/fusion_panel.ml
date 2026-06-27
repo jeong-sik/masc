@@ -20,7 +20,9 @@ let outcome_of_result ~(panelist : string) ~(model : string)
     let answer = Fusion_oas.answer_text resp in
     if String.length (String.trim answer) = 0 then
       Fusion_types.Failed
-        { failed_model = panelist; reason = Fusion_types.Empty_response }
+        { failed_model = panelist
+        ; reason = Fusion_types.Empty_response (Fusion_oas.empty_response_detail resp)
+        }
     else
       Fusion_types.Answered
         { model = panelist; answer; usage = Fusion_oas.usage_of resp }
@@ -51,6 +53,7 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
             match
               Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
                 ~max_tool_calls:g.max_tool_calls ~timeout_s:g.timeout_s
+                ?max_tokens:g.max_output_tokens
                 ~name:panelist model
             with
             | Ok agent -> ((agent, panelist, model) :: oks, fails)

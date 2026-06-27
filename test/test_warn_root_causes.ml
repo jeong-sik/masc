@@ -270,14 +270,14 @@ let test_concurrent_atomic_writes_never_empty () =
 let test_keeper_mainline_failures_log_at_error () =
   check bool "missing checkpoint after run logs at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_finalize_response.ml"
-       {|"keeper:%s runtime=%s missing OAS checkpoint after run"|});
+       {|"runtime=%s missing OAS checkpoint after run"|});
   check bool "memory write failures log at ERROR" true
     (file_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
-       {|"keeper:%s memory_write failed: %s"|});
+       {|"memory_write failed: %s"|});
   check bool "memory write failures are no longer WARN" true
     (file_not_contains_pattern "lib/keeper/keeper_agent_run_post_turn_memory.ml"
        {|Log.Keeper.warn
-               "keeper:%s memory_write failed: %s"|});
+               "memory_write failed: %s"|});
   check bool "stale episode creation failure string is absent" true
     (file_not_contains_pattern "lib/keeper/keeper_agent_run.ml"
        {|episode_create failed|})

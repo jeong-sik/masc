@@ -280,6 +280,14 @@ let buffer_event event_id event_str =
     run_test_hook buffer_commit_test_hook;
     let timestamp = Time_compat.now () in
     let next = (event_id, event_str, timestamp) :: lst in
+    (* [buffer_event] runs on the broadcast hot path. [List.take] always
+       allocates a fresh list up to [max_buffer_size], so calling it
+       unconditionally pays an O(max_buffer_size) copy on every broadcast
+       even when the buffer is well below the cap (startup, after cleanup,
+       low-traffic periods). [List.compare_length_with] only walks the list
+       and short-circuits at the threshold with no allocation, so gate the
+       [take] copy behind it and reuse the existing list on the under-cap
+       path. *)
     let trimmed =
       if List.compare_length_with next max_buffer_size > 0 then
         take max_buffer_size next
@@ -304,7 +312,7 @@ let get_events_after last_id =
      The previous shape was [List.rev lst |> fold prepend |> List.rev],
      which walked the buffer three times to produce the same result.
      Each SSE replay (client reconnect with [Last-Event-Id]) saves
-     2 × O(buffer) over the old form; max_buffer_size=100. *)
+     2 × O(buffer) over the old form; max_buffer_size=1000. *)
   List.fold_left (fun acc (id, ev, _ts) ->
     if id > last_id then ev :: acc else acc
   ) [] lst

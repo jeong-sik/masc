@@ -365,6 +365,8 @@ let composite_execution_completion_unsatisfied_reason execution =
 let composite_execution_budget_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
   | Some
+      (* TEL-OK: pure dashboard classifier; maps typed receipt labels to a
+         display reason without performing an action. *)
       ( Completion_contract_result.Unknown
       | Completion_contract_result.Not_dispatched
       | Completion_contract_result.Violated

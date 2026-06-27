@@ -38,7 +38,7 @@ let blocker_class_of_sdk_error (err : Agent_sdk.Error.sdk_error) : blocker_class
   | Some (Keeper_turn_driver.Runtime_exhausted { reason; _ }) ->
     Some (Runtime_exhausted (blocker_reason_of_turn_driver_reason reason))
   | Some (Keeper_turn_driver.Resumable_cli_session _) -> None
-  | Some (Keeper_turn_driver.Accept_rejected _) -> None
+  | Some (Keeper_turn_driver.Accept_rejected _) -> Some Completion_contract_violation
   | Some (Keeper_turn_driver.Admission_queue_timeout _) ->
     Some Admission_queue_wait_timeout
   | Some (Keeper_turn_driver.Admission_queue_rejected _) -> None

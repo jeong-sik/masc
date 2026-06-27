@@ -83,7 +83,11 @@ let update_metrics_from_failure (meta : keeper_meta) ~(latency_ms : int)
             match Keeper_turn_driver.summary_of_masc_internal_error err with
             | Some summary -> summary
             | None -> reason)
-        | _ -> reason)
+        | Some err ->
+            Option.value
+              ~default:reason
+              (Keeper_turn_driver.summary_of_masc_internal_error err)
+        | None -> reason)
     | None -> reason
   in
   let failure_counts_for_proactive_backoff =

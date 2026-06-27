@@ -13,3 +13,8 @@ val clear_if_recovered
   -> previous_streak:int
   -> was_latched:bool
   -> Keeper_meta_contract.keeper_meta
+
+val clear_for_operator_resume
+  :  base_path:string
+  -> Keeper_meta_contract.keeper_meta
+  -> Keeper_meta_contract.keeper_meta

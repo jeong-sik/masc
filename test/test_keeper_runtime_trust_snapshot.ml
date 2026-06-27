@@ -35,6 +35,37 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 ;;
 
+let runtime_toml =
+  {|
+version = 1
+
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+max-concurrent = 1
+|}
+;;
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "runtime_trust_snapshot_runtime_" ".toml" in
+  write_file path runtime_toml;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+;;
+
 let with_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -249,6 +280,72 @@ let test_unknown_completion_contract_result_stays_visible () =
           |> to_string))
 ;;
 
+let test_completion_blocker_supersedes_passive_only_receipt () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       init_runtime_default_for_tests ();
+       let keeper_name = "runtime-trust-accept-empty" in
+       let blocker_detail =
+         "Provider returned an empty assistant turn for runtime runpod_fable5.gemma4-coder-fable5; no text or tool progress was produced."
+       in
+       let blocker =
+         Masc.Keeper_meta_contract.blocker_info_of_class
+           ~detail:blocker_detail
+           Masc.Keeper_meta_contract.Completion_contract_violation
+       in
+       let meta =
+         make_meta keeper_name
+         |> Masc.Keeper_meta_contract.map_runtime (fun rt ->
+           { rt with last_blocker = Some blocker })
+       in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "operator_disposition", `String "pass"
+             ; "operator_disposition_reason", `String "healthy"
+             ; "terminal_reason_code", `String "completed"
+             ; "completion_contract_result", `String "passive_only"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "runtime blocker class"
+         "completion_contract_violation"
+         (snapshot
+          |> member "runtime_blockers"
+          |> member "runtime_blocker_class"
+          |> to_string);
+       Alcotest.(check string)
+         "passive-only receipt does not become display reason"
+         "fsm_invariant"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check string)
+         "attention follows runtime blocker"
+         "runtime_blocked"
+         (snapshot |> member "attention_reason" |> to_string);
+       Alcotest.(check bool)
+         "runtime blocker summary names empty provider turn"
+         true
+         (String.equal
+            blocker_detail
+            (snapshot
+             |> member "runtime_blockers"
+             |> member "runtime_blocker_summary"
+             |> to_string)))
+;;
+
 let test_model_observability_uses_runtime_trust_selected_model () =
   let runtime_trust =
     `Assoc
@@ -350,6 +447,10 @@ let () =
             "unknown completion-contract result remains visible"
             `Quick
             test_unknown_completion_contract_result_stays_visible
+        ; Alcotest.test_case
+            "runtime blocker supersedes passive-only receipt"
+            `Quick
+            test_completion_blocker_supersedes_passive_only_receipt
         ; Alcotest.test_case
             "status model observability reuses runtime-trust execution selected model"
             `Quick

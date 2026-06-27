@@ -504,6 +504,22 @@ let summarize_list ?(empty = "none") values =
   | [] -> empty
   | _ -> String.concat ", " values
 
+let short_accept_rejection_reason reason =
+  String_util.utf8_safe ~max_bytes:180 ~suffix:"..." (String.trim reason)
+  |> String_util.to_string
+
+let nonempty_or_unknown value =
+  let value = String.trim value in
+  if String.equal value "" then "unknown" else value
+
+let accept_rejection_kind_display = function
+  | Some kind -> accept_rejection_kind_to_string kind
+  | None -> "unknown"
+
+let accept_response_shape_display = function
+  | Some shape -> accept_response_shape_to_string shape
+  | None -> "unknown"
+
 let summary_of_masc_internal_error = function
   | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
       let retry_after_suffix =
@@ -549,9 +565,62 @@ let summary_of_masc_internal_error = function
          requested_max_tokens
          provider_ceiling
          reason)
+  | Accept_rejected
+      {
+        scope;
+        reason_kind = Some Accept_no_usable_progress;
+        response_shape = Some Accept_response_empty;
+        last_tool_effect = None;
+        any_mutating_tool = None;
+        tool_effects_seen = [];
+        _;
+      } ->
+    Some
+      (Printf.sprintf
+         "Provider returned an empty assistant turn for runtime %s; no text or tool progress was produced."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
+      {
+        scope;
+        reason_kind = Some Accept_no_usable_progress;
+        response_shape = Some Accept_response_thinking_only;
+        last_tool_effect = Some Tool_effect_read_only;
+        any_mutating_tool = Some false;
+        tool_effects_seen;
+        _;
+      }
+    when tool_effects_seen <> [] ->
+    Some
+      (Printf.sprintf
+         "Provider produced only read-only tool activity for runtime %s; no mutating keeper progress was accepted."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
+      {
+        scope;
+        reason_kind = Some Accept_predicate_rejected;
+        response_shape;
+        reason;
+        _;
+      } ->
+    let shape = accept_response_shape_display response_shape in
+    Some
+      (Printf.sprintf
+         "Provider response for runtime %s was rejected by the accept predicate; response_shape=%s; reason=%s"
+         (nonempty_or_unknown scope)
+         shape
+         (short_accept_rejection_reason reason))
+  | Accept_rejected { scope; reason_kind; response_shape; reason; _ } ->
+    let reason_kind = accept_rejection_kind_display reason_kind in
+    let response_shape = accept_response_shape_display response_shape in
+    Some
+      (Printf.sprintf
+         "Provider response for runtime %s was rejected by the keeper accept contract; reason_kind=%s; response_shape=%s; reason=%s"
+         (nonempty_or_unknown scope)
+         reason_kind
+         response_shape
+         (short_accept_rejection_reason reason))
   | Runtime_exhausted _
   | Resumable_cli_session _
-  | Accept_rejected _
   | Admission_queue_timeout _
   | Admission_queue_rejected _
   | Turn_timeout _
@@ -584,7 +653,8 @@ let runtime_id_of_masc_internal_error = function
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
       else runtime_id
-  | Accept_rejected _
+  | Accept_rejected { scope; _ } ->
+      nonempty_or_unknown scope
   | Admission_queue_rejected _
   | Turn_timeout _
   | Provider_timeout _

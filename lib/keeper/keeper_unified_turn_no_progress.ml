@@ -14,7 +14,7 @@ let recovery_stimulus ~now ~keeper_name =
 let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   let detail =
     Printf.sprintf
-      "no_progress loop detected: streak=%d threshold=%d; manual pause applied"
+      "no_progress loop detected: streak=%d threshold=%d; keeper paused until operator resume clears the no-progress latch"
       streak
       threshold
   in
@@ -119,4 +119,37 @@ let clear_if_recovered ~(config : Workspace.config) meta ~previous_streak ~was_l
   | Some { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop; _ } ->
     Keeper_meta_contract.map_runtime (fun rt -> { rt with last_blocker = None }) meta
   | _ -> meta
+;;
+
+let clear_for_operator_resume ~base_path meta =
+  let keeper_name = meta.Keeper_meta_contract.name in
+  let was_latched = Keeper_no_progress_loop_detector.is_latched ~keeper_name in
+  Keeper_no_progress_loop_detector.reset ~keeper_name;
+  let cleared_failure_reason =
+    match Keeper_registry.get ~base_path keeper_name with
+    | Some { Keeper_registry.last_failure_reason =
+               Some (Keeper_registry.Provider_runtime_error { code; _ })
+           ; _
+           }
+      when String.equal code "no_progress_loop" ->
+      Keeper_registry.set_failure_reason ~base_path keeper_name None;
+      true
+    | _ -> false
+  in
+  let cleared_meta_blocker =
+    match meta.runtime.last_blocker with
+    | Some { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop; _ } ->
+      true
+    | _ -> false
+  in
+  if was_latched || cleared_failure_reason || cleared_meta_blocker then
+    Log.Keeper.info
+      "%s: operator resume cleared no_progress loop latch/blocker (latched=%b failure_reason=%b meta_blocker=%b)"
+      keeper_name
+      was_latched
+      cleared_failure_reason
+      cleared_meta_blocker;
+  if cleared_meta_blocker then
+    Keeper_meta_contract.map_runtime (fun rt -> { rt with last_blocker = None }) meta
+  else meta
 ;;

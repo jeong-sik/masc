@@ -186,6 +186,10 @@ let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
     latest_receipt =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
   | None -> false
+  | Some "completion_contract_violation"
+    when Option.is_some
+           (Option.bind latest_receipt receipt_contract_attention_reason) ->
+      true
   | Some _ -> (
       match latest_receipt with
       | None -> true

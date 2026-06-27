@@ -254,8 +254,9 @@ let available_actions : available_action list =
     make_available_action ~action_type:"keeper_probe" ~tool_name:"masc_keeper_status"
       ~target_type:"keeper"
       ~description:"Immediate keeper diagnostic snapshot.";
-    make_available_action ~action_type:"keeper_recover" ~tool_name:"masc_keeper_recover"
-      ~target_type:"keeper"
+    make_available_action
+      ~action_type:Operator_action_constants.keeper_recover
+      ~tool_name:"masc_keeper_recover" ~target_type:"keeper"
       ~description:"Safe down/up recovery for stale/degraded keeper.";
   ]
 

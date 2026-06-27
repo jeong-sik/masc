@@ -107,7 +107,7 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
 const TRUST_RUNTIME_FAILURE_ALIASES: ReadonlySet<string> = new Set([
   'completion_contract_violation',
   'fsm_invariant',
-  'no_capable_provider',
+  'runtime_exhausted',
   'sandbox_violation',
   'critical_block',
 ])
@@ -129,6 +129,9 @@ export const ATTENTION_COMPLETION_CONTRACT_RESULTS = [
 ] as const
 export type AttentionCompletionContractResult = typeof ATTENTION_COMPLETION_CONTRACT_RESULTS[number]
 
+const ATTENTION_COMPLETION_CONTRACT_RESULT_SET: ReadonlySet<string> =
+  new Set(ATTENTION_COMPLETION_CONTRACT_RESULTS)
+
 const COMPLETION_CONTRACT_ATTENTION_REASON_LABELS: Record<AttentionCompletionContractResult, string> = {
   violated: '완료 계약 위반',
   claim_only_after_owned_task: '작업 소유 없는 claim',
@@ -143,7 +146,7 @@ const COMPLETION_CONTRACT_ATTENTION_REASON_LABELS: Record<AttentionCompletionCon
 export function isAttentionCompletionContractResult(
   s: string,
 ): s is AttentionCompletionContractResult {
-  return (ATTENTION_COMPLETION_CONTRACT_RESULTS as readonly string[]).includes(s)
+  return ATTENTION_COMPLETION_CONTRACT_RESULT_SET.has(s)
 }
 
 export function completionContractAttentionReasonLabel(reason: string): string | null {

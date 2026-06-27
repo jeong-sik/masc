@@ -5,6 +5,11 @@ let yojson_testable =
     (fun fmt json -> Format.fprintf fmt "%s" (Yojson.Safe.to_string json))
     ( = )
 
+let dropped_reason_testable =
+  Alcotest.testable
+    (fun fmt reason -> Format.pp_print_string fmt (B.dropped_http_url_reason_to_string reason))
+    ( = )
+
 let blocks_to_json_list blocks =
   match B.blocks_to_yojson blocks with
   | `List items -> items
@@ -258,6 +263,32 @@ let test_query_string_stripped_for_extension_check () =
     [ `Assoc [ ("t", `String "image"); ("src", `String "https://example.com/a.png?w=100") ] ]
     (blocks_to_json_list blocks)
 
+let test_redacted_http_url_opt_reports_drop_reason () =
+  let drops = ref [] in
+  let on_drop reason = drops := reason :: !drops in
+  Alcotest.(check (option string))
+    "http accepted"
+    (Some "https://example.com/a.png")
+    (B.redacted_http_url_opt ~on_drop "https://example.com/a.png");
+  Alcotest.(check (list dropped_reason_testable)) "no drop" [] !drops;
+  Alcotest.(check (option string))
+    "ftp dropped"
+    None
+    (B.redacted_http_url_opt ~on_drop "ftp://example.com/a.png");
+  Alcotest.(check (list dropped_reason_testable))
+    "unsupported scheme recorded"
+    [ B.Unsupported_scheme "ftp" ]
+    !drops;
+  drops := [];
+  Alcotest.(check (option string))
+    "missing scheme dropped"
+    None
+    (B.redacted_http_url_opt ~on_drop "example.com/a.png");
+  Alcotest.(check (list dropped_reason_testable))
+    "missing scheme recorded"
+    [ B.Missing_scheme ]
+    !drops
+
 let test_blocks_of_yojson_rejects_malformed () =
   Alcotest.(check bool) "not a list" true (B.blocks_of_yojson (`String "x") = None);
   Alcotest.(check bool) "empty list" true (B.blocks_of_yojson (`List []) = None);
@@ -335,6 +366,8 @@ let () =
             test_case_insensitive_standalone_url;
           Alcotest.test_case "query string stripped for extension check" `Quick
             test_query_string_stripped_for_extension_check;
+          Alcotest.test_case "redacted_http_url_opt reports drop reason" `Quick
+            test_redacted_http_url_opt_reports_drop_reason;
         ] );
       ( "serialization",
         [

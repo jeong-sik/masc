@@ -715,7 +715,7 @@ let blocked_keeper_operator_action = function
       | Keeper_state_machine.Dead ) ->
       List.find_opt
         (fun (action : Operator_pending_confirm.available_action) ->
-          String.equal action.action_type "keeper_recover")
+          String.equal action.action_type Operator_action_constants.keeper_recover)
         Operator_pending_confirm.available_actions
   | Durable_paused_autoboot_enabled
   | Meta_read_error

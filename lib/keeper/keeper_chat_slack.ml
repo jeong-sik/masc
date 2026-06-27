@@ -52,13 +52,12 @@ let escape_mrkdwn_text s =
 let truncate_block_text s = truncate_to_limit s slack_block_text_limit
 
 let redacted_http_url_opt url =
-  let url = redact url in
-  try
-    match Uri.scheme (Uri.of_string url) with
-    | Some "http" | Some "https" -> Some url
-    | _ -> None
-  with
-  | _ -> None
+  Keeper_chat_blocks.redacted_http_url_opt
+    ~on_drop:(fun reason ->
+      Log.Keeper.warn
+        "keeper_chat_slack: dropped non-http(s) chat block URL reason=%s"
+        (Keeper_chat_blocks.dropped_http_url_reason_to_string reason))
+    url
 
 let strip_trailing_slash s =
   let len = String.length s in

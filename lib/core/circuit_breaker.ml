@@ -321,13 +321,13 @@ let global () =
   match Atomic.get global_cache with
   | Some t -> t
   | None ->
+      let candidate = create_default () in
       Mutex.protect global_mu (fun () ->
         match Atomic.get global_cache with
         | Some t -> t
         | None ->
-            let t = create_default () in
-            Atomic.set global_cache (Some t);
-            t)
+            Atomic.set global_cache (Some candidate);
+            candidate)
 
 let check_global ~agent_id = check (global ()) ~agent_id
 let record_failure_global ~agent_id ~reason = record_failure (global ()) ~agent_id ~reason

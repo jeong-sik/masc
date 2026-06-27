@@ -112,6 +112,16 @@ type chat_block =
   | Link of link_block
   | Fusion of fusion_block
 
+type dropped_http_url_reason =
+  | Missing_scheme
+  | Unsupported_scheme of string
+  | Invalid_url
+
+val dropped_http_url_reason_to_string : dropped_http_url_reason -> string
+
+val redacted_http_url_opt :
+  ?on_drop:(dropped_http_url_reason -> unit) -> string -> string option
+
 val parse_text_to_blocks : string -> chat_block list
 val block_to_yojson : chat_block -> Yojson.Safe.t
 val blocks_to_yojson : chat_block list -> Yojson.Safe.t

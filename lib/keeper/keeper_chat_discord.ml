@@ -55,13 +55,12 @@ let truncate content =
   Discord_rest_client.truncate_to_limit (Observability_redact.redact_text content)
 
 let redacted_http_url_opt url =
-  let url = Observability_redact.redact_text url in
-  try
-    match Uri.scheme (Uri.of_string url) with
-    | Some "http" | Some "https" -> Some url
-    | _ -> None
-  with
-  | _ -> None
+  Keeper_chat_blocks.redacted_http_url_opt
+    ~on_drop:(fun reason ->
+      Log.Keeper.warn
+        "keeper_chat_discord: dropped non-http(s) chat block URL reason=%s"
+        (Keeper_chat_blocks.dropped_http_url_reason_to_string reason))
+    url
 
 let is_ascii_space = function
   | ' ' | '\n' | '\r' | '\t' -> true

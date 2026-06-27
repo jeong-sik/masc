@@ -48,6 +48,9 @@ let normalize_response_text_for_finalization
   match Keeper_tool_response.normalize_response_text ~text ~tool_names () with
   | Ok response_text -> Ok response_text
   | Error _ ->
+    (* Finalization intentionally exposes the higher-level accept-rejected
+       error with tool context and raw runtime response. The normalizer error
+       only says the response text could not be canonicalized. *)
     let last_tool_context =
       Keeper_turn_driver_try_provider.accept_rejection_context_of_run_result
         ~initial_messages

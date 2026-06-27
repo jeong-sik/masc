@@ -228,7 +228,7 @@ let test_budget_not_dispatched_receipt_marks_attention () =
          (snapshot |> member "disposition" |> to_string);
        Alcotest.(check string)
          "display reason"
-         "not_dispatched"
+         "completion_contract_result:not_dispatched"
          (snapshot |> member "disposition_reason" |> to_string);
        Alcotest.(check bool)
          "needs attention"

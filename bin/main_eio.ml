@@ -953,6 +953,57 @@ let init_cmd =
   let info = Cmd.info "init" ~doc in
   Cmd.v info Term.(const init_cmd_exit $ base_path $ init_force)
 
+let memory_os_gc_keeper =
+  let doc =
+    "Only dry-run the given keeper id. Repeatable. When omitted, all existing \
+     non-shared keeper fact stores are scanned."
+  in
+  Arg.(value & opt_all string [] & info ["keeper"] ~docv:"KEEPER" ~doc)
+
+let memory_os_gc_json =
+  let doc = "Emit machine-readable JSON instead of text output" in
+  Arg.(value & flag & info ["json"] ~doc)
+
+let memory_os_gc_dry_run_cmd_exit base_path keeper_ids as_json =
+  let base_path = Env_config.normalize_masc_base_path_input base_path in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
+  let report =
+    Eio_main.run
+    @@ fun env ->
+    let now = Eio.Time.now (Eio.Stdenv.clock env) in
+    match keeper_ids with
+    | [] ->
+      Masc.Keeper_memory_os_gc_dry_run_report.run_for_keepers_dir
+        ~keepers_dir
+        ~now
+        ()
+    | ids ->
+      Masc.Keeper_memory_os_gc_dry_run_report.run_for_keepers_dir
+        ~keepers_dir
+        ~keeper_ids:ids
+        ~now
+        ()
+  in
+  if as_json
+  then
+    print_endline
+      (Yojson.Safe.pretty_to_string
+         (Masc.Keeper_memory_os_gc_dry_run_report.to_json report))
+  else
+    print_string (Masc.Keeper_memory_os_gc_dry_run_report.render_text report);
+  if report.error_count > 0 then 1 else 0
+
+let memory_os_gc_dry_run_cmd =
+  let doc =
+    "Run the Memory OS fact-store GC in dry-run mode and print the TTL/dedup \
+     report without rewriting stores."
+  in
+  let info = Cmd.info "memory-os-gc-dry-run" ~doc in
+  Cmd.v info
+    Term.(
+      const memory_os_gc_dry_run_cmd_exit $ base_path $ memory_os_gc_keeper
+      $ memory_os_gc_json)
+
 let setup_gc () =
   (* OCaml 5 defaults to a 2 MiB minor heap per active domain.  Sampling
      main_eio.exe showed heavy stop-the-world minor-GC pressure from JSON
@@ -973,7 +1024,7 @@ let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
-    info [ init_cmd; login_cmd ]
+    info [ init_cmd; login_cmd; memory_os_gc_dry_run_cmd ]
 
 let () =
   setup_gc ();

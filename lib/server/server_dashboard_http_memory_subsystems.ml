@@ -413,7 +413,11 @@ let recall_quality_summary_json ~sample_limit ~top_key_limit summary =
     ]
 ;;
 
-let compute_memory_quality_dashboard_json ~config ~sample_limit ~top_key_limit =
+let compute_memory_quality_dashboard_json
+      ~(config : Workspace_utils.config)
+      ~sample_limit
+      ~top_key_limit
+  =
   match load_recall_quality_records ~config ~sample_limit with
   | Ok rows ->
     rows
@@ -424,7 +428,11 @@ let compute_memory_quality_dashboard_json ~config ~sample_limit ~top_key_limit =
     |> recall_quality_summary_json ~sample_limit ~top_key_limit
 ;;
 
-let memory_quality_dashboard_json ~config ~sample_limit ~top_key_limit =
+let memory_quality_dashboard_json
+      ~(config : Workspace_utils.config)
+      ~sample_limit
+      ~top_key_limit
+  =
   (* NDT-OK: wall-clock read only gates the dashboard quality cache TTL. *)
   let now = Unix.gettimeofday () in
   let cache_matches = function

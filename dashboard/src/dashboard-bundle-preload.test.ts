@@ -14,8 +14,12 @@ type ManifestEntry = {
 const outDirs: string[] = []
 
 function modulePreloads(html: string): string[] {
-  return [...html.matchAll(/<link[^>]+rel=["']modulepreload["'][^>]+href=["']([^"']+)["'][^>]*>/gi)]
-    .flatMap(match => match[1] ? [match[1]] : [])
+  const template = document.createElement('template')
+  template.innerHTML = html
+  return [...template.content.querySelectorAll('link[rel~="modulepreload"]')].flatMap(link => {
+    const href = link.getAttribute('href')
+    return href ? [href] : []
+  })
 }
 
 function manifestEntriesByName(
@@ -70,4 +74,18 @@ describe('dashboard production bundle preloads', () => {
     const preloads = modulePreloads(html)
     expect(preloads).toEqual([dashboardHrefForManifestEntry(vendorEntry)])
   }, 120_000)
+
+  it('reads modulepreloads from parsed link attributes', () => {
+    const html = [
+      '<link href=/dashboard/assets/mermaid.js rel=modulepreload>',
+      '<script type="module" src="/dashboard/assets/index.js"></script>',
+      '<link rel="stylesheet" href="/dashboard/assets/index.css">',
+      '<link crossorigin rel="modulepreload" href="/dashboard/assets/vendor.js">',
+    ].join('')
+
+    expect(modulePreloads(html)).toEqual([
+      '/dashboard/assets/mermaid.js',
+      '/dashboard/assets/vendor.js',
+    ])
+  })
 })

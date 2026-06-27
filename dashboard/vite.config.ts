@@ -1,11 +1,10 @@
-import { defineConfig, type Plugin } from 'vite'
+import { defineConfig, type HtmlTagDescriptor, type Plugin } from 'vite'
 import preact from '@preact/preset-vite'
 import solid from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
 
 const dashboardBasePath = '/dashboard/'
-const dashboardEntryHtml = 'index.html'
 const dashboardVendorChunkName = 'vendor'
 
 function normalizeModuleId(id: string): string {
@@ -53,45 +52,49 @@ function dashboardAssetHref(fileName: string): string {
   return `${dashboardBasePath}${fileName}`
 }
 
-function htmlAttributeValue(tag: string, attributeName: string): string | null {
-  const match = tag.match(new RegExp(`\\s${attributeName}\\s*=\\s*(["'])(.*?)\\1`, 'i'))
-  return match?.[2] ?? null
-}
-
-function filterGeneratedModulePreloads(html: string, allowedHrefs: ReadonlySet<string>): string {
-  return html.replace(/<link\b[^>]*>/gi, tag => {
-    if (htmlAttributeValue(tag, 'rel') !== 'modulepreload') return tag
-    const href = htmlAttributeValue(tag, 'href')
-    return href && allowedHrefs.has(href) ? tag : ''
-  })
+function dashboardVendorPreloadTag(fileName: string): HtmlTagDescriptor {
+  return {
+    tag: 'link',
+    attrs: {
+      crossorigin: '',
+      href: dashboardAssetHref(fileName),
+      rel: 'modulepreload',
+    },
+    injectTo: 'head',
+  }
 }
 
 function dashboardModulePreloadContractPlugin(): Plugin {
   return {
+    apply: 'build',
     name: 'masc-dashboard-modulepreload-contract',
     enforce: 'post',
-    generateBundle(_options, bundle) {
-      const allowedPreloadHrefs = new Set<string>()
-      for (const output of Object.values(bundle)) {
-        if (output.type === 'chunk' && output.name === dashboardVendorChunkName) {
-          allowedPreloadHrefs.add(dashboardAssetHref(output.fileName))
+    transformIndexHtml: {
+      order: 'post',
+      handler(_html, ctx) {
+        const bundle = ctx.bundle
+        if (!bundle) {
+          this.error('Expected Vite to provide the dashboard output bundle while transforming index.html.')
         }
-      }
 
-      if (allowedPreloadHrefs.size !== 1) {
-        this.error(`Expected exactly one ${dashboardVendorChunkName} chunk for dashboard HTML preloads.`)
-      }
+        const vendorChunkFiles: string[] = []
+        for (const output of Object.values(bundle)) {
+          if (output.type === 'chunk' && output.name === dashboardVendorChunkName) {
+            vendorChunkFiles.push(output.fileName)
+          }
+        }
 
-      const htmlAsset = bundle[dashboardEntryHtml]
-      if (!htmlAsset || htmlAsset.type !== 'asset') {
-        this.error(`Expected Vite to emit ${dashboardEntryHtml}.`)
-      }
+        if (vendorChunkFiles.length !== 1) {
+          this.error(`Expected exactly one ${dashboardVendorChunkName} chunk for dashboard HTML preloads.`)
+        }
 
-      const html =
-        typeof htmlAsset.source === 'string'
-          ? htmlAsset.source
-          : Buffer.from(htmlAsset.source).toString('utf8')
-      htmlAsset.source = filterGeneratedModulePreloads(html, allowedPreloadHrefs)
+        const vendorChunkFile = vendorChunkFiles[0]
+        if (!vendorChunkFile) {
+          this.error(`Expected a file name for the ${dashboardVendorChunkName} chunk.`)
+        }
+
+        return [dashboardVendorPreloadTag(vendorChunkFile)]
+      },
     },
   }
 }
@@ -145,6 +148,12 @@ export default defineConfig(({ command }) => {
       // copy step) from ~30 MB to ~7.3 MB without losing debug coverage.
       sourcemap: 'hidden',
       modulePreload: {
+        // Vite's automatic HTML preloads are all-or-nothing here; the
+        // build hook below injects the single manifest-derived vendor tag.
+        resolveDependencies(_url, deps, { hostType }) {
+          if (hostType === 'html') return []
+          return deps
+        },
         // MASC dashboard targets the operator's modern browser runtime.
         polyfill: false,
       },

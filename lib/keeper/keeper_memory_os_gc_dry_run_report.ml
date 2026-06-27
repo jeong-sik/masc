@@ -1,5 +1,10 @@
 (** Read-only operator report for Memory OS fact-store GC dry-runs. *)
 
+type keeper_error =
+  | Missing_fact_store of { facts_path : string }
+  | Corrupt_fact_store of { message : string }
+  | Fact_store_access_error of { message : string }
+
 type keeper_result =
   | Keeper_ok of
       { keeper_id : string
@@ -10,7 +15,7 @@ type keeper_result =
       }
   | Keeper_error of
       { keeper_id : string
-      ; message : string
+      ; error : keeper_error
       }
 
 type t =
@@ -33,10 +38,25 @@ let unique_sorted xs =
 
 let fact_store_missing_error ~keepers_dir ~keeper_id =
   let path = Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id in
-  Keeper_error
-    { keeper_id
-    ; message = Printf.sprintf "fact store not found: %s" path
-    }
+  Keeper_error { keeper_id; error = Missing_fact_store { facts_path = path } }
+;;
+
+let access_error_message = function
+  | Sys_error message -> Some message
+  | Unix.Unix_error (error, fn, arg) ->
+    Some (Printf.sprintf "%s(%s): %s" fn arg (Unix.error_message error))
+  | _ -> None
+;;
+
+let keeper_error_message = function
+  | Missing_fact_store { facts_path } -> Printf.sprintf "fact store not found: %s" facts_path
+  | Corrupt_fact_store { message } | Fact_store_access_error { message } -> message
+;;
+
+let keeper_error_code = function
+  | Missing_fact_store _ -> "fact_store_missing"
+  | Corrupt_fact_store _ -> "fact_store_corrupt"
+  | Fact_store_access_error _ -> "fact_store_access_error"
 ;;
 
 let run_one ~keepers_dir ~explicit ~keeper_id ~now =
@@ -64,7 +84,12 @@ let run_one ~keepers_dir ~explicit ~keeper_id ~now =
         }
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn -> Keeper_error { keeper_id; message = Printexc.to_string exn })
+    | Keeper_memory_os_gc.Fact_store_corrupt message ->
+      Keeper_error { keeper_id; error = Corrupt_fact_store { message } }
+    | exn ->
+      (match access_error_message exn with
+       | Some message -> Keeper_error { keeper_id; error = Fact_store_access_error { message } }
+       | None -> raise exn))
 ;;
 
 let run_for_keepers_dir ~keepers_dir ?keeper_ids ~now () =
@@ -114,11 +139,11 @@ let result_to_json = function
       ; "written", `Int row.written
       ]
   | Keeper_error row ->
-    `Assoc
+    Tool_args.error_assoc
       [ "keeper_id", `String row.keeper_id
-      ; "status", `String "error"
       ; "dry_run", `Bool true
-      ; "error", `String row.message
+      ; "error_code", `String (keeper_error_code row.error)
+      ; "message", `String (keeper_error_message row.error)
       ]
 ;;
 
@@ -145,7 +170,12 @@ let render_result = function
       row.ttl_expired
       row.dedup_removed
       row.written
-  | Keeper_error row -> Printf.sprintf "%s\terror\t%s\n" row.keeper_id row.message
+  | Keeper_error row ->
+    Printf.sprintf
+      "%s\t%s\t%s\n"
+      row.keeper_id
+      (keeper_error_code row.error)
+      (keeper_error_message row.error)
 ;;
 
 let render_text report =

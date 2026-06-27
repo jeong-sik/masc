@@ -1,5 +1,10 @@
 (** Read-only operator report for Memory OS fact-store GC dry-runs. *)
 
+type keeper_error =
+  | Missing_fact_store of { facts_path : string }
+  | Corrupt_fact_store of { message : string }
+  | Fact_store_access_error of { message : string }
+
 type keeper_result =
   | Keeper_ok of
       { keeper_id : string
@@ -10,7 +15,7 @@ type keeper_result =
       }
   | Keeper_error of
       { keeper_id : string
-      ; message : string
+      ; error : keeper_error
       }
 
 type t =

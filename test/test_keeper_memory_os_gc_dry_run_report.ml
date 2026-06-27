@@ -60,7 +60,13 @@ let test_report_summarizes_dry_run_without_rewrite () =
         Alcotest.(check int) "alpha ttl expired" 1 row.ttl_expired;
         Alcotest.(check int) "alpha would write" 1 row.written
       | Some (Report.Keeper_error row) ->
-        Alcotest.failf "unexpected alpha error: %s" row.message
+        Alcotest.failf
+          "unexpected alpha error: %s"
+          (match row.error with
+           | Report.Missing_fact_store { facts_path } ->
+             Printf.sprintf "missing %s" facts_path
+           | Report.Corrupt_fact_store { message }
+           | Report.Fact_store_access_error { message } -> message)
       | None -> Alcotest.fail "missing alpha result"))
 ;;
 
@@ -78,10 +84,32 @@ let test_explicit_missing_keeper_is_error () =
       Alcotest.(check int) "error count" 1 report.error_count;
       match result_for "missing" report with
       | Some (Report.Keeper_error row) ->
-        Alcotest.(check bool)
-          "message names missing fact store"
-          true
-          (String.starts_with ~prefix:"fact store not found:" row.message)
+        let expected_path =
+          Memory_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id:"missing"
+        in
+        (match row.error with
+         | Report.Missing_fact_store { facts_path } ->
+           Alcotest.(check string) "missing fact store path" expected_path facts_path
+         | Report.Corrupt_fact_store _ | Report.Fact_store_access_error _ ->
+           Alcotest.fail "expected structured missing fact store error");
+        (match Report.to_json report with
+         | `Assoc fields ->
+           (match List.assoc_opt "keepers" fields with
+            | Some (`List [ `Assoc keeper_fields ]) ->
+              Alcotest.(check (option string))
+                "canonical error status"
+                (Some "error")
+                (Option.bind
+                   (List.assoc_opt "status" keeper_fields)
+                   (function `String s -> Some s | _ -> None));
+              Alcotest.(check (option string))
+                "structured error code"
+                (Some "fact_store_missing")
+                (Option.bind
+                   (List.assoc_opt "error_code" keeper_fields)
+                   (function `String s -> Some s | _ -> None))
+            | Some _ | None -> Alcotest.fail "missing keeper JSON row")
+         | _ -> Alcotest.fail "report JSON must be an object")
       | Some (Report.Keeper_ok _) -> Alcotest.fail "expected missing keeper error"
       | None -> Alcotest.fail "missing explicit keeper result"))
 ;;

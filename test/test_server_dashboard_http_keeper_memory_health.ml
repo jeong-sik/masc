@@ -4,6 +4,7 @@ module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Metrics = Masc.Otel_metric_store
 module KeeperMetrics = Keeper_metrics
+module LibrarianRuntime = Masc.Keeper_librarian_runtime
 module Health = Server_dashboard_http_keeper_memory_health
 
 let test_now = 1_700_000_000.0
@@ -241,7 +242,9 @@ let test_reports_provider_slot_busy_metric_as_alert () =
   @@ fun _env ->
   let now = test_now in
   let base = fresh_dir "masc-memory-health-provider-slot" in
-  let keeper_id = "slotbusy-health" in
+  (* Otel_metric_store is process-global. Use a temp-derived keeper label so
+     repeated test runs in one process cannot inherit this counter cell. *)
+  let keeper_id = "slotbusy-health-" ^ Filename.basename base in
   let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir
@@ -249,7 +252,10 @@ let test_reports_provider_slot_busy_metric_as_alert () =
     [ fact ~now "slot busy metric keeper fact" ];
   Metrics.inc_counter
     KeeperMetrics.(to_string MemoryLaneProviderSlotBusy)
-    ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian_provider_slot" ]
+    ~labels:
+      [ "keeper", keeper_id
+      ; "site", LibrarianRuntime.memory_os_librarian_provider_slot_site
+      ]
     ~delta:3.0
     ();
   let json = Health.keeper_memory_health_http_json ~base_path:base in

@@ -17,6 +17,8 @@ import {
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
 const EVENT_RATIO_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'events_to_facts_ratio'
+const TTL_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'ttl_expired_on_disk'
+const PROVIDER_SLOT_BUSY_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'provider_slot_busy'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -25,11 +27,11 @@ function formatBytes(bytes: number): string {
 }
 
 function entryAlerts(entry: KeeperMemoryHealthKeeperEntry): KeeperMemoryHealthAlert[] {
-  return entry.alerts ?? []
+  return entry.alerts
 }
 
 function providerSlotBusy(entry: KeeperMemoryHealthKeeperEntry): number {
-  return entry.provider_slot_busy ?? 0
+  return entry.provider_slot_busy
 }
 
 function hasTargetAlert(alerts: KeeperMemoryHealthAlert[], target: KeeperMemoryHealthAlertTarget): boolean {
@@ -45,6 +47,8 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const alerts = entryAlerts(entry)
   const warn = isRowWarning(entry)
   const ratioWarn = hasTargetAlert(alerts, EVENT_RATIO_ALERT_TARGET)
+  const ttlWarn = hasTargetAlert(alerts, TTL_ALERT_TARGET)
+  const providerSlotBusyWarn = hasTargetAlert(alerts, PROVIDER_SLOT_BUSY_ALERT_TARGET)
   const providerSlotBusyCount = providerSlotBusy(entry)
 
   return html`
@@ -58,15 +62,15 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
           : html`<span>${ratioStr}</span>`}
       </td>
       <td>
-        ${entry.ttl_expired_on_disk > 0
+        ${ttlWarn
           ? html`<span class="kmh-badge kmh-badge--warn">${entry.ttl_expired_on_disk}</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+          : html`<span class="kmh-badge kmh-badge--ok">${entry.ttl_expired_on_disk}</span>`}
       </td>
       <td>${entry.near_duplicate}</td>
       <td>
-        ${providerSlotBusyCount > 0
+        ${providerSlotBusyWarn
           ? html`<span class="kmh-badge kmh-badge--warn">${providerSlotBusyCount}</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+          : html`<span class="kmh-badge kmh-badge--ok">${providerSlotBusyCount}</span>`}
       </td>
       <td>
         ${alerts.length > 0
@@ -138,11 +142,10 @@ export function KeeperMemoryHealth() {
   }
 
   const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
-  const derivedAlertCount = data.keepers.reduce((total, entry) => {
-    return total + entryAlerts(entry).length
-  }, 0)
-  const totalAlerts = data.alert_summary?.total_alerts ?? derivedAlertCount
-  const totalProviderSlotBusy = data.totals.provider_slot_busy ?? 0
+  const totalAlerts = data.alert_summary.total_alerts
+  const ttlExpiredWarn = data.alert_summary.ttl_expired_keepers > 0
+  const providerSlotBusyWarn = data.alert_summary.provider_slot_busy_keepers > 0
+  const totalProviderSlotBusy = data.totals.provider_slot_busy
 
   return html`
     <div class="kmh-panel">
@@ -163,7 +166,7 @@ export function KeeperMemoryHealth() {
           </div>
           <div class="kmh-stat" data-stat-key="ttl-expired">
             <span class="kmh-stat-label">TTL 만료(디스크)</span>
-            <span class=${`kmh-stat-value${data.totals.ttl_expired_on_disk > 0 ? ' kmh-stat-value--warn' : ''}`}>
+            <span class=${`kmh-stat-value${ttlExpiredWarn ? ' kmh-stat-value--warn' : ''}`}>
               ${data.totals.ttl_expired_on_disk}
             </span>
           </div>
@@ -173,7 +176,7 @@ export function KeeperMemoryHealth() {
           </div>
           <div class="kmh-stat" data-stat-key="provider-slot-busy">
             <span class="kmh-stat-label">슬롯 실패</span>
-            <span class=${`kmh-stat-value${totalProviderSlotBusy > 0 ? ' kmh-stat-value--warn' : ''}`}>
+            <span class=${`kmh-stat-value${providerSlotBusyWarn ? ' kmh-stat-value--warn' : ''}`}>
               ${totalProviderSlotBusy}
             </span>
           </div>

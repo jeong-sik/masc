@@ -59,12 +59,14 @@ let near_duplicate_threshold = 0.0
    compaction attention, but no control-flow or pruning decision depends on it.
    The backend owns the value and publishes it through [alert_summary.thresholds]
    so the dashboard does not duplicate the literal. *)
-let events_to_facts_ratio_warn_threshold = 2.0
+let events_to_facts_ratio_warn_threshold =
+  Keeper_memory_os_policy.events_to_facts_ratio_attention_threshold
+;;
 
 let provider_slot_busy_threshold = 0.0
 
 let provider_slot_busy_metric = Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
-let provider_slot_busy_site = "memory_os_librarian_provider_slot"
+let provider_slot_busy_site = Keeper_librarian_runtime.memory_os_librarian_provider_slot_site
 
 let alert_code_to_string = function
   | Ttl_expired_on_disk -> "ttl_expired_on_disk"
@@ -188,6 +190,9 @@ let file_size_bytes path =
 ;;
 
 let provider_slot_busy_for_keeper keeper_id =
+  (* MemoryLaneProviderSlotBusy is emitted through [inc_counter], so values are
+     integral counts even though the metric store carries floats. Keep the JSON
+     field as an int to match the rest of this count-oriented health snapshot. *)
   Otel_metric_store.metric_value_or_zero
     provider_slot_busy_metric
     ~labels:[ "keeper", keeper_id; "site", provider_slot_busy_site ]

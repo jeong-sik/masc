@@ -32,6 +32,8 @@ let global_slot_capacity () =
   Env_config.KeeperMemoryOs.librarian_global_slot ()
 ;;
 
+let memory_os_librarian_provider_slot_site = "memory_os_librarian_provider_slot"
+
 let provider_slot_wait_sec = 0.25
 
 type provider_slot_state =
@@ -694,8 +696,8 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
              | None ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
-                 ~labels:
-                   [ "keeper", keeper_id; "site", "memory_os_librarian_provider_slot" ]
+                ~labels:
+                  [ "keeper", keeper_id; "site", memory_os_librarian_provider_slot_site ]
                  ();
                Log.Keeper.warn ~keeper_name:keeper_id
                  "memory os librarian skipped runtime=%s: global provider slot busy (capacity=%d)"

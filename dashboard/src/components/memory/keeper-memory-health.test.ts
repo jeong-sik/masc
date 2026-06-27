@@ -58,7 +58,7 @@ function makeResponse(
       provider_slot_busy: 0,
       ...totalsOverrides,
     },
-    ...(alertSummary === undefined ? {} : { alert_summary: alertSummary }),
+    alert_summary: alertSummary ?? makeAlertSummary(),
   }
 }
 
@@ -193,6 +193,28 @@ describe('KeeperMemoryHealth', () => {
 
       expect(container.querySelector('.kmh-row--warn')).not.toBeNull()
       expect(screen.getByText('TTL')).not.toBeNull()
+    })
+
+    it('does not style raw ttl or provider-slot counts as warnings without backend alerts', async () => {
+      mockFetch.mockResolvedValue(
+        makeResponse([
+          makeEntry({
+            keeper_id: 'raw-counts',
+            ttl_expired_on_disk: 4,
+            provider_slot_busy: 3,
+            alerts: [],
+          }),
+        ], { ttl_expired_on_disk: 4, provider_slot_busy: 3 }),
+      )
+      const { container } = render(html`<${KeeperMemoryHealth} />`)
+      await waitFor(() => expect(screen.getByText('raw-counts')).not.toBeNull())
+
+      expect(container.querySelector('.kmh-row--warn')).toBeNull()
+      expect(container.querySelector('.kmh-badge--warn')).toBeNull()
+      expect(container.querySelector('[data-stat-key="ttl-expired"] .kmh-stat-value--warn')).toBeNull()
+      expect(container.querySelector('[data-stat-key="provider-slot-busy"] .kmh-stat-value--warn')).toBeNull()
+      expect(statValue(container, 'ttl-expired')).toContain('4')
+      expect(statValue(container, 'provider-slot-busy')).toContain('3')
     })
   })
 

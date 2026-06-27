@@ -61,3 +61,5 @@ let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
        fresh context is enough to advance the staleness marker. *)
     { existing with last_verified_at = Some now }
 ;;
+
+let events_to_facts_ratio_attention_threshold = 2.0

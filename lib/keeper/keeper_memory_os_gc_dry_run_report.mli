@@ -4,6 +4,11 @@ type keeper_error =
   | Missing_fact_store of { facts_path : string }
   | Corrupt_fact_store of { message : string }
   | Fact_store_access_error of { message : string }
+  | Fact_store_locked of
+      { caller : string
+      ; lock_path : string
+      ; attempts : int
+      }
 
 type keeper_result =
   | Keeper_ok of
@@ -46,6 +51,22 @@ val run_for_keepers_dir
     existing non-shared [*.facts.jsonl] store in [keepers_dir] is scanned. If it
     is provided, missing stores are reported as per-keeper errors instead of
     silently returning an empty report. *)
+
+module For_testing : sig
+  val run_for_keepers_dir
+    :  keepers_dir:string
+    -> run_gc_for_keepers_dir:
+         (keepers_dir:string
+          -> dry_run:bool
+          -> keeper_id:string
+          -> now:float
+          -> unit
+          -> Keeper_memory_os_gc.gc_report)
+    -> ?keeper_ids:string list
+    -> now:float
+    -> unit
+    -> t
+end
 
 val to_json : t -> Yojson.Safe.t
 val render_text : t -> string

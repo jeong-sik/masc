@@ -996,7 +996,8 @@ let memory_os_gc_dry_run_cmd_exit base_path keeper_ids as_json =
 let memory_os_gc_dry_run_cmd =
   let doc =
     "Run the Memory OS fact-store GC in dry-run mode and print the TTL/dedup \
-     report without rewriting stores."
+     report without rewriting stores. The scan still takes each keeper fact-store \
+     lock; contended stores are reported as per-keeper errors."
   in
   let info = Cmd.info "memory-os-gc-dry-run" ~doc in
   Cmd.v info

@@ -4,6 +4,11 @@ type keeper_error =
   | Missing_fact_store of { facts_path : string }
   | Corrupt_fact_store of { message : string }
   | Fact_store_access_error of { message : string }
+  | Fact_store_locked of
+      { caller : string
+      ; lock_path : string
+      ; attempts : int
+      }
 
 type keeper_result =
   | Keeper_ok of
@@ -57,12 +62,19 @@ let access_error_message = function
 let keeper_error_message = function
   | Missing_fact_store { facts_path } -> Printf.sprintf "fact store not found: %s" facts_path
   | Corrupt_fact_store { message } | Fact_store_access_error { message } -> message
+  | Fact_store_locked { caller; lock_path; attempts } ->
+    Printf.sprintf
+      "fact store lock timeout: caller=%s lock_path=%s attempts=%d"
+      caller
+      lock_path
+      attempts
 ;;
 
 let keeper_error_code = function
   | Missing_fact_store _ -> "fact_store_missing"
   | Corrupt_fact_store _ -> "fact_store_corrupt"
   | Fact_store_access_error _ -> "fact_store_access_error"
+  | Fact_store_locked _ -> "fact_store_locked"
 ;;
 
 module String_map = Map.Make (String)
@@ -75,7 +87,16 @@ let merge_category_counts left right =
   List.fold_left add String_map.empty (left @ right) |> String_map.bindings
 ;;
 
-let run_one ~keepers_dir ~explicit ~keeper_id ~now =
+let default_run_gc_for_keepers_dir ~keepers_dir ~dry_run ~keeper_id ~now () =
+  Keeper_memory_os_gc.run_gc_for_keepers_dir
+    ~keepers_dir
+    ~dry_run
+    ~keeper_id
+    ~now
+    ()
+;;
+
+let run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now =
   let facts_path =
     Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
   in
@@ -84,7 +105,7 @@ let run_one ~keepers_dir ~explicit ~keeper_id ~now =
   else (
     try
       let report =
-        Keeper_memory_os_gc.run_gc_for_keepers_dir
+        run_gc_for_keepers_dir
           ~keepers_dir
           ~dry_run:true
           ~keeper_id
@@ -103,6 +124,9 @@ let run_one ~keepers_dir ~explicit ~keeper_id ~now =
         }
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | File_lock_eio.Flock_timeout { caller; path; attempts } ->
+      Keeper_error
+        { keeper_id; error = Fact_store_locked { caller; lock_path = path; attempts } }
     | Keeper_memory_os_gc.Fact_store_corrupt message ->
       Keeper_error { keeper_id; error = Corrupt_fact_store { message } }
     | exn ->
@@ -111,7 +135,13 @@ let run_one ~keepers_dir ~explicit ~keeper_id ~now =
        | None -> raise exn))
 ;;
 
-let run_for_keepers_dir ~keepers_dir ?keeper_ids ~now () =
+let run_for_keepers_dir_with_runner
+      ~keepers_dir
+      ~run_gc_for_keepers_dir
+      ?keeper_ids
+      ~now
+      ()
+  =
   let explicit, keeper_ids =
     match keeper_ids with
     | Some ids -> true, unique_sorted ids
@@ -120,7 +150,10 @@ let run_for_keepers_dir ~keepers_dir ?keeper_ids ~now () =
       , Keeper_memory_os_io.list_fact_store_keeper_ids_for_keepers_dir ~keepers_dir )
   in
   let results =
-    List.map (fun keeper_id -> run_one ~keepers_dir ~explicit ~keeper_id ~now) keeper_ids
+    List.map
+      (fun keeper_id ->
+         run_one ~keepers_dir ~run_gc_for_keepers_dir ~explicit ~keeper_id ~now)
+      keeper_ids
   in
   let
     total_input,
@@ -177,15 +210,34 @@ let run_for_keepers_dir ~keepers_dir ?keeper_ids ~now () =
   }
 ;;
 
+let run_for_keepers_dir ~keepers_dir ?keeper_ids ~now () =
+  run_for_keepers_dir_with_runner
+    ~keepers_dir
+    ~run_gc_for_keepers_dir:default_run_gc_for_keepers_dir
+    ?keeper_ids
+    ~now
+    ()
+;;
+
+module For_testing = struct
+  let run_for_keepers_dir ~keepers_dir ~run_gc_for_keepers_dir ?keeper_ids ~now () =
+    run_for_keepers_dir_with_runner
+      ~keepers_dir
+      ~run_gc_for_keepers_dir
+      ?keeper_ids
+      ~now
+      ()
+  ;;
+end
+
 let category_counts_to_json rows =
   `Assoc (List.map (fun (category, count) -> category, `Int count) rows)
 ;;
 
 let result_to_json = function
   | Keeper_ok row ->
-    `Assoc
+    Tool_args.ok_assoc
       [ "keeper_id", `String row.keeper_id
-      ; "status", `String "ok"
       ; "dry_run", `Bool true
       ; "total_input", `Int row.total_input
       ; "ttl_expired", `Int row.ttl_expired

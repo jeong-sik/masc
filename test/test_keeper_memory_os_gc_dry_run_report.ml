@@ -1,5 +1,6 @@
 module Types = Masc.Keeper_memory_os_types
 module Memory_io = Masc.Keeper_memory_os_io
+module GC = Masc.Keeper_memory_os_gc
 module Report = Masc.Keeper_memory_os_gc_dry_run_report
 
 let fact_fixture ~now ~claim =
@@ -78,7 +79,9 @@ let test_report_summarizes_dry_run_without_rewrite () =
            | Report.Missing_fact_store { facts_path } ->
              Printf.sprintf "missing %s" facts_path
            | Report.Corrupt_fact_store { message }
-           | Report.Fact_store_access_error { message } -> message)
+           | Report.Fact_store_access_error { message } -> message
+           | Report.Fact_store_locked { lock_path; _ } ->
+             Printf.sprintf "locked %s" lock_path)
       | None -> Alcotest.fail "missing alpha result"))
 ;;
 
@@ -102,7 +105,9 @@ let test_explicit_missing_keeper_is_error () =
         (match row.error with
          | Report.Missing_fact_store { facts_path } ->
            Alcotest.(check string) "missing fact store path" expected_path facts_path
-         | Report.Corrupt_fact_store _ | Report.Fact_store_access_error _ ->
+         | Report.Corrupt_fact_store _
+         | Report.Fact_store_access_error _
+         | Report.Fact_store_locked _ ->
            Alcotest.fail "expected structured missing fact store error");
         (match Report.to_json report with
          | `Assoc fields ->
@@ -126,6 +131,108 @@ let test_explicit_missing_keeper_is_error () =
       | None -> Alcotest.fail "missing explicit keeper result"))
 ;;
 
+let fake_gc_report ?(total_input = 1) ?(ttl_expired = 0) ?(written = 1) () =
+  { GC.total_input = total_input
+  ; ttl_expired
+  ; ttl_expired_ephemeral = 0
+  ; ttl_expired_non_ephemeral = ttl_expired
+  ; ttl_expired_by_category = (if ttl_expired > 0 then [ "fact", ttl_expired ] else [])
+  ; dedup_removed = 0
+  ; written
+  ; dry_run = true
+  }
+;;
+
+let seed_keeper ~now keeper_id =
+  Memory_io.append_fact ~keeper_id (fact_fixture ~now ~claim:(keeper_id ^ " fact"))
+;;
+
+let test_lock_timeout_is_per_keeper_error () =
+  with_eio (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      let now = 1_000.0 in
+      seed_keeper ~now "locked";
+      let run_gc_for_keepers_dir ~keepers_dir:_ ~dry_run:_ ~keeper_id:_ ~now:_ () =
+        raise
+          (File_lock_eio.Flock_timeout
+             { caller = "unit-test"; path = "/tmp/facts.jsonl.lock"; attempts = 3 })
+      in
+      let report =
+        Report.For_testing.run_for_keepers_dir
+          ~keepers_dir
+          ~run_gc_for_keepers_dir
+          ~keeper_ids:[ "locked" ]
+          ~now
+          ()
+      in
+      Alcotest.(check int) "one per-keeper error" 1 report.error_count;
+      match result_for "locked" report with
+      | Some (Report.Keeper_error { error = Report.Fact_store_locked row; _ }) ->
+        Alcotest.(check string) "caller" "unit-test" row.caller;
+        Alcotest.(check int) "attempts" 3 row.attempts
+      | Some (Report.Keeper_error _) -> Alcotest.fail "expected lock timeout error"
+      | Some (Report.Keeper_ok _) -> Alcotest.fail "expected locked keeper error"
+      | None -> Alcotest.fail "missing locked result"))
+;;
+
+let test_corrupt_store_is_per_keeper_error () =
+  with_eio (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      let now = 1_000.0 in
+      seed_keeper ~now "corrupt";
+      let run_gc_for_keepers_dir ~keepers_dir:_ ~dry_run:_ ~keeper_id:_ ~now:_ () =
+        raise (GC.Fact_store_corrupt "bad row")
+      in
+      let report =
+        Report.For_testing.run_for_keepers_dir
+          ~keepers_dir
+          ~run_gc_for_keepers_dir
+          ~keeper_ids:[ "corrupt" ]
+          ~now
+          ()
+      in
+      Alcotest.(check int) "one corrupt error" 1 report.error_count;
+      match result_for "corrupt" report with
+      | Some (Report.Keeper_error { error = Report.Corrupt_fact_store { message }; _ }) ->
+        Alcotest.(check string) "message" "bad row" message
+      | Some (Report.Keeper_error _) -> Alcotest.fail "expected corrupt store error"
+      | Some (Report.Keeper_ok _) -> Alcotest.fail "expected corrupt keeper error"
+      | None -> Alcotest.fail "missing corrupt result"))
+;;
+
+let test_mixed_results_keep_ok_totals_and_errors () =
+  with_eio (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      let now = 1_000.0 in
+      List.iter (seed_keeper ~now) [ "alpha"; "broken" ];
+      let run_gc_for_keepers_dir ~keepers_dir:_ ~dry_run:_ ~keeper_id ~now:_ () =
+        if String.equal keeper_id "broken"
+        then raise (GC.Fact_store_corrupt "broken")
+        else fake_gc_report ~total_input:2 ~ttl_expired:1 ~written:1 ()
+      in
+      let report =
+        Report.For_testing.run_for_keepers_dir
+          ~keepers_dir
+          ~run_gc_for_keepers_dir
+          ~keeper_ids:[ "alpha"; "broken" ]
+          ~now
+          ()
+      in
+      Alcotest.(check int) "two results" 2 (List.length report.results);
+      Alcotest.(check int) "one error" 1 report.error_count;
+      Alcotest.(check int) "ok total input only" 2 report.total_input;
+      Alcotest.(check int) "ok ttl only" 1 report.ttl_expired))
+;;
+
+let test_empty_scan_is_empty_report () =
+  with_eio (fun () ->
+    with_temp_keepers_dir (fun keepers_dir ->
+      let report = Report.run_for_keepers_dir ~keepers_dir ~now:1_000.0 () in
+      Alcotest.(check int) "no keepers" 0 (List.length report.results);
+      Alcotest.(check int) "no errors" 0 report.error_count;
+      Alcotest.(check int) "no input" 0 report.total_input))
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os_gc_dry_run_report"
@@ -138,6 +245,22 @@ let () =
             "explicit missing keeper is an error"
             `Quick
             test_explicit_missing_keeper_is_error
+        ; Alcotest.test_case
+            "lock timeout is per-keeper error"
+            `Quick
+            test_lock_timeout_is_per_keeper_error
+        ; Alcotest.test_case
+            "corrupt store is per-keeper error"
+            `Quick
+            test_corrupt_store_is_per_keeper_error
+        ; Alcotest.test_case
+            "mixed results keep ok totals and errors"
+            `Quick
+            test_mixed_results_keep_ok_totals_and_errors
+        ; Alcotest.test_case
+            "empty scan is empty report"
+            `Quick
+            test_empty_scan_is_empty_report
         ] )
     ]
 ;;

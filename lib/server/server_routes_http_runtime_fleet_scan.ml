@@ -794,17 +794,20 @@ let paused_keeper_last_blocker_json paused_keepers_json name =
   | `Assoc fields -> (
     match List.assoc_opt "details" fields with
     | Some (`List details) ->
-      details
-      |> List.find_map (function
-        | `Assoc detail_fields
-          when (match List.assoc_opt "name" detail_fields with
-                | Some (`String detail_name) -> String.equal detail_name name
-                | _ -> false) ->
-            (match List.assoc_opt "last_blocker" detail_fields with
-             | Some last_blocker -> Some last_blocker
-             | None -> Some `Null)
-        | _ -> None)
-      |> Option.value ~default:`Null
+      (match
+         details
+         |> List.find_map (function
+           | `Assoc detail_fields
+             when (match List.assoc_opt "name" detail_fields with
+                   | Some (`String detail_name) -> String.equal detail_name name
+                   | _ -> false) ->
+               (match List.assoc_opt "last_blocker" detail_fields with
+                | Some last_blocker -> Some last_blocker
+                | None -> Some `Null)
+           | _ -> None)
+       with
+       | Some last_blocker -> last_blocker
+       | None -> `Null)
     | Some _ | None -> `Null)
   | _ -> `Null
 

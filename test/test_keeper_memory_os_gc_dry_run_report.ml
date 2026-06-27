@@ -50,6 +50,10 @@ let test_report_summarizes_dry_run_without_rewrite () =
       Alcotest.(check int) "keeper count" 2 (List.length report.results);
       Alcotest.(check int) "total input" 3 report.total_input;
       Alcotest.(check int) "ttl expired" 1 report.ttl_expired;
+      Alcotest.(check int)
+        "non-ephemeral expired is a migration candidate"
+        1
+        report.ttl_expired_non_ephemeral;
       Alcotest.(check int) "error count" 0 report.error_count;
       Alcotest.(check int)
         "alpha file unchanged by dry-run"
@@ -58,6 +62,14 @@ let test_report_summarizes_dry_run_without_rewrite () =
       match result_for "alpha" report with
       | Some (Report.Keeper_ok row) ->
         Alcotest.(check int) "alpha ttl expired" 1 row.ttl_expired;
+        Alcotest.(check int)
+          "alpha migration candidates"
+          1
+          row.ttl_expired_non_ephemeral;
+        Alcotest.(check (list (pair string int)))
+          "alpha expired by category"
+          [ "fact", 1 ]
+          row.ttl_expired_by_category;
         Alcotest.(check int) "alpha would write" 1 row.written
       | Some (Report.Keeper_error row) ->
         Alcotest.failf

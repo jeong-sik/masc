@@ -9,6 +9,9 @@ module Int_set = Set.Make (Int)
 type gc_report =
   { total_input : int
   ; ttl_expired : int
+  ; ttl_expired_ephemeral : int
+  ; ttl_expired_non_ephemeral : int
+  ; ttl_expired_by_category : (string * int) list
   ; dedup_removed : int
   ; written : int
   ; dry_run : bool
@@ -25,6 +28,37 @@ let ttl_expired ~now (fact : fact) =
   match fact.valid_until with
   | None -> false
   | Some ts -> now > ts
+;;
+
+let bump_count key counts =
+  let current = Option.value (String_map.find_opt key counts) ~default:0 in
+  String_map.add key (current + 1) counts
+;;
+
+let expired_category_counts expired =
+  let ephemeral, non_ephemeral, by_category =
+    List.fold_left
+      (fun (ephemeral, non_ephemeral, by_category) item ->
+         let category = item.fact.category in
+         let category_key = category_to_string category in
+         let ephemeral, non_ephemeral =
+           match category with
+           | Ephemeral -> ephemeral + 1, non_ephemeral
+           | Fact
+           | Constraint
+           | Preference
+           | Code_change
+           | Validated_approach
+           | Lesson
+           | Blocker
+           | Goal
+           | Unknown _ -> ephemeral, non_ephemeral + 1
+         in
+         ephemeral, non_ephemeral, bump_count category_key by_category)
+      (0, 0, String_map.empty)
+      expired
+  in
+  ephemeral, non_ephemeral, String_map.bindings by_category
 ;;
 
 (* Claim identity uses the shared SSOT [claim_identity] (RFC-0259 §3.7: the
@@ -117,11 +151,17 @@ let run_gc_with_store
       let live, expired =
         List.partition (fun item -> not (ttl_expired ~now item.fact)) indexed
       in
+      let ttl_expired_ephemeral, ttl_expired_non_ephemeral, ttl_expired_by_category =
+        expired_category_counts expired
+      in
       let deduped = dedup_by_claim live in
       let survivors = List.map (fun item -> item.fact) deduped in
       if not dry_run then rewrite_facts_atomically survivors;
       { total_input = List.length facts
       ; ttl_expired = List.length expired
+      ; ttl_expired_ephemeral
+      ; ttl_expired_non_ephemeral
+      ; ttl_expired_by_category
       ; dedup_removed = List.length live - List.length deduped
       ; written = List.length survivors
       ; dry_run

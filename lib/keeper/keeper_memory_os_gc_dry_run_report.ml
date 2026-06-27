@@ -10,6 +10,9 @@ type keeper_result =
       { keeper_id : string
       ; total_input : int
       ; ttl_expired : int
+      ; ttl_expired_ephemeral : int
+      ; ttl_expired_non_ephemeral : int
+      ; ttl_expired_by_category : (string * int) list
       ; dedup_removed : int
       ; written : int
       }
@@ -23,6 +26,9 @@ type t =
   ; results : keeper_result list
   ; total_input : int
   ; ttl_expired : int
+  ; ttl_expired_ephemeral : int
+  ; ttl_expired_non_ephemeral : int
+  ; ttl_expired_by_category : (string * int) list
   ; dedup_removed : int
   ; written : int
   ; error_count : int
@@ -59,6 +65,16 @@ let keeper_error_code = function
   | Fact_store_access_error _ -> "fact_store_access_error"
 ;;
 
+module String_map = Map.Make (String)
+
+let merge_category_counts left right =
+  let add counts (category, count) =
+    let current = Option.value (String_map.find_opt category counts) ~default:0 in
+    String_map.add category (current + count) counts
+  in
+  List.fold_left add String_map.empty (left @ right) |> String_map.bindings
+;;
+
 let run_one ~keepers_dir ~explicit ~keeper_id ~now =
   let facts_path =
     Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id
@@ -79,6 +95,9 @@ let run_one ~keepers_dir ~explicit ~keeper_id ~now =
         { keeper_id
         ; total_input = report.total_input
         ; ttl_expired = report.ttl_expired
+        ; ttl_expired_ephemeral = report.ttl_expired_ephemeral
+        ; ttl_expired_non_ephemeral = report.ttl_expired_non_ephemeral
+        ; ttl_expired_by_category = report.ttl_expired_by_category
         ; dedup_removed = report.dedup_removed
         ; written = report.written
         }
@@ -103,28 +122,63 @@ let run_for_keepers_dir ~keepers_dir ?keeper_ids ~now () =
   let results =
     List.map (fun keeper_id -> run_one ~keepers_dir ~explicit ~keeper_id ~now) keeper_ids
   in
-  let total_input, ttl_expired, dedup_removed, written, error_count =
+  let
+    total_input,
+    ttl_expired,
+    ttl_expired_ephemeral,
+    ttl_expired_non_ephemeral,
+    ttl_expired_by_category,
+    dedup_removed,
+    written,
+    error_count
+    =
     List.fold_left
-      (fun (total_input, ttl_expired, dedup_removed, written, error_count) -> function
+      (fun
+        ( total_input
+        , ttl_expired
+        , ttl_expired_ephemeral
+        , ttl_expired_non_ephemeral
+        , ttl_expired_by_category
+        , dedup_removed
+        , written
+        , error_count )
+        -> function
          | Keeper_ok row ->
            ( total_input + row.total_input
            , ttl_expired + row.ttl_expired
+           , ttl_expired_ephemeral + row.ttl_expired_ephemeral
+           , ttl_expired_non_ephemeral + row.ttl_expired_non_ephemeral
+           , merge_category_counts ttl_expired_by_category row.ttl_expired_by_category
            , dedup_removed + row.dedup_removed
            , written + row.written
            , error_count )
          | Keeper_error _ ->
-           total_input, ttl_expired, dedup_removed, written, error_count + 1)
-      (0, 0, 0, 0, 0)
+           ( total_input
+           , ttl_expired
+           , ttl_expired_ephemeral
+           , ttl_expired_non_ephemeral
+           , ttl_expired_by_category
+           , dedup_removed
+           , written
+           , error_count + 1 ))
+      (0, 0, 0, 0, [], 0, 0, 0)
       results
   in
   { keepers_dir
   ; results
   ; total_input
   ; ttl_expired
+  ; ttl_expired_ephemeral
+  ; ttl_expired_non_ephemeral
+  ; ttl_expired_by_category
   ; dedup_removed
   ; written
   ; error_count
   }
+;;
+
+let category_counts_to_json rows =
+  `Assoc (List.map (fun (category, count) -> category, `Int count) rows)
 ;;
 
 let result_to_json = function
@@ -135,6 +189,10 @@ let result_to_json = function
       ; "dry_run", `Bool true
       ; "total_input", `Int row.total_input
       ; "ttl_expired", `Int row.ttl_expired
+      ; "ttl_expired_ephemeral", `Int row.ttl_expired_ephemeral
+      ; "ttl_expired_non_ephemeral", `Int row.ttl_expired_non_ephemeral
+      ; "ttl_expired_by_category", category_counts_to_json row.ttl_expired_by_category
+      ; "migration_candidate_expired", `Int row.ttl_expired_non_ephemeral
       ; "dedup_removed", `Int row.dedup_removed
       ; "written", `Int row.written
       ]
@@ -155,6 +213,10 @@ let to_json report =
     ; "error_count", `Int report.error_count
     ; "total_input", `Int report.total_input
     ; "ttl_expired", `Int report.ttl_expired
+    ; "ttl_expired_ephemeral", `Int report.ttl_expired_ephemeral
+    ; "ttl_expired_non_ephemeral", `Int report.ttl_expired_non_ephemeral
+    ; "ttl_expired_by_category", category_counts_to_json report.ttl_expired_by_category
+    ; "migration_candidate_expired", `Int report.ttl_expired_non_ephemeral
     ; "dedup_removed", `Int report.dedup_removed
     ; "written", `Int report.written
     ; "keepers", `List (List.map result_to_json report.results)
@@ -164,10 +226,12 @@ let to_json report =
 let render_result = function
   | Keeper_ok row ->
     Printf.sprintf
-      "%s\tok\ttotal=%d\tttl_expired=%d\tdedup_removed=%d\twould_write=%d\n"
+      "%s\tok\ttotal=%d\tttl_expired=%d\tephemeral_expired=%d\tmigration_candidates=%d\tdedup_removed=%d\twould_write=%d\n"
       row.keeper_id
       row.total_input
       row.ttl_expired
+      row.ttl_expired_ephemeral
+      row.ttl_expired_non_ephemeral
       row.dedup_removed
       row.written
   | Keeper_error row ->
@@ -188,13 +252,15 @@ let render_text report =
     "Memory OS GC dry-run\n\
      keepers_dir: %s\n\
      keepers: %d, errors: %d\n\
-     totals: total=%d ttl_expired=%d dedup_removed=%d would_write=%d\n\
+     totals: total=%d ttl_expired=%d ephemeral_expired=%d migration_candidates=%d dedup_removed=%d would_write=%d\n\
      %s"
     report.keepers_dir
     (List.length report.results)
     report.error_count
     report.total_input
     report.ttl_expired
+    report.ttl_expired_ephemeral
+    report.ttl_expired_non_ephemeral
     report.dedup_removed
     report.written
     body

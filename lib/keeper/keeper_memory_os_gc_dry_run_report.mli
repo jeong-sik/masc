@@ -10,6 +10,9 @@ type keeper_result =
       { keeper_id : string
       ; total_input : int
       ; ttl_expired : int
+      ; ttl_expired_ephemeral : int
+      ; ttl_expired_non_ephemeral : int
+      ; ttl_expired_by_category : (string * int) list
       ; dedup_removed : int
       ; written : int
       }
@@ -23,6 +26,9 @@ type t =
   ; results : keeper_result list
   ; total_input : int
   ; ttl_expired : int
+  ; ttl_expired_ephemeral : int
+  ; ttl_expired_non_ephemeral : int
+  ; ttl_expired_by_category : (string * int) list
   ; dedup_removed : int
   ; written : int
   ; error_count : int

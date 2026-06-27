@@ -275,8 +275,7 @@ let update_entry_if_registered ~base_path name f =
 ;;
 
 let update_entry_if_registered_unit ~base_path name f =
-  (* fire-and-forget: bool wrapper discards whether a validated write was
-     installed; callers only need side effects and logged metrics. *)
+  (* fire-and-forget: discard whether the validated registry write was installed. *)
   ignore (update_entry_if_registered ~base_path name (fun entry -> f entry, true))
 ;;
 

@@ -602,33 +602,38 @@ let stamp_turn_progress ~now ~event_kind obs =
 let mark_turn_started ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    let turn_id = e.meta.runtime.usage.total_turns + 1 in
-    let obs =
-      { turn_id
-      ; started_at = now
-      ; last_progress_at = now
-      ; last_progress_kind = Some "turn_started"
-      ; active_tool_count = 0
-      ; turn_phase = Packed Turn_prompting
-      ; decision_stage = Packed Decision_undecided
-      ; measurement = None
-      ; measurement_bind_count = 0
-      ; selected_model = None
-      }
-    in
-    changed := true;
-    { e with
-      current_turn_observation = Some obs
-    ; compaction_stage = Packed Compaction_accumulating
-    });
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      let turn_id = e.meta.runtime.usage.total_turns + 1 in
+      let obs =
+        { turn_id
+        ; started_at = now
+        ; last_progress_at = now
+        ; last_progress_kind = Some "turn_started"
+        ; active_tool_count = 0
+        ; turn_phase = Packed Turn_prompting
+        ; decision_stage = Packed Decision_undecided
+        ; measurement = None
+        ; measurement_bind_count = 0
+        ; selected_model = None
+        }
+      in
+      changed := true;
+      { e with
+        current_turn_observation = Some obs
+      ; compaction_stage = Packed Compaction_accumulating
+      })
+  in
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let record_turn_progress ~base_path name ~event_kind =
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (stamp_turn_progress ~now ~event_kind))
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (stamp_turn_progress ~now ~event_kind))
+  in
+  ()
 ;;
 
 (* RFC-0197 (P1-4a): write-through mirror of the turn event bus
@@ -641,53 +646,60 @@ let record_turn_progress ~base_path name ~event_kind =
    [current_turn_observation] (turn already ended) is a no-op, so a late
    background-drain callback after [mark_turn_finished] cannot leak. *)
 let record_turn_tool_inflight ~base_path name ~count =
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs -> { obs with active_tool_count = count }))
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (fun obs -> { obs with active_tool_count = count }))
+  in
+  ()
 ;;
 
 (* RFC-0045: SDK-turn boundary reset.  Resets in-turn FSM fields without touching keeper-turn-scoped data ([turn_id], [started_at], [selected_model], [measurement], [measurement_bind_count]).  Bypasse... *)
 let mark_sdk_turn_started ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    match e.current_turn_observation with
-    | None -> e
-    | Some obs ->
-      if
-        obs.turn_phase = Packed Turn_prompting
-        && obs.decision_stage = Packed Decision_undecided
-      then e
-      else (
-        changed := true;
-        let new_obs =
-          { (stamp_turn_progress ~now ~event_kind:"sdk_turn_started" obs) with
-            turn_phase = Packed Turn_prompting
-          ; decision_stage = Packed Decision_undecided
-          }
-        in
-        { e with current_turn_observation = Some new_obs }));
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      match e.current_turn_observation with
+      | None -> e
+      | Some obs ->
+        if
+          obs.turn_phase = Packed Turn_prompting
+          && obs.decision_stage = Packed Decision_undecided
+        then e
+        else (
+          changed := true;
+          let new_obs =
+            { (stamp_turn_progress ~now ~event_kind:"sdk_turn_started" obs) with
+              turn_phase = Packed Turn_prompting
+            ; decision_stage = Packed Decision_undecided
+            }
+          in
+          { e with current_turn_observation = Some new_obs }))
+  in
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let mark_turn_measurement ~base_path name =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    match e.current_turn_observation, e.pending_turn_measurement with
-    | Some obs, Some measurement ->
-      changed := true;
-      { e with
-        current_turn_observation =
-          Some
-            { obs with
-              measurement = Some measurement
-            ; measurement_bind_count = obs.measurement_bind_count + 1
-            ; last_progress_at = now
-            ; last_progress_kind = Some "turn_measurement"
-            }
-      ; pending_turn_measurement = None
-      }
-    | _ -> e);
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      match e.current_turn_observation, e.pending_turn_measurement with
+      | Some obs, Some measurement ->
+        changed := true;
+        { e with
+          current_turn_observation =
+            Some
+              { obs with
+                measurement = Some measurement
+              ; measurement_bind_count = obs.measurement_bind_count + 1
+              ; last_progress_at = now
+              ; last_progress_kind = Some "turn_measurement"
+              }
+        ; pending_turn_measurement = None
+        }
+      | _ -> e)
+  in
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -699,41 +711,45 @@ let set_turn_decision_stage ~base_path name (decision_stage : decision_stage_act
   let target_packed = decision_stage_active_to_packed decision_stage in
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      if obs.decision_stage = target_packed
-      then obs
-      else (
-        changed := true;
-        { (stamp_turn_progress ~now ~event_kind:"decision_stage" obs) with
-          decision_stage = target_packed
-        })));
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (fun obs ->
+        if obs.decision_stage = target_packed
+        then obs
+        else (
+          changed := true;
+          { (stamp_turn_progress ~now ~event_kind:"decision_stage" obs) with
+            decision_stage = target_packed
+          })))
+  in
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
 let set_turn_phase_direct ~base_path name ~event_kind (turn_phase : packed_turn_phase) =
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
-      | Resolved_turn_idempotent -> obs
-      | Resolved_turn_transition _ ->
-        changed := true;
-        { (stamp_turn_progress ~now ~event_kind obs) with
-          turn_phase
-        }
-      | Resolved_turn_violation violation ->
-        Keeper_fsm_guard_runtime.wrap_unit
-          ~action:"turn_phase_transition"
-          ~stage:"guard"
-          (fun () ->
-             raise_turn_phase_transition_violation
-               ~where:event_kind
-               ~from:obs.turn_phase
-               ~to_:turn_phase
-               ~violation);
-        obs));
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (fun obs ->
+        match resolve_turn_phase_transition ~from:obs.turn_phase ~target:turn_phase with
+        | Resolved_turn_idempotent -> obs
+        | Resolved_turn_transition _ ->
+          changed := true;
+          { (stamp_turn_progress ~now ~event_kind obs) with
+            turn_phase
+          }
+        | Resolved_turn_violation violation ->
+          Keeper_fsm_guard_runtime.wrap_unit
+            ~action:"turn_phase_transition"
+            ~stage:"guard"
+            (fun () ->
+               raise_turn_phase_transition_violation
+                 ~where:event_kind
+                 ~from:obs.turn_phase
+                 ~to_:turn_phase
+                 ~violation);
+          obs))
+  in
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 
@@ -749,27 +765,29 @@ let set_turn_phase_with ~base_path name ~event_kind ~target ~update_obs =
      via [wrap_unit] so guard metrics name the actual caller. *)
   let changed = ref false in
   let now = Time_compat.now () in
-  update_entry_if_registered ~base_path name (fun e ->
-    update_current_turn e (fun obs ->
-      match resolve_turn_phase_transition ~from:obs.turn_phase ~target with
-      | Resolved_turn_idempotent -> obs
-      | Resolved_turn_transition _ ->
-        changed := true;
-        let obs' =
-          { (stamp_turn_progress ~now ~event_kind obs) with turn_phase = target }
-        in
-        update_obs obs'
-      | Resolved_turn_violation violation ->
-        Keeper_fsm_guard_runtime.wrap_unit
-          ~action:"turn_phase_transition"
-          ~stage:"guard"
-          (fun () ->
-             raise_turn_phase_transition_violation
-               ~where:event_kind
-               ~from:obs.turn_phase
-               ~to_:target
-               ~violation);
-        obs));
+  let (_ : bool) =
+    update_entry_if_registered ~base_path name (fun e ->
+      update_current_turn e (fun obs ->
+        match resolve_turn_phase_transition ~from:obs.turn_phase ~target with
+        | Resolved_turn_idempotent -> obs
+        | Resolved_turn_transition _ ->
+          changed := true;
+          let obs' =
+            { (stamp_turn_progress ~now ~event_kind obs) with turn_phase = target }
+          in
+          update_obs obs'
+        | Resolved_turn_violation violation ->
+          Keeper_fsm_guard_runtime.wrap_unit
+            ~action:"turn_phase_transition"
+            ~stage:"guard"
+            (fun () ->
+               raise_turn_phase_transition_violation
+                 ~where:event_kind
+                 ~from:obs.turn_phase
+                 ~to_:target
+                 ~violation);
+          obs))
+  in
   if !changed then broadcast_composite_changed ~name ~ts_unix:now
 ;;
 

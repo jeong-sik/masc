@@ -99,8 +99,7 @@ let ack_consumed ~base_path name stimuli =
   with
   | Ok () -> ()
   | Error msg ->
-    Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg;
-    failwith ("keeper event queue ack_consumed failed: " ^ msg)
+    Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg
 ;;
 
 let snapshot ~base_path name =

@@ -1360,6 +1360,36 @@ let test_read_recent_audit_filters_after_wide_scan () =
       Alcotest.fail
         (Printf.sprintf "expected one target audit, got %d" (List.length items))
 
+let test_list_recent_resolved_json_projects_resolved_history () =
+  with_temp_masc_base @@ fun base_path ->
+  let keeper_name = "resolved-history-target" in
+  AQ.audit_approval_event ~base_path ~event_type:"resolved" ~id:"target-resolved"
+    ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
+    ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
+  for i = 1 to 64 do
+    AQ.audit_approval_event ~base_path ~event_type:"pending"
+      ~id:(Printf.sprintf "pending-noise-%02d" i)
+      ~keeper_name:(Printf.sprintf "busy-keeper-%02d" i)
+      ~tool_name:"tool_search_files" ~risk_level:AQ.Low ()
+  done;
+  match AQ.list_recent_resolved_json ~base_path ~n:1 () with
+  | [ json ] ->
+    let open Yojson.Safe.Util in
+    Alcotest.(check string) "resolved id" "target-resolved" (json |> member "id" |> to_string);
+    Alcotest.(check string) "keeper name" keeper_name (json |> member "keeper_name" |> to_string);
+    Alcotest.(check string) "tool name" "tool_search_files" (json |> member "tool_name" |> to_string);
+    Alcotest.(check string) "risk level" "medium" (json |> member "risk_level" |> to_string);
+    Alcotest.(check string) "decision" "approve" (json |> member "decision" |> to_string);
+    Alcotest.(check bool) "resolved_at float present" true
+      (json |> member "resolved_at" |> to_float > 0.0);
+    Alcotest.(check bool) "resolved_at_iso present" true
+      (contains_substring (json |> member "resolved_at_iso" |> to_string) "T");
+    Alcotest.(check bool) "pending timestamp omitted" false
+      (has_assoc_key "requested_at" json)
+  | items ->
+    Alcotest.fail
+      (Printf.sprintf "expected one resolved audit, got %d" (List.length items))
+
 let test_runtime_trust_approval_read_model_filters_after_wide_scan () =
   with_test_config @@ fun config ->
   AQ.For_testing.reset_audit_store ();
@@ -1466,6 +1496,9 @@ let () =
         test_submit_pending_audit_uses_workspace_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick
         test_read_recent_audit_filters_after_wide_scan;
+      Alcotest.test_case
+        "list_recent_resolved_json projects resolved history" `Quick
+        test_list_recent_resolved_json_projects_resolved_history;
       Alcotest.test_case
         "runtime trust approval read model scans before keeper filter" `Quick
         test_runtime_trust_approval_read_model_filters_after_wide_scan;

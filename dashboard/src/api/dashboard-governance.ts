@@ -14,6 +14,7 @@ import {
 } from './board'
 import { normalizePendingConfirmation } from '../pending-confirm'
 import { asKeeperApprovalRiskLevel } from '../lib/governance-risk-level'
+import { normalizeKeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
 import type {
   KeeperApprovalRule,
   DashboardGovernanceResponse,
@@ -21,6 +22,7 @@ import type {
   GovernanceTimelineEvent,
   GovernanceJudgment,
   KeeperApprovalQueueItem,
+  KeeperResolvedApprovalItem,
   GovernanceCaseBundle,
   PendingConfirmation,
 } from '../types'
@@ -65,6 +67,40 @@ function normalizeHitlStatus(raw: unknown): DashboardGovernanceResponse['hitl'] 
   }
 }
 
+function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprovalItem | null {
+  if (!isRecord(raw)) return null
+  const id = asString(raw.id, '').trim()
+  const keeperName = asString(raw.keeper_name, '').trim()
+  const toolName = asString(raw.tool_name, '').trim()
+  if (!id || !keeperName || !toolName) return null
+  const ruleMatch = isRecord(raw.rule_match)
+    ? {
+        rule_id: asNullableString(raw.rule_match.rule_id),
+        matched_by: asNullableString(raw.rule_match.matched_by),
+      }
+    : null
+  const decisionRaw = asNullableString(raw.decision)
+  return {
+    id,
+    keeper_name: keeperName,
+    tool_name: toolName,
+    risk_level: asKeeperApprovalRiskLevel(raw.risk_level),
+    decision: normalizeKeeperResolvedApprovalDecision(decisionRaw),
+    decision_raw: decisionRaw,
+    resolved_at: asNullableIsoTimestamp(raw.resolved_at_iso ?? raw.resolved_at ?? raw.ts),
+    turn_id: asInt(raw.turn_id),
+    task_id: asNullableString(raw.task_id),
+    goal_id: asNullableString(raw.goal_id),
+    goal_ids: Array.isArray(raw.goal_ids)
+      ? raw.goal_ids.filter((value): value is string => typeof value === 'string')
+      : [],
+    sandbox_target: asNullableString(raw.sandbox_target),
+    disposition: asNullableString(raw.disposition),
+    disposition_reason: asNullableString(raw.disposition_reason),
+    rule_match: ruleMatch,
+  }
+}
+
 export function fetchDashboardGovernance(
   opts?: FetchDashboardGovernanceOptions,
 ): Promise<DashboardGovernanceResponse> {
@@ -90,8 +126,8 @@ export function fetchDashboardGovernance(
       : []
     const recentResolved = Array.isArray(raw.recent_resolved)
       ? raw.recent_resolved
-          .map(item => normalizeKeeperApprovalQueueItem(item))
-          .filter((item): item is KeeperApprovalQueueItem => item !== null)
+          .map(item => normalizeKeeperResolvedApprovalItem(item))
+          .filter((item): item is KeeperResolvedApprovalItem => item !== null)
       : []
     const approvalRules = Array.isArray(raw.approval_rules)
       ? raw.approval_rules

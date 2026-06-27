@@ -1,6 +1,6 @@
 import type { Agent, BoardPost, StopCause, ExecutionSignalTruth, EvidenceSourceCore } from './core'
 import type { OperatorAttentionItem, OperatorRecommendedAction } from './dashboard-mission'
-import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, PendingConfirmation, PendingConfirmSummary } from './governance'
+import type { BoardMonitoring, GovernanceMonitoring, GovernanceDecisionItem, GovernanceTimelineEvent, GovernanceJudgeSummary, GovernanceJudgment, KeeperApprovalQueueItem, KeeperApprovalRule, KeeperResolvedApprovalItem, PendingConfirmation, PendingConfirmSummary } from './governance'
 
 // --- Dashboard projection responses ---
 
@@ -671,7 +671,7 @@ export interface DashboardGovernanceResponse {
   judgments?: GovernanceJudgment[]
   pending_actions?: PendingConfirmation[]
   approval_queue?: KeeperApprovalQueueItem[]
-  recent_resolved?: KeeperApprovalQueueItem[]
+  recent_resolved?: KeeperResolvedApprovalItem[]
   approval_rules?: KeeperApprovalRule[]
   hitl?: {
     enabled: boolean

@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import * as Vitest from 'vitest'
-import type { DashboardGovernanceResponse, KeeperApprovalQueueItem } from '../../types'
+import type { DashboardGovernanceResponse, KeeperApprovalQueueItem, KeeperResolvedApprovalItem } from '../../types'
 
 const { afterEach, beforeEach, describe, expect, it, vi } = Vitest
 
@@ -24,7 +24,10 @@ function queueItem(overrides: Partial<KeeperApprovalQueueItem> & { id: string })
   }
 }
 
-function responseWithQueue(approval_queue: KeeperApprovalQueueItem[]): DashboardGovernanceResponse {
+function responseWithQueue(
+  approval_queue: KeeperApprovalQueueItem[],
+  recent_resolved: KeeperResolvedApprovalItem[] = [],
+): DashboardGovernanceResponse {
   return {
     generated_at: '2026-06-19T00:00:00Z',
     summary: { judge_online: false },
@@ -33,19 +36,23 @@ function responseWithQueue(approval_queue: KeeperApprovalQueueItem[]): Dashboard
     judgments: [],
     pending_actions: [],
     approval_queue,
+    recent_resolved,
   } as DashboardGovernanceResponse
 }
 
 // Mirrors governance.test.ts loadComponentWithApi: mock the api seam that
 // refreshGovernance() reaches on mount, plus the sse-store refresh registry.
-async function loadSurface(approval_queue: KeeperApprovalQueueItem[]) {
+async function loadSurface(
+  approval_queue: KeeperApprovalQueueItem[],
+  recent_resolved: KeeperResolvedApprovalItem[] = [],
+) {
   vi.resetModules()
   const resolveGovernanceApproval = vi
     .fn()
     .mockResolvedValue({ ok: true, id: 'appr-1', decision: 'approve' })
   vi.doMock('../../api', () => ({
     decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue)),
+    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue, recent_resolved)),
     fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
     resolveGovernanceApproval,
     deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
@@ -277,6 +284,37 @@ describe('ApprovalsSurface', () => {
     expect(container.textContent).not.toContain('보류')
     expect(container.textContent).not.toContain('되돌리기')
     expect(container.textContent).not.toContain('처리이력')
+  }, 20000)
+
+  it('renders resolved approval history with resolved timestamp and closed decision class', async () => {
+    const { ApprovalsSurface } = await loadSurface(
+      [],
+      [
+        {
+          id: 'appr-done',
+          keeper_name: 'masc-improver',
+          tool_name: 'fs_write',
+          risk_level: 'medium',
+          decision: 'reject',
+          decision_raw: 'reject:operator denied',
+          resolved_at: '2026-06-27T01:02:03Z',
+        },
+      ],
+    )
+
+    render(html`<${ApprovalsSurface} />`, container)
+    await flushUi()
+
+    const history = container.querySelector('[data-testid="approvals-history"]')
+    expect(history).not.toBeNull()
+    expect(history?.textContent).toContain('최근 처리 (1)')
+    expect(history?.textContent).toContain('거부')
+    expect(history?.textContent).toContain('fs_write')
+    expect(history?.textContent).toContain('masc-improver')
+    expect(history?.textContent).toContain('appr-done')
+    expect(history?.querySelector('.ap-history-decision')?.className).toContain('decision-reject')
+    expect(history?.querySelector('.ap-history-decision')?.className).not.toContain('operator denied')
+    expect(history?.querySelector('.ap-history-at')?.textContent).toContain('2026')
   }, 20000)
 
   it('shows the empty state when no approvals are pending', async () => {

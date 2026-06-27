@@ -72,6 +72,8 @@ let read_recent_audit_raw store limit =
     rows
 ;;
 
+let approval_audit_resolved_event = "resolved"
+
 let keeper_audit_metric_label = function
   | Some keeper when String.trim keeper <> "" -> keeper
   | Some _ | None -> "aggregate"
@@ -220,6 +222,23 @@ let audit_scan_window ?keeper_name n =
     max 500 (max n 1 * 64)
 ;;
 
+let resolved_audit_scan_window n =
+  max 500 (max n 1 * 64)
+;;
+
+let record_audit_read_failure ?keeper_name ~site exn =
+  Keeper_fd_pressure.note_exception ~site exn;
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ApprovalQueueFailures)
+    ~labels:
+      [ "keeper",
+        keeper_audit_metric_label keeper_name;
+        "site",
+        Keeper_approval_queue_failure_site.(to_label Audit_read_recent)
+      ]
+    ()
+;;
+
 let read_recent_audit ~base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list =
   if n <= 0
   then []
@@ -241,17 +260,38 @@ let read_recent_audit ~base_path ?keeper_name ?(n = 20) () : Yojson.Safe.t list 
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        Keeper_fd_pressure.note_exception ~site:"approval_audit.read_recent" exn;
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string ApprovalQueueFailures)
-          ~labels:
-            [ "keeper",
-              keeper_audit_metric_label keeper_name;
-              "site",
-              Keeper_approval_queue_failure_site.(to_label Audit_read_recent)
-            ]
-          ();
+        record_audit_read_failure ?keeper_name ~site:"approval_audit.read_recent" exn;
         [])
+;;
+
+let json_member_or_null key json =
+  match Json_util.assoc_member_opt key json with
+  | Some value -> value
+  | None -> `Null
+;;
+
+let resolved_approval_json_of_audit_event json =
+  let resolved_at = Safe_ops.json_float_opt "ts" json in
+  `Assoc
+    [ "id", `String (Safe_ops.json_string ~default:"" "id" json)
+    ; "keeper_name", `String (Safe_ops.json_string ~default:"" "keeper" json)
+    ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
+    ; "risk_level", `String (Safe_ops.json_string ~default:"" "risk" json)
+    ; "decision", Json_util.string_opt_to_json_trimmed (Safe_ops.json_string_opt "decision" json)
+    ; "resolved_at", Json_util.float_opt_to_json resolved_at
+    ; ( "resolved_at_iso",
+        match resolved_at with
+        | Some ts -> `String (Masc_domain.iso8601_of_unix_seconds ts)
+        | None -> `Null )
+    ; "turn_id", json_member_or_null "turn_id" json
+    ; "task_id", json_member_or_null "task_id" json
+    ; "goal_id", json_member_or_null "goal_id" json
+    ; "goal_ids", json_member_or_null "goal_ids" json
+    ; "sandbox_target", json_member_or_null "sandbox_target" json
+    ; "disposition", json_member_or_null "disposition" json
+    ; "disposition_reason", json_member_or_null "disposition_reason" json
+    ; "rule_match", json_member_or_null "rule_match" json
+    ]
 ;;
 
 let list_recent_resolved_json ~base_path ?(n = 20) () : Yojson.Safe.t list =
@@ -262,14 +302,16 @@ let list_recent_resolved_json ~base_path ?(n = 20) () : Yojson.Safe.t list =
     | None -> []
     | Some store ->
       try
-        read_recent_audit_raw store (audit_scan_window n)
+        read_recent_audit_raw store (resolved_audit_scan_window n)
         |> List.filter (fun json ->
-             String.equal "resolved" (Safe_ops.json_string ~default:"" "event" json))
+             String.equal approval_audit_resolved_event
+               (Safe_ops.json_string ~default:"" "event" json))
         |> List.filteri (fun idx _ -> idx < n)
+        |> List.map resolved_approval_json_of_audit_event
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        Keeper_fd_pressure.note_exception ~site:"approval_audit.list_recent_resolved" exn;
+        record_audit_read_failure ~site:"approval_audit.list_recent_resolved" exn;
         [])
 ;;
 
@@ -498,7 +540,7 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
     decision_str;
   audit_approval_event
     ~base_path:base_path
-    ~event_type:"resolved"
+    ~event_type:approval_audit_resolved_event
     ~id:entry.id
     ~keeper_name:entry.keeper_name
     ~tool_name:entry.tool_name

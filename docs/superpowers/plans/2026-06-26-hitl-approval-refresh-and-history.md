@@ -49,7 +49,7 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
 - [ ] **Step 3: OCaml 타입체크**
 
 ```bash
-cd /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/hitl-approval-refresh-and-history
+cd <repo>
 scripts/dune-local.sh build lib/server/server_dashboard_http.cma
 ```
 
@@ -99,7 +99,7 @@ export function fetchDashboardGovernance(
 - [ ] **Step 3: Frontend 타입/테스트**
 
 ```bash
-cd /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/hitl-approval-refresh-and-history/dashboard
+cd <repo>/dashboard
 npx tsc --noEmit
 npx vitest run src/api/dashboard.test.ts
 ```
@@ -191,7 +191,7 @@ function handleGovernance(opts?: { force?: boolean }): void {
 - [ ] **Step 5: 타입/테스트**
 
 ```bash
-cd /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/hitl-approval-refresh-and-history/dashboard
+cd <repo>/dashboard
 npx tsc --noEmit
 npx vitest run src/components/governance.test.ts src/sse-store.test.ts src/components/approvals/approvals-surface.test.ts
 ```
@@ -263,8 +263,9 @@ const recentResolved = Array.isArray(raw.recent_resolved)
 - [ ] **Step 4: OCaml/TypeScript 타입체크**
 
 ```bash
-cd /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/hitl-approval-refresh-and-history
+cd <repo>
 scripts/dune-local.sh build lib/dashboard/dashboard_governance.cma
+cd dashboard
 npx tsc --noEmit
 ```
 
@@ -331,7 +332,7 @@ ${resolvedItems.length > 0
 - [ ] **Step 5: 테스트**
 
 ```bash
-cd /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/hitl-approval-refresh-and-history/dashboard
+cd <repo>/dashboard
 npx tsc --noEmit
 npx vitest run src/components/approvals/approvals-surface.test.ts
 ```
@@ -350,7 +351,7 @@ git commit -m "feat(dashboard): render recent resolved approvals on approvals su
 - [ ] **Step 1: OCaml 타입체크 (touched targets)**
 
 ```bash
-cd /Users/dancer/me/workspace/yousleepwhen/masc/.worktrees/feature/hitl-approval-refresh-and-history
+cd <repo>
 scripts/dune-local.sh build lib/server/server_dashboard_http.cma lib/dashboard/dashboard_governance.cma
 ```
 

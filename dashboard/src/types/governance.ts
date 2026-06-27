@@ -1,5 +1,8 @@
 // --- Governance ---
 
+import type { KeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
+export type { KeeperResolvedApprovalDecision } from '../lib/keeper-approval-decision'
+
 export interface GovernanceContextRef {
   board_post_id?: string | null
   task_id?: string | null
@@ -240,6 +243,27 @@ export interface KeeperApprovalQueueItem {
   } | null
   input?: unknown
   input_preview?: string | null
+}
+
+export interface KeeperResolvedApprovalItem {
+  id: string
+  keeper_name: string
+  tool_name: string
+  risk_level?: KeeperApprovalRiskLevel | null
+  decision: KeeperResolvedApprovalDecision
+  decision_raw?: string | null
+  resolved_at?: string | null
+  turn_id?: number | null
+  task_id?: string | null
+  goal_id?: string | null
+  goal_ids?: string[]
+  sandbox_target?: string | null
+  disposition?: string | null
+  disposition_reason?: string | null
+  rule_match?: {
+    rule_id?: string | null
+    matched_by?: string | null
+  } | null
 }
 
 export interface KeeperApprovalRule {

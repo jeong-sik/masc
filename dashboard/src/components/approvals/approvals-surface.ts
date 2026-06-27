@@ -14,14 +14,19 @@
 import { html } from 'htm/preact'
 import { Fragment } from 'preact'
 import { useEffect, useMemo, useState } from 'preact/hooks'
-import type { KeeperApprovalQueueItem } from '../../types'
+import type { KeeperApprovalQueueItem, KeeperResolvedApprovalItem } from '../../types'
 import { TELEMETRY_AUTO_REFRESH_MS } from '../../config/constants'
 import { setupVisibleAutoRefresh } from '../../lib/auto-refresh'
+import { formatDateTimeKo } from '../../lib/format-time'
 import {
   keeperApprovalRiskLabel,
   keeperApprovalRiskVisualBand,
   type KeeperApprovalRiskVisualBand,
 } from '../../lib/governance-risk-level'
+import {
+  keeperResolvedApprovalDecisionClass,
+  keeperResolvedApprovalDecisionLabel,
+} from '../../lib/keeper-approval-decision'
 import { navigate } from '../../router'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { LoadingState } from '../common/feedback-state'
@@ -111,26 +116,20 @@ function approvalRuleSummary(item: KeeperApprovalQueueItem): string | null {
     : null
 }
 
-function resolvedDecisionLabel(decision: string | null | undefined): string {
-  if (decision === 'approve') return '승인'
-  if (decision === 'reject') return '거부'
-  return decision || '처리됨'
-}
-
-function ResolvedApprovalItem({ item }: { item: KeeperApprovalQueueItem }) {
-  const decision = resolvedDecisionLabel(item.decision)
+function ResolvedApprovalItem({ item }: { item: KeeperResolvedApprovalItem }) {
+  const decision = keeperResolvedApprovalDecisionLabel(item.decision)
   return html`
     <li
       class="ap-history-item"
       data-testid="approval-history-item"
       data-approval-id=${item.id}
     >
-      <span class=${`ap-history-decision ${item.decision ?? ''}`}>${decision}</span>
+      <span class=${`ap-history-decision ${keeperResolvedApprovalDecisionClass(item.decision)}`}>${decision}</span>
       <span class="ap-history-tool mono">${item.tool_name}</span>
       <span class="ap-history-keeper">${item.keeper_name}</span>
       <span class="ap-history-id mono">${item.id}</span>
-      ${item.requested_at
-        ? html`<span class="ap-history-at">${new Date(item.requested_at).toLocaleString('ko-KR')}</span>`
+      ${item.resolved_at
+        ? html`<span class="ap-history-at">${formatDateTimeKo(item.resolved_at)}</span>`
         : null}
     </li>
   `

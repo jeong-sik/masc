@@ -33,7 +33,10 @@ export function normalizeFusionPanelReason(model: string, reason: string | undef
     return normalizeProviderAttribution(model, decodeOcamlStringLiteral(providerMatch[1] ?? '').trim())
   }
   if (/^\(?\s*Fusion_types\.Timeout\s*\)?$/.test(trimmed)) return 'timeout'
-  if (/^\(?\s*Fusion_types\.Empty_response\s*\)?$/.test(trimmed)) return 'empty response'
+  const emptyMatch = trimmed.match(/^\(?\s*Fusion_types\.Empty_response(?:\s+"([\s\S]*)")?\s*\)?$/)
+  if (emptyMatch) {
+    return decodeOcamlStringLiteral(emptyMatch[1] ?? '').trim() || 'empty response'
+  }
   return normalizeProviderAttribution(model, trimmed)
 }
 

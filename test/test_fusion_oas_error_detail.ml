@@ -1,15 +1,5 @@
 open Masc
 
-let contains ~needle haystack =
-  let needle_len = String.length needle in
-  let haystack_len = String.length haystack in
-  let rec loop i =
-    i + needle_len <= haystack_len
-    && (String.equal (String.sub haystack i needle_len) needle || loop (i + 1))
-  in
-  String.equal needle "" || loop 0
-;;
-
 let provider_cfg () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.Anthropic
@@ -115,13 +105,41 @@ let test_empty_response_detail_summarizes_shape () =
   in
   let detail = Fusion_oas.For_testing.empty_response_detail response in
   Alcotest.(check bool) "stop reason included" true
-    (contains ~needle:"stop_reason=max_tokens" detail);
+    (String_util.string_contains_substring ~needle:"stop_reason=max_tokens" detail);
   Alcotest.(check bool) "thinking block counted" true
-    (contains ~needle:"thinking_blocks=1" detail);
+    (String_util.string_contains_substring ~needle:"thinking_blocks=1" detail);
   Alcotest.(check bool) "output tokens included" true
-    (contains ~needle:"output_tokens=32" detail);
+    (String_util.string_contains_substring ~needle:"output_tokens=32" detail);
   Alcotest.(check bool) "reasoning body not leaked" false
-    (contains ~needle:"secret chain" detail)
+    (String_util.string_contains_substring ~needle:"secret chain" detail)
+;;
+
+let test_empty_response_detail_escapes_unknown_stop_reason () =
+  let response : Agent_sdk.Types.api_response =
+    { id = "r"
+    ; model = "m"
+    ; stop_reason = Agent_sdk.Types.Unknown "line\nquote\""
+    ; content = []
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  let detail = Fusion_oas.For_testing.empty_response_detail response in
+  Alcotest.(check bool) "unknown stop reason escaped" true
+    (String_util.string_contains_substring ~needle:"stop_reason=unknown:line\\nquote\\\""
+       detail);
+  Alcotest.(check bool) "raw newline not embedded" false
+    (String_util.string_contains_substring ~needle:"line\nquote" detail)
+;;
+
+let test_panel_failure_yojson_accepts_legacy_empty_response () =
+  match Fusion_types.panel_failure_of_yojson (`String "Empty_response") with
+  | Ok (Fusion_types.Empty_response detail) ->
+    Alcotest.(check string) "legacy detail" "empty response" detail
+  | Ok other ->
+    Alcotest.failf "unexpected panel failure: %s"
+      (Fusion_types.show_panel_failure other)
+  | Error err -> Alcotest.fail err
 ;;
 
 let test_timeout_budget_does_not_set_total_execution_ceiling () =
@@ -172,6 +190,14 @@ let () =
             "empty response detail summarizes shape"
             `Quick
             test_empty_response_detail_summarizes_shape
+        ; Alcotest.test_case
+            "empty response detail escapes unknown stop reason"
+            `Quick
+            test_empty_response_detail_escapes_unknown_stop_reason
+        ; Alcotest.test_case
+            "panel failure yojson accepts legacy empty response"
+            `Quick
+            test_panel_failure_yojson_accepts_legacy_empty_response
         ; Alcotest.test_case
             "timeout budget does not arm OAS total execution ceiling"
             `Quick

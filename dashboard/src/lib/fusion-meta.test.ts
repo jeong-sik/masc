@@ -38,6 +38,12 @@ describe('normalizeFusionPanelReason', () => {
     expect(normalizeFusionPanelReason('gpt-5', '( Fusion_types.Empty_response )')).toBe(
       'empty response',
     )
+    expect(
+      normalizeFusionPanelReason(
+        'gpt-5',
+        'Fusion_types.Empty_response "empty response (stop_reason=max_tokens)"',
+      ),
+    ).toBe('empty response (stop_reason=max_tokens)')
   })
 
   it('passes through plain reasons', () => {

@@ -20,7 +20,15 @@ let stop_reason_label : Agent_sdk.Types.stop_reason -> string = function
   | ContextWindowExceeded -> "context_window_exceeded"
   | Unknown s ->
     let s = String.trim s in
-    if String.equal s "" then "unknown" else "unknown:" ^ s
+    if String.equal s "" then "unknown"
+    else
+      let escaped = String.escaped s in
+      let max_len = 80 in
+      let safe =
+        if String.length escaped <= max_len then escaped
+        else String.sub escaped 0 max_len ^ "..."
+      in
+      "unknown:" ^ safe
 
 let empty_response_detail (resp : Agent_sdk.Types.api_response) : string =
   let text_blocks = ref 0 in
@@ -98,11 +106,14 @@ let panel_failure_code = function
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Provider_error _ -> "provider_error"
   | Fusion_types.Empty_response _ -> "empty_response"
+  | Fusion_types.Invalid_max_output_tokens _ -> "invalid_max_output_tokens"
 
 let panel_failure_detail ~runtime_id = function
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Provider_error detail -> provider_error_detail ~runtime_id detail
   | Fusion_types.Empty_response detail -> detail
+  | Fusion_types.Invalid_max_output_tokens n ->
+    Printf.sprintf "invalid max_output_tokens %d" n
 
 (* 이미 attribution된 실패를 재-attribution 없이 렌더한다. Provider_error의 detail은
    실패 시점(panel outcome_of_result / build_agent)에 provider_error_detail
@@ -114,6 +125,8 @@ let panel_failure_text = function
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Provider_error detail -> detail
   | Fusion_types.Empty_response detail -> detail
+  | Fusion_types.Invalid_max_output_tokens n ->
+    Printf.sprintf "invalid max_output_tokens %d" n
 
 let timeout_budget_opt timeout_s =
   if Float.is_finite timeout_s && timeout_s > 0.0 then Some timeout_s else None
@@ -184,11 +197,9 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
     let base_config =
       match max_tokens with
       | None -> Ok base_config
-      | Some n when n > 0 -> Ok { base_config with max_tokens = n }
-      | Some n ->
-        Error
-          (Fusion_types.Provider_error
-             (Printf.sprintf "%s: invalid max_tokens %d" model n))
+      | Some n when Fusion_policy.valid_max_output_tokens (Some n) ->
+        Ok { base_config with max_tokens = n }
+      | Some n -> Error (Fusion_types.Invalid_max_output_tokens n)
     in
     Result.bind base_config (fun base_config ->
     (* max_tool_calls는 OpenRouter Fusion의 per-panel tool budget에 대응.

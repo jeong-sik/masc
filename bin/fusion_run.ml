@@ -49,7 +49,7 @@ let string_of_failure (f : Fusion_types.panel_failure) : string =
   match f with
   | Fusion_types.Timeout -> "timeout"
   | Fusion_types.Provider_error msg -> "provider_error: " ^ msg
-  | Fusion_types.Empty_response -> "empty_response"
+  | Fusion_types.Empty_response _ -> "empty_response"
 
 let string_of_decision (d : Fusion_types.judge_decision) : string =
   match d with

@@ -90,7 +90,7 @@ end
 type panel_failure =
   | Timeout
   | Provider_error of string
-  | Empty_response
+  | Empty_response of string
   | Budget_exhausted
 
 type panel_outcome =

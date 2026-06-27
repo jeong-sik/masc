@@ -107,7 +107,6 @@ const ATTENTION_REASON_LABELS: Record<AttentionReason, string> = {
 const TRUST_RUNTIME_FAILURE_ALIASES: ReadonlySet<string> = new Set([
   'completion_contract_violation',
   'fsm_invariant',
-  'runtime_exhausted',
   'sandbox_violation',
   'critical_block',
 ])

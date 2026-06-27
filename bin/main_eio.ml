@@ -932,8 +932,10 @@ let seed_one ~target_root ~force tally rel =
 
 let init_cmd_exit base_path force =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
+  (* [init] seeds the explicitly requested workspace; runtime resolution may
+     honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
   let target_root =
-    (Config_dir_resolver.resolve_for_base_path ~base_path).config_root.path
+    Filename.concat (Config_dir_resolver.masc_root ~base_path) "config"
   in
   Fs_compat.mkdir_p target_root;
   let result =

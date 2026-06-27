@@ -27,14 +27,11 @@
     because the path jail is a SEPARATE, PERMANENT policy axis — not because it
     is temporary:
 
-      - The path jail is default-ON ([Shell_ir_path_jail.enabled] defaults to
-        true, env_config_runtime.ml:956). RFC-0255 §3 rejects removing it
-        (alternative C: "the jail is the only write-escape guard on Host"), and
-        RFC-0255 P5 GRADUATES it to the only path — i.e. makes it permanent. The
-        "short-lived valve, not a steady state" with removal target P5 is the
-        kill-switch's DISABLED state (setting the flag to false), NOT the jail.
-        Depending on the path jail is therefore depending on a permanent
-        defense.
+      - RFC-0255 §3 rejects removing the path jail (alternative C: "the jail is
+        the only write-escape guard on Host"), and RFC-0255 P5 graduates it to
+        the only path — i.e. makes it permanent. The former short-lived
+        kill-switch was the temporary part; depending on the path jail is
+        therefore depending on a permanent defense.
       - Command-shape (what binary / git op / redirect) and path-scope (where
         the argument points) are orthogonal axes. A command-shape differential
         that folded in the path jail would conflate the two and could never

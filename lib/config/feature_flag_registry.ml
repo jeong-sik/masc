@@ -187,12 +187,6 @@ let all_flags : flag list = [
     description = "Route Execute tool calls through the capability-based Shell IR approval policy gate";
     default = true; category = "runtime";
     lifecycle = Active; since = "2.234.0" };
-
-  { env_name = "MASC_SHELL_IR_PATH_JAIL_ENABLED";
-    description = "Apply the Shell IR workspace path jail (validate_shell_ir_paths) to keeper Execute commands. Kill-switch: set false to disable path_reject without a rebuild (RFC-0255 section 4.6); also drops the only positional write-escape guard on Host";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "2.235.0" };
-
   { env_name = "MASC_SLOT_YIELD_ENABLED";
     description = "Release LLM slot during tool execution so other agents can use it";
     default = true; category = "runtime";

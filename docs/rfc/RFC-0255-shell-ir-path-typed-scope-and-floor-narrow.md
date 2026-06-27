@@ -124,13 +124,13 @@ Split `Git_op.Destructive` by **recoverability** (§2.6), not by local/remote:
 
 > **Implementation caveat (M1).** The RFC-0254 claim "the compiler forces every match site" did **not** hold at the floor: `find_destructive_git` used `Git_op.Destructive _ as g` with a `_ :: rest` catch-all under `[@@warning "-4"]`. This PR keeps raw destructive git floored and adds a closed `git_is_floored : Git_op.t -> bool`, so a future top-level `Git_op.t` constructor must receive an explicit floor decision instead of falling through the capability scan.
 
-### 4.6 Path-jail kill-switch (closes §2.4) — valve with a removal obligation
+### 4.6 Path-jail kill-switch (historical valve, sunset at P5)
 
-Introduce `MASC_SHELL_IR_PATH_JAIL_ENABLED` (default `true`, lifecycle `Active`, re-readable per process) gating `validate_shell_ir_paths`, so a path-policy false-positive can be disabled without a rebuild — symmetric with the approval-gate kill-switch.
+Historical P1 introduced `MASC_SHELL_IR_PATH_JAIL_ENABLED` (default `true`, re-readable per process) gating `validate_shell_ir_paths`, so a path-policy false-positive could be disabled without a rebuild — symmetric with the approval-gate kill-switch.
 
 > **Security note (M2).** Disabling this flag removes the **only positional write-escape guard** on the Host profile: `find_write_escape` inspects `Capability.Write_path`, which is emitted only from **redirects**, never positional argv (`capability_check.ml:~36-41`). So a positional write-escape (`cp ../../x /tmp`, `mv` outside the workspace) is caught by nothing but the path jail. Turning the flag off trades write containment for read relief — acceptable as a short-lived valve, not a steady state.
 
-**Removal obligation (CLAUDE.md Override condition):** the flag carries `removal target: P5 landing` and a tracking issue from day one. It is a valve, not the fix; the fix is §4.1–4.4.
+**P5 sunset status:** the flag has been removed. Product runtime always calls `Exec_policy.validate_shell_ir_paths`; a path-policy false-positive now requires a policy/data fix or rollback, not an operator env override. The temporary valve was removed; the path jail graduated into the permanent defense.
 
 ## 5. Non-goals
 
@@ -140,10 +140,10 @@ Introduce `MASC_SHELL_IR_PATH_JAIL_ENABLED` (default `true`, lifecycle `Active`,
 
 ## 6. Implementation plan
 
-1. **P1 — kill-switch (§4.6).** Smallest, unblocks operations. Flag + gate + `removal target: P5` + tracking issue. Ship first so a regression has an env-level mitigation.
+1. **P1 — kill-switch (§4.6, historical).** Smallest, unblocks operations. Flag + gate + `removal target: P5` + tracking issue. Shipped first so a regression had an env-level mitigation.
 2. **P2 — floor classifier hardening (§4.5).** Keep raw destructive git floored, add the closed `git_is_floored` classifier so future `Git_op.t` arms cannot fail open, and document the structured-recovery preconditions required before any future narrowing of `reset --hard` / `branch -D`. Tests per §4.5. Self-contained in `lib/exec`.
 3. **P3+P4 — typed cwd-correct producer + jail consumer, ATOMIC (one PR) (§4.1–4.4).** Thread cwd/mapped-roots through the producer; author per-slot direction metadata; resolve cross-lib ownership; rewrite the jail to consume typed scopes; **land the `Sensitive_path` deny-list (§4.3) in the same PR as the read widening**; delete `looks_like_path_token`/`*_token`. P3 and P4 must not land separately — a half-migrated state runs two classifiers (the RFC-0254 §5.4 anti-pattern). Reconcile `find_write_escape` (§4.4).
-4. **P5 — verification (§7) + remove the kill-switch's removal obligation** (or graduate the flag to permanent if soak demands it, with an explicit decision).
+4. **P5 — verification (§7) + remove the kill-switch.** The path jail graduated to the only product path; the env-level off-switch did not.
 
 P1+P2 resolve the *floor* and the *operational gap* quickly; P3+P4 are the structural root fix and ship as one coherent, atomic change.
 
@@ -157,8 +157,8 @@ P1+P2 resolve the *floor* and the *operational gap* quickly; P3+P4 are the struc
 
 ## 8. Rollout
 
-- P1 kill-switch ships first; if the live false-positive storm recurs, `MASC_SHELL_IR_PATH_JAIL_ENABLED=false` + **restart** is the immediate mitigation (env read at process start; no live flip). Operators must know this also drops the positional write-escape guard (§4.6 M2).
-- P3+P4 graduate behind the same flag: land honoring the flag, soak, then make typed-scope the only path; remove the kill-switch obligation at P5.
+- P1 kill-switch shipped first as a historical mitigation valve. At P5 the env-level mitigation is removed; if a live false-positive storm recurs, operators should roll back or patch policy/data rather than disabling the path jail.
+- P3+P4 graduated behind the same flag historically: land honoring the flag, soak, then make typed-scope the only path; remove the kill-switch at P5.
 - Post-enable verification (`<base-path>/.masc/logs/system_log_*.jsonl`): `path_reject` should drop to genuine write-escapes; `policy_denied` should show raw destructive git (`push --force`/`clean -fd`/`worktree remove`/`reset --hard`/`branch -D`) and structured recovery commands should emit their own proof records if added.
 
 ## 9. Alternatives considered

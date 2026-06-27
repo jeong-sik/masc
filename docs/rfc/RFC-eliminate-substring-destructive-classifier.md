@@ -57,12 +57,10 @@ worker 도구는 전부 MCP 프록시(`worker_container.ml:298-332` `build_oas_m
 
 **중요 — caps 는 redirect 만 path cap 을 emit** (`capability_check.mli:13-16`): `rm`/`chmod`/`dd` 의 인자 경로는
 cap 이 아니라 단순 arg 이므로 `find_write_escape`(catastrophic_floor)가 못 본다. 이들의 경로 차단은 오직 path
-jail(3)이 한다. path jail 은 `Shell_ir_path_jail.enabled` 로 끌 수 있으나 **기본값 true**(`env_config_runtime.ml:956`)
-이며 **영구 메커니즘**이다 — RFC-0255 §3 은 "path jail 제거"(대안 C)를 *기각*("the jail is the only write-escape
-guard on Host")하고, P5 는 jail 을 *the only path* 로 graduate(=무조건화)한다. "short-lived valve, not a steady
-state"·`removal target: P5` 가 가리키는 것은 jail 을 **끄는 kill-switch(disabled 상태)**이지 jail 자체가 아니다
-(`keeper_tool_execute_shell_ir.ml:77-81`: "When disabled, … short-lived valve"). 즉 제거되는 건 off-switch 이고,
-그 결과 jail 은 영구화된다.
+jail(3)이 한다. path jail 은 **영구 메커니즘**이다 — RFC-0255 §3 은 "path jail 제거"(대안 C)를 *기각*
+("the jail is the only write-escape guard on Host")하고, P5 는 jail 을 *the only path* 로 graduate(=무조건화)한다.
+"short-lived valve, not a steady state"·`removal target: P5` 가 가리키는 것은 jail 을 **끄던 kill-switch(disabled
+상태)**이지 jail 자체가 아니다. P5 에서 제거되는 건 off-switch 이고, 그 결과 jail 은 영구화된다.
 
 ### 2.4 측정 framing — command-shape only (path jail 은 별개의 영구 축)
 본 RFC 의 harness 와 gap 은 (1)+(2) **command-shape 분류기**만 측정하고 (3) path jail 을 **의도적으로 제외**한다.

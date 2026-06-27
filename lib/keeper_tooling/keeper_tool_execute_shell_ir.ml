@@ -92,15 +92,11 @@ let rec first_privileged_program = function
      | None -> first_privileged_program rest)
 ;;
 
+(* Public seam shared by direct Shell IR dispatch and Docker sandbox host-path
+   validation, where container paths are first rewritten for the host policy
+   check.  Keeping the facade here ensures both routes use the same jail. *)
 let validate_paths ?keeper_id ?base_path ~workdir ir =
-  (* RFC-0255 section 4.6: path-jail kill-switch. When disabled, skip the
-     workspace path whitelist entirely. This also removes the only positional
-     write-escape guard on the Host profile ([find_write_escape] covers
-     redirect writes only), so it is a short-lived valve, not a steady state.
-     removal target: RFC-0255 P5. *)
-  if Env_config_runtime.Shell_ir_path_jail.enabled () then
-    Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ~workdir ir
-  else Ok ()
+  Exec_policy.validate_shell_ir_paths ?keeper_id ?base_path ~workdir ir
 ;;
 
 let tool_execute_command_context ?(allow_pipes = true) command =

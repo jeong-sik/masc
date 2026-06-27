@@ -6,7 +6,9 @@ import { get, type AbortableRequestOptions } from './core'
 import { isRecord, asBoolean, asNumber, asNullableString, asString, asStringArray, asRecordArray } from '../components/common/normalize'
 import { decodeTelemetryFreshnessMetadata, type TelemetryFreshnessMetadata } from './dashboard-shared'
 
-// Mirror of Keeper_memory_os_types.librarian_unstructured_fallback_terminal_marker.
+// Mirror of Keeper_memory_os_types.librarian_unstructured_fallback_terminal_marker
+// (lib/keeper/keeper_memory_os_types.ml). Keep this string literal in sync with the
+// backend SSOT; there is no codegen for this boundary.
 export const MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER = 'librarian_unstructured_fallback'
 
 // Accepts either a string array or a single string; mirrors the keeper-config

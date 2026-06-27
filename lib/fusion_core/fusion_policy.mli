@@ -191,10 +191,16 @@ val judge_tool_budget_of : panel_group list -> int
     adaptive 재시도 분기를 판정한다. *)
 val adaptive_timeout_enabled : preset -> bool
 
+(** [judge_wave_budget_enabled ~wave_budget_s] is false only for the validated
+    legacy disabled value [0.0]. Positive finite or effectively-unbounded
+    budgets still enforce the wave cap. *)
+val judge_wave_budget_enabled : wave_budget_s:float -> bool
+
 (** 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
-    [factor <= adaptive_extension_threshold](= 1.0)이면 [base_s]를 wave 예산에 맞춰
-    반환하고, [already_timed_out]이고 [factor > adaptive_extension_threshold]이면
-    [base_s *. factor]를 [max_s]로 상한·남은 예산으로 하한해 확장한다. 결과가
+    [wave_budget_s = 0.0]이면 legacy disabled budget으로 간주해 wave cap을 적용하지
+    않는다. [factor <= adaptive_extension_threshold](= 1.0)이면 [base_s]를 반환하고,
+    [already_timed_out]이고 [factor > adaptive_extension_threshold]이면 [base_s *.
+    factor]를 [max_s]로 상한·남은 예산으로 하한해 확장한다. 결과가
     [min_effective_timeout_s](0.001s) 미만이면 [None]. *)
 val adjust_judge_timeout
   :  base_s:float

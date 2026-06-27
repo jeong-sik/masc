@@ -260,6 +260,8 @@ let min_effective_timeout_s = 0.001
 let adaptive_timeout_enabled (p : preset) =
   p.adaptive_timeout_factor > adaptive_extension_threshold
 
+let judge_wave_budget_enabled ~wave_budget_s = wave_budget_s > 0.0
+
 (* 적응형 타임아웃: 1차 심판/재시도 호출에 사용할 effective timeout을 계산한다.
    - factor <= [adaptive_extension_threshold] (또는 아직 타임아웃 안 됨): base_s를 wave
      예산에 맞춰 반환.
@@ -268,8 +270,12 @@ let adaptive_timeout_enabled (p : preset) =
    예산/상한이 너무 작아 [min_effective_timeout_s] 미만이면 None (즉시 실패). *)
 let adjust_judge_timeout ~base_s ~max_s ~factor ~wave_budget_s ~elapsed_s
     ~already_timed_out : float option =
+  let budget_enabled = judge_wave_budget_enabled ~wave_budget_s in
+  let budget_allows timeout_s =
+    (not budget_enabled) || elapsed_s +. timeout_s <= wave_budget_s
+  in
   if factor <= adaptive_extension_threshold || not already_timed_out
-  then if elapsed_s +. base_s <= wave_budget_s then Some base_s else None
+  then if budget_allows base_s then Some base_s else None
   else
     let extended = base_s *. factor in
     let proposed =
@@ -277,8 +283,11 @@ let adjust_judge_timeout ~base_s ~max_s ~factor ~wave_budget_s ~elapsed_s
       | Some m -> Float.min extended m
       | None -> extended
     in
-    let remaining = wave_budget_s -. elapsed_s in
-    let effective = Float.min proposed remaining in
+    let effective =
+      if budget_enabled
+      then Float.min proposed (wave_budget_s -. elapsed_s)
+      else proposed
+    in
     if effective < min_effective_timeout_s then None else Some effective
 
 (* RFC-0280: 검증된 preset을 타입으로 증명한다 (Parse, don't validate).

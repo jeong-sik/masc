@@ -123,7 +123,10 @@ let test_adjust_judge_timeout_disabled () =
        ~wave_budget_s:100.0 ~elapsed_s:5.0 ~already_timed_out:false);
   check (option (float 0.001)) "factor=1.0 over budget" None
     (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
-       ~wave_budget_s:14.0 ~elapsed_s:5.0 ~already_timed_out:false)
+       ~wave_budget_s:14.0 ~elapsed_s:5.0 ~already_timed_out:false);
+  check (option (float 0.001)) "wave budget 0 disables cap" (Some 10.0)
+    (Fusion_policy.adjust_judge_timeout ~base_s:10.0 ~max_s:None ~factor:1.0
+       ~wave_budget_s:0.0 ~elapsed_s:500.0 ~already_timed_out:false)
 
 let test_adjust_judge_timeout_extend () =
   check (option (float 0.001)) "extend capped by max_s" (Some 15.0)

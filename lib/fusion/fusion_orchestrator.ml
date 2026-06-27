@@ -245,8 +245,12 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             preset.Fusion_policy.judge_wave_budget_s -. (now () -. t0)
           in
           let meta_budget_check () =
-            let remaining = remaining_wave_budget () in
-            if remaining < preset.Fusion_policy.meta_timeout_s
+            if
+              not
+                (Fusion_policy.judge_wave_budget_enabled
+                   ~wave_budget_s:preset.Fusion_policy.judge_wave_budget_s)
+            then Ok preset.Fusion_policy.meta_timeout_s
+            else if remaining_wave_budget () < preset.Fusion_policy.meta_timeout_s
             then
               Error
                 ( Fusion_types.Budget_exceeded "insufficient remaining budget for meta"

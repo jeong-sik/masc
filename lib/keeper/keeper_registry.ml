@@ -525,8 +525,7 @@ let clear_board_wakeups ~base_path name =
 ;;
 
 let cleanup_tracking ~base_path name =
-  let key = registry_key ~base_path name in
-  match StringMap.find_opt key (Atomic.get registry) with
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   | Some entry ->
     (match
        put_entry

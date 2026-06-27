@@ -22,6 +22,20 @@ type entry =
   ; reason : string
   }
 
+type scan_error =
+  { path : string
+  ; operation : string
+  ; message : string
+  }
+
+type scan_result =
+  { entries : entry list
+  ; truncated : bool
+  ; visited : int
+  ; errors : scan_error list
+  ; exists : bool
+  }
+
 let default_max_depth = 4
 let default_max_entries = 5_000
 
@@ -48,20 +62,7 @@ let split_relative rel =
 
 let has_suffix name suffix = String.ends_with ~suffix name
 
-let is_backup_name name =
-  has_suffix name ".bak"
-  || has_suffix name ".backup"
-  || has_suffix name ".old"
-  || has_suffix name "~"
-;;
-
-let is_orphan_temp_name name =
-  String.equal name "PYEOF"
-  || (String.starts_with ~prefix:".atomic_" name && has_suffix name ".tmp")
-  || has_suffix name ".tmp"
-;;
-
-let live_top_level_dirs =
+let live_runtime_store_dirs =
   [ "tool_usage"
   ; "runtime-manifests"
   ; "metrics"
@@ -72,48 +73,54 @@ let live_top_level_dirs =
   ]
 ;;
 
-let live_keeper_child_dirs =
-  [ "metrics"
-  ; "execution-receipts"
-  ; "turn-records"
-  ; "reaction-ledger"
-  ; "runtime-manifests"
-  ; "trajectories"
-  ; "tool_usage"
-  ]
+let member name names = List.exists (String.equal name) names
+
+let regular_path_exists_no_follow path =
+  try
+    match (Unix.lstat path).Unix.st_kind with
+    | Unix.S_REG -> true
+    | Unix.S_DIR | Unix.S_LNK | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK ->
+      false
+  with
+  | Unix.Unix_error _ -> false
 ;;
 
-let memory_os_filenames = [ "facts.jsonl"; "events.jsonl"; "episodes.jsonl" ]
-
-let member name names = List.exists (String.equal name) names
+let migrated_memory_path_for_legacy_filename ~current_keepers_dir ~keeper_id filename =
+  if String.equal filename "facts.jsonl"
+  then
+    Some
+      (Keeper_memory_os_io.facts_path_for_keepers_dir
+         ~keepers_dir:current_keepers_dir
+         ~keeper_id)
+  else if String.equal filename "events.jsonl"
+  then
+    Some
+      (Keeper_memory_os_io.events_path_for_keepers_dir
+         ~keepers_dir:current_keepers_dir
+         ~keeper_id)
+  else None
+;;
 
 let migrated_memory_path_exists ~current_keepers_dir parts =
   match parts with
-  | keeper_id :: filename :: [] when member filename memory_os_filenames ->
-    Sys.file_exists (Filename.concat (Filename.concat current_keepers_dir keeper_id) filename)
+  | keeper_id :: filename :: [] ->
+    (match migrated_memory_path_for_legacy_filename ~current_keepers_dir ~keeper_id filename with
+     | Some path -> regular_path_exists_no_follow path
+     | None -> false)
   | _ -> false
 ;;
 
 let classify ~current_keepers_dir ~rel ~kind =
   let parts = split_relative rel in
-  let name =
-    match List.rev parts with
-    | [] -> rel
-    | hd :: _ -> hd
-  in
-  if is_orphan_temp_name name
-  then Orphaned, "orphaned_temp_or_marker"
-  else if is_backup_name name
-  then Backup, "backup_suffix"
-  else if migrated_memory_path_exists ~current_keepers_dir parts
+  if migrated_memory_path_exists ~current_keepers_dir parts
   then Migrated, "memory_os_file_already_present_under_config_keepers"
   else (
     match parts with
     | [ top ] when String.equal kind "file" && has_suffix top ".json" ->
       Live, "legacy_keeper_meta_json"
-    | top :: _ when member top live_top_level_dirs ->
+    | top :: _ when member top live_runtime_store_dirs ->
       Live, "known_top_level_runtime_store"
-    | _keeper :: child :: _ when member child live_keeper_child_dirs ->
+    | _keeper :: child :: _ when member child live_runtime_store_dirs ->
       Live, "known_keeper_runtime_store"
     | _ -> Unknown, "unclassified_legacy_path")
 ;;
@@ -129,27 +136,54 @@ let stat_kind st =
   | Unix.S_SOCK -> "socket"
 ;;
 
-let safe_lstat path =
-  try Some (Unix.lstat path) with
-  | Unix.Unix_error _ -> None
+let error_message = function
+  | Unix.Unix_error (err, _, _) -> Unix.error_message err
+  | Sys_error msg -> msg
+  | exn -> Printexc.to_string exn
 ;;
 
-let sorted_readdir path =
-  try Sys.readdir path |> Array.to_list |> List.sort String.compare with
-  | Sys_error _ -> []
+let display_path ~root path =
+  if String.equal path root then "." else relative_path ~root path
+;;
+
+let record_error errors ~root ~operation path exn =
+  let error =
+    { path = display_path ~root path; operation; message = error_message exn }
+  in
+  errors := error :: !errors;
+  Log.Dashboard.warn
+    "legacy keeper inventory %s failed for %s: %s"
+    operation
+    error.path
+    error.message
+;;
+
+let lstat_result errors ~root path =
+  try Ok (Unix.lstat path) with
+  | Unix.Unix_error _ as exn ->
+    record_error errors ~root ~operation:"lstat" path exn;
+    Error ()
+;;
+
+let sorted_readdir_result errors ~root path =
+  try Ok (Sys.readdir path |> Array.to_list |> List.sort String.compare) with
+  | Sys_error _ as exn ->
+    record_error errors ~root ~operation:"readdir" path exn;
+    Error ()
 ;;
 
 let scan_entries ~legacy_dir ~current_keepers_dir ~max_depth ~max_entries =
   let entries = ref [] in
   let visited = ref 0 in
   let truncated = ref false in
+  let errors = ref [] in
   let rec visit ~depth path =
     if !visited >= max_entries
     then truncated := true
     else (
-      match safe_lstat path with
-      | None -> ()
-      | Some st ->
+      match lstat_result errors ~root:legacy_dir path with
+      | Error () -> ()
+      | Ok st ->
         incr visited;
         let kind = stat_kind st in
         let rel = relative_path ~root:legacy_dir path in
@@ -164,18 +198,49 @@ let scan_entries ~legacy_dir ~current_keepers_dir ~max_depth ~max_entries =
            }
            :: !entries;
         if String.equal kind "dir" && depth < max_depth
-        then
-          sorted_readdir path
-          |> List.iter (fun name -> visit ~depth:(depth + 1) (Filename.concat path name)))
+        then (
+          match sorted_readdir_result errors ~root:legacy_dir path with
+          | Error () -> ()
+          | Ok names ->
+            names
+            |> List.iter (fun name -> visit ~depth:(depth + 1) (Filename.concat path name))))
   in
-  if Sys.file_exists legacy_dir
-  then
-    sorted_readdir legacy_dir
-    |> List.iter (fun name -> visit ~depth:0 (Filename.concat legacy_dir name));
-  List.rev !entries, !truncated, !visited
+  let exists =
+    match
+      try Ok (Unix.lstat legacy_dir) with
+      | Unix.Unix_error (Unix.ENOENT, _, _)
+      | Unix.Unix_error (Unix.ENOTDIR, _, _) -> Error `Missing
+      | Unix.Unix_error _ as exn -> Error (`Failure exn)
+    with
+    | Error `Missing -> false
+    | Error (`Failure exn) ->
+      record_error errors ~root:legacy_dir ~operation:"lstat" legacy_dir exn;
+      false
+    | Ok st when st.Unix.st_kind = Unix.S_DIR ->
+      (match sorted_readdir_result errors ~root:legacy_dir legacy_dir with
+       | Error () -> true
+       | Ok names ->
+         names |> List.iter (fun name -> visit ~depth:0 (Filename.concat legacy_dir name));
+         true)
+    | Ok st ->
+      record_error
+        errors
+        ~root:legacy_dir
+        ~operation:"readdir"
+        legacy_dir
+        (Sys_error
+           (Printf.sprintf "expected directory, found %s" (stat_kind st)));
+      true
+  in
+  { entries = List.rev !entries
+  ; truncated = !truncated
+  ; visited = !visited
+  ; errors = List.rev !errors
+  ; exists
+  }
 ;;
 
-let entry_to_json entry =
+let entry_to_json (entry : entry) =
   `Assoc
     [ "path", `String entry.path
     ; "depth", `Int entry.depth
@@ -183,6 +248,14 @@ let entry_to_json entry =
     ; "bytes", `Int entry.bytes
     ; "class", `String (class_to_string entry.classification)
     ; "reason", `String entry.reason
+    ]
+;;
+
+let scan_error_to_json (error : scan_error) =
+  `Assoc
+    [ "path", `String error.path
+    ; "operation", `String error.operation
+    ; "message", `String error.message
     ]
 ;;
 
@@ -202,44 +275,54 @@ let class_totals entries =
     class_to_string cls, `Assoc [ "count", `Int count; "bytes", `Int bytes ])
 ;;
 
-let cleanup_candidate_class = function
-  | Orphaned | Backup -> true
-  | Live | Migrated | Unknown -> false
-;;
-
-let cleanup_plan_json entries =
-  let candidates = List.filter (fun entry -> cleanup_candidate_class entry.classification) entries in
-  let bytes = List.fold_left (fun acc entry -> acc + entry.bytes) 0 candidates in
+let cleanup_plan_json () =
   `Assoc
     [ "delete_allowed", `Bool false
     ; "requires_operator_approval", `Bool true
-    ; "candidate_classes", `List [ `String "orphaned"; `String "backup" ]
-    ; "candidate_count", `Int (List.length candidates)
-    ; "candidate_bytes", `Int bytes
-    ; "candidates", `List (List.map entry_to_json candidates)
+    ; "candidate_policy", `String "disabled_until_owner_verified"
+    ; "candidate_classes", `List []
+    ; "candidate_count", `Int 0
+    ; "candidate_bytes", `Int 0
+    ; "candidates", `List []
     ]
+;;
+
+let redacted_workspace_path ~base_path path =
+  let base_prefix =
+    if String.ends_with ~suffix:"/" base_path then base_path else base_path ^ "/"
+  in
+  if String.equal path base_path
+  then "."
+  else if String.starts_with ~prefix:base_prefix path
+  then
+    String.sub path (String.length base_prefix) (String.length path - String.length base_prefix)
+  else if String.equal (Filename.basename path) Common.keepers_runtime_dirname
+  then Filename.concat "<config>" Common.keepers_runtime_dirname
+  else "<external>"
 ;;
 
 let legacy_keeper_inventory_http_json ~base_path ?(max_depth = default_max_depth)
       ?(max_entries = default_max_entries) () =
-  let masc_root = Config_dir_resolver.masc_root ~base_path in
-  let legacy_dir = Filename.concat masc_root "keepers" in
+  let legacy_dir = Common.keepers_runtime_dir_of_base ~base_path in
   let current_keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path in
-  let entries, truncated, visited =
+  let result =
     scan_entries ~legacy_dir ~current_keepers_dir ~max_depth ~max_entries
   in
   `Assoc
-    [ "base_path", `String base_path
-    ; "legacy_keepers_path", `String legacy_dir
-    ; "current_config_keepers_path", `String current_keepers_dir
-    ; "exists", `Bool (Sys.file_exists legacy_dir)
+    [ "path_scope", `String "workspace_relative"
+    ; "legacy_keepers_path", `String (redacted_workspace_path ~base_path legacy_dir)
+    ; ( "current_config_keepers_path"
+      , `String (redacted_workspace_path ~base_path current_keepers_dir) )
+    ; "exists", `Bool result.exists
     ; "read_only", `Bool true
     ; "max_depth", `Int max_depth
     ; "max_entries", `Int max_entries
-    ; "visited_entries", `Int visited
-    ; "truncated", `Bool truncated
-    ; "class_totals", `Assoc (class_totals entries)
-    ; "entries", `List (List.map entry_to_json entries)
-    ; "dry_run_cleanup_plan", cleanup_plan_json entries
+    ; "visited_entries", `Int result.visited
+    ; "truncated", `Bool result.truncated
+    ; "scan_complete", `Bool ((not result.truncated) && result.errors = [])
+    ; "scan_errors", `List (List.map scan_error_to_json result.errors)
+    ; "class_totals", `Assoc (class_totals result.entries)
+    ; "entries", `List (List.map entry_to_json result.entries)
+    ; "dry_run_cleanup_plan", cleanup_plan_json ()
     ]
 ;;

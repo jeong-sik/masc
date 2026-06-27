@@ -32,6 +32,12 @@ let bool_field name json =
   | _ -> Alcotest.failf "expected bool field %S" name
 ;;
 
+let string_field name json =
+  match assoc_field name json with
+  | Some (`String s) -> s
+  | _ -> Alcotest.failf "expected string field %S" name
+;;
+
 let object_field name json =
   match assoc_field name json with
   | Some (`Assoc _ as obj) -> obj
@@ -71,12 +77,11 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
   ensure_dir current;
   ensure_dir (Filename.concat legacy "alpha");
   ensure_dir (Filename.concat legacy "alpha/metrics");
-  ensure_dir (Filename.concat current "alpha");
   write_file (Filename.concat legacy "alpha/.atomic_dead.tmp") "orphan";
   write_file (Filename.concat legacy "PYEOF") "marker";
   write_file (Filename.concat legacy "alpha/old.backup") "backup";
   write_file (Filename.concat legacy "alpha/facts.jsonl") "{}\n";
-  write_file (Filename.concat current "alpha/facts.jsonl") "{}\n";
+  write_file (Filename.concat current "alpha.facts.jsonl") "{}\n";
   write_file (Filename.concat legacy "alpha/metrics/2026.jsonl") "{}\n";
   write_file (Filename.concat legacy "mystery.bin") "?";
   let json =
@@ -88,8 +93,21 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
   in
   Alcotest.(check bool) "inventory is read-only" true (bool_field "read_only" json);
   Alcotest.(check bool) "not truncated" false (bool_field "truncated" json);
-  Alcotest.(check int) "orphaned count" 2 (class_count "orphaned" json);
-  Alcotest.(check int) "backup count" 1 (class_count "backup" json);
+  Alcotest.(check bool) "scan complete" true (bool_field "scan_complete" json);
+  Alcotest.(check string)
+    "path scope"
+    "workspace_relative"
+    (string_field "path_scope" json);
+  Alcotest.(check string)
+    "legacy path redacted"
+    ".masc/keepers"
+    (string_field "legacy_keepers_path" json);
+  Alcotest.(check string)
+    "config keepers path redacted"
+    ".masc/config/keepers"
+    (string_field "current_config_keepers_path" json);
+  Alcotest.(check int) "orphaned count" 0 (class_count "orphaned" json);
+  Alcotest.(check int) "backup count" 0 (class_count "backup" json);
   Alcotest.(check int) "migrated count" 1 (class_count "migrated" json);
   Alcotest.(check bool)
     "live metric classified"
@@ -99,13 +117,30 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
     "unknown file classified"
     true
     (List.mem ("mystery.bin", "unknown") (entry_classes json));
+  Alcotest.(check bool)
+    "temp file requires owner proof"
+    true
+    (List.mem ("alpha/.atomic_dead.tmp", "unknown") (entry_classes json));
+  Alcotest.(check bool)
+    "marker file requires owner proof"
+    true
+    (List.mem ("PYEOF", "unknown") (entry_classes json));
+  Alcotest.(check bool)
+    "backup file requires owner proof"
+    true
+    (List.mem ("alpha/old.backup", "unknown") (entry_classes json));
   let plan = object_field "dry_run_cleanup_plan" json in
   Alcotest.(check bool) "delete disabled" false (bool_field "delete_allowed" plan);
   Alcotest.(check bool)
     "operator approval required"
     true
     (bool_field "requires_operator_approval" plan);
-  Alcotest.(check int) "cleanup candidates" 3 (int_field "candidate_count" plan)
+  Alcotest.(check string)
+    "candidate policy"
+    "disabled_until_owner_verified"
+    (string_field "candidate_policy" plan);
+  Alcotest.(check int) "cleanup candidates" 0 (int_field "candidate_count" plan);
+  Alcotest.(check int) "cleanup candidate list" 0 (List.length (list_field "candidates" plan))
 ;;
 
 let test_scan_cap_marks_truncation () =
@@ -126,6 +161,39 @@ let test_scan_cap_marks_truncation () =
   Alcotest.(check int) "visited cap" 1 (int_field "visited_entries" json)
 ;;
 
+let test_reports_scan_errors_for_invalid_legacy_root () =
+  let base = fresh_dir "masc-legacy-keeper-inventory-error" in
+  let masc = Filename.concat base ".masc" in
+  ensure_dir masc;
+  write_file (Filename.concat masc "keepers") "not a directory";
+  let json =
+    Inventory.legacy_keeper_inventory_http_json
+      ~base_path:base
+      ~max_depth:4
+      ~max_entries:100
+      ()
+  in
+  Alcotest.(check bool) "legacy root exists" true (bool_field "exists" json);
+  Alcotest.(check bool) "scan incomplete" false (bool_field "scan_complete" json);
+  let errors = list_field "scan_errors" json in
+  Alcotest.(check int) "scan error count" 1 (List.length errors);
+  (match List.hd errors with
+   | `Assoc fields ->
+     Alcotest.(check (option string))
+       "error path"
+       (Some ".")
+       (match List.assoc_opt "path" fields with
+        | Some (`String path) -> Some path
+        | _ -> None);
+     Alcotest.(check (option string))
+       "error operation"
+       (Some "readdir")
+       (match List.assoc_opt "operation" fields with
+        | Some (`String operation) -> Some operation
+        | _ -> None)
+   | _ -> Alcotest.fail "scan error must be an object")
+;;
+
 let () =
   Alcotest.run
     "server_dashboard_http_legacy_keeper_inventory"
@@ -135,5 +203,9 @@ let () =
             `Quick
             test_classifies_legacy_paths_and_dry_run_candidates
         ; Alcotest.test_case "scan cap marks truncation" `Quick test_scan_cap_marks_truncation
+        ; Alcotest.test_case
+            "reports scan errors"
+            `Quick
+            test_reports_scan_errors_for_invalid_legacy_root
         ] )
     ]

@@ -699,14 +699,38 @@ let add_routes ~sw ~clock router =
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/legacy-keeper-inventory" (fun request reqd ->
-       with_public_read (fun state req reqd ->
+       with_permission_auth ~permission:Masc_domain.CanAdmin (fun state req reqd ->
          let base_path = (Mcp_server.workspace_config state).base_path in
-         let cache_key = Printf.sprintf "legacy_keeper_inventory:%s" base_path in
+         let max_depth =
+           Server_utils.int_query_param
+             req
+             "max_depth"
+             ~default:
+               Server_dashboard_http_legacy_keeper_inventory.default_max_depth
+           |> Server_utils.clamp ~min_v:0 ~max_v:8
+         in
+         let max_entries =
+           Server_utils.int_query_param
+             req
+             "max_entries"
+             ~default:
+               Server_dashboard_http_legacy_keeper_inventory.default_max_entries
+           |> Server_utils.clamp ~min_v:1 ~max_v:50_000
+         in
+         let cache_key =
+           Printf.sprintf
+             "legacy_keeper_inventory:%s:%d:%d"
+             base_path
+             max_depth
+             max_entries
+         in
          let json =
            Dashboard_cache.get_or_compute cache_key ~ttl:standard_cache_ttl_s (fun () ->
-             Domain_pool_ref.submit_io_or_inline (fun () ->
+             Executor_pool_ref.submit_or_inline (fun () ->
                Server_dashboard_http_legacy_keeper_inventory.legacy_keeper_inventory_http_json
                  ~base_path
+                 ~max_depth
+                 ~max_entries
                  ()))
          in
          Http.Response.json_value ~compress:true ~request:req json reqd

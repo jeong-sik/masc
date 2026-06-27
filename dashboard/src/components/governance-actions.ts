@@ -94,7 +94,7 @@ export async function respondToKeeperApproval(
         ? (rememberRule ? 'keeper 승인 요청을 승인하고 Always 규칙을 저장했습니다' : 'keeper 승인 요청을 승인했습니다')
         : 'keeper 승인 요청을 거부했습니다'
     showToast(message, 'success')
-    await refreshGovernance()
+    await refreshGovernance({ force: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'keeper 승인 요청을 처리하지 못했습니다'
     governanceError.value = message
@@ -110,7 +110,7 @@ export async function deleteKeeperApprovalRule(id: string) {
   try {
     await deleteGovernanceApprovalRule(id)
     showToast('Always 규칙을 삭제했습니다', 'success')
-    await refreshGovernance()
+    await refreshGovernance({ force: true })
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Always 규칙을 삭제하지 못했습니다'
     governanceError.value = message

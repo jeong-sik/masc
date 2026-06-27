@@ -24,6 +24,11 @@ import type {
   GovernanceCaseBundle,
   PendingConfirmation,
 } from '../types'
+import type { AbortableRequestOptions } from './core'
+
+export interface FetchDashboardGovernanceOptions extends AbortableRequestOptions {
+  force?: boolean
+}
 
 function normalizeKeeperApprovalRule(raw: unknown): KeeperApprovalRule | null {
   if (!isRecord(raw)) return null
@@ -60,9 +65,14 @@ function normalizeHitlStatus(raw: unknown): DashboardGovernanceResponse['hitl'] 
   }
 }
 
-export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse> {
+export function fetchDashboardGovernance(
+  opts?: FetchDashboardGovernanceOptions,
+): Promise<DashboardGovernanceResponse> {
   return withRetries('fetchDashboardGovernance', async () => {
-    const raw = await get<Record<string, unknown>>('/api/v1/dashboard/governance')
+    const query = opts?.force ? '?force=1' : ''
+    const raw = await get<Record<string, unknown>>(`/api/v1/dashboard/governance${query}`, {
+      signal: opts?.signal,
+    })
     const items = Array.isArray(raw.items)
       ? raw.items
           .map(item => normalizeGovernanceDecisionItem(item))
@@ -75,6 +85,11 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
       : []
     const approvalQueue = Array.isArray(raw.approval_queue)
       ? raw.approval_queue
+          .map(item => normalizeKeeperApprovalQueueItem(item))
+          .filter((item): item is KeeperApprovalQueueItem => item !== null)
+      : []
+    const recentResolved = Array.isArray(raw.recent_resolved)
+      ? raw.recent_resolved
           .map(item => normalizeKeeperApprovalQueueItem(item))
           .filter((item): item is KeeperApprovalQueueItem => item !== null)
       : []
@@ -124,6 +139,7 @@ export function fetchDashboardGovernance(): Promise<DashboardGovernanceResponse>
         : [],
       pending_actions: pendingActions,
       approval_queue: approvalQueue,
+      recent_resolved: recentResolved,
       approval_rules: approvalRules,
       hitl: normalizeHitlStatus(raw.hitl),
     }

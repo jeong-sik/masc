@@ -74,8 +74,8 @@ import {
 
 // --- Refresh function registration (avoids circular imports) ---
 
-let _refreshGovernanceFn: (() => void) | null = null
-export function registerGovernanceRefresh(fn: () => void): void {
+let _refreshGovernanceFn: ((opts?: { force?: boolean }) => void) | null = null
+export function registerGovernanceRefresh(fn: (opts?: { force?: boolean }) => void): void {
   _refreshGovernanceFn = fn
 }
 
@@ -323,8 +323,8 @@ function handleKeeperLifecycle(event: { type: string; name?: string }): void {
   }
 }
 
-function handleGovernance(): void {
-  _refreshGovernanceFn?.()
+function handleGovernance(opts?: { force?: boolean }): void {
+  _refreshGovernanceFn?.(opts)
 }
 
 async function refreshActiveRoute(): Promise<void> {
@@ -504,7 +504,7 @@ export function routeServerPushEvent(event: SSEEvent): void {
       })
     }
     if (_refreshGovernanceFn) {
-      scheduleRefresh('governance', () => void handleGovernance())
+      scheduleRefresh('governance', () => void handleGovernance({ force: true }))
     }
   }
 }

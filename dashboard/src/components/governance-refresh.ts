@@ -33,10 +33,10 @@ export async function selectDecision(item: GovernanceDecisionItem) {
   await loadDecisionDetail(item)
 }
 
-export async function refreshGovernance() {
+export async function refreshGovernance(opts?: { force?: boolean }) {
   governanceError.value = ''
-  await governanceResource.load(async () => {
-    const data = await fetchDashboardGovernance()
+  await governanceResource.load(async (signal) => {
+    const data = await fetchDashboardGovernance({ force: opts?.force, signal })
     const items = filteredItemsByFilter(governanceFilter.value, data.items ?? [])
     const current = selectedDecisionKey.value
     const next = getSelectedDecision(current, items) ?? items[0] ?? null

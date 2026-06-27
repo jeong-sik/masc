@@ -504,6 +504,53 @@ let summarize_list ?(empty = "none") values =
   | [] -> empty
   | _ -> String.concat ", " values
 
+let accept_rejection_summary_max_bytes = 180
+
+let short_accept_rejection_reason reason =
+  (* Keep accept-rejection summaries below the 200-byte narrative blocker cap
+     so the full summary fits when it is embedded in blocker detail. *)
+  String_util.utf8_safe
+    ~max_bytes:accept_rejection_summary_max_bytes
+    ~suffix:"..."
+    (String.trim reason)
+  |> String_util.to_string
+
+let nonempty_or_unknown value =
+  let value = String.trim value in
+  if String.equal value "" then "unknown" else value
+
+let accept_rejection_kind_display = function
+  | Some kind -> accept_rejection_kind_to_string kind
+  | None -> "unknown"
+
+let accept_response_shape_display = function
+  | Some shape -> accept_response_shape_to_string shape
+  | None -> "unknown"
+
+let accept_rejection_is_empty_no_progress
+    ~reason_kind
+    ~response_shape
+    ~last_tool_effect
+    ~any_mutating_tool
+    ~tool_effects_seen =
+  reason_kind = Some Accept_no_usable_progress
+  && response_shape = Some Accept_response_empty
+  && Option.is_none last_tool_effect
+  && Option.is_none any_mutating_tool
+  && tool_effects_seen = []
+
+let accept_rejection_is_read_only_no_progress
+    ~reason_kind
+    ~response_shape
+    ~last_tool_effect
+    ~any_mutating_tool
+    ~tool_effects_seen =
+  reason_kind = Some Accept_no_usable_progress
+  && response_shape = Some Accept_response_thinking_only
+  && last_tool_effect = Some Tool_effect_read_only
+  && any_mutating_tool = Some false
+  && tool_effects_seen <> []
+
 let summary_of_masc_internal_error = function
   | Capacity_backpressure { runtime_id; source; detail; retry_after } ->
       let retry_after_suffix =
@@ -549,9 +596,73 @@ let summary_of_masc_internal_error = function
          requested_max_tokens
          provider_ceiling
          reason)
+  | Accept_rejected
+      {
+        scope;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
+        tool_effects_seen = [];
+        _;
+      }
+    when accept_rejection_is_empty_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen:[] ->
+    Some
+      (Printf.sprintf
+         "Provider returned an empty assistant turn for runtime %s; no text or tool progress was produced."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
+      {
+        scope;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
+        tool_effects_seen;
+        _;
+      }
+    when accept_rejection_is_read_only_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen ->
+    Some
+      (Printf.sprintf
+         "Provider produced only read-only tool activity for runtime %s; no mutating keeper progress was accepted."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
+      {
+        scope;
+        reason_kind = Some Accept_predicate_rejected;
+        response_shape;
+        reason;
+        _;
+      } ->
+    let shape = accept_response_shape_display response_shape in
+    Some
+      (Printf.sprintf
+         "Provider response for runtime %s was rejected by the accept predicate; response_shape=%s; reason=%s"
+         (nonempty_or_unknown scope)
+         shape
+         (short_accept_rejection_reason reason))
+  | Accept_rejected { scope; reason_kind; response_shape; reason; _ } ->
+    let reason_kind = accept_rejection_kind_display reason_kind in
+    let response_shape = accept_response_shape_display response_shape in
+    Some
+      (Printf.sprintf
+         "Provider response for runtime %s was rejected by the keeper accept contract; reason_kind=%s; response_shape=%s; reason=%s"
+         (nonempty_or_unknown scope)
+         reason_kind
+         response_shape
+         (short_accept_rejection_reason reason))
   | Runtime_exhausted _
   | Resumable_cli_session _
-  | Accept_rejected _
   | Admission_queue_timeout _
   | Admission_queue_rejected _
   | Turn_timeout _
@@ -584,7 +695,8 @@ let runtime_id_of_masc_internal_error = function
       let runtime_id = runtime_id_to_string runtime_id in
       if String.equal (String.trim runtime_id) "" then "unknown"
       else runtime_id
-  | Accept_rejected _
+  | Accept_rejected { scope; _ } ->
+      nonempty_or_unknown scope
   | Admission_queue_rejected _
   | Turn_timeout _
   | Provider_timeout _
@@ -596,24 +708,36 @@ let runtime_id_of_masc_internal_error = function
 let accept_no_progress_retry_kind = function
   | Accept_rejected
       {
-        reason_kind = Some Accept_no_usable_progress;
-        response_shape = Some Accept_response_empty;
-        last_tool_effect = None;
-        any_mutating_tool = None;
-        tool_effects_seen = [];
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
+        tool_effects_seen;
         _;
-      } ->
+      }
+    when accept_rejection_is_empty_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen ->
     Some `Empty_no_progress
   | Accept_rejected
       {
-        reason_kind = Some Accept_no_usable_progress;
-        response_shape = Some Accept_response_thinking_only;
-        last_tool_effect = Some Tool_effect_read_only;
-        any_mutating_tool = Some false;
         tool_effects_seen;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
         _;
-      } ->
-    if tool_effects_seen = [] then None else Some `Read_only_no_progress
+      }
+    when accept_rejection_is_read_only_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen ->
+    Some `Read_only_no_progress
   | Accept_rejected _
   | Runtime_exhausted _
   | Capacity_backpressure _

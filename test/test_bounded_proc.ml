@@ -11,10 +11,10 @@ open Alcotest
 
 let with_env f =
   Eio_main.run @@ fun env ->
-  let clock = Eio.Stdenv.clock env in
+  let mono_clock = Eio.Stdenv.mono_clock env in
   let process_mgr = Eio.Stdenv.process_mgr env in
   let cwd = Eio.Stdenv.cwd env in
-  f ~clock ~process_mgr ~cwd
+  f ~mono_clock ~process_mgr ~cwd
 
 (* Process-existence probe: returns [true] when at least one running
    process matches [argv_substring]. Uses [pgrep -f] which scans the
@@ -36,9 +36,9 @@ let process_exists argv_substring =
       | _ -> false)
 
 let test_done_within_timeout () =
-  with_env @@ fun ~clock ~process_mgr ~cwd ->
+  with_env @@ fun ~mono_clock ~process_mgr ~cwd ->
   let outcome =
-    Bounded_proc.run_argv_with_timeout ~clock ~process_mgr ~cwd
+    Bounded_proc.run_argv_with_timeout ~mono_clock ~process_mgr ~cwd
       ~timeout_s:5.0 [ "echo"; "hello" ]
   in
   match outcome with
@@ -51,31 +51,40 @@ let test_done_within_timeout () =
        | Unix.WEXITED n -> Printf.sprintf "WEXITED %d" n
        | Unix.WSIGNALED n -> Printf.sprintf "WSIGNALED %d" n
        | Unix.WSTOPPED n -> Printf.sprintf "WSTOPPED %d" n)
-  | Bounded_proc.Timeout elapsed ->
-    failf "unexpected timeout after %.3fs" elapsed
+  | Bounded_proc.Timeout timeout ->
+    failf "unexpected timeout after %.3fs" timeout.elapsed_s
 
 (* Marker string lets the post-timeout pgrep probe distinguish our
    subprocess from unrelated [sleep] commands on the host. *)
 let test_timeout_kills_process () =
-  with_env @@ fun ~clock ~process_mgr ~cwd ->
+  with_env @@ fun ~mono_clock ~process_mgr ~cwd ->
   let marker = "__bounded_proc_rfc0109_marker__" in
+  let argv =
+    [ "sh"
+    ; "-c"
+    ; Printf.sprintf "printf partial-out; printf partial-err >&2; sleep 10 # %s" marker
+    ]
+  in
   let outcome =
-    Bounded_proc.run_argv_with_timeout ~clock ~process_mgr ~cwd
-      ~timeout_s:0.5
-      [ "sh"; "-c"; Printf.sprintf "sleep 10 # %s" marker ]
+    Bounded_proc.run_argv_with_timeout ~mono_clock ~process_mgr ~cwd
+      ~timeout_s:0.5 argv
   in
   (match outcome with
-   | Bounded_proc.Timeout elapsed ->
-     check (float 1.0) "timeout fired near requested budget" 0.5 elapsed
+   | Bounded_proc.Timeout timeout ->
+     check (float 0.2) "timeout fired near requested budget" 0.5 timeout.elapsed_s;
+     check (float 0.0) "timeout budget preserved" 0.5 timeout.timeout_s;
+     check (list string) "argv preserved" argv timeout.argv;
+     check string "partial stdout preserved" "partial-out" timeout.stdout;
+     check string "partial stderr preserved" "partial-err" timeout.stderr
    | Bounded_proc.Done _ ->
      failf "expected Timeout, got Done");
   check bool "OS process terminated after switch release" false
     (process_exists marker)
 
 let test_stderr_capture () =
-  with_env @@ fun ~clock ~process_mgr ~cwd ->
+  with_env @@ fun ~mono_clock ~process_mgr ~cwd ->
   let outcome =
-    Bounded_proc.run_argv_with_timeout ~clock ~process_mgr ~cwd
+    Bounded_proc.run_argv_with_timeout ~mono_clock ~process_mgr ~cwd
       ~timeout_s:5.0
       [ "sh"; "-c"; "echo out; echo err >&2" ]
   in
@@ -89,14 +98,14 @@ let test_stderr_capture () =
        | Unix.WEXITED n -> Printf.sprintf "WEXITED %d" n
        | Unix.WSIGNALED n -> Printf.sprintf "WSIGNALED %d" n
        | Unix.WSTOPPED n -> Printf.sprintf "WSTOPPED %d" n)
-  | Bounded_proc.Timeout elapsed ->
-    failf "unexpected timeout after %.3fs" elapsed
+  | Bounded_proc.Timeout timeout ->
+    failf "unexpected timeout after %.3fs" timeout.elapsed_s
 
 let test_stdin_delivered () =
-  with_env @@ fun ~clock ~process_mgr ~cwd ->
+  with_env @@ fun ~mono_clock ~process_mgr ~cwd ->
   let payload = "round-trip via stdin\n" in
   let outcome =
-    Bounded_proc.run_argv_with_timeout ~clock ~process_mgr ~cwd
+    Bounded_proc.run_argv_with_timeout ~mono_clock ~process_mgr ~cwd
       ~stdin_string:payload ~timeout_s:5.0 [ "cat" ]
   in
   match outcome with
@@ -108,8 +117,8 @@ let test_stdin_delivered () =
        | Unix.WEXITED n -> Printf.sprintf "WEXITED %d" n
        | Unix.WSIGNALED n -> Printf.sprintf "WSIGNALED %d" n
        | Unix.WSTOPPED n -> Printf.sprintf "WSTOPPED %d" n)
-  | Bounded_proc.Timeout elapsed ->
-    failf "unexpected timeout after %.3fs" elapsed
+  | Bounded_proc.Timeout timeout ->
+    failf "unexpected timeout after %.3fs" timeout.elapsed_s
 
 let () =
   run "Bounded_proc"

@@ -164,7 +164,19 @@ sangsu `mid_turn_no_progress 307s` 와 masc-improver `oas_timeout_budget 276s` �
 `lib/bounded_proc/bounded_proc.{ml,mli}`:
 
 ```ocaml
-(** Run [argv] as a subprocess with hard wall-clock bound. Inner
+type timeout =
+  { argv : string list
+  ; timeout_s : float
+  ; elapsed_s : float
+  ; stdout : string
+  ; stderr : string
+  }
+
+type outcome =
+  | Done of Unix.process_status * string * string
+  | Timeout of timeout
+
+(** Run [argv] as a subprocess with a hard monotonic-time bound. Inner
     [Switch.run] scope ensures the process is SIGKILLed when the timeout
     fiber wins the race, regardless of whether the process honoured any
     earlier cancellation signal.
@@ -172,25 +184,23 @@ sangsu `mid_turn_no_progress 307s` 와 masc-improver `oas_timeout_budget 276s` �
     Eio guarantees: per https://ocaml.org/p/eio/latest/doc/Eio/Process/
     "The child process will be sent Sys.sigkill when the switch is
     released." This helper relies on that single invariant. *)
-val with_bounded_run :
-  clock:_ Eio.Time.clock ->
+val run_argv_with_timeout :
+  mono_clock:_ Eio.Time.Mono.t ->
   process_mgr:_ Eio.Process.mgr ->
   cwd:_ Eio.Path.t ->
   ?env:string array ->
-  ?stdin_source:_ Eio.Flow.source ->
+  ?stdin_string:string ->
   timeout_s:float ->
   string list ->
-  [ `Done of Unix.process_status * string * string
-  | `Timeout of float (* elapsed *)
-  ]
+  outcome
 ```
 
 구현 핵심 (verifiable):
 
 ```ocaml
-let with_bounded_run ~clock ~process_mgr ~cwd ?env ?stdin_source
+let run_argv_with_timeout ~mono_clock ~process_mgr ~cwd ?env ?stdin_string
     ~timeout_s argv =
-  let start = Eio.Time.now clock in
+  let start = Eio.Time.Mono.now mono_clock in
   Eio.Switch.run @@ fun proc_sw ->
     let stdout_buf = Buffer.create 4096 in
     let stderr_buf = Buffer.create 1024 in
@@ -204,8 +214,13 @@ let with_bounded_run ~clock ~process_mgr ~cwd ?env ?stdin_source
     Eio.Flow.close stderr_w;
     Eio.Fiber.first
       (fun () ->
-        Eio.Time.sleep clock timeout_s;
-        `Timeout (Eio.Time.now clock -. start))
+        Eio.Time.Mono.sleep mono_clock timeout_s;
+        Timeout { argv; timeout_s;
+                  elapsed_s =
+                    seconds_of_span
+                      (Mtime.span start (Eio.Time.Mono.now mono_clock));
+                  stdout = Buffer.contents stdout_buf;
+                  stderr = Buffer.contents stderr_buf })
       (fun () ->
         Eio.Fiber.both
           (fun () ->
@@ -287,7 +302,7 @@ P1+ 머지 조건 (각 Phase 별):
 
 ## 8. Open questions
 
-- helper 의 timeout 발동 시 stdout/stderr buffer 의 *부분 결과* 를 caller 에 surface 해야 하는가? 현재 시그너처는 `\`Timeout of float` 만 — diagnosis 용으로 partial buffer 도 넘겨야 할 수도. P0 review 시 결정.
+- helper 의 timeout 발동 시 stdout/stderr buffer 의 *부분 결과* 를 caller 에 surface 해야 하는가? 2026-06-26 기준 `Timeout of timeout` record 로 반영 완료: `argv`, `timeout_s`, monotonic `elapsed_s`, partial `stdout`/`stderr` 를 caller 에 surface 한다.
 - supervisor 의 `Fun.protect ~finally` (line 401) 를 `Switch.on_release` 로 migrate 하는 것은 P4 에 포함시킬지, 별도 RFC 로 분리할지. memory `software-development.md` 의 "Fun.protect는 finally 예외가 원래 예외를 덮을 수 있음" 원칙과 직결.
 - `with_unix_capture` (Unix fallback path) 도 같은 invariant 가 적용되어야 하는가? `Stdlib.Unix.fork+execv` 기반이라 SIGKILL 직접 보내야 — Phase 별도.
 

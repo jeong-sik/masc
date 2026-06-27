@@ -173,16 +173,142 @@ let test_no_progress_loop_detection_pauses_keeper () =
           check
             string
             "blocker detail"
-            "no_progress loop detected: streak=10 threshold=10; manual pause applied"
+            "no_progress loop detected: streak=10 threshold=10; keeper paused until operator resume clears the no-progress latch"
             detail
         | Some _ -> fail "expected No_progress_loop blocker"
         | None -> fail "expected no_progress loop blocker");
        match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
        | Some entry ->
-         check bool "registry meta paused" true entry.Masc.Keeper_registry.meta.paused
+         check bool "registry meta paused" true entry.Masc.Keeper_registry.meta.paused;
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | Some (Masc.Keeper_registry.Provider_runtime_error { code; _ }) ->
+            check
+              string
+              "registry no-progress failure code"
+              Masc.Keeper_unified_turn_no_progress.failure_reason_code
+              code
+          | Some _ -> fail "expected no_progress provider-runtime failure reason"
+          | None -> fail "expected no_progress failure reason")
+       | None -> fail "expected registered keeper")
+
+let test_operator_resume_clears_no_progress_loop_latch () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-no-progress-resume-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "no-progress-resume" in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"latched"
+           Keeper_meta_contract.No_progress_loop
+       in
+       let meta =
+         make_meta keeper_name
+         |> Keeper_meta_contract.map_runtime (fun rt ->
+           { rt with last_blocker = Some blocker })
+       in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       ignore
+         (Masc.Keeper_no_progress_loop_detector.record_turn
+            ~threshold_override:1
+            ~keeper_name
+            ~made_progress:false
+            ());
+       Masc.Keeper_registry.set_failure_reason
+         ~base_path:config.base_path
+         keeper_name
+         (Some
+            (Masc.Keeper_registry.Provider_runtime_error
+               { code = Masc.Keeper_unified_turn_no_progress.failure_reason_code
+               ; detail = "latched"
+               ; provider_id = None
+               ; http_status = None
+               ; runtime_id = None
+               ; reason = None
+               }));
+       check bool
+         "detector latched before resume"
+         true
+         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       let resumed_meta =
+         Masc.Keeper_unified_turn_no_progress.clear_for_operator_resume
+           ~base_path:config.base_path
+           meta
+       in
+       check bool
+         "detector reset by operator resume"
+         false
+         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       (match resumed_meta.runtime.last_blocker with
+        | None -> ()
+        | Some _ -> fail "expected no_progress meta blocker to clear");
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | None -> ()
+          | Some _ -> fail "expected no_progress failure reason to clear")
+       | None -> fail "expected registered keeper")
+
+let test_wakeup_directive_persists_no_progress_meta_clear () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-no-progress-wakeup-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "no-progress-wakeup" in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"latched"
+           Keeper_meta_contract.No_progress_loop
+       in
+       let meta =
+         make_meta keeper_name
+         |> Keeper_meta_contract.map_runtime (fun rt ->
+           { rt with last_blocker = Some blocker })
+       in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       Masc.Keeper_registry.set_failure_reason
+         ~base_path:config.base_path
+         keeper_name
+         (Some
+            (Masc.Keeper_registry.Provider_runtime_error
+               { code = Masc.Keeper_unified_turn_no_progress.failure_reason_code
+               ; detail = "latched"
+               ; provider_id = None
+               ; http_status = None
+               ; runtime_id = None
+               ; reason = None
+               }));
+       Masc.Keeper_keepalive.process_directive ~agent_name:keeper_name "wakeup";
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         (match entry.Masc.Keeper_registry.meta.runtime.last_blocker with
+          | None -> ()
+          | Some _ -> fail "expected wakeup to persist no_progress meta clear");
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | None -> ()
+          | Some _ -> fail "expected wakeup to clear no_progress failure reason")
        | None -> fail "expected registered keeper")
 
 let test_idle_detected_repeated_failure_pauses_keeper () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir "masc-idle-detected-pause-" in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -287,6 +413,10 @@ let () =
         [
           test_case "loop detection pauses keeper for manual resume" `Quick
             test_no_progress_loop_detection_pauses_keeper;
+          test_case "operator resume clears no-progress latch" `Quick
+            test_operator_resume_clears_no_progress_loop_latch;
+          test_case "wakeup directive persists no-progress meta clear" `Quick
+            test_wakeup_directive_persists_no_progress_meta_clear;
         ] );
       ( "idle-detected loop",
         [

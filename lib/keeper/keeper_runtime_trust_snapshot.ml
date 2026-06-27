@@ -186,15 +186,21 @@ let runtime_blocker_supersedes_receipt ~meta ~runtime_blocker_fields
     latest_receipt =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
   | None -> false
-  | Some _ -> (
+  | Some raw_blocker_class -> (
+    match Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class with
+    | Some Keeper_meta_contract.Completion_contract_violation
+      when Option.is_some
+             (Option.bind latest_receipt receipt_contract_attention_reason) ->
+        true
+    | _ -> (
       match latest_receipt with
       | None -> true
       | Some receipt -> (
           match receipt_ended_at_unix receipt with
           | Some receipt_ts ->
-              meta.runtime.usage.last_turn_ts
-              > receipt_ts +. runtime_blocker_receipt_timestamp_epsilon_sec
-          | None -> meta.runtime.usage.last_turn_ts > 0.0))
+            meta.runtime.usage.last_turn_ts
+            > receipt_ts +. runtime_blocker_receipt_timestamp_epsilon_sec
+          | None -> meta.runtime.usage.last_turn_ts > 0.0)))
 
 let current_receipt_for_runtime_state ~meta ~runtime_blocker_fields
     latest_receipt =

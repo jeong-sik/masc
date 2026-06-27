@@ -161,40 +161,62 @@ let scenario_consolidation_gate () =
   section "S1 consolidation typed-gate (#21244) — non-vacuity + teeth";
   let now = 1_000_000.0 in
   let eph c = mk_fact ~now ~category:Types.Ephemeral c in
-  let fct c = mk_fact ~now ~category:Types.Fact c in
-  let con c = mk_fact ~now ~category:Types.Constraint c in
+  let approach c =
+    mk_fact
+      ~now
+      ~category:Types.Validated_approach
+      ~claim_kind:(Some Types.Durable_knowledge)
+      c
+  in
+  let lesson c =
+    mk_fact
+      ~now
+      ~category:Types.Lesson
+      ~claim_kind:(Some Types.Durable_knowledge)
+      c
+  in
   (* Modelled on the #21244 live finding: the ONLY >=2-keeper-corroborated claims
      were ephemeral lifecycle boilerplate. Here two ephemeral claims AND two
-     durable claims each clear the 2-keeper bar; single-keeper noise must never
-     promote regardless of category. *)
+     outcome-positive durable claims each clear the 2-keeper bar; single-keeper
+     noise must never promote regardless of category. *)
   let keeper_facts =
-    [ "alpha", [ eph "checkpoint saved"; eph "no tasks pending"; fct "build is driven by dune"; fct "alpha local scratch note" ]
-    ; "beta", [ eph "checkpoint saved"; eph "no tasks pending"; fct "build is driven by dune"; con "must not push directly to main" ]
-    ; "gamma", [ eph "checkpoint saved"; con "must not push directly to main" ]
-    ; "delta", [ fct "build is driven by dune" ]
+    [ "alpha", [ eph "checkpoint saved"; eph "no tasks pending"; approach "dune cache disabled fixes stale cmx"; approach "alpha local scratch note" ]
+    ; "beta", [ eph "checkpoint saved"; eph "no tasks pending"; approach "dune cache disabled fixes stale cmx"; lesson "must not push directly to main" ]
+    ; "gamma", [ eph "checkpoint saved"; lesson "must not push directly to main" ]
+    ; "delta", [ approach "dune cache disabled fixes stale cmx" ]
     ]
   in
   note "non-vacuity: ephemeral corroborated by >=2 keepers = {checkpoint saved (3), no tasks pending (2)} = 2 present";
-  note "non-vacuity: durable corroborated by >=2 keepers = {build is driven by dune (3 Fact), must not push directly to main (2 Constraint)} = 2 present";
+  note "non-vacuity: outcome-positive durable corroborated by >=2 keepers = {dune cache disabled fixes stale cmx (3 Validated_approach), must not push directly to main (2 Lesson)} = 2 present";
   let _considered, promoted = Consolidator.promote_facts ~now ~keeper_facts () in
   let promoted_claims = List.map (fun f -> f.Types.claim) promoted |> List.sort String.compare in
   check "exactly 2 claims promoted (completeness — not '>= something')" (List.length promoted = 2);
   check
-    "promoted set is exactly the two durable claims"
-    (promoted_claims = [ "build is driven by dune"; "must not push directly to main" ]);
+    "promoted set is exactly the two outcome-positive durable claims"
+    (promoted_claims = [ "dune cache disabled fixes stale cmx"; "must not push directly to main" ]);
   check
-    "no promoted fact is non-promotable (zero ephemeral leaked cross-keeper)"
-    (List.for_all (fun f -> Types.is_promotable f.Types.category) promoted);
+    "no promoted fact is outside the shared outcome-positive gate"
+    (List.for_all
+       (fun f ->
+          Types.is_promotable f.Types.category
+          && Types.is_outcome_positive_for_shared_promotion f.Types.category)
+       promoted);
   (* Teeth: reproduce the #21244 pathology by mislabelling the SAME ephemeral
-     claims as fact (what the LLM producer actually did). If they now promote,
-     the gate's decision provably hinges on the category label. *)
+     claims as validated approaches. If they now promote, the gate's decision
+     provably hinges on the category label. *)
   let relabel f =
-    if f.Types.category = Types.Ephemeral then { f with Types.category = Types.Fact } else f
+    if f.Types.category = Types.Ephemeral
+    then
+      { f with
+        Types.category = Types.Validated_approach
+      ; Types.claim_kind = Some Types.Durable_knowledge
+      }
+    else f
   in
   let mislabeled = List.map (fun (k, fs) -> (k, List.map relabel fs)) keeper_facts in
   let _c2, promoted_bug = Consolidator.promote_facts ~now ~keeper_facts:mislabeled () in
   check
-    "TEETH: mislabel ephemeral->fact and they leak (promoted 2 -> 4) — gate is real, label is load-bearing"
+    "TEETH: mislabel ephemeral->validated_approach and they leak (promoted 2 -> 4) — gate is real, label is load-bearing"
     (List.length promoted_bug = 4);
   note "=> verifies the GATE, not the PRODUCER. Whether the LLM labels boilerplate 'ephemeral' is unverified here."
 ;;
@@ -206,7 +228,14 @@ let scenario_forgetting_composition () =
   with_temp_keepers_dir (fun _dir ->
     let now = 2_000_000.0 in
     let expired = mk_fact ~now ~category:Types.Ephemeral ~valid_until:(Some (now -. 10.0)) "scheduled tick alpha" in
-    let durable = mk_fact ~now ~category:Types.Fact ~valid_until:None "dune build invariant holds" in
+    let durable =
+      mk_fact
+        ~now
+        ~category:Types.Lesson
+        ~claim_kind:(Some Types.Durable_knowledge)
+        ~valid_until:None
+        "dune build invariant holds"
+    in
     Memory_io.append_fact ~keeper_id:"alpha" expired;
     Memory_io.append_fact ~keeper_id:"alpha" durable;
     Memory_io.append_fact ~keeper_id:"beta" durable;

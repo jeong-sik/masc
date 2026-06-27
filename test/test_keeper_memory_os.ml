@@ -3338,6 +3338,29 @@ let test_is_promotable_durable_kinds () =
     blocked
 ;;
 
+let test_shared_promotion_outcome_positive_kinds () =
+  let outcome_positive = [ Types.Validated_approach; Types.Lesson ] in
+  let blocked =
+    [ Types.Fact; Types.Constraint; Types.Preference; Types.Blocker; Types.Goal
+    ; Types.Code_change; Types.Ephemeral; Types.Unknown "novel"
+    ]
+  in
+  List.iter
+    (fun c ->
+       Alcotest.(check bool)
+         (Types.category_to_string c ^ " outcome-positive")
+         true
+         (Types.is_outcome_positive_for_shared_promotion c))
+    outcome_positive;
+  List.iter
+    (fun c ->
+       Alcotest.(check bool)
+         (Types.category_to_string c ^ " not outcome-positive")
+         false
+         (Types.is_outcome_positive_for_shared_promotion c))
+    blocked
+;;
+
 (* RFC-0247 §2.3: retention is category-driven. Only Ephemeral gets a finite TTL;
    every durable arm returns None (never hard-expires). Exhaustive so a new
    category must be classified here. The companion lifetime-cycles (truth-decay
@@ -3767,8 +3790,28 @@ let test_self_observation_not_promoted () =
     ; Types.claim_id = Some "two-approvals-rule"
     }
   in
+  let denied_claim_kind claim_kind claim_id marker =
+    { (fact_fixture ~now ()) with
+      Types.claim = claim_id ^ " (" ^ marker ^ ")"
+    ; Types.category = Types.Lesson
+    ; Types.claim_kind = Some claim_kind
+    ; Types.claim_id = Some claim_id
+    }
+  in
   let keeper_facts =
-    [ "k1", [ self_obs "k1"; durable "k1" ]; "k2", [ self_obs "k2"; durable "k2" ] ]
+    [ ( "k1"
+      , [ self_obs "k1"
+        ; denied_claim_kind Types.External_state "external-state-pr-status" "k1"
+        ; denied_claim_kind Types.Diagnostic "diagnostic-ratio-alert" "k1"
+        ; durable "k1"
+        ] )
+    ; ( "k2"
+      , [ self_obs "k2"
+        ; denied_claim_kind Types.External_state "external-state-pr-status" "k2"
+        ; denied_claim_kind Types.Diagnostic "diagnostic-ratio-alert" "k2"
+        ; durable "k2"
+        ] )
+    ]
   in
   let _considered, shared =
     Consolidator.promote_facts ~min_keepers:2 ~now ~keeper_facts ()
@@ -3778,6 +3821,18 @@ let test_self_observation_not_promoted () =
     false
     (List.exists
        (fun (f : Types.fact) -> f.Types.claim_kind = Some Types.Self_observation)
+       shared);
+  Alcotest.(check bool)
+    "external-state claim kind is never promoted to the shared tier"
+    false
+    (List.exists
+       (fun (f : Types.fact) -> f.Types.claim_id = Some "external-state-pr-status")
+       shared);
+  Alcotest.(check bool)
+    "diagnostic claim kind is never promoted to the shared tier"
+    false
+    (List.exists
+       (fun (f : Types.fact) -> f.Types.claim_id = Some "diagnostic-ratio-alert")
        shared);
   Alcotest.(check bool)
     "outcome-positive durable knowledge with two keepers IS promoted"
@@ -5014,6 +5069,10 @@ let () =
             "durable kinds promote incl. validated_approach/lesson (RFC-0247 §6)"
             `Quick
             test_is_promotable_durable_kinds
+        ; Alcotest.test_case
+            "shared promotion outcome-positive kinds are stricter than promotable"
+            `Quick
+            test_shared_promotion_outcome_positive_kinds
         ; Alcotest.test_case
             "retention TTL/lifetime is category-driven (RFC-0247 §2.3)"
             `Quick

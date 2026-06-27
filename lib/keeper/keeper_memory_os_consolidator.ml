@@ -21,15 +21,12 @@ open Keeper_memory_os_types
 
 module Io = Keeper_memory_os_io
 
-(* Which categories are objective enough to share across keepers is a
-   compile-time property of the closed [category] taxonomy
-   (Keeper_memory_os_types.is_promotable: only Fact/Constraint), not a runtime
-   list. Default-deny is structural: a new arm (e.g. the [Ephemeral]
-   coordination-boilerplate kind, RFC-0247 §2.5 / #21244) cannot leak into the
-   shared tier unless it is classified promotable at the type level. This
-   strengthens #21241's typed [category list] into an exhaustive predicate, so a
-   future arm forces a compile-time promotability decision rather than silently
-   defaulting out of a list. *)
+(* Which categories are durable enough to consider, and which are
+   outcome-positive enough to cross keepers, are compile-time properties of the
+   closed [category] taxonomy. Default-deny is structural: a new arm (e.g. the
+   [Ephemeral] coordination-boilerplate kind, RFC-0247 §2.5 / #21244) cannot leak
+   into the shared tier unless it is classified both promotable and
+   outcome-positive at the type level. *)
 
 (* Minimum distinct keepers that must hold a claim before it is shared. Two is
    the smallest set that distinguishes corroboration from a single keeper's echo
@@ -49,17 +46,6 @@ type contribution =
   ; fact : fact
   }
 
-(* Audit 2026-06-26: `_shared` must be corroborated AND outcome-positive. Until a
-   dedicated outcome-eval signal is joined into facts, the only structural source
-   of outcome-positive evidence is the outcome-derived category pair. Plain
-   [Fact]/[Constraint] remains keeper-local even when repeated by multiple
-   keepers. *)
-let outcome_positive_for_shared_promotion = function
-  | Validated_approach | Lesson -> true
-  | Code_change | Fact | Preference | Blocker | Goal | Constraint | Ephemeral | Unknown _ ->
-    false
-;;
-
 (* RFC-0247 (purge): eligibility is structural — a promotable, outcome-positive
    category. The prior confidence floor (only claims above 0.5 count as
    corroboration) was a score gate and is gone. *)
@@ -70,7 +56,7 @@ let outcome_positive_for_shared_promotion = function
    accident. *)
 let eligible fact =
   is_promotable fact.category
-  && outcome_positive_for_shared_promotion fact.category
+  && is_outcome_positive_for_shared_promotion fact.category
   &&
   match fact.claim_kind with
   | Some Durable_knowledge | None -> true

@@ -212,18 +212,27 @@ let category_and_claim_kind_of_persisted_row ~category_str ~claim_kind =
     in
     Some (category_of_string category_str, claim_kind)
 ;;
-(* Exhaustive promotability: only objective, durable claim kinds cross keepers.
-   Extends the prior [Fact; Constraint] whitelist with the two outcome-derived
-   kinds [Validated_approach] and [Lesson] — a validated approach and a hard-won
-   lesson are exactly the knowledge worth sharing fleet-wide. Everything else —
-   including [Ephemeral] and any [Unknown] label — stays keeper-local. Exhaustive
-   match (not a runtime [category list]) so a future durable kind must be
-   classified here at compile time rather than silently defaulting to
-   non-promotable, the no-silent-omission property RFC-0247 §2.5 argues for over
-   the prompt-suppression approach. *)
+
+(* Exhaustive category promotability. This is a necessary category whitelist for
+   durable promotion decisions, not the complete `_shared` gate. The consolidator
+   additionally requires [is_outcome_positive_for_shared_promotion] so repeated
+   plain [Fact]/[Constraint] rows remain keeper-local until outcome evaluation
+   upgrades them. Exhaustive match (not a runtime [category list]) so a future
+   durable kind must be classified here at compile time rather than silently
+   defaulting to non-promotable, the no-silent-omission property RFC-0247 §2.5
+   argues for over the prompt-suppression approach. *)
 let is_promotable = function
   | Fact | Constraint | Validated_approach | Lesson -> true
   | Code_change | Preference | Blocker | Goal | Ephemeral | Unknown _ -> false
+;;
+
+(* Shared Tier-2 promotion is stricter than generic category promotability:
+   repeated plain facts/constraints stay keeper-local until outcome evaluation
+   turns them into a validated approach or lesson. *)
+let is_outcome_positive_for_shared_promotion = function
+  | Validated_approach | Lesson -> true
+  | Code_change | Fact | Preference | Blocker | Goal | Constraint | Ephemeral | Unknown _ ->
+    false
 ;;
 
 (* RFC-0259 §3.2(b): an explicitly structured reference to verifiable external

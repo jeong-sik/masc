@@ -180,12 +180,16 @@ let dashboard_governance_http_json request ~base_path : Yojson.Safe.t =
     int_query_param request "offset" ~default:0 |> clamp ~min_v:0 ~max_v:5000
   in
   let status_filter = None in
+  let force = bool_query_param request "force" ~default:false in
   let cache_key =
     Printf.sprintf "governance:%s;%d;%d" base_path limit offset
   in
-  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s (fun () ->
+  let compute () =
     Domain_pool_ref.submit_io_or_inline (fun () ->
-      Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter))
+      Dashboard_governance.dashboard_json ~base_path ~limit ~offset ~status_filter)
+  in
+  if force then Dashboard_cache.invalidate cache_key;
+  Dashboard_cache.get_or_compute cache_key ~ttl:board_governance_cache_ttl_s compute
 ;;
 
 (** Read the optional [?window=<minutes>] query param.

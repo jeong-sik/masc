@@ -72,25 +72,6 @@ val get : base_path:string -> string -> registry_entry option
 (** Return all registered keepers. *)
 val all : ?base_path:string -> unit -> registry_entry list
 
-type registry_entry_validation_error =
-  | Registry_key_malformed of
-      { key : string
-      ; reason : string
-      }
-  | Registry_base_path_mismatch of
-      { expected : string
-      ; actual : string
-      }
-  | Registry_name_mismatch of
-      { expected : string
-      ; actual : string
-      }
-  | Registry_meta_name_mismatch of
-      { expected : string
-      ; actual : string
-      }
-  | Registry_meta_agent_name_empty
-
 val registry_entry_validation_error_to_string :
   registry_entry_validation_error -> string
 
@@ -99,6 +80,44 @@ val validate_registry_entry :
   string ->
   registry_entry ->
   (unit, registry_entry_validation_error) result
+
+(** Health verdict for a single entry.  Pure: does not read the registry. *)
+val health_of_entry :
+  base_path:string -> string -> registry_entry -> registry_entry_health
+
+(** Like [get] but returns the entry together with its health verdict.
+    Returns [Some _] even when the entry is corrupted, so callers can decide
+    whether to consume it. *)
+val get_with_health :
+  base_path:string -> string -> (registry_entry * registry_entry_health) option
+
+(** Insert or replace a registry entry.  Validates [entry] before installing;
+    on validation error returns the health reason and emits
+    [RegistryInvalidEntry] with [operation="put"]. *)
+val put_entry :
+  base_path:string ->
+  string ->
+  registry_entry ->
+  (unit, registry_entry_validation_error) result
+
+(** Result-returning update: validates [f entry] before installing.  On
+    validation error returns the health reason, emits
+    [RegistryInvalidEntry] with [operation="update"], and leaves the original
+    entry untouched.  Only CAS conflicts retry. *)
+val update_entry :
+  base_path:string ->
+  string ->
+  (registry_entry -> registry_entry) ->
+  (unit, registry_entry_validation_error) result
+
+(** Update a registered entry and return [true] only when a validated write
+    was installed.  Missing keepers, no-op closures, and validation failures
+    return [false]. *)
+val update_entry_if_registered :
+  base_path:string ->
+  string ->
+  (registry_entry -> registry_entry * bool) ->
+  bool
 
 (** Update the meta for a registered keeper. No-op if not found. *)
 val update_meta : base_path:string -> string -> keeper_meta -> unit
@@ -316,6 +335,11 @@ val record_spawn_slot_denied :
   keeper_name:string -> surface:string -> spawn_slot_denial_reason -> unit
 
 module For_testing : sig
+  (** Test-only bypass: install an entry without validation so tests can seed
+      corrupted registry state. *)
+  val unsafe_put_entry :
+    base_path:string -> string -> registry_entry -> unit
+
   val spawn_slots_decision :
     ?fd_admitted:bool ->
     unit ->

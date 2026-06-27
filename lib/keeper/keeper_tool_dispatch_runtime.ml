@@ -479,8 +479,26 @@ let execute_keeper_tool_call_with_outcome
   =
   let args = input in
   let meta =
-    match Keeper_registry.get ~base_path:config.base_path meta.name with
-    | Some entry -> entry.meta
+    match Keeper_registry.get_with_health ~base_path:config.base_path meta.name with
+    | Some (entry, Keeper_registry.Healthy) -> entry.meta
+    | Some (_, health) ->
+      let reason_label =
+        match health with
+        | Keeper_registry.Healthy -> "healthy"
+        | Keeper_registry.Meta_validation_failed _ -> "meta_validation_failed"
+        | Keeper_registry.Required_field_missing _ -> "required_field_missing"
+        | Keeper_registry.Base_path_mismatch _ -> "base_path_mismatch"
+        | Keeper_registry.Name_mismatch _ -> "name_mismatch"
+      in
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string RegistryInvalidEntry)
+        ~labels:
+          [ "operation", "tool_dispatch_fallback"
+          ; "name", meta.name
+          ; "reason", reason_label
+          ]
+        ();
+      meta
     | None -> meta
   in
   let apply_circuit_breaker (result : executed_tool_result) =

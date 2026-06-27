@@ -818,7 +818,9 @@ let rec dispatch_event_with_audit
                to_phase_str
                event_str);
           (* Record transition in audit ring buffer for dashboard API. *)
-          (* DET-OK: absent audit selection falls back to this dispatch event. *)
+          (* DET-OK: absent audit attribution falls back to the already-applied
+             dispatch event, so replay/control state is not inferred from this
+             projection-only record. *)
           let audit_events_fired = Option.value events_fired ~default:[ event ] in
           let audit_selected_event = Option.value selected_event ~default:event in
           Keeper_transition_audit.record_transition

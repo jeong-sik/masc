@@ -336,7 +336,6 @@ let keeper_meta_persistent_drift_categories
       drift_if "persona" (current.persona <> target.persona);
       drift_if "proactive" (current.proactive <> target.proactive);
       drift_if "tool_access" (current.tool_access <> target.tool_access);
-      drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
       drift_if "goal" (not (goal_horizon_text_equal current.goal target.goal));
       drift_if "instructions"
         (not (personality_text_equal current.instructions target.instructions));
@@ -344,9 +343,6 @@ let keeper_meta_persistent_drift_categories
         (current.autoboot_enabled <> target.autoboot_enabled);
       drift_if "mention_targets"
         (current.mention_targets <> target.mention_targets);
-      drift_if "active_goal_ids"
-        (Option.is_some defaults.active_goal_ids
-         && current.active_goal_ids <> target.active_goal_ids);
       drift_if "sandbox_profile"
         (current.sandbox_profile <> target.sandbox_profile);
       drift_if "sandbox_image" (current.sandbox_image <> target.sandbox_image);
@@ -491,9 +487,9 @@ let ensure_keeper_meta_with_cause config name =
        previous overlay-only path made operators see stale JSON forever
        (for example persona=analyst while TOML declared masc-improver),
        which hid prompt/tool/autonomy drift from health and bootstrap
-       checks.  Runtime-owned list fields are only persisted when TOML
-       explicitly owns them, avoiding accidental allowed_paths or
-       active_goal_ids erasure. *)
+       checks.  TOML-only policy lists such as [tool_denylist] and
+       [active_goal_ids] are overlaid in the returned meta but do not trigger
+       a runtime JSON rewrite by themselves. *)
     let cats =
       keeper_meta_persistent_drift_categories
         ~defaults

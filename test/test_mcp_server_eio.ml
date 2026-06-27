@@ -1150,6 +1150,7 @@ let test_handle_request_tools_call_transition_claim_guidance () =
                 ( "arguments",
                   `Assoc
                     [
+                      ("agent_name", `String "codex");
                       ("task_id", `String "task-001");
                       ("action", `String "claim");
                     ] );
@@ -1197,6 +1198,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
       ~arguments:
         (`Assoc
           [
+            ("agent_name", `String "codex");
             ("task_id", `String "task-001");
             ("action", `String "claim");
           ])
@@ -1216,6 +1218,7 @@ let test_handle_request_tools_call_transition_done_guidance () =
                 ( "arguments",
                   `Assoc
                     [
+                      ("agent_name", `String "codex");
                       ("task_id", `String "task-001");
                       ("action", `String "done");
                       ("notes", `String "Completed task and verified output");

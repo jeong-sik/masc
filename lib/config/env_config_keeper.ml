@@ -206,6 +206,12 @@ module KeeperMemoryOs = struct
     | None -> ""
   ;;
 
+  let float_default_to_display value =
+    let raw = string_of_float value in
+    let len = String.length raw in
+    if len > 0 && Char.equal raw.[len - 1] '.' then raw ^ "0" else raw
+  ;;
+
   let get_bool_logged ?(invalid = Env_config_memory.Default) name ~default =
     Env_config_memory.get_bool_logged
       ~invalid

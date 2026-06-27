@@ -94,6 +94,10 @@ module KeeperMemoryOs : sig
   val consolidation_enabled_default : bool
   val consolidation_runtime_id_default : string option
 
+  val float_default_to_display : float -> string
+  (** Render a float default for snapshot display, preserving one trailing
+      decimal digit so that values like [600.] display as ["600.0"]. *)
+
   val recall_enabled : unit -> bool
   val librarian_enabled : unit -> bool
   val librarian_cadence_turns : unit -> int

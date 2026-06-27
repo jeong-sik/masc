@@ -9,10 +9,10 @@
     [Mcp_tool_runtime_types.context] with Eio fiber infrastructure).
 
     Note on persona path resolution: [normalize_all_names] uses
-    [Config_dir_resolver.personas_dir_opt()] first, which can ignore
-    [base_path].  The join-gate contract test pins [MASC_PERSONAS_DIR] to a
-    known-empty temporary directory so the persona check is deterministic in
-    CI. *)
+    [Config_dir_resolver.personas_dir_opt()] first, then falls back to
+    [base_path]/.masc/personas.  The join-gate contract test clears the global
+    persona override and passes an explicit temporary [base_path], so path
+    expectations stay deterministic in CI. *)
 
 open Alcotest
 open Masc
@@ -51,17 +51,17 @@ let restore_env name = function
          resolver state for these tests. *)
       Unix.putenv name ""
 
-let with_empty_personas_dir f =
-  with_temp_dir "workspace-bind-personas" @@ fun personas_dir ->
+let with_empty_persona_base_path f =
+  with_temp_dir "workspace-bind-base" @@ fun base_path ->
   let original = Sys.getenv_opt "MASC_PERSONAS_DIR" in
   Fun.protect
     ~finally:(fun () ->
       restore_env "MASC_PERSONAS_DIR" original;
       Config_dir_resolver.reset ())
     (fun () ->
-      Unix.putenv "MASC_PERSONAS_DIR" personas_dir;
+      Unix.putenv "MASC_PERSONAS_DIR" "";
       Config_dir_resolver.reset ();
-      f personas_dir)
+      f base_path)
 
 (* Same flags as handle_join uses *)
 let join_normalize ~input ?base_path () =
@@ -99,10 +99,10 @@ let test_invalid_chars_rejected () =
 (* --------------------------------------------------------------------- *)
 
 let test_join_gate_uses_persona_check () =
-  with_empty_personas_dir @@ fun personas_dir ->
+  with_empty_persona_base_path @@ fun base_path ->
   let input = "missing-persona" in
   begin
-    match normalize ~input ~check_persona:false () with
+    match normalize ~input ~base_path ~check_persona:false () with
     | Ok _ -> ()
     | Error other ->
         fail
@@ -110,11 +110,13 @@ let test_join_gate_uses_persona_check () =
              "plain normalize without persona check should accept valid name, got %s"
              (Keeper_identity.show_validation_error other))
   end;
-  match join_normalize ~input () with
+  match join_normalize ~input ~base_path () with
   | Error (Keeper_identity.Persona_not_found { resolved; searched; _ }) ->
       check string "resolved persona" input resolved;
       check string "searched persona path"
-        (Filename.concat personas_dir input)
+        (Filename.concat
+           (Filename.concat (Common.masc_dir_from_base_path ~base_path) "personas")
+           input)
         searched
   | Error other ->
       fail

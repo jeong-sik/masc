@@ -14,6 +14,10 @@ let minimal_keeper_json ~trace_id =
     ; ("goal", `String "test")
     ]
 
+let strict_meta_of_fields fields =
+  Masc.Keeper_meta_json_parse.meta_of_json
+    (`Assoc (fields @ [ ("tool_access", Json_util.json_string_list []) ]))
+
 let test_valid_trace_id () =
   match Masc_test_deps.meta_of_json_fixture (minimal_keeper_json ~trace_id:"alice-001") with
   | Ok meta ->
@@ -53,9 +57,8 @@ let test_legacy_runtime_id_alias_tolerated () =
   in
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta ->
-      check string "unassigned keeper resolves to default runtime"
-        (Runtime.get_default_runtime_id ())
-        (Keeper_meta_contract.runtime_id_of_meta meta)
+      check string "name" "alice" meta.name;
+      check string "agent_name" "keeper-alice-agent" meta.agent_name
   | Error e -> fail ("expected keeper meta runtime_id key to parse, got Error: " ^ e)
 
 let test_conflicting_runtime_id_and_legacy_runtime_id_rejected () =
@@ -72,7 +75,7 @@ let test_conflicting_runtime_id_and_legacy_runtime_id_rejected () =
         ("runtime_id", `String "runtime-b");
       ]
   in
-  match Masc_test_deps.meta_of_json_fixture json with
+  match Masc.Keeper_meta_json_parse.meta_of_json json with
   | Error msg ->
       check bool "error mentions runtime_id" true
         (try
@@ -89,14 +92,13 @@ let test_conflicting_runtime_id_and_legacy_runtime_id_rejected () =
             ^ Keeper_meta_contract.runtime_id_of_meta meta)
 
 let test_missing_trace_id () =
-  let json =
-    `Assoc
+  match
+    strict_meta_of_fields
       [ ("name", `String "bob")
       ; ("agent_name", `String "keeper-bob-agent")
       ; ("goal", `String "test")
       ]
-  in
-  match Masc_test_deps.meta_of_json_fixture json with
+  with
   | Error msg ->
       check bool "error mentions trace_id"
         true

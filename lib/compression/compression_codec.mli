@@ -49,6 +49,13 @@ val of_used_dict : bool -> encoding
 val content_encoding : encoding -> string
 (** HTTP [Content-Encoding] header value for an [encoding]. *)
 
+val legacy_standard_result : original:string -> compress_result -> string * bool
+(** [legacy_standard_result ~original result] adapts codec results for the
+    legacy [Content-Encoding: zstd] path. Standard zstd results are advertised
+    as compressed; unchanged payloads and dictionary results return
+    [(original_or_payload, false)] so callers cannot leak dictionary-compressed
+    bytes without a matching dictionary content-encoding. *)
+
 (** {1 Compression} *)
 
 val compress : ?level:int -> string -> compress_result

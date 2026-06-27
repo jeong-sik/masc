@@ -89,7 +89,8 @@ let make_meta
   | Error err -> failwith ("make_meta failed: " ^ err)
 
 let make_ctx () =
-  Masc.Keeper_context_runtime.create ~system_prompt:"test" ~max_tokens:4000
+  Masc.Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+    ~max_tokens:4000
 
 let with_exec_fixture ?(process = false) ?tool_access name fn =
   let dir = temp_dir name in

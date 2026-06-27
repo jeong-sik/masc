@@ -190,7 +190,7 @@
   meta_cognition_parse
   meta_cognition_interpret
   meta_cognition_digest
-  keeper_memory_os_gc
+  keeper_memory_os_gc keeper_memory_os_gc_dry_run_report
   keeper_memory_os_hebbian
   keeper_memory_os_io keeper_user_model
   keeper_memory_os_recall)

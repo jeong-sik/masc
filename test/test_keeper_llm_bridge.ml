@@ -10,23 +10,6 @@ let contains_substring text needle =
   needle_len = 0 || loop 0
 ;;
 
-let assert_no_clock_error ~label ~called result =
-  Alcotest.(check bool) (label ^ ": function was not called") false !called;
-  match result with
-  | Error (Agent_sdk.Error.Internal msg) ->
-    Alcotest.(check bool)
-      (label ^ ": message names no-clock failure")
-      true
-      (contains_substring msg "Eio clock unavailable");
-    Alcotest.(check bool)
-      (label ^ ": message names timeout")
-      true
-      (contains_substring msg "timeout_s=1")
-  | Error err ->
-    Alcotest.failf "unexpected error shape: %s" (Agent_sdk.Error.to_string err)
-  | Ok value -> Alcotest.failf "unexpected success: %s" value
-;;
-
 let latest_keeper_log_matching needle =
   Log.Ring.recent
     ~limit:50
@@ -52,35 +35,43 @@ let assert_latest_failure_envelope ~label ~needle ~cause_code ~operator_action =
       (envelope |> member "operator_action" |> to_string)
 ;;
 
-let test_missing_env_fails_closed_without_calling_fn () =
+let expected_uninitialized_error =
+  Invalid_argument "Masc_eio_env.get: not initialized. Call init at server startup."
+;;
+
+let test_missing_env_raises_without_calling_fn () =
   Masc_eio_env.reset_for_test ();
   let called = ref false in
-  let result =
+  let run () =
     Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0 (fun () ->
       called := true;
       Ok "should-not-run")
+    |> ignore
   in
-  assert_no_clock_error ~label:"missing env" ~called result;
-  assert_latest_failure_envelope
-    ~label:"missing env"
-    ~needle:"Eio clock unavailable"
-    ~cause_code:"eio_clock_unavailable"
-    ~operator_action:"check_masc_eio_env"
+  Alcotest.check_raises
+    "missing env raises Invalid_argument"
+    expected_uninitialized_error
+    run;
+  Alcotest.(check bool) "function was not called" false !called
 ;;
 
-let test_clockless_env_fails_closed_without_calling_fn () =
+let test_uninitialized_env_inside_eio_raises_without_calling_fn () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       Masc_eio_env.reset_for_test ();
       Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ();
         let called = ref false in
-        let result =
+        let run () =
           Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0 (fun () ->
             called := true;
             Ok "should-not-run")
+          |> ignore
         in
-        assert_no_clock_error ~label:"clockless env" ~called result)))
+        Alcotest.check_raises
+          "uninitialized env inside Eio raises Invalid_argument"
+          expected_uninitialized_error
+          run;
+        Alcotest.(check bool) "function was not called" false !called)))
 ;;
 
 let test_clocked_env_runs_function () =
@@ -273,13 +264,13 @@ let () =
     "keeper_llm_bridge"
     [ ( "timeout clock"
       , [ Alcotest.test_case
-            "missing env fails closed"
+            "missing env raises"
             `Quick
-            test_missing_env_fails_closed_without_calling_fn
+            test_missing_env_raises_without_calling_fn
         ; Alcotest.test_case
-            "clockless env fails closed"
+            "uninitialized env inside Eio raises"
             `Quick
-            test_clockless_env_fails_closed_without_calling_fn
+            test_uninitialized_env_inside_eio_raises_without_calling_fn
         ; Alcotest.test_case "clocked env runs" `Quick test_clocked_env_runs_function
         ; Alcotest.test_case
             "uninitialized domain returns None"

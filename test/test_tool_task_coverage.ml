@@ -401,23 +401,18 @@ let () = test "masc_oas_bridge_rejects_without_eio_env" (fun () ->
       "masc_oas_bridge_rejects_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
   | None ->
     let called = ref false in
-    match
+    let run () =
       Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
         called := true;
         Ok "ok")
-    with
-    | Ok _ -> failwith "expected failure when no Eio clock is available"
-    | Error err ->
-      (match Keeper_internal_error.classify_masc_internal_error err with
-       | Some (Keeper_internal_error.Internal_contract_rejected _) ->
-         Alcotest.(check bool) "fn was not called" false !called
-       | Some other ->
-         failwith
-           ("expected Internal_contract_rejected, got "
-            ^ Keeper_internal_error.kind_of_masc_internal_error other)
-       | None ->
-         failwith ("expected typed keeper error, got " ^ Agent_sdk.Error.to_string err))
-)
+      |> ignore
+    in
+    Alcotest.check_raises
+      "run_safe raises Invalid_argument when env not initialized"
+      (Invalid_argument "Masc_eio_env.get: not initialized. Call init at server startup.")
+      run;
+    Alcotest.(check bool) "fn was not called" false !called)
+
 
 (* Test dispatch transition claim *)
 let () = test "dispatch_transition_claim" (fun () ->

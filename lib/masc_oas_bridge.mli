@@ -5,17 +5,26 @@
 
 (** Safe execution of a generic OAS operation with a mandatory timeout.
     Requires an initialized {!Masc_eio_env} carrying an Eio clock.
-    If the environment is missing or has no clock, returns
-    [Agent_sdk.Error.Internal (Internal_contract_rejected ...)] instead of
-    executing the wrapped function.
 
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
-    Raises [Invalid_argument] when [timeout_s] is not positive or infinite. *)
+    Raises [Invalid_argument] when [timeout_s] is not positive or infinite, or
+    when {!Masc_eio_env} has not been initialised. *)
 val run_safe
   :  caller:string
   -> timeout_s:float
+  -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
+  -> ('a, Agent_sdk.Error.sdk_error) result
+
+(** [run_unbounded ~caller fn] runs [fn] without a structural timeout.
+
+    This is for intentional no-timeout callers only; normal OAS boundaries
+    should use {!run_safe} or {!run_with_caller}.  Requires an initialised
+    {!Masc_eio_env} and preserves the same cancellation and error conversion
+    behaviour as {!run_safe}. *)
+val run_unbounded
+  :  caller:string
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)
   -> ('a, Agent_sdk.Error.sdk_error) result
 

@@ -215,11 +215,9 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
               ~config:provider_config ~messages ()
           in
           let outcome =
-            match env.clock with
-            | Some clock -> (
-                try Ok (Eio.Time.with_timeout_exn clock (Stdlib.Float.of_int timeout_sec) run_completion)
-                with Eio.Time.Timeout -> Error "timeout")
-            | None -> Ok (run_completion ())
+            try
+              Ok (Eio.Time.with_timeout_exn env.clock (Stdlib.Float.of_int timeout_sec) run_completion)
+            with Eio.Time.Timeout -> Error "timeout"
           in
           let latency_ms =
             Stdlib.Int.of_float ((Time_compat.now () -. started) *. 1000.0)

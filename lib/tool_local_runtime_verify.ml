@@ -118,11 +118,9 @@ let probe_chat_completion_compatible
           ~config:provider_config ~messages ()
       in
       let outcome =
-        match env.clock with
-        | Some clock -> (
-            try Ok (Eio.Time.with_timeout_exn clock (Stdlib.Float.of_int timeout_sec) run_completion)
-            with Eio.Time.Timeout -> Error "timeout")
-        | None -> Ok (run_completion ())
+        try
+          Ok (Eio.Time.with_timeout_exn env.clock (Stdlib.Float.of_int timeout_sec) run_completion)
+        with Eio.Time.Timeout -> Error "timeout"
       in
       match outcome with
       | Error message -> (Some false, Some message)

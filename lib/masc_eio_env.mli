@@ -17,18 +17,15 @@
 type t = {
   sw : Eio.Switch.t;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
-  clock : float Eio.Time.clock_ty Eio.Resource.t option;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
 }
-(** Captured Eio handles. [clock] is optional because some
-    callers (e.g. tests, stdio mode) initialise without one;
-    components that strictly require a clock should pattern
-    match on [Some] and fail loudly rather than substitute a
-    fallback. *)
+(** Captured Eio handles. [clock] is mandatory; callers must supply
+    a valid clock at initialisation. *)
 
 val init :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit ->
   unit
 (** Capture the runtime handles for the current OCaml domain.

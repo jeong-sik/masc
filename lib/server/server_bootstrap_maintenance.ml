@@ -104,17 +104,13 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "metrics_flush")
     (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
-  (* RFC-0137 PR-2: host FD pressure poller. Watches sysmon's pressure state
-     file at /tmp/masc-host-pressure.state every 1s; bridges WARN/CRIT into
+  (* RFC-0137 PR-2: host FD pressure poller. Watches sysmon's configured
+     pressure state file every 1s; bridges WARN/CRIT into
      [Keeper_fd_pressure.engage_external] so the keeper scheduling gates pause
      before kern.maxfiles exhaustion can panic the kernel. Disable via
      [MASC_HOST_FD_PRESSURE_POLLER_DISABLED=1]. Sunsets when RFC-0097
      (sandbox container reuse) reaches steady state — see RFC-0137 §9. *)
-  let poller_disabled =
-    match Sys.getenv_opt "MASC_HOST_FD_PRESSURE_POLLER_DISABLED" with
-    | Some ("1" | "true" | "TRUE") -> true
-    | _ -> false
-  in
+  let poller_disabled = Env_config_core.host_fd_pressure_poller_disabled () in
   if not poller_disabled then Host_fd_pressure_poller.start ~sw ~clock;
   (* Deterministic output budget enforcement: truncate oversized tool outputs
      with structured metadata before metrics/OTEL hooks see them. *)

@@ -207,10 +207,9 @@ let degraded_trust_json ?now () =
    adjacent process (Apple Virtualization VM XPC under Docker Desktop)
    while masc's own [nofile] budget stays comfortable.
 
-   The out-of-process [sysmon-fd-oom-disk.sh] daemon emits a JSON state
-   file at [/tmp/masc-host-pressure.state] on WARN/CRIT thresholds; the
-   [Host_fd_pressure_poller] (PR-2) reads it on a 1s cadence and invokes
-   [engage_external].
+   The out-of-process sysmon daemon emits a JSON state file on WARN/CRIT
+   thresholds; [Host_fd_pressure_poller] (PR-2) reads the configured path on a
+   1s cadence and invokes [engage_external].
 
    Monotonic guarantee: stale [ts] produces a smaller [until_ts] than
    the current [cooldown_until], so [cas_monotonic_max] rejects it — no

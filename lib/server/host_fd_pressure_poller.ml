@@ -12,19 +12,43 @@
    - Parse failures and missing files are no-ops, not warnings —
      during normal operation the file is *absent* most of the time. *)
 
-let state_file_path () =
-  match Sys.getenv_opt "MASC_HOST_FD_PRESSURE_STATE_FILE" with
-  | Some s when s <> "" -> s
-  | _ -> "/tmp/masc-host-pressure.state"
+type state_file_source =
+  | Canonical_env
+  | Legacy_env
+  | Default
+
+type state_file_resolution =
+  { path : string
+  ; source : state_file_source
+  }
+
+let state_file_source_to_string = function
+  | Canonical_env -> Env_config_core.host_fd_pressure_state_file_env_key
+  | Legacy_env -> Env_config_core.legacy_host_fd_pressure_state_file_env_key
+  | Default -> "default"
+
+let resolve_state_file_path () =
+  match
+    ( Env_config_core.host_fd_pressure_state_file_path_opt ()
+    , Env_config_core.legacy_host_fd_pressure_state_file_path_opt () )
+  with
+  | Some path, _ -> { path; source = Canonical_env }
+  | None, Some path -> { path; source = Legacy_env }
+  | None, None ->
+    { path = Env_config_core.default_host_fd_pressure_state_file_path; source = Default }
 ;;
 
-let poll_interval_sec () =
-  Env_config_core.get_float
-    ~default:1.0
-    "MASC_HOST_FD_PRESSURE_POLL_INTERVAL_SEC"
-  |> Float.max 0.5
-  |> Float.min 60.0
+let state_file_env_conflict () =
+  match
+    ( Env_config_core.host_fd_pressure_state_file_path_opt ()
+    , Env_config_core.legacy_host_fd_pressure_state_file_path_opt () )
+  with
+  | Some canonical, Some legacy when not (String.equal canonical legacy) ->
+    Some (canonical, legacy)
+  | _ -> None
 ;;
+
+let poll_interval_sec = Env_config_core.host_fd_pressure_poll_interval_sec
 
 (* iso8601 -> unix epoch seconds. sysmon emits e.g.
    "2026-05-19T22:02:26+0900". We strip the trailing tz offset and
@@ -174,11 +198,23 @@ let one_tick path =
 
 let start ~sw ~clock =
   Eio.Fiber.fork ~sw (fun () ->
-    let path = state_file_path () in
+    let resolution = resolve_state_file_path () in
+    let path = resolution.path in
     let interval = poll_interval_sec () in
+    (match state_file_env_conflict () with
+     | Some (canonical, legacy) ->
+       Log.Server.warn
+         "host_fd_pressure_poller: %s=%s overrides legacy %s=%s; set the sysmon \
+          producer to the canonical env to avoid split-brain state files"
+         Env_config_core.host_fd_pressure_state_file_env_key
+         canonical
+         Env_config_core.legacy_host_fd_pressure_state_file_env_key
+         legacy
+     | None -> ());
     Log.Server.info
-      "host_fd_pressure_poller: started path=%s interval=%.1fs"
+      "host_fd_pressure_poller: started path=%s source=%s interval=%.1fs"
       path
+      (state_file_source_to_string resolution.source)
       interval;
     let rec loop () =
       Eio.Time.sleep clock interval;

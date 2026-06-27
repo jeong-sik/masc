@@ -40,7 +40,7 @@ ALERT_COOLDOWN="${MASC_SYSMON_ALERT_COOLDOWN:-300}"
 # Pressure flag file. masc server (future) is expected to poll this
 # and engage Keeper_fd_pressure when level=CRIT. We always rewrite it
 # atomically so a reader sees a consistent snapshot.
-PRESSURE_STATE_FILE="${MASC_SYSMON_PRESSURE_STATE:-/tmp/masc-host-pressure.state}"
+PRESSURE_STATE_FILE="${MASC_HOST_FD_PRESSURE_STATE_FILE:-${MASC_SYSMON_PRESSURE_STATE:-/tmp/masc-host-pressure.state}}"
 PRESSURE_EVENTS_FILE="${MASC_SYSMON_PRESSURE_EVENTS:-/tmp/masc-host-pressure.events.jsonl}"
 
 usage() {
@@ -73,7 +73,8 @@ Pressure flag (for masc server integration, future):
   /tmp/masc-host-pressure.state    latest snapshot when level != OK;
                                    removed when system is OK.
   /tmp/masc-host-pressure.events.jsonl  append-only history.
-  Override paths via MASC_SYSMON_PRESSURE_STATE / MASC_SYSMON_PRESSURE_EVENTS.
+  Override state path via MASC_HOST_FD_PRESSURE_STATE_FILE.
+  Override events path via MASC_SYSMON_PRESSURE_EVENTS.
   Reader contract: parse JSON line for level/kinds/summary/ts/pid.
   Server polls this file (e.g. once per second) and invokes
   Keeper_fd_pressure.engage when level=CRIT. Wiring is RFC-pending

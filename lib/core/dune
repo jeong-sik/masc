@@ -23,6 +23,7 @@
   domain_pool_ref
   masc_runtime_events
   system_error_class
+  executable_path
   text_similarity
   string_util
   list_util

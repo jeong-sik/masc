@@ -3,9 +3,10 @@ import {
   runtimeBandMeta,
   summarizeKeeperMonitoring,
   summarizeMonitoringEvidence,
+  isTransientPhase,
 } from './monitoring-runtime'
 import type { KeeperMonitoringSummary } from './monitoring-runtime'
-import type { Keeper } from '../types'
+import type { Keeper, PipelineStage } from '../types'
 
 function makeSummary(overrides: Partial<KeeperMonitoringSummary> = {}): KeeperMonitoringSummary {
   return {
@@ -47,6 +48,56 @@ describe('runtimeBandMeta', () => {
     expect(meta.key).toBe('offline')
     expect(meta.label).toContain('오프라인')
     expect(meta.description).toContain('기동')
+  })
+
+  // RFC-0295 §5.1 — transient band metadata. The 5th value activates the
+  // busy rail; meta must agree with the prototype's FL_TONE_LABEL.busy gloss.
+  it('returns transient meta', () => {
+    const meta = runtimeBandMeta('transient')
+    expect(meta.key).toBe('transient')
+    expect(meta.label).toBe('전이')
+    expect(meta.description).toContain('전이')
+  })
+})
+
+// ================================================================
+// isTransientPhase
+// ================================================================
+
+describe('isTransientPhase', () => {
+  // Both KeeperPhase (PascalCase SSOT) and PipelineStage (lowercase wire)
+  // spellings must resolve to true. Either spelling may arrive through
+  // projection.opState.phase or keeper.pipeline_stage, so the helper
+  // bridges both formats at one location.
+  it.each([
+    ['Compacting', 'PascalCase KeeperPhase'],
+    ['HandingOff', 'PascalCase KeeperPhase'],
+    ['Draining', 'PascalCase KeeperPhase'],
+    ['Restarting', 'PascalCase KeeperPhase'],
+    ['compacting', 'lowercase PipelineStage'],
+    ['handoff', 'lowercase PipelineStage'],
+    ['draining', 'lowercase PipelineStage'],
+    ['restarting', 'lowercase PipelineStage'],
+  ])('returns true for transient phase %s (%s)', (phase) => {
+    expect(isTransientPhase(phase)).toBe(true)
+  })
+
+  it.each([
+    ['Running'],
+    ['Paused'],
+    ['Offline'],
+    ['Failing'],
+    ['idle'],
+    ['offline'],
+    ['paused'],
+    ['unknown'],
+  ])('returns false for non-transient phase %s', (phase) => {
+    expect(isTransientPhase(phase)).toBe(false)
+  })
+
+  it('returns false for null and undefined', () => {
+    expect(isTransientPhase(null)).toBe(false)
+    expect(isTransientPhase(undefined)).toBe(false)
   })
 })
 
@@ -228,4 +279,95 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
   })
 
+  // RFC-0295 §6 verification: each of the four transient FSM phases must
+  // route to the new `transient` band regardless of which spelling arrives.
+  // Driven via composite.phase (open string wire, `KeeperCompositePhaseSchema`)
+  // and keeper.phase (PascalCase SSOT) to cover both projection paths.
+  //
+  // Wire spelling notes: composite.phase uses snake_case for `handing_off`
+  // but single-word lowercase for the rest (`compacting`/`draining`/
+  // `restarting`) — see `keeper-store-normalize.ts:110` `BACKEND_PHASE_LOWERCASE_MAP`.
+  // `handoff` is the PipelineStage spelling (types/core.ts:945) used for
+  // `keeper.pipeline_stage`; it does not appear in the composite wire.
+  describe('transient band routing (RFC-0295 §5.2)', () => {
+    const transientPhases: ReadonlyArray<[string, string]> = [
+      ['compacting', 'lowercase composite.phase'],
+      ['draining', 'lowercase composite.phase'],
+      ['handing_off', 'snake_case composite.phase (lowercase map SSOT)'],
+      ['restarting', 'lowercase composite.phase'],
+    ]
+
+    it.each(transientPhases)(
+      'routes %s (%s) to the transient band',
+      (phase, _label) => {
+        const summary = summarizeKeeperMonitoring(
+          {
+            name: 'keeper-transient',
+            status: 'busy',
+            phase: 'Running',
+            pipeline_stage: phase === 'handing_off' ? 'handoff' : phase,
+          } as Keeper,
+          { keeper: 'keeper-transient', phase } as unknown as Parameters<
+            typeof summarizeKeeperMonitoring
+          >[1],
+        )
+        expect(summary.band.key).toBe('transient')
+        expect(summary.band.label).toBe('전이')
+      },
+    )
+
+    it.each([
+      ['Compacting', 'PascalCase keeper.phase'],
+      ['Draining', 'PascalCase keeper.phase'],
+      ['HandingOff', 'PascalCase keeper.phase'],
+      ['Restarting', 'PascalCase keeper.phase'],
+    ] as const)(
+      'routes %s (%s) to the transient band',
+      (phase, _label) => {
+        const summary = summarizeKeeperMonitoring({
+          name: 'keeper-transient-pascal',
+          status: 'busy',
+          phase,
+          pipeline_stage: phase === 'HandingOff' ? 'handoff' : (phase.toLowerCase() as PipelineStage),
+        } as Keeper)
+        expect(summary.band.key).toBe('transient')
+      },
+    )
+
+    // Order matters in `keeperBand`: transient must beat attention so a
+    // mid-compaction blocker check does not repaint the row as red.
+    it('transient beats attention when a live blocker signal fires mid-compaction', () => {
+      const summary = summarizeKeeperMonitoring(
+        {
+          name: 'keeper-transient-blocked',
+          status: 'busy',
+          phase: 'Running',
+          pipeline_stage: 'compacting',
+          runtime_blocker_class: 'turn_timeout',
+          runtime_blocker_summary: 'turn timed out after queue wait',
+        } as Keeper,
+        { keeper: 'keeper-transient-blocked', phase: 'compacting' } as unknown as Parameters<
+          typeof summarizeKeeperMonitoring
+        >[1],
+      )
+      expect(summary.band.key).toBe('transient')
+    })
+
+    // Offband priority: paused/offline remain sticky over transient so a
+    // paused keeper mid-restart does not silently flip to busy.
+    it('offline beats transient when both apply', () => {
+      const summary = summarizeKeeperMonitoring(
+        {
+          name: 'keeper-offline-restarting',
+          status: 'offline',
+          phase: 'Restarting',
+          pipeline_stage: 'restarting',
+        } as Keeper,
+        { keeper: 'keeper-offline-restarting', phase: 'restarting' } as unknown as Parameters<
+          typeof summarizeKeeperMonitoring
+        >[1],
+      )
+      expect(summary.band.key).toBe('offline')
+    })
+  })
 })

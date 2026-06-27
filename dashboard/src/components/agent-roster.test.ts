@@ -725,7 +725,10 @@ describe('AgentRoster live-only cards', () => {
     ) as HTMLElement[]
     expect(rows.length).toBe(3)
     // every row carries a tone the rail CSS can paint
-    const valid = new Set(['ok', 'warn', 'bad', 'idle'])
+    // RFC-0295: `busy` joins the valid set after the RuntimeBand 5th-value
+    // extension; the CSS `[data-tone="busy"]` selectors in fleet.css are now
+    // reachable from a transient-phase keeper.
+    const valid = new Set(['ok', 'warn', 'bad', 'idle', 'busy'])
     expect(rows.every(r => valid.has(r.getAttribute('data-tone') ?? ''))).toBe(true)
     const toneByName = (name: string) =>
       rows.find(r => r.textContent?.includes(name))?.getAttribute('data-tone')

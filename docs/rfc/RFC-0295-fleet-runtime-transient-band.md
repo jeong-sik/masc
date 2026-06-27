@@ -4,7 +4,7 @@ title: "Fleet RuntimeBand 5th value — transient (busy tone dead-branch recover
 status: Draft
 created: 2026-06-27
 updated: 2026-06-27
-revision_note: "§5.2 mapping source corrected in revision 2 (2026-06-27). The transient phases live on `opState.phase` (KeeperPhase SSOT), not `opState.kind` (closed sum of offline/paused/stuck/running). agentBand retains 4-tone routing because AgentStatus carries no FSM-phase information."
+revision_note: "§5.2 mapping source corrected in revision 2 (2026-06-27). The transient phases live on `opState.phase` (KeeperPhase SSOT), not `opState.kind` (closed sum of offline/paused/stuck/running). agentBand retains 4-tone routing because AgentStatus carries no FSM-phase information. Revision 3 (2026-06-27): §5.2 documents wire-vocabulary asymmetry — composite uses `handing_off` (snake_case via BACKEND_PHASE_LOWERCASE_MAP), pipeline_stage uses `handoff` (single word); both resolve to the HandingOff PascalCase SSOT."
 author: jeong-sik (vincent)
 supersedes: []
 superseded_by: null
@@ -177,6 +177,21 @@ format, `types/core.ts:945`). The `STAGE_PHASE_EQUIVALENTS` table at
 | `opState.phase ∈ {Compacting, HandingOff, Draining, Restarting}` *(or pipeline_stage equivalents `compacting`/`handoff`/`draining`/`restarting`)* | **`transient`** (new) |
 | `attention_signals.length > 0` | `attention` |
 | else | `active` |
+
+**Wire vocabulary asymmetry (revision 3, 2026-06-27, found by pre-flight vitest
+on implementation PR)** — `opState.phase` is *normalized* by
+`toKeeperPhase` (keeper-store-normalize.ts:159) which consults
+`BACKEND_PHASE_LOWERCASE_MAP` (line 110). That map spells `handing_off`
+(snake_case) for the composite wire, while the `pipeline_stage` wire uses
+`handoff` (single word, types/core.ts:945). Both shapes resolve to the
+`HandingOff` PascalCase SSOT, so they are *the same phase* — but the
+caller-facing literals are not interchangeable. `isTransientPhase` accepts
+both spellings (and the PascalCase) so the band routing is consistent
+regardless of which projection path fires. Pre-flight test:
+`monitoring-runtime.test.ts:288-291` ('handing_off' composite) and
+`monitoring-runtime.test.ts:299-302` ('HandingOff' PascalCase) both pass;
+`'handoff'` only fires through the `pipeline_stage` path (`STAGE_LABELS`
+key, line 84).
 
 The mapping is **phase-first**, not kind-first. `opState.kind` lives on
 a closed sum (`offline`/`paused`/`stuck`/`running` —

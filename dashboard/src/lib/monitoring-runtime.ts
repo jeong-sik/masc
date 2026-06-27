@@ -7,7 +7,7 @@ import {
   type KeeperRuntimeProjection,
 } from './keeper-runtime-projection'
 
-export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline'
+export type RuntimeBand = 'active' | 'attention' | 'paused' | 'offline' | 'transient'
 
 interface RuntimeBandMeta {
   key: RuntimeBand
@@ -130,6 +130,11 @@ const BAND_META: Record<RuntimeBand, RuntimeBandMeta> = {
     label: '오프라인',
     description: '프로세스나 하트비트를 확인하지 못해 기동이 필요한 상태입니다.',
   },
+  transient: {
+    key: 'transient',
+    label: '전이',
+    description: '컨텍스트 압축, 승계, 종료, 재시작 등 단계 전이 중이라 결과 확인 전 입니다.',
+  },
 }
 
 function phaseMeta(key: string | null | undefined): PhaseMeta {
@@ -146,6 +151,24 @@ function stageMeta(key: string | null | undefined): StageMeta {
 
 function normalizeStage(stage: PipelineStage | string | null | undefined): string {
   return stage ? String(stage) : 'offline'
+}
+
+// Transient FSM phases — KeeperPhase SSOT (PascalCase, `types/core.ts:1083`)
+// plus their lowercase pipeline_stage wire equivalents (`types/core.ts:945`).
+// These signal a *transition* (compacting/handoff/draining/restarting) rather
+// than steady-state, so they route to the dedicated `transient` band instead
+// of `active` (which would silently re-merge them with healthy keepers mid-
+// transition) or `attention` (which is reserved for failure/stall signals).
+const TRANSIENT_PHASE_KEYS: ReadonlySet<string> = new Set<string>([
+  'Compacting', 'compacting',
+  'HandingOff', 'handoff',
+  'Draining', 'draining',
+  'Restarting', 'restarting',
+])
+
+export function isTransientPhase(phase: string | null | undefined): boolean {
+  if (phase == null) return false
+  return TRANSIENT_PHASE_KEYS.has(phase)
 }
 
 export function keeperPhaseForDisplay(
@@ -166,8 +189,16 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   // were strict subsets of `projection.opState.kind === 'paused'` and
   // `projection.opState.kind === 'offline'`; routing through the runtime
   // projection keeps monitoring aligned with detail live-truth.
+  //
+  // RFC-0295 §5.2 (pixel-perfect Fleet tone rail): transient FSM phases
+  // (Compacting / HandingOff / Draining / Restarting) get their own band so
+  // the prototype's busy rail becomes live instead of collapsing into
+  // `active`. Routed *before* attention so a mid-compaction blocker check
+  // doesn't repaint the row as red — the operator's first scan question is
+  // "what is currently moving", not "what is currently failing".
   if (projection.opState.kind === 'paused') return 'paused'
   if (projection.opState.kind === 'offline') return 'offline'
+  if (isTransientPhase(projection.opState.phase)) return 'transient'
   if (projection.signals.some(signal => signal.contributesToAttention)) {
     return 'attention'
   }

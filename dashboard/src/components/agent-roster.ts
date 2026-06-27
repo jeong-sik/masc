@@ -86,6 +86,7 @@ function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
     case 'attention': return '확인 필요'
     case 'paused': return '재개 대기'
     case 'offline': return isKeeper ? '기동 필요' : '연결 없음'
+    case 'transient': return '전이'
   }
 }
 
@@ -93,12 +94,15 @@ function rosterBandActionHint(band: RuntimeBand, isKeeper: boolean): string {
 // Tone for the scannable per-row rail (keeper-v2 Fleet design: a left edge
 // keyed to runtime band so keeper state reads down a single column instead of
 // every row looking identical). Maps masc's RuntimeBand onto the v2 tone
-// vocabulary (ok/warn/bad/idle); the CSS in v2-monitoring.css paints the edge.
-const ROSTER_BAND_TONE: Record<RuntimeBand, 'ok' | 'warn' | 'bad' | 'idle'> = {
+// vocabulary (ok/warn/bad/busy/idle); the CSS in v2-monitoring.css paints the
+// edge. RFC-0295: `transient` resolves to `busy`, activating the previously
+// dead `[data-tone="busy"]` selectors in fleet.css.
+const ROSTER_BAND_TONE: Record<RuntimeBand, 'ok' | 'warn' | 'bad' | 'busy' | 'idle'> = {
   active: 'ok',
   attention: 'bad',
   paused: 'warn',
   offline: 'idle',
+  transient: 'busy',
 }
 
 // Legacy `tool_use` / `scheduled_autonomous` / `thinking` removed — the
@@ -305,9 +309,10 @@ export function rosterBlockerDisplay(
 
 // keeper-v2 Fleet skin (fleet.css .fl-*) helpers. The prototype keys every
 // chip / rail / aside-state on a 5-value tone vocabulary
-// (ok/warn/bad/busy/idle). masc's RuntimeBand collapses onto 4 of those via
-// ROSTER_BAND_TONE; the Korean tone label below is the same `FL_TONE_LABEL`
-// the prototype shipped, used for the aside "selected runtime" state line.
+// (ok/warn/bad/busy/idle). RFC-0295 brings masc's RuntimeBand to the same 5
+// values via ROSTER_BAND_TONE (transient → busy); the Korean tone label
+// below is the same `FL_TONE_LABEL` the prototype shipped, used for the
+// aside "selected runtime" state line.
 type FleetTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'
 
 const FL_TONE_LABEL: Record<FleetTone, string> = {
@@ -476,6 +481,9 @@ const FILTER_META: Record<StatusFilter, { label: string; description: string }> 
   attention: { label: runtimeBandMeta('attention').label, description: runtimeBandMeta('attention').description },
   paused: { label: runtimeBandMeta('paused').label, description: runtimeBandMeta('paused').description },
   offline: { label: runtimeBandMeta('offline').label, description: runtimeBandMeta('offline').description },
+  // RFC-0295: `transient` joins the filter facets so the operator can drill
+  // into mid-compaction / mid-handoff keepers without losing the busy rail.
+  transient: { label: runtimeBandMeta('transient').label, description: runtimeBandMeta('transient').description },
 }
 
 /**
@@ -650,6 +658,10 @@ function countAgentsByStatus(
     attention: 0,
     paused: 0,
     offline: 0,
+    // RFC-0295: keep parity with the 5-band facet so transient keepers
+    // appear under their own filter rather than being silently absorbed by
+    // `active`.
+    transient: 0,
   }
 
   for (const agent of agentList) {
@@ -861,12 +873,18 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       return true
     })
     .sort((a: Agent, b: Agent) => {
+      // RFC-0295: transient sits between active and paused on the sort
+      // axis — the prototype groups "what is currently moving" above the
+      // healthy steady-state rows so the operator's first scan reads as
+      // "attention → transient → active → paused → offline" instead of
+      // burying a mid-compaction keeper under the active rows.
       const order: Record<StatusFilter, number> = {
         all: 0,
         attention: 0,
-        active: 1,
-        paused: 2,
-        offline: 3,
+        transient: 1,
+        active: 2,
+        paused: 3,
+        offline: 4,
       }
       const aOrder = order[bandByAgent.get(a.name)?.key ?? 'attention']
       const bOrder = order[bandByAgent.get(b.name)?.key ?? 'attention']

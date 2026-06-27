@@ -10,7 +10,7 @@ type owned_active_task = {
 val owned_active_tasks_for_meta :
   config:Workspace.config ->
   meta:Keeper_meta_contract.keeper_meta ->
-  owned_active_task list
+  (owned_active_task list, string) result
 
 (** Find the deterministic active task a keeper should treat as current.
 

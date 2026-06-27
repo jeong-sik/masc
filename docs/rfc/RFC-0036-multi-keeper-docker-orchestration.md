@@ -53,7 +53,7 @@ val register_cleanup_hook : cleanup_hook -> unit
 ```
 
 Calls fire on:
-- Every phase transition in `transition_to`, before the registry write commits.
+- Every phase transition in `transition_to`, after the validated registry write commits.
 - `cleanup_dead_tombstone` exit, after the registry unregister.
 
 The hook is **synchronous, best-effort, non-throwing**. Implementations log + swallow exceptions; the supervisor never observes hook failure. This matches the same pattern as `Shutdown_hooks.run_all` (no timeout cliff that can preempt OCaml code). Hook list is `Atomic.t` ref-cell.

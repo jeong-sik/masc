@@ -18,6 +18,79 @@ let with_path path f =
     f
 ;;
 
+let with_cwd path f =
+  let prior = Sys.getcwd () in
+  Sys.chdir path;
+  Fun.protect ~finally:(fun () -> Sys.chdir prior) f
+;;
+
+let touch path =
+  let oc = open_out path in
+  close_out oc
+;;
+
+let test_executable_path_lookup_requires_executable_file () =
+  let dir = temp_dir "executable-path-bits-" in
+  let executable = Filename.concat dir "masc-test-tool" in
+  let non_executable = Filename.concat dir "masc-test-data" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove executable with Sys_error _ -> ());
+      (try Sys.remove non_executable with Sys_error _ -> ());
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      touch executable;
+      touch non_executable;
+      Unix.chmod executable 0o700;
+      Unix.chmod non_executable 0o600;
+      let getenv = function
+        | "PATH" -> Some dir
+        | _ -> None
+      in
+      check
+        bool
+        "executable file found"
+        true
+        (Executable_path.command_available ~getenv "masc-test-tool");
+      check
+        bool
+        "non-executable file rejected"
+        false
+        (Executable_path.command_available ~getenv "masc-test-data"))
+;;
+
+let test_executable_path_ignores_empty_path_entries () =
+  let dir = temp_dir "executable-path-empty-" in
+  let name = "masc-test-tool" in
+  let executable = Filename.concat dir name in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Sys.remove executable with Sys_error _ -> ());
+      try Unix.rmdir dir with Unix.Unix_error _ -> ())
+    (fun () ->
+      touch executable;
+      Unix.chmod executable 0o700;
+      with_cwd dir (fun () ->
+        let empty_path = function
+          | "PATH" -> Some ""
+          | _ -> None
+        in
+        let explicit_path = function
+          | "PATH" -> Some (":" ^ dir)
+          | _ -> None
+        in
+        check
+          bool
+          "empty PATH entry is not cwd"
+          false
+          (Executable_path.command_available ~getenv:empty_path name);
+        check
+          bool
+          "non-empty PATH entry still works"
+          true
+          (Executable_path.command_available ~getenv:explicit_path name)))
+;;
+
 let check_ocamllsp_command_not_found ~path =
   Eio_main.run @@ fun env ->
   Eio.Switch.run @@ fun sw ->
@@ -141,7 +214,17 @@ let test_shutdown_signals_child_and_closes_held_pipes () =
 let () =
   run
     "lsp_process_manager"
-    [ ( "path-resolution"
+    [ ( "executable-path"
+      , [ test_case
+            "requires executable files"
+            `Quick
+            test_executable_path_lookup_requires_executable_file
+        ; test_case
+            "ignores empty PATH entries"
+            `Quick
+            test_executable_path_ignores_empty_path_entries
+        ] )
+    ; ( "path-resolution"
       , [ test_case
             "rejects non-executable PATH file before spawn"
             `Quick

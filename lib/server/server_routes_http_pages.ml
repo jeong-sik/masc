@@ -219,16 +219,11 @@ let dashboard_asset_root () =
 let dashboard_index_path () =
   Filename.concat (dashboard_asset_root ()) "index.html"
 
+let dashboard_etag_hex_chars = 12
+
 let dashboard_etag_of_body body =
   let hash = Digest.string body |> Digest.to_hex in
-  String.sub hash 0 12
-
-let dashboard_etag () =
-  match read_file (dashboard_index_path ()) with
-  | Ok body -> dashboard_etag_of_body body
-  | Error msg ->
-      Log.Pages.warn "dashboard_etag read failed: %s" msg;
-      "none"
+  String.sub hash 0 dashboard_etag_hex_chars
 
 let dashboard_index_cache_control = "no-store, max-age=0, must-revalidate"
 

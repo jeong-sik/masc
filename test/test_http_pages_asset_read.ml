@@ -12,15 +12,23 @@ open Alcotest
 
 module Pages = Server_routes_http_pages
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Array.iter
+        (fun name -> remove_tree (Filename.concat path name))
+        (Sys.readdir path);
+      Unix.rmdir path
+    end else Sys.remove path
+;;
+
 let with_temp_dir f =
   let dir = Filename.temp_file "masc_http_pages_test" "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
-  Fun.protect
-    ~finally:(fun () ->
-      Array.iter (fun n -> try Sys.remove (Filename.concat dir n) with _ -> ()) (Sys.readdir dir);
-      try Unix.rmdir dir with _ -> ())
-    (fun () -> f dir)
+  Fun.protect ~finally:(fun () -> remove_tree dir) (fun () -> f dir)
 ;;
 
 let test_read_file_binary_roundtrip () =
@@ -52,7 +60,7 @@ let test_read_file_missing () =
 
 let restore_env name = function
   | Some value -> Unix.putenv name value
-  | None -> Unix.putenv name ""
+  | None -> unsetenv name
 ;;
 
 let with_env vars f =
@@ -62,42 +70,19 @@ let with_env vars f =
     List.iter (fun (name, value) -> restore_env name value) original)
 ;;
 
-let write_file path contents =
-  Out_channel.with_open_bin path (fun oc -> Out_channel.output_string oc contents)
-;;
-
-let with_temp_dashboard f =
-  with_temp_dir (fun dir ->
-    let assets = Filename.concat dir "assets" in
-    let dashboard = Filename.concat assets "dashboard" in
-    Unix.mkdir assets 0o755;
-    Unix.mkdir dashboard 0o755;
-    Fun.protect
-      (fun () -> f ~assets ~dashboard)
-      ~finally:(fun () ->
-        let index = Filename.concat dashboard "index.html" in
-        if Sys.file_exists index then Sys.remove index;
-        if Sys.file_exists dashboard then Unix.rmdir dashboard;
-        if Sys.file_exists assets then Unix.rmdir assets))
-;;
-
-let short_digest body =
-  String.sub (Digest.to_hex (Digest.string body)) 0 12
-;;
-
 let test_dashboard_etag_of_body_content_hash () =
   let first = Pages.dashboard_etag_of_body "first body" in
   let second = Pages.dashboard_etag_of_body "second body" in
-  check string "matches content digest" (short_digest "first body") first;
+  check string "matches content digest" "a97e73ad8da7" first;
   check bool "changes when content changes" true (not (String.equal first second))
 ;;
 
-let test_dashboard_etag_reads_index_content () =
-  with_temp_dashboard (fun ~assets ~dashboard ->
-    with_env [ "MASC_ASSETS_DIR", assets ] (fun () ->
-      let body = "<!doctype html><title>content-etag</title>" in
-      write_file (Filename.concat dashboard "index.html") body;
-      check string "index content digest" (short_digest body) (Pages.dashboard_etag ())))
+let test_with_env_restores_missing_env_as_unset () =
+  let name = "MASC_HTTP_PAGES_TEST_RESTORE_ENV" in
+  unsetenv name;
+  with_env [ name, "temporary" ] (fun () ->
+    check (option string) "set in body" (Some "temporary") (Sys.getenv_opt name));
+  check (option string) "unset after body" None (Sys.getenv_opt name)
 ;;
 
 let () =
@@ -109,7 +94,8 @@ let () =
         ] )
     ; ( "dashboard_etag"
       , [ test_case "body content hash" `Quick test_dashboard_etag_of_body_content_hash
-        ; test_case "index content hash" `Quick test_dashboard_etag_reads_index_content
+        ; test_case "missing env restored as unset" `Quick
+            test_with_env_restores_missing_env_as_unset
         ] )
     ]
 ;;

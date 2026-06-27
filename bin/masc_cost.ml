@@ -17,15 +17,8 @@ type cost_entry = {
 
 (** Get MASC root directory *)
 let get_masc_root () =
-  let base_path =
-    match (Host_config.from_env ()).base_path with
-    | Some path -> path
-    | None ->
-        (* MASC_BASE_PATH is unset or empty; fall back to the cwd resolver
-           SSOT, which handles a deleted working directory gracefully. *)
-        Config_dir_resolver.current_working_dir ()
-  in
-  Common.masc_dir_from_base_path ~base_path
+  let base_path = Config_dir_resolver.base_path_or_cwd () in
+  Config_dir_resolver.masc_root ~base_path
 
 (** Get costs file path *)
 let costs_file () = Filename.concat (get_masc_root ()) "costs.jsonl"

@@ -381,15 +381,22 @@ let register_with_state
     ; compaction_stage = Packed Compaction_accumulating
     }
   in
-  (* fire-and-forget: put_entry validates and logs on failure; the constructed entry is always used. *)
-  ignore (put_entry ~base_path name entry);
-  if phase = Running then Atomic.incr running_count_atomic;
-  Log.Keeper.debug
-    "registry: keeper registered name=%s running_count=%d"
-    name
-    (Atomic.get running_count_atomic);
-  refresh_entry_event_queue_from_persistence ~base_path name entry;
-  entry
+  match put_entry ~base_path name entry with
+  | Error reason ->
+    let detail = registry_entry_validation_error_to_string reason in
+    Log.Keeper.error
+      "registry: keeper registration rejected name=%s reason=%s"
+      name
+      detail;
+    invalid_arg ("keeper registry registration rejected: " ^ detail)
+  | Ok () ->
+    if phase = Running then Atomic.incr running_count_atomic;
+    Log.Keeper.debug
+      "registry: keeper registered name=%s running_count=%d"
+      name
+      (Atomic.get running_count_atomic);
+    refresh_entry_event_queue_from_persistence ~base_path name entry;
+    entry
 ;;
 
 let register ~base_path name meta =

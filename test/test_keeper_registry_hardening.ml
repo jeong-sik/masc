@@ -63,6 +63,28 @@ let test_update_entry_rejects_corrupted_result () =
   | Some e -> check string "original base_path preserved" original_base_path e.base_path
 ;;
 
+let test_register_rejects_invalid_entry_without_phantom_count () =
+  KR.clear ();
+  let meta = make_meta "ghost" in
+  let invalid_meta =
+    { meta with
+      runtime = { meta.runtime with trace_id = "" }
+    }
+  in
+  (match KR.register ~base_path "ghost" invalid_meta with
+   | _ -> fail "register accepted invalid runtime trace_id"
+   | exception Invalid_argument msg ->
+     check
+       bool
+       "error mentions trace_id"
+       true
+       (Masc.String_util.contains_substring msg "trace_id"));
+  (match KR.get ~base_path "ghost" with
+   | None -> ()
+   | Some _ -> fail "ghost entry was installed");
+  check int "running count unchanged" 0 (KR.count_running ())
+;;
+
 let test_get_filters_corrupted_entry () =
   KR.clear ();
   let entry = register "alice" in
@@ -169,6 +191,12 @@ let () =
             "rejects corrupted closure result and preserves original"
             `Quick
             test_update_entry_rejects_corrupted_result
+        ] )
+    ; ( "register"
+      , [ test_case
+            "rejects invalid entry without phantom count"
+            `Quick
+            test_register_rejects_invalid_entry_without_phantom_count
         ] )
     ; ( "get_with_health"
       , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )

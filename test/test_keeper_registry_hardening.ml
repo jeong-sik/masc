@@ -35,7 +35,7 @@ let register name =
 ;;
 
 let health_to_string = KR.registry_entry_validation_error_to_string
-let invalid_trace_id = Masc.Keeper_id.For_testing.unsafe_trace_id_of_string ""
+let invalid_trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string ""
 
 let test_put_entry_rejects_meta_name_mismatch () =
   KR.clear ();

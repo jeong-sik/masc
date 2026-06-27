@@ -82,6 +82,18 @@ type degraded_retry_budget_decision =
   | Degraded_retry_slot_phase_exhausted of EC.degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
 
+type 'a degraded_retry_prepare_result =
+  | Degraded_retry_prepared of {
+      retry : EC.degraded_retry;
+      reason : string;
+      next : 'a;
+    }
+  | Degraded_retry_setup_failed of {
+      retry : EC.degraded_retry;
+      reason : string;
+      fail_open_err : Agent_sdk.Error.sdk_error;
+    }
+
 val next_fail_open_runtime_for_turn_with_budget :
   base_runtime:string ->
   effective_runtime:string ->
@@ -91,6 +103,27 @@ val next_fail_open_runtime_for_turn_with_budget :
   remaining_turn_budget_s:float ->
   Agent_sdk.Error.sdk_error ->
   degraded_retry_budget_decision
+
+val prepare_degraded_retry_allowed :
+  current_runtime_id:string ->
+  attempt:int ->
+  err:Agent_sdk.Error.sdk_error ->
+  retry:EC.degraded_retry ->
+  publish_cascade_resolution:
+    (runtime_id:string ->
+     decision:Keeper_unified_turn_cascade_resolution.cascade_decision_kind ->
+     reason:string ->
+     next_runtime:string option ->
+     attempt:int ->
+     Agent_sdk.Error.sdk_error ->
+     unit) ->
+  emit_runtime_selected:(runtime_id:string -> fallback_reason:string -> unit) ->
+  emit_runtime_rotation:(from_runtime:string -> to_runtime:string -> reason:string -> unit) ->
+  setup_runtime:(string -> ('a, Agent_sdk.Error.sdk_error) result) ->
+  'a degraded_retry_prepare_result
+(** Shared setup path for allowed degraded-runtime retries. The selector must
+    provide a non-empty [next_runtime]; an empty target is converted into a
+    setup failure instead of falling back to the current runtime. *)
 
 type turn_event_bus_overflow = {
   estimated_tokens : int;

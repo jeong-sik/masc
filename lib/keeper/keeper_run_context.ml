@@ -31,6 +31,43 @@ type run_context =
   ; runtime_config_path : string option
   }
 
+let prompt_profile_default default current =
+  (* DET-OK: keeper TOML/persona profile defaults are the declarative
+     prompt-config boundary; persisted meta is the legacy fallback. *)
+  match default with
+  | Some value -> value
+  | None -> current
+
+let build_base_system_prompt
+      ~(config : Workspace.config)
+      ~(profile_defaults : Keeper_types_profile.keeper_profile_defaults)
+      ~(meta : keeper_meta)
+  =
+  let persona_extended =
+    Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
+      profile_defaults
+    |> Keeper_types_profile.load_persona_extended
+    |> Option.value ~default:""
+  in
+  let active_goals =
+    List.filter_map
+      (fun goal_id ->
+         match Goal_store.get_goal config ~goal_id with
+         (* RFC-0294: active_goals tuple dropped its horizon element. *)
+         | Some { Goal_store.id; title; _ } -> Some (id, title)
+         | None -> None)
+      meta.active_goal_ids
+  in
+  Keeper_prompt.build_keeper_system_prompt
+    ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
+    ~instructions:
+      (prompt_profile_default profile_defaults.instructions meta.instructions)
+    ~persona_extended
+    ~keeper_name:meta.name
+    ~active_goals
+    ~home_ground:config.base_path
+    ()
+
 let prepare_run_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -117,39 +154,8 @@ let prepare_run_context
     resolution.Config_dir_resolver.config_root.path
   in
   let runtime_config_path = Runtime.config_path () in
-  let persona_extended =
-    Keeper_types_profile.resolved_persona_name ~keeper_name:meta.name
-      profile_defaults
-    |> Keeper_types_profile.load_persona_extended
-    |> Option.value ~default:""
-  in
-  let active_goals =
-    List.filter_map
-      (fun goal_id ->
-         match Goal_store.get_goal config ~goal_id with
-         (* RFC-0294: active_goals tuple dropped its horizon element. *)
-         | Some { Goal_store.id; title; _ } ->
-             Some (id, title)
-         | None -> None)
-      meta.active_goal_ids
-  in
-  let prompt_profile_default default current =
-    (* DET-OK: keeper TOML/persona profile defaults are the declarative
-       prompt-config boundary; persisted meta is the legacy fallback. *)
-    match default with
-    | Some value -> value
-    | None -> current
-  in
   let base_system_prompt =
-    Keeper_prompt.build_keeper_system_prompt
-      ~goal:(prompt_profile_default profile_defaults.goal meta.goal)
-      ~instructions:
-        (prompt_profile_default profile_defaults.instructions meta.instructions)
-      ~persona_extended
-      ~keeper_name:meta.name
-      ~active_goals
-      ~home_ground:config.base_path
-      ()
+    build_base_system_prompt ~config ~profile_defaults ~meta
   in
   (* 4. Create or restore working context, re-apply current prompt *)
   let base_ctx =

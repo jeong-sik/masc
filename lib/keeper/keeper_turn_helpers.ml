@@ -199,6 +199,10 @@ let record_pre_dispatch_terminal_observation
       ~(trajectory_outcome : Trajectory.trajectory_outcome)
       ?error_kind
       ?error_message
+      ?(degraded_retry_applied = false)
+      ?degraded_retry_runtime
+      ?fallback_reason
+      ?(runtime_rotation_attempts = [])
       ?keeper_turn_id
       ()
   : unit
@@ -242,10 +246,10 @@ let record_pre_dispatch_terminal_observation
     ; runtime_attempt_count = 0
     ; runtime_fallback_applied = false
     ; runtime_outcome = Keeper_execution_receipt.Runtime_not_dispatched
-    ; degraded_retry_applied = false
-    ; degraded_retry_runtime = None
-    ; fallback_reason = None
-    ; runtime_rotation_attempts = []
+    ; degraded_retry_applied
+    ; degraded_retry_runtime
+    ; fallback_reason
+    ; runtime_rotation_attempts
     ; stop_reason = None
     ; error_kind
     ; error_message

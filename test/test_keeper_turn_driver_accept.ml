@@ -77,6 +77,70 @@ let accept_no_progress_retry_kind_string err =
       | `Read_only_no_progress -> "read_only_no_progress")
     kind
 
+let direct_empty_no_progress_retry_reason_string err =
+  Option.map
+    Masc.Keeper_error_classify.degraded_retry_reason_to_string
+    (Masc.Keeper_turn.For_testing.direct_empty_no_progress_retry_reason err)
+
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+
+let direct_retry_runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let with_direct_retry_runtime f =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "direct_retry_runtime_" ".toml" in
+  write_file path direct_retry_runtime_toml;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with Sys_error _ -> ())
+    (fun () ->
+       match Runtime.init_default ~config_path:path with
+       | Ok () -> f ()
+       | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
+
+let direct_empty_no_progress_retry_decision ?time_spent_in_turn_s err =
+  Masc.Keeper_turn.For_testing.direct_empty_no_progress_retry_decision
+    ~base_runtime:"test_provider.test_model"
+    ~effective_runtime:"runtime.direct-empty"
+    ~attempted_runtimes:[ "runtime.direct-empty" ]
+    ~estimated_input_tokens:1
+    ?time_spent_in_turn_s
+    ~remaining_turn_budget_s:60.0
+    err
+
+type direct_retry_observed_attempt =
+  { observed_runtime_id : string
+  ; observed_max_context : int
+  ; observed_is_retry : bool
+  ; observed_degraded_retry_runtime : string option
+  ; observed_fallback_reason : string option
+  ; observed_rotation_attempt_count : int
+  }
+
 let test_keeper_hook_relaxes_strict_tool_choice () =
   let open Agent_sdk.Types in
   let relax = Masc.Keeper_run_tools_hooks.relax_strict_tool_choice_for_keeper in
@@ -674,6 +738,10 @@ let test_read_only_retry_uses_typed_context_not_reason_tokens () =
     (Option.map
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason typed_err));
+  Alcotest.(check (option string))
+    "direct keeper_msg does not rotate read-only no-progress"
+    None
+    (direct_empty_no_progress_retry_reason_string typed_err);
   let string_only_err =
     accept_rejected_sdk_error
       ~response_shape:None
@@ -688,13 +756,476 @@ let test_read_only_retry_uses_typed_context_not_reason_tokens () =
     (Masc.Keeper_turn_driver.For_testing
      .accept_no_progress_read_only_should_try_next
        string_only_err);
-  Alcotest.(check (option string))
-    "legacy reason tokens alone are not runtime-recoverable"
-    None
-    (Option.map
-       Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason
-          string_only_err))
+	  Alcotest.(check (option string))
+	    "legacy reason tokens alone are not runtime-recoverable"
+	    None
+	    (Option.map
+	       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+	       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason
+	          string_only_err))
+
+let test_direct_empty_no_progress_retry_uses_shared_budget_decision () =
+  with_direct_retry_runtime (fun () ->
+    let empty_err =
+      accept_rejected_sdk_error
+        ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+        ~last_tool_effect:None
+        ~reason:"shape=empty"
+        ()
+    in
+    (match direct_empty_no_progress_retry_decision empty_err with
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
+       Alcotest.(check string)
+         "allowed reason"
+         "empty_no_progress"
+         (Masc.Keeper_error_classify.degraded_retry_reason_to_string
+            retry.fallback_reason)
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
+       Alcotest.fail "fresh direct empty retry should not exhaust slot phase"
+     | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
+       Alcotest.fail "fresh direct empty retry should rotate");
+    let exhausted_after =
+      Masc.Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec +. 1.0
+    in
+    (match
+       direct_empty_no_progress_retry_decision
+         ~time_spent_in_turn_s:exhausted_after
+         empty_err
+     with
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
+       ->
+       Alcotest.(check string)
+         "slot-exhausted reason"
+         "empty_no_progress"
+         (Masc.Keeper_error_classify.degraded_retry_reason_to_string
+            retry.fallback_reason)
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _ ->
+       Alcotest.fail "exhausted direct empty retry should not rotate"
+     | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
+       Alcotest.fail "exhausted direct empty retry should report slot exhaustion");
+    let read_only_err =
+      accept_rejected_sdk_error
+        ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
+        ~last_tool_effect:(Some Keeper_internal_error.Tool_effect_read_only)
+        ~any_mutating_tool:false
+        ~tool_effects_seen:[ Keeper_internal_error.Tool_effect_read_only ]
+        ~reason:"shape=thinking_only"
+        ()
+    in
+    Alcotest.(check bool)
+      "direct read-only no-progress remains terminal"
+      true
+      (match direct_empty_no_progress_retry_decision read_only_err with
+       | Masc.Keeper_turn_runtime_budget.No_degraded_retry -> true
+	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _
+	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
+	         false))
+
+let cascade_decision_to_string
+    (decision : Masc.Keeper_unified_turn_cascade_resolution.cascade_decision_kind) =
+  match decision with
+  | Degraded_retry_allowed -> "degraded_retry_allowed"
+  | Degraded_retry_slot_phase_exhausted -> "degraded_retry_slot_phase_exhausted"
+  | No_degraded_retry -> "no_degraded_retry"
+  | Transient_network_retry -> "transient_network_retry"
+
+let prepare_retry_observers () =
+  let published = ref [] in
+  let selected = ref [] in
+  let rotated = ref [] in
+  let publish_cascade_resolution
+      ~runtime_id ~decision ~reason ~next_runtime ~attempt _err =
+    published :=
+      ( runtime_id
+      , cascade_decision_to_string decision
+      , reason
+      , next_runtime
+      , attempt )
+      :: !published
+  in
+  let emit_runtime_selected ~runtime_id ~fallback_reason =
+    selected := (runtime_id, fallback_reason) :: !selected
+  in
+  let emit_runtime_rotation ~from_runtime ~to_runtime ~reason =
+    rotated := (from_runtime, to_runtime, reason) :: !rotated
+  in
+  published, selected, rotated, publish_cascade_resolution,
+  emit_runtime_selected, emit_runtime_rotation
+
+let test_prepare_degraded_retry_rejects_empty_runtime () =
+  let published, selected, rotated, publish_cascade_resolution,
+      emit_runtime_selected, emit_runtime_rotation =
+    prepare_retry_observers ()
+  in
+  let setup_called = ref false in
+  let err = Agent_sdk.Error.Internal "empty direct response" in
+  let retry : Masc.Keeper_error_classify.degraded_retry =
+    {
+      next_runtime = " \t ";
+      fallback_reason = Masc.Keeper_error_classify.Empty_no_progress;
+    }
+  in
+  match
+    Masc.Keeper_turn_runtime_budget.prepare_degraded_retry_allowed
+      ~current_runtime_id:"runtime.direct-empty"
+      ~attempt:1
+      ~err
+      ~retry
+      ~publish_cascade_resolution
+      ~emit_runtime_selected
+      ~emit_runtime_rotation
+      ~setup_runtime:(fun _ ->
+        setup_called := true;
+        Ok ())
+  with
+  | Masc.Keeper_turn_runtime_budget.Degraded_retry_prepared _ ->
+    Alcotest.fail "empty next_runtime must not prepare a retry"
+  | Masc.Keeper_turn_runtime_budget.Degraded_retry_setup_failed
+      { reason; fail_open_err; _ } ->
+    Alcotest.(check string) "reason preserved" "empty_no_progress" reason;
+    Alcotest.(check bool) "setup not called" false !setup_called;
+    Alcotest.(check bool)
+      "failure is explicit"
+      true
+      (contains
+         ~needle:"degraded retry selected empty next_runtime"
+         (Agent_sdk.Error.to_string fail_open_err));
+    Alcotest.(check (list (pair string string)))
+      "no runtime-selected metric for empty target"
+      []
+      (List.rev !selected);
+    Alcotest.(check (list (triple string string string)))
+      "no rotation metric for empty target"
+      []
+      (List.rev !rotated);
+    (match List.rev !published with
+     | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
+       Alcotest.(check string)
+         "published from current runtime"
+         "runtime.direct-empty"
+         runtime_id;
+       Alcotest.(check string)
+         "empty target publishes terminal decision"
+         "no_degraded_retry"
+         decision;
+       Alcotest.(check string)
+         "publish reason identifies empty target"
+         "empty_degraded_retry_runtime"
+         reason;
+       Alcotest.(check (option string)) "no next runtime" None next_runtime;
+       Alcotest.(check int) "attempt" 1 attempt
+     | rows ->
+       Alcotest.failf "expected one cascade event, got %d" (List.length rows))
+
+let test_prepare_degraded_retry_reports_setup_failure () =
+  let published, selected, rotated, publish_cascade_resolution,
+      emit_runtime_selected, emit_runtime_rotation =
+    prepare_retry_observers ()
+  in
+  let err = Agent_sdk.Error.Internal "empty direct response" in
+  let setup_err = Agent_sdk.Error.Internal "retry setup failed" in
+  let retry : Masc.Keeper_error_classify.degraded_retry =
+    {
+      next_runtime = " runtime.fallback ";
+      fallback_reason = Masc.Keeper_error_classify.Empty_no_progress;
+    }
+  in
+  match
+    Masc.Keeper_turn_runtime_budget.prepare_degraded_retry_allowed
+      ~current_runtime_id:"runtime.direct-empty"
+      ~attempt:2
+      ~err
+      ~retry
+      ~publish_cascade_resolution
+      ~emit_runtime_selected
+      ~emit_runtime_rotation
+      ~setup_runtime:(fun runtime_id ->
+        Alcotest.(check string)
+          "setup sees normalized runtime"
+          "runtime.fallback"
+          runtime_id;
+        Error setup_err)
+  with
+  | Masc.Keeper_turn_runtime_budget.Degraded_retry_prepared _ ->
+    Alcotest.fail "setup failure must not prepare a retry"
+  | Masc.Keeper_turn_runtime_budget.Degraded_retry_setup_failed
+      { retry; reason; fail_open_err } ->
+    Alcotest.(check string) "normalized retry runtime" "runtime.fallback"
+      retry.next_runtime;
+    Alcotest.(check string) "reason" "empty_no_progress" reason;
+    Alcotest.(check string)
+      "failure propagated"
+      (Agent_sdk.Error.to_string setup_err)
+      (Agent_sdk.Error.to_string fail_open_err);
+    Alcotest.(check (list (pair string string)))
+      "no runtime-selected metric on setup failure"
+      []
+      (List.rev !selected);
+    Alcotest.(check (list (triple string string string)))
+      "no rotation metric on setup failure"
+      []
+      (List.rev !rotated);
+    (match List.rev !published with
+     | [ (_runtime_id, decision, reason, next_runtime, attempt) ] ->
+       Alcotest.(check string) "decision" "degraded_retry_allowed" decision;
+       Alcotest.(check string) "publish reason" "empty_no_progress" reason;
+       Alcotest.(check (option string))
+         "next runtime"
+         (Some "runtime.fallback")
+         next_runtime;
+       Alcotest.(check int) "attempt" 2 attempt
+     | rows ->
+       Alcotest.failf "expected one cascade event, got %d" (List.length rows))
+
+let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
+  with_direct_retry_runtime (fun () ->
+    let empty_err =
+      accept_rejected_sdk_error
+        ~response_shape:(Some Keeper_internal_error.Accept_response_empty)
+        ~last_tool_effect:None
+        ~reason:"shape=empty"
+        ()
+    in
+    let expected_retry_runtime =
+      match direct_empty_no_progress_retry_decision empty_err with
+      | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
+        retry.next_runtime
+      | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
+        Alcotest.fail
+          "fresh direct empty retry should not exhaust slot phase before loop"
+      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
+        Alcotest.fail "fresh direct empty retry should select a fallback runtime"
+    in
+    let retry_context_resolution
+        : Masc.Keeper_context_runtime.max_context_resolution =
+      { requested_override = None
+      ; primary_budget = 4096
+      ; runtime_budget = 4096
+      ; turn_budget = 4096
+      ; effective_budget = 4096
+      }
+    in
+    let attempts = ref [] in
+    let published = ref [] in
+    let selected = ref [] in
+    let rotated = ref [] in
+    let validated = ref [] in
+    let setup_failures = ref [] in
+    let yielded = ref 0 in
+    let retry_execution runtime_id : Masc.Keeper_turn_runtime_budget.runtime_execution =
+      { runtime_id
+      ; max_context_resolution = retry_context_resolution
+      ; max_context = retry_context_resolution.turn_budget
+      ; temperature = 0.0
+      ; max_tokens = 1024
+      }
+    in
+    let result =
+      Masc.Keeper_turn.For_testing.run_direct_empty_no_progress_retry_loop
+        ~keeper_name:"keeper-test"
+        ~base_runtime:"test_provider.test_model"
+        ~initial_runtime:"runtime.direct-empty"
+        ~initial_max_context:1024
+        ~estimated_input_tokens:1
+        ~timeout_sec:60.0
+        ~remaining_turn_budget_s:(fun () -> 60.0)
+        ~current_turn_phase_elapsed_ms:(function
+          | None -> 7, None
+          | Some _ -> 7, Some 0)
+        ~now_s:(fun () -> 10.0)
+        ~setup_retry_runtime:(fun runtime_id ->
+          validated := runtime_id :: !validated;
+          Ok (retry_execution runtime_id))
+        ~publish_cascade_resolution:
+          (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt _err ->
+             published :=
+               ( runtime_id
+               , cascade_decision_to_string decision
+               , reason
+               , next_runtime
+               , attempt )
+               :: !published)
+        ~emit_runtime_selected:(fun ~runtime_id ~fallback_reason ->
+          selected := (runtime_id, fallback_reason) :: !selected)
+        ~emit_runtime_rotation:(fun ~from_runtime ~to_runtime ~reason ->
+          rotated := (from_runtime, to_runtime, reason) :: !rotated)
+        ~record_retry_setup_failure:(fun ~from_runtime ~retry:_ ~rotation_attempt:_
+                                      ~fail_open_err:_ ->
+          setup_failures := from_runtime :: !setup_failures)
+        ~before_retry:(fun () -> yielded := !yielded + 1)
+        ~run_once:
+          (fun ~runtime_id ~max_context ~is_retry ~degraded_retry_runtime
+               ~fallback_reason ~runtime_rotation_attempts ->
+             attempts :=
+               { observed_runtime_id = runtime_id
+               ; observed_max_context = max_context
+               ; observed_is_retry = is_retry
+               ; observed_degraded_retry_runtime = degraded_retry_runtime
+               ; observed_fallback_reason =
+                   Option.map
+                     Masc.Keeper_error_classify.degraded_retry_reason_to_string
+                     fallback_reason
+               ; observed_rotation_attempt_count =
+                   List.length runtime_rotation_attempts
+               }
+               :: !attempts;
+             if is_retry then Ok ("ok:" ^ runtime_id) else Error empty_err)
+        ()
+    in
+    (match result with
+     | Error err ->
+       Alcotest.failf
+         "retry loop should succeed on fallback runtime: %s"
+         (Agent_sdk.Error.to_string err)
+     | Ok (value, final_max_context) ->
+       Alcotest.(check string)
+         "retry result comes from fallback runtime"
+         ("ok:" ^ expected_retry_runtime)
+         value;
+       Alcotest.(check int)
+         "final max context comes from fallback runtime"
+         4096
+         final_max_context);
+    (match List.rev !attempts with
+     | [ first; second ] ->
+       Alcotest.(check string)
+         "first attempt uses initial runtime"
+         "runtime.direct-empty"
+         first.observed_runtime_id;
+       Alcotest.(check int)
+         "first attempt uses initial max context"
+         1024
+         first.observed_max_context;
+       Alcotest.(check bool) "first attempt is not retry" false
+         first.observed_is_retry;
+       Alcotest.(check (option string))
+         "first attempt has no degraded runtime"
+         None
+         first.observed_degraded_retry_runtime;
+       Alcotest.(check string)
+         "second attempt uses fallback runtime"
+         expected_retry_runtime
+         second.observed_runtime_id;
+       Alcotest.(check int)
+         "second attempt uses fallback max context"
+         4096
+         second.observed_max_context;
+       Alcotest.(check bool) "second attempt is retry" true
+         second.observed_is_retry;
+       Alcotest.(check (option string))
+         "second attempt carries degraded retry runtime"
+         (Some expected_retry_runtime)
+         second.observed_degraded_retry_runtime;
+       Alcotest.(check (option string))
+         "second attempt carries fallback reason"
+         (Some "empty_no_progress")
+         second.observed_fallback_reason;
+       Alcotest.(check int)
+         "second attempt receives scheduled rotation attempt"
+         1
+         second.observed_rotation_attempt_count
+     | attempts ->
+       Alcotest.failf "expected exactly two attempts, got %d"
+         (List.length attempts));
+    Alcotest.(check (list string))
+      "fallback runtime was validated"
+      [ expected_retry_runtime ]
+      (List.rev !validated);
+    Alcotest.(check (list (pair string string)))
+      "runtime selected metric emitted"
+      [ expected_retry_runtime, "empty_no_progress" ]
+      (List.rev !selected);
+    Alcotest.(check (list (triple string string string)))
+      "runtime rotation metric emitted"
+      [ "runtime.direct-empty", expected_retry_runtime, "empty_no_progress" ]
+      (List.rev !rotated);
+    Alcotest.(check int) "cooperative retry yield runs once" 1 !yielded;
+    Alcotest.(check (list string)) "no setup failure recorded" [] !setup_failures;
+    (match List.rev !published with
+     | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
+       Alcotest.(check string)
+         "cascade published from initial runtime"
+         "runtime.direct-empty"
+         runtime_id;
+       Alcotest.(check string)
+         "cascade records allowed retry"
+         "degraded_retry_allowed"
+         decision;
+       Alcotest.(check string) "cascade reason" "empty_no_progress" reason;
+       Alcotest.(check (option string))
+         "cascade next runtime"
+         (Some expected_retry_runtime)
+         next_runtime;
+       Alcotest.(check int) "cascade attempt" 1 attempt
+     | published ->
+       Alcotest.failf "expected one cascade event, got %d"
+         (List.length published)))
+
+let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
+  let terminal_err = Agent_sdk.Error.Internal "not retryable" in
+  let published = ref [] in
+  let run_count = ref 0 in
+  let result =
+    Masc.Keeper_turn.For_testing.run_direct_empty_no_progress_retry_loop
+      ~keeper_name:"keeper-test"
+      ~base_runtime:"runtime.initial"
+      ~initial_runtime:"runtime.initial"
+      ~initial_max_context:2048
+      ~estimated_input_tokens:1
+      ~timeout_sec:60.0
+      ~remaining_turn_budget_s:(fun () -> 60.0)
+      ~current_turn_phase_elapsed_ms:(fun _ -> 3, None)
+      ~now_s:(fun () -> 10.0)
+      ~setup_retry_runtime:(fun _ ->
+        Alcotest.fail "non-retryable terminal errors must not set up a retry")
+      ~publish_cascade_resolution:
+        (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt _err ->
+           published :=
+             ( runtime_id
+             , cascade_decision_to_string decision
+             , reason
+             , next_runtime
+             , attempt )
+             :: !published)
+      ~emit_runtime_selected:(fun ~runtime_id:_ ~fallback_reason:_ ->
+        Alcotest.fail "non-retryable terminal errors must not emit selection")
+      ~emit_runtime_rotation:(fun ~from_runtime:_ ~to_runtime:_ ~reason:_ ->
+        Alcotest.fail "non-retryable terminal errors must not emit rotation")
+      ~record_retry_setup_failure:
+        (fun ~from_runtime:_ ~retry:_ ~rotation_attempt:_ ~fail_open_err:_ ->
+           Alcotest.fail "non-retryable terminal errors must not record setup failure")
+      ~before_retry:(fun () ->
+        Alcotest.fail "non-retryable terminal errors must not yield before retry")
+      ~run_once:
+        (fun ~runtime_id ~max_context ~is_retry ~degraded_retry_runtime:_
+             ~fallback_reason:_ ~runtime_rotation_attempts:_ ->
+           incr run_count;
+           Alcotest.(check string) "initial runtime" "runtime.initial" runtime_id;
+           Alcotest.(check int) "initial max context" 2048 max_context;
+           Alcotest.(check bool) "not retry" false is_retry;
+           Error terminal_err)
+      ()
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "terminal error should be returned"
+   | Error err ->
+     Alcotest.(check string)
+       "terminal error propagated"
+       (Agent_sdk.Error.to_string terminal_err)
+       (Agent_sdk.Error.to_string err));
+  Alcotest.(check int) "only initial attempt runs" 1 !run_count;
+  match List.rev !published with
+  | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
+    Alcotest.(check string) "published from initial runtime" "runtime.initial" runtime_id;
+    Alcotest.(check string) "terminal decision" "no_degraded_retry" decision;
+    Alcotest.(check string)
+      "terminal reason"
+      "terminal_error_not_degraded_retry_eligible"
+      reason;
+    Alcotest.(check (option string)) "no next runtime" None next_runtime;
+    Alcotest.(check int) "attempt" 1 attempt
+  | rows ->
+    Alcotest.failf "expected one cascade event, got %d" (List.length rows)
 
 let test_thinking_with_text_is_accepted () =
   let result =
@@ -879,7 +1410,11 @@ let test_empty_non_end_turn_response_is_rejected () =
      Alcotest.failf
        "expected completion_contract_violation blocker, got %s"
        (Masc.Keeper_meta_contract.blocker_class_to_string other)
-   | None -> Alcotest.fail "expected accept rejection blocker class")
+   | None -> Alcotest.fail "expected accept rejection blocker class");
+  Alcotest.(check (option string))
+    "direct keeper_msg rotates empty no-progress"
+    (Some "empty_no_progress")
+    (direct_empty_no_progress_retry_reason_string err)
 
 let test_empty_after_workspace_mutation_stays_terminal () =
   let checkpoint =
@@ -917,7 +1452,11 @@ let test_empty_after_workspace_mutation_stays_terminal () =
     None
     (Option.map
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
-       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err));
+  Alcotest.(check (option string))
+    "direct keeper_msg does not rotate after mutation"
+    None
+    (direct_empty_no_progress_retry_reason_string err)
 
 let test_blank_text_non_end_turn_response_is_rejected () =
   let result =
@@ -1080,8 +1619,28 @@ let () =
             "read-only retry uses typed context, not reason tokens"
             `Quick
             test_read_only_retry_uses_typed_context_not_reason_tokens;
-          Alcotest.test_case "thinking plus text is accepted" `Quick
-            test_thinking_with_text_is_accepted;
+	          Alcotest.test_case
+	            "direct empty no-progress retry uses shared budget decision"
+	            `Quick
+	            test_direct_empty_no_progress_retry_uses_shared_budget_decision;
+          Alcotest.test_case
+            "degraded retry rejects empty runtime target"
+            `Quick
+            test_prepare_degraded_retry_rejects_empty_runtime;
+          Alcotest.test_case
+            "degraded retry reports setup failure"
+            `Quick
+            test_prepare_degraded_retry_reports_setup_failure;
+	          Alcotest.test_case
+	            "direct empty no-progress retry runs fallback attempt"
+	            `Quick
+	            test_direct_empty_no_progress_retry_loop_runs_fallback_attempt;
+          Alcotest.test_case
+            "direct retry publishes terminal non-retry cascade"
+            `Quick
+            test_direct_retry_loop_publishes_non_retry_terminal_cascade;
+	          Alcotest.test_case "thinking plus text is accepted" `Quick
+	            test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick
             test_thinking_with_tool_use_is_accepted;
           Alcotest.test_case "accept delegates to OAS response shape" `Quick

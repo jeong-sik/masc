@@ -117,6 +117,32 @@ let append_dynamic_context a b =
   | a, "" -> a
   | a, b -> a ^ "\n\n" ^ b
 
+let dynamic_context_with_recent_failures ~keeper_name dynamic_context =
+  Keeper_failure_circuit_breaker.recent_failures_for_prompt ~keeper_name
+  |> render_recent_failure_context
+  |> append_dynamic_context dynamic_context
+
+let estimate_input_tokens
+    ~(prompt_metrics : Keeper_agent_prompt_metrics.prompt_metrics)
+    ~(system_prompt : string)
+    ~(dynamic_context : string)
+    ~(memory_context : string)
+    ~(temporal_context : string)
+    ~(user_message : string)
+    ~(history_messages : Agent_sdk.Types.message list) : int =
+  let composition =
+    Keeper_agent_prompt_metrics.build_ctx_composition_metrics
+      ~system_prompt
+      ~dynamic_context
+      ~memory_context
+      ~temporal_context
+      ~user_message
+      ~history_messages
+      ~actual_input_tokens:None
+  in
+  max prompt_metrics.Keeper_agent_prompt_metrics.estimated_total_tokens
+      composition.Keeper_agent_prompt_metrics.display_total_tokens
+
 let build_turn_context
       ~(ctx : Keeper_run_context.run_context)
       ~(build_turn_prompt :
@@ -144,12 +170,7 @@ let build_turn_context
       ~messages:(Keeper_context_runtime.messages_of_context ctx_work)
   in
   let dynamic_context =
-    let recent_failure_context =
-      Keeper_failure_circuit_breaker.recent_failures_for_prompt
-        ~keeper_name:meta.name
-      |> render_recent_failure_context
-    in
-    append_dynamic_context dynamic_context recent_failure_context
+    dynamic_context_with_recent_failures ~keeper_name:meta.name dynamic_context
   in
   let memory_context = "" in
   let temporal_context =
@@ -194,21 +215,14 @@ let build_turn_context
       (Keeper_context_runtime.messages_of_context ctx_work)
   in
   let estimated_input_tokens =
-    (* Prompt build runs before the LLM call, so the actual input-token
-       count is unknown here; post-response code paths in
-       [Keeper_agent_run] pass the provider-reported value. *)
-    let composition =
-      Keeper_agent_prompt_metrics.build_ctx_composition_metrics
-        ~system_prompt:turn_system_prompt
-        ~dynamic_context
-        ~memory_context
-        ~temporal_context
-        ~user_message
-        ~history_messages
-        ~actual_input_tokens:None
-    in
-    max prompt_metrics.Keeper_agent_prompt_metrics.estimated_total_tokens
-        composition.Keeper_agent_prompt_metrics.display_total_tokens
+    estimate_input_tokens
+      ~prompt_metrics
+      ~system_prompt:turn_system_prompt
+      ~dynamic_context
+      ~memory_context
+      ~temporal_context
+      ~user_message
+      ~history_messages
   in
   let ctx_work = Keeper_context_runtime.append ctx_work user_msg in
   if not is_retry

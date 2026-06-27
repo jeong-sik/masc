@@ -30,6 +30,10 @@ let build_runtime_execution
     , Agent_sdk.Error.sdk_error )
     result
   =
+  let runtime_id = String.trim runtime_id in
+  if String.equal runtime_id "" then
+    Error (Agent_sdk.Error.Internal "runtime_id must be non-empty")
+  else
   let model_labels =
     Keeper_context_runtime.effective_model_labels_for_turn meta
   in

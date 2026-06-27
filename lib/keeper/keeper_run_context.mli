@@ -28,6 +28,14 @@ type run_context =
   ; runtime_config_path : string option
   }
 
+val build_base_system_prompt :
+     config:Workspace.config
+  -> profile_defaults:Keeper_types_profile.keeper_profile_defaults
+  -> meta:keeper_meta
+  -> string
+(** Build the keeper base system prompt from the same persisted meta/profile
+    inputs used by {!prepare_run_context}. *)
+
 val prepare_run_context :
      config:Workspace.config
   -> meta:keeper_meta

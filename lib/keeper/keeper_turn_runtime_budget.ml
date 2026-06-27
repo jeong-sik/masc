@@ -89,6 +89,66 @@ type degraded_retry_budget_decision =
   | Degraded_retry_slot_phase_exhausted of EC.degraded_retry
   | Degraded_retry_allowed of EC.degraded_retry
 
+type 'a degraded_retry_prepare_result =
+  | Degraded_retry_prepared of {
+      retry : EC.degraded_retry;
+      reason : string;
+      next : 'a;
+    }
+  | Degraded_retry_setup_failed of {
+      retry : EC.degraded_retry;
+      reason : string;
+      fail_open_err : Agent_sdk.Error.sdk_error;
+    }
+
+let empty_degraded_retry_runtime_error =
+  Agent_sdk.Error.Internal "degraded retry selected empty next_runtime"
+
+let prepare_degraded_retry_allowed
+      ~current_runtime_id
+      ~attempt
+      ~err
+      ~(retry : EC.degraded_retry)
+      ~publish_cascade_resolution
+      ~emit_runtime_selected
+      ~emit_runtime_rotation
+      ~setup_runtime
+  =
+  let reason = EC.degraded_retry_reason_to_string retry.fallback_reason in
+  match String.trim retry.next_runtime with
+  | "" ->
+    publish_cascade_resolution
+      ~runtime_id:current_runtime_id
+      ~decision:Keeper_unified_turn_cascade_resolution.No_degraded_retry
+      ~reason:"empty_degraded_retry_runtime"
+      ~next_runtime:None
+      ~attempt
+      err;
+    Degraded_retry_setup_failed {
+      retry;
+      reason;
+      fail_open_err = empty_degraded_retry_runtime_error;
+    }
+  | next_runtime ->
+    let retry = { retry with next_runtime } in
+    publish_cascade_resolution
+      ~runtime_id:current_runtime_id
+      ~decision:Keeper_unified_turn_cascade_resolution.Degraded_retry_allowed
+      ~reason
+      ~next_runtime:(Some retry.next_runtime)
+      ~attempt
+      err;
+    (match setup_runtime retry.next_runtime with
+     | Ok next ->
+       emit_runtime_selected ~runtime_id:retry.next_runtime ~fallback_reason:reason;
+       emit_runtime_rotation
+         ~from_runtime:current_runtime_id
+         ~to_runtime:retry.next_runtime
+         ~reason;
+       Degraded_retry_prepared { retry; reason; next }
+     | Error fail_open_err ->
+       Degraded_retry_setup_failed { retry; reason; fail_open_err })
+
 let next_fail_open_runtime_for_turn_with_budget
     ~(base_runtime : string)
     ~(effective_runtime : string)

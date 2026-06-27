@@ -12,6 +12,10 @@ let sdk_error_kind = function
   | Agent_sdk.Error.Internal _ -> "internal"
 ;;
 
+let sdk_error_kind_for_receipt err =
+  Keeper_execution_receipt.error_kind_of_string (sdk_error_kind err)
+;;
+
 let network_error_kind_user_label = function
   | Llm_provider.Http_client.Connection_refused -> "connection refused"
   | Llm_provider.Http_client.Dns_failure -> "DNS lookup failed"

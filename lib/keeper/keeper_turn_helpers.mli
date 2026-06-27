@@ -74,6 +74,10 @@ val record_pre_dispatch_terminal_observation :
   trajectory_outcome:Trajectory.trajectory_outcome ->
   ?error_kind:Keeper_execution_receipt.error_kind ->
   ?error_message:string ->
+  ?degraded_retry_applied:bool ->
+  ?degraded_retry_runtime:string ->
+  ?fallback_reason:Keeper_error_classify.degraded_retry_reason ->
+  ?runtime_rotation_attempts:Keeper_execution_receipt.runtime_rotation_attempt list ->
   ?keeper_turn_id:int ->
   unit -> unit
 (** Record a terminal observation (receipt + activity graph event) for a

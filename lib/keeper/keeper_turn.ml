@@ -195,9 +195,262 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
         (Printf.sprintf "[Co-view context]\n%s"
            (Yojson.Safe.pretty_to_string json))
 
+let direct_empty_no_progress_retry_reason err =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some internal_error ->
+    (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
+     | Some `Empty_no_progress ->
+       Some Keeper_error_classify.Empty_no_progress
+     | _ -> None)
+  | None -> None
+
+let retry_reason_is_empty_no_progress
+    (retry : Keeper_error_classify.degraded_retry) =
+  match retry.fallback_reason with
+  | Keeper_error_classify.Empty_no_progress -> true
+  | _ -> false
+
+let next_direct_empty_no_progress_retry_decision
+    ~base_runtime
+    ~effective_runtime
+    ~attempted_runtimes
+    ~estimated_input_tokens
+    ?time_spent_in_turn_s
+    ~remaining_turn_budget_s
+    err =
+  match direct_empty_no_progress_retry_reason err with
+  | None -> Keeper_turn_runtime_budget.No_degraded_retry
+  | Some Keeper_error_classify.Empty_no_progress ->
+    (match
+       Keeper_turn_runtime_budget.next_fail_open_runtime_for_turn_with_budget
+         ~base_runtime
+         ~effective_runtime
+         ~attempted_runtimes
+         ~estimated_input_tokens
+         ?time_spent_in_turn_s
+         ~remaining_turn_budget_s
+         err
+     with
+     | Keeper_turn_runtime_budget.Degraded_retry_allowed retry
+       when retry_reason_is_empty_no_progress retry ->
+       Keeper_turn_runtime_budget.Degraded_retry_allowed retry
+     | Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
+       when retry_reason_is_empty_no_progress retry ->
+       Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
+     | _ -> Keeper_turn_runtime_budget.No_degraded_retry)
+  | _ -> Keeper_turn_runtime_budget.No_degraded_retry
+
+let run_direct_empty_no_progress_retry_loop
+      ~keeper_name
+      ~base_runtime
+      ~initial_runtime
+      ~initial_max_context
+      ~estimated_input_tokens
+      ~timeout_sec
+      ~remaining_turn_budget_s
+      ~current_turn_phase_elapsed_ms
+      ~now_s
+      ~(setup_retry_runtime :
+         string ->
+         (Keeper_turn_runtime_budget.runtime_execution, Agent_sdk.Error.sdk_error)
+         result)
+      ~publish_cascade_resolution
+      ~emit_runtime_selected
+      ~emit_runtime_rotation
+      ~record_retry_setup_failure
+      ~before_retry
+      ~run_once
+      ()
+  =
+  let rec run_attempt
+      ~runtime_id
+      ?runtime_execution
+      ~attempted_runtimes
+      ?degraded_retry
+      ~runtime_rotation_attempts
+      ~attempt
+      ~retry_phase_started_at
+      ~is_retry
+      ()
+    =
+    let degraded_retry_runtime =
+      Option.map
+        (fun (retry : Keeper_error_classify.degraded_retry) ->
+           retry.next_runtime)
+        degraded_retry
+    in
+    let fallback_reason =
+      Option.map
+        (fun (retry : Keeper_error_classify.degraded_retry) ->
+           retry.fallback_reason)
+        degraded_retry
+    in
+    let attempt_max_context =
+      match runtime_execution with
+      | Some execution -> execution.Keeper_turn_runtime_budget.max_context
+      | None -> initial_max_context
+    in
+    match
+      run_once
+        ~runtime_id
+        ~max_context:attempt_max_context
+        ~is_retry
+        ~degraded_retry_runtime
+        ~fallback_reason
+        ~runtime_rotation_attempts:(List.rev runtime_rotation_attempts)
+    with
+    | Ok result -> Ok (result, attempt_max_context)
+    | Error err as error ->
+      (match
+         next_direct_empty_no_progress_retry_decision
+           ~base_runtime
+           ~effective_runtime:runtime_id
+           ~attempted_runtimes
+           ~estimated_input_tokens
+           ~time_spent_in_turn_s:(timeout_sec -. remaining_turn_budget_s ())
+           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
+           err
+       with
+       | Keeper_turn_runtime_budget.No_degraded_retry ->
+         let reason =
+           match direct_empty_no_progress_retry_reason err with
+           | Some retry_reason ->
+             Printf.sprintf
+               "terminal_%s_no_degraded_retry"
+               (Keeper_error_classify.degraded_retry_reason_to_string retry_reason)
+           | None -> "terminal_error_not_degraded_retry_eligible"
+         in
+         publish_cascade_resolution
+           ~runtime_id
+           ~decision:Keeper_unified_turn_cascade_resolution.No_degraded_retry
+           ~reason
+           ~next_runtime:None
+           ~attempt
+           err;
+         error
+       | Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry ->
+         let reason =
+           Keeper_error_classify.degraded_retry_reason_to_string
+             retry.fallback_reason
+         in
+         publish_cascade_resolution
+           ~runtime_id
+           ~decision:
+             Keeper_unified_turn_cascade_resolution
+             .Degraded_retry_slot_phase_exhausted
+           ~reason
+           ~next_runtime:(Some retry.next_runtime)
+           ~attempt
+           err;
+         Log.Keeper.warn
+           "%s: direct keeper_msg empty response from runtime=%s suggested \
+            retry to %s (reason=%s), but productive slot phase budget %.1fs \
+            is exhausted after %.1fs"
+           keeper_name
+           runtime_id
+           retry.next_runtime
+           reason
+           Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec
+           (timeout_sec -. remaining_turn_budget_s ());
+         error
+       | Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
+         (match
+            Keeper_turn_runtime_budget.prepare_degraded_retry_allowed
+              ~current_runtime_id:runtime_id
+              ~attempt
+              ~err
+              ~retry
+              ~publish_cascade_resolution
+              ~emit_runtime_selected
+              ~emit_runtime_rotation
+              ~setup_runtime:setup_retry_runtime
+          with
+          | Keeper_turn_runtime_budget.Degraded_retry_setup_failed
+              { retry; fail_open_err; _ } ->
+            let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+              current_turn_phase_elapsed_ms retry_phase_started_at
+            in
+            let rotation_attempt =
+              Keeper_unified_turn_rotation_attempt.build
+                ~recorded_at:(now_iso ())
+                ~productive_phase_elapsed_ms
+                ?retry_phase_elapsed_ms
+                ~from_runtime:runtime_id
+                ~retry
+                ~outcome:Keeper_execution_receipt.Rotation_setup_failed
+                fail_open_err
+            in
+            record_retry_setup_failure
+              ~from_runtime:runtime_id
+              ~retry
+              ~rotation_attempt
+              ~fail_open_err;
+            Error fail_open_err
+          | Keeper_turn_runtime_budget.Degraded_retry_prepared
+              { retry; reason; next = next_execution } ->
+            let retry_phase_started_at =
+              match retry_phase_started_at with
+              | Some _ -> retry_phase_started_at
+              | None -> Some (now_s ())
+            in
+            let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+              current_turn_phase_elapsed_ms retry_phase_started_at
+            in
+            let rotation_attempt =
+              Keeper_unified_turn_rotation_attempt.build
+                ~recorded_at:(now_iso ())
+                ~productive_phase_elapsed_ms
+                ?retry_phase_elapsed_ms
+                ~from_runtime:runtime_id
+                ~retry
+                ~outcome:Keeper_execution_receipt.Rotation_retry_scheduled
+                err
+            in
+            let retry_resolution = next_execution.max_context_resolution in
+            Log.Keeper.warn
+              "%s: direct keeper_msg empty response from runtime=%s; retrying \
+               runtime=%s reason=%s max_context=%d context_budget=%d \
+               primary_budget=%d requested_override=%s"
+              keeper_name
+              runtime_id
+              next_execution.runtime_id
+              reason
+              next_execution.max_context
+              retry_resolution.effective_budget
+              retry_resolution.primary_budget
+              (match retry_resolution.requested_override with
+               | Some requested -> string_of_int requested
+               | None -> "none");
+            before_retry ();
+            run_attempt
+              ~runtime_id:next_execution.runtime_id
+              ~runtime_execution:next_execution
+              ~attempted_runtimes:(next_execution.runtime_id :: attempted_runtimes)
+              ~degraded_retry:retry
+              ~runtime_rotation_attempts:(rotation_attempt :: runtime_rotation_attempts)
+              ~attempt:1
+              ~retry_phase_started_at
+              ~is_retry:true
+              ()))
+  in
+  run_attempt
+    ~runtime_id:initial_runtime
+    ~attempted_runtimes:[ initial_runtime ]
+    ~runtime_rotation_attempts:[]
+    ~attempt:1
+    ~retry_phase_started_at:None
+    ~is_retry:false
+    ()
+
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
   let surface_context_to_instructions = surface_context_to_instructions
+  let direct_empty_no_progress_retry_reason =
+    direct_empty_no_progress_retry_reason
+  let direct_empty_no_progress_retry_decision =
+    next_direct_empty_no_progress_retry_decision
+  let run_direct_empty_no_progress_retry_loop =
+    run_direct_empty_no_progress_retry_loop
 end
 
 let resolve_turn_runtime_id (meta : keeper_meta) =
@@ -491,8 +744,8 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
       let effective_models =
         if direct_reply then
           Provider_runtime_projection.default_execution_model_strings
-            (               (turn_runtime_id))
-              else
+            turn_runtime_id
+        else
           effective_model_labels_for_turn meta
       in
       Progress.Tracker.step turn_tracker ~message:"Validating API keys" ();
@@ -506,21 +759,24 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
           | Error e ->
             Progress.stop_tracking turn_task_id;
             tool_result_error ("" ^ e)
-          | Ok () ->
-         let max_runtime_context =
-           let resolution =
-             Keeper_context_runtime.resolve_max_context_resolution
-               ~requested_override:meta.max_context_override effective_models
-           in
+	      | Ok () ->
+	            let max_runtime_context =
+	              let resolution =
+	                Keeper_context_runtime.resolve_max_context_resolution
+	                  ~requested_override:meta.max_context_override effective_models
+              in
             (match resolution.requested_override with
             | Some requested ->
               Log.Keeper.debug
                 "%s: using max_context_override=%d context_budget=%d primary_budget=%d effective_budget=%d (manual turn)"
                 meta.name requested resolution.turn_budget resolution.primary_budget
                 resolution.effective_budget
-            | None -> ());
-           resolution.turn_budget
-         in
+	            | None -> ());
+	              resolution.turn_budget
+	            in
+		            let profile_defaults =
+		              Keeper_types_profile.load_keeper_profile_defaults meta.name
+		            in
             let base_dir =
               let root = session_base_dir ctx.config in
               match channel_session_key with
@@ -760,37 +1016,234 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                 world_observation
             in
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
-            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
-            let run_result, latency_ms =
-              Keeper_context_runtime.timed (fun () ->
-                  run_direct_turn_with_fsm
-                    ~keeper_name:meta.name
-                    ~turn_id:keeper_turn_id
-                    (fun () ->
-                       Keeper_agent_run.run_turn
-                         ~config:ctx.config ~meta ~turn_ctx_cell ~base_dir
-                         ~max_context:max_runtime_context
-                         ~build_turn_prompt
-                         ~user_message:message
-                         ?user_blocks
-                         ~runtime_id:
-                           (                         (turn_runtime_id))
-                         ~world_observation
-                         ~turn_affordances
-                         (* A kmsg turn is user-triggered, i.e. reactive: it must
-                            use the reactive idle budget so the graduated idle hook
-                            (nudge -> final warning -> graceful Skip) can run its
-                            course before the OAS loop guard aborts the run. *)
-                         ~max_idle_turns:
-                           (Keeper_runtime_resolved.reactive_max_idle_turns ())
-                         ?oas_timeout_s:keeper_msg_oas_timeout_s
-                         ~generation:meta.runtime.generation
-                         ?on_event
-                         ~trajectory_acc
-                         ?event_bus
-                         ()))
-            in
-            match run_result with
+	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+	            let direct_history_messages =
+	              let (_session, ctx_opt) =
+	                Keeper_context_runtime.load_context_from_checkpoint
+	                  ~max_checkpoint_messages:
+	                    meta.compaction.max_checkpoint_messages
+	                  ~trace_id:
+	                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+	                  ~primary_model_max_tokens:max_runtime_context
+	                  ~base_dir
+	              in
+	              match ctx_opt with
+	              | None -> []
+	              | Some ctx ->
+	                Keeper_context_runtime.messages_of_context ctx
+	                |> Keeper_context_core.repair_broken_tool_call_pairs
+	            in
+	            let direct_base_system_prompt =
+	              Keeper_run_context.build_base_system_prompt
+	                ~config:ctx.config
+	                ~profile_defaults
+	                ~meta
+	            in
+	            let direct_prompt_for_estimate =
+	              build_turn_prompt
+	                ~base_system_prompt:direct_base_system_prompt
+	                ~messages:direct_history_messages
+	            in
+	            let direct_dynamic_context =
+	              Keeper_run_prompt.dynamic_context_with_recent_failures
+	                ~keeper_name:meta.name
+	                direct_prompt_for_estimate.dynamic_context
+	            in
+	            let direct_user_message_for_estimate =
+	              Keeper_run_prompt.sanitize_user_message message
+	            in
+	            let direct_prompt_metrics =
+	              Keeper_agent_run.build_prompt_metrics
+	                ~system_prompt:direct_prompt_for_estimate.system_prompt
+	                ~dynamic_context:direct_dynamic_context
+	                ~user_message:direct_user_message_for_estimate
+	            in
+	            let direct_prompt_estimated_input_tokens =
+	              Keeper_run_prompt.estimate_input_tokens
+	                ~prompt_metrics:direct_prompt_metrics
+	                ~system_prompt:direct_prompt_for_estimate.system_prompt
+	                ~dynamic_context:direct_dynamic_context
+	                ~memory_context:""
+	                ~temporal_context:""
+	                ~user_message:direct_user_message_for_estimate
+	                ~history_messages:direct_history_messages
+	            in
+	            let run_result, latency_ms =
+	              Keeper_context_runtime.timed (fun () ->
+	                  match Eio_context.get_clock () with
+	                  | Error msg -> Error (Agent_sdk.Error.Internal msg)
+	                  | Ok clock ->
+	                  let { Keeper_unified_turn_retry_setup.timeout_sec
+	                      ; remaining_turn_budget_s
+	                      ; current_turn_phase_elapsed_ms
+	                      ; max_idle_turns
+	                      ; _
+	                      }
+	                    =
+	                    Keeper_unified_turn_retry_setup.build
+	                      ~now:(fun () -> Eio.Time.now clock)
+	                      ~keeper_name:meta.name
+	                      ~channel:Keeper_world_observation.Reactive
+	                      ~turn_affordances
+	                  in
+	                  let publish_direct_cascade_resolution
+	                      ~runtime_id
+	                      ~decision
+	                      ~reason
+	                      ~next_runtime
+	                      ~attempt
+	                      err =
+	                    Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+	                      ~keeper_name:meta.name
+	                      ~runtime_id
+	                      ~decision
+	                      ~reason
+	                      ~next_runtime
+	                      ~attempt
+	                      ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+	                      ~error_message:(Some (Agent_sdk.Error.to_string err))
+	                  in
+	                  let setup_direct_retry_runtime runtime_id =
+	                    Keeper_unified_turn_pre_dispatch.build_runtime_execution
+	                      ~meta
+	                      ~profile_defaults
+	                      ~runtime_id
+	                  in
+
+		                  run_direct_turn_with_fsm
+		                    ~keeper_name:meta.name
+		                    ~turn_id:keeper_turn_id
+		                    (fun () ->
+		                       run_direct_empty_no_progress_retry_loop
+		                         ~keeper_name:meta.name
+		                         ~base_runtime:turn_runtime_id
+		                         ~initial_runtime:turn_runtime_id
+		                         ~initial_max_context:max_runtime_context
+		                         ~estimated_input_tokens:
+		                           direct_prompt_estimated_input_tokens
+		                         ~timeout_sec
+		                         ~remaining_turn_budget_s
+		                         ~current_turn_phase_elapsed_ms
+		                         ~now_s:(fun () -> Eio.Time.now clock)
+		                         ~setup_retry_runtime:setup_direct_retry_runtime
+		                         ~publish_cascade_resolution:
+		                           publish_direct_cascade_resolution
+		                         ~emit_runtime_selected:
+		                           (fun ~runtime_id ~fallback_reason ->
+		                              Otel_metric_store.inc_counter
+		                                Keeper_metrics.(to_string RuntimeSelected)
+		                                ~labels:
+		                                  [ ("keeper", meta.name)
+		                                  ; ("runtime_id", runtime_id)
+		                                  ; ("source", "fallback")
+		                                  ; ("fallback_reason", fallback_reason)
+		                                  ]
+		                                ())
+		                         ~emit_runtime_rotation:
+		                           (fun ~from_runtime ~to_runtime ~reason ->
+		                              Otel_metric_store.inc_counter
+		                                Keeper_metrics.(to_string RuntimeRotation)
+		                                ~labels:
+		                                  [ ("keeper", meta.name)
+		                                  ; ("from_runtime", from_runtime)
+		                                  ; ("to_runtime", to_runtime)
+		                                  ; ("reason", reason)
+		                                  ]
+		                                ())
+		                         ~record_retry_setup_failure:
+		                           (fun ~from_runtime ~retry ~rotation_attempt
+		                                ~fail_open_err ->
+		                              let reason =
+		                                Keeper_error_classify
+		                                .degraded_retry_reason_to_string
+		                                  retry.fallback_reason
+		                              in
+		                              Log.Keeper.warn
+		                                "%s: direct keeper_msg empty response \
+		                                 from runtime=%s suggested retry to %s \
+		                                 (reason=%s), but retry setup failed: %s"
+		                                meta.name
+		                                from_runtime
+		                                retry.next_runtime
+		                                reason
+		                                (short_preview
+		                                   (Agent_sdk.Error.to_string
+		                                      fail_open_err));
+		                              Keeper_turn_helpers.record_pre_dispatch_terminal_observation
+		                                ~config:ctx.config
+		                                ~meta
+		                                ~generation:meta.runtime.generation
+		                                ~runtime_id:retry.next_runtime
+		                                ~outcome:`Error
+		                                ~terminal_reason_code:
+		                                  (Printf.sprintf
+		                                     "direct_retry_setup_%s"
+		                                     (Keeper_agent_error
+		                                      .terminal_reason_code_of_sdk_error
+		                                        fail_open_err))
+		                                ~activity_kind:
+		                                  "direct_empty_no_progress_retry_setup"
+		                                ~trajectory_outcome:
+		                                  (Trajectory.Failed
+		                                     (Agent_sdk.Error.to_string
+		                                        fail_open_err))
+		                                ~error_kind:
+		                                  (Keeper_agent_error
+		                                   .sdk_error_kind_for_receipt
+		                                     fail_open_err)
+		                                ~error_message:
+		                                  (Agent_sdk.Error.to_string fail_open_err)
+		                                ~degraded_retry_applied:true
+		                                ~degraded_retry_runtime:retry.next_runtime
+		                                ~fallback_reason:retry.fallback_reason
+		                                ~runtime_rotation_attempts:
+		                                  [ rotation_attempt ]
+		                                ~keeper_turn_id
+		                                ())
+		                         ~before_retry:
+		                           (fun () ->
+		                              (* Empty accept rejection is a response
+		                                 contract miss, not a transient network
+		                                 failure. Keep the existing cooperative
+		                                 yield instead of borrowing provider
+		                                 backoff reserved for transport errors. *)
+		                              Eio.Fiber.yield ())
+		                         ~run_once:
+		                           (fun ~runtime_id ~max_context ~is_retry
+		                                ~degraded_retry_runtime ~fallback_reason
+		                                ~runtime_rotation_attempts ->
+		                              Keeper_agent_run.run_turn
+		                                ~config:ctx.config
+		                                ~meta
+		                                ~turn_ctx_cell
+		                                ~base_dir
+		                                ~max_context
+		                                ~build_turn_prompt
+		                                ~user_message:message
+		                                ?user_blocks
+		                                ~runtime_id
+		                                ~world_observation
+		                                ~turn_affordances
+		                                (* A kmsg turn is user-triggered, i.e.
+		                                   reactive: it must use the reactive
+		                                   idle budget so the graduated idle hook
+		                                   (nudge -> final warning -> graceful
+		                                   Skip) can run its course before the
+		                                   OAS loop guard aborts the run. *)
+		                                ~max_idle_turns
+		                                ?oas_timeout_s:keeper_msg_oas_timeout_s
+		                                ~generation:meta.runtime.generation
+		                                ?on_event
+		                                ~trajectory_acc
+		                                ?degraded_retry_runtime
+		                                ?fallback_reason
+		                                ~runtime_rotation_attempts
+		                                ~is_retry
+		                                ?event_bus
+		                                ())
+		                         ()))
+		            in
+		            match run_result with
             | Error err ->
               let e_str = Agent_sdk.Error.to_string err in
               let user_message = Keeper_agent_error.user_message_of_sdk_error err in
@@ -803,7 +1256,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
               start_keepalive ctx meta;
               Progress.stop_tracking turn_task_id;
               tool_result_error user_message
-            | Ok result ->
+	            | Ok (result, final_max_runtime_context) ->
               (try
                  let _ = Trajectory.finalize trajectory_acc
                    Trajectory.Completed in
@@ -833,9 +1286,9 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                       ~origin:Keeper_registry.Post_turn_lifecycle
                       ~keeper_name:meta.name
                       Keeper_state_machine.Handoff_started)
-                  ~meta
-                  ~model:result.model_used
-                  ~primary_model_max_tokens:max_runtime_context
+	                  ~meta
+	                  ~model:result.model_used
+	                  ~primary_model_max_tokens:final_max_runtime_context
                   ~current_turn_blocker_info:None
                   ~checkpoint:result.checkpoint
                 |> resilience_handles.sync_lifecycle_meta

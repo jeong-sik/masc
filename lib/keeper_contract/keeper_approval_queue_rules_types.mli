@@ -66,9 +66,17 @@ val risk_level_of_string : string -> risk_level option
 val approval_decision_to_string : decision -> string
 
 val approval_audit_decision_to_string : approval_audit_decision -> string
+val fingerprint_preview_length : int
+(** Length (bytes) of the human-readable fingerprint preview. *)
+
 val string_opt_of_json : Yojson.Safe.t -> string option
-val string_opt_member : string -> Yojson.Safe.t -> string option
 val bool_member : string -> Yojson.Safe.t -> default:bool -> bool
 val rule_match_to_yojson : rule_match -> Yojson.Safe.t
 val approval_rule_to_yojson : approval_rule -> Yojson.Safe.t
+
+val approval_rule_of_yojson_with_error :
+  Yojson.Safe.t -> (approval_rule, string) Stdlib.result
+(** Parse an approval rule, returning the first validation failure reason.
+    The legacy {!approval_rule_of_yojson} variant silently discards the reason. *)
+
 val approval_rule_of_yojson : Yojson.Safe.t -> approval_rule option

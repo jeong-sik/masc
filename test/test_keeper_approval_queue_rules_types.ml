@@ -123,6 +123,60 @@ let test_approval_rule_rejects_malformed_object_json () =
            ; "max_risk", `String "high"
            ; "created_at", `Float 1780587600.0
            ; "match_count", `Int (-1)
+           ]));
+  check
+    (option reject)
+    "blank tool name"
+    None
+    (Q.approval_rule_of_yojson
+       (`Assoc
+           [ "id", `String "rule-1"
+           ; "keeper_name", `String "keeper"
+           ; "tool_name", `String " "
+           ; "request_fingerprint", `String "abcdef"
+           ; "max_risk", `String "high"
+           ; "created_at", `Float 1780587600.0
+           ; "match_count", `Int 0
+           ]));
+  check
+    (option reject)
+    "blank request fingerprint"
+    None
+    (Q.approval_rule_of_yojson
+       (`Assoc
+           [ "id", `String "rule-1"
+           ; "keeper_name", `String "keeper"
+           ; "tool_name", `String "tool_execute"
+           ; "request_fingerprint", `String "  "
+           ; "max_risk", `String "high"
+           ; "created_at", `Float 1780587600.0
+           ; "match_count", `Int 0
+           ]));
+  check
+    (option reject)
+    "missing created_at"
+    None
+    (Q.approval_rule_of_yojson
+       (`Assoc
+           [ "id", `String "rule-1"
+           ; "keeper_name", `String "keeper"
+           ; "tool_name", `String "tool_execute"
+           ; "request_fingerprint", `String "abcdef"
+           ; "max_risk", `String "high"
+           ; "match_count", `Int 0
+           ]));
+  check
+    (option reject)
+    "missing match_count"
+    None
+    (Q.approval_rule_of_yojson
+       (`Assoc
+           [ "id", `String "rule-1"
+           ; "keeper_name", `String "keeper"
+           ; "tool_name", `String "tool_execute"
+           ; "request_fingerprint", `String "abcdef"
+           ; "max_risk", `String "high"
+           ; "created_at", `Float 1780587600.0
            ]))
 ;;
 

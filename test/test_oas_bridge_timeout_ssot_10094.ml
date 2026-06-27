@@ -25,6 +25,15 @@ let clear_envs () =
     ""
 ;;
 
+let check_timeout_equal label expected actual =
+  if Float.is_infinite expected then
+    Alcotest.(check bool)
+      label
+      true
+      (Float.is_infinite actual && Float.compare expected actual = 0)
+  else Alcotest.(check (float 0.0001)) label expected actual
+;;
+
 let test_remaining_defaults () =
   clear_envs ();
   let cases =
@@ -35,7 +44,7 @@ let test_remaining_defaults () =
   in
   List.iter
     (fun (caller, expected) ->
-       Alcotest.(check (float 0.0001))
+       check_timeout_equal
          (Printf.sprintf "default for %s" (Cfg.caller_key caller))
          expected
          (Cfg.timeout_sec ~caller ()))
@@ -51,7 +60,7 @@ let test_per_caller_env_override () =
     "anti_rationalization env overrides default"
     45.5
     (Cfg.timeout_sec ~caller:Cfg.Anti_rationalization ());
-  Alcotest.(check (float 0.0001))
+  check_timeout_equal
     "governance_judge unaffected by anti_rationalization env"
     Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());

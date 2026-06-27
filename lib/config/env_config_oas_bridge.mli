@@ -1,8 +1,8 @@
 (** Env_config_oas_bridge — per-caller OAS bridge timeout SSOT (#10094).
 
     Each remaining caller is named so its hardcoded default is preserved
-    or bounded for advisory dashboard judges, while the operator can tune
-    any single caller via env without touching the others.
+    while the operator can tune any single caller via env without touching
+    the others.
 
     Lookup order in {!timeout_sec} (top wins):
     1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC].
@@ -31,8 +31,7 @@ val caller_key : caller -> string
 (** Resolve the OAS bridge timeout (seconds) for [caller] using the
     four-step lookup order documented above. Invalid env values, including
     non-positive floats and [nan], fall back to [global_default_sec].
-    Positive [Float.infinity] is accepted as the explicit no-wrapper
-    timeout value for advisory callers. *)
+    Positive [Float.infinity] is accepted as a no-wrapper timeout value. *)
 val timeout_sec : caller:caller -> unit -> float
 
 (** [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — env var consulted in
@@ -51,9 +50,8 @@ val known_callers : unit -> caller list
     fallback without hardcoding the literal. *)
 val global_default_sec : float
 
-(** Active finite default for advisory dashboard judge callers
-    ({!Governance_judge} / {!Operator_judge}). These callers go through
-    {!Masc_oas_bridge.run_with_caller}, so their checked-in default must
-    be a MASC-owned wall-clock budget rather than an unbounded call that
-    only relies on provider-specific inner timeouts. *)
+(** Current checked-in default for advisory dashboard judge callers
+    ({!Governance_judge} / {!Operator_judge}). This preserves the
+    pre-#22402 no-wrapper behavior until those callers move to a dedicated
+    advisory no-wrapper path. *)
 val dashboard_judge_default_sec : float

@@ -17,17 +17,16 @@
    checked-in default is bounded separately while env overrides stay
    available.
 
-   2026-06-26 follow-up (#22402): dashboard judges still go through
-   [Masc_oas_bridge.run_with_caller], so their checked-in production
-   default must be finite.  Otherwise the bridge timeout contract
-   claims structural protection while these callers remain unbounded
-   unless the provider layer happens to time out.
+   2026-06-27 follow-up (#22402): the dashboard judge default flip to 300s
+   is reverted here as an interim compatibility step.  A dedicated
+   advisory no-wrapper path should handle the contract split separately,
+   without changing fleet-wide idle behavior in the clock-required bridge PR.
 
    This test pins:
 
      1. Both judges resolve to [dashboard_judge_default_sec] by default,
-        so the bridge wraps advisory dashboard judge cycles in a
-        MASC-owned wall-clock budget.
+        preserving the advisory no-wrapper behavior until the dedicated
+        path lands.
      2. The canonical per-caller env var
         ([MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] etc.) is the
         only per-judge override surface. *)
@@ -48,19 +47,28 @@ let clear_all_envs () =
     (fun caller -> Unix.putenv (Cfg.per_caller_env_var ~caller) "")
     (Cfg.known_callers ())
 
-let test_dashboard_judge_default_is_finite () =
-  Alcotest.(check (float 0.0001))
-    "dashboard_judge_default_sec is the active finite production budget"
-    300.0
-    Cfg.dashboard_judge_default_sec
+let check_timeout_equal label expected actual =
+  if Float.is_infinite expected then
+    Alcotest.(check bool)
+      label
+      true
+      (Float.is_infinite actual && Float.compare expected actual = 0)
+  else Alcotest.(check (float 0.0001)) label expected actual
 
-let test_judge_defaults_have_finite_timeout () =
+let test_dashboard_judge_default_is_no_wrapper () =
+  Alcotest.(check bool)
+    "dashboard_judge_default_sec preserves no-wrapper default"
+    true
+    (Float.is_infinite Cfg.dashboard_judge_default_sec
+     && Cfg.dashboard_judge_default_sec > 0.0)
+
+let test_judge_defaults_preserve_no_wrapper_timeout () =
   clear_all_envs ();
-  Alcotest.(check (float 0.0001))
+  check_timeout_equal
     "Governance_judge default equals dashboard_judge_default_sec"
     Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
-  Alcotest.(check (float 0.0001))
+  check_timeout_equal
     "Operator_judge default equals dashboard_judge_default_sec"
     Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Operator_judge ())
@@ -94,10 +102,10 @@ let () =
     [
       ( "defaults",
         [
-          Alcotest.test_case "dashboard_judge_default_sec is finite"
-            `Quick test_dashboard_judge_default_is_finite;
-          Alcotest.test_case "judge defaults have finite wrapper timeout"
-            `Quick test_judge_defaults_have_finite_timeout;
+          Alcotest.test_case "dashboard_judge_default_sec is no-wrapper"
+            `Quick test_dashboard_judge_default_is_no_wrapper;
+          Alcotest.test_case "judge defaults preserve no-wrapper timeout"
+            `Quick test_judge_defaults_preserve_no_wrapper_timeout;
           Alcotest.test_case "judges listed in known_callers"
             `Quick test_judges_listed_in_known_callers;
         ] );

@@ -16,9 +16,11 @@ into unbounded execution.
 Do not add a default-off opt-out flag that restores clockless bridge execution.
 That would preserve the unsafe behavior this contract removes.
 
-Callers registered in `Env_config_oas_bridge.known_callers` must have finite
-checked-in defaults. `Float.infinity` is accepted only as an explicit operator
-override, not as the production default for a `run_with_caller` path.
+Request-path callers registered in `Env_config_oas_bridge.known_callers` must
+have finite checked-in defaults. Advisory dashboard judges keep their
+pre-#22402 `Float.infinity` default until they move to a dedicated no-wrapper
+path; this avoids changing fleet-wide idle behavior in the clock-required
+bridge PR.
 
 ## Migration
 
@@ -26,15 +28,17 @@ Server boot:
 
 - `Server_runtime_bootstrap.init_runtime_context` supplies `clock`, `net`, and
   `sw`.
-- Call `Masc_eio_env.init ~sw ~net ~clock ()` before any code path can invoke
-  `Masc_oas_bridge.run_safe` or `run_with_caller`.
+- `Server_runtime_bootstrap.create_server_state` initializes `Masc_eio_env`
+  once, before any server code path can invoke `Masc_oas_bridge.run_safe` or
+  `run_with_caller`.
 
 Standalone Eio binaries:
 
 - After `Eio_main.run` and `Eio.Switch.run`, use `Eio.Stdenv.clock env` and
   `Eio.Stdenv.net env` to initialize `Masc_eio_env`.
-- `bin/fusion_run.ml`, `bin/masc_completion_trust_eval.ml`, and
-  `bin/main_stdio_eio.ml` are the current entrypoint examples.
+- `bin/fusion_run.ml` and `bin/masc_completion_trust_eval.ml` are the current
+  standalone entrypoint examples. `bin/main_stdio_eio.ml` goes through
+  `create_server_state`.
 
 Additional OCaml domains:
 

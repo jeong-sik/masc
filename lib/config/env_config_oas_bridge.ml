@@ -3,15 +3,15 @@
     Each remaining caller is named so:
 
       1. anti-rationalization keeps its compute-heavy default (180s);
-      2. dashboard judge daemons have a MASC-owned structural timeout
-         instead of relying on provider-specific inner timeouts;
+      2. dashboard judge daemons keep their no-wrapper default until the
+         dedicated advisory no-wrapper path lands;
       3. the operator can override any single caller's budget via
          [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC];
       4. the operator can set a fallback for unknown / future callers
          via [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC].
 
     The lookup order is per-caller env > per-caller hardcoded default
-    > [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] > 300.0.  An unknown
+    > [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] > 300.0. An unknown
     caller (future caller without a typed default) falls through to
     the global default rather than failing closed — the operator will
     see [metric_oas_bridge_timeout{caller=...}] in Otel_metric_store
@@ -26,14 +26,10 @@ type caller =
 (** Hardcoded default seconds for each known caller. *)
 let global_default_sec = 300.0
 
-(** Default for advisory dashboard judge callers. This is intentionally
-    finite: those callers use [Masc_oas_bridge.run_with_caller], so the
-    bridge must own a structural wall-clock budget rather than presenting
-    an unbounded call as protected by the timeout contract.  Per-caller
-    env overrides still win, including explicit [Float.infinity] when an
-    operator intentionally wants to disable the wrapper for a local
-    experiment. *)
-let dashboard_judge_default_sec = global_default_sec
+(** Default for advisory dashboard judge callers. This intentionally preserves
+    the pre-#22402 no-wrapper behavior while the dedicated advisory no-wrapper
+    path is split into its own PR. Per-caller env overrides still win. *)
+let dashboard_judge_default_sec = Float.infinity
 
 let caller_key = function
   | Anti_rationalization -> "anti_rationalization"
@@ -83,10 +79,9 @@ let trimmed_value_opt name =
   | None -> None
 ;;
 
-(** Accept positive floats including [Float.infinity]. Explicit infinite env
-    overrides are allowed for local operator experiments even though checked-in
-    production defaults stay finite.  The OAS bridge treats [infinity] as
-    no-fire, so the helper name intentionally does not claim finiteness. *)
+(** Accept positive floats including [Float.infinity]. The OAS bridge treats
+    [infinity] as no-fire, so the helper name intentionally does not claim
+    finiteness. *)
 let positive_or_default ~default value =
   if Float.compare value 0.0 > 0 then value else default
 ;;
@@ -101,12 +96,13 @@ let timeout_env_value ~default raw =
 
       1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC]
          — wins unconditionally.  Lets the operator tune one
-         caller without touching others.  Positive [Float.infinity]
-         passes through as an explicit no-wrapper operator override.
+         caller without touching others. Positive [Float.infinity] passes
+         through as a no-wrapper override.
       2. Per-caller checked-in default ([known_default_sec]).
-         Preserves intentional 180s budgets for compute-heavy
-         callers; dashboard judge callers resolve to the finite
-         [dashboard_judge_default_sec] budget.
+         Preserves intentional 180s budgets for compute-heavy callers;
+         dashboard judge callers temporarily resolve to
+         [dashboard_judge_default_sec] ([Float.infinity]) until they move
+         to a dedicated advisory no-wrapper path.
       3. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only
          consulted for UNKNOWN callers (typo, future caller
          without a default entry).  Treating it as an override

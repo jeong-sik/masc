@@ -506,6 +506,23 @@ let test_rfc0121_masc_root_agrees_with_common () =
     (Common.masc_dir_from_base_path ~base_path:bp)
     (Config_dir_resolver.masc_root ~base_path:bp)
 
+let test_current_working_dir_returns_absolute () =
+  let cwd = Config_dir_resolver.current_working_dir () in
+  check bool "cwd is absolute" true (not (Filename.is_relative cwd))
+
+let test_base_path_or_cwd_honors_env () =
+  with_env "MASC_BASE_PATH" (Some "/tmp/masc-base-from-env") (fun () ->
+    Config_dir_resolver.reset ();
+    check string "base_path_or_cwd uses env" "/tmp/masc-base-from-env"
+      (Config_dir_resolver.base_path_or_cwd ()))
+
+let test_base_path_or_cwd_falls_back_to_cwd () =
+  with_env "MASC_BASE_PATH" None (fun () ->
+    Config_dir_resolver.reset ();
+    check string "base_path_or_cwd falls back to cwd"
+      (Config_dir_resolver.current_working_dir ())
+      (Config_dir_resolver.base_path_or_cwd ()))
+
 let () =
   run "config_dir_resolver"
     [
@@ -581,5 +598,14 @@ let () =
             test_rfc0121_keeper_repo_mappings_toml;
           test_case "masc_root agrees with Common" `Quick
             test_rfc0121_masc_root_agrees_with_common;
+        ] );
+      ( "path_ssot_helpers",
+        [
+          test_case "current_working_dir returns an absolute path" `Quick
+            test_current_working_dir_returns_absolute;
+          test_case "base_path_or_cwd honors MASC_BASE_PATH" `Quick
+            test_base_path_or_cwd_honors_env;
+          test_case "base_path_or_cwd falls back to cwd" `Quick
+            test_base_path_or_cwd_falls_back_to_cwd;
         ] );
     ]

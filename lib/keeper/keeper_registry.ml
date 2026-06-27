@@ -644,16 +644,6 @@ let rec dispatch_event_with_audit
       | Error _ -> entry.compaction_stage
       | Ok () -> compaction_stage_after_event entry event
     in
-    let put_transition_entry updated_entry =
-      match put_entry ~base_path name updated_entry with
-      | Ok () -> Ok ()
-      | Error reason ->
-        Error
-          (Keeper_state_machine.Precondition_violation
-             { event = Keeper_state_machine.event_to_string event
-             ; reason = registry_entry_validation_error_to_string reason
-             })
-    in
     let result =
       match origin_result with
       | Error _ as err -> err
@@ -750,8 +740,10 @@ let rec dispatch_event_with_audit
            ~new_phase:tr.new_phase
            ~conditions_after:tr.updated_conditions
            ~restart_count:entry.restart_count;
-       (match
-          put_transition_entry
+       ignore
+         (put_entry
+            ~base_path
+            name
             { entry with
               phase = tr.new_phase
             ; conditions = tr.updated_conditions
@@ -760,77 +752,73 @@ let rec dispatch_event_with_audit
             ; last_auto_rules
             ; pending_turn_measurement
             ; compaction_stage
-            }
-        with
-        | Error e -> Error e
-        | Ok () ->
-          List.iter
-            (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
-            tr.entry_actions;
-          List.iter
-            (fun followup_event ->
-               match dispatch_event_with_audit ~base_path name followup_event with
-               | Ok _ -> ()
-               | Error
-                   (Keeper_state_machine.Invalid_transition
-                      { from_phase; to_phase; reason }) ->
-                 record_followup_dispatch_rejection followup_event;
-                 let from_phase_str = Keeper_state_machine.phase_to_string from_phase in
-                 let to_phase_str = Keeper_state_machine.phase_to_string to_phase in
-                 Log.Keeper.emit
-                   Log.Error
-                   ~category:Log.Fsm
-                   ~details:
-                     (`Assoc
-                       [ "from_phase", `String from_phase_str
-                       ; "to_phase", `String to_phase_str
-                       ; "reason", `String reason
-                       ])
-                   (Printf.sprintf
-                      "registry(%s): followup dispatch failed: %s -> %s (%s)"
-                      name
-                      from_phase_str
-                      to_phase_str
-                      reason)
-               | Error
-                   (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
-                 record_followup_dispatch_rejection followup_event;
-                 let current_phase_str = Keeper_state_machine.phase_to_string current in
-                 Log.Keeper.emit
-                   Log.Warn
-                   ~category:Log.Fsm
-                   ~details:
-                     (`Assoc
-                       [ "current_phase", `String current_phase_str
-                       ; "attempted_event", `String attempted_event
-                       ])
-                   (Printf.sprintf
-                      "registry(%s): followup skipped, already terminal: %s (event: %s)"
-                      name
-                      current_phase_str
-                      attempted_event)
-               | Error
-                   (Keeper_state_machine.Precondition_violation { event = ev; reason }) ->
-                 record_followup_dispatch_rejection followup_event;
-                 Log.Keeper.emit
-                   Log.Warn
-                   ~category:Log.Fsm
-                   ~details:(`Assoc [ "event", `String ev; "reason", `String reason ])
-                   (Printf.sprintf
-                      "registry(%s): followup skipped, precondition violated: %s (%s)"
-                      name
-                      ev
-                      reason))
-            (List.filter_map
-               (followup_event_of_entry_action ~phase:tr.new_phase)
-               tr.entry_actions);
-          (* Composite-lifecycle SSE envelope — RFC-0003 §6.
-             The body carries only the keeper name and observation timestamp;
-             subscribers re-fetch [/api/v1/keepers/:name/composite] for the
-             full snapshot so the spec's "single writer, pull observers"
-             invariant is preserved. *)
-          broadcast_composite_changed ~name ~ts_unix:now;
-          Ok tr)
+            });
+       List.iter
+         (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
+         tr.entry_actions;
+       List.iter
+         (fun followup_event ->
+            match dispatch_event_with_audit ~base_path name followup_event with
+            | Ok _ -> ()
+            | Error
+                (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason })
+              ->
+              record_followup_dispatch_rejection followup_event;
+              let from_phase_str = Keeper_state_machine.phase_to_string from_phase in
+              let to_phase_str = Keeper_state_machine.phase_to_string to_phase in
+              Log.Keeper.emit
+                Log.Error
+                ~category:Log.Fsm
+                ~details:
+                  (`Assoc
+                    [ "from_phase", `String from_phase_str
+                    ; "to_phase", `String to_phase_str
+                    ; "reason", `String reason
+                    ])
+                (Printf.sprintf
+                   "registry(%s): followup dispatch failed: %s -> %s (%s)"
+                   name
+                   from_phase_str
+                   to_phase_str
+                   reason)
+            | Error (Keeper_state_machine.Terminal_state { current; attempted_event }) ->
+              record_followup_dispatch_rejection followup_event;
+              let current_phase_str = Keeper_state_machine.phase_to_string current in
+              Log.Keeper.emit
+                Log.Warn
+                ~category:Log.Fsm
+                ~details:
+                  (`Assoc
+                    [ "current_phase", `String current_phase_str
+                    ; "attempted_event", `String attempted_event
+                    ])
+                (Printf.sprintf
+                   "registry(%s): followup skipped, already terminal: %s (event: %s)"
+                   name
+                   current_phase_str
+                   attempted_event)
+            | Error (Keeper_state_machine.Precondition_violation { event = ev; reason })
+              ->
+              record_followup_dispatch_rejection followup_event;
+              Log.Keeper.emit
+                Log.Warn
+                ~category:Log.Fsm
+                ~details:(`Assoc [ "event", `String ev; "reason", `String reason ])
+                (Printf.sprintf
+                   "registry(%s): followup skipped, precondition violated: %s (%s)"
+                   name
+                   ev
+                   reason))
+         (List.filter_map
+            (followup_event_of_entry_action ~phase:tr.new_phase)
+            tr.entry_actions);
+       (* Composite-lifecycle SSE envelope — RFC-0003 §6.
+          The body carries only the keeper name and observation timestamp;
+          subscribers re-fetch [/api/v1/keepers/:name/composite] for the
+          full snapshot so the spec's "single writer, pull observers"
+          invariant is preserved. *)
+       broadcast_composite_changed ~name ~ts_unix:now;
+       Ok tr
      | Ok tr ->
        (* No phase change — still update conditions *)
        let new_seq = entry.transition_seq + 1 in
@@ -845,20 +833,19 @@ let rec dispatch_event_with_audit
            ~new_phase:tr.new_phase
            ~conditions_after:tr.updated_conditions
            ~restart_count:entry.restart_count;
-       (match
-          put_transition_entry
+       ignore
+         (put_entry
+            ~base_path
+            name
             { entry with
               conditions = tr.updated_conditions
             ; transition_seq = new_seq
             ; last_auto_rules
             ; pending_turn_measurement
             ; compaction_stage
-            }
-        with
-        | Error e -> Error e
-        | Ok () ->
-          broadcast_composite_changed ~name ~ts_unix:now;
-          Ok tr)
+            });
+       broadcast_composite_changed ~name ~ts_unix:now;
+       Ok tr
      | Error e ->
        Otel_metric_store.inc_counter
          Keeper_metrics.(to_string LifecycleDispatchRejections)

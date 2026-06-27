@@ -15,7 +15,7 @@ let snapshot =
 let execution completion_contract_result =
   `Assoc
     [ "latest_receipt_present", `Bool true
-    ; "recorded_at", `String "2026-06-05T00:00:00Z"
+    ; "recorded_at", `String "2999-01-01T00:00:00Z"
     ; "completion_contract_result", `String completion_contract_result
     ; "operator_disposition", `String "pass_next_model"
     ; "operator_disposition_reason", `Null
@@ -93,7 +93,7 @@ let test_contract_blocker_marks_attention () =
   check
     (option string)
     "reason"
-    (Some "surface_mismatch")
+    (Some "completion_contract_result:surface_mismatch")
     attention.cra_reason
 ;;
 
@@ -165,7 +165,7 @@ let test_passive_budget_exhaustion_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "passive_only")
+    (Some "completion_contract_result:passive_only")
     attention.cra_reason
 ;;
 
@@ -181,7 +181,7 @@ let test_completed_passive_receipt_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "passive_only")
+    (Some "completion_contract_result:passive_only")
     attention.cra_reason
 ;;
 
@@ -197,7 +197,7 @@ let test_not_dispatched_budget_exhaustion_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "not_dispatched")
+    (Some "completion_contract_result:not_dispatched")
     attention.cra_reason
 ;;
 

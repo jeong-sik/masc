@@ -6,7 +6,13 @@ import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
-import { ChatComposer, ChatTranscript, type ChatComposerSendPayload } from './primitives'
+import {
+  CHAT_COMPOSER_COMMAND_HEADER_SUFFIX,
+  CHAT_COMPOSER_DROP_PLACEHOLDER,
+  ChatComposer,
+  ChatTranscript,
+  type ChatComposerSendPayload,
+} from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
 import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
@@ -2696,19 +2702,16 @@ describe('ChatComposer v2 prototype surface', () => {
     expect(run).toHaveBeenCalledTimes(1)
   })
 
-  it('shows the keeper identifier in the slash menu header when draftPersistKey is set', () => {
-    // Mirrors prototype composer.jsx:204: <div className="slashmenu-h">{keeper.id} · 명령</div>.
-    // The live composer header was a generic "keeper · 명령" string, hiding which
-    // keeper's commands the operator is picking from. Reading draftPersistKey
-    // (already passed by every caller) is the lowest-friction way to surface
-    // the operator-visible identifier without adding a new prop.
+  it('shows the keeper label in the slash menu header', () => {
+    const keeperLabel = 'ocaml-multicore/eio'
     render(
       html`<${ChatComposer}
         draft="/res"
         placeholder="메시지 입력..."
         disabled=${false}
         streaming=${false}
-        draftPersistKey="ocaml-multicore/eio"
+        draftPersistKey="draft:v1:internal:opaque"
+        keeperLabel=${keeperLabel}
         commands=${[
           { id: 'restart', group: 'lifecycle', label: 'Restart keeper', run: () => {} },
         ]}
@@ -2718,13 +2721,10 @@ describe('ChatComposer v2 prototype surface', () => {
       container,
     )
     const header = container.querySelector('.slashmenu-h')
-    expect(header?.textContent).toBe('ocaml-multicore/eio · 명령')
+    expect(header?.textContent).toBe(`${keeperLabel} · ${CHAT_COMPOSER_COMMAND_HEADER_SUFFIX}`)
   })
 
   it('switches the textarea placeholder to the drop cue while files are dragged over', () => {
-    // Mirrors prototype composer.jsx:223: placeholder switches to '여기에 놓아 첨부…'
-    // during drag so the operator gets a single, unambiguous instruction instead
-    // of seeing both the drop visual on the box and the static placeholder.
     render(
       html`<${ChatComposer}
         draft=""
@@ -2742,6 +2742,6 @@ describe('ChatComposer v2 prototype surface', () => {
     const composer = container.querySelector('.composer') as HTMLDivElement
     fireEvent.dragOver(composer)
     const textareaAfterDrag = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
-    expect(textareaAfterDrag.placeholder).toBe('여기에 놓아 첨부…')
+    expect(textareaAfterDrag.placeholder).toBe(CHAT_COMPOSER_DROP_PLACEHOLDER)
   })
 })

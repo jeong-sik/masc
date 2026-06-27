@@ -24,6 +24,9 @@ type SchemaLike<T> = {
   safeParse(value: unknown): SafeParseResult<T>
 }
 
+export const SSE_APPROVAL_PENDING_EVENT = 'approval:pending'
+export const SSE_APPROVAL_RESOLVED_EVENT = 'approval:resolved'
+
 const FIXED_SSE_EVENT_TYPES = new Set([
   'agent_bound',
   'masc/agent_bound',
@@ -68,8 +71,8 @@ const FIXED_SSE_EVENT_TYPES = new Set([
   'client_input_rejected',
   'client_input_updated',
   'governance_param_changed',
-  'approval:pending',
-  'approval:resolved',
+  SSE_APPROVAL_PENDING_EVENT,
+  SSE_APPROVAL_RESOLVED_EVENT,
   'project_snapshot',
   'namespace_truth_snapshot',
   'execution_snapshot',

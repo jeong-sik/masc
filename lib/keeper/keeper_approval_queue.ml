@@ -40,6 +40,13 @@ let recent_audit_cache : (string, recent_audit_cache_entry) Hashtbl.t =
 ;;
 
 let recent_audit_cache_ttl_sec = 1.0
+let recent_resolved_history_limit = 20
+let audit_wide_scan_min_rows = 500
+let audit_wide_scan_multiplier = 64
+
+let wide_audit_scan_window n =
+  max audit_wide_scan_min_rows (max n 1 * audit_wide_scan_multiplier)
+;;
 
 let recent_audit_cache_key store limit =
   Printf.sprintf "%s:%d" (Dated_jsonl.base_dir store) limit
@@ -72,13 +79,21 @@ let read_recent_audit_raw store limit =
     rows
 ;;
 
+let approval_audit_pending_event = "pending"
 let approval_audit_resolved_event = "resolved"
+let approval_sse_pending_event = "approval:pending"
+let approval_sse_resolved_event = "approval:resolved"
 
-let approval_audit_decision_kind = function
-  | Approval_resolved Agent_sdk.Hooks.Approve -> "approve"
-  | Approval_resolved (Agent_sdk.Hooks.Reject _) -> "reject"
-  | Approval_resolved (Agent_sdk.Hooks.Edit _) -> "edit"
-  | Approval_expired _ -> "reject"
+let non_empty_reason reason =
+  let reason = String.trim reason in
+  if String.equal reason "" then None else Some reason
+;;
+
+let approval_audit_decision_kind_and_reason = function
+  | Approval_resolved Agent_sdk.Hooks.Approve -> "approve", None
+  | Approval_resolved (Agent_sdk.Hooks.Reject reason) -> "reject", non_empty_reason reason
+  | Approval_resolved (Agent_sdk.Hooks.Edit _) -> "edit", None
+  | Approval_expired reason -> "reject", non_empty_reason reason
 ;;
 
 let keeper_audit_metric_label = function
@@ -160,11 +175,12 @@ let audit_approval_event
       ?decision
       ()
   =
-  let decision, decision_kind =
+  let decision, decision_kind, decision_reason =
     match decision with
-    | None -> "", None
+    | None -> "", None, None
     | Some decision ->
-      approval_audit_decision_to_string decision, Some (approval_audit_decision_kind decision)
+      let kind, reason = approval_audit_decision_kind_and_reason decision in
+      approval_audit_decision_to_string decision, Some kind, reason
   in
   match get_audit_store ~base_path () with
   | None -> ()
@@ -199,6 +215,9 @@ let audit_approval_event
          @ (match decision_kind with
             | Some kind -> [ "decision_kind", `String kind ]
             | None -> [])
+         @ (match decision_reason with
+            | Some reason -> [ "decision_reason", `String reason ]
+            | None -> [])
          @
          match auto_approved with
          | Some value -> [ "auto_approved", `Bool value ]
@@ -232,14 +251,12 @@ let audit_scan_window ?keeper_name n =
     (* Approval audit is global, but runtime trust asks for per-keeper
          "latest" records. Scan a bounded wider window before filtering so a
          busy fleet cannot hide the target keeper behind unrelated events. *)
-    max 500 (max n 1 * 64)
+    wide_audit_scan_window n
 ;;
 
-let resolved_audit_scan_window n =
-  max 500 (max n 1 * 64)
-;;
+let resolved_audit_scan_window = wide_audit_scan_window
 
-let record_audit_read_failure ?keeper_name ~site exn =
+let record_audit_read_failure ?keeper_name ?(metric_site = Keeper_approval_queue_failure_site.Audit_read_recent) ~site exn =
   Keeper_fd_pressure.note_exception ~site exn;
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)
@@ -247,7 +264,7 @@ let record_audit_read_failure ?keeper_name ~site exn =
       [ "keeper",
         keeper_audit_metric_label keeper_name;
         "site",
-        Keeper_approval_queue_failure_site.(to_label Audit_read_recent)
+        Keeper_approval_queue_failure_site.to_label metric_site
       ]
     ()
 ;;
@@ -315,6 +332,7 @@ let resolved_approval_json_of_audit_event json =
     ; "risk_level", `String (Safe_ops.json_string ~default:"" "risk" json)
     ; "decision", Json_util.string_opt_to_json_trimmed (Safe_ops.json_string_opt "decision" json)
     ; "decision_kind", Json_util.string_opt_to_json_trimmed (resolved_approval_decision_kind json)
+    ; "decision_reason", json_member_or_null "decision_reason" json
     ; "resolved_at", Json_util.float_opt_to_json resolved_at
     ; ( "resolved_at_iso",
         match resolved_at with
@@ -331,7 +349,9 @@ let resolved_approval_json_of_audit_event json =
     ]
 ;;
 
-let list_recent_resolved_json ~base_path ?(n = 20) () : Yojson.Safe.t list =
+let list_recent_resolved_json ~base_path ?(n = recent_resolved_history_limit) ()
+  : Yojson.Safe.t list
+  =
   if n <= 0
   then []
   else (
@@ -343,12 +363,16 @@ let list_recent_resolved_json ~base_path ?(n = 20) () : Yojson.Safe.t list =
         |> List.filter (fun json ->
              String.equal approval_audit_resolved_event
                (Safe_ops.json_string ~default:"" "event" json))
+        |> List.rev
         |> List.filteri (fun idx _ -> idx < n)
         |> List.map resolved_approval_json_of_audit_event
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
-        record_audit_read_failure ~site:"approval_audit.list_recent_resolved" exn;
+        record_audit_read_failure
+          ~metric_site:Keeper_approval_queue_failure_site.Audit_list_recent_resolved
+          ~site:"approval_audit.list_recent_resolved"
+          exn;
         [])
 ;;
 
@@ -521,7 +545,7 @@ let broadcast_pending entry =
   try
     Sse.broadcast
       (`Assoc
-          [ "type", `String "approval:pending"
+          [ "type", `String approval_sse_pending_event
           ; ( "payload"
             , `Assoc
                 (pending_entry_json_fields
@@ -536,7 +560,7 @@ let broadcast_pending entry =
       ~keeper_name:entry.keeper_name
       ~site:"broadcast_pending"
       ~id:entry.id
-      ~event_type:"pending"
+      ~event_type:approval_audit_pending_event
       exn
 ;;
 
@@ -549,7 +573,7 @@ let record_pending (entry : pending_approval) =
     (risk_level_to_string entry.risk_level);
   audit_approval_event
     ~base_path:entry.audit_base_path
-    ~event_type:"pending"
+    ~event_type:approval_audit_pending_event
     ~id:entry.id
     ~keeper_name:entry.keeper_name
     ~tool_name:entry.tool_name
@@ -616,7 +640,7 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
   try
     Sse.broadcast
       (`Assoc
-          [ "type", `String "approval:resolved"
+          [ "type", `String approval_sse_resolved_event
           ; ( "payload"
             , `Assoc
                 [ "id", `String entry.id
@@ -636,7 +660,7 @@ let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
       ~keeper_name:entry.keeper_name
       ~site:"broadcast_resolved"
       ~id:entry.id
-      ~event_type:"resolved"
+      ~event_type:approval_audit_resolved_event
       exn
 ;;
 

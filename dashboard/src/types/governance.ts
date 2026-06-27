@@ -252,6 +252,7 @@ export interface KeeperResolvedApprovalItem {
   risk_level?: KeeperApprovalRiskLevel | null
   decision: KeeperResolvedApprovalDecision
   decision_raw?: string | null
+  decision_reason?: string | null
   resolved_at?: string | null
   turn_id?: number | null
   task_id?: string | null

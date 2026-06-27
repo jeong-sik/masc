@@ -60,6 +60,10 @@ import { hydrateGoalLoopSnapshot } from './goal-loop-state'
 import { showToast } from './components/common/toast'
 import type { ErrorCode } from './types/error'
 import { parseOasPayloadOrNull } from './schemas/sse-event-payload'
+import {
+  SSE_APPROVAL_PENDING_EVENT,
+  SSE_APPROVAL_RESOLVED_EVENT,
+} from './schemas/sse'
 import { route } from './router'
 import { routeWantsRefreshTarget, type RouteRefreshTarget } from './refresh-scope'
 import {
@@ -492,11 +496,14 @@ export function routeServerPushEvent(event: SSEEvent): void {
     handleKeeperLifecycle(event)
   }
 
+  const approvalRefreshEvent =
+    event.type === SSE_APPROVAL_PENDING_EVENT
+    || event.type === SSE_APPROVAL_RESOLVED_EVENT
+
   if (
     event.type.startsWith('decision_')
     || event.type === 'governance_param_changed'
-    || event.type === 'approval:pending'
-    || event.type === 'approval:resolved'
+    || approvalRefreshEvent
   ) {
     if (route.value.tab === 'command') {
       scheduleRefresh('command_route', () => {
@@ -504,7 +511,8 @@ export function routeServerPushEvent(event: SSEEvent): void {
       })
     }
     if (_refreshGovernanceFn) {
-      scheduleRefresh('governance', () => void handleGovernance({ force: true }))
+      const opts = approvalRefreshEvent ? { force: true } : undefined
+      scheduleRefresh('governance', () => void handleGovernance(opts))
     }
   }
 }

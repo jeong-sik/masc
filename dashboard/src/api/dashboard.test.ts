@@ -1344,6 +1344,7 @@ describe('fetchDashboardGovernance', () => {
             risk_level: 'medium',
             decision: 'reject:operator denied',
             decision_kind: 'reject',
+            decision_reason: 'operator denied',
             resolved_at_iso: '2026-06-27T01:02:03Z',
           },
           {
@@ -1372,6 +1373,7 @@ describe('fetchDashboardGovernance', () => {
         risk_level: 'medium',
         decision: 'reject',
         decision_raw: 'reject:operator denied',
+        decision_reason: 'operator denied',
         resolved_at: '2026-06-27T01:02:03Z',
       }),
       expect.objectContaining({
@@ -1381,6 +1383,7 @@ describe('fetchDashboardGovernance', () => {
         risk_level: 'high',
         decision: 'unknown',
         decision_raw: 'reject:legacy reason',
+        decision_reason: null,
         resolved_at: '2026-06-27T01:03:03Z',
       }),
     ])

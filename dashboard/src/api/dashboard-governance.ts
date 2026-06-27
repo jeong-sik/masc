@@ -81,6 +81,7 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
     : null
   const decisionRaw = asNullableString(raw.decision)
   const decisionKind = asNullableString(raw.decision_kind)
+  const decisionReason = asNullableString(raw.decision_reason)
   return {
     id,
     keeper_name: keeperName,
@@ -88,6 +89,7 @@ function normalizeKeeperResolvedApprovalItem(raw: unknown): KeeperResolvedApprov
     risk_level: asKeeperApprovalRiskLevel(raw.risk_level),
     decision: normalizeKeeperResolvedApprovalDecision(decisionKind),
     decision_raw: decisionRaw,
+    decision_reason: decisionReason,
     resolved_at: asNullableIsoTimestamp(raw.resolved_at_iso ?? raw.resolved_at ?? raw.ts),
     turn_id: asInt(raw.turn_id),
     task_id: asNullableString(raw.task_id),

@@ -10,5 +10,6 @@ type t =
   | Approval_expired
   | Expire_callback
   | Audit_read_recent
+  | Audit_list_recent_resolved
 
 val to_label : t -> string

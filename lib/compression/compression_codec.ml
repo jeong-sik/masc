@@ -38,6 +38,11 @@ let content_encoding = function
   | Dictionary -> "zstd-dict"
   | Standard -> "zstd"
 
+let legacy_standard_result ~original = function
+  | Unchanged payload -> payload, false
+  | Compressed { payload; encoding = Standard } -> payload, true
+  | Compressed { encoding = Dictionary; _ } -> original, false
+
 let compress ?(level = 3) (data : string) : compress_result =
   let orig_size = String.length data in
   if orig_size < min_size then

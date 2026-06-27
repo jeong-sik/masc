@@ -155,8 +155,10 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
   return stage ? String(stage) : 'offline'
 }
 
-// Transient FSM phases — derived from the closed-sum SSOTs
-// (KeeperPhase: `types/core.ts:1083`, PipelineStage: `types/core.ts:945`).
+// Transient FSM phases — accepted here only after upstream normalization to
+// the closed-sum SSOTs (KeeperPhase: `types/core.ts:1083`, PipelineStage:
+// `types/core.ts:945`). Raw composite wire spellings such as `handing_off`
+// are normalized before this helper sees them.
 // These signal a *transition* (compacting/handoff/draining/restarting) rather
 // than steady-state, so they route to the dedicated `transient` band instead
 // of `active` (which would silently re-merge them with healthy keepers mid-

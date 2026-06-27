@@ -357,10 +357,12 @@ export function formatActiveOverConfigured(
   if (kind === 'keeper') {
     const running = counts.live.keepers
     const paused = counts.live.pausedKeepers
+    const transient = counts.live.transientKeepers
     const offline = counts.live.offlineKeepers
     const configured = counts.configured.keepers
     const parts = [`런타임 가동 ${running}`]
     if (paused > 0) parts.push(`일시정지 ${paused}`)
+    if (transient > 0) parts.push(`전이 ${transient}`)
     if (offline > 0) parts.push(`오프라인 ${offline}`)
     parts.push(`설정 ${configured}`)
     return parts.join(' / ')
@@ -408,6 +410,7 @@ export function formatKeeperRosterCount(counts: Pick<RuntimeCounts, 'live' | 'co
     formatKeeperCountBreakdown({
       liveKeepers: counts.live.keepers,
       pausedKeepers: counts.live.pausedKeepers,
+      transientKeepers: counts.live.transientKeepers,
       offlineKeepers: counts.live.offlineKeepers,
       configuredKeepers: counts.configured.keepers,
     }).replace(/^키퍼 /, ''),
@@ -415,11 +418,13 @@ export function formatKeeperRosterCount(counts: Pick<RuntimeCounts, 'live' | 'co
 }
 
 export function formatRuntimeRosterCount(counts: Pick<RuntimeCounts, 'live' | 'configured'>): string {
-  return [
+  const parts = [
     `상세 ${runtimeDetailRows(counts)}`,
     `런타임 가동 ${counts.live.totalRuntimes}`,
-    `키퍼 설정 ${counts.configured.keepers}`,
-  ].join(' / ')
+  ]
+  if (counts.live.transientKeepers > 0) parts.push(`전이 ${counts.live.transientKeepers}`)
+  parts.push(`키퍼 설정 ${counts.configured.keepers}`)
+  return parts.join(' / ')
 }
 
 export function formatCommandTargetSection(kind: CommandTargetKind, count: number): string {

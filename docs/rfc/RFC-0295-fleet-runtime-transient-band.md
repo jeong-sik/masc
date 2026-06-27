@@ -189,12 +189,16 @@ on implementation PR)** — `opState.phase` is *normalized* by
 `handoff` (single word, types/core.ts:945). Both shapes resolve to the
 `HandingOff` PascalCase SSOT, so they are *the same phase* — but the
 caller-facing literals are not interchangeable. `isTransientPhase` accepts
-both spellings (and the PascalCase) so the band routing is consistent
-regardless of which projection path fires. Pre-flight test:
-`monitoring-runtime.test.ts:288-291` ('handing_off' composite) and
-`monitoring-runtime.test.ts:299-302` ('HandingOff' PascalCase) both pass;
-`'handoff'` only fires through the `pipeline_stage` path (`STAGE_LABELS`
-key, line 84).
+the normalized `KeeperPhase` spellings and the `PipelineStage` spelling
+(`handoff`); raw composite `handing_off` is normalized before arrival by
+`derivePreferredPhase` / `toKeeperPhase`. Band routing is therefore
+consistent regardless of which projection path fires without making the
+helper a second raw-wire parser. Pre-flight test:
+`monitoring-runtime.test.ts:288-291` covers the raw `handing_off` composite
+path through `summarizeKeeperMonitoring`, and
+`monitoring-runtime.test.ts:299-302` covers the `HandingOff` PascalCase path;
+`handoff` only fires through the `pipeline_stage` path (`STAGE_LABELS` key,
+line 84).
 
 The mapping is **phase-first**, not kind-first. `opState.kind` lives on
 a closed sum (`offline`/`paused`/`stuck`/`running` —

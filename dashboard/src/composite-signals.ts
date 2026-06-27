@@ -10,7 +10,7 @@
 
 import { signal } from '@preact/signals'
 
-import type { FleetCompositeSnapshot } from './api/schemas/keeper-composite'
+import type { FleetCompositeSnapshot, KeeperCompositeSnapshot } from './api/schemas/keeper-composite'
 
 interface CompositeTickEnvelope {
   name: string
@@ -23,6 +23,22 @@ export const compositeTick = signal<CompositeTickEnvelope>({
 })
 
 export const fleetCompositeSnapshot = signal<FleetCompositeSnapshot | null>(null)
+
+export function buildCompositeByKeeperKey(
+  snapshot: FleetCompositeSnapshot | null,
+): ReadonlyMap<string, KeeperCompositeSnapshot> {
+  const map = new Map<string, KeeperCompositeSnapshot>()
+  if (!snapshot) return map
+  for (const snap of snapshot.snapshots) {
+    const identityKeys = [snap.keeper, snap.correlation_id]
+    for (const candidate of identityKeys) {
+      if (typeof candidate === 'string' && candidate !== '' && !map.has(candidate)) {
+        map.set(candidate, snap)
+      }
+    }
+  }
+  return map
+}
 
 export function hydrateFleetCompositeSnapshot(payload: unknown): void {
   void import('./api/schemas/keeper-composite')

@@ -73,7 +73,7 @@ import {
 import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
-import { fleetCompositeSnapshot } from '../composite-signals'
+import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
 
 type StatusFilter = 'all' | RuntimeBand
 
@@ -677,13 +677,7 @@ function countAgentsByStatus(
     const keeperRuntime = findKeeperRuntimeForAgent(agent, keeperLookup)
     // RFC-0135 PR-12: pass composite to band derivation so stale
     // blockers are demoted via SSOT instead of inflating attention.
-    const composite =
-      keeperRuntime && compositeByKeeperKey
-        ? compositeByKeeperKey.get(keeperRuntime.name)
-          ?? (typeof keeperRuntime.keeper_id === 'string'
-            ? compositeByKeeperKey.get(keeperRuntime.keeper_id) ?? null
-            : null)
-        : null
+    const composite = compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const band = runtimeBandMetaForAgent(agent, keeperRuntime, composite).key
     counts[band] += 1
   }
@@ -791,19 +785,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   // panel already uses. `.value` access here auto-subscribes the
   // component to SSE-driven updates from `hydrateFleetCompositeSnapshot`.
   const fleetSnapshot = fleetCompositeSnapshot.value
-  const compositeByKeeperKey = useMemo(() => {
-    const map = new Map<string, KeeperCompositeSnapshot>()
-    if (!fleetSnapshot) return map
-    for (const snap of fleetSnapshot.snapshots) {
-      const identityKeys = [snap.keeper, snap.correlation_id]
-      for (const candidate of identityKeys) {
-        if (typeof candidate === 'string' && candidate !== '' && !map.has(candidate)) {
-          map.set(candidate, snap)
-        }
-      }
-    }
-    return map
-  }, [fleetSnapshot])
+  const compositeByKeeperKey = useMemo(() => buildCompositeByKeeperKey(fleetSnapshot), [fleetSnapshot])
 
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
@@ -1015,12 +997,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       ?? findKeeperRuntime(agent.name, runtimeKeeperList)
     const band = bandByAgent.get(agent.name) ?? runtimeBandMeta('attention')
     const compositeForMonitoring: KeeperCompositeSnapshot | null =
-      keeperRuntime
-        ? compositeByKeeperKey.get(keeperRuntime.name)
-          ?? (typeof keeperRuntime.keeper_id === 'string'
-            ? compositeByKeeperKey.get(keeperRuntime.keeper_id) ?? null
-            : null)
-        : null
+      compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime, compositeForMonitoring) : null
     const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
     const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime, compositeForMonitoring) : null
@@ -1037,13 +1014,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     const contextMeta = rosterContextMeta(keeperRuntime ?? null)
     const workPreview = trimText(currentWork, 140) ?? '최근 활동 요약 없음'
     const summaryText = workPreview
-    const compositeForKeeper: KeeperCompositeSnapshot | null = keeperRuntime
-      ? compositeByKeeperKey.get(keeperRuntime.name)
-        ?? (keeperRuntime.keeper_id != null
-          ? compositeByKeeperKey.get(keeperRuntime.keeper_id)
-          : undefined)
-        ?? null
-      : null
+    const compositeForKeeper: KeeperCompositeSnapshot | null =
+      compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const stateNote =
       keeperRuntime
         ? rosterStateNote(

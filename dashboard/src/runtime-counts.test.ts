@@ -424,6 +424,15 @@ describe('formatActiveOverConfigured', () => {
     expect(formatActiveOverConfigured(counts, 'keeper')).toBe('런타임 가동 4 / 일시정지 3 / 설정 24')
   })
 
+  it('includes transient keeper count in keeper formatting when transient keepers exist', () => {
+    const counts = {
+      live: { agents: 0, keepers: 4, pausedKeepers: 1, offlineKeepers: 3, transientKeepers: 2, keeperRows: 10, tasks: 0, totalRuntimes: 4, available: true },
+      configured: { keepers: 10, totalRuntimes: 10, source: 'namespace-truth' as const },
+    }
+    expect(formatActiveOverConfigured(counts, 'keeper'))
+      .toBe('런타임 가동 4 / 일시정지 1 / 전이 2 / 오프라인 3 / 설정 10')
+  })
+
   it('formats runtime totals as "런타임 가동 N / 설정 M"', () => {
     const counts = {
       live: { agents: 3, keepers: 2, pausedKeepers: 0, offlineKeepers: 0, transientKeepers: 0, keeperRows: 2, tasks: 0, totalRuntimes: 5, available: true },
@@ -477,6 +486,17 @@ describe('runtime count role helpers', () => {
       offlineKeepers: 3,
       configuredKeepers: 10,
     })).toBe('키퍼 런타임 가동 4 / 일시정지 1 / 전이 2 / 오프라인 3 / 설정 10')
+  })
+
+  it('formats roster chips with transient rows visible in breakdowns', () => {
+    const transientCounts = {
+      live: { agents: 0, keepers: 4, pausedKeepers: 1, offlineKeepers: 3, transientKeepers: 2, keeperRows: 10, tasks: 0, totalRuntimes: 4, available: true },
+      configured: { keepers: 10, totalRuntimes: 10, source: 'namespace-truth' as const },
+    }
+    expect(formatKeeperRosterCount(transientCounts))
+      .toBe('상세 10 / 런타임 가동 4 / 일시정지 1 / 전이 2 / 오프라인 3 / 설정 10')
+    expect(formatRuntimeRosterCount(transientCounts))
+      .toBe('상세 10 / 런타임 가동 4 / 전이 2 / 키퍼 설정 10')
   })
 
   it('formats roster chips with detail rows, running runtimes, and configured inventory', () => {

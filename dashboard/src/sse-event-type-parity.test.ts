@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 // Cross-boundary parity gate for the SSE event-type strings the dashboard
@@ -25,8 +26,8 @@ import { describe, expect, it } from 'vitest'
 // keystone, tracked separately (MASC task-1478 sibling / RFC-0004 increment).
 //
 // vitest cwd = dashboard/, so backend sources are one level up under ../lib. A
-// wrong path throws ENOENT (loud fail), never a vacuous pass. The closing quote
-// in the assertion anchors the match so a suffix rename ("approval:pending:v2")
+// wrong path throws ENOENT (loud fail), never a vacuous pass. The source parser
+// uses TypeScript AST comparisons, so a suffix rename ("approval:pending:v2")
 // does not satisfy "approval:pending".
 
 // event-type -> the backend .ml that emits the quoted literal.
@@ -54,23 +55,100 @@ const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
     'OAS-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (oas: prefix).',
 }
 
-function parseFeRoutedEventTypes(source: string): Set<string> {
+function sourceFile(fileName: string, source: string): ts.SourceFile {
+  return ts.createSourceFile(fileName, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
+}
+
+function stringLiteralValue(node: ts.Expression): string | null {
+  if (ts.isStringLiteral(node) || ts.isNoSubstitutionTemplateLiteral(node)) return node.text
+  return null
+}
+
+function parseEventConstantValues(source: string): Map<string, string> {
+  const constants = new Map<string, string>()
+  const file = sourceFile('schemas/sse.ts', source)
+
+  function visit(node: ts.Node): void {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.initializer) {
+      const value = stringLiteralValue(node.initializer)
+      if (value) constants.set(node.name.text, value)
+    }
+    ts.forEachChild(node, visit)
+  }
+
+  visit(file)
+  return constants
+}
+
+function isEventTypeRouteExpression(node: ts.Expression): boolean {
+  if (ts.isIdentifier(node)) return node.text === 'routedType'
+  if (
+    ts.isPropertyAccessExpression(node)
+    && node.name.text === 'type'
+    && ts.isIdentifier(node.expression)
+  ) {
+    return node.expression.text === 'event'
+  }
+  if (
+    ts.isCallExpression(node)
+    && ts.isIdentifier(node.expression)
+    && node.expression.text === 'normalizeMascEventType'
+    && node.arguments.length === 1
+  ) {
+    const arg = node.arguments[0]
+    return arg ? isEventTypeRouteExpression(arg) : false
+  }
+  return false
+}
+
+function routedEventValue(
+  routeExpression: ts.Expression,
+  valueExpression: ts.Expression,
+  eventConstants: ReadonlyMap<string, string>,
+): string | null {
+  if (!isEventTypeRouteExpression(routeExpression)) return null
+  const literal = stringLiteralValue(valueExpression)
+  if (literal) return literal
+  if (ts.isIdentifier(valueExpression)) {
+    const value = eventConstants.get(valueExpression.text)
+    if (!value) throw new Error(`unresolved SSE event constant in route: ${valueExpression.text}`)
+    return value
+  }
+  return null
+}
+
+function parseFeRoutedEventTypes(
+  source: string,
+  eventConstants: ReadonlyMap<string, string>,
+): Set<string> {
   // The exact-match routing forms in sse-store.ts:
   //   event.type === 'X'
+  //   event.type === SSE_EVENT_CONSTANT
   //   routedType === 'X'
   //   normalizeMascEventType(event.type) === 'X'
-  const re =
-    /(?:event\.type|routedType|normalizeMascEventType\(event\.type\)) === '([a-zA-Z0-9_:/]+)'/g
   const found = new Set<string>()
-  for (const m of source.matchAll(re)) {
-    const eventType = m[1]
-    if (eventType) found.add(eventType)
+
+  function visit(node: ts.Node): void {
+    if (
+      ts.isBinaryExpression(node)
+      && node.operatorToken.kind === ts.SyntaxKind.EqualsEqualsEqualsToken
+    ) {
+      const leftValue = routedEventValue(node.left, node.right, eventConstants)
+      if (leftValue) found.add(leftValue)
+      const rightValue = routedEventValue(node.right, node.left, eventConstants)
+      if (rightValue) found.add(rightValue)
+    }
+    ts.forEachChild(node, visit)
   }
+
+  visit(sourceFile('sse-store.ts', source))
   return found
 }
 
 const sseStoreSource = readFileSync(resolve(process.cwd(), 'src/sse-store.ts'), 'utf8')
-const feRouted = parseFeRoutedEventTypes(sseStoreSource)
+const sseSchemaSource = readFileSync(resolve(process.cwd(), 'src/schemas/sse.ts'), 'utf8')
+const eventConstants = parseEventConstantValues(sseSchemaSource)
+const feRouted = parseFeRoutedEventTypes(sseStoreSource, eventConstants)
 const classified = new Set([
   ...Object.keys(BACKEND_EMITTED),
   ...Object.keys(FE_ONLY_OR_EXTERNAL),

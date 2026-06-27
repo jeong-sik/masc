@@ -438,7 +438,7 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts ~cr
     ~restart_count
     ~last_restart_ts
     ~crash_log
-    ~update_entry
+    ~update_entry:update_entry_unit
 ;;
 
 (* [dedup_key] is the key under which a board wakeup is deduped. RFC-0239 R4

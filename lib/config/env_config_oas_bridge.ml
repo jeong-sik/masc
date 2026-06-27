@@ -92,8 +92,34 @@ let upper_case s =
     else c)
 ;;
 
+(** Per-caller OAS bridge timeout override for anti-rationalization. Positive
+    finite values set the wrapper budget; [infinity] means no-fire.
+    @category Timeouts @ops_class operator *)
+let anti_rationalization_env_var =
+  "MASC_OAS_BRIDGE_TIMEOUT_ANTI_RATIONALIZATION_SEC"
+;;
+
+(** Per-caller OAS bridge timeout override for the dashboard governance judge.
+    Positive finite values set the wrapper budget; [infinity] means no-fire.
+    @category Timeouts @ops_class operator *)
+let governance_judge_env_var =
+  "MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC"
+;;
+
+(** Per-caller OAS bridge timeout override for the dashboard operator judge.
+    Positive finite values set the wrapper budget; [infinity] means no-fire.
+    @category Timeouts @ops_class operator *)
+let operator_judge_env_var =
+  "MASC_OAS_BRIDGE_TIMEOUT_OPERATOR_JUDGE_SEC"
+;;
+
 let per_caller_env_var ~caller =
-  Printf.sprintf "MASC_OAS_BRIDGE_TIMEOUT_%s_SEC" (upper_case (caller_key caller))
+  match caller with
+  | Anti_rationalization -> anti_rationalization_env_var
+  | Governance_judge -> governance_judge_env_var
+  | Operator_judge -> operator_judge_env_var
+  | Unknown caller ->
+    Printf.sprintf "MASC_OAS_BRIDGE_TIMEOUT_%s_SEC" (upper_case caller)
 ;;
 
 let global_env_var = "MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC"

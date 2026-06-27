@@ -14,7 +14,7 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 374 unique knobs across 9 modules.
+**Total**: 377 unique knobs across 9 modules.
 
 **Typed getter classification**: 44/227 tagged (`operator`: 44, `algorithm`: 0, `unclassified`: 183).
 
@@ -203,11 +203,14 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_KEEPER_SUPERVISOR_MAX_RESTARTS` | typed:int | Thresholds | operator | 17 | Maximum restart attempts before declaring a keeper dead. @category Thresholds @ops_class operator |
 | `MASC_KEEPER_SUPERVISOR_SWEEP_SEC` | typed:float | Timeouts | operator | 29 | Interval between supervisor sweep runs (seconds). @category Timeouts @ops_class operator |
 
-## Env_config_oas_bridge (1 knobs; typed classification 0/0)
+## Env_config_oas_bridge (4 knobs; typed classification 0/0)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 99 |  |
+| `MASC_OAS_BRIDGE_TIMEOUT_ANTI_RATIONALIZATION_SEC` | string_literal | Timeouts | operator | 99 | Per-caller OAS bridge timeout override for anti-rationalization. Positive finite values set the wrapper budget; [infi... |
+| `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 125 |  |
+| `MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC` | string_literal | Timeouts | operator | 106 | Per-caller OAS bridge timeout override for the dashboard governance judge. Positive finite values set the wrapper bud... |
+| `MASC_OAS_BRIDGE_TIMEOUT_OPERATOR_JUDGE_SEC` | string_literal | Timeouts | operator | 113 | Per-caller OAS bridge timeout override for the dashboard operator judge. Positive finite values set the wrapper budge... |
 
 ## Env_config_runtime (114 knobs; typed classification 5/91)
 

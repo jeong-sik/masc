@@ -9,8 +9,9 @@
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
-    Raises [Invalid_argument] when [timeout_s] is not positive or infinite, or
-    when {!Masc_eio_env} has not been initialised. *)
+    Missing {!Masc_eio_env} returns a typed [Internal_contract_rejected] SDK
+    error without running [fn]. Raises [Invalid_argument] only when [timeout_s]
+    is not positive or infinite. *)
 val run_safe
   :  caller:string
   -> timeout_s:float
@@ -20,8 +21,9 @@ val run_safe
 (** [run_unbounded ~caller fn] runs [fn] without a structural timeout.
 
     This is for intentional no-timeout callers only; normal OAS boundaries
-    should use {!run_safe} or {!run_with_caller}.  Requires an initialised
-    {!Masc_eio_env} and preserves the same cancellation and error conversion
+    should use {!run_safe} or {!run_with_caller}.  Missing {!Masc_eio_env}
+    returns a typed [Internal_contract_rejected] SDK error without running [fn],
+    and initialized calls preserve the same cancellation and error conversion
     behaviour as {!run_safe}. *)
 val run_unbounded
   :  caller:string
@@ -35,7 +37,7 @@ val run_unbounded
     env-overridable per-caller budget.  See [Env_config_oas_bridge]
     for the per-caller default table, env-var layout, and invalid-env fallback.
 
-    Inherits the [Invalid_argument] contract from [run_safe].
+    Inherits the timeout validation contract from [run_safe].
     [Env_config_oas_bridge.timeout_sec] clamps non-positive and [nan]
     env overrides to the default and accepts ["infinity"] as no-fire.
     Infinite budgets dispatch through {!run_unbounded}; finite budgets

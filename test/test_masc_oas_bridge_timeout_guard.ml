@@ -17,6 +17,24 @@ let expected_invalid_timeout timeout_s =
        timeout_s)
 ;;
 
+let check_internal_contract_rejected ~label ~reason_contains = function
+  | Ok _ -> Alcotest.failf "%s: expected Internal_contract_rejected error" label
+  | Error err ->
+    (match Keeper_internal_error.classify_masc_internal_error err with
+     | Some (Keeper_internal_error.Internal_contract_rejected { reason }) ->
+       Alcotest.(check bool)
+         (label ^ " reason")
+         true
+         (contains ~needle:reason_contains reason)
+     | Some other ->
+       Alcotest.failf
+         "%s: unexpected internal error kind %s"
+         label
+         (Keeper_internal_error.kind_of_masc_internal_error other)
+     | None ->
+       Alcotest.failf "%s: unexpected SDK error %s" label (Agent_sdk.Error.to_string err))
+;;
+
 let restore_masc_eio_env = function
   | None -> Masc_eio_env.reset_for_test ()
   | Some env ->
@@ -65,16 +83,15 @@ let test_rejects_nan_timeout () =
 let test_rejects_when_eio_env_not_initialized () =
   with_no_masc_eio_env (fun () ->
     let called = ref false in
-    let run () =
+    let result =
       Masc_oas_bridge.run_safe ~caller:"test_timeout_guard" ~timeout_s:0.1 (fun () ->
         called := true;
         Ok "ok")
-      |> ignore
     in
-    Alcotest.check_raises
-      "run_safe raises Invalid_argument when env not initialized"
-      (Invalid_argument "Masc_eio_env.get: not initialized. Call init at server startup.")
-      run;
+    check_internal_contract_rejected
+      ~label:"run_safe missing env"
+      ~reason_contains:"Masc_eio_env is not initialized"
+      result;
     Alcotest.(check bool) "fn was not called" false !called)
 ;;
 
@@ -82,16 +99,15 @@ let test_run_with_caller_rejects_when_eio_env_not_initialized () =
   let caller = Env_config_oas_bridge.Anti_rationalization in
   with_no_masc_eio_env (fun () ->
     let called = ref false in
-    let run () =
+    let result =
       Masc_oas_bridge.run_with_caller ~caller (fun () ->
         called := true;
         Ok "ok")
-      |> ignore
     in
-    Alcotest.check_raises
-      "run_with_caller raises Invalid_argument when env not initialized"
-      (Invalid_argument "Masc_eio_env.get: not initialized. Call init at server startup.")
-      run;
+    check_internal_contract_rejected
+      ~label:"run_with_caller missing env"
+      ~reason_contains:"Masc_eio_env is not initialized"
+      result;
     Alcotest.(check bool) "fn was not called" false !called)
 ;;
 
@@ -131,16 +147,15 @@ let test_run_with_caller_accepts_infinity_env_timeout () =
 let test_run_unbounded_requires_initialized_env () =
   with_no_masc_eio_env (fun () ->
     let called = ref false in
-    let run () =
+    let result =
       Masc_oas_bridge.run_unbounded ~caller:"test_timeout_guard" (fun () ->
         called := true;
         Ok "ok")
-      |> ignore
     in
-    Alcotest.check_raises
-      "run_unbounded raises Invalid_argument when env not initialized"
-      (Invalid_argument "Masc_eio_env.get: not initialized. Call init at server startup.")
-      run;
+    check_internal_contract_rejected
+      ~label:"run_unbounded missing env"
+      ~reason_contains:"Masc_eio_env is not initialized"
+      result;
     Alcotest.(check bool) "fn was not called" false !called)
 ;;
 

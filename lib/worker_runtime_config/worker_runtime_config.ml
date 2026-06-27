@@ -51,45 +51,42 @@ let env_image_opt () =
 let env_host_mcp_base_url_opt () =
   Sys.getenv_opt "MASC_WORKER_RUNTIME_HOST_MCP_BASE_URL" |> trim_opt
 
+let parse_file_config json =
+  let m key src = Option.value ~default:`Null (Json_util.assoc_member_opt key src) in
+  let spawn_json = m "worker_spawn" json in
+  let backend =
+    match m "backend" spawn_json with
+    | `String value -> (
+        match Worker_execution_backend.of_string value with
+        | Some backend -> backend
+        | None -> default.worker_spawn.backend)
+    | _ -> default.worker_spawn.backend
+  in
+  let docker_json = m "docker" spawn_json in
+  let image =
+    match m "image" docker_json with
+    | `String value when String.trim value <> "" -> value
+    | _ -> default.worker_spawn.docker.image
+  in
+  let host_mcp_base_url =
+    match m "host_mcp_base_url" docker_json with
+    | `String value ->
+        let trimmed = String.trim value in
+        if trimmed = "" then None else Some trimmed
+    | _ -> None
+  in
+  { worker_spawn = { backend; docker = { image; host_mcp_base_url } } }
+
 let load_file_config path =
   if Sys.file_exists path then
-    try
-      let json = Safe_ops.read_json_eio path in
-        let m key src = Option.value ~default:`Null (Json_util.assoc_member_opt key src) in
-        let spawn_json = m "worker_spawn" json in
-        let backend =
-          match m "backend" spawn_json with
-          | `String value -> (
-              match Worker_execution_backend.of_string value with
-              | Some backend -> backend
-              | None -> default.worker_spawn.backend)
-          | _ -> default.worker_spawn.backend
-        in
-        let docker_json = m "docker" spawn_json in
-        let image =
-          match m "image" docker_json with
-          | `String value when String.trim value <> "" -> value
-          | _ -> default.worker_spawn.docker.image
-        in
-        let host_mcp_base_url =
-          match m "host_mcp_base_url" docker_json with
-          | `String value ->
-              let trimmed = String.trim value in
-              if trimmed = "" then None else Some trimmed
-          | _ -> None
-        in
-        {
-          worker_spawn =
-            {
-              backend;
-              docker = { image; host_mcp_base_url };
-            };
-        }
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | exn ->
-        Log.CmdPlane.warn "worker-runtime config malformed at %s: %s" path
-          (Printexc.to_string exn);
+    match Safe_ops.read_json_file_safe path with
+    | Ok (`Assoc _ as json) -> parse_file_config json
+    | Ok _ ->
+        Log.CmdPlane.warn
+          "worker-runtime config malformed at %s: expected JSON object" path;
+        malformed_fail_closed
+    | Error msg ->
+        Log.CmdPlane.warn "worker-runtime config malformed at %s: %s" path msg;
         malformed_fail_closed
   else default
 

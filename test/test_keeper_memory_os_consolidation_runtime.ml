@@ -3,6 +3,7 @@
 
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
+module Consolidation = Masc.Keeper_memory_os_consolidation
 module Runtime = Masc.Keeper_memory_os_consolidation_runtime
 module Atypes = Agent_sdk.Types
 
@@ -41,16 +42,6 @@ let message_text (message : Atypes.message) =
     | Atypes.Text s -> Some s
     | _ -> None)
   |> String.concat "\n"
-;;
-
-let contains_substring ~needle text =
-  let needle_len = String.length needle in
-  let text_len = String.length text in
-  let rec loop index =
-    index + needle_len <= text_len
-    && (String.equal (String.sub text index needle_len) needle || loop (index + 1))
-  in
-  String.equal needle "" || loop 0
 ;;
 
 let fake_complete canned : Runtime.complete_fn =
@@ -281,32 +272,38 @@ let test_consolidate_rejects_malformed_fact_store () =
         | _ -> Alcotest.fail "expected Unparseable for malformed fact store"))))
 ;;
 
-let test_consolidate_respects_configured_max_tokens () =
+let test_consolidate_respects_provider_config_and_prompt_template () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
       with_prompts (fun () ->
       with_temp_keepers (fun () ->
         let keeper_id = "keeper-1" in
-        List.iter
-          (Io.append_fact ~keeper_id)
-          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        let facts = [ fact "a"; fact "b"; fact "c"; fact "d" ] in
+        List.iter (Io.append_fact ~keeper_id) facts;
         let seen_max_tokens = ref None in
         let plan =
           {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"ab","category":"fact"}],"drop_indices":[]}|}
         in
         let seen_response_format = ref None in
-        let seen_bare_object_contract = ref false in
+        let seen_prompt_matches_template = ref false in
+        let expected_prompt =
+          match
+            Prompt_registry.render_prompt_template
+              Masc.Keeper_prompt_names.librarian_memory_consolidation
+              [ "numbered_facts", Consolidation.render_numbered_facts facts ]
+          with
+          | Ok text -> String.trim text
+          | Error msg -> Alcotest.failf "failed to render expected prompt: %s" msg
+        in
         let complete =
           fake_complete_with_config
             (fun config messages ->
                seen_max_tokens := config.Llm_provider.Provider_config.max_tokens;
                seen_response_format := Some config.Llm_provider.Provider_config.response_format;
-               let rendered_prompt = messages |> List.map message_text |> String.concat "\n" in
-               seen_bare_object_contract
-               := contains_substring
-                    ~needle:"Return exactly one JSON object"
-                    rendered_prompt
-                  && contains_substring ~needle:"Do not wrap" rendered_prompt)
+               let rendered_prompt =
+                 messages |> List.map message_text |> String.concat "\n" |> String.trim
+               in
+               seen_prompt_matches_template := String.equal expected_prompt rendered_prompt)
             plan
         in
         let outcome =
@@ -331,9 +328,9 @@ let test_consolidate_respects_configured_max_tokens () =
           (Some true)
           (Option.map (fun format -> format = Atypes.JsonMode) !seen_response_format);
         Alcotest.(check bool)
-          "prompt carries bare JSON object contract"
+          "prompt registry output is passed through verbatim"
           true
-          !seen_bare_object_contract))))
+          !seen_prompt_matches_template))))
 ;;
 
 let () =
@@ -346,9 +343,9 @@ let () =
 	        ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
 	        ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store
         ; Alcotest.test_case
-            "respects configured max_tokens cap"
+            "respects provider config and prompt template"
             `Quick
-            test_consolidate_respects_configured_max_tokens
+            test_consolidate_respects_provider_config_and_prompt_template
 	        ] )
     ]
 ;;

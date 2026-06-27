@@ -77,11 +77,6 @@ module Compression : sig
       data shorter than 256 bytes is kept as-is.  Raw zstd
       compression is delegated to {!Compression_codec}, which owns
       compression failure diagnostics. *)
-  val compress_zstd_result
-    :  original:string
-    -> Compression_codec.compress_result
-    -> string * bool
-
   val compress_zstd : ?level:int -> string -> string * bool
 
   (** [compress_zstd_result ~original result] adapts the shared codec result to

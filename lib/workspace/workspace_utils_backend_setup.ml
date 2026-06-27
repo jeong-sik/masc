@@ -269,7 +269,7 @@ let backend_config_for base_path =
 let create_backend cfg =
   let filesystem_fallback reason =
     Log.Backend.warn "%s Falling back to Memory backend." reason;
-    Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.Backend_types.cluster_name))
+    Ok (Memory (Backend.Memory.get_or_create ~base_path:cfg.Backend_types.base_path))
   in
   let fs_usable fs =
     try
@@ -354,7 +354,7 @@ let build_default_config base_path =
     | Error e ->
         Log.Backend.warn "Backend init failed (%s). Falling back to Memory."
           (Backend_types.show_error e);
-        Memory (Backend.Memory.get_or_create ~base_path:backend_config.cluster_name)
+        Memory (Backend.Memory.get_or_create ~base_path:backend_config.base_path)
   in
   {
     base_path = resolved_path;  (* Use resolved path (git root for worktrees) *)

@@ -74,7 +74,7 @@ let create_default () = create ()
 (** {1 Internal Helpers} *)
 
 let with_lock t f =
-  Eio.Mutex.use_rw ~protect:true t.mutex (fun () -> f ())
+  Eio_guard.with_mutex t.mutex f
 
 (** Write a breaker back to the map. *)
 let put_breaker t breaker =
@@ -310,18 +310,29 @@ let wrap_result t ~agent_id (f : unit -> 'a) : ('a, string) result =
 
 (** {1 Global Instance}
 
-    Uses [Eio.Lazy] instead of [Stdlib.Lazy] because [Lazy.force] is not
-    fiber-safe: concurrent forcing raises [CamlinternalLazy.Undefined].
-    [Eio.Lazy] blocks the second caller until init completes.
-    [cancel:`Protect] ensures init finishes even if the forcing fiber
-    is cancelled. *)
+    The singleton is read from tests and startup paths that can run before an
+    Eio scheduler exists, so it must not force [Eio.Lazy].  Use a
+    cross-context Atomic+Stdlib.Mutex memo instead of [Stdlib.Lazy.force]. *)
 
-let global = Eio.Lazy.from_fun ~cancel:`Protect create_default
+let global_cache : t option Atomic.t = Atomic.make None
+let global_mu = Mutex.create ()
 
-let check_global ~agent_id = check (Eio.Lazy.force global) ~agent_id
-let record_failure_global ~agent_id ~reason = record_failure (Eio.Lazy.force global) ~agent_id ~reason
-let record_success_global ~agent_id = record_success (Eio.Lazy.force global) ~agent_id
+let global () =
+  match Atomic.get global_cache with
+  | Some t -> t
+  | None ->
+      Mutex.protect global_mu (fun () ->
+        match Atomic.get global_cache with
+        | Some t -> t
+        | None ->
+            let t = create_default () in
+            Atomic.set global_cache (Some t);
+            t)
+
+let check_global ~agent_id = check (global ()) ~agent_id
+let record_failure_global ~agent_id ~reason = record_failure (global ()) ~agent_id ~reason
+let record_success_global ~agent_id = record_success (global ()) ~agent_id
 let force_open_global ~agent_id ~reason ~duration_sec =
-  force_open (Eio.Lazy.force global) ~agent_id ~reason ~duration_sec
-let force_close_global ~agent_id = force_close (Eio.Lazy.force global) ~agent_id
-let get_status_global ~agent_id = get_status (Eio.Lazy.force global) ~agent_id
+  force_open (global ()) ~agent_id ~reason ~duration_sec
+let force_close_global ~agent_id = force_close (global ()) ~agent_id
+let get_status_global ~agent_id = get_status (global ()) ~agent_id

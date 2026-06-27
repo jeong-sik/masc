@@ -81,6 +81,9 @@ let rec rm_rf path =
     end else
       Sys.remove path
 
+let inherited_env_base suffix =
+  Filename.concat (Filename.get_temp_dir_name ()) ("workspace-utils-" ^ suffix)
+
 (* capture_stderr removed — legacy warning tests removed in workspace flat-path cleanup *)
 
 let test_resolve_masc_base_path_ignores_inherited_env_in_test_by_default () =
@@ -98,7 +101,7 @@ let test_resolve_masc_base_path_ignores_inherited_env_in_test_by_default () =
   write_file (Filename.concat worktree_path ".git")
     (Printf.sprintf "gitdir: %s\n" branch_gitdir);
   with_envs
-    [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+    [ ("MASC_BASE_PATH", Some (inherited_env_base "inherited-worktree"));
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "requested git root wins in tests" repo_root
@@ -109,7 +112,7 @@ let test_resolve_masc_base_path_prefers_requested_path_in_test () =
     Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-requested"
   in
   with_envs
-    [ ("MASC_BASE_PATH", Some "/Users/dancer/me");
+    [ ("MASC_BASE_PATH", Some (inherited_env_base "inherited-requested"));
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
     (fun () ->
       check string "requested path wins in tests" requested
@@ -156,7 +159,7 @@ let test_resolve_masc_base_path_ignores_base_path_override_without_opt_in () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-opt-in"
   in
-  let explicit = "/Users/dancer/me" in
+  let explicit = inherited_env_base "inherited-opt-in" in
   with_envs
     [ ("MASC_BASE_PATH", Some explicit);
       ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
@@ -548,6 +551,34 @@ let test_list_dir_prefers_backend_for_memory_keys () =
       check (list string) "memory backend ignores local-only stale files"
         [ "backend.json" ] listed)
 
+let test_default_config_memory_fallback_isolated_by_base_path () =
+  let first = Filename.temp_dir "workspace-utils-memory-first" "" in
+  let second = Filename.temp_dir "workspace-utils-memory-second" "" in
+  Fun.protect
+    ~finally:(fun () ->
+      Workspace_utils.reset_default_config_cache ();
+      rm_rf first;
+      rm_rf second)
+    (fun () ->
+      Workspace_utils.reset_default_config_cache ();
+      let cfg_first = Workspace_utils.default_config first in
+      let cfg_second = Workspace_utils.default_config second in
+      let first_workers =
+        Filename.concat (Workspace_utils.masc_root_dir cfg_first) "workers"
+      in
+      let second_workers =
+        Filename.concat (Workspace_utils.masc_root_dir cfg_second) "workers"
+      in
+      Workspace_utils.write_json cfg_first
+        (Filename.concat first_workers "only-first.json")
+        (`Assoc [ ("base", `String "first") ]);
+      check (list string) "first backend sees its write"
+        [ "only-first.json" ]
+        (Workspace_utils.list_dir cfg_first first_workers);
+      check (list string) "second backend is isolated"
+        []
+        (Workspace_utils.list_dir cfg_second second_workers))
+
 (* ============================================================
    Test Runners
    ============================================================ *)
@@ -662,5 +693,7 @@ let () =
       test_case "masc_root_dir nested with cluster" `Quick test_masc_root_dir_with_cluster_nested;
       test_case "list_dir prefers backend for memory keys" `Quick
         test_list_dir_prefers_backend_for_memory_keys;
+      test_case "memory fallback isolated by base path" `Quick
+        test_default_config_memory_fallback_isolated_by_base_path;
     ];
   ]

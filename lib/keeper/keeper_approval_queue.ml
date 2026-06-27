@@ -74,6 +74,13 @@ let read_recent_audit_raw store limit =
 
 let approval_audit_resolved_event = "resolved"
 
+let approval_audit_decision_kind = function
+  | Approval_resolved Agent_sdk.Hooks.Approve -> "approve"
+  | Approval_resolved (Agent_sdk.Hooks.Reject _) -> "reject"
+  | Approval_resolved (Agent_sdk.Hooks.Edit _) -> "edit"
+  | Approval_expired _ -> "reject"
+;;
+
 let keeper_audit_metric_label = function
   | Some keeper when String.trim keeper <> "" -> keeper
   | Some _ | None -> "aggregate"
@@ -153,8 +160,11 @@ let audit_approval_event
       ?decision
       ()
   =
-  let decision =
-    decision |> Option.map approval_audit_decision_to_string |> Option.value ~default:""
+  let decision, decision_kind =
+    match decision with
+    | None -> "", None
+    | Some decision ->
+      approval_audit_decision_to_string decision, Some (approval_audit_decision_kind decision)
   in
   match get_audit_store ~base_path () with
   | None -> ()
@@ -185,6 +195,9 @@ let audit_approval_event
             | None -> [])
          @ (match source_approval_id with
             | Some approval_id -> [ "source_approval_id", `String approval_id ]
+            | None -> [])
+         @ (match decision_kind with
+            | Some kind -> [ "decision_kind", `String kind ]
             | None -> [])
          @
          match auto_approved with
@@ -270,6 +283,33 @@ let json_member_or_null key json =
   | None -> `Null
 ;;
 
+let closed_decision_kind_of_string value =
+  match String.trim value with
+  | "approve" -> Some "approve"
+  | "reject" -> Some "reject"
+  | "edit" -> Some "edit"
+  | _ -> None
+;;
+
+let legacy_decision_kind_of_string value =
+  let value = String.trim value in
+  match closed_decision_kind_of_string value with
+  | Some _ as kind -> kind
+  | None when String.starts_with ~prefix:"reject:" value -> Some "reject"
+  | None -> None
+;;
+
+let resolved_approval_decision_kind json =
+  match
+    Safe_ops.json_string_opt "decision_kind" json
+    |> Option.bind closed_decision_kind_of_string
+  with
+  | Some _ as kind -> kind
+  | None ->
+    Safe_ops.json_string_opt "decision" json
+    |> Option.bind legacy_decision_kind_of_string
+;;
+
 let resolved_approval_json_of_audit_event json =
   let resolved_at = Safe_ops.json_float_opt "ts" json in
   `Assoc
@@ -278,6 +318,7 @@ let resolved_approval_json_of_audit_event json =
     ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
     ; "risk_level", `String (Safe_ops.json_string ~default:"" "risk" json)
     ; "decision", Json_util.string_opt_to_json_trimmed (Safe_ops.json_string_opt "decision" json)
+    ; "decision_kind", Json_util.string_opt_to_json_trimmed (resolved_approval_decision_kind json)
     ; "resolved_at", Json_util.float_opt_to_json resolved_at
     ; ( "resolved_at_iso",
         match resolved_at with

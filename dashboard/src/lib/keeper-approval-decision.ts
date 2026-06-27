@@ -21,7 +21,7 @@ export function normalizeKeeperResolvedApprovalDecision(
 ): KeeperResolvedApprovalDecision {
   const value = raw?.trim()
   if (value === 'approve') return 'approve'
-  if (value === 'reject' || value?.startsWith('reject:')) return 'reject'
+  if (value === 'reject') return 'reject'
   if (value === 'edit') return 'edit'
   return 'unknown'
 }

@@ -61,7 +61,7 @@ async function loadSurface(
   }))
   vi.doMock('../../api/dashboard-governance', () => ({
     decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
-    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue)),
+    fetchDashboardGovernance: vi.fn().mockResolvedValue(responseWithQueue(approval_queue, recent_resolved)),
     fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
     resolveGovernanceApproval,
     deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),

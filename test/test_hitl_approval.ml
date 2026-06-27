@@ -1365,7 +1365,7 @@ let test_list_recent_resolved_json_projects_resolved_history () =
   let keeper_name = "resolved-history-target" in
   AQ.audit_approval_event ~base_path ~event_type:"resolved" ~id:"target-resolved"
     ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
-    ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
+    ~decision:(AQ.Approval_resolved (Agent_sdk.Hooks.Reject "operator denied")) ();
   for i = 1 to 64 do
     AQ.audit_approval_event ~base_path ~event_type:"pending"
       ~id:(Printf.sprintf "pending-noise-%02d" i)
@@ -1379,7 +1379,10 @@ let test_list_recent_resolved_json_projects_resolved_history () =
     Alcotest.(check string) "keeper name" keeper_name (json |> member "keeper_name" |> to_string);
     Alcotest.(check string) "tool name" "tool_search_files" (json |> member "tool_name" |> to_string);
     Alcotest.(check string) "risk level" "medium" (json |> member "risk_level" |> to_string);
-    Alcotest.(check string) "decision" "approve" (json |> member "decision" |> to_string);
+    Alcotest.(check string) "decision" "reject:operator denied"
+      (json |> member "decision" |> to_string);
+    Alcotest.(check string) "decision kind" "reject"
+      (json |> member "decision_kind" |> to_string);
     Alcotest.(check bool) "resolved_at float present" true
       (json |> member "resolved_at" |> to_float > 0.0);
     Alcotest.(check bool) "resolved_at_iso present" true

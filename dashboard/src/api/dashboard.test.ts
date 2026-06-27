@@ -1343,7 +1343,16 @@ describe('fetchDashboardGovernance', () => {
             tool_name: 'fs_write',
             risk_level: 'medium',
             decision: 'reject:operator denied',
+            decision_kind: 'reject',
             resolved_at_iso: '2026-06-27T01:02:03Z',
+          },
+          {
+            id: 'appr-legacy',
+            keeper_name: 'keeper-a',
+            tool_name: 'shell_exec',
+            risk_level: 'high',
+            decision: 'reject:legacy reason',
+            resolved_at_iso: '2026-06-27T01:03:03Z',
           },
         ],
       }), {
@@ -1364,6 +1373,15 @@ describe('fetchDashboardGovernance', () => {
         decision: 'reject',
         decision_raw: 'reject:operator denied',
         resolved_at: '2026-06-27T01:02:03Z',
+      }),
+      expect.objectContaining({
+        id: 'appr-legacy',
+        keeper_name: 'keeper-a',
+        tool_name: 'shell_exec',
+        risk_level: 'high',
+        decision: 'unknown',
+        decision_raw: 'reject:legacy reason',
+        resolved_at: '2026-06-27T01:03:03Z',
       }),
     ])
     expect(result.recent_resolved?.[0]).not.toHaveProperty('requested_at')

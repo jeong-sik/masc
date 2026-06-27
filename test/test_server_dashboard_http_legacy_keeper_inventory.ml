@@ -2,7 +2,23 @@
 
 module Inventory = Server_dashboard_http_legacy_keeper_inventory
 
-let fresh_dir prefix = Filename.temp_dir prefix ""
+let rec rm_rf path =
+  match Unix.lstat path with
+  | exception Unix.Unix_error _ -> ()
+  | { Unix.st_kind = Unix.S_DIR; _ } ->
+    Sys.readdir path
+    |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+    (try Unix.rmdir path with
+     | Unix.Unix_error _ -> ())
+  | _ ->
+    (try Unix.unlink path with
+     | Unix.Unix_error _ -> ())
+;;
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_dir prefix "" in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+;;
 
 let ensure_dir path =
   if not (Sys.file_exists path) then Unix.mkdir path 0o755
@@ -68,7 +84,7 @@ let entry_classes json =
 ;;
 
 let test_classifies_legacy_paths_and_dry_run_candidates () =
-  let base = fresh_dir "masc-legacy-keeper-inventory" in
+  with_temp_dir "masc-legacy-keeper-inventory" @@ fun base ->
   let legacy = Filename.concat (Filename.concat base ".masc") "keepers" in
   let current = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
   ensure_dir (Filename.concat base ".masc");
@@ -85,6 +101,7 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
   write_file (Filename.concat legacy "alpha/facts.jsonl") "{}\n";
   write_file (Filename.concat current "alpha.facts.jsonl") "{}\n";
   write_file (Filename.concat legacy "alpha/metrics/2026.jsonl") "{}\n";
+  write_file (Filename.concat legacy "alpha/metrics/data.tmp") "runtime scratch";
   write_file (Filename.concat legacy "mystery.bin") "?";
   let json =
     Inventory.legacy_keeper_inventory_http_json
@@ -124,6 +141,10 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
     true
     (List.mem ("alpha/metrics/2026.jsonl", "live") (entry_classes json));
   Alcotest.(check bool)
+    "tmp under runtime store stays live"
+    true
+    (List.mem ("alpha/metrics/data.tmp", "live") (entry_classes json));
+  Alcotest.(check bool)
     "unknown file classified"
     true
     (List.mem ("mystery.bin", "unknown") (entry_classes json));
@@ -156,7 +177,7 @@ let test_classifies_legacy_paths_and_dry_run_candidates () =
 ;;
 
 let test_scan_cap_marks_truncation () =
-  let base = fresh_dir "masc-legacy-keeper-inventory-cap" in
+  with_temp_dir "masc-legacy-keeper-inventory-cap" @@ fun base ->
   let legacy = Filename.concat (Filename.concat base ".masc") "keepers" in
   ensure_dir (Filename.concat base ".masc");
   ensure_dir legacy;
@@ -174,7 +195,7 @@ let test_scan_cap_marks_truncation () =
 ;;
 
 let test_reports_scan_errors_for_invalid_legacy_root () =
-  let base = fresh_dir "masc-legacy-keeper-inventory-error" in
+  with_temp_dir "masc-legacy-keeper-inventory-error" @@ fun base ->
   let masc = Filename.concat base ".masc" in
   ensure_dir masc;
   write_file (Filename.concat masc "keepers") "not a directory";

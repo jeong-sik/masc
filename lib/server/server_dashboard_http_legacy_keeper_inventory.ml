@@ -39,13 +39,25 @@ type scan_result =
 let default_max_depth = 4
 let default_max_entries = 5_000
 
+(* HTTP response schema constants. Keep these stable for dashboard clients and
+   tests that inspect the JSON contract. *)
+let class_live = "live"
+let class_migrated = "migrated"
+let class_orphaned = "orphaned"
+let class_backup = "backup"
+let class_unknown = "unknown"
+let cleanup_candidate_policy = "not_available_until_owner_verified"
+let cleanup_candidate_source = "inventory_only"
+
 let class_to_string = function
-  | Live -> "live"
-  | Migrated -> "migrated"
-  | Orphaned -> "orphaned"
-  | Backup -> "backup"
-  | Unknown -> "unknown"
+  | Live -> class_live
+  | Migrated -> class_migrated
+  | Orphaned -> class_orphaned
+  | Backup -> class_backup
+  | Unknown -> class_unknown
 ;;
+
+let inventory_classes = [ Live; Migrated; Orphaned; Backup; Unknown ]
 
 let normalize_path path =
   path
@@ -323,18 +335,31 @@ let scan_error_to_json (error : scan_error) =
     ]
 ;;
 
+module Class_map = Map.Make (struct
+    type t = inventory_class
+
+    let compare = Stdlib.compare
+  end)
+
 let class_totals entries =
-  let classes = [ Live; Migrated; Orphaned; Backup; Unknown ] in
-  classes
+  let counts =
+    List.fold_left
+      (fun counts entry ->
+         let count, bytes =
+           match Class_map.find_opt entry.classification counts with
+           | Some totals -> totals
+           | None -> 0, 0
+         in
+         Class_map.add entry.classification (count + 1, bytes + entry.bytes) counts)
+      Class_map.empty
+      entries
+  in
+  inventory_classes
   |> List.map (fun cls ->
     let count, bytes =
-      List.fold_left
-        (fun (count, bytes) entry ->
-           if entry.classification = cls
-           then count + 1, bytes + entry.bytes
-           else count, bytes)
-        (0, 0)
-        entries
+      match Class_map.find_opt cls counts with
+      | Some totals -> totals
+      | None -> 0, 0
     in
     class_to_string cls, `Assoc [ "count", `Int count; "bytes", `Int bytes ])
 ;;
@@ -343,8 +368,8 @@ let cleanup_plan_json () =
   `Assoc
     [ "delete_allowed", `Bool false
     ; "requires_operator_approval", `Bool true
-    ; "candidate_policy", `String "not_available_until_owner_verified"
-    ; "candidate_source", `String "inventory_only"
+    ; "candidate_policy", `String cleanup_candidate_policy
+    ; "candidate_source", `String cleanup_candidate_source
     ]
 ;;
 

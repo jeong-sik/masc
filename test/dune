@@ -2184,15 +2184,16 @@
 
 ; RFC-0084 host-config-cleanup-F — test-mode predicate migration.
 ; Pins `String.starts_with ~prefix:"test_"` literal count at 0 in
-; lib/config_dir_resolver/config_dir_resolver.ml, asserts helper signature is
-; unit->bool (no executable_name param), and verifies Host_config.is_test_mode is
-; called from the migrated site. Cross-checks is_test_mode round-trip.
-; Requires masc_test_deps for Masc.Host_config.is_test_mode.
+; Masc_test_deps.config_dir_resolver_source_path, asserts helper signature is
+; unit->bool (no executable_name param), and verifies Host_config.is_test_mode
+; is called from the migrated site. Cross-checks is_test_mode round-trip.
+; Requires masc_test_deps for Masc.Host_config.is_test_mode and ast_grep for
+; structural source ratchets.
 
 (test
  (name test_pr_f_test_mode_migration)
  (modules test_pr_f_test_mode_migration)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ast_grep))
 
 ; RFC-0084 host-config-cleanup-C — coreutils path migration.
 ; Pins 0 occurrences of the 6 absolute coreutils literals in
@@ -2203,7 +2204,7 @@
 (test
  (name test_pr_c_coreutils_migration)
  (modules test_pr_c_coreutils_migration)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ast_grep))
 
 ; RFC-0084 host-config-cleanup-B — shell binary path migration.
 ; Pins 0 occurrences of /bin/bash and /bin/zsh literals across
@@ -2213,7 +2214,7 @@
 (test
  (name test_pr_b_shell_paths_migration)
  (modules test_pr_b_shell_paths_migration)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ast_grep))
 
 ; RFC-0084 host-config-cleanup-D — agent runtime root migration.
 ; Pins 0 occurrences of /tmp/.masc_agent[_mcp]_<sid> literals
@@ -2223,7 +2224,7 @@
 (test
  (name test_pr_d_agent_runtime_migration)
  (modules test_pr_d_agent_runtime_migration)
- (libraries masc_test_deps))
+ (libraries masc_test_deps ast_grep))
 
 ; server_bootstrap_loops fork helper ratchet.
 ; Pins raw Eio.Fiber.fork ownership to the cancel-safe helper instead

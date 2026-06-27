@@ -69,6 +69,13 @@ let count_calls ~module_path ~callee =
     !count
 ;;
 
+let count_calls_across_files ~module_paths ~callee =
+  List.fold_left
+    (fun acc module_path -> acc + count_calls ~module_path ~callee)
+    0
+    module_paths
+;;
+
 (* Count value-binding patterns ([let name = ...] or [let rec name = ...])
    whose identifier equals [name] exactly.  Catches the *identifier* —
    the axis [count_string_literals] cannot see, because identifiers are
@@ -90,6 +97,37 @@ let count_value_bindings ~module_path ~name =
              | Ppat_var { txt; _ } when txt = name -> incr count
              | _ -> ());
             Ast_iterator.default_iterator.pat self p)
+      }
+    in
+    iter.structure iter structure;
+    !count
+;;
+
+let count_value_bindings_with_unit_arg ~module_path ~name =
+  match parse_implementation module_path with
+  | Error _ -> 0
+  | Ok structure ->
+    let count = ref 0 in
+    let has_unit_arg (expr : Parsetree.expression) =
+      match expr.pexp_desc with
+      | Pexp_function (param :: _, _, _) ->
+        (match param.pparam_desc with
+         | Pparam_val (_, _, pat) ->
+           (match pat.ppat_desc with
+            | Ppat_construct ({ txt = Lident "()"; _ }, _) -> true
+            | _ -> false)
+         | Pparam_newtype _ -> false)
+      | _ -> false
+    in
+    let iter =
+      { Ast_iterator.default_iterator with
+        value_binding =
+          (fun self vb ->
+            (match vb.pvb_pat.ppat_desc with
+             | Ppat_var { txt; _ } when txt = name && has_unit_arg vb.pvb_expr ->
+               incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.value_binding self vb)
       }
     in
     iter.structure iter structure;
@@ -157,4 +195,11 @@ let count_string_literals ~module_path ~needle =
     in
     iter.structure iter structure;
     !count
+;;
+
+let count_string_literals_across_files ~module_paths ~needle =
+  List.fold_left
+    (fun acc module_path -> acc + count_string_literals ~module_path ~needle)
+    0
+    module_paths
 ;;

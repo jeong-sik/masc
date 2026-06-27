@@ -34,53 +34,15 @@ let pinned_zsh_literal_count = 0
 let pinned_bash_binding_count = 0
 let pinned_zsh_binding_count = 0
 
-let repo_path relative =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> Filename.concat root relative
-  | None -> relative
-;;
-
-let read_file path =
-  let path = if Filename.is_relative path then repo_path path else path in
-  match In_channel.with_open_text path In_channel.input_all with
-  | exception exn ->
-      Alcotest.failf
-        "failed to read source path %S: %s"
-        path
-        (Printexc.to_string exn)
-  | content -> content
-;;
-
-let count_substring ~haystack ~needle =
-  let rec loop i acc =
-    let next = String.index_from_opt haystack i needle.[0] in
-    match next with
-    | None -> acc
-    | Some j ->
-      let len = String.length needle in
-      if j + len <= String.length haystack
-         && String.sub haystack j len = needle
-      then loop (j + len) (acc + 1)
-      else loop (j + 1) acc
-  in
-  loop 0 0
-;;
-
-let count_across_files ~files ~needle =
-  List.fold_left
-    (fun acc path ->
-      acc + count_substring ~haystack:(read_file path) ~needle)
-    0 files
-;;
-
 let execute_consumer_files = [ "lib/keeper/keeper_tool_execute_runtime.ml" ]
 
 let zsh_consumer_files = []
 
 let test_no_bash_literals_in_consumer_files () =
   let occurrences =
-    count_across_files ~files:execute_consumer_files
-      ~needle:{|"/bin/bash"|}
+    Ast_grep.count_string_literals_across_files
+      ~module_paths:execute_consumer_files
+      ~needle:"/bin/bash"
   in
   (check int)
     "literal `\"/bin/bash\"` in keeper consumer files must be 0 after PR-B"
@@ -89,8 +51,9 @@ let test_no_bash_literals_in_consumer_files () =
 
 let test_no_zsh_literals_in_consumer_files () =
   let occurrences =
-    count_across_files ~files:zsh_consumer_files
-      ~needle:{|"/bin/zsh"|}
+    Ast_grep.count_string_literals_across_files
+      ~module_paths:zsh_consumer_files
+      ~needle:"/bin/zsh"
   in
   (check int)
     "literal `\"/bin/zsh\"` in keeper consumer files must be 0 after PR-B"
@@ -99,8 +62,9 @@ let test_no_zsh_literals_in_consumer_files () =
 
 let test_execute_binding_invoked_exactly_once () =
   let occurrences =
-    count_across_files ~files:execute_consumer_files
-      ~needle:"(Host_config.host ()).host_bash"
+    Ast_grep.count_calls_across_files
+      ~module_paths:execute_consumer_files
+      ~callee:"Host_config.host"
   in
   (check int)
     "Host_config.host_bash binding is no longer needed by Execute consumers"
@@ -109,8 +73,9 @@ let test_execute_binding_invoked_exactly_once () =
 
 let test_zsh_binding_invoked_per_module () =
   let occurrences =
-    count_across_files ~files:zsh_consumer_files
-      ~needle:"Host_config.host ()"
+    Ast_grep.count_calls_across_files
+      ~module_paths:zsh_consumer_files
+      ~callee:"Host_config.host"
   in
   (check int)
     "Host_config.host zsh binding is no longer needed by Execute consumers"

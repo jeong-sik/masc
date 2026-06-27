@@ -26,57 +26,26 @@ open Alcotest
 let pinned_literal_count = 0
 let pinned_host_config_invocations = 1
 
-let repo_path relative =
-  match Sys.getenv_opt "DUNE_SOURCEROOT" with
-  | Some root -> Filename.concat root relative
-  | None -> relative
-;;
-
-let read_file path =
-  let path = if Filename.is_relative path then repo_path path else path in
-  match In_channel.with_open_text path In_channel.input_all with
-  | exception exn ->
-      Alcotest.failf
-        "failed to read source path %S: %s"
-        path
-        (Printexc.to_string exn)
-  | content -> content
-;;
-
-let count_substring ~haystack ~needle =
-  let rec loop i acc =
-    let next = String.index_from_opt haystack i needle.[0] in
-    match next with
-    | None -> acc
-    | Some j ->
-      let len = String.length needle in
-      if j + len <= String.length haystack
-         && String.sub haystack j len = needle
-      then loop (j + len) (acc + 1)
-      else loop (j + 1) acc
-  in
-  loop 0 0
-;;
-
 let test_no_coreutils_literals_in_shell_ops () =
-  let content =
-    String.concat "\n"
-      (List.map
-         read_file
-         [
-           "lib/keeper/keeper_workspace_ops.ml";
-           "lib/keeper/keeper_workspace_read_ops.ml";
-           "lib/keeper/keeper_workspace_ops_setup.ml";
-         ])
+  let module_paths =
+    [
+      "lib/keeper/keeper_workspace_ops.ml";
+      "lib/keeper/keeper_workspace_read_ops.ml";
+      "lib/keeper/keeper_workspace_ops_setup.ml";
+    ]
   in
   let needles =
-    [ {|"/bin/pwd"|}; {|"/bin/ls"|}; {|"/bin/cat"|}
-    ; {|"/usr/bin/head"|}; {|"/usr/bin/tail"|}; {|"/usr/bin/wc"|}
+    [ "/bin/pwd"; "/bin/ls"; "/bin/cat"
+    ; "/usr/bin/head"; "/usr/bin/tail"; "/usr/bin/wc"
     ]
   in
   let total =
     List.fold_left
-      (fun acc needle -> acc + count_substring ~haystack:content ~needle)
+      (fun acc needle ->
+        acc
+        + Ast_grep.count_string_literals_across_files
+            ~module_paths
+            ~needle)
       0 needles
   in
   (check int)
@@ -86,10 +55,10 @@ let test_no_coreutils_literals_in_shell_ops () =
 ;;
 
 let test_single_host_config_invocation () =
-  let content = read_file "lib/keeper/keeper_workspace_ops_setup.ml" in
   let occurrences =
-    count_substring ~haystack:content
-      ~needle:"Host_config.host"
+    Ast_grep.count_calls
+      ~module_path:"lib/keeper/keeper_workspace_ops_setup.ml"
+      ~callee:"Host_config.host"
   in
   (check int)
     "Host_config.host must be invoked exactly once \

@@ -54,19 +54,21 @@ let decision_string_field json key =
   Yojson.Safe.Util.member "decision" json |> fun decision ->
   string_field decision key
 
+let masc_root ~base_path = Config_dir_resolver.masc_root ~base_path
+
 let receipts_dir ~base_path ~keeper =
-  List.fold_left Filename.concat base_path
-    [ ".masc"; "keepers"; keeper; "execution-receipts" ]
+  List.fold_left Filename.concat (masc_root ~base_path)
+    [ "keepers"; keeper; "execution-receipts" ]
 
 let runtime_manifests_dir ~base_path ~keeper =
-  List.fold_left Filename.concat base_path
-    [ ".masc"; "keepers"; keeper; "runtime-manifests" ]
+  List.fold_left Filename.concat (masc_root ~base_path)
+    [ "keepers"; keeper; "runtime-manifests" ]
 
 let logs_dir ~base_path =
-  List.fold_left Filename.concat base_path [ ".masc"; "logs" ]
+  List.fold_left Filename.concat (masc_root ~base_path) [ "logs" ]
 
 let tool_calls_dir ~base_path =
-  List.fold_left Filename.concat base_path [ ".masc"; "tool_calls" ]
+  List.fold_left Filename.concat (masc_root ~base_path) [ "tool_calls" ]
 
 (** Naive substring check — avoids pulling in [Str] for one call. *)
 let contains_substring s sub =

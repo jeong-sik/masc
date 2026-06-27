@@ -93,7 +93,7 @@ let test_contract_blocker_marks_attention () =
   check
     (option string)
     "reason"
-    (Some "completion_contract_result:surface_mismatch")
+    (Some "surface_mismatch")
     attention.cra_reason
 ;;
 
@@ -154,7 +154,7 @@ let test_passive_budget_exhaustion_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "completion_contract_result:passive_only")
+    (Some "passive_only")
     attention.cra_reason
 ;;
 
@@ -170,7 +170,7 @@ let test_completed_passive_receipt_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "completion_contract_result:passive_only")
+    (Some "passive_only")
     attention.cra_reason
 ;;
 
@@ -186,7 +186,7 @@ let test_not_dispatched_budget_exhaustion_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "completion_contract_result:not_dispatched")
+    (Some "not_dispatched")
     attention.cra_reason
 ;;
 

@@ -20,6 +20,21 @@ module Cap = Masc.Keeper_tool_capability_axis
    context, so wrap each Alcotest body in Eio_main.run. *)
 let with_eio f () = Eio_main.run @@ fun _env -> f ()
 
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then (
+      Sys.readdir path |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+
+let with_temp_config f =
+  let base_path = Filename.temp_file "test_no_progress_loop_" "" in
+  Unix.unlink base_path;
+  Unix.mkdir base_path 0o755;
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_path)
+    (fun () -> f (Masc.Workspace.default_config base_path))
+
 let detected_count keeper =
   Metrics.metric_value_or_zero
     "masc_keeper_no_progress_loop_detected_total"
@@ -477,6 +492,52 @@ let test_scope_message_internal_textonly_accrues_streak () =
     "internal scope-message prose without evidence accrues streak" 4
     (D.current_streak ~keeper_name:k)
 
+(* task-5 keeper-stability: a passive-only turn that observed no actionable
+   work and did not own an active task is legitimately idle. It must not accrue
+   the no-progress streak even when the surface otherwise requires evidence.
+   The exemption applies to any tool classified as [Passive_status] by
+   [Keeper_tool_progress.classify_tool_progress], including peer-surface tools
+   when no work/owned task exists. *)
+let test_passive_only_no_work_does_not_accrue () =
+  D.reset_all_for_test ();
+  let k = "passive-no-work" in
+  (* The classifier uses [claimable_task_count] to decide whether there is an
+     actionable signal, so [unclaimed_task_count] is omitted here. *)
+  let observation =
+    { scheduled_observation with
+      claimable_task_count = 0
+    }
+  in
+  let is_legitimate tool_calls had_owned_active_task =
+    Success.legitimate_no_work_passive_only
+      ~observation
+      ~tool_calls
+      ~had_owned_active_task
+  in
+  Alcotest.(check bool) "passive-only no-work is legitimate" true
+    (is_legitimate [ ("keeper_surface_read", None) ] false);
+  Alcotest.(check bool) "owned active task breaks legitimacy" false
+    (is_legitimate [ ("keeper_surface_read", None) ] true);
+  Alcotest.(check bool) "actionable signal breaks legitimacy" false
+    (Success.legitimate_no_work_passive_only
+       ~observation:{ observation with claimable_task_count = 1 }
+       ~tool_calls:[ ("keeper_surface_read", None) ]
+       ~had_owned_active_task:false);
+  (* [classify_tool_progress] currently treats [tool_execute] as [Passive_status],
+     so the negative case for a non-passive tool uses a claim tool instead. *)
+  Alcotest.(check bool) "non-passive tool breaks legitimacy" false
+    (is_legitimate [ (List.hd Cap.claim_task_tool_names, None) ] false);
+  for _ = 1 to D.threshold () do
+    let surface_requires_evidence = true in
+    record_turn ~keeper_name:k
+      ~made_progress:
+        (D.turn_made_progress ~strong_evidence:false ~surface_requires_evidence
+         || is_legitimate [ ("keeper_surface_read", None) ] false)
+    |> ignore_outcome
+  done;
+  Alcotest.(check int) "streak stays 0" 0 (D.current_streak ~keeper_name:k)
+;;
+
 (* RFC-0239 / audit D1·D3: the no-progress detector reads the typed outcome
    recorded on each tool call, not just the tool name. *)
 module Outcome = Keeper_tool_outcome
@@ -491,6 +552,67 @@ let no_eligible_outcome =
           ; all_goals_excluded = false
           }
     }
+
+let make_meta name : Masc.Keeper_meta_contract.keeper_meta =
+  match
+    Masc_test_deps.meta_of_json_fixture
+      (`Assoc
+          [ "name", `String name
+          ; "trace_id", `String ("trace-" ^ name)
+          ; "goal", `String "test no-progress detector"
+          ])
+  with
+  | Ok meta -> meta
+  | Error err -> Alcotest.fail ("meta fixture failed: " ^ err)
+
+let prompt_metrics =
+  Masc.Keeper_agent_prompt_metrics.build_prompt_metrics ~system_prompt:""
+    ~dynamic_context:"" ~user_message:""
+
+let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
+  { actual_input_tokens = None
+  ; display_total_tokens = 0
+  ; estimated_known_tokens = 0
+  ; segments = []
+  }
+
+let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =
+  { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
+  ; config_root = ""
+  ; runtime_config_path = None
+  }
+
+let tool_call ?typed_outcome tool_name : Masc.Keeper_agent_result.tool_call_detail =
+  { tool_name
+  ; provider = "test"
+  ; outcome = "ok"
+  ; typed_outcome
+  ; latency_ms = 0.0
+  ; task_id = None
+  ; route_evidence = None
+  }
+
+let run_result tool_calls : Masc.Keeper_agent_run.run_result =
+  { response_text = ""
+  ; model_used = "test-model"
+  ; prompt_metrics
+  ; ctx_composition
+  ; runtime_observation = None
+  ; turn_count = 1
+  ; usage = Masc.Inference_utils.zero_usage
+  ; usage_reported = true
+  ; tool_calls
+  ; checkpoint = None
+  ; trace_ref = None
+  ; run_validation = None
+  ; stop_reason = Runtime_agent.Completed
+  ; inference_telemetry = None
+  ; tool_surface
+  ; pre_dispatch_compacted = false
+  ; pre_dispatch_compaction_trigger = None
+  ; pre_dispatch_compaction_before_tokens = None
+  ; pre_dispatch_compaction_after_tokens = None
+  }
 
 (* audit D3: a [Task_claim] turn is exempt only when a claim bound work. A claim
    that typed [No_eligible_tasks] did not bind work (the sangsu claim-idle loop,
@@ -541,6 +663,33 @@ let test_sangsu_claim_idle_loop_accrues () =
   Alcotest.(check bool) "claim that bound work stays exempt" true
     (D.turn_made_progress ~strong_evidence:false
        ~surface_requires_evidence:(not (Success.claim_bound_work bound)))
+
+let test_apply_loop_detectors_passive_only_no_work_does_not_accrue () =
+  D.reset_all_for_test ();
+  with_temp_config @@ fun config ->
+  let keeper = "apply-passive-no-work" in
+  let meta = make_meta keeper in
+  let result = run_result [ tool_call "keeper_surface_read" ] in
+  for _ = 1 to D.threshold () do
+    ignore
+      (Success.apply_loop_detectors ~config ~observation:scheduled_observation
+         ~meta meta result)
+  done;
+  Alcotest.(check int) "production detector path keeps passive no-work at zero" 0
+    (D.current_streak ~keeper_name:keeper)
+
+let test_apply_loop_detectors_claim_no_eligible_accrues () =
+  D.reset_all_for_test ();
+  with_temp_config @@ fun config ->
+  let keeper = "apply-claim-no-eligible" in
+  let meta = make_meta keeper in
+  let claim = List.hd Cap.claim_task_tool_names in
+  let result = run_result [ tool_call ~typed_outcome:no_eligible_outcome claim ] in
+  ignore
+    (Success.apply_loop_detectors ~config ~observation:scheduled_observation ~meta
+       meta result);
+  Alcotest.(check int) "production detector path accrues typed no-eligible claim" 1
+    (D.current_streak ~keeper_name:keeper)
 
 (* RFC-0289 / SSOT: [Keeper_tool_outcome.is_nonprogress] is the single owner of
    the outcome gate (previously inlined in [typed_outcome_is_nonprogress], now a
@@ -604,12 +753,21 @@ let () =
           Alcotest.test_case
             "R3 scope-message internal prose accrues streak"
             `Quick (with_eio test_scope_message_internal_textonly_accrues_streak);
+          Alcotest.test_case
+            "passive-only no-work does not accrue streak (task-5)"
+            `Quick (with_eio test_passive_only_no_work_does_not_accrue);
           Alcotest.test_case "claim exemption is outcome-aware (D3)"
             `Quick test_claim_outcome_aware_exemption;
           Alcotest.test_case "strong evidence drops typed-failure completions (D1)"
             `Quick test_strong_evidence_outcome_aware;
           Alcotest.test_case "sangsu claim-idle loop accrues streak"
             `Quick test_sangsu_claim_idle_loop_accrues;
+          Alcotest.test_case
+            "apply_loop_detectors passive-only no-work stays reset"
+            `Quick (with_eio test_apply_loop_detectors_passive_only_no_work_does_not_accrue);
+          Alcotest.test_case
+            "apply_loop_detectors typed no-eligible claim accrues"
+            `Quick (with_eio test_apply_loop_detectors_claim_no_eligible_accrues);
           Alcotest.test_case "is_nonprogress 4-arm mapping (RFC-0289 SSOT)"
             `Quick test_is_nonprogress_branches;
         ] );

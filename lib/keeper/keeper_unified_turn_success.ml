@@ -193,7 +193,38 @@ let claim_bound_work (calls : (string * Keeper_tool_outcome.t option) list) =
     calls
 ;;
 
-let apply_loop_detectors ~config ~observation updated_meta result =
+let legitimate_no_work_passive_only
+      ~observation
+      ~(tool_calls : (string * Keeper_tool_outcome.t option) list)
+      ~had_owned_active_task
+  =
+  let actionable_signal =
+    Keeper_contract_classifier.classify_actionable_signal
+      (Keeper_contract_classifier.of_keeper_world_observation observation)
+  in
+  let passive_status_tool name =
+    match Keeper_tool_progress.classify_tool_progress name with
+    | Keeper_tool_progress.Passive_status -> true
+    | Keeper_tool_progress.Claim_context
+    | Keeper_tool_progress.Execution
+    | Keeper_tool_progress.Completion -> false
+  in
+  let non_material_outcome_effect name outcome =
+    match Keeper_tool_progress.classify_tool_progress_with_outcome name outcome with
+    | Keeper_tool_progress.Streak_increment
+    | Keeper_tool_progress.Streak_reset_and_empty_queue_sleep _ -> true
+    | Keeper_tool_progress.Streak_reset -> false
+  in
+  (not had_owned_active_task)
+  && tool_calls <> []
+  && List.for_all
+       (fun (name, outcome) ->
+          passive_status_tool name && non_material_outcome_effect name outcome)
+       tool_calls
+  && actionable_signal = Keeper_contract_classifier.No_actionable_signal
+;;
+
+let apply_loop_detectors ~config ~observation ~meta updated_meta result =
   (* RFC-0239 §3 R3 / RFC-0276 §3.2: feed the loop detector a semantic
      no-progress verdict derived from observed turn facts, not the LLM
      self-declared header. A turn makes progress if it produced durable
@@ -232,10 +263,18 @@ let apply_loop_detectors ~config ~observation updated_meta result =
     | (Peer_only | User_facing | Internal_prose) as delivery ->
       delivery_requires_evidence delivery
   in
+  let had_owned_active_task_at_turn_start =
+    Option.is_some meta.Keeper_meta_contract.current_task_id
+  in
+  let legitimate_no_work_passive_only =
+    legitimate_no_work_passive_only ~observation ~tool_calls:calls_with_outcomes
+      ~had_owned_active_task:had_owned_active_task_at_turn_start
+  in
   let made_progress =
     Keeper_no_progress_loop_detector.turn_made_progress
       ~strong_evidence
       ~surface_requires_evidence
+    || legitimate_no_work_passive_only
   in
   let threshold_override =
     no_work_budget_threshold_override
@@ -285,6 +324,10 @@ module For_testing = struct
   let delivery_requires_evidence = delivery_requires_evidence
   let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
   let claim_bound_work = claim_bound_work
+
+  let legitimate_no_work_passive_only = legitimate_no_work_passive_only
+
+  let apply_loop_detectors = apply_loop_detectors
 end
 
 let append_metrics_snapshot
@@ -639,7 +682,7 @@ let handle
       result
   in
   let updated_meta =
-    apply_loop_detectors ~config ~observation updated_meta result
+    apply_loop_detectors ~config ~observation ~meta updated_meta result
   in
   append_metrics_snapshot
     ~config

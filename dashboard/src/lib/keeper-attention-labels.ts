@@ -92,9 +92,10 @@ const TRUST_RUNTIME_FAILURE_ALIASES: ReadonlySet<string> = new Set([
 ])
 
 // Mirrors the completion_contract_result arms that
-// keeper_runtime_trust_snapshot.ml can promote into an attention_reason via
-// `completion_contract_result:<reason>`. The satisfied_* receipt results are
-// intentionally absent because they are not attention reasons.
+// keeper_runtime_trust_snapshot.ml can promote into an attention_reason, either
+// as bare tokens or via the legacy `completion_contract_result:<reason>`
+// composite form. The satisfied_* receipt results are intentionally absent
+// because they are not attention reasons.
 export const ATTENTION_COMPLETION_CONTRACT_RESULTS = [
   'violated',
   'claim_only_after_owned_task',
@@ -106,8 +107,6 @@ export const ATTENTION_COMPLETION_CONTRACT_RESULTS = [
   'no_capable_provider',
 ] as const
 export type AttentionCompletionContractResult = typeof ATTENTION_COMPLETION_CONTRACT_RESULTS[number]
-export type CompletionContractAttentionReason =
-  `completion_contract_result:${AttentionCompletionContractResult}`
 
 const COMPLETION_CONTRACT_ATTENTION_REASON_LABELS: Record<AttentionCompletionContractResult, string> = {
   violated: '완료 계약 위반',
@@ -128,8 +127,7 @@ export function isAttentionCompletionContractResult(
 
 export function completionContractAttentionReasonLabel(reason: string): string | null {
   const prefix = 'completion_contract_result:'
-  if (!reason.startsWith(prefix)) return null
-  const result = reason.slice(prefix.length)
+  const result = reason.startsWith(prefix) ? reason.slice(prefix.length) : reason
   if (!isAttentionCompletionContractResult(result)) return null
   return COMPLETION_CONTRACT_ATTENTION_REASON_LABELS[result]
 }

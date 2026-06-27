@@ -249,7 +249,10 @@ let run_keepalive_unified_turn
            Keeper_registry.record_skip_reasons
              ~base_path:ctx.config.base_path
              meta_after_triage.name
-             ~reasons:verdict_strs
+             ~reasons:verdict_strs;
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_after_triage.name
          | Runtime_backpressured { runtime_id; reason } ->
            record_runtime_backpressure_observation
              ~base_path:ctx.config.base_path

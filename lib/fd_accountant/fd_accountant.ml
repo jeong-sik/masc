@@ -74,7 +74,7 @@ type fd_holding_state =
 type slot_state =
   { cap : int
   ; sem : Eio.Semaphore.t
-  ; mutex : Eio.Mutex.t
+  ; mutex : Stdlib.Mutex.t
   ; mutable holding_state : fd_holding_state
   ; mutable next_hold_id : int
   }
@@ -92,7 +92,7 @@ let _state_for_kind : (kind * slot_state) list =
       let cap = read_cap kind in
       (kind, { cap
               ; sem = Eio.Semaphore.make cap
-              ; mutex = Eio.Mutex.create ()
+              ; mutex = Stdlib.Mutex.create ()
               ; holding_state = Idle
               ; next_hold_id = 0
               }))
@@ -100,15 +100,16 @@ let _state_for_kind : (kind * slot_state) list =
 
 let state_of kind = List.assoc kind _state_for_kind
 
-(* Typed-state transitions under the per-slot mutex.  The mutex scope is one
-   record update; it does not span the caller's [f ()] so contention is
-   bounded.  [Eio.Mutex.use_rw ~protect:true] is the runtime contract here:
-   this accountant is installed in Eio server paths, and cancellation while
-   entering/leaving the state machine must not strand the lock. *)
+(* Typed-state transitions under the per-slot mutex. The mutex scope is one
+   record update and this state is read by both Eio fibers and worker domains,
+   so use [Stdlib.Mutex] rather than an Eio-owned mutex. *)
 (* Internal per-slot state-record form.  Not exported -- callers
    go through the kind-level entry points below. *)
+let with_slot_mutex state f =
+  Stdlib.Mutex.protect state.mutex f
+
 let mark_acquire_slot state =
-  Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
+  with_slot_mutex state (fun () ->
       let hold_id = state.next_hold_id in
       state.next_hold_id <- hold_id + 1;
       let acquired_at = Unix.gettimeofday () in
@@ -116,13 +117,13 @@ let mark_acquire_slot state =
       hold_id)
 
 let mark_release_slot state ~hold_id =
-  Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
+  with_slot_mutex state (fun () ->
       match state.holding_state with
       | Idle -> ()
       | In_flight _ -> state.holding_state <- Idle)
 
 let read_holding_slot state =
-  Eio.Mutex.use_rw ~protect:true state.mutex (fun () ->
+  with_slot_mutex state (fun () ->
       match state.holding_state with
       | Idle -> 0 | In_flight _ -> 1)
 

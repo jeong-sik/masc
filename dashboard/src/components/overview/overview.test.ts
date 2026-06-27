@@ -568,7 +568,7 @@ describe('deriveKeeperAttentionReason', () => {
   it('humanizes known completion-contract composite reason codes', () => {
     const reason = deriveKeeperAttentionReason(makeKeeper({
       name: 'composite',
-      attention_reason: 'completion_contract_result:passive_only',
+      attention_reason: 'passive_only',
     }))
     expect(reason.text).toBe('수동 응답만 있음')
   })

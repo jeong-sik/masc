@@ -250,7 +250,10 @@ let run_direct_empty_no_progress_retry_loop
       ~remaining_turn_budget_s
       ~current_turn_phase_elapsed_ms
       ~now_s
-      ~setup_retry_runtime
+      ~(setup_retry_runtime :
+         string ->
+         (Keeper_turn_runtime_budget.runtime_execution, Agent_sdk.Error.sdk_error)
+         result)
       ~publish_cascade_resolution
       ~emit_runtime_selected
       ~emit_runtime_rotation
@@ -1014,17 +1017,50 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
             in
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
+	            let direct_history_messages =
+	              let (_session, ctx_opt) =
+	                Keeper_context_runtime.load_context_from_checkpoint
+	                  ~max_checkpoint_messages:
+	                    meta.compaction.max_checkpoint_messages
+	                  ~trace_id:
+	                    (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+	                  ~primary_model_max_tokens:max_runtime_context
+	                  ~base_dir
+	              in
+	              match ctx_opt with
+	              | None -> []
+	              | Some ctx ->
+	                Keeper_context_runtime.messages_of_context ctx
+	                |> Keeper_context_core.repair_broken_tool_call_pairs
+	            in
 	            let direct_prompt_for_estimate =
-	              build_turn_prompt ~base_system_prompt ~messages:[]
+	              build_turn_prompt
+	                ~base_system_prompt
+	                ~messages:direct_history_messages
+	            in
+	            let direct_dynamic_context =
+	              Keeper_run_prompt.dynamic_context_with_recent_failures
+	                ~keeper_name:meta.name
+	                direct_prompt_for_estimate.dynamic_context
+	            in
+	            let direct_user_message_for_estimate =
+	              Keeper_run_prompt.sanitize_user_message message
 	            in
 	            let direct_prompt_metrics =
 	              Keeper_agent_run.build_prompt_metrics
 	                ~system_prompt:direct_prompt_for_estimate.system_prompt
-	                ~dynamic_context:direct_prompt_for_estimate.dynamic_context
-	                ~user_message:message
+	                ~dynamic_context:direct_dynamic_context
+	                ~user_message:direct_user_message_for_estimate
 	            in
 	            let direct_prompt_estimated_input_tokens =
-	              max 1 direct_prompt_metrics.estimated_total_tokens
+	              Keeper_run_prompt.estimate_input_tokens
+	                ~prompt_metrics:direct_prompt_metrics
+	                ~system_prompt:direct_prompt_for_estimate.system_prompt
+	                ~dynamic_context:direct_dynamic_context
+	                ~memory_context:""
+	                ~temporal_context:""
+	                ~user_message:direct_user_message_for_estimate
+	                ~history_messages:direct_history_messages
 	            in
 	            let run_result, latency_ms =
 	              Keeper_context_runtime.timed (fun () ->
@@ -1151,6 +1187,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                                     fail_open_err)
 		                                ~error_message:
 		                                  (Agent_sdk.Error.to_string fail_open_err)
+		                                ~degraded_retry_applied:true
 		                                ~degraded_retry_runtime:retry.next_runtime
 		                                ~fallback_reason:retry.fallback_reason
 		                                ~runtime_rotation_attempts:

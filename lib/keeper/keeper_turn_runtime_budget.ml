@@ -138,13 +138,14 @@ let prepare_degraded_retry_allowed
       ~next_runtime:(Some retry.next_runtime)
       ~attempt
       err;
-    emit_runtime_selected ~runtime_id:retry.next_runtime ~fallback_reason:reason;
-    emit_runtime_rotation
-      ~from_runtime:current_runtime_id
-      ~to_runtime:retry.next_runtime
-      ~reason;
     (match setup_runtime retry.next_runtime with
-     | Ok next -> Degraded_retry_prepared { retry; reason; next }
+     | Ok next ->
+       emit_runtime_selected ~runtime_id:retry.next_runtime ~fallback_reason:reason;
+       emit_runtime_rotation
+         ~from_runtime:current_runtime_id
+         ~to_runtime:retry.next_runtime
+         ~reason;
+       Degraded_retry_prepared { retry; reason; next }
      | Error fail_open_err ->
        Degraded_retry_setup_failed { retry; reason; fail_open_err })
 

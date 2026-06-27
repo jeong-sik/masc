@@ -958,12 +958,12 @@ let test_prepare_degraded_retry_reports_setup_failure () =
       (Agent_sdk.Error.to_string setup_err)
       (Agent_sdk.Error.to_string fail_open_err);
     Alcotest.(check (list (pair string string)))
-      "runtime-selected metric emitted after non-empty target"
-      [ "runtime.fallback", "empty_no_progress" ]
+      "no runtime-selected metric on setup failure"
+      []
       (List.rev !selected);
     Alcotest.(check (list (triple string string string)))
-      "rotation metric emitted after non-empty target"
-      [ "runtime.direct-empty", "runtime.fallback", "empty_no_progress" ]
+      "no rotation metric on setup failure"
+      []
       (List.rev !rotated);
     (match List.rev !published with
      | [ (_runtime_id, decision, reason, next_runtime, attempt) ] ->

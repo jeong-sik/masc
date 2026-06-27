@@ -35,6 +35,23 @@ val render_recent_failure_context :
     keeper's recent tool failure signatures. Returns [""] when there is no
     recent failure memory. *)
 
+val dynamic_context_with_recent_failures :
+  keeper_name:string -> string -> string
+(** Append the bounded recent-failure prompt block exactly as turn dispatch
+    does before computing prompt metrics. *)
+
+val estimate_input_tokens :
+  prompt_metrics:Keeper_agent_prompt_metrics.prompt_metrics ->
+  system_prompt:string ->
+  dynamic_context:string ->
+  memory_context:string ->
+  temporal_context:string ->
+  user_message:string ->
+  history_messages:Agent_sdk.Types.message list ->
+  int
+(** Shared pre-call input-token estimate used by retry budget checks and
+    normal turn prompt construction. *)
+
 val build_turn_context
   :  ctx:Keeper_run_context.run_context
   -> build_turn_prompt:(base_system_prompt:string -> messages:Agent_sdk.Types.message list -> Keeper_agent_prompt_metrics.turn_prompt)

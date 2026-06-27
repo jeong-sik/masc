@@ -480,6 +480,7 @@ let keeper_phase_snapshot ?base_path () =
           match entry.phase with
           | Keeper_state_machine.Running ->
             {
+              acc with
               counts = { counts with running = counts.running + 1; executable };
               running_names = entry.name :: acc.running_names;
               recovering_names;
@@ -775,7 +776,6 @@ let public_health_diagnostic_preview ?base_path ~keeper_name text =
 
 let blocked_keeper_detail_json
     ?base_path
-    ?phase
     ?phase_detail
     ~keeper_bootstrap_enabled
     ~bootable_set
@@ -787,6 +787,7 @@ let blocked_keeper_detail_json
   let is_bootable = String_set.mem name bootable_set in
   let is_capacity = String_set.mem name capacity_set in
   let has_read_error = String_set.mem name read_error_set in
+  let phase = Option.map (fun detail -> detail.phase) phase_detail in
   let last_failure =
     match base_path with
     | None -> None
@@ -853,7 +854,9 @@ let blocked_keeper_detail_json
           public_health_diagnostic_preview ?base_path ~keeper_name:name
         in
         [
-          ("last_failure_reason", Json_util.string_opt_to_json detail.last_failure_reason);
+          ( "last_failure_reason"
+          , Json_util.string_opt_to_json
+              (Option.map diagnostic_preview detail.last_failure_reason) );
           ("last_error", Json_util.string_opt_to_json (Option.map diagnostic_preview detail.last_error));
           ("restart_count", `Int detail.restart_count);
           ("dead_since_ts", Json_util.float_opt_to_json detail.dead_since_ts);

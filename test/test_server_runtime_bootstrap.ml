@@ -1096,7 +1096,19 @@ let mark_keeper_dead_with_registry_cause config
   Keeper_registry.record_restart ~base_path meta.name;
   Keeper_registry.record_restart ~base_path meta.name;
   Keeper_registry.set_failure_reason ~base_path meta.name
-    (Some (Keeper_registry.Fiber_unresolved Keeper_registry.Cancelled_by_parent));
+    (Some
+       (Keeper_registry.Provider_runtime_error
+          {
+            code = "provider_http_500";
+            detail =
+              Printf.sprintf
+                "provider cancelled with sk-testsecret at %s/private/provider.json"
+                base_path;
+            provider_id = Some "runpod";
+            http_status = Some 500;
+            runtime_id = Some "runtime-a";
+            reason = None;
+          }));
   Keeper_registry.set_last_error_entry ~base_path ~name:meta.name
     (Printf.sprintf
        "synthetic cancelled by parent sk-testsecret at %s/private/state.json"
@@ -2076,9 +2088,19 @@ let test_health_json_exposes_dead_keeper_registry_cause () =
           Alcotest.(check string) "health suggests dead keeper recovery"
             "inspect_dead_keeper_root_cause"
             (detail |> member "action" |> to_string);
-          Alcotest.(check string) "health surfaces registry failure reason"
-            "fiber_unresolved(cancelled_by_parent)"
-            (detail |> member "last_failure_reason" |> to_string);
+          let last_failure_reason =
+            detail |> member "last_failure_reason" |> to_string
+          in
+          Alcotest.(check bool) "health preserves failure reason class" true
+            (contains_substring last_failure_reason "provider_runtime_error");
+          Alcotest.(check bool) "health redacts failure reason token" false
+            (contains_substring last_failure_reason "sk-testsecret");
+          Alcotest.(check bool) "health redacts failure reason base path" false
+            (contains_substring last_failure_reason config.Workspace.base_path);
+          Alcotest.(check bool) "health marks redacted failure reason" true
+            (contains_substring last_failure_reason "[REDACTED]");
+          Alcotest.(check bool) "health marks redacted failure reason path" true
+            (contains_substring last_failure_reason "[REDACTED_PATH]");
           let last_error = detail |> member "last_error" |> to_string in
           Alcotest.(check bool) "health preserves last error class" true
             (contains_substring last_error "synthetic cancelled by parent");

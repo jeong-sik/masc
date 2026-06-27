@@ -199,7 +199,7 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
        let summary_after_unsubscribe =
          EB.drain ~site:"test_after_unsubscribe" t
        in
-       check int "captured subscription removed" 1 summary_after_unsubscribe.event_count)
+       check int "captured subscription removed" 0 summary_after_unsubscribe.event_count)
 ;;
 
 let temp_dir prefix =

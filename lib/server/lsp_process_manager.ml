@@ -61,16 +61,7 @@ let lang_of_path file_path =
 
 (** Check that an executable exists on [PATH]. *)
 let command_exists cmd =
-  try
-    let _ = Unix.getenv "PATH" in
-    let paths = String.split_on_char ':' (Unix.getenv "PATH") in
-    List.exists
-      (fun dir ->
-         let full = Filename.concat dir cmd in
-         Sys.file_exists full)
-      paths
-  with
-  | Not_found -> false
+  Executable_path.path_has_executable cmd
 ;;
 
 (** Allocate a fresh JSON-RPC request ID for this process. *)

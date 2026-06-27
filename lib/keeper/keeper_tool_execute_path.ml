@@ -168,32 +168,8 @@ let resolve_tool_read_path
         ~raw_for_error:raw_path
         ~projected_path
 
-let executable_file path =
-  try
-    let st = Unix.stat path in
-    st.Unix.st_kind = Unix.S_REG
-    &&
-    (Unix.access path [ Unix.X_OK ];
-     true)
-  with
-  | Unix.Unix_error _ | Sys_error _ -> false
-
-let path_has_executable name =
-  match Sys.getenv_opt "PATH" with
-  | None -> false
-  | Some path ->
-    path
-    |> String.split_on_char ':'
-    |> List.exists (fun dir ->
-      (* Do not mirror the shell's empty-PATH current-directory fallback
-         for keeper probes; only explicit directories are trusted. *)
-      dir <> "" && executable_file (Filename.concat dir name))
-
 let shell_command_available name =
-  let name = String.trim name in
-  if name = "" then false
-  else if String.contains name '/' then executable_file name
-  else path_has_executable name
+  Executable_path.command_available name
 
 let normalize_for_containment path =
   Keeper_alerting_path.normalize_path_for_check path

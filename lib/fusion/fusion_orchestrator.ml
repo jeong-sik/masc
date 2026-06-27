@@ -17,18 +17,11 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
   | Fusion_types.Allow req ->
     (match Fusion_policy.find_preset policy req.Fusion_types.preset with
      | None ->
-       (* 게이트가 preset 존재를 이미 검증했으므로 도달 불가. 방어적으로 Denied. *)
        Fusion_metrics.record_invocation ~topology `Denied;
        Denied (Fusion_types.Preset_unknown req.Fusion_types.preset)
      | Some vp ->
-          (* RFC-0280: find_preset가 검증된 preset을 돌려준다 — invariant 재검증 불필요.
-             raw preset으로 coerce해 필드를 읽는다(read-only). *)
           let preset = Fusion_policy.Validated_preset.preset vp in
-          (* 프롬프트·타임아웃은 preset(=config)에서. 코드 default 없음 — config 로드
-             시 Missing_prompt로 fail-fast 검증됨. *)
           let groups = preset.Fusion_policy.panels in
-          (* req.web_tools를 각 그룹에 fold-in: effective group web_tools = req || group.
-             Fusion_panel.run은 순수하게 그룹 설정만 신뢰한다. *)
           let effective_groups =
             List.map
               (fun (g : Fusion_policy.panel_group) ->
@@ -43,16 +36,11 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               ~outer_timeout_s:(Fusion_policy.panel_outer_timeout_of groups)
               ~groups:effective_groups ~prompt:req.Fusion_types.prompt ()
           in
-          (* 심판은 preset당 1개이므로 web_tools/max_tool_calls를 그룹들에서 derive한다 —
-             단일 그룹(legacy desugar)이면 오늘과 byte-identical(req||group, 그룹 값). *)
           let judge_web_tools =
             Fusion_policy.judge_web_tools_of ~req_web_tools:req.Fusion_types.web_tools
               groups
           in
           let judge_max_tool_calls = Fusion_policy.judge_tool_budget_of groups in
-          (* 단일 심판 thunk — Simple/Refine/Conditional이 쓰는 preset.judge 1회 실행.
-             thunk라 JOJ 위상은 이를 호출하지 않는다(JOJ는 자기 judges로 fan-out하므로
-             단일 심판 호출이 낭비/오답). 각 분기에서 최대 1회 호출. *)
           let run_single_judge () =
             Fusion_judge.run ~sw ~net
               ~timeout_s:preset.Fusion_policy.judge_timeout_s
@@ -62,13 +50,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools
               ~max_tool_calls:judge_max_tool_calls ()
           in
-          (* refine 헬퍼: 1차 종합 (s1,u1)을 2차 심판이 재검토하고 두 usage를 합산한다.
-             canonical result와 실행 노드 관측([judge_outcome list], RFC-0284)을 함께
-             만든다 — canonical은 downstream(chat 결론/wake/board headline)이 쓰고, 노드는
-             대시보드가 무엇이 실행됐나를 렌더한다. 2차 실패면 1차 종합으로 graceful
-             degrade(canonical=s1)하되 실패 노드도 관측에 정직히 남긴다(silent 아님: warn).
-             Refine(무조건)와 Conditional(Insufficient일 때만)이 공유한다 — 같은 변환을
-             두 번 짜지 않는다(N-of-M 회피). *)
           let refine_over (s1, u1) =
             let single_node =
               Fusion_types.Synthesized
@@ -104,221 +85,63 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                     }
                 ] )
           in
-          (* Adaptive timeout: wave-wide wall-clock budget and per-judge extension.
-             We snapshot t0 before the first-judge wave; each fiber reads the clock
-             just before/after its judge call. Masc_eio_env.clock is optional but
-             fusion orchestration strictly requires a wall clock — both to size
-             runtime timeout windows for external judge calls AND to record per-node
-             elapsed_s. Per Masc_eio_env.mli, a component that strictly requires a
-             clock should match on [Some] and fail loudly rather than substitute a
-             blocking wall-clock fallback inside an Eio fiber. Production
-             callers (server_runtime_bootstrap, bin executables) initialise Masc_eio_env with
-             ~clock. *)
           let env = Masc_eio_env.get () in
-          let now () =
+          let now_opt () =
             match env.clock with
-            | Some c -> Eio.Time.now c
-            | None ->
-              failwith
-                "Fusion_orchestrator: adaptive timeout requires a wall clock — initialise Masc_eio_env with ~clock"
+            | Some c -> Some (Eio.Time.now c)
+            | None -> None
           in
-          let t0 = now () in
-          (* first_judge_run is a tuple (judge_spec, id, result, elapsed_s, timed_out).
-             We use a tuple because OCaml does not allow [type] definitions inside
-             a [let ... in] expression. *)
-          let run_first_judge ~already_timed_out (j : Fusion_policy.judge_spec)
-            : Fusion_policy.judge_spec
-              * string
-              * ( Fusion_types.judge_synthesis * Fusion_types.usage
-                , Fusion_types.judge_failure * Fusion_types.usage )
-                result
-              * float
-              * bool
-            =
-            let id = Fusion_policy.panelist_id ~label:j.jlabel ~model:j.jmodel in
-            let elapsed_s = now () -. t0 in
-            match
-              Fusion_policy.adjust_judge_timeout
-                ~base_s:j.jtimeout_s
-                ~max_s:j.jmax_timeout_s
-                ~factor:preset.Fusion_policy.adaptive_timeout_factor
-                ~wave_budget_s:preset.Fusion_policy.judge_wave_budget_s
-                ~elapsed_s
-                ~already_timed_out
-            with
-            | None ->
-              (* wave budget 초과로 심판 실행 전 SKIP. typed [Fusion_types.Budget_exceeded]로 표현하여
-                 fallback 트리거가 string substring이 아닌 variant match로 분류한다. *)
-              let detail =
-                if already_timed_out
-                then
-                  Printf.sprintf
-                    "adaptive timeout recovery for judge %s exceeded wave budget" id
-                else
-                  Printf.sprintf
-                    "judge %s skipped: would exceed wave budget (elapsed %.3f, budget %.3f)"
-                    id
-                    elapsed_s
-                    preset.Fusion_policy.judge_wave_budget_s
-              in
-              ( j
-              , id
-              , Error (Fusion_types.Budget_exceeded detail, Fusion_types.zero_usage)
-              , elapsed_s
-              , false )
-            | Some timeout_s ->
-              let result =
-                Fusion_judge.run ~sw ~net ~timeout_s
-                  ?max_tokens:j.jmax_output_tokens
-                  ~judge_system_prompt:j.jsystem_prompt ~judge_model:j.jmodel
-                  ~question:req.Fusion_types.prompt ~panel ~web_tools:j.jweb_tools
-                  ~max_tool_calls:j.jmax_tool_calls ()
-              in
-              let elapsed_s = now () -. t0 in
-              let timed_out =
-                match result with
-                | Error (f, _) -> Fusion_types.judge_failure_is_timeout f
-                | Ok _ -> false
-              in
-              (j, id, result, elapsed_s, timed_out)
+          let clock =
+            Fusion_orchestrator_judge_wave.make_clock
+              ~now_opt
+              ~missing_clock_failure:
+                (Fusion_types.Internal_error
+                   "fusion adaptive timeout requires a wall clock; initialise Masc_eio_env with ~clock")
           in
-          let run_first_judges judges  =
-            let first_pass =
-              Eio.Fiber.List.map
-                ~max_fibers:policy.Fusion_policy.max_concurrent_judges
-                (run_first_judge ~already_timed_out:false)
-                judges
-            in
-            if not (Fusion_policy.adaptive_timeout_enabled preset)
-            then first_pass
-            else
-              Eio.Fiber.List.map
-                ~max_fibers:policy.Fusion_policy.max_concurrent_judges
-                (fun ((j, _, _, _, timed_out) as run) ->
-                   if timed_out
-                   then (
-                     Fusion_metrics.record_adaptive_timeout ();
-                     run_first_judge ~already_timed_out:true j)
-                   else run)
-                first_pass
+          let elapsed_since_t0 () =
+            Fusion_orchestrator_judge_wave.elapsed_since_t0 clock
           in
-          let first_judge_nodes runs =
-            List.map
-              (fun (_, id, result, elapsed_s, _timed_out) ->
-                 match result with
-                 | Ok (s, u) ->
-                   Fusion_types.Synthesized
-                     { Fusion_types.role = First id; synthesis = s; usage = u }
-                 | Error (failure, u) ->
-                   Fusion_types.Judge_failed
-                     { Fusion_types.failed_role = First id
-                     ; failure
-                     ; usage = u
-                     ; elapsed_s
-                     })
-              runs
+          let run_first_judges judges =
+            Fusion_orchestrator_judge_wave.run_first_judges
+              ~sw
+              ~net
+              ~max_concurrent_judges:policy.Fusion_policy.max_concurrent_judges
+              ~preset
+              ~panel
+              ~question:req.Fusion_types.prompt
+              ~clock
+              ~judge_web_tools
+              ~judge_max_tool_calls
+              judges
           in
-          let successful_syntheses runs =
-            List.filter_map
-              (fun (_, id, result, _, _) ->
-                 match result with
-                 | Ok (s, u) -> Some (id, s, u)
-                 | Error _ -> None)
-              runs
+          let first_judge_nodes =
+            Fusion_orchestrator_judge_wave.first_judge_nodes
           in
-          let successful_pair_syntheses pairs =
-            List.filter_map
-              (fun (id, r) ->
-                 match r with Ok (s, u) -> Some (id, s, u) | Error _ -> None)
-              pairs
+          let successful_syntheses =
+            Fusion_orchestrator_judge_wave.successful_syntheses
           in
-          let firsts_usage runs =
-            Fusion_types.sum_all_usage
-              (List.map (fun (_, id, result, _, _) -> (id, result)) runs)
+          let successful_pair_syntheses =
+            Fusion_orchestrator_judge_wave.successful_pair_syntheses
           in
-          let all_fail_error_of_runs ~fallback runs =
-            Fusion_types.all_fail_error
-              ~fallback
-              (List.map (fun (_, id, result, _, _) -> (id, result)) runs)
-          in
-          let remaining_wave_budget () =
-            preset.Fusion_policy.judge_wave_budget_s -. (now () -. t0)
+          let firsts_usage = Fusion_orchestrator_judge_wave.firsts_usage in
+          let all_fail_error_of_runs =
+            Fusion_orchestrator_judge_wave.all_fail_error_of_runs
           in
           let meta_budget_check () =
-            if
-              not
-                (Fusion_policy.judge_wave_budget_enabled
-                   ~wave_budget_s:preset.Fusion_policy.judge_wave_budget_s)
-            then Ok preset.Fusion_policy.meta_timeout_s
-            else if remaining_wave_budget () < preset.Fusion_policy.meta_timeout_s
-            then
-              Error
-                ( Fusion_types.Budget_exceeded "insufficient remaining budget for meta"
-                , Fusion_types.zero_usage )
-            else Ok preset.Fusion_policy.meta_timeout_s
+            Fusion_orchestrator_judge_wave.meta_budget_check ~preset clock
           in
-          let run_fallback_judge ()  =
-            match preset.Fusion_policy.fallback_judge_model with
-            | None -> None
-            | Some model ->
-              let elapsed_s = now () -. t0 in
-              let j : Fusion_policy.judge_spec =
-                { jmodel = model
-                ; jlabel = "fallback"
-                ; jsystem_prompt = preset.Fusion_policy.judge_system_prompt
-                ; jweb_tools = judge_web_tools
-                ; jmax_tool_calls = judge_max_tool_calls
-                ; jmax_output_tokens = preset.Fusion_policy.judge_max_output_tokens
-                ; jtimeout_s = preset.Fusion_policy.judge_timeout_s
-                ; jmax_timeout_s = None
-                }
-              in
-              let id = Fusion_policy.panelist_id ~label:j.jlabel ~model:j.jmodel in
-              (match
-                 Fusion_policy.adjust_judge_timeout
-                   ~base_s:j.jtimeout_s
-                   ~max_s:None
-                   ~factor:1.0
-                   ~wave_budget_s:preset.Fusion_policy.judge_wave_budget_s
-                   ~elapsed_s
-                   ~already_timed_out:false
-               with
-               | None ->
-                 Some
-                   ( j
-                   , id
-                   , Error
-                       ( Fusion_types.Budget_exceeded
-                           "fallback judge skipped: insufficient remaining wave budget"
-                       , Fusion_types.zero_usage )
-                   , elapsed_s
-                   , false )
-               | Some timeout_s ->
-                 let result =
-                   Fusion_judge.run ~sw ~net ~timeout_s
-                     ?max_tokens:j.jmax_output_tokens
-                     ~judge_system_prompt:preset.Fusion_policy.judge_system_prompt
-                     ~judge_model:model
-                     ~question:req.Fusion_types.prompt ~panel ~web_tools:judge_web_tools
-                     ~max_tool_calls:judge_max_tool_calls ()
-                 in
-                 let elapsed_s = now () -. t0 in
-                 let timed_out =
-                   match result with
-                   | Error (f, _) -> Fusion_types.judge_failure_is_timeout f
-                   | Ok _ -> false
-                 in
-                 Some (j, id, result, elapsed_s, timed_out))
+          let run_fallback_judge () =
+            Fusion_orchestrator_judge_wave.run_fallback_judge
+              ~sw
+              ~net
+              ~preset
+              ~panel
+              ~question:req.Fusion_types.prompt
+              ~clock
+              ~judge_web_tools
+              ~judge_max_tool_calls
+              ()
           in
-          (* JOJ(judge-of-judges, RFC-0283): N개 1차 심판이 같은 패널을 독립 종합 → meta가
-             reconcile. preset.judges >= 2 필요(미구성/1개는 단일 심판 위상으로 표현 가능하므로
-             런타임 에러 = fail-closed). 1차는 [Eio.Fiber.List.map ~max_fibers]로 병렬(패널
-             fan-out과 동일 fault-isolation idiom — Fusion_judge.run이 per-judge 실패를 Error로
-             격리하므로 한 심판 실패가 나머지를 안 죽인다). 성공 종합만 meta 입력, 전원 실패면
-             첫 에러 전파. usage = 성공 1차 전부 + meta 합산. meta 실패 시 1차 첫 성공으로
-             graceful degrade(RFC-0283 §5.1, warn) — meta가 태운 토큰(meta_u)도 합산해
-             버리지 않는다(#22087 §1과 동일 원칙). 에러는 (string * usage) 동반: 토큰 소비 전
-             구성 실패는 [zero_usage]를 싣는다. *)
           let run_judge_of_judges () =
             match preset.Fusion_policy.judges with
             | [] | [ _ ] ->
@@ -334,8 +157,6 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 match ok_priors with
                 | _ :: _ -> firsts
                 | [] ->
-                  (* 전원 실패 시 모든 에러가 타임아웃/예산 에러면 fallback 심판을 한 번
-                     시도한다. *)
                   if
                     List.for_all
                       (fun (_, _, result, _, _) ->
@@ -365,7 +186,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                  let firsts_usage = firsts_usage firsts_with_fallback in
                  (match meta_budget_check () with
                   | Error (failure, _) ->
-                    let elapsed_s = now () -. t0 in
+                    let elapsed_s = elapsed_since_t0 () in
                     ( Ok (first_s, firsts_usage)
                     , first_nodes
                       @ [ Fusion_types.Judge_failed
@@ -401,7 +222,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                           synthesis: %s"
                          req.Fusion_types.run_id
                          (Fusion_types.judge_failure_text failure);
-                       let elapsed_s = now () -. t0 in
+                       let elapsed_s = elapsed_since_t0 () in
                        ( Ok (first_s, Fusion_types.add_usage firsts_usage meta_u)
                        , first_nodes
                          @ [ Fusion_types.Judge_failed
@@ -461,7 +282,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                   let priors = List.map (fun (id, s, _) -> (id, s)) ok_priors in
                   (match meta_budget_check () with
                    | Error (failure, _) ->
-                     let elapsed_s = now () -. t0 in
+                     let elapsed_s = elapsed_since_t0 () in
                      ( (stage_id, Ok (first_s, firsts_usage))
                      , first_nodes
                        @ [ Fusion_types.Judge_failed
@@ -496,7 +317,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                           "fusion run %s staged JOJ %s meta judge failed, keeping first judge synthesis: %s"
                           req.Fusion_types.run_id stage_id
                           (Fusion_types.judge_failure_text failure);
-                        let elapsed_s = now () -. t0 in
+                        let elapsed_s = elapsed_since_t0 () in
                         ( ( stage_id
                           , Ok (first_s, Fusion_types.add_usage firsts_usage stage_u) )
                         , first_nodes
@@ -531,7 +352,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                  let priors = List.map (fun (id, s, _) -> (id, s)) ok_stages in
                  (match meta_budget_check () with
                   | Error (failure, _) ->
-                    let elapsed_s = now () -. t0 in
+                    let elapsed_s = elapsed_since_t0 () in
                     ( Ok (first_stage_s, stage_usage)
                     , stage_nodes
                       @ [ Fusion_types.Judge_failed
@@ -565,7 +386,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                          "fusion run %s staged JOJ final meta judge failed, keeping first stage synthesis: %s"
                          req.Fusion_types.run_id
                          (Fusion_types.judge_failure_text failure);
-                       let elapsed_s = now () -. t0 in
+                       let elapsed_s = elapsed_since_t0 () in
                        ( Ok (first_stage_s, Fusion_types.add_usage stage_usage final_u)
                        , stage_nodes
                          @ [ Fusion_types.Judge_failed
@@ -576,27 +397,12 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                                }
                            ] ))))
           in
-          (* 위상별 reduce. Simple은 1차 종합 그대로(현행과 byte-identical — downstream
-             judge/judge_usage/emit 동일). Refine는 무조건 refine. Conditional은 1차 판정이
-             [Insufficient](애매)일 때만 refine, 그 외엔 1차 종합 그대로(= Simple). JOJ는 N개
-             1차 심판 + meta. 1차 심판 실패는 단일-심판 위상에선 그대로 전파(refine할 종합이
-             없음 = Simple과 동일 에러 의미). topology·decision 둘 다 닫힌 합 exhaustive match라
-             새 변형 추가 시 컴파일 에러로 누락을 강제한다 — catch-all 없음. *)
-          (* judge_full = canonical (downstream 종합/usage), judge_nodes = 실행 관측
-             ([judge_outcome list], RFC-0284 → sink judges:[]). 각 arm이 둘을 hand-write한다
-             — 콤비네이터/plan-tree 없음(닫힌 enum dispatch 유지, staged JOJ도 named arm +
-             작은 helper로 표현). 단일-심판 노드는 [Single], 1차 심판 실패는 단일-심판
-             위상에선 그대로 전파(Simple과 동일 에러 의미)하고 실패 노드 한 건만 남긴다. *)
           let judge_full, judge_nodes =
             match
               Fusion_types.judge_skip_reason
                 ~min_answered:preset.Fusion_policy.min_answered panel
             with
             | Some reason ->
-              (* Quorum-not-met — 종합할 답이 preset 기준보다 적다. judge를 얇거나 빈
-                 <panel_answers>로 호출하면 근거 부족 종합을 정상처럼 표출한다. judge
-                 미실행 + 명시적 실패로 완료한다(기존 judge-error 표시 경로 재사용).
-                 judge_nodes=[] — 실행된 심판 없음(RFC-0284). *)
               let reason = Fusion_types.render_skip_reason reason in
               (Error (Fusion_types.Internal_error reason, Fusion_types.zero_usage), [])
             | None ->
@@ -651,17 +457,12 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
             | Fusion_types.Judge_of_judges -> run_judge_of_judges ()
             | Fusion_types.Staged_judge_of_judges -> run_staged_judge_of_judges ()
           in
-          (* 심판 종합과 토큰 usage를 분리: outcome.judge는 synthesis만(소비자 호환),
-             usage는 sink 비용 회계로(RFC §10 패널N+심판M). 심판 실패 시에도 소비한
-             토큰은 회계한다(run_composed가 에러에 usage를 동반 — 응답 받은 뒤 실패면
-             소비분, 그 전 실패면 zero). *)
           let judge = judge_full |> Result.map fst |> Result.map_error fst in
           let judge_usage =
             match judge_full with
             | Ok (_, u) -> u
             | Error (_, u) -> u
           in
-          (* RFC-0284 observation record → OTel counters. *)
           List.iter (Fusion_metrics.record_judge_execution ~topology) judge_nodes;
           (match
              Fusion_sink.emit ~base_dir ~keeper:req.Fusion_types.keeper

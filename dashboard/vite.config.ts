@@ -1,8 +1,12 @@
-import { defineConfig } from 'vite'
+import { defineConfig, type Plugin } from 'vite'
 import preact from '@preact/preset-vite'
 import solid from 'vite-plugin-solid'
 import tailwindcss from '@tailwindcss/vite'
 import { visualizer } from 'rollup-plugin-visualizer'
+
+const dashboardBasePath = '/dashboard/'
+const dashboardEntryHtml = 'index.html'
+const dashboardVendorChunkName = 'vendor'
 
 function normalizeModuleId(id: string): string {
   return id.replace(/\\/g, '/')
@@ -45,6 +49,53 @@ const heavyMermaidDependencyChunks: Array<{ packages: string[]; chunk: string }>
   },
 ]
 
+function dashboardAssetHref(fileName: string): string {
+  return `${dashboardBasePath}${fileName}`
+}
+
+function htmlAttributeValue(tag: string, attributeName: string): string | null {
+  const match = tag.match(new RegExp(`\\s${attributeName}\\s*=\\s*(["'])(.*?)\\1`, 'i'))
+  return match?.[2] ?? null
+}
+
+function filterGeneratedModulePreloads(html: string, allowedHrefs: ReadonlySet<string>): string {
+  return html.replace(/<link\b[^>]*>/gi, tag => {
+    if (htmlAttributeValue(tag, 'rel') !== 'modulepreload') return tag
+    const href = htmlAttributeValue(tag, 'href')
+    return href && allowedHrefs.has(href) ? tag : ''
+  })
+}
+
+function dashboardModulePreloadContractPlugin(): Plugin {
+  return {
+    name: 'masc-dashboard-modulepreload-contract',
+    enforce: 'post',
+    generateBundle(_options, bundle) {
+      const allowedPreloadHrefs = new Set<string>()
+      for (const output of Object.values(bundle)) {
+        if (output.type === 'chunk' && output.name === dashboardVendorChunkName) {
+          allowedPreloadHrefs.add(dashboardAssetHref(output.fileName))
+        }
+      }
+
+      if (allowedPreloadHrefs.size !== 1) {
+        this.error(`Expected exactly one ${dashboardVendorChunkName} chunk for dashboard HTML preloads.`)
+      }
+
+      const htmlAsset = bundle[dashboardEntryHtml]
+      if (!htmlAsset || htmlAsset.type !== 'asset') {
+        this.error(`Expected Vite to emit ${dashboardEntryHtml}.`)
+      }
+
+      const html =
+        typeof htmlAsset.source === 'string'
+          ? htmlAsset.source
+          : Buffer.from(htmlAsset.source).toString('utf8')
+      htmlAsset.source = filterGeneratedModulePreloads(html, allowedPreloadHrefs)
+    },
+  }
+}
+
 export default defineConfig(({ command }) => {
   const proxyTarget = process.env.MASC_DASHBOARD_PROXY_TARGET
   if (command === 'serve' && !proxyTarget) {
@@ -81,8 +132,9 @@ export default defineConfig(({ command }) => {
       }),
       preact(),
       ...reportPlugins,
+      dashboardModulePreloadContractPlugin(),
     ],
-    base: '/dashboard/',
+    base: dashboardBasePath,
     build: {
       outDir: '../assets/dashboard',
       emptyOutDir: true,
@@ -95,13 +147,6 @@ export default defineConfig(({ command }) => {
       modulePreload: {
         // MASC dashboard targets the operator's modern browser runtime.
         polyfill: false,
-        // Keep the HTML entry preload contract tied to our own vendor chunk
-        // name instead of Vite/Rollup private helper module ids. JS dynamic
-        // import dependency lists remain Vite-managed.
-        resolveDependencies(_url, deps, { hostType }) {
-          if (hostType !== 'html') return deps
-          return deps.filter(dep => dep.startsWith('assets/vendor-'))
-        },
       },
       rollupOptions: {
         output: {

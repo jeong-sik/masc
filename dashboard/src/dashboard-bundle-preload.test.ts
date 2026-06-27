@@ -8,6 +8,7 @@ type ManifestEntry = {
   file?: string
   imports?: string[]
   isEntry?: boolean
+  name?: string
 }
 
 const outDirs: string[] = []
@@ -15,6 +16,18 @@ const outDirs: string[] = []
 function modulePreloads(html: string): string[] {
   return [...html.matchAll(/<link[^>]+rel=["']modulepreload["'][^>]+href=["']([^"']+)["'][^>]*>/gi)]
     .flatMap(match => match[1] ? [match[1]] : [])
+}
+
+function manifestEntriesByName(
+  manifest: Record<string, ManifestEntry>,
+  name: string,
+): Array<[string, ManifestEntry]> {
+  return Object.entries(manifest).filter(([, entry]) => entry.name === name)
+}
+
+function dashboardHrefForManifestEntry(entry: ManifestEntry): string {
+  if (!entry.file) throw new Error('manifest entry has no file')
+  return `/dashboard/${entry.file}`
 }
 
 describe('dashboard production bundle preloads', () => {
@@ -47,12 +60,14 @@ describe('dashboard production bundle preloads', () => {
     const entry = manifest['index.html']
 
     expect(entry?.isEntry).toBe(true)
-    expect((entry?.imports ?? []).filter(id => id.startsWith('_vendor-'))).toHaveLength(1)
-    expect((entry?.imports ?? []).some(id => id.includes('mermaid'))).toBe(false)
+    const vendorEntries = manifestEntriesByName(manifest, 'vendor')
+    expect(vendorEntries).toHaveLength(1)
+    const vendorEntryPair = vendorEntries[0]
+    if (!vendorEntryPair) throw new Error('vendor manifest entry missing')
+    const [vendorKey, vendorEntry] = vendorEntryPair
+    expect((entry?.imports ?? []).filter(id => manifest[id]?.name === 'vendor')).toEqual([vendorKey])
 
     const preloads = modulePreloads(html)
-    expect(preloads).toHaveLength(1)
-    expect(preloads[0]).toMatch(/\/assets\/vendor-[^/]+\.js$/)
-    expect(preloads.some(href => href.includes('mermaid'))).toBe(false)
+    expect(preloads).toEqual([dashboardHrefForManifestEntry(vendorEntry)])
   }, 120_000)
 })

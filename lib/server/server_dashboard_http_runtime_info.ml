@@ -655,28 +655,8 @@ let normalized_path_opt path =
     Some normalized
 ;;
 
-let lexical_normalize_path path =
-  let path = Env_config_core.strip_path_trailing_slashes path in
-  let is_absolute = not (Filename.is_relative path) in
-  let push_segment acc = function
-    | "" | "." -> acc
-    | ".." ->
-      (match acc, is_absolute with
-       | _ :: rest, _ -> rest
-       | [], true -> []
-       | [], false -> [ ".." ])
-    | segment -> segment :: acc
-  in
-  let segments = path |> String.split_on_char '/' |> List.fold_left push_segment [] in
-  match is_absolute, List.rev segments with
-  | true, [] -> "/"
-  | true, segments -> "/" ^ String.concat "/" segments
-  | false, [] -> "."
-  | false, segments -> String.concat "/" segments
-;;
-
 let normalized_path_segments path =
-  let normalized = lexical_normalize_path path in
+  let normalized = Env_config_core.normalize_path_lexically path in
   if String.equal normalized "/" || String.equal normalized "."
   then []
   else normalized |> String.split_on_char '/' |> List.filter (fun segment -> segment <> "")

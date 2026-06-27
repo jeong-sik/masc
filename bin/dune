@@ -123,7 +123,7 @@
  (modules masc_recall_outcome_eval)
  (public_name masc-recall-outcome-eval)
  (package masc)
- (libraries masc masc.config masc_core unix yojson))
+ (libraries masc masc.config masc.config_dir_resolver masc_core unix yojson))
 
 (executable
  (name public_tool_manifest)

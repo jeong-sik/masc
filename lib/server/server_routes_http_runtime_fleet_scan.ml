@@ -612,21 +612,6 @@ type blocked_keeper_reason =
   | No_keeper_binding
   | Unknown
 
-let keeper_phase_is_terminal = function
-  | Keeper_state_machine.Stopped
-  | Keeper_state_machine.Dead
-  | Keeper_state_machine.Zombie -> true
-  | Keeper_state_machine.Offline
-  | Keeper_state_machine.Running
-  | Keeper_state_machine.Failing
-  | Keeper_state_machine.Overflowed
-  | Keeper_state_machine.Compacting
-  | Keeper_state_machine.HandingOff
-  | Keeper_state_machine.Draining
-  | Keeper_state_machine.Paused
-  | Keeper_state_machine.Crashed
-  | Keeper_state_machine.Restarting -> false
-
 let blocked_keeper_reason_label = function
   | Durable_paused_autoboot_enabled -> "durable_paused_autoboot_enabled"
   | Meta_read_error -> "meta_read_error"
@@ -711,7 +696,7 @@ let blocked_keeper_detail_json
   let phase_name = Option.map Keeper_state_machine.phase_to_string phase in
   let terminal_phase =
     match phase with
-    | Some phase -> keeper_phase_is_terminal phase
+    | Some phase -> Keeper_state_machine.is_terminal phase
     | None -> false
   in
   let last_failure_fields =

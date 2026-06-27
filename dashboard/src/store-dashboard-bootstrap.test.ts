@@ -23,6 +23,18 @@ vi.mock('./api/dashboard', () => ({
   fetchDashboardGoalsTree: apiMocks.fetchDashboardGoalsTree,
 }))
 
+vi.mock('./api/dashboard-execution', () => ({
+  fetchDashboardExecution: apiMocks.fetchDashboardExecution,
+}))
+
+vi.mock('./api/dashboard-mission', () => ({
+  fetchDashboardPlanning: apiMocks.fetchDashboardPlanning,
+}))
+
+vi.mock('./api/dashboard-goals', () => ({
+  fetchDashboardGoalsTree: apiMocks.fetchDashboardGoalsTree,
+}))
+
 vi.mock('./sse', () => ({
   journal: {
     log: vi.fn(),

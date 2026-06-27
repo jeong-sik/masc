@@ -54,6 +54,15 @@ async function loadGovernance() {
     submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
     submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
   }))
+  vi.doMock('../api/dashboard-governance', () => ({
+    fetchDashboardGovernance,
+    fetchGovernanceCaseStatus: vi.fn().mockResolvedValue(null),
+    decideGovernanceExecutionOrder: vi.fn().mockResolvedValue(undefined),
+    resolveGovernanceApproval: vi.fn().mockResolvedValue({ ok: true }),
+    deleteGovernanceApprovalRule: vi.fn().mockResolvedValue({ ok: true }),
+    submitGovernanceCaseBrief: vi.fn().mockResolvedValue(null),
+    submitGovernancePetition: vi.fn().mockResolvedValue({ case: { id: 'x' } }),
+  }))
   vi.doMock('../sse-store', () => ({ registerGovernanceRefresh: vi.fn() }))
   const signals = await import('./governance-signals')
   const actions = await import('./governance-actions')
@@ -64,6 +73,7 @@ afterEach(() => {
   vi.resetModules()
   vi.clearAllMocks()
   vi.doUnmock('../api')
+  vi.doUnmock('../api/dashboard-governance')
   vi.doUnmock('../sse-store')
 })
 

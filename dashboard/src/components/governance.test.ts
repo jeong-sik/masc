@@ -57,6 +57,7 @@ async function loadComponentWithApi(api: {
 }) {
   Vitest.vi.resetModules()
   Vitest.vi.doMock('../api', () => api)
+  Vitest.vi.doMock('../api/dashboard-governance', () => api)
   Vitest.vi.doMock('../sse-store', () => ({
     registerGovernanceRefresh: Vitest.vi.fn(),
   }))
@@ -99,6 +100,7 @@ describe('Governance surface', () => {
     Vitest.vi.resetModules()
     Vitest.vi.clearAllMocks()
     Vitest.vi.doUnmock('../api')
+    Vitest.vi.doUnmock('../api/dashboard-governance')
     Vitest.vi.doUnmock('../sse-store')
   })
 

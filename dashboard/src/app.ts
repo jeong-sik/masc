@@ -189,18 +189,11 @@ export function App() {
 
     // Governance/HITL approvals feed the always-visible nav-rail approvals
     // badge and topbar attention indicator (see approvalsBadge below), so the
-    // governance resource must refresh globally — not only while the
-    // governance/approvals surface is mounted (those surfaces are the only
-    // importers of governance-actions, which is what registers this refresh).
-    // Without an eager registration a pending HITL approval emits its
-    // `approval:pending` SSE event into a null handler and the badge stays 0
-    // until the operator manually opens the approvals surface. Register the
-    // refresh eagerly; governance-actions is dynamically imported but the boot
-    // call below eagerly triggers that chunk load (its components still render
-    // only on surface mount). Loading once at boot shows an approval already
-    // pending at open.
+    // governance resource must refresh globally. Keep boot on the read-only
+    // refresh module instead of governance-actions: first paint should not load
+    // toast/action write handlers just to count pending approvals.
     const refreshGovernanceLazy = () => {
-      void import('./components/governance-actions')
+      void import('./components/governance-refresh')
         .then(({ refreshGovernance }) => refreshGovernance())
         .catch(err => {
           console.warn('[app] governance refresh unavailable', err instanceof Error ? err.message : err)

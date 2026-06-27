@@ -71,7 +71,7 @@ The field removals from the `fact` record (`types.ml:100-120`) and their codec h
 3. **Consolidate (LLM judgment)** — the LLM merges near-duplicate facts in a group into one durable topic-fact, **rewrites relative→absolute dates**, and marks contradicted older facts for deletion. This is where differently-worded-same-meaning claims finally merge (today they never do). Output is the merged claim text + which source facts it supersedes.
 4. **Prune/index** — keep the store bounded by a *judgment keep-decision* ("which facts are still load-bearing"), not `score_fact` truncation.
 
-The promoted shared fact's `confidence`/`noisy_or` recompute is **deleted**; `observed_by` (distinct keeper set) and `is_promotable` gate survive. Promotion eligibility moves from "`confidence >= 0.5` floor" to "`is_promotable` AND the judgment pass chose to surface it cross-keeper."
+The promoted shared fact's `confidence`/`noisy_or` recompute is **deleted**; `observed_by` (distinct keeper set), `is_promotable`, and the stricter outcome-positive shared gate survive. Promotion eligibility moves from "`confidence >= 0.5` floor" to "`is_promotable` AND `is_outcome_positive_for_shared_promotion` AND the judgment pass chose to surface it cross-keeper." `is_outcome_positive_for_shared_promotion` is a temporary category proxy pending #22447 outcome-eval metadata.
 
 ### FORGET — delete-on-contradiction + ephemeral drop, by judgment (no TTL-decay verdict)
 

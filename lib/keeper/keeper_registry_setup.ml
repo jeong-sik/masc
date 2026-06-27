@@ -244,6 +244,7 @@ let update_entry ~base_path name f =
 ;;
 
 let update_entry_unit ~base_path name f =
+  (* fire-and-forget: unit wrapper discards Ok/Error; callers only need side effects and logged metrics. *)
   ignore (update_entry ~base_path name f)
 ;;
 
@@ -274,6 +275,8 @@ let update_entry_if_registered ~base_path name f =
 ;;
 
 let update_entry_if_registered_unit ~base_path name f =
+  (* fire-and-forget: bool wrapper discards whether a validated write was
+     installed; callers only need side effects and logged metrics. *)
   ignore (update_entry_if_registered ~base_path name (fun entry -> f entry, true))
 ;;
 
@@ -379,6 +382,7 @@ let register_with_state
     ; compaction_stage = Packed Compaction_accumulating
     }
   in
+  (* fire-and-forget: put_entry validates and logs on failure; the constructed entry is always used. *)
   ignore (put_entry ~base_path name entry);
   if phase = Running then Atomic.incr running_count_atomic;
   Log.Keeper.debug

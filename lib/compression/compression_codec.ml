@@ -18,6 +18,7 @@ type compress_result =
   | Compressed of compressed
 
 let min_size = 32
+let legacy_min_size = 256
 let max_dict_size = 2048
 
 let should_use_dict (size : int) : bool =

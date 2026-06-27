@@ -61,14 +61,25 @@ module Compression = struct
     | Compression_codec.Compressed { payload; encoding } ->
         (payload, Some (Compression_codec.content_encoding encoding))
 
-  (** Legacy: Standard zstd without dictionary *)
-  let compress_zstd ?(level = 3) (data : string) : (string * bool) =
-    if String.length data < 256
+  (** Legacy: Standard zstd without dictionary.
+
+      The [bool] returned here tracks whether the caller should emit a
+      [Content-Encoding: zstd] header. It may be [false] either because the
+      payload was incompressible or because compression failed and
+      [Compression_codec.compress] silently fell back to the original payload
+      after logging the failure. *)
+  let compress_zstd ?(level = 3) (data : string) : string * bool =
+    if String.length data < Compression_codec.legacy_min_size
     then data, false
     else
       match Compression_codec.compress ~level data with
       | Compression_codec.Unchanged payload -> payload, false
-      | Compression_codec.Compressed { payload; encoding = _ } -> payload, true
+      | Compression_codec.Compressed { payload; encoding = Standard } ->
+        payload, true
+      | Compression_codec.Compressed { payload; encoding = Dictionary } ->
+        (* Legacy path does not advertise dictionary support; emit the
+           uncompressed payload instead of dictionary-compressed bytes. *)
+        payload, false
 end
 
 (** Late-response failure classifier (#13059).

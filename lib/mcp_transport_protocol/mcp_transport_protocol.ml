@@ -149,14 +149,50 @@ module Http_negotiation = struct
             (type_ = "application" && subtype = "json")
             || (type_ = "*" && subtype = "*"))
 
+  (* Content-Type is a single media type (no comma-separated list, no q
+     parameter). Parse it locally rather than reusing the Accept-list parser,
+     which splits on commas and understands quality values. *)
+  type parsed_content_type =
+    { type_ : string
+    ; subtype : string
+    }
+
+  let parse_content_type s =
+    let s = String.trim s in
+    if String.equal s ""
+    then None
+    else (
+      match String.split_on_char ';' s with
+      | [] -> None
+      | media :: params ->
+        (match String.split_on_char '/' (String.trim media) with
+         | [ type_; subtype ] ->
+           let type_ = String.trim type_ |> String.lowercase_ascii in
+           let subtype = String.trim subtype |> String.lowercase_ascii in
+           if String.equal type_ "" || String.equal subtype ""
+           then None
+           else (
+             let has_q =
+               List.exists
+                 (fun p ->
+                    match String.index_opt p '=' with
+                    | None -> false
+                    | Some i ->
+                      let name =
+                        String.sub p 0 i |> String.trim |> String.lowercase_ascii
+                      in
+                      String.equal name "q")
+                 params
+             in
+             if has_q then None else Some { type_; subtype })
+         | _ -> None))
+
   let is_json_content_type = function
     | None -> false
     | Some h ->
-        (match Mcp_protocol.Http_negotiation.parse_accept_header h with
-         | [ mt ] ->
-             String.equal (String.lowercase_ascii mt.type_) "application"
-             && String.equal (String.lowercase_ascii mt.subtype) "json"
-         | [] | _ :: _ :: _ -> false)
+        (match parse_content_type h with
+         | Some { type_ = "application"; subtype = "json" } -> true
+         | Some _ | None -> false)
 
   let accepts_streamable_mcp = function
     | None -> false

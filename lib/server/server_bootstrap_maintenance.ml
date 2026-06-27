@@ -484,6 +484,19 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                then Dated_jsonl.prune (Dated_jsonl.create ~base_dir:dir ()) ~days
                else 0
              in
+             let prune_recall_injections () =
+               match
+                 Keeper_recall_injection_ledger.prune_older_than
+                   ~masc_root:masc
+                   ~retention_days:days
+               with
+               | Ok count -> count
+               | Error label ->
+                 Log.Server.warn
+                   "periodic JSONL prune: recall_injections failed label=%s"
+                   (Keeper_recall_injection_ledger.string_of_prune_error label);
+                 0
+             in
              let total =
                prune_dir (Filename.concat masc "audit")
                + prune_dir (Filename.concat masc "telemetry")
@@ -492,6 +505,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
                + prune_dir (Filename.concat masc "messages")
                + prune_dir (Filename.concat masc "events")
                + prune_dir (Filename.concat masc "activity-events")
+               + prune_recall_injections ()
                + prune_dir (Filename.concat masc "voice_sessions")
                + prune_dir (Filename.concat masc "tool_calls")
                (* transition-audit was absent from this list since its
@@ -502,7 +516,7 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
              if total > 0
              then
                Log.Server.info
-                 "periodic JSONL prune: deleted %d day-files (retention=%dd)"
+                 "periodic JSONL prune: pruned %d day-files (retention=%dd)"
                  total
                  days
            with

@@ -291,7 +291,7 @@ let make_test_checkpoint ?(working_context = None) ~response_text () =
     thinking_budget = None;
     cache_system_prompt = false;
 
-    context = Agent_sdk.Context.create ();
+    context = Agent_sdk.Context.create ~eio:true ();
     mcp_sessions = [];
     working_context;
   }

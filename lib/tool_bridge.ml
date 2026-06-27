@@ -257,13 +257,13 @@ let oas_descriptor_of_masc_tool name =
            rate-limited remote APIs. Use [Exclusive_external] so the OAS
            runtime runs them in isolation and flushes any parallel-read batch
            before and after. *)
-        Some "external_effect", Some Agent_sdk.Tool.Exclusive_external
+        Some Agent_sdk.Tool.External_effect, Some Agent_sdk.Tool.Exclusive_external
       | Agent_sdk.Tool.ReadOnly ->
-        Some "read_only", Some Agent_sdk.Tool.Parallel_read
+        Some Agent_sdk.Tool.Read_only, Some Agent_sdk.Tool.Parallel_read
       | Agent_sdk.Tool.Write ->
-        Some "workspace_mutating", Some Agent_sdk.Tool.Sequential_workspace
+        Some Agent_sdk.Tool.Workspace_mutating, Some Agent_sdk.Tool.Sequential_workspace
       | Agent_sdk.Tool.Destructive ->
-        Some "external_effect", Some Agent_sdk.Tool.Exclusive_external
+        Some Agent_sdk.Tool.External_effect, Some Agent_sdk.Tool.Exclusive_external
     in
     {
       Agent_sdk.Tool.kind = Some "masc";

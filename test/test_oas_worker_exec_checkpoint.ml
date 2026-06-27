@@ -50,7 +50,7 @@ let dummy_checkpoint : Agent_sdk.Checkpoint.t =
     thinking_budget = None;
     cache_system_prompt = false;
 
-    context = Agent_sdk.Context.create ();
+    context = Agent_sdk.Context.create ~eio:true ();
     mcp_sessions = [];
     working_context = None;
   }

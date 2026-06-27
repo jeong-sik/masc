@@ -123,7 +123,10 @@ let tool_contracts_to_json tools =
             |> Option.value ~default:[]
           in
           let mutation_class =
-            Json_util.string_opt_to_json (Option.bind descriptor (fun d -> d.mutation_class))
+            descriptor
+            |> Option.bind (fun d -> d.mutation_class)
+            |> Option.map Agent_sdk.Tool.mutation_class_to_string
+            |> Json_util.string_opt_to_json
           in
           `Assoc
             [ "name", `String tool.schema.name

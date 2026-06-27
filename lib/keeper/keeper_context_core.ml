@@ -552,7 +552,7 @@ let resume_checkpoint_of_context
       ~(max_checkpoint_messages : int)
       (ctx : working_context) : Agent_sdk.Checkpoint.t
   =
-  let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
+  let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   {
     ctx.checkpoint with
     version = Agent_sdk.Checkpoint.checkpoint_version;
@@ -585,7 +585,7 @@ let context_of_oas_checkpoint
     if repair_orphans then repair_broken_tool_call_pairs messages
     else messages
   in
-  let context = Agent_sdk.Context.copy cp.context in
+  let context = Agent_sdk.Context.copy ~eio:true cp.context in
   let checkpoint =
     { cp with system_prompt = Some system_prompt; messages; context }
   in
@@ -601,7 +601,7 @@ let save_oas_checkpoint
     ~(ctx : working_context)
     ~(generation : int)
   : (Agent_sdk.Checkpoint.t, string) result =
-  let checkpoint_context = Agent_sdk.Context.copy (oas_context_of_context ctx) in
+  let checkpoint_context = Agent_sdk.Context.copy ~eio:true (oas_context_of_context ctx) in
   Agent_sdk.Context.set_scoped checkpoint_context Agent_sdk.Context.Session
     checkpoint_generation_key (`Int generation);
   let checkpoint_messages, checkpoint_stats =

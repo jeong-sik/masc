@@ -96,24 +96,30 @@ either policy.
 
 ### 2.1 Make acknowledgement authoritative over the persisted snapshot
 
-The contract this RFC fixes: **once `ack_inflight` (equivalently `ack_consumed`)
-runs for a stimulus, that stimulus must not appear in the next persisted snapshot
-loaded for that keeper.** Today `ack_inflight` clears the inflight record but the
-live-queue dequeue + persist-snapshot write are not jointly ordered against the
-next load, so an acknowledged stimulus can be re-materialized.
+The contract this RFC fixes: **once the genuine consumed-ack path
+(`ack_consumed`) succeeds for a stimulus, that stimulus must not appear in the
+next persisted snapshot loaded for that keeper.** `ack_inflight` remains an
+inflight-only helper because `requeue_front` uses it after putting an unconsumed
+lease back into pending; it must not drain pending in that path. The bug was that
+the consumed-ack caller used the inflight-only helper and never made the pending
+snapshot agree with the acknowledged fact.
 
 The fix is a synchronization rule on the persist path, not a new data structure.
 Concretely (exact field paths and the precise CAS sequence confirmed at
 implementation time against `keeper_event_queue_persistence.ml`, in the style of
 RFC-0250 §2.1):
 
-- `dequeue` already records inflight (`keeper_registry_event_queue.ml:115`) and
-  persists the live queue snapshot (`:121`). The snapshot written here must not
-  contain the dequeued stimulus in its pending set.
-- `ack_inflight` removes the inflight record. After it, a subsequent `load`
-  (`event_queue_persistence.ml`) must yield a pending set that excludes the
-  acknowledged stimulus, with no window in which a concurrent load can observe it
-  as pending.
+- `dequeue` already records inflight (`keeper_registry_event_queue.ml`) and
+  persists the live queue snapshot. The snapshot written here must not contain
+  the dequeued stimulus in its pending set.
+- `ack_consumed` removes the exact consumed stimuli from both pending and
+  inflight snapshots under one persistence lock. Public `load` takes the same
+  lock before reading both files, so it cannot observe the old split state where
+  inflight was already cleared while pending still contained the consumed
+  stimulus.
+- Durable consumed-ack failure is not a log-and-continue path. Persistence
+  returns `Error`, and the registry ack wrapper raises rather than treating the
+  stimulus as acknowledged.
 
 The diverging path is now identified directly (§1 claim 2): the ack path clears
 `event-queue-inflight.json` (verified empty), but the pending snapshot
@@ -124,12 +130,12 @@ loop adds one more copy to a pending snapshot that never shrinks — which is wh
 the files hold 8–70 copies per keeper rather than one. The fix therefore has two
 sides, both wiring rather than new mechanism:
 
-- **Ack must drain the pending snapshot, not only the inflight file.** After
-  `ack_inflight`, the corresponding stimulus must be absent from the next
-  `event-queue.json` load. The exact CAS ordering between the dequeue snapshot
-  write (`keeper_registry_event_queue.ml:121`) and the ack is confirmed at
-  implementation time, but the contract — pending and inflight agree — is fixed
-  here.
+- **Consumed ack must drain the pending snapshot, not only the inflight file.**
+  After successful `ack_consumed`, the corresponding stimulus must be absent
+  from the next `event-queue.json` load. There is no orphan heuristic: the drain
+  removes only the exact stimuli that the turn already dequeued and passed to
+  the genuine ack path. A delayed-but-valid stimulus that was not consumed is not
+  matched and remains pending.
 - **Launch enqueue must be idempotent against the persisted pending set.**
   `enqueue_if_missing` (`keeper_registry_event_queue.ml:17-19`) already guards
   the in-memory queue; the same guard must hold against the persisted snapshot
@@ -167,10 +173,11 @@ Neither side adds a type, a classifier, a cap, or a sweeper.
 ## §3 Verification
 
 - **Contract test (the core regression).** A fixture that enqueues a stimulus,
-  dequeues it, runs `ack_inflight`, and then `load`s the persist snapshot must
+  dequeues it, runs `ack_consumed`, and then `load`s the persist snapshot must
   observe the stimulus absent from the pending set. A buggy variant that skips the
-  synchronization must fail this test. (Mirror RFC-0020's clean/buggy `.cfg` pair
-  pattern if a TLA+ model of the persist path is warranted.)
+  synchronized pending+inflight update must fail this test. (Mirror RFC-0020's
+  clean/buggy `.cfg` pair pattern if a TLA+ model of the persist path is
+  warranted.)
 - **Loop-break integration test.** A keeper fixture with an orphan `bootstrap`
   stimulus in persist and `active_goal_ids = []`: after the fix, the heartbeat
   consumes it once, acks it, and the next snapshot is empty — the keeper reaches

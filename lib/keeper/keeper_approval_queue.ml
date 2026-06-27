@@ -300,14 +300,10 @@ let legacy_decision_kind_of_string value =
 ;;
 
 let resolved_approval_decision_kind json =
-  match
-    Safe_ops.json_string_opt "decision_kind" json
-    |> Option.bind closed_decision_kind_of_string
-  with
+  match Option.bind (Safe_ops.json_string_opt "decision_kind" json) closed_decision_kind_of_string with
   | Some _ as kind -> kind
   | None ->
-    Safe_ops.json_string_opt "decision" json
-    |> Option.bind legacy_decision_kind_of_string
+    Option.bind (Safe_ops.json_string_opt "decision" json) legacy_decision_kind_of_string
 ;;
 
 let resolved_approval_json_of_audit_event json =

@@ -70,10 +70,9 @@ module For_testing : sig
     remaining_turn_budget_s:(unit -> float) ->
     current_turn_phase_elapsed_ms:(float option -> int * int option) ->
     now_s:(unit -> float) ->
-    max_context_resolution_for_retry_runtime:
-      (string -> Keeper_context_runtime.max_context_resolution) ->
-    validate_retry_runtime:
-      (string -> (unit, Agent_sdk.Error.sdk_error) result) ->
+    setup_retry_runtime:
+      (string ->
+       (Keeper_turn_runtime_budget.runtime_execution, Agent_sdk.Error.sdk_error) result) ->
     publish_cascade_resolution:
       (runtime_id:string ->
        decision:Keeper_unified_turn_cascade_resolution.cascade_decision_kind ->

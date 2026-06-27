@@ -250,8 +250,7 @@ let run_direct_empty_no_progress_retry_loop
       ~remaining_turn_budget_s
       ~current_turn_phase_elapsed_ms
       ~now_s
-      ~max_context_resolution_for_retry_runtime
-      ~validate_retry_runtime
+      ~setup_retry_runtime
       ~publish_cascade_resolution
       ~emit_runtime_selected
       ~emit_runtime_rotation
@@ -260,14 +259,9 @@ let run_direct_empty_no_progress_retry_loop
       ~run_once
       ()
   =
-  let max_context_for_retry_runtime runtime_id =
-    let resolution : Keeper_context_runtime.max_context_resolution =
-      max_context_resolution_for_retry_runtime runtime_id
-    in
-    resolution.turn_budget
-  in
   let rec run_attempt
       ~runtime_id
+      ?runtime_execution
       ~attempted_runtimes
       ?degraded_retry
       ~runtime_rotation_attempts
@@ -289,8 +283,9 @@ let run_direct_empty_no_progress_retry_loop
         degraded_retry
     in
     let attempt_max_context =
-      if is_retry then max_context_for_retry_runtime runtime_id
-      else initial_max_context
+      match runtime_execution with
+      | Some execution -> execution.Keeper_turn_runtime_budget.max_context
+      | None -> initial_max_context
     in
     match
       run_once
@@ -314,14 +309,21 @@ let run_direct_empty_no_progress_retry_loop
            err
        with
        | Keeper_turn_runtime_budget.No_degraded_retry ->
-         if Option.is_some (direct_empty_no_progress_retry_reason err) then
-           publish_cascade_resolution
-             ~runtime_id
-             ~decision:Keeper_unified_turn_cascade_resolution.No_degraded_retry
-             ~reason:"terminal_error_no_degraded_retry"
-             ~next_runtime:None
-             ~attempt
-             err;
+         let reason =
+           match direct_empty_no_progress_retry_reason err with
+           | Some retry_reason ->
+             Printf.sprintf
+               "terminal_%s_no_degraded_retry"
+               (Keeper_error_classify.degraded_retry_reason_to_string retry_reason)
+           | None -> "terminal_error_not_degraded_retry_eligible"
+         in
+         publish_cascade_resolution
+           ~runtime_id
+           ~decision:Keeper_unified_turn_cascade_resolution.No_degraded_retry
+           ~reason
+           ~next_runtime:None
+           ~attempt
+           err;
          error
        | Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry ->
          let reason =
@@ -358,7 +360,7 @@ let run_direct_empty_no_progress_retry_loop
               ~publish_cascade_resolution
               ~emit_runtime_selected
               ~emit_runtime_rotation
-              ~setup_runtime:validate_retry_runtime
+              ~setup_runtime:setup_retry_runtime
           with
           | Keeper_turn_runtime_budget.Degraded_retry_setup_failed
               { retry; fail_open_err; _ } ->
@@ -382,7 +384,7 @@ let run_direct_empty_no_progress_retry_loop
               ~fail_open_err;
             Error fail_open_err
           | Keeper_turn_runtime_budget.Degraded_retry_prepared
-              { retry; reason; next = () } ->
+              { retry; reason; next = next_execution } ->
             let retry_phase_started_at =
               match retry_phase_started_at with
               | Some _ -> retry_phase_started_at
@@ -401,18 +403,16 @@ let run_direct_empty_no_progress_retry_loop
                 ~outcome:Keeper_execution_receipt.Rotation_retry_scheduled
                 err
             in
-            let retry_resolution =
-              max_context_resolution_for_retry_runtime retry.next_runtime
-            in
+            let retry_resolution = next_execution.max_context_resolution in
             Log.Keeper.warn
               "%s: direct keeper_msg empty response from runtime=%s; retrying \
                runtime=%s reason=%s max_context=%d context_budget=%d \
                primary_budget=%d requested_override=%s"
               keeper_name
               runtime_id
-              retry.next_runtime
+              next_execution.runtime_id
               reason
-              retry_resolution.turn_budget
+              next_execution.max_context
               retry_resolution.effective_budget
               retry_resolution.primary_budget
               (match retry_resolution.requested_override with
@@ -420,11 +420,12 @@ let run_direct_empty_no_progress_retry_loop
                | None -> "none");
             before_retry ();
             run_attempt
-              ~runtime_id:retry.next_runtime
-              ~attempted_runtimes:(retry.next_runtime :: attempted_runtimes)
+              ~runtime_id:next_execution.runtime_id
+              ~runtime_execution:next_execution
+              ~attempted_runtimes:(next_execution.runtime_id :: attempted_runtimes)
               ~degraded_retry:retry
               ~runtime_rotation_attempts:(rotation_attempt :: runtime_rotation_attempts)
-              ~attempt:(attempt + 1)
+              ~attempt:1
               ~retry_phase_started_at
               ~is_retry:true
               ()))
@@ -770,11 +771,6 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 	            | None -> ());
 	              resolution.turn_budget
 	            in
-		            let max_context_resolution_for_retry_runtime runtime_id =
-		              Provider_runtime_projection.default_execution_model_strings runtime_id
-		              |> Keeper_context_runtime.resolve_max_context_resolution
-		                   ~requested_override:meta.max_context_override
-		            in
 		            let profile_defaults =
 		              Keeper_types_profile.load_keeper_profile_defaults meta.name
 		            in
@@ -1019,7 +1015,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
             (* RFC-0225 §3.3: per-run carrier for the chat lane. *)
 	            let turn_ctx_cell = Keeper_tool_call_log.create_turn_ctx_cell () in
 	            let direct_prompt_for_estimate =
-	              build_turn_prompt ~base_system_prompt:"" ~messages:[]
+	              build_turn_prompt ~base_system_prompt ~messages:[]
 	            in
 	            let direct_prompt_metrics =
 	              Keeper_agent_run.build_prompt_metrics
@@ -1065,32 +1061,11 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 	                      ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
 	                      ~error_message:(Some (Agent_sdk.Error.to_string err))
 	                  in
-	                  let validate_direct_retry_runtime runtime_id =
-	                    match
-	                      Keeper_unified_turn_pre_dispatch.build_runtime_execution
-	                        ~meta
-	                        ~profile_defaults
-	                        ~runtime_id
-	                    with
-	                    | Error err -> Error err
-	                    | Ok _ ->
-	                      let retry_models =
-	                        Provider_runtime_projection
-	                        .default_execution_model_strings
-	                          runtime_id
-	                      in
-	                      (match
-	                         Keeper_types_support.ensure_api_keys_for_labels
-	                           retry_models
-	                       with
-	                       | Error e -> Error (Agent_sdk.Error.Internal e)
-	                       | Ok () ->
-	                         (match
-	                            Keeper_turn_helpers.ensure_local_discovery_ready
-	                              retry_models
-	                          with
-	                          | Error e -> Error (Agent_sdk.Error.Internal e)
-	                          | Ok () -> Ok ()))
+	                  let setup_direct_retry_runtime runtime_id =
+	                    Keeper_unified_turn_pre_dispatch.build_runtime_execution
+	                      ~meta
+	                      ~profile_defaults
+	                      ~runtime_id
 	                  in
 
 		                  run_direct_turn_with_fsm
@@ -1108,8 +1083,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                         ~remaining_turn_budget_s
 		                         ~current_turn_phase_elapsed_ms
 		                         ~now_s:(fun () -> Eio.Time.now clock)
-		                         ~max_context_resolution_for_retry_runtime
-		                         ~validate_retry_runtime:validate_direct_retry_runtime
+		                         ~setup_retry_runtime:setup_direct_retry_runtime
 		                         ~publish_cascade_resolution:
 		                           publish_direct_cascade_resolution
 		                         ~emit_runtime_selected:

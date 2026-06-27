@@ -1012,6 +1012,14 @@ let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
     let validated = ref [] in
     let setup_failures = ref [] in
     let yielded = ref 0 in
+    let retry_execution runtime_id : Masc.Keeper_turn_runtime_budget.runtime_execution =
+      { runtime_id
+      ; max_context_resolution = retry_context_resolution
+      ; max_context = retry_context_resolution.turn_budget
+      ; temperature = 0.0
+      ; max_tokens = 1024
+      }
+    in
     let result =
       Masc.Keeper_turn.For_testing.run_direct_empty_no_progress_retry_loop
         ~keeper_name:"keeper-test"
@@ -1025,15 +1033,9 @@ let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
           | None -> 7, None
           | Some _ -> 7, Some 0)
         ~now_s:(fun () -> 10.0)
-        ~max_context_resolution_for_retry_runtime:(fun runtime_id ->
-          Alcotest.(check string)
-            "retry context resolved for fallback"
-            expected_retry_runtime
-            runtime_id;
-          retry_context_resolution)
-        ~validate_retry_runtime:(fun runtime_id ->
+        ~setup_retry_runtime:(fun runtime_id ->
           validated := runtime_id :: !validated;
-          Ok ())
+          Ok (retry_execution runtime_id))
         ~publish_cascade_resolution:
           (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt _err ->
              published :=
@@ -1158,6 +1160,72 @@ let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
      | published ->
        Alcotest.failf "expected one cascade event, got %d"
          (List.length published)))
+
+let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
+  let terminal_err = Agent_sdk.Error.Internal "not retryable" in
+  let published = ref [] in
+  let run_count = ref 0 in
+  let result =
+    Masc.Keeper_turn.For_testing.run_direct_empty_no_progress_retry_loop
+      ~keeper_name:"keeper-test"
+      ~base_runtime:"runtime.initial"
+      ~initial_runtime:"runtime.initial"
+      ~initial_max_context:2048
+      ~estimated_input_tokens:1
+      ~timeout_sec:60.0
+      ~remaining_turn_budget_s:(fun () -> 60.0)
+      ~current_turn_phase_elapsed_ms:(fun _ -> 3, None)
+      ~now_s:(fun () -> 10.0)
+      ~setup_retry_runtime:(fun _ ->
+        Alcotest.fail "non-retryable terminal errors must not set up a retry")
+      ~publish_cascade_resolution:
+        (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt _err ->
+           published :=
+             ( runtime_id
+             , cascade_decision_to_string decision
+             , reason
+             , next_runtime
+             , attempt )
+             :: !published)
+      ~emit_runtime_selected:(fun ~runtime_id:_ ~fallback_reason:_ ->
+        Alcotest.fail "non-retryable terminal errors must not emit selection")
+      ~emit_runtime_rotation:(fun ~from_runtime:_ ~to_runtime:_ ~reason:_ ->
+        Alcotest.fail "non-retryable terminal errors must not emit rotation")
+      ~record_retry_setup_failure:
+        (fun ~from_runtime:_ ~retry:_ ~rotation_attempt:_ ~fail_open_err:_ ->
+           Alcotest.fail "non-retryable terminal errors must not record setup failure")
+      ~before_retry:(fun () ->
+        Alcotest.fail "non-retryable terminal errors must not yield before retry")
+      ~run_once:
+        (fun ~runtime_id ~max_context ~is_retry ~degraded_retry_runtime:_
+             ~fallback_reason:_ ~runtime_rotation_attempts:_ ->
+           incr run_count;
+           Alcotest.(check string) "initial runtime" "runtime.initial" runtime_id;
+           Alcotest.(check int) "initial max context" 2048 max_context;
+           Alcotest.(check bool) "not retry" false is_retry;
+           Error terminal_err)
+      ()
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "terminal error should be returned"
+   | Error err ->
+     Alcotest.(check string)
+       "terminal error propagated"
+       (Agent_sdk.Error.to_string terminal_err)
+       (Agent_sdk.Error.to_string err));
+  Alcotest.(check int) "only initial attempt runs" 1 !run_count;
+  match List.rev !published with
+  | [ (runtime_id, decision, reason, next_runtime, attempt) ] ->
+    Alcotest.(check string) "published from initial runtime" "runtime.initial" runtime_id;
+    Alcotest.(check string) "terminal decision" "no_degraded_retry" decision;
+    Alcotest.(check string)
+      "terminal reason"
+      "terminal_error_not_degraded_retry_eligible"
+      reason;
+    Alcotest.(check (option string)) "no next runtime" None next_runtime;
+    Alcotest.(check int) "attempt" 1 attempt
+  | rows ->
+    Alcotest.failf "expected one cascade event, got %d" (List.length rows)
 
 let test_thinking_with_text_is_accepted () =
   let result =
@@ -1567,6 +1635,10 @@ let () =
 	            "direct empty no-progress retry runs fallback attempt"
 	            `Quick
 	            test_direct_empty_no_progress_retry_loop_runs_fallback_attempt;
+          Alcotest.test_case
+            "direct retry publishes terminal non-retry cascade"
+            `Quick
+            test_direct_retry_loop_publishes_non_retry_terminal_cascade;
 	          Alcotest.test_case "thinking plus text is accepted" `Quick
 	            test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick

@@ -4743,6 +4743,16 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       [ "before_prompt"; "after_prompt"; "prompt_text"; "context_text" ])
 ;;
 
+let runtime_manifest_json_with_event row_json event =
+  match row_json with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+           if String.equal key "event" then key, `String event else key, value)
+         fields)
+  | _ -> Alcotest.fail "runtime manifest row must encode as object"
+
 let test_compaction_snapshots_json_skips_unrelated_manifest_events () =
   with_temp_workspace_config (fun config ->
     let keeper_id = "memory-panel-test" in
@@ -4768,15 +4778,7 @@ let test_compaction_snapshots_json_skips_unrelated_manifest_events () =
     in
     let row_json = Runtime_manifest.to_json row in
     let unrelated_json =
-      match row_json with
-      | `Assoc fields ->
-        `Assoc
-          (List.map
-             (fun (key, value) ->
-               if String.equal key "event" then key, `String "memory_injected"
-               else key, value)
-             fields)
-      | _ -> Alcotest.fail "runtime manifest row must encode as object"
+      runtime_manifest_json_with_event row_json "memory_injected"
     in
     let path = Runtime_manifest.path_for_trace config ~keeper_name:keeper_id ~trace_id in
     write_text_file
@@ -4797,6 +4799,62 @@ let test_compaction_snapshots_json_skips_unrelated_manifest_events () =
     Alcotest.(check int)
       "read error count"
       0
+      (json_int_field "compaction_snapshots" top "read_error_count"))
+;;
+
+let test_compaction_snapshots_json_surfaces_unknown_manifest_events () =
+  with_temp_workspace_config (fun config ->
+    let keeper_id = "memory-panel-test" in
+    let trace_id = "trace-compaction-dashboard-unknown-event" in
+    let row =
+      Runtime_manifest.make
+        ~ts:"2026-06-26T03:04:00Z"
+        ~keeper_name:keeper_id
+        ~trace_id
+        ~keeper_turn_id:13
+        ~event:Runtime_manifest.Event_bus_correlated
+        ~runtime_id:"oas-seoul-1"
+        ~status:"observed"
+        ~decision:
+          (Runtime_manifest.with_clock_refs
+             ~clock_refs:
+               (Runtime_manifest.clock_refs
+                  ~compaction_id:"cmp-unknown-event"
+                  ~compaction_source:"event_bus"
+                  ())
+             (`Assoc [ "context_compacted_count", `Int 1 ]))
+        ()
+    in
+    let row_json = Runtime_manifest.to_json row in
+    let unknown_event_json =
+      runtime_manifest_json_with_event row_json "context_compacted_v2"
+    in
+    let path = Runtime_manifest.path_for_trace config ~keeper_name:keeper_id ~trace_id in
+    write_text_file
+      path
+      (Yojson.Safe.to_string unknown_event_json ^ "\n" ^ Yojson.Safe.to_string row_json ^ "\n");
+    let top =
+      Server_dashboard_http_keeper_api.compaction_snapshots_json
+        ~config
+        ~keeper_id
+        ~limit:10
+      |> json_assoc "compaction_snapshots"
+    in
+    Alcotest.(check int) "count" 1 (json_int_field "compaction_snapshots" top "count");
+    let read_errors = json_item_list "compaction_snapshots" top "read_errors" in
+    Alcotest.(check int) "read errors" 1 (List.length read_errors);
+    let error_json = Yojson.Safe.to_string (`List read_errors) in
+    Alcotest.(check bool)
+      "unknown event is surfaced"
+      true
+      (contains "unknown event" error_json);
+    Alcotest.(check bool)
+      "unknown event name is surfaced"
+      true
+      (contains "context_compacted_v2" error_json);
+    Alcotest.(check int)
+      "read error count"
+      (List.length read_errors)
       (json_int_field "compaction_snapshots" top "read_error_count"))
 ;;
 
@@ -5014,6 +5072,10 @@ let () =
             "dashboard compaction snapshots skip unrelated manifest events"
             `Quick
             test_compaction_snapshots_json_skips_unrelated_manifest_events
+        ; Alcotest.test_case
+            "dashboard compaction snapshots surface unknown manifest events"
+            `Quick
+            test_compaction_snapshots_json_surfaces_unknown_manifest_events
         ; Alcotest.test_case
             "dashboard compaction snapshots surface manifest read errors"
             `Quick

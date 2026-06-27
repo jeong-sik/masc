@@ -80,6 +80,22 @@ let event_kind_of_string = function
   | "turn_finished" -> Some Turn_finished
   | _ -> None
 
+type compaction_snapshot_event_class =
+  | Compaction_snapshot_relevant
+  | Compaction_snapshot_known_unrelated
+  | Compaction_snapshot_unknown
+
+let classify_compaction_snapshot_event event =
+  match event with
+  | "memory_injected" | "memory_flushed" ->
+      Compaction_snapshot_known_unrelated
+  | _ -> (
+      match event_kind_of_string event with
+      | Some Event_bus_correlated | Some Context_compacted ->
+          Compaction_snapshot_relevant
+      | Some _ -> Compaction_snapshot_known_unrelated
+      | None -> Compaction_snapshot_unknown)
+
 (* ── Record types ────────────────────────────────────────────────────── *)
 
 type links = {

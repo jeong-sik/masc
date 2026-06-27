@@ -24,6 +24,19 @@ let write_lines path lines =
        close_out oc)
 ;;
 
+let read_lines path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let rec loop acc =
+         match input_line ic with
+         | line -> loop (line :: acc)
+         | exception End_of_file -> List.rev acc
+       in
+       loop [])
+;;
+
 let with_temp_masc_root f =
   let marker = Filename.temp_file "recall-outcome-eval-" ".tmp" in
   Sys.remove marker;

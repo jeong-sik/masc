@@ -210,9 +210,9 @@ let receipt_map (receipts : receipt_record list) : receipt_record String_map.t =
     receipts
 ;;
 
-let recall_groups records =
+let recall_groups (records : recall_record list) : recall_record list String_map.t =
   List.fold_left
-    (fun acc record ->
+    (fun acc (record : recall_record) ->
        let existing = Option.value (String_map.find_opt record.trace_id acc) ~default:[] in
        String_map.add record.trace_id (record :: existing) acc)
     String_map.empty
@@ -256,7 +256,9 @@ let trace_row_of_group
   let receipt = String_map.find_opt trace_id receipts in
   let outcome_bucket = outcome_bucket_of_receipt receipt in
   let fact_keys =
-    records |> List.concat_map (fun r -> r.injected_fact_keys) |> unique_sorted
+    records
+    |> List.concat_map (fun (r : recall_record) -> r.injected_fact_keys)
+    |> unique_sorted
   in
   { trace_id
   ; keeper_id = (match records with r :: _ -> Some r.keeper_id | [] -> None)
@@ -307,7 +309,7 @@ let key_counts keys =
     keys
 ;;
 
-let add_record_to_fact_summaries acc record =
+let add_record_to_fact_summaries acc (record : recall_record) =
   let counts = key_counts record.injected_fact_keys in
   String_map.fold
     (fun fact_key count acc ->
@@ -326,7 +328,7 @@ let add_record_to_fact_summaries acc record =
     acc
 ;;
 
-let add_outcome_to_fact_summary bucket row =
+let add_outcome_to_fact_summary bucket (row : fact_key_summary) =
   match bucket with
   | Outcome_ok -> { row with outcome_ok = row.outcome_ok + 1 }
   | Outcome_skipped -> { row with outcome_skipped = row.outcome_skipped + 1 }
@@ -385,7 +387,8 @@ let evaluate ~masc_root =
   in
   let count_bucket bucket =
     List.fold_left
-      (fun acc row -> if row.outcome_bucket = bucket then acc + 1 else acc)
+      (fun acc (row : trace_row) ->
+         if row.outcome_bucket = bucket then acc + 1 else acc)
       0
       traces
   in
@@ -397,14 +400,21 @@ let evaluate ~masc_root =
   ; recall_traces = List.length traces
   ; traces_with_receipt =
       List.fold_left
-        (fun acc row -> if Option.is_some row.receipt then acc + 1 else acc)
+        (fun acc (row : trace_row) ->
+           if Option.is_some row.receipt then acc + 1 else acc)
         0
         traces
   ; traces_without_receipt = count_bucket Outcome_missing_receipt
   ; injected_fact_keys =
-      List.fold_left (fun acc row -> acc + row.injected_fact_keys) 0 traces
+      List.fold_left
+        (fun acc (row : trace_row) -> acc + row.injected_fact_keys)
+        0
+        traces
   ; recall_failure_records =
-      List.fold_left (fun acc row -> acc + row.recall_failure_records) 0 traces
+      List.fold_left
+        (fun acc (row : trace_row) -> acc + row.recall_failure_records)
+        0
+        traces
   ; outcome_ok = count_bucket Outcome_ok
   ; outcome_skipped = count_bucket Outcome_skipped
   ; outcome_error = count_bucket Outcome_error

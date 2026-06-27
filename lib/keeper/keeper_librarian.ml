@@ -19,6 +19,7 @@ let wire_field_source_turn = "source_turn"
 let wire_field_source_tool_call_id = "source_tool_call_id"
 let wire_field_claim_id = "claim_id"
 let wire_field_claim_kind = "claim_kind"
+let wire_field_schema_version = "schema_version"
 
 let wire_episode_fields =
   [ wire_field_episode_summary
@@ -38,6 +39,8 @@ let wire_claim_fields =
   ; wire_field_claim_kind
   ]
 ;;
+
+let accepted_episode_fields = wire_field_schema_version :: wire_episode_fields
 
 let trim_nonempty s =
   let s = String.trim s in
@@ -146,11 +149,23 @@ let string_list_field_or_empty key fields =
   | Some _ -> string_list_field key fields
 ;;
 
+let field_allowed ~allowed field =
+  List.exists (String.equal field) allowed
+;;
+
+let first_unexpected_field ~allowed fields =
+  List.find_map
+    (fun (field, _) ->
+       if field_allowed ~allowed field then None else Some field)
+    fields
+;;
+
 type parse_error =
   | Empty_output
   | Invalid_json of string
   | Json_string_invalid_json of string
   | Top_level_not_object
+  | Unexpected_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
 
@@ -159,6 +174,7 @@ let parse_error_to_string = function
   | Invalid_json msg -> "invalid_json: " ^ msg
   | Json_string_invalid_json msg -> "json_string_invalid_json: " ^ msg
   | Top_level_not_object -> "top_level_not_object"
+  | Unexpected_field field -> "unexpected_field: " ^ field
   | Missing_required_fields -> "missing_required_fields"
   | Claim_schema_mismatch -> "claim_schema_mismatch"
 ;;
@@ -251,6 +267,11 @@ let source_turn_range claims =
     Some (lo, hi)
 ;;
 
+let unexpected_claim_field = function
+  | `Assoc fields -> first_unexpected_field ~allowed:wire_claim_fields fields
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
+;;
+
 let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
   (episode, parse_error) result
   =
@@ -266,36 +287,42 @@ let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
   | Ok json ->
     (match json with
     | `Assoc fields ->
-      (match
-         string_field wire_field_episode_summary fields
-         , List.assoc_opt wire_field_claims fields
-         , string_list_field_or_empty wire_field_open_items fields
-         , string_list_field_or_empty wire_field_constraints fields
-         , string_list_field_or_empty wire_field_preserved_tool_refs fields
-       with
-       | ( Some episode_summary
-         , Some (`List claim_items)
-         , Some open_items
-         , Some constraints
-         , Some preserved_tool_refs ) ->
-         (match traverse (fact_of_json ~trace_id:inp.trace_id ~now) claim_items with
-          | Some claims ->
-            Ok
-              { trace_id = inp.trace_id
-              ; generation
-              ; episode_summary
-              ; claims
-              ; open_items
-              ; constraints
-              ; preserved_tool_refs
-              ; source_turn_range = source_turn_range claims
-              ; created_at = now
-              ; valid_until = None
-              ; terminal_marker = None
-              ; schema_version
-              }
-          | None -> Error Claim_schema_mismatch)
-       | _ -> Error Missing_required_fields)
+      (match first_unexpected_field ~allowed:accepted_episode_fields fields with
+       | Some field -> Error (Unexpected_field field)
+       | None ->
+         (match
+            string_field wire_field_episode_summary fields
+            , List.assoc_opt wire_field_claims fields
+            , string_list_field_or_empty wire_field_open_items fields
+            , string_list_field_or_empty wire_field_constraints fields
+            , string_list_field_or_empty wire_field_preserved_tool_refs fields
+          with
+          | ( Some episode_summary
+            , Some (`List claim_items)
+            , Some open_items
+            , Some constraints
+            , Some preserved_tool_refs ) ->
+            (match List.find_map unexpected_claim_field claim_items with
+             | Some field -> Error (Unexpected_field field)
+             | None ->
+               (match traverse (fact_of_json ~trace_id:inp.trace_id ~now) claim_items with
+                | Some claims ->
+                  Ok
+                    { trace_id = inp.trace_id
+                    ; generation
+                    ; episode_summary
+                    ; claims
+                    ; open_items
+                    ; constraints
+                    ; preserved_tool_refs
+                    ; source_turn_range = source_turn_range claims
+                    ; created_at = now
+                    ; valid_until = None
+                    ; terminal_marker = None
+                    ; schema_version
+                    }
+                | None -> Error Claim_schema_mismatch))
+          | _ -> Error Missing_required_fields))
     | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
       Error Top_level_not_object)
 ;;

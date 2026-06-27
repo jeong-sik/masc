@@ -70,9 +70,7 @@ let minimal_episode_json ?(claim = "c") () =
 (* A minimal valid episode, parsed from known-good JSON, reused as the [Parsed]
    payload so the stub does not have to fabricate the record by hand. *)
 let sample_episode () =
-  let raw =
-    episode_json_string ~claims:[ claim_json ~confidence:(`Float 0.9) () ] ()
-  in
+  let raw = episode_json_string ~claims:[ claim_json () ] () in
   let inp = { Lib.trace_id = "t"; generation = 0; messages = [] } in
   match Lib.episode_of_output ~now:1_000_000.0 ~generation:inp.generation inp raw with
   | Some ep -> ep
@@ -355,6 +353,42 @@ let test_rejects_string_source_turn () =
   check bool "string source_turn rejected" true (Option.is_none (parse_ep raw))
 ;;
 
+let expect_unexpected_field field raw =
+  let inp = { Lib.trace_id = "unexpected-field-t"; generation = 0; messages = [] } in
+  match Lib.episode_of_output_result ~now:1_000_000.0 ~generation:0 inp raw with
+  | Error (Lib.Unexpected_field got) -> check string "unexpected field" field got
+  | Error error ->
+    Alcotest.failf
+      "expected Unexpected_field %s, got %s"
+      field
+      (Lib.parse_error_to_string error)
+  | Ok _ -> Alcotest.failf "expected Unexpected_field %s" field
+;;
+
+let test_rejects_unexpected_episode_field () =
+  let raw =
+    `Assoc
+      [ field_episode_summary, `String "s"
+      ; field_claims, `List [ claim_json () ]
+      ; field_open_items, `List []
+      ; field_constraints, `List []
+      ; field_preserved_tool_refs, `List []
+      ; "extra_episode_field", `String "drift"
+      ]
+    |> Yojson.Safe.to_string
+  in
+  expect_unexpected_field "extra_episode_field" raw
+;;
+
+let test_rejects_unexpected_claim_field () =
+  let raw =
+    episode_json_string
+      ~claims:[ claim_json ~confidence:(`Float 0.9) () ]
+      ()
+  in
+  expect_unexpected_field deprecated_field_confidence raw
+;;
+
 let test_parse_result_reports_error () =
   let inp = { Lib.trace_id = "typed-error-t"; generation = 0; messages = [] } in
   match Lib.episode_of_output_result ~now:1_000_000.0 ~generation:0 inp "not json" with
@@ -470,6 +504,9 @@ let () =
         [
           test_case "rejects markdown-wrapped JSON" `Quick test_rejects_markdown_wrapped;
           test_case "rejects prose-wrapped JSON" `Quick test_rejects_prose_wrapped_json;
+          test_case "rejects unexpected episode field" `Quick
+            test_rejects_unexpected_episode_field;
+          test_case "rejects unexpected claim field" `Quick test_rejects_unexpected_claim_field;
           test_case "parses JSON-string-wrapped object" `Quick test_parses_json_string_wrapping;
           test_case "rejects string source_turn" `Quick test_rejects_string_source_turn;
           test_case "parse result reports typed error" `Quick test_parse_result_reports_error;

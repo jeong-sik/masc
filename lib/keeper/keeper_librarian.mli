@@ -41,6 +41,7 @@ type parse_error =
   | Invalid_json of string
   | Json_string_invalid_json of string
   | Top_level_not_object
+  | Unexpected_field of string
   | Missing_required_fields
   | Claim_schema_mismatch
 

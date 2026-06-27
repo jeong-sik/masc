@@ -213,6 +213,42 @@ let test_budget_not_dispatched_receipt_marks_attention () =
          (snapshot |> member "operator_disposition_reason" |> to_string))
 ;;
 
+let test_unknown_completion_contract_result_stays_visible () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-unknown-contract" in
+       let meta = make_meta keeper_name in
+       let receipt_store =
+         Masc.Keeper_types_support.keeper_execution_receipt_store config keeper_name
+       in
+       Dated_jsonl.append
+         receipt_store
+         (`Assoc
+             [ "ended_at", `String "2026-06-01T00:00:00Z"
+             ; "completion_contract_result", `String "future_state"
+             ]);
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "raw completion contract result remains on execution summary"
+         "future_state"
+         (snapshot |> member "execution" |> member "completion_contract_result"
+          |> to_string);
+       Alcotest.(check string)
+         "unknown result is visible instead of collapsed to not observed"
+         "unknown_completion_contract_result:future_state"
+         (snapshot |> member "execution" |> member "mutation_guard_summary"
+          |> to_string))
+;;
+
 let test_model_observability_uses_runtime_trust_selected_model () =
   let runtime_trust =
     `Assoc
@@ -310,6 +346,10 @@ let () =
             "budget not-dispatched receipt marks runtime-trust attention"
             `Quick
             test_budget_not_dispatched_receipt_marks_attention
+        ; Alcotest.test_case
+            "unknown completion-contract result remains visible"
+            `Quick
+            test_unknown_completion_contract_result_stays_visible
         ; Alcotest.test_case
             "status model observability reuses runtime-trust execution selected model"
             `Quick

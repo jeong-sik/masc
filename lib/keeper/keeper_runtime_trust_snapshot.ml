@@ -585,6 +585,11 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
   let completion_contract_result =
     Option.bind latest_receipt (json_string_opt_member "completion_contract_result")
   in
+  let completion_contract_result_raw =
+    match Option.map String.trim completion_contract_result with
+    | Some value when value <> "" -> Some value
+    | Some _ | None -> None
+  in
   let completion_contract_result_typed =
     Option.bind
       (Option.map (fun value -> String.lowercase_ascii (String.trim value))
@@ -623,7 +628,10 @@ let execution_summary_json ~(meta : Keeper_meta_contract.keeper_meta) ~latest_re
         "mutation_contract_satisfied"
     | Some result ->
         Keeper_execution_receipt_types.completion_contract_result_to_string result
-    | None -> "mutation_contract_not_observed"
+    | None -> (
+        match completion_contract_result_raw with
+        | Some raw -> "unknown_completion_contract_result:" ^ raw
+        | None -> "mutation_contract_not_observed")
   in
   `Assoc
     [

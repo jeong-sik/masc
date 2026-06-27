@@ -933,7 +933,7 @@ let seed_one ~target_root ~force tally rel =
 let init_cmd_exit base_path force =
   let base_path = Env_config.normalize_masc_base_path_input base_path in
   let target_root =
-    Filename.concat (Workspace_utils.masc_dir_from_base_path ~base_path) "config"
+    (Config_dir_resolver.resolve_for_base_path ~base_path).config_root.path
   in
   Fs_compat.mkdir_p target_root;
   let result =

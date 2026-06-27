@@ -210,48 +210,6 @@ let compute_hebbian ~base_path ~now () =
 let memory_quality_recent_limit = 500
 let memory_quality_top_key_limit = 10
 
-type recall_quality_record =
-  { injected_fact_keys : string list
-  ; injected_episode_keys : string list
-  ; failure_reason : string option
-  }
-
-let json_string_field fields key =
-  match List.assoc_opt key fields with
-  | Some (`String value) -> Some value
-  | _ -> None
-;;
-
-let json_string_list_field fields key =
-  match List.assoc_opt key fields with
-  | Some (`List items) ->
-    List.filter_map (function
-      | `String value -> Some value
-      | _ -> None)
-      items
-  | _ -> []
-;;
-
-let recall_quality_record_of_json = function
-  | `Assoc fields ->
-    (match json_string_field fields "keeper_id" with
-     | None -> None
-     | Some _keeper_id ->
-       Some
-         { injected_fact_keys = json_string_list_field fields "injected_fact_keys"
-         ; injected_episode_keys = json_string_list_field fields "injected_episode_keys"
-         ; failure_reason = json_string_field fields "failure_reason"
-         })
-  | _ -> None
-;;
-
-let memory_quality_error_label = function
-  | Sys_error _ -> "sys_error"
-  | Unix.Unix_error _ -> "unix_error"
-  | Yojson.Json_error _ -> "json_error"
-  | _ -> "unexpected_exception"
-;;
-
 let load_recall_quality_records ~(config : Workspace_utils.config) =
   try
     let masc_root = Workspace_utils.masc_dir config in
@@ -262,10 +220,10 @@ let load_recall_quality_records ~(config : Workspace_utils.config) =
     in
     Ok
       (Dated_jsonl.read_recent store memory_quality_recent_limit
-       |> List.filter_map recall_quality_record_of_json)
+       |> List.filter_map Keeper_recall_injection_ledger.record_of_json)
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | exn -> Error (memory_quality_error_label exn)
+  | exn -> Error (Keeper_recall_injection_ledger.error_label_of_exn exn)
 ;;
 
 let increment_count tbl key =
@@ -291,21 +249,7 @@ let count_rows_by ?(limit = max_int) pairs =
     `Assoc [ "key", `String key; "count", `Int count ])
 ;;
 
-let legacy_unstructured_fallback_key_prefix =
-  "claim:"
-  ^ Keeper_memory_os_types.normalize_claim
-      Keeper_memory_os_types.librarian_unstructured_fallback_claim_prefix
-;;
-
-(* Dashboard-only compatibility metric for legacy pre-[Diagnostic] fallback
-   rows. Prompt recall and retention decisions use typed fact fields upstream;
-   this counts old injected fact keys after they have already reached the
-   read-only recall ledger. *)
-let is_legacy_unstructured_fallback_key key =
-  String.starts_with ~prefix:legacy_unstructured_fallback_key_prefix key
-;;
-
-let recall_quality_json records =
+let recall_quality_json (records : Keeper_recall_injection_ledger.record list) =
   let fact_counts = Hashtbl.create 256 in
   let failure_counts = Hashtbl.create 16 in
   let total_fact_injections = ref 0 in
@@ -316,7 +260,7 @@ let recall_quality_json records =
        List.iter
          (fun key ->
             incr total_fact_injections;
-            if is_legacy_unstructured_fallback_key key
+            if Keeper_memory_os_types.legacy_unstructured_fallback_claim_key key
             then incr diagnostic_fallback_key_injections;
             increment_count fact_counts key)
          record.injected_fact_keys)

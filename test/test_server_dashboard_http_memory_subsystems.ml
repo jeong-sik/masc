@@ -328,9 +328,8 @@ let append_recall_record
 ;;
 
 let legacy_unstructured_fallback_fact_key () =
-  "claim:"
-  ^ Types.normalize_claim
-      (Types.librarian_unstructured_fallback_claim_prefix ^ " (provider): raw")
+  Types.claim_identity
+    (fact (Types.librarian_unstructured_fallback_claim_prefix ^ " (provider): raw"))
 ;;
 
 let test_http_json_surfaces_memory_quality_summary () =

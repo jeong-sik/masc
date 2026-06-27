@@ -25,6 +25,18 @@
 val base_dir : masc_root:string -> string
 (** Directory that stores recall injection JSONL day files. *)
 
+type record =
+  { keeper_id : string
+  ; injected_fact_keys : string list
+  ; injected_episode_keys : string list
+  ; failure_reason : string option
+  }
+(** Typed subset of the append schema consumed by read-only dashboard/eval
+    surfaces. Field ownership stays here so consumers do not duplicate ledger
+    JSON field names. *)
+
+val record_of_json : Yojson.Safe.t -> record option
+
 val to_json
   :  ?failure_reason:string
   -> keeper_id:string
@@ -58,11 +70,15 @@ val append
 type prune_error =
   [ `Sys_error
   | `Unix_error
+  | `Json_error
   | `Unexpected_exception
   ]
 (** Bounded failure label for recall-ledger prune setup failures. *)
 
 val string_of_prune_error : prune_error -> string
+val error_label_of_exn : exn -> string
+(** Bounded error label shared by recall-ledger maintenance and read-only
+    dashboard consumers. *)
 
 val prune_older_than
   :  masc_root:string

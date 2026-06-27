@@ -11,7 +11,12 @@ let regular_file_is_executable path =
     | Unix.S_REG ->
       Unix.access path [ Unix.X_OK ];
       true
-    | _ -> false
+    | Unix.S_DIR
+    | Unix.S_CHR
+    | Unix.S_BLK
+    | Unix.S_LNK
+    | Unix.S_FIFO
+    | Unix.S_SOCK -> false
   with
   | Unix.Unix_error _ | Sys_error _ -> false
 ;;

@@ -1827,61 +1827,129 @@ let eval_tags_json d =
   `List (List.map (fun tag -> `String tag) d.eval_tags)
 ;;
 
+let effect_domain_json = function
+  | Some effect_domain -> `String (Tool_catalog.effect_domain_to_string effect_domain)
+  | None -> `Null
+;;
+
+let effect_domain_fields = function
+  | Some domain ->
+    [ "effect_domain", `String (Tool_catalog.effect_domain_to_string domain) ]
+  | None -> []
+;;
+
+let common_policy_json_fields ~readonly_key policy =
+  [ "visibility", `String (Tool_catalog.visibility_to_string policy.visibility)
+  ; readonly_key, Json_util.bool_opt_to_json policy.readonly_hint
+  ; "approval", `String (approval_to_string policy.approval)
+  ; "retryable", `Bool policy.retryable
+  ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
+  ; "inline_safe", `Bool policy.inline_safe
+  ; "maintenance_only", `Bool policy.maintenance_only
+  ]
+;;
+
 let route_evidence_json d =
   let policy = d.policy in
-  let policy_fields =
-    match policy.effect_domain with
-    | Some domain ->
-      [ "effect_domain", `String (Tool_catalog.effect_domain_to_string domain) ]
-    | None -> []
-  in
   `Assoc
     ([ "descriptor_id", `String d.id
      ; "public_name", `String d.public_name
      ; "canonical_name", `String d.internal_name
      ; "description", `String d.description
-     ; "visibility", `String (Tool_catalog.visibility_to_string policy.visibility)
-     ; "readonly", Json_util.bool_opt_to_json policy.readonly_hint
      ; "executor", `String (executor_to_string d.executor)
      ; "backend", `String (backend_to_string d.backend)
      ; "sandbox", `String (sandbox_to_string d.sandbox)
      ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
      ; "receipt_labels", receipt_labels_json d
      ; "eval_tags", eval_tags_json d
-     ; "approval", `String (approval_to_string policy.approval)
-     ; "retryable", `Bool policy.retryable
-     ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
-     ; "inline_safe", `Bool policy.inline_safe
-     ; "maintenance_only", `Bool policy.maintenance_only
      ]
-     @ policy_fields)
+     @ common_policy_json_fields ~readonly_key:"readonly" policy
+     @ effect_domain_fields policy.effect_domain)
 ;;
 
 let schema_property_names schema =
   match Json_util.assoc_member_opt "properties" schema with
-  | Some (`Assoc properties) -> List.map fst properties
-  | _ -> []
+  | None -> [], []
+  | Some (`Assoc properties) -> List.map fst properties, []
+  | Some other ->
+    ( []
+    , [ Printf.sprintf
+          "properties: expected object, got %s"
+          (Json_util.kind_name other)
+      ] )
 ;;
 
-let schema_required_names schema = Json_util.json_string_list_member "required" schema
+let schema_required_names schema =
+  match Json_util.assoc_member_opt "required" schema with
+  | None -> [], []
+  | Some (`List values) ->
+    List.fold_right
+      (fun value (names, errors) ->
+         match value with
+         | `String name when not (String.equal name "") -> name :: names, errors
+         | other ->
+           ( names
+           , Printf.sprintf
+               "required: expected non-empty string, got %s"
+               (Json_util.kind_name other)
+             :: errors ))
+      values
+      ([], [])
+  | Some other ->
+    ( []
+    , [ Printf.sprintf
+          "required: expected string array, got %s"
+          (Json_util.kind_name other)
+      ] )
 
 let schema_one_of_required_names schema =
   match Json_util.assoc_member_opt "oneOf" schema with
+  | None -> [], []
   | Some (`List cases) ->
-    List.filter_map
-      (fun case ->
-         match schema_required_names case with
-         | [] -> None
-         | required -> Some (Json_util.json_string_list required))
-      cases
-  | _ -> []
+    let mapped_cases =
+      List.mapi
+        (fun index case ->
+           match case with
+           | `Assoc _ ->
+             let required, errors = schema_required_names case in
+             ( (if required = [] then None else Some (Json_util.json_string_list required))
+             , List.map (Printf.sprintf "oneOf[%d].%s" index) errors )
+           | other ->
+             ( None
+             , [ Printf.sprintf
+                   "oneOf[%d]: expected object, got %s"
+                   index
+                   (Json_util.kind_name other)
+               ] ))
+        cases
+    in
+    let required, errors =
+      List.fold_right
+        (fun (required, errors) (required_acc, error_acc) ->
+           ( match required with
+             | Some required -> required :: required_acc
+             | None -> required_acc )
+           , errors @ error_acc)
+        mapped_cases
+        ([], [])
+    in
+    required, errors
+  | Some other ->
+    ( []
+    , [ Printf.sprintf
+          "oneOf: expected object array, got %s"
+          (Json_util.kind_name other)
+      ] )
 ;;
 
 let schema_shape_json schema =
-  let one_of_required = schema_one_of_required_names schema in
+  let properties, property_errors = schema_property_names schema in
+  let required, required_errors = schema_required_names schema in
+  let one_of_required, one_of_errors = schema_one_of_required_names schema in
+  let errors = property_errors @ required_errors @ one_of_errors in
   let base =
-    [ "properties", Json_util.json_string_list (schema_property_names schema)
-    ; "required", Json_util.json_string_list (schema_required_names schema)
+    [ "properties", Json_util.json_string_list properties
+    ; "required", Json_util.json_string_list required
     ]
   in
   let fields =
@@ -1889,28 +1957,22 @@ let schema_shape_json schema =
     then base
     else ("one_of_required", `List one_of_required) :: base
   in
+  let fields =
+    if errors = []
+    then fields
+    else ("schema_errors", Json_util.json_string_list errors) :: fields
+  in
   `Assoc fields
 ;;
 
 let discovery_policy_json policy =
   `Assoc
-    [ ( "visibility"
-      , `String (Tool_catalog.visibility_to_string policy.visibility) )
-    ; "readonly_hint", Json_util.bool_opt_to_json policy.readonly_hint
-    ; ( "effect_domain"
-      , (match policy.effect_domain with
-         | Some effect_domain ->
-           `String (Tool_catalog.effect_domain_to_string effect_domain)
-         | None -> `Null) )
-    ; ( "policy_group"
+    (common_policy_json_fields ~readonly_key:"readonly_hint" policy
+     @ [ "effect_domain", effect_domain_json policy.effect_domain
+       ; ( "policy_group"
       , Json_util.string_opt_to_json
           (Option.map Tool_catalog.effect_domain_to_string policy.effect_domain) )
-    ; "approval", `String (approval_to_string policy.approval)
-    ; "retryable", `Bool policy.retryable
-    ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
-    ; "inline_safe", `Bool policy.inline_safe
-    ; "maintenance_only", `Bool policy.maintenance_only
-    ]
+       ])
 ;;
 
 let discovery_json d =

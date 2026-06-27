@@ -2,6 +2,7 @@ open Alcotest
 
 module KET = Masc.Keeper_tool_dispatch_runtime
 module KES = Masc.Keeper_tool_shared_runtime
+module KTD = Masc.Keeper_tool_descriptor
 module Workspace = Masc.Workspace
 
 let tool_ok ?(tool_name = "") message =
@@ -501,6 +502,8 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     (list_member_contains "properties" "executable" schema_shape);
   check bool "Execute schema properties include pipeline" true
     (list_member_contains "properties" "pipeline" schema_shape);
+  check bool "Execute schema has no shape errors" true
+    (Yojson.Safe.Util.member "schema_errors" schema_shape = `Null);
   let examples = Yojson.Safe.Util.(member "examples" execute |> to_list) in
   let example_with_executable executable =
     List.exists
@@ -525,7 +528,46 @@ let test_keeper_tools_list_json_uses_typed_groups () =
        examples);
   let grep = find_descriptor "tool_search_files" in
   check bool "non-execute descriptor omits examples field" true
-    (Yojson.Safe.Util.member "examples" grep = `Null)
+    (Yojson.Safe.Util.member "examples" grep = `Null);
+  let grep_policy = Yojson.Safe.Util.member "policy" grep in
+  check string "Grep policy group" "read_only"
+    (string_member "policy_group" grep_policy);
+  check bool "Grep active internal name listed" true
+    (list_member_contains "active_names" "tool_search_files" grep);
+  let malformed_execute =
+    { (List.hd (KTD.descriptors_for_internal "tool_execute")) with
+      KTD.input_schema =
+        `Assoc
+          [ "properties", `String "not-an-object"
+          ; "required", `List [ `String "ok"; `Int 1 ]
+          ; "oneOf", `List [ `String "not-an-object"; `Assoc [ "required", `String "bad" ] ]
+          ]
+    }
+  in
+  let malformed_shape =
+    Yojson.Safe.Util.(
+      KTD.discovery_json malformed_execute |> member "schema_shape")
+  in
+  check bool "malformed schema surfaces property error" true
+    (list_member_contains
+       "schema_errors"
+       "properties: expected object, got string"
+       malformed_shape);
+  check bool "malformed schema surfaces required error" true
+    (list_member_contains
+       "schema_errors"
+       "required: expected non-empty string, got int"
+       malformed_shape);
+  check bool "malformed schema surfaces oneOf case error" true
+    (list_member_contains
+       "schema_errors"
+       "oneOf[0]: expected object, got string"
+       malformed_shape);
+  check bool "malformed schema surfaces oneOf required-shape error" true
+    (list_member_contains
+       "schema_errors"
+       "oneOf[1].required: expected string array, got string"
+       malformed_shape)
 
 let test_execute_with_outcome_missing_file_is_failure () =
   with_exec_fixture "keeper_tool_dispatch_runtime_missing_file"

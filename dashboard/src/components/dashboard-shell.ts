@@ -4,8 +4,10 @@ import { lazy, Suspense } from 'preact/compat'
 import { useEffect, useMemo } from 'preact/hooks'
 import type { GroundedVerdict, RouteState, TabId } from '../types'
 import type { DashboardCdalHealth, DashboardFleetSafetyHealth, DashboardKeeperReactionLedgerHealth, DashboardRuntimeResolution, Keeper } from '../types'
-import type { DashboardRuntimeProbePayload } from '../api/dashboard'
-import { fetchDashboardRuntimeProbe } from '../api/dashboard'
+import {
+  fetchDashboardRuntimeProbe,
+  type DashboardRuntimeProbePayload,
+} from '../api/dashboard-tools-prompts'
 import { hashForRoute, navigate, route } from '../router'
 import { connected, reconnectCount, lastDisconnectedAt } from '../sse'
 import { dashboardWsOnlyEnabled } from '../dashboard-ws-cutover'

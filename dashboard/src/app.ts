@@ -21,7 +21,7 @@ import { cancelPendingSSERefreshes, registerGovernanceRefresh, registerMissionRe
 import { refreshShell } from './store'
 import { connectDashboardWS, disconnectDashboardWS, subscribeDashboardRoute } from './dashboard-ws'
 import { ensureDevToken } from './api/dev-token'
-import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard'
+import { fetchDashboardConfig, parseContextThresholds } from './api/dashboard-logs'
 import { CONTEXT_RATIO_CRITICAL, CONTEXT_RATIO_WARN, CONTEXT_RATIO_COMPACTING } from './config/constants'
 import { setContextThresholds } from './config/context-thresholds'
 import { DashboardMain, DashboardHealthStrip, isKeeperDetailDashboardRoute } from './components/dashboard-shell'

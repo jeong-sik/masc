@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { render } from 'preact'
 import { html } from 'htm/preact'
 
-vi.mock('../api/dashboard', () => ({
+vi.mock('../api/dashboard-logs', () => ({
   fetchDashboardConfig: vi.fn(),
 }))
 
@@ -17,7 +17,7 @@ vi.mock('../store', async (importOriginal) => {
   }
 })
 
-import { fetchDashboardConfig } from '../api/dashboard'
+import { fetchDashboardConfig } from '../api/dashboard-logs'
 import { refreshShell } from '../store'
 import { refreshServerConfig, ServerConfig } from './server-config'
 

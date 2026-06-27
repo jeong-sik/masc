@@ -409,7 +409,7 @@ function reactionLedgerHealthChip(
   }
 }
 
-function cdalHealthChip(cdal: DashboardCdalHealth | null | undefined): DashboardHealthChip | null {
+function contractHealthChip(cdal: DashboardCdalHealth | null | undefined): DashboardHealthChip | null {
   if (!cdal) return null
   const writerStatus = cdal.writer_status ?? 'unknown'
   const proofStatus = cdal.proof_store?.status ?? 'unknown'
@@ -639,7 +639,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
     }
   }
 
-  const cdalChip = cdalHealthChip(runtime?.cdal)
+  const cdalChip = contractHealthChip(runtime?.cdal)
   if (cdalChip) {
     chips.push(cdalChip)
   }

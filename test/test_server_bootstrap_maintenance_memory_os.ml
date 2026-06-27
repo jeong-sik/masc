@@ -11,7 +11,12 @@ module Io = Masc.Keeper_memory_os_io
 module Recall = Masc.Keeper_memory_os_recall
 module Atypes = Agent_sdk.Types
 
-let message_text (m : Atypes.message) = m.content
+let message_text (m : Atypes.message) =
+  m.content
+  |> List.filter_map (function
+    | Atypes.Text s -> Some s
+    | _ -> None)
+  |> String.concat "\n"
 
 let now = 1_000_000.0
 

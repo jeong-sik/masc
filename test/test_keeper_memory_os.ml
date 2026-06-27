@@ -11,6 +11,7 @@ module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
 module Metrics = Masc.Otel_metric_store
 module Runtime_manifest = Masc.Keeper_runtime_manifest
+module Keeper_user_model = Masc.Keeper_user_model
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
 

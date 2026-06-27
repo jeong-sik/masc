@@ -6,50 +6,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 void vi
 
 const mocks = vi.hoisted(() => ({
-  fetchDashboardPrompts: vi.fn(async () => ({
-    prompts: [
-      {
-        key: 'keeper.world',
-        category: 'keeper',
-        description: 'world block',
-        current: 'override world',
-        default: 'file world',
-        effective: 'override world',
-        file_value: 'file world',
-        override_value: 'override world',
-        file_path: 'fixture/config/prompts/keeper.world.md',
-        file_exists: true,
-        source: 'override' as const,
-        has_override: true,
-        char_count: 14,
-        required_file: true,
-        template_variables: ['keeper'],
-      },
-      {
-        key: 'governance.dry_run',
-        category: 'governance',
-        description: 'dry run block',
-        current: 'dry run prompt',
-        default: 'dry run prompt',
-        effective: 'dry run prompt',
-        file_value: 'dry run prompt',
-        override_value: null,
-        file_path: 'fixture/config/prompts/governance.dry_run.md',
-        file_exists: true,
-        source: 'file' as const,
-        has_override: false,
-        char_count: 14,
-        required_file: true,
-        template_variables: [],
-      },
-    ],
-  })),
+  clearPromptOverride: vi.fn(async () => ({ ok: true, message: 'override cleared' })),
+  fetchDashboardPrompts: vi.fn(),
+  savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' })),
 }))
 
 vi.mock('../../api', () => ({
-  clearPromptOverride: vi.fn(async () => ({ ok: true, message: 'override cleared' })),
+  clearPromptOverride: mocks.clearPromptOverride,
   fetchDashboardPrompts: mocks.fetchDashboardPrompts,
-  savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' })),
+  savePromptOverride: mocks.savePromptOverride,
 }))
 
 import type { DashboardPromptItem } from '../../api'
@@ -89,6 +54,41 @@ const HELPER_FIXTURES: DashboardPromptItem[] = [
   }),
 ]
 
+function defaultPromptItems(): DashboardPromptItem[] {
+  return [
+    makePrompt({
+      key: 'keeper.world',
+      category: 'keeper',
+      description: 'world block',
+      current: 'override world',
+      default: 'file world',
+      effective: 'override world',
+      file_value: 'file world',
+      override_value: 'override world',
+      file_path: 'fixture/config/prompts/keeper.world.md',
+      source: 'override',
+      has_override: true,
+      char_count: 14,
+      template_variables: ['keeper'],
+    }),
+    makePrompt({
+      key: 'governance.dry_run',
+      category: 'governance',
+      description: 'dry run block',
+      current: 'dry run prompt',
+      default: 'dry run prompt',
+      effective: 'dry run prompt',
+      file_value: 'dry run prompt',
+      override_value: null,
+      file_path: 'fixture/config/prompts/governance.dry_run.md',
+      source: 'file',
+      has_override: false,
+      char_count: 14,
+      template_variables: [],
+    }),
+  ]
+}
+
 describe('promptSourceCounts', () => {
   it('counts each source and total', () => {
     expect(promptSourceCounts(HELPER_FIXTURES)).toEqual({
@@ -121,7 +121,10 @@ describe('PromptRegistryPanel', () => {
   beforeEach(() => {
     container = document.createElement('div')
     document.body.appendChild(container)
-    mocks.fetchDashboardPrompts.mockClear()
+    mocks.clearPromptOverride.mockClear()
+    mocks.fetchDashboardPrompts.mockReset()
+    mocks.fetchDashboardPrompts.mockResolvedValue({ prompts: defaultPromptItems() })
+    mocks.savePromptOverride.mockClear()
   })
 
   afterEach(() => {
@@ -200,5 +203,37 @@ describe('PromptRegistryPanel', () => {
       window.confirm = originalConfirm
       await fireEvent.input(searchInput(), { target: { value: '' } })
     }
+  })
+
+  it('rebinds the draft when reload removes the selected prompt before saving', async () => {
+    const remainingPrompt = defaultPromptItems()[1]
+    mocks.fetchDashboardPrompts
+      .mockResolvedValueOnce({ prompts: defaultPromptItems() })
+      .mockResolvedValueOnce({ prompts: [remainingPrompt] })
+
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+
+    const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement
+    await fireEvent.input(textarea(), { target: { value: 'stale keeper draft' } })
+
+    const refreshButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('새로고침'),
+    ) as HTMLButtonElement
+    await fireEvent.click(refreshButton)
+
+    await waitFor(() => {
+      expect(textarea().value).toBe('dry run prompt')
+    })
+
+    const applyButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('오버라이드 적용'),
+    ) as HTMLButtonElement
+    await fireEvent.click(applyButton)
+
+    await waitFor(() => {
+      expect(mocks.savePromptOverride).toHaveBeenCalledWith('governance.dry_run', 'dry run prompt')
+    })
   })
 })

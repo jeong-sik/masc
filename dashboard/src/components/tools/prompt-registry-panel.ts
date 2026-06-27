@@ -1,7 +1,7 @@
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
 import { Markdown } from "../common/markdown"
-import { useEffect, useState } from 'preact/hooks'
+import { useEffect, useMemo, useState } from 'preact/hooks'
 import {
   clearPromptOverride,
   fetchDashboardPrompts,
@@ -37,7 +37,7 @@ export interface PromptPreset {
 export interface PromptDestination {
   stageTitle: string
   messageSlot: string
-  role: string
+  role: KeeperPromptAssemblyStage['role']
   summary: string
 }
 
@@ -65,6 +65,9 @@ function sourceBadgeClass(source: PromptSource): string {
 }
 
 const STAGE_PRESET_PREFIX = 'stage:'
+const COMPUTED_PROMPT_SOURCE: KeeperPromptAssemblyRow['source'] = 'computed'
+const NOT_SENT_MESSAGE_SLOT = 'not sent'
+const MODEL_INPUT_STAGE_ROLE: KeeperPromptAssemblyStage['role'] = 'model_input'
 
 function stagePresetId(preset: PromptPresetId): string | null {
   if (preset === 'all' || preset === 'attention') return null
@@ -72,7 +75,7 @@ function stagePresetId(preset: PromptPresetId): string | null {
 }
 
 function promptAssemblyRows(stage: KeeperPromptAssemblyStage): KeeperPromptAssemblyRow[] {
-  return stage.rows.filter(row => row.source !== 'computed')
+  return stage.rows.filter(row => row.source !== COMPUTED_PROMPT_SOURCE)
 }
 
 function promptPresetRows(report: KeeperPromptAssemblyReport, preset: PromptPresetId): Set<string> | null {
@@ -84,8 +87,12 @@ function promptPresetRows(report: KeeperPromptAssemblyReport, preset: PromptPres
 }
 
 function stagePresetLabel(stage: KeeperPromptAssemblyStage): string {
-  if (stage.messageSlot === 'not sent') return stage.title
+  if (stage.messageSlot === NOT_SENT_MESSAGE_SLOT) return stage.title
   return `${stage.messageSlot}: ${stage.title}`
+}
+
+function isModelInputDestination(destination: PromptDestination): boolean {
+  return destination.role === MODEL_INPUT_STAGE_ROLE
 }
 
 function presetPromptCount(
@@ -110,11 +117,12 @@ export function promptPresetOptions(
     .filter(stage => promptAssemblyRows(stage).length > 0)
     .map(stage => {
       const id: PromptPresetId = `${STAGE_PRESET_PREFIX}${stage.id}`
+      const stagePromptKeys = new Set(promptAssemblyRows(stage).map(row => row.promptKey))
       return {
         id,
         label: stagePresetLabel(stage),
         description: stage.summary,
-        count: presetPromptCount(prompts, report, id),
+        count: prompts.filter(prompt => stagePromptKeys.has(prompt.key)).length,
       }
     })
 
@@ -122,14 +130,14 @@ export function promptPresetOptions(
     {
       id: 'all',
       label: '전체',
-      description: 'All registered prompt files and overrides.',
+      description: '등록된 모든 프롬프트 파일과 오버라이드.',
       count: prompts.length,
     },
     ...stagePresets,
     {
       id: 'attention',
       label: '수정/누락',
-      description: 'Saved overrides and missing required prompt files.',
+      description: '저장된 오버라이드와 누락된 필수 프롬프트 파일.',
       count: presetPromptCount(prompts, report, 'attention'),
     },
   ]
@@ -154,19 +162,23 @@ function normalizeDraft(prompt: DashboardPromptItem | null): string {
   return prompt.override_value ?? prompt.effective
 }
 
+function draftKeyForPrompt(prompt: DashboardPromptItem | null): string | null {
+  return prompt?.key ?? null
+}
+
 // Pure helper: filter by source + substring search (case-insensitive).
 // Exported for unit testing.
 export function filterPrompts(
   prompts: DashboardPromptItem[],
   source: PromptSourceFilter,
   query: string,
-  report?: KeeperPromptAssemblyReport,
+  report: KeeperPromptAssemblyReport,
   preset: PromptPresetId = 'all',
 ): DashboardPromptItem[] {
   const q = query.trim().toLowerCase()
   const allowedPromptKeys =
     preset !== 'all' && preset !== 'attention'
-      ? report ? promptPresetRows(report, preset) : new Set<string>()
+      ? promptPresetRows(report, preset)
       : null
   return prompts.filter(p => {
     if (preset === 'attention' && !p.has_override && p.source !== 'missing') return false
@@ -207,9 +219,10 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const [status, setStatus] = useState<string | null>(null)
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
   const [draft, setDraft] = useState('')
+  const [draftPromptKey, setDraftPromptKey] = useState<string | null>(null)
   const [preset, setPreset] = useState<PromptPresetId>('all')
 
-  const report = buildKeeperPromptAssemblyReport(prompts)
+  const report = useMemo(() => buildKeeperPromptAssemblyReport(prompts), [prompts])
   const presets = promptPresetOptions(prompts, report)
   const activePreset = presets.some(item => item.id === preset) ? preset : 'all'
   const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value, report, activePreset)
@@ -217,7 +230,16 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
     (selectedKey ? prompts.find(prompt => prompt.key === selectedKey) : null) ?? visiblePrompts[0] ?? null
   const selectedDestinations = selectedPrompt ? promptDestinationsForKey(report, selectedPrompt.key) : []
   const counts = promptSourceCounts(prompts)
-  const draftDirty = selectedPrompt ? draft !== normalizeDraft(selectedPrompt) : draft.length > 0
+  const draftDirty = selectedPrompt
+    ? draftPromptKey === selectedPrompt.key
+      ? draft !== normalizeDraft(selectedPrompt)
+      : draft.length > 0
+    : draft.length > 0
+
+  function setDraftForPrompt(prompt: DashboardPromptItem | null) {
+    setDraft(normalizeDraft(prompt))
+    setDraftPromptKey(draftKeyForPrompt(prompt))
+  }
 
   async function loadPrompts(preferredKey?: string | null) {
     setLoading(true)
@@ -232,8 +254,9 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
           : nextPrompts[0]?.key ?? null
       setSelectedKey(nextSelectedKey)
       const nextPrompt = nextPrompts.find(prompt => prompt.key === nextSelectedKey) ?? nextPrompts[0] ?? null
-      setDraft(normalizeDraft(nextPrompt))
+      setDraftForPrompt(nextPrompt)
     } catch (err) {
+      setStatus(null)
       setError(errorToString(err))
     } finally {
       setLoading(false)
@@ -245,27 +268,33 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   }, [])
 
   useEffect(() => {
-    if (!selectedPrompt) setDraft('')
-  }, [selectedPrompt?.key])
+    const nextDraftPromptKey = draftKeyForPrompt(selectedPrompt)
+    if (draftPromptKey === nextDraftPromptKey) return
+    setDraft(normalizeDraft(selectedPrompt))
+    setDraftPromptKey(nextDraftPromptKey)
+  }, [selectedPrompt, draftPromptKey])
 
   function confirmDiscardDraft(nextPrompt: DashboardPromptItem): boolean {
     if (!selectedPrompt || nextPrompt.key === selectedPrompt.key || !draftDirty) return true
-    return (
-      typeof window === 'undefined' ||
-      typeof window.confirm !== 'function' ||
-      window.confirm('저장하지 않은 override 초안을 버리고 다른 프롬프트를 열까요?')
-    )
+    if (typeof window === 'undefined' || typeof window.confirm !== 'function') return false
+    return window.confirm('저장하지 않은 override 초안을 버리고 다른 프롬프트를 열까요?')
   }
 
   function selectPrompt(prompt: DashboardPromptItem) {
     if (!confirmDiscardDraft(prompt)) return
     setSelectedKey(prompt.key)
-    setDraft(normalizeDraft(prompt))
+    setDraftForPrompt(prompt)
     setStatus(null)
   }
 
   async function applyOverride() {
     if (!selectedPrompt) return
+    if (draftPromptKey !== selectedPrompt.key) {
+      setError('선택된 프롬프트가 바뀌어 초안을 다시 동기화했습니다. 내용을 확인한 뒤 다시 저장하세요.')
+      setStatus(null)
+      setDraftForPrompt(selectedPrompt)
+      return
+    }
     setSaving(true)
     setError(null)
     setStatus(null)
@@ -285,6 +314,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
 
   async function clearOverride() {
     if (!selectedPrompt) return
+    if (draftPromptKey !== selectedPrompt.key) setDraftForPrompt(selectedPrompt)
     setSaving(true)
     setError(null)
     setStatus(null)
@@ -455,7 +485,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
                   ${selectedDestinations.map(destination => html`
                     <div class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-2">
                       <div class="mb-1 flex flex-wrap items-center gap-2">
-                        <${StatusChip} tone=${destination.role === 'model_input' ? 'info' : 'neutral'} uppercase=${false}>${destination.messageSlot}<//>
+                        <${StatusChip} tone=${isModelInputDestination(destination) ? 'info' : 'neutral'} uppercase=${false}>${destination.messageSlot}<//>
                         <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${destination.stageTitle}</span>
                       </div>
                       <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">${destination.summary}</div>
@@ -509,7 +539,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
                 오버라이드 제거
               <//>
               <${ActionButton} variant="ghost" size="md" disabled=${saving || loading} onClick=${() => {
-                setDraft(normalizeDraft(selectedPrompt))
+                setDraftForPrompt(selectedPrompt)
                 setStatus(null)
               }}>
                 초안 초기화

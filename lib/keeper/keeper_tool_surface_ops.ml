@@ -90,12 +90,33 @@ let rec cached_text_by_key cache_ref ~key ~ttl_s compute =
           Otel_metric_store.metric_tool_keeper_cache_cas_conflicts ();
         cached_text_by_key cache_ref ~key ~ttl_s compute
       end
+
+let submit_keeper_msg_with_captured_event_bus
+      ?timeout_sec
+      ~clock
+      ~sw
+      ~base_path
+      ~keeper_name
+      ~(f : ?event_bus:Agent_sdk.Event_bus.t -> unit -> tool_result)
+      () =
+  let event_bus = Keeper_event_bus.get () in
+  Keeper_msg_async.submit
+    ?timeout_sec
+    ~clock
+    ~sw
+    ~base_path
+    ~keeper_name
+    ~f:(fun () -> f ?event_bus ())
+    ()
+
 module For_testing = struct
   let reset_keeper_list_cache () =
     Atomic.set keeper_list_cache (empty_text_cache ~generation:0)
   let invalidate_keeper_list_cache = invalidate_keeper_list_cache
   let cached_keeper_list_text ~key ~ttl_s compute =
     cached_text_by_key keeper_list_cache ~key ~ttl_s compute
+  let submit_keeper_msg_with_captured_event_bus =
+    submit_keeper_msg_with_captured_event_bus
 end
 let annotate_keeper_json ~runtime_class json =
   match json with
@@ -634,15 +655,14 @@ let keeper_msg_body
       Turn.keeper_msg_timeout_override resolved_args
       |> Result.value ~default:None
     in
-    let event_bus = Keeper_event_bus.get () in
     let request_id =
-      Keeper_msg_async.submit
+      submit_keeper_msg_with_captured_event_bus
         ?timeout_sec
         ~clock
         ~sw
         ~base_path:config.base_path
         ~keeper_name:name
-        ~f:(fun () ->
+        ~f:(fun ?event_bus () ->
           let result = Turn.handle_keeper_msg ?event_bus keeper_ctx resolved_args in
           if tool_result_success result
           then begin
@@ -682,15 +702,14 @@ let handle_keeper_msg ctx args : tool_result =
       Turn.keeper_msg_timeout_override resolved_args
       |> Result.value ~default:None
     in
-    let event_bus = Keeper_event_bus.get () in
     let request_id =
-      Keeper_msg_async.submit
+      submit_keeper_msg_with_captured_event_bus
         ?timeout_sec
         ~clock:ctx.clock
         ~sw:ctx.sw
         ~base_path:ctx.config.base_path
         ~keeper_name:name
-        ~f:(fun () ->
+        ~f:(fun ?event_bus () ->
           let result = Turn.handle_keeper_msg ?event_bus ctx resolved_args in
           if tool_result_success result
           then begin
@@ -786,6 +805,9 @@ let handle_keeper_msg_stream ?on_text_delta ?on_event ctx args : tool_result =
   match
     let* name = resolve_keeper_name ctx args in
     let resolved_args = with_keeper_name args name in
+    (* Stream turns are synchronous today, but still pin the bus visible at the
+       public surface boundary so later refactors cannot reintroduce a nested
+       fallback lookup in the turn body. *)
     let event_bus = Keeper_event_bus.get () in
     let result =
       Turn.handle_keeper_msg ?on_text_delta ?on_event ?event_bus ctx resolved_args

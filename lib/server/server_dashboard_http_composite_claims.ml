@@ -368,7 +368,7 @@ let composite_execution_budget_unsatisfied_reason execution =
       (* TEL-OK: pure dashboard classifier; maps typed receipt labels to a
          display reason without performing an action. *)
       ( Completion_contract_result.Unknown
-      | Completion_contract_result.Not_dispatched
+      | Completion_contract_result.Not_dispatched (* TEL-OK: pure classifier. *)
       | Completion_contract_result.Violated
       | Completion_contract_result.Surface_mismatch
       | Completion_contract_result.No_capable_provider

@@ -2,6 +2,9 @@
 
 module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
+module Metrics = Masc.Otel_metric_store
+module KeeperMetrics = Keeper_metrics
+module LibrarianRuntime = Masc.Keeper_librarian_runtime
 module Health = Server_dashboard_http_keeper_memory_health
 
 let test_now = 1_700_000_000.0
@@ -62,10 +65,28 @@ let float_field name json =
   | _ -> Alcotest.failf "expected float field %S" name
 ;;
 
+let string_field name json =
+  match assoc_field name json with
+  | Some (`String s) -> s
+  | _ -> Alcotest.failf "expected string field %S" name
+;;
+
+let list_field name json =
+  match assoc_field name json with
+  | Some (`List xs) -> xs
+  | _ -> Alcotest.failf "expected list field %S" name
+;;
+
 let totals json =
   match assoc_field "totals" json with
   | Some t -> t
   | None -> Alcotest.fail "expected totals object"
+;;
+
+let alert_summary json =
+  match assoc_field "alert_summary" json with
+  | Some s -> s
+  | None -> Alcotest.fail "expected alert_summary object"
 ;;
 
 let keeper_obj id json =
@@ -155,6 +176,8 @@ let test_reports_per_keeper_metric_values () =
     (float_field "events_to_facts_ratio" k);
   Alcotest.(check int) "nothing expired" 0 (int_field "ttl_expired_on_disk" k);
   Alcotest.(check int) "no duplicates" 0 (int_field "near_duplicate" k);
+  Alcotest.(check int) "no provider slot busy skips" 0 (int_field "provider_slot_busy" k);
+  Alcotest.(check int) "no keeper alerts" 0 (List.length (list_field "alerts" k));
   Alcotest.(check int) "totals.facts" 2 (int_field "facts" (totals json));
   Alcotest.(check bool)
     "totals.facts_bytes positive"
@@ -189,9 +212,75 @@ let test_dry_run_gc_reports_expired_and_duplicates () =
   Alcotest.(check int) "all rows counted on disk" 4 (int_field "facts" k);
   Alcotest.(check int) "one TTL-expired row" 1 (int_field "ttl_expired_on_disk" k);
   Alcotest.(check int) "one duplicate row" 1 (int_field "near_duplicate" k);
+  let alerts = list_field "alerts" k in
+  Alcotest.(check int) "two keeper alerts" 2 (List.length alerts);
+  Alcotest.(check (list string))
+    "alert codes"
+    [ "ttl_expired_on_disk"; "near_duplicate" ]
+    (List.map (string_field "code") alerts);
+  Alcotest.(check (list string))
+    "alert targets"
+    [ "ttl_expired_on_disk"; "near_duplicate" ]
+    (List.map (string_field "target") alerts);
+  Alcotest.(check (list string))
+    "alert labels"
+    [ "TTL"; "중복" ]
+    (List.map (string_field "label") alerts);
+  let summary = alert_summary json in
+  Alcotest.(check int) "summary total alerts" 2 (int_field "total_alerts" summary);
+  Alcotest.(check int) "summary warn alerts" 2 (int_field "warn_alerts" summary);
+  Alcotest.(check int) "summary keepers with alerts" 1 (int_field "keepers_with_alerts" summary);
+  Alcotest.(check int) "summary ttl keepers" 1 (int_field "ttl_expired_keepers" summary);
+  Alcotest.(check int) "summary duplicate keepers" 1 (int_field "near_duplicate_keepers" summary);
   (* dry_run must NOT rewrite the store: a fresh read still sees all 4 rows. *)
   let reread = Io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id:"gc" in
   Alcotest.(check int) "store untouched by dry-run gc" 4 (List.length reread)
+;;
+
+let test_reports_provider_slot_busy_metric_as_alert () =
+  Eio_main.run
+  @@ fun _env ->
+  let now = test_now in
+  let base = fresh_dir "masc-memory-health-provider-slot" in
+  (* Otel_metric_store is process-global. Use a temp-derived keeper label so
+     repeated test runs in one process cannot inherit this counter cell. *)
+  let keeper_id = "slotbusy-health-" ^ Filename.basename base in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  Io.rewrite_facts_atomically_for_keepers_dir
+    ~keepers_dir
+    ~keeper_id
+    [ fact ~now "slot busy metric keeper fact" ];
+  Metrics.inc_counter
+    KeeperMetrics.(to_string MemoryLaneProviderSlotBusy)
+    ~labels:
+      [ "keeper", keeper_id
+      ; "site", LibrarianRuntime.memory_os_librarian_provider_slot_site
+      ]
+    ~delta:3.0
+    ();
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let k = keeper_obj keeper_id json in
+  Alcotest.(check int) "provider slot busy projected" 3 (int_field "provider_slot_busy" k);
+  Alcotest.(check int)
+    "totals provider slot busy"
+    3
+    (int_field "provider_slot_busy" (totals json));
+  let alerts = list_field "alerts" k in
+  Alcotest.(check (list string))
+    "provider slot alert code"
+    [ "provider_slot_busy" ]
+    (List.map (string_field "code") alerts);
+  Alcotest.(check (list string))
+    "provider slot alert target"
+    [ "provider_slot_busy" ]
+    (List.map (string_field "target") alerts);
+  Alcotest.(check (list string))
+    "provider slot alert label"
+    [ "슬롯" ]
+    (List.map (string_field "label") alerts);
+  let summary = alert_summary json in
+  Alcotest.(check int) "summary provider slot keepers" 1 (int_field "provider_slot_busy_keepers" summary);
+  Alcotest.(check int) "summary total alerts" 1 (int_field "total_alerts" summary)
 ;;
 
 let test_sorts_keepers_by_facts_bytes_desc () =
@@ -265,6 +354,10 @@ let () =
             "dry-run gc reports expired and duplicate rows"
             `Quick
             test_dry_run_gc_reports_expired_and_duplicates
+        ; Alcotest.test_case
+            "reports provider slot busy metric as alert"
+            `Quick
+            test_reports_provider_slot_busy_metric_as_alert
         ; Alcotest.test_case
             "sorts keepers by facts_bytes descending"
             `Quick

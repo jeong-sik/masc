@@ -62,6 +62,11 @@ val cadence_counter_entries : unit -> int
     leak-regression signal for the keeper-keyed cadence table and a memory-health
     metric for the dashboard. Read-only. *)
 
+val memory_os_librarian_provider_slot_site : string
+(** OTel [site] label used when the fleet-wide librarian provider slot is busy.
+    The producer and dashboard health reader share this value so label drift
+    cannot silently hide provider-slot-busy alerts. *)
+
 val max_messages : unit -> int
 (** Base per-turn cap on checkpoint messages sent to the librarian prompt. The
     effective prompt window is this value scaled by [cadence_turns] so skipped

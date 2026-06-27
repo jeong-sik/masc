@@ -9,15 +9,16 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
   fetchKeeperMemoryHealth,
+  type KeeperMemoryHealthAlert,
+  type KeeperMemoryHealthAlertTarget,
   type KeeperMemoryHealthKeeperEntry,
   type KeeperMemoryHealthResponse,
 } from '../../api/dashboard'
 import { DEFAULT_PANEL_REFRESH_MS, formatAutoRefreshLabel, setupVisibleAutoRefresh } from '../../lib/auto-refresh'
 
-// Rows whose events-to-facts ratio exceeds this threshold are flagged for
-// operator attention — a high ratio suggests the event log has grown much
-// larger than the fact store, which may indicate GC backpressure.
-const EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD = 2
+const EVENT_RATIO_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'events_to_facts_ratio'
+const TTL_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'ttl_expired_on_disk'
+const PROVIDER_SLOT_BUSY_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'provider_slot_busy'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -25,16 +26,30 @@ function formatBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(2)} MB`
 }
 
+function entryAlerts(entry: KeeperMemoryHealthKeeperEntry): KeeperMemoryHealthAlert[] {
+  return entry.alerts
+}
+
+function providerSlotBusy(entry: KeeperMemoryHealthKeeperEntry): number {
+  return entry.provider_slot_busy
+}
+
+function hasTargetAlert(alerts: KeeperMemoryHealthAlert[], target: KeeperMemoryHealthAlertTarget): boolean {
+  return alerts.some(alert => alert.target === target)
+}
+
 function isRowWarning(entry: KeeperMemoryHealthKeeperEntry): boolean {
-  return (
-    entry.events_to_facts_ratio > EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD
-    || entry.ttl_expired_on_disk > 0
-  )
+  return entryAlerts(entry).length > 0
 }
 
 function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
-  const warn = isRowWarning(entry)
   const ratioStr = entry.events_to_facts_ratio.toFixed(2)
+  const alerts = entryAlerts(entry)
+  const warn = isRowWarning(entry)
+  const ratioWarn = hasTargetAlert(alerts, EVENT_RATIO_ALERT_TARGET)
+  const ttlWarn = hasTargetAlert(alerts, TTL_ALERT_TARGET)
+  const providerSlotBusyWarn = hasTargetAlert(alerts, PROVIDER_SLOT_BUSY_ALERT_TARGET)
+  const providerSlotBusyCount = providerSlotBusy(entry)
 
   return html`
     <tr class=${warn ? 'kmh-row--warn' : ''}>
@@ -42,16 +57,28 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       <td>${entry.facts.toLocaleString()}</td>
       <td>${formatBytes(entry.facts_bytes)}</td>
       <td>
-        ${entry.events_to_facts_ratio > EVENTS_TO_FACTS_RATIO_WARN_THRESHOLD
+        ${ratioWarn
           ? html`<span class="kmh-badge kmh-badge--warn">${ratioStr}</span>`
           : html`<span>${ratioStr}</span>`}
       </td>
       <td>
-        ${entry.ttl_expired_on_disk > 0
+        ${ttlWarn
           ? html`<span class="kmh-badge kmh-badge--warn">${entry.ttl_expired_on_disk}</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">0</span>`}
+          : html`<span class="kmh-badge kmh-badge--ok">${entry.ttl_expired_on_disk}</span>`}
       </td>
       <td>${entry.near_duplicate}</td>
+      <td>
+        ${providerSlotBusyWarn
+          ? html`<span class="kmh-badge kmh-badge--warn">${providerSlotBusyCount}</span>`
+          : html`<span class="kmh-badge kmh-badge--ok">${providerSlotBusyCount}</span>`}
+      </td>
+      <td>
+        ${alerts.length > 0
+          ? alerts.map(alert => html`
+            <span class="kmh-badge kmh-badge--warn" title=${alert.message}>${alert.label}</span>
+          `)
+          : html`<span class="kmh-badge kmh-badge--ok">정상</span>`}
+      </td>
     </tr>
   `
 }
@@ -115,39 +142,55 @@ export function KeeperMemoryHealth() {
   }
 
   const generatedAt = new Date(data.generated_at * 1000).toLocaleTimeString()
+  const totalAlerts = data.alert_summary.total_alerts
+  const ttlExpiredWarn = data.alert_summary.ttl_expired_keepers > 0
+  const providerSlotBusyWarn = data.alert_summary.provider_slot_busy_keepers > 0
+  const totalProviderSlotBusy = data.totals.provider_slot_busy
 
   return html`
     <div class="kmh-panel">
       <div class="kmh-header">
         <div class="kmh-title">키퍼 메모리 상태</div>
         <div class="kmh-totals-strip">
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="facts">
             <span class="kmh-stat-label">전체 사실</span>
             <span class="kmh-stat-value">${data.totals.facts.toLocaleString()}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="facts-bytes">
             <span class="kmh-stat-label">사실 크기</span>
             <span class="kmh-stat-value">${formatBytes(data.totals.facts_bytes)}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="events-bytes">
             <span class="kmh-stat-label">이벤트 크기</span>
             <span class="kmh-stat-value">${formatBytes(data.totals.events_bytes)}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="ttl-expired">
             <span class="kmh-stat-label">TTL 만료(디스크)</span>
-            <span class=${`kmh-stat-value${data.totals.ttl_expired_on_disk > 0 ? ' kmh-stat-value--warn' : ''}`}>
+            <span class=${`kmh-stat-value${ttlExpiredWarn ? ' kmh-stat-value--warn' : ''}`}>
               ${data.totals.ttl_expired_on_disk}
             </span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="near-duplicate">
             <span class="kmh-stat-label">근접중복</span>
             <span class="kmh-stat-value">${data.totals.near_duplicate}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="provider-slot-busy">
+            <span class="kmh-stat-label">슬롯 실패</span>
+            <span class=${`kmh-stat-value${providerSlotBusyWarn ? ' kmh-stat-value--warn' : ''}`}>
+              ${totalProviderSlotBusy}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="alerts">
+            <span class="kmh-stat-label">경보</span>
+            <span class=${`kmh-stat-value${totalAlerts > 0 ? ' kmh-stat-value--warn' : ''}`}>
+              ${totalAlerts}
+            </span>
+          </div>
+          <div class="kmh-stat" data-stat-key="cadence-counter">
             <span class="kmh-stat-label">케이던스 카운터</span>
             <span class="kmh-stat-value">${data.cadence_counter_entries}</span>
           </div>
-          <div class="kmh-stat">
+          <div class="kmh-stat" data-stat-key="keeper-count">
             <span class="kmh-stat-label">키퍼 수</span>
             <span class="kmh-stat-value">${data.keepers.length}</span>
           </div>
@@ -170,6 +213,8 @@ export function KeeperMemoryHealth() {
                   <th>events:facts 비율</th>
                   <th>만료(디스크)</th>
                   <th>근접중복</th>
+                  <th>슬롯 실패</th>
+                  <th>경보</th>
                 </tr>
               </thead>
               <tbody>

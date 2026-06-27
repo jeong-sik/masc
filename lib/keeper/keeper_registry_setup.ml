@@ -86,7 +86,7 @@ let validate_registry_entry ~base_path name (entry : registry_entry) =
   then Error Registry_meta_agent_name_empty
   else Ok ()
 
-let validate_registry_meta ~base_path:_ name (meta : keeper_meta) =
+let validate_registry_meta name (meta : keeper_meta) =
   let expected_name = String.trim name in
   if not (String.equal meta.name expected_name)
   then
@@ -112,7 +112,7 @@ let record_invalid_registry_entry ~operation ~name reason =
     (registry_entry_validation_error_to_string reason)
 
 let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
-  match validate_registry_meta ~base_path name meta with
+  match validate_registry_meta name meta with
   | Ok () -> meta
   | Error reason ->
       let expected_name = String.trim name in
@@ -127,7 +127,7 @@ let canonicalize_registry_meta ~operation ~base_path name (meta : keeper_meta) =
         }
       in
       record_invalid_registry_entry ~operation ~name reason;
-      (match validate_registry_meta ~base_path name repaired with
+      (match validate_registry_meta name repaired with
        | Ok () -> repaired
        | Error repair_reason ->
            record_invalid_registry_entry ~operation ~name repair_reason;
@@ -495,7 +495,7 @@ let all ?base_path () =
 ;;
 
 let update_meta ~base_path name meta =
-  match validate_registry_meta ~base_path name meta with
+  match validate_registry_meta name meta with
   | Error reason ->
       record_invalid_registry_entry ~operation:"update_meta" ~name reason
   | Ok () ->
@@ -512,7 +512,7 @@ let reload_meta_from_disk ~base_path name =
       match effective_meta_of_profile_defaults defaults meta with
       | Error msg -> Error msg
       | Ok effective_meta -> (
-          match validate_registry_meta ~base_path name effective_meta with
+          match validate_registry_meta name effective_meta with
           | Error reason ->
               record_invalid_registry_entry ~operation:"reload_meta_from_disk" ~name reason;
               Error (registry_entry_validation_error_to_string reason)
@@ -529,7 +529,7 @@ let reload_meta_from_disk ~base_path name =
 (* Runtime-attempt cluster (runtime_attempt_merge / meta_for_runtime_attempt / record_runtime_attempt / runtime_attempt_suffix / last_runtime_attempt / runtime_attempt_freshness_threshold_sec / enrich... *)
 
 let sync_meta_if_registered ~base_path name meta =
-  match validate_registry_meta ~base_path name meta with
+  match validate_registry_meta name meta with
   | Error reason ->
       record_invalid_registry_entry ~operation:"sync_meta_if_registered" ~name reason
   | Ok () ->

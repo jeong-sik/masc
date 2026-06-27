@@ -54,7 +54,10 @@ let test_is_json_content_type () =
   check_json "with charset" true "application/json; charset=utf-8";
   check_json "case-insensitive" true "Application/JSON";
   check_json "quoted param with comma" true "application/json; boundary=\"a,b\"";
+  check_json "quoted param with semicolon" true "application/json; boundary=\"a;b\"";
   check_json "reject q param" false "application/json;q=0.5";
+  check_json "reject malformed q param" false "application/json; q";
+  check_json "reject malformed param" false "application/json; boundary";
   check_json "reject comma list" false "application/json, text/plain";
   check_json "reject json-seq suffix" false "application/json-seq";
   check_json "reject json5 suffix" false "application/json5";

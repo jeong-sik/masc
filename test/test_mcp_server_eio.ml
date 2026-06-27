@@ -18,8 +18,8 @@ module Masc_log = Log
 
 let () =
   Mirage_crypto_rng_unix.use_default ();
-  ignore Operator_tool.force_link;
-  ignore (Server_mcp_transport_ws.session_count ());
+  let (_operator_force_link : unit) = Operator_tool.force_link in
+  let (_dashboard_ws_sessions : int) = Server_mcp_transport_ws.session_count () in
   Atomic.set Workspace_hooks.get_default_runtime_id_fn (fun () -> "test.local");
   Atomic.set Workspace_hooks.get_cross_verifier_runtime_id_fn (fun () -> None)
 

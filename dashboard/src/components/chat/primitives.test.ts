@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import { render, options } from 'preact'
-import { fireEvent } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
@@ -1914,7 +1914,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(bundle?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('곧 답합니다')
   })
 
-  it('renders thinking text as sanitized markdown with newlines preserved', () => {
+  it('renders thinking text as sanitized markdown with newlines preserved', async () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -1939,7 +1939,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(think.className).toContain('whitespace-pre-wrap')
     expect(think.className).toContain('markdown-body')
     // Markdown is rendered, not shown as literal `**강조**`.
-    expect(think.querySelector('strong')?.textContent).toBe('강조')
+    await waitFor(() => expect(think.querySelector('strong')?.textContent).toBe('강조'))
     // Both source lines survive the round-trip.
     expect(think.textContent).toContain('첫째 줄')
     expect(think.textContent).toContain('둘째 줄')
@@ -2536,7 +2536,7 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
     render(html`<${ChatTranscript} entries=${entries} emptyText="empty" />`, container)
   }
 
-  it('renders a code fence in assistant prose as a code block', () => {
+  it('renders a code fence in assistant prose as a code block', async () => {
     renderEntries([
       entry({
         id: 'a1',
@@ -2545,12 +2545,13 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
         text: 'Here you go:\n\n```ts\nconst x = 1\n```',
       }),
     ])
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull())
     const code = container.querySelector('[data-chat-block="code"]')
     expect(code).not.toBeNull()
     expect(code?.textContent).toContain('const x = 1')
   })
 
-  it('re-parses richly even when the backend supplied a degraded p-only block', () => {
+  it('re-parses richly even when the backend supplied a degraded p-only block', async () => {
     // The backend persists a line-based parse (escaped <p>); the render path
     // must still recover the structured code block from the message text.
     renderEntries([
@@ -2566,7 +2567,7 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
         ],
       }),
     ])
-    expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull()
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull())
   })
 
   it('keeps server blocks as-is when the message carries a non-text card/clip', () => {

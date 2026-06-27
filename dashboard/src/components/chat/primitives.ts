@@ -1,13 +1,10 @@
 import { html } from 'htm/preact'
-import type { ComponentChildren, VNode } from 'preact'
-import { marked } from 'marked'
+import type { ComponentChildren, RefObject, VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
-import { renderMermaidSvg, useMermaidInView } from '../common/mermaid-graph'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
-import { parseMarkdownToBlocks } from './markdown-blocks'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
@@ -478,12 +475,7 @@ function ChatArtifactPreview({
   if (type === 'md') {
     return html`
       <${ChatPreviewModal} title=${name} onClose=${onClose}>
-        <div
-          class="chat-lightbox-md markdown-body"
-          dangerouslySetInnerHTML=${{
-            __html: purifyHtml(marked.parse(text) as string),
-          }}
-        />
+        <${AsyncMarkdownDiv} text=${text} className="chat-lightbox-md markdown-body" />
       <//>
     `
   }
@@ -504,19 +496,55 @@ function sanitizeSvg(raw: string): string {
   return purifyHtml(raw, { USE_PROFILES: { svg: true } })
 }
 
+type MarkedApi = typeof import('marked')['marked']
+type SanitizeConfig = Parameters<typeof purifyHtml>[1]
+
+let markedPromise: Promise<MarkedApi> | null = null
+
+function loadMarked(): Promise<MarkedApi> {
+  if (!markedPromise) {
+    markedPromise = import('marked').then((module) => module.marked)
+  }
+  return markedPromise
+}
+
+function AsyncMarkdownDiv({
+  text,
+  className,
+  sanitizeConfig,
+}: {
+  text: string
+  className: string
+  sanitizeConfig?: SanitizeConfig
+}) {
+  const [rendered, setRendered] = useState<string | null>(null)
+
+  useLayoutEffect(() => {
+    let active = true
+    setRendered(null)
+    void (async () => {
+      try {
+        const marked = await loadMarked()
+        const next = purifyHtml(marked.parse(text) as string, sanitizeConfig)
+        if (active) setRendered(next)
+      } catch {
+        if (active) setRendered(null)
+      }
+    })()
+    return () => { active = false }
+  }, [text, sanitizeConfig])
+
+  return rendered === null
+    ? html`<div class=${className}>${text}</div>`
+    : html`<div class=${className} dangerouslySetInnerHTML=${{ __html: rendered }} />`
+}
+
 function renderInlineHtml(raw: string): { __html: string } {
   return { __html: sanitizeHtml(linkifyHtmlReferences(raw)) }
 }
 
-// Trace-step thinking text: render through the same sanitized markdown path the
-// assistant message body uses (purifyHtml(marked.parse(...))) so newlines and
-// inline formatting survive. Raw `${step.text}` interpolation collapsed both —
-// the model emits multi-line reasoning and the single-span layout folded it into
-// one run-on line. purifyHtml strips untrusted model markup (XSS coverage in
-// primitives.test.ts); `whitespace-pre-wrap` on the container preserves the
-// newlines marked leaves between paragraphs.
-function traceStepMarkdown(raw: string): { __html: string } {
-  return { __html: purifyHtml(marked.parse(raw) as string) }
+function renderPlainLinkedHtml(raw: string): { __html: string } {
+  return { __html: sanitizeHtml(linkifyHtmlReferences(escapeHtml(raw))) }
 }
 
 function highlightJson(obj: unknown): string {
@@ -673,10 +701,36 @@ async function copyWithToast(text: string, successMessage: string): Promise<void
   showToast(ok ? successMessage : '복사하지 못했습니다', ok ? 'success' : 'error')
 }
 
+function useLazyInView<T extends HTMLElement>(
+  rootMargin = '200px',
+): [RefObject<T>, boolean] {
+  const ref = useRef<T>(null)
+  const [inView, setInView] = useState(() => typeof IntersectionObserver === 'undefined')
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el || inView) return undefined
+    if (typeof IntersectionObserver === 'undefined') {
+      setInView(true)
+      return undefined
+    }
+    const observer = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) setInView(true)
+      },
+      { rootMargin },
+    )
+    observer.observe(el)
+    return () => observer.disconnect()
+  }, [inView, rootMargin])
+
+  return [ref, inView]
+}
+
 function ChatCodeBlock({ cap, html: htmlContent, source }: { cap?: string; html: string; source?: string }) {
   const [highlighted, setHighlighted] = useState<string | null>(null)
   const [failed, setFailed] = useState(false)
-  const [containerRef, shouldHighlight] = useMermaidInView<HTMLDivElement>('300px')
+  const [containerRef, shouldHighlight] = useLazyInView<HTMLDivElement>('300px')
   const codeId = useId()
 
   useEffect(() => {
@@ -1131,7 +1185,7 @@ function ChatSvgBlock({ svg, cap }: { svg: string; cap?: string }) {
 
 function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   const id = useId()
-  const [containerRef, shouldRender] = useMermaidInView<HTMLElement>('200px')
+  const [containerRef, shouldRender] = useLazyInView<HTMLElement>('200px')
   const [svg, setSvg] = useState<string | null>(null)
   const [error, setError] = useState(false)
 
@@ -1146,6 +1200,7 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
         // to avoid SVG corruption, and returns DOMPurify-sanitized output.
         // Re-running DOMPurify per chat block added ~1s+ of main-thread work
         // for large diagrams (see dashboard perf audit).
+        const { renderMermaidSvg } = await import('../common/mermaid-graph')
         const rendered = await renderMermaidSvg(source, `mermaid-${id}`)
         if (active) setSvg(rendered)
       } catch {
@@ -1183,9 +1238,9 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
           <div class="chat-block-tstep-row">
             <span class="chat-block-tstep-kind">Thinking</span>
           </div>
-          <div
-            class="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
-            dangerouslySetInnerHTML=${traceStepMarkdown(step.text)}
+          <${AsyncMarkdownDiv}
+            text=${step.text}
+            className="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
           />
         </div>
       </div>
@@ -1418,11 +1473,9 @@ function asFusionTotalOutputTokens(meta: unknown): number | undefined {
 
 // Render untrusted model/judge markdown through the same sanitized path the rest
 // of the transcript uses (DOMPurify over marked) — never inject raw model output.
+// Marked is loaded lazily so closed fusion panels do not tax initial keeper load.
 function FusionMarkdown({ text }: { text: string }) {
-  return html`<div
-    class="markdown-body text-xs leading-relaxed"
-    dangerouslySetInnerHTML=${{ __html: purifyHtml(marked.parse(text) as string) }}
-  />`
+  return html`<${AsyncMarkdownDiv} text=${text} className="markdown-body text-xs leading-relaxed" />`
 }
 
 // One panel model's contribution. Collapsed by default so three verbose model
@@ -1842,6 +1895,19 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
   'shell',
 ])
 
+function hasRichBlockMarkdownCue(text: string): boolean {
+  const trimmed = text.trim()
+  if (!trimmed) return false
+  return (
+    /^ {0,3}(```|~~~)/m.test(text)
+    || /^ {0,3}#{1,6}\s+\S/m.test(text)
+    || /^ {0,3}>\s*\[!(NOTE|TIP|IMPORTANT|WARNING|CAUTION|DANGER|WARN|ERROR)\]/im.test(text)
+    || (/^\s*\|.+\|\s*$/m.test(text) && /^\s*\|?\s*:?-{3,}:?\s*\|/m.test(text))
+    || /!\[[^\]]*]\([^)]+\)/.test(text)
+    || /^<svg\b[\s\S]*<\/svg>$/i.test(trimmed)
+  )
+}
+
 // Memoized message bubble. A streaming reply re-renders the conversation panel
 // on every SSE event; the transcript reconcile preserves the entry reference of
 // every settled message (keeper-state.ts), and KeeperConversationPanel hoists
@@ -1875,6 +1941,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const [messageCollapsed, setMessageCollapsed] = useState(true)
   const expanded = showMetadata && expandedRaw
   const rawExpanded = showMetadata && rawExpandedRaw
+  const [bubbleRef, bubbleInView] = useLazyInView<HTMLElement>('300px')
   const liveLabel = liveMessageLabel(entry)
   const messageText = liveLabel ? '' : entry.text || '(empty reply)'
   const messageLength = messageText.length
@@ -1884,16 +1951,35 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   const richTextRole = entry.role === 'assistant' || entry.role === 'system'
   const hasRealText = !liveLabel && !!entry.text && entry.text.trim().length > 0
   const hasCardBlock = (entry.blocks ?? []).some((b) => CARD_BLOCK_TYPES.has(b.t))
+  const shouldParseRichBlocks =
+    !isFailureMessage
+    && richTextRole
+    && hasRealText
+    && !hasCardBlock
+    && bubbleInView
+    && hasRichBlockMarkdownCue(entry.text ?? '')
   // Re-parse assistant/system prose so markdown (code fences, tables, callouts)
   // renders as structured blocks. The backend persists only a line-based parse
   // (lib/keeper/keeper_chat_blocks.ml -> escaped <p>), so without this the rich
   // renderer never receives a code/table block. Skipped when the message owns a
   // card/clip the text cannot reproduce (CARD_BLOCK_TYPES) — those server blocks
   // render as-is.
-  const parsedBlocks = useMemo(() => {
-    if (isFailureMessage || !richTextRole || !hasRealText || hasCardBlock) return null
-    return parseMarkdownToBlocks(entry.text ?? '')
-  }, [isFailureMessage, richTextRole, hasRealText, hasCardBlock, entry.text])
+  const [parsedBlocks, setParsedBlocks] = useState<ChatBlock[] | null>(null)
+  useEffect(() => {
+    let active = true
+    setParsedBlocks(null)
+    if (!shouldParseRichBlocks) return () => { active = false }
+    void (async () => {
+      try {
+        const { parseMarkdownToBlocks } = await import('./markdown-blocks')
+        const next = parseMarkdownToBlocks(entry.text ?? '')
+        if (active) setParsedBlocks(next)
+      } catch {
+        if (active) setParsedBlocks(null)
+      }
+    })()
+    return () => { active = false }
+  }, [shouldParseRichBlocks, entry.text])
   const effectiveBlocks = isFailureMessage ? [] : (parsedBlocks ?? entry.blocks ?? [])
   const hasEffectiveBlocks = effectiveBlocks.length > 0
   const collapseThreshold = 1200
@@ -1912,6 +1998,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
 
   return html`
     <article
+      ref=${bubbleRef}
       class=${`chat-bubble ${tone} flex w-full flex-col backdrop-blur-sm ${
         isMessenger
           ? 'max-w-[82%] gap-2.5 rounded-[var(--radius-xl)] px-4 py-3.5'
@@ -2104,12 +2191,7 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
               : html`
                   <div
                     class=${`markdown-body whitespace-pre-wrap break-words text-base leading-airy text-[var(--color-fg-primary)] ${isCollapsible && messageCollapsed ? 'max-h-96 overflow-hidden' : ''}`}
-                    dangerouslySetInnerHTML=${{
-                      __html: purifyHtml(
-                        marked.parse(messageText) as string,
-                        { ALLOWED_TAGS: ['p', 'br', 'strong', 'em', 'code', 'pre', 'ul', 'ol', 'li', 'h1', 'h2', 'h3', 'h4', 'blockquote', 'a', 'hr'] }
-                      )
-                    }}
+                    dangerouslySetInnerHTML=${renderPlainLinkedHtml(messageText)}
                   />
                 `}
             ${entry.delivery === 'streaming'

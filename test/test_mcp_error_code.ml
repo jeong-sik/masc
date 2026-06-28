@@ -34,6 +34,20 @@ let index_of haystack needle =
     done;
     !found)
 
+let index_of_after haystack needle start =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen > hlen || start > hlen - nlen then None
+  else (
+    let found = ref None in
+    for i = start to hlen - nlen do
+      match !found with
+      | Some _ -> ()
+      | None ->
+          if String.sub haystack i nlen = needle then found := Some i
+    done;
+    !found)
+
 let read_file path =
   let ic = open_in path in
   Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
@@ -163,15 +177,21 @@ let test_sse_get_registers_before_streaming_response () =
   let http = read_source_file "lib/server/server_mcp_transport_http.ml" in
   let agui = read_source_file "lib/server/server_mcp_transport_http_agui.ml" in
   let assert_order label source =
-    match
-      ( index_of source "Sse.register"
-      , index_of source "Httpun.Reqd.respond_with_streaming" )
-    with
-    | Some register_at, Some stream_at ->
-        check bool label true (register_at < stream_at);
-        check bool (label ^ " has 404 register error responder") true
-          (string_contains source "respond_sse_register_error")
-    | _ -> fail (label ^ ": missing Sse.register or respond_with_streaming")
+    match index_of source "Sse.register" with
+    | None -> fail (label ^ ": missing Sse.register")
+    | Some register_at ->
+        (match
+           ( index_of_after source "respond_sse_register_error" register_at,
+             index_of_after
+               source
+               "Httpun.Reqd.respond_with_streaming"
+               register_at )
+         with
+         | Some error_at, Some stream_at ->
+             check bool (label ^ " has register error before stream") true
+               (register_at < error_at && error_at < stream_at)
+         | _ ->
+             fail (label ^ ": missing register error responder or streaming open"))
   in
   assert_order "generic SSE GET validates before 200 stream" http;
   assert_order "AG-UI SSE validates before 200 stream" agui

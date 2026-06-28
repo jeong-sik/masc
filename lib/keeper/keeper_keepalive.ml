@@ -288,21 +288,31 @@ let set_keeper_paused_state ~agent_name paused =
       log_directive_agent_not_in_registry ~agent_name ~action)
     (fun entry ->
        let previous_failure_reason = entry.last_failure_reason in
-       let directive_source_meta_result =
-         if paused then Ok entry.meta else clear_no_progress_loop_for_operator_resume entry
+       (* On resume, dropping the no-progress recovery stimulus is a cosmetic
+          cleanup that must NOT gate the authoritative unpause. A disk failure in
+          [clear_no_progress_loop_for_operator_resume] used to short-circuit the
+          resume and leave the keeper paused forever: no_progress pause is
+          [Manual_resume_required], so there is no other recovery path. Run it
+          best-effort and always fall through to the paused-state write below;
+          the authoritative [persist_directive_meta_update] stays fail-closed.
+          KLV-2 / RFC-0152. *)
+       let directive_source_meta =
+         if paused then entry.meta
+         else (
+           match clear_no_progress_loop_for_operator_resume entry with
+           | Ok cleared_meta -> cleared_meta
+           | Error err ->
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string DirectiveFailures)
+               ~labels:[ "keeper", entry.name; "site", "no_progress_resume_clear" ]
+               ();
+             Log.Keeper.warn
+               "directive resume: best-effort no_progress clear failed for %s; \
+                proceeding with unpause: %s"
+               entry.name
+               err;
+             entry.meta)
        in
-       match directive_source_meta_result with
-       | Error err ->
-         Otel_metric_store.inc_counter
-           Keeper_metrics.(to_string DirectiveFailures)
-           ~labels:
-             [ "keeper", entry.name; "site", "no_progress_resume_clear" ]
-           ();
-         Log.Keeper.error
-           "directive resume: no_progress clear failed for %s: %s"
-           entry.name
-           err
-       | Ok directive_source_meta ->
        let cleared_completion_contract =
          if paused then directive_source_meta
        else

@@ -37,6 +37,15 @@ let typed_find (kind : string) (path : string) (tbl : Otoml.t) (key : string) ge
          (Printf.sprintf "%s must be %s; got %s" key kind msg))
 ;;
 
+let strict_float_find (path : string) (tbl : Otoml.t) (key : string)
+  : (float option, parse_error list) result
+  =
+  match Otoml.find_opt tbl Fun.id [ key ] with
+  | None -> Ok None
+  | Some (Otoml.TomlFloat value) -> Ok (Some value)
+  | Some _ -> Error (error (path ^ "." ^ key) (key ^ " must be a float"))
+;;
+
 let positive_finite_float_opt_field
       ~(path : string)
       ~(key : string)
@@ -313,7 +322,7 @@ let parse_provider (id : string) (tbl : Otoml.t)
           Absent (most providers) leaves the OAS kind-based default in force. *)
        let connect_timeout_key = Runtime_schema.connect_timeout_s_key in
        let connect_timeout_result =
-         typed_find "a float" path tbl connect_timeout_key Otoml.get_float
+         strict_float_find path tbl connect_timeout_key
          |> positive_finite_float_opt_field ~path ~key:connect_timeout_key
        in
        (match connect_timeout_result with

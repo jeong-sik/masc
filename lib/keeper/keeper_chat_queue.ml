@@ -263,9 +263,18 @@ let find_entry keeper_name =
   Eio.Mutex.use_rw ~protect:true registry_mutex (fun () ->
       Hashtbl.find_opt registry keeper_name)
 
+let with_entry_lock entry f =
+  match
+    Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+        try Ok (f ()) with
+        | exn -> Error (exn, Printexc.get_raw_backtrace ()))
+  with
+  | Ok value -> value
+  | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
+
 let enqueue ~keeper_name msg =
   let entry = get_or_create_entry_locked keeper_name in
-  Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+  with_entry_lock entry (fun () ->
       let before = queue_to_list entry.q in
       Queue.push msg entry.q;
       persist_or_rollback ~keeper_name entry.q ~before)
@@ -274,7 +283,7 @@ let dequeue ~keeper_name =
   match find_entry keeper_name with
   | None -> None
   | Some entry ->
-      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+      with_entry_lock entry (fun () ->
           if Queue.is_empty entry.q
           then None
           else (
@@ -301,7 +310,7 @@ let dequeue_batch ~keeper_name =
   match find_entry keeper_name with
   | None -> []
   | Some entry ->
-      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+      with_entry_lock entry (fun () ->
           let before = queue_to_list entry.q in
           match Queue.take_opt entry.q with
           | None -> []
@@ -335,14 +344,13 @@ let length ~keeper_name =
   match find_entry keeper_name with
   | None -> 0
   | Some entry ->
-      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
-          Queue.length entry.q)
+      with_entry_lock entry (fun () -> Queue.length entry.q)
 
 let clear ~keeper_name =
   match find_entry keeper_name with
   | None -> ()
   | Some entry ->
-      Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+      with_entry_lock entry (fun () ->
           let before = queue_to_list entry.q in
           Queue.clear entry.q;
           persist_or_rollback ~keeper_name entry.q ~before)
@@ -365,7 +373,7 @@ let configure_persistence ~base_path =
         then
           let snapshot_items = queue_to_list q in
           let entry = get_or_create_entry_locked keeper_name in
-          Eio.Mutex.use_rw ~protect:true entry.mutex (fun () ->
+          with_entry_lock entry (fun () ->
               let before = queue_to_list entry.q in
               replace_queue entry.q (snapshot_items @ before);
               persist_or_rollback ~keeper_name entry.q ~before))

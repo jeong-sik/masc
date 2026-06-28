@@ -483,21 +483,25 @@ let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
   }
 
 let meta_with_directive_paused_state ~(config : Workspace.config) directive meta paused =
-  let source_meta =
-    match directive with
-    | `Resume ->
-        Keeper_unified_turn_no_progress.clear_for_operator_resume
-          ~base_path:config.base_path
-          meta
-    | `Pause | `Wakeup -> meta
+  let paused_meta source_meta =
+    {
+      source_meta with
+      paused;
+      auto_resume_after_sec = None;
+      runtime = { source_meta.runtime with last_blocker = None };
+      updated_at = Keeper_meta_contract.now_iso ();
+    }
   in
-  {
-    source_meta with
-    paused;
-    auto_resume_after_sec = None;
-    runtime = { source_meta.runtime with last_blocker = None };
-    updated_at = Keeper_meta_contract.now_iso ();
-  }
+  match directive with
+  | `Resume ->
+    (match
+       Keeper_unified_turn_no_progress.clear_for_operator_resume
+         ~base_path:config.base_path
+         meta
+     with
+     | Ok source_meta -> Ok (paused_meta source_meta)
+     | Error _ as err -> err)
+  | `Pause | `Wakeup -> Ok (paused_meta meta)
 
 let should_persist_directive_paused_state directive (meta : Keeper_meta_contract.keeper_meta) paused =
   match directive with
@@ -505,19 +509,10 @@ let should_persist_directive_paused_state directive (meta : Keeper_meta_contract
   | `Pause | `Wakeup -> not (Bool.equal meta.paused paused)
 
 let persist_directive_paused_state ~config ~name ~action_str directive meta paused =
-  let updated_meta = meta_with_directive_paused_state ~config directive meta paused in
-  (* Pause/resume toggle via CAS merge: do not rewind a concurrent
-     turn's cumulative usage counters. *)
-  match
-    Keeper_meta_store.write_meta_with_merge
-      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-      config
-      updated_meta
-  with
-  | Ok () -> Ok ()
+  match meta_with_directive_paused_state ~config directive meta paused with
   | Error err ->
       Log.Keeper.warn
-        "directive %s: write_meta failed for %s: %s"
+        "directive %s: no_progress resume clear failed for %s: %s"
         action_str
         name
         err;
@@ -527,10 +522,36 @@ let persist_directive_paused_state ~config ~name ~action_str directive meta paus
           [
             ( "phase",
               Keeper_paused_state_persist_phase.(to_label Directive) );
-            ("reason", "write_meta_error");
+            ("reason", "no_progress_clear_error");
           ]
         ();
       Error err
+  | Ok updated_meta ->
+    (* Pause/resume toggle via CAS merge: do not rewind a concurrent
+       turn's cumulative usage counters. *)
+    (match
+       Keeper_meta_store.write_meta_with_merge
+         ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+         config
+         updated_meta
+     with
+     | Ok () -> Ok ()
+     | Error err ->
+       Log.Keeper.warn
+         "directive %s: write_meta failed for %s: %s"
+         action_str
+         name
+         err;
+       Otel_metric_store.inc_counter
+         Keeper_metrics.(to_string PausedStatePersistErrors)
+         ~labels:
+           [
+             ( "phase",
+               Keeper_paused_state_persist_phase.(to_label Directive) );
+             ("reason", "write_meta_error");
+           ]
+         ();
+       Error err)
 
 let ensure_registered_for_resume ~sw ~clock state agent_name name =
   let config = Mcp_server.workspace_config state in

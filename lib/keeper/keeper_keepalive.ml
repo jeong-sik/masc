@@ -128,14 +128,16 @@ let directive_paused_meta (meta : keeper_meta) paused =
 ;;
 
 let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry_entry) =
-  let updated_meta =
+  match
     Keeper_unified_turn_no_progress.clear_for_operator_resume
       ~base_path:entry.base_path
       entry.meta
-  in
-  if not (updated_meta == entry.meta) then
-    persist_directive_meta_update entry ~updated_meta;
-  updated_meta
+  with
+  | Error _ as err -> err
+  | Ok updated_meta ->
+    if not (updated_meta == entry.meta) then
+      persist_directive_meta_update entry ~updated_meta;
+    Ok updated_meta
 ;;
 
 (* Unknown-keeper directives can repeat while boot/crash truth is still
@@ -265,9 +267,21 @@ let set_keeper_paused_state ~agent_name paused =
         ();
       log_directive_agent_not_in_registry ~agent_name ~action)
     (fun entry ->
-       let directive_source_meta =
-         if paused then entry.meta else clear_no_progress_loop_for_operator_resume entry
+       let directive_source_meta_result =
+         if paused then Ok entry.meta else clear_no_progress_loop_for_operator_resume entry
        in
+       match directive_source_meta_result with
+       | Error err ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string DirectiveFailures)
+           ~labels:
+             [ "keeper", entry.name; "site", "no_progress_resume_clear" ]
+           ();
+         Log.Keeper.error
+           "directive resume: no_progress clear failed for %s: %s"
+           entry.name
+           err
+       | Ok directive_source_meta ->
        let cleared_completion_contract =
          if paused then directive_source_meta
          else

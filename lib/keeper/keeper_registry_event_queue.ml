@@ -111,25 +111,7 @@ let ack_consumed ~base_path name stimuli =
 ;;
 
 let drop_by_post_id ~base_path name ~post_id =
-  let drop_persisted () =
-    match
-      Keeper_event_queue_persistence.drop_by_post_id
-        ~base_path
-        ~keeper_name:name
-        ~post_id
-    with
-    | Ok stimuli -> stimuli
-    | Error msg ->
-      Log.Keeper.warn
-        "registry: drop_by_post_id failed name=%s post_id=%s: %s"
-        name
-        post_id
-        msg;
-      []
-  in
-  match Keeper_registry.get ~base_path name with
-  | None -> drop_persisted ()
-  | Some entry ->
+  let remove_live entry =
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
       let removed, next = Keeper_event_queue.remove_by_post_id post_id cur in
@@ -141,7 +123,28 @@ let drop_by_post_id ~base_path name ~post_id =
         removed)
       else loop ()
     in
-    uniq_stimuli (loop () @ drop_persisted ())
+    loop ()
+  in
+  match
+    Keeper_event_queue_persistence.drop_by_post_id
+      ~base_path
+      ~keeper_name:name
+      ~post_id
+  with
+  | Error msg ->
+    Log.Keeper.warn
+      "registry: drop_by_post_id failed name=%s post_id=%s: %s"
+      name
+      post_id
+      msg;
+    Error msg
+  | Ok persisted_removed ->
+    let live_removed =
+      match Keeper_registry.get ~base_path name with
+      | None -> []
+      | Some entry -> remove_live entry
+    in
+    Ok (uniq_stimuli (live_removed @ persisted_removed))
 ;;
 
 let snapshot ~base_path name =

@@ -121,6 +121,7 @@ val normalize_base_path_for_hash : string -> string
 
 (** [base_path_hash base_path] = the {!sandbox_base_path_hash_label_key}
     label value: hex MD5 of the normalised base path. Pure. *)
+val normalize_base_path_for_hash : string -> string
 val base_path_hash : string -> string
 
 (** [sanitize_label_value v] maps any character outside

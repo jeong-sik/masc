@@ -61,6 +61,11 @@ module Paths = Exec_policy_paths
 val validate_path :
   ?keeper_id:string -> ?base_path:string -> ?workdir:string -> string -> bool
 
+module Paths : sig
+  val validate_path :
+    ?keeper_id:string -> ?base_path:string -> ?workdir:string -> string -> bool
+end
+
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 
 val existing_sibling_dirs_hint : ?workdir:string -> string -> string option

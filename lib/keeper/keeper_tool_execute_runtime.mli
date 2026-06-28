@@ -15,6 +15,8 @@ val handle_tool_execute :
 module For_testing : sig
   val elapsed_duration_ms : start_time:float -> end_time:float -> int
   val path_probe_json : cwd:string -> string -> Yojson.Safe.t
+  val repo_root_public_prefix_from_cwd : string -> string option
+  val repo_cwd_relative_rewrite : cwd:string -> string -> string option
   val typed_execute_response_cwd_json :
     turn_sandbox_factory:Keeper_sandbox_factory.t option ->
     cwd:string ->

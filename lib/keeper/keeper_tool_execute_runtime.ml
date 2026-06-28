@@ -25,18 +25,20 @@ type path_probe =
 
 let path_probe_parent_entries_limit = 40
 
-let string_has_prefix ~prefix text =
-  let prefix_len = String.length prefix in
-  String.length text >= prefix_len && String.sub text 0 prefix_len = prefix
-
 let path_components path =
   path
   |> String.split_on_char '/'
   |> List.filter (fun component -> String.trim component <> "")
 
+(* The repos/ checkout root is part of the playground layout documented in
+   [Config_dir_resolver] / [Keeper_tool_execute_path]. Keep the components
+   here in sync with that SSOT: a cwd either at the repo clone
+   (repos/<repo>) or inside a repo worktree (repos/<repo>/.worktrees/<task>)
+   both resolve to the same prefix for path-argument rewriting. *)
 let repo_root_public_prefix_from_cwd cwd =
   let rec loop = function
     | [ "repos"; repo ] -> Some ("repos/" ^ repo ^ "/")
+    | [ "repos"; repo; ".worktrees"; _ ] -> Some ("repos/" ^ repo ^ "/")
     | _ :: rest -> loop rest
     | [] -> None
   in
@@ -58,7 +60,7 @@ let repo_cwd_relative_rewrite ~cwd path_argument =
   match repo_root_public_prefix_from_cwd cwd with
   | Some prefix
     when Filename.is_relative path_argument
-         && string_has_prefix ~prefix path_argument ->
+         && String.starts_with ~prefix path_argument ->
     Some
       (String.sub path_argument (String.length prefix)
          (String.length path_argument - String.length prefix))
@@ -244,6 +246,8 @@ let typed_execute_response_cwd_json
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let path_probe_json ~cwd path = path_probe_json ~cwd (path_probe ~cwd path)
+  let repo_root_public_prefix_from_cwd = repo_root_public_prefix_from_cwd
+  let repo_cwd_relative_rewrite = repo_cwd_relative_rewrite
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
 end
 

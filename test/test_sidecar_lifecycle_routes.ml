@@ -68,6 +68,20 @@ let env_values key env =
     else None)
 ;;
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some existing -> Unix.putenv key existing
+      | None -> Unix.putenv key "")
+    (fun () ->
+      (match value with
+       | Some next -> Unix.putenv key next
+       | None -> Unix.putenv key "");
+      f ())
+;;
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
@@ -216,6 +230,28 @@ let test_resolve_existing_sidecar_dir_falls_back_to_project_root () =
       "project root used when base path is missing sidecars"
       (Some project_dir)
       (Routes.resolve_existing_sidecar_dir ~project_root ~base_path "discord"))
+;;
+
+let test_runtime_base_path_result_prefers_explicit_base_path () =
+  check
+    result_t
+    "explicit request base path wins"
+    (Ok "/tmp/runtime-root")
+    (Routes.runtime_base_path_result ~base_path:" /tmp/runtime-root " ())
+;;
+
+let test_runtime_base_path_result_fails_without_base_path () =
+  with_env Env_config_core.base_path_env_key None @@ fun () ->
+  with_env Env_config_core.base_path_input_env_key None @@ fun () ->
+  match Routes.runtime_sidecar_dir_result "discord" with
+  | Ok dir -> failf "expected missing base path error, got %s" dir
+  | Error msg ->
+    check bool "mentions request base path" true (contains_substring msg "base_path");
+    check
+      bool
+      "mentions env base path"
+      true
+      (contains_substring msg Env_config_core.base_path_env_key)
 ;;
 
 let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
@@ -990,6 +1026,14 @@ let () =
             "project root fallback when base path misses sidecars"
             `Quick
             test_resolve_existing_sidecar_dir_falls_back_to_project_root
+        ; test_case
+            "runtime base path prefers explicit request scope"
+            `Quick
+            test_runtime_base_path_result_prefers_explicit_base_path
+        ; test_case
+            "runtime base path fails closed without request or env base"
+            `Quick
+            test_runtime_base_path_result_fails_without_base_path
         ; test_case
             "missing directory message includes setup hint"
             `Quick

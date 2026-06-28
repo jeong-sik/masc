@@ -29,8 +29,12 @@ val trim_opt : string option -> string option
 (** {1 Base-path / project root resolution} *)
 
 val runtime_base_path : ?base_path:string -> unit -> string
-(** Effective [base_path] for runtime path resolution.  Defaults to
-    the configured server base when not provided. *)
+(** Effective [base_path] for runtime path resolution. Raises when no
+    explicit or env-derived base path is available. *)
+
+val runtime_base_path_result : ?base_path:string -> unit -> (string, string) result
+(** Effective [base_path] for runtime path resolution. The request-scoped
+    [base_path] wins; otherwise the resolver's env-derived base path wins. *)
 
 val request_base_path : Mcp_server.server_state -> string
 (** Base path bound to the server state for the current process. *)

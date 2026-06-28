@@ -12,7 +12,7 @@ code_refs:
 
 # MASC TUI Spec & Design Draft
 
-> 본 문서는 `docs/design/tui/TUI-ROADMAP.md`의 P0~P1 범위를 구현하기 위한 설계 초안이다.
+> 본 문서는 `docs/design/tui/TUI-ROADMAP.md`의 P0 범위 중 현재 PR에서 런타임에 노출하는 surface를 정의한다.
 > 현재는 초안(draft)이며, 사용자/운영자 검토를 거쳐 구체화한다.
 
 ## 1. 개요 및 목표
@@ -23,7 +23,8 @@ MASC TUI를 Dashboard V2 surface 기준으로 확장하여, 웹 대시보드 없
 
 ### 1.2 In-Scope
 
-- 뷰: Overview, Monitoring (agents/runtime/fleet-health/transport-health), Keepers, Board, Approvals, Command/Operations, Workspace (work/planning/verification/repositories), Lab (tools/harness/keeper-memory-health), Logs
+- 현재 PR에서 노출하는 뷰: Overview, Keepers, Board, Approvals, Planning
+- 후속 로드맵: Monitoring, Command/Operations, Workspace, Lab, Logs
 - 읽기 위주의 데이터 노출 + 제한된 쓰기 (approval confirm/deny, operator action, keeper message — 기존 유지)
 - ANSI 터미널 기반 UI, 별도 UI 라이브러리 미사용
 
@@ -44,15 +45,15 @@ MASC TUI를 Dashboard V2 surface 기준으로 확장하여, 웹 대시보드 없
 +--------v---------+      +---------------------+
 |  View Dispatcher |----->|  Surface Renderers  |  bin/masc_tui_render.ml (확장)
 |  (surface enum)  |      |  - overview         |
-+------------------+      |  - monitoring_*     |
-         |                |  - keepers          |
-+--------v---------+      |  - board            |
-|   State Store    |      |  - approvals        |
-|  (signals-like)  |      |  - command          |
-+------------------+      |  - workspace_*      |
-         |                |  - lab_*            |
-+--------v---------+      |  - logs             |
-|   Data Loader    |      +---------------------+
++------------------+      |  - keepers          |
+         |                |  - board            |
++--------v---------+      |  - approvals        |
+|   State Store    |      |  - planning         |
+|  (signals-like)  |      +---------------------+
++------------------+
+         |
++--------v---------+
+|   Data Loader    |
 |  (FS + HTTP API) |
 +------------------+
 ```
@@ -62,21 +63,13 @@ MASC TUI를 Dashboard V2 surface 기준으로 확장하여, 웹 대시보드 없
 ```ocaml
 type surface =
   | Overview
-  | Monitoring of monitoring_section
-  | Keepers
+  | Keepers of keeper_mode
   | Board
   | Approvals
-  | Command
-  | Workspace of workspace_section
-  | Lab of lab_section
-  | Logs
-
-and monitoring_section = Agents | Fleet_health | Runtime | Observatory | Transport_health
-and workspace_section = Work | Planning | Repositories | Verification
-and lab_section = Tools | Harness | Keeper_memory_health
+  | Planning
 ```
 
-기존 `view_mode` (Dashboard | Keeper_list | Keeper_detail | Keeper_logs | Keeper_message)은 keepers surface 난 낶부 상태로 재편된다.
+기존 `view_mode` (Dashboard | Keeper_list | Keeper_detail | Keeper_logs | Keeper_message)은 keepers surface 내부 상태로 재편된다.
 
 ### 2.2 데이터 로더 전략
 
@@ -146,11 +139,11 @@ and lab_section = Tools | Harness | Keeper_memory_health
 │ [CRIT] keeper alpha stuck      │ 12:02 task-42 claimed      │
 │ [WARN] context >80% on beta    │ 11:58 approval pending     │
 ├─────────────────────────────────────────────────────────────┤
-│ Quick Nav: 1:Monitoring 2:Keepers 3:Board 4:Approvals       │
+│ Tab: next  r: refresh  q: quit                              │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 4.2 Monitoring Surface
+### 4.2 Future Monitoring Surface
 
 - `agents`: keeper roster + composite phase + last seen
 - `fleet-health`: tool call health (total/failures/timeouts/failure_rate/p95)
@@ -196,22 +189,22 @@ and lab_section = Tools | Harness | Keeper_memory_health
 └─────────────────────────────────────────────────────────────┘
 ```
 
-### 4.6 Workspace > Planning Surface
+### 4.6 Planning Surface
 
 - Goal tree (fold/unfold): phase badge 기준
 - Task kanban-ish list
 - Verification requests
 
-### 4.7 Lab Surface
+### 4.7 Future Lab Surface
 
 - Tools: registered MCP tool 목록 + server
 - Harness: safety harness health snapshot
 - Keeper Memory Health: per-keeper fact store size, GC stats
 
-### 4.8 Logs Surface
+### 4.8 Future Logs Surface
 
 - System logs tail (파일 또는 `/api/v1/dashboard/logs`)
-- Keeper logs는 keepers surface 난 낶 유지
+- Keeper logs는 keepers surface 내부에 유지
 
 ## 5. 네비게이션 및 키바인딩
 
@@ -219,8 +212,7 @@ and lab_section = Tools | Harness | Keeper_memory_health
 
 | 키 | 동작 |
 |---|---|
-| `1`~`9` | primary surface quick switch (overview=1, keepers=2, board=3, approvals=4, monitoring=5, workspace=6, lab=7, logs=8, command=9) |
-| `Tab` / `Shift-Tab` | 다음/이전 surface |
+| `Tab` | 다음 surface (overview -> keepers -> approvals -> board -> planning) |
 | `q` | TUI 종료 |
 | `r` | 강제 새로고침 |
 | `?` | 키 도움말 overlay |
@@ -265,16 +257,10 @@ type tui_state = {
 
   (* per-surface caches *)
   overview: overview_snapshot option;
-  monitoring_agents: keeper_roster option;
-  monitoring_fleet: fleet_health option;
-  monitoring_runtime: runtime_health option;
   board_posts: board_post list;
   board_selected_post: Post_id.t option;
   approvals: approval_item list;
   planning: goal_tree option;
-  tools: tool_item list;
-  logs: log_line list;
-  log_scroll: int;
 
   (* keepers (기존) *)
   keepers: keeper list;
@@ -302,7 +288,7 @@ type tui_state = {
 1. Overview surface
 2. Board list/read
 3. Approvals queue + confirm/deny
-4. Workspace > Planning (goal tree)
+4. Planning (goal tree)
 
 ### Phase 2: P1 Monitoring
 

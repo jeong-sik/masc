@@ -146,39 +146,13 @@ type keeper_mode =
   | Keeper_logs
   | Keeper_message
 
-(** Monitoring sub-sections *)
-type monitoring_section =
-  | Agents
-  | Fleet_health
-  | Runtime
-  | Observatory
-  | Transport_health
-
-(** Workspace sub-sections *)
-type workspace_section =
-  | Work
-  | Workspace_planning
-  | Repositories
-  | Verification
-
-(** Lab sub-sections *)
-type lab_section =
-  | Tools
-  | Harness
-  | Keeper_memory_health
-
-(** Top-level TUI surface — aligned with Dashboard V2 navigation. *)
+(** Top-level TUI surface. *)
 type surface =
   | Overview
-  | Monitoring of monitoring_section
   | Keepers of keeper_mode
   | Board
   | Approvals
   | Planning
-  | Command
-  | Workspace of workspace_section
-  | Lab of lab_section
-  | Logs
 
 (** Backward-compatible alias. *)
 type view_mode = surface

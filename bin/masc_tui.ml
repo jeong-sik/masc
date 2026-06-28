@@ -601,7 +601,7 @@ let main () =
                       | None -> state.planning_mode <- Planning_list)
                  | Planning_list -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-            | Approvals | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ());
+            | Approvals -> ());
            add_event state "system" "Manual refresh"
        | Some "\t" ->
            (* Tab cycles through primary surfaces *)
@@ -610,12 +610,7 @@ let main () =
             | Keepers _ -> state.view <- Approvals
             | Approvals -> state.view <- Board
             | Board -> state.view <- Planning
-            | Planning -> state.view <- Command
-            | Command -> state.view <- Workspace Work
-            | Workspace _ -> state.view <- Lab Tools
-            | Lab _ -> state.view <- Logs
-            | Logs -> state.view <- Overview
-            | Monitoring _ -> state.view <- Overview)
+            | Planning -> state.view <- Overview)
        | Some "esc" ->
            (* Esc goes back *)
            (match state.view with
@@ -641,7 +636,7 @@ let main () =
                      state.planning_mode <- Planning_list;
                      state.planning_scroll <- 0
                  | Planning_list -> ())
-            | Overview | Keepers Keeper_list | Approvals | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
+            | Overview | Keepers Keeper_list | Approvals -> ())
        | Some "j" | Some "down" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -676,7 +671,7 @@ let main () =
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
                      state.planning_scroll <- state.planning_scroll + 1)
-            | Overview | Keepers Keeper_message | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
+            | Overview | Keepers Keeper_message -> ())
        | Some "k" | Some "up" ->
            (match state.view with
             | Keepers Keeper_list ->
@@ -713,7 +708,7 @@ let main () =
                  | Planning_detail _ ->
                      if state.planning_scroll > 0 then
                        state.planning_scroll <- state.planning_scroll - 1)
-            | Overview | Keepers Keeper_message | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
+            | Overview | Keepers Keeper_message -> ())
        | Some "\r" | Some "\n" ->
            (* Enter opens detail from list *)
            (match state.view with
@@ -750,7 +745,7 @@ let main () =
                       | None -> ())
                  | Planning_detail _ -> ())
             | Overview | Keepers Keeper_detail | Keepers Keeper_logs | Keepers Keeper_message
-            | Approvals | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
+            | Approvals -> ())
        | Some "l" | Some "L" ->
            (* L opens log view from detail *)
            (match state.view with
@@ -762,7 +757,7 @@ let main () =
                      state.view <- Keepers Keeper_logs
                  | None -> ())
             | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
+            | Board | Approvals | Planning -> ())
        | Some "m" | Some "M" ->
            (* M opens message view from detail *)
            (match state.view with
@@ -770,7 +765,7 @@ let main () =
                 Buffer.clear state.msg_input;
                 state.view <- Keepers Keeper_message
             | Keepers Keeper_detail | Overview | Keepers Keeper_list | Keepers Keeper_logs | Keepers Keeper_message
-            | Board | Approvals | Planning | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ())
+            | Board | Approvals | Planning -> ())
       | _ -> ());
 
       Eio.Fiber.yield ();
@@ -811,7 +806,7 @@ let main () =
                    | None -> state.planning_mode <- Planning_list)
               | Planning_list -> ())
          | Overview | Keepers Keeper_list | Keepers Keeper_detail | Keepers Keeper_message
-         | Approvals | Command | Workspace _ | Lab _ | Logs | Monitoring _ -> ());
+         | Approvals -> ());
         last_check := now
       end;
 

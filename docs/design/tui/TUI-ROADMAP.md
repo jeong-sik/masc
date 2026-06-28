@@ -16,6 +16,11 @@ code_refs:
 > 목표: Web Dashboard V2의 surface/section을 기준으로 MASC TUI에 필요한 기능을 파악하고, 기존 TUI 구현 대비 **Keep / Drop / Add / Change**를 결정한다.
 > 범위: 문서 기획 단계. 본 문서는 우선순위와 방향을 제시하며, 구현 코드는 포함하지 않는다.
 
+## Current PR Implementation Scope
+
+현재 PR은 P0 operator path 중 런타임에 실제 구현된 surface만 노출한다: Overview, Keepers, Board, Approvals, Planning.
+Monitoring, Command/Operations, Workspace 세부 화면, Lab, Logs는 이 문서의 로드맵 항목으로 남기며 production 탭 순환이나 render dispatch에는 placeholder로 노출하지 않는다.
+
 ## 1. 현재 TUI 상태 요약
 
 `bin/masc_tui*.ml`과 `docs/TUI-GUIDE.md`를 기준으로 TUI는 이미 다음 뷰를 구현하고 있다.

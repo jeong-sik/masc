@@ -140,7 +140,7 @@ describe('resolveRuntimeCounts', () => {
   it('reports both 2 live and 16 configured keepers in the fluctuation scenario without picking a winner', () => {
     // Real-world reproduction: composite API returns 2 running fiber keepers
     // while .masc/keepers/ holds 16 persona registrations. Both must surface
-    // simultaneously so the UI can render "런타임 가동 2 / 설정 16" instead of swapping.
+    // simultaneously so the UI can render "keeper 실행 fiber 2 / configured keeper 16" instead of swapping.
     expect(resolveRuntimeCounts({
       executionLoaded: true,
       agentsCount: 0,
@@ -408,12 +408,12 @@ describe('keeperRowLooksRunning', () => {
 })
 
 describe('formatActiveOverConfigured', () => {
-  it('formats keeper counts as "런타임 가동 N / 설정 M"', () => {
+  it('formats keeper counts as separate running-fiber and configured-keeper surfaces', () => {
     const counts = {
       live: { agents: 0, keepers: 2, pausedKeepers: 0, offlineKeepers: 0, transientKeepers: 0, keeperRows: 2, tasks: 0, totalRuntimes: 2, available: true },
       configured: { keepers: 16, totalRuntimes: 16, source: 'namespace-truth' as const },
     }
-    expect(formatActiveOverConfigured(counts, 'keeper')).toBe('런타임 가동 2 / 설정 16')
+    expect(formatActiveOverConfigured(counts, 'keeper')).toBe('keeper 실행 fiber 2 / configured keeper 16')
   })
 
   it('includes paused count in keeper formatting when paused keepers exist', () => {
@@ -421,7 +421,7 @@ describe('formatActiveOverConfigured', () => {
       live: { agents: 0, keepers: 4, pausedKeepers: 3, offlineKeepers: 0, transientKeepers: 0, keeperRows: 7, tasks: 0, totalRuntimes: 4, available: true },
       configured: { keepers: 24, totalRuntimes: 24, source: 'namespace-truth' as const },
     }
-    expect(formatActiveOverConfigured(counts, 'keeper')).toBe('런타임 가동 4 / 일시정지 3 / 설정 24')
+    expect(formatActiveOverConfigured(counts, 'keeper')).toBe('keeper 실행 fiber 4 / 일시정지 keeper 3 / configured keeper 24')
   })
 
   it('includes transient keeper count in keeper formatting when transient keepers exist', () => {
@@ -430,15 +430,15 @@ describe('formatActiveOverConfigured', () => {
       configured: { keepers: 10, totalRuntimes: 10, source: 'namespace-truth' as const },
     }
     expect(formatActiveOverConfigured(counts, 'keeper'))
-      .toBe('런타임 가동 4 / 일시정지 1 / 전이 2 / 오프라인 3 / 설정 10')
+      .toBe('keeper 실행 fiber 4 / 일시정지 keeper 1 / 전이 keeper 2 / 오프라인 keeper 3 / configured keeper 10')
   })
 
-  it('formats runtime totals as "런타임 가동 N / 설정 M"', () => {
+  it('formats runtime totals without merging workspace agents into keeper fibers', () => {
     const counts = {
       live: { agents: 3, keepers: 2, pausedKeepers: 0, offlineKeepers: 0, transientKeepers: 0, keeperRows: 2, tasks: 0, totalRuntimes: 5, available: true },
       configured: { keepers: 16, totalRuntimes: 20, source: 'namespace-truth' as const },
     }
-    expect(formatActiveOverConfigured(counts, 'runtime')).toBe('런타임 가동 5 / 설정 20')
+    expect(formatActiveOverConfigured(counts, 'runtime')).toBe('keeper 실행 fiber 2 / workspace agents 3 / configured runtimes 20')
   })
 
   it('defaults kind to "keeper" when omitted', () => {
@@ -446,7 +446,7 @@ describe('formatActiveOverConfigured', () => {
       live: { agents: 0, keepers: 0, pausedKeepers: 0, offlineKeepers: 0, transientKeepers: 0, keeperRows: 0, tasks: 0, totalRuntimes: 0, available: false },
       configured: { keepers: 0, totalRuntimes: 0, source: 'none' as const },
     }
-    expect(formatActiveOverConfigured(counts)).toBe('런타임 가동 0 / 설정 0')
+    expect(formatActiveOverConfigured(counts)).toBe('keeper 실행 fiber 0 / configured keeper 0')
   })
 })
 
@@ -475,7 +475,7 @@ describe('runtime count role helpers', () => {
       liveKeepers: 4,
       pausedKeepers: 12,
       configuredKeepers: 16,
-    })).toBe('키퍼 런타임 가동 4 / 일시정지 12 / 설정 16')
+    })).toBe('keeper 실행 fiber 4 / 일시정지 keeper 12 / configured keeper 16')
   })
 
   it('formats transient keeper rows separately from offline inventory', () => {
@@ -485,7 +485,7 @@ describe('runtime count role helpers', () => {
       transientKeepers: 2,
       offlineKeepers: 3,
       configuredKeepers: 10,
-    })).toBe('키퍼 런타임 가동 4 / 일시정지 1 / 전이 2 / 오프라인 3 / 설정 10')
+    })).toBe('keeper 실행 fiber 4 / 일시정지 keeper 1 / 전이 keeper 2 / 오프라인 keeper 3 / configured keeper 10')
   })
 
   it('formats roster chips with transient rows visible in breakdowns', () => {
@@ -494,14 +494,14 @@ describe('runtime count role helpers', () => {
       configured: { keepers: 10, totalRuntimes: 10, source: 'namespace-truth' as const },
     }
     expect(formatKeeperRosterCount(transientCounts))
-      .toBe('상세 10 / 런타임 가동 4 / 일시정지 1 / 전이 2 / 오프라인 3 / 설정 10')
+      .toBe('keeper 행 10 / keeper 실행 fiber 4 / 일시정지 keeper 1 / 전이 keeper 2 / 오프라인 keeper 3 / configured keeper 10')
     expect(formatRuntimeRosterCount(transientCounts))
-      .toBe('상세 10 / 런타임 가동 4 / 전이 2 / 키퍼 설정 10')
+      .toBe('runtime 행 10 / keeper 실행 fiber 4 / workspace agents 0 / 일시정지 keeper 1 / 전이 keeper 2 / 오프라인 keeper 3 / configured keeper 10')
   })
 
   it('formats roster chips with detail rows, running runtimes, and configured inventory', () => {
-    expect(formatKeeperRosterCount(counts)).toBe('상세 16 / 런타임 가동 4 / 일시정지 12 / 설정 16')
-    expect(formatRuntimeRosterCount(counts)).toBe('상세 20 / 런타임 가동 8 / 키퍼 설정 16')
+    expect(formatKeeperRosterCount(counts)).toBe('keeper 행 16 / keeper 실행 fiber 4 / 일시정지 keeper 12 / configured keeper 16')
+    expect(formatRuntimeRosterCount(counts)).toBe('runtime 행 20 / keeper 실행 fiber 4 / workspace agents 4 / 일시정지 keeper 12 / configured keeper 16')
   })
 
   it('surfaces offline keeper detail rows separately from running capacity', () => {
@@ -511,8 +511,8 @@ describe('runtime count role helpers', () => {
     }
 
     expect(keeperDetailRows(splitCounts)).toBe(17)
-    expect(formatKeeperRosterCount(splitCounts)).toBe('상세 17 / 런타임 가동 2 / 일시정지 6 / 오프라인 9 / 설정 17')
-    expect(formatRuntimeRosterCount(splitCounts)).toBe('상세 17 / 런타임 가동 2 / 키퍼 설정 17')
+    expect(formatKeeperRosterCount(splitCounts)).toBe('keeper 행 17 / keeper 실행 fiber 2 / 일시정지 keeper 6 / 오프라인 keeper 9 / configured keeper 17')
+    expect(formatRuntimeRosterCount(splitCounts)).toBe('runtime 행 17 / keeper 실행 fiber 2 / workspace agents 0 / 일시정지 keeper 6 / 오프라인 keeper 9 / configured keeper 17')
   })
 
   it('formats command target sections as mission targets, not live runtime counts', () => {

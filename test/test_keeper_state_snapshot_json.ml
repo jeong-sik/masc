@@ -449,6 +449,41 @@ let test_budget_finalizer_drops_synthetic_response_text () =
     []
     finalized.state_snapshot.decisions
 
+let test_synthetic_finalizer_drops_raw_response_text () =
+  let raw_response_text =
+    String.concat
+      "\n"
+      [
+        "The system context changed without new user input.";
+        "What should I do next?";
+        "Check keeper_tasks_list again.";
+        "What should I do next?";
+        "Check keeper_tasks_list again.";
+      ]
+  in
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"test"
+      ~goal:"Monitor keeper work"
+      ~actual_keeper_tool_names:["keeper_tasks_list"]
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text
+      ()
+  in
+  Alcotest.(check string)
+    "synthetic state source"
+    "synthesized"
+    (KMP.state_snapshot_source_to_string finalized.state_snapshot_source);
+  Alcotest.(check string)
+    "synthetic response uses typed fallback instead of raw text"
+    "Used: keeper_tasks_list"
+    finalized.response_text;
+  Alcotest.(check bool)
+    "raw repeated text not persisted as response"
+    false
+    (contains_substring finalized.response_text "What should I do next?")
+
 (* ── Test runner ─────────────────────────────────────────────────── *)
 
 let () =
@@ -502,5 +537,9 @@ let () =
             "budget finalizer drops synthetic response text"
             `Quick
             test_budget_finalizer_drops_synthetic_response_text;
+          Alcotest.test_case
+            "synthetic finalizer drops raw response text"
+            `Quick
+            test_synthetic_finalizer_drops_raw_response_text;
         ] );
     ]

@@ -534,19 +534,8 @@ let string_set_of_list values =
 let json_string_list values = Json_util.json_string_list values
 
 let configured_keeper_is_materializable ?base_path name =
-  try
-    let defaults =
-      match base_path with
-      | Some base_path ->
-        Keeper_types_profile.load_keeper_profile_defaults_for_base_path
-          ~base_path
-          name
-      | None -> Keeper_types_profile.load_keeper_profile_defaults name
-    in
-    Keeper_types_profile.keeper_profile_defaults_materializable defaults
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> true
+  Keeper_types_profile.keeper_profile_defaults_materializable_for_name ?base_path
+    name
 
 let keeper_identity_drift_scan config =
   let configured_names =

@@ -13,6 +13,7 @@
     - [Keeper_turn_fsm.turn_state]     (10 variants, Step 4a)
     - [Keeper_contract_classifier.actionable_signal] (4 variants, Step 6a)
     - [Keeper_contract_classifier.contract_status]   (7 variants, Step 6a)
+    - [Keeper_profile_load_failure_site.t] typed metric labels
     - [Keeper_turn_fsm.pp_failure_reason] surfaces record-bearing fields
     - [Keeper_contract_classifier.pp_contract_status] surfaces missing list
 *)
@@ -237,6 +238,36 @@ let test_pp_contract_status_surfaces_missing_list () =
        true
      with Not_found -> false)
 
+(* ── Keeper_profile_load_failure_site.t ──────────────────────── *)
+
+let all_profile_load_failure_sites : Keeper_profile_load_failure_site.t list =
+  [
+    Personas_root;
+    Personas_dirs_resolve;
+    Toml_skip;
+    Toml_fallback;
+    Materializable_check;
+    Load_persona_extended;
+    Agent_md_read;
+    List_persona_summaries;
+  ]
+
+let test_profile_load_failure_site_labels_unique () =
+  let labels =
+    List.map Keeper_profile_load_failure_site.to_label
+      all_profile_load_failure_sites
+  in
+  Alcotest.(check (list string))
+    "no duplicate profile load failure site labels"
+    []
+    (duplicates labels)
+
+let test_materializable_check_site_label () =
+  Alcotest.(check string)
+    "materializable check label"
+    "materializable_check"
+    Keeper_profile_load_failure_site.(to_label Materializable_check)
+
 (* ── Test runner ─────────────────────────────────────────────── *)
 
 let () =
@@ -282,5 +313,12 @@ let () =
             test_contract_status_labels_unique;
           Alcotest.test_case "pp surfaces missing list" `Quick
             test_pp_contract_status_surfaces_missing_list;
+        ] );
+      ( "profile_load_failure_site",
+        [
+          Alcotest.test_case "labels unique" `Quick
+            test_profile_load_failure_site_labels_unique;
+          Alcotest.test_case "materializable check label" `Quick
+            test_materializable_check_site_label;
         ] );
     ]

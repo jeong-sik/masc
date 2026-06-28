@@ -46,14 +46,9 @@ let keeper_count (config : Workspace.config) : int =
 let configured_runtime_keeper_names config =
   Keeper_meta_store.configured_keeper_names config
   |> List.filter (fun name ->
-    try
-      Keeper_types_profile.load_keeper_profile_defaults_for_base_path
-        ~base_path:config.Workspace.base_path
-        name
-      |> Keeper_types_profile.keeper_profile_defaults_materializable
-    with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _ -> true)
+       Keeper_types_profile.keeper_profile_defaults_materializable_for_name
+         ~base_path:config.Workspace.base_path
+         name)
 
 let configured_keeper_count (config : Workspace.config) : int =
   List.length (configured_runtime_keeper_names config)

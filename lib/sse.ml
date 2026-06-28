@@ -225,7 +225,7 @@ let sync_transport_snapshot ?(force = false) () =
            let by_idle = Float.compare right.idle_seconds left.idle_seconds in
            if by_idle <> 0 then by_idle
            else String.compare left.session_id right.session_id)
-    |> take 3
+    |> List.take 3
     |> List.map (fun (session : session_snapshot) ->
          {
            Transport_metrics.session_id = session.session_id;

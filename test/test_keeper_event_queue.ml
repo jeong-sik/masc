@@ -120,6 +120,9 @@ let () =
   let bootstrap_stim =
     { post_id = "bootstrap"; urgency = Normal; arrived_at = 0.0; payload = Bootstrap }
   in
+  let duplicate_bootstrap_stim =
+    { bootstrap_stim with arrived_at = 42.0 }
+  in
   let ghost_stim =
     { post_id = "ghost"; urgency = Low; arrived_at = 0.0; payload = No_progress_recovery }
   in
@@ -128,6 +131,8 @@ let () =
   let q = enqueue q board_stim in
   let q = enqueue q bootstrap_stim in
   assert (length q = 2);
+  assert (stimulus_identity_equal bootstrap_stim duplicate_bootstrap_stim);
+  assert (List.length (uniq_stimuli [ bootstrap_stim; duplicate_bootstrap_stim ]) = 1);
   let stim, q =
     match dequeue q with
     | Some s -> s
@@ -268,6 +273,25 @@ let () =
       Keeper_event_queue_persistence.persist ~base_path ~keeper_name rest;
       assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
 
+  (* --- durable snapshot load collapses legacy duplicates that differ only by
+         arrival time. --- *)
+  let base_path = temp_dir "keeper-event-queue-load-dedup" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-event-queue-load-dedup-test" in
+      let duplicated =
+        empty
+        |> fun q -> enqueue q bootstrap_stim
+        |> fun q -> enqueue q duplicate_bootstrap_stim
+      in
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name duplicated;
+      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
+      assert (length restored = 1);
+      let only, rest = Option.get (dequeue restored) in
+      assert (String.equal only.post_id "bootstrap");
+      assert (is_empty rest));
+
   (* --- durable in-flight store: ack removes only consumed stimuli --- *)
   let base_path = temp_dir "keeper-event-queue-inflight-partial-ack" in
   Fun.protect
@@ -377,6 +401,8 @@ let () =
       Masc.Keeper_registry.clear ();
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      assert (length (Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name) = 1);
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       Masc.Keeper_registry.clear ();
       ignore (Masc.Keeper_registry.register ~base_path keeper_name meta);
@@ -402,7 +428,12 @@ let () =
       let meta = meta_for_keeper keeper_name "trace-event-queue-unregistered-test" in
       Masc.Keeper_registry.clear ();
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
+      Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name board_stim;
       Masc.Keeper_registry_event_queue.enqueue ~base_path keeper_name bootstrap_stim;
+      Masc.Keeper_registry_event_queue.enqueue
+        ~base_path
+        keeper_name
+        duplicate_bootstrap_stim;
       assert (Sys.file_exists (snapshot_path ~base_path ~keeper_name));
       let pending = Masc.Keeper_registry_event_queue.snapshot ~base_path keeper_name in
       assert (length pending = 2);

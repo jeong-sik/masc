@@ -130,6 +130,11 @@ val should_record_cadence_success : extraction_kind -> bool
     Unstructured fallback episodes are durable diagnostics, but they mean the
     provider still failed to produce structured memory. *)
 
+val should_preserve_unstructured_fallback : string -> bool
+(** Whether raw unparseable provider output is worth preserving as a diagnostic
+    fallback fact. Empty output carries no evidence and should remain a provider
+    failure instead of polluting memory. *)
+
 val run_with_parse_retries
   :  max_retries:int
   -> attempt:(Agent_sdk.Types.message list -> attempt_outcome)

@@ -48,6 +48,7 @@ let bar = String.make 72 '='
 let string_of_failure (f : Fusion_types.panel_failure) : string =
   match f with
   | Fusion_types.Timeout -> "timeout"
+  | Fusion_types.Bridge_error msg -> "bridge_error: " ^ msg
   | Fusion_types.Provider_error msg -> "provider_error: " ^ msg
   | Fusion_types.Empty_response detail -> "empty_response: " ^ detail
   | Fusion_types.Invalid_max_output_tokens n ->
@@ -380,8 +381,8 @@ let () =
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
   (* Capture the Eio handles the OAS/fusion call path reads via
-     [Masc_eio_env.get_opt]. Without this, [Masc_oas_bridge.run_safe] finds no
-     clock and runs the panel/judge calls without timeout enforcement. *)
+     [Masc_eio_env.get_opt]. Without this, [Masc_oas_bridge.run_safe] fails
+     closed before starting panel/judge calls. *)
   Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
   let config_path = Masc.Fusion_config_loader.runtime_toml_path ~base_path in
   (match Runtime.init_default_strict ~config_path with

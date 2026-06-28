@@ -390,6 +390,10 @@ let should_record_cadence_success = function
   | Unstructured_fallback -> false
 ;;
 
+let should_preserve_unstructured_fallback raw =
+  not (String.equal (String.trim raw) "")
+;;
+
 let rec run_with_parse_retries ~max_retries ~attempt messages =
   match attempt messages with
   | Parsed episode -> Ok episode
@@ -578,16 +582,19 @@ let extract_with_provider_classified
          | Some raw -> raw
          | None -> ""
        in
-       let now = Eio.Time.now clock in
-       Log.Keeper.warn
-         "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
-         inp.trace_id
-         generation
-         msg;
-       Ok
-         { episode = unstructured_episode ~now ~generation inp ~reason:msg ~raw
-         ; kind = Unstructured_fallback
-         }))
+       if not (should_preserve_unstructured_fallback raw)
+       then Error msg
+       else (
+         let now = Eio.Time.now clock in
+         Log.Keeper.warn
+           "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
+           inp.trace_id
+           generation
+           msg;
+         Ok
+          { episode = unstructured_episode ~now ~generation inp ~reason:msg ~raw
+          ; kind = Unstructured_fallback
+          })))
 ;;
 
 let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp =

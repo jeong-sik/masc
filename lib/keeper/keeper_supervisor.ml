@@ -218,6 +218,20 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
   in
   let dead_ttl_sec = Runtime_params.get Governance_registry.keeper_dead_ttl_sec in
   let base_path = ctx.config.base_path in
+  (* HITL visibility: a keeper blocked on a pending approval surfaces to the
+     operator only as a silent chat stall — [keeper_cycle_decision] returns
+     [blocked Approval_pending] and the keeper emits no further
+     chat/observation until the operator resolves the approval (or
+     [approval_janitor] expires it at the 30m mark). Name the keeper and the
+     outstanding approval on every sweep so the terminal log and downstream
+     consumers can see *why* the chat is awaiting a response. *)
+  Keeper_meta_store.keeper_names ctx.config
+  |> List.iter (fun name ->
+       if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:name
+       then
+         Log.Keeper.warn
+           "keeper:%s blocked on pending HITL approval; chat awaits operator decision"
+           name);
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)

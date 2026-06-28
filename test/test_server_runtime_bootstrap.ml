@@ -1613,7 +1613,7 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         let state = Mcp_server.create_state ~base_path:dir in
         Server_auth.server_state := Some state;
         let config = Mcp_server.workspace_config state in
-        let assignee = "missing-keeper-agent" in
+        let assignee = "keeper-missing-agent" in
         let task =
           make_task
             ~id:"task-active-owner-without-binding"
@@ -1681,6 +1681,88 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
                 ( row |> member "agent_name" |> to_string
                 , row |> member "reason" |> to_string )));
         Alcotest.(check bool) "health asks operator action" true
+          (fleet_safety |> member "operator_action_required" |> to_bool)))
+
+let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
+  with_temp_dir "health-non-keeper-active-task-owner-advisory" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let assignee = "codex-mcp-client" in
+        let task =
+          make_task
+            ~id:"task-client-owned-active"
+            ~title:"Active task owned by MCP client"
+            ~status:
+              (Types.Claimed
+                 { assignee; claimed_at = "2026-06-26T00:00:01Z" })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let fleet_safety = json |> member "keeper_fleet_safety" in
+        Alcotest.(check string)
+          "health stays ok for non-keeper client owner"
+          "ok"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check (option string))
+          "health keeps blocker empty"
+          None
+          (fleet_safety |> member "blocker" |> to_string_option);
+        Alcotest.(check bool)
+          "non-keeper client is not a keeper-fiber blocker"
+          false
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int)
+          "health exposes no blocking keeper-owner rows"
+          0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check int)
+          "health exposes one non-keeper owner row"
+          1
+          (fleet_safety |> member "non_keeper_active_task_owner_count" |> to_int);
+        let owners =
+          fleet_safety |> member "non_keeper_active_task_owners" |> to_list
+        in
+        Alcotest.(check int) "one advisory owner row" 1 (List.length owners);
+        let owner = List.hd owners in
+        Alcotest.(check string)
+          "advisory row agent"
+          assignee
+          (owner |> member "agent_name" |> to_string);
+        Alcotest.(check string)
+          "advisory row owner kind"
+          "non_keeper_client"
+          (owner |> member "owner_kind" |> to_string);
+        Alcotest.(check bool)
+          "advisory row does not block fleet"
+          false
+          (owner |> member "fleet_blocking" |> to_bool);
+        Alcotest.(check (list string))
+          "blocked keeper names stay empty"
+          []
+          (fleet_safety |> member "blocked_keeper_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check bool)
+          "health does not ask fleet operator action"
+          false
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
 let test_health_json_preserves_active_task_owner_meta_read_error () =
@@ -4077,6 +4159,10 @@ let () =
             "health json degrades on active task owner without keeper binding"
             `Quick
             test_health_json_degrades_on_active_task_owner_without_keeper_binding;
+          Alcotest.test_case
+            "health json reports non-keeper active task owner as advisory"
+            `Quick
+            test_health_json_reports_non_keeper_active_task_owner_as_advisory;
           Alcotest.test_case
             "health json preserves active task owner meta read error"
             `Quick

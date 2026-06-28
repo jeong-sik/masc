@@ -75,6 +75,12 @@ let canonical_keeper_name_from_agent_name agent_name =
       else
         None
 
+let is_keeper_principal_agent_name agent_name =
+  let trimmed = String.trim agent_name in
+  is_keeper_agent_alias trimmed
+  || (Nickname.is_dictionary_generated_nickname trimmed
+      && Option.is_some (canonical_keeper_name_from_agent_name trimmed))
+
 (** Phase A F5 (2026-04-27): single source of truth for the
     ["keeper-<name>"] prefix pattern.  Two call sites used to embed
     [String.sub trimmed 0 7 = "keeper-"] manually; both now go through

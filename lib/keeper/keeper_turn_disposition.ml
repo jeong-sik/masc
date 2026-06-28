@@ -14,6 +14,8 @@ type t =
   | Input_required
   | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted
+  | Completion_contract_unsatisfied
+  | Completion_contract_no_progress
   | Post_commit_ambiguous
   | Provider_error of Code.t
   | Unknown of { raw_error : string }
@@ -30,6 +32,8 @@ let severity = function
   | External_cancel
   | Turn_wall_clock_timeout
   | Runtime_attempts_exhausted -> Warn
+  | Completion_contract_unsatisfied
+  | Completion_contract_no_progress
   | Post_commit_ambiguous
   | Provider_error _ -> Bad
   | Unknown _ -> Unknown_bad
@@ -43,6 +47,10 @@ let summary = function
     "keeper turn hit a stale/no-progress timeout"
   | Runtime_attempts_exhausted ->
     "runtime attempts exhausted; inspect per-attempt root causes"
+  | Completion_contract_unsatisfied ->
+    "completion contract was not satisfied; review the contract or the runtime"
+  | Completion_contract_no_progress ->
+    "no progress was made on the contract; operator resume clears the no-progress latch"
   | Post_commit_ambiguous ->
     "provider failed after a mutating tool may have committed side effects"
   | Provider_error code -> Printf.sprintf "keeper turn ended with %s" (Code.to_wire code)
@@ -57,6 +65,8 @@ let next_action = function
   | External_cancel -> Some "rerun_if_still_relevant"
   | Turn_wall_clock_timeout -> Some "inspect_turn_timeout"
   | Runtime_attempts_exhausted -> Some "inspect_runtime_attempts"
+  | Completion_contract_unsatisfied -> Some "inspect_completion_contract"
+  | Completion_contract_no_progress -> Some "resume_or_inspect_completion_contract"
   | Post_commit_ambiguous -> Some "reconcile_partial_commit"
   | Provider_error _ | Unknown _ -> Some "inspect_latest_error"
 ;;
@@ -67,6 +77,8 @@ let to_wire = function
   | External_cancel -> "external_cancel"
   | Turn_wall_clock_timeout -> "turn_wall_clock_timeout"
   | Runtime_attempts_exhausted -> "runtime_attempts_exhausted"
+  | Completion_contract_unsatisfied -> "completion_contract_unsatisfied"
+  | Completion_contract_no_progress -> "completion_contract_no_progress"
   | Post_commit_ambiguous -> "post_commit_ambiguous"
   | Provider_error code -> Code.to_wire code
   | Unknown { raw_error = "" } -> "unknown_error"
@@ -109,6 +121,8 @@ let of_wire = function
   | "external_cancel" -> External_cancel
   | "turn_wall_clock_timeout" -> Turn_wall_clock_timeout
   | "runtime_attempts_exhausted" -> Runtime_attempts_exhausted
+  | "completion_contract_unsatisfied" -> Completion_contract_unsatisfied
+  | "completion_contract_no_progress" -> Completion_contract_no_progress
   | "post_commit_ambiguous" -> Post_commit_ambiguous
   | "unknown_error" -> Unknown { raw_error = "" }
   | other ->
@@ -124,17 +138,21 @@ let equal a b =
   | External_cancel, External_cancel
   | Turn_wall_clock_timeout, Turn_wall_clock_timeout
   | Runtime_attempts_exhausted, Runtime_attempts_exhausted
+  | Completion_contract_unsatisfied, Completion_contract_unsatisfied
+  | Completion_contract_no_progress, Completion_contract_no_progress
   | Post_commit_ambiguous, Post_commit_ambiguous -> true
   | Provider_error a, Provider_error b -> String.equal (Code.to_wire a) (Code.to_wire b)
   | Unknown a, Unknown b -> String.equal a.raw_error b.raw_error
-  | Success, _
-  | Input_required, _
-  | External_cancel, _
-  | Turn_wall_clock_timeout, _
-  | Runtime_attempts_exhausted, _
-  | Post_commit_ambiguous, _
-  | Provider_error _, _
-  | Unknown _, _ -> false
+  | ( Success
+    | Input_required
+    | External_cancel
+    | Turn_wall_clock_timeout
+    | Runtime_attempts_exhausted
+    | Completion_contract_unsatisfied
+    | Completion_contract_no_progress
+    | Post_commit_ambiguous
+    | Provider_error _
+    | Unknown _ ), _ -> false
 ;;
 
 let pp fmt t = Format.pp_print_string fmt (to_wire t)

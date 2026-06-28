@@ -6,8 +6,9 @@ module P = Masc.Otel_metric_store
 open Alcotest
 
 let with_fresh f () =
-  GM.reset_for_testing ();
-  f ()
+  Eio_main.run (fun _env ->
+    GM.reset_for_testing ();
+    f ())
 
 let now = 1_000_000.0
 

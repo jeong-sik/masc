@@ -211,7 +211,7 @@ let tool_search_alias_entries =
   ; "tool_search_files", "코드 검색 소스코드 grep rg 패턴 찾기 파일"
   ; ( "tool_execute"
     , "명령어 실행 쉘 빌드 테스트 run dune build check compile compiles code git github gh \
-       status log diff" )
+       status log diff 깃허브 이슈 풀리퀘스트 워크트리 브랜치" )
   ; ( "keeper_memory_search"
     , "기억 검색 대화 이전 메시지 memory previous earlier user said recall deployment" )
   ; "keeper_library_search", "라이브러리 지식 문서 검색"

@@ -528,9 +528,11 @@ let summarize_rows ~keeper_name ~limit rows =
   let completion_contract_unknown_result_counts = Hashtbl.create 8 in
   let stimulus_seen = Hashtbl.create 16 in
   let stimulus_kind_by_id = Hashtbl.create 16 in
+  let stimulus_recorded_at_by_id = Hashtbl.create 16 in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
   let latest_board_cursor = ref None in
+  let latest_reaction_at = ref None in
   let cursor_swept_stimulus_count = ref 0 in
   let legacy_cursor_swept_stimulus_count = ref 0 in
   let remember_stimulus stimulus_id =
@@ -569,6 +571,13 @@ let summarize_rows ~keeper_name ~limit rows =
      | Some latest when compare_board_cursor_token latest cursor_token >= 0 -> ()
      | _ -> latest_board_cursor := Some cursor_token);
     mark_board_cursor_swept cursor_token
+  in
+  let note_reaction_time = function
+    | None -> ()
+    | Some value ->
+      (match !latest_reaction_at with
+       | Some latest when latest >= value -> ()
+       | _ -> latest_reaction_at := Some value)
   in
   let remember_board_stimulus row stimulus_id =
     match board_stimulus_token row with
@@ -666,6 +675,10 @@ let summarize_rows ~keeper_name ~limit rows =
         let stimulus_kind = nested_string_field "stimulus" "kind" row in
         note_stimulus_kind stimulus_kind;
         note_payload_parse_error row;
+        (match float_field "recorded_at_unix" row with
+         | Some recorded_at ->
+           Hashtbl.replace stimulus_recorded_at_by_id id recorded_at
+         | None -> ());
         (match stimulus_kind with
          | Some kind -> Hashtbl.replace stimulus_kind_by_id id kind
          | None -> ());
@@ -673,12 +686,14 @@ let summarize_rows ~keeper_name ~limit rows =
         remember_board_stimulus row id
       | Some "reaction", Some id ->
         incr reaction_count;
+        note_reaction_time (float_field "recorded_at_unix" row);
         note_reaction_kind (nested_string_field "reaction" "kind" row);
         note_completion_contract_attention row;
         mark_reacted id
       | Some "cursor_ack", Some id ->
         incr reaction_count;
         incr cursor_ack_count;
+        note_reaction_time (float_field "recorded_at_unix" row);
         mark_reacted id;
         (match nested_float_field "cursor" "cursor_ts" row with
          | Some cursor_ts ->
@@ -689,11 +704,13 @@ let summarize_rows ~keeper_name ~limit rows =
          | None -> ())
       | Some "reaction", None ->
         incr reaction_count;
+        note_reaction_time (float_field "recorded_at_unix" row);
         note_reaction_kind (nested_string_field "reaction" "kind" row);
         note_completion_contract_attention row
       | Some "cursor_ack", None ->
         incr reaction_count;
         incr cursor_ack_count;
+        note_reaction_time (float_field "recorded_at_unix" row);
         (match nested_float_field "cursor" "cursor_ts" row with
          | Some cursor_ts ->
            let cursor_post_id =
@@ -703,6 +720,19 @@ let summarize_rows ~keeper_name ~limit rows =
          | None -> ())
       | _ -> ())
     rows;
+  Hashtbl.iter
+    (fun id raw_kind ->
+       match
+         stimulus_kind_of_string raw_kind,
+         Hashtbl.find_opt stimulus_seen id,
+         Hashtbl.find_opt stimulus_recorded_at_by_id id,
+         !latest_reaction_at
+       with
+       | Some No_progress_recovery, Some false, Some stimulus_ts, Some reaction_ts
+         when reaction_ts >= stimulus_ts ->
+         Hashtbl.replace stimulus_seen id true
+       | _ -> ())
+    stimulus_kind_by_id;
   let pending_stimulus_ids =
     !stimulus_order
     |> List.rev

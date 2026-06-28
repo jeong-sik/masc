@@ -224,6 +224,7 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Eio_context.set_net net;
   Eio_context.set_clock clock;
   Eio_context.set_mono_clock mono_clock;
+  Masc_eio_env.init ~sw ~net ~clock ();
   (* RFC-0257: own detached per-keeper memory-lane fibers on the server root
      switch. After [set_switch] so the lane and provider calls it forks share
      the same long-lived switch (cancelled together at shutdown). *)
@@ -484,8 +485,6 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
     init_runtime_context env
   in
 
-  (* Initialize Eio environment for MODEL HTTP calls (cohttp-eio via OAS Provider) *)
-  Masc_eio_env.init ~sw ~net ~clock ();
   Discovery_cache.set_env ~sw ~net;
   Discovery_cache.set_base_path base_path;
   (* Start global rate-limit bucket cleanup loop to prevent unbounded growth of

@@ -892,9 +892,9 @@ let mark_compute_finish (st : state) ~cycle_id ~started_at ~outcome ~reason =
   Otel_metric_store.observe_histogram governance_compute_duration_metric
     ~labels duration_sec;
   (* Single emission at the outcome-derived level (never two lines).
-     [compute_timeout] is no longer reported because the governance
-     judge no longer carries a per-cycle budget; the OAS bridge
-     applies its own (or no-timeout) inside the wrapped computation. *)
+     [compute_timeout] is no longer reported by this daemon layer; the
+     OAS bridge owns the per-caller structural timeout inside the
+     wrapped computation. *)
   Log.Governance.emit
     (level_of_compute_outcome ~outcome ~reason)
     (Printf.sprintf
@@ -977,11 +977,10 @@ let refresh_once ~sw ~net
        for a runtime "is the Switch still alive?" probe (Eio 1.3
        does not export such a probe in its public API anyway).
 
-       The no-timeout policy for the governance/operator judge
-       callers means the bridge no longer contributes a cycle
-       wrapper; the OAS provider keeps its own per-call timeout,
-       and any path that doesn't deliver a response simply runs to
-       the provider's natural budget. *)
+       The OAS bridge owns the governance/operator judge wall-clock
+       budget via [Env_config_oas_bridge], so this daemon layer keeps
+       only the typed in-flight invariant and does not add a second
+       cycle wrapper. *)
     let cycle_id = mark_compute_start st in
     let compute_result =
       try

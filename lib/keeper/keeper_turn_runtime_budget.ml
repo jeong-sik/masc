@@ -101,6 +101,23 @@ type 'a degraded_retry_prepare_result =
       fail_open_err : Agent_sdk.Error.sdk_error;
     }
 
+type 'a degraded_retry_step =
+  | Degraded_retry_step_not_allowed
+  | Degraded_retry_step_slot_phase_exhausted of {
+      retry : EC.degraded_retry;
+      reason : string;
+    }
+  | Degraded_retry_step_setup_failed of {
+      retry : EC.degraded_retry;
+      reason : string;
+      fail_open_err : Agent_sdk.Error.sdk_error;
+    }
+  | Degraded_retry_step_prepared of {
+      retry : EC.degraded_retry;
+      reason : string;
+      next : 'a;
+    }
+
 let empty_degraded_retry_runtime_error =
   Agent_sdk.Error.Internal "degraded retry selected empty next_runtime"
 
@@ -177,6 +194,282 @@ let next_fail_open_runtime_for_turn_with_budget
         let _ = estimated_input_tokens in
         let _ = remaining_turn_budget_s in
         Degraded_retry_allowed retry)
+
+let plan_degraded_retry_step
+      ~base_runtime
+      ~current_runtime_id
+      ~attempted_runtimes
+      ~estimated_input_tokens
+      ~time_spent_in_turn_s
+      ~remaining_turn_budget_s
+      ~attempt
+      ~err
+      ~allow_retry
+      ~publish_cascade_resolution
+      ~emit_runtime_selected
+      ~emit_runtime_rotation
+      ~setup_runtime
+  =
+  match
+    next_fail_open_runtime_for_turn_with_budget
+      ~base_runtime
+      ~effective_runtime:current_runtime_id
+      ~attempted_runtimes
+      ~estimated_input_tokens
+      ?time_spent_in_turn_s
+      ~remaining_turn_budget_s
+      err
+  with
+  | No_degraded_retry -> Degraded_retry_step_not_allowed
+  | Degraded_retry_allowed retry when allow_retry retry ->
+    (match
+       prepare_degraded_retry_allowed
+         ~current_runtime_id
+         ~attempt
+         ~err
+         ~retry
+         ~publish_cascade_resolution
+         ~emit_runtime_selected
+         ~emit_runtime_rotation
+         ~setup_runtime
+     with
+     | Degraded_retry_prepared { retry; reason; next } ->
+       Degraded_retry_step_prepared { retry; reason; next }
+     | Degraded_retry_setup_failed { retry; reason; fail_open_err } ->
+       Degraded_retry_step_setup_failed { retry; reason; fail_open_err })
+  | Degraded_retry_allowed _ -> Degraded_retry_step_not_allowed
+  | Degraded_retry_slot_phase_exhausted retry when allow_retry retry ->
+    let reason = EC.degraded_retry_reason_to_string retry.fallback_reason in
+    publish_cascade_resolution
+      ~runtime_id:current_runtime_id
+      ~decision:Keeper_unified_turn_cascade_resolution.Degraded_retry_slot_phase_exhausted
+      ~reason
+      ~next_runtime:(Some retry.next_runtime)
+      ~attempt
+      err;
+    Degraded_retry_step_slot_phase_exhausted { retry; reason }
+  | Degraded_retry_slot_phase_exhausted _ -> Degraded_retry_step_not_allowed
+
+let yield_before_empty_no_progress_retry () = Eio.Fiber.yield ()
+
+let direct_empty_no_progress_retry_reason err =
+  match Keeper_turn_driver.classify_masc_internal_error err with
+  | Some internal_error ->
+    (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
+     | Some `Empty_no_progress -> Some EC.Empty_no_progress
+     | Some `Read_only_no_progress | None -> None)
+  | None -> None
+
+let retry_reason_is_empty_no_progress (retry : EC.degraded_retry) =
+  match retry.fallback_reason with
+  | EC.Empty_no_progress -> true
+  | _ -> false
+
+let direct_empty_no_progress_retry_decision
+    ~base_runtime
+    ~effective_runtime
+    ~attempted_runtimes
+    ~estimated_input_tokens
+    ?time_spent_in_turn_s
+    ~remaining_turn_budget_s
+    err =
+  match direct_empty_no_progress_retry_reason err with
+  | None -> No_degraded_retry
+  | Some EC.Empty_no_progress ->
+    (match
+       next_fail_open_runtime_for_turn_with_budget
+         ~base_runtime
+         ~effective_runtime
+         ~attempted_runtimes
+         ~estimated_input_tokens
+         ?time_spent_in_turn_s
+         ~remaining_turn_budget_s
+         err
+     with
+     | Degraded_retry_allowed retry when retry_reason_is_empty_no_progress retry
+       -> Degraded_retry_allowed retry
+     | Degraded_retry_slot_phase_exhausted retry
+       when retry_reason_is_empty_no_progress retry ->
+       Degraded_retry_slot_phase_exhausted retry
+     | _ -> No_degraded_retry)
+  | Some _ -> No_degraded_retry
+
+let run_direct_empty_no_progress_retry_loop
+      ~keeper_name
+      ~base_runtime
+      ~initial_runtime
+      ~initial_max_context
+      ~estimated_input_tokens
+      ~timeout_sec
+      ~remaining_turn_budget_s
+      ~current_turn_phase_elapsed_ms
+      ~now_s
+      ~(setup_retry_runtime :
+         string -> (runtime_execution, Agent_sdk.Error.sdk_error) result)
+      ~publish_cascade_resolution
+      ~emit_runtime_selected
+      ~emit_runtime_rotation
+      ~record_retry_setup_failure
+      ~before_retry
+      ~run_once
+      ()
+  =
+  let rec run_attempt
+      ~runtime_id
+      ?runtime_execution
+      ~attempted_runtimes
+      ?degraded_retry
+      ~runtime_rotation_attempts
+      ~attempt
+      ~retry_phase_started_at
+      ~is_retry
+      ()
+    =
+    let degraded_retry_runtime =
+      Option.map (fun (retry : EC.degraded_retry) -> retry.next_runtime)
+        degraded_retry
+    in
+    let fallback_reason =
+      Option.map (fun (retry : EC.degraded_retry) -> retry.fallback_reason)
+        degraded_retry
+    in
+    let attempt_max_context =
+      match runtime_execution with
+      | Some execution -> execution.max_context
+      | None -> initial_max_context
+    in
+    match
+      run_once
+        ~runtime_id
+        ~max_context:attempt_max_context
+        ~is_retry
+        ~degraded_retry_runtime
+        ~fallback_reason
+        ~runtime_rotation_attempts:(List.rev runtime_rotation_attempts)
+    with
+    | Ok result -> Ok (result, attempt_max_context)
+    | Error err as error ->
+      (match
+         plan_degraded_retry_step
+           ~base_runtime
+           ~current_runtime_id:runtime_id
+           ~attempted_runtimes
+           ~estimated_input_tokens
+           ~time_spent_in_turn_s:
+             (Some (timeout_sec -. remaining_turn_budget_s ()))
+           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
+           ~attempt
+           ~err
+           ~allow_retry:retry_reason_is_empty_no_progress
+           ~publish_cascade_resolution
+           ~emit_runtime_selected
+           ~emit_runtime_rotation
+           ~setup_runtime:setup_retry_runtime
+       with
+       | Degraded_retry_step_not_allowed ->
+         let reason =
+           match direct_empty_no_progress_retry_reason err with
+           | Some retry_reason ->
+             Printf.sprintf
+               "terminal_%s_no_degraded_retry"
+               (EC.degraded_retry_reason_to_string retry_reason)
+           | None -> "terminal_error_not_degraded_retry_eligible"
+         in
+         publish_cascade_resolution
+           ~runtime_id
+           ~decision:Keeper_unified_turn_cascade_resolution.No_degraded_retry
+           ~reason
+           ~next_runtime:None
+           ~attempt
+           err;
+         error
+       | Degraded_retry_step_slot_phase_exhausted { retry; reason } ->
+         Log.Keeper.warn
+           "%s: direct keeper_msg empty response from runtime=%s suggested \
+            retry to %s (reason=%s), but productive slot phase budget %.1fs \
+            is exhausted after %.1fs"
+           keeper_name
+           runtime_id
+           retry.next_runtime
+           reason
+           degraded_retry_slot_phase_budget_sec
+           (timeout_sec -. remaining_turn_budget_s ());
+         error
+       | Degraded_retry_step_setup_failed { retry; fail_open_err; _ } ->
+         let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+           current_turn_phase_elapsed_ms retry_phase_started_at
+         in
+         let rotation_attempt =
+           Keeper_unified_turn_rotation_attempt.build
+             ~recorded_at:(now_iso ())
+             ~productive_phase_elapsed_ms
+             ?retry_phase_elapsed_ms
+             ~from_runtime:runtime_id
+             ~retry
+             ~outcome:Keeper_execution_receipt.Rotation_setup_failed
+             fail_open_err
+         in
+         record_retry_setup_failure
+           ~from_runtime:runtime_id
+           ~retry
+           ~rotation_attempt
+           ~fail_open_err;
+         Error fail_open_err
+       | Degraded_retry_step_prepared { retry; reason; next = next_execution }
+         ->
+         let retry_phase_started_at =
+           match retry_phase_started_at with
+           | Some _ -> retry_phase_started_at
+           | None -> Some (now_s ())
+         in
+         let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
+           current_turn_phase_elapsed_ms retry_phase_started_at
+         in
+         let rotation_attempt =
+           Keeper_unified_turn_rotation_attempt.build
+             ~recorded_at:(now_iso ())
+             ~productive_phase_elapsed_ms
+             ?retry_phase_elapsed_ms
+             ~from_runtime:runtime_id
+             ~retry
+             ~outcome:Keeper_execution_receipt.Rotation_retry_scheduled
+             err
+         in
+         let retry_resolution = next_execution.max_context_resolution in
+         Log.Keeper.warn
+           "%s: direct keeper_msg empty response from runtime=%s; retrying \
+            runtime=%s reason=%s max_context=%d context_budget=%d \
+            primary_budget=%d requested_override=%s"
+           keeper_name
+           runtime_id
+           next_execution.runtime_id
+           reason
+           next_execution.max_context
+           retry_resolution.effective_budget
+           retry_resolution.primary_budget
+           (match retry_resolution.requested_override with
+            | Some requested -> string_of_int requested
+            | None -> "none");
+         before_retry ();
+         run_attempt
+           ~runtime_id:next_execution.runtime_id
+           ~runtime_execution:next_execution
+           ~attempted_runtimes:(next_execution.runtime_id :: attempted_runtimes)
+           ~degraded_retry:retry
+           ~runtime_rotation_attempts:(rotation_attempt :: runtime_rotation_attempts)
+           ~attempt:1
+           ~retry_phase_started_at
+           ~is_retry:true
+           ())
+  in
+  run_attempt
+    ~runtime_id:initial_runtime
+    ~attempted_runtimes:[ initial_runtime ]
+    ~runtime_rotation_attempts:[]
+    ~attempt:1
+    ~retry_phase_started_at:None
+    ~is_retry:false
+    ()
 
 type turn_event_bus_overflow =
   Keeper_turn_runtime_budget_event_bus.turn_event_bus_overflow = {

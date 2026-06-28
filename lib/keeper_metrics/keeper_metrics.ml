@@ -563,6 +563,30 @@ let all : t list =
   ]
 ;;
 
+let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =
+  Otel_metric_store_core.inc_counter
+    (to_string RuntimeSelected)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "runtime_id", runtime_id
+      ; "source", "fallback"
+      ; "fallback_reason", fallback_reason
+      ]
+    ()
+;;
+
+let emit_runtime_rotation ~keeper_name ~from_runtime ~to_runtime ~reason =
+  Otel_metric_store_core.inc_counter
+    (to_string RuntimeRotation)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "from_runtime", from_runtime
+      ; "to_runtime", to_runtime
+      ; "reason", reason
+      ]
+    ()
+;;
+
 (* Zero-fill: register the unlabeled 0-cell of every counter at module
    init so each declared keeper counter exports 0 from process start.
    Without this a counter that never fired is indistinguishable in

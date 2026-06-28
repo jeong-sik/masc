@@ -563,6 +563,18 @@ let sort_goals_for_tree (goals : planning_goal list) : planning_goal list =
   in
   List.fold_left insert_sorted [] goals
 
+let planning_status_label = function
+  | Planning_goal_active -> "active"
+  | Planning_goal_paused -> "paused"
+  | Planning_goal_done -> "done"
+  | Planning_goal_dropped -> "dropped"
+
+let planning_status_color = function
+  | Planning_goal_active -> Ansi.cyan
+  | Planning_goal_paused -> Ansi.yellow
+  | Planning_goal_done -> Ansi.green
+  | Planning_goal_dropped -> Ansi.red
+
 (** Render the Planning surface (list view). *)
 let render_planning_list (state : state) =
   let (rows, cols) = get_terminal_size () in
@@ -637,19 +649,13 @@ let render_planning_list (state : state) =
              let depth = goal_depth p.pl_goals g in
              let indent = String.make (depth * 2) ' ' in
              let branch = if depth > 0 then "└─ " else "  " in
-             let status_color =
-               match String.lowercase_ascii g.pg_status with
-               | "done" -> Ansi.green
-               | "active" -> Ansi.cyan
-               | "paused" -> Ansi.yellow
-               | "dropped" -> Ansi.red
-               | _ -> Ansi.dim
-             in
+             let status_color = planning_status_color g.pg_status in
+             let status_label = planning_status_label g.pg_status in
              let due = match g.pg_due_date with Some d -> "  " ^ d | None -> "" in
              let line =
                Printf.sprintf "%s%s%s[%s]%s P%d  %s%s"
                  indent branch status_color
-                 (fit_width g.pg_status 8)
+                 (fit_width status_label 8)
                  Ansi.reset
                  g.pg_priority
                  (fit_width g.pg_title (cols - 30 - (depth * 2) - String.length due))
@@ -683,16 +689,10 @@ let render_planning_detail (state : state) (goal : planning_goal) =
   Buffer.add_string buf Ansi.clear;
   Buffer.add_string buf Ansi.hide_cursor;
 
-  let status_color =
-    match String.lowercase_ascii goal.pg_status with
-    | "done" -> Ansi.green
-    | "active" -> Ansi.cyan
-    | "paused" -> Ansi.yellow
-    | "dropped" -> Ansi.red
-    | _ -> Ansi.dim
-  in
+  let status_color = planning_status_color goal.pg_status in
+  let status_label = planning_status_label goal.pg_status in
   let header = Printf.sprintf " MASC Planning  %s[%s]%s  %s"
-    status_color (fit_width goal.pg_status 8) Ansi.reset
+    status_color (fit_width status_label 8) Ansi.reset
     (fit_width goal.pg_id 20)
   in
 

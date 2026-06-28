@@ -67,6 +67,14 @@ type planning_mode =
   | Planning_list
   | Planning_detail of string
 
+(** Goal status from /api/v1/dashboard/planning. Unknown wire values are
+    rejected at decode time so the renderer cannot silently dim a new state. *)
+type planning_goal_status =
+  | Planning_goal_active
+  | Planning_goal_paused
+  | Planning_goal_done
+  | Planning_goal_dropped
+
 (** Approval / pending confirmation item *)
 type approval_item = {
   ap_token: string;
@@ -105,7 +113,7 @@ type overview_snapshot = {
 type planning_goal = {
   pg_id: string;
   pg_title: string;
-  pg_status: string;
+  pg_status: planning_goal_status;
   pg_phase: string;
   pg_priority: int;
   pg_due_date: string option;

@@ -26,20 +26,44 @@ let test_http_get_uses_auth_headers () =
 
 let test_planning_constructors_do_not_collide () =
   let module_path = "bin/masc_tui_types.ml" in
-  let workspace_constructors =
-    Ast_grep.constructor_names_of_type
-      ~module_path
-      ~type_name:"workspace_section"
+  let planning_mode_constructors =
+    Ast_grep.constructor_names_of_type ~module_path ~type_name:"planning_mode"
   in
   let surface_constructors =
     Ast_grep.constructor_names_of_type ~module_path ~type_name:"surface"
   in
-  check bool "workspace section renamed Planning constructor" false
-    (List.mem "Planning" workspace_constructors);
-  check bool "workspace planning constructor explicit" true
-    (List.mem "Workspace_planning" workspace_constructors);
+  check bool "planning sub-mode does not reuse top-level Planning" false
+    (List.mem "Planning" planning_mode_constructors);
+  check bool "planning list sub-mode explicit" true
+    (List.mem "Planning_list" planning_mode_constructors);
+  check bool "planning detail sub-mode explicit" true
+    (List.mem "Planning_detail" planning_mode_constructors);
   check bool "top-level Planning surface remains" true
     (List.mem "Planning" surface_constructors)
+;;
+
+let test_planning_status_is_closed_sum () =
+  let constructors =
+    Ast_grep.constructor_names_of_type
+      ~module_path:"bin/masc_tui_types.ml"
+      ~type_name:"planning_goal_status"
+  in
+  check (list string) "planning status constructors"
+    [
+      "Planning_goal_active";
+      "Planning_goal_paused";
+      "Planning_goal_done";
+      "Planning_goal_dropped";
+    ]
+    constructors;
+  check int "renderer does not lowercase planning status strings" 0
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"String.lowercase_ascii");
+  check int "loader has an explicit unknown-status decode error" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~needle:"unknown planning goal status")
 ;;
 
 let () =
@@ -52,6 +76,10 @@ let () =
           "planning constructors do not collide"
           `Quick
           test_planning_constructors_do_not_collide;
+        test_case
+          "planning status is closed-sum"
+          `Quick
+          test_planning_status_is_closed_sum;
       ]
     )
   ]

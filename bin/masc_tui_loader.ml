@@ -413,7 +413,20 @@ let load_overview ~(host : string) ~(port : int) :
 let decode_planning_goal json =
   let* pg_id = required_string_field json "id" in
   let* pg_title = required_string_field json "title" in
-  let* pg_status = required_string_field json "status" in
+  let* raw_status = required_string_field json "status" in
+  let* pg_status =
+    match String.lowercase_ascii raw_status with
+    | "active" -> Ok Planning_goal_active
+    | "paused" -> Ok Planning_goal_paused
+    | "done" -> Ok Planning_goal_done
+    | "dropped" -> Ok Planning_goal_dropped
+    | other ->
+        Error
+          (Printf.sprintf
+             "unknown planning goal status %S (normalized %S)"
+             raw_status
+             other)
+  in
   let* pg_phase = required_string_field json "phase" in
   let* pg_priority = required_int_field json "priority" in
   let* pg_due_date = optional_string_field json "due_date" in

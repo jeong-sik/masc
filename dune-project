@@ -57,7 +57,7 @@
   (eio-ssl (>= 0.3.0))
   ;; Pinned to OAS v0.207.11 release; the release carries the provider
   ;; reasoning-effort policy fix (#2188) previously pinned from main.
-  (agent_sdk (>= 0.207.11))
+  (agent_sdk (>= 0.207.12))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

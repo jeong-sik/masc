@@ -159,10 +159,19 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
 // the closed-sum SSOTs (KeeperPhase: `types/core.ts:1083`, PipelineStage:
 // `types/core.ts:945`). Raw composite wire spellings such as `handing_off`
 // are normalized before this helper sees them.
-// These signal a *transition* (compacting/handoff/draining/restarting) rather
-// than steady-state, so they route to the dedicated `transient` band instead
-// of `active` (which would silently re-merge them with healthy keepers mid-
-// transition) or `attention` (which is reserved for failure/stall signals).
+// These signal an *autonomous* transition (compacting/handoff/restarting)
+// rather than steady-state, so they route to the dedicated `transient` band
+// instead of `active` (which would silently re-merge them with healthy
+// keepers mid-transition) or `attention` (which is reserved for failure/stall
+// signals).
+//
+// `Draining` is intentionally NOT in this set. The prototype `data.jsx:37`
+// treats `Draining` as `warn` (paired with `Paused` under the `pause` glyph),
+// and `fleet-tone.ts:85` lifts that to the workspace tone SSOT. Including
+// Draining here would force the runtime band to `transient` → `busy` rail,
+// disagreeing with the workspace tone (`warn` dot/pill) on the same keeper.
+// The correct non-offline display band for `Draining` is `paused`, reached
+// by a phase-direct branch in `keeperBand()` after typed offline routing.
 //
 // `satisfies readonly KeeperPhase[]` ties each literal to the closed sum: any
 // drift (typo or new transient variant) becomes a compile-time error instead
@@ -171,14 +180,12 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
 const TRANSIENT_KEEPER_PHASES = [
   'Compacting',
   'HandingOff',
-  'Draining',
   'Restarting',
 ] as const satisfies readonly KeeperPhase[]
 
 const TRANSIENT_PIPELINE_STAGES = [
   'compacting',
   'handoff',
-  'draining',
   'restarting',
 ] as const satisfies readonly PipelineStage[]
 
@@ -211,14 +218,34 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   // `projection.opState.kind === 'offline'`; routing through the runtime
   // projection keeps monitoring aligned with detail live-truth.
   //
-  // RFC-0295 §5.2 (pixel-perfect Fleet tone rail): transient FSM phases
-  // (Compacting / HandingOff / Draining / Restarting) get their own band so
-  // the prototype's busy rail becomes live instead of collapsing into
-  // `active`. Routed *before* attention so a mid-compaction blocker check
-  // doesn't repaint the row as red — the operator's first scan question is
-  // "what is currently moving", not "what is currently failing".
+  // RFC-0295 §5.2 (pixel-perfect Fleet tone rail): autonomous transient FSM
+  // phases (Compacting / HandingOff / Restarting) get their own band so the
+  // prototype's busy rail becomes live instead of collapsing into `active`.
+  // Routed *before* attention so a mid-compaction blocker check doesn't
+  // repaint the row as red — the operator's first scan question is "what is
+  // currently moving", not "what is currently failing".
+  //
+  // RFC-0295 §5.3 (pixel-perfect Fleet tone rail, Draining reconciliation):
+  // `Draining` routes to the `paused` band based on phase directly — NOT
+  // through `opState.kind === 'paused'`, because the operational state
+  // machine distinguishes "operator pause" (kind=paused, can be resumed) from
+  // "operator stop via Draining" (kind=running, terminal intent). Folding
+  // Draining into the paused variant would silently flip action-panel
+  // semantics (canPause/canResume), roster state-note labels (agent-roster
+  // line 179), and presence display (line 252) — none of which the
+  // prototype calls for. The band is a *presentation* layer derived from
+  // phase; the operational kind is an *action* layer derived from
+  // pause/resume/operator-intent. The two are deliberately orthogonal here.
+  //
+  // The prototype `data.jsx:37,49` pairs `Draining` with `Paused` under the
+  // `pause` glyph / `warn` rail — that pairing is a display choice, not an
+  // action-equivalence claim. `fleet-tone.ts:85` already lifts
+  // `PHASE_TONE.draining = 'warn'`; this branch makes the runtime band
+  // agree with the workspace tone without letting Draining override typed
+  // offline truth.
   if (projection.opState.kind === 'paused') return 'paused'
   if (projection.opState.kind === 'offline') return 'offline'
+  if (projection.opState.phase === 'Draining') return 'paused'
   if (isTransientPhase(projection.opState.phase)) return 'transient'
   if (projection.signals.some(signal => signal.contributesToAttention)) {
     return 'attention'

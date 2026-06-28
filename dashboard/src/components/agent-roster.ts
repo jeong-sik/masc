@@ -702,10 +702,12 @@ export function countRuntimeKinds(
   agents: number
   keepers: number
   pausedKeepers: number
-  // RFC-0295: transient band rows (Compacting/HandingOff/Draining/Restarting)
+  // RFC-0295: transient band rows (Compacting / HandingOff / Restarting)
   // are now part of the breakdown. Exposed so consumers can reconcile
   // `keepers + pausedKeepers + transientKeepers + offlineKeepers` against
-  // `keeperRows` without guessing where the missing rows went.
+  // `keeperRows` without guessing where the missing rows went. Draining is
+  // NOT counted here — it routes to the `paused` band (RFC-0295 §5.3),
+  // matching the prototype's `warn`/`pause` pairing in `data.jsx`.
   transientKeepers: number
   offlineKeepers: number
   keeperRows: number

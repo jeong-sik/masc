@@ -24,6 +24,7 @@ type compaction_snapshot_event_class =
   | Compaction_snapshot_known_unrelated
   | Compaction_snapshot_unknown
 
+val known_unrelated_untyped_compaction_snapshot_events : string list
 val classify_compaction_snapshot_event : string -> compaction_snapshot_event_class
 
 type links = {

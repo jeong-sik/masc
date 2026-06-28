@@ -380,6 +380,13 @@ let bool_field name json =
   | _ -> false
 ;;
 
+let string_list_field name json =
+  list_field name json
+  |> List.filter_map (function
+    | `String value -> Some value
+    | _ -> None)
+;;
+
 let nested_string_field outer inner json =
   match assoc_field outer json with
   | Some nested -> string_field inner nested
@@ -399,6 +406,28 @@ let reaction_receipt_field name row =
      | Some receipt -> string_field name receipt
      | None -> None)
   | None -> None
+;;
+
+let reaction_field name row =
+  match assoc_field "reaction" row with
+  | Some reaction -> assoc_field name reaction
+  | None -> None
+;;
+
+let reaction_current_task_id row =
+  match reaction_field "current_task_id" row with
+  | Some (`String value) when String.trim value <> "" -> Some value
+  | _ -> None
+;;
+
+let reaction_goal_ids row =
+  match assoc_field "reaction" row with
+  | Some reaction -> string_list_field "goal_ids" reaction
+  | None -> []
+;;
+
+let passive_only_without_work_scope row =
+  Option.is_none (reaction_current_task_id row) && reaction_goal_ids row = []
 ;;
 
 let summary_schema = "keeper.reaction_ledger.summary.v1"
@@ -593,6 +622,8 @@ let summarize_rows ~keeper_name ~limit rows =
       (match Receipt_result.of_string result with
        | Some typed ->
          (match contract_result_attention_of_typed typed with
+          | Contract_attention { result = Receipt_result.Passive_only; _ }
+            when passive_only_without_work_scope row -> ()
           | Contract_attention { result; label } ->
             note_contract_attention_label ~result ~label
           | Contract_no_attention -> ())

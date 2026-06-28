@@ -31,6 +31,7 @@ let target_files =
   ]
 
 let status_detail_file = "lib/keeper/keeper_status_detail.ml"
+let keeper_up_update_file = "lib/keeper/keeper_turn_up_update.ml"
 
 let metric_name = "Keeper_metrics.(to_string PausedStatePersistErrors)"
 
@@ -167,6 +168,22 @@ let test_counter_inc_calls () =
        src
      >= 6)
 
+let test_resume_paths_clear_no_progress_latch () =
+  let lifecycle_src =
+    load_source "lib/server/server_dashboard_http_keeper_api_lifecycle_post.ml"
+  in
+  let update_src = load_source keeper_up_update_file in
+  check bool "boot resume clears no-progress latch" true
+    (count_occurrences
+       ~needle:"Keeper_unified_turn_no_progress.clear_for_operator_resume"
+       lifecycle_src
+     >= 1);
+  check bool "masc_keeper_up resume clears no-progress latch" true
+    (count_occurrences
+       ~needle:"Keeper_unified_turn_no_progress.clear_for_operator_resume"
+       update_src
+     >= 1)
+
 let test_keeper_status_disposition_mirrors_runtime_trust () =
   let src = load_source status_detail_file in
   check bool "keeper status builds runtime_trust" true
@@ -203,6 +220,8 @@ let () =
             test_error_branch_observable
         ; test_case "counter inc calls present" `Quick
             test_counter_inc_calls
+        ; test_case "resume paths clear no-progress latch" `Quick
+            test_resume_paths_clear_no_progress_latch
         ; test_case "keeper status mirrors runtime-trust disposition" `Quick
             test_keeper_status_disposition_mirrors_runtime_trust
         ] )

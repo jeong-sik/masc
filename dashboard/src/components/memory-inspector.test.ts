@@ -251,6 +251,8 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('검증')
     expect(container.textContent).toContain('active recall candidate')
     expect(container.textContent).toContain('1/3 recallable')
+    expect(container.textContent).toContain('핵심 회상 후보')
+    expect(container.textContent).toContain('실제 prompt recall 후보 1/1개를 표시')
     expect(container.textContent).not.toContain('diagnostic row: operator pin backend source absent')
     expect(container.textContent).not.toContain('librarian parse fallback')
     expect(container.textContent).not.toContain('amplitude 캐시는 만료됨')
@@ -278,6 +280,7 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     expect(container.textContent).not.toContain('diagnostic row: operator pin backend source absent')
     expect(container.textContent).not.toContain('librarian parse fallback')
+    expect(container.textContent).toContain('librarian fallback 진단 1개는 기본 회상 화면에서 접힘')
 
     const diagnosticBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '진단/증거 1')
     expect(diagnosticBtn).toBeTruthy()
@@ -343,9 +346,10 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     // read_errors visible (no silent failure)
     expect(container.querySelector('.mem-read-error')?.textContent).toContain('one malformed row skipped')
-    // pins → Phase 2 disclosure (no fabricated pin rows)
+    // pins → Phase 2 disclosure, while the section still shows real recall candidates.
     const disclosures = [...container.querySelectorAll('.mem-disclosure')].map(d => d.textContent ?? '')
     expect(disclosures.some(t => t.includes('Phase 2'))).toBe(true)
+    expect(container.textContent).toContain('핵심 회상 후보')
     // no prototype fixture leakage
     expect(container.querySelector('.mem-pin')).toBeFalsy()
   })

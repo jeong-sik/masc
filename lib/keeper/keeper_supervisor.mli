@@ -24,6 +24,11 @@ val supervise_keepalive :
 
 (** {1 Sweep and Recovery} *)
 
+val pending_hitl_approval_keeper_names : Workspace.config -> string list
+(** Return persisted keeper names that currently have a pending HITL
+    approval. Used by [sweep_and_recover] to surface otherwise silent
+    chat stalls without changing approval/resume behavior. *)
+
 val sweep_and_recover :
      load_or_materialize_keeper_meta:
        ('a context -> string -> (keeper_meta option, string) result)

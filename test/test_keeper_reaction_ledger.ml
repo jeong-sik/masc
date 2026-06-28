@@ -379,6 +379,56 @@ let test_completion_contract_result_canonical_roundtrip () =
      |> Option.map Receipt.completion_contract_result_to_string)
 ;;
 
+let test_summary_ignores_passive_only_without_work_scope () =
+  with_temp_base @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let keeper_name = "passive-no-work-keeper" in
+  let receipt_json =
+    `Assoc
+      [ "schema", `String "keeper.execution_receipt.v1"
+      ; "trace_id", `String "trace-passive-no-work"
+      ; "outcome", `String "receipt_done"
+      ; "terminal_reason_code", `String "completed"
+      ; "operator_disposition", `String "pass"
+      ; "operator_disposition_reason", `String "healthy"
+      ; "completion_contract_result", `String "passive_only"
+      ]
+  in
+  Keeper_reaction_ledger.record_execution_receipt_reaction
+    config
+    ~keeper_name
+    ~trace_id:"trace-passive-no-work"
+    ~turn_count:1
+    ~current_task_id:None
+    ~goal_ids:[]
+    ~outcome:"receipt_done"
+    ~terminal_reason_code:"completed"
+    ~receipt_json
+    ();
+  let summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check int "passive-only no-work attention not counted" 0
+    (summary |> member "completion_contract_attention_count" |> to_int);
+  check int "passive-only no-work passive count not counted" 0
+    (summary |> member "completion_contract_passive_only_count" |> to_int);
+  check
+    string
+    "passive-only no-work summary remains ok"
+    "ok"
+    (summary |> member "status" |> to_string);
+  let fleet =
+    Keeper_reaction_ledger.fleet_summary_json
+      ~base_path
+      ~keeper_names:[ keeper_name ]
+      ~limit_per_keeper:10
+  in
+  check int "fleet passive-only no-work attention not counted" 0
+    (fleet |> member "completion_contract_attention_count" |> to_int);
+  check int "fleet passive-only no-work passive count not counted" 0
+    (fleet |> member "completion_contract_passive_only_count" |> to_int)
+;;
+
 let test_summary_marks_unreacted_and_reacted_stimuli () =
   with_temp_base @@ fun base_path ->
   let keeper_name = "summary-keeper" in
@@ -751,6 +801,10 @@ let () =
             "completion-contract parser and attention use canonical receipt type"
             `Quick
             test_completion_contract_result_canonical_roundtrip
+        ; test_case
+            "summary ignores passive-only receipts without work scope"
+            `Quick
+            test_summary_ignores_passive_only_without_work_scope
         ; test_case
             "summary marks unreacted and reacted stimuli"
             `Quick

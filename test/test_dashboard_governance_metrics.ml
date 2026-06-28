@@ -47,6 +47,20 @@ let test_deterministic_sort () =
   let (second_tool, _, _) = List.nth counts 1 in
   check string "tie-break: tool asc" "zz_tool" second_tool
 
+let test_ring_caps_oldest_event () =
+  let max_ring_size = GM.max_ring_size_for_testing in
+  inject ~tool:"bash" ~reason:"oldest" ();
+  for _ = 1 to max_ring_size do
+    inject ~tool:"bash" ~reason:"kept" ()
+  done;
+  check int "ring size remains capped" max_ring_size (GM.ring_size_for_testing ());
+  let counts = GM.tool_rejection_counts ~now_ts:(now +. 1.0) ~window_minutes:60 () in
+  check int "only kept reason remains" 1 (List.length counts);
+  let (tool, reason, count) = List.hd counts in
+  check string "tool" "bash" tool;
+  check string "oldest reason pruned" "kept" reason;
+  check int "kept count" max_ring_size count
+
 let test_approval_summary_empty () =
   let summary = GM.approval_queue_summary () in
   check int "empty queue depth" 0 summary.depth;
@@ -97,6 +111,7 @@ let () =
       test_case "single rejection" `Quick (with_fresh test_single_rejection);
       test_case "window filter" `Quick (with_fresh test_window_filter);
       test_case "deterministic sort" `Quick (with_fresh test_deterministic_sort);
+      test_case "ring caps oldest event" `Quick (with_fresh test_ring_caps_oldest_event);
     ];
     "approval_queue", [
       test_case "empty queue summary" `Quick test_approval_summary_empty;

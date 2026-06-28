@@ -1305,7 +1305,8 @@ let test_sweep_warns_for_pending_hitl_approval () =
       sweep_and_recover_no_materialize ctx;
       let expected =
         Printf.sprintf
-          "keeper:%s blocked on pending HITL approval; chat awaits operator decision"
+          "keeper:%s blocked on 1 pending HITL approval(s); chat awaits operator \
+           decision"
           name
       in
       let warning_seen =

@@ -228,14 +228,19 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
      operator only as a silent chat stall — [keeper_cycle_decision] returns
      [blocked Approval_pending] and the keeper emits no further
      chat/observation until the operator resolves the approval (or
-     [approval_janitor] expires it at the 30m mark). Name the keeper and the
-     outstanding approval on every sweep so the terminal log and downstream
+     [approval_janitor] expires it at the 30m mark). Name the keeper and
+     pending approval count on every sweep so the terminal log and downstream
      consumers can see *why* the chat is awaiting a response. *)
   pending_hitl_approval_keeper_names ctx.config
   |> List.iter (fun name ->
+       let pending_count =
+         Keeper_approval_queue.pending_count_for_keeper ~keeper_name:name
+       in
        Log.Keeper.warn
-         "keeper:%s blocked on pending HITL approval; chat awaits operator decision"
-         name);
+         "keeper:%s blocked on %d pending HITL approval(s); chat awaits operator \
+          decision"
+         name
+         pending_count);
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)

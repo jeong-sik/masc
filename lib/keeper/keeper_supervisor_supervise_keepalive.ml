@@ -54,7 +54,7 @@ let supervise_keepalive
     | Error reason ->
       Keeper_registry.record_spawn_slot_denied
         ~keeper_name:meta.name
-        ~surface:ctx.agent_name
+        ~surface:"supervisor"
         reason;
       publish_lifecycle
         ~event:

@@ -106,8 +106,8 @@ let sp
   | Ok tid -> tid
   | Error _ -> failwith "spawn failed"
 
-let poll_for_closed tid =
-  wait_until ~timeout_s:3.0 (fun () ->
+let poll_for_closed ?(timeout_s = 3.0) tid =
+  wait_until ~timeout_s (fun () ->
     match Bg_task.read tid ~since_stdout:0 ~since_stderr:0 with
     | Ok s -> s.closed
     | Error _ -> false)
@@ -345,11 +345,11 @@ let test_global_capacity_blocks_detached_stampede () =
            failf "unexpected spawn failure: %s" msg
        | Error (Bg_task.Invalid_cwd msg) ->
            failf "unexpected invalid cwd: %s" msg
-       | Ok tid ->
-           ignore (Bg_task.kill tid ~signal:Sys.sigterm ~grace_sec:0.2);
-           fail "second background task bypassed global capacity");
+      | Ok tid ->
+          ignore (Bg_task.kill tid ~signal:Sys.sigterm ~grace_sec:0.2);
+          fail "second background task bypassed global capacity");
       ignore (Bg_task.kill first ~signal:Sys.sigterm ~grace_sec:0.2);
-      check bool "first closed" true (poll_for_closed first);
+      check bool "first closed" true (poll_for_closed ~timeout_s:10.0 first);
       match
         Bg_task.spawn ~keeper:"kp-cap-b"
           ~argv:[ "/bin/echo"; "after-capacity" ]

@@ -43,6 +43,15 @@ let find_tool_exn tools name =
       | _ -> false)
     tools
 
+let tool_names tools =
+  tools
+  |> List.filter_map (function
+       | `Assoc fields -> (
+           match List.assoc_opt "name" fields with
+           | Some (`String name) -> Some name
+           | _ -> None)
+       | _ -> None)
+
 let tools_list_response ~clock ~sw ?(include_hidden = false) ?names state =
   let names_json =
     match names with
@@ -81,6 +90,29 @@ let test_public_tools_expose_only_truthful_statuses () =
             (String.equal status "real" || String.equal status "adapter"))
         tools)
 
+let test_keeper_lifecycle_front_door_is_public () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let clock = Eio.Stdenv.clock env in
+  Eio.Switch.run @@ fun sw ->
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let tools = tools_list_response ~clock ~sw state |> response_tools in
+      let names = tool_names tools in
+      List.iter
+        (fun name ->
+          check bool (name ^ " visible in default tools/list") true
+            (List.mem name names))
+        [
+          "masc_keeper_list";
+          "masc_keeper_status";
+          "masc_keeper_up";
+          "masc_keeper_down";
+        ];
+      check bool "async keeper msg remains hidden by default" false
+        (List.mem "masc_keeper_msg" names))
+
 let test_selected_tools_report_contract_status () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -105,6 +137,12 @@ let test_selected_tools_report_contract_status () =
 let () =
   run "tool contract truth"
     [
-      ("public", [ test_case "public tools stay truthful" `Quick test_public_tools_expose_only_truthful_statuses ]);
+      ( "public",
+        [
+          test_case "public tools stay truthful" `Quick
+            test_public_tools_expose_only_truthful_statuses;
+          test_case "keeper lifecycle front door is public" `Quick
+            test_keeper_lifecycle_front_door_is_public;
+        ] );
       ("hidden", [ test_case "selected tools expose implementation status" `Quick test_selected_tools_report_contract_status ]);
     ]

@@ -37,7 +37,7 @@ val run
   -> max_tool_calls:int
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
-     , string * Fusion_types.usage )
+     , Fusion_types.judge_failure * Fusion_types.usage )
      result
 
 (** REFINE 위상의 2차 심판 프롬프트를 구성한다. [compose_prompt]의 질문+패널 블록에
@@ -69,7 +69,7 @@ val run_refine
   -> max_tool_calls:int
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
-     , string * Fusion_types.usage )
+     , Fusion_types.judge_failure * Fusion_types.usage )
      result
 
 (** [attach_usage parsed usage]는 심판 응답 파싱 결과에 그 호출이 소비한 [usage]를 성공·
@@ -79,7 +79,7 @@ val attach_usage
   :  (Fusion_types.judge_synthesis, string) result
   -> Fusion_types.usage
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
-     , string * Fusion_types.usage )
+     , Fusion_types.judge_failure * Fusion_types.usage )
      result
 
 (** JOJ(judge-of-judges, RFC-0283) meta 심판 프롬프트를 구성한다. [compose_refine_prompt]와
@@ -110,5 +110,5 @@ val run_meta
   -> max_tool_calls:int
   -> unit
   -> ( Fusion_types.judge_synthesis * Fusion_types.usage
-     , string * Fusion_types.usage )
+     , Fusion_types.judge_failure * Fusion_types.usage )
      result

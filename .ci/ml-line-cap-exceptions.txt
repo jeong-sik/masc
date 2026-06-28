@@ -15,3 +15,7 @@ lib/keeper/keeper_run_tools_hooks.ml
 lib/keeper/keeper_run_tools_setup.ml
 lib/keeper/keeper_turn_driver_try_runtime.ml
 lib/keeper/keeper_unified_turn_execution.ml
+# Fusion core test monolith pre-dates the adaptive-timeout schema expansion.
+# New focused cases live in test/test_fusion_adaptive_timeout.ml; full extraction
+# should happen separately from the feature hardening branch.
+test/fusion_core/test_fusion.ml

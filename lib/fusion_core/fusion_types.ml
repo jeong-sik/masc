@@ -216,12 +216,59 @@ type judge_node =
   }
 [@@deriving yojson, show, eq]
 
+(* 심판(judge) 실패의 닫힌 합. {!panel_failure}와 동형이되 심판 도메인 전용 사유
+   ([Empty_result]/[Build_error]/[Parse_error]/[Budget_exceeded])를 추가한다.
+   [Fusion_judge] 계열이 {!Agent_sdk.Error}의 [Timeout] variant를 match에서 잡아 typed로
+   반환하므로, 호출자는 string substring 분류 없이 exhaustive match로 분류한다
+   (CLAUDE.md §string-classifier 안티패턴 회피). [panel_failure]를 공유하지 않는 이유는
+   mli 주석 참조. *)
+type judge_failure =
+  | Timeout
+  | Provider_error of string
+  | Empty_response of string
+  | Empty_result
+  | Build_error of string
+  | Parse_error of string
+  | Budget_exceeded of string
+  | Internal_error of string
+[@@deriving yojson, show, eq]
+
+let judge_failure_is_timeout = function Timeout -> true | _ -> false
+
+let judge_failure_is_timeout_or_budget = function
+  | Timeout | Budget_exceeded _ -> true
+  | _ -> false
+
+let judge_failure_text = function
+  | Timeout -> "timeout"
+  | Provider_error detail -> detail
+  | Empty_response detail -> detail
+  | Empty_result -> "judge: empty result"
+  | Build_error detail -> detail
+  | Parse_error detail -> detail
+  | Budget_exceeded detail -> detail
+  | Internal_error detail -> detail
+
+let judge_failure_tag = function
+  | Timeout -> "timeout"
+  | Provider_error _ -> "provider_error"
+  | Empty_response _ -> "empty_response"
+  | Empty_result -> "empty_result"
+  | Build_error _ -> "build_error"
+  | Parse_error _ -> "parse_error"
+  | Budget_exceeded _ -> "budget_exceeded"
+  | Internal_error _ -> "internal_error"
+
 type judge_error_node =
   { failed_role : judge_role
-  ; error : string
+  ; failure : judge_failure
   ; usage : usage
       (** 실패해도 태운 토큰 — 관측 record가 비용을 버리지 않는다(RFC-0284, 적대 리뷰 #22112 E).
           [panel_error]와 달리 심판 실패는 토큰 소비 후일 수 있어 usage를 동반한다. *)
+  ; elapsed_s : float
+      (** 이 심판 노드가 시작된 시점부터 실패까지 경과한 시간(초). 예산/타임아웃
+          분석에 쓰인다(RFC-0284-FUSION-P0). [timed_out]은 [judge_failure_is_timeout failure]
+          로 파생 가능해 별도 필드에서 제거했다. *)
   }
 [@@deriving yojson, show, eq]
 

@@ -110,11 +110,36 @@ let attach_usage
     (parsed : (Fusion_types.judge_synthesis, string) result)
     (usage : Fusion_types.usage) :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
-    , string * Fusion_types.usage )
+    , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   match parsed with
   | Ok synthesis -> Ok (synthesis, usage)
-  | Error msg -> Error (msg, usage)
+  | Error msg -> Error (Fusion_types.Parse_error msg, usage)
+
+let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
+  match e with
+  | Agent_sdk.Error.Api api_error -> Agent_sdk.Error.Retry.error_message api_error
+  | Agent_sdk.Error.Provider provider_error ->
+    Llm_provider.Error.to_string provider_error
+  | Agent_sdk.Error.Agent _ | Agent_sdk.Error.Mcp _ | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _ | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _ | Agent_sdk.Error.Internal _ ->
+    Agent_sdk.Error.to_string e
+
+(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. [Api (Retry.Timeout _)]
+   를 잡아 [Timeout]으로 propagate하고, 그 외는 [Provider_error]에 사람-가독 detail을
+   보존한다. Non-timeout detail은 표시용이며 재분류에 쓰지 않는다; provider 오류는
+   [Llm_provider.Error.to_string] 경로로 렌더해 provider/status/retry/phase metadata를
+   유지한다. 이 match가 "to_string 직렬화 → substring 역분류" round-trip 안티패턴의 근본
+   해소다: timeout 분류가 컴파일 타입에 묶인다. [prefix]는 호출 context(run 실패 vs
+   provider 에러)의 로그/관측 prefix를 보존한다. *)
+let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
+    Fusion_types.judge_failure =
+  match e with
+  | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _) -> Timeout
+  | _ ->
+    Provider_error
+      (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
 
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
    서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고
@@ -126,7 +151,7 @@ let attach_usage
 let run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model
     ~web_tools ~max_tool_calls ~prompt () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
-    , string * Fusion_types.usage )
+    , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
   match
@@ -135,8 +160,9 @@ let run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_mod
   with
   | Error reason ->
     Error
-      ( Printf.sprintf "judge build failed: %s"
-          (Fusion_oas.panel_failure_detail ~runtime_id:judge_model reason)
+      ( Fusion_types.Build_error
+          (Printf.sprintf "judge build failed: %s"
+             (Fusion_oas.panel_failure_detail ~runtime_id:judge_model reason))
       , Fusion_types.zero_usage )
   | Ok agent ->
     (match
@@ -145,31 +171,30 @@ let run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_mod
      with
      | Error e ->
        Error
-         ( "judge run failed: "
-           ^ Fusion_oas.provider_error_detail ~runtime_id:judge_model
-               (Agent_sdk.Error.to_string e)
+         ( failure_of_sdk_error ~runtime_id:judge_model ~prefix:"judge run failed: " e
          , Fusion_types.zero_usage )
-     | Ok [] -> Error ("judge: empty result", Fusion_types.zero_usage)
+     | Ok [] -> Error (Fusion_types.Empty_result, Fusion_types.zero_usage)
      | Ok ((_name, Ok resp) :: _) ->
        let text = Fusion_oas.answer_text resp in
        (* 응답은 받았으므로 소비 토큰을 회계한다 — 빈 응답이든 파싱 실패든 동일. *)
        let usage = Fusion_oas.usage_of resp in
        if String.length (String.trim text) = 0 then
-         Error ("judge: " ^ Fusion_oas.empty_response_detail resp, usage)
+         Error
+           ( Empty_response ("judge: " ^ Fusion_oas.empty_response_detail resp)
+           , usage )
        else
          (* 성공 종합·파싱 실패 모두에 심판이 소비한 토큰을 묶는다(panel_answer.usage와 대칭). *)
          attach_usage (Fusion_judge_parse.of_string text) usage
      | Ok ((_name, Error e) :: _) ->
        Error
-         ( "judge provider error: "
-           ^ Fusion_oas.provider_error_detail ~runtime_id:judge_model
-               (Agent_sdk.Error.to_string e)
+         ( failure_of_sdk_error ~runtime_id:judge_model
+             ~prefix:"judge provider error: " e
          , Fusion_types.zero_usage ))
 
 let run ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~question
     ~panel ~web_tools ~max_tool_calls () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
-    , string * Fusion_types.usage )
+    , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~web_tools
     ~max_tool_calls ~prompt:(compose_prompt ~question ~panel) ()
@@ -177,7 +202,7 @@ let run ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~quest
 let run_refine ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~question
     ~panel ~prior ~web_tools ~max_tool_calls () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
-    , string * Fusion_types.usage )
+    , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~web_tools
     ~max_tool_calls ~prompt:(compose_refine_prompt ~question ~panel ~prior) ()
@@ -185,7 +210,7 @@ let run_refine ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model
 let run_meta ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~question
     ~panel ~priors ~web_tools ~max_tool_calls () :
     ( Fusion_types.judge_synthesis * Fusion_types.usage
-    , string * Fusion_types.usage )
+    , Fusion_types.judge_failure * Fusion_types.usage )
     result =
   run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~web_tools
     ~max_tool_calls ~prompt:(compose_meta_prompt ~question ~panel ~priors) ()

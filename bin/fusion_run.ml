@@ -122,7 +122,8 @@ let synthesize ~sw ~net ~(preset : Fusion_policy.preset) ~(prompt : string)
          preset.Fusion_policy.panels)
     ~max_tool_calls:(Fusion_policy.judge_tool_budget_of preset.Fusion_policy.panels)
     ()
-  |> Result.map_error fst
+  |> Result.map_error (fun (failure, _usage) ->
+    Fusion_types.judge_failure_text failure)
 
 (* Print a judge arm and return (resolved_answer, judge_in_tokens, judge_out_tokens). *)
 let print_judge_arm ~(tag : string)

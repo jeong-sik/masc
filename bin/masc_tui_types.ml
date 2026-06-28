@@ -169,18 +169,17 @@ let planning_goal_depth (goals : planning_goal list) (goal : planning_goal) =
     goals goal
 
 let planning_visible_goals (goals : planning_goal list) : planning_goal list =
-  let rec insert_sorted acc goal =
-    let depth = planning_goal_depth goals goal in
-    let rec place = function
-      | [] -> List.rev acc @ [goal]
-      | x :: xs ->
-          let x_depth = planning_goal_depth goals x in
-          if depth < x_depth then List.rev acc @ goal :: x :: xs
-          else place xs
-    in
-    place (List.rev acc)
-  in
-  List.fold_left insert_sorted [] goals
+  goals
+  |> List.mapi (fun index goal -> (index, goal))
+  |> List.stable_sort (fun (left_index, left_goal) (right_index, right_goal) ->
+         match
+           Int.compare
+             (planning_goal_depth goals left_goal)
+             (planning_goal_depth goals right_goal)
+         with
+         | 0 -> Int.compare left_index right_index
+         | depth_cmp -> depth_cmp)
+  |> List.map snd
 
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =

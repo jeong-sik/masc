@@ -112,6 +112,15 @@ let test_planning_cursor_uses_visible_goal_order () =
     (Ast_grep.count_value_bindings
        ~module_path:"bin/masc_tui_types.ml"
        ~name:"planning_visible_goals");
+  check int "visible planning helper avoids duplicate-prone insertion helper" 0
+    (Ast_grep.count_value_bindings
+       ~module_path:"bin/masc_tui_types.ml"
+       ~name:"insert_sorted");
+  check bool "visible planning helper uses stable depth sort" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_types.ml"
+       ~callee:"List.stable_sort"
+     >= 1);
   check int "render no longer owns a private tree sorter" 0
     (Ast_grep.count_value_bindings
        ~module_path:"bin/masc_tui_render.ml"

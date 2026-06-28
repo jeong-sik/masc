@@ -163,8 +163,8 @@ let test_http_status_quiet_is_ok () =
 let test_sse_register_error_body_uses_jsonrpc_invalid_request () =
   let open Yojson.Safe.Util in
   let body =
-    Masc.Server_mcp_transport_http_respond.error_body
-      ~code:C.Invalid_request "unknown session stale-mcp"
+    C.jsonrpc_error_body C.Invalid_request ~message:"unknown session stale-mcp"
+    |> Yojson.Safe.from_string
   in
   check string "jsonrpc" "2.0" (body |> member "jsonrpc" |> to_string);
   check string "id is null" "null" (body |> member "id" |> Yojson.Safe.to_string);

@@ -376,19 +376,20 @@ let validate_docker_dispatch_context
       ~(cmd : string)
       ()
   =
-  let cmd_ir =
-    match Exec_policy.parse_string_to_ir ~mode:Tool_execute cmd with
-    | Ok ir -> Some ir
-    | Error _ -> None
-  in
+  match Exec_policy.parse_string_to_ir ~mode:Tool_execute cmd with
+  | Error reason ->
+    Error
+      (Printf.sprintf
+         "sandbox_profile=docker blocked unsupported shell command shape: %s \
+          [blocked_cmd=%s]"
+         (Exec_policy.block_reason_to_string reason)
+         cmd)
+  | Ok cmd_ir ->
   let cwd, sandbox_root_git_blocker =
-    match cmd_ir with
-    | Some ir ->
-      Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
-        ~config ~meta ~cwd ~cmd ir
-    | None -> cwd, None
+    Keeper_tool_execute_command_semantics.resolve_sandbox_root_git_cwd
+      ~config ~meta ~cwd ~cmd cmd_ir
   in
-  match sandbox_root_git_blocker with
+  (match sandbox_root_git_blocker with
   | Some message -> Error message
   | None ->
     let path_validation =
@@ -404,12 +405,17 @@ let validate_docker_dispatch_context
             ~base_path:(Keeper_alerting_path.project_root_of_config config)
             ~workdir:cwd
             validation_ir
-        | Error _ -> Ok ())
+        | Error reason ->
+          Error
+            (Printf.sprintf
+               "sandbox_profile=docker blocked unsupported shell command shape after \
+                host path rewrite: %s"
+               (Exec_policy.block_reason_to_string reason)))
       else Ok ()
     in
     match path_validation with
     | Error err -> Error (Printf.sprintf "%s [blocked_cmd=%s]" err cmd)
-    | Ok () -> Ok (cwd, cmd_ir)
+    | Ok () -> Ok (cwd, Some cmd_ir))
 ;;
 
 let run_docker_shell_command_with_status_internal

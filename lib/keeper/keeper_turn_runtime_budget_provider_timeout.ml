@@ -11,15 +11,14 @@
    producing a first token, and denying the follow-up attempt only converts the
    real provider failure into a synthetic turn-budget failure.
 
-   RFC-0129 (2026-05-18): the prior reserve_fraction band-aid below
-   was removed. The current live-stream cap chain is progress-based:
-     [Keeper_turn_driver_try_provider.per_provider_timeout_s] is not
-       forwarded to [Runtime_agent_context.max_execution_time_s];
-     [stream_idle_timeout_s] bounds inter-line silence; and
-     [body_timeout_s] is opt-in via the explicit body-timeout override.
-   So the original "OAS HTTP body lacking timeout" condition no longer
-   holds and cumulative per-attempt caps must not kill healthy slow
-   streams (14-event 307.5s cluster, 2026-05-17 fleet).
+   The current cap chain has two layers:
+     [Keeper_turn_driver_try_provider.per_provider_timeout_s] is forwarded to
+       [Runtime_agent_context.max_execution_time_s] as the hard Agent.run
+       switch owner;
+     [stream_idle_timeout_s] bounds inter-line silence, and [body_timeout_s]
+       remains override-driven for transport/body reads.
+   The hard cap should be generous enough for healthy slow streams, while
+   still guaranteeing a stuck tool/provider turn releases the Keeper slot.
 *)
 
 let provider_timeout_guard_sec = 15.0

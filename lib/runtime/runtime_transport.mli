@@ -84,6 +84,7 @@ val runtime_mcp_policy_with_masc_agent_name :
   Llm_provider.Llm_transport.runtime_mcp_policy
 
 val codex_cli_can_auth_keeper_bound_runtime_mcp :
+  base_path:string ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   bool
@@ -98,6 +99,7 @@ val codex_cli_can_auth_keeper_bound_runtime_mcp :
     with [runtime_mcp_policy_with_masc_agent_name] applied when [agent_name] is
     non-empty. *)
 val runtime_mcp_policy_for_provider :
+  base_path:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
@@ -108,6 +110,7 @@ val runtime_mcp_policy_for_provider :
     the runtime MCP lane (e.g. mixed surface, missing keeper identity for
     agent-internal tools, or empty input). *)
 val runtime_mcp_policy_of_tool_names :
+  base_path:string ->
   ?agent_name:string ->
   ?allow_agent_internal:bool ->
   string list ->
@@ -116,6 +119,7 @@ val runtime_mcp_policy_of_tool_names :
 (** Public-only variant of {!runtime_mcp_policy_of_tool_names}.  Forwards
     without [allow_agent_internal]. *)
 val public_mcp_runtime_policy_of_tool_names :
+  base_path:string ->
   ?agent_name:string ->
   string list ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
@@ -136,6 +140,7 @@ val provider_label : Llm_provider.Provider_config.t -> string
     token exists, the resolver excludes those tools from the resulting policy
     and keeps the turn alive with the remaining supported lane. *)
 val resolve_tool_lane_for_oas_tools :
+  base_path:string ->
   ?agent_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   tools:Agent_sdk.Tool.t list ->

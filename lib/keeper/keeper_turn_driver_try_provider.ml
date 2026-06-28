@@ -19,6 +19,7 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
+  ; base_path : string
   ; keeper_name : string
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
@@ -164,17 +165,10 @@ let wrap_runtime_mcp_external_tool_hooks
     Some { hooks with before_turn_params }
 
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
-  (* Never forward per-provider timeouts to OAS [max_execution_time_s].
-     That field is a cumulative wall-clock kill switch for one Agent.run /
-     run_stream call; it cancels healthy active streams even while chunks are
-     arriving. Provider-attempt liveness is progress-based instead:
-     [stream_idle_timeout_s] catches inter-line stalls, the liveness observer
-     catches no-first-token / inter-chunk gaps, and tool/max-turn limits bound
-     finite work. *)
-  (match per_provider_timeout_s with
-   | Some (_ : float) -> ()
-   | None -> ());
-  None
+  (* Forward the keeper turn deadline into OAS [max_execution_time_s] so
+     Agent.run owns a child switch and releases tool/resource fibers on a hard
+     timeout. Stream/body idle budgets still catch progress gaps earlier. *)
+  per_provider_timeout_s
 
 let stream_idle_timeout_for_attempt ~configured =
   Some
@@ -386,6 +380,7 @@ let run_try_provider
   let config_result =
     match
       Runtime_candidate.resolve_tool_lane_for_oas_tools
+        ~base_path:ctx.base_path
         ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
         ~tools:ctx.tools
         candidate
@@ -396,6 +391,7 @@ let run_try_provider
         match runtime_mcp_policy, String.trim ctx.keeper_name with
         | Some policy, keeper_name when keeper_name <> "" ->
           Runtime_candidate.runtime_mcp_policy_for_agent
+            ~base_path:ctx.base_path
             ~agent_name:(Keeper_identity.keeper_agent_name ctx.keeper_name)
             candidate
             (Some policy)

@@ -47,6 +47,7 @@ let mu = Eio.Mutex.create ()
 let pending : (string, entry) Hashtbl.t = Hashtbl.create 16
 let active_switches : (string, Eio.Switch.t) Hashtbl.t = Hashtbl.create 16
 exception CancelledByOperator
+exception Worker_timeout of float
 let counter = Atomic.make 0
 let max_age_sec = Masc_time_constants.hour
 
@@ -345,26 +346,33 @@ let is_terminal_status = function
 ;;
 
 let set_status ?(preserve_terminal = false) request_id status =
-  with_lock (fun () ->
-    match Hashtbl.find_opt pending request_id with
-    | Some entry when preserve_terminal && is_terminal_status entry.status -> ()
-    | Some entry ->
-      let completed_at =
-        match status with
-        | Done _ | Lost _ | Cancelled _ ->
-          (* NDT-OK: completed_at is observational wall-clock metadata for
-             terminal request records; state transitions are status-derived. *)
-          Some (Unix.gettimeofday ())
-        | _ -> None
-      in
-      let updated = { entry with status; completed_at } in
-      Hashtbl.replace pending request_id updated;
-      persist_entry updated
-    | None -> ())
+  let to_persist =
+    with_lock (fun () ->
+      match Hashtbl.find_opt pending request_id with
+      | Some entry when preserve_terminal && is_terminal_status entry.status -> None
+      | Some entry ->
+        let completed_at =
+          match status with
+          | Done _ | Lost _ | Cancelled _ ->
+            (* NDT-OK: completed_at is observational wall-clock metadata for
+               terminal request records; state transitions are status-derived. *)
+            Some (Unix.gettimeofday ())
+          | _ -> None
+        in
+        let updated = { entry with status; completed_at } in
+        Hashtbl.replace pending request_id updated;
+        Some updated
+      | None -> None)
+  in
+  Option.iter persist_entry to_persist
 ;;
 
 let set_status_protected ?preserve_terminal request_id status =
   Eio.Cancel.protect (fun () -> set_status ?preserve_terminal request_id status)
+;;
+
+let clear_active_switch request_id =
+  with_lock (fun () -> Hashtbl.remove active_switches request_id)
 ;;
 
 let cancelled_status ~cancelled_by reason =
@@ -398,10 +406,6 @@ let timeout_done_status ~request_id ~keeper_name ~timeout_sec =
     }
 ;;
 
-type worker_result =
-  | Worker_done of tool_result
-  | Worker_timeout of { timeout_sec : float }
-
 let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
     ~keeper_name () : string =
   gc_stale ();
@@ -416,37 +420,33 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
     ; completed_at = None
     }
   in
-  with_lock (fun () ->
-    Hashtbl.replace pending request_id entry;
-    persist_entry entry);
+  with_lock (fun () -> Hashtbl.replace pending request_id entry);
+  persist_entry entry;
   Eio.Fiber.fork_daemon ~sw (fun () ->
     set_status_protected ~preserve_terminal:true request_id Running;
+    let run_worker_with_timeout () =
+      match clock, timeout_sec with
+      | Some clock, Some timeout_sec ->
+        (try Eio.Time.with_timeout_exn clock timeout_sec f with
+         | Eio.Time.Timeout ->
+           let status = timeout_done_status ~request_id ~keeper_name ~timeout_sec in
+           set_status_protected ~preserve_terminal:true request_id status;
+           raise (Worker_timeout timeout_sec))
+      | None, _ | _, None -> f ()
+    in
     let result =
       try
         Eio.Switch.run (fun req_sw ->
           with_lock (fun () -> Hashtbl.replace active_switches request_id req_sw);
-          Fun.protect
-            ~finally:(fun () -> with_lock (fun () -> Hashtbl.remove active_switches request_id))
-            (fun () ->
-               let worker_result =
-                 match clock, timeout_sec with
-                 | Some clock, Some timeout_sec ->
-                   (try Worker_done (Eio.Time.with_timeout_exn clock timeout_sec f) with
-                    | Eio.Time.Timeout -> Worker_timeout { timeout_sec })
-                 | None, _ | _, None -> Worker_done (f ())
-               in
-               match worker_result with
-               | Worker_done result ->
-                 Done
-                   { ok = tool_result_success result
-                   ; body = tool_result_body result
-                   }
-               | Worker_timeout { timeout_sec } ->
-                 timeout_done_status ~request_id ~keeper_name ~timeout_sec))
+          let result = run_worker_with_timeout () in
+          Done { ok = tool_result_success result; body = tool_result_body result })
       with
+      | Worker_timeout timeout_sec ->
+        timeout_done_status ~request_id ~keeper_name ~timeout_sec
       | CancelledByOperator -> operator_cancelled_status ()
       | Eio.Cancel.Cancelled _ as e ->
         set_status_protected ~preserve_terminal:true request_id (runtime_cancelled_status ());
+        clear_active_switch request_id;
         raise e
       | exn ->
         Done
@@ -455,6 +455,7 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
           }
     in
     set_status_protected ~preserve_terminal:true request_id result;
+    clear_active_switch request_id;
     `Stop_daemon);
   request_id
 ;;
@@ -573,4 +574,7 @@ module For_testing = struct
   let record_path = record_path
   let load_record = load_record
   let gc_stale_disk = gc_stale_disk
+  let active_switch_count () =
+    Eio.Mutex.use_ro mu (fun () -> Hashtbl.length active_switches)
+  ;;
 end

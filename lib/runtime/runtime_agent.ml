@@ -6,8 +6,21 @@
 
     @since God file decomposition — extracted from oas_worker.ml *)
 
-let oas_tool_of_masc_hook = ref (fun ~name:_ ~description:_ ~input_schema:_ _handler -> failwith "oas_tool_of_masc_hook is not set")
-let set_oas_tool_of_masc_hook f = oas_tool_of_masc_hook := f
+type oas_tool_projector =
+  name:string ->
+  description:string ->
+  input_schema:Yojson.Safe.t ->
+  (Yojson.Safe.t -> Tool_result.result) ->
+  Agent_sdk.Tool.t
+
+let oas_tool_of_masc_hook : oas_tool_projector option ref = ref None
+let set_oas_tool_of_masc_hook f = oas_tool_of_masc_hook := Some f
+
+let oas_tool_hook_unset_error () =
+  Agent_sdk.Error.Internal
+    "runtime_agent_oas_tool_hook_unset: inline MASC tool projection requires \
+     Tool_bridge initialization before Runtime_agent.run_with_masc_tools"
+;;
 
 (* ================================================================ *)
 (* Configuration                                                     *)
@@ -325,21 +338,26 @@ let decide_clock_for_idle
     ~(stream_idle_timeout_s : float option)
     ~(process_clock : (float Eio.Time.clock_ty Eio.Resource.t, string) result)
     ~(ctx_clock : float Eio.Time.clock_ty Eio.Resource.t option)
-  : float Eio.Time.clock_ty Eio.Resource.t option =
+  : (float Eio.Time.clock_ty Eio.Resource.t option, Agent_sdk.Error.sdk_error) result =
   match process_clock, ctx_clock with
-  | Ok c, _ -> Some c
-  | Error _, (Some _ as c) -> c
+  | Ok c, _ -> Ok (Some c)
+  | Error _, (Some _ as c) -> Ok c
   | Error e, None ->
     (match stream_idle_timeout_s with
      | Some idle ->
-       failwith
-         (Printf.sprintf
-            "runtime_agent: stream_idle_timeout_s configured (%.1fs) but no \
-             clock resolvable (%s); refusing to run with a silently disarmed \
-             stream idle timeout"
-            idle
-            e)
-     | None -> None)
+       Error
+         (Agent_sdk.Error.Config
+            (Agent_sdk.Error.InvalidConfig
+               { field = "stream_idle_timeout_s"
+               ; detail =
+                   Printf.sprintf
+                     "runtime_agent: stream_idle_timeout_s configured (%.1fs) \
+                      but no clock resolvable (%s); refusing to run with a \
+                      silently disarmed stream idle timeout"
+                     idle
+                     e
+               }))
+     | None -> Ok None)
 ;;
 
 let resolve_clock_for_idle ~(stream_idle_timeout_s : float option) =
@@ -816,21 +834,21 @@ let build
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
     ~(config : config)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
-  let clock =
-    resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s
-  in
-  match
-    transport_for_provider
-      ~sw
-      ~net
-      ?clock
-      ?stream_idle_timeout_s:config.stream_idle_timeout_s
-      ?body_timeout_s:config.body_timeout_s
-      ~provider_cfg:config.provider_cfg
-      ()
-  with
+  match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
   | Error _ as e -> e
-  | Ok transport ->
+  | Ok clock ->
+    (match
+       transport_for_provider
+         ~sw
+         ~net
+         ?clock
+         ?stream_idle_timeout_s:config.stream_idle_timeout_s
+         ?body_timeout_s:config.body_timeout_s
+         ~provider_cfg:config.provider_cfg
+         ()
+     with
+     | Error _ as e -> e
+     | Ok transport ->
       let builder =
         Runtime_agent_context.builder_without_approval ~net ~config ?transport ()
       in
@@ -839,7 +857,7 @@ let build
         | Some cb -> Agent_sdk.Builder.with_approval cb builder
         | None -> builder
       in
-      Agent_sdk.Builder.build_safe builder
+      Agent_sdk.Builder.build_safe builder)
 
 (* ================================================================ *)
 (* Idle-detail enrichment                                           *)
@@ -917,21 +935,21 @@ let resume_from_checkpoint
     ~(config : config)
     ~(checkpoint : Agent_sdk.Checkpoint.t)
   : (Agent_sdk.Agent.t, Agent_sdk.Error.sdk_error) result =
-  let clock =
-    resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s
-  in
-  match
-    transport_for_provider
-      ~sw
-      ~net
-      ?clock
-      ?stream_idle_timeout_s:config.stream_idle_timeout_s
-      ?body_timeout_s:config.body_timeout_s
-      ~provider_cfg:config.provider_cfg
-      ()
-  with
+  match resolve_clock_for_idle ~stream_idle_timeout_s:config.stream_idle_timeout_s with
   | Error _ as e -> e
-  | Ok transport ->
+  | Ok clock ->
+    (match
+       transport_for_provider
+         ~sw
+         ~net
+         ?clock
+         ?stream_idle_timeout_s:config.stream_idle_timeout_s
+         ?body_timeout_s:config.body_timeout_s
+         ~provider_cfg:config.provider_cfg
+         ()
+     with
+     | Error _ as e -> e
+     | Ok transport ->
       let prepared_resume =
         Runtime_agent_context.prepare_resume ~config ~checkpoint
       in
@@ -944,7 +962,7 @@ let resume_from_checkpoint
            ~tools:config.tools ?context:config.context
            ~options ~config:prepared_resume.agent_config
            ~auto_context_overflow_retry:config.oas_auto_context_overflow_retry
-           ())
+           ()))
 
 (* ================================================================ *)
 (* Run                                                               *)
@@ -1318,6 +1336,7 @@ let run
 let run_with_masc_tools
     ~(sw : Eio.Switch.t)
     ~(net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t)
+    ~base_path
     ~(config : config)
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
@@ -1325,9 +1344,10 @@ let run_with_masc_tools
     ?on_yield
     ?on_resume
     (goal : string)
-  : (run_result, Agent_sdk.Error.sdk_error) result =
+	  : (run_result, Agent_sdk.Error.sdk_error) result =
   match
     public_mcp_runtime_policy_of_tool_names
+      ~base_path
       (List.map (fun (td : Masc_domain.tool_schema) -> td.name) masc_tools)
   with
   | Some runtime_mcp_policy
@@ -1338,16 +1358,19 @@ let run_with_masc_tools
   | _ when masc_tools = [] ->
       run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
   | _ when provider_supports_inline_tools config.provider_cfg ->
-      let oas_tools =
-        List.map
-          (fun (td : Masc_domain.tool_schema) ->
-            (!oas_tool_of_masc_hook)
-              ~name:td.name
-              ~description:td.description
-              ~input_schema:td.input_schema
-              (fun input -> dispatch ~name:td.name ~args:input))
-          masc_tools
-      in
-      let config = { config with tools = oas_tools @ config.tools } in
-      run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal
+      (match !oas_tool_of_masc_hook with
+       | None -> Error (oas_tool_hook_unset_error ())
+       | Some oas_tool_of_masc ->
+         let oas_tools =
+           List.map
+             (fun (td : Masc_domain.tool_schema) ->
+               oas_tool_of_masc
+                 ~name:td.name
+                 ~description:td.description
+                 ~input_schema:td.input_schema
+                 (fun input -> dispatch ~name:td.name ~args:input))
+             masc_tools
+         in
+         let config = { config with tools = oas_tools @ config.tools } in
+         run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal)
   | _ -> run ~sw ~net ~config ?on_event ?on_yield ?on_resume goal

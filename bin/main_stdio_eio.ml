@@ -17,6 +17,26 @@ let base_path =
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
 let run_cmd base_path =
+  Printexc.record_backtrace true;
+  let normalized_base_path =
+    Env_config.normalize_masc_base_path_input base_path
+  in
+  let resolution_source =
+    match Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE" with
+    | Some source when String.trim source <> "" -> String.trim source
+    | _ ->
+      (match Sys.getenv_opt "MASC_BASE_PATH" with
+       | Some existing
+         when String.equal
+                (Env_config.normalize_masc_base_path_input existing)
+                normalized_base_path -> "explicit_env"
+       | _ -> "explicit_cli")
+  in
+  Server_base_path_guard.guard_self_repo_base_path normalized_base_path;
+  Server_base_path_guard.guard_implicit_base_path
+    ~resolution_source
+    ~normalized_base_path;
+  Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE" resolution_source;
   Eio_main.run @@ fun env ->
   Mirage_crypto_rng_unix.use_default ();
   Eio_guard.enable ();

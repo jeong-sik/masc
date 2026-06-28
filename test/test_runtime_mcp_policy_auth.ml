@@ -71,6 +71,11 @@ let save_auth_config dir ~enabled ~require_token =
   Auth.save_auth_config dir { Masc_domain.default_auth_config with enabled; require_token }
 ;;
 
+let save_raw_token dir ~agent_name ~raw_token =
+  let auth_dir = Common.auth_dir_from_base_path ~base_path:dir in
+  Auth.save_private_text_file (Filename.concat auth_dir (agent_name ^ ".token")) raw_token
+;;
+
 let test_public_policy_absent_without_required_bearer () =
   with_workspace (fun dir ->
     save_auth_config dir ~enabled:true ~require_token:true;
@@ -78,17 +83,23 @@ let test_public_policy_absent_without_required_bearer () =
       with_env "MASC_INTERNAL_MCP_TOKEN" (Some "internal-token") (fun () ->
         check
           bool
-          "required bearer missing returns no public runtime-MCP policy"
-          true
-          (Option.is_none
-             (Policy.public_mcp_runtime_policy_of_tool_names [ "masc_tasks" ])))))
+	          "required bearer missing returns no public runtime-MCP policy"
+	          true
+	          (Option.is_none
+	             (Policy.public_mcp_runtime_policy_of_tool_names
+	                ~base_path:dir
+	                [ "masc_tasks" ])))))
 ;;
 
 let test_public_policy_allowed_when_bearer_not_required () =
   with_workspace (fun dir ->
     save_auth_config dir ~enabled:true ~require_token:false;
     with_env "MASC_TOKEN" None (fun () ->
-      match Policy.public_mcp_runtime_policy_of_tool_names [ "masc_tasks" ] with
+	      match
+	        Policy.public_mcp_runtime_policy_of_tool_names
+	          ~base_path:dir
+	          [ "masc_tasks" ]
+	      with
       | None -> fail "auth-optional workspace should allow headerless runtime-MCP policy"
       | Some policy ->
         check (list (pair string string)) "no auth headers" [] (masc_headers policy)))
@@ -102,9 +113,10 @@ let test_keeper_policy_uses_internal_token_without_public_bearer () =
     with_env "MASC_TOKEN" None (fun () ->
       with_env "MASC_INTERNAL_MCP_TOKEN" (Some internal_token) (fun () ->
         match
-          Policy.runtime_mcp_policy_of_tool_names
-            ~agent_name:"keeper-rondo-agent"
-            [ "masc_tasks" ]
+	          Policy.runtime_mcp_policy_of_tool_names
+	            ~base_path:dir
+	            ~agent_name:"keeper-rondo-agent"
+	            [ "masc_tasks" ]
         with
         | None -> fail "keeper runtime-MCP policy should use internal token"
         | Some policy ->
@@ -123,7 +135,38 @@ let test_keeper_policy_uses_internal_token_without_public_bearer () =
             (option string)
             "agent identity header"
             (Some "keeper-rondo-agent")
-            (find_header "x-masc-agent-name" headers))))
+	            (find_header "x-masc-agent-name" headers))))
+;;
+
+let test_policy_uses_explicit_base_path_not_ambient_env () =
+  with_workspace (fun dir ->
+    with_workspace (fun ambient_dir ->
+      save_auth_config dir ~enabled:true ~require_token:true;
+      save_auth_config ambient_dir ~enabled:true ~require_token:true;
+      save_raw_token
+        dir
+        ~agent_name:"keeper-rondo-agent"
+        ~raw_token:"explicit-base-token";
+      save_raw_token
+        ambient_dir
+        ~agent_name:"keeper-rondo-agent"
+        ~raw_token:"ambient-env-token";
+      with_env "MASC_BASE_PATH" (Some ambient_dir) (fun () ->
+        with_env "MASC_TOKEN" None (fun () ->
+          match
+            Policy.runtime_mcp_policy_of_tool_names
+              ~base_path:dir
+              ~agent_name:"keeper-rondo-agent"
+              [ "masc_tasks" ]
+          with
+          | None -> fail "explicit base path should provide keeper token"
+          | Some policy ->
+            let headers = masc_headers policy in
+            check
+              (option string)
+              "authorization header comes from explicit base path"
+              (Some "Bearer explicit-base-token")
+              (find_header "Authorization" headers)))))
 ;;
 
 let () =
@@ -138,10 +181,14 @@ let () =
             "public policy allowed when bearer is optional"
             `Quick
             test_public_policy_allowed_when_bearer_not_required
-        ; test_case
-            "keeper policy uses internal token without public bearer"
-            `Quick
-            test_keeper_policy_uses_internal_token_without_public_bearer
-        ] )
+	        ; test_case
+	            "keeper policy uses internal token without public bearer"
+	            `Quick
+	            test_keeper_policy_uses_internal_token_without_public_bearer
+	        ; test_case
+	            "policy uses explicit base path instead of ambient env"
+	            `Quick
+	            test_policy_uses_explicit_base_path_not_ambient_env
+	        ] )
     ]
 ;;

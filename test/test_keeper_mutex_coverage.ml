@@ -29,6 +29,20 @@ let wait_for_done_with_clock clock request_id =
   loop 100
 ;;
 
+let wait_for_active_switch_count clock expected =
+  let rec loop remaining =
+    let actual = Keeper_msg_async.For_testing.active_switch_count () in
+    if actual = expected
+    then ()
+    else if remaining <= 0
+    then Alcotest.failf "active_switch_count expected %d, got %d" expected actual
+    else (
+      Eio.Time.sleep clock 0.01;
+      loop (remaining - 1))
+  in
+  loop 100
+;;
+
 let wait_for_running request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
@@ -84,6 +98,15 @@ let contains_substring ~needle value =
       else loop (i + 1)
     in
     loop 0)
+;;
+
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       really_input_string ic len)
 ;;
 
 let temp_dir prefix =
@@ -307,6 +330,10 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let base_path = temp_dir "keeper-msg-async-timeout-" in
+  Alcotest.(check int)
+    "no active switches before timeout request"
+    0
+    (Keeper_msg_async.For_testing.active_switch_count ());
   let release_late, notify_release_late = Eio.Promise.create () in
   let request_id =
     Keeper_msg_async.submit
@@ -347,6 +374,11 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
           | `String value -> Some value
           | _ -> None))
    | _ -> Alcotest.fail "expected timeout body JSON object");
+  Alcotest.(check bool)
+    "cancel after terminal timeout returns false"
+    false
+    (Keeper_msg_async.cancel ~base_path request_id);
+  wait_for_active_switch_count clock 0;
   Eio.Promise.resolve notify_release_late ();
   Eio.Time.sleep clock 0.05;
   match Keeper_msg_async.poll request_id with
@@ -598,6 +630,24 @@ let test_voice_output_turn_serializes_speakers () =
     (Atomic.get second_entered)
 ;;
 
+let test_keeper_msg_async_persists_outside_global_mutex () =
+  let source = read_file "lib/keeper/keeper_msg_async.ml" in
+  Alcotest.(check bool)
+    "set_status computes optional persist entry"
+    true
+    (contains_substring ~needle:"let to_persist =" source);
+  Alcotest.(check bool)
+    "persist happens after lock returns"
+    true
+    (contains_substring ~needle:"Option.iter persist_entry to_persist" source);
+  Alcotest.(check bool)
+    "status update does not persist while holding lock"
+    false
+    (contains_substring
+       ~needle:"Hashtbl.replace pending request_id updated;\n      persist_entry updated"
+       source)
+;;
+
 let () =
   run
     "keeper_mutex_coverage"
@@ -647,6 +697,10 @@ let () =
             "load_record unknown status is Unreadable"
             `Quick
             test_keeper_msg_async_load_record_unknown_status_is_unreadable
+        ; test_case
+            "persistence outside global mutex"
+            `Quick
+            test_keeper_msg_async_persists_outside_global_mutex
         ] )
     ; ( "eio_guard"
       , [ test_case

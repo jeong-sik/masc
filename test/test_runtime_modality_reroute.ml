@@ -337,6 +337,13 @@ let test_driver_degrade_branch_emits_manifest () =
      && string_contains source "media_degrade_manifest_decision"
      && string_contains source "Keeper_runtime_manifest.Runtime_routed")
 
+let test_runtime_agent_oas_tool_hook_fails_typed_not_failwith () =
+  let source = read_file "lib/runtime/runtime_agent.ml" in
+  check bool "legacy failwith hook removed" false
+    (string_contains source "failwith \"oas_tool_of_masc_hook is not set\"");
+  check bool "typed unset hook error present" true
+    (string_contains source "runtime_agent_oas_tool_hook_unset")
+
 let () =
   run "rfc0265_modality_reroute"
     [ ( "decide_modality_reroute"
@@ -374,5 +381,7 @@ let () =
             test_degrade_manifest_public_projection
         ; test_case "driver degrade branch emits manifest" `Quick
             test_driver_degrade_branch_emits_manifest
+        ; test_case "runtime agent OAS tool hook typed failure" `Quick
+            test_runtime_agent_oas_tool_hook_fails_typed_not_failwith
         ] )
     ]

@@ -599,7 +599,7 @@ let test_cli_sidecar_root_is_exported () =
         (contains_substring captured
            ("MASC_SIDECAR_ROOT=" ^ canonical_path sidecar_root)))
 
-let test_zshenv_absolute_base_path_is_preserved () =
+let test_zshenv_absolute_base_path_is_ignored () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
       let repo = Filename.concat parent "workspace/yousleepwhen/masc" in
@@ -623,13 +623,11 @@ let test_zshenv_absolute_base_path_is_preserved () =
             ]
           [ "--http"; "--port"; "9965" ]
       in
-      if code <> 0 then
-        failf "start script failed (%d)\nstdout:\n%s\nstderr:\n%s" code stdout
-          stderr;
-      let captured = read_file capture in
-      let expected_root = canonical_path parent in
-      check bool "zshenv absolute base path preserved" true
-        (contains_substring captured ("MASC_BASE_PATH=" ^ expected_root)))
+      let _ = stdout in
+      check bool "zshenv base path alone is rejected" true (code <> 0);
+      check bool "stderr rejects HOME/profile inference" true
+        (contains_substring stderr
+           "Refusing to infer a runtime root from HOME"))
 
 let test_shared_root_env_base_path_is_preserved () =
   with_temp_dir "start-masc-script" (fun dir ->
@@ -723,7 +721,7 @@ let test_explicit_base_path_execs_from_base_path () =
       check bool "exec cwd matches explicit base path" true
         (contains_substring captured ("PWD=" ^ expected_root)))
 
-let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
+let test_explicit_base_path_ignores_config_from_zshenv () =
   with_temp_dir "start-masc-script" (fun dir ->
       let parent = Filename.concat dir "parent-root" in
       let repo = Filename.concat parent "workspace/yousleepwhen/masc" in
@@ -757,9 +755,9 @@ let test_explicit_base_path_ignores_repo_local_config_from_zshenv () =
       check bool "explicit base path resets config root to base path" true
         (contains_substring captured
            ("MASC_CONFIG_DIR=" ^ Filename.concat expected_parent ".masc/config"));
-      check bool "stderr explains repo-local config ignore" true
+      check bool "zshenv config was not imported" false
         (contains_substring stderr "Ignoring repo-local MASC_CONFIG_DIR");
-      check bool "stderr explains repo-local personas ignore" true
+      check bool "zshenv personas were not imported" false
         (contains_substring stderr "Ignoring repo-local MASC_PERSONAS_DIR"))
 
 let test_explicit_base_path_ignores_repo_local_config_from_parent_env () =
@@ -994,9 +992,24 @@ let test_stale_executable_requires_build_lock () =
             (Sys.file_exists capture);
           check bool "lock holder is reported" true
             (contains_substring stderr "Another MASC build in progress");
-          check bool "stale executable refusal is explicit" true
-            (contains_substring stderr
-               "refusing to continue with a stale or missing executable")))
+	          check bool "stale executable refusal is explicit" true
+	            (contains_substring stderr
+	               "refusing to continue with a stale or missing executable")))
+
+let test_default_build_lock_is_worktree_local () =
+  let source = read_file (script_path ()) in
+  check bool "default build lock is worktree-local" true
+    (contains_substring source
+       "MASC_BUILD_LOCK=\"${MASC_BUILD_LOCK_PATH:-$SCRIPT_DIR/.masc-build.lock}\"");
+  check bool "default build lock is not global /tmp" false
+    (contains_substring source "MASC_BUILD_LOCK_PATH:-/tmp/masc-build.lock")
+
+let test_stdio_entrypoint_uses_shared_base_path_guard () =
+  let source = read_file "bin/main_stdio_eio.ml" in
+  check bool "stdio guards self repo base path" true
+    (contains_substring source "Server_base_path_guard.guard_self_repo_base_path");
+  check bool "stdio rejects implicit base path" true
+    (contains_substring source "Server_base_path_guard.guard_implicit_base_path")
 
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->
@@ -1226,9 +1239,9 @@ let () =
           test_case "explicit base path execs from base path" `Quick
             test_explicit_base_path_execs_from_base_path;
           test_case
-            "explicit base path ignores repo-local config from zshenv"
+            "explicit base path ignores config from zshenv"
             `Quick
-            test_explicit_base_path_ignores_repo_local_config_from_zshenv;
+            test_explicit_base_path_ignores_config_from_zshenv;
           test_case
             "explicit base path ignores repo-local config from parent env"
             `Quick
@@ -1241,9 +1254,13 @@ let () =
             test_stale_dune_artifacts_are_cleaned_and_retried;
           test_case "Dune cache temp errors retry with cache disabled" `Quick
             test_dune_cache_temp_error_retries_with_cache_disabled;
-          test_case "stale executable requires build lock" `Quick
-            test_stale_executable_requires_build_lock;
-          test_case "stdio skips dashboard build and HTTP preflight" `Quick
+	          test_case "stale executable requires build lock" `Quick
+	            test_stale_executable_requires_build_lock;
+	          test_case "default build lock is worktree-local" `Quick
+	            test_default_build_lock_is_worktree_local;
+	          test_case "stdio entrypoint uses shared base path guard" `Quick
+	            test_stdio_entrypoint_uses_shared_base_path_guard;
+	          test_case "stdio skips dashboard build and HTTP preflight" `Quick
             test_stdio_skips_dashboard_build_and_http_preflight;
           test_case
             "dashboard build failure is non-blocking by default in HTTP mode"
@@ -1254,8 +1271,8 @@ let () =
             `Quick test_http_dashboard_build_blocking_mode_fails_closed;
           test_case "HTTP preflight waits for transient port conflict" `Quick
             test_http_preflight_waits_for_port_to_clear_before_build;
-          test_case "zshenv absolute base path is preserved" `Quick
-            test_zshenv_absolute_base_path_is_preserved;
+          test_case "zshenv absolute base path is ignored" `Quick
+            test_zshenv_absolute_base_path_is_ignored;
           test_case "shared-root env base path is preserved" `Quick
             test_shared_root_env_base_path_is_preserved;
           test_case "worktree prefers local build over workspace build" `Quick

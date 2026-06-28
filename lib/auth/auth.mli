@@ -29,6 +29,8 @@ val auth_config_file : string -> string
 val credential_file : string -> string -> string
 val internal_keeper_token_hash_file : string -> string
 val internal_keeper_token_env_key : string
+val extract_agent_type_prefix : string -> string option
+val save_internal_keeper_token_hash : string -> raw_token:string -> unit
 
 (** {1 Auth Config} *)
 
@@ -334,5 +336,3 @@ val is_auth_enabled : string -> bool
 
 val read_initial_admin : string -> string option
 (** [read_initial_admin config] returns the bootstrap admin agent name. *)
-
-

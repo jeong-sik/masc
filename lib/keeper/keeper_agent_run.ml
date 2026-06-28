@@ -467,7 +467,7 @@ let run_turn
          | Some value -> value
          | None -> Keeper_runtime_resolved.oas_call_timeout_sec ()
        in
-       let per_provider_timeout_s = None in
+       let per_provider_timeout_s = Some timeout_s in
        (* OAS [stream_idle_timeout_s] bounds inter-line idle on HTTP streams
        (Anthropic/OpenAI/Gemini/GLM/Ollama). The deadline resets after each
        successful line, so this is gap detection, not total run cap.
@@ -502,13 +502,13 @@ let run_turn
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
               let call_run_named ~initial_messages =
-                (* This path must not impose a cumulative OAS bridge timeout.
-                   Progressing streams are bounded by stream idle and attempt
-                   liveness; completed attempts are bounded before retry by
-                   turn-budget admission. *)
-                Keeper_turn_driver.run_named
-                  ~runtime_id:runtime_id_string
-                    ~keeper_name:meta.name
+                (* The keeper turn deadline must own the OAS Agent.run switch.
+                   Stream/body idle budgets catch liveness gaps; this hard
+                   ceiling is the final guard that releases a stuck turn slot. *)
+	                Keeper_turn_driver.run_named
+	                  ~runtime_id:runtime_id_string
+	                  ~base_path:config.base_path
+	                    ~keeper_name:meta.name
                     ~goal:user_message
                     ?goal_blocks:user_blocks
                     ~priority

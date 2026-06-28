@@ -159,24 +159,29 @@ val runtime_mcp_policy_with_masc_agent_name :
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   Llm_provider.Llm_transport.runtime_mcp_policy
 val codex_cli_can_auth_keeper_bound_runtime_mcp :
+  base_path:string ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy ->
   bool
 val runtime_mcp_policy_for_provider :
+  base_path:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   agent_name:string ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 val public_mcp_runtime_policy_of_tool_names :
+  base_path:string ->
   ?agent_name:string ->
   string list ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 val runtime_mcp_policy_of_tool_names :
+  base_path:string ->
   ?agent_name:string ->
   ?allow_agent_internal:bool ->
   string list ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 val resolve_tool_lane_for_oas_tools :
+  base_path:string ->
   ?agent_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   tools:Agent_sdk.Tool.t list ->
@@ -298,7 +303,7 @@ module For_testing : sig
     stream_idle_timeout_s:float option ->
     process_clock:(float Eio.Time.clock_ty Eio.Resource.t, string) result ->
     ctx_clock:float Eio.Time.clock_ty Eio.Resource.t option ->
-    float Eio.Time.clock_ty Eio.Resource.t option
+    (float Eio.Time.clock_ty Eio.Resource.t option, Agent_sdk.Error.sdk_error) result
 
   val required_modalities_of_content_blocks :
     Agent_sdk.Types.content_block list -> string list
@@ -443,6 +448,7 @@ val run_blocks :
 val run_with_masc_tools :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
+  base_path:string ->
   config:config ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->

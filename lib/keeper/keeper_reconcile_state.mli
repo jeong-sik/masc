@@ -3,9 +3,8 @@
     Tracks per-keeper consecutive failures of [ensure_keeper_meta] inside
     the [keeper_runtime] periodic sweep. Without back-off the sweep emits
     one WARN per failed keeper every [~30s] forever — a [Workaround
-    Rejection Bar §retry loop] anti-pattern. See:
-    [/Users/dancer/Downloads/MASC:OAS Error-Warn Reduction Goal -
-    2026-05-18.html] §P6 (config drift).
+    Rejection Bar §retry loop] anti-pattern. See the May 2026
+    MASC/OAS error-warn reduction audit §P6 (config drift).
 
     Classifications returned by [record_failure]:
 

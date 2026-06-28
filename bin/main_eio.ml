@@ -68,8 +68,6 @@ let mcp_protocol_version_default =
 
 let default_base_path = Server_mcp_transport_http.default_base_path
 
-let implicit_base_path_resolution_source () = "implicit_base_path"
-
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
 
@@ -468,7 +466,10 @@ let run_server ~sw ~env ~host ~port ~base_path =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Log.Server.error "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
+    Log.Server.error
+      "[main] keeper bootstrap failed; refusing to continue without keepers: %s"
+      (Printexc.to_string exn);
+    raise exn
 
 (** CLI options *)
 let port =
@@ -566,35 +567,6 @@ let acquire_base_path_lock base_path =
            pid base_path pid);
       exit 1
 
-(** Reject base_path that points to the server's own source repo.
-    Detects by checking if the running executable lives under base_path/_build/.
-    Runtime state (.masc/keepers, traces, logs) must not pollute the repo. *)
-let guard_self_repo_base_path base_path =
-  let base_path = Env_config.normalize_masc_base_path_input base_path in
-  let abs_base =
-    try Unix.realpath base_path with Unix.Unix_error _ -> base_path
-  in
-  let abs_exe =
-    try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> ""
-  in
-  let build_prefix = abs_base ^ "/_build/" in
-  let is_self_repo =
-    abs_exe <> ""
-    && String.length abs_exe > String.length build_prefix
-    && String.sub abs_exe 0 (String.length build_prefix) = build_prefix
-  in
-  if is_self_repo then begin
-    Printf.eprintf
-       "[FATAL] --base-path points to the server's own source repo: %s\n\
-       (executable: %s)\n\
-       Runtime state would pollute the repo. Use a workspace root instead:\n\
-       \  --base-path $MASC_BASE_PATH    (recommended)\n\
-       \  --base-path /path/to/workspace (explicit workspace root)\n\
-       Or start via: sb mcp masc start\n"
-      base_path abs_exe;
-    exit 1
-  end
-
 let run_cmd host port base_path =
   Printexc.record_backtrace true;
   let raw_base_path = String.trim base_path in
@@ -620,26 +592,16 @@ let run_cmd host port base_path =
             Env_config.normalize_masc_base_path_input (default_base_path ())
           in
           if String.equal default_path normalized_base_path then
-            implicit_base_path_resolution_source ()
+            Server_base_path_guard.implicit_base_path_resolution_source
           else
             "explicit_cli"
   in
   let stripped_base_path =
     Env_config.strip_path_trailing_slashes (String.trim base_path)
   in
-  guard_self_repo_base_path normalized_base_path;
-  if String.equal resolution_source "implicit_base_path" then begin
-    Printf.eprintf
-      "[FATAL] Server refused to start with an implicit base path.\n\
-       Resolution source: %s\n\
-       Resolved path: %s\n\n\
-       Start the server with an explicit base path:\n\
-       \  --base-path /path/to/workspace     (CLI flag)\n\
-       \  MASC_BASE_PATH=/path/to/workspace  (environment variable)\n\n\
-       Use a workspace root, not the repository checkout or $HOME directly.\n"
-      resolution_source normalized_base_path;
-    exit 1
-  end;
+  Server_base_path_guard.guard_self_repo_base_path normalized_base_path;
+  Server_base_path_guard.guard_implicit_base_path ~resolution_source
+    ~normalized_base_path;
   let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
   Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;

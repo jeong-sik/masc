@@ -1903,6 +1903,18 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
     (Some "sse_stream_incomplete")
     (kind (StreamIncomplete { reason = "max_output_tokens" }))
 
+let test_per_provider_timeout_forwards_to_oas_hard_deadline () =
+  Alcotest.(check (option (float 0.0)))
+    "keeper timeout forwards to OAS max_execution_time_s"
+    (Some 123.0)
+    (Masc.Keeper_turn_driver.For_testing.max_execution_time_for_attempt
+       ~per_provider_timeout_s:123.0
+       ());
+  Alcotest.(check (option (float 0.0)))
+    "missing timeout stays disabled"
+    None
+    (Masc.Keeper_turn_driver.For_testing.max_execution_time_for_attempt ())
+
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
@@ -2006,5 +2018,9 @@ let () =
             test_reject_reason_describes_mixed_non_progress_response;
           Alcotest.test_case "sse progress classifies known deltas" `Quick
             test_sse_event_progress_kind_classifies_known_deltas;
+          Alcotest.test_case
+            "keeper timeout forwards to OAS hard deadline"
+            `Quick
+            test_per_provider_timeout_forwards_to_oas_hard_deadline;
         ] );
     ]

@@ -133,7 +133,19 @@ let runtime_blocker_surface_of_masc_internal_error = function
       ; continue_gate =
           blocker_class_continue_gate Completion_contract_violation
       }
-  | _ -> None
+  | Keeper_turn_driver.Runtime_exhausted _
+  | Keeper_turn_driver.Capacity_backpressure _
+  | Keeper_turn_driver.Resumable_cli_session _
+  | Keeper_turn_driver.Admission_queue_timeout _
+  | Keeper_turn_driver.Admission_queue_rejected _
+  | Keeper_turn_driver.Turn_timeout _
+  | Keeper_turn_driver.Provider_timeout _
+  | Keeper_turn_driver.Max_tokens_ceiling_violation _
+  | Keeper_turn_driver.Ambiguous_post_commit _
+  | Keeper_turn_driver.Internal_unhandled_exception _
+  | Keeper_turn_driver.Internal_bridge_exception _
+  | Keeper_turn_driver.Internal_contract_rejected _ ->
+    None
 
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
@@ -277,46 +289,39 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                window; keeper was auto-paused before restart loop."
               distinct_count)
          Stale_fleet_batch)
+  | Keeper_registry.Completion_contract_violation { detail } ->
+    Some
+      (runtime_blocker_surface_of_typed_class
+         ~summary:
+           (if String.trim detail = ""
+            then "Provider response violated the completion contract after dispatch."
+            else detail)
+         Completion_contract_violation)
   | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
-    (match Keeper_turn_driver.classify_masc_internal_error_of_string detail with
-     | Some internal_error ->
-       (match runtime_blocker_surface_of_masc_internal_error internal_error with
-        | Some _ as surface -> surface
-        | None ->
-          Some
-            { blocker_class = "provider_runtime_error"
-            ; summary =
-                Printf.sprintf
-                  "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
-                  code
-                  detail
-            ; continue_gate = false
-            })
-     | None ->
-       (match
-          Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
-            ~code
-            ~detail
-        with
-        | Keeper_provider_runtime_boundary.Provider_timeout _ ->
-          Some
-            (runtime_blocker_surface_of_typed_class
-               ~summary:
-                 (Printf.sprintf
-                    "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
-                    code
-                    detail)
-               Turn_timeout)
-        | Keeper_provider_runtime_boundary.Not_provider_runtime_failure ->
-          Some
-            { blocker_class = "provider_runtime_error"
-            ; summary =
-                Printf.sprintf
-                  "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
-                  code
-                  detail
-            ; continue_gate = false
-            }))
+    (match
+       Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
+         ~code
+         ~detail
+     with
+     | Keeper_provider_runtime_boundary.Provider_timeout _ ->
+       Some
+         (runtime_blocker_surface_of_typed_class
+            ~summary:
+              (Printf.sprintf
+                 "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
+                 code
+                 detail)
+            Turn_timeout)
+     | Keeper_provider_runtime_boundary.Not_provider_runtime_failure ->
+       Some
+         { blocker_class = "provider_runtime_error"
+         ; summary =
+             Printf.sprintf
+               "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
+               code
+               detail
+         ; continue_gate = false
+         })
   | Keeper_registry.Ambiguous_partial_commit { kind; detail } ->
     let blocker_class =
       match kind with

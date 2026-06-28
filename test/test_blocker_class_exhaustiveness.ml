@@ -307,7 +307,30 @@ let test_provider_timeout_catch_all_maps_to_turn_timeout () =
   check bool "no continue gate" false surface.KSB.continue_gate
 ;;
 
-let test_masc_accept_rejected_record_maps_to_completion_contract () =
+let completion_contract_surface_exn ?(detail = "completion contract violated") () =
+  match
+    KSB.runtime_blocker_surface_of_failure_reason
+      (Reg.Completion_contract_violation { detail })
+  with
+  | Some surface -> surface
+  | None ->
+    fail "runtime_blocker_surface_of_failure_reason returned None for Completion_contract_violation"
+;;
+
+let test_typed_completion_contract_maps_to_completion_contract () =
+  let surface = completion_contract_surface_exn () in
+  check string
+    "typed completion contract -> completion contract"
+    "completion_contract_violation"
+    surface.KSB.blocker_class;
+  check bool
+    "summary preserves typed detail"
+    true
+    (String.starts_with ~prefix:"completion contract violated" surface.KSB.summary);
+  check bool "no continue gate" false surface.KSB.continue_gate
+;;
+
+let test_masc_accept_rejected_provider_record_does_not_reparse_detail () =
   let accept_error =
     KTD.sdk_error_of_masc_internal_error
       (KTD.Accept_rejected
@@ -329,15 +352,9 @@ let test_masc_accept_rejected_record_maps_to_completion_contract () =
       ()
   in
   check string
-    "masc accept rejection -> completion contract"
-    "completion_contract_violation"
+    "provider runtime detail is not reparsed"
+    "provider_runtime_error"
     surface.KSB.blocker_class;
-  check bool
-    "summary uses typed empty-turn diagnostic"
-    true
-    (String.starts_with
-       ~prefix:"Provider returned an empty assistant turn"
-       surface.KSB.summary);
   check bool "no continue gate" false surface.KSB.continue_gate
 ;;
 
@@ -368,8 +385,10 @@ let () =
             test_reason_none_provider_error_falls_through
         ; test_case "provider timeout catch-all maps to timeout" `Quick
             test_provider_timeout_catch_all_maps_to_turn_timeout
-        ; test_case "masc accept_rejected maps to completion contract" `Quick
-            test_masc_accept_rejected_record_maps_to_completion_contract
+        ; test_case "typed completion contract maps to completion contract" `Quick
+            test_typed_completion_contract_maps_to_completion_contract
+        ; test_case "provider runtime detail is not reparsed" `Quick
+            test_masc_accept_rejected_provider_record_does_not_reparse_detail
         ] )
     ]
 ;;

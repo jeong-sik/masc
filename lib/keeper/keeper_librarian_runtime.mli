@@ -50,26 +50,38 @@ val cadence_due : keeper_id:string -> trace_id:string -> bool
     on. The counter is keyed by [keeper_id] and stores the active [trace_id]
     alongside it, so a handoff rollover (a new [trace_id]) resets the cadence
     cycle in place — bounding the table to one row per keeper. First call for an
-    unseen keeper, or the first call after a rollover, is due immediately. *)
+    unseen keeper, or the first call after a rollover, is due immediately.
+
+    Must be called inside an [Eio] fiber context (acquires [Eio.Mutex.use_rw
+    ~protect:true]). *)
 
 val cadence_record_success : keeper_id:string -> trace_id:string -> unit
 (** Record a successful structured extraction for [keeper_id] on [trace_id] so
     the cadence counter resets and the next cycle can begin. Must only be called
     after a due turn actually produced a structured episode; skipped, failed, or
-    unstructured-fallback attempts must not call this. *)
+    unstructured-fallback attempts must not call this.
+
+    Must be called inside an [Eio] fiber context (acquires [Eio.Mutex.use_rw
+    ~protect:true]). *)
 
 val cadence_record_attempt : keeper_id:string -> trace_id:string -> unit
 (** Record a completed non-success extraction attempt for [keeper_id] on
     [trace_id] so transient provider failures and diagnostic fallbacks do not
     immediately retry every keeper turn. This intentionally does not mark the
     extraction as semantically successful. Skipped work such as a busy provider
-    slot must not call this, because no provider attempt happened. *)
+    slot must not call this, because no provider attempt happened.
+
+    Must be called inside an [Eio] fiber context (acquires [Eio.Mutex.use_rw
+    ~protect:true]). *)
 
 val cadence_counter_entries : unit -> int
 (** Number of live per-keeper cadence rows. Bounded by the number of keepers
     that have run (one row each), independent of trace rotations — so it is the
     leak-regression signal for the keeper-keyed cadence table and a memory-health
-    metric for the dashboard. Read-only. *)
+    metric for the dashboard. Read-only.
+
+    Must be called inside an [Eio] fiber context (acquires [Eio.Mutex.use_rw
+    ~protect:true]). *)
 
 val memory_os_librarian_provider_slot_site : string
 (** OTel [site] label used when the fleet-wide librarian provider slot is busy.

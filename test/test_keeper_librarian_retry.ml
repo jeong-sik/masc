@@ -518,6 +518,7 @@ let test_retry_nudge_matches_schema () =
 ;;
 
 let () =
+  Eio_main.run @@ fun _env ->
   run "keeper_librarian_retry"
     [
       ( "parse_retry",

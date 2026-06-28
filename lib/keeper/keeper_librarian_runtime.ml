@@ -137,10 +137,18 @@ let cadence_turns () =
    table mints a fresh row per rotation and never reclaims the previous one,
    growing without bound over the process lifetime. Keying by keeper_id bounds
    the table to one row per live keeper; a rotated trace is detected as a stored
-   mismatch and resets the schedule in place. Stdlib.Mutex (not Eio.Mutex): the
-   critical section is a Hashtbl read/write that never yields, and the table is
-   reachable from concurrent keeper fibers. *)
-let cadence_mu = Stdlib.Mutex.create ()
+   mismatch and resets the schedule in place.
+
+   Eio.Mutex with ~protect:true: the cadence table is reachable from concurrent
+   keeper fibers, and Stdlib.Mutex blocks the domain thread, which can stall
+   unrelated Eio work and deadlock if a fiber holds the Stdlib lock while
+   waiting on another Eio resource (see the P0 review of the [cadence_mu]
+   downgrade in PR #22588 and the [provider_slots_mu] anti-pattern inherited
+   from PR #22460). ~protect:true poisons on fiber exception so the next
+   acquirer sees the failure rather than spinning on corrupt state. The
+   critical section is a non-yielding Hashtbl read/write, so Eio.Mutex's fiber
+   scheduler overhead is negligible. *)
+let cadence_mu = Eio.Mutex.create ()
 let cadence_counters : (string, string * int) Hashtbl.t = Hashtbl.create 16
 
 (* A counter value below 0 means the keeper has never had a successful
@@ -188,7 +196,7 @@ let cadence_step_keyed ~cadence ~current_trace ~prior =
 ;;
 
 let cadence_due ~keeper_id ~trace_id =
-  Stdlib.Mutex.protect cadence_mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true cadence_mu (fun () ->
     let prior = Hashtbl.find_opt cadence_counters keeper_id in
     let value, due =
       cadence_step_keyed ~cadence:(cadence_turns ()) ~current_trace:trace_id ~prior
@@ -198,12 +206,12 @@ let cadence_due ~keeper_id ~trace_id =
 ;;
 
 let cadence_record_success ~keeper_id ~trace_id =
-  Stdlib.Mutex.protect cadence_mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true cadence_mu (fun () ->
     Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
 ;;
 
 let cadence_record_attempt ~keeper_id ~trace_id =
-  Stdlib.Mutex.protect cadence_mu (fun () ->
+  Eio.Mutex.use_rw ~protect:true cadence_mu (fun () ->
     Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
 ;;
 
@@ -212,7 +220,7 @@ let cadence_record_attempt ~keeper_id ~trace_id =
    with trace rotations. Read-only; consumed by the cadence test and the
    dashboard memory-health panel. *)
 let cadence_counter_entries () =
-  Stdlib.Mutex.protect cadence_mu (fun () -> Hashtbl.length cadence_counters)
+  Eio.Mutex.use_rw ~protect:true cadence_mu (fun () -> Hashtbl.length cadence_counters)
 ;;
 
 let max_messages () =

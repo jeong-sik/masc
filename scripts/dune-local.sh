@@ -13,12 +13,14 @@ Local Dune wrapper for multi-agent development:
   - serializes local Dune invocations with a machine-wide lock
   - serializes opam switch validation with opam pin mutations
   - defaults local concurrency to DUNE_LOCAL_JOBS, or 2
+  - disables the shared Dune artifact cache by default for local builds
   - injects --root <repo-root> unless --root is already present
   - asserts agent_sdk opam pin matches the repo SSOT before each build
   - asserts core opam dependencies are installed in the active switch
   - asserts OCaml is at or above the repo floor (5.4)
 
 Set MASC_DUNE_THROTTLE=0 to bypass the local lock.
+Set MASC_DUNE_CACHE=enabled or enabled-except-user-rules to opt into the shared Dune cache.
 Set MASC_OPAM_LOCK=0 or MASC_SKIP_OPAM_LOCK=1 to bypass the shared opam switch lock.
 Set MASC_OPAM_LOCK_PATH=/path/to/lock to override the shared opam lock path.
 Set MASC_OPAM_LOCK_AFTER_DUNE_TIMEOUT=seconds to bound opam-lock wait after the Dune lock (0 = wait forever).
@@ -376,6 +378,11 @@ fi
 if [[ "${GITHUB_ACTIONS:-}" != "true" ]]; then
   export DUNE_JOBS="${DUNE_JOBS:-${DUNE_LOCAL_JOBS:-2}}"
   export DUNE_BUILD_DIR="${DUNE_BUILD_DIR:-$repo_root/_build}"
+  # The shared Dune cache can return native artifacts compiled against an
+  # older local opam pin, which then link with fresh CMIs and fail with
+  # "make inconsistent assumptions over interface". Local wrapper builds
+  # favor deterministic rebuilds; operators can opt back in explicitly.
+  export DUNE_CACHE="${MASC_DUNE_CACHE:-disabled}"
 fi
 
 # --- stale Dune lock/RPC cleanup ----------------------------------------
@@ -689,8 +696,8 @@ if [[ "${GITHUB_ACTIONS:-}" != "true" \
 fi
 # -----------------------------------------------------------------------
 
-printf '[dune-local] DUNE_JOBS=%s DUNE_BUILD_DIR=%s\n' \
-  "${DUNE_JOBS:-auto}" "${DUNE_BUILD_DIR:-_build}" >&2
+printf '[dune-local] DUNE_JOBS=%s DUNE_BUILD_DIR=%s DUNE_CACHE=%s\n' \
+  "${DUNE_JOBS:-auto}" "${DUNE_BUILD_DIR:-_build}" "${DUNE_CACHE:-default}" >&2
 printf '[dune-local] command:' >&2
 printf ' %q' "${cmd[@]}" >&2
 printf '\n' >&2

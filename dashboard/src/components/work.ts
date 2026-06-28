@@ -157,9 +157,9 @@ function keeperByName(name: string | null | undefined): Keeper | undefined {
   return keepers.value.find(k => k.name === name)
 }
 
-function leadKeeperForGoal(goal: Goal): Keeper | undefined {
+function leadNameForGoal(goal: Goal): string | undefined {
   const active = keepers.value.find(k => k.active_goal_ids?.includes(goal.id))
-  if (active) return active
+  if (active) return active.name
 
   const goalTasks = tasks.value.filter(t => t.goal_id === goal.id)
   const counts = new Map<string, number>()
@@ -174,7 +174,7 @@ function leadKeeperForGoal(goal: Goal): Keeper | undefined {
       topCount = count
     }
   }
-  return topName ? keeperByName(topName) : undefined
+  return topName
 }
 
 function openKeeperWorkspace(name: string): void {
@@ -439,7 +439,7 @@ function GoalCard({
   onClaim: (id: string) => void
 }) {
   const progress = goalProgressCounts(goalTasks)
-  const lead = leadKeeperForGoal(goal)
+  const leadName = leadNameForGoal(goal)
 
   // Border tint by goal status (prototype .wk-goal.st-warn/.st-bad/.st-volt,
   // v2.css:812-814): at_risk→amber, blocked→bad, verifying→volt. `st-ok`
@@ -460,9 +460,9 @@ function GoalCard({
           ? html`<span class="wk-approval" title="완료 승인 필요">✓ 완료 승인</span>`
           : null}
         ${goal.due_date ? html`<span class="wk-due mono">${goal.due_date}</span>` : null}
-        ${lead ? html`
-          <span class="wk-lead" title=${`리드 · ${lead.name}`}>
-            <${KeeperBadge} id=${lead.name} size="md" variant="sigil" />
+        ${leadName ? html`
+          <span class=${`wk-lead${keeperByName(leadName) ? '' : ' offline'}`} title=${`리드 · ${leadName}${keeperByName(leadName) ? '' : ' (Offline)'}`}>
+            <${KeeperBadge} id=${leadName} size="md" variant="sigil" />
           </span>
         ` : null}
       </button>

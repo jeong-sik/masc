@@ -67,7 +67,7 @@ let repo_cwd_relative_rewrite ~cwd path_argument =
   | Some _ | None -> None
 
 let path_mentions_masc_state path_argument =
-  path_components path_argument |> List.exists (String.equal ".masc")
+  path_components path_argument |> List.exists (String.equal Common.masc_dirname)
 
 let path_probe_recovery ~cwd path_argument =
   match repo_cwd_relative_rewrite ~cwd path_argument with

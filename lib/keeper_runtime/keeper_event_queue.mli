@@ -141,6 +141,10 @@ val prepend_list : stimulus list -> t -> t
     draining stimuli but before completing the turn, so restart/retry keeps an
     at-least-once replay boundary. *)
 
+val remove_by_post_id : post_id -> t -> stimulus list * t
+(** Remove all stimuli whose [post_id] matches the argument, returning the
+    removed stimuli in FIFO order plus the remaining queue. *)
+
 val dedup_by_post_id : ?window_seconds:float -> t -> t
 (** Drops later duplicates of the same [post_id] when their
     [arrived_at] differs by less than [window_seconds] (default

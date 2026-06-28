@@ -124,6 +124,14 @@ let prepend_list stimuli queue =
     ; length = queue.length + List.length stimuli
     }
 
+let remove_by_post_id post_id queue =
+  let removed, kept =
+    queue
+    |> to_list
+    |> List.partition (fun stimulus -> String.equal stimulus.post_id post_id)
+  in
+  removed, of_list kept
+
 let dedup_by_post_id ?(window_seconds = 60.0) (queue : t) : t =
   let within_window a b =
     Float.abs (a.arrived_at -. b.arrived_at) <= window_seconds

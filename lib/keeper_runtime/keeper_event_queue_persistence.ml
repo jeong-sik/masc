@@ -79,6 +79,13 @@ let remove_stimuli queue stimuli =
     |> List.filter (fun stimulus -> not (remove stimulus))
     |> queue_of_list
 
+let uniq_stimuli stimuli =
+  List.fold_left
+    (fun acc stimulus -> if List.exists (( = ) stimulus) acc then acc else stimulus :: acc)
+    []
+    stimuli
+  |> List.rev
+
 let load_from_path ~keeper_name path =
   if not (Sys.file_exists path)
   then Keeper_event_queue.empty
@@ -258,3 +265,35 @@ let ack_consumed ~base_path ~keeper_name stimuli =
             pending_path
             inflight_path
             (Printexc.to_string exn))))
+
+let drop_by_post_id ~base_path ~keeper_name ~post_id =
+  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
+  | Error msg, _ | _, Error msg -> Error msg
+  | Ok pending_path, Ok inflight_path ->
+    (try
+       with_write_lock (fun () ->
+         let pending = load_from_path ~keeper_name pending_path in
+         let inflight = load_from_path ~keeper_name inflight_path in
+         let pending_removed, pending' =
+           Keeper_event_queue.remove_by_post_id post_id pending
+         in
+         let inflight_removed, inflight' =
+           Keeper_event_queue.remove_by_post_id post_id inflight
+         in
+         match persist_to_path_result ~keeper_name pending_path pending' with
+         | Error _ as err -> err
+         | Ok () ->
+           (match persist_to_path_result ~keeper_name inflight_path inflight' with
+            | Error _ as err -> err
+            | Ok () -> Ok (uniq_stimuli (pending_removed @ inflight_removed))))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "drop_by_post_id raised keeper=%s pending=%s inflight=%s post_id=%s: %s"
+            keeper_name
+            pending_path
+            inflight_path
+            post_id
+            (Printexc.to_string exn)))

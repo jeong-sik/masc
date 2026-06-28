@@ -199,6 +199,12 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> fail ("parse base: " ^ err)
 
+let queue_contains_post_id queue post_id =
+  queue
+  |> Keeper_event_queue.to_list
+  |> List.exists (fun stimulus ->
+    String.equal stimulus.Keeper_event_queue.post_id post_id)
+
 let test_no_progress_loop_detection_pauses_keeper () =
   let base_path = temp_dir "masc-no-progress-pause-" in
   Fun.protect
@@ -259,16 +265,7 @@ let test_operator_resume_clears_no_progress_loop_latch () =
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        let keeper_name = "no-progress-resume" in
-       let blocker =
-         Keeper_meta_contract.blocker_info_of_class
-           ~detail:"latched"
-           Keeper_meta_contract.No_progress_loop
-       in
-       let meta =
-         make_meta keeper_name
-         |> Keeper_meta_contract.map_runtime (fun rt ->
-           { rt with last_blocker = Some blocker })
-       in
+       let meta = make_meta keeper_name in
        Masc.Keeper_registry.clear ();
        ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
        ignore
@@ -277,31 +274,81 @@ let test_operator_resume_clears_no_progress_loop_latch () =
             ~keeper_name
             ~made_progress:false
             ());
-       Masc.Keeper_registry.set_failure_reason
-         ~base_path:config.base_path
-         keeper_name
-         (Some
-            (Masc.Keeper_registry.Provider_runtime_error
-               { code = Masc.Keeper_unified_turn_no_progress.failure_reason_code
-               ; detail = "latched"
-               ; provider_id = None
-               ; http_status = None
-               ; runtime_id = None
-               ; reason = None
-               }));
+       let paused_meta =
+         Masc.Keeper_unified_turn_no_progress.mark_loop_detected
+           ~config
+           meta
+           ~streak:10
+           ~threshold:10
+       in
+       let recovery_post_id = "no-progress-loop:" ^ keeper_name in
        check bool
          "detector latched before resume"
          true
          (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       check bool
+         "recovery stimulus queued before resume"
+         true
+         (queue_contains_post_id
+            (Masc.Keeper_registry_event_queue.snapshot
+               ~base_path:config.base_path
+               keeper_name)
+            recovery_post_id);
+       let pending_summary =
+         Masc.Keeper_reaction_ledger.summary_for_keeper
+           ~base_path:config.base_path
+           ~keeper_name
+           ~limit:10
+       in
+       check int
+         "ledger recovery stimulus pending before resume"
+         1
+         (pending_summary
+          |> Yojson.Safe.Util.member "pending_no_progress_recovery_count"
+          |> Yojson.Safe.Util.to_int);
        let resumed_meta =
          Masc.Keeper_unified_turn_no_progress.clear_for_operator_resume
            ~base_path:config.base_path
-           meta
+           paused_meta
        in
        check bool
          "detector reset by operator resume"
          false
          (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       check bool
+         "operator resume drops queued recovery stimulus"
+         false
+         (queue_contains_post_id
+            (Masc.Keeper_registry_event_queue.snapshot
+               ~base_path:config.base_path
+               keeper_name)
+            recovery_post_id);
+       check bool
+         "operator resume drops durable recovery stimulus"
+         false
+         (queue_contains_post_id
+            (Keeper_event_queue_persistence.load
+               ~base_path:config.base_path
+               ~keeper_name)
+            recovery_post_id);
+       let resumed_summary =
+         Masc.Keeper_reaction_ledger.summary_for_keeper
+           ~base_path:config.base_path
+           ~keeper_name
+           ~limit:10
+       in
+       check int
+         "operator resume closes pending recovery ledger stimulus"
+         0
+         (resumed_summary
+          |> Yojson.Safe.Util.member "pending_no_progress_recovery_count"
+          |> Yojson.Safe.Util.to_int);
+       check int
+         "operator resume ledger reaction counted"
+         1
+         (resumed_summary
+          |> Yojson.Safe.Util.member "operator_escalation_count"
+          |> Yojson.Safe.Util.to_int);
        (match resumed_meta.runtime.last_blocker with
         | None -> ()
         | Some _ -> fail "expected no_progress meta blocker to clear");

@@ -25,6 +25,14 @@ let requeue_missing_front queue stimuli =
   Keeper_event_queue.prepend_list missing queue
 ;;
 
+let uniq_stimuli stimuli =
+  List.fold_left
+    (fun acc stimulus -> if List.exists (( = ) stimulus) acc then acc else stimulus :: acc)
+    []
+    stimuli
+  |> List.rev
+;;
+
 let persist_live_queue ~base_path (entry : Keeper_registry.registry_entry) name =
   Keeper_event_queue_persistence.persist_snapshot
     ~base_path
@@ -100,6 +108,40 @@ let ack_consumed ~base_path name stimuli =
   | Ok () -> ()
   | Error msg ->
     Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg
+;;
+
+let drop_by_post_id ~base_path name ~post_id =
+  let drop_persisted () =
+    match
+      Keeper_event_queue_persistence.drop_by_post_id
+        ~base_path
+        ~keeper_name:name
+        ~post_id
+    with
+    | Ok stimuli -> stimuli
+    | Error msg ->
+      Log.Keeper.warn
+        "registry: drop_by_post_id failed name=%s post_id=%s: %s"
+        name
+        post_id
+        msg;
+      []
+  in
+  match Keeper_registry.get ~base_path name with
+  | None -> drop_persisted ()
+  | Some entry ->
+    let rec loop () =
+      let cur = Atomic.get entry.event_queue in
+      let removed, next = Keeper_event_queue.remove_by_post_id post_id cur in
+      if removed = []
+      then removed
+      else if Atomic.compare_and_set entry.event_queue cur next
+      then (
+        persist_live_queue ~base_path entry name;
+        removed)
+      else loop ()
+    in
+    uniq_stimuli (loop () @ drop_persisted ())
 ;;
 
 let snapshot ~base_path name =

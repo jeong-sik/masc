@@ -177,6 +177,14 @@ let () =
     ~label:"MR2: incident reference in _respond.ml"
     mcp_respond_src
     "2026-05-05 OAS cancel race";
+  assert_contains
+    ~label:"MR3: SSE register error helper emits fresh session id"
+    mcp_respond_src
+    "let new_session_id = Mcp_session.generate ()";
+  assert_contains
+    ~label:"MR4: SSE register error responds Not_found before stream open"
+    mcp_respond_src
+    "Httpun.Response.create ~headers `Not_found";
 
   (* ---- lib/server/server_mcp_transport_http.ml -------------------------- *)
   let mcp_http_src =
@@ -216,6 +224,40 @@ let () =
           safe_respond_with_string try body). Regression: 2026-05-05 cycle9 \
           FATAL."
          direct_count);
+
+  let generic_sse_register_error_count =
+    count_occurrences mcp_http_src
+      "respond_sse_register_error ~deps ~origin ~protocol_version reqd msg"
+  in
+  if generic_sse_register_error_count <> 1 then
+    failwith
+      (Printf.sprintf
+         "[MT4] expected generic SSE register failure to use \
+          respond_sse_register_error exactly once before opening a 200 stream; \
+          found %d"
+         generic_sse_register_error_count);
+
+  (* ---- lib/server/server_mcp_transport_http_agui.ml --------------------- *)
+  let mcp_agui_src =
+    resolve_path
+      [ Filename.concat project_root
+          "lib/server/server_mcp_transport_http_agui.ml"
+      ; "lib/server/server_mcp_transport_http_agui.ml"
+      ; "../lib/server/server_mcp_transport_http_agui.ml"
+      ]
+    |> read_file
+  in
+
+  let agui_sse_register_error_count =
+    count_occurrences mcp_agui_src
+      "respond_sse_register_error ~deps ~origin ~protocol_version reqd msg"
+  in
+  if agui_sse_register_error_count <> 2 then
+    failwith
+      (Printf.sprintf
+         "[AG1] expected observer and presence SSE register failures to use \
+          respond_sse_register_error before opening 200 streams; found %d"
+         agui_sse_register_error_count);
 
   (* ---- lib/server/server_routes_http_keeper_stream.ml ------------------- *)
   let keeper_stream_src =

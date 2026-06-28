@@ -546,6 +546,19 @@ let test_keeper_sandbox_args_rejected () =
         true
         (contains_substring ~needle:"network_mode" msg)
 
+let test_keeper_sandbox_args_allowed_for_dashboard_patch () =
+  let args =
+    `Assoc [ "sandbox_profile", `String "docker"; "network_mode", `String "none" ]
+  in
+  match
+    Masc.Keeper_config.reject_removed_keeper_input_keys
+      ~allow_sandbox_fields:true
+      ~tool_name:"dashboard_keeper_config_patch"
+      args
+  with
+  | Error msg -> Alcotest.failf "dashboard config patch should accept sandbox posture args: %s" msg
+  | Ok () -> ()
+
 let test_masc_keeper_msg_schema () =
   match find_registered_tool "masc_keeper_msg" with
   | None -> Alcotest.fail "masc_keeper_msg not found"
@@ -780,6 +793,8 @@ let () =
         test_masc_keeper_up_schema;
       Alcotest.test_case "keeper-sandbox-args-rejected" `Quick
         test_keeper_sandbox_args_rejected;
+      Alcotest.test_case "keeper-sandbox-args-dashboard-allowed" `Quick
+        test_keeper_sandbox_args_allowed_for_dashboard_patch;
       Alcotest.test_case "keeper-msg" `Quick
         test_masc_keeper_msg_schema;
       Alcotest.test_case "keeper-repair" `Quick

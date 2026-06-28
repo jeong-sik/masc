@@ -265,6 +265,24 @@ let test_gate_error_strings () =
   check string "internal" "internal error"
     (Gate_protocol.gate_error_to_string (Gate_protocol.Internal "details"))
 
+let check_status_parse label raw expected =
+  check
+    (option string)
+    label
+    (Option.map Gate_protocol.message_request_status_to_string expected)
+    (Option.map Gate_protocol.message_request_status_to_string
+       (Gate_protocol.message_request_status_of_string raw))
+
+let test_message_request_status_of_string () =
+  check_status_parse "accepted" "accepted" (Some Gate_protocol.Accepted);
+  check_status_parse "queued" "queued" (Some Gate_protocol.Queued);
+  check_status_parse "running" "running" (Some Gate_protocol.Running);
+  check_status_parse "done" "done" (Some Gate_protocol.Done);
+  check_status_parse "error" "error" (Some Gate_protocol.Failed);
+  check_status_parse "lost" "lost" (Some Gate_protocol.Lost);
+  check_status_parse "cancelled" "cancelled" (Some Gate_protocol.Cancelled);
+  check_status_parse "unknown fails closed" "finished" None
+
 let () =
   Alcotest.run "Gate_protocol"
     [
@@ -300,5 +318,7 @@ let () =
         [
           test_case "validation error strings" `Quick test_validation_error_strings;
           test_case "gate error strings" `Quick test_gate_error_strings;
+          test_case "message request status parse" `Quick
+            test_message_request_status_of_string;
         ] );
     ]

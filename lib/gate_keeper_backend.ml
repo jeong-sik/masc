@@ -34,16 +34,6 @@ let non_empty_opt value =
   | "" -> None
   | trimmed -> Some trimmed
 
-let message_request_status_of_string = function
-  | "accepted" -> Gate_protocol.Accepted
-  | "queued" -> Gate_protocol.Queued
-  | "running" -> Gate_protocol.Running
-  | "done" -> Gate_protocol.Done
-  | "error" | "failed" -> Gate_protocol.Failed
-  | "lost" -> Gate_protocol.Lost
-  | "cancelled" -> Gate_protocol.Cancelled
-  | _ -> Gate_protocol.Accepted
-
 let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata body =
   Safe_ops.protect ~default:None (fun () ->
     let json = Yojson.Safe.from_string body in
@@ -52,19 +42,17 @@ let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata
       | None -> None
       | Some value -> non_empty_opt value
     in
-    match request_id with
-    | None -> None
-    | Some request_id ->
+    let status =
+      Json_util.get_string json "status"
+      |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
+      |> Option.bind Gate_protocol.message_request_status_of_string
+    in
+    match request_id, status with
+    | Some request_id, Some status ->
         let destination_id =
           match Json_util.get_string json "keeper_name" with
           | Some value -> Option.value (non_empty_opt value) ~default:keeper_name
           | None -> keeper_name
-        in
-        let status =
-          Json_util.get_string json "status"
-          |> Option.value ~default:"accepted"
-          |> String.lowercase_ascii
-          |> message_request_status_of_string
         in
         let request : Gate_protocol.message_request =
           { request_id
@@ -78,7 +66,8 @@ let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata
           ; metadata = ("status_source", "keeper_msg_async") :: metadata
           }
         in
-        Some request)
+        Some request
+    | _ -> None)
 
 let in_flight_metadata (info : Keeper_turn_admission.in_flight_info option) =
   match info with

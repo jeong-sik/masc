@@ -1450,6 +1450,59 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
 ;;
 
+let test_librarian_runtime_keeps_nonempty_fallback_across_empty_retries () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let keeper_id = "runtime-librarian-fallback-empty-retry-keeper" in
+        let calls = ref 0 in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          incr calls;
+          if !calls = 1
+          then Ok (fake_response "first invalid librarian payload")
+          else Ok (fake_response "")
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-runtime-fallback-empty-retry"
+          ; generation = 10
+          ; messages =
+              [ text_message "Please remember fallback evidence across retries." ]
+          }
+        in
+        match
+          Librarian_runtime.extract_and_append_with_provider_classified
+            ~complete
+            ~clock
+            ~timeout_sec:1.0
+            ~sw
+            ~net
+            ~keeper_id
+            ~provider_cfg:(test_provider_cfg ())
+            inp
+        with
+        | Error err ->
+          Alcotest.fail
+            (Printf.sprintf
+               "expected non-empty first response to be preserved, got %s"
+               (Librarian_runtime.extraction_error_to_string err))
+        | Ok extraction ->
+          Alcotest.(check int)
+            "initial invalid response + empty retries"
+            (1 + Librarian_runtime.librarian_max_parse_retries)
+            !calls;
+          (match extraction.Librarian_runtime.kind with
+           | Librarian_runtime.Unstructured_fallback -> ()
+           | Librarian_runtime.Structured_episode ->
+             Alcotest.fail "expected unstructured fallback extraction");
+          (match extraction.Librarian_runtime.episode.Types.claims with
+           | [ fact ] ->
+             Alcotest.(check bool)
+               "fallback claim keeps first non-empty provider text"
+               true
+               (contains "first invalid librarian payload" fact.Types.claim)
+           | facts -> Alcotest.failf "expected one fallback fact, got %d" (List.length facts)))))
+;;
+
 let test_librarian_unstructured_fallback_uses_exact_text_identity () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
@@ -5411,6 +5464,10 @@ let () =
             "unparseable output is preserved as unstructured fallback"
             `Quick
             test_librarian_runtime_preserves_unstructured_fallback
+        ; Alcotest.test_case
+            "non-empty fallback evidence survives empty retries"
+            `Quick
+            test_librarian_runtime_keeps_nonempty_fallback_across_empty_retries
         ; Alcotest.test_case
             "unstructured fallback uses exact-text identity"
             `Quick

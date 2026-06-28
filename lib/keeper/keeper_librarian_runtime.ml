@@ -1,6 +1,14 @@
 (** Runtime adapter for Memory OS librarian extraction. *)
 
-let librarian_max_tokens = 1024
+(* Cap on the librarian extraction output, applied as
+   [min provider_cfg.max_tokens librarian_max_tokens] at the complete call
+   (see [extract] below). The previous fixed cap of 1024 truncated episode
+   JSON mid-object whenever the summary plus facts exceeded ~1024 output
+   tokens, surfacing as "invalid_json: Unexpected end of input" and an
+   unstructured fallback every turn. 4096 covers realistic episode payloads
+   while staying well under the JSON-capable model context budget; tunable
+   via Env_config.KeeperMemoryOs. *)
+let librarian_max_tokens = Env_config.KeeperMemoryOs.librarian_max_tokens_default
 
 (* Memory extraction runs against a JSON-capable model with a long context
    window and is not constrained by the generic inference API budget (30s).

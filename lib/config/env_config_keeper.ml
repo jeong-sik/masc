@@ -195,6 +195,7 @@ module KeeperMemoryOs = struct
   let librarian_cadence_turns_default = 3
   let librarian_max_messages_default = 24
   let librarian_timeout_sec_default = 600.0
+  let librarian_max_tokens_default = 4096
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true

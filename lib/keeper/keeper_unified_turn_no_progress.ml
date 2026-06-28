@@ -1,19 +1,8 @@
-(** No-progress loop recovery helpers for the unified keeper turn. *)
+(** No-progress loop pause helpers for the unified keeper turn. *)
 
 let failure_reason_code = "no_progress_loop"
 
 let recovery_post_id ~keeper_name = "no-progress-loop:" ^ keeper_name
-
-(* RFC-0020: the no-progress recovery stimulus carries no data — the consumer
-   only branches on the kind. streak/threshold are recorded in the failure
-   reason / blocker detail by the caller, not in the stimulus payload. *)
-let recovery_stimulus ~now ~keeper_name =
-  { Keeper_event_queue.post_id = recovery_post_id ~keeper_name
-  ; urgency = Keeper_event_queue.Immediate
-  ; arrived_at = now
-  ; payload = Keeper_event_queue.No_progress_recovery
-  }
-;;
 
 let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   let detail =
@@ -36,25 +25,6 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
     ~base_path:config.base_path
     meta.Keeper_meta_contract.name
     (Some failure_reason);
-  let stimulus =
-    recovery_stimulus ~now:(Time_compat.now ()) ~keeper_name:meta.name
-  in
-  Keeper_registry_event_queue.enqueue
-    ~base_path:config.base_path
-    meta.name
-    stimulus;
-  (try
-     Keeper_reaction_ledger.record_event_queue_stimulus
-       ~base_path:config.base_path
-       ~keeper_name:meta.name
-       stimulus
-   with
-   | Eio.Cancel.Cancelled _ as exn -> raise exn
-   | exn ->
-     Log.Keeper.warn
-       "%s: failed to persist no-progress recovery stimulus in reaction ledger: %s"
-       meta.name
-         (Printexc.to_string exn));
   let blocked_meta =
     Keeper_meta_contract.map_runtime
     (fun rt ->
@@ -79,20 +49,20 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
       "%s: no_progress loop escalated to blocker and operator-resume pause \
        (streak=%d threshold=%d)"
       meta.name
-      streak
-      threshold;
-    paused_meta
+	      streak
+	      threshold;
+	    paused_meta
   | Error pause_err ->
-    (* RFC-0246 P2: this is the no-progress pause-fallback wake. If pause sync
-       failed we used to wake the keeper as a recovery stimulus — but at this
-       point the keeper is already latched in a no-progress loop, so re-waking
-       just reruns the same empty turn (pause-fail -> wake -> no-progress ->
-       pause-fail). Pass [~bypass_tombstone:false] so a latched keeper stays
-       blocked instead of self-waking forever; an operator can force-resume. *)
+    (* RFC-0246 P2: a latched keeper must not receive a synthetic
+       no-progress recovery wake. The stimulus carries no actionable data, so
+       queuing it after a failed pause just lets the event-queue override force
+       another empty turn (pause-fail -> queue -> no-progress -> pause-fail).
+       Pass [~bypass_tombstone:false] so an automatic wake stays suppressed;
+       an operator can still force-resume. *)
     Keeper_registry.wakeup ~bypass_tombstone:false ~base_path:config.base_path meta.name;
     Log.Keeper.error
-      "%s: no_progress loop pause sync failed: %s; recovery stimulus queued \
-       instead (streak=%d threshold=%d)"
+      "%s: no_progress loop pause sync failed: %s; automatic recovery wake \
+       suppressed (streak=%d threshold=%d)"
       meta.name
       pause_err
       streak

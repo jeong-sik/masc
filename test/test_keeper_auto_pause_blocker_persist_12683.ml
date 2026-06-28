@@ -248,14 +248,22 @@ let test_no_progress_loop_detection_pauses_keeper () =
          check bool "registry meta paused" true entry.Masc.Keeper_registry.meta.paused;
          (match entry.Masc.Keeper_registry.last_failure_reason with
           | Some (Masc.Keeper_registry.Provider_runtime_error { code; _ }) ->
-            check
-              string
-              "registry no-progress failure code"
-              Masc.Keeper_unified_turn_no_progress.failure_reason_code
-              code
-          | Some _ -> fail "expected no_progress provider-runtime failure reason"
-          | None -> fail "expected no_progress failure reason")
-       | None -> fail "expected registered keeper")
+	            check
+	              string
+	              "registry no-progress failure code"
+	              Masc.Keeper_unified_turn_no_progress.failure_reason_code
+	              code
+	          | Some _ -> fail "expected no_progress provider-runtime failure reason"
+	          | None -> fail "expected no_progress failure reason");
+	         check
+	           bool
+	           "no-progress pause does not queue synthetic recovery stimulus"
+	           true
+	           (Masc.Keeper_event_queue.is_empty
+	              (Masc.Keeper_registry_event_queue.snapshot
+	                 ~base_path:config.base_path
+	                 keeper_name))
+	       | None -> fail "expected registered keeper")
 
 let test_operator_resume_clears_no_progress_loop_latch () =
   Eio_main.run

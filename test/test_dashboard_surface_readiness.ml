@@ -167,10 +167,16 @@ let test_live_spotcheck_keeps_script_values_as_scripts () =
            check string "live_spotcheck kind" "script"
              Yojson.Safe.Util.(ref_json |> member "kind" |> to_string))
 
-let test_redirect_only_cognition_is_not_readiness_surface () =
+let test_cognition_drilldown_is_hidden_diagnostic_surface () =
   let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.cognition" () in
-  let surfaces = Yojson.Safe.Util.(json |> member "surfaces" |> to_list) in
-  check int "redirect-only surface omitted" 0 (List.length surfaces)
+  let surfaces = load_surface_contracts_from_json json in
+  match surfaces with
+  | [ surface ] ->
+      check string "surface id" "monitoring.cognition" surface.id;
+      check string "exposure_status" "diagnostic" surface.exposure_status;
+      check bool "hidden_from_nav" true surface.hidden_from_nav;
+      check bool "meets_main_gate" false surface.meets_main_gate
+  | _ -> fail "expected one cognition diagnostic surface"
 
 let test_runtime_readiness_uses_provider_read_model () =
   let json = Dashboard_surface_readiness.json ~surface_id:"monitoring.runtime" () in
@@ -290,6 +296,8 @@ let test_hidden_diagnostic_surfaces_are_not_main_gate () =
       "cockpit";
       "monitoring.transport-health";
       "monitoring.feature-health";
+      "monitoring.journey";
+      "monitoring.cognition";
       "workspace.board";
       "workspace.sub-boards";
       "workspace.moderation";
@@ -308,8 +316,8 @@ let () =
             test_live_spotcheck_serializes_route_values_as_routes;
           test_case "script live spotchecks stay scripts" `Quick
             test_live_spotcheck_keeps_script_values_as_scripts;
-          test_case "redirect-only cognition is not readiness surface" `Quick
-            test_redirect_only_cognition_is_not_readiness_surface;
+          test_case "cognition drilldown is hidden diagnostic surface" `Quick
+            test_cognition_drilldown_is_hidden_diagnostic_surface;
           test_case "runtime readiness uses provider read model" `Quick
             test_runtime_readiness_uses_provider_read_model;
           test_case "code ide readiness uses ide presence read model" `Quick

@@ -241,6 +241,37 @@ let test_user_message_of_network_errors () =
     (AE.user_message_of_sdk_error guardrail)
 ;;
 
+let test_user_message_of_masc_accept_rejected () =
+  let err =
+    KTD.sdk_error_of_masc_internal_error
+      (KTD.Accept_rejected
+         { scope = "runpod_fable5.gemma4-coder-fable5"
+         ; model = None
+         ; reason_kind = Some KTD.Accept_no_usable_progress
+         ; response_shape = Some KTD.Accept_response_empty
+         ; last_tool_effect = None
+         ; any_mutating_tool = None
+         ; tool_effects_seen = []
+         ; reason =
+             "response rejected by accept (runtime=runpod_fable5.gemma4-coder-fable5): \
+              shape=empty; stop_reason=end_turn"
+         })
+  in
+  let message = AE.user_message_of_sdk_error err in
+  Alcotest.(check string)
+    "accept rejection user message"
+    "Provider returned an empty assistant turn for runtime runpod_fable5.gemma4-coder-fable5; no text or tool progress was produced."
+    message;
+  Alcotest.(check bool)
+    "message hides SDK internal wrapper"
+    false
+    (String_util.contains_substring_ci message "Internal error");
+  Alcotest.(check bool)
+    "message hides structured payload prefix"
+    false
+    (String_util.contains_substring_ci message "[masc_oas_error]")
+;;
+
 let test_ollama_session_limit_is_hard_quota () =
   let message =
     "you (yousleepwhen) have reached your session usage limit, add extra usage: \
@@ -614,6 +645,10 @@ let () =
             "network errors are presented as runtime availability failures"
             `Quick
             test_user_message_of_network_errors
+        ; Alcotest.test_case
+            "structured accept rejection is presented without internal wrapper"
+            `Quick
+            test_user_message_of_masc_accept_rejected
         ] )
     ; ( "runtime quota guard"
       , [ Alcotest.test_case

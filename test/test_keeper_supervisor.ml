@@ -1017,13 +1017,13 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
   check (float 0.001) "keepalive denial metric increments"
     (keepalive_denials_before +. 1.0)
     (denial_count "keepalive");
-  let supervisor_denials_before = denial_count supervisor_agent_name in
+  let supervisor_denials_before = denial_count "supervisor" in
   Sup.supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
   check bool "supervisor denial does not register keeper" false
     (Reg.is_registered ~base_path:config.base_path name);
   check (float 0.001) "supervisor denial metric increments"
     (supervisor_denials_before +. 1.0)
-    (denial_count supervisor_agent_name);
+    (denial_count "supervisor");
   check (float 0.001) "spawn denial does not fork heartbeat" fork_before (fork_total ())
 
 let test_active_supervision_keeper_count_uses_current_entries () =
@@ -1678,9 +1678,9 @@ let test_max_restarts_exhaustion_preserves_current_task_when_owned_task_query_fa
       in
       Reg.restore_supervisor_state ~base_path:config.base_path name
         ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
-      let oc = open_out (Masc.Workspace.backlog_path config) in
-      output_string oc "{ not valid json";
-      close_out oc;
+      let backlog_path = Masc.Workspace.backlog_path config in
+      write_file backlog_path "{ not valid json";
+      write_file (backlog_path ^ ".last-good") "{ not valid json";
       let ctx : _ Keeper_types_profile.context =
         {
           config;

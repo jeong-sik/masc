@@ -161,6 +161,14 @@ let schedule_ready_meta () =
   }
 ;;
 
+let run_reasons d =
+  match d.WO.verdict with
+  | WO.Run { reasons = first, rest } -> first :: rest
+  | WO.Skip _ -> []
+;;
+
+let has_run_reason reason d = List.exists (( = ) reason) (run_reasons d)
+
 (* Core invariant (PR #21685): a warm keeper with no signal and no backlog
    stays silent. The removed [Entropic_oscillation] trigger was the only path
    that ran a turn in this state; deleting it makes [should_run] deterministically
@@ -196,9 +204,39 @@ let test_scheduled_automation_attention_runs_after_task_cooldown () =
   in
   check bool "scheduled automation attention runs" true d.should_run;
   check bool "reason includes scheduled_automation_due" true
-    (List.mem
-       "scheduled_automation_due"
-       (WO.verdict_reasons_to_strings d.verdict))
+    (has_run_reason WO.Scheduled_automation_due d)
+
+let test_bootstrap_event_queue_trigger_runs_warm_keeper () =
+  let meta = warm_meta () in
+  let d =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:no_provider_cooldown
+      ~reactive_wake:false
+      ~event_queue_triggers:[ WO.Bootstrap_stimulus ]
+      ~meta
+      no_signal_obs
+  in
+  check bool "bootstrap event queue trigger runs" true d.should_run;
+  check bool "bootstrap trigger stays reactive" true
+    (match d.channel with
+     | WO.Reactive -> true
+     | WO.Scheduled_autonomous -> false);
+  check bool "reason includes bootstrap stimulus" true
+    (has_run_reason WO.Bootstrap_stimulus_pending d)
+
+let test_no_progress_event_queue_trigger_runs_warm_keeper () =
+  let meta = warm_meta () in
+  let d =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:no_provider_cooldown
+      ~reactive_wake:false
+      ~event_queue_triggers:[ WO.No_progress_recovery_stimulus ]
+      ~meta
+      no_signal_obs
+  in
+  check bool "no-progress event queue trigger runs" true d.should_run;
+  check bool "reason includes no-progress stimulus" true
+    (has_run_reason WO.No_progress_recovery_stimulus_pending d)
 
 let () = init_runtime_default_for_tests ()
 
@@ -218,6 +256,14 @@ let () =
             "scheduled automation attention runs after task cooldown"
             `Quick
             test_scheduled_automation_attention_runs_after_task_cooldown
+        ; test_case
+            "bootstrap event queue trigger runs warm keeper"
+            `Quick
+            test_bootstrap_event_queue_trigger_runs_warm_keeper
+        ; test_case
+            "no-progress event queue trigger runs warm keeper"
+            `Quick
+            test_no_progress_event_queue_trigger_runs_warm_keeper
         ] )
     ]
 ;;

@@ -522,6 +522,23 @@ let test_store_rejects_live_aliases () =
       | Ok _ -> fail (name ^ " should be rejected as a live-store alias"))
     cases
 
+let test_store_rejects_live_alias_with_relative_base () =
+  let cwd = tmpdir () in
+  let base_path = Cal.absolute_workspace_base_path ~cwd "repo" in
+  match
+    Cal.resolve_record_verdicts_store ~cwd:base_path
+      ~record_verdicts:true
+      ~verdict_store_dir:(Some "data/verdicts")
+      ~live_store_dir:(Some (Filename.concat base_path "data/verdicts"))
+      ()
+  with
+  | Error msg ->
+    check bool "mentions live store" true (contains ~sub:"live" msg);
+    check bool "base path is absolute" false (Filename.is_relative base_path)
+  | Ok _ ->
+    fail
+      "expected relative --base plus relative live verdict dir to be rejected"
+
 let test_store_rejects_live_child () =
   let child = Filename.concat live_store "eval-scratch" in
   match
@@ -656,6 +673,8 @@ let () =
       test_case "rejects empty store dir" `Quick test_store_rejects_empty_dir;
       test_case "rejects live store" `Quick test_store_rejects_live;
       test_case "rejects live store aliases" `Quick test_store_rejects_live_aliases;
+      test_case "rejects relative-base live alias" `Quick
+        test_store_rejects_live_alias_with_relative_base;
       test_case "rejects live store child" `Quick test_store_rejects_live_child;
       test_case "accepts isolated" `Quick test_store_accepts_isolated;
       test_case "no live store -> no collision" `Quick test_store_no_live_no_collision;

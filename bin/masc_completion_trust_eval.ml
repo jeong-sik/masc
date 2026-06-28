@@ -497,10 +497,10 @@ let print_corpus (scenarios : EH.scenario list) =
 ;;
 
 let resolve_base = function
-  | Some p -> p
+  | Some p -> Cal.absolute_workspace_base_path p
   | None -> (
     match Config_dir_resolver.current_env_base_path_opt () with
-    | Some p -> p
+    | Some p -> Cal.absolute_workspace_base_path p
     | None ->
       error "no workspace base path: set MASC_BASE_PATH or pass --base PATH")
 ;;

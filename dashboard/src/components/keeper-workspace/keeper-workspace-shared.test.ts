@@ -133,8 +133,8 @@ describe('WorkspaceSigil', () => {
     render(html`<${WorkspaceSigil} id="masc-improver" size=${46} />`, host)
     const el = host.querySelector('.kw-sigil') as HTMLElement
     expect(el).toBeTruthy()
-    expect(el.textContent).toBe('MS') // canonical sigil for masc-improver
-    expect(el.style.background).toContain('--color-keeper-6') // canonical slot 6
+    expect(el.textContent).toBe('MI')
+    expect(el.style.background).toContain('--color-keeper-7') // based on new hash12
     expect(el.style.width).toBe('46px')
   })
 })

@@ -93,7 +93,7 @@ describe('IdeExplorer tree row keyboard accessibility', () => {
       container.querySelectorAll<HTMLElement>('[role="treeitem"]'),
     ).find(el => el.textContent?.includes('router.ts'))
 
-    expect(keeperOwnedRow?.textContent).toContain('NK')
+    expect(keeperOwnedRow?.textContent).toContain('NI')
     expect(keeperOwnedRow?.textContent).toContain('router.ts')
   })
 

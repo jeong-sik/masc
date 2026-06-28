@@ -12,7 +12,8 @@ type t
     sweep can exclude active tool execution from the no-progress window.
     Defaults to a no-op. *)
 val create :
-  ?on_pending_count_change:(int -> unit)
+  ?event_bus:Agent_sdk.Event_bus.t
+  -> ?on_pending_count_change:(int -> unit)
   -> keeper_name:string
   -> turn_id:int
   -> unit

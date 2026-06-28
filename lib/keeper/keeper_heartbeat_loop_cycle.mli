@@ -1,7 +1,8 @@
 (** Keeper cycle execution with error-class handling. *)
 
 val run_keeper_cycle
-  :  ctx:_ Keeper_types_profile.context
+  :  ?event_bus:Agent_sdk.Event_bus.t
+  -> ctx:_ Keeper_types_profile.context
   -> meta_after_triage:Keeper_meta_contract.keeper_meta
   -> stop:bool Atomic.t
   -> obs:Keeper_world_observation.world_observation

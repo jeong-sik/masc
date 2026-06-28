@@ -27,6 +27,7 @@ let run_keeper_cycle
       ~(generation : int)
       ?(channel : Keeper_world_observation.keeper_cycle_channel = Scheduled_autonomous)
       ?shared_context
+      ?event_bus
       ()
   : (keeper_meta, Agent_sdk.Error.sdk_error) result
   =
@@ -324,6 +325,7 @@ let run_keeper_cycle
                in
                let turn_event_bus_state =
                  Keeper_unified_turn_event_bus.create
+                   ?event_bus
                  (* RFC-0197 P1-4a: mirror the in-flight tool count into the
                     live turn_observation so the supervisor sweep excludes
                     active tool execution from the no-progress window. *)
@@ -466,6 +468,7 @@ let run_keeper_cycle
                            ; committed_mutating_tools_snapshot
                            ; config
                            ; drain_turn_event_bus
+                           ; event_bus
                            ; event_bus_integrity_error_snapshot
                            ; generation
                            ; keeper_turn_id

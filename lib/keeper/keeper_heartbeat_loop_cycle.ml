@@ -44,6 +44,7 @@ module Observations = Keeper_heartbeat_loop_observations
    inside the slot for the same reason as the chat lane: a concurrent turn
    must not interleave with this lane's meta writes (RFC-0225 §1). *)
 let run_keeper_cycle_admitted
+      ?event_bus
       ~ctx
       ~meta_after_triage
       ~stop
@@ -61,6 +62,7 @@ let run_keeper_cycle_admitted
         ~generation:meta_after_triage.runtime.generation
         ~channel:turn_decision.channel
         ~shared_context
+        ?event_bus
         ())
   with
   | Error err ->
@@ -126,6 +128,7 @@ let run_keeper_cycle_admitted
 ;;
 
 let run_keeper_cycle
+      ?event_bus
       ~ctx
       ~meta_after_triage
       ~stop
@@ -144,7 +147,8 @@ let run_keeper_cycle
          ~stop
          ~obs
          ~turn_decision
-         ~shared_context)
+         ~shared_context
+         ?event_bus)
   with
   | `Ran updated -> updated
   | `Busy in_flight ->

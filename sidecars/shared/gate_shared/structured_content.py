@@ -224,6 +224,37 @@ def structured_plain_text(structured: dict[str, Any] | None) -> str:
     return "\n\n".join(parts)
 
 
+def _message_request_text(response: GateResponse) -> str:
+    request = response.message_request
+    if not isinstance(request, dict):
+        return ""
+
+    status = str(request.get("status", "")).strip().lower()
+    if not status:
+        return ""
+    keeper = str(request.get("destination_id") or response.keeper_name or "keeper")
+    request_id = str(request.get("request_id", "")).strip()
+    metadata = request.get("metadata")
+    in_flight_lane = ""
+    if isinstance(metadata, dict):
+        in_flight_lane = str(metadata.get("in_flight_lane", "")).strip()
+
+    if status in {"accepted", "queued"}:
+        state = "queued"
+    elif status == "running":
+        state = "running"
+    else:
+        state = status
+
+    id_text = f" (request_id={request_id})" if request_id else ""
+    lane_text = f" Current turn: {in_flight_lane}." if in_flight_lane else ""
+    return f"{keeper} is busy; your message is {state}{id_text}.{lane_text}"
+
+
 def response_text(response: GateResponse) -> str:
     """Return the renderable response body independent of reply vs structured shape."""
-    return structured_plain_text(response.structured) or response.reply
+    return (
+        structured_plain_text(response.structured)
+        or _message_request_text(response)
+        or response.reply
+    )

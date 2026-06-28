@@ -38,9 +38,30 @@ module Http = Http_server_eio
     {[
       {
         "ok": true,
-        "keeper_name": "luna",
+        "destination_id": "luna",
         "reply": "The project is on track...",
         "turn_stats": { "model_used": null, "duration_ms": 1234, "tokens_used": 567 }
+      }
+    ]}
+
+    Response (accepted while keeper is busy):
+    {[
+      {
+        "ok": true,
+        "destination_id": "luna",
+        "reply": "luna is busy; your message is queued (request_id=luna-abc123).",
+        "turn_stats": { "model_used": null, "duration_ms": 8, "tokens_used": 0 },
+        "message_request": {
+          "request_id": "luna-abc123",
+          "destination_type": "keeper",
+          "destination_id": "luna",
+          "channel": "discord",
+          "actor_id": "123456789",
+          "status": "queued",
+          "modalities": ["text"],
+          "transport": "discord",
+          "metadata": { "status_source": "keeper_msg_async" }
+        }
       }
     ]}
 

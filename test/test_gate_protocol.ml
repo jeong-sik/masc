@@ -183,6 +183,7 @@ let test_outbound_emits_destination_id () =
     content = "hi";
     structured = None;
     turn_stats = None;
+    message_request = None;
   } in
   let json = Gate_protocol.outbound_to_json out in
   let open Yojson.Safe.Util in
@@ -198,6 +199,7 @@ let test_outbound_to_json_roundtrip () =
     content = "reply text";
     structured = None;
     turn_stats = Some { model_used = "m1"; duration_ms = 100; tokens_used = 50 };
+    message_request = None;
   } in
   let json = Gate_protocol.outbound_to_json out in
   let open Yojson.Safe.Util in
@@ -207,6 +209,37 @@ let test_outbound_to_json_roundtrip () =
   let stats = json |> member "turn_stats" in
   check bool "model redacted" true (stats |> member "model_used" = `Null);
   check int "duration" 100 (stats |> member "duration_ms" |> to_int)
+
+let test_outbound_to_json_includes_message_request () =
+  let request : Gate_protocol.message_request =
+    {
+      request_id = "req-123";
+      destination_type = "keeper";
+      destination_id = "luna";
+      channel = "slack";
+      actor_id = Some "U123";
+      status = Gate_protocol.Queued;
+      modalities = [ "text" ];
+      transport = Some "slack";
+      metadata = [ ("status_source", "keeper_msg_async") ];
+    }
+  in
+  let out : Gate_protocol.outbound_message = {
+    keeper_name = "luna";
+    content = "luna is busy; your message is queued (request_id=req-123).";
+    structured = None;
+    turn_stats = None;
+    message_request = Some request;
+  } in
+  let json = Gate_protocol.outbound_to_json out in
+  let open Yojson.Safe.Util in
+  let request_json = json |> member "message_request" in
+  check string "request id" "req-123"
+    (request_json |> member "request_id" |> to_string);
+  check string "status" "queued"
+    (request_json |> member "status" |> to_string);
+  check string "destination id" "luna"
+    (request_json |> member "destination_id" |> to_string)
 
 let test_error_json () =
   let json = Gate_protocol.error_json "something broke" in
@@ -231,6 +264,24 @@ let test_gate_error_strings () =
     (Gate_protocol.gate_error_to_string Gate_protocol.Dispatch_unavailable);
   check string "internal" "internal error"
     (Gate_protocol.gate_error_to_string (Gate_protocol.Internal "details"))
+
+let check_status_parse label raw expected =
+  check
+    (option string)
+    label
+    (Option.map Gate_protocol.message_request_status_to_string expected)
+    (Option.map Gate_protocol.message_request_status_to_string
+       (Gate_protocol.message_request_status_of_string raw))
+
+let test_message_request_status_of_string () =
+  check_status_parse "accepted" "accepted" (Some Gate_protocol.Accepted);
+  check_status_parse "queued" "queued" (Some Gate_protocol.Queued);
+  check_status_parse "running" "running" (Some Gate_protocol.Running);
+  check_status_parse "done" "done" (Some Gate_protocol.Done);
+  check_status_parse "error" "error" (Some Gate_protocol.Failed);
+  check_status_parse "lost" "lost" (Some Gate_protocol.Lost);
+  check_status_parse "cancelled" "cancelled" (Some Gate_protocol.Cancelled);
+  check_status_parse "unknown fails closed" "finished" None
 
 let () =
   Alcotest.run "Gate_protocol"
@@ -259,11 +310,15 @@ let () =
             test_inbound_of_json_rejects_keeper_name_only;
           test_case "outbound emits destination_id" `Quick test_outbound_emits_destination_id;
           test_case "outbound roundtrip" `Quick test_outbound_to_json_roundtrip;
+          test_case "outbound includes message_request" `Quick
+            test_outbound_to_json_includes_message_request;
           test_case "error_json" `Quick test_error_json;
         ] );
       ( "strings",
         [
           test_case "validation error strings" `Quick test_validation_error_strings;
           test_case "gate error strings" `Quick test_gate_error_strings;
+          test_case "message request status parse" `Quick
+            test_message_request_status_of_string;
         ] );
     ]

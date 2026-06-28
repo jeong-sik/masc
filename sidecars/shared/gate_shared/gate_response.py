@@ -22,6 +22,7 @@ class GateResponse:
     tokens_used: int
     error: str
     structured: dict[str, Any] | None
+    message_request: dict[str, Any] | None = None
 
     @staticmethod
     def from_json(data: dict[str, Any]) -> GateResponse:
@@ -31,6 +32,12 @@ class GateResponse:
         structured = (
             cast(dict[str, Any], raw_structured)
             if isinstance(raw_structured, dict)
+            else None
+        )
+        raw_message_request = data.get("message_request")
+        message_request = (
+            cast(dict[str, Any], raw_message_request)
+            if isinstance(raw_message_request, dict)
             else None
         )
         keeper_name = str(data.get("destination_id", ""))
@@ -43,6 +50,7 @@ class GateResponse:
             tokens_used=int(stats.get("tokens_used", 0)),
             error=str(data.get("error", "")),
             structured=structured,
+            message_request=message_request,
         )
 
     @staticmethod
@@ -56,4 +64,5 @@ class GateResponse:
             tokens_used=0,
             error=msg,
             structured=None,
+            message_request=None,
         )

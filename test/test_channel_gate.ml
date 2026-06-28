@@ -149,6 +149,7 @@ let mock_dispatch_ok ~channel:_ ~channel_user_id:_ ~channel_user_name:_
     content = "mock reply";
     structured = None;
     stats = Some { Gate_protocol.model_used = "test-model"; duration_ms = 42; tokens_used = 10 };
+    message_request = None;
   }
 
 let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~channel_user_name:_
@@ -158,6 +159,28 @@ let mock_dispatch_error ~channel:_ ~channel_user_id:_ ~channel_user_name:_
 let mock_dispatch_unavailable ~channel:_ ~channel_user_id:_ ~channel_user_name:_
     ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
   Gate_protocol.Unavailable_result
+
+let queued_request : Gate_protocol.message_request =
+  {
+    request_id = "req-queued";
+    destination_type = "keeper";
+    destination_id = "luna";
+    channel = "discord";
+    actor_id = Some "user-1";
+    status = Gate_protocol.Queued;
+    modalities = [ "text" ];
+    transport = Some "discord";
+    metadata = [ ("status_source", "keeper_msg_async") ];
+  }
+
+let mock_dispatch_queued ~channel:_ ~channel_user_id:_ ~channel_user_name:_
+    ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_ ~content:_ =
+  Gate_protocol.Reply
+    { content = "luna is busy; your message is queued (request_id=req-queued)."
+    ; structured = None
+    ; stats = None
+    ; message_request = Some queued_request
+    }
 
 let test_handle_inbound_success () =
   reset_dedup ();
@@ -169,6 +192,22 @@ let test_handle_inbound_success () =
       (match out.turn_stats with
        | Some s -> check string "model" "test-model" s.model_used
        | None -> fail "expected turn_stats")
+  | Error e -> fail (Channel_gate.gate_error_to_string e)
+
+let test_handle_inbound_surfaces_message_request () =
+  reset_dedup ();
+  let msg = make_message ~idempotency_key:(unique_key "dispatch-queued") () in
+  match Channel_gate.handle_inbound ~dispatch:mock_dispatch_queued msg with
+  | Ok out -> (
+      check string "reply content"
+        "luna is busy; your message is queued (request_id=req-queued)."
+        out.content;
+      match out.message_request with
+      | Some request ->
+          check string "request id" "req-queued" request.request_id;
+          check string "status" "queued"
+            (Gate_protocol.message_request_status_to_string request.status)
+      | None -> fail "expected message_request")
   | Error e -> fail (Channel_gate.gate_error_to_string e)
 
 let test_handle_inbound_keeper_error () =
@@ -209,6 +248,7 @@ let test_handle_inbound_passes_channel_context_to_dispatch () =
       content = "ok";
       structured = None;
       stats = None;
+      message_request = None;
     }
   in
   let msg =
@@ -238,7 +278,12 @@ let test_handle_inbound_passes_metadata_to_dispatch () =
   let dispatch ~channel:_ ~channel_user_id:_ ~channel_user_name:_
       ~channel_workspace_id:_ ~keeper_name:_ ~metadata ~content:_ =
     seen := Some metadata;
-    Gate_protocol.Reply { content = "ok"; structured = None; stats = None }
+    Gate_protocol.Reply
+      { content = "ok"
+      ; structured = None
+      ; stats = None
+      ; message_request = None
+      }
   in
   let msg =
     {
@@ -268,7 +313,12 @@ let test_handle_inbound_streaming_forwards_snapshot_callback () =
       ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_
       ~content:_ =
     on_text_snapshot "partial";
-    Gate_protocol.Reply { content = "ok"; structured = None; stats = None }
+    Gate_protocol.Reply
+      { content = "ok"
+      ; structured = None
+      ; stats = None
+      ; message_request = None
+      }
   in
   let msg =
     make_message ~idempotency_key:(unique_key "dispatch-stream") ()
@@ -291,7 +341,12 @@ let test_handle_inbound_streaming_validation_blocks_callback () =
       ~channel_user_name:_ ~channel_workspace_id:_ ~keeper_name:_ ~metadata:_
       ~content:_ =
     dispatch_called := true;
-    Gate_protocol.Reply { content = "ok"; structured = None; stats = None }
+    Gate_protocol.Reply
+      { content = "ok"
+      ; structured = None
+      ; stats = None
+      ; message_request = None
+      }
   in
   let msg =
     make_message ~content:"   "
@@ -338,6 +393,8 @@ let () =
         [
           test_case "dispatches and returns reply" `Quick
             test_handle_inbound_success;
+          test_case "surfaces message_request" `Quick
+            test_handle_inbound_surfaces_message_request;
           test_case "passes channel context to dispatch" `Quick
             test_handle_inbound_passes_channel_context_to_dispatch;
           test_case "passes metadata to dispatch" `Quick

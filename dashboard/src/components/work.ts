@@ -381,17 +381,17 @@ function TaskRow({ task, onClaim }: { task: Task; onClaim: (id: string) => void 
         </span>
         <span class="wk-spacer"></span>
         <span class=${`wk-task-state ${state.cls}`}>${state.label}</span>
-        ${keeper
+        ${task.assignee
           ? html`
             <button
               type="button"
-              class="wk-task-kp"
+              class=${`wk-task-kp${keeper ? '' : ' offline'}`}
               data-testid="job-keeper"
-              onClick=${(e: Event) => { e.stopPropagation(); openKeeperWorkspace(keeper.name) }}
-              title=${`${keeper.name} 대화 열기`}
+              onClick=${(e: Event) => { e.stopPropagation(); openKeeperWorkspace(task.assignee!) }}
+              title=${`${task.assignee} 대화 열기${keeper ? '' : ' (Offline)'}`}
             >
-              <${KeeperBadge} id=${keeper.name} size="sm" variant="sigil" />
-              <span class="mono">${keeper.name}</span>
+              <${KeeperBadge} id=${task.assignee} size="sm" variant="sigil" />
+              <span class="mono">${task.assignee}</span>
             </button>
           `
           : task.status === 'todo'
@@ -725,15 +725,15 @@ function KanbanCard({
       ${blocker ? html`<div class="wk-kcard-block">⚠ ${blocker}</div>` : null}
       ${hasDescription ? html`<p class="wk-kcard-desc">${description}</p>` : null}
       <div class="wk-kcard-foot">
-        ${keeper
+        ${task.assignee
           ? html`
             <button
               type="button"
-              class="wk-kcard-kp"
-              title=${`${keeper.name} 대화 열기`}
-              onClick=${(e: Event) => { e.stopPropagation(); openKeeperWorkspace(keeper.name) }}
+              class=${`wk-kcard-kp${keeper ? '' : ' offline'}`}
+              title=${`${task.assignee} 대화 열기${keeper ? '' : ' (Offline)'}`}
+              onClick=${(e: Event) => { e.stopPropagation(); openKeeperWorkspace(task.assignee!) }}
             >
-              <${KeeperBadge} id=${keeper.name} size="sm" variant="sigil" />
+              <${KeeperBadge} id=${task.assignee} size="sm" variant="sigil" />
             </button>
           `
           : task.status === 'todo'

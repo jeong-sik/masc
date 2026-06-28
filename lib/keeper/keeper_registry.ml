@@ -525,7 +525,8 @@ let clear_board_wakeups ~base_path name =
 ;;
 
 let cleanup_tracking ~base_path name =
-  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  let key = registry_key ~base_path name in
+  match StringMap.find_opt key (Atomic.get registry) with
   | Some entry ->
     (match
        put_entry
@@ -684,8 +685,8 @@ let compaction_stage_after_event entry event =
 ;;
 
 (** Registry mutation is still non-yielding (StringMap lookup + put,
-    Atomic.set). Transition side effects run only after [put_entry], so
-    observability and follow-up state transitions happen after the registry
+    Atomic.set). Entry actions run only after [put_entry], so any
+    observability or follow-up state transitions happen after the registry
     state is consistent. *)
 let rec dispatch_event_with_audit
           ~base_path
@@ -818,9 +819,7 @@ let rec dispatch_event_with_audit
                to_phase_str
                event_str);
           (* Record transition in audit ring buffer for dashboard API. *)
-          (* DET-OK: absent audit attribution falls back to the already-applied
-             dispatch event, so replay/control state is not inferred from this
-             projection-only record. *)
+          (* DET-OK: absent audit selection falls back to this dispatch event. *)
           let audit_events_fired = Option.value events_fired ~default:[ event ] in
           let audit_selected_event = Option.value selected_event ~default:event in
           Keeper_transition_audit.record_transition

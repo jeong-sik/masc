@@ -11,6 +11,7 @@ let key_to_env =
     "bootstrap.stale_turn_sec",         "MASC_KEEPER_BOOTSTRAP_STALE_TURN_SEC";
     "bootstrap.max_scan",               "MASC_KEEPER_BOOTSTRAP_MAX_SCAN";
     "bootstrap.max_active_keepers",     "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS";
+    "bootstrap.autoboot_max",           "MASC_KEEPER_AUTOBOOT_MAX";
     (* [autonomous] *)
     "autonomous.fairness_cooldown_sec", "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC";
     "autonomous.max_idle_turns",        "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS";

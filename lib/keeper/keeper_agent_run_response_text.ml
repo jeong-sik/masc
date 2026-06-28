@@ -77,11 +77,16 @@ let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
 ;;
 
 let finalize ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names
-      ~stop_reason ~raw_response_text
+      ~completion_contract_result ~stop_reason ~raw_response_text
       ()
   =
   let budget_exhausted = stop_reason_is_turn_budget_exhausted stop_reason in
-  let raw_response_text = if budget_exhausted then "" else raw_response_text in
+  let contract_requires_attention =
+    Keeper_execution_receipt.completion_contract_result_requires_attention
+      completion_contract_result
+  in
+  let suppress_response_text = budget_exhausted || contract_requires_attention in
+  let raw_response_text = if suppress_response_text then "" else raw_response_text in
   let state_snapshot, state_snapshot_source =
     state_snapshot
       ~reported_state_snapshot
@@ -97,6 +102,6 @@ let finalize ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_nam
   in
   { state_snapshot
   ; state_snapshot_source
-  ; response_text = if budget_exhausted then "" else response_text
+  ; response_text = if suppress_response_text then "" else response_text
   }
 ;;

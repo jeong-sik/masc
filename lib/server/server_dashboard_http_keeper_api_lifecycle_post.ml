@@ -83,10 +83,19 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       match Keeper_meta_store.read_meta config name with
       | Ok (Some meta) when Bool.equal meta.paused paused -> ()
       | Ok (Some meta) ->
+          let source_meta =
+            if paused then meta
+            else
+              Keeper_unified_turn_no_progress.clear_for_operator_resume
+                ~base_path:config.base_path
+                meta
+          in
           let updated_meta =
             {
-              meta with
+              source_meta with
               paused;
+              auto_resume_after_sec =
+                (if paused then source_meta.auto_resume_after_sec else None);
               updated_at = Keeper_meta_contract.now_iso ();
             }
           in

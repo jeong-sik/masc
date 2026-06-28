@@ -19,6 +19,24 @@ let sample_synthesis : Fusion_types.judge_synthesis =
   ; decision = Fusion_types.Answer "ok"
   }
 
+let sample_judge model : Fusion_policy.judge_spec =
+  { Fusion_policy.jmodel = model
+  ; jlabel = ""
+  ; jsystem_prompt = "judge"
+  ; jweb_tools = false
+  ; jmax_tool_calls = 0
+  ; jmax_output_tokens = None
+  ; jtimeout_s = 1.0
+  ; jmax_timeout_s = None
+  }
+
+let failed_judge_run model failure :
+    Fusion_orchestrator_judge_wave.judge_run =
+  sample_judge model, model, Error (failure, Fusion_types.zero_usage), 0.0, false
+
+let ok_judge_run model : Fusion_orchestrator_judge_wave.judge_run =
+  sample_judge model, model, Ok (sample_synthesis, sample_usage), 0.0, false
+
 let parse s = Otoml.Parser.from_string s
 
 let adaptive_toml =
@@ -173,6 +191,46 @@ let test_runtime_clock_missing_env_returns_typed_failure () =
         (Fusion_types.judge_failure_text failure)
     | Ok _ -> fail "expected missing clock failure")
 
+let test_timeout_budget_first_wave_appends_fallback () =
+  let fallback_calls = ref 0 in
+  let fallback = ok_judge_run "fallback-model" in
+  let runs =
+    [ failed_judge_run "judge-a" Fusion_types.Timeout
+    ; failed_judge_run
+        "judge-b"
+        (Fusion_types.Budget_exceeded "wave budget exhausted")
+    ]
+  in
+  let with_fallback =
+    Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
+      ~run_fallback_judge:(fun () ->
+        incr fallback_calls;
+        Some fallback)
+      runs
+  in
+  check int "fallback called once" 1 !fallback_calls;
+  check int "fallback appended" 3 (List.length with_fallback);
+  match List.rev with_fallback with
+  | (_, id, Ok _, _, _) :: _ -> check string "fallback id" "fallback-model" id
+  | _ -> fail "expected appended successful fallback"
+
+let test_timeout_budget_first_wave_skips_fallback_on_provider_error () =
+  let fallback_calls = ref 0 in
+  let runs =
+    [ failed_judge_run "judge-a" Fusion_types.Timeout
+    ; failed_judge_run "judge-b" (Fusion_types.Provider_error "hard failure")
+    ]
+  in
+  let without_fallback =
+    Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
+      ~run_fallback_judge:(fun () ->
+        incr fallback_calls;
+        Some (ok_judge_run "fallback-model"))
+      runs
+  in
+  check int "fallback not called" 0 !fallback_calls;
+  check int "original runs kept" 2 (List.length without_fallback)
+
 let test_record_adaptive_timeout_emits () =
   let before =
     Otel_metric_store.metric_value_or_zero
@@ -228,6 +286,12 @@ let () =
     ; ( "clock"
       , [ test_case "missing runtime env returns typed failure" `Quick
             test_runtime_clock_missing_env_returns_typed_failure
+        ] )
+    ; ( "fallback"
+      , [ test_case "timeout/budget wave appends fallback" `Quick
+            test_timeout_budget_first_wave_appends_fallback
+        ; test_case "provider failure skips fallback" `Quick
+            test_timeout_budget_first_wave_skips_fallback_on_provider_error
         ] )
     ; ( "metrics"
       , [ test_case "record_adaptive_timeout emits counter" `Quick

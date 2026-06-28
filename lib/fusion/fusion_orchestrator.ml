@@ -120,6 +120,9 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
           let all_fail_error_of_runs =
             Fusion_orchestrator_judge_wave.all_fail_error_of_runs
           in
+          let with_timeout_budget_fallback =
+            Fusion_orchestrator_judge_wave.with_timeout_budget_fallback
+          in
           let meta_budget_check () =
             Fusion_orchestrator_judge_wave.meta_budget_check ~preset clock
           in
@@ -145,24 +148,8 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
               , [] )
             | judges ->
               let firsts = run_first_judges judges in
-              let ok_priors = successful_syntheses firsts in
               let firsts_with_fallback =
-                match ok_priors with
-                | _ :: _ -> firsts
-                | [] ->
-                  if
-                    List.for_all
-                      (fun (_, _, result, _, _) ->
-                         match result with
-                         | Error (f, _) ->
-                           Fusion_types.judge_failure_is_timeout_or_budget f
-                         | Ok _ -> false)
-                      firsts
-                  then
-                    (match run_fallback_judge () with
-                     | Some fb -> firsts @ [ fb ]
-                     | None -> firsts)
-                  else firsts
+                with_timeout_budget_fallback ~run_fallback_judge firsts
               in
               let first_nodes = first_judge_nodes firsts_with_fallback in
               let ok_priors = successful_syntheses firsts_with_fallback in
@@ -237,7 +224,10 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                   , Fusion_types.zero_usage )
               , [] )
             | Ok _groups ->
-              let firsts = run_first_judges preset.Fusion_policy.judges in
+              let firsts =
+                run_first_judges preset.Fusion_policy.judges
+                |> with_timeout_budget_fallback ~run_fallback_judge
+              in
               let rec take n acc rest =
                 if n = 0
                 then (List.rev acc, rest)

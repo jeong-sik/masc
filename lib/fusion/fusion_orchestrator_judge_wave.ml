@@ -185,6 +185,21 @@ let all_fail_error_of_runs ~fallback runs =
     (List.map (fun (_, id, result, _, _) -> id, result) runs)
 ;;
 
+let failed_timeout_or_budget (_, _, result, _, _) =
+  match result with
+  | Error (failure, _) -> Fusion_types.judge_failure_is_timeout_or_budget failure
+  | Ok _ -> false
+;;
+
+let with_timeout_budget_fallback ~run_fallback_judge runs =
+  if runs <> [] && List.for_all failed_timeout_or_budget runs
+  then (
+    match run_fallback_judge () with
+    | Some fallback -> runs @ [ fallback ]
+    | None -> runs)
+  else runs
+;;
+
 let remaining_wave_budget ~preset clock =
   preset.Fusion_policy.judge_wave_budget_s -. elapsed_since_t0 clock
 ;;

@@ -156,7 +156,8 @@ val should_record_cadence_backoff : extraction_kind -> bool
 
 val should_record_cadence_backoff_after_error : extraction_error -> bool
 (** Whether an extraction error represents enough completed work to defer the
-    next attempt until the next cadence window. *)
+    next attempt until the next cadence window. Only completed provider-attempt
+    failures should defer cadence; local deterministic failures stay due. *)
 
 val should_preserve_unstructured_fallback : string -> bool
 (** Whether raw unparseable provider output is worth preserving as a diagnostic

@@ -240,7 +240,10 @@ let test_cadence_error_backoff_policy () =
   check bool "provider transport failure defers cadence" true
     (R.should_record_cadence_backoff_after_error
        (R.Provider_transport_failed "http timeout"));
-  check bool "fact upsert failure defers cadence" true
+  check bool "prompt render failure stays due" false
+    (R.should_record_cadence_backoff_after_error
+       (R.Prompt_render_failed "missing template"));
+  check bool "fact upsert failure stays due" false
     (R.should_record_cadence_backoff_after_error
        (R.Memory_fact_upsert_failed "permission denied"));
   check bool "missing provider clock does not claim a completed attempt" false

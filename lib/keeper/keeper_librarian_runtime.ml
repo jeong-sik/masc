@@ -432,12 +432,9 @@ let should_record_cadence_backoff = function
 ;;
 
 let should_record_cadence_backoff_after_error = function
-  | Provider_clock_unavailable -> false
-  | Prompt_render_failed _
-  | Provider_timeout
-  | Provider_transport_failed _
-  | Provider_empty_response
-  | Memory_fact_upsert_failed _ -> true
+  | Provider_timeout | Provider_transport_failed _ | Provider_empty_response -> true
+  | Provider_clock_unavailable | Prompt_render_failed _ | Memory_fact_upsert_failed _ ->
+    false
 ;;
 
 let should_preserve_unstructured_fallback raw =

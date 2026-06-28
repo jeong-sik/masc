@@ -61,6 +61,9 @@ module Compression = struct
     | Compression_codec.Compressed { payload; encoding } ->
         (payload, Some (Compression_codec.content_encoding encoding))
 
+  let compress_zstd_result ~original result =
+    Compression_codec.legacy_standard_result ~original result
+
   (** Legacy: Standard zstd without dictionary.
 
       The [bool] returned here tracks whether the caller should emit a

@@ -746,9 +746,110 @@ let blocked_keeper_action = function
 let blocked_keeper_action_label reason =
   reason |> blocked_keeper_action |> blocked_keeper_operator_action_to_string
 
+let blocked_keeper_operator_action = function
+  | Phase
+      ( Keeper_state_machine.Failing
+      | Keeper_state_machine.Crashed
+      | Keeper_state_machine.Restarting
+      | Keeper_state_machine.Dead ) ->
+      List.find_opt
+        (fun (action : Operator_pending_confirm.available_action) ->
+          String.equal action.action_type Operator_action_constants.keeper_recover)
+        Operator_pending_confirm.available_actions
+  | Durable_paused_autoboot_enabled
+  | Meta_read_error
+  | Not_bootable
+  | Boot_failure _
+  | Bootstrap_disabled
+  | Phase
+      ( Keeper_state_machine.Offline
+      | Keeper_state_machine.Running
+      | Keeper_state_machine.Overflowed
+      | Keeper_state_machine.Compacting
+      | Keeper_state_machine.HandingOff
+      | Keeper_state_machine.Draining
+      | Keeper_state_machine.Paused
+      | Keeper_state_machine.Stopped
+      | Keeper_state_machine.Zombie )
+  | Not_registered
+  | Not_running
+  | No_keeper_binding
+  | Unknown ->
+      None
+
+let blocked_keeper_operator_action_fields reason =
+  match blocked_keeper_operator_action reason with
+  | None ->
+      [
+        ("operator_action_type", `Null);
+        ("operator_tool_name", `Null);
+        ("operator_action_confirm_required", `Null);
+      ]
+  | Some action ->
+      [
+        ("operator_action_type", `String action.action_type);
+        ("operator_tool_name", `String action.tool_name);
+        ("operator_action_confirm_required", `Bool action.confirm_required);
+      ]
+
+let latest_crash_log_reason crash_log =
+  let latest =
+    List.fold_left
+      (fun acc (ts, reason) ->
+        let reason = String.trim reason in
+        if String.equal reason "" then acc
+        else
+          match acc with
+          | None -> Some (ts, reason)
+          | Some (latest_ts, _) when ts > latest_ts -> Some (ts, reason)
+          | Some _ -> acc)
+      None
+      crash_log
+  in
+  Option.map snd latest
+
+let phase_supports_crash_log_failure_reason = function
+  | Keeper_state_machine.Failing
+  | Keeper_state_machine.Crashed
+  | Keeper_state_machine.Dead ->
+      true
+  | Keeper_state_machine.Offline
+  | Keeper_state_machine.Running
+  | Keeper_state_machine.Overflowed
+  | Keeper_state_machine.Compacting
+  | Keeper_state_machine.HandingOff
+  | Keeper_state_machine.Draining
+  | Keeper_state_machine.Paused
+  | Keeper_state_machine.Stopped
+  | Keeper_state_machine.Restarting
+  | Keeper_state_machine.Zombie ->
+      false
+
 let active_task_owner_fiber_scan_semantics =
   "reports active task owners without executable keeper fibers; disabled \
    keepers are excluded; matching rows can degrade fleet status"
+
+let paused_keeper_last_blocker_json paused_keepers_json name =
+  match paused_keepers_json with
+  | `Assoc fields -> (
+    match List.assoc_opt "details" fields with
+    | Some (`List details) ->
+      (match
+         details
+         |> List.find_map (function
+           | `Assoc detail_fields
+             when (match List.assoc_opt "name" detail_fields with
+                   | Some (`String detail_name) -> String.equal detail_name name
+                   | _ -> false) ->
+               (match List.assoc_opt "last_blocker" detail_fields with
+                | Some last_blocker -> Some last_blocker
+                | None -> Some `Null)
+           | _ -> None)
+       with
+       | Some last_blocker -> last_blocker
+       | None -> `Null)
+    | Some _ | None -> `Null)
+  | _ -> `Null
 
 (* Maximum length of the diagnostic string surfaced on public [/health]
    fields via [public_health_diagnostic_preview]. Operational limit (UX
@@ -781,6 +882,7 @@ let public_health_diagnostic_preview ?base_path ~keeper_name text =
 
 let blocked_keeper_detail_json
     ?base_path
+    ?(last_blocker = `Null)
     ?phase_detail
     ~keeper_bootstrap_enabled
     ~bootable_set
@@ -792,12 +894,52 @@ let blocked_keeper_detail_json
   let is_bootable = String_set.mem name bootable_set in
   let is_capacity = String_set.mem name capacity_set in
   let has_read_error = String_set.mem name read_error_set in
-  let phase_name = Option.map (fun detail -> detail.phase) phase_detail in
-  let phase = Option.bind phase_name Keeper_state_machine.phase_of_string in
+  let phase_from_detail =
+    Option.bind
+      (Option.map (fun detail -> detail.phase) phase_detail)
+      Keeper_state_machine.phase_of_string
+  in
   let last_failure =
     match base_path with
     | None -> None
     | Some base_path -> Keeper_runtime.boot_meta_failure_for ~base_path ~name
+  in
+  let registry_entry =
+    match base_path with
+    | None -> None
+    | Some base_path -> Keeper_registry.get ~base_path name
+  in
+  let diagnostic_preview =
+    public_health_diagnostic_preview ?base_path ~keeper_name:name
+  in
+  let registry_phase =
+    match registry_entry with
+    | Some (entry : Keeper_registry.registry_entry) -> Some entry.phase
+    | None -> None
+  in
+  let phase =
+    match registry_phase with
+    | Some _ as phase -> phase
+    | None -> phase_from_detail
+  in
+  let phase_name =
+    match phase with
+    | Some phase -> Some (Keeper_state_machine.phase_to_string phase)
+    | None -> Option.map (fun detail -> detail.phase) phase_detail
+  in
+  let registry_last_failure_reason =
+    let raw =
+      match registry_entry with
+      | Some { Keeper_registry.last_failure_reason = Some reason; _ } ->
+          Some (Keeper_registry.failure_reason_to_string reason)
+      | Some { Keeper_registry.last_failure_reason = None; crash_log; _ }
+        when Option.value
+               ~default:false
+               (Option.map phase_supports_crash_log_failure_reason phase) ->
+          latest_crash_log_reason crash_log
+      | Some { Keeper_registry.last_failure_reason = None; _ } | None -> None
+    in
+    Option.map diagnostic_preview raw
   in
   let reason =
     if is_paused then Durable_paused_autoboot_enabled
@@ -847,7 +989,8 @@ let blocked_keeper_detail_json
     match phase_detail with
     | None ->
         [
-          ("last_failure_reason", `Null);
+          ( "last_failure_reason"
+          , Json_util.string_opt_to_json registry_last_failure_reason );
           ("last_error", `Null);
           ("restart_count", `Null);
           ("dead_since_ts", `Null);
@@ -855,13 +998,14 @@ let blocked_keeper_detail_json
           ("latest_crash_reason", `Null);
         ]
     | Some detail ->
-        let diagnostic_preview =
-          public_health_diagnostic_preview ?base_path ~keeper_name:name
+        let last_failure_reason =
+          match detail.last_failure_reason with
+          | Some reason -> Some (diagnostic_preview reason)
+          | None -> registry_last_failure_reason
         in
         [
           ( "last_failure_reason"
-          , Json_util.string_opt_to_json
-              (Option.map diagnostic_preview detail.last_failure_reason) );
+          , Json_util.string_opt_to_json last_failure_reason );
           ("last_error", Json_util.string_opt_to_json (Option.map diagnostic_preview detail.last_error));
           ("restart_count", `Int detail.restart_count);
           ("dead_since_ts", Json_util.float_opt_to_json detail.dead_since_ts);
@@ -878,6 +1022,7 @@ let blocked_keeper_detail_json
        ("reason", `String (blocked_keeper_reason_label reason));
        ("action", `String (blocked_keeper_action_label reason));
        ("phase", Json_util.string_opt_to_json phase_name);
+       ("last_blocker", last_blocker);
        ("bootable", `Bool is_bootable);
        ("reaction_capacity", `Bool is_capacity);
        ("paused", `Bool is_paused);
@@ -887,6 +1032,7 @@ let blocked_keeper_detail_json
        , Json_util.string_opt_to_json keeper_bootstrap_blocker );
      ]
      @ terminal_phase_field
+     @ blocked_keeper_operator_action_fields reason
      @ last_failure_fields
      @ phase_detail_fields)
 
@@ -1269,6 +1415,7 @@ let keeper_fleet_safety_health_json
            (fun name ->
              blocked_keeper_detail_json
                ?base_path:runtime_base_path
+               ~last_blocker:(paused_keeper_last_blocker_json paused_keepers_json name)
                ?phase_detail:(phase_detail name)
                ~keeper_bootstrap_enabled
                ~bootable_set

@@ -179,16 +179,12 @@ val wrap_result :
 
 (** {1 Global instance}
 
-    Lazy-initialised singleton.  Uses {!Eio.Lazy} (not
-    {!Stdlib.Lazy}) because [Lazy.force] is not fiber-safe —
-    concurrent forcing would raise
-    {!CamlinternalLazy.Undefined}.  {!Eio.Lazy} blocks the second
-    caller until init completes.  [cancel:`Protect] ensures init
-    finishes even when the forcing fiber is cancelled. *)
+    Memoized singleton.  Uses Atomic+Stdlib.Mutex rather than {!Eio.Lazy}
+    because tests and startup paths can touch the helpers before an Eio
+    scheduler exists. *)
 
-val global : t Eio.Lazy.t
-(** Global circuit-breaker instance.  Force via [Eio.Lazy.force]
-    or use the [*_global] helpers below. *)
+val global : unit -> t
+(** Global circuit-breaker instance.  Prefer the [*_global] helpers below. *)
 
 val check_global : agent_id:string -> (unit, string) result
 val record_failure_global : agent_id:string -> reason:string -> unit

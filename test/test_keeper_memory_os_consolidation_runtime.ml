@@ -5,6 +5,7 @@ module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Consolidation = Masc.Keeper_memory_os_consolidation
 module Runtime = Masc.Keeper_memory_os_consolidation_runtime
+module Agent_sdk_response = Masc.Agent_sdk_response
 module Atypes = Agent_sdk.Types
 
 let now = 1_000_000.0

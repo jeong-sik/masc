@@ -2,7 +2,7 @@
 
     Before this decoupling, an untrusted *token count* (e.g.
     [zero_token_usage_reported]) forced the accounted [cost_usd] to 0.0 and the
-    source label to [usage_untrusted], even when the provider reported a positive
+    source label to [untrusted_usage], even when the provider reported a positive
     authoritative cost. Empirically this had never suppressed a real dollar (all
     untrusted ledger rows carried raw_cost_usd=0.0), so the coupling was a no-op that
     carried a latent footgun: a future provider reporting 0 tokens + nonzero
@@ -15,7 +15,7 @@
       WHILE [usage_trust="untrusted"] is still surfaced (token-trust visibility
       preserved — only the COST coupling was removed).
     - untrusted token usage + zero/absent cost_usd => 0.0 accounted, and the
-      [usage_untrusted] labels are retained (no-op vs. pre-decouple behavior, as
+      [untrusted_usage] labels are retained (no-op vs. pre-decouple behavior, as
       every real untrusted row carries cost_usd=0.0 today). *)
 
 open Alcotest
@@ -80,8 +80,8 @@ let test_untrusted_tokens_still_surface_trust () =
 let test_untrusted_tokens_zero_cost_stays_zero () =
   let p = payload ~cost_usd:0.0 ~usage_trust:untrusted_zero_tokens in
   check (float 1e-9) "zero cost stays 0.0" 0.0 (float_field p "cost_usd");
-  check string "cost_usd_source remains usage_untrusted for zero cost"
-    "usage_untrusted" (string_field p "cost_usd_source");
+  check string "cost_usd_source remains untrusted_usage for zero cost"
+    "untrusted_usage" (string_field p "cost_usd_source");
   check string "usage_trust still untrusted" "untrusted"
     (string_field p "usage_trust")
 

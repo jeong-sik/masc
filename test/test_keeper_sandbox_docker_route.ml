@@ -218,7 +218,11 @@ let make_meta ?tool_access ~name ~sandbox () =
 let with_eio_fs f =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  f ()
+  Process_eio.init
+    ~cwd_default:Eio.Path.(Eio.Stdenv.fs env / Sys.getcwd ())
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
+  Fun.protect ~finally:Process_eio.reset_for_testing f
 
 let setup ?tool_access ~sandbox f =
   with_eio_fs @@ fun () ->
@@ -913,8 +917,7 @@ let test_execute_git_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
-  ensure_dir repo;
-  git_ok ~cwd:repo [ "init"; "-q" ];
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute ~turn_sandbox_factory:None ~exec_cache:None ~config ~meta
       ~args:(tool_execute_typed_exec_args ~cwd:repo "git" ~argv:[ "status" ])
@@ -1090,8 +1093,7 @@ let test_execute_git_status_readonly_without_write_tool_access () =
   setup ~tool_access:[] ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
   let repo = Filename.concat (Filename.concat playground "repos") "masc" in
-  ensure_dir repo;
-  git_ok ~cwd:repo [ "init"; "-q" ];
+  setup_ready_repo_with_origin ~config ~repo_name:"masc" ~repo;
   let raw =
     Keeper_tool_command_runtime.handle_tool_execute
       ~turn_sandbox_factory:None

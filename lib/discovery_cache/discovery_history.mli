@@ -43,6 +43,10 @@ val prune :
   base_path:string -> days:int -> unit
 (** Delete discovery day-files older than [days] days. *)
 
+val failure_observer_fn : (site:string -> unit) Atomic.t
+(** Observability hook for bounded discovery-history failure labels. Default
+    no-op keeps [masc.discovery_cache] independent from the metric store. *)
+
 module For_testing : sig
   val observe_failure : site:string -> base_path:string -> exn -> unit
   (** White-box helper. [site] is canonicalized before metric emission and is

@@ -14,6 +14,8 @@
 
 open Masc
 
+let () = Workspace_metric_hooks.install ()
+
 let counter_value ~event_family ~event_kind =
   Otel_metric_store.metric_value_or_zero
     Otel_metric_store.metric_workspace_telemetry_drop

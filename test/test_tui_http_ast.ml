@@ -24,6 +24,18 @@ let test_http_get_uses_auth_headers () =
       n
 ;;
 
+let test_http_client_does_not_own_tui_env_contract () =
+  let module_path = "bin/masc_tui_http.ml" in
+  check int "no local TUI env literals" 0
+    (Ast_grep.count_string_literals ~module_path ~needle:"MASC_TUI_");
+  check int "no ambient agent env fallback" 0
+    (Ast_grep.count_string_literals ~module_path ~needle:"MASC_AGENT");
+  check int "no local timeout env accessor" 0
+    (Ast_grep.count_calls ~module_path ~callee:"Env_config_core.get_float_nonneg");
+  check int "no local timeout env binding" 0
+    (Ast_grep.count_value_bindings ~module_path ~name:"timeout_env")
+;;
+
 let test_planning_constructors_do_not_collide () =
   let module_path = "bin/masc_tui_types.ml" in
   let planning_mode_constructors =
@@ -143,6 +155,10 @@ let () =
       [
         test_case "check success status" `Quick test_is_success_http_status_called;
         test_case "auth headers used" `Quick test_http_get_uses_auth_headers;
+        test_case
+          "http client does not own TUI env contract"
+          `Quick
+          test_http_client_does_not_own_tui_env_contract;
         test_case
           "planning constructors do not collide"
           `Quick

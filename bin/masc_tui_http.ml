@@ -2,10 +2,7 @@
 
 let report_err prefix msg = Printf.sprintf "(%s: %s)" prefix msg
 let default_timeout_sec = 10.0
-let timeout_env = "MASC_TUI_HTTP_TIMEOUT_SEC"
-
-let request_timeout_sec () =
-  Env_config_core.get_float_nonneg ~default:default_timeout_sec timeout_env
+let request_timeout_sec () = default_timeout_sec
 
 let trim_nonempty value =
   let trimmed = String.trim value in
@@ -23,13 +20,10 @@ let sanitize_header_value value =
        | c -> c)
   |> String.trim
 
-let default_agent_name () =
-  first_nonempty_env [ "MASC_TUI_AGENT"; "MASC_AGENT" ]
-  |> Option.value ~default:"masc-tui"
-  |> sanitize_header_value
+let default_agent_name = "masc-tui"
 
 let auth_headers () =
-  let agent_header = [ ("X-MASC-Agent", default_agent_name ()) ] in
+  let agent_header = [ ("X-MASC-Agent", default_agent_name) ] in
   match first_nonempty_env [ "MASC_TOKEN" ] with
   | Some token ->
       ("Authorization", "Bearer " ^ sanitize_header_value token) :: agent_header

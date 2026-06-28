@@ -272,7 +272,14 @@ let append_decision_record
                   match r.stop_reason with
                   | Runtime_agent.Completed -> "completed"
                   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-                      Printf.sprintf "turn_budget_exhausted(%d/%d)" turns_used limit
+                      Keeper_turn_disposition.(
+                        to_wire
+                          (Turn_budget_exhausted
+                             { dimension = `Turns
+                             ; used = turns_used
+                             ; limit
+                             ; source = `Oas_sdk
+                             }))
                   | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
                       (match tool_name with
                        | Some tool ->

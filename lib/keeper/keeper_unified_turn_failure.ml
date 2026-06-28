@@ -62,6 +62,10 @@ let record_failure_and_maybe_escalate
   let threshold =
     Runtime_params.get Governance_registry.keeper_max_turn_failures
   in
+  let pause_threshold = Runtime.pause_threshold () in
+  let turn_fail_streak_threshold =
+    pause_threshold.Runtime_schema.turn_fail_streak_threshold
+  in
   if EC.is_runtime_exhausted_error err && count > 0
   then
     Keeper_registry.set_failure_reason
@@ -70,17 +74,17 @@ let record_failure_and_maybe_escalate
       (Some (Keeper_registry.Turn_consecutive_failures count));
   let runtime_auto_paused =
     EC.is_runtime_exhausted_error err
-    && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
+    && count >= turn_fail_streak_threshold
     && not updated_meta.paused
   in
   let completion_contract_auto_paused =
     EC.is_accept_no_usable_progress_error err
-    && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
+    && count >= turn_fail_streak_threshold
     && not updated_meta.paused
   in
   let idle_detected_auto_paused =
     is_idle_detected_error err
-    && count >= Keeper_behavioral_regime.turn_fail_streak_threshold
+    && count >= turn_fail_streak_threshold
     && not updated_meta.paused
   in
   let auto_pause_succeeded =
@@ -135,7 +139,7 @@ let record_failure_and_maybe_escalate
              runtime fix"
             meta.name
             count
-            Keeper_behavioral_regime.turn_fail_streak_threshold
+            turn_fail_streak_threshold
             threshold
         else
           if completion_contract_auto_paused
@@ -146,7 +150,7 @@ let record_failure_and_maybe_escalate
                must inspect provider/model reasoning output before resuming"
               meta.name
               count
-              Keeper_behavioral_regime.turn_fail_streak_threshold
+              turn_fail_streak_threshold
               threshold
               "none"
           else
@@ -156,7 +160,7 @@ let record_failure_and_maybe_escalate
                repeated tool/thinking behavior before resuming"
               meta.name
               count
-              Keeper_behavioral_regime.turn_fail_streak_threshold
+              turn_fail_streak_threshold
               threshold;
         true
       | Error sync_err ->

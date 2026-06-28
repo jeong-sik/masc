@@ -60,15 +60,11 @@ let of_disposition ?source ?summary ?next_action disposition =
 ;;
 
 let success () = make ~source:"turn_result" "success"
-let contains_ci text needle = String_util.contains_substring_ci text needle
-
-let contract_code_from_error_text raw_error =
-  if
-    contains_ci raw_error "no ToolUse block"
-    || contains_ci raw_error "returned no keeper tool"
-  then "completion_contract_no_progress"
-  else "completion_contract_unsatisfied"
-;;
+(* WORKAROUND removed: [contract_code_from_error_text] was a substring
+   classifier emitting one of two wire strings. It had zero callers
+   (verified by rg, 2026-06-28) and was a textbook anti-pattern #2
+   (string classifier where typed variant is possible). Removed in
+   commit 3 of the keeper typed-reason series. *)
 
 let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_error err =
   if post_commit_ambiguous
@@ -88,20 +84,30 @@ let of_failure ?(post_commit_ambiguous = false) ?(tool_call_count = 0) ~raw_erro
         Keeper_turn_disposition.Runtime_attempts_exhausted
     | Some (Keeper_turn_driver.Turn_timeout _) ->
       make ~source:"typed_error" "turn_wall_clock_timeout"
-    | _ ->
-      (match err with
-       | _ ->
-         (* RFC-0047 follow-up: emit typed [Provider_error] directly via
-            [Keeper_agent_error.terminal_reason_code_of_sdk_error_typed]
-            so [registry_failure_reason_of_terminal_reason] can match
-            exhaustively on disposition without a substring guard for
-            "api_error_*" wires. The typed bridge encapsulates the
-            [Sdk_error _] wrapping; the consumer no longer touches a
-            raw wire string. *)
-         of_disposition
-           ~source:"typed_error"
-           (Keeper_turn_disposition.Provider_error
-              (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))))
+    | Some
+        ( Keeper_turn_driver.Resumable_cli_session _
+        | Keeper_turn_driver.Accept_rejected _
+        | Keeper_turn_driver.Admission_queue_timeout _
+        | Keeper_turn_driver.Admission_queue_rejected _
+        | Keeper_turn_driver.Max_tokens_ceiling_violation _
+        | Keeper_turn_driver.Ambiguous_post_commit _
+        | Keeper_turn_driver.Internal_unhandled_exception _
+        | Keeper_turn_driver.Internal_bridge_exception _
+        | Keeper_turn_driver.Internal_contract_rejected _ ) ->
+      of_disposition
+        ~source:"typed_error"
+        (Keeper_turn_disposition.Provider_error
+           (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err))
+    | None ->
+      (* The driver classifier returned None, meaning err is a generic
+         [Agent_sdk.Error.t] not in the masc_internal_error family.
+         Route through the typed bridge instead of catching [_ ->
+         ...] silently (anti-pattern #2). The bridge matches every
+         [Agent_sdk.Error.t] variant exhaustively. *)
+      of_disposition
+        ~source:"typed_error"
+        (Keeper_turn_disposition.Provider_error
+           (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed err)))
 ;;
 
 let of_code ?source ?summary ?next_action code =

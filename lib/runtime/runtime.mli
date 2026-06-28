@@ -118,6 +118,12 @@ val media_failover : unit -> string list
     from declared [\[models.*.capabilities\]] in declaration order. Every entry is
     validated at load so each resolves to a configured runtime. *)
 
+val pause_threshold : unit -> pause_threshold
+(** [\[pause\]] threshold knobs from runtime.toml, or
+    {!Runtime_schema.pause_threshold_default} when runtime.toml is unavailable or
+    invalid. Operational pause decision paths use this accessor instead of the
+    legacy top-level fallback constants. *)
+
 val get_runtime_by_id : string -> t option
 (** [get_runtime_by_id id] is the materialized runtime whose binding-key id
     ["provider.model"] equals [id], or [None] if no such runtime is configured.

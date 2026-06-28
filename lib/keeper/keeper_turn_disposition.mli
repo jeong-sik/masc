@@ -37,9 +37,35 @@ type t =
   (** Runtime aggregate outcome: all candidate attempts were exhausted.
           Operators should inspect per-attempt root causes instead of treating
           this as the root cause. *)
+  | Completion_contract_unsatisfied
+  (** The keeper turn completed its tool-use block but did not satisfy
+      the completion contract. Distinct from
+      [Completion_contract_no_progress] (no progress at all) and from
+      [Post_commit_ambiguous] (a tool may have committed side effects).
+      Operator action: review the contract and either widen the turn
+      or adjust the runtime. *)
+  | Completion_contract_no_progress
+  (** The keeper turn neither progressed nor produced a tool call. The
+      supervisor's no-progress latch fires on this condition. Operator
+      action: same as [Completion_contract_unsatisfied]; once the
+      operator resumes, the latch is cleared by
+      [Keeper_unified_turn_completion_contract.clear_for_operator_resume]. *)
   | Post_commit_ambiguous
   (** Provider failed after a mutating tool may have committed side
           effects. Reconcile required. *)
+  | Turn_budget_exhausted of
+      { dimension : [ `Turns | `Wall_clock_seconds | `Idle_turns ]
+      ; used : int
+      ; limit : int
+      ; source : [ `Oas_sdk | `Keeper_runtime | `User_config ]
+      }
+  (** Typed vocabulary for the legacy "turn_budget_exhausted(%d/%d)"
+      free-text label that was emitted across 4+ call sites. The
+      dimension/source tags make it impossible to misattribute a
+      keeper-runtime cooloff to an OAS SDK max-turns ceiling.
+
+      Wire form: ["turn_budget_exhausted(<dim>:<source>:<used>/<limit>)"]
+      for backward-compatibility with dashboards and OTEL queries. *)
   | Provider_error of Keeper_turn_terminal_code.t
   (** Runtime-layer termination promoted to operator-facing
           disposition. The inner code preserves the typed runtime cause

@@ -129,6 +129,19 @@ type binding =
   }
 [@@deriving show, eq]
 
+(** {1 Pause threshold knobs} *)
+
+type pause_threshold =
+  { turn_fail_streak_threshold : int
+  ; recent_restart_window_sec : float
+  ; recent_restart_count_threshold : int
+  ; tool_failure_count_threshold : int
+  ; tool_failure_ratio_threshold : float
+  }
+[@@deriving show, eq]
+
+val pause_threshold_default : pause_threshold
+
 (** {1 Top-level config} *)
 
 type config =
@@ -164,6 +177,9 @@ type config =
         admits it. [[]] = derive capable runtimes from declared
         [\[models.*.capabilities\]] in declaration order. Each id must resolve to
         a configured runtime (rejected at load like [\[runtime\].default]). *)
+  ; pause_threshold : pause_threshold
+    (** [\[pause\]] — typed SSOT for keeper pause / regime threshold knobs.
+        Missing or wrong-typed values fall back to [pause_threshold_default]. *)
   }
 [@@deriving show, eq]
 

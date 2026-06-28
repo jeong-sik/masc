@@ -539,6 +539,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
+    ; pause_threshold = Runtime_schema.pause_threshold_default
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -571,6 +572,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
+    ; pause_threshold = Runtime_schema.pause_threshold_default
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -604,6 +606,7 @@ let provider_cfg () =
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
+    ; pause_threshold = Runtime_schema.pause_threshold_default
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -682,6 +685,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; cross_verifier_runtime_id = None
     ; keeper_assignments = []
     ; media_failover = []
+    ; pause_threshold = Runtime_schema.pause_threshold_default
     }
   in
   match Runtime.of_binding cfg runpod_binding with

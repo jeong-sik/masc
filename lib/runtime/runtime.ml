@@ -275,6 +275,7 @@ type loaded_state =
   ; librarian_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
+  ; config_path : string option
   }
 
 let empty_loaded_state =
@@ -284,6 +285,7 @@ let empty_loaded_state =
   ; librarian_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
+  ; config_path = None
   }
 
 let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
@@ -291,6 +293,7 @@ let loaded_state_ref : loaded_state Atomic.t = Atomic.make empty_loaded_state
 let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let set_loaded
+    ~config_path
     (runtimes, rt, assignments, librarian_id, cross_verifier_id, media_failover) =
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
@@ -299,11 +302,12 @@ let set_loaded
     ; librarian_runtime_id = librarian_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
+    ; config_path = Some config_path
     }
 
 let init_default ~config_path =
   let* loaded = load_list ~config_path in
-  set_loaded loaded;
+  set_loaded ~config_path loaded;
   Ok ()
 
 (* Startup entry point: [load_list] (RFC-0206 routing validation) PLUS the OAS
@@ -318,7 +322,7 @@ let init_default_strict ~config_path =
     (match validate_runtime_model_capabilities ~config_path runtimes with
      | Error _ as e -> e
      | Ok () ->
-       set_loaded loaded;
+       set_loaded ~config_path loaded;
        Ok ())
 
 let runtime_state () = Atomic.get loaded_state_ref
@@ -434,6 +438,26 @@ let config_path () : string option =
       in
       if Sys.file_exists path then Some path else None
   | Invalid_env | Missing -> None
+;;
+
+let pause_threshold () =
+  let runtime_config_path =
+    match (runtime_state ()).config_path with
+    | Some path -> Some path
+    | None -> config_path ()
+  in
+  match runtime_config_path with
+  | None -> Runtime_schema.pause_threshold_default
+  | Some config_path ->
+    (match Runtime_toml.parse_file config_path with
+     | Ok cfg -> cfg.pause_threshold
+     | Error errs ->
+       Log.Runtime.warn
+         "runtime: failed to parse [pause] thresholds from %s (%d error(s)); \
+          using defaults"
+         config_path
+         (List.length errs);
+       Runtime_schema.pause_threshold_default)
 ;;
 
 let runtime_config_path_result ?runtime_config_path () =

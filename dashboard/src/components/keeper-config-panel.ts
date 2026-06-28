@@ -10,7 +10,7 @@ import {
   patchKeeperConfig,
   setKeeperToolPolicy,
 } from '../api/dashboard'
-import type { KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode, SharedMemoryScope } from '../api/dashboard'
+import type { KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
@@ -179,9 +179,19 @@ function formatRelativeTime(date: Date): string {
 }
 
 // Runtime config draft for sandbox/proactive/compaction/handoff inline editing
+export function normalizeMaxContextOverrideDraft(value: number, maxTokens?: number | null): number {
+  if (!Number.isFinite(value)) return 0
+  const normalized = Math.max(0, Math.trunc(value))
+  const max = Number.isFinite(maxTokens) && (maxTokens ?? 0) > 0
+    ? Math.trunc(maxTokens as number)
+    : null
+  return max == null ? normalized : Math.min(max, normalized)
+}
 
 export type RuntimeDraft = {
   runtime_id: string
+  autoboot_enabled: boolean
+  max_context_override: number
   sandbox_profile: SandboxProfile
   active_goal_ids: string[]
   mention_targets_text: string
@@ -190,6 +200,7 @@ export type RuntimeDraft = {
   proactive_enabled: boolean
   proactive_idle_sec: number
   proactive_cooldown_sec: number
+  compaction_profile: string
   compaction_ratio_gate: number
   compaction_message_gate: number
   compaction_token_gate: number
@@ -201,9 +212,10 @@ export type RuntimeDraft = {
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
-// Tool denylist is saved via the separate /tools set_policy endpoint (not the
+// Tool policy is saved via the separate /tools set_policy endpoint (not the
 // /config PATCH), so it has its own draft/saving state. null draft = "show the
-// live denylist"; a string = the operator's in-progress edit.
+// live policy"; a string = the operator's in-progress edit.
+const toolAccessDraftText = signal<string | null>(null)
 const denylistDraftText = signal<string | null>(null)
 const denylistSaving = signal(false)
 
@@ -216,6 +228,7 @@ function resetKeeperConfigPanelDrafts(): void {
   promptPreviewTab.value = 'blocks'
   runtimeDraft.value = null
   runtimeSaving.value = false
+  toolAccessDraftText.value = null
   denylistDraftText.value = null
   denylistSaving.value = false
   hookFilterQuery.value = ''
@@ -257,13 +270,14 @@ export function coerceNetworkMode(raw: string | undefined): SandboxNetworkMode {
   return raw === 'none' ? 'none' : 'inherit'
 }
 
-export function coerceSharedMemoryScope(raw: string | undefined): SharedMemoryScope {
-  return raw === 'workspace' ? 'workspace' : 'disabled'
-}
-
 export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
+    autoboot_enabled: c.autoboot_enabled,
+    max_context_override: normalizeMaxContextOverrideDraft(
+      c.max_context_override ?? 0,
+      c.limits.max_context_override_tokens,
+    ),
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     active_goal_ids: c.workspace.active_goal_ids.length > 0
       ? c.workspace.active_goal_ids
@@ -274,6 +288,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
     proactive_enabled: c.proactive.enabled,
     proactive_idle_sec: c.proactive.idle_sec,
     proactive_cooldown_sec: c.proactive.cooldown_sec,
+    compaction_profile: c.compaction.profile,
     compaction_ratio_gate: c.compaction.ratio_gate,
     compaction_message_gate: c.compaction.message_gate,
     compaction_token_gate: c.compaction.token_gate,
@@ -293,6 +308,14 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
     ? orig.workspace.active_goal_ids
     : orig.active_goal_ids
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
+  if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
+  const draftMaxContextOverride = normalizeMaxContextOverrideDraft(
+    draft.max_context_override,
+    orig.limits.max_context_override_tokens,
+  )
+  if (draftMaxContextOverride !== (orig.max_context_override ?? 0)) {
+    payload.max_context_override = draftMaxContextOverride > 0 ? draftMaxContextOverride : null
+  }
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
   if (!sameStringArray(newPaths, origPaths)) payload.allowed_paths = newPaths
@@ -301,6 +324,7 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
   if (draft.proactive_enabled !== orig.proactive.enabled) payload.proactive_enabled = draft.proactive_enabled
   if (draft.proactive_idle_sec !== orig.proactive.idle_sec) payload.proactive_idle_sec = draft.proactive_idle_sec
   if (draft.proactive_cooldown_sec !== orig.proactive.cooldown_sec) payload.proactive_cooldown_sec = draft.proactive_cooldown_sec
+  if (draft.compaction_profile !== orig.compaction.profile) payload.compaction_profile = draft.compaction_profile
   if (draft.compaction_ratio_gate !== orig.compaction.ratio_gate) payload.compaction_ratio_gate = draft.compaction_ratio_gate
   if (draft.compaction_message_gate !== orig.compaction.message_gate) payload.compaction_message_gate = draft.compaction_message_gate
   if (draft.compaction_token_gate !== orig.compaction.token_gate) payload.compaction_token_gate = draft.compaction_token_gate
@@ -337,6 +361,8 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
   const payload = buildRuntimePayload(rd, c)
   return {
     runtime_id: 'runtime_id' in payload,
+    autoboot_enabled: 'autoboot_enabled' in payload,
+    max_context_override: 'max_context_override' in payload,
     active_goal_ids: 'active_goal_ids' in payload,
     mention_targets: 'mention_targets' in payload,
     allowed_paths: 'allowed_paths' in payload,
@@ -345,6 +371,7 @@ function computeRuntimeDirtyFlags(rd: RuntimeDraft, c: KeeperConfig): Record<str
     proactive_enabled: 'proactive_enabled' in payload,
     proactive_idle_sec: 'proactive_idle_sec' in payload,
     proactive_cooldown_sec: 'proactive_cooldown_sec' in payload,
+    compaction_profile: 'compaction_profile' in payload,
     compaction_ratio_gate: 'compaction_ratio_gate' in payload,
     compaction_message_gate: 'compaction_message_gate' in payload,
     compaction_token_gate: 'compaction_token_gate' in payload,
@@ -834,6 +861,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const dirtyFlags = rd ? computeRuntimeDirtyFlags(rd, c) : {}
 
   const runtimeHasChanges = rd ? Object.keys(buildRuntimePayload(rd, c)).length > 0 : false
+  const maxContextOverrideTokens = c.limits.max_context_override_tokens ?? undefined
   const runtimeOptions = rd
     ? dedupeStrings([
         rd.runtime_id,
@@ -864,30 +892,26 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     runtimeDraft.value = initRuntimeDraftFromConfig(c)
   }
 
-  // Parse the denylist textarea into a deduped, trimmed tool-name list.
-  function parseDenylistDraft(text: string): string[] {
+  // Parse tool policy textareas into deduped, trimmed tool-name lists.
+  function parseToolPolicyListDraft(text: string): string[] {
     return [...new Set(text.split('\n').map((s) => s.trim()).filter(Boolean))]
   }
 
-  async function saveToolDenylist() {
-    const text = denylistDraftText.value
-    if (text === null) return
-    const deny = parseDenylistDraft(text)
+  async function saveToolPolicy() {
+    const accessText = toolAccessDraftText.value ?? c.tools.tool_access.join('\n')
+    const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
+    const toolAccess = parseToolPolicyListDraft(accessText)
+    const deny = parseToolPolicyListDraft(denyText)
     denylistSaving.value = true
     try {
-      // set_policy overwrites tool_access AND tool_denylist atomically, so echo
-      // the current tool_access to preserve the operator's configured allowlist
-      // record (consumed by tool visibility + assignment telemetry). Runtime
-      // EXECUTION gating keys only off the denylist, not tool_access — see
-      // keeper_tool_policy.ml ("tool_access does NOT gate execution"; empty
-      // tool_access means "all candidates", not "no access").
       const updated = await setKeeperToolPolicy(keeperName, {
-        tool_access: c.tools.tool_access,
+        tool_access: toolAccess,
         deny,
       })
       applyKeeperConfigUpdate(keeperName, updated)
+      toolAccessDraftText.value = null
       denylistDraftText.value = null
-      showToast('도구 거부 목록 저장 완료', 'success')
+      showToast('도구 정책 저장 완료', 'success')
     } catch (err) {
       showToast(err instanceof Error ? err.message : '저장 실패', 'error')
     } finally {
@@ -1085,6 +1109,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         ['활성 런타임', c.execution.active_model ? 'runtime' : null],
         ['runtime timeout', perProviderTimeoutLabel(c.execution), true],
       ]} />
+      ${rd ? html`
+        <${InlineNumberRow} label="컨텍스트 오버라이드" value=${rd.max_context_override}
+          onChange=${(v: number) => updateRuntimeDraft('max_context_override', normalizeMaxContextOverrideDraft(v, c.limits.max_context_override_tokens))}
+          min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
+          dirty=${dirtyFlags.max_context_override} />
+      ` : c.max_context_override != null ? html`
+        <${ConfigRow} label="컨텍스트 오버라이드" value=${formatTokens(c.max_context_override)} />
+      ` : null}
       <div style="margin-top:14px;">
         <div class="kcf-tf-h"><label>런타임 후보</label></div>
         <${RuntimeList} runtimes=${c.execution.models} />
@@ -1092,14 +1124,20 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     </${KcfSec}>
   `
 
-  // policy ⚖ — verify gate + compaction + proactive + handoff + tool denylist
+  // policy ⚖ — verify gate + compaction + proactive + handoff + tool policy
   const policyTab = html`
     <${MajorSectionHeader} title="검증" />
     <${BoolRow} label="검증" value=${c.execution.verify} />
 
     <${SectionHeader} title="컴팩션" />
-    <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
     ${rd ? html`
+      <${InlineSelectRow}
+        label="compaction_profile"
+        value=${rd.compaction_profile}
+        options=${['aggressive', 'balanced', 'conservative', 'custom'] as const}
+        onChange=${(value: string) => updateRuntimeDraft('compaction_profile', value)}
+        dirty=${dirtyFlags.compaction_profile}
+      />
       <${SetRow} label="비율 게이트" hint="컨텍스트 사용률 %" dirty=${dirtyFlags.compaction_ratio_gate}>
         <${SetSeg} ariaLabel="비율 게이트" value=${Math.round(rd.compaction_ratio_gate * 100)}
           options=${[75, 80, 85, 90]}
@@ -1111,13 +1149,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         dirty=${dirtyFlags.compaction_message_gate} />
       <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
         onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
-        min=${0} max=${1000000} step=${1000} suffix="tok"
+        min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
         dirty=${dirtyFlags.compaction_token_gate} />
       <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
         onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}
         min=${0} max=${3600} step=${30} suffix="s"
         dirty=${dirtyFlags.compaction_cooldown_sec} />
     ` : html`
+      <${ConfigRow} label="프로필" value=${c.compaction.profile || MISSING_DATA_DASH} />
       <${ConfigRow} label="비율 게이트" value=${formatPct(c.compaction.ratio_gate)} />
       <${ConfigRow} label="메시지 게이트" value=${String(c.compaction.message_gate)} />
       <${ConfigRow} label="토큰 게이트" value=${formatTokens(c.compaction.token_gate)} />
@@ -1126,6 +1165,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
 
     <${SectionHeader} title="프로액티브" />
     ${rd ? html`
+      <${SetRow} label="자동 부팅" hint="서버 시작 시 keeper 등록" dirty=${dirtyFlags.autoboot_enabled}>
+        <${SetToggle} ariaLabel="자동 부팅" on=${rd.autoboot_enabled}
+          onChange=${(v: boolean) => updateRuntimeDraft('autoboot_enabled', v)} />
+      </${SetRow}>
       <${SetRow} label="활성" hint="유휴 시 keeper 자가 기동" dirty=${dirtyFlags.proactive_enabled}>
         <${SetToggle} ariaLabel="프로액티브 활성" on=${rd.proactive_enabled}
           onChange=${(v: boolean) => updateRuntimeDraft('proactive_enabled', v)} />
@@ -1139,6 +1182,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         min=${10} max=${3600} step=${10} suffix="s"
         dirty=${dirtyFlags.proactive_cooldown_sec} />
     ` : html`
+      <${BoolRow} label="자동 부팅" value=${c.autoboot_enabled} />
       <${BoolRow} label="활성" value=${c.proactive.enabled} />
       <${ConfigRow} label="유휴 트리거" value=${c.proactive.idle_sec + 's'} />
       <${ConfigRow} label="쿨다운" value=${c.proactive.cooldown_sec + 's'} />
@@ -1166,15 +1210,33 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     `}
 
     ${(() => {
+      const accessText = toolAccessDraftText.value ?? c.tools.tool_access.join('\n')
       const denyText = denylistDraftText.value ?? c.tools.tool_denylist.join('\n')
-      const deduped = parseDenylistDraft(denyText)
-      const changed = JSON.stringify(deduped) !== JSON.stringify(c.tools.tool_denylist)
+      const accessDeduped = parseToolPolicyListDraft(accessText)
+      const denyDeduped = parseToolPolicyListDraft(denyText)
+      const changed =
+        JSON.stringify(accessDeduped) !== JSON.stringify(c.tools.tool_access)
+        || JSON.stringify(denyDeduped) !== JSON.stringify(c.tools.tool_denylist)
       return html`
-        <${SectionHeader} title="도구 거부 목록 (정책)" />
+        <${SectionHeader} title="도구 정책" />
         <p class="text-3xs text-text-muted mb-2 px-1 leading-relaxed">
-          이 keeper가 사용할 수 없는 도구 이름(한 줄에 하나). 저장 시 set_policy 로 적용되며 현재 도구 접근(tool_access ${c.tools.tool_access.length}개)은 보존됩니다.
+          저장 시 set_policy 로 tool_access 와 tool_denylist 를 함께 적용합니다. tool_access 는 후보 프로필이고 실행 차단은 denylist가 담당합니다.
         </p>
         <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${changed ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-[var(--color-fg-secondary)]">tool_access</span>
+            <span class="text-xs text-[var(--color-fg-muted)]">${accessDeduped.length}개</span>
+          </div>
+          <textarea aria-label="tool_access" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y mb-3"
+            rows=${3}
+            value=${accessText}
+            placeholder="예: tool_read_file"
+            onInput=${(e: Event) => { toolAccessDraftText.value = (e.target as HTMLTextAreaElement).value }}
+          ></textarea>
+          <div class="flex items-center justify-between mb-2">
+            <span class="text-sm text-[var(--color-fg-secondary)]">tool_denylist</span>
+            <span class="text-xs text-[var(--color-fg-muted)]">${denyDeduped.length}개</span>
+          </div>
           <textarea aria-label="tool_denylist" class="w-full text-sm font-mono bg-[var(--color-bg-hover)] border border-[var(--color-border-default)] rounded-[var(--r-1)] px-3 py-2 text-[var(--color-fg-secondary)] resize-y"
             rows=${4}
             value=${denyText}
@@ -1182,17 +1244,17 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
             onInput=${(e: Event) => { denylistDraftText.value = (e.target as HTMLTextAreaElement).value }}
           ></textarea>
           <div class="flex items-center gap-2 mt-2">
-            <span class="text-3xs text-text-muted">${deduped.length} deny</span>
+            <span class="text-3xs text-text-muted">${accessDeduped.length} access · ${denyDeduped.length} deny</span>
             <div class="flex-1"></div>
             <button type="button"
               class="${BTN_FILLED_BASE} bg-[var(--color-status-ok)] text-[var(--color-fg-on-ok)] text-xs"
-              onClick=${saveToolDenylist}
+              onClick=${saveToolPolicy}
               disabled=${denylistSaving.value || !changed}
             >${denylistSaving.value ? '저장 중...' : '정책 저장'}</button>
             <button type="button"
               class="${BTN_FILLED_BASE} bg-[var(--color-bg-hover)] text-[var(--color-fg-secondary)] text-xs"
-              title="초기화: 편집한 거부 목록을 서버 값으로 되돌립니다"
-              onClick=${() => { denylistDraftText.value = null }}
+              title="초기화: 편집한 도구 정책을 서버 값으로 되돌립니다"
+              onClick=${() => { toolAccessDraftText.value = null; denylistDraftText.value = null }}
               disabled=${denylistSaving.value || !changed}
             >초기화하기</button>
           </div>

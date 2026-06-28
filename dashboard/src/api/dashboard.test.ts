@@ -1903,6 +1903,12 @@ describe('fetchKeeperConfig', () => {
     const rawResponse = {
       name: 'keeper-sangsu',
       active_goal_ids: ['goal-runtime'],
+      autoboot_enabled: 'false',
+      max_context_override: '64000',
+      limits: {
+        min_context_override_tokens: '64000',
+        max_context_override_tokens: '1000000',
+      },
       sandbox_profile: 'docker',
       network_mode: 'none',
       sandbox_last_error: 'sandbox docker exec failed',
@@ -2038,6 +2044,12 @@ describe('fetchKeeperConfig', () => {
     const result = await fetchKeeperConfig('keeper-sangsu')
 
     expect(result.allowed_paths).toEqual(['/tmp/workspace'])
+    expect(result.autoboot_enabled).toBe(false)
+    expect(result.max_context_override).toBe(64000)
+    expect(result.limits).toEqual({
+      min_context_override_tokens: 64000,
+      max_context_override_tokens: 1000000,
+    })
     expect(result.sandbox_profile).toBe('docker')
     expect(result.network_mode).toBe('none')
     expect(result.sandbox_last_error).toBe('sandbox docker exec failed')

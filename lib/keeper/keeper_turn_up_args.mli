@@ -8,9 +8,11 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
-(** Parsed [keeper_up] tool arguments. Every optional field is
-    [None] when the JSON arg was absent or [`Null]; non-optional
-    fields default to [""], [[]], or the profile-default. *)
+(** Parsed [keeper_up] tool arguments. Optional fields are [None] when the
+    JSON arg was absent or [`Null], except [max_context_override_opt], whose
+    paired [max_context_override_present] distinguishes explicit clear from
+    omission on update. Non-optional fields default to [""], [[]], or the
+    profile-default. *)
 type parsed_args =
   { name : string
   ; compaction_profile_opt : string option
@@ -21,6 +23,7 @@ type parsed_args =
   ; mention_targets_opt : string list option
   ; active_goal_ids_opt : string list option
   ; max_context_override_opt : int option
+  ; max_context_override_present : bool
   ; proactive_enabled_opt : bool option
   ; proactive_idle_sec_opt : int option
   ; proactive_cooldown_sec_opt : int option

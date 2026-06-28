@@ -140,12 +140,19 @@ function normalizeKeeperConfig(raw: unknown, requestedName: string): KeeperConfi
   const tools = isRecord(data.tools) ? data.tools : {}
   const sources = isRecord(data.sources) ? data.sources : {}
   const metrics = isRecord(data.metrics) ? data.metrics : {}
+  const limits = isRecord(data.limits) ? data.limits : {}
   const perProviderTimeoutSec = asLooseNullableNumber(execution.per_provider_timeout_sec)
   const lastLatencyMs = asInt(metrics.last_latency_ms)
 
   return {
     name: asNullableString(data.name) ?? requestedName,
     active_goal_ids: normalizeStringList(data.active_goal_ids),
+    autoboot_enabled: asLooseBoolean(data.autoboot_enabled, true),
+    max_context_override: asInt(data.max_context_override) ?? null,
+    limits: {
+      min_context_override_tokens: asInt(limits.min_context_override_tokens) ?? null,
+      max_context_override_tokens: asInt(limits.max_context_override_tokens) ?? null,
+    },
     sandbox_profile: asNullableString(data.sandbox_profile) ?? '(unknown sandbox_profile)',
     network_mode: asNullableString(data.network_mode) ?? '(unknown network_mode)',
     sandbox_last_error: asNullableString(data.sandbox_last_error),
@@ -283,12 +290,13 @@ export function fetchKeeperConfig(name: string): Promise<KeeperConfig> {
 
 export type SandboxProfile = 'local' | 'docker'
 export type SandboxNetworkMode = 'none' | 'inherit'
-export type SharedMemoryScope = 'disabled' | 'workspace'
 
 export type KeeperConfigUpdatePayload = {
   runtime_id?: string
   active_goal_ids?: string[]
   mention_targets?: string[]
+  autoboot_enabled?: boolean
+  max_context_override?: number | null
   allowed_paths?: string[]
   // Sandbox
   sandbox_profile?: SandboxProfile
@@ -301,6 +309,7 @@ export type KeeperConfigUpdatePayload = {
   proactive_idle_sec?: number
   proactive_cooldown_sec?: number
   // Compaction
+  compaction_profile?: string
   compaction_ratio_gate?: number
   compaction_message_gate?: number
   compaction_token_gate?: number
@@ -324,11 +333,9 @@ export async function patchKeeperConfig(
 
 // Tool policy is set atomically (tool_access + denylist) via the dedicated
 // /tools endpoint with action=set_policy — a different mutation shape from the
-// /config PATCH above. The caller should echo the current tool_access so that
-// editing only the denylist preserves the operator's configured allowlist
-// record (which feeds tool visibility + assignment telemetry). Runtime
-// execution gating keys only off the denylist, not tool_access. The endpoint
-// returns the updated tools block (not the full config), so we re-fetch the
+// /config PATCH above. The endpoint overwrites both tool_access and denylist,
+// and runtime execution gating keys only off the denylist, not tool_access.
+// It returns the updated tools block (not the full config), so we re-fetch the
 // config to get a consistent normalized snapshot.
 export async function setKeeperToolPolicy(
   name: string,

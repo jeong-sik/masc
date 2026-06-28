@@ -666,8 +666,9 @@ module Broadcast_dedupe = struct
         commit_emit t slot key;
         Emitted event
       | exception exn ->
+        let bt = Printexc.get_raw_backtrace () in
         cancel_emit t slot key;
-        raise exn)
+        Printexc.raise_with_backtrace exn bt)
   ;;
 
   let reset t =

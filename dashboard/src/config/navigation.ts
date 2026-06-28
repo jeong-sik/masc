@@ -59,6 +59,8 @@ type SurfaceSectionId =
   | 'fleet-health'   // Phase 1: absorbs telemetry + fleet + tool-quality + monitoring governance
   | 'transport-health' // Hidden support route for transport diagnostics; linked from Runtime.
   | 'feature-health' // Hidden support route for feature flag diagnostics; linked from Runtime.
+  | 'journey' // Hidden execution-flow drill-down.
+  | 'cognition' // Hidden keeper cognition drill-down.
   // command
   | 'operations'     // Phase 1+6: absorbs intervene + governance + inspector (Phase 7: connectors split out)
   // connectors (Phase 7: top-level surface — sidecar-driven channel bridges)
@@ -351,7 +353,20 @@ export const DASHBOARD_SECTION_ITEMS: Record<NonHomeTabId, DashboardSectionNavIt
       params: { section: 'feature-health' },
       hidden: true,
     },
-
+    {
+      id: 'journey',
+      label: 'Journey Map',
+      description: 'Execution-flow drill-down.',
+      params: { section: 'journey' },
+      hidden: true,
+    },
+    {
+      id: 'cognition',
+      label: 'Keeper Cognition',
+      description: 'Keeper cognition and memory drill-down.',
+      params: { section: 'cognition' },
+      hidden: true,
+    },
   ],
   keepers: [],
   board: [],
@@ -518,7 +533,6 @@ export const SECTION_REDIRECTS: Record<TabSectionKey, SectionRedirect> = {
   'monitoring:governance':   { section: 'fleet-health', view: 'governance' },
   'monitoring:attribution':   { section: 'fleet-health', view: 'attribution' },
   'monitoring:fsm-hub':      { section: 'agents', view: 'fsm' },
-  'monitoring:cognition':    { section: 'agents' },
   'monitoring:metrics':      { section: 'runtime' },
   'monitoring:cost': { section: 'runtime', view: 'cost' },
 

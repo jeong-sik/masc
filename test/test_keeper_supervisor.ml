@@ -20,6 +20,8 @@ module KFP = Keeper_failure_policy
 module KSP = Masc.Keeper_supervisor_self_preservation
 module KSR = Masc.Keeper_supervisor_reconcile_keepalive
 
+let supervisor_agent_name = Sup.supervisor_agent_name
+
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_supervisor_" "" in
   Unix.unlink dir;
@@ -586,7 +588,7 @@ let test_missing_persona_without_profile_or_toml_is_error () =
 let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
   {
     config;
-    agent_name = "supervisor";
+    agent_name = supervisor_agent_name;
     sw;
     clock = Eio.Stdenv.clock env;
     proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -607,7 +609,7 @@ let test_declarative_boot_materializes_goal_from_instructions () =
       Reg.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
   Fun.protect
     ~finally:(fun () -> KR.stop_keepalive ~base_path:config.base_path name)
@@ -635,7 +637,7 @@ let test_declarative_boot_records_goal_required_failure () =
       Reg.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
   (match KR.load_or_materialize_boot_meta ctx name with
    | Ok _ -> fail "expected declarative keeper without any intent to fail"
@@ -664,7 +666,7 @@ let test_reconcile_materializes_configured_keeper_without_meta () =
       Reg.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
   let materialized = ref [] in
   let supervised = ref [] in
@@ -700,7 +702,7 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
       Reg.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
   let materialized = ref [] in
   let supervised = ref [] in
@@ -742,7 +744,7 @@ let test_reconcile_materialize_failure_continues_with_metric () =
       Reg.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
   let supervised = ref [] in
   let metric = Keeper_metrics.(to_string KeeperMaterializationFailures) in
@@ -782,7 +784,7 @@ let test_reconcile_supervise_exception_continues () =
       Reg.clear ();
       KR.reset_test_state base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let ctx = keeper_runtime_context env sw config in
   let supervised = ref [] in
   let metric = Keeper_metrics.(to_string ReconcileFailures) in
@@ -921,7 +923,7 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
     Masc.Keeper_runtime.reset_test_state base_dir;
     cleanup_dir base_dir);
   let config = Masc.Workspace.default_config base_dir in
-  let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
   let name = "spawn-denied-no-fork" in
   let meta = make_meta name in
   (match Keeper_meta_store.write_meta config meta with
@@ -930,7 +932,7 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
   let ctx : _ Keeper_types_profile.context =
     {
       config;
-      agent_name = "supervisor";
+      agent_name = supervisor_agent_name;
       sw;
       clock = Eio.Stdenv.clock env;
       proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -965,13 +967,13 @@ let test_spawn_admission_denial_does_not_register_or_fork () =
   check (float 0.001) "keepalive denial metric increments"
     (keepalive_denials_before +. 1.0)
     (denial_count "keepalive");
-  let supervisor_denials_before = denial_count "supervisor" in
+  let supervisor_denials_before = denial_count supervisor_agent_name in
   Sup.supervise_keepalive ~proactive_warmup_sec:0 ctx meta;
   check bool "supervisor denial does not register keeper" false
     (Reg.is_registered ~base_path:config.base_path name);
   check (float 0.001) "supervisor denial metric increments"
     (supervisor_denials_before +. 1.0)
-    (denial_count "supervisor");
+    (denial_count supervisor_agent_name);
   check (float 0.001) "spawn denial does not fork heartbeat" fork_before (fork_total ())
 
 let test_active_supervision_keeper_count_uses_current_entries () =
@@ -1141,7 +1143,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _workspace = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _workspace = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let base = make_meta "paused-reconcile" in
       let meta =
         {
@@ -1165,7 +1167,7 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1225,7 +1227,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       write_keeper_toml config_dir ~name;
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1250,7 +1252,7 @@ let test_restart_path_emits_attempt_and_started_outcome_metrics () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1286,7 +1288,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let meta = make_meta name in
       let reg = Reg.register ~base_path:config.base_path name meta in
       resolve_done_for_test reg (`Crashed "ordinary crash");
@@ -1309,7 +1311,7 @@ let test_restart_path_emits_meta_unavailable_outcome_metric () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1348,7 +1350,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "dead-alert-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1374,7 +1376,7 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1396,6 +1398,187 @@ let test_max_restarts_exhaustion_emits_dead_alert () =
       check bool "keeper phase advanced to Dead"
         true (phase = Keeper_state_machine.Dead))
 
+let test_max_restarts_exhaustion_releases_owned_task () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "dead-task-owner" in
+      let base_meta = make_meta name in
+      let created =
+        match
+          Masc.Workspace.add_task_with_result
+            config
+            ~title:"dead owner release regression"
+            ~priority:1
+            ~description:"task must be released when keeper exhausts restart budget"
+        with
+        | Ok created -> created
+        | Error err -> fail (Masc.Workspace.add_task_error_to_string err)
+      in
+      (match
+         Masc.Workspace.claim_task_r
+           config
+           ~agent_name:base_meta.agent_name
+           ~task_id:created.task_id
+           ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      (match
+         Masc.Workspace.transition_task_r
+           config
+           ~agent_name:base_meta.agent_name
+           ~task_id:created.task_id
+           ~action:Masc_domain.Start
+           ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      let task_id =
+        match Keeper_id.Task_id.of_string created.task_id with
+        | Ok task_id -> task_id
+        | Error err -> fail err
+      in
+      let meta = { base_meta with current_task_id = Some task_id } in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      resolve_done_for_test reg (`Crashed "synthetic exhaustion");
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Heartbeat_consecutive_failures 9));
+      let max_restarts =
+        Masc.Runtime_params.get
+          Masc.Governance_registry.keeper_supervisor_max_restarts
+      in
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      let task =
+        Masc.Workspace.get_tasks_raw config
+        |> List.find (fun (task : Masc_domain.task) ->
+          String.equal task.id created.task_id)
+      in
+      (match task.task_status with
+       | Masc_domain.Todo -> ()
+       | status ->
+         fail
+           (Printf.sprintf
+              "expected released task to be todo, got %s"
+              (Masc_domain.task_status_to_string status)));
+      (match Keeper_meta_store.read_meta config name with
+       | Ok (Some persisted) ->
+         check (option string) "dead keeper current_task_id cleared" None
+           (Option.map Keeper_id.Task_id.to_string persisted.current_task_id)
+       | Ok None -> fail "expected persisted keeper meta"
+       | Error err -> fail err))
+
+let test_max_restarts_exhaustion_preserves_current_task_when_owned_task_query_fails () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "dead-task-owner-discovery-fails" in
+      let base_meta = make_meta name in
+      let created =
+        match
+          Masc.Workspace.add_task_with_result
+            config
+            ~title:"dead owner discovery failure regression"
+            ~priority:1
+            ~description:"current_task_id must survive backlog query failures"
+        with
+        | Ok created -> created
+        | Error err -> fail (Masc.Workspace.add_task_error_to_string err)
+      in
+      (match
+         Masc.Workspace.claim_task_r
+           config
+           ~agent_name:base_meta.agent_name
+           ~task_id:created.task_id
+           ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      (match
+         Masc.Workspace.transition_task_r
+           config
+           ~agent_name:base_meta.agent_name
+           ~task_id:created.task_id
+           ~action:Masc_domain.Start
+           ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      let task_id =
+        match Keeper_id.Task_id.of_string created.task_id with
+        | Ok task_id -> task_id
+        | Error err -> fail err
+      in
+      let meta = { base_meta with current_task_id = Some task_id } in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      resolve_done_for_test reg (`Crashed "synthetic exhaustion");
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Heartbeat_consecutive_failures 9));
+      let max_restarts =
+        Masc.Runtime_params.get
+          Masc.Governance_registry.keeper_supervisor_max_restarts
+      in
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:max_restarts ~last_restart_ts:0.0 ~crash_log:[];
+      let oc = open_out (Masc.Workspace.backlog_path config) in
+      output_string oc "{ not valid json";
+      close_out oc;
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      (match Keeper_meta_store.read_meta config name with
+       | Ok (Some persisted) ->
+         check (option string)
+           "dead keeper current_task_id preserved when discovery fails"
+           (Some created.task_id)
+           (Option.map Keeper_id.Task_id.to_string persisted.current_task_id)
+       | Ok None -> fail "expected persisted keeper meta"
+       | Error err -> fail err))
+
 let with_reap_ready_dead_keeper name f =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1409,7 +1592,7 @@ let with_reap_ready_dead_keeper name f =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
        | Ok () -> ()
@@ -1419,7 +1602,7 @@ let with_reap_ready_dead_keeper name f =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1491,7 +1674,7 @@ let test_stale_storm_pause_skips_restart () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "stale-storm-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1517,7 +1700,7 @@ let test_stale_storm_pause_skips_restart () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1553,6 +1736,97 @@ let test_stale_storm_pause_skips_restart () =
       check bool "registry entry unregistered after storm pause"
         false (Reg.is_registered ~base_path:config.base_path name))
 
+let test_stale_storm_pause_releases_owned_task () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "stale-storm-task-owner" in
+      let base_meta = make_meta name in
+      let created =
+        match
+          Masc.Workspace.add_task_with_result
+            config
+            ~title:"auto-pause release regression"
+            ~priority:1
+            ~description:"task must be released when keeper auto-pauses"
+        with
+        | Ok created -> created
+        | Error err -> fail (Masc.Workspace.add_task_error_to_string err)
+      in
+      (match
+         Masc.Workspace.claim_task_r
+           config
+           ~agent_name:base_meta.agent_name
+           ~task_id:created.task_id
+           ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      (match
+         Masc.Workspace.transition_task_r
+           config
+           ~agent_name:base_meta.agent_name
+           ~task_id:created.task_id
+           ~action:Masc_domain.Start
+           ()
+       with
+       | Ok _ -> ()
+       | Error err -> fail (Masc_domain.masc_error_to_string err));
+      let task_id =
+        match Keeper_id.Task_id.of_string created.task_id with
+        | Ok task_id -> task_id
+        | Error err -> fail err
+      in
+      let meta = { base_meta with current_task_id = Some task_id } in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      resolve_done_for_test reg (`Crashed "synthetic stale storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      let task =
+        Masc.Workspace.get_tasks_raw config
+        |> List.find (fun (task : Masc_domain.task) ->
+          String.equal task.id created.task_id)
+      in
+      (match task.task_status with
+       | Masc_domain.Todo -> ()
+       | status ->
+         fail
+           (Printf.sprintf
+              "expected auto-paused owner task to be todo, got %s"
+              (Masc_domain.task_status_to_string status)));
+      (match Keeper_meta_store.read_meta config name with
+       | Ok (Some persisted) ->
+         check bool "auto-paused meta.paused=true" true persisted.paused;
+         check (option string) "auto-paused current_task_id cleared" None
+           (Option.map Keeper_id.Task_id.to_string persisted.current_task_id)
+       | Ok None -> fail "expected persisted keeper meta"
+       | Error err -> fail err))
+
 let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -1565,7 +1839,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "legacy-stale-fleet-batch-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1588,7 +1862,7 @@ let test_legacy_stale_fleet_batch_routes_to_restart_budget () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1622,7 +1896,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "provider-timeout-loop-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1645,7 +1919,7 @@ let test_provider_timeout_loop_pause_skips_restart () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1686,7 +1960,7 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "unresolved-watchdog-stopped" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1701,7 +1975,7 @@ let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1737,7 +2011,7 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "stale-run-stop-signal" in
       let base_meta = make_meta name in
       let meta =
@@ -1773,7 +2047,7 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1823,7 +2097,7 @@ let test_non_storm_crashed_restarts_normally () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "non-storm-keeper" in
       let meta = make_meta name in
       (match Keeper_meta_store.write_meta config meta with
@@ -1849,7 +2123,7 @@ let test_non_storm_crashed_restarts_normally () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1885,7 +2159,7 @@ let test_storm_pause_requires_manual_resume () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "storm-manual-resume" in
       let meta = make_meta name in
       (* Ensure no prior auto_resume_after_sec. *)
@@ -1903,7 +2177,7 @@ let test_storm_pause_requires_manual_resume () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -1944,7 +2218,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "backoff-doubles" in
       (* Simulate a keeper that was already auto-paused with 1h delay. *)
       let initial_meta =
@@ -1964,7 +2238,7 @@ let test_oas_auto_resume_after_sec_doubles_on_repause () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -2000,7 +2274,7 @@ let test_sweep_auto_resumes_after_backoff () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "auto-resume-keeper" in
       write_keeper_toml config_dir ~name;
       (* Simulate a keeper paused 2h ago with a 1h (3600s) auto-resume
@@ -2030,7 +2304,7 @@ let test_sweep_auto_resumes_after_backoff () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -2075,7 +2349,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "auto-resume-registered" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -2109,7 +2383,7 @@ let test_sweep_auto_resumes_registered_paused_entry () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -2145,7 +2419,7 @@ let test_operator_pause_not_auto_resumed () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "operator-paused-keeper" in
       write_keeper_toml config_dir ~name;
       (* Paused 2h ago with NO auto_resume_after_sec (operator pause). *)
@@ -2174,7 +2448,7 @@ let test_operator_pause_not_auto_resumed () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -2249,7 +2523,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "capacity-paused-without-resume-policy" in
       write_keeper_toml config_dir ~name;
       let two_hours_ago =
@@ -2290,7 +2564,7 @@ let test_capacity_blocker_without_resume_policy_not_auto_resumed () =
       let ctx : _ Keeper_types_profile.context =
         {
           config;
-          agent_name = "supervisor";
+          agent_name = supervisor_agent_name;
           sw;
           clock = Eio.Stdenv.clock env;
           proc_mgr = Some (Eio.Stdenv.process_mgr env);
@@ -2335,7 +2609,7 @@ let test_initial_auto_resume_capped_at_max () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "initial-cap-regression" in
       (* meta has no prior auto_resume_after_sec (first auto-pause). *)
       let meta = make_meta name in
@@ -2388,7 +2662,7 @@ let test_persisted_blocker_survives_unregister () =
       cleanup_dir base_dir)
     (fun () ->
       let config = Masc.Workspace.default_config base_dir in
-      let _init_msg = Masc.Workspace.init config ~agent_name:(Some "supervisor") in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
       let name = "auto-pause-blocker-keeper" in
       let meta = make_meta name in
       let meta =
@@ -2411,7 +2685,7 @@ let test_persisted_blocker_survives_unregister () =
       Reg.set_failure_reason ~base_path:config.base_path name
         (Some (Reg.Stale_termination_storm { count = 5 }));
       let ctx : _ Keeper_types_profile.context =
-        { config; agent_name = "supervisor"; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = Some (Eio.Stdenv.net env) }
+        { config; agent_name = supervisor_agent_name; sw; clock = Eio.Stdenv.clock env; proc_mgr = Some (Eio.Stdenv.process_mgr env); net = Some (Eio.Stdenv.net env) }
       in
       sweep_and_recover_no_materialize ctx;
       
@@ -2785,6 +3059,14 @@ let () =
     "dead_state_alert", [
       test_case "max_restarts exhaustion emits Dead alert" `Quick
         test_max_restarts_exhaustion_emits_dead_alert;
+      test_case "max_restarts exhaustion releases owned task" `Quick
+        test_max_restarts_exhaustion_releases_owned_task;
+      test_case
+        "max_restarts exhaustion preserves current_task_id when owned task query fails"
+        `Quick
+        test_max_restarts_exhaustion_preserves_current_task_when_owned_task_query_fails;
+      test_case "stale storm auto-pause releases owned task" `Quick
+        test_stale_storm_pause_releases_owned_task;
       test_case "sweep cleanup fires Tombstone_reaped hook" `Quick
         test_sweep_and_recover_fires_tombstone_reaped_hook;
       test_case "failing Tombstone_reaped hook is swallowed" `Quick

@@ -16,6 +16,19 @@ import {
   type CompactionSnapshot,
 } from './compaction-snapshots'
 
+type CompactionReadError = {
+  readonly scope: string
+  readonly error: string
+}
+
+type CompactionSnapshotLoadState = {
+  readonly loading: boolean
+  readonly error: string | null
+  readonly readErrorCount: number
+  readonly readErrors: readonly CompactionReadError[]
+  readonly scanTruncated: boolean
+}
+
 function isFiniteNumber(n: number | null | undefined): n is number {
   return typeof n === 'number' && Number.isFinite(n)
 }
@@ -79,6 +92,33 @@ function DataGapNote({ children }: { children: string }): VNode {
   return html`<div class="mem-empty" data-stub="compaction-detail">${children}</div>`
 }
 
+function CompactionScanDiagnostics({
+  loadState,
+}: {
+  loadState: CompactionSnapshotLoadState
+}): VNode | null {
+  const shownErrors = loadState.readErrors.slice(0, 3)
+  const hiddenErrorCount = Math.max(0, loadState.readErrorCount - shownErrors.length)
+  if (loadState.readErrorCount <= 0 && !loadState.scanTruncated) return null
+  return html`
+    <div class="mem-read-error" role="status" data-testid="compaction-scan-diagnostics">
+      <strong>스캔 진단</strong>
+      ${loadState.readErrorCount > 0 ? html`<span>manifest row ${loadState.readErrorCount}개를 읽지 못했습니다.</span>` : null}
+      ${loadState.scanTruncated ? html`<span>응답이 limit에 의해 잘렸습니다.</span>` : null}
+      ${shownErrors.length > 0
+        ? html`
+          <ul>
+            ${shownErrors.map((err) => html`
+              <li><code>${err.scope}</code>: ${err.error}</li>
+            `)}
+          </ul>
+        `
+        : null}
+      ${hiddenErrorCount > 0 ? html`<span class="mono">+${hiddenErrorCount} more</span>` : null}
+    </div>
+  `
+}
+
 export function CompactionInspectorOverlay({
   keeper,
   onClose,
@@ -89,9 +129,12 @@ export function CompactionInspectorOverlay({
   const events = keeperCompactionSnapshots(keeper.name)
   const [idx, setIdx] = useState(0)
   const [side, setSide] = useState<'before' | 'after'>('after')
-  const [loadState, setLoadState] = useState<{ loading: boolean; error: string | null }>({
+  const [loadState, setLoadState] = useState<CompactionSnapshotLoadState>({
     loading: true,
     error: null,
+    readErrorCount: 0,
+    readErrors: [],
+    scanTruncated: false,
   })
 
   useEffect(() => {
@@ -108,12 +151,24 @@ export function CompactionInspectorOverlay({
   useEffect(() => {
     const controller = new AbortController()
     let active = true
-    setLoadState({ loading: true, error: null })
+    setLoadState({
+      loading: true,
+      error: null,
+      readErrorCount: 0,
+      readErrors: [],
+      scanTruncated: false,
+    })
     void fetchKeeperCompactionSnapshots(keeper.name, undefined, { signal: controller.signal })
       .then((payload) => {
         if (!active) return
         hydrateCompactionSnapshots(keeper.name, payload.items)
-        setLoadState({ loading: false, error: null })
+        setLoadState({
+          loading: false,
+          error: null,
+          readErrorCount: payload.read_error_count,
+          readErrors: payload.read_errors,
+          scanTruncated: payload.scan_truncated,
+        })
       })
       .catch((err: unknown) => {
         if (!active) return
@@ -121,6 +176,9 @@ export function CompactionInspectorOverlay({
         setLoadState({
           loading: false,
           error: err instanceof Error ? err.message : String(err),
+          readErrorCount: 0,
+          readErrors: [],
+          scanTruncated: false,
         })
       })
     return () => {
@@ -144,6 +202,7 @@ export function CompactionInspectorOverlay({
               : loadState.error
                 ? html`<div class="mem-read-error" role="alert">${'⚠'} 컴팩션 스냅샷 불러오기 실패 — ${loadState.error}</div>`
                 : html`
+                  <${CompactionScanDiagnostics} loadState=${loadState} />
                   <div class="cmp-empty">
                     아직 이 keeper에서 durable compaction snapshot이 없습니다.<br />
                     컨텍스트가 임계치를 넘거나 ‘지금 컴팩트’를 실행하면 새 결과가 기록됩니다.
@@ -188,7 +247,7 @@ export function CompactionInspectorOverlay({
             ? html`<div class="mem-empty mem-disclosure">durable snapshot 새로고침 중…</div>`
             : loadState.error
               ? html`<div class="mem-read-error" role="alert">${'⚠'} durable snapshot 새로고침 실패 — ${loadState.error}</div>`
-              : null}
+              : html`<${CompactionScanDiagnostics} loadState=${loadState} />`}
           <div class="cmp-trigger"><span class="sub-k">트리거</span>${ev.trigger}</div>
           <div class="cmp-trigger"><span class="sub-k">수행 런타임</span><span class="mono">${ev.runtime}</span></div>
           <div class="cmp-trigger"><span class="sub-k">소스</span><span class="mono">${ev.detailSource ?? ev.source}${ev.status ? ` · ${ev.status}` : ''}</span></div>

@@ -71,14 +71,8 @@ let handle_ag_ui_events ~deps request reqd =
           stop_sse_session_preserve_guard session_id;
           if Option.is_some last_event_id then
             Transport_metrics.inc_sse_reconnect ();
-          let headers =
-            Httpun.Headers.of_list
-              (sse_stream_headers ~deps session_id protocol_version origin)
-          in
-          let response = Httpun.Response.create ~headers `OK in
-          let writer = Httpun.Reqd.respond_with_streaming reqd response in
-          let mutex = Eio.Mutex.create () in
-          let info_ref : sse_conn_info option ref = ref None in
+          ensure_sse_backing_session_for_known_transport_session
+            ~transport_session_id:session_id ~sse_session_id:session_id;
           (match
              Sse.register ~kind:Sse.Observer ~auth session_id
                ~last_event_id:(Option.value ~default:0 last_event_id)
@@ -87,8 +81,16 @@ let handle_ag_ui_events ~deps request reqd =
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
-               Httpun.Body.Writer.close writer
+               respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Ok (client_id, event_stream, evicted) ->
+              let headers =
+                Httpun.Headers.of_list
+                  (sse_stream_headers ~deps session_id protocol_version origin)
+              in
+              let response = Httpun.Response.create ~headers `OK in
+              let writer = Httpun.Reqd.respond_with_streaming reqd response in
+              let mutex = Eio.Mutex.create () in
+              let info_ref : sse_conn_info option ref = ref None in
               (match evicted with
               | Some evicted_sid ->
                   (* RFC-0099 PR-3: cap-exceeded eviction publishes typed
@@ -186,12 +188,8 @@ let handle_presence_events ~deps request reqd =
             ~protocol_version ~reason ~retry_after_s reqd
       | Ok () ->
           stop_sse_session_preserve_guard session_id;
-          let headers =
-            presence_stream_headers ~deps raw_session_id protocol_version origin
-          in
-          let response = Httpun.Response.create ~headers `OK in
-          let writer = Httpun.Reqd.respond_with_streaming reqd response in
-          let mutex = Eio.Mutex.create () in
+          ensure_sse_backing_session_for_known_transport_session
+            ~transport_session_id:raw_session_id ~sse_session_id:session_id;
           (match
              Sse.register ~kind:Sse.Presence ~auth session_id ~last_event_id:0
                ~on_disconnect:(fun () ->
@@ -200,8 +198,14 @@ let handle_presence_events ~deps request reqd =
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
                Log.Server.warn "%s" msg;
-               Httpun.Body.Writer.close writer
+               respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Ok (client_id, event_stream, evicted) ->
+              let headers =
+                presence_stream_headers ~deps raw_session_id protocol_version origin
+              in
+              let response = Httpun.Response.create ~headers `OK in
+              let writer = Httpun.Reqd.respond_with_streaming reqd response in
+              let mutex = Eio.Mutex.create () in
           (match evicted with
           | Some evicted_sid ->
               (* RFC-0099 PR-3: cap-exceeded eviction publishes typed

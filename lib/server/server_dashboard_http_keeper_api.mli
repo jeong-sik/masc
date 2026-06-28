@@ -157,13 +157,17 @@ val handle_keeper_lifecycle_post :
     [action] parameter selects the keeper FSM event. *)
 
 val handle_keeper_directive_post :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
-  'a -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /directive] (operator directive injection). *)
 
 val handle_keeper_bulk_directive_post :
+  sw:Eio.Switch.t ->
+  clock:[> float Eio.Time.clock_ty ] Eio.Time.clock ->
   Mcp_server.server_state ->
-  'a -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
+  string -> Httpun.Request.t -> Httpun.Reqd.t -> string -> unit
 (** Handle [POST /api/v1/keepers_bulk/directive]. Body:
     [{"names": [...], "action": "pause"|"resume"|"wakeup"}]. Runs the
     same per-keeper meta read / persist / dispatch path as

@@ -44,9 +44,16 @@ let keeper_count (config : Workspace.config) : int =
   List.length (keeper_names config)
 
 let configured_runtime_keeper_names config =
-  let loader_level_names = Keeper_types_profile.loader_level_keeper_toml_key_names in
   Keeper_meta_store.configured_keeper_names config
-  |> List.filter (fun name -> not (List.exists (String.equal name) loader_level_names))
+  |> List.filter (fun name ->
+    try
+      Keeper_types_profile.load_keeper_profile_defaults_for_base_path
+        ~base_path:config.Workspace.base_path
+        name
+      |> Keeper_types_profile.keeper_profile_defaults_materializable
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _ -> true)
 
 let configured_keeper_count (config : Workspace.config) : int =
   List.length (configured_runtime_keeper_names config)

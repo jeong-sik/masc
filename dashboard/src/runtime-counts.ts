@@ -360,14 +360,18 @@ export function formatActiveOverConfigured(
     const transient = counts.live.transientKeepers
     const offline = counts.live.offlineKeepers
     const configured = counts.configured.keepers
-    const parts = [`런타임 가동 ${running}`]
-    if (paused > 0) parts.push(`일시정지 ${paused}`)
-    if (transient > 0) parts.push(`전이 ${transient}`)
-    if (offline > 0) parts.push(`오프라인 ${offline}`)
-    parts.push(`설정 ${configured}`)
+    const parts = [`keeper 실행 fiber ${running}`]
+    if (paused > 0) parts.push(`일시정지 keeper ${paused}`)
+    if (transient > 0) parts.push(`전이 keeper ${transient}`)
+    if (offline > 0) parts.push(`오프라인 keeper ${offline}`)
+    parts.push(`configured keeper ${configured}`)
     return parts.join(' / ')
   }
-  return `런타임 가동 ${counts.live.totalRuntimes} / 설정 ${counts.configured.totalRuntimes}`
+  return [
+    `keeper 실행 fiber ${counts.live.keepers}`,
+    `workspace agents ${counts.live.agents}`,
+    `configured runtimes ${counts.configured.totalRuntimes}`,
+  ].join(' / ')
 }
 
 export function keeperDetailRows(counts: Pick<RuntimeCounts, 'live'>): number {
@@ -393,37 +397,40 @@ export function formatKeeperCountBreakdown({
   offlineKeepers = 0,
   configuredKeepers,
 }: KeeperCountBreakdownInput): string {
-  const parts = [`키퍼 런타임 가동 ${normalizeCount(liveKeepers)}`]
+  const parts = [`keeper 실행 fiber ${normalizeCount(liveKeepers)}`]
   const paused = normalizeCount(pausedKeepers)
   const transient = normalizeCount(transientKeepers)
   const offline = normalizeCount(offlineKeepers)
-  if (paused > 0) parts.push(`일시정지 ${paused}`)
-  if (transient > 0) parts.push(`전이 ${transient}`)
-  if (offline > 0) parts.push(`오프라인 ${offline}`)
-  parts.push(`설정 ${normalizeCount(configuredKeepers)}`)
+  if (paused > 0) parts.push(`일시정지 keeper ${paused}`)
+  if (transient > 0) parts.push(`전이 keeper ${transient}`)
+  if (offline > 0) parts.push(`오프라인 keeper ${offline}`)
+  parts.push(`configured keeper ${normalizeCount(configuredKeepers)}`)
   return parts.join(' / ')
 }
 
 export function formatKeeperRosterCount(counts: Pick<RuntimeCounts, 'live' | 'configured'>): string {
   return [
-    `상세 ${keeperDetailRows(counts)}`,
+    `keeper 행 ${keeperDetailRows(counts)}`,
     formatKeeperCountBreakdown({
       liveKeepers: counts.live.keepers,
       pausedKeepers: counts.live.pausedKeepers,
       transientKeepers: counts.live.transientKeepers,
       offlineKeepers: counts.live.offlineKeepers,
       configuredKeepers: counts.configured.keepers,
-    }).replace(/^키퍼 /, ''),
+    }),
   ].join(' / ')
 }
 
 export function formatRuntimeRosterCount(counts: Pick<RuntimeCounts, 'live' | 'configured'>): string {
   const parts = [
-    `상세 ${runtimeDetailRows(counts)}`,
-    `런타임 가동 ${counts.live.totalRuntimes}`,
+    `runtime 행 ${runtimeDetailRows(counts)}`,
+    `keeper 실행 fiber ${counts.live.keepers}`,
+    `workspace agents ${counts.live.agents}`,
   ]
-  if (counts.live.transientKeepers > 0) parts.push(`전이 ${counts.live.transientKeepers}`)
-  parts.push(`키퍼 설정 ${counts.configured.keepers}`)
+  if (counts.live.pausedKeepers > 0) parts.push(`일시정지 keeper ${counts.live.pausedKeepers}`)
+  if (counts.live.transientKeepers > 0) parts.push(`전이 keeper ${counts.live.transientKeepers}`)
+  if (counts.live.offlineKeepers > 0) parts.push(`오프라인 keeper ${counts.live.offlineKeepers}`)
+  parts.push(`configured keeper ${counts.configured.keepers}`)
   return parts.join(' / ')
 }
 

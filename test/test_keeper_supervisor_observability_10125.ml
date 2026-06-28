@@ -54,16 +54,15 @@ let last_sweep_for ~base_path =
     ()
 ;;
 
-(* Both metrics are declared at init via [Otel_metric_store.add ~labels:[]],
-   so [get_metric_value ~labels:[] ()] returns [Some 0.0] if and only
-   if the registration block actually ran. Pins that the #10125
-   dashboard wiring is present — if either name is missing the whole
-   dashboard becomes invisible on a fresh install.
+(* The sweep-start counter is declared at init via zero-fill so
+   [get_metric_value ~labels:[] ()] returns [Some 0.0] if and only
+   if the registration block actually ran. The last-sweep timestamp is a gauge
+   and intentionally stays lazy until a sweep beat writes an honest value.
 
    Note: [metric_total] cannot be used as a registration check because
    it folds across all labelled variants and returns [0.0] for both
    "not registered" and "registered but no observations yet". *)
-let test_metrics_registered () =
+let test_counter_registered_and_gauge_lazy () =
   let starts =
     Metrics.get_metric_value Keeper_metrics.(to_string SupervisorSweepStarts) ()
   in
@@ -73,7 +72,7 @@ let test_metrics_registered () =
       ()
   in
   Alcotest.(check bool) "sweep_starts registered" true (Option.is_some starts);
-  Alcotest.(check bool) "last_sweep_unixtime registered" true (Option.is_some last_sweep)
+  Alcotest.(check bool) "last_sweep_unixtime lazy before set" true (Option.is_none last_sweep)
 ;;
 
 (* Helper returns [None] before the sweep gauge is set in
@@ -189,9 +188,9 @@ let () =
     "keeper_supervisor_observability_10125"
     [ ( "metrics-registered"
       , [ Alcotest.test_case
-            "both metrics registered at init"
+            "counter registered and gauge lazy at init"
             `Quick
-            test_metrics_registered
+            test_counter_registered_and_gauge_lazy
         ] )
     ; ( "age-helper"
       , [ Alcotest.test_case

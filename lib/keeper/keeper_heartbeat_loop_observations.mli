@@ -7,6 +7,13 @@ val record_provider_timeout_observation
   -> keeper_name:string
   -> unit
 
+val smart_idle_sleep_observation_reasons : string list
+
+val record_smart_idle_sleep_observation
+  :  base_path:string
+  -> keeper_name:string
+  -> unit
+
 val clear_provider_timeout_failure_reason
   :  base_path:string
   -> keeper_name:string

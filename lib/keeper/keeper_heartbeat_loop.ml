@@ -622,7 +622,11 @@ let run_smart_heartbeat_gate
            Keeper_metrics.(to_string SkipIdleWakeResumed)
            ~labels:[ "keeper", meta_current.name ]
            ()
-       | Keeper_keepalive_signal.Stopped | Keeper_keepalive_signal.Timeout -> ());
+       | Keeper_keepalive_signal.Timeout ->
+         Observations.record_smart_idle_sleep_observation
+           ~base_path:config.base_path
+           ~keeper_name:meta_current.name
+       | Keeper_keepalive_signal.Stopped -> ());
       (* Carry the idle-backoff sleep result forward so the turn evaluator can
          tell a broadcast-driven [Woken] from this keeper's own cadence
          [Timeout]. Only the real sleep (Skip_idle) writes here; Emit/Skip_busy

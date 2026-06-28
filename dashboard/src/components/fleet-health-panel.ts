@@ -321,7 +321,7 @@ function FleetCommandStrip() {
             일시정지 ${countText(pausedCount)}
           </span>
           <span class=${`fl-hpill ${cdalTone(cdal) === 'crit' ? 'bad' : cdalTone(cdal) === 'warn' ? 'warn' : 'ok'}`}>
-            CDAL ${cdal?.writer_status ?? 'unknown'}
+            Contract verification ${cdal?.writer_status ?? 'unknown'}
           </span>
         </div>
       </div>
@@ -424,7 +424,7 @@ function RuntimeCdalBlock({ cdal }: { cdal: DashboardCdalHealth | null }) {
   if (!cdal) {
     return html`
       <div class="v2-monitoring-card rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] px-3 py-5 text-center text-2xs text-[var(--color-fg-muted)]">
-        CDAL runtime snapshot unavailable.
+        Contract verification snapshot unavailable.
       </div>
     `
   }
@@ -505,7 +505,7 @@ function RuntimeBlockerBoard() {
           delta=${{ direction: pausedCount && pausedCount > 0 ? 'down' : 'flat', text: compactList(pausedNames) }}
         />
         <${StatTile}
-          label="CDAL writer"
+          label="Contract writer"
           value=${cdal?.writer_status ?? MISSING_DATA_DASH}
           status=${cdalTone(cdal)}
           delta=${{ direction: cdal?.operator_action_required ? 'down' : 'flat', text: cdal?.proof_store?.status ?? 'proof unknown' }}
@@ -517,7 +517,7 @@ function RuntimeBlockerBoard() {
           <${RuntimePausedKeeperTable} fleetSafety=${fleetSafety} />
         </div>
         <div>
-          <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">CDAL blockers</div>
+          <div class="mb-2 text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">Contract blockers</div>
           <${RuntimeCdalBlock} cdal=${cdal} />
         </div>
       </div>

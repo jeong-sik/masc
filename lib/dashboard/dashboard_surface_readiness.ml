@@ -241,6 +241,61 @@ let all_entries =
       ~live_spotcheck:"/api/v1/dashboard/memory-subsystems"
       ()
   ; entry
+      ~id:"keepers"
+      ~label:"Keepers"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Dedicated keeper roster, conversation, and context workspace."
+      ~route_hash:"#keepers"
+      ~live_spotcheck:"/api/v1/dashboard/keepers"
+      ~tool_name:"masc_keeper_list"
+      ()
+  ; entry
+      ~id:"board"
+      ~label:"Board"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Top-level board surface for human, agent, automation, and system posts."
+      ~route_hash:"#board"
+      ~live_spotcheck:"/api/v1/dashboard/board"
+      ~tool_name:"masc_board_list"
+      ()
+  ; entry
+      ~id:"schedule"
+      ~label:"Schedule"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Scheduled keeper automation and wake signals."
+      ~route_hash:"#schedule"
+      ~live_spotcheck:"/api/v1/dashboard/schedule"
+      ~tool_name:"masc_surface_audit"
+      ()
+  ; entry
+      ~id:"approvals"
+      ~label:"Approvals"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Keeper HITL approval queue and pending tool-call gates."
+      ~route_hash:"#approvals"
+      ~live_spotcheck:"/api/v1/dashboard/briefing"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
+      ~id:"fusion"
+      ~label:"Fusion"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Panel and judge deliberations emitted by masc_fusion."
+      ~route_hash:"#fusion"
+      ~live_spotcheck:"/api/v1/dashboard/fusion"
+      ~tool_name:"masc_surface_audit"
+      ()
+  ; entry
       ~id:"command.operations"
       ~label:"Actions"
       ~exposure_status:"main"
@@ -263,11 +318,22 @@ let all_entries =
       ~live_spotcheck:"/api/v1/gate/connectors"
       ()
   ; entry
-      ~id:"workspace.board"
-      ~label:"Board"
+      ~id:"workspace.work"
+      ~label:"Work"
       ~exposure_status:"main"
       ~hidden_from_nav:false
       ~meets_main_gate:true
+      ~rationale:"Goal/job breakdown and keeper assignment board."
+      ~route_hash:"#workspace?section=work"
+      ~live_spotcheck:"/api/v1/dashboard/work"
+      ~tool_name:"masc_tasks"
+      ()
+  ; entry
+      ~id:"workspace.board"
+      ~label:"Board"
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
       ~rationale:"Shared board surface for human, agent, automation, and system posts."
       ~route_hash:"#workspace?section=board"
       ~live_spotcheck:"/api/v1/dashboard/board"
@@ -276,9 +342,9 @@ let all_entries =
   ; entry
       ~id:"workspace.sub-boards"
       ~label:"Sub-Boards"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
       ~rationale:"Named board spaces with distinct access policies."
       ~route_hash:"#workspace?section=sub-boards"
       ~live_spotcheck:"/api/v1/board/sub-boards"
@@ -287,9 +353,9 @@ let all_entries =
   ; entry
       ~id:"workspace.moderation"
       ~label:"Moderation"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
       ~rationale:"Board moderation queue and action surface."
       ~route_hash:"#workspace?section=moderation"
       ~live_spotcheck:"/api/v1/dashboard/board/moderation/queue"
@@ -350,6 +416,39 @@ let all_entries =
       ~tool_name:"masc_surface_audit"
       ()
   ; entry
+      ~id:"lab.performance"
+      ~label:"Performance"
+      ~exposure_status:"lab"
+      ~hidden_from_nav:false
+      ~meets_main_gate:false
+      ~rationale:"FPS meter, VirtualList, content-visibility, native dialog, and observer probes."
+      ~route_hash:"#lab?section=performance"
+      ~live_spotcheck:"/api/v1/dashboard/surface-readiness"
+      ~tool_name:"masc_surface_audit"
+      ()
+  ; entry
+      ~id:"lab.memory-subsystems"
+      ~label:"Memory OS"
+      ~exposure_status:"lab"
+      ~hidden_from_nav:false
+      ~meets_main_gate:false
+      ~rationale:"Live episodes, user model projection, Hebbian synapses, and gated memory entries."
+      ~route_hash:"#lab?section=memory-subsystems"
+      ~live_spotcheck:"/api/v1/dashboard/memory-subsystems"
+      ~tool_name:"masc_surface_audit"
+      ()
+  ; entry
+      ~id:"lab.keeper-memory-health"
+      ~label:"키퍼 메모리 상태"
+      ~exposure_status:"lab"
+      ~hidden_from_nav:false
+      ~meets_main_gate:false
+      ~rationale:"Per-keeper fact-store size, GC statistics, and cadence counter."
+      ~route_hash:"#lab?section=keeper-memory-health"
+      ~live_spotcheck:"/api/v1/dashboard/keeper-memory-health"
+      ~tool_name:"masc_surface_audit"
+      ()
+  ; entry
       ~id:"code.ide-shell"
       ~label:"Code IDE"
       ~exposure_status:"main"
@@ -358,6 +457,17 @@ let all_entries =
       ~rationale:"Keeper collaboration IDE shell."
       ~route_hash:"#code?section=ide-shell"
       ~live_spotcheck:"/api/v1/ide/presence"
+      ()
+  ; entry
+      ~id:"settings"
+      ~label:"Settings"
+      ~exposure_status:"main"
+      ~hidden_from_nav:false
+      ~meets_main_gate:true
+      ~rationale:"Operator console for keeper-v2 configuration."
+      ~route_hash:"#settings"
+      ~live_spotcheck:"/api/v1/dashboard/settings"
+      ~tool_name:"masc_surface_audit"
       ()
   ; entry
       ~id:"logs"

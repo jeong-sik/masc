@@ -8,6 +8,8 @@ open Alcotest
 
 module KR = Masc.Keeper_registry
 module KET = Masc.Keeper_tool_dispatch_runtime
+module KLH = Masc.Keeper_lifecycle_hooks
+module KSM = Keeper_state_machine
 
 let base_path = "/tmp/test_keeper_registry_hardening"
 
@@ -35,7 +37,6 @@ let register name =
 ;;
 
 let health_to_string = KR.registry_entry_validation_error_to_string
-let invalid_trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string ""
 
 let test_put_entry_rejects_meta_name_mismatch () =
   KR.clear ();
@@ -62,6 +63,27 @@ let test_update_entry_rejects_corrupted_result () =
   match KR.get ~base_path "alice" with
   | None -> fail "original entry disappeared after rejected update"
   | Some e -> check string "original base_path preserved" original_base_path e.base_path
+;;
+
+let test_dispatch_write_failure_skips_phase_side_effects () =
+  KR.clear ();
+  KLH.reset_for_testing ();
+  Fun.protect
+    ~finally:(fun () -> KLH.reset_for_testing ())
+    (fun () ->
+       let hook_calls = ref 0 in
+       KLH.register (fun ~keeper_id:_ _ -> incr hook_calls);
+       let entry = register "alice" in
+       let corrupted = { entry with meta = { entry.meta with name = "bob" } } in
+       KR.For_testing.unsafe_put_entry ~base_path "alice" corrupted;
+       match KR.dispatch_event ~base_path "alice" KSM.Fiber_started with
+       | Ok _ -> fail "dispatch accepted a transition whose registry write failed"
+       | Error (KSM.Invalid_transition _ | KSM.Precondition_violation _) ->
+         check int "phase hook skipped before failed write" 0 !hook_calls
+       | Error other ->
+         fail
+           ( "unexpected dispatch error: "
+           ^ KSM.transition_error_to_string other ))
 ;;
 
 let test_get_filters_corrupted_entry () =
@@ -173,6 +195,12 @@ let () =
             "rejects corrupted closure result and preserves original"
             `Quick
             test_update_entry_rejects_corrupted_result
+        ] )
+    ; ( "dispatch_event"
+      , [ test_case
+            "skips phase side effects when validated write fails"
+            `Quick
+            test_dispatch_write_failure_skips_phase_side_effects
         ] )
     ; ( "get_with_health"
       , [ test_case "get filters corrupted entry" `Quick test_get_filters_corrupted_entry ] )

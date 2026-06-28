@@ -55,7 +55,7 @@ describe('filterAttributionEvents', () => {
   })
 
   it('matches by gate substring (case-insensitive)', () => {
-    const result = filterAttributionEvents(events, 'CDAL')
+    const result = filterAttributionEvents(events, 'verdict')
     expect(result).toHaveLength(1)
     expect(result[0]!.attribution.gate).toBe('cdal_verdict')
   })

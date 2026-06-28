@@ -220,6 +220,48 @@ let test_path_probe_does_not_list_parent_outside_cwd () =
        | Some entries -> check (list string) "outside parent entries hidden" [] entries
        | None -> fail "path probe should include parent_entries")
 
+let path_probe_recovery probe =
+  match json_assoc_member "recovery" probe with
+  | Some (`Assoc _ as recovery) -> recovery
+  | Some _ | None -> fail "path probe should include recovery object"
+
+let test_path_probe_flags_repo_cwd_duplicate_prefix () =
+  let base = temp_dir "typed_exec_path_probe_repo_" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base)
+    (fun () ->
+       let repo = Filename.concat (Filename.concat base "repos") "masc" in
+       Unix.mkdir (Filename.concat base "repos") 0o755;
+       Unix.mkdir repo 0o755;
+       let probe =
+         Keeper_tool_execute_runtime.For_testing.path_probe_json
+           ~cwd:repo
+           "repos/masc/lib/keeper/keeper_tool_registry.ml"
+       in
+       let recovery = path_probe_recovery probe in
+       check (option string) "recovery kind"
+         (Some "repo_cwd_duplicate_prefix")
+         (json_string "kind" recovery);
+       check (option string) "relative retry path"
+         (Some "lib/keeper/keeper_tool_registry.ml")
+         (json_string "retry_path" recovery))
+
+let test_path_probe_flags_masc_state_path () =
+  let probe =
+    Keeper_tool_execute_runtime.For_testing.path_probe_json
+      ~cwd:"/home/keeper/playground/garnet"
+      "repos/masc/.masc/"
+  in
+  let recovery = path_probe_recovery probe in
+  check (option string) "recovery kind"
+    (Some "masc_state_not_filesystem")
+    (json_string "kind" recovery);
+  check (option string) "hint mentions task/context"
+    (Some
+       ".masc runtime state is not available as a repo/sandbox file path in \
+        keeper tools; use keeper task/context tools instead.")
+    (json_string "hint" recovery)
+
 let test_retired_path_jail_env_detection () =
   let configured value =
     Retired_env_warnings.For_testing.shell_ir_path_jail_env_configured
@@ -299,6 +341,12 @@ let () =
         ; test_case
             "absolute missing path outside cwd does not list parent"
             `Quick test_path_probe_does_not_list_parent_outside_cwd
+        ; test_case
+            "repo cwd duplicate prefix returns relative retry"
+            `Quick test_path_probe_flags_repo_cwd_duplicate_prefix
+        ; test_case
+            ".masc state path points to task/context tools"
+            `Quick test_path_probe_flags_masc_state_path
         ] )
     ; ( "retired-env"
       , [

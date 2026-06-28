@@ -25,6 +25,23 @@ type path_probe =
 
 let path_probe_parent_entries_limit = 40
 
+let string_has_prefix ~prefix text =
+  let prefix_len = String.length prefix in
+  String.length text >= prefix_len && String.sub text 0 prefix_len = prefix
+
+let path_components path =
+  path
+  |> String.split_on_char '/'
+  |> List.filter (fun component -> String.trim component <> "")
+
+let repo_root_public_prefix_from_cwd cwd =
+  let rec loop = function
+    | [ "repos"; repo ] -> Some ("repos/" ^ repo ^ "/")
+    | _ :: rest -> loop rest
+    | [] -> None
+  in
+  loop (path_components cwd)
+
 let path_contains_glob_meta s =
   String.exists
     (function
@@ -34,6 +51,70 @@ let path_contains_glob_meta s =
 
 let resolve_against_cwd ~cwd path =
   if Filename.is_relative path then Filename.concat cwd path else path
+
+let repo_cwd_relative_rewrite ~cwd path_argument =
+  let cwd = String.trim cwd in
+  let path_argument = String.trim path_argument in
+  match repo_root_public_prefix_from_cwd cwd with
+  | Some prefix
+    when Filename.is_relative path_argument
+         && string_has_prefix ~prefix path_argument ->
+    Some
+      (String.sub path_argument (String.length prefix)
+         (String.length path_argument - String.length prefix))
+  | Some _ | None -> None
+
+let path_mentions_masc_state path_argument =
+  path_components path_argument |> List.exists (String.equal ".masc")
+
+let path_probe_recovery ~cwd path_argument =
+  match repo_cwd_relative_rewrite ~cwd path_argument with
+  | Some relative_path ->
+    `Assoc
+      [ "kind", `String "repo_cwd_duplicate_prefix"
+      ; ( "hint"
+        , `String
+            "cwd already points at the repo checkout; retry with the path relative \
+             to that cwd instead of repeating repos/<repo>." )
+      ; "retry_path", `String relative_path
+      ; ( "alternatives"
+        , `List
+            [ `String
+                (Printf.sprintf "Use argv path %S with the current cwd." relative_path)
+            ; `String
+                (Printf.sprintf
+                   "Or omit cwd and use the sandbox-relative path %S."
+                   path_argument)
+            ] )
+      ]
+  | None when path_mentions_masc_state path_argument ->
+    `Assoc
+      [ "kind", `String "masc_state_not_filesystem"
+      ; ( "hint"
+        , `String
+            ".masc runtime state is not available as a repo/sandbox file path in \
+             keeper tools; use keeper task/context tools instead." )
+      ; "retry_path", `Null
+      ; ( "alternatives"
+        , `List
+            [ `String "Use keeper_context_status for sandbox paths."
+            ; `String "Use keeper task/context tools for .masc task or runtime state."
+            ] )
+      ]
+  | None ->
+    `Assoc
+      [ "kind", `String "probe_parent"
+      ; ( "hint"
+        , `String
+            "Probe the parent directory first and retry with an existing child path; \
+             do not infer module names as directory paths." )
+      ; "retry_path", `Null
+      ; ( "alternatives"
+        , `List
+            [ `String "Read path_probe.parent_entries before retrying."
+            ; `String "Use a visible read/listing tool to confirm the exact path."
+            ] )
+      ]
 
 let take n xs =
   let rec loop acc remaining = function
@@ -86,7 +167,7 @@ let path_probe ~cwd path_argument =
   ; parent_entries
   }
 
-let path_probe_json probe =
+let path_probe_json ~cwd probe =
   `Assoc
     [ "path_argument", `String probe.path_argument
     ; "resolved_path", `String probe.resolved_path
@@ -108,10 +189,11 @@ let path_probe_json probe =
            else
              "Probe the parent directory first and retry with an existing child \
               path; do not infer module names as directory paths.") )
+    ; "recovery", path_probe_recovery ~cwd probe.path_argument
     ]
 
 let path_probe_fields ~cwd path_argument =
-  [ "path_probe", path_probe_json (path_probe ~cwd path_argument) ]
+  [ "path_probe", path_probe_json ~cwd (path_probe ~cwd path_argument) ]
 
 (* Pre-dispatch path existence validation for typed commands.
    Uses Shell_ir_typed GADT path annotations (exhaustive, no
@@ -161,7 +243,7 @@ let typed_execute_response_cwd_json
 
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
-  let path_probe_json ~cwd path = path_probe_json (path_probe ~cwd path)
+  let path_probe_json ~cwd path = path_probe_json ~cwd (path_probe ~cwd path)
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
 end
 

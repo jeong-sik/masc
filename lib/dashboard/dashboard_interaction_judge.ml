@@ -98,12 +98,14 @@ let prompt_for_facts facts_json =
   let template =
     In_channel.with_open_text "config/prompts/dashboard_interaction_judge.md" In_channel.input_all
   in
-  (* template 은 facts 자리에 단일 %s placeholder(L2)를 가진다. 이전 코드는
+  (* template 은 facts 자리에 %s placeholder(L2)를 가진다. 이전 코드는
      [Printf.sprintf "%s\n\nFacts:\n%s" template facts_str] 였는데 template 이
      format string 이 아니라 *인자*라 template 내부의 %s 가 치환되지 않은 채
-     LLM 에게 literal "%s" 로 전달되었다(schema 위반의 근본 원인). template 의
-     %s 자리에 facts 를 직접 치환한다 — template 에 % 는 이 하나뿐(grep 확인). *)
-  Printf.sprintf template facts_str
+     LLM 에게 literal "%s" 로 전달되었다(schema 위반의 근본 원인).
+     치환은 printf format 이 아니라 문자열 split/concat 으로 처리한다 —
+     markdown 에 literal % (예 백분율) 가 추가돼도 [sprintf] 의 Invalid_arg
+     로 judge 가 크래시하지 않는다(리뷰 nit). *)
+  String.concat facts_str (String.split_on_string "%s" template)
 
 let compute_judgments ~build_facts =
   let runtime_id = Runtime.get_default_runtime_id () in

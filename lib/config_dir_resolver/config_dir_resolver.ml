@@ -147,6 +147,8 @@ let current_working_dir () =
 
 let base_path_or_cwd () =
   match (Host_config.from_env ()).base_path with
+  | Some path when Filename.is_relative path ->
+    Filename.concat (current_working_dir ()) path
   | Some path -> path
   | None -> current_working_dir ()
 

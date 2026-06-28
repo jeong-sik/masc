@@ -537,6 +537,24 @@ let test_base_path_or_cwd_honors_env () =
     check string "base_path_or_cwd uses env" "/tmp/masc-base-from-env"
       (Config_dir_resolver.base_path_or_cwd ()))
 
+let test_base_path_or_cwd_anchors_relative_env_to_cwd () =
+  with_temp_dir "config-dir-relative-base" @@ fun root ->
+  let cwd = Filename.concat root "cwd" in
+  Unix.mkdir cwd 0o755;
+  with_env "MASC_BASE_PATH" (Some "relative-root") (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+      Config_dir_resolver.reset ();
+      let saved_cwd = Sys.getcwd () in
+      Unix.chdir cwd;
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.chdir saved_cwd;
+          Config_dir_resolver.reset ())
+        (fun () ->
+          check string "base_path_or_cwd anchors relative env under cwd"
+            (Filename.concat cwd "relative-root")
+            (Config_dir_resolver.base_path_or_cwd ()))))
+
 let test_base_path_or_cwd_falls_back_to_cwd () =
   with_env "MASC_BASE_PATH" None (fun () ->
     Config_dir_resolver.reset ();
@@ -628,6 +646,8 @@ let () =
             test_current_working_dir_survives_deleted_cwd;
           test_case "base_path_or_cwd honors MASC_BASE_PATH" `Quick
             test_base_path_or_cwd_honors_env;
+          test_case "base_path_or_cwd anchors relative MASC_BASE_PATH"
+            `Quick test_base_path_or_cwd_anchors_relative_env_to_cwd;
           test_case "base_path_or_cwd falls back to cwd" `Quick
             test_base_path_or_cwd_falls_back_to_cwd;
         ] );

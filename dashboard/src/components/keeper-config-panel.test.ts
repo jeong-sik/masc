@@ -638,6 +638,9 @@ const mocks = vi.hoisted(() => {
     patchKeeperConfig: vi.fn(),
     updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
     setKeeperToolPolicy: vi.fn(async () => makeKeeperConfig()),
+    pauseKeeper: vi.fn(async () => ({ ok: true, action: 'pause', name: 'keeper-sangsu' })),
+    resumeKeeper: vi.fn(async () => ({ ok: true, action: 'resume', name: 'keeper-sangsu' })),
+    wakeKeeper: vi.fn(async () => ({ ok: true, action: 'wakeup', name: 'keeper-sangsu' })),
   }
 })
 
@@ -648,6 +651,12 @@ vi.mock('../api/dashboard', () => ({
   patchKeeperConfig: mocks.patchKeeperConfig,
   updateKeeperRuntime: mocks.updateKeeperRuntime,
   setKeeperToolPolicy: mocks.setKeeperToolPolicy,
+}))
+
+vi.mock('../api/keeper', () => ({
+  pauseKeeper: mocks.pauseKeeper,
+  resumeKeeper: mocks.resumeKeeper,
+  wakeKeeper: mocks.wakeKeeper,
 }))
 
 import {
@@ -684,6 +693,10 @@ describe('KeeperConfigPanel', () => {
     mocks.fetchRuntimeProfiles.mockClear()
     mocks.patchKeeperConfig.mockClear()
     mocks.updateKeeperRuntime.mockClear()
+    mocks.setKeeperToolPolicy.mockClear()
+    mocks.pauseKeeper.mockClear()
+    mocks.resumeKeeper.mockClear()
+    mocks.wakeKeeper.mockClear()
   })
 
   afterEach(() => {
@@ -726,6 +739,10 @@ describe('KeeperConfigPanel', () => {
     await flush()
     expect(container.textContent).toContain('레지스트리 상태')
     expect(container.textContent).toContain('running')
+    expect(container.textContent).toContain('자동 부팅 설정')
+    expect(container.textContent).toContain('레지스트리 등록')
+    expect(container.textContent).toContain('실행 주의')
+    expect(container.textContent).not.toContain('자동 부팅 등록')
 
     // hooks tab: the "전역 런타임 아키텍처" block is keeper-agnostic and
     // collapsed by default; its content (deny list / destructive tools / cost
@@ -753,6 +770,97 @@ describe('KeeperConfigPanel', () => {
     const textareas = Array.from(container.querySelectorAll('textarea'))
     expect(textareas.length).toBeGreaterThan(0)
     expect(textareas[0]?.value).toContain('Ship stable keeper ops')
+  })
+
+  it('surfaces execution attention separately from healthy lifecycle state', async () => {
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(makeKeeperConfig({
+      runtime: {
+        paused: false,
+        registered: true,
+        keepalive_running: true,
+        registry_state: 'running',
+        fiber_health: 'alive',
+      },
+      runtime_trust: {
+        disposition: 'Blocked',
+        disposition_reason: 'completion_contract_result:passive_only',
+        needs_attention: true,
+        attention_reason: 'completion_contract_result:passive_only',
+        next_human_action: null,
+        execution: {
+          completion_contract_result: 'passive_only',
+          latest_receipt_at: '2026-06-28T10:56:23Z',
+        },
+        latest_receipt: {
+          current_task_id: 'task-1537',
+        },
+      } as KeeperConfig['runtime_trust'],
+    }))
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '상태·진단')
+    await flush()
+
+    expect(container.textContent).toContain('킵얼라이브 실행')
+    expect(container.textContent).toContain('파이버 상태')
+    expect(container.textContent).toContain('alive')
+    expect(container.textContent).toContain('실행 주의')
+    expect(container.textContent).toContain('ON · completion_contract_result:passive_only')
+    expect(container.textContent).toContain('완료 계약')
+    expect(container.textContent).toContain('passive_only')
+    expect(container.textContent).toContain('작업 scope')
+    expect(container.textContent).toContain('task-1537')
+  })
+
+  it('runs lifecycle directives from the health tab and refreshes the config snapshot', async () => {
+    mocks.fetchKeeperConfig
+      .mockResolvedValueOnce(makeKeeperConfig({
+        autoboot_enabled: false,
+        runtime: {
+          paused: false,
+          registered: false,
+          keepalive_running: false,
+          registry_state: 'missing',
+          fiber_health: 'dead',
+        },
+      }))
+      .mockResolvedValueOnce(makeKeeperConfig({
+        autoboot_enabled: false,
+        runtime: {
+          paused: false,
+          registered: true,
+          keepalive_running: true,
+          registry_state: 'running',
+          fiber_health: 'alive',
+        },
+      }))
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '상태·진단')
+    await flush()
+    expect(container.textContent).toContain('missing')
+    expect(container.textContent).toContain('자동 부팅 설정')
+    expect(container.textContent).toContain('레지스트리 등록')
+
+    const resumeButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('재개·등록'),
+    )
+    expect(resumeButton).toBeTruthy()
+    resumeButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+    await flush()
+
+    expect(mocks.resumeKeeper).toHaveBeenCalledWith('keeper-sangsu')
+    expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
+    expect(container.textContent).toContain('running')
+    expect(container.textContent).toContain('alive')
   })
 
   it('unsubscribes shared keeper config handlers on unmount', async () => {

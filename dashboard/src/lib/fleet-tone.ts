@@ -61,10 +61,11 @@ export type KeeperPhaseToken =
  *  instead of keeping parallel string classifiers.
  *
  *  `Draining` is `warn` here because it represents operator intent via
- *  the `stop` action's danger:true via-phase. `monitoring-runtime.ts:171`
- *  `TRANSIENT_KEEPER_PHASES` treats it as a transient FSM phase; that
- *  RuntimeBand divergence is out of scope here and should be reconciled in
- *  a separate typed-runtime-state change.
+ *  the `stop` action's danger:true via-phase. The runtime band agrees:
+ *  `monitoring-runtime.ts:keeperBand` routes `Draining` to the `paused`
+ *  band, which `ROSTER_BAND_TONE` (`agent-roster.ts`) maps to `warn` —
+ *  the workspace tone (`PHASE_TONE.draining = 'warn'`) and the rail
+ *  agree.
  *
  *  Why `Object.create(null)` instead of a plain object literal: the
  *  `isKeeperPhaseToken` guard uses own-property checks, and JS `in` /

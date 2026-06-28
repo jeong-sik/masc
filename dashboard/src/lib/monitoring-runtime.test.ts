@@ -7,6 +7,7 @@ import {
 } from './monitoring-runtime'
 import type { KeeperMonitoringSummary } from './monitoring-runtime'
 import type { Keeper, PipelineStage } from '../types'
+import { deriveKeeperRuntimeProjection } from './keeper-runtime-projection'
 
 function makeSummary(overrides: Partial<KeeperMonitoringSummary> = {}): KeeperMonitoringSummary {
   return {
@@ -69,31 +70,45 @@ describe('isTransientPhase', () => {
   // spellings must resolve to true. Either spelling may arrive through
   // projection.opState.phase or keeper.pipeline_stage, so the helper
   // bridges both formats at one location.
+  //
+  // `Draining` / `draining` are NOT in this set: operator-initiated stop
+  // routes to the `paused` band (RFC-0295 §5.3) via a direct phase check
+  // in `keeperBand()`, NOT via the transient branch. Including Draining in
+  // `TRANSIENT_KEEPER_PHASES` would force the keeper row to paint the busy
+  // rail, disagreeing with the workspace tone (`PHASE_TONE.draining = 'warn'`,
+  // `fleet-tone.ts`) on the same row. See the `TRANSIENT_KEEPER_PHASES`
+  // comment in `monitoring-runtime.ts`.
   it.each([
     ['Compacting', 'PascalCase KeeperPhase'],
     ['HandingOff', 'PascalCase KeeperPhase'],
-    ['Draining', 'PascalCase KeeperPhase'],
     ['Restarting', 'PascalCase KeeperPhase'],
     ['compacting', 'lowercase PipelineStage'],
     ['handoff', 'lowercase PipelineStage'],
-    ['draining', 'lowercase PipelineStage'],
     ['restarting', 'lowercase PipelineStage'],
   ])('returns true for transient phase %s (%s)', (phase) => {
     expect(isTransientPhase(phase)).toBe(true)
   })
 
   it.each([
-    ['Running'],
-    ['Paused'],
-    ['Offline'],
-    ['Failing'],
-    ['idle'],
-    ['offline'],
-    ['paused'],
-    ['unknown'],
-  ])('returns false for non-transient phase %s', (phase) => {
-    expect(isTransientPhase(phase)).toBe(false)
-  })
+    ['Running', 'PascalCase KeeperPhase'],
+    ['Paused', 'PascalCase KeeperPhase'],
+    ['Offline', 'PascalCase KeeperPhase'],
+    ['Failing', 'PascalCase KeeperPhase'],
+    // `Draining` is operator-initiated stop → routes to `paused` band, NOT
+    // `transient`. The PascalCase and lowercase wire spellings must both
+    // resolve to false so `keeperBand()` doesn't repaint the row as busy.
+    ['Draining', 'operator-initiated stop → paused band'],
+    ['draining', 'lowercase wire spelling of Draining → paused band'],
+    ['idle', 'lowercase PipelineStage'],
+    ['offline', 'lowercase PipelineStage'],
+    ['paused', 'lowercase PipelineStage'],
+    ['unknown', 'lowercase PipelineStage'],
+  ] as ReadonlyArray<[string, string]>)(
+    'returns false for non-transient phase %s (%s)',
+    (phase, _label) => {
+      expect(isTransientPhase(phase)).toBe(false)
+    },
+  )
 
   it('returns false for null and undefined', () => {
     expect(isTransientPhase(null)).toBe(false)
@@ -279,20 +294,20 @@ describe('summarizeKeeperMonitoring', () => {
     expect(summary.hint).toBe('오래 응답이 없어 실제 상태 확인이 필요합니다.')
   })
 
-  // RFC-0295 §6 verification: each of the four transient FSM phases must
-  // route to the new `transient` band regardless of which spelling arrives.
-  // Driven via composite.phase (open string wire, `KeeperCompositePhaseSchema`)
-  // and keeper.phase (PascalCase SSOT) to cover both projection paths.
+  // RFC-0295 §5.2 verification: the three autonomous transient FSM phases
+  // (Compacting / HandingOff / Restarting) route to the `transient` band.
+  // `Draining` is NOT in this set — operator-initiated stop routes to the
+  // `paused` band via RFC-0295 §5.3 (see `Draining → paused band routing`
+  // block below).
   //
   // Wire spelling notes: composite.phase uses snake_case for `handing_off`
-  // but single-word lowercase for the rest (`compacting`/`draining`/
-  // `restarting`) — see `keeper-store-normalize.ts:110` `BACKEND_PHASE_LOWERCASE_MAP`.
-  // `handoff` is the PipelineStage spelling (types/core.ts:945) used for
+  // but single-word lowercase for the rest (`compacting`/`restarting`) — see
+  // `keeper-store-normalize.ts:110` `BACKEND_PHASE_LOWERCASE_MAP`. `handoff`
+  // is the PipelineStage spelling (types/core.ts:945) used for
   // `keeper.pipeline_stage`; it does not appear in the composite wire.
   describe('transient band routing (RFC-0295 §5.2)', () => {
     const transientPhases: ReadonlyArray<[string, string]> = [
       ['compacting', 'lowercase composite.phase'],
-      ['draining', 'lowercase composite.phase'],
       ['handing_off', 'snake_case composite.phase (lowercase map SSOT)'],
       ['restarting', 'lowercase composite.phase'],
     ]
@@ -318,7 +333,6 @@ describe('summarizeKeeperMonitoring', () => {
 
     it.each([
       ['Compacting', 'PascalCase keeper.phase'],
-      ['Draining', 'PascalCase keeper.phase'],
       ['HandingOff', 'PascalCase keeper.phase'],
       ['Restarting', 'PascalCase keeper.phase'],
     ] as const)(
@@ -368,6 +382,107 @@ describe('summarizeKeeperMonitoring', () => {
         >[1],
       )
       expect(summary.band.key).toBe('offline')
+    })
+  })
+
+  // RFC-0295 §5.3 verification: `Draining` (operator-initiated stop) must
+  // route to the `paused` band, NOT the `transient` band (which would force
+  // the busy rail) and NOT the `active` band (which would force the ok
+  // rail). Both spellings — PascalCase keeper.phase and lowercase composite
+  // wire — must resolve correctly.
+  //
+  // The branch is on `projection.opState.phase` directly (NOT on
+  // `opState.kind === 'paused'`) because Draining is operator-stop intent,
+  // not a paused keeper that can be resumed. Folding Draining into the
+  // paused variant would silently change the action-panel canPause/canResume
+  // semantics and the roster state-note label.
+  describe('Draining → paused band routing (RFC-0295 §5.3)', () => {
+    it('PascalCase Draining keeper.phase ⇒ paused band, label=일시정지', () => {
+      const summary = summarizeKeeperMonitoring({
+        name: 'keeper-draining-pascal',
+        status: 'running',
+        phase: 'Draining',
+        pipeline_stage: 'draining',
+      } as Keeper)
+      expect(summary.band.key).toBe('paused')
+      expect(summary.band.label).toBe('일시정지')
+    })
+
+    it('lowercase composite.phase "draining" ⇒ paused band (after toKeeperPhase normalization)', () => {
+      const summary = summarizeKeeperMonitoring(
+        {
+          name: 'keeper-draining-composite',
+          status: 'running',
+          phase: 'Running',
+          pipeline_stage: 'draining',
+        } as Keeper,
+        { keeper: 'keeper-draining-composite', phase: 'draining' } as unknown as Parameters<
+          typeof summarizeKeeperMonitoring
+        >[1],
+      )
+      expect(summary.band.key).toBe('paused')
+    })
+
+    // The phase-direct branch must NOT collapse into `opState.kind === 'paused'`.
+    // A normal Draining keeper has pause_state='active' (operator hit `stop`,
+    // not `pause`) so `opState.kind === 'paused'` is false. If a future
+    // refactor moves the route into the opState branch, this test catches
+    // it via the `opState.kind === 'running'` expectation.
+    it('Draining with status=running, paused=false ⇒ kind=running BUT band=paused (display vs action)', () => {
+      const summary = summarizeKeeperMonitoring({
+        name: 'keeper-draining-operator-stop',
+        status: 'running',
+        phase: 'Draining',
+        pipeline_stage: 'draining',
+        paused: false,
+        pause_state: 'active',
+      } as Keeper)
+      expect(summary.band.key).toBe('paused')
+      // Sanity: the kind is still 'running' — the projection layer does
+      // not lie about action semantics. Action panel (canPause/canResume)
+      // and roster state-note continue to read opState.kind.
+      const projection = deriveKeeperRuntimeProjection({
+        keeper: {
+          name: 'keeper-draining-operator-stop',
+          status: 'running',
+          phase: 'Draining',
+          pipeline_stage: 'draining',
+          paused: false,
+          pause_state: 'active',
+        } as Keeper,
+        composite: null,
+      })
+      expect(projection.opState.kind).toBe('running')
+    })
+
+    // Off-band priority: offline beats paused via phase so a Draining
+    // keeper that the backend has also flagged as offline (e.g. draining
+    // timed out, then offline) still routes to `offline` first.
+    it('offline beats Draining-→-paused band when both apply', () => {
+      const summary = summarizeKeeperMonitoring(
+        {
+          name: 'keeper-offline-draining',
+          status: 'offline',
+          phase: 'Offline',
+          pipeline_stage: 'draining',
+        } as Keeper,
+        { keeper: 'keeper-offline-draining', phase: 'offline' } as unknown as Parameters<
+          typeof summarizeKeeperMonitoring
+        >[1],
+      )
+      expect(summary.band.key).toBe('offline')
+    })
+
+    // Cross-PR regression (PR #22512 feedback): positive control that a
+    // healthy Running keeper is NOT routed to `paused` by the new branch.
+    it('Running keeper is NOT routed to paused by the Draining branch (positive control)', () => {
+      const summary = summarizeKeeperMonitoring({
+        name: 'keeper-running-control',
+        status: 'running',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+      } as Keeper)
+      expect(summary.band.key).toBe('active')
     })
   })
 })

@@ -6,8 +6,6 @@
    Equality and hashing are typed ([equal] / [hash]); the wire string is
    a derived view, never the source of truth. *)
 
-open! Core
-
 type contract_violation_detail =
   { reason_code :
       [ `No_tool_use_block
@@ -149,35 +147,35 @@ let hash = function
     Hashtbl.hash
       ( 0
       , consecutive_idle_cycles
-      , match detector_kind with
-        | `Consecutive_idle_turns -> 0
-        | `Consecutive_no_progress -> 1
-        | `Both -> 2 )
+      , (match detector_kind with
+         | `Consecutive_idle_turns -> 0
+         | `Consecutive_no_progress -> 1
+         | `Both -> 2) )
   | Completion_contract_violation d ->
     Hashtbl.hash
       ( 1
-      , match d.reason_code with
-        | `No_tool_use_block -> 0
-        | `No_keeper_tool_returned -> 1
-        | `Repeated_text_only_response -> 2
-        | `Unspecified -> 3
+      , (match d.reason_code with
+         | `No_tool_use_block -> 0
+         | `No_keeper_tool_returned -> 1
+         | `Repeated_text_only_response -> 2
+         | `Unspecified -> 3)
       , d.raw_error_summary )
   | Idle_detected { consecutive_idle_turns } -> Hashtbl.hash (2, consecutive_idle_turns)
   | Runtime_exhausted r ->
     Hashtbl.hash
       ( 3
-      , match r with
-        | All_providers_failed -> 0
-        | No_providers_available -> 1
-        | Structural_attempt_timeout { stage } -> Hashtbl.hash (2, stage)
-        | Unspecified_runtime -> 3 )
+      , (match r with
+         | All_providers_failed -> 0
+         | No_providers_available -> 1
+         | Structural_attempt_timeout { stage } -> Hashtbl.hash (2, stage)
+         | Unspecified_runtime -> 3) )
   | Turn_budget_exhausted { dimension; used; limit; source } ->
     Hashtbl.hash
       ( 4
-      , match dimension with `Turns -> 0 | `Wall_clock_seconds -> 1 | `Idle_turns -> 2
+      , (match dimension with `Turns -> 0 | `Wall_clock_seconds -> 1 | `Idle_turns -> 2)
       , used
       , limit
-      , match source with `Oas_sdk -> 0 | `Keeper_runtime -> 1 | `User_config -> 2 )
+      , (match source with `Oas_sdk -> 0 | `Keeper_runtime -> 1 | `User_config -> 2) )
   | Stale_storm -> 5
   | Provider_timeout_loop { consecutive_timeouts } -> Hashtbl.hash (6, consecutive_timeouts)
   | Operator_paused { operator_actor } -> Hashtbl.hash (7, operator_actor)
@@ -261,7 +259,27 @@ let pp ppf = function
 (* Stdlib Result helpers (kept local so the module has no external
    dependency on a project-specific [R] module). *)
 let ( let* ) = Result.bind
-let ( let+ ) = Result.map
+let ( let+ ) result f = Result.map f result
+
+let errorf fmt = Printf.ksprintf (fun msg -> Error msg) fmt
+
+let chop_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  let value_len = String.length value in
+  if value_len >= prefix_len && String.sub value 0 prefix_len = prefix
+  then Some (String.sub value prefix_len (value_len - prefix_len))
+  else None
+;;
+
+let chop_suffix ~suffix value =
+  let suffix_len = String.length suffix in
+  let value_len = String.length value in
+  if value_len >= suffix_len
+     && String.sub value (value_len - suffix_len) suffix_len = suffix
+  then Some (String.sub value 0 (value_len - suffix_len))
+  else None
+;;
+
 let int_of_string_exn s =
   match int_of_string s with
   | n -> Ok n
@@ -276,7 +294,7 @@ let to_wire = function
   | Idle_detected { consecutive_idle_turns } ->
     Printf.sprintf "idle_detected:idle_turns=%d" consecutive_idle_turns
   | Runtime_exhausted r ->
-    Printf.sprintf "runtime_exhausted:%a" pp_runtime_exhaustion r
+    Format.asprintf "runtime_exhausted:%a" pp_runtime_exhaustion r
   | Turn_budget_exhausted { dimension; used; limit; source } ->
     Printf.sprintf
       "turn_budget_exhausted:dim=%s:used=%d:limit=%d:source=%s"
@@ -297,113 +315,124 @@ let to_wire = function
    compatibility — that layer is intentionally permissive; this layer
    is intentionally strict). *)
 let of_wire wire =
-  
+  let parse_dim = function
+    | "turns" -> Ok `Turns
+    | "wall_clock_seconds" -> Ok `Wall_clock_seconds
+    | "idle_turns" -> Ok `Idle_turns
+    | other -> errorf "Keeper_latched_reason.of_wire: unknown dimension %S" other
+  in
+  let parse_source = function
+    | "oas_sdk" -> Ok `Oas_sdk
+    | "keeper_runtime" -> Ok `Keeper_runtime
+    | "user_config" -> Ok `User_config
+    | other -> errorf "Keeper_latched_reason.of_wire: unknown source %S" other
+  in
+  let parse_detector = function
+    | "consecutive_idle_turns" -> Ok `Consecutive_idle_turns
+    | "consecutive_no_progress" -> Ok `Consecutive_no_progress
+    | "both" -> Ok `Both
+    | other -> errorf "Keeper_latched_reason.of_wire: unknown detector %S" other
+  in
+  let parse_reason_code = function
+    | "no_tool_use_block" -> Ok `No_tool_use_block
+    | "no_keeper_tool_returned" -> Ok `No_keeper_tool_returned
+    | "repeated_text_only_response" -> Ok `Repeated_text_only_response
+    | "unspecified" -> Ok `Unspecified
+    | other -> errorf "Keeper_latched_reason.of_wire: unknown reason_code %S" other
+  in
+  let parse_field name field =
+    match chop_prefix ~prefix:(name ^ "=") field with
+    | Some value -> Ok value
+    | None -> errorf "Keeper_latched_reason.of_wire: expected %s= field, got %S" name field
+  in
+  let parse_string_literal s =
+    let len = String.length s in
+    if len >= 2 && Char.equal s.[0] '"' && Char.equal s.[len - 1] '"'
+    then (
+      let body = String.sub s 1 (len - 2) in
+      match Scanf.unescaped body with
+      | decoded -> Ok decoded
+      | exception Scanf.Scan_failure msg ->
+        errorf "Keeper_latched_reason.of_wire: malformed quoted summary %S: %s" s msg
+      | exception Failure msg ->
+        errorf "Keeper_latched_reason.of_wire: malformed quoted summary %S: %s" s msg
+      | exception Invalid_argument msg ->
+        errorf "Keeper_latched_reason.of_wire: malformed quoted summary %S: %s" s msg)
+    else errorf "Keeper_latched_reason.of_wire: summary must be quoted, got %S" s
+  in
   match String.split_on_char ':' wire with
-  | [ "no_progress_loop"; payload ] ->
-    (match String.split_on_char '=' payload with
-     | [ "cycles"; c ] :: [ "detector"; d ] :: [] ->
-       let+ cycles = int_of_string_exn c in
-       let detector =
-         match d with
-         | "consecutive_idle_turns" -> `Consecutive_idle_turns
-         | "consecutive_no_progress" -> `Consecutive_no_progress
-         | "both" -> `Both
-         | _ -> Error (Printf.sprintf "Keeper_latched_reason.of_wire: unknown detector %S" d
-       in
-       No_progress_loop { consecutive_idle_cycles = cycles; detector_kind = detector }
-     | _ -> Error (Printf.sprintf "Keeper_latched_reason.of_wire: malformed no_progress_loop payload %S" payload)
-  | "completion_contract_violation" :: "code=" :: _ :: _
+  | [ "no_progress_loop"; cycles_field; detector_field ] ->
+    let* cycles_str = parse_field "cycles" cycles_field in
+    let* detector_str = parse_field "detector" detector_field in
+    let* cycles = int_of_string_exn cycles_str in
+    let+ detector = parse_detector detector_str in
+    No_progress_loop { consecutive_idle_cycles = cycles; detector_kind = detector }
   | "completion_contract_violation" :: _ ->
-    (* Payload-bearing variants with embedded ':' (e.g. summary quoting)
-       are reconstructed byte-for-byte. *)
-    let code =
-      let stripped = String.chop_prefix ~prefix:"completion_contract_violation:code=" wire in
-      match stripped with
-      | Some s ->
-        (match String.split_on_char ':' s with
-         | code_str :: _ -> code_str
-         | [] -> "")
-      | None -> ""
+    let prefix = "completion_contract_violation:code=" in
+    let* rest =
+      match chop_prefix ~prefix wire with
+      | Some rest -> Ok rest
+      | None ->
+        errorf "Keeper_latched_reason.of_wire: malformed completion contract wire %S" wire
     in
-    let reason_code =
-      match code with
-      | "no_tool_use_block" -> `No_tool_use_block
-      | "no_keeper_tool_returned" -> `No_keeper_tool_returned
-      | "repeated_text_only_response" -> `Repeated_text_only_response
-      | _ -> `Unspecified
+    let* code, summary_wire =
+      match String.index_opt rest ':' with
+      | Some idx ->
+        let code = String.sub rest 0 idx in
+        let summary_wire =
+          String.sub rest (idx + 1) (String.length rest - idx - 1)
+        in
+        Ok (code, summary_wire)
+      | None ->
+        errorf "Keeper_latched_reason.of_wire: missing completion summary in %S" wire
     in
-    let summary =
-      let prefix = Printf.sprintf "completion_contract_violation:code=%s:summary=" code in
-      String.chop_prefix ~prefix wire |> Option.value ~default:""
-    in
-    Ok (Completion_contract_violation { reason_code; raw_error_summary = summary })
-  | [ "idle_detected"; payload ] ->
-    (match String.split_on_char '=' payload with
-     | [ "idle_turns"; t ] :: [] ->
-       let+ idle_turns = int_of_string_exn t in
-       Idle_detected { consecutive_idle_turns = idle_turns }
-     | _ -> Error (Printf.sprintf "Keeper_latched_reason.of_wire: malformed idle_detected payload %S" payload)
-  | "runtime_exhausted" :: "all_providers_failed" :: [] ->
+    let* reason_code = parse_reason_code code in
+    let* summary_encoded = parse_field "summary" summary_wire in
+    let+ summary = parse_string_literal summary_encoded in
+    Completion_contract_violation
+      { reason_code; raw_error_summary = summary }
+  | [ "idle_detected"; idle_field ] ->
+    let* idle_str = parse_field "idle_turns" idle_field in
+    let+ idle_turns = int_of_string_exn idle_str in
+    Idle_detected { consecutive_idle_turns = idle_turns }
+  | [ "runtime_exhausted"; "all_providers_failed" ] ->
     Ok (Runtime_exhausted All_providers_failed)
-  | "runtime_exhausted" :: "no_providers_available" :: [] ->
+  | [ "runtime_exhausted"; "no_providers_available" ] ->
     Ok (Runtime_exhausted No_providers_available)
-  | "runtime_exhausted" :: "structural_attempt_timeout" :: "stage=" :: stage :: [] ->
-    Ok (Runtime_exhausted (Structural_attempt_timeout { stage }))
   | [ "runtime_exhausted"; "unspecified_runtime" ] ->
     Ok (Runtime_exhausted Unspecified_runtime)
-  | "turn_budget_exhausted" :: "dim=" :: _ :: _ ->
-    let+ dim =
-      let prefix = "turn_budget_exhausted:dim=" in
-      let stripped = String.chop_prefix ~prefix wire |> Option.value ~default:"" in
-      match String.split_on_char ':' stripped with
-      | d :: _ ->
-        (match d with
-         | "turns" -> Ok `Turns
-         | "wall_clock_seconds" -> Ok `Wall_clock_seconds
-         | "idle_turns" -> Ok `Idle_turns
-         | _ ->
-           Error (Printf.sprintf "Keeper_latched_reason.of_wire: unknown dimension %S" d)
-      | [] -> Error (Printf.sprintf "Keeper_latched_reason.of_wire: missing dimension"
-    in
-    (* Use typed accessor for the remaining fields; full parse via
-       sub-functions rather than ad-hoc string splits. *)
-    let parse_int_field prefix =
-      let stripped = String.chop_prefix ~prefix wire |> Option.value ~default:"" in
-      match String.split_on_char ':' stripped with
-      | _ :: rest ->
-        (match rest with
-         | v :: _ -> int_of_string_exn v
-         | [] -> Error (Printf.sprintf "missing int after %s" prefix)
-      | [] -> Error (Printf.sprintf "missing field %s" prefix
-    in
-    let* used = parse_int_field "turn_budget_exhausted:dim=turns:used=" in
-    let* limit = parse_int_field (Printf.sprintf "turn_budget_exhausted:dim=%s:used=%d:limit=" (pp_dim dim) used) in
-    let* source =
-      let stripped =
-        String.chop_prefix
-          ~prefix:(Printf.sprintf "turn_budget_exhausted:dim=%s:used=%d:limit=%d:source=" (pp_dim dim) used limit)
-          wire
-        |> Option.value ~default:""
-      in
-      match stripped with
-      | "oas_sdk" -> Ok `Oas_sdk
-      | "keeper_runtime" -> Ok `Keeper_runtime
-      | "user_config" -> Ok `User_config
-      | _ -> Error (Printf.sprintf "Keeper_latched_reason.of_wire: unknown source %S" stripped
-    in
-    Ok (Turn_budget_exhausted { dimension = dim; used; limit; source })
+  | [ "runtime_exhausted"; detail ] ->
+    let prefix = "structural_attempt_timeout{stage=" in
+    (match chop_prefix ~prefix detail with
+     | Some tail ->
+       (match chop_suffix ~suffix:"}" tail with
+        | Some stage -> Ok (Runtime_exhausted (Structural_attempt_timeout { stage }))
+        | None ->
+          errorf "Keeper_latched_reason.of_wire: malformed runtime detail %S" detail)
+     | None ->
+       errorf "Keeper_latched_reason.of_wire: unknown runtime detail %S" detail)
+  | [ "turn_budget_exhausted"; dim_field; used_field; limit_field; source_field ] ->
+    let* dim_str = parse_field "dim" dim_field in
+    let* used_str = parse_field "used" used_field in
+    let* limit_str = parse_field "limit" limit_field in
+    let* source_str = parse_field "source" source_field in
+    let* dimension = parse_dim dim_str in
+    let* used = int_of_string_exn used_str in
+    let* limit = int_of_string_exn limit_str in
+    let+ source = parse_source source_str in
+    Turn_budget_exhausted { dimension; used; limit; source }
   | [ "stale_storm" ] -> Ok Stale_storm
-  | [ "provider_timeout_loop"; payload ] ->
-    (match String.split_on_char '=' payload with
-     | [ "count"; c ] :: [] ->
-       let+ count = int_of_string_exn c in
-       Provider_timeout_loop { consecutive_timeouts = count }
-     | _ -> Error (Printf.sprintf "Keeper_latched_reason.of_wire: malformed provider_timeout_loop payload %S" payload)
-  | "operator_paused" :: "actor=" :: _ :: _ ->
-    let actor = String.chop_prefix ~prefix:"operator_paused:actor=" wire |> Option.value ~default:"" in
-    Ok (Operator_paused { operator_actor = actor })
+  | [ "provider_timeout_loop"; count_field ] ->
+    let* count_str = parse_field "count" count_field in
+    let+ consecutive_timeouts = int_of_string_exn count_str in
+    Provider_timeout_loop { consecutive_timeouts }
+  | "operator_paused" :: _ ->
+    let prefix = "operator_paused:actor=" in
+    (match chop_prefix ~prefix wire with
+     | Some operator_actor -> Ok (Operator_paused { operator_actor })
+     | None -> errorf "Keeper_latched_reason.of_wire: malformed operator pause wire %S" wire)
   | _ ->
-    Error (Printf.sprintf "Keeper_latched_reason.of_wire: unknown wire form %S" wire
+    errorf "Keeper_latched_reason.of_wire: unknown wire form %S" wire
 ;;
 
 (* -------------------------------------------------------------------- *)
@@ -422,7 +451,7 @@ module Stable = struct
     | "turns" -> Ok `Turns
     | "wall_clock_seconds" -> Ok `Wall_clock_seconds
     | "idle_turns" -> Ok `Idle_turns
-    | _ -> Error (Printf.sprintf "Keeper_latched_reason: unknown dimension %S" s
+    | _ -> Error (Printf.sprintf "Keeper_latched_reason: unknown dimension %S" s)
   ;;
 
   let string_of_source = function
@@ -436,7 +465,7 @@ module Stable = struct
     | "oas_sdk" -> Ok `Oas_sdk
     | "keeper_runtime" -> Ok `Keeper_runtime
     | "user_config" -> Ok `User_config
-    | _ -> Error (Printf.sprintf "Keeper_latched_reason: unknown source %S" s
+    | _ -> Error (Printf.sprintf "Keeper_latched_reason: unknown source %S" s)
   ;;
 
   let string_of_reason_code = function
@@ -452,7 +481,7 @@ module Stable = struct
     | "no_keeper_tool_returned" -> Ok `No_keeper_tool_returned
     | "repeated_text_only_response" -> Ok `Repeated_text_only_response
     | "unspecified" -> Ok `Unspecified
-    | _ -> Error (Printf.sprintf "Keeper_latched_reason: unknown reason_code %S" s
+    | _ -> Error (Printf.sprintf "Keeper_latched_reason: unknown reason_code %S" s)
   ;;
 
   let string_of_detector = function
@@ -466,7 +495,7 @@ module Stable = struct
     | "consecutive_idle_turns" -> Ok `Consecutive_idle_turns
     | "consecutive_no_progress" -> Ok `Consecutive_no_progress
     | "both" -> Ok `Both
-    | _ -> Error (Printf.sprintf "Keeper_latched_reason: unknown detector %S" s
+    | _ -> Error (Printf.sprintf "Keeper_latched_reason: unknown detector %S" s)
   ;;
 
   let runtime_to_yojson r : Yojson.Safe.t =
@@ -487,7 +516,7 @@ module Stable = struct
     | `Assoc [ "kind", `String "unspecified_runtime" ] -> Ok Unspecified_runtime
     | _ ->
       Error (Printf.sprintf "Keeper_latched_reason: unknown runtime_exhaustion shape: %s"
-        (Yojson.Safe.to_string j)
+               (Yojson.Safe.to_string j))
   ;;
 
   let to_yojson t : Yojson.Safe.t =
@@ -559,6 +588,9 @@ module Stable = struct
     | `Assoc [ "kind", `String "operator_paused"; "actor", `String actor ] ->
       Ok (Operator_paused { operator_actor = actor })
     | _ ->
-      Error (Printf.sprintf "Keeper_latched_reason.of_yojson: unknown shape: %s" (Yojson.Safe.to_string j)
+      Error
+        (Printf.sprintf
+           "Keeper_latched_reason.of_yojson: unknown shape: %s"
+           (Yojson.Safe.to_string j))
   ;;
 end

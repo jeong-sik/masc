@@ -145,6 +145,25 @@ let round_trippable : (string * D.t) list =
   ; "External_cancel", D.External_cancel
   ; "Turn_wall_clock_timeout", D.Turn_wall_clock_timeout
   ; "Post_commit_ambiguous", D.Post_commit_ambiguous
+  ; "Completion_contract_unsatisfied", D.Completion_contract_unsatisfied
+  ; "Completion_contract_no_progress", D.Completion_contract_no_progress
+  ; ( "Turn_budget_exhausted/Turns/Oas"
+    , D.Turn_budget_exhausted
+        { dimension = `Turns; used = 10; limit = 10; source = `Oas_sdk } )
+  ; ( "Turn_budget_exhausted/WallClock/User"
+    , D.Turn_budget_exhausted
+        { dimension = `Wall_clock_seconds
+        ; used = 95
+        ; limit = 90
+        ; source = `User_config
+        } )
+  ; ( "Turn_budget_exhausted/Idle/Keeper"
+    , D.Turn_budget_exhausted
+        { dimension = `Idle_turns
+        ; used = 3
+        ; limit = 2
+        ; source = `Keeper_runtime
+        } )
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
   ; (* Runtime wires that Code.of_wire recognises losslessly (no payload
@@ -157,6 +176,77 @@ let round_trippable : (string * D.t) list =
   ; "Provider_error/TurnLivelock", D.Provider_error Code.Turn_livelock_pause
   ; "Provider_error/Fiber", D.Provider_error Code.Fiber_unresolved
   ]
+;;
+
+(* Documented lossy Turn_budget_exhausted wires — fall back to
+   [Unknown { raw_error = original }] per the parser's fail-closed
+   contract. The original wire is preserved verbatim for diagnostic
+   surfacing so a producer using a stale dimension tag does not silently
+   land in a typed bucket. *)
+let turn_budget_lossy_wires : (string * string) list =
+  [ ( "Turn_budget_exhausted unknown dimension"
+    , "turn_budget_exhausted(galactic:oas_sdk:10/10)" )
+  ; ( "Turn_budget_exhausted unknown source"
+    , "turn_budget_exhausted(turns:galactic:10/10)" )
+  ; ( "Turn_budget_exhausted malformed counts"
+    , "turn_budget_exhausted(turns:oas_sdk:notanumber/10)" )
+  ; ( "Turn_budget_exhausted missing parens"
+    , "turn_budget_exhausted turns:oas_sdk:10/10" )
+  ; ( "Turn_budget_exhausted missing close paren"
+    , "turn_budget_exhausted(turns:oas_sdk:10/10" )
+  ; ( "Turn_budget_exhausted extra count segment"
+    , "turn_budget_exhausted(turns:oas_sdk:10/10/11)" )
+  ]
+;;
+
+let test_turn_budget_lossy_wires_fail_closed () =
+  List.iter
+    (fun (label, wire) ->
+       match D.of_wire wire with
+       | D.Unknown { raw_error } ->
+         Alcotest.(check string)
+           (label ^ " preserves wire verbatim")
+           wire
+           raw_error
+       | other ->
+         Alcotest.failf "%s expected Unknown, got %a" label D.pp other)
+    turn_budget_lossy_wires
+;;
+
+let test_completion_contract_severity_is_bad () =
+  Alcotest.(check string)
+    "Completion_contract_unsatisfied severity"
+    "bad"
+    (typed_severity_str (D.severity D.Completion_contract_unsatisfied));
+  Alcotest.(check string)
+    "Completion_contract_no_progress severity"
+    "bad"
+    (typed_severity_str (D.severity D.Completion_contract_no_progress))
+;;
+
+let test_turn_budget_exhausted_severity_is_bad () =
+  Alcotest.(check string)
+    "Turn_budget_exhausted severity"
+    "bad"
+    (typed_severity_str
+       (D.severity
+          (D.Turn_budget_exhausted
+             { dimension = `Turns
+             ; used = 10
+             ; limit = 10
+             ; source = `Oas_sdk
+             })))
+;;
+
+let test_completion_contract_next_action () =
+  Alcotest.(check (option string))
+    "Completion_contract_unsatisfied next_action"
+    (Some "inspect_completion_contract")
+    (D.next_action D.Completion_contract_unsatisfied);
+  Alcotest.(check (option string))
+    "Completion_contract_no_progress next_action"
+    (Some "resume_or_inspect_completion_contract")
+    (D.next_action D.Completion_contract_no_progress)
 ;;
 
 let test_round_trip_recognised () =
@@ -363,6 +453,26 @@ let () =
             "parametrised payloads land in Unknown (asymmetric)"
             `Quick
             test_round_trip_lossy_payloads
+        ; Alcotest.test_case
+            "Turn_budget_exhausted malformed wires fail closed"
+            `Quick
+            test_turn_budget_lossy_wires_fail_closed
+        ] )
+    ; ( "completion-contract typed accessors (RFC-0047 PR-2)"
+      , [ Alcotest.test_case
+            "severity is bad"
+            `Quick
+            test_completion_contract_severity_is_bad
+        ; Alcotest.test_case
+            "next_action dispatches to resume/inspect"
+            `Quick
+            test_completion_contract_next_action
+        ] )
+    ; ( "Turn_budget_exhausted typed accessors"
+      , [ Alcotest.test_case
+            "severity is bad"
+            `Quick
+            test_turn_budget_exhausted_severity_is_bad
         ] )
     ; ( "of_termination_code projection"
       , [ Alcotest.test_case

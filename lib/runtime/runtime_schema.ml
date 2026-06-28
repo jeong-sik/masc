@@ -169,6 +169,32 @@ type binding =
   }
 [@@deriving show, eq]
 
+(** {1 Pause threshold knobs}
+
+    Typed record mirroring the [\[pause\]] runtime.toml section.  All fields
+    are [int] or [float] — primitive thresholds, not reason classifiers, so
+    polymorphic variants / closed-sum types are not warranted here. *)
+type pause_threshold =
+  { turn_fail_streak_threshold : int
+  ; recent_restart_window_sec : float
+  ; recent_restart_count_threshold : int
+  ; tool_failure_count_threshold : int
+  ; tool_failure_ratio_threshold : float
+  }
+[@@deriving show, eq]
+
+(** [Pause_threshold.default] mirrors the legacy hardcoded values in
+    [Keeper_behavioral_regime.ml:46-50]. Field names must match — they are
+    the runtime.toml SSOT keys. *)
+let pause_threshold_default =
+  { turn_fail_streak_threshold = 3
+  ; recent_restart_window_sec = 300.0
+  ; recent_restart_count_threshold = 2
+  ; tool_failure_count_threshold = 3
+  ; tool_failure_ratio_threshold = 0.7
+  }
+;;
+
 (** {1 Top-level config}
 
     Routes/aliases/profiles/system_targets/strategy from the deleted
@@ -220,32 +246,6 @@ type config =
         intentionally deferred to a separate PR to keep this commit additive. *)
   }
 [@@deriving show, eq]
-
-(** {1 Pause threshold knobs}
-
-    Typed record mirroring the [\[pause\]] runtime.toml section.  All fields
-    are [int] or [float] — primitive thresholds, not reason classifiers, so
-    polymorphic variants / closed-sum types are not warranted here. *)
-type pause_threshold =
-  { turn_fail_streak_threshold : int
-  ; recent_restart_window_sec : float
-  ; recent_restart_count_threshold : int
-  ; tool_failure_count_threshold : int
-  ; tool_failure_ratio_threshold : float
-  }
-[@@deriving show, eq]
-
-(** [Pause_threshold.default] mirrors the legacy hardcoded values in
-    [Keeper_behavioral_regime.ml:46-50]. Field names must match — they are
-    the runtime.toml SSOT keys. *)
-let pause_threshold_default =
-  { turn_fail_streak_threshold = 3
-  ; recent_restart_window_sec = 300.0
-  ; recent_restart_count_threshold = 2
-  ; tool_failure_count_threshold = 3
-  ; tool_failure_ratio_threshold = 0.7
-  }
-;;
 
 (** {1 Lookups} *)
 

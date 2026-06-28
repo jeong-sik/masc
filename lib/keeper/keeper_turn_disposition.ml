@@ -8,6 +8,23 @@
 
 module Code = Keeper_turn_terminal_code
 
+let chop_prefix ~prefix value =
+  let prefix_len = String.length prefix in
+  let value_len = String.length value in
+  if value_len >= prefix_len && String.sub value 0 prefix_len = prefix
+  then Some (String.sub value prefix_len (value_len - prefix_len))
+  else None
+;;
+
+let chop_suffix ~suffix value =
+  let suffix_len = String.length suffix in
+  let value_len = String.length value in
+  if value_len >= suffix_len
+     && String.sub value (value_len - suffix_len) suffix_len = suffix
+  then Some (String.sub value 0 (value_len - suffix_len))
+  else None
+;;
+
 type t =
   | Success
   | External_cancel
@@ -173,30 +190,28 @@ let of_wire_turn_budget_exhausted wire =
     | "user_config" -> Some `User_config
     | _ -> None
   in
-  match String.chop_prefix ~prefix:"turn_budget_exhausted(" wire with
+  match chop_prefix ~prefix:"turn_budget_exhausted(" wire with
   | None -> None
   | Some body ->
-    let body = String.chop_suffix ~suffix:")" body |> Option.value ~default:body in
-    let parts = String.split_on_char ':' body in
-    Option.bind (List.nth_opt parts 0) ~f:(fun dim_str ->
-      Option.bind (List.nth_opt parts 1) ~f:(fun src_str ->
-        Option.bind (List.nth_opt parts 2) ~f:(fun counts_str ->
-          Option.bind (parse_dimension dim_str) ~f:(fun dim ->
-            Option.bind (parse_source src_str) ~f:(fun src ->
-              let count_parts = String.split_on_char '/' counts_str in
-              Option.bind (List.nth_opt count_parts 0) ~f:(fun used_str ->
-                Option.bind (List.nth_opt count_parts 1) ~f:(fun limit_str ->
-                  Option.bind (Int.of_string_opt used_str) ~f:(fun used ->
-                    Option.bind (Int.of_string_opt limit_str) ~f:(fun limit ->
-                      Some (Turn_budget_exhausted
-                              { dimension = dim
-                              ; used
-                              ; limit
-                              ; source = src }))))))))))
+    (match chop_suffix ~suffix:")" body with
+     | None -> None
+     | Some body ->
+       (match String.split_on_char ':' body with
+        | [ dim_str; src_str; counts_str ] ->
+          (match
+             parse_dimension dim_str, parse_source src_str, String.split_on_char '/' counts_str
+           with
+           | Some dim, Some src, [ used_str; limit_str ] ->
+             (match int_of_string_opt used_str, int_of_string_opt limit_str with
+              | Some used, Some limit ->
+                Some (Turn_budget_exhausted { dimension = dim; used; limit; source = src })
+              | _ -> None)
+           | _ -> None)
+        | _ -> None))
 ;;
 
 let of_wire wire =
-  match String.chop_prefix ~prefix:"turn_budget_exhausted" wire with
+  match chop_prefix ~prefix:"turn_budget_exhausted" wire with
   | Some _ ->
     (match of_wire_turn_budget_exhausted wire with
      | Some disposition -> disposition

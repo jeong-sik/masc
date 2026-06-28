@@ -77,7 +77,7 @@ val to_wire : t -> string
     repo must use [of_wire] or pattern-match on the typed value
     directly. *)
 
-val of_wire : string -> (t, [> R.msg ]) result
+val of_wire : string -> (t, string) result
 (** [of_wire s] parses [s] into a typed [t]. Returns [Error] when [s]
     is not a known wire form. Never falls back to a permissive
     default. *)
@@ -93,5 +93,5 @@ val pp : Format.formatter -> t -> unit
 
 module Stable : sig
   val to_yojson : t -> Yojson.Safe.t
-  val of_yojson : Yojson.Safe.t -> (t, [> R.msg ]) result
+  val of_yojson : Yojson.Safe.t -> (t, string) result
 end

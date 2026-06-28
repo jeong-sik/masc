@@ -18,6 +18,9 @@
     [Keeper_supervisor_resume_reconcile_gate] and is not touched here.
 
     Returns the (possibly mutated) meta. *)
+val failure_reason_code : string
+(** Provider-runtime failure code owned by this latch clear path. *)
+
 val clear_for_operator_resume
   :  base_path:string
   -> Keeper_meta_contract.keeper_meta

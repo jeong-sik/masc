@@ -399,10 +399,9 @@ let composite_execution_budget_unsatisfied_reason execution =
    An unrecognised string falls through [Unknown _] and yields [false];
    no permissive default, no silent accept. *)
 let execution_turn_budget_disposition execution =
-  json_string "terminal_reason_code" execution
-  |> Option.bind ~f:(fun raw ->
+  Option.bind (json_string "terminal_reason_code" execution) (fun raw ->
     let trimmed = String.trim raw in
-    if String.is_empty trimmed
+    if String.length trimmed = 0
     then None
     else Some (Keeper_turn_disposition.of_wire (String.lowercase_ascii trimmed)))
 ;;
@@ -412,14 +411,14 @@ let execution_turn_budget_disposition_of_reason reason =
   | None -> None
   | Some raw ->
     let trimmed = String.trim raw in
-    if String.is_empty trimmed
+    if String.length trimmed = 0
     then None
     else Some (Keeper_turn_disposition.of_wire (String.lowercase_ascii trimmed))
 ;;
 
 let composite_execution_turn_budget_exhausted execution =
   match execution_turn_budget_disposition execution with
-  | Some Keeper_turn_disposition.Turn_budget_exhausted -> true
+  | Some (Keeper_turn_disposition.Turn_budget_exhausted _) -> true
   | Some _ | None -> false
 ;;
 
@@ -431,8 +430,7 @@ let composite_execution_budget_exhausted_pass execution =
   match execution_turn_budget_disposition_of_reason
           (lower_string_opt (json_string "operator_disposition_reason" execution)) with
   | None -> true
-  | Some "" -> true
-  | Some Keeper_turn_disposition.Turn_budget_exhausted -> true
+  | Some (Keeper_turn_disposition.Turn_budget_exhausted _) -> true
   | Some Keeper_turn_disposition.Unknown _ -> true
   | Some _ -> false
 ;;

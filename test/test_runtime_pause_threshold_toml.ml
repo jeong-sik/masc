@@ -30,7 +30,8 @@ let parse_string_or_fail s =
   | Error errs ->
     let rendered =
       errs
-      |> List.map (fun e -> Printf.sprintf "[%s] %s" e.Schema.path e.message)
+      |> List.map (fun (e : Toml.parse_error) ->
+        Printf.sprintf "[%s] %s" e.path e.message)
       |> String.concat "; "
     in
     failf "parse_string failed: %s" rendered

@@ -119,14 +119,12 @@ let terminal_reason_from_receipt receipt =
 let receipt_contract_attention_reason receipt =
   let completion_contract_result = completion_contract_result_from_receipt receipt in
   let turn_budget_exhausted =
-    json_string_opt_member "terminal_reason_code" receipt
-    |> Option.map ~f:(fun value ->
-      String.lowercase_ascii (String.trim value))
-    |> Option.map ~f:Keeper_turn_disposition.of_wire
-    |> Option.value ~default:Keeper_turn_disposition.(Unknown { raw_error = "" })
-    |> function
-    | Keeper_turn_disposition.Turn_budget_exhausted _ -> true
-    | _ -> false
+    match json_string_opt_member "terminal_reason_code" receipt with
+    | Some value ->
+      (match Keeper_turn_disposition.of_wire (String.lowercase_ascii (String.trim value)) with
+       | Keeper_turn_disposition.Turn_budget_exhausted _ -> true
+       | _ -> false)
+    | None -> false
   in
   let attention_reason result =
     "completion_contract_result:" ^ Completion_contract_result.to_string result

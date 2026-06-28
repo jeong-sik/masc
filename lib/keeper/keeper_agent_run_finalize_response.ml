@@ -47,6 +47,21 @@ let finalize
     Keeper_agent_run_response_text.stop_reason_is_turn_budget_exhausted
       result.stop_reason
   in
+  let completion_contract_result = acc.receipt_completion_contract_result in
+  let contract_requires_attention =
+    Keeper_execution_receipt.completion_contract_result_requires_attention
+      completion_contract_result
+  in
+  let suppress_visible_response = budget_exhausted || contract_requires_attention in
+  let raw_response_text_present =
+    (not budget_exhausted) && String.trim raw_response_text <> ""
+  in
+  if contract_requires_attention && raw_response_text_present
+  then
+    Log.Keeper.info ~keeper_name:meta.name
+      "suppressing keeper-visible response for completion_contract_result=%s"
+      (Keeper_execution_receipt.completion_contract_result_to_string
+         completion_contract_result);
   let reported_state_snapshot =
     reported_state_snapshot_from_checkpoint result.checkpoint
   in
@@ -61,6 +76,7 @@ let finalize
       ~keeper_name:meta.name
       ~goal:meta.goal
       ~actual_keeper_tool_names
+      ~completion_contract_result
       ~stop_reason:result.stop_reason
       ~raw_response_text
       ()
@@ -97,9 +113,9 @@ let finalize
     ~append_manifest
     ()
   in
-  receipt_response_text_present_ref := String.trim response_text <> "";
+  receipt_response_text_present_ref := raw_response_text_present;
   let assistant_msg =
-    if budget_exhausted
+    if suppress_visible_response || String.trim response_text = ""
     then None
     else
       Some
@@ -121,15 +137,12 @@ let finalize
     match result.checkpoint with
     | Some checkpoint ->
       let patched =
-        if budget_exhausted
-        then checkpoint
-        else
-          Keeper_context_core.patch_checkpoint_last_assistant
-            checkpoint
-            ~session_id:
-              (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-            ~response_text
-            ~snapshot:state_snapshot
+        Keeper_context_core.patch_checkpoint_last_assistant
+          checkpoint
+          ~session_id:
+            (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+          ~response_text
+          ~snapshot:state_snapshot
       in
       (match
          Keeper_checkpoint_store.save_oas_classified

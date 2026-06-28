@@ -308,6 +308,23 @@ let test_runtime_base_path_uses_resolver_precedence () =
     (Routes.runtime_base_path ~base_path:" /tmp/explicit-runtime " ())
 ;;
 
+let test_runtime_base_path_anchors_relative_env_base () =
+  with_temp_dir "sidecar-runtime-relative-env" (fun dir ->
+    let previous_cwd = Sys.getcwd () in
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir previous_cwd;
+        Config_dir_resolver.reset ())
+      (fun () ->
+         Sys.chdir dir;
+         with_env Env_config_core.base_path_input_env_key None (fun () ->
+           with_env Env_config_core.base_path_env_key (Some "relative-root") (fun () ->
+             Config_dir_resolver.reset ();
+             let expected = Ok (Filename.concat dir "relative-root") in
+             let actual = Routes.runtime_base_path_result () in
+             check result_t "relative env base anchors to cwd" expected actual))))
+;;
+
 let test_status_file_prefers_existing_project_root_candidate () =
   with_temp_dir "sidecar-status-project-fallback" (fun dir ->
     let base_path = Filename.concat dir "runtime-root" in
@@ -1042,6 +1059,10 @@ let () =
             "runtime base path follows resolver precedence"
             `Quick
             test_runtime_base_path_uses_resolver_precedence
+        ; test_case
+            "runtime base path anchors relative env base"
+            `Quick
+            test_runtime_base_path_anchors_relative_env_base
         ; test_case
             "status file falls back to project root candidate"
             `Quick

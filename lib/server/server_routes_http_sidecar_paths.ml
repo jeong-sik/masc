@@ -30,7 +30,7 @@ let runtime_base_path_result ?base_path () =
   | Some path -> Ok path
   | None ->
     (match Config_dir_resolver.current_env_base_path_opt () with
-     | Some path -> Ok path
+     | Some path -> Ok (Config_dir_resolver.absolute_path path)
      | None -> Error unresolved_runtime_base_path_message)
 ;;
 

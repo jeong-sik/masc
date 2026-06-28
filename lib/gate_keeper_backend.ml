@@ -325,9 +325,7 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
           (Keeper_tool_surface.dispatch_stream ~on_text_delta keeper_ctx
              ~name:"masc_keeper_msg" ~args)
   in
-  match
-    dispatch_result
-  with
+  match dispatch_result with
   | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->
       let body = Tool_result.message result in
       let duration_ms =

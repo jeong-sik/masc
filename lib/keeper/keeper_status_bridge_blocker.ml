@@ -119,6 +119,22 @@ let no_progress_loop_summary =
   "Keeper auto-paused after repeated no-evidence turns; this is a progress-safety latch, not a provider failure. Operator resume clears the latch."
 ;;
 
+let runtime_blocker_surface_of_masc_internal_error = function
+  | Keeper_turn_driver.Accept_rejected _ as err ->
+    let summary =
+      Option.value
+        ~default:"Provider response violated the completion contract after dispatch."
+        (Keeper_turn_driver.summary_of_masc_internal_error err)
+    in
+    Some
+      { blocker_class =
+          runtime_blocker_class_label Completion_contract_violation
+      ; summary
+      ; continue_gate =
+          blocker_class_continue_gate Completion_contract_violation
+      }
+  | _ -> None
+
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
@@ -262,30 +278,45 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
               distinct_count)
          Stale_fleet_batch)
   | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
-    (match
-       Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
-         ~code
-         ~detail
-     with
-     | Keeper_provider_runtime_boundary.Provider_timeout _ ->
-       Some
-         (runtime_blocker_surface_of_typed_class
-            ~summary:
-              (Printf.sprintf
-                 "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
-                 code
-                 detail)
-            Turn_timeout)
-     | Keeper_provider_runtime_boundary.Not_provider_runtime_failure ->
-       Some
-         { blocker_class = "provider_runtime_error"
-         ; summary =
-             Printf.sprintf
-               "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
-               code
-               detail
-         ; continue_gate = false
-         })
+    (match Keeper_turn_driver.classify_masc_internal_error_of_string detail with
+     | Some internal_error ->
+       (match runtime_blocker_surface_of_masc_internal_error internal_error with
+        | Some _ as surface -> surface
+        | None ->
+          Some
+            { blocker_class = "provider_runtime_error"
+            ; summary =
+                Printf.sprintf
+                  "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
+                  code
+                  detail
+            ; continue_gate = false
+            })
+     | None ->
+       (match
+          Keeper_provider_runtime_boundary.classify_provider_runtime_error_record
+            ~code
+            ~detail
+        with
+        | Keeper_provider_runtime_boundary.Provider_timeout _ ->
+          Some
+            (runtime_blocker_surface_of_typed_class
+               ~summary:
+                 (Printf.sprintf
+                    "Provider timeout (%s): %s; keeper can soft-fail and retry with provider cooldown."
+                    code
+                    detail)
+               Turn_timeout)
+        | Keeper_provider_runtime_boundary.Not_provider_runtime_failure ->
+          Some
+            { blocker_class = "provider_runtime_error"
+            ; summary =
+                Printf.sprintf
+                  "Provider runtime catch-all (%s): %s; inspect typed provider/auth/DNS/timeout/capacity cause."
+                  code
+                  detail
+            ; continue_gate = false
+            }))
   | Keeper_registry.Ambiguous_partial_commit { kind; detail } ->
     let blocker_class =
       match kind with

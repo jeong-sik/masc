@@ -307,6 +307,40 @@ let test_provider_timeout_catch_all_maps_to_turn_timeout () =
   check bool "no continue gate" false surface.KSB.continue_gate
 ;;
 
+let test_masc_accept_rejected_record_maps_to_completion_contract () =
+  let accept_error =
+    KTD.sdk_error_of_masc_internal_error
+      (KTD.Accept_rejected
+         { scope = "runpod_fable5.gemma4-coder-fable5"
+         ; model = Some "runtime"
+         ; reason_kind = Some KTD.Accept_no_usable_progress
+         ; response_shape = Some KTD.Accept_response_empty
+         ; last_tool_effect = None
+         ; any_mutating_tool = None
+         ; tool_effects_seen = []
+         ; reason = "shape=empty; stop_reason=end_turn"
+         })
+  in
+  let surface =
+    provider_runtime_surface_exn
+      ~reason:None
+      ~code:"accept_rejected"
+      ~detail:(Agent_sdk.Error.to_string accept_error)
+      ()
+  in
+  check string
+    "masc accept rejection -> completion contract"
+    "completion_contract_violation"
+    surface.KSB.blocker_class;
+  check bool
+    "summary uses typed empty-turn diagnostic"
+    true
+    (String.starts_with
+       ~prefix:"Provider returned an empty assistant turn"
+       surface.KSB.summary);
+  check bool "no continue gate" false surface.KSB.continue_gate
+;;
+
 (* ── Runner ────────────────────────────────────────────────────── *)
 
 let () =
@@ -334,6 +368,8 @@ let () =
             test_reason_none_provider_error_falls_through
         ; test_case "provider timeout catch-all maps to timeout" `Quick
             test_provider_timeout_catch_all_maps_to_turn_timeout
+        ; test_case "masc accept_rejected maps to completion contract" `Quick
+            test_masc_accept_rejected_record_maps_to_completion_contract
         ] )
     ]
 ;;

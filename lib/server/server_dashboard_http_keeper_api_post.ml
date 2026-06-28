@@ -483,7 +483,7 @@ let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
   }
 
 let meta_with_directive_paused_state ~(config : Workspace.config) directive meta paused =
-  let paused_meta source_meta =
+  let paused_meta (source_meta : Keeper_meta_contract.keeper_meta) =
     {
       source_meta with
       paused;

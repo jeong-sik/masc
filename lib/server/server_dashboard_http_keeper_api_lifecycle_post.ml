@@ -212,14 +212,14 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
       match Keeper_meta_store.read_meta config name with
       | Ok (Some meta) when meta.paused ->
           if persist_keeper_paused_state false
-          then
+          then (
             match resolve_keeper_agent_name () with
             | Some keeper_agent_name ->
               Keeper_keepalive.process_directive ~agent_name:keeper_agent_name "resume"
             | None ->
               Log.Keeper.warn
                 "keeper boot: agent_name not found for paused keeper %s"
-                name
+                name)
       | Ok (Some _) -> ()
       (* Issue #8391 HIGH #1: split [Ok None] from [Error _] — boot itself
          already succeeded via Keeper_tool_surface.dispatch, so we don't change the

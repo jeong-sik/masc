@@ -826,8 +826,9 @@ let phase_supports_crash_log_failure_reason = function
       false
 
 let active_task_owner_fiber_scan_semantics =
-  "reports active task owners without executable keeper fibers; disabled \
-   keepers are excluded; matching rows can degrade fleet status"
+  "reports active keeper task owners without executable keeper fibers; disabled \
+   keepers and credentialed non-keeper external clients are excluded; matching \
+   rows can degrade fleet status"
 
 let paused_keeper_last_blocker_json paused_keepers_json name =
   match paused_keepers_json with
@@ -1139,6 +1140,13 @@ let keeper_names_for_agent agent_bindings assignee =
        if String.equal agent_name assignee then Some keeper_name else None)
   |> sorted_unique_strings
 
+let is_credentialed_external_client config assignee =
+  (not (Keeper_identity.is_keeper_agent_alias assignee))
+  &&
+  match Auth.load_credential config.Workspace_utils_backend_setup.base_path assignee with
+  | Some _ -> true
+  | None -> false
+
 let active_task_owner_fiber_scan config ~executable_names =
   let executable_set = string_set_of_list executable_names in
   let binding_scan = keeper_agent_bindings config in
@@ -1166,6 +1174,9 @@ let active_task_owner_fiber_scan config ~executable_names =
                  then []
                  else (
                    match keeper_names with
+                   | []
+                     when is_credentialed_external_client config assignee ->
+                       []
                    | []
                      when List.mem assignee binding_scan.disabled_agent_names
                           || meta_read_errors <> [] ->

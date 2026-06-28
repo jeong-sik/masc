@@ -1683,6 +1683,67 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Alcotest.(check bool) "health asks operator action" true
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
+let test_health_json_ignores_non_keeper_active_task_owner_without_binding () =
+  with_temp_dir "health-non-keeper-active-task-owner" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let assignee = "codex-mcp-client" in
+        (match
+           Auth.save_raw_token_credential
+             config.Workspace_utils_backend_setup.base_path
+             ~agent_name:assignee ~role:Masc_domain.Worker
+             ~raw_token:"codex-mcp-client-token"
+         with
+        | Ok _ -> ()
+        | Error err ->
+            Alcotest.failf "failed to seed external client credential: %s"
+              (Masc_domain.masc_error_to_string err));
+        let task =
+          make_task
+            ~id:"task-external-owner"
+            ~title:"External client-owned task"
+            ~status:
+              (Types.InProgress
+                 { assignee; started_at = "2026-06-26T00:00:01Z" })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let fleet_safety = json |> member "keeper_fleet_safety" in
+        Alcotest.(check string) "health ignores external client task owner"
+          "ok"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check (option string)) "health has no blocker" None
+          (fleet_safety |> member "blocker" |> to_string_option);
+        Alcotest.(check bool) "health does not expose external client owner" false
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int) "health exposes no external client owner rows" 0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check (list string)) "health has no blocked keeper names"
+          []
+          (fleet_safety |> member "blocked_keeper_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check bool) "health does not ask operator action" false
+          (fleet_safety |> member "operator_action_required" |> to_bool)))
+
 let test_health_json_preserves_active_task_owner_meta_read_error () =
   with_temp_dir "health-active-task-owner-meta-read-error" (fun dir ->
     let config_root = make_config_root dir in
@@ -4077,6 +4138,10 @@ let () =
             "health json degrades on active task owner without keeper binding"
             `Quick
             test_health_json_degrades_on_active_task_owner_without_keeper_binding;
+          Alcotest.test_case
+            "health json ignores non-keeper active task owner without binding"
+            `Quick
+            test_health_json_ignores_non_keeper_active_task_owner_without_binding;
           Alcotest.test_case
             "health json preserves active task owner meta read error"
             `Quick

@@ -388,6 +388,19 @@ let test_registry_failure_reason_preserves_no_provider_runtime_reason () =
     "runtime_exhausted_no_providers_available"
 ;;
 
+let test_registry_failure_reason_completion_contract_is_typed () =
+  let raw_error = "provider returned empty assistant turn" in
+  let terminal = Legacy.of_disposition D.Completion_contract_no_progress in
+  match Unified_types.registry_failure_reason_of_terminal_reason terminal ~raw_error with
+  | Some (Registry.Completion_contract_violation { detail }) ->
+    Alcotest.(check string) "typed completion-contract detail" raw_error detail
+  | Some other ->
+    Alcotest.failf
+      "expected Completion_contract_violation, got %s"
+      (Registry.failure_reason_to_string other)
+  | None -> Alcotest.fail "expected typed completion-contract failure reason"
+;;
+
 let empty_turn_state : Unified_types.turn_state =
   { cycle_completed = false
   ; manifest_seq = 0
@@ -489,6 +502,10 @@ let () =
             "structured runtime no-provider reason is preserved"
             `Quick
             test_registry_failure_reason_preserves_no_provider_runtime_reason
+        ; Alcotest.test_case
+            "completion contract disposition creates typed failure reason"
+            `Quick
+            test_registry_failure_reason_completion_contract_is_typed
         ] )
     ; ( "turn finalization"
       , [ Alcotest.test_case

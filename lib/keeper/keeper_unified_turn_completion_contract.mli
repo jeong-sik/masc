@@ -10,8 +10,9 @@
 
 (** Clear the completion-contract latch on operator resume.
 
-    Resets [Keeper_registry.last_failure_reason] (when its code is
-    ["completion_contract_violation"]) and the
+    Resets [Keeper_registry.last_failure_reason] (when it is the typed
+    [Completion_contract_violation] failure, plus the legacy provider-runtime
+    code kept for on-disk compatibility) and the
     [Keeper_meta_contract.runtime.last_blocker] (when its klass is
     [Completion_contract_violation]). Other resume state —
     [paused], [turn_consecutive_failures] — is owned by
@@ -19,7 +20,7 @@
 
     Returns the (possibly mutated) meta. *)
 val failure_reason_code : string
-(** Provider-runtime failure code owned by this latch clear path. *)
+(** Legacy provider-runtime failure code still cleared for on-disk compatibility. *)
 
 val clear_for_operator_resume
   :  base_path:string

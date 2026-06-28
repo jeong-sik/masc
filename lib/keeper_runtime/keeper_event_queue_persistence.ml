@@ -258,3 +258,32 @@ let ack_consumed ~base_path ~keeper_name stimuli =
             pending_path
             inflight_path
             (Printexc.to_string exn))))
+
+let drop_by_post_id ~base_path ~keeper_name ~post_id =
+  match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with
+  | Error msg, _ | _, Error msg -> Error msg
+  | Ok pending_path, Ok inflight_path ->
+    (try
+       with_write_lock (fun () ->
+         let pending = load_from_path ~keeper_name pending_path in
+         let inflight = load_from_path ~keeper_name inflight_path in
+         let removed, pending', inflight' =
+           Keeper_event_queue.remove_by_post_id_pair post_id pending inflight
+         in
+         match persist_to_path_result ~keeper_name pending_path pending' with
+         | Error _ as err -> err
+         | Ok () ->
+           (match persist_to_path_result ~keeper_name inflight_path inflight' with
+            | Error _ as err -> err
+            | Ok () -> Ok removed))
+     with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn ->
+       Error
+         (Printf.sprintf
+            "drop_by_post_id raised keeper=%s pending=%s inflight=%s post_id=%s: %s"
+            keeper_name
+            pending_path
+            inflight_path
+            post_id
+            (Printexc.to_string exn)))

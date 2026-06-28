@@ -89,6 +89,8 @@ let of_failure_reason : Keeper_registry.failure_reason -> t = function
   | Keeper_registry.Provider_timeout_loop _ ->
     Provider_runtime_error "provider_timeout_loop"
   | Keeper_registry.Provider_runtime_error { code; _ } -> Provider_runtime_error code
+  | Keeper_registry.Completion_contract_violation _ ->
+    Provider_runtime_error "completion_contract_violation"
   | Keeper_registry.Ambiguous_partial_commit
       { kind = Keeper_registry.Post_commit_timeout; _ } ->
     Ambiguous_partial_commit_post_commit_timeout

@@ -323,6 +323,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
            | Keeper_registry.Stale_turn_timeout _
            | Keeper_registry.Stale_fleet_batch _
            | Keeper_registry.Provider_runtime_error _
+           | Keeper_registry.Completion_contract_violation _
            | Keeper_registry.Ambiguous_partial_commit _
            | Keeper_registry.Fiber_unresolved _
            | Keeper_registry.Exception _ )
@@ -352,6 +353,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
     | Some (Keeper_registry.Heartbeat_consecutive_failures _)
     | Some (Keeper_registry.Turn_consecutive_failures _)
     | Some (Keeper_registry.Provider_runtime_error _)
+    | Some (Keeper_registry.Completion_contract_violation _)
     | Some Keeper_registry.Turn_overflow_pause
     | Some Keeper_registry.Turn_livelock_pause
     | Some (Keeper_registry.Ambiguous_partial_commit _)
@@ -396,6 +398,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
       | Some (Keeper_registry.Heartbeat_consecutive_failures _)
       | Some (Keeper_registry.Turn_consecutive_failures _)
       | Some (Keeper_registry.Provider_runtime_error _)
+      | Some (Keeper_registry.Completion_contract_violation _)
       | Some Keeper_registry.Turn_overflow_pause
       | Some Keeper_registry.Turn_livelock_pause
       | Some (Keeper_registry.Ambiguous_partial_commit _)
@@ -750,7 +753,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
        when paused_meta_requires_reconcile_recovery meta
             && not (Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name)
        -> restore_reconcile_continue_gate ctx meta
-     | _ -> ());
+     | Ok (Some _)
+     | Ok None
+     | Error _ -> ());
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3: prune stale paused keeper meta files from disk. Keep
      reconcile-recovery pauses until the operator explicitly resolves them. *)
@@ -791,14 +796,16 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
              "%s: paused meta prune failed: %s"
              name
              (Printexc.to_string exn);
-           Otel_metric_store.inc_counter
-             Keeper_metrics.(to_string SupervisorCleanupFailures)
-             ~labels:
+              Otel_metric_store.inc_counter
+                Keeper_metrics.(to_string SupervisorCleanupFailures)
+                ~labels:
                [ "keeper", name
                ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Paused_meta_prune))
                ]
              ())
-      | _ -> ());
+      | Ok (Some _)
+      | Ok None
+      | Error _ -> ());
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 3.5: self-healing circuit breaker — auto-resume keepers that were
      auto-paused and whose explicit pause timer has elapsed.  Clearing
@@ -854,9 +861,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
                 ~event:
                   (Keeper_lifecycle_events.Custom_event
                      { verb = Keeper_lifecycle_events.Auto_resumed; phase = None })
-                name
-                (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec)
-                ();
+                 name
+                 (Printf.sprintf "auto_resume backoff=%.0fs" resume_after_sec)
+                 ();
               Otel_metric_store.inc_counter
                 Keeper_metrics.(to_string AutoResumedTotal)
                 ~labels:[ "keeper", name ]
@@ -875,8 +882,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
                 ~labels:[ "keeper", name; "phase", "auto_resume" ]
                 ();
               Log.Keeper.warn "%s: auto-resume meta write failed: %s" name err)
-         | _ -> ())
-      | _ -> ());
+         | Some _, Some _
+         | Some _, None
+         | None, Some _
+         | None, None -> ())
+      | Ok (Some _)
+      | Ok None
+      | Error _ -> ());
     Eio_guard.yield_step sweep_names_ym);
   (* Phase 4: reconcile LAST — only orphaned durable keepers *)
   reconcile_keepalive_keepers ~load_or_materialize_keeper_meta ctx

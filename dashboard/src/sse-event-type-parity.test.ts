@@ -26,8 +26,8 @@ import { describe, expect, it } from 'vitest'
 // keystone, tracked separately (MASC task-1478 sibling / RFC-0004 increment).
 //
 // vitest cwd = dashboard/, so backend sources are one level up under ../lib. A
-// wrong path throws ENOENT (loud fail), never a vacuous pass. The closing quote
-// in the assertion anchors the match so a suffix rename ("approval:pending:v2")
+// wrong path throws ENOENT (loud fail), never a vacuous pass. The source parser
+// uses TypeScript AST comparisons, so a suffix rename ("approval:pending:v2")
 // does not satisfy "approval:pending".
 
 // event-type -> the backend .ml that emits the quoted literal.

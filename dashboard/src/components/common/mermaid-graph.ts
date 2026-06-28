@@ -5,6 +5,7 @@ import { EmptyState } from './feedback-state'
 import { sanitizeHtml } from '../../lib/dompurify.js'
 import { memoizeLru } from '../../lib/lru-cache'
 import { loadMermaid, type MermaidApi } from './mermaid-loader'
+import { useInViewOnce } from './use-in-view'
 
 /**
  * Observe whether an element is in (or near) the viewport.
@@ -16,29 +17,7 @@ import { loadMermaid, type MermaidApi } from './mermaid-loader'
 export function useMermaidInView<T extends HTMLElement>(
   rootMargin = '200px',
 ): [RefObject<T>, boolean] {
-  const ref = useRef<T>(null)
-  const [inView, setInView] = useState(false)
-
-  useEffect(() => {
-    const el = ref.current
-    if (!el || inView) return
-    if (typeof IntersectionObserver === 'undefined') {
-      setInView(true)
-      return
-    }
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry?.isIntersecting) {
-          setInView(true)
-        }
-      },
-      { rootMargin },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [inView, rootMargin])
-
-  return [ref, inView]
+  return useInViewOnce<T>(rootMargin)
 }
 
 let mermaidConfigured = false

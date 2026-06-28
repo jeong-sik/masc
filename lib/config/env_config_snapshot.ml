@@ -617,6 +617,10 @@ let memory_entries =
       "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
       "Provider timeout for librarian extraction in seconds";
     entry
+      ~default:(string_of_int Memory_os_defaults.librarian_max_tokens_default)
+      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
+      "Output token cap for librarian extraction (applied as min with provider max_tokens)";
+    entry
       ~default:
         (optional_default_to_display Memory_os_defaults.librarian_runtime_id_default)
       "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"

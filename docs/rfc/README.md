@@ -295,6 +295,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0292 | Complete lib/auth de-duplication — remove drifted Masc.Auth* test copies | Draft | 92f93e11de 2026-06-24 | - |
 | 0293 | Keeper execution-endpoint backend (host / ephemeral-docker / persistent-docke... | Draft | 0ba556bf42 2026-06-24 | - |
 | 0294 | Purge the workspace-goal horizon (short/mid/long) — dead cadence cohort + a s... | Draft | d7d30816c2 2026-06-24 | - |
+| 0296 | CI skip-gate main-push safety-net — always run Build and Test on non-PR events (fake-green hole, RFC-0270 4th) | Draft | - 2026-06-28 | - |
 | elim | Eliminate Substring Destructive Classifier in Favor of Typed Shell IR | Draft | 664f8aafe3 2026-06-25 | - |
 | keep | Vision-as-a-tool delegation (decouple multimodal input from conversation runt... | Draft | 55bab0404b 2026-06-25 | - |
 | runt | Per-runtime note field & dashboard surfacing | Draft | 8e1998934b 2026-06-25 | - |

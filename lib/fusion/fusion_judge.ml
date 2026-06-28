@@ -116,9 +116,21 @@ let attach_usage
   | Ok synthesis -> Ok (synthesis, usage)
   | Error msg -> Error (Fusion_types.Parse_error msg, usage)
 
+let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
+  match e with
+  | Agent_sdk.Error.Api api_error -> Agent_sdk.Error.Retry.error_message api_error
+  | Agent_sdk.Error.Provider provider_error ->
+    Llm_provider.Error.to_string provider_error
+  | Agent_sdk.Error.Agent _ | Agent_sdk.Error.Mcp _ | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _ | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _ | Agent_sdk.Error.Internal _ ->
+    Agent_sdk.Error.to_string e
+
 (* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. [Api (Retry.Timeout _)]
    를 잡아 [Timeout]으로 propagate하고, 그 외는 [Provider_error]에 사람-가독 detail을
-   보존한다. 이 match가 "to_string 직렬화 → substring 역분류" round-trip 안티패턴의 근본
+   보존한다. Non-timeout detail은 표시용이며 재분류에 쓰지 않는다; provider 오류는
+   [Llm_provider.Error.to_string] 경로로 렌더해 provider/status/retry/phase metadata를
+   유지한다. 이 match가 "to_string 직렬화 → substring 역분류" round-trip 안티패턴의 근본
    해소다: timeout 분류가 컴파일 타입에 묶인다. [prefix]는 호출 context(run 실패 vs
    provider 에러)의 로그/관측 prefix를 보존한다. *)
 let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
@@ -127,9 +139,7 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
   | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _) -> Timeout
   | _ ->
     Provider_error
-      (prefix
-       ^ Fusion_oas.provider_error_detail ~runtime_id
-           (Agent_sdk.Error.to_string e))
+      (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
 
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
    서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고

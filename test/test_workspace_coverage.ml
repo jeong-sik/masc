@@ -17,6 +17,7 @@ open Masc
    the bare module resolves via masc_test_deps, no mega-lib alias needed. *)
 
 let () = Mirage_crypto_rng_unix.use_default ()
+let () = Workspace_metric_hooks.install ()
 
 (* ============================================================ *)
 (* Test Helpers                                                  *)

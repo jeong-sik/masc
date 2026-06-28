@@ -47,7 +47,7 @@ let checkpoint_with_messages messages : Agent_sdk.Checkpoint.t =
     thinking_budget = None;
     cache_system_prompt = false;
 
-    context = Agent_sdk.Context.create ~eio:true ();
+    context = Agent_sdk.Context.create ~eio:false ();
     mcp_sessions = [];
     working_context = None;
   }

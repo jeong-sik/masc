@@ -36,8 +36,12 @@ val text_of_message : Agent_sdk.Types.message -> string
 (** {1 Working-context construction & mutation} *)
 
 (** Construct a fresh working context with the given system prompt
-    and token budget. *)
-val create : system_prompt:string -> max_tokens:int -> working_context
+    and token budget.
+
+    [~eio:true] selects the OAS context backend required when the context can
+    be touched by Eio fibers. Use [~eio:false] only for synchronous tests or
+    serialization fixtures. *)
+val create : eio:bool -> system_prompt:string -> max_tokens:int -> working_context
 
 val set_system_prompt :
   working_context -> system_prompt:string -> working_context
@@ -110,7 +114,7 @@ val repair_broken_tool_call_pairs_with_stats :
 (** {1 Context (de)serialization} *)
 
 val serialize_context : working_context -> string
-val deserialize_context : string -> max_tokens:int -> working_context
+val deserialize_context : eio:bool -> string -> max_tokens:int -> working_context
 val context_to_json : working_context -> Yojson.Safe.t
 
 (** {1 Session lifecycle} *)

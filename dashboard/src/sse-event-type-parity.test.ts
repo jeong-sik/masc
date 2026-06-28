@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 
+import * as ts from 'typescript'
 import { describe, expect, it } from 'vitest'
 
 // Cross-boundary parity gate for the SSE event-type strings the dashboard
@@ -54,38 +55,104 @@ const FE_ONLY_OR_EXTERNAL: Record<string, string> = {
     'OAS-subsystem event bridged into the masc SSE stream, not emitted by masc lib/ (oas: prefix).',
 }
 
-function parseFeRoutedEventTypes(source: string): Set<string> {
-  // The exact-match routing forms in sse-store.ts:
-  //   event.type === 'X'
-  //   event.type === SSE_SOME_EVENT
-  //   routedType === 'X'
-  //   normalizeMascEventType(event.type) === 'X'
-  const exportedConstants = parseExportedStringConstants(
-    readFileSync(resolve(process.cwd(), 'src/schemas/sse.ts'), 'utf8'),
-  )
-  const re =
-    /(?:event\.type|routedType|normalizeMascEventType\(event\.type\)) === (?:'([a-zA-Z0-9_:/]+)'|([A-Z][A-Z0-9_]*))/g
-  const found = new Set<string>()
-  for (const m of source.matchAll(re)) {
-    const eventType = m[1] ?? exportedConstants.get(m[2] ?? '')
-    if (eventType) found.add(eventType)
-  }
-  return found
-}
-
 function parseExportedStringConstants(source: string): Map<string, string> {
+  const file = ts.createSourceFile('schemas/sse.ts', source, ts.ScriptTarget.Latest, true)
   const constants = new Map<string, string>()
-  const re = /export const ([A-Z][A-Z0-9_]*) = '([a-zA-Z0-9_:/]+)'/g
-  for (const m of source.matchAll(re)) {
-    const name = m[1]
-    const value = m[2]
-    if (name && value) constants.set(name, value)
+  for (const statement of file.statements) {
+    if (!ts.isVariableStatement(statement)) continue
+    const exported = statement.modifiers?.some(modifier => modifier.kind === ts.SyntaxKind.ExportKeyword)
+    if (!exported) continue
+    for (const declaration of statement.declarationList.declarations) {
+      if (!ts.isIdentifier(declaration.name) || !declaration.initializer) continue
+      if (ts.isStringLiteral(declaration.initializer)) {
+        constants.set(declaration.name.text, declaration.initializer.text)
+      }
+    }
   }
   return constants
 }
 
+function isEventTypeAccess(expression: ts.Expression): boolean {
+  return (
+    ts.isPropertyAccessExpression(expression)
+    && ts.isIdentifier(expression.expression)
+    && expression.expression.text === 'event'
+    && expression.name.text === 'type'
+  )
+}
+
+function isNormalizeEventTypeCall(expression: ts.Expression): boolean {
+  if (!ts.isCallExpression(expression)) return false
+  const argument = expression.arguments[0]
+  return (
+    ts.isIdentifier(expression.expression)
+    && expression.expression.text === 'normalizeMascEventType'
+    && expression.arguments.length === 1
+    && argument !== undefined
+    && isEventTypeAccess(argument)
+  )
+}
+
+function isExactRouteOperand(expression: ts.Expression): boolean {
+  return (
+    isEventTypeAccess(expression)
+    || (ts.isIdentifier(expression) && expression.text === 'routedType')
+    || isNormalizeEventTypeCall(expression)
+  )
+}
+
+function routedEventTypeFromExpression(
+  expression: ts.Expression,
+  exportedConstants: ReadonlyMap<string, string>,
+): string | null {
+  if (ts.isStringLiteral(expression)) return expression.text
+  if (ts.isIdentifier(expression)) {
+    const value = exportedConstants.get(expression.text)
+    if (!value) {
+      throw new Error(
+        `SSE exact-route comparison references ${expression.text}, but schemas/sse.ts does not export it as a string constant`,
+      )
+    }
+    return value
+  }
+  return null
+}
+
+function routedEventTypeFromBinaryExpression(
+  expression: ts.BinaryExpression,
+  exportedConstants: ReadonlyMap<string, string>,
+): string | null {
+  if (expression.operatorToken.kind !== ts.SyntaxKind.EqualsEqualsEqualsToken) return null
+  if (isExactRouteOperand(expression.left)) {
+    return routedEventTypeFromExpression(expression.right, exportedConstants)
+  }
+  if (isExactRouteOperand(expression.right)) {
+    return routedEventTypeFromExpression(expression.left, exportedConstants)
+  }
+  return null
+}
+
+function parseFeRoutedEventTypes(
+  source: string,
+  exportedConstants: ReadonlyMap<string, string>,
+): Set<string> {
+  const found = new Set<string>()
+  const file = ts.createSourceFile('sse-store.ts', source, ts.ScriptTarget.Latest, true)
+  function visit(node: ts.Node): void {
+    if (ts.isBinaryExpression(node)) {
+      const eventType = routedEventTypeFromBinaryExpression(node, exportedConstants)
+      if (eventType) found.add(eventType)
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(file)
+  return found
+}
+
+const sseSchemaSource = readFileSync(resolve(process.cwd(), 'src/schemas/sse.ts'), 'utf8')
+const sseSchemaConstants = parseExportedStringConstants(sseSchemaSource)
 const sseStoreSource = readFileSync(resolve(process.cwd(), 'src/sse-store.ts'), 'utf8')
-const feRouted = parseFeRoutedEventTypes(sseStoreSource)
+const feRouted = parseFeRoutedEventTypes(sseStoreSource, sseSchemaConstants)
 const classified = new Set([
   ...Object.keys(BACKEND_EMITTED),
   ...Object.keys(FE_ONLY_OR_EXTERNAL),

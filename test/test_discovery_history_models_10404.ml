@@ -6,7 +6,9 @@
 
 open Alcotest
 module DH = Discovery_history
-module P = Otel_metric_store
+module P = Masc.Otel_metric_store
+
+let metric_discovery_history_failures = P.metric_discovery_history_failures
 
 let make ~models : DH.probe_record = {
   ts = 1777129200.0;
@@ -66,14 +68,14 @@ let test_single_model_round_trip () =
 let test_failure_observer_increments_metric () =
   let labels = [("site", "unknown")] in
   let before =
-    P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
+    P.metric_value_or_zero metric_discovery_history_failures ~labels ()
   in
   DH.For_testing.observe_failure
     ~site:"unit_test"
     ~base_path:"/tmp/masc-discovery-history"
     (Failure "synthetic discovery history failure");
   let after =
-    P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
+    P.metric_value_or_zero metric_discovery_history_failures ~labels ()
   in
   check (float 0.0001) "discovery history failure counted"
     (before +. 1.0)
@@ -82,14 +84,14 @@ let test_failure_observer_increments_metric () =
 let test_failure_observer_bounds_metric_site_label () =
   let labels = [("site", "arbitrary_unbounded_test_site")] in
   let before =
-    P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
+    P.metric_value_or_zero metric_discovery_history_failures ~labels ()
   in
   DH.For_testing.observe_failure
     ~site:"arbitrary_unbounded_test_site"
     ~base_path:"/tmp/masc-discovery-history"
     (Failure "synthetic discovery history failure");
   let after =
-    P.metric_value_or_zero P.metric_discovery_history_failures ~labels ()
+    P.metric_value_or_zero metric_discovery_history_failures ~labels ()
   in
   check (float 0.0001) "raw arbitrary site label not emitted"
     before
@@ -109,7 +111,7 @@ let test_failure_metric_registered () =
   let metric =
     P.snapshot ()
     |> List.find_opt (fun (m : P.metric) ->
-      String.equal m.name P.metric_discovery_history_failures && m.labels = [])
+      String.equal m.name metric_discovery_history_failures && m.labels = [])
   in
   check bool "discovery history failure registered" true (Option.is_some metric);
   check bool "discovery history failure registered as counter" true

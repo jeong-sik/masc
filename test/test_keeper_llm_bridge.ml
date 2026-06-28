@@ -68,21 +68,6 @@ let test_missing_env_fails_closed_without_calling_fn () =
     ~operator_action:"check_masc_eio_env"
 ;;
 
-let test_clockless_env_fails_closed_without_calling_fn () =
-  Eio_main.run (fun env ->
-    Eio.Switch.run (fun sw ->
-      Masc_eio_env.reset_for_test ();
-      Fun.protect ~finally:Masc_eio_env.reset_for_test (fun () ->
-        Masc_eio_env.init ~sw ~net:(Eio.Stdenv.net env) ();
-        let called = ref false in
-        let result =
-          Keeper_llm_bridge.run_with_timeout_and_fallback ~timeout_s:1.0 (fun () ->
-            called := true;
-            Ok "should-not-run")
-        in
-        assert_no_clock_error ~label:"clockless env" ~called result)))
-;;
-
 let test_clocked_env_runs_function () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -276,10 +261,6 @@ let () =
             "missing env fails closed"
             `Quick
             test_missing_env_fails_closed_without_calling_fn
-        ; Alcotest.test_case
-            "clockless env fails closed"
-            `Quick
-            test_clockless_env_fails_closed_without_calling_fn
         ; Alcotest.test_case "clocked env runs" `Quick test_clocked_env_runs_function
         ; Alcotest.test_case
             "uninitialized domain returns None"

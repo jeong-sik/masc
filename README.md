@@ -92,7 +92,7 @@ scripts/run-local.sh --target-dir "$PWD"
 
 ### Run modes
 
-- **`scripts/start-loopback.sh`**: 고정 포트 `8935`로 기동. Keeper 스케줄러를 끄고 순수 로컬 Mock 디버깅용으로 사용한다.
+- **`scripts/start-loopback.sh`**: 고정 포트 `8935`로 기동. Keeper 스케줄러를 끄고 순수 로컬 Mock 디버깅용으로 사용한다. Keeper autoboot가 필요하면 `--with-keeper-bootstrap`을 명시한다.
 - **`scripts/run-local.sh --target-dir /path`**: 지정한 폴더 기준으로 격리 기동. 포트는 폴더 경로 해시를 기반으로 `9100-9999` 범위에서 자동 할당한다.
 - **`./start-masc.sh --http`**: Keeper 스케줄러를 포함한 전체 런타임을 기동한다.
 

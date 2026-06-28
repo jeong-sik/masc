@@ -50,6 +50,11 @@ let with_env key value f =
 let contains_substring haystack needle =
   String_util.contains_substring haystack needle
 
+let with_eio_fs f =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:Fs_compat.clear_fs f
+
 let secret_root_default ~base_dir ~keeper_name =
   Filename.concat
     (Filename.concat
@@ -348,34 +353,36 @@ let test_recent_direct_context_omits_voice_audio_self_echo () =
         (contains_substring rendered "I will say this out loud now."))
 
 let test_direct_owner_context_excludes_connector_turns () =
-  let base_dir = temp_base_path "keeper-chat-direct-owner-gate" in
-  Fun.protect
-    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
-    (fun () ->
-      let keeper_name = "keeper-chat-direct-owner-gate" in
-      K.append_turn ~base_dir ~keeper_name
-        ~user_content:"what did you just say"
-        ~user_attachments:[]
-        ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
-        ~assistant_content:"I just answered from direct chat."
-        ();
-      let config = Masc.Workspace.default_config base_dir in
-      let meta = make_meta keeper_name in
-      let context ?channel_session_key ~direct_reply ~channel () =
-        KT.For_testing.direct_owner_conversation_context
-          ~config ~meta ~direct_reply ~channel_session_key ~channel
-      in
-      Alcotest.(check bool) "owner direct receives recent transcript" true
-        (contains_substring
-           (context ~direct_reply:true ~channel:"" ())
-           "I just answered from direct chat.");
-      Alcotest.(check string) "connector channel suppresses transcript" ""
-        (context ~direct_reply:true ~channel:"discord" ());
-      Alcotest.(check string) "connector session suppresses transcript" ""
-        (context ~direct_reply:true ~channel:""
-           ~channel_session_key:"discord_workspace" ());
-      Alcotest.(check string) "non-direct turn suppresses transcript" ""
-        (context ~direct_reply:false ~channel:"" ()))
+  with_eio_fs (fun () ->
+    let base_dir = temp_base_path "keeper-chat-direct-owner-gate" in
+    Fun.protect
+      ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+      (fun () ->
+        let meta = make_meta "keeper-chat-direct-owner-gate" in
+        let keeper_name = meta.name in
+        K.append_turn ~base_dir ~keeper_name
+          ~user_content:"what did you just say"
+          ~user_attachments:[]
+          ~surface:(Masc.Surface_ref.Dashboard { session_id = None })
+          ~assistant_content:"I just answered from direct chat."
+          ();
+        let config = Masc.Workspace.default_config base_dir in
+        let context ?channel_session_key ~direct_reply ~channel () =
+          KT.For_testing.direct_owner_conversation_context
+            ~config ~meta ~direct_reply ~channel_session_key ~channel
+        in
+        let owner_context = context ~direct_reply:true ~channel:"" () in
+        Alcotest.(check bool) "owner direct receives recent transcript" true
+          (contains_substring
+             owner_context
+             "I just answered from direct chat.");
+        Alcotest.(check string) "connector channel suppresses transcript" ""
+          (context ~direct_reply:true ~channel:"discord" ());
+        Alcotest.(check string) "connector session suppresses transcript" ""
+          (context ~direct_reply:true ~channel:""
+             ~channel_session_key:"discord_workspace" ());
+        Alcotest.(check string) "non-direct turn suppresses transcript" ""
+          (context ~direct_reply:false ~channel:"" ())))
 
 let test_append_turn_redacts_projected_secrets () =
   let base_dir = temp_base_path "keeper-chat-store-redact" in

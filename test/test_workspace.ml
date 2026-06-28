@@ -330,6 +330,18 @@ let transition_done config ~agent_name ~task_id ~notes =
   | Ok msg -> msg
   | Error err -> Masc_domain.masc_error_to_string err
 
+let transition_start config ~agent_name ~task_id =
+  match
+    Workspace.transition_task_r
+      config
+      ~agent_name
+      ~task_id
+      ~action:Masc_domain.Start
+      ()
+  with
+  | Ok msg -> msg
+  | Error err -> Masc_domain.masc_error_to_string err
+
 (* Helper to create fresh test environment.
    Eio context + Fs_compat.set_fs are set up in the top-level runner,
    so Workspace.default_config gets FileSystem backend. *)
@@ -354,7 +366,7 @@ let test_lifecycle_messages_are_typed () =
   with_test_env (fun config ->
     let join_result = Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] () in
     Alcotest.(check bool) "join success" true
-      (str_contains join_result "joined");
+      (str_contains join_result "session bound");
     let leave_result = Workspace.end_session config ~agent_name:"gemini" in
     Alcotest.(check bool) "leave success" true (str_contains leave_result "left");
     ignore (Workspace.bind_session config ~agent_name:"gemini" ~capabilities:[] ());
@@ -365,9 +377,9 @@ let test_lifecycle_messages_are_typed () =
         (fun (message : Types.message) -> String.equal message.msg_type msg_type)
         messages
     in
-    Alcotest.(check bool) "join typed" true (has_msg_type "lifecycle_join");
-    Alcotest.(check bool) "leave typed" true (has_msg_type "lifecycle_leave");
-    Alcotest.(check bool) "rejoin typed" true (has_msg_type "lifecycle_rejoin");
+    Alcotest.(check bool) "join typed" true (has_msg_type "session_bound");
+    Alcotest.(check bool) "leave typed" true (has_msg_type "session_ended");
+    Alcotest.(check bool) "rejoin typed" true (has_msg_type "session_rebound");
     Alcotest.(check bool) "lifecycle pings not plain broadcasts" false
       (List.exists
          (fun (message : Types.message) ->
@@ -551,13 +563,19 @@ let test_multiple_tasks_independent () =
     let _ = Workspace.add_task config ~title:"Task B" ~priority:2 ~description:"" in
     let _ = Workspace.add_task config ~title:"Task C" ~priority:3 ~description:"" in
 
-    (* Claim one, complete another - verify independence *)
+    (* Claim and complete two tasks independently. Current ownership guards keep
+       one active task per agent, so use two agents to isolate task state. *)
     let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-001" in
-    let _ = Workspace.claim_task config ~agent_name:"claude" ~task_id:"task-002" in
-    let _ = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    let _ = Workspace.claim_task config ~agent_name:"gemini" ~task_id:"task-002" in
+    let start_1 = transition_start config ~agent_name:"claude" ~task_id:"task-001" in
+    let start_2 = transition_start config ~agent_name:"gemini" ~task_id:"task-002" in
+    Alcotest.(check bool) "start task 001" true (contains_check start_1);
+    Alcotest.(check bool) "start task 002" true (contains_check start_2);
+    let done_1 = transition_done config ~agent_name:"claude" ~task_id:"task-001" ~notes:"" in
+    Alcotest.(check bool) "complete task 001" true (contains_check done_1);
 
-    (* Task 002 should still be claimable to complete *)
-    let result = transition_done config ~agent_name:"claude" ~task_id:"task-002" ~notes:"" in
+    (* Task 002 should still be independently completable. *)
+    let result = transition_done config ~agent_name:"gemini" ~task_id:"task-002" ~notes:"" in
     Alcotest.(check bool) "independent tasks" true (contains_check result)
   )
 
@@ -1649,13 +1667,14 @@ let test_rejoin_event_log () =
     let _ = Workspace.bind_session config ~agent_name:"logcheck" ~capabilities:[] () in
     let _ = Workspace.end_session config ~agent_name:"logcheck" in
 
-    (* Rejoin — should produce event log with "rejoin":true *)
+    (* Rejoin — should produce event log with "session_rebound":true *)
     let _ = Workspace.bind_session config ~agent_name:"logcheck" ~capabilities:[] () in
 
     (* Read event log and check for rejoin entry *)
     let events = read_event_log config in
     let has_rejoin = List.exists (fun line ->
-      str_contains line "\"rejoin\":true" && str_contains line "agent_session_bound"
+      str_contains line "\"session_rebound\":true"
+      && str_contains line "agent_session_bound"
     ) events in
     Alcotest.(check bool) "rejoin event logged" true has_rejoin
   )

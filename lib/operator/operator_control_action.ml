@@ -121,7 +121,8 @@ let default_target_type_for action_type =
     -> "workspace"
   | action when String.equal action Operator_action_constants.goal_completion_decision ->
     Operator_action_constants.goal_target_type
-  | "keeper_message" | "keeper_probe" | "keeper_recover" -> "keeper"
+  | "keeper_message" | "keeper_probe" -> "keeper"
+  | action when String.equal action Operator_action_constants.keeper_recover -> "keeper"
   | _ -> ""
 
 let generate_confirm_token ~(clock : _ Eio.Time.clock) config =

@@ -98,7 +98,6 @@ let compute_metrics_window
     ~(primary_model_norm : string)
     ~(primary_model : string)
   : Yojson.Safe.t list * Yojson.Safe.t * Yojson.Safe.t option * Yojson.Safe.t option =
-  let _primary_model = primary_model in
   let m key source = Option.value ~default:`Null (Json_util.assoc_member_opt key source) in
   let work_kind_counts : (string, int) Hashtbl.t = Hashtbl.create 16 in
   let model_counts_window : (string, int) Hashtbl.t = Hashtbl.create 16 in

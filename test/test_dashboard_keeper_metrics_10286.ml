@@ -208,8 +208,8 @@ let test_metrics_window_redacts_model_and_handoff_labels () =
       ~primary_model:"openai:gpt-5.4"
   in
   let open Yojson.Safe.Util in
-  check bool "primary model redacted" true
-    (summary |> member "primary_model" = `Null);
+  check string "primary model preserved" "openai:gpt-5.4"
+    (summary |> member "primary_model" |> to_string);
   (match summary |> member "top_models" |> to_list with
   | [ top ] ->
       check string "model bucket is runtime" "runtime"

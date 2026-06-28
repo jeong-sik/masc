@@ -74,7 +74,7 @@ let test_join_uses_default_namespace () =
           in
           check bool "join succeeds" true
             (String.length result > 0);
-          check (option string) "hook sees join event" (Some "join")
+          check (option string) "hook sees session_bound event" (Some "session_bound")
             !captured_event_kind;
           let event_log =
             match find_latest_event_log config with

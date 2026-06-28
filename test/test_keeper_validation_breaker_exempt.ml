@@ -13,6 +13,8 @@ open Alcotest
 module Task = Masc.Keeper_tool_task_runtime
 module Dispatch = Masc.Keeper_tool_dispatch_runtime
 module Boundary = Masc.Keeper_tools_oas_failure_boundary
+module Response_text = Masc.Keeper_agent_run_response_text
+module State = Masc.Keeper_memory_policy
 module U = Yojson.Safe.Util
 (* Tool_result lives in the leaf [masc_tool_types] lib (wrapped false), so
    it is referenced bare — not under [Masc.] — matching existing tests. *)
@@ -116,6 +118,40 @@ let test_task_create_multi_active_goals_without_goal_id_is_unscoped () =
        | tasks ->
            failf "expected exactly one persisted task, got %d" (List.length tasks))
 
+let test_state_block_reply_returns_state_snapshot () =
+  let raw_response_text =
+    "[STATE]\n\
+     Goal: Keep runtime visible\n\
+     Next: Check main CI\n\
+     Constraints: Use worktrees\n\
+     [/STATE]"
+  in
+  let
+    { Response_text.state_snapshot
+    ; state_snapshot_source
+    ; response_text
+    }
+    =
+    Response_text.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"keeper-task-create-test"
+      ~goal:"Keep runtime visible"
+      ~actual_keeper_tool_names:[]
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text
+      ()
+  in
+  check string "state block source" "model_state_block"
+    (State.state_snapshot_source_to_string state_snapshot_source);
+  check (option string) "state keeps goal" (Some "Keep runtime visible")
+    state_snapshot.goal;
+  check (list string) "state keeps next items" [ "Check main CI" ]
+    state_snapshot.next_items;
+  check (list string) "state keeps constraints" [ "Use worktrees" ]
+    state_snapshot.constraints;
+  check string "visible response falls back to goal" "Keep runtime visible"
+    response_text
+
 (* RFC-0239 / audit D1: a rejected keeper_task_done must carry a typed
    [Error] outcome so the no-progress loop detector demotes it (PR #22127
    wired the detector to read typed_outcome; this proves the producer emits
@@ -190,6 +226,8 @@ let () =
             "keeper_task_create treats ambiguous active_goal_ids as advisory"
             `Quick
             test_task_create_multi_active_goals_without_goal_id_is_unscoped
+        ; test_case "state block reply returns state snapshot" `Quick
+            test_state_block_reply_returns_state_snapshot
         ; test_case "rejected done (missing task_id) emits typed Error (D1)"
             `Quick test_done_missing_task_id_emits_typed_error
         ; test_case "rejected done (failed transition) emits typed Error (D1)"

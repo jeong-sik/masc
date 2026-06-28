@@ -65,6 +65,11 @@ let write_keeper_meta_json config (meta : Keeper_meta_contract.keeper_meta) =
     (Keeper_types_profile.keeper_meta_path config meta.name)
     (Keeper_meta_json.meta_to_json meta)
 
+let write_keeper_meta_json_for_name config name (meta : Keeper_meta_contract.keeper_meta) =
+  write_json
+    (Keeper_types_profile.keeper_meta_path config name)
+    (Keeper_meta_json.meta_to_json meta)
+
 let test_runtime_toml =
   {|
 [runtime]
@@ -221,7 +226,7 @@ let test_registry_reload_meta_from_disk_repairs_stale_meta () =
       let persisted_meta = make_keeper_meta ~name () in
       let stale_meta = { persisted_meta with tool_denylist = [ "stale_tool" ] } in
       ignore (KR.register ~base_path:config.base_path name stale_meta);
-      write_keeper_meta_json config persisted_meta;
+      write_keeper_meta_json_for_name config name persisted_meta;
       match KR.reload_meta_from_disk ~base_path:config.base_path name with
       | Ok (Some entry) ->
           check (list string) "reload applies base-path TOML denylist" [ "Write" ]

@@ -37,10 +37,6 @@ let make_ctx base_path =
   ignore (Workspace.init config ~agent_name:(Some agent_name));
   { Task.Tool.config; agent_name; sw = None }
 
-let make_peer_ctx config agent_name =
-  ignore (Workspace.bind_session config ~agent_name ~capabilities:[] ());
-  { Task.Tool.config; agent_name; sw = None }
-
 let run_transition ctx ~task_id ~action ?(notes = "") () =
   let args =
     `Assoc
@@ -63,7 +59,32 @@ let event_exists predicate config =
 let test_masc_transition_claim_done_emits_task_lifecycle () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  with_default_runtime_id_hook (fun () ->
+  let previous_default_runtime =
+    Atomic.get Workspace_hooks.get_default_runtime_id_fn
+  in
+  let previous_observe_task_transition =
+    Atomic.get Workspace_hooks.observe_task_transition_fn
+  in
+  Atomic.set Workspace_hooks.get_default_runtime_id_fn
+    (fun () -> "test-evaluator-runtime");
+  Atomic.set Workspace_hooks.observe_task_transition_fn
+    (fun config ~agent_name ~task_id ~transition ~details:_ ->
+      match transition with
+      | Masc_domain.Claim | Masc_domain.Start ->
+        Telemetry_eio.track_task_started config ~task_id ~agent_id:agent_name
+      | Masc_domain.Done_action | Masc_domain.Approve_verification ->
+        Telemetry_eio.track_task_completed config ~task_id ~duration_ms:0 ~success:true
+      | Masc_domain.Cancel ->
+        Telemetry_eio.track_task_completed config ~task_id ~duration_ms:0 ~success:false
+      | Masc_domain.Release
+      | Masc_domain.Submit_for_verification
+      | Masc_domain.Reject_verification -> ());
+  Fun.protect
+    ~finally:(fun () ->
+      Atomic.set Workspace_hooks.get_default_runtime_id_fn previous_default_runtime;
+      Atomic.set Workspace_hooks.observe_task_transition_fn
+        previous_observe_task_transition)
+    (fun () ->
   with_isolated_runtime_env (fun () ->
     let base_path =
       Filename.concat
@@ -79,9 +100,9 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
     in
     if not (Tool_result.is_success result) then Alcotest.fail (Tool_result.message result);
     run_transition ctx ~task_id:"task-001" ~action:"claim" ();
+    run_transition ctx ~task_id:"task-001" ~action:"start" ();
     run_transition ctx ~task_id:"task-001" ~action:"done"
       ~notes:"Telemetry lifecycle regression proof completed." ();
-    let verifier_ctx = make_peer_ctx ctx.config "telemetry-verifier" in
     let started =
       event_exists
         (function
@@ -98,19 +119,8 @@ let test_masc_transition_claim_done_emits_task_lifecycle () =
           | _ -> false)
         ctx.config
     in
-    if not completed then
-      run_transition verifier_ctx ~task_id:"task-001" ~action:"approve"
-        ~notes:"Verification approved for telemetry lifecycle proof." ();
-    let completed =
-      event_exists
-        (function
-          | Telemetry_eio.Task_completed { task_id = "task-001"; success = true; _ } ->
-            true
-          | _ -> false)
-        ctx.config
-    in
     Alcotest.(check bool) "claim emits Task_started" true started;
-    Alcotest.(check bool) "done/approve emits Task_completed" true completed))
+    Alcotest.(check bool) "done emits Task_completed" true completed))
 
 let () =
   Alcotest.run "Telemetry_task_transition_10358"
@@ -118,7 +128,7 @@ let () =
       ( "telemetry",
         [
           Alcotest.test_case
-            "masc_transition claim->done emits task lifecycle telemetry"
+            "masc_transition claim->start->done emits task lifecycle telemetry"
             `Quick
             test_masc_transition_claim_done_emits_task_lifecycle;
         ] );

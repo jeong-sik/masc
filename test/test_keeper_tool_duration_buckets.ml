@@ -7,7 +7,12 @@ let provider = HK.runtime_lane_label
 let outcome = "ok"
 
 let base_labels =
-  [ "keeper", keeper; "provider", provider; "tool", tool; "outcome", outcome ]
+  [ "keeper", keeper
+  ; "provider", provider
+  ; "tool", tool
+  ; "outcome", outcome
+  ; "tool_type", Masc.Tool_telemetry.tool_type_of_name tool
+  ]
 
 let bucket_metric = Keeper_metrics.(to_string ToolCallDurationBucket)
 let duration_metric = Keeper_metrics.(to_string ToolCallDuration)
@@ -66,6 +71,7 @@ let test_record_materializes_zero_lower_bucket () =
     ; "provider", provider
     ; "tool", tool
     ; "outcome", outcome
+    ; "tool_type", Masc.Tool_telemetry.tool_type_of_name tool
     ]
   in
   let count le =

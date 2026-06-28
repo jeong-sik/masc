@@ -2,6 +2,33 @@ open Alcotest
 
 module Vc = Voice_config
 
+let with_env key value f =
+  let prior = Sys.getenv_opt key in
+  (match value with
+   | Some v -> Unix.putenv key v
+   | None -> Unix.putenv key "");
+  Fun.protect
+    ~finally:(fun () ->
+      match prior with
+      | Some v -> Unix.putenv key v
+      | None -> Unix.putenv key "")
+    f
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let rec rm_rf path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path
+        |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
 let minimal_config_json ~session_endpoints =
   Printf.sprintf {|{
   "tts": {
@@ -85,6 +112,24 @@ let test_tts_empty_endpoints_rejected () =
   | Ok _ -> fail "expected Error for empty tts endpoints, got Ok"
   | Error _ -> ()
 
+let test_config_path_survives_deleted_cwd_without_base () =
+  with_temp_dir "voice-config-deleted-cwd-" @@ fun root ->
+  let doomed = Filename.concat root "doomed" in
+  Unix.mkdir doomed 0o755;
+  let saved_cwd = Sys.getcwd () in
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  with_env "HOME" (Some root) @@ fun () ->
+  Fun.protect
+    ~finally:(fun () -> Sys.chdir saved_cwd)
+    (fun () ->
+       Sys.chdir doomed;
+       Unix.rmdir doomed;
+       let path = Vc.config_path () in
+       check bool
+         "deleted cwd still resolves a voice_config.json path"
+         true
+         (Filename.basename path = "voice_config.json"))
+
 let () =
   Alcotest.run "voice_config"
     [
@@ -103,5 +148,9 @@ let () =
             `Quick test_session_invalid_endpoint_rejected;
           test_case "empty tts endpoints still rejected"
             `Quick test_tts_empty_endpoints_rejected;
+          test_case
+            "config path survives deleted cwd without base"
+            `Quick
+            test_config_path_survives_deleted_cwd_without_base;
         ] );
     ]

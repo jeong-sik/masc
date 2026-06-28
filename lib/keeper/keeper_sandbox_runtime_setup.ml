@@ -201,7 +201,7 @@ let strip_trailing_slashes = Env_config_core.strip_trailing_slashes
 let normalize_base_path_for_hash base_path =
   let abs =
     if Filename.is_relative base_path
-    then Filename.concat (Config_dir_resolver.base_path_or_cwd ()) base_path
+    then Filename.concat (Config_dir_resolver.current_working_dir ()) base_path
     else base_path
   in
   strip_trailing_slashes abs

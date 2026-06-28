@@ -72,7 +72,7 @@ let repo_voice_config_path_opt () =
     match (Host_config.from_env ()).base_path with
     | Some bp -> bp
     | None ->
-      let cwd = Sys.getcwd () in
+      let cwd = Config_dir_resolver.current_working_dir () in
       (match Workspace_utils_backend_setup.find_git_root cwd with
        | Some path -> path
        | None -> cwd)

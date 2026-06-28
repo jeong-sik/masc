@@ -451,7 +451,122 @@ let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
            entry.Masc.Keeper_registry.meta.paused;
          (match entry.Masc.Keeper_registry.last_failure_reason with
           | None -> ()
-          | Some _ -> fail "expected overwritten no-progress failure reason to clear")
+         | Some _ -> fail "expected overwritten no-progress failure reason to clear")
+       | None -> fail "expected registered keeper")
+
+let test_direct_success_persist_failure_keeps_no_progress_pause () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-no-progress-direct-success-persist-fail-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
+      Masc.Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "no-progress-direct-success-persist-fail" in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"latched"
+           Keeper_meta_contract.No_progress_loop
+       in
+       let meta =
+         { (make_meta keeper_name
+            |> Keeper_meta_contract.map_runtime (fun rt ->
+              { rt with last_blocker = Some blocker }))
+           with
+           paused = true
+         }
+       in
+       Masc.Keeper_registry.clear ();
+       let entry =
+         Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta
+       in
+       let paused_entry =
+         { entry with
+           phase = Masc.Keeper_state_machine.Paused
+         ; conditions =
+             { entry.conditions with
+               Masc.Keeper_state_machine.operator_paused = true
+             }
+         }
+       in
+       (match
+          Masc.Keeper_registry.put_entry
+            ~base_path:config.base_path
+            keeper_name
+            paused_entry
+        with
+        | Ok () -> ()
+        | Error err ->
+          fail
+            ("seed paused registry entry: "
+             ^ Masc.Keeper_registry.registry_entry_validation_error_to_string err));
+       ignore
+         (Masc.Keeper_turn_livelock.record_turn_start
+            ~base_path:config.base_path
+            ~keeper:keeper_name
+            ~turn_id:42);
+       ignore
+         (Masc.Keeper_no_progress_loop_detector.record_turn
+            ~threshold_override:1
+            ~keeper_name
+            ~made_progress:false
+            ());
+       Masc.Keeper_registry.set_failure_reason
+         ~base_path:config.base_path
+         keeper_name
+         (Some
+            (Masc.Keeper_registry.Provider_runtime_error
+               { code = Masc.Keeper_unified_turn_no_progress.failure_reason_code
+               ; detail = "latched"
+               ; provider_id = None
+               ; http_status = None
+               ; runtime_id = None
+               ; reason = None
+               }));
+       let invalid_meta = { meta with agent_name = "" } in
+       let recovered_meta =
+         Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
+           ~config
+           ~pre_turn_meta:invalid_meta
+           invalid_meta
+       in
+       check bool "failed persistence keeps returned meta paused" true recovered_meta.paused;
+       check bool
+         "failed persistence keeps detector latched"
+         true
+         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       (match
+          Masc.Keeper_turn_livelock.current_state
+            ~base_path:config.base_path
+            ~keeper:keeper_name
+        with
+        | Some _ -> ()
+        | None -> fail "expected failed persistence to keep livelock state");
+       (match Masc.Keeper_registry.get_phase ~base_path:config.base_path keeper_name with
+        | Some Masc.Keeper_state_machine.Paused -> ()
+        | Some phase ->
+          fail
+            ("expected failed persistence to avoid Operator_resume, got phase "
+             ^ Masc.Keeper_state_machine.phase_to_string phase)
+        | None -> fail "expected registry phase");
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool
+           "registry meta remains paused"
+           true
+           entry.Masc.Keeper_registry.meta.paused;
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | Some (Masc.Keeper_registry.Provider_runtime_error { code; _ })
+            when String.equal
+                   code
+                   Masc.Keeper_unified_turn_no_progress.failure_reason_code -> ()
+          | Some _ -> fail "expected no_progress failure reason to remain"
+          | None -> fail "expected failed persistence to keep failure reason")
        | None -> fail "expected registered keeper")
 
 let test_direct_success_leaves_unrelated_pause_intact () =
@@ -634,6 +749,10 @@ let () =
             "direct success clears no-progress pause after blocker overwrite"
             `Quick
             test_direct_success_clears_no_progress_pause_after_blocker_overwrite;
+          test_case
+            "direct success persistence failure keeps no-progress pause"
+            `Quick
+            test_direct_success_persist_failure_keeps_no_progress_pause;
           test_case "direct success leaves unrelated pause intact" `Quick
             test_direct_success_leaves_unrelated_pause_intact;
         ] );

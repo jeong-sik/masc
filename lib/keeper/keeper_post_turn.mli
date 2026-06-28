@@ -128,3 +128,15 @@ val recover_latest_checkpoint_for_overflow_retry :
   model:string ->
   primary_model_max_tokens:int ->
   overflow_retry_recovery option
+
+module For_testing : sig
+  val invalid_snapshot_goal_fingerprint : string -> string
+
+  val invalid_snapshot_goal_warning_message :
+    keeper_name:string -> goal_id:string -> string
+
+  val should_log_invalid_snapshot_goal :
+    keeper_name:string -> goal_id:string -> bool
+
+  val reset_invalid_snapshot_goal_log_dedupe : unit -> unit
+end

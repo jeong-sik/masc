@@ -899,6 +899,7 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
         ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
         ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
         ; timeout_env
+        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
         ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
         ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
         ; "MASC_KEEPER_MEMORY_OS_GC"

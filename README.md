@@ -88,7 +88,7 @@ scripts/dune-local.sh build bin/main_eio.exe
 scripts/run-local.sh --target-dir "$PWD"
 ```
 
-`scripts/dune-local.sh`는 worktree 간 동시 빌드 충돌을 막기 위해 글로벌 락 파일(`/tmp/me-dune-local.lock`)을 사용한다.
+`scripts/dune-local.sh`는 worktree 간 동시 빌드 충돌을 막기 위해 글로벌 락 파일(`/tmp/me-dune-local.lock`)을 사용하고, 로컬 기본값으로 Dune shared cache를 끈다. shared opam pin이 움직인 뒤 stale native artifact가 섞이는 경우를 피하기 위한 기본값이며, 필요하면 `MASC_DUNE_CACHE=enabled`로 명시적으로 다시 켤 수 있다.
 
 ### Run modes
 

@@ -1895,6 +1895,8 @@
 
 (include stanzas/test_keeper_supervisor_finally_cancel_swallow.inc)
 
+(include stanzas/test_keeper_supervisor_hitl_visibility_source.inc)
+
 (include stanzas/test_keeper_surface_status.inc)
 
 (include stanzas/test_failing_minimum_essential.inc)

@@ -605,6 +605,9 @@ let run_smart_heartbeat_gate
     | Keeper_heartbeat_smart.Skip_idle next_time ->
       let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
       Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
+      Observations.record_smart_idle_sleep_admission
+        ~base_path:config.base_path
+        ~keeper_name:meta_current.name;
       let jitter = wait *. 0.1 *. Random.float 1.0 in
       let outcome =
         Keeper_keepalive_signal.interruptible_sleep ~clock ~stop ~wakeup (wait +. jitter)

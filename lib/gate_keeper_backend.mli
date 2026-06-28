@@ -99,3 +99,44 @@ val extract_reply_text : string -> string
 val extract_turn_stats : string -> Gate_protocol.turn_stats option
 (** Extract model usage statistics from a keeper response JSON body.
     Returns [None] when all fields are absent or zero. *)
+
+(** {1 Async ACK Envelope Parsing}
+
+    The Channel Gate's async dispatch path returns a JSON envelope that the
+    downstream connector uses to track the keeper-side request lifecycle
+    (request_id, status, destination). Parsing this envelope is a wire
+    boundary: malformed input must surface as a typed failure so the
+    dispatch site can emit a deliberate degraded ACK rather than silently
+    substitute the keeper's reply body. *)
+
+type ack_parse_failure =
+  | Invalid_json of string
+  | Missing_request_id
+  | Empty_request_id
+  | Missing_status
+  | Invalid_status of string
+(** Closed-sum typed parse failure for {!extract_message_request_ack}. Each
+    variant names a distinct cause so the dispatch site can log structured
+    backend drift and emit a degraded ACK that names the parse failure
+    explicitly. *)
+
+val ack_parse_failure_to_string : ack_parse_failure -> string
+(** Render an {!ack_parse_failure} as a stable human-readable label. Used
+    by the degraded ACK path so the connector sees a precise cause rather
+    than the raw keeper reply body. *)
+
+val extract_message_request_ack :
+  channel:string ->
+  channel_user_id:string ->
+  keeper_name:string ->
+  metadata:(string * string) list ->
+  string ->
+  (Gate_protocol.message_request, ack_parse_failure) result
+(** Parse the async ACK envelope from a keeper tool response body.
+    Returns [Ok request] when the body is a valid JSON object with both
+    a non-empty [request_id] and a [status] that maps to one of the closed
+    [Gate_protocol.message_request_status] variants.
+    Returns [Error reason] otherwise. JSON parse failures are isolated
+    from the closed-sum status check so that a malformed envelope is
+    surfaced as a backend-degraded path, distinct from a legitimately
+    absent ACK field. *)

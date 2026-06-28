@@ -445,6 +445,25 @@ function FactRow({ fact }: { fact: MemoryOsFact }) {
     </div>`
 }
 
+function RecallCandidatePreview({
+  facts,
+  total,
+}: {
+  facts: readonly MemoryOsFact[]
+  total: number
+}) {
+  if (facts.length === 0) {
+    return html`
+      <${DisclosureNote} text="operator 핀은 Phase 2에서 연결 예정 — 현재 표시할 prompt recall 후보도 없음." />
+    `
+  }
+  return html`
+    <${Fragment}>
+      <div class="mem-store">${facts.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>
+      <${DisclosureNote} text=${`operator 핀은 Phase 2에서 연결 예정 — 현재는 실제 prompt recall 후보 ${facts.length}/${total}개를 표시.`} />
+    </>`
+}
+
 // Honest disclosure for a section whose backend source lands in a later RFC
 // phase. NOT a stub: it states the absence and the phase, renders no fabricated
 // data, and is visually distinct from a real-data section.
@@ -502,12 +521,13 @@ function OneKeeperMemoryReal({
   const recallableFacts = facts.filter(isPromptRecallableFact)
   const diagnosticFacts = facts.filter(isDiagnosticEvidenceFact)
   const allEpisodes = [...snapshot.episodes.items].reverse()
+  const recallPreviewFacts = recallableFacts.slice(0, 3)
   const episodes = allEpisodes
     .filter(ep => ep.terminal_marker !== MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
     .slice(0, 5)
-  const fallbackEpisodes = allEpisodes
+  const allFallbackEpisodes = allEpisodes
     .filter(ep => ep.terminal_marker === MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
-    .slice(0, 5)
+  const fallbackEpisodes = allFallbackEpisodes.slice(0, 5)
   const visibilityRows =
     visibilityFilter.value === 'recallable'
       ? recallableFacts
@@ -555,8 +575,11 @@ function OneKeeperMemoryReal({
       </div>
 
       <div class="turn-sec">
-        <h4>핀 고정 사실</h4>
-        <${DisclosureNote} text="operator 핀은 Phase 2에서 연결 예정 — 현재 백엔드 소스 없음." />
+        <div class="mem-sec-head">
+          <h4>핵심 회상 후보</h4>
+          <span class="mem-n mono">${recallPreviewFacts.length}/${recallableFacts.length}</span>
+        </div>
+        <${RecallCandidatePreview} facts=${recallPreviewFacts} total=${recallableFacts.length} />
       </div>
 
       <div class="turn-sec">
@@ -614,6 +637,9 @@ function OneKeeperMemoryReal({
               <${DisclosureNote} text="유지/요약/폐기 3열 diff는 Phase 3에서 연결 예정 — episode 요약만 표시." />
             </>`
           : html`<div class="mem-empty">압축(episode) 이력 없음.</div>`}
+        ${!showFallbackEpisodes && allFallbackEpisodes.length > 0
+          ? html`<${DisclosureNote} text=${`librarian fallback 진단 ${allFallbackEpisodes.length}개는 기본 회상 화면에서 접힘 — 진단/증거 필터에서 확인.`} />`
+          : null}
       </div>
 
       ${showFallbackEpisodes && fallbackEpisodes.length

@@ -493,6 +493,99 @@ let test_wakeup_directive_persists_no_progress_meta_clear () =
           | Some _ -> fail "expected wakeup to clear no_progress failure reason")
        | None -> fail "expected registered keeper")
 
+let test_resume_directive_persist_failure_keeps_completion_contract_pause () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-completion-resume-persist-fail-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "completion-resume-persist-fail" in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"completion contract violated"
+           Keeper_meta_contract.Completion_contract_violation
+       in
+       let meta =
+         { (make_meta keeper_name
+            |> Keeper_meta_contract.map_runtime (fun rt ->
+              { rt with last_blocker = Some blocker }))
+           with
+           paused = true
+         }
+       in
+       Masc.Keeper_registry.clear ();
+       let entry =
+         Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta
+       in
+       let paused_entry =
+         { entry with
+           phase = Keeper_state_machine.Paused
+         ; conditions =
+             { entry.conditions with
+               Keeper_state_machine.operator_paused = true
+             }
+         }
+       in
+       (match
+          Masc.Keeper_registry.put_entry
+            ~base_path:config.base_path
+            keeper_name
+            paused_entry
+        with
+        | Ok () -> ()
+        | Error err ->
+          fail
+            ("seed paused registry entry: "
+             ^ Masc.Keeper_registry.registry_entry_validation_error_to_string err));
+       Masc.Keeper_registry.set_failure_reason
+         ~base_path:config.base_path
+         keeper_name
+         (Some
+            (Masc.Keeper_registry.Completion_contract_violation
+               { detail = "completion contract violated" }));
+       let keeper_json_path =
+         Filename.concat
+           (Filename.concat
+              (Masc.Workspace_utils.masc_dir_from_base_path
+                 ~base_path:config.base_path)
+              "keepers")
+           (keeper_name ^ ".json")
+       in
+       Unix.mkdir keeper_json_path 0o755;
+       Masc.Keeper_keepalive.process_directive ~agent_name:keeper_name "resume";
+       (match Masc.Keeper_registry.get_phase ~base_path:config.base_path keeper_name with
+        | Some Keeper_state_machine.Paused -> ()
+        | Some phase ->
+          fail
+            ("expected failed persistence to avoid Operator_resume, got phase "
+             ^ Keeper_state_machine.phase_to_string phase)
+        | None -> fail "expected registry phase");
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool
+           "registry meta remains paused"
+           true
+           entry.Masc.Keeper_registry.meta.paused;
+         (match entry.Masc.Keeper_registry.meta.runtime.last_blocker with
+          | Some
+              { Keeper_meta_contract.klass =
+                  Keeper_meta_contract.Completion_contract_violation
+              ; _
+              } -> ()
+          | Some _ -> fail "expected completion-contract blocker to remain"
+          | None -> fail "expected completion-contract blocker to remain");
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | Some (Masc.Keeper_registry.Completion_contract_violation _) -> ()
+          | Some _ -> fail "expected completion-contract failure reason to remain"
+          | None -> fail "expected failed persistence to restore failure reason")
+       | None -> fail "expected registered keeper")
+
 let test_direct_success_clears_no_progress_pause () =
   Eio_main.run
   @@ fun env ->
@@ -979,6 +1072,10 @@ let () =
             test_operator_resume_keeps_no_progress_state_on_drop_failure;
           test_case "wakeup directive persists no-progress meta clear" `Quick
             test_wakeup_directive_persists_no_progress_meta_clear;
+          test_case
+            "resume directive persistence failure keeps completion-contract pause"
+            `Quick
+            test_resume_directive_persist_failure_keeps_completion_contract_pause;
           test_case "direct success clears no-progress pause" `Quick
             test_direct_success_clears_no_progress_pause;
           test_case

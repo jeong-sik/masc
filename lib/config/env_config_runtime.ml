@@ -472,7 +472,9 @@ module Board = struct
   (** Capacity of the board flusher inbox (scheduled sweep/flush messages
       enqueued by the sweeper). Single source of truth shared by the
       persistence layer, its [.mli] doc, and the stream creation site.
-      Default: 1000. *)
+      Default: 1000.
+      @category Concurrency
+      @ops_class operator *)
   let flusher_inbox_capacity =
     get_int ~default:1000 "MASC_BOARD_FLUSHER_INBOX_CAPACITY"
 

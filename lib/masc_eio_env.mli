@@ -9,24 +9,23 @@
     the captured handles via {!get} or {!get_opt}.
 
     Internal storage is hidden and domain-local. There is no
-    process-wide fallback; an OCaml domain that performs OAS HTTP
-    calls must call {!init} with handles owned by that domain. *)
+    process-wide fallback; an OCaml domain that performs OAS HTTP calls
+    must call {!init} with handles, including a clock, owned by that
+    domain. See [docs/oas-bridge-clock-timeout-contract.md] for the
+    migration contract. *)
 
 type t = {
   sw : Eio.Switch.t;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
-  clock : float Eio.Time.clock_ty Eio.Resource.t option;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
 }
-(** Captured Eio handles. [clock] is optional because some
-    callers (e.g. tests, stdio mode) initialise without one;
-    components that strictly require a clock should pattern
-    match on [Some] and fail loudly rather than substitute a
-    fallback. *)
+(** Captured Eio handles. [clock] is mandatory because timeout-enforced
+    OAS calls cannot be represented safely without one. *)
 
 val init :
   sw:Eio.Switch.t ->
   net:[ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t ->
-  ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
+  clock:float Eio.Time.clock_ty Eio.Resource.t ->
   unit ->
   unit
 (** Capture the runtime handles for the current OCaml domain.
@@ -46,7 +45,6 @@ val get : unit -> t
 
 val get_opt : unit -> t option
 (** Read the captured environment without raising. Returns
-    [None] when {!init} has not run in the current OCaml domain. Used by tests
-    and by code paths that must degrade gracefully (runtime catalog runtime,
-    masc_oas_bridge fallback, local-runtime probes, oas_worker_named
-    scheduler). *)
+    [None] when {!init} has not run in the current OCaml domain. Used by
+    tests and by code paths that must degrade explicitly rather than
+    borrowing another domain's switch/net/clock handles. *)

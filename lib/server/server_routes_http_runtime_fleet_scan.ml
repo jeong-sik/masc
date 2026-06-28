@@ -534,6 +534,8 @@ let string_set_of_list values =
 let json_string_list values = Json_util.json_string_list values
 
 let configured_keeper_is_materializable config name =
+  (* #22586: autoboot-disabled keepers carry no identity-drift materialization
+     pressure. *)
   Keeper_meta_store.declarative_autoboot_enabled_by_default config name
   &&
   try
@@ -542,10 +544,9 @@ let configured_keeper_is_materializable config name =
         ~base_path:config.Workspace.base_path
         name
     in
-    (* Exclude loader-only TOMLs such as base.toml from identity drift. *)
-    Option.is_some defaults.persona_name
-    || Option.is_some defaults.goal
-    || defaults.mention_targets <> []
+    (* #22615: SSOT materializability predicate (replaces the inline
+       persona/goal/mention check). *)
+    Keeper_types_profile.keeper_profile_defaults_materializable defaults
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _ -> true

@@ -143,6 +143,17 @@ let persona_operator_todo_placeholder_fields
       ("keeper.goal", defaults.goal);
     ]
 
+let keeper_profile_defaults_materializable (defaults : keeper_profile_defaults) =
+  let has_runtime_identity =
+    Option.is_some defaults.persona_name
+    || Option.is_some defaults.goal
+    || defaults.mention_targets <> []
+  in
+  match defaults.autoboot_enabled with
+  | Some true -> true
+  | Some false | None -> has_runtime_identity
+;;
+
 let keeper_toml_path_opt name =
   Config_dir_resolver.log_warnings ~context:"KeeperTypesProfile" ();
   Config_dir_resolver.keeper_toml_path_opt name

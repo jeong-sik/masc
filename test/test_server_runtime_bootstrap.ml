@@ -1379,6 +1379,45 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
           (health |> member "keeper_identity_drift" |> member "status"
            |> to_string)))
 
+let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
+    () =
+  with_temp_dir "keeper-identity-drift-base-autoboot" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_file
+      (Filename.concat (Filename.concat config_root "keepers") "base.toml")
+      "[keeper]\nautoboot_enabled = true\ninstructions = \"default keeper\"\n";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"base" ~trace_id:"trace-base" ());
+        let json =
+          Server_routes_http_runtime_fleet_scan.keeper_identity_drift_health_json
+            config
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "drift status" "ok"
+          (json |> member "status" |> to_string);
+        Alcotest.(check bool) "base meta does not block drift" false
+          (json |> member "blocking" |> to_bool);
+        Alcotest.(check (list string)) "materializable configured names"
+          [ "base" ]
+          (json |> member "materializable_configured_keeper_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check (list string)) "meta without config"
+          []
+          (json |> member "meta_without_config_names" |> to_list
+           |> List.map to_string)))
+
 let test_health_json_keeps_timeout_pause_without_policy_manual () =
   with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
     let config_root = make_config_root dir in
@@ -4150,6 +4189,10 @@ let () =
             "health json surfaces keeper identity config/meta drift"
             `Quick
             test_keeper_identity_drift_health_json_surfaces_config_meta_split;
+          Alcotest.test_case
+            "health json treats explicit autoboot base as materializable"
+            `Quick
+            test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable;
           Alcotest.test_case
             "health json keeps timeout pause without policy manual"
             `Quick test_health_json_keeps_timeout_pause_without_policy_manual;

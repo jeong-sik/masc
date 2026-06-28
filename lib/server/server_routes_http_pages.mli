@@ -41,7 +41,7 @@
       {!playground_asset_path},
       {!dashboard_asset_root},
       {!dashboard_index_path},
-      {!dashboard_etag},
+      {!dashboard_etag_of_body},
       {!dashboard_index_cache_control},
       {!favicon_svg}).
     - {b Server-state helpers}
@@ -114,11 +114,13 @@ val dashboard_index_path : unit -> string
 (** Resolved path to the legacy dashboard's
     [index.html]. *)
 
-val dashboard_etag : unit -> string
-(** ETag derived from the dashboard index file's mtime
-    digest (first 12 hex chars).  Stable across
-    process restarts as long as the asset bundle is
-    untouched. *)
+val dashboard_etag_hex_chars : int
+(** Number of hex digest characters included in the
+    dashboard index ETag. *)
+
+val dashboard_etag_of_body : string -> string
+(** Content-derived ETag digest for dashboard [index.html]
+    response bytes, truncated to [dashboard_etag_hex_chars]. *)
 
 val dashboard_index_cache_control : string
 (** Cache-control header value for the dashboard index

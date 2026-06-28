@@ -289,6 +289,8 @@ let keeper_config_json (config : Workspace.config) (name : string)
        `Assoc [
          ("name", `String m.name);
          ("active_goal_ids", active_goal_ids_json);
+         ("autoboot_enabled", `Bool m.autoboot_enabled);
+         ("max_context_override", Json_util.int_opt_to_json m.max_context_override);
          ("sandbox_profile", `String (Keeper_types_profile_sandbox.sandbox_profile_to_string m.sandbox_profile));
          ("network_mode", `String (Keeper_types_profile_sandbox.network_mode_to_string m.network_mode));         ("sandbox_last_error", Json_util.string_opt_to_json sandbox_last_error);
          ("allowed_paths",

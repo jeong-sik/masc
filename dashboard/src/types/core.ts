@@ -1541,6 +1541,8 @@ interface KeeperHookIntrospection {
 export interface KeeperConfig {
   name: string
   active_goal_ids: string[]
+  autoboot_enabled: boolean
+  max_context_override: number | null
   sandbox_profile?: 'local' | 'docker' | string
   network_mode?: 'none' | 'inherit' | string
   sandbox_last_error?: string | null

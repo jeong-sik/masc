@@ -160,7 +160,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("max_context_override", `Assoc [
           ("type", `String "integer");
-          ("description", `String "Optional: absolute context token limit override for this keeper. Use to bypass global or discovered limits.");
+          ("description", `String "Optional: absolute context token limit override for this keeper. Use 0 to clear the override.");
         ]);
         ("proactive_enabled", `Assoc [
           ("type", `String "boolean");

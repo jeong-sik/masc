@@ -208,7 +208,6 @@ export {
 export type {
   SandboxProfile,
   SandboxNetworkMode,
-  SharedMemoryScope,
   KeeperConfigUpdatePayload,
 } from './dashboard-keeper-config'
 export {

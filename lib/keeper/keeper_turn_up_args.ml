@@ -19,6 +19,7 @@ type parsed_args = {
   mention_targets_opt : string list option;
   active_goal_ids_opt : string list option;
   max_context_override_opt : int option;
+  max_context_override_present : bool;
   proactive_enabled_opt : bool option;
   proactive_idle_sec_opt : int option;
   proactive_cooldown_sec_opt : int option;
@@ -105,6 +106,44 @@ let parse_runtime_id_opt args =
            "runtime_id must be a string (received %s)"
            (Json_util.kind_name other))
 
+let normalize_max_context_override_value v =
+  let min_keeper_context = Keeper_config.min_keeper_context_tokens in
+  let max_keeper_context = Keeper_config.max_keeper_context_tokens in
+  if v = 0 then Ok None
+  else if v >= min_keeper_context && v <= max_keeper_context then Ok (Some v)
+  else if v > 0 && v < min_keeper_context then (
+    Log.Misc.warn
+      "max_context_override=%d below minimum %d, clamped to %d"
+      v min_keeper_context min_keeper_context;
+    Ok (Some min_keeper_context))
+  else
+    Error
+      (Printf.sprintf "max_context_override=%d out of range (0 or %d..%d)"
+         v min_keeper_context max_keeper_context)
+
+let parse_max_context_override args =
+  match Json_util.assoc_member_opt "max_context_override" args with
+  | None -> Ok (false, None)
+  | Some `Null -> Ok (true, None)
+  | Some (`Int v) ->
+      Result.map (fun value -> (true, value))
+        (normalize_max_context_override_value v)
+  | Some (`Intlit raw) -> (
+      match int_of_string_opt raw with
+      | Some v ->
+          Result.map (fun value -> (true, value))
+            (normalize_max_context_override_value v)
+      | None ->
+          Error
+            (Printf.sprintf
+               "max_context_override must be an integer or null (received %s)"
+               raw))
+  | Some other ->
+      Error
+        (Printf.sprintf
+           "max_context_override must be an integer or null (received %s)"
+           (Json_util.kind_name other))
+
 let resolve_tool_name_list ~preferred ~fallback =
   Dashboard_utils.first_some preferred fallback
   |> Option.value ~default:[]
@@ -162,24 +201,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       Ok runtime_id_opt ->
     let goal_opt = get_string_opt args "goal" in
     let autoboot_enabled_opt = get_bool_opt args "autoboot_enabled" in
-    let max_context_override_opt =
-      let min_keeper_context = Keeper_config.min_keeper_context_tokens in
-      let max_keeper_context = Keeper_config.max_keeper_context_tokens in
-      match Safe_ops.json_int_opt "max_context_override" args with
-      | None -> None
-      | Some v when v >= min_keeper_context && v <= max_keeper_context ->
-          Some v
-      | Some v when v > 0 && v < min_keeper_context ->
-          Log.Misc.warn
-            "max_context_override=%d below minimum %d, clamped to %d"
-            v min_keeper_context min_keeper_context;
-          Some min_keeper_context
-      | Some v ->
-          Log.Misc.warn
-            "max_context_override=%d out of range (%d..%d), ignored"
-            v min_keeper_context max_keeper_context;
-          None
-    in
+    let max_context_override_res = parse_max_context_override args in
     let proactive_enabled_opt = get_bool_opt args "proactive_enabled" in
     let proactive_idle_sec_opt = Safe_ops.json_int_opt "proactive_idle_sec" args in
     let proactive_cooldown_sec_opt = Safe_ops.json_int_opt "proactive_cooldown_sec" args in
@@ -220,10 +242,11 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       | Some _ -> instructions_arg
       | None -> profile_defaults.instructions
     in
-    match sandbox_profile_error, tool_denylist_opt_res with
-    | Some msg, _ -> Error (tool_result_error msg)
-    | None, Error msg -> Error (tool_result_error msg)
-    | None, Ok tool_denylist_opt ->
+    match sandbox_profile_error, tool_denylist_opt_res, max_context_override_res with
+    | Some msg, _, _ -> Error (tool_result_error msg)
+    | None, Error msg, _ -> Error (tool_result_error msg)
+    | None, _, Error msg -> Error (tool_result_error msg)
+    | None, Ok tool_denylist_opt, Ok (max_context_override_present, max_context_override_opt) ->
     Ok {
       name;
       compaction_profile_opt;
@@ -234,6 +257,7 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
       autoboot_enabled_opt;
       mention_targets_opt;
       max_context_override_opt;
+      max_context_override_present;
       proactive_enabled_opt;
       proactive_idle_sec_opt;
       proactive_cooldown_sec_opt;

@@ -6,7 +6,6 @@ import {
   buildRuntimePayload,
   coerceNetworkMode,
   coerceSandboxProfile,
-  coerceSharedMemoryScope,
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
@@ -28,6 +27,8 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   return {
     name: 'keeper-sangsu',
     active_goal_ids: ['goal-runtime'],
+    autoboot_enabled: true,
+    max_context_override: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
     sandbox_last_error: null,
@@ -261,18 +262,14 @@ describe('sandbox coerce helpers', () => {
     expect(coerceNetworkMode(undefined)).toBe('inherit')
   })
 
-  it('coerceSharedMemoryScope maps workspace, falls back to disabled otherwise', () => {
-    expect(coerceSharedMemoryScope('workspace')).toBe('workspace')
-    expect(coerceSharedMemoryScope('disabled')).toBe('disabled')
-    expect(coerceSharedMemoryScope('unknown')).toBe('disabled')
-    expect(coerceSharedMemoryScope(undefined)).toBe('disabled')
-  })
 })
 
 function makeKeeperConfigForSandbox(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
   const base: KeeperConfig = {
     name: 'test-keeper',
     active_goal_ids: [],
+    autoboot_enabled: true,
+    max_context_override: null,
     sandbox_profile: 'local',
     network_mode: 'inherit',
     allowed_paths: [],
@@ -504,6 +501,36 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       compaction_token_gate: 32000,
     }), c)
     expect(payload.compaction_token_gate).toBe(32000)
+  })
+
+  it('emits compaction_profile, autoboot, and max_context_override edits', () => {
+    const c = makeKeeperConfigForSandbox({
+      autoboot_enabled: true,
+      max_context_override: null,
+      compaction: {
+        profile: 'balanced',
+        ratio_gate: 0.8,
+        message_gate: 0,
+        token_gate: 24000,
+        cooldown_sec: 0,
+      },
+    })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      autoboot_enabled: false,
+      max_context_override: 64000,
+      compaction_profile: 'conservative',
+    }), c)
+    expect(payload.autoboot_enabled).toBe(false)
+    expect(payload.max_context_override).toBe(64000)
+    expect(payload.compaction_profile).toBe('conservative')
+  })
+
+  it('emits null to clear max_context_override when draft is zero', () => {
+    const c = makeKeeperConfigForSandbox({ max_context_override: 64000 })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      max_context_override: 0,
+    }), c)
+    expect(payload.max_context_override).toBeNull()
   })
 })
 
@@ -814,6 +841,43 @@ describe('KeeperConfigPanel', () => {
     })
   })
 
+  it('saves edited tool_access and denylist together via set_policy', async () => {
+    mocks.setKeeperToolPolicy.mockClear()
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+
+    const toolAccess = container.querySelector(
+      'textarea[aria-label="tool_access"]',
+    ) as HTMLTextAreaElement | null
+    const denylist = container.querySelector(
+      'textarea[aria-label="tool_denylist"]',
+    ) as HTMLTextAreaElement | null
+    expect(toolAccess).not.toBeNull()
+    expect(denylist).not.toBeNull()
+
+    toolAccess!.value = 'tool_read_file\nmasc_status\ntool_read_file\n'
+    toolAccess!.dispatchEvent(new Event('input', { bubbles: true }))
+    denylist!.value = 'Execute\nDangerTool\nExecute\n'
+    denylist!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('정책 저장'),
+    )
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
+      tool_access: ['tool_read_file', 'masc_status'],
+      deny: ['Execute', 'DangerTool'],
+    })
+  })
+
   it('patches runtime_id from the dashboard panel', async () => {
     mocks.patchKeeperConfig.mockResolvedValueOnce(
       makeKeeperConfig({
@@ -952,6 +1016,61 @@ describe('KeeperConfigPanel', () => {
       expect.objectContaining({
         mention_targets: ['alpha', 'beta'],
         compaction_token_gate: 32000,
+      }),
+    )
+  })
+
+  it('patches compaction profile, autoboot, and max-context override from the dashboard panel', async () => {
+    const base = makeKeeperConfig()
+    mocks.patchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({
+        autoboot_enabled: false,
+        max_context_override: 64000,
+        compaction: {
+          ...base.compaction,
+          profile: 'conservative',
+        },
+      }),
+    )
+
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '런타임')
+    await flush()
+    const maxContext = container.querySelector('input[aria-label="컨텍스트 오버라이드"]') as HTMLInputElement | null
+    expect(maxContext).not.toBeNull()
+    maxContext!.value = '64000'
+    maxContext!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    const compactionProfile = container.querySelector('select[aria-label="compaction_profile"]') as HTMLSelectElement | null
+    expect(compactionProfile).not.toBeNull()
+    compactionProfile!.value = 'conservative'
+    compactionProfile!.dispatchEvent(new Event('change', { bubbles: true }))
+    await flush()
+
+    const autoboot = container.querySelector('button[aria-label="자동 부팅"]') as HTMLButtonElement | null
+    expect(autoboot).not.toBeNull()
+    autoboot!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+
+    const saveButton = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('런타임 설정 저장'),
+    )
+    saveButton?.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+
+    expect(mocks.patchKeeperConfig).toHaveBeenCalledWith(
+      'keeper-sangsu',
+      expect.objectContaining({
+        autoboot_enabled: false,
+        max_context_override: 64000,
+        compaction_profile: 'conservative',
       }),
     )
   })

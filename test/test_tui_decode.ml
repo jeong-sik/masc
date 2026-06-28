@@ -201,6 +201,36 @@ let test_parse_keeper_chat_response_sse_delta () =
   | Ok text -> Alcotest.(check string) "delta text" "hello world" text
   | Error err -> Alcotest.fail err
 
+let test_parse_keeper_chat_response_ag_ui_sse () =
+  let response =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+     data: {\"type\":\"RUN_STARTED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n\
+     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"default\",\"runId\":\"run-1\",\"delta\":\"hello\"}\n\n\
+     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"default\",\"runId\":\"run-1\",\"delta\":\" world\"}\n\n\
+     data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n"
+  in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.(check string) "AG-UI delta text" "hello world" text
+  | Error err -> Alcotest.fail err
+
+let test_parse_keeper_chat_response_ag_ui_error () =
+  let response =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+     data: {\"type\":\"RUN_ERROR\",\"threadId\":\"default\",\"runId\":\"run-1\",\"message\":\"boom\"}\n\n"
+  in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.failf "expected RUN_ERROR failure, got %S" text
+  | Error err -> Alcotest.(check string) "AG-UI error message" "boom" err
+
+let test_parse_keeper_chat_response_ag_ui_empty_terminal () =
+  let response =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+     data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n"
+  in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.(check string) "empty terminal response" "" text
+  | Error err -> Alcotest.fail err
+
 let test_parse_keeper_chat_response_body_json () =
   let response = "{\"result\":{\"text\":\"hello body\"}}" in
   match Tui_decode.parse_keeper_chat_response response with
@@ -303,6 +333,12 @@ let () =
       [
         Alcotest.test_case "sse delta" `Quick
           test_parse_keeper_chat_response_sse_delta;
+        Alcotest.test_case "AG-UI SSE" `Quick
+          test_parse_keeper_chat_response_ag_ui_sse;
+        Alcotest.test_case "AG-UI error" `Quick
+          test_parse_keeper_chat_response_ag_ui_error;
+        Alcotest.test_case "AG-UI empty terminal" `Quick
+          test_parse_keeper_chat_response_ag_ui_empty_terminal;
         Alcotest.test_case "body json" `Quick
           test_parse_keeper_chat_response_body_json;
         Alcotest.test_case "json error" `Quick

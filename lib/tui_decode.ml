@@ -541,14 +541,24 @@ type chat_event =
 let decode_chat_event json =
   let event_type = get_string json "type" in
   match event_type with
-  | Some ("content_delta" | "delta") -> (
+  | Some ("TEXT_MESSAGE_CONTENT" | "content_delta" | "delta") -> (
       match get_string json "delta" with
       | Some text -> Ok (Delta text)
       | None -> Error "delta event missing string 'delta'")
-  | Some ("content_complete" | "complete") -> (
+  | Some ("RUN_FINISHED" | "content_complete" | "complete") -> (
       match get_string json "text" with
       | Some text -> Ok (Complete text)
-      | None -> Ok Ignore)
+      | None -> Ok (Complete ""))
+  | Some "RUN_ERROR" -> (
+      match get_string json "message" with
+      | Some message -> Error message
+      | None -> (
+          match get_object json "error" with
+          | Some err_json -> (
+              match get_string err_json "message" with
+              | Some message -> Error message
+              | None -> Error "RUN_ERROR payload missing string 'message'")
+          | None -> Error "RUN_ERROR payload missing string 'message'"))
   | _ -> (
       match get_object json "error" with
       | Some err_json -> (
@@ -561,6 +571,7 @@ let parse_keeper_chat_response response =
   let lines = String.split_on_char '\n' response in
   let result = Buffer.create 256 in
   let completion_text = ref None in
+  let saw_terminal = ref false in
   let rec consume_sse = function
     | [] -> Ok ()
     | raw_line :: rest ->
@@ -577,8 +588,10 @@ let parse_keeper_chat_response response =
             let* chunk = decode_chat_event json in
             (match chunk with
              | Delta text -> Buffer.add_string result text
-             | Complete text when Buffer.length result = 0 -> completion_text := Some text
-             | Complete _ -> ()
+             | Complete text when Buffer.length result = 0 ->
+                 saw_terminal := true;
+                 if text <> "" then completion_text := Some text
+             | Complete _ -> saw_terminal := true
              | Ignore -> ());
             consume_sse rest
         ) else
@@ -590,6 +603,7 @@ let parse_keeper_chat_response response =
   else
     match !completion_text with
     | Some text when text <> "" -> Ok text
+    | _ when !saw_terminal -> Ok ""
     | _ -> (
         let body =
           match split_headers_body response with

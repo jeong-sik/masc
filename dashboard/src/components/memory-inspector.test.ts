@@ -218,6 +218,14 @@ function turnRecordsPayloadWithEmptyFallbackFact() {
   return payload
 }
 
+function turnRecordsPayloadWithoutRecallableFacts() {
+  const payload = turnRecordsPayload()
+  for (const fact of payload.memory_os.facts.items) {
+    fact.prompt_recallable = false
+  }
+  return payload
+}
+
 const improver: MemoryKeeper = { id: 'masc-improver', ctx: 0.86, status: 'run' }
 
 function renderInspector(keeper: MemoryKeeper = improver, onClose = vi.fn()) {
@@ -309,6 +317,20 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).toContain('librarian parse fallback')
   })
 
+  it('explains when the active filter hides all stored memory facts', async () => {
+    stubFetch(turnRecordsPayloadWithoutRecallableFacts())
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+
+    expect(container.textContent).toContain('현재 필터에 표시할 memory-os fact가 없습니다.')
+    expect(container.textContent).toContain('recallable=0 · diagnostic=2 · total=3')
+
+    const allBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '전체 3')
+    expect(allBtn).toBeTruthy()
+    fireEvent.click(allBtn!)
+    expect(container.textContent).toContain('retention D0 = 가입일, 첫 세션 기준')
+  })
+
   it('does not leak empty librarian fallback categories into the default recall filter', async () => {
     stubFetch(turnRecordsPayloadWithEmptyFallbackFact())
     const { container } = renderInspector()
@@ -383,7 +405,28 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     stubFetch({ keeper: 'ghost', count: 0, source: 'turn_record', memory_os: null, user_model: null, entries: [] })
     const { container } = renderInspector({ id: 'ghost', ctx: 0, status: 'off' })
     await waitFor(() => expect(container.textContent).toContain('memory-os 소스 없음'))
+    expect(container.textContent).toContain('turn-records가 비어 있습니다')
     expect(container.querySelector('.mem-bar')).toBeFalsy()
+  })
+
+  it('does not claim turn-records are empty when only the memory_os projection is missing', async () => {
+    stubFetch({
+      keeper: 'ghost',
+      count: 2,
+      source: 'turn_record',
+      health: 'ok',
+      stale_reason: null,
+      durable_store: '.masc/keepers/ghost/turn-records',
+      skipped_rows: 1,
+      memory_os: null,
+      user_model: null,
+      entries: [],
+    })
+    const { container } = renderInspector({ id: 'ghost', ctx: 0, status: 'off' })
+    await waitFor(() => expect(container.textContent).toContain('memory-os 소스 없음'))
+    expect(container.textContent).toContain('turn-records 2건은 있지만 memory_os projection이 null입니다.')
+    expect(container.textContent).toContain('source=turn_record · health=ok · stale=none · skipped=1')
+    expect(container.textContent).not.toContain('turn-records가 비어 있습니다')
   })
 })
 

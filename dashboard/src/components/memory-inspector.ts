@@ -472,6 +472,27 @@ function DisclosureNote({ text }: { text: string }) {
   return html`<div class="mem-empty mem-disclosure">${'ⓘ'} ${text}</div>`
 }
 
+function MemoryOsMissingState({ response }: { response: TurnRecordsResponse | null | undefined }) {
+  const recordCount = response?.count ?? 0
+  const source = response?.source ?? 'turn_record'
+  const health = response?.health ?? 'unknown'
+  const staleReason = response?.stale_reason ?? 'none'
+  const skipped = response?.skipped_rows ?? 0
+  const durableStore = response?.durable_store ?? null
+  const hasTurnRecords = recordCount > 0
+  return html`
+    <div class="mem-empty">
+      <strong>memory-os 소스 없음</strong><br />
+      ${hasTurnRecords
+        ? html`turn-records ${recordCount}건은 있지만 memory_os projection이 null입니다.`
+        : html`이 keeper의 turn-records가 비어 있습니다.`}
+      <br />
+      <span class="mono">source=${source} · health=${health} · stale=${staleReason} · skipped=${skipped}</span>
+      ${durableStore ? html`<br /><span class="mono">${durableStore}</span>` : null}
+    </div>
+  `
+}
+
 function ReadErrors({ snapshot }: { snapshot: MemoryOsTurnRecordSnapshot }) {
   if (snapshot.read_errors.length === 0) return null
   const text = snapshot.read_errors.map(e => `${e.scope}: ${e.error}`).join(' · ')
@@ -606,7 +627,14 @@ function OneKeeperMemoryReal({
                 >전체 ${facts.length}</button>
               </div>
               <${CategoryFilters} cats=${cats} active=${effectiveFilter} onPick=${(t: string) => { kindFilter.value = t }} />
-              <div class="mem-store">${visibleStoreRows.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>
+              ${visibleStoreRows.length > 0
+                ? html`<div class="mem-store">${visibleStoreRows.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>`
+                : html`
+                  <div class="mem-empty">
+                    현재 필터에 표시할 memory-os fact가 없습니다.<br />
+                    <span class="mono">recallable=${recallableFacts.length} · diagnostic=${diagnosticFacts.length} · total=${facts.length}</span>
+                  </div>
+                `}
               ${hiddenStoreRows > 0
                 ? html`
                   <button
@@ -946,7 +974,7 @@ export function MemoryInspector({
                 ? html`<div class="mem-read-error" role="alert">${'⚠'} 메모리 불러오기 실패 — ${state.error}</div>`
                 : response?.memory_os
                   ? html`<${OneKeeperMemoryReal} snapshot=${response.memory_os} rows=${response.entries} />`
-                  : html`<div class="mem-empty">memory-os 소스 없음 — 이 keeper의 turn-records가 비어 있음.</div>`}
+                  : html`<${MemoryOsMissingState} response=${response} />`}
         </div>
       </div>
     </div>`

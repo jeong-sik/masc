@@ -24,6 +24,10 @@ type CompactionReadError = {
 type CompactionSnapshotLoadState = {
   readonly loading: boolean
   readonly error: string | null
+  readonly payloadCount: number | null
+  readonly decodedCount: number | null
+  readonly payloadSource: string | null
+  readonly payloadProducer: string | null
   readonly readErrorCount: number
   readonly readErrors: readonly CompactionReadError[]
   readonly scanTruncated: boolean
@@ -119,6 +123,30 @@ function CompactionScanDiagnostics({
   `
 }
 
+function CompactionEmptyState({
+  keeperName,
+  loadState,
+}: {
+  keeperName: string
+  loadState: CompactionSnapshotLoadState
+}): VNode {
+  const payloadCount = loadState.payloadCount ?? 0
+  const decodedCount = loadState.decodedCount ?? 0
+  const source = loadState.payloadSource ?? 'unknown_source'
+  const producer = loadState.payloadProducer ?? 'unknown_producer'
+  const schemaDrift = payloadCount > 0 && decodedCount === 0
+  return html`
+    <div class="cmp-empty">
+      <strong>${schemaDrift ? '표시 가능한 compaction snapshot이 없습니다.' : '아직 이 keeper에서 durable compaction snapshot이 없습니다.'}</strong><br />
+      ${schemaDrift
+        ? html`API는 ${keeperName} snapshot ${payloadCount}건을 보고했지만 대시보드 디코더가 표시 가능한 행 ${decodedCount}건만 수락했습니다.`
+        : html`컨텍스트가 임계치를 넘거나 ‘지금 컴팩트’를 실행하면 새 결과가 기록됩니다.`}
+      <br />
+      <span class="mono">source=${source} · producer=${producer} · api_count=${payloadCount} · decoded=${decodedCount}</span>
+    </div>
+  `
+}
+
 export function CompactionInspectorOverlay({
   keeper,
   onClose,
@@ -138,6 +166,10 @@ export function CompactionInspectorOverlay({
   const [loadState, setLoadState] = useState<CompactionSnapshotLoadState>({
     loading: true,
     error: null,
+    payloadCount: null,
+    decodedCount: null,
+    payloadSource: null,
+    payloadProducer: null,
     readErrorCount: 0,
     readErrors: [],
     scanTruncated: false,
@@ -160,6 +192,10 @@ export function CompactionInspectorOverlay({
     setLoadState({
       loading: true,
       error: null,
+      payloadCount: null,
+      decodedCount: null,
+      payloadSource: null,
+      payloadProducer: null,
       readErrorCount: 0,
       readErrors: [],
       scanTruncated: false,
@@ -173,6 +209,10 @@ export function CompactionInspectorOverlay({
         setLoadState({
           loading: false,
           error: null,
+          payloadCount: payload.count,
+          decodedCount: payload.items.length,
+          payloadSource: payload.source,
+          payloadProducer: payload.producer,
           readErrorCount: payload.read_error_count,
           readErrors: payload.read_errors,
           scanTruncated: payload.scan_truncated,
@@ -184,6 +224,10 @@ export function CompactionInspectorOverlay({
         setLoadState({
           loading: false,
           error: err instanceof Error ? err.message : String(err),
+          payloadCount: null,
+          decodedCount: null,
+          payloadSource: null,
+          payloadProducer: null,
           readErrorCount: 0,
           readErrors: [],
           scanTruncated: false,
@@ -211,10 +255,7 @@ export function CompactionInspectorOverlay({
                 ? html`<div class="mem-read-error" role="alert">${'⚠'} 컴팩션 스냅샷 불러오기 실패 — ${loadState.error}</div>`
                 : html`
                   <${CompactionScanDiagnostics} loadState=${loadState} />
-                  <div class="cmp-empty">
-                    아직 이 keeper에서 durable compaction snapshot이 없습니다.<br />
-                    컨텍스트가 임계치를 넘거나 ‘지금 컴팩트’를 실행하면 새 결과가 기록됩니다.
-                  </div>
+                  <${CompactionEmptyState} keeperName=${keeper.name} loadState=${loadState} />
                 `}
           </div>
         </div>

@@ -2847,6 +2847,7 @@ let test_assess_stale_run () =
        ~phase:KSM.Running
        ~in_turn:None
        ~last_turn_ts:100.0
+       ~started_at:0.0
        ~now:300.0
        ~threshold:150.0
    with
@@ -2861,8 +2862,35 @@ let test_assess_stale_run () =
           ~phase:KSM.Running
           ~in_turn:None
           ~last_turn_ts:290.0
+          ~started_at:0.0
           ~now:300.0
           ~threshold:150.0));
+  (* fresh restart: metadata says the last completed turn is old, but the
+     current supervised fiber has not had a full stale window yet. *)
+  check bool "fresh restart with stale metadata -> None" true
+    (Option.is_none
+       (Sup.assess_stale_run
+          ~phase:KSM.Running
+          ~in_turn:None
+          ~last_turn_ts:100.0
+          ~started_at:280.0
+          ~now:300.0
+          ~threshold:150.0));
+  (* restarted and stale: once the current supervised lifetime also exceeds the
+     threshold, preserve the original stall value from last_turn_ts. *)
+  (match
+     Sup.assess_stale_run
+       ~phase:KSM.Running
+       ~in_turn:None
+       ~last_turn_ts:100.0
+       ~started_at:120.0
+       ~now:300.0
+       ~threshold:150.0
+   with
+   | Some (Reg.Stale_turn_timeout (Reg.Idle_turn { stall_seconds })) ->
+     check int "restarted stale preserves last_turn stall=200" 200
+       (int_of_float stall_seconds)
+   | _ -> check bool "restarted stale must stamp Idle_turn{200}" false true);
   (* in-turn: a turn is live (Some _) → None — Idle_turn contract needs None. *)
   check bool "in-turn → None" true
     (Option.is_none
@@ -2870,6 +2898,7 @@ let test_assess_stale_run () =
           ~phase:KSM.Running
           ~in_turn:(Some ())
           ~last_turn_ts:100.0
+          ~started_at:0.0
           ~now:300.0
           ~threshold:150.0));
   (* fresh-start: last_turn_ts = 0 → None — never mis-stamp a just-started keeper. *)
@@ -2879,6 +2908,7 @@ let test_assess_stale_run () =
           ~phase:KSM.Running
           ~in_turn:None
           ~last_turn_ts:0.0
+          ~started_at:290.0
           ~now:300.0
           ~threshold:150.0));
   (* not-running: Crashed → None. *)
@@ -2888,6 +2918,7 @@ let test_assess_stale_run () =
           ~phase:KSM.Crashed
           ~in_turn:None
           ~last_turn_ts:100.0
+          ~started_at:0.0
           ~now:300.0
           ~threshold:150.0));
   (* boundary: stall exactly == threshold → None (strict >). *)
@@ -2897,6 +2928,7 @@ let test_assess_stale_run () =
           ~phase:KSM.Running
           ~in_turn:None
           ~last_turn_ts:150.0
+          ~started_at:0.0
           ~now:300.0
           ~threshold:150.0))
 
@@ -3234,7 +3266,7 @@ let () =
     ];
     "stale_run_window", [
       test_case
-        "assess_stale_run covers frozen/fresh/in-turn/fresh-start/not-running/boundary"
+        "assess_stale_run covers frozen/fresh/restart/in-turn/fresh-start/not-running/boundary"
         `Quick test_assess_stale_run;
     ];
     "mid_turn_progress_window", [

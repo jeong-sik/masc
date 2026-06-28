@@ -110,6 +110,7 @@ type degraded_retry_reason =
   | Auth_error
   | Read_only_no_progress
   | Empty_no_progress
+  | Thinking_only_no_progress
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 

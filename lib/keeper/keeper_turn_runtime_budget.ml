@@ -250,22 +250,23 @@ let plan_degraded_retry_step
     Degraded_retry_step_slot_phase_exhausted { retry; reason }
   | Degraded_retry_slot_phase_exhausted _ -> Degraded_retry_step_not_allowed
 
-let yield_before_empty_no_progress_retry () = Eio.Fiber.yield ()
+let yield_before_direct_no_progress_retry () = Eio.Fiber.yield ()
 
-let direct_empty_no_progress_retry_reason err =
+let direct_no_progress_retry_reason err =
   match Keeper_turn_driver.classify_masc_internal_error err with
   | Some internal_error ->
     (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
      | Some `Empty_no_progress -> Some EC.Empty_no_progress
+     | Some `Thinking_only_no_progress -> Some EC.Thinking_only_no_progress
      | Some `Read_only_no_progress | None -> None)
   | None -> None
 
-let retry_reason_is_empty_no_progress (retry : EC.degraded_retry) =
+let retry_reason_is_direct_no_progress (retry : EC.degraded_retry) =
   match retry.fallback_reason with
-  | EC.Empty_no_progress -> true
+  | EC.Empty_no_progress | EC.Thinking_only_no_progress -> true
   | _ -> false
 
-let direct_empty_no_progress_retry_decision
+let direct_no_progress_retry_decision
     ~base_runtime
     ~effective_runtime
     ~attempted_runtimes
@@ -273,9 +274,9 @@ let direct_empty_no_progress_retry_decision
     ?time_spent_in_turn_s
     ~remaining_turn_budget_s
     err =
-  match direct_empty_no_progress_retry_reason err with
+  match direct_no_progress_retry_reason err with
   | None -> No_degraded_retry
-  | Some EC.Empty_no_progress ->
+  | Some (EC.Empty_no_progress | EC.Thinking_only_no_progress) ->
     (match
        next_fail_open_runtime_for_turn_with_budget
          ~base_runtime
@@ -286,15 +287,15 @@ let direct_empty_no_progress_retry_decision
          ~remaining_turn_budget_s
          err
      with
-     | Degraded_retry_allowed retry when retry_reason_is_empty_no_progress retry
+     | Degraded_retry_allowed retry when retry_reason_is_direct_no_progress retry
        -> Degraded_retry_allowed retry
      | Degraded_retry_slot_phase_exhausted retry
-       when retry_reason_is_empty_no_progress retry ->
+       when retry_reason_is_direct_no_progress retry ->
        Degraded_retry_slot_phase_exhausted retry
      | _ -> No_degraded_retry)
   | Some _ -> No_degraded_retry
 
-let run_direct_empty_no_progress_retry_loop
+let run_direct_no_progress_retry_loop
       ~keeper_name
       ~base_runtime
       ~initial_runtime
@@ -360,7 +361,7 @@ let run_direct_empty_no_progress_retry_loop
            ~remaining_turn_budget_s:(remaining_turn_budget_s ())
            ~attempt
            ~err
-           ~allow_retry:retry_reason_is_empty_no_progress
+           ~allow_retry:retry_reason_is_direct_no_progress
            ~publish_cascade_resolution
            ~emit_runtime_selected
            ~emit_runtime_rotation
@@ -368,7 +369,7 @@ let run_direct_empty_no_progress_retry_loop
        with
        | Degraded_retry_step_not_allowed ->
          let reason =
-           match direct_empty_no_progress_retry_reason err with
+           match direct_no_progress_retry_reason err with
            | Some retry_reason ->
              Printf.sprintf
                "terminal_%s_no_degraded_retry"
@@ -385,7 +386,7 @@ let run_direct_empty_no_progress_retry_loop
          error
        | Degraded_retry_step_slot_phase_exhausted { retry; reason } ->
          Log.Keeper.warn
-           "%s: direct keeper_msg empty response from runtime=%s suggested \
+           "%s: direct keeper_msg no-progress response from runtime=%s suggested \
             retry to %s (reason=%s), but productive slot phase budget %.1fs \
             is exhausted after %.1fs"
            keeper_name
@@ -437,7 +438,7 @@ let run_direct_empty_no_progress_retry_loop
          in
          let retry_resolution = next_execution.max_context_resolution in
          Log.Keeper.warn
-           "%s: direct keeper_msg empty response from runtime=%s; retrying \
+           "%s: direct keeper_msg no-progress response from runtime=%s; retrying \
             runtime=%s reason=%s max_context=%d context_budget=%d \
             primary_budget=%d requested_override=%s"
            keeper_name

@@ -20,6 +20,8 @@
 
 open Masc
 
+let () = Workspace_metric_hooks.install ()
+
 let failure_metric_value kind =
   Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_observe_failures
     ~labels:[("kind", kind)] ()

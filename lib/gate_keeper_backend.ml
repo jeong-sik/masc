@@ -92,7 +92,7 @@ let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata
            (match Json_util.get_string json "request_id" with
             | Some _ -> Error Empty_request_id
             | None -> Error Missing_request_id)
-       | Some _ as request_id -> (
+       | Some trimmed_request_id -> (
            match Json_util.get_string json "status" with
            | None -> Error Missing_status
            | Some raw ->
@@ -101,7 +101,6 @@ let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata
                   Gate_protocol.message_request_status_of_string normalized
                 with
                | Some status ->
-                   let trimmed_request_id = Option.get request_id in
                    let destination_id =
                      match Json_util.get_string json "keeper_name" with
                      | Some value ->

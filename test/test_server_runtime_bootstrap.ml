@@ -1333,6 +1333,8 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"masc-improver" ~trace_id:"trace-masc-improver" ());
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"operator" ~trace_id:"trace-operator" ());
         let json =
           Server_routes_http_runtime_fleet_scan.keeper_identity_drift_health_json
             config
@@ -1357,6 +1359,9 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
           [ "mad-improver" ]
           (json |> member "materializable_configured_keeper_names" |> to_list
            |> List.map to_string);
+        Alcotest.(check (list string)) "persisted meta includes disabled keeper"
+          [ "masc-improver"; "operator" ]
+          (json |> member "persisted_meta_names" |> to_list |> List.map to_string);
         Alcotest.(check (list string)) "configured without meta"
           [ "mad-improver" ]
           (json |> member "configured_without_meta_names" |> to_list

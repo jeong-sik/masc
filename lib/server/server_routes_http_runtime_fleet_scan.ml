@@ -562,7 +562,7 @@ let keeper_identity_drift_scan config =
     |> List.filter (configured_keeper_is_materializable config)
     |> sorted_unique_strings
   in
-  let configured_set = string_set_of_list materializable_configured_names in
+  let configured_set = string_set_of_list configured_names in
   let persisted_set = string_set_of_list persisted_meta_names in
   {
     configured_names;

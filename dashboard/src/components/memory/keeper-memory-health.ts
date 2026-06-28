@@ -20,7 +20,6 @@ const EVENT_RATIO_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'events_to_facts
 const TTL_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'ttl_expired_on_disk'
 const NEAR_DUPLICATE_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'near_duplicate'
 const PROVIDER_SLOT_BUSY_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'provider_slot_busy'
-const LIBRARIAN_FALLBACK_ALERT_TARGET: KeeperMemoryHealthAlertTarget = 'librarian_fallback_facts'
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`
@@ -52,7 +51,6 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const ttlWarn = hasTargetAlert(alerts, TTL_ALERT_TARGET)
   const nearDuplicateWarn = hasTargetAlert(alerts, NEAR_DUPLICATE_ALERT_TARGET)
   const providerSlotBusyWarn = hasTargetAlert(alerts, PROVIDER_SLOT_BUSY_ALERT_TARGET)
-  const librarianFallbackWarn = hasTargetAlert(alerts, LIBRARIAN_FALLBACK_ALERT_TARGET)
   const providerSlotBusyCount = providerSlotBusy(entry)
 
   return html`
@@ -79,11 +77,6 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
         ${providerSlotBusyWarn
           ? html`<span class="kmh-badge kmh-badge--warn">${providerSlotBusyCount}</span>`
           : html`<span class="kmh-badge kmh-badge--ok">${providerSlotBusyCount}</span>`}
-      </td>
-      <td>
-        ${librarianFallbackWarn
-          ? html`<span class="kmh-badge kmh-badge--warn">${entry.librarian_fallback_facts}</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">${entry.librarian_fallback_facts}</span>`}
       </td>
       <td>
         ${alerts.length > 0
@@ -158,7 +151,6 @@ export function KeeperMemoryHealth() {
   const totalAlerts = data.alert_summary.total_alerts
   const ttlExpiredWarn = data.alert_summary.ttl_expired_keepers > 0
   const providerSlotBusyWarn = data.alert_summary.provider_slot_busy_keepers > 0
-  const librarianFallbackWarn = data.alert_summary.librarian_fallback_fact_keepers > 0
   const totalProviderSlotBusy = data.totals.provider_slot_busy
 
   return html`
@@ -192,12 +184,6 @@ export function KeeperMemoryHealth() {
             <span class="kmh-stat-label">슬롯 실패</span>
             <span class=${`kmh-stat-value${providerSlotBusyWarn ? ' kmh-stat-value--warn' : ''}`}>
               ${totalProviderSlotBusy}
-            </span>
-          </div>
-          <div class="kmh-stat" data-stat-key="librarian-fallback-facts">
-            <span class="kmh-stat-label">폴백 진단</span>
-            <span class=${`kmh-stat-value${librarianFallbackWarn ? ' kmh-stat-value--warn' : ''}`}>
-              ${data.totals.librarian_fallback_facts}
             </span>
           </div>
           <div class="kmh-stat" data-stat-key="alerts">
@@ -234,7 +220,6 @@ export function KeeperMemoryHealth() {
                   <th>만료(디스크)</th>
                   <th>근접중복</th>
                   <th>슬롯 실패</th>
-                  <th>폴백 진단</th>
                   <th>경보</th>
                 </tr>
               </thead>

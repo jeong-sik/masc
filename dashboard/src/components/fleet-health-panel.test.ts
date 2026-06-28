@@ -168,8 +168,8 @@ describe('FleetHealthPanel', () => {
             paused_elapsed_sec: 12,
             auto_resume_remaining_sec: 48,
             last_blocker: {
-              klass: 'turn_timeout',
-              detail: 'turn exceeded budget',
+              klass: 'no_progress_loop',
+              detail: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
             },
             missing_pause_root_cause: false,
           }],
@@ -247,6 +247,8 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
     expect(screen.getByText('8/17')).toBeTruthy()
     expect(screen.getByText('analyst')).toBeTruthy()
+    expect(screen.getByText(/blocker=no-progress safety pause/)).toBeTruthy()
+    expect(screen.queryByText(/manual pause applied/)).toBeNull()
     expect(screen.getAllByText('proof_store_incomplete').length).toBeGreaterThan(0)
     expect(screen.getByText(/contract-stale-a/)).toBeTruthy()
   })

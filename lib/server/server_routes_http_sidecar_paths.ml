@@ -18,10 +18,26 @@ let parse_name request = validate_name (Server_utils.query_param request "name")
 
 let trim_opt = Env_config_core.trim_opt
 
-let runtime_base_path ?base_path () =
+let unresolved_runtime_base_path_message =
+  Printf.sprintf
+    "sidecar runtime base path is unresolved; pass the request workspace \
+     base_path or set %s"
+    Env_config_core.base_path_env_key
+;;
+
+let runtime_base_path_result ?base_path () =
   match trim_opt base_path with
-  | Some path -> path
-  | None -> Config_dir_resolver.base_path_or_cwd ()
+  | Some path -> Ok path
+  | None ->
+    (match Config_dir_resolver.current_env_base_path_opt () with
+     | Some path -> Ok (Config_dir_resolver.absolute_path path)
+     | None -> Error unresolved_runtime_base_path_message)
+;;
+
+let runtime_base_path ?base_path () =
+  match runtime_base_path_result ?base_path () with
+  | Ok path -> path
+  | Error msg -> invalid_arg msg
 ;;
 
 let request_base_path state = (Mcp_server.workspace_config state).base_path
@@ -266,24 +282,26 @@ let today_log_file ?sidecar_root ?project_root ~base_path id =
 ;;
 
 let runtime_sidecar_dir_result ?base_path id =
-  let runtime_base_path = runtime_base_path ?base_path () in
-  let configured_sidecar_root = sidecar_root () in
-  let project_root = project_root_from_executable () in
-  match
-    resolve_existing_sidecar_dir
-      ?sidecar_root:configured_sidecar_root
-      ?project_root
-      ~base_path:runtime_base_path
-      id
-  with
-  | Some dir -> Ok dir
-  | None ->
-    Error
-      (missing_sidecar_dir_message
+  match runtime_base_path_result ?base_path () with
+  | Error _ as error -> error
+  | Ok runtime_base_path ->
+    let configured_sidecar_root = sidecar_root () in
+    let project_root = project_root_from_executable () in
+    (match
+       resolve_existing_sidecar_dir
          ?sidecar_root:configured_sidecar_root
          ?project_root
          ~base_path:runtime_base_path
-         id)
+         id
+     with
+     | Some dir -> Ok dir
+     | None ->
+       Error
+         (missing_sidecar_dir_message
+            ?sidecar_root:configured_sidecar_root
+            ?project_root
+            ~base_path:runtime_base_path
+            id))
 ;;
 
 let runtime_sidecar_script_result ?base_path id =

@@ -6,7 +6,14 @@ val parse_name : Httpun.Request.t -> (string, string) result
 
 val trim_opt : string option -> string option
 
+val runtime_base_path_result : ?base_path:string -> unit -> (string, string) result
+(** Effective [base_path] for runtime path resolution. The request-scoped
+    [base_path] wins; otherwise the resolver's env-derived base path wins. *)
+
 val runtime_base_path : ?base_path:string -> unit -> string
+(** Effective [base_path] for runtime path resolution. Raises when no
+    explicit or env-derived base path is available. *)
+
 val request_base_path : Mcp_server.server_state -> string
 val dir_exists : string -> bool
 val project_root_from_executable : unit -> string option

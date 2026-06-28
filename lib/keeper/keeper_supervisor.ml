@@ -211,6 +211,12 @@ let release_dead_keeper_owned_tasks (ctx : _ context) (entry : Keeper_registry.r
           err)
 ;;
 
+let pending_hitl_approval_keeper_names config =
+  keeper_names config
+  |> List.filter (fun name ->
+       Keeper_approval_queue.has_pending_for_keeper ~keeper_name:name)
+;;
+
 let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
   let now = Time_compat.now () in
   let max_restarts =
@@ -225,13 +231,11 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
      [approval_janitor] expires it at the 30m mark). Name the keeper and the
      outstanding approval on every sweep so the terminal log and downstream
      consumers can see *why* the chat is awaiting a response. *)
-  Keeper_meta_store.keeper_names ctx.config
+  pending_hitl_approval_keeper_names ctx.config
   |> List.iter (fun name ->
-       if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:name
-       then
-         Log.Keeper.warn
-           "keeper:%s blocked on pending HITL approval; chat awaits operator decision"
-           name);
+       Log.Keeper.warn
+         "keeper:%s blocked on pending HITL approval; chat awaits operator decision"
+         name);
   (* Phase 2: sweep order — restart/unregister FIRST, reconcile LAST.
      This prevents reconcile from re-launching keepers that sweep is about
      to process (defense-in-depth alongside is_registered check). *)

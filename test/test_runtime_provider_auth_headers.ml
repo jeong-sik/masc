@@ -693,11 +693,11 @@ let runtime_or_fail ?(provider = runpod_provider) () =
   | None -> fail "expected runtime binding to materialize"
 
 let with_dashboard_probe_http_get hook f =
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
+  Server_runtime_probe.set_dashboard_runtime_provider_http_get_for_tests
     hook;
   Fun.protect
     ~finally:(fun () ->
-      Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
+      Server_runtime_probe.clear_dashboard_runtime_provider_http_get_for_tests ())
     f
 
 let first_provider_probe json =
@@ -725,7 +725,7 @@ let assert_dashboard_runtime_probe_reachable runtime =
            , [ "content-type", "application/json" ]
            , {|{"data":[{"id":"qwen"}]}|} ))
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_runtime_probe.dashboard_runtime_probe_payload_json_for_tests
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let reachable_provider = first_provider_probe reachable_json in
@@ -745,16 +745,16 @@ let assert_dashboard_runtime_probe_reachable runtime =
 
 let assert_dashboard_runtime_probe_missing_auth runtime =
   dashboard_probe_missing_auth_calls := 0;
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_provider_http_get_for_tests
+  Server_runtime_probe.set_dashboard_runtime_provider_http_get_for_tests
     (fun ~url:_ ~headers:_ ~timeout_sec:_ ->
        incr dashboard_probe_missing_auth_calls;
        Ok (200, [], {|{"data":[]}|}));
   let json =
     Fun.protect
       ~finally:(fun () ->
-        Server_dashboard_http_runtime_info.clear_dashboard_runtime_provider_http_get_for_tests ())
+        Server_runtime_probe.clear_dashboard_runtime_provider_http_get_for_tests ())
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_runtime_probe.dashboard_runtime_probe_payload_json_for_tests
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let provider = first_provider_probe json in
@@ -783,7 +783,7 @@ let assert_dashboard_runtime_probe_redacts_url_credentials () =
     with_dashboard_probe_http_get
       (fun ~url:_ ~headers:_ ~timeout_sec:_ -> Ok (200, [], {|{"data":[]}|}))
       (fun () ->
-         Server_dashboard_http_runtime_info.dashboard_runtime_probe_payload_json_for_tests
+         Server_runtime_probe.dashboard_runtime_probe_payload_json_for_tests
            ~default_id:"runpod_mtp.qwen" [ runtime ])
   in
   let provider = first_provider_probe json in

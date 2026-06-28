@@ -89,8 +89,8 @@ let envelope_status = function
   | _ -> "?"
 
 let reset_probe_seams () =
-  Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_runner_for_tests ();
-  Server_dashboard_http_runtime_info.clear_dashboard_runtime_probe_cache_for_tests ()
+  Server_runtime_probe.clear_dashboard_runtime_probe_runner_for_tests ();
+  Server_runtime_probe.clear_dashboard_runtime_probe_cache_for_tests ()
 
 (* P1: failure-visibility contract. When the background refresh raises, the
    failure envelope persisted to the cache must carry probe_ok=false and a
@@ -100,7 +100,7 @@ let reset_probe_seams () =
 
 let test_failure_envelope_carries_unreachable_status () =
   let envelope =
-    Server_dashboard_http_runtime_info.dashboard_runtime_probe_failure_envelope_of_exn
+    Server_runtime_probe.dashboard_runtime_probe_failure_envelope_of_exn
       (Failure "simulated ollama timeout")
   in
   check bool "failure envelope probe_ok false" false (envelope_probe_ok envelope);
@@ -111,11 +111,11 @@ let test_failure_envelope_carries_unreachable_status () =
    without ever invoking the (synchronous) runner. *)
 let test_cold_start_returns_warming_up_without_probe () =
   reset_probe_seams ();
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+  Server_runtime_probe.set_dashboard_runtime_probe_runner_for_tests
     slow_runner;
   slow_runner_invoked := 0;
   let json =
-    Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
+    Server_runtime_probe.dashboard_runtime_probe_http_json ()
   in
   check int "slow runner never invoked on cold start" 0 !slow_runner_invoked;
   check bool "warming-up envelope returned (probe_ok false)" false (probe_ok_of json);
@@ -128,7 +128,7 @@ let test_cold_start_returns_warming_up_without_probe () =
    knows a refresh was scheduled and the fresh value arrives on the next poll. *)
 let test_force_with_stale_cache_serves_stale_without_probe () =
   reset_probe_seams ();
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+  Server_runtime_probe.set_dashboard_runtime_probe_runner_for_tests
     slow_runner;
   slow_runner_invoked := 0;
   let stale_probe =
@@ -139,10 +139,10 @@ let test_force_with_stale_cache_serves_stale_without_probe () =
       ]
   in
   (* Older than both the TTL (30s) and the force window (10s). *)
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
+  Server_runtime_probe.set_dashboard_runtime_probe_cache_for_tests
     ~probe:stale_probe ~age_sec:100.0 ();
   let json =
-    Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json
+    Server_runtime_probe.dashboard_runtime_probe_http_json
       ~force:true ()
   in
   check int "slow runner never invoked on force=1 stale" 0 !slow_runner_invoked;
@@ -158,7 +158,7 @@ let test_force_with_stale_cache_serves_stale_without_probe () =
    runner is not invoked. *)
 let test_force_within_recent_window_serves_recent () =
   reset_probe_seams ();
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+  Server_runtime_probe.set_dashboard_runtime_probe_runner_for_tests
     slow_runner;
   slow_runner_invoked := 0;
   let recent_probe =
@@ -169,10 +169,10 @@ let test_force_within_recent_window_serves_recent () =
       ]
   in
   (* Within the force window (10s). *)
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
+  Server_runtime_probe.set_dashboard_runtime_probe_cache_for_tests
     ~probe:recent_probe ~age_sec:1.0 ();
   let json =
-    Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json
+    Server_runtime_probe.dashboard_runtime_probe_http_json
       ~force:true ()
   in
   check int "slow runner never invoked on force=1 recent" 0 !slow_runner_invoked;
@@ -196,7 +196,7 @@ let test_force_within_recent_window_serves_recent () =
    [Eio.Switch] harness and is tracked as a follow-up. *)
 let test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe () =
   reset_probe_seams ();
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_runner_for_tests
+  Server_runtime_probe.set_dashboard_runtime_probe_runner_for_tests
     slow_runner;
   slow_runner_invoked := 0;
   let fresh_probe =
@@ -208,10 +208,10 @@ let test_soft_ttl_fresh_hit_serves_fresh_without_sync_probe () =
   in
   (* Past the soft-TTL (15s), still within the cache TTL (30s) and outside the
      force window (10s): the soft-TTL refresh branch is taken. *)
-  Server_dashboard_http_runtime_info.set_dashboard_runtime_probe_cache_for_tests
+  Server_runtime_probe.set_dashboard_runtime_probe_cache_for_tests
     ~probe:fresh_probe ~age_sec:20.0 ();
   let json =
-    Server_dashboard_http_runtime_info.dashboard_runtime_probe_http_json ()
+    Server_runtime_probe.dashboard_runtime_probe_http_json ()
   in
   check int "slow runner never invoked on soft-TTL fresh hit" 0 !slow_runner_invoked;
   check string "refresh_state is fresh" "fresh" (refresh_state_of json);

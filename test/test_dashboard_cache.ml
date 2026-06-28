@@ -574,48 +574,52 @@ let with_temp_dir prefix f =
 
 let test_runtime_git_cache_returns_stale_and_refreshes ~clock () =
   let module Runtime = Server_dashboard_http_runtime_info in
-  Runtime.clear_git_rev_parse_short_cache_for_tests ();
+  let module Git_probe = Server_git_probe in
+  let module Runtime_probe = Server_runtime_probe in
+  Git_probe.clear_git_rev_parse_short_cache_for_tests ();
   with_temp_dir "runtime-git-cache" (fun dir ->
-      Runtime.seed_git_rev_parse_short_cache_for_tests dir (Some "old")
+      Git_probe.seed_git_rev_parse_short_cache_for_tests dir (Some "old")
         ~refreshed_at:(Time_compat.now () -. 120.0);
       let probes = Atomic.make 0 in
-      Runtime.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
+      Git_probe.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
           Atomic.incr probes;
           Eio.Time.sleep clock 0.05;
           Some "new");
       Fun.protect
         ~finally:(fun () ->
-          Runtime.clear_git_rev_parse_short_probe_hook_for_tests ();
-          Runtime.clear_git_rev_parse_short_cache_for_tests ())
+          Git_probe.clear_git_rev_parse_short_probe_hook_for_tests ();
+          Git_probe.clear_git_rev_parse_short_cache_for_tests ())
         (fun () ->
           Alcotest.(check (option string))
             "expired cache returns stale immediately"
-            (Some "old") (Runtime.git_rev_parse_short dir);
+            (Some "old") (Git_probe.git_rev_parse_short dir);
           Eio.Time.sleep clock 0.15;
           Alcotest.(check (option string))
             "background refresh stores fresh value"
-            (Some "new") (Runtime.git_rev_parse_short dir);
+            (Some "new") (Git_probe.git_rev_parse_short dir);
           Alcotest.(check int) "single background probe" 1
             (Atomic.get probes)))
 
 let test_runtime_git_cache_stale_worker_domain_does_not_touch_root_switch ~sw () =
   let module Runtime = Server_dashboard_http_runtime_info in
-  Runtime.clear_git_rev_parse_short_cache_for_tests ();
+  let module Git_probe = Server_git_probe in
+  let module Runtime_probe = Server_runtime_probe in
+  Git_probe.clear_git_rev_parse_short_cache_for_tests ();
   with_temp_dir "runtime-git-cache-domain" (fun dir ->
-      Runtime.seed_git_rev_parse_short_cache_for_tests dir (Some "old")
+      Git_probe.seed_git_rev_parse_short_cache_for_tests dir (Some "old")
         ~refreshed_at:(Time_compat.now () -. 120.0);
       let probes = Atomic.make 0 in
-      Runtime.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
+      Git_probe.set_git_rev_parse_short_probe_hook_for_tests (fun _ ->
           Atomic.incr probes;
           Some "new");
       Fun.protect
         ~finally:(fun () ->
-          Runtime.clear_git_rev_parse_short_probe_hook_for_tests ();
-          Runtime.clear_git_rev_parse_short_cache_for_tests ())
+          Git_probe.clear_git_rev_parse_short_probe_hook_for_tests ();
+          Git_probe.clear_git_rev_parse_short_cache_for_tests ())
         (fun () ->
           Eio_context.set_switch sw;
           let worker =
-            Domain.spawn (fun () -> Runtime.git_rev_parse_short dir)
+            Domain.spawn (fun () -> Git_probe.git_rev_parse_short dir)
           in
           Alcotest.(check (option string))
             "worker-domain stale hit returns cached value"
@@ -626,8 +630,10 @@ let test_runtime_git_cache_stale_worker_domain_does_not_touch_root_switch ~sw ()
 
 let test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock () =
   let module Runtime = Server_dashboard_http_runtime_info in
+  let module Git_probe = Server_git_probe in
+  let module Runtime_probe = Server_runtime_probe in
   let old_status =
-    { Runtime.branch = Some "main"
+    { Git_probe.branch = Some "main"
     ; upstream_ref = Some "origin/main"
     ; upstream_head_commit = Some "old"
     ; ahead_count = Some 0
@@ -641,8 +647,8 @@ let test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock () =
     | Some expected, Some actual ->
       Alcotest.(check (option string))
         (label ^ " branch")
-        expected.Runtime.branch
-        actual.Runtime.branch;
+        expected.Git_probe.branch
+        actual.Git_probe.branch;
       Alcotest.(check (option string))
         (label ^ " upstream ref")
         expected.upstream_ref
@@ -661,38 +667,40 @@ let test_runtime_git_upstream_cache_returns_stale_and_refreshes ~clock () =
         actual.behind_count
     | _ -> Alcotest.failf "%s status mismatch" label
   in
-  Runtime.clear_git_upstream_status_cache_for_tests ();
+  Git_probe.clear_git_upstream_status_cache_for_tests ();
   with_temp_dir "runtime-git-upstream-cache" (fun dir ->
-      Runtime.seed_git_upstream_status_cache_for_tests dir (Some old_status)
+      Git_probe.seed_git_upstream_status_cache_for_tests dir (Some old_status)
         ~refreshed_at:(Time_compat.now () -. 120.0);
       let probes = Atomic.make 0 in
-      Runtime.set_git_upstream_status_probe_hook_for_tests (fun _ ->
+      Git_probe.set_git_upstream_status_probe_hook_for_tests (fun _ ->
           Atomic.incr probes;
           Eio.Time.sleep clock 0.05;
           Some new_status);
       Fun.protect
         ~finally:(fun () ->
-          Runtime.clear_git_upstream_status_probe_hook_for_tests ();
-          Runtime.clear_git_upstream_status_cache_for_tests ())
+          Git_probe.clear_git_upstream_status_probe_hook_for_tests ();
+          Git_probe.clear_git_upstream_status_cache_for_tests ())
         (fun () ->
           check_status
             "expired cache returns stale immediately"
             (Some old_status)
-            (Runtime.git_upstream_status dir);
+            (Git_probe.git_upstream_status dir);
           Eio.Time.sleep clock 0.15;
           check_status
             "background refresh stores fresh value"
             (Some new_status)
-            (Runtime.git_upstream_status dir);
+            (Git_probe.git_upstream_status dir);
           Alcotest.(check int) "single background probe" 1
             (Atomic.get probes)))
 
 let test_runtime_git_probe_argv_disables_optional_locks () =
   let module Runtime = Server_dashboard_http_runtime_info in
+  let module Git_probe = Server_git_probe in
+  let module Runtime_probe = Server_runtime_probe in
   Alcotest.(check (list string))
     "runtime git probe argv uses no-optional-locks"
     [ "git"; "-C"; "/tmp/demo"; "--no-optional-locks"; "rev-parse"; "--short"; "HEAD" ]
-    (Runtime.git_rev_parse_short_probe_argv "/tmp/demo")
+    (Git_probe.git_rev_parse_short_probe_argv "/tmp/demo")
 
 (* -- Harness ---------------------------------------------------------------- *)
 

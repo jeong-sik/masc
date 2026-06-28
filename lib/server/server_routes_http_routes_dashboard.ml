@@ -334,7 +334,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/runtime-probe" (fun request reqd ->
        let force = Server_utils.bool_query_param request "force" ~default:false in
        let handle _state req reqd =
-         let json = dashboard_runtime_probe_http_json ~force () in
+         let json = Server_runtime_probe.dashboard_runtime_probe_http_json ~force () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        in
        with_tool_auth ~tool_name:"masc_runtime_ollama_probe" handle request reqd)

@@ -99,7 +99,7 @@ let test_dashboard_perf_reads_root_benchmarks () =
       ]);
   set_mtime baseline_file 1_000.0;
   set_mtime latest_file 2_000.0;
-  let json = Server_dashboard_http.dashboard_perf_http_json config in
+  let json = Server_dashboard_http_runtime_info.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "ok" (json |> member "status" |> to_string);
   check string "result file" "benchmarks/results/results_20260331_140000.csv"
@@ -136,7 +136,7 @@ let test_dashboard_perf_reads_worktree_benchmarks () =
     ];
   set_mtime latest_file 3_000.0;
   with_env "MASC_BENCHMARK_RESULTS_DIR" worktree_results_dir @@ fun () ->
-  let json = Server_dashboard_http.dashboard_perf_http_json config in
+  let json = Server_dashboard_http_runtime_info.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "ok" (json |> member "status" |> to_string);
   check string "worktree dir selected" ".worktrees/feat-perf/benchmarks/results"
@@ -170,7 +170,7 @@ let test_dashboard_perf_prefers_latest_scoped_artifact () =
   set_mtime worktree_file 2_000.0;
   set_mtime root_file 3_000.0;
   with_cwd workspace_root @@ fun () ->
-  let json = Server_dashboard_http.dashboard_perf_http_json config in
+  let json = Server_dashboard_http_runtime_info.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "ok" (json |> member "status" |> to_string);
   check string "latest scoped file wins" "benchmarks/results/results_20260331_160000.csv"
@@ -179,7 +179,7 @@ let test_dashboard_perf_prefers_latest_scoped_artifact () =
 let test_dashboard_perf_empty_shape () =
   with_temp_base @@ fun base_path ->
   let config = Lib.Workspace.default_config base_path in
-  let json = Server_dashboard_http.dashboard_perf_http_json config in
+  let json = Server_dashboard_http_runtime_info.dashboard_perf_http_json config in
   let open Yojson.Safe.Util in
   check string "status" "empty" (json |> member "status" |> to_string);
   check int "benchmarks empty" 0

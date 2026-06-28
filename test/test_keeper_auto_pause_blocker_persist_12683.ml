@@ -259,7 +259,7 @@ let test_no_progress_loop_detection_pauses_keeper () =
 	           bool
 	           "no-progress pause does not queue synthetic recovery stimulus"
 	           true
-	           (Masc.Keeper_event_queue.is_empty
+	           (Keeper_event_queue.is_empty
 	              (Masc.Keeper_registry_event_queue.snapshot
 	                 ~base_path:config.base_path
 	                 keeper_name))

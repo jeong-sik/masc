@@ -564,27 +564,6 @@ let render_board_read (state : state) (post : board_post) =
   print_string (Buffer.contents buf);
   flush stdout
 
-(** Compute display depth of a goal based on parent chain. *)
-let goal_depth (goals : planning_goal list) (goal : planning_goal) =
-  bounded_parent_depth ~id_of:(fun g -> g.pg_id)
-    ~parent_id_of:(fun g -> g.pg_parent_goal_id)
-    goals goal
-
-(** Sort goals so parents appear before children. *)
-let sort_goals_for_tree (goals : planning_goal list) : planning_goal list =
-  let rec insert_sorted acc goal =
-    let depth = goal_depth goals goal in
-    let rec place = function
-      | [] -> List.rev acc @ [goal]
-      | x :: xs ->
-          let x_depth = goal_depth goals x in
-          if depth < x_depth then List.rev acc @ goal :: x :: xs
-          else place xs
-    in
-    place (List.rev acc)
-  in
-  List.fold_left insert_sorted [] goals
-
 let planning_status_label = function
   | Planning_goal_active -> "active"
   | Planning_goal_paused -> "paused"
@@ -621,7 +600,11 @@ let render_planning_list (state : state) =
   box_line buf cols header;
   box_divider buf cols;
 
-  let goals = match state.planning with None -> [] | Some p -> sort_goals_for_tree p.pl_goals in
+  let goals =
+    match state.planning with
+    | None -> []
+    | Some p -> planning_visible_goals p.pl_goals
+  in
   let count = List.length goals in
 
   (match state.planning with
@@ -668,7 +651,7 @@ let render_planning_list (state : state) =
            if idx < count then begin
              let g = List.nth goals idx in
              let is_selected = idx = state.planning_cursor in
-             let depth = goal_depth p.pl_goals g in
+             let depth = planning_goal_depth p.pl_goals g in
              let indent = String.make (depth * 2) ' ' in
              let branch = if depth > 0 then "└─ " else "  " in
              let status_color = planning_status_color g.pg_status in

@@ -107,6 +107,27 @@ let test_overview_state_domains_are_closed_sum () =
        ~needle:"unknown attention severity")
 ;;
 
+let test_planning_cursor_uses_visible_goal_order () =
+  check int "visible planning helper lives in shared types" 1
+    (Ast_grep.count_value_bindings
+       ~module_path:"bin/masc_tui_types.ml"
+       ~name:"planning_visible_goals");
+  check int "render no longer owns a private tree sorter" 0
+    (Ast_grep.count_value_bindings
+       ~module_path:"bin/masc_tui_render.ml"
+       ~name:"sort_goals_for_tree");
+  check bool "render uses shared visible-goal order" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui_render.ml"
+       ~callee:"planning_visible_goals"
+     >= 1);
+  check bool "key handling uses shared visible-goal order" true
+    (Ast_grep.count_calls
+       ~module_path:"bin/masc_tui.ml"
+       ~callee:"planning_visible_goals"
+     >= 2)
+;;
+
 let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
@@ -125,6 +146,10 @@ let () =
           "overview state domains are closed-sum"
           `Quick
           test_overview_state_domains_are_closed_sum;
+        test_case
+          "planning cursor uses visible goal order"
+          `Quick
+          test_planning_cursor_uses_visible_goal_order;
       ]
     )
   ]

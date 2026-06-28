@@ -264,8 +264,9 @@ let apply_planning_load state = function
   | Ok planning ->
       state.planning <- Some planning;
       state.planning_error <- None;
-      if state.planning_cursor >= List.length planning.pl_goals then
-        state.planning_cursor <- max 0 (List.length planning.pl_goals - 1)
+      let goals = planning_visible_goals planning.pl_goals in
+      if state.planning_cursor >= List.length goals then
+        state.planning_cursor <- max 0 (List.length goals - 1)
   | Error err ->
       state.planning <- None;
       state.planning_mode <- Planning_list;
@@ -666,7 +667,11 @@ let main () =
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
-                     let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
+                     let goals =
+                       match state.planning with
+                       | None -> []
+                       | Some p -> planning_visible_goals p.pl_goals
+                     in
                      if state.planning_cursor < List.length goals - 1 then
                        state.planning_cursor <- state.planning_cursor + 1
                  | Planning_detail _ ->
@@ -737,7 +742,11 @@ let main () =
             | Planning ->
                 (match state.planning_mode with
                  | Planning_list ->
-                     let goals = match state.planning with None -> [] | Some p -> p.pl_goals in
+                     let goals =
+                       match state.planning with
+                       | None -> []
+                       | Some p -> planning_visible_goals p.pl_goals
+                     in
                      (match List.nth_opt goals state.planning_cursor with
                       | Some g ->
                           state.planning_mode <- Planning_detail g.pg_id;

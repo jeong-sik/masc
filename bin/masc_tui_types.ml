@@ -163,6 +163,25 @@ type planning_snapshot = {
   pl_generated_at: string;
 }
 
+let planning_goal_depth (goals : planning_goal list) (goal : planning_goal) =
+  Tui_decode.bounded_parent_depth ~id_of:(fun g -> g.pg_id)
+    ~parent_id_of:(fun g -> g.pg_parent_goal_id)
+    goals goal
+
+let planning_visible_goals (goals : planning_goal list) : planning_goal list =
+  let rec insert_sorted acc goal =
+    let depth = planning_goal_depth goals goal in
+    let rec place = function
+      | [] -> List.rev acc @ [goal]
+      | x :: xs ->
+          let x_depth = planning_goal_depth goals x in
+          if depth < x_depth then List.rev acc @ goal :: x :: xs
+          else place xs
+    in
+    place (List.rev acc)
+  in
+  List.fold_left insert_sorted [] goals
+
 (** Sub-mode inside the Keepers surface *)
 type keeper_mode =
   | Keeper_list

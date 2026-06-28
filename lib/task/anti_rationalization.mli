@@ -6,8 +6,9 @@
     Inspired by Trail of Bits' Stop hook anti-rationalization pattern:
     a separate model reviews the primary agent's work before accepting it.
 
-    When the LLM reviewer is unavailable, falls back to local pattern matching
-    only. Liveness takes priority over correctness.
+    When the LLM reviewer is unavailable, the configured fail-open/fail-closed
+    policy decides whether liveness or safety takes priority. Empty or malformed
+    evaluator output is treated as an invalid verdict and rejected.
 
     Cross-model evaluation (#3067): use [~evaluator_runtime] to force
     a different model family than the generator, providing genuine
@@ -28,6 +29,12 @@ type review_request = {
 type verdict =
   | Approve
   | Reject of string
+
+type verdict_parse_error =
+  | Empty_review_output
+  | Unrecognized_review_format of string
+
+val verdict_parse_error_to_string : verdict_parse_error -> string
 
 type excuse_pattern_decision =
   | Terminal_reject
@@ -134,6 +141,11 @@ val build_prompt :
     Exposed for testing.
     @since 2.223.0 changed return type from [verdict] to [(verdict, string) result] *)
 val parse_verdict : string -> (verdict, string) result
+
+(** Typed variant of {!parse_verdict}. Production routing uses this form so
+    empty output and malformed output cannot be distinguished by fragile string
+    matching. *)
+val parse_verdict_typed : string -> (verdict, verdict_parse_error) result
 
 (** Parse verdict from structured tool call JSON arguments (primary path).
     Deterministic extraction from report_review_verdict tool output.

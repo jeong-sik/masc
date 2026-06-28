@@ -7,6 +7,12 @@ import type { VNode } from 'preact'
 import { kSlot, kSigil } from '../keeper-badge'
 import { keeperDisplayStatus } from '../../lib/keeper-runtime-display'
 import { isKeeperOffline, isKeeperPaused } from '../../lib/keeper-predicates'
+import {
+  PHASE_LABEL_KO,
+  PHASE_TONE,
+  type FleetTone,
+  type KeeperPhaseToken,
+} from '../../lib/fleet-tone'
 import type { Keeper } from '../../types'
 
 /** Coarse lifecycle bucket used both for the dot tone and roster grouping. */
@@ -18,16 +24,15 @@ export function keeperBucket(keeper: Keeper): KeeperBucket {
   return 'running'
 }
 
-export type DotTone = 'ok' | 'warn' | 'bad' | 'idle'
-
-const DOT_CLASS: Record<DotTone, string> = {
+const DOT_CLASS: Readonly<Record<FleetTone, string>> = {
   ok: 'kw-dot ok',
   warn: 'kw-dot warn',
   bad: 'kw-dot bad',
+  busy: 'kw-dot busy',
   idle: 'kw-dot',
 }
 
-export function StatusDot({ tone, pulse }: { tone: DotTone; pulse?: boolean }): VNode {
+export function StatusDot({ tone, pulse }: { tone: FleetTone; pulse?: boolean }): VNode {
   return html`<span class=${`${DOT_CLASS[tone]}${pulse ? ' pulse' : ''}`} aria-hidden="true"></span>`
 }
 
@@ -58,78 +63,73 @@ export function WorkspaceSigil({
   return html`<span class=${`kw-sigil${beat ? ' kw-sigil-beat' : ''}`} style=${style} title=${id} aria-label=${id}>${sigil}</span>`
 }
 
-/** Friendly (Korean) label per canonical status token. Keyed on the tokens
- *  keeperDisplayStatus emits (lib/keeper-runtime-display.ts keeperLifecycleStatus),
- *  so the roster row + header pill read the same vocabulary as the rest of the
- *  dashboard instead of the raw PascalCase FSM enum (e.g. "Compacting"). */
-const PHASE_LABEL_KO: Record<string, string> = {
-  running: '실행 중',
-  paused: '일시정지',
-  compacting: '압축 중',
-  handoff: '인계 중',
-  draining: '정리 중',
-  restarting: '재시작 중',
-  failing: '오류 발생',
-  overflowed: '컨텍스트 초과',
-  stopped: '중지됨',
-  unbooted: '미기동',
-  crashed: '비정상 종료',
-  dead: '종료됨',
-  zombie: '응답 없음',
-  idle: '유휴',
-  unknown: '알 수 없음',
+/** Normalize the canonical status token (from `keeperDisplayStatus`) into
+ *  the closed `KeeperPhaseToken` keyspace. Unknown tokens collapse to
+ *  `'unknown'` so `PHASE_TONE` / `PHASE_LABEL_KO` lookups are total.
+ *
+ *  Previously this was `keeperPhaseToken` reading from `lifecycle_phase`
+ *  directly. That returned the raw `lifecycle_phase ?? phase` value
+ *  (PascalCase) — incompatible with the lowercase-keyed SSOT in
+ *  `fleet-tone.ts`. Routing through `keeperDisplayStatus` (which already
+ *  applies the lowercasing + isKeeperPaused short-circuit) means there is
+ *  exactly one mapping table from `KeeperPhase` to lowercase token (in
+ *  `keeper-runtime-display.ts:197` `keeperLifecycleStatus`). */
+export function phaseTokenFromKeeper(keeper: Keeper): KeeperPhaseToken {
+  const token = keeperDisplayStatus(keeper).trim().toLowerCase()
+  return isKeeperPhaseToken(token) ? token : 'unknown'
+}
+
+/** Closed-sum guard. `keeperDisplayStatus` returns a `string` (its
+ *  signature is intentionally permissive because callers pass through
+ *  arbitrary backend status values), so we narrow here against the
+ *  declared token union. New tokens from the wire that are not yet in
+ *  `KeeperPhaseToken` collapse to `'unknown'` via this fallback.
+ *
+ *  Why `Object.prototype.hasOwnProperty.call` instead of `value in PHASE_TONE`:
+ *  the `in` operator walks the prototype chain. Although `PHASE_TONE` is
+ *  now built with `Object.create(null)` (see `lib/fleet-tone.ts`) so
+ *  this specific leak no longer applies, the `hasOwnProperty` form is
+ *  defensive against future refactors that switch the map to a plain
+ *  object literal or a `Map`. Either backend leak mode would let a
+ *  wire token like `'constructor'` or `'toString'` slip past the
+ *  `'unknown'` fallback and surface inherited `Object.prototype`
+ *  members in `keeperStatusTone` / `keeperPhaseLabel`. */
+function isKeeperPhaseToken(value: string): value is KeeperPhaseToken {
+  return Object.prototype.hasOwnProperty.call(PHASE_TONE, value)
 }
 
 /** Phase label shown in the roster sub-row and the chat header state pill.
  *  Routes through keeperDisplayStatus so error/transient phases surface with
  *  the same token vocabulary the rest of the dashboard uses, then maps to a
- *  Korean label. Previously returned the raw `lifecycle_phase` enum, which
- *  leaked "Running"/"Compacting"/"HandingOff" into the UI. */
+ *  Korean label from the fleet-tone SSOT (no parallel PHASE_LABEL_KO here —
+ *  that table moved to `lib/fleet-tone.ts`). Previously returned the raw
+ *  `lifecycle_phase` enum, which leaked "Running"/"Compacting"/"HandingOff"
+ *  into the UI. */
 export function keeperPhaseLabel(keeper: Keeper): string {
-  const token = keeperDisplayStatus(keeper)
+  const token = phaseTokenFromKeeper(keeper)
   return PHASE_LABEL_KO[token] ?? token
 }
 
-/** Error phases that must not render as a healthy green dot. */
-const ERROR_STATUS_TOKENS = new Set(['failing', 'overflowed', 'crashed', 'dead', 'zombie'])
-/** Transient / attention phases that warrant a warn (amber) dot. */
-const WARN_STATUS_TOKENS = new Set(['paused', 'compacting', 'handoff', 'draining', 'restarting'])
-
-/** Canonical lower-cased phase token, preferring the FSM lifecycle_phase and
- *  falling back to the legacy phase field. Used whenever logic (rather than
- *  display text) needs a normalized phase. */
-export function keeperPhaseToken(keeper: Keeper): string {
-  return (keeper.lifecycle_phase ?? keeper.phase ?? '').toLowerCase()
-}
-
-/** True for phases the backend treats as terminal/unrecoverable. Kept in the
- *  same SSOT module as ERROR_STATUS_TOKENS so roster / rail / chat do not
- *  re-implement this with inline literal comparisons. */
-export function isTerminalPhase(keeper: Keeper): boolean {
-  return ERROR_STATUS_TOKENS.has(keeperPhaseToken(keeper))
-}
-
-/** Health tone for the status dot + header pill.
+/** Health tone for the status dot + header pill. One-line closed-map lookup
+ *  against the fleet-tone SSOT (PHASE_TONE) — no parallel Set<string>
+ *  classifier. The repo-owned fleet-tone module owns the KeeperPhase →
+ *  tone mapping, so adding a new phase forces the compiler to flag a
+ *  missing entry there.
  *
- *  Distinct from keeperBucket, which only groups running/paused/offline for
- *  the roster: a Failing or Overflowed keeper is neither offline nor paused,
- *  so the bucket classifies it as "running" and it would render a green dot
- *  while actually degraded. This maps the canonical status token to a tone so
- *  error phases surface as `bad` (the .kw-dot.bad / .kw-state-pill.bad styles
- *  that were otherwise unreachable). */
-export function keeperStatusTone(keeper: Keeper): DotTone {
-  const token = keeperDisplayStatus(keeper)
-  if (ERROR_STATUS_TOKENS.has(token)) return 'bad'
-  if (WARN_STATUS_TOKENS.has(token)) return 'warn'
-  if (token === 'running') return 'ok'
-  return 'idle'
+ *  Distinct from keeperBucket, which only groups running/paused/offline
+ *  for the roster: a Failing or Overflowed keeper is neither offline nor
+ *  paused, so the bucket classifies it as "running" and it would render a
+ *  green dot while actually degraded. PHASE_TONE handles this — Failing /
+ *  Overflowed both map to `bad`. */
+export function keeperStatusTone(keeper: Keeper): FleetTone {
+  return PHASE_TONE[phaseTokenFromKeeper(keeper)]
 }
 
 /** Fleet surfaces are attention-first: a keeper with blocked work or an
  *  approval gate should not look healthy just because its runtime is still
- *  technically running. Kept here so roster rows and the selected-runtime rail
- *  cannot silently diverge. */
-export function keeperFleetTone(keeper: Keeper): DotTone {
+ *  technically running. Kept here so roster rows and the selected-runtime
+ *  rail cannot silently diverge. */
+export function keeperFleetTone(keeper: Keeper): FleetTone {
   if (
     keeper.needs_attention === true
     || (keeper.blocked_task_count ?? 0) > 0
@@ -138,12 +138,21 @@ export function keeperFleetTone(keeper: Keeper): DotTone {
   return keeperStatusTone(keeper)
 }
 
-/** The state-pill modifier class for the chat header, derived from the health
- *  tone so error phases get the `bad` pill rather than collapsing to `off`. */
-export function statePillTone(tone: DotTone): 'run' | 'warn' | 'bad' | 'off' {
+/** The state-pill modifier class for the chat header, derived from the
+ *  health tone so error phases get the `bad` pill rather than collapsing
+ *  to `off`. Transient (busy) phases get the dedicated `busy` pill so the
+ *  header shows "compacting" as working-through, not stopped.
+ *
+ *  Note: this is a 1:1 type mapping, not a classifier. Same `FleetTone`
+ *  keyspace → CSS class suffix. Kept as a function (not a constant table)
+ *  because TypeScript `Record<FleetTone, PillClass>` would already be
+ *  total, and the explicit `if` chain is easier for maintainers to read
+ *  at the call site. */
+export function statePillTone(tone: FleetTone): 'run' | 'warn' | 'bad' | 'busy' | 'off' {
   if (tone === 'ok') return 'run'
   if (tone === 'warn') return 'warn'
   if (tone === 'bad') return 'bad'
+  if (tone === 'busy') return 'busy'
   return 'off'
 }
 

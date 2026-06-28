@@ -94,7 +94,12 @@ let requeue_front ~base_path name stimuli =
 ;;
 
 let ack_consumed ~base_path name stimuli =
-  Keeper_event_queue_persistence.ack_inflight ~base_path ~keeper_name:name stimuli
+  match
+    Keeper_event_queue_persistence.ack_consumed ~base_path ~keeper_name:name stimuli
+  with
+  | Ok () -> ()
+  | Error msg ->
+    Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg
 ;;
 
 let snapshot ~base_path name =

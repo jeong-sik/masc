@@ -5,8 +5,8 @@
 
     The two production call sites are:
     - [Keeper_registry.dispatch_event_with_audit] fires [Phase_transition]
-      after the state machine accepts a phase change and before the
-      registry write commits.
+      after the state machine accepts a phase change and the registry write
+      commits.
     - [Keeper_supervisor.sweep_and_recover] fires [Tombstone_reaped] after
       a dead-keeper unregister succeeds (see [Keeper_lifecycle_hooks.run]
       invocation in keeper_supervisor.ml).
@@ -34,8 +34,8 @@ type event =
       to_phase   : Keeper_state_machine.phase;
     }
       (** Fired from [Keeper_registry.dispatch_event_with_audit] for real
-          phase changes before the registry write commits. Hooks observe
-          the intent of the transition; they cannot veto. *)
+          phase changes after the registry write commits. Hooks observe an
+          applied transition; they cannot veto. *)
   | Tombstone_reaped
       (** Fired by [Keeper_supervisor.cleanup_dead_tombstone] after the
           registry unregister completes. The keeper is fully gone from

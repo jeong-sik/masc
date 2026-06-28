@@ -192,14 +192,14 @@ let all_flags : flag list = [
     default = true; category = "runtime";
     lifecycle = Active; since = "2.208.0" };
 
-  (* ── CDAL (Contract-Driven Agent Loop) ───────────────────── *)
+  (* ── Contract verification ───────────────────────────────── *)
   { env_name = "MASC_CDAL_ENABLED";
-    description = "Contract-driven agent loop: proof capture and verdict evaluation";
+    description = "Contract verification: proof capture and verdict evaluation";
     default = true; category = "runtime";
     lifecycle = Active; since = "2.162.0" };
 
   { env_name = "MASC_CDAL_GATE_ENABLED";
-    description = "CDAL verdict gate: block task completion when verdict is Violated/Inconclusive";
+    description = "Contract-verdict gate: block task completion when verdict is Violated/Inconclusive";
     default = true; category = "runtime";
     lifecycle = Active; since = "0.9.3" };
 

@@ -57,6 +57,14 @@
   color: var(--accent-warn, #e0a82e);
 }
 
+.kmh-stat-detail {
+  display: inline-block;
+  margin-left: var(--space-1);
+  font-size: var(--text-xs);
+  color: var(--text-tertiary);
+  font-variant-numeric: tabular-nums;
+}
+
 .kmh-table-wrap {
   overflow-x: auto;
 }

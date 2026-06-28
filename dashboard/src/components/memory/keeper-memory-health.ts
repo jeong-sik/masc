@@ -54,6 +54,8 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
   const providerSlotBusyWarn = hasTargetAlert(alerts, PROVIDER_SLOT_BUSY_ALERT_TARGET)
   const librarianFallbackWarn = hasTargetAlert(alerts, LIBRARIAN_FALLBACK_ALERT_TARGET)
   const providerSlotBusyCount = providerSlotBusy(entry)
+  const fallbackDetail = `빈 ${entry.librarian_fallback_empty_response_facts} · 원문 ${entry.librarian_fallback_nonempty_facts}`
+  const fallbackTitle = `empty ${entry.librarian_fallback_empty_response_facts} / non-empty ${entry.librarian_fallback_nonempty_facts}`
 
   return html`
     <tr class=${warn ? 'kmh-row--warn' : ''}>
@@ -82,8 +84,11 @@ function KeeperRow({ entry }: { entry: KeeperMemoryHealthKeeperEntry }) {
       </td>
       <td>
         ${librarianFallbackWarn
-          ? html`<span class="kmh-badge kmh-badge--warn">${entry.librarian_fallback_facts}</span>`
-          : html`<span class="kmh-badge kmh-badge--ok">${entry.librarian_fallback_facts}</span>`}
+          ? html`<span class="kmh-badge kmh-badge--warn" title=${fallbackTitle}>${entry.librarian_fallback_facts}</span>`
+          : html`<span class="kmh-badge kmh-badge--ok" title=${fallbackTitle}>${entry.librarian_fallback_facts}</span>`}
+        ${entry.librarian_fallback_facts > 0
+          ? html`<span class="kmh-stat-detail">${fallbackDetail}</span>`
+          : null}
       </td>
       <td>
         ${alerts.length > 0
@@ -198,6 +203,9 @@ export function KeeperMemoryHealth() {
             <span class="kmh-stat-label">폴백 진단</span>
             <span class=${`kmh-stat-value${librarianFallbackWarn ? ' kmh-stat-value--warn' : ''}`}>
               ${data.totals.librarian_fallback_facts}
+            </span>
+            <span class="kmh-stat-detail">
+              빈 ${data.totals.librarian_fallback_empty_response_facts} · 원문 ${data.totals.librarian_fallback_nonempty_facts}
             </span>
           </div>
           <div class="kmh-stat" data-stat-key="alerts">

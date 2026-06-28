@@ -188,6 +188,14 @@ let test_reports_per_keeper_metric_values () =
     "no librarian fallback facts"
     0
     (int_field "librarian_fallback_facts" k);
+  Alcotest.(check int)
+    "no empty response fallback facts"
+    0
+    (int_field "librarian_fallback_empty_response_facts" k);
+  Alcotest.(check int)
+    "no nonempty fallback facts"
+    0
+    (int_field "librarian_fallback_nonempty_facts" k);
   Alcotest.(check int) "no keeper alerts" 0 (List.length (list_field "alerts" k));
   Alcotest.(check int) "totals.facts" 2 (int_field "facts" (totals json));
   Alcotest.(check bool)
@@ -304,20 +312,43 @@ let test_reports_librarian_fallback_facts_as_alert () =
     Types.librarian_unstructured_fallback_claim_prefix
     ^ " (librarian provider returned empty response): <empty response>"
   in
+  let invalid_json_fallback_claim =
+    Types.librarian_unstructured_fallback_claim_prefix
+    ^ " (librarian provider returned invalid episode JSON (invalid_json)): raw"
+  in
   Io.rewrite_facts_atomically_for_keepers_dir
     ~keepers_dir
     ~keeper_id:"fallback"
-    [ fact ~now "ordinary durable row"; librarian_fallback_fact ~now fallback_claim ];
+    [ fact ~now "ordinary durable row"
+    ; librarian_fallback_fact ~now fallback_claim
+    ; librarian_fallback_fact ~now invalid_json_fallback_claim
+    ];
   let json = Health.keeper_memory_health_http_json ~base_path:base in
   let k = keeper_obj "fallback" json in
   Alcotest.(check int)
     "librarian fallback facts projected"
-    1
+    2
     (int_field "librarian_fallback_facts" k);
   Alcotest.(check int)
-    "totals librarian fallback facts"
+    "empty response fallback facts projected"
     1
+    (int_field "librarian_fallback_empty_response_facts" k);
+  Alcotest.(check int)
+    "nonempty fallback facts projected"
+    1
+    (int_field "librarian_fallback_nonempty_facts" k);
+  Alcotest.(check int)
+    "totals librarian fallback facts"
+    2
     (int_field "librarian_fallback_facts" (totals json));
+  Alcotest.(check int)
+    "totals empty response fallback facts"
+    1
+    (int_field "librarian_fallback_empty_response_facts" (totals json));
+  Alcotest.(check int)
+    "totals nonempty fallback facts"
+    1
+    (int_field "librarian_fallback_nonempty_facts" (totals json));
   let alerts = list_field "alerts" k in
   Alcotest.(check (list string))
     "librarian fallback alert code"

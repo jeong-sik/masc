@@ -356,6 +356,11 @@ let legacy_unstructured_fallback_claim (claim : string) =
   String.starts_with ~prefix:librarian_unstructured_fallback_claim_prefix claim
 ;;
 
+let legacy_unstructured_fallback_empty_response_claim (claim : string) =
+  legacy_unstructured_fallback_claim claim
+  && String.ends_with ~suffix:": <empty response>" claim
+;;
+
 let fact_prompt_recallable (fact : fact) =
   match fact.claim_kind with
   | Some Diagnostic -> false

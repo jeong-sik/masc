@@ -1043,12 +1043,6 @@ let keeper_fleet_safety_health_json
   let active_task_owner_without_executable_fiber =
     active_task_owner_without_executable_fiber_count > 0
   in
-  let phase_values =
-    match phase_snapshot with
-    | Some snapshot -> snapshot.phase_values
-    | None -> []
-  in
-  let phase_value name = List.assoc_opt name phase_values in
   let minimum_running_fibers =
     if target_count <= 1 then target_count else 2
   in
@@ -1141,7 +1135,6 @@ let keeper_fleet_safety_health_json
            (fun name ->
              blocked_keeper_detail_json
                ?base_path:runtime_base_path
-               ?phase:(phase_value name)
                ~bootable_set
                ~capacity_set
                ~paused_set

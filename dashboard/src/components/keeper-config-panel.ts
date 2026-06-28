@@ -179,11 +179,13 @@ function formatRelativeTime(date: Date): string {
 }
 
 // Runtime config draft for sandbox/proactive/compaction/handoff inline editing
-export const MAX_CONTEXT_OVERRIDE_TOKENS = 1_000_000
-
-export function normalizeMaxContextOverrideDraft(value: number): number {
+export function normalizeMaxContextOverrideDraft(value: number, maxTokens?: number | null): number {
   if (!Number.isFinite(value)) return 0
-  return Math.min(MAX_CONTEXT_OVERRIDE_TOKENS, Math.max(0, Math.trunc(value)))
+  const normalized = Math.max(0, Math.trunc(value))
+  const max = Number.isFinite(maxTokens) && (maxTokens ?? 0) > 0
+    ? Math.trunc(maxTokens as number)
+    : null
+  return max == null ? normalized : Math.min(max, normalized)
 }
 
 export type RuntimeDraft = {
@@ -272,7 +274,10 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
     autoboot_enabled: c.autoboot_enabled,
-    max_context_override: normalizeMaxContextOverrideDraft(c.max_context_override ?? 0),
+    max_context_override: normalizeMaxContextOverrideDraft(
+      c.max_context_override ?? 0,
+      c.limits.max_context_override_tokens,
+    ),
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     active_goal_ids: c.workspace.active_goal_ids.length > 0
       ? c.workspace.active_goal_ids
@@ -304,7 +309,10 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
     : orig.active_goal_ids
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
-  const draftMaxContextOverride = normalizeMaxContextOverrideDraft(draft.max_context_override)
+  const draftMaxContextOverride = normalizeMaxContextOverrideDraft(
+    draft.max_context_override,
+    orig.limits.max_context_override_tokens,
+  )
   if (draftMaxContextOverride !== (orig.max_context_override ?? 0)) {
     payload.max_context_override = draftMaxContextOverride > 0 ? draftMaxContextOverride : null
   }
@@ -853,6 +861,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const dirtyFlags = rd ? computeRuntimeDirtyFlags(rd, c) : {}
 
   const runtimeHasChanges = rd ? Object.keys(buildRuntimePayload(rd, c)).length > 0 : false
+  const maxContextOverrideTokens = c.limits.max_context_override_tokens ?? undefined
   const runtimeOptions = rd
     ? dedupeStrings([
         rd.runtime_id,
@@ -1102,8 +1111,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ]} />
       ${rd ? html`
         <${InlineNumberRow} label="컨텍스트 오버라이드" value=${rd.max_context_override}
-          onChange=${(v: number) => updateRuntimeDraft('max_context_override', normalizeMaxContextOverrideDraft(v))}
-          min=${0} max=${MAX_CONTEXT_OVERRIDE_TOKENS} step=${1000} suffix="tok"
+          onChange=${(v: number) => updateRuntimeDraft('max_context_override', normalizeMaxContextOverrideDraft(v, c.limits.max_context_override_tokens))}
+          min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
           dirty=${dirtyFlags.max_context_override} />
       ` : c.max_context_override != null ? html`
         <${ConfigRow} label="컨텍스트 오버라이드" value=${formatTokens(c.max_context_override)} />
@@ -1140,7 +1149,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         dirty=${dirtyFlags.compaction_message_gate} />
       <${InlineNumberRow} label="토큰 게이트" value=${rd.compaction_token_gate}
         onChange=${(v: number) => updateRuntimeDraft('compaction_token_gate', v)}
-        min=${0} max=${1000000} step=${1000} suffix="tok"
+        min=${0} max=${maxContextOverrideTokens} step=${1000} suffix="tok"
         dirty=${dirtyFlags.compaction_token_gate} />
       <${InlineNumberRow} label="쿨다운 (초)" value=${rd.compaction_cooldown_sec}
         onChange=${(v: number) => updateRuntimeDraft('compaction_cooldown_sec', v)}

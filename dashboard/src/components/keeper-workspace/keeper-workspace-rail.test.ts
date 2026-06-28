@@ -409,6 +409,33 @@ describe('KeeperWorkspaceRail', () => {
     expect(diagnostics.textContent).toContain('unknown event: "memory_injected"')
     expect(diagnostics.textContent).toContain('limit')
     expect(container.textContent).toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
+    expect(container.textContent).toContain('api_count=0 · decoded=0')
+  })
+
+  it('distinguishes empty durable compaction results from decoded schema drift', async () => {
+    vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
+      schema: 'keeper.compaction_snapshots.v1',
+      keeper: 'masc-improver',
+      source: 'runtime_manifest|keeper_meta',
+      producer: 'keeper_runtime_manifest|keeper_meta_store',
+      limit: 25,
+      count: 2,
+      read_error_count: 0,
+      read_errors: [],
+      scan_truncated: false,
+      items: [],
+    })
+
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
+      el => el.textContent?.includes('before/after'),
+    ) as HTMLElement | undefined
+    expect(btn).toBeTruthy()
+    fireEvent.click(btn as HTMLElement)
+
+    await waitFor(() => expect(container.textContent).toContain('API는 masc-improver snapshot 2건을 보고'))
+    expect(container.textContent).toContain('api_count=2 · decoded=0')
+    expect(container.textContent).toContain('source=runtime_manifest|keeper_meta')
   })
 
   it('keeps newly recorded optimistic compactions above older durable snapshots', () => {

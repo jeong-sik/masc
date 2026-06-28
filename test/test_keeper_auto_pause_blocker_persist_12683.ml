@@ -374,7 +374,146 @@ let test_direct_success_clears_no_progress_pause () =
            entry.Masc.Keeper_registry.meta.paused;
          (match entry.Masc.Keeper_registry.last_failure_reason with
           | None -> ()
-          | Some _ -> fail "expected direct success to clear no_progress failure reason")
+         | Some _ -> fail "expected direct success to clear no_progress failure reason")
+       | None -> fail "expected registered keeper")
+
+let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-no-progress-direct-success-overwrite-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
+      Masc.Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "no-progress-direct-success-overwrite" in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"timeout overwritten no-progress blocker"
+           Keeper_meta_contract.Turn_timeout
+       in
+       let meta =
+         { (make_meta keeper_name
+            |> Keeper_meta_contract.map_runtime (fun rt ->
+              { rt with last_blocker = Some blocker }))
+           with
+           paused = true
+         }
+       in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       ignore
+         (Masc.Keeper_no_progress_loop_detector.record_turn
+            ~threshold_override:1
+            ~keeper_name
+            ~made_progress:false
+            ());
+       Masc.Keeper_registry.set_failure_reason
+         ~base_path:config.base_path
+         keeper_name
+         (Some
+            (Masc.Keeper_registry.Provider_runtime_error
+               { code = Masc.Keeper_unified_turn_no_progress.failure_reason_code
+               ; detail = "latched"
+               ; provider_id = None
+               ; http_status = None
+               ; runtime_id = None
+               ; reason = None
+               }));
+       let recovered_meta =
+         Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
+           ~config
+           ~pre_turn_meta:meta
+           meta
+       in
+       check bool
+         "direct success resumes no-progress pause after blocker overwrite"
+         false
+         recovered_meta.paused;
+       check bool
+         "detector reset after blocker overwrite"
+         false
+         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       (match recovered_meta.runtime.last_blocker with
+        | Some { Keeper_meta_contract.klass = Turn_timeout; detail } ->
+          check string "non-no-progress blocker preserved" blocker.detail detail
+        | Some _ -> fail "expected overwritten Turn_timeout blocker to remain"
+        | None -> fail "expected non-no-progress blocker to remain");
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool
+           "registry meta resumed after blocker overwrite"
+           false
+           entry.Masc.Keeper_registry.meta.paused;
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | None -> ()
+          | Some _ -> fail "expected overwritten no-progress failure reason to clear")
+       | None -> fail "expected registered keeper")
+
+let test_direct_success_leaves_unrelated_pause_intact () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-no-progress-direct-success-unrelated-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
+      Masc.Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "no-progress-direct-success-unrelated" in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"ordinary timeout pause"
+           Keeper_meta_contract.Turn_timeout
+       in
+       let meta =
+         { (make_meta keeper_name
+            |> Keeper_meta_contract.map_runtime (fun rt ->
+              { rt with last_blocker = Some blocker }))
+           with
+           paused = true
+         ; auto_resume_after_sec = Some 60.0
+         }
+       in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let recovered_meta =
+         Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
+           ~config
+           ~pre_turn_meta:meta
+           meta
+       in
+       check bool "unrelated pause stays paused" true recovered_meta.paused;
+       check
+         (option (float 0.001))
+         "unrelated auto-resume stays intact"
+         (Some 60.0)
+         recovered_meta.auto_resume_after_sec;
+       check bool
+         "detector remains unlatched for unrelated pause"
+         false
+         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       (match recovered_meta.runtime.last_blocker with
+        | Some { Keeper_meta_contract.klass = Turn_timeout; detail } ->
+          check string "unrelated blocker preserved" blocker.detail detail
+        | Some _ -> fail "expected unrelated Turn_timeout blocker to remain"
+        | None -> fail "expected unrelated blocker to remain");
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool
+           "registry meta remains paused"
+           true
+           entry.Masc.Keeper_registry.meta.paused;
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | None -> ()
+          | Some _ -> fail "expected no unrelated failure reason")
        | None -> fail "expected registered keeper")
 
 let test_idle_detected_repeated_failure_pauses_keeper () =
@@ -491,6 +630,12 @@ let () =
             test_wakeup_directive_persists_no_progress_meta_clear;
           test_case "direct success clears no-progress pause" `Quick
             test_direct_success_clears_no_progress_pause;
+          test_case
+            "direct success clears no-progress pause after blocker overwrite"
+            `Quick
+            test_direct_success_clears_no_progress_pause_after_blocker_overwrite;
+          test_case "direct success leaves unrelated pause intact" `Quick
+            test_direct_success_leaves_unrelated_pause_intact;
         ] );
       ( "idle-detected loop",
         [

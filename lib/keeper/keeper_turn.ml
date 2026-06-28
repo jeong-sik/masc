@@ -89,15 +89,70 @@ let has_no_progress_loop_blocker (meta : keeper_meta) =
   | Some { klass = No_progress_loop; _ } -> true
   | _ -> false
 
+let is_no_progress_failure_reason = function
+  | Some (Keeper_registry.Provider_runtime_error { code; _ }) ->
+    String.equal code Keeper_unified_turn_no_progress.failure_reason_code
+  | _ -> false
+
+let has_no_progress_failure_reason ~base_path keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some { Keeper_registry.last_failure_reason; _ } ->
+    is_no_progress_failure_reason last_failure_reason
+  | _ -> false
+
+let has_direct_success_no_progress_pause ~(config : Workspace.config)
+    (meta : keeper_meta) =
+  meta.paused
+  && (has_no_progress_loop_blocker meta
+      || Keeper_no_progress_loop_detector.is_latched ~keeper_name:meta.name
+      || has_no_progress_failure_reason ~base_path:config.base_path meta.name)
+
+let persist_direct_success_no_progress_resume ~base_path (resumed_meta : keeper_meta) =
+  match
+    Keeper_registry.update_entry
+      ~base_path
+      resumed_meta.name
+      (fun entry ->
+        let last_failure_reason =
+          if is_no_progress_failure_reason entry.last_failure_reason
+          then None
+          else entry.last_failure_reason
+        in
+        { entry with
+          meta = resumed_meta
+        ; last_failure_reason
+        ; turn_consecutive_failures = 0
+        })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: direct keeper_msg success could not persist no_progress resume state: %s"
+      resumed_meta.name
+      (Keeper_registry.registry_entry_validation_error_to_string err)
+
 let clear_direct_success_no_progress_pause
       ~(config : Workspace.config)
       ~(pre_turn_meta : keeper_meta)
       (meta : keeper_meta)
   : keeper_meta
   =
-  if not (pre_turn_meta.paused && has_no_progress_loop_blocker pre_turn_meta)
+  if not (has_direct_success_no_progress_pause ~config pre_turn_meta)
   then meta
-  else (
+  else
+    match
+      Keeper_registry.dispatch_event_and_log
+        ~base_path:config.base_path
+        meta.name
+        Keeper_state_machine.Operator_resume
+    with
+    | Error err ->
+      Log.Keeper.warn
+        "%s: direct keeper_msg success could not dispatch Operator_resume after no_progress recovery signal: %s"
+        meta.name
+        (Keeper_state_machine.transition_error_to_string err);
+      meta
+    | Ok _ ->
     let cleared_meta =
       Keeper_unified_turn_no_progress.clear_for_operator_resume
         ~base_path:config.base_path
@@ -110,25 +165,17 @@ let clear_direct_success_no_progress_pause
       ; updated_at = now_iso ()
       }
     in
-    Keeper_registry.update_meta
+    persist_direct_success_no_progress_resume
       ~base_path:config.base_path
-      resumed_meta.name
       resumed_meta;
-    Keeper_registry.reset_turn_failures
-      ~base_path:config.base_path
-      resumed_meta.name;
     Keeper_turn_livelock.reset_keeper_livelock
       ~base_path:config.base_path
       ~keeper:resumed_meta.name;
     Keeper_livelock_state.reset_for_keeper ~keeper:resumed_meta.name;
-    Keeper_registry.dispatch_event_unit
-      ~base_path:config.base_path
-      resumed_meta.name
-      Keeper_state_machine.Operator_resume;
     Log.Keeper.info
       "%s: direct keeper_msg success cleared no_progress pause/blocker"
       resumed_meta.name;
-    resumed_meta)
+    resumed_meta
 
 let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =

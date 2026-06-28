@@ -75,7 +75,7 @@ type SurfaceSectionId =
   | 'moderation'     // Board moderation queue and actions
   | 'planning'       // Phase 1: absorbs goals
   | 'repositories'   // Multi-repository cockpit and keeper access mapping
-  | 'verification'   // CDAL follow-up (#7531): Mission detail verification table
+  | 'verification'   // Contract follow-up (#7531): Mission detail verification table
   // lab
   | 'tools'
   | 'harness'

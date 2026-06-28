@@ -632,8 +632,8 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
     const status = typeof detail.status === 'string' ? detail.status : 'unknown'
     const blockingGaps = stringArrayField(detail.blocking_gap_artifacts)
     const summary = blockingGaps.length > 0
-      ? `CDAL ${status} · gaps ${blockingGaps.join(', ')}`
-      : `CDAL ${status}`
+      ? `Contract verdict ${status} · gaps ${blockingGaps.join(', ')}`
+      : `Contract verdict ${status}`
     return {
       id: `tl-${ts}-${evt.type}-${index}`,
       ts,
@@ -649,10 +649,10 @@ function timelineEventToTrace(evt: AgentTimelineEvent, index: number): UnifiedTr
     const tripwires = stringArrayField(detail.review_tripwires)
     const gaps = stringArrayField(detail.evidence_gap_artifacts)
     const summary = tripwires.length > 0
-      ? `CDAL friction · ${tripwires.join(', ')}`
+      ? `Contract friction · ${tripwires.join(', ')}`
       : gaps.length > 0
-        ? `CDAL friction · gaps ${gaps.join(', ')}`
-        : 'CDAL friction'
+        ? `Contract friction · gaps ${gaps.join(', ')}`
+        : 'Contract friction'
     return {
       id: `tl-${ts}-${evt.type}-${index}`,
       ts,

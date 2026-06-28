@@ -607,10 +607,10 @@ let test_no_progress_recovery_reaction_clears_pending () =
     (reacted_summary |> member "turn_started_count" |> to_int)
 ;;
 
-let test_no_progress_recovery_later_reaction_clears_pending () =
+let test_no_progress_recovery_unrelated_reaction_does_not_clear_pending () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
-  let keeper_name = "no-progress-later-reaction-keeper" in
+  let keeper_name = "no-progress-unrelated-reaction-keeper" in
   let stimulus = no_progress_recovery_stimulus ~keeper_name () in
   Keeper_reaction_ledger.record_event_queue_stimulus
     ~base_path
@@ -644,18 +644,22 @@ let test_no_progress_recovery_later_reaction_clears_pending () =
     ~terminal_reason_code:"completed"
     ~receipt_json
     ();
-  let reacted_summary =
+  let unrelated_reaction_summary =
     Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
   in
-  check_member_string "later reaction recovery summary status" "ok" "status" reacted_summary;
-  check bool "later reaction recovery needs no operator action" false
-    (reacted_summary |> member "operator_action_required" |> to_bool);
-  check int "later reaction clears recovery stimulus" 0
-    (reacted_summary |> member "pending_stimulus_count" |> to_int);
-  check int "later reaction clears no-progress recovery kind" 0
-    (reacted_summary |> member "pending_no_progress_recovery_count" |> to_int);
-  check int "execution receipt reaction counted" 1
-    (reacted_summary |> member "execution_receipt_count" |> to_int)
+  check_member_string
+    "unrelated reaction recovery summary remains degraded"
+    "degraded"
+    "status"
+    unrelated_reaction_summary;
+  check bool "unrelated reaction recovery still needs operator action" true
+    (unrelated_reaction_summary |> member "operator_action_required" |> to_bool);
+  check int "unrelated reaction leaves recovery stimulus pending" 1
+    (unrelated_reaction_summary |> member "pending_stimulus_count" |> to_int);
+  check int "unrelated reaction leaves no-progress recovery kind pending" 1
+    (unrelated_reaction_summary |> member "pending_no_progress_recovery_count" |> to_int);
+  check int "execution receipt reaction still counted" 1
+    (unrelated_reaction_summary |> member "execution_receipt_count" |> to_int)
 ;;
 
 let test_no_progress_recovery_cursor_ack_does_not_clear_pending () =
@@ -922,9 +926,9 @@ let () =
             `Quick
             test_no_progress_recovery_reaction_clears_pending
         ; test_case
-            "later keeper reaction clears no-progress recovery pending"
+            "unrelated keeper reaction does not clear no-progress recovery pending"
             `Quick
-            test_no_progress_recovery_later_reaction_clears_pending
+            test_no_progress_recovery_unrelated_reaction_does_not_clear_pending
         ; test_case
             "cursor ack alone does not clear no-progress recovery pending"
             `Quick

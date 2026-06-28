@@ -529,10 +529,10 @@ let summarize_rows ~keeper_name ~limit rows =
   let stimulus_seen = Hashtbl.create 16 in
   let stimulus_kind_by_id = Hashtbl.create 16 in
   let stimulus_recorded_at_by_id = Hashtbl.create 16 in
+  let reaction_recorded_at_by_id = Hashtbl.create 16 in
   let board_stimulus_tokens = Hashtbl.create 16 in
   let stimulus_order = ref [] in
   let latest_board_cursor = ref None in
-  let latest_reaction_at = ref None in
   let cursor_swept_stimulus_count = ref 0 in
   let legacy_cursor_swept_stimulus_count = ref 0 in
   let remember_stimulus stimulus_id =
@@ -572,12 +572,12 @@ let summarize_rows ~keeper_name ~limit rows =
      | _ -> latest_board_cursor := Some cursor_token);
     mark_board_cursor_swept cursor_token
   in
-  let note_reaction_time = function
+  let note_reaction_time stimulus_id = function
     | None -> ()
     | Some value ->
-      (match !latest_reaction_at with
+      (match Hashtbl.find_opt reaction_recorded_at_by_id stimulus_id with
        | Some latest when latest >= value -> ()
-       | _ -> latest_reaction_at := Some value)
+       | _ -> Hashtbl.replace reaction_recorded_at_by_id stimulus_id value)
   in
   let remember_board_stimulus row stimulus_id =
     match board_stimulus_token row with
@@ -686,7 +686,7 @@ let summarize_rows ~keeper_name ~limit rows =
         remember_board_stimulus row id
       | Some "reaction", Some id ->
         incr reaction_count;
-        note_reaction_time (float_field "recorded_at_unix" row);
+        note_reaction_time id (float_field "recorded_at_unix" row);
         note_reaction_kind (nested_string_field "reaction" "kind" row);
         note_completion_contract_attention row;
         mark_reacted id
@@ -702,7 +702,6 @@ let summarize_rows ~keeper_name ~limit rows =
          | None -> ())
       | Some "reaction", None ->
         incr reaction_count;
-        note_reaction_time (float_field "recorded_at_unix" row);
         note_reaction_kind (nested_string_field "reaction" "kind" row);
         note_completion_contract_attention row
       | Some "cursor_ack", None ->
@@ -723,7 +722,7 @@ let summarize_rows ~keeper_name ~limit rows =
          stimulus_kind_of_string raw_kind,
          Hashtbl.find_opt stimulus_seen id,
          Hashtbl.find_opt stimulus_recorded_at_by_id id,
-         !latest_reaction_at
+         Hashtbl.find_opt reaction_recorded_at_by_id id
        with
        | Some No_progress_recovery, Some false, Some stimulus_ts, Some reaction_ts
          when reaction_ts >= stimulus_ts ->

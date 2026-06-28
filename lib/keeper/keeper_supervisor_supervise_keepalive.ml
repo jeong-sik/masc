@@ -52,7 +52,10 @@ let supervise_keepalive
   else
     match Keeper_registry.spawn_slots_decision () with
     | Error reason ->
-      Keeper_registry.record_spawn_slot_denied ~keeper_name:meta.name ~surface:"supervisor" reason;
+      Keeper_registry.record_spawn_slot_denied
+        ~keeper_name:meta.name
+        ~surface:"supervisor"
+        reason;
       publish_lifecycle
         ~event:
           (Keeper_lifecycle_events.Custom_event

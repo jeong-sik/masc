@@ -233,6 +233,24 @@ let of_wire wire =
         | None -> Unknown { raw_error = other }))
 ;;
 
+let legacy_simple_turn_budget_exhausted wire =
+  match chop_prefix ~prefix:"turn_budget_exhausted:" wire with
+  | None -> false
+  | Some counts ->
+    (match String.split_on_char '/' counts with
+     | [ used; limit ] ->
+       Option.is_some (int_of_string_opt used)
+       && Option.is_some (int_of_string_opt limit)
+     | _ -> false)
+;;
+
+let is_turn_budget_exhausted_wire wire =
+  let wire = String.lowercase_ascii (String.trim wire) in
+  match of_wire wire with
+  | Turn_budget_exhausted _ -> true
+  | _ -> legacy_simple_turn_budget_exhausted wire
+;;
+
 let equal a b =
   match a, b with
   | Success, Success

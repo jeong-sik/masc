@@ -652,6 +652,74 @@ let test_runtime_toml_reserves_web_search_namespace () =
     check (option string) "default runtime" (Some "local.sample")
       cfg.Runtime_schema.default_runtime_id
 
+let test_runtime_toml_rejects_unknown_runtime_key () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     defualt = \"local.typo\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "unknown [runtime] key should fail parse"
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    check bool "error mentions runtime.defualt" true
+      (String_util.contains_substring rendered "runtime.defualt");
+    check bool "error explains unknown runtime key" true
+      (String_util.contains_substring rendered "unknown [runtime] key")
+
+let test_runtime_toml_allows_runtime_profile_tables () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     \n\
+     [runtime.primary_profile]\n\
+     members = [\"local.sample\"]\n\
+     tiers = [\"primary_profile\"]\n\
+     \n\
+     [runtime.secondary_profile]\n\
+     members = [\"local.sample\"]\n\
+     tiers = [\"secondary_profile\"]\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should allow [runtime.<profile>] tables:\n%s" rendered
+  | Ok cfg ->
+    check (option string) "default runtime" (Some "local.sample")
+      cfg.Runtime_schema.default_runtime_id;
+    check int "profile tables are not provider bindings" 1
+      (List.length cfg.Runtime_schema.bindings)
+
 (** The runtime singletons were migrated from plain [ref]s to [Atomic.t] so
     that reads from worker domains on OCaml 5 see published writes.  This test
     exercises the public getter surface after [init_default] to ensure the
@@ -976,6 +1044,10 @@ let () =
             `Quick test_toml_catalog_resolves_web_search_keys;
           test_case "web_search is a reserved runtime TOML namespace" `Quick
             test_runtime_toml_reserves_web_search_namespace;
+          test_case "runtime table rejects unknown keys" `Quick
+            test_runtime_toml_rejects_unknown_runtime_key;
+          test_case "runtime table allows profile tables" `Quick
+            test_runtime_toml_allows_runtime_profile_tables;
           test_case "atomic runtime getters are consistent after init" `Quick
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick

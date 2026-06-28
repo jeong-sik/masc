@@ -348,7 +348,7 @@ let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_a
 
 let composite_execution_passive_only_without_work_scope execution =
   match completion_contract_result_of_execution execution with
-  | Some Contract_passive_only ->
+  | Some Completion_contract_result.Passive_only ->
     Option.is_none (json_string "current_task_id" execution)
     && Json_util.json_string_list_member "goal_ids" execution = []
   | Some _ | None -> false
@@ -356,7 +356,7 @@ let composite_execution_passive_only_without_work_scope execution =
 
 let composite_execution_completion_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
-  | Some Contract_passive_only
+  | Some Completion_contract_result.Passive_only
     when composite_execution_passive_only_without_work_scope execution ->
     None
   | Some
@@ -371,7 +371,7 @@ let composite_execution_completion_unsatisfied_reason execution =
 
 let composite_execution_budget_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
-  | Some Contract_passive_only
+  | Some Completion_contract_result.Passive_only
     when composite_execution_passive_only_without_work_scope execution ->
     None
   | Some

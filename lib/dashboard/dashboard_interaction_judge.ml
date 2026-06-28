@@ -45,6 +45,7 @@ type runtime_snapshot = {
 
 type state = {
   mu : Eio.Mutex.t;
+  mutable started : bool;
   mutable snapshot : runtime_snapshot;
   mutable last_json : Yojson.Safe.t;
 }
@@ -60,6 +61,7 @@ let get_state base_path =
           let s =
             {
               mu = Eio.Mutex.create ();
+              started = false;
               snapshot = {
                 enabled = true;
                 judge_online = false;
@@ -96,7 +98,12 @@ let prompt_for_facts facts_json =
   let template =
     In_channel.with_open_text "config/prompts/dashboard_interaction_judge.md" In_channel.input_all
   in
-  Printf.sprintf "%s\n\nFacts:\n%s" template facts_str
+  (* template 은 facts 자리에 단일 %s placeholder(L2)를 가진다. 이전 코드는
+     [Printf.sprintf "%s\n\nFacts:\n%s" template facts_str] 였는데 template 이
+     format string 이 아니라 *인자*라 template 내부의 %s 가 치환되지 않은 채
+     LLM 에게 literal "%s" 로 전달되었다(schema 위반의 근본 원인). template 의
+     %s 자리에 facts 를 직접 치환한다 — template 에 % 는 이 하나뿐(grep 확인). *)
+  Printf.sprintf template facts_str
 
 let compute_judgments ~build_facts =
   let runtime_id = Runtime.get_default_runtime_id () in
@@ -150,13 +157,25 @@ let refresh_once st build_facts =
 
 let start ~sw ~clock ~base_path ~build_facts =
   let st = get_state base_path in
-  Eio.Fiber.fork ~sw (fun () ->
-    let rec loop () =
-      Eio.Fiber.check ();
-      Eio.Time.sleep clock 60.0; (* We will use 60s, earlier the reviewer mentioned 10s polling LLM cost. The reviewer said: "10s polling + LLM cost. setInterval(fetchJudge, 10000) re-runs the judge every 10s". Ah, the frontend polls every 10s, but the backend loop here was 600s! 600s is 10 min. Wait, I will keep backend loop 600s. *)
+  (* Idempotency: 같은 base_path 에 start 가 두 번 호출되면 두 fiber 가 동시에
+     폴링하며 LLM 을 중복 청구한다(operator_judge 의 started 플래그 패턴). st.mu
+     안에서 started CAS 로 한 번만 fork_daemon 한다(crash 복구에 유리). *)
+  let should_start =
+    Eio_guard.with_mutex st.mu (fun () ->
+      if st.started then false else (st.started <- true; true))
+  in
+  if should_start then begin
+    (* switch 종료 시 state 를 정리해 module-level Hashtbl 이 무한 성장하지 않게.
+       remove 도 outer_mu 안에서 get_state 와 직렬화한다. *)
+    Eio.Switch.on_release sw (fun () ->
+      Eio_guard.with_mutex outer_mu (fun () -> Hashtbl.remove states base_path));
+    Eio.Fiber.fork_daemon ~sw (fun () ->
+      let rec loop () =
+        Eio.Fiber.check ();
+        Eio.Time.sleep clock 60.0;
+        refresh_once st build_facts;
+        loop ()
+      in
       refresh_once st build_facts;
-      loop ()
-    in
-    refresh_once st build_facts;
-    loop ()
-  )
+      loop ())
+  end

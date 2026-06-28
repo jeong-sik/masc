@@ -417,9 +417,9 @@ let execution_turn_budget_disposition_of_reason reason =
 ;;
 
 let composite_execution_turn_budget_exhausted execution =
-  match execution_turn_budget_disposition execution with
-  | Some (Keeper_turn_disposition.Turn_budget_exhausted _) -> true
-  | Some _ | None -> false
+  match json_string "terminal_reason_code" execution with
+  | Some raw -> Keeper_turn_disposition.is_turn_budget_exhausted_wire raw
+  | None -> false
 ;;
 
 let composite_execution_budget_exhausted_pass execution =
@@ -430,6 +430,7 @@ let composite_execution_budget_exhausted_pass execution =
   match execution_turn_budget_disposition_of_reason
           (lower_string_opt (json_string "operator_disposition_reason" execution)) with
   | None -> true
+  | Some Keeper_turn_disposition.Success -> true
   | Some (Keeper_turn_disposition.Turn_budget_exhausted _) -> true
   | Some Keeper_turn_disposition.Unknown _ -> true
   | Some _ -> false

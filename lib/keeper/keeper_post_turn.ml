@@ -95,6 +95,7 @@ type overflow_retry_recovery = {
 
 let invalid_snapshot_goal_log_dedupe_limit = 512
 let invalid_snapshot_goal_log_dedupe : (string, unit) Hashtbl.t = Hashtbl.create 64
+let invalid_snapshot_goal_log_dedupe_mutex = Stdlib.Mutex.create ()
 
 let short_digest text =
   let hex = Digest.string text |> Digest.to_hex in
@@ -107,14 +108,15 @@ let invalid_snapshot_goal_dedupe_key ~keeper_name ~goal_id =
 
 let should_log_invalid_snapshot_goal ~keeper_name ~goal_id =
   let key = invalid_snapshot_goal_dedupe_key ~keeper_name ~goal_id in
-  if Hashtbl.mem invalid_snapshot_goal_log_dedupe key
-  then false
-  else (
-    if Hashtbl.length invalid_snapshot_goal_log_dedupe
-       >= invalid_snapshot_goal_log_dedupe_limit
-    then Hashtbl.clear invalid_snapshot_goal_log_dedupe;
-    Hashtbl.add invalid_snapshot_goal_log_dedupe key ();
-    true)
+  Stdlib.Mutex.protect invalid_snapshot_goal_log_dedupe_mutex (fun () ->
+    if Hashtbl.mem invalid_snapshot_goal_log_dedupe key
+    then false
+    else (
+      if Hashtbl.length invalid_snapshot_goal_log_dedupe
+         >= invalid_snapshot_goal_log_dedupe_limit
+      then Hashtbl.clear invalid_snapshot_goal_log_dedupe;
+      Hashtbl.add invalid_snapshot_goal_log_dedupe key ();
+      true))
 
 let invalid_snapshot_goal_warning_message ~keeper_name ~goal_id =
   Printf.sprintf
@@ -995,5 +997,6 @@ module For_testing = struct
   let should_log_invalid_snapshot_goal = should_log_invalid_snapshot_goal
 
   let reset_invalid_snapshot_goal_log_dedupe () =
-    Hashtbl.clear invalid_snapshot_goal_log_dedupe
+    Stdlib.Mutex.protect invalid_snapshot_goal_log_dedupe_mutex (fun () ->
+      Hashtbl.clear invalid_snapshot_goal_log_dedupe)
 end

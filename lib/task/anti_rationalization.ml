@@ -5,9 +5,10 @@
 
     Gate ordering:
     1. Empty/trivially-short notes  → immediate Reject (no LLM needed)
-    2. Known excuse pattern match   → Reject with pattern name
-    3. LLM review (runtime:verifier) → APPROVE / REJECT
-    4. LLM unavailable              → Approve (liveness > correctness)
+    2. Known excuse pattern match   → advisory or configured Reject
+    3. Completion contract          → local or LLM-assisted Reject
+    4. LLM review (runtime:verifier) → APPROVE / REJECT
+    5. LLM unavailable              → configured fail-open/fail-closed policy
 
     @since v2.145.0 *)
 
@@ -28,6 +29,15 @@ type review_request =
 type verdict =
   | Approve
   | Reject of string
+
+type verdict_parse_error =
+  | Empty_review_output
+  | Unrecognized_review_format of string
+
+let verdict_parse_error_to_string = function
+  | Empty_review_output -> "empty review output"
+  | Unrecognized_review_format msg -> msg
+;;
 
 type excuse_pattern_decision =
   | Terminal_reject
@@ -501,7 +511,7 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
 (** Parse "APPROVE" or "REJECT: reason" from model text output.
     Returns Result instead of bare verdict to avoid silent degradation.
     ADR D3: unknown format returns Error, NOT a permissive default. *)
-let parse_verdict (text : string) : (verdict, string) result =
+let parse_verdict_typed (text : string) : (verdict, verdict_parse_error) result =
   let trimmed = String.trim text in
   let upper = String.uppercase_ascii trimmed in
   
@@ -543,13 +553,20 @@ let parse_verdict (text : string) : (verdict, string) result =
   | None ->
     (* No keyword found - check if text is empty *)
     if String.length trimmed = 0
-    then Error "empty review output"
+    then Error Empty_review_output
     else
       Error
-        (sprintf
-           "unrecognized review format: %s"
-           (String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed
-            |> String_util.to_string))
+        (Unrecognized_review_format
+           (sprintf
+              "unrecognized review format: %s"
+              (String_util.utf8_safe ~max_bytes:83 ~suffix:"..." trimmed
+               |> String_util.to_string)))
+;;
+
+let parse_verdict (text : string) : (verdict, string) result =
+  match parse_verdict_typed text with
+  | Ok v -> Ok v
+  | Error err -> Error (verdict_parse_error_to_string err)
 ;;
 
 (* ================================================================ *)
@@ -569,10 +586,9 @@ let parse_verdict (text : string) : (verdict, string) result =
 
    Prefer [\[runtime\].cross_verifier] when set: the evaluator requests a JSON
    structured verdict, so it must run on a JSON-capable model independent of the
-   fleet default. When the default runtime cannot emit JSON the evaluator returns
-   empty and the gate approves by liveness (#8688); routing it explicitly keeps
-   the gate live and restores cross-model separation. [None] = inherit the global
-   default (legacy). *)
+   fleet default. When the default runtime cannot emit JSON the evaluator may
+   return empty output; routing it explicitly keeps the gate live and restores
+   cross-model separation. [None] = inherit the global default (legacy). *)
 let default_evaluator_runtime () =
   match (Atomic.get Workspace_hooks.get_cross_verifier_runtime_id_fn) () with
   | Some id -> id
@@ -785,26 +801,19 @@ let review
               | None ->
                 (* LLM responded with text — lenient fallback *)
                 task_info "[anti-rationalization] verdict via text fallback";
-                (match parse_verdict text with
+                (match parse_verdict_typed text with
                  | Ok v -> v, Llm_text_fallback, None
-                 | Error "empty review output" ->
-                   (* An evaluator that returns empty text is not producing
-                 unknown-format output (ADR D3 target); it is producing
-                 no signal, indistinguishable from an unavailable
-                 evaluator. Approve by liveness — same policy as the
-                 [Error err] branch below — instead of blaming the
-                 completing agent for an evaluator-side gap. Observed
-                 35 rejects in 2 days (#8688, <base-path>/.masc/tool_calls). *)
-                   task_warn
-                     "[anti-rationalization] evaluator returned empty text (approving by \
-                      liveness)";
-                   Approve, Fallback, Some "evaluator returned empty response"
-                 | Error parse_err ->
-                   (* ADR D3: parse failure is NOT silently approved.
-                 Use Reject instead of Approve for unknown format. *)
-                   task_warn
-                     "[anti-rationalization] verdict parse failed: %s (rejecting)"
-                     parse_err;
+                 | Error parse_error ->
+                   let parse_err = verdict_parse_error_to_string parse_error in
+                   (match parse_error with
+                    | Empty_review_output ->
+                      task_warn
+                        "[anti-rationalization] evaluator returned empty text \
+                         (rejecting)"
+                    | Unrecognized_review_format _ ->
+                      task_warn
+                        "[anti-rationalization] verdict parse failed: %s (rejecting)"
+                        parse_err);
                    ( Reject (sprintf "review format unrecognized: %s" parse_err)
                    , Format_reject
                    , Some parse_err ))

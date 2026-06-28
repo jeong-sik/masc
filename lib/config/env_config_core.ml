@@ -29,6 +29,36 @@ let raw_value_opt name =
     | Some _ as value -> value
     | None -> Config_boot_overrides.get_opt name
 
+(* [MASC_PARSE_WARN] governs strict mode below. Defined here (rather than with
+   the other env-key constants further down) so the malformed handler can see
+   it. *)
+let parse_warn_env_key = "MASC_PARSE_WARN"
+
+(* Strict mode: when [MASC_PARSE_WARN] is truthy a malformed env value becomes a
+   hard [Config_error] (fail-fast boot) instead of warn + default. Read with a
+   primitive truthy check rather than [get_bool] so a malformed value for this
+   very key cannot recurse back into [reject_malformed_env]. *)
+let parse_strict_mode () =
+  match raw_value_opt parse_warn_env_key with
+  | Some v ->
+    (match String.trim v |> String.lowercase_ascii with
+     | "true" | "1" | "yes" | "on" -> true
+     | _ -> false)
+  | None -> false
+
+(* A non-empty env value that does not parse to the expected type is an operator
+   misconfiguration, not a silent fallback. Loud by default: warn and use
+   [default]. [MASC_PARSE_WARN] escalates to [Config_error] for fail-fast boot.
+   The empty string is handled by each caller as "unset" (silent default) — an
+   empty env var is a common intentional no-op. *)
+let reject_malformed_env ~name ~raw ~type_name =
+  Log.Misc.warn "malformed env %s=%S (expected %s); using default" name raw
+    type_name;
+  if parse_strict_mode () then
+    raise
+      (Config_error
+         (Printf.sprintf "malformed env %s=%S (expected %s)" name raw type_name))
+
 (** Safe getters with defaults *)
 let get_string ~default name =
   match raw_value_opt name with
@@ -37,13 +67,27 @@ let get_string ~default name =
 
 let get_int ~default name =
   match raw_value_opt name with
-  | Some v -> Safe_ops.int_of_string_with_default ~default v
   | None -> default
+  | Some v ->
+    if String.trim v = "" then default
+    else (
+      match Safe_ops.int_of_string_safe v with
+      | Some n -> n
+      | None ->
+        reject_malformed_env ~name ~raw:v ~type_name:"int";
+        default)
 
 let get_float ~default name =
   match raw_value_opt name with
-  | Some v -> Safe_ops.float_of_string_with_default ~default v
   | None -> default
+  | Some v ->
+    if String.trim v = "" then default
+    else (
+      match Safe_ops.float_of_string_safe v with
+      | Some f -> f
+      | None ->
+        reject_malformed_env ~name ~raw:v ~type_name:"float";
+        default)
 
 (** Variants that floor at zero.  An operator who sets a negative
     value (e.g. [MASC_KEEPER_ALERT_MAX_RETRIES=-5]) gets the default
@@ -97,13 +141,15 @@ let get_ratio ~default name =
 
 let get_bool ~default name =
   match raw_value_opt name with
+  | None -> default
   | Some v ->
       (match String.trim v |> String.lowercase_ascii with
        | "true" | "1" | "yes" | "on" -> true
        | "false" | "0" | "no" | "off" -> false
        | "" -> default
-       | _ -> default)
-  | None -> default
+       | _ ->
+           reject_malformed_env ~name ~raw:v ~type_name:"bool";
+           default)
 
 let trim_opt = function
   | Some raw ->
@@ -499,7 +545,8 @@ let git_fetch_timeout_sec () =
 let log_level_env_key = "MASC_LOG_LEVEL"
 let log_routine_level_env_key = "MASC_LOG_ROUTINE_LEVEL"
 let telemetry_enabled_env_key = "MASC_TELEMETRY_ENABLED"
-let parse_warn_env_key = "MASC_PARSE_WARN"
+(* [parse_warn_env_key] is defined near the top of this module (next to the
+   malformed handler that consumes it). *)
 let governance_level_env_key = "MASC_GOVERNANCE_LEVEL"
 
 (** Log level string (e.g. "debug", "info", "warn", "error"). *)
@@ -510,9 +557,10 @@ let log_level_opt () =
 let telemetry_enabled () =
   get_bool ~default:true telemetry_enabled_env_key
 
-(** Whether to log parse warnings. Default: false. *)
-let parse_warn_enabled () =
-  get_bool ~default:false parse_warn_env_key
+(** Whether malformed env parses are escalated to a hard [Config_error]
+    (fail-fast boot) instead of a warn + default. Controlled by
+    [MASC_PARSE_WARN]. Default: false (warn + use default). *)
+let parse_warn_enabled () = parse_strict_mode ()
 
 (** Governance level. Set at runtime by server_runtime_bootstrap.
     Valid: "production", "development", etc. Default: "production". *)

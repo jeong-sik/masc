@@ -42,7 +42,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_LOG_LEVEL` | string_literal | n/a | n/a | 499 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_LOG_ROUTINE_LEVEL` | string_literal | n/a | n/a | 500 | SSOT for logging / observability env-var names (issue 8352). |
 | `MASC_ORCHESTRATOR_ENABLED` | string_literal | n/a | n/a | 443 | SSOT for the MASC_ORCHESTRATOR_ENABLED env-var name (issue 8352). Referenced by feature_flag_registry catalog, env_co... |
-| `MASC_PARSE_WARN` | typed:bool | unclassified | unclassified | 515 | Whether to log parse warnings. Default: false. |
+| `MASC_PARSE_WARN` | typed:bool | unclassified | unclassified | 563 | Whether malformed env parses fail fast. Default: false. |
 | `MASC_PERSONAS_DIR` | string_literal | n/a | n/a | 448 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
 | `MASC_PUBSUB_MAX_MESSAGES` | typed:int | unclassified | unclassified | 539 | PubSub max messages per read. Default: 1000. |
 | `MASC_RELAY_CALIBRATION_ENABLED` | typed:bool | unclassified | unclassified | 470 | Whether relay token calibration is enabled. Default: true. |

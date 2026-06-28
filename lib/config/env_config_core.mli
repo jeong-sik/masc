@@ -197,10 +197,17 @@ val git_fetch_timeout_sec : unit -> float
 val log_level_env_key : string
 val log_routine_level_env_key : string
 val telemetry_enabled_env_key : string
+
+(** [MASC_PARSE_WARN]. Malformed env values always warn; this flag escalates
+    them to a hard {!Config_error} (fail-fast boot). *)
 val parse_warn_env_key : string
+
 val governance_level_env_key : string
 val log_level_opt : unit -> string option
 val telemetry_enabled : unit -> bool
+
+(** Whether malformed env parses are escalated to {!Config_error} (fail-fast)
+    instead of warn + default. Controlled by [MASC_PARSE_WARN]. Default: false. *)
 val parse_warn_enabled : unit -> bool
 val governance_level : unit -> string
 val disable_hitl_env_key : string

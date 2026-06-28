@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.19.51)
+(version 0.19.52)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -55,13 +55,10 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.12 release. The release carries the semver
-  ;; repair of #2194's breaking change (#2207, default_config reverted to
-  ;; value), the call-time capability fallback (#2189), the one-shot HTTP
-  ;; client lifecycle bound to the caller switch (#2176), the otel
-  ;; module-load snapshot removal (#2200), and tool-concurrency + perf
-  ;; fixes (#2187, #2209).
-  (agent_sdk (>= 0.207.12))
+  ;; Pinned to OAS v0.207.14 release. The release includes the visible
+  ;; reasoning catalog surface, call-time default model resolution, and the
+  ;; hard removal of legacy provider compatibility shims.
+  (agent_sdk (>= 0.207.14))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

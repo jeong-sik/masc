@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.19.52] - 2026-06-29
+
+### Changed
+- Bump OAS agent_sdk pin to 0.207.14 release and bump masc version to 0.19.52.
+- Refresh the OAS API surface fingerprint for `main@25a59927ea61d1c2b77e35c66aabb512e839eaff`, including the legacy provider compatibility shim purge.
+
 ## [0.19.51] - 2026-06-28
 
 ### Changed

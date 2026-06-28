@@ -490,12 +490,13 @@ let source_entries_arg args =
        | _ -> None)
     | _ -> None
   in
-  match Option.value ~default:(`Null) (Json_util.assoc_member_opt "sources" args) with
-  | `List values ->
+  match Json_util.assoc_member_opt "sources" args with
+  | None | Some `Null -> None
+  | Some (`List values) ->
     (match List.filter_map source_entry values with
      | [] -> None
      | entries -> Some entries)
-  | `Assoc fields ->
+  | Some (`Assoc fields) ->
     (* Single Assoc sent instead of a List — wrap it. *)
     (match source_entry (`Assoc fields) with
      | Some entry ->
@@ -503,7 +504,7 @@ let source_entries_arg args =
          "source_entries_arg: wrapped single Assoc into List for sources";
        Some [ entry ]
      | None -> None)
-  | other ->
+  | Some other ->
     Log.BoardLog.warn
       "source_entries_arg: ignoring non-List/non-Object sources: %s"
       (Json_util.kind_name other);

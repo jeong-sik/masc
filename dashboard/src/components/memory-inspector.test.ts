@@ -180,6 +180,22 @@ function stubFetch(payload: unknown = turnRecordsPayload()) {
   return fetchMock
 }
 
+function abortablePendingResponse(init?: RequestInit): Promise<Response> {
+  return new Promise((_, reject) => {
+    const signal = init?.signal
+    const abort = () => {
+      const error = new Error('Aborted')
+      error.name = 'AbortError'
+      reject(error)
+    }
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
+}
+
 function turnRecordsPayloadWithEmptyFallbackFact() {
   const payload = turnRecordsPayload()
   const fact = {
@@ -340,15 +356,16 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(recallSection?.querySelector('.mem-disclosure')).toBeFalsy()
   })
 
-  it('surfaces read_errors and renders honest disclosures for the unbacked pin section', async () => {
+  it('surfaces read_errors and renders recall candidates without pin placeholders', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     // read_errors visible (no silent failure)
     expect(container.querySelector('.mem-read-error')?.textContent).toContain('one malformed row skipped')
-    // pins → Phase 2 disclosure, while the section still shows real recall candidates.
+    // The section shows real recall candidates without the old unbacked operator-pin disclosure.
     const disclosures = [...container.querySelectorAll('.mem-disclosure')].map(d => d.textContent ?? '')
-    expect(disclosures.some(t => t.includes('Phase 2'))).toBe(true)
+    expect(disclosures.some(t => t.includes('Phase 2'))).toBe(false)
+    expect(disclosures.some(t => t.includes('실제 prompt recall 후보 1/1개를 표시'))).toBe(true)
     expect(container.textContent).toContain('핵심 회상 후보')
     // no prototype fixture leakage
     expect(container.querySelector('.mem-pin')).toBeFalsy()
@@ -371,18 +388,53 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
 })
 
 describe('MemoryInspector — scope toggle', () => {
-  it('switches to the aggregate (전체) view showing the real roster + a deferral note', async () => {
-    stubFetch()
+  it('switches to the aggregate (전체) view and fetches real keeper memory rows', async () => {
+    const fetchMock = stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     const allBtn = [...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')
     expect(allBtn).toBeTruthy()
     fireEvent.click(allBtn!)
     expect(container.querySelector('.tid')?.textContent).toBe('전체 keeper')
-    // roster table = one row per default keeper (ids + status are real)
-    expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length).toBe(DEFAULT_MEMORY_KEEPERS.length)
-    // aggregate memory totals are deferred, disclosed — not fabricated
-    expect([...container.querySelectorAll('.mem-disclosure')].some(d => (d.textContent ?? '').includes('추후 연결'))).toBe(true)
+    await waitFor(() =>
+      expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length)
+        .toBe(DEFAULT_MEMORY_KEEPERS.length))
+    expect(fetchMock.mock.calls.some(call =>
+      String(call[0]).includes('/api/v1/keepers/nick0cave/turn-records?limit=12'))).toBe(true)
+    expect(container.textContent).toContain('전체 memory-os')
+    expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length}/${DEFAULT_MEMORY_KEEPERS.length} loaded`)
+    expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length}/18 recallable`)
+    expect(container.textContent).toContain('800B · trace-a#7')
+    expect([...container.querySelectorAll('.mem-disclosure')].some(d => (d.textContent ?? '').includes('읽기 전용 집계'))).toBe(true)
+    expect(container.textContent).not.toContain('추후 연결')
+  })
+
+  it('shows completed aggregate rows while one keeper request is still pending', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path.includes('/api/v1/keepers/drifter/turn-records?limit=12')) {
+        return abortablePendingResponse(init)
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(turnRecordsPayload()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    fireEvent.click([...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!)
+
+    await waitFor(() =>
+      expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length)
+        .toBe(DEFAULT_MEMORY_KEEPERS.length - 1))
+    expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length - 1}/${DEFAULT_MEMORY_KEEPERS.length} loaded`)
+    expect(container.textContent).toContain('전체 keeper memory-os 집계 불러오는 중')
+    expect([...container.querySelectorAll('.mem-td-id .mono')].map(cell => cell.textContent))
+      .not.toContain('drifter')
   })
 
   it('maps roster status to dot state run→ok / pause→idle / off→bad', async () => {
@@ -390,6 +442,9 @@ describe('MemoryInspector — scope toggle', () => {
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     fireEvent.click([...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!)
+    await waitFor(() =>
+      expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length)
+        .toBe(DEFAULT_MEMORY_KEEPERS.length))
     const dotClassFor = (id: string): string | undefined => {
       const row = [...container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)')].find(r =>
         (r.querySelector('.mem-td-id .mono')?.textContent ?? '') === id)

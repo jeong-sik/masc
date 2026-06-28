@@ -134,6 +134,14 @@ let remember_protocol_version_if_initialize_succeeded
 let is_known_session session_id =
   SMap.mem session_id (Atomic.get protocol_version_by_session)
 
+let ensure_sse_backing_session_for_known_transport_session
+    ~transport_session_id ~sse_session_id =
+  if is_known_session transport_session_id then
+    let (_ : Session.McpSessionStore.mcp_session) =
+      Session.McpSessionStore.get_or_create ~id:sse_session_id ()
+    in
+    ()
+
 let remember_mcp_profile ?otel_transport_context session_id profile =
   atomic_update mcp_profile_by_session (fun map -> SMap.add session_id profile map);
   if is_known_session session_id then

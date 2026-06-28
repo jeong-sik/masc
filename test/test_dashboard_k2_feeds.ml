@@ -20,26 +20,12 @@ let test_counter = ref 0
 
 let tmpdir prefix =
   incr test_counter;
-  let dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf
-         "%s_%d_%d_%d"
-         prefix
-         (Unix.getpid ())
-         !test_counter
-         (int_of_float (Unix.gettimeofday () *. 1000.0)))
-  in
-  (try Unix.mkdir dir 0o755 with
-   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  dir
+  Filename.temp_dir (Printf.sprintf "%s_%d_" prefix !test_counter) ""
 ;;
 
 let write_file path content =
   let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc content)
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc content)
 ;;
 
 let runtime_toml =

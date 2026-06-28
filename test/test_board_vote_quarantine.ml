@@ -52,6 +52,7 @@ let board_post_meta_drop_value () =
     ()
 
 let test_malformed_post_meta_json_counts_drop () =
+  Masc.Board_metric_hooks_adapter.install ();
   let before = board_post_meta_drop_value () in
   let json =
     `Assoc

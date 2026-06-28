@@ -1,7 +1,7 @@
 (** Keeper_turn_telemetry — post-turn observability logging.
 
     Extracted from keeper_agent_run.ml as part of #5732 god-module split.
-    CDAL proof / contract-verdict / friction logging helpers were removed
+    Contract-verification proof / contract-verdict / friction logging helpers were removed
     when verification collapsed to [Cdal_evidence_gate]; only memory-bank
     write logging remains. *)
 

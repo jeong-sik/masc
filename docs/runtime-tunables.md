@@ -28,7 +28,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_BUILD_GIT_COMMIT` | string_literal | n/a | n/a | 535 | Git commit hash override for build identity. |
 | `MASC_CLUSTER_NAME` | string_literal | n/a | n/a | 230 |  |
 | `MASC_CONFIG_DIR` | string_literal | n/a | n/a | 447 | SSOT for MASC_CONFIG_DIR / MASC_PERSONAS_DIR env-var names (issue 8352). Shared by snapshot catalog and docker worker... |
-| `MASC_DATA_DIR` | string_literal | n/a | n/a | 460 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for CDAL verdicts and ... |
+| `MASC_DATA_DIR` | string_literal | n/a | n/a | 460 | SSOT for the MASC_DATA_DIR env-var name (issue 8352). Overrides [<base_path>/data] as the root for contract verdicts ... |
 | `MASC_DISABLE_HITL` | typed:bool | Security | operator | 529 | Whether to disable HITL (human-in-the-loop) approval gates. Default: false. @category Security @ops_class operator |
 | `MASC_GIT_FETCH_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 494 | [git fetch origin] is network-bound and can stall behind a slow Docker bridge or a large remote. Default 120s gives e... |
 | `MASC_GOVERNANCE_LEVEL` | typed:string | unclassified | unclassified | 520 | Governance level. Set at runtime by server_runtime_bootstrap. Valid: "production", "development", etc. Default: "prod... |
@@ -227,7 +227,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_CANCELLATION_CLEANUP_SEC` | typed:float | unclassified | unclassified | 839 | Cancellation token cleanup interval (seconds). Default: 300 (5 min). |
 | `MASC_CANCELLATION_TOKEN_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 187 | Token cleanup max age (seconds) |
 | `MASC_CDAL_ENABLED` | feature_flag | n/a | n/a | 335 | Enable contract-driven proof capture. Default: true. |
-| `MASC_CDAL_GATE_ENABLED` | feature_flag | n/a | n/a | 339 | Block task completion when CDAL verdict is Violated/Inconclusive. Default: false. |
+| `MASC_CDAL_GATE_ENABLED` | feature_flag | n/a | n/a | 339 | Block task completion when contract verdict is Violated/Inconclusive. Default: false. |
 | `MASC_CDAL_VERDICT_LOOKUP_LIMIT` | typed:int | unclassified | unclassified | 346 | Max verdicts to scan when looking up the latest verdict by task_id. Beyond this limit, older entries are silently ski... |
 | `MASC_CLAIM_TTL_SECONDS` | typed:float | unclassified | unclassified | 96 | Maximum time a task can stay Claimed/InProgress without agent heartbeat before being auto-released back to Todo (seco... |
 | `MASC_DASHBOARD_CTX_COMPACTING` | typed:float | unclassified | unclassified | 674 |  |

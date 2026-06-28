@@ -1,6 +1,6 @@
 ; Content-addressed blob store for tool outputs.
 ;
-; Distinct from lib/cdal/artifact_store (CDAL evaluator results / verdicts):
+; Distinct from lib/cdal/artifact_store (contract evaluator results / verdicts):
 ;   - this store: SHA256-addressed bytes blobs, sharded by sha[0..1]
 ;   - cdal store: schema-driven JSON envelopes keyed by arbitrary id
 ;

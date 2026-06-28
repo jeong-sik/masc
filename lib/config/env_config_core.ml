@@ -455,7 +455,7 @@ let personas_dir_env_key = "MASC_PERSONAS_DIR"
    identifier strings, not as readers. *)
 
 (** SSOT for the MASC_DATA_DIR env-var name (issue 8352).
-    Overrides [<base_path>/data] as the root for CDAL verdicts and other
+    Overrides [<base_path>/data] as the root for contract verdicts and other
     runtime data stores. Read by cdal_verdict_gate and cdal_eval_v1. *)
 let data_dir_env_key = "MASC_DATA_DIR"
 

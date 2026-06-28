@@ -224,7 +224,7 @@ let run_argv_with_status_retry_eintr ?timeout_sec argv =
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox command"
           ~env:(Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
-          ~cwd:(Sys.getcwd ())
+          ~cwd:(Config_dir_resolver.current_working_dir ())
           argv
       in
       match st with
@@ -554,7 +554,7 @@ let run_argv_with_status_split_retry_eintr
       ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
         let raw_source = String.concat " " argv in
         let env = Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()) in
-        let cwd = Sys.getcwd () in
+        let cwd = Config_dir_resolver.current_working_dir () in
         match on_stdout_chunk, on_stderr_chunk with
         | None, None ->
           Masc_exec.Exec_gate.run_argv_with_status_split
@@ -597,7 +597,7 @@ let run_argv_with_stdin_and_status_retry_eintr ?timeout_sec ~stdin_content argv 
           ~raw_source:(String.concat " " argv)
           ~summary:"keeper turn sandbox stdin command"
           ~env:(Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
-          ~cwd:(Sys.getcwd ())
+          ~cwd:(Config_dir_resolver.current_working_dir ())
           ~stdin_content
           argv
       in
@@ -625,7 +625,7 @@ let run_argv_with_stdin_and_status_split_retry_eintr
       ~run_attempt:(fun ?on_stdout_chunk ?on_stderr_chunk () ->
         let raw_source = String.concat " " argv in
         let env = Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()) in
-        let cwd = Sys.getcwd () in
+        let cwd = Config_dir_resolver.current_working_dir () in
         Masc_exec.Exec_gate.run_argv_with_stdin_and_status_split
           ?timeout_sec
           ~actor:`System_sandbox
@@ -1058,7 +1058,10 @@ let run_exec_pipeline_with_status_once
           let cwd = Option.value stage_cwd ~default:cwd in
           let container_cwd = container_cwd_of_host t ~host_cwd:cwd in
           let argv = docker_exec_pipeline_argv t ~container_name ~container_cwd command_argv in
-          { Process_eio.argv; env = Some (Env_keeper_scrub.filter_environment_c_messages (Unix.environment ())); cwd = Some (Sys.getcwd ()) })
+          { Process_eio.argv
+          ; env = Some (Env_keeper_scrub.filter_environment_c_messages (Unix.environment ()))
+          ; cwd = Some (Config_dir_resolver.current_working_dir ())
+          })
         stages
     in
     Ok

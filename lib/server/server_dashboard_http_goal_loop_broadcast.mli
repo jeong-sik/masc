@@ -20,6 +20,14 @@ val goal_loop_broadcast_event_type : string
     [dashboard_slice_for_sse_type] bridge entry in [Server_mcp_transport_ws]
     that maps it onto the "goals" slice. *)
 
+val goal_loop_broadcast_interval_s : float
+(** Periodic refresh interval for the goal-loop status broadcast. *)
+
+val goal_loop_broadcast_timeout_s : float
+(** Per-refresh compute timeout. Must stay below
+    {!goal_loop_broadcast_interval_s} so {!Proactive_refresh.start} does not
+    clamp and warn on startup. *)
+
 val goal_loop_snapshot_event : Yojson.Safe.t -> Yojson.Safe.t
 (** [goal_loop_snapshot_event status] wraps [status] in the SSE envelope
     ([type] / [payload] / [ts_unix]) that {!broadcast_goal_loop_status} emits.

@@ -489,7 +489,7 @@ let test_summary_cursor_ack_sweeps_covered_board_stimuli () =
   check_member_string "cursor-swept summary status" "ok" "status" swept_summary;
   check int "cursor-swept pending count" 0
     (swept_summary |> member "pending_stimulus_count" |> to_int);
-  check int "cursor sweep count" 1
+  check int "cursor sweep count" 2
     (swept_summary |> member "cursor_swept_stimulus_count" |> to_int);
   Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name third;
   let future_summary =

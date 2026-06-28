@@ -613,14 +613,6 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           stop_sse_session session_id;
           if Option.is_some last_event_id then
             Transport_metrics.inc_sse_reconnect ();
-          let headers =
-            Httpun.Headers.of_list
-              (sse_stream_headers ~deps session_id protocol_version origin)
-          in
-          let response = Httpun.Response.create ~headers `OK in
-          let writer = Httpun.Reqd.respond_with_streaming reqd response in
-          let mutex = Eio.Mutex.create () in
-          let info_ref : sse_conn_info option ref = ref None in
           (match
              Sse.register ~kind:sse_kind ~auth session_id
                ~last_event_id:(Option.value ~default:0 last_event_id)
@@ -628,11 +620,17 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
            with
            | Error reg_err ->
                let msg = Sse.registration_error_to_string reg_err in
-               (* Headers already sent with streaming response; close the
-                  connection cleanly and log the typed failure. *)
                Log.Server.warn "%s" msg;
-               Httpun.Body.Writer.close writer
+               respond_sse_register_error ~deps ~origin ~protocol_version reqd msg
            | Ok (client_id, event_stream, evicted) ->
+              let headers =
+                Httpun.Headers.of_list
+                  (sse_stream_headers ~deps session_id protocol_version origin)
+              in
+              let response = Httpun.Response.create ~headers `OK in
+              let writer = Httpun.Reqd.respond_with_streaming reqd response in
+              let mutex = Eio.Mutex.create () in
+              let info_ref : sse_conn_info option ref = ref None in
           (match evicted with
           | Some evicted_sid ->
               (* RFC-0099 PR-3: cap-exceeded eviction publishes typed

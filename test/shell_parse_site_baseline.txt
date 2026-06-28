@@ -2,7 +2,7 @@
 #   <relpath>:<line>  # <owner_label>
 # Refresh: MASC_SHELL_PARSE_SITE_DUMP=1 dune exec test/test_shell_parse_site_ratchet.exe
 # Labels — closed set documented in test/test_shell_parse_site_ratchet.ml
-lib/build_identity.ml:56  # argv_subsystem
+lib/build_identity.ml:57  # argv_subsystem
 lib/chronicle_ingest.ml:33  # argv_subsystem
 lib/chronicle_validate.ml:35  # argv_subsystem
 lib/dashboard/dashboard_branches.ml:232  # argv_workspace
@@ -22,11 +22,12 @@ lib/keeper/keeper_alerting.ml:383  # argv_keeper
 lib/keeper/keeper_alerting.ml:477  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:224  # argv_keeper
 lib/keeper/keeper_sandbox_control.ml:325  # argv_keeper
+lib/keeper/keeper_sandbox_control.ml:446  # argv_keeper
 lib/keeper/keeper_sandbox_docker.ml:196  # argv_keeper
 lib/keeper/keeper_sandbox_docker.ml:583  # argv_keeper
 lib/keeper/keeper_sandbox_read_backend.ml:184  # argv_keeper
 lib/keeper/keeper_sandbox_runner.ml:167  # argv_keeper
-lib/keeper/keeper_sandbox_runtime_setup.ml:49  # argv_keeper
+lib/keeper/keeper_sandbox_runtime_setup.ml:51  # argv_keeper
 lib/keeper/keeper_tools_oas_handler_exec.ml:76  # argv_keeper
 lib/keeper/keeper_turn_sandbox_runtime.ml:221  # argv_keeper
 lib/keeper/keeper_turn_sandbox_runtime.ml:560  # argv_keeper

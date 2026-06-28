@@ -337,9 +337,6 @@ let keeper_meta_persistent_drift_categories
       drift_if "tool_access" (current.tool_access <> target.tool_access);
       drift_if "instructions"
         (not (personality_text_equal current.instructions target.instructions));
-      drift_if "active_goal_ids"
-        (Option.is_some defaults.active_goal_ids
-         && current.active_goal_ids <> target.active_goal_ids);
       drift_if "oas_env" (current.oas_env <> target.oas_env);
     ]
 
@@ -351,6 +348,9 @@ let keeper_meta_overlay_drift_categories
     [
       drift_if "proactive" (current.proactive <> target.proactive);
       drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
+      drift_if "active_goal_ids"
+        (Option.is_some defaults.active_goal_ids
+         && current.active_goal_ids <> target.active_goal_ids);
       drift_if "goal" (not (goal_text_equal current.goal target.goal));
       drift_if "autoboot_enabled"
         (current.autoboot_enabled <> target.autoboot_enabled);

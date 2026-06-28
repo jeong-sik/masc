@@ -2467,8 +2467,8 @@ let test_health_json_redacts_registry_failure_reason () =
                 (contains_substring reason base_path);
               Alcotest.(check bool) "retains explicit redaction marker" true
                 (contains_substring reason "[REDACTED]");
-              Alcotest.(check bool) "retains workspace placeholder" true
-                (contains_substring reason "<workspace>"))))
+              Alcotest.(check bool) "retains workspace path redaction marker" true
+                (contains_substring reason "[REDACTED_PATH]"))))
 
 let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
   with_temp_dir "health-restored-crash-log-keeper" (fun dir ->

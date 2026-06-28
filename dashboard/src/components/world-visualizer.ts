@@ -34,17 +34,21 @@ function keeperColor(keeper: Keeper): string {
   return cssVar(`--color-keeper-${slot}`)
 }
 
-// ── Type declarations for Interaction Judge payload ─────────────────
 interface InteractionJudgeData {
-  stigmergy?: Record<string, number>
-  interactions?: { source: string; target: string; strength: number; reasoning?: string }[]
+  judge_online?: boolean
+  refreshing?: boolean
+  last_error?: string | null
+  data?: {
+    stigmergy?: Record<string, number>
+    interactions?: { source: string; target: string; strength: number; reasoning?: string }[]
+  }
 }
 
 function getJudgeInteractionStrength(judgeData: InteractionJudgeData | null, a: Keeper, b: Keeper): number {
-  if (!judgeData || !judgeData.interactions) return 0
+  if (!judgeData || !judgeData.data || !judgeData.data.interactions) return 0
   const aName = a.name.toLowerCase()
   const bName = b.name.toLowerCase()
-  const match = judgeData.interactions.find(i => 
+  const match = judgeData.data.interactions.find(i => 
     (i.source.toLowerCase() === aName && i.target.toLowerCase() === bName) ||
     (i.source.toLowerCase() === bName && i.target.toLowerCase() === aName)
   )
@@ -52,8 +56,8 @@ function getJudgeInteractionStrength(judgeData: InteractionJudgeData | null, a: 
 }
 
 function getJudgeStigmergy(judgeData: InteractionJudgeData | null, keeper: Keeper): number {
-  if (!judgeData || !judgeData.stigmergy) return 0
-  const val = judgeData.stigmergy[keeper.name] || judgeData.stigmergy[keeper.name.toLowerCase()]
+  if (!judgeData || !judgeData.data || !judgeData.data.stigmergy) return 0
+  const val = judgeData.data.stigmergy[keeper.name] || judgeData.data.stigmergy[keeper.name.toLowerCase()]
   return val ?? 0
 }
 
@@ -333,6 +337,15 @@ export function WorldVisualizer() {
         </div>
         ${fleetSize > 0 ? html`
           <div class="flex items-center gap-3 text-3xs text-[var(--color-fg-muted)] font-mono">
+            ${judgeData && judgeData.judge_online === false ? html`
+              <span class="inline-flex items-center gap-1 text-[var(--color-status-warn)] border border-solid border-[var(--color-status-warn)] rounded-[var(--r-1)] px-1 py-0.5" title="Judge offline — interactions not computed">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z"></path>
+                  <path d="M11.854 4.146a.5.5 0 010 .708l-7 7a.5.5 0 01-.708-.708l7-7a.5.5 0 01.708 0z"></path>
+                </svg>
+                Judge Offline
+              </span>
+            ` : null}
             <span title="Fleet size">${fleetSize} keepers</span>
             <span title="Average convergence">${Math.round(avgConv * 100)}% conv</span>
           </div>

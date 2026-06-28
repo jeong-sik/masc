@@ -51,7 +51,14 @@ export interface MemoryKeeper {
 // Keeper roster fallback for the agent-profile mount (agent-detail-memory.ts)
 // when an agent id is outside the live keepers signal. Identity-only — carries
 // no memory content (that is fetched per keeper).
-export const DEFAULT_MEMORY_KEEPERS: readonly MemoryKeeper[] = []
+export const DEFAULT_MEMORY_KEEPERS: readonly MemoryKeeper[] = [
+  { id: 'masc-improver', ctx: 0, status: 'run' },
+  { id: 'nick0cave', ctx: 0, status: 'run' },
+  { id: 'sangsu', ctx: 0, status: 'run' },
+  { id: 'qa-king', ctx: 0, status: 'pause' },
+  { id: 'analyst', ctx: 0, status: 'run' },
+  { id: 'drifter', ctx: 0, status: 'off' },
+]
 
 // ── byte / token formatters ──
 export function memFmtTok(n: number): string {

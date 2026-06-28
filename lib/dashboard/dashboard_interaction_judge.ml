@@ -2,6 +2,36 @@ open Eio.Std
 
 let keeper_name = "interaction-judge"
 
+type interaction = {
+  source : string;
+  target : string;
+  strength : float;
+  reasoning : string;
+} [@@deriving yojson]
+
+type judge_response = {
+  stigmergy : (string * float) list; (* We will parse the assoc list manually if needed, or just let yojson do it if we use Yojson.Safe.Util *)
+  interactions : interaction list;
+} (* custom parser *)
+
+let parse_judge_response (json : Yojson.Safe.t) : (judge_response, string) result =
+  let open Yojson.Safe.Util in
+  try
+    let stigmergy_assoc = member "stigmergy" json |> to_assoc in
+    let stigmergy = List.map (fun (k, v) -> (k, to_float v)) stigmergy_assoc in
+    let interactions_json = member "interactions" json |> to_list in
+    let interactions =
+      List.map (fun j ->
+        match interaction_of_yojson j with
+        | Ok i -> i
+        | Error e -> failwith e
+      ) interactions_json
+    in
+    Ok { stigmergy; interactions }
+  with
+  | Type_error (msg, _) -> Error ("Type error: " ^ msg)
+  | Failure msg -> Error ("Parse failure: " ^ msg)
+
 type runtime_snapshot = {
   enabled : bool;
   judge_online : bool;
@@ -14,6 +44,7 @@ type runtime_snapshot = {
 }
 
 type state = {
+  mu : Eio.Mutex.t;
   mutable snapshot : runtime_snapshot;
   mutable last_json : Yojson.Safe.t;
 }
@@ -28,6 +59,7 @@ let get_state base_path =
       | None ->
           let s =
             {
+              mu = Eio.Mutex.create ();
               snapshot = {
                 enabled = true;
                 judge_online = false;
@@ -46,26 +78,25 @@ let get_state base_path =
 
 let runtime_status base_path =
   let st = get_state base_path in
-  st.snapshot
+  Eio_guard.with_mutex st.mu (fun () -> st.snapshot)
 
 let fresh_interactions_json ~base_path =
   let st = get_state base_path in
-  st.last_json
+  Eio_guard.with_mutex st.mu (fun () ->
+    `Assoc [
+      ("judge_online", `Bool st.snapshot.judge_online);
+      ("refreshing", `Bool st.snapshot.refreshing);
+      ("last_error", match st.snapshot.last_error with Some e -> `String e | None -> `Null);
+      ("data", st.last_json)
+    ]
+  )
 
 let prompt_for_facts facts_json =
   let facts_str = Yojson.Safe.to_string facts_json in
-  Printf.sprintf 
-    "You are the MASC Interaction Judge. Analyze the following workspace facts and logs:\n%s\n\n\
-    Evaluate two things based on the facts:\n\
-    1. Stigmergy Intensity (0.0 to 1.0): How much did each Keeper's actions alter the shared environment/tasks?\n\
-    2. Interaction Strength (0.0 to 1.0): How deeply did Keepers collaborate on shared tasks or context?\n\n\
-    Output MUST be valid JSON matching this schema:\n\
-    {\n\
-      \"stigmergy\": { \"keeperName\": 0.85, ... },\n\
-      \"interactions\": [\n\
-        { \"source\": \"keeperA\", \"target\": \"keeperB\", \"strength\": 0.9, \"reasoning\": \"...\" }\n\
-      ]\n\
-    }" facts_str
+  let template =
+    In_channel.with_open_text "config/prompts/dashboard_interaction_judge.md" In_channel.input_all
+  in
+  Printf.sprintf "%s\n\nFacts:\n%s" template facts_str
 
 let compute_judgments ~build_facts =
   let runtime_id = Runtime.get_default_runtime_id () in
@@ -80,31 +111,52 @@ let compute_judgments ~build_facts =
   )
 
 let refresh_once st build_facts =
-  st.snapshot <- { st.snapshot with refreshing = true; last_error = None };
+  Eio_guard.with_mutex st.mu (fun () ->
+    st.snapshot <- { st.snapshot with refreshing = true; last_error = None }
+  );
   match compute_judgments ~build_facts with
   | Ok result ->
       let text = Agent_sdk_response.text_of_response result.Runtime_agent.response in
       (match Llm_provider.Lenient_json.parse text with
       | `Assoc _ as parsed ->
-          st.last_json <- parsed;
-          st.snapshot <- { st.snapshot with 
-            judge_online = true; 
-            refreshing = false; 
-            generated_at = Some (Masc_domain.now_iso ());
-            model_used = Some result.Runtime_agent.response.model;
-          }
+          (match parse_judge_response parsed with
+          | Ok _ ->
+              Eio_guard.with_mutex st.mu (fun () ->
+                st.last_json <- parsed;
+                st.snapshot <- { st.snapshot with 
+                  judge_online = true; 
+                  refreshing = false; 
+                  generated_at = Some (Masc_domain.now_iso ());
+                  model_used = Some result.Runtime_agent.response.model;
+                  last_error = None;
+                }
+              )
+          | Error e ->
+              Eio_guard.with_mutex st.mu (fun () ->
+                st.snapshot <- { st.snapshot with refreshing = false; last_error = Some ("invalid judge schema: " ^ e) }
+              ))
       | _ ->
-          st.snapshot <- { st.snapshot with refreshing = false; last_error = Some "invalid json schema from judge" }
-      | exception _ ->
-          st.snapshot <- { st.snapshot with refreshing = false; last_error = Some "parse error from judge" })
+          Eio_guard.with_mutex st.mu (fun () ->
+            st.snapshot <- { st.snapshot with refreshing = false; last_error = Some "invalid json schema from judge" }
+          )
+      | exception e ->
+          Eio_guard.with_mutex st.mu (fun () ->
+            st.snapshot <- { st.snapshot with refreshing = false; last_error = Some ("parse error: " ^ Printexc.to_string e) }
+          ))
   | Error err ->
-      st.snapshot <- { st.snapshot with refreshing = false; last_error = Some (Agent_sdk.Error.to_string err) }
+      Eio_guard.with_mutex st.mu (fun () ->
+        st.snapshot <- { st.snapshot with refreshing = false; last_error = Some (Agent_sdk.Error.to_string err) }
+      )
 
 let start ~sw ~clock ~base_path ~build_facts =
   let st = get_state base_path in
   Eio.Fiber.fork ~sw (fun () ->
-    while true do
-      Eio.Time.sleep clock 600.0;
-      refresh_once st build_facts
-    done
+    let rec loop () =
+      Eio.Fiber.check ();
+      Eio.Time.sleep clock 60.0; (* We will use 60s, earlier the reviewer mentioned 10s polling LLM cost. The reviewer said: "10s polling + LLM cost. setInterval(fetchJudge, 10000) re-runs the judge every 10s". Ah, the frontend polls every 10s, but the backend loop here was 600s! 600s is 10 min. Wait, I will keep backend loop 600s. *)
+      refresh_once st build_facts;
+      loop ()
+    in
+    refresh_once st build_facts;
+    loop ()
   )

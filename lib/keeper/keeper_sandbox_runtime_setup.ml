@@ -40,6 +40,8 @@ let docker_image_missing_next_action =
   "Run scripts/build-keeper-sandbox-image.sh to build the default keeper sandbox image."
 ;;
 
+let docker_command_cwd () = Config_dir_resolver.current_working_dir ()
+
 (* RFC-0107 Phase E step 2 — branch on MASC_DOCKER_TRANSPORT env flag here.
    When set to "api", route through [Sandbox.Docker_api] (UDS HTTP) instead
    of forking a [docker] subprocess; the subprocess path stays as the
@@ -51,7 +53,7 @@ let run_docker_argv_with_status ~summary ~timeout_sec argv =
       ~raw_source:(String.concat " " argv)
       ~summary
       ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-      ~cwd:(Sys.getcwd ())
+      ~cwd:(docker_command_cwd ())
       ~timeout_sec
       argv)
 ;;

@@ -553,10 +553,18 @@ let normalize_claim_id raw =
    author here (RFC-0259 §3.7 and RFC-0247 §3 reject deriving it in code). This is
    the single dedup SSOT: the write upsert, recall dedup, GC dedup, and Tier-2
    consolidation MUST all key on this one function. *)
+let claim_identity_of_claim_text claim = "claim:" ^ normalize_claim claim
+
 let claim_identity (f : fact) =
   match Option.bind f.claim_id normalize_claim_id with
   | Some id -> "id:" ^ id
-  | None -> "claim:" ^ normalize_claim f.claim
+  | None -> claim_identity_of_claim_text f.claim
+;;
+
+let legacy_unstructured_fallback_claim_key key =
+  String.starts_with
+    ~prefix:(claim_identity_of_claim_text librarian_unstructured_fallback_claim_prefix)
+    key
 ;;
 
 let optional_float_field key = function

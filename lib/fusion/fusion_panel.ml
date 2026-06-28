@@ -35,6 +35,11 @@ let outcome_of_result ~(panelist : string) ~(model : string)
                (Agent_sdk.Error.to_string e))
       }
 
+let bridge_failure_of_error (error : Agent_sdk.Error.sdk_error) : Fusion_types.panel_failure =
+  match error with
+  | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Fusion_types.Timeout
+  | _ -> Fusion_types.Bridge_error (Agent_sdk.Error.to_string error)
+
 let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
   : Fusion_types.panel_outcome list
   =
@@ -84,12 +89,13 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
         (fun (_agent, panelist, model) (_name, res) ->
           outcome_of_result ~panelist ~model res)
         built run_results
-    | Error _ ->
-      (* 구조적 타임아웃/취소: 빌드된 패널 전부 Timeout 처리. *)
+    | Error error ->
+      (* 구조적 타임아웃은 패널 전체 Timeout. 다른 bridge/bootstrap 오류는
+         Timeout으로 오분류하지 않는다. *)
+      let reason = bridge_failure_of_error error in
       List.map
         (fun (_agent, panelist, _model) ->
-          Fusion_types.Failed
-            { failed_model = panelist; reason = Fusion_types.Timeout })
+          Fusion_types.Failed { failed_model = panelist; reason })
         built
   in
   build_failures @ answered

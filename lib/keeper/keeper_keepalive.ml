@@ -33,6 +33,8 @@ include Keeper_keepalive_signal
 include Keeper_heartbeat_snapshot
 include Keeper_heartbeat_loop
 
+module StringMap = Set_util.StringMap
+
 (* OAS Event_bus — delegated to Keeper_event_bus to avoid dependency cycles. *)
 let set_bus bus = Keeper_event_bus.set bus
 let get_bus () = Keeper_event_bus.get ()
@@ -136,22 +138,40 @@ let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry
   updated_meta
 ;;
 
-(* Directive orphan livelock guard: when an upstream source (e.g. a gRPC
-   HeartbeatAck) re-emits a directive for a keeper that is not in the
-   registry, [log_directive_agent_not_in_registry] fired on every
-   [process_directive] call produced a per-second WARN storm — a livelock
-   that drowned the real boot/failure signal and kept the keeper from making
-   progress. Throttle the WARN to one per [not_in_registry_warn_cooldown_s]
-   per agent_name so the storm collapses to a single line per window; the
-   [DirectiveFailures] counter (incremented by the caller) still records every
-   attempt, so the rate stays observable without log spam. *)
-let not_in_registry_warn_cooldown_s = 60.0
-let not_in_registry_last_warn : (string, float) Hashtbl.t = Hashtbl.create 32
-let not_in_registry_warn_due ~agent_name ~now =
-  let prev = try Hashtbl.find not_in_registry_last_warn agent_name with Not_found -> 0.0 in
-  let due = now -. prev >= not_in_registry_warn_cooldown_s in
-  if due then Hashtbl.replace not_in_registry_last_warn agent_name now;
-  due
+(* Unknown-keeper directives can repeat while boot/crash truth is still
+   elsewhere. Keep WARN output low-cardinality; the caller-side
+   [DirectiveFailures] counter still records every miss. *)
+let not_in_registry_warn_cooldown_s = Masc_time_constants.minute
+
+type not_in_registry_warn_decision =
+  | Warn_unknown_keeper
+  | Debug_throttled_unknown_keeper
+
+let not_in_registry_warn_due ?(cooldown_s = not_in_registry_warn_cooldown_s) ~previous ~now =
+  match previous with
+  | None -> true
+  | Some prev -> now < prev || now -. prev >= cooldown_s
+;;
+
+let not_in_registry_warn_state_step ~agent_name ~now last_warns =
+  if not_in_registry_warn_due ~previous:(StringMap.find_opt agent_name last_warns) ~now
+  then Warn_unknown_keeper, StringMap.add agent_name now last_warns
+  else Debug_throttled_unknown_keeper, last_warns
+;;
+
+let not_in_registry_last_warn : float StringMap.t Atomic.t =
+  Atomic.make StringMap.empty
+;;
+
+let not_in_registry_warn_decision ~agent_name ~now =
+  let rec loop () =
+    let current = Atomic.get not_in_registry_last_warn in
+    let decision, updated = not_in_registry_warn_state_step ~agent_name ~now current in
+    if updated == current || Atomic.compare_and_set not_in_registry_last_warn current updated
+    then decision
+    else loop ()
+  in
+  loop ()
 ;;
 
 let log_directive_agent_not_in_registry ~agent_name ~action =
@@ -179,20 +199,15 @@ let log_directive_agent_not_in_registry ~agent_name ~action =
           ; "reason", `String "not_yet_registered"
           ])
       (Printf.sprintf "directive %s: agent %s not yet registered" action agent_name)
-  else
-    (* Throttle the unknown-keeper WARN to one per cooldown window per agent
-       (see [not_in_registry_warn_due]); subsequent attempts in the window are
-       demoted to Debug so the directive orphan livelock no longer floods the
-       log, while the caller-side DirectiveFailures counter still records each
-       attempt. *)
-    if not_in_registry_warn_due ~agent_name ~now:(Time_compat.now ())
-    then
+  else (
+    match not_in_registry_warn_decision ~agent_name ~now:(Time_compat.now ()) with
+    | Warn_unknown_keeper ->
       Log.Keeper.emit
         Log.Warn
         ~category:Log.Directive
         ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String action ])
         (Printf.sprintf "directive %s: agent %s not in registry" action agent_name)
-    else
+    | Debug_throttled_unknown_keeper ->
       Log.Keeper.emit
         Log.Debug
         ~category:Log.Directive
@@ -203,6 +218,7 @@ let log_directive_agent_not_in_registry ~agent_name ~action =
             ; "reason", `String "not_in_registry_throttled"
             ])
         (Printf.sprintf "directive %s: agent %s not in registry (throttled)" action agent_name)
+  )
 ;;
 
 let set_keeper_paused_state ~agent_name paused =

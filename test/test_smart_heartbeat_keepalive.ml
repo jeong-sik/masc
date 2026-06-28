@@ -291,6 +291,49 @@ let test_visibility_gate_preserves_busy () =
   in
   check bool "busy keeps cycle path" true (decision = HS.Skip_busy)
 
+let is_warn_unknown_keeper = function
+  | KK.Warn_unknown_keeper -> true
+  | KK.Debug_throttled_unknown_keeper -> false
+
+let is_debug_throttled_unknown_keeper = function
+  | KK.Debug_throttled_unknown_keeper -> true
+  | KK.Warn_unknown_keeper -> false
+
+let test_not_in_registry_warn_due_first_event () =
+  check bool "first unknown-keeper directive warns" true
+    (KK.not_in_registry_warn_due ~previous:None ~now:1_000.0)
+
+let test_not_in_registry_warn_due_throttles_within_window () =
+  check bool "same window throttles" false
+    (KK.not_in_registry_warn_due
+       ~previous:(Some 1_000.0)
+       ~now:(1_000.0 +. (KK.not_in_registry_warn_cooldown_s /. 2.0)))
+
+let test_not_in_registry_warn_due_recovers_on_clock_regression () =
+  check bool "clock regression does not suppress forever" true
+    (KK.not_in_registry_warn_due ~previous:(Some 1_000.0) ~now:999.0)
+
+let test_not_in_registry_warn_state_is_per_agent () =
+  let open KK in
+  let state = StringMap.add "keeper-a-agent" 1_000.0 StringMap.empty in
+  let decision_a, _ =
+    not_in_registry_warn_state_step
+      ~agent_name:"keeper-a-agent"
+      ~now:(1_000.0 +. (not_in_registry_warn_cooldown_s /. 2.0))
+      state
+  in
+  let decision_b, updated =
+    not_in_registry_warn_state_step
+      ~agent_name:"keeper-b-agent"
+      ~now:(1_000.0 +. (not_in_registry_warn_cooldown_s /. 2.0))
+      state
+  in
+  check bool "same agent throttled" true
+    (is_debug_throttled_unknown_keeper decision_a);
+  check bool "different agent warns" true (is_warn_unknown_keeper decision_b);
+  check bool "different agent recorded" true
+    (Option.is_some (StringMap.find_opt "keeper-b-agent" updated))
+
 (* ── MissedWakeup gap regression guard (KeeperHeartbeat.tla) ───────
    Skip_idle + Woken must promote the gate to [true]. Without this,
    external wakeup_keeper / board_signal calls that fire during a
@@ -524,6 +567,16 @@ let () =
       test_case "visible consumer bypasses delay" `Quick
         test_visibility_gate_allows_visible_consumer;
       test_case "busy decision is preserved" `Quick test_visibility_gate_preserves_busy;
+    ];
+    "directive_orphan_warn_gate", [
+      test_case "first unknown keeper directive warns"
+        `Quick test_not_in_registry_warn_due_first_event;
+      test_case "same unknown keeper is throttled within window"
+        `Quick test_not_in_registry_warn_due_throttles_within_window;
+      test_case "clock regression does not suppress forever"
+        `Quick test_not_in_registry_warn_due_recovers_on_clock_regression;
+      test_case "warn gate is per agent"
+        `Quick test_not_in_registry_warn_state_is_per_agent;
     ];
     "board_wakeup_selection", [
       test_case "explicit mentions bypass and win"

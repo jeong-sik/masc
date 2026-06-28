@@ -2549,3 +2549,8 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries masc_test_deps masc.runtime))
+
+(test
+ (name test_install_script)
+ (modules test_install_script)
+ (libraries alcotest))

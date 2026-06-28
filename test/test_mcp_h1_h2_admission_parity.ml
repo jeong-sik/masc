@@ -4,6 +4,7 @@ module Transport = Server_mcp_transport_http
 module Request_context = Server_mcp_request_context
 module Headers = Server_mcp_transport_http_headers
 module Negotiation = Mcp_transport_protocol.Http_negotiation
+module Mcp_store = Masc.Session.McpSessionStore
 
 let source_root () =
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
@@ -270,6 +271,33 @@ let test_shared_protocol_and_delete_matrix () =
   check (option string) "DELETE without session has no admission id" None
     (Transport.get_session_id_any (request ~meth:`DELETE "/mcp"))
 
+let test_sse_backing_session_bridge_requires_known_transport_session () =
+  let transport_session_id = "h1-h2-parity-sse-transport-session" in
+  let sse_session_id = "presence:" ^ transport_session_id in
+  let unknown_transport_session_id =
+    "h1-h2-parity-sse-unknown-transport-session"
+  in
+  let unknown_sse_session_id = "presence:" ^ unknown_transport_session_id in
+  let cleanup () =
+    Transport.forget_mcp_session transport_session_id;
+    Transport.forget_mcp_session unknown_transport_session_id;
+    ignore (Mcp_store.remove sse_session_id);
+    ignore (Mcp_store.remove unknown_sse_session_id)
+  in
+  Fun.protect ~finally:cleanup (fun () ->
+      cleanup ();
+      Transport.remember_protocol_version transport_session_id "2025-11-25";
+      Transport.ensure_sse_backing_session_for_known_transport_session
+        ~transport_session_id ~sse_session_id;
+      check bool "known transport session creates SSE backing session" true
+        (Option.is_some (Mcp_store.peek sse_session_id));
+      Transport.ensure_sse_backing_session_for_known_transport_session
+        ~transport_session_id:unknown_transport_session_id
+        ~sse_session_id:unknown_sse_session_id;
+      check bool "unknown transport session does not mint SSE backing session"
+        true
+        (Option.is_none (Mcp_store.peek unknown_sse_session_id)))
+
 let test_records_mcp_server_session_duration_metric () =
   let session_id = "h1-h2-parity-session-duration" in
   let transport_context =
@@ -424,6 +452,9 @@ let () =
             test_shared_post_admission_matrix;
           test_case "protocol and DELETE predicate matrix" `Quick
             test_shared_protocol_and_delete_matrix;
+          test_case "SSE backing session bridge requires known transport session"
+            `Quick
+            test_sse_backing_session_bridge_requires_known_transport_session;
           test_case "server session duration metric" `Quick
             test_records_mcp_server_session_duration_metric;
           test_case "profile-only session does not start duration metric" `Quick

@@ -119,6 +119,11 @@ val sandbox_component_label_value : string
 val normalize_base_path_for_hash : string -> string
 val base_path_hash : string -> string
 
+(** [normalize_base_path_for_hash base_path] resolves relative base paths
+    against the current working directory before hashing. Pure apart from
+    [Sys.getcwd] for relative inputs. *)
+val normalize_base_path_for_hash : string -> string
+
 (** [sanitize_label_value v] maps any character outside
     [[A-Za-z0-9_.-]] to ['_']. Pure. *)
 val sanitize_label_value : string -> string

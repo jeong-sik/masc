@@ -579,6 +579,60 @@ describe('countRuntimeKinds', () => {
     })
   })
 
+  it('counts Draining-phase keepers under pausedKeepers (band SSOT, not isKeeperPaused)', () => {
+    // RFC-0295 §5.3 (iter-6): The Draining phase routes to the `paused` band
+    // in `keeperBand()` and the rail paint, filter chip, and count chip must
+    // all derive from the same `band` SSOT. `isKeeperPaused()` is the
+    // action-layer predicate (operator-pause vs. operator-stop) and does
+    // NOT include Draining — so a Draining keeper is `isKeeperPaused =
+    // false` but `band === 'paused'`. The count must follow the band.
+    const result = countRuntimeKinds(
+      [],
+      [
+        {
+          name: 'runner',
+          status: 'active',
+          phase: 'Running',
+          pipeline_stage: 'idle',
+          keepalive_running: true,
+        } as Keeper,
+        {
+          name: 'drain',
+          // Crucially NO `paused: true` flag, NO `phase: 'Paused'`, NO
+          // `pipeline_stage: 'paused'` — Draining is operator-initiated
+          // stop, not pause.
+          status: 'busy',
+          phase: 'Draining',
+          pipeline_stage: 'draining',
+          keepalive_running: true,
+        } as Keeper,
+        {
+          name: 'rester',
+          status: 'paused',
+          phase: 'Paused',
+          pipeline_stage: 'paused',
+          paused: true,
+          keepalive_running: false,
+        } as Keeper,
+      ],
+    )
+
+    // Drain band = paused → counted under pausedKeepers.
+    // Rester band = paused → counted under pausedKeepers.
+    // Runner band = active → counted under keepers (runningKeepers).
+    // No transient (Draining is not in TRANSIENT_KEEPER_PHASES after iter-5).
+    // No offline.
+    expect(result).toEqual({
+      agents: 0,
+      keepers: 1,
+      pausedKeepers: 2,
+      transientKeepers: 0,
+      offlineKeepers: 0,
+      keeperRows: 3,
+      totalRuntimes: 3,
+    })
+  })
+
   it('uses composite snapshots when counting transient keeper rows', () => {
     const composite = makeCompositeSnapshot({
       keeper: 'compact',

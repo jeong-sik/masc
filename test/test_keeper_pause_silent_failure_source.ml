@@ -64,6 +64,11 @@ let count_occurrences ~needle haystack =
     in
     loop 0 0
 
+let first_index ~needle haystack =
+  match Str.search_forward (Str.regexp_string needle) haystack 0 with
+  | pos -> Some pos
+  | exception Not_found -> None
+
 let target_source () =
   String.concat "\n" (List.map load_source target_files)
 
@@ -155,6 +160,21 @@ let test_error_branch_observable () =
     true
     (count_occurrences ~needle:"read_meta_error" src >= 3)
 
+let test_write_error_branch_observable () =
+  let src = target_source () in
+  check bool "write_meta error log keeps reason" true
+    (count_occurrences
+       ~needle:"directive %s: write_meta failed for %s: %s"
+       src
+     >= 1);
+  check bool "write_meta error returns HTTP failure" true
+    (count_occurrences
+       ~needle:"failed to persist paused state"
+       src
+     >= 1);
+  check bool "write_meta error counter labelled write_meta_error" true
+    (count_occurrences ~needle:"write_meta_error" src >= 1)
+
 let test_counter_inc_calls () =
   let src = target_source () in
   (* The metric must actually be incremented at least 4 times: 2 in
@@ -172,16 +192,75 @@ let test_resume_paths_clear_no_progress_latch () =
   let lifecycle_src =
     load_source "lib/server/server_dashboard_http_keeper_api_lifecycle_post.ml"
   in
+  let directive_src = load_source "lib/server/server_dashboard_http_keeper_api_post.ml" in
   let update_src = load_source keeper_up_update_file in
   check bool "boot resume clears no-progress latch" true
     (count_occurrences
        ~needle:"Keeper_unified_turn_no_progress.clear_for_operator_resume"
        lifecycle_src
      >= 1);
+  check bool "directive resume clears no-progress latch" true
+    (count_occurrences
+       ~needle:"Keeper_unified_turn_no_progress.clear_for_operator_resume"
+       directive_src
+     >= 1);
   check bool "masc_keeper_up resume clears no-progress latch" true
     (count_occurrences
        ~needle:"Keeper_unified_turn_no_progress.clear_for_operator_resume"
        update_src
+     >= 1)
+
+let test_directive_resume_boots_missing_registry_keeper () =
+  let directive_src = load_source "lib/server/server_dashboard_http_keeper_api_post.ml" in
+  check bool "directive resume has registry-missing boot helper" true
+    (count_occurrences ~needle:"ensure_registered_for_resume" directive_src >= 3);
+  check bool "directive resume uses keeper_up instead of silent directive noop" true
+    (count_occurrences ~needle:"~name:\"masc_keeper_up\"" directive_src >= 1)
+
+let test_directive_resume_ensures_before_meta_mutation () =
+  let directive_src = load_source "lib/server/server_dashboard_http_keeper_api_post.ml" in
+  let check_order label before after_ =
+    match
+      first_index ~needle:before directive_src,
+      first_index ~needle:after_ directive_src
+    with
+    | Some before_pos, Some after_pos -> check bool label true (before_pos < after_pos)
+    | _ -> Alcotest.failf "missing order markers for %s" label
+  in
+  check_order "single resume ensure precedes persist"
+    "let ensure_result ="
+    "let persist_result =";
+  check bool "single booted resume does not stale-persist old meta" true
+    (count_occurrences
+       ~needle:"| `Resume, `Booted_missing_registry -> Ok ()"
+       directive_src
+     >= 1);
+  check bool "bulk booted resume does not stale-persist old meta" true
+    (count_occurrences
+       ~needle:"| `Resume, `Booted_missing_registry, _, _ -> Ok ()"
+       directive_src
+     >= 1)
+
+let test_bulk_directive_partial_failure_observable () =
+  let directive_src = load_source "lib/server/server_dashboard_http_keeper_api_post.ml" in
+  check bool "bulk directive computes failed count" true
+    (count_occurrences
+       ~needle:"let failed_count = requested_count - ok_count"
+       directive_src
+     >= 1);
+  check bool "bulk directive top-level ok reflects failures" true
+    (count_occurrences ~needle:"(\"ok\", `Bool (failed_count = 0))" directive_src >= 1);
+  check bool "bulk directive response includes failed count" true
+    (count_occurrences ~needle:"(\"failed\", `Int failed_count)" directive_src >= 1);
+  check bool "bulk directive partial failure returns non-200" true
+    (count_occurrences
+       ~needle:"~status:`Internal_server_error ~compress:true"
+       directive_src
+     >= 1);
+  check bool "bulk directive invalidates cache only after success" true
+    (count_occurrences
+       ~needle:"if ok_count > 0 then invalidate_keeper_execution_surfaces ~config"
+       directive_src
      >= 1)
 
 let test_keeper_status_disposition_mirrors_runtime_trust () =
@@ -218,10 +297,18 @@ let () =
             test_ok_none_branch_observable
         ; test_case "Error _ branch observable" `Quick
             test_error_branch_observable
+        ; test_case "write_meta error branch observable" `Quick
+            test_write_error_branch_observable
         ; test_case "counter inc calls present" `Quick
             test_counter_inc_calls
         ; test_case "resume paths clear no-progress latch" `Quick
             test_resume_paths_clear_no_progress_latch
+        ; test_case "directive resume boots missing registry keeper" `Quick
+            test_directive_resume_boots_missing_registry_keeper
+        ; test_case "directive resume ensures before meta mutation" `Quick
+            test_directive_resume_ensures_before_meta_mutation
+        ; test_case "bulk directive partial failure observable" `Quick
+            test_bulk_directive_partial_failure_observable
         ; test_case "keeper status mirrors runtime-trust disposition" `Quick
             test_keeper_status_disposition_mirrors_runtime_trust
         ] )

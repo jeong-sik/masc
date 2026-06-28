@@ -1224,7 +1224,7 @@ let add_routes ~sw ~clock router =
          (fun state agent_name req reqd ->
            Http.Request.read_body_async reqd (fun body_str ->
              Keeper_api.handle_keeper_bulk_directive_post
-               state agent_name req reqd body_str))
+               ~sw ~clock state agent_name req reqd body_str))
          request reqd)
 
   |> Http.Router.post "/api/v1/keepers/chat/stream" (fun request reqd ->
@@ -1319,7 +1319,8 @@ let add_routes ~sw ~clock router =
            with_token_permission_auth ~permission:Masc_domain.CanAdmin
              (fun state agent_name req reqd ->
                Http.Request.read_body_async reqd (fun body_str ->
-                 Keeper_api.handle_keeper_directive_post state agent_name req reqd body_str
+                 Keeper_api.handle_keeper_directive_post
+                   ~sw ~clock state agent_name req reqd body_str
                )
              ) request reqd
        | Keeper_api.Keeper_post_unknown ->

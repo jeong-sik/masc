@@ -52,6 +52,20 @@ val respond_not_ready :
     a future "always go through json_headers" refactor would require
     promoting both to optional and is deferred. *)
 
+val respond_sse_register_error :
+  deps:Server_mcp_transport_http_types.deps ->
+  origin:string ->
+  protocol_version:string ->
+  Httpun.Reqd.t ->
+  string ->
+  unit
+(** [respond_sse_register_error ~deps ~origin ~protocol_version reqd msg]
+    responds 404 + a fresh [Mcp-Session-Id] for an SSE GET register whose
+    session validation failed (unknown/expired). Sent before the 200 stream
+    is opened so MCP clients re-run [initialize] instead of retrying the
+    same stale session forever. Mirrors the POST JSON-RPC unknown-session
+    path ([server_mcp_transport_http.ml]). *)
+
 val respond_sse_rate_limited :
   deps:Server_mcp_transport_http_types.deps ->
   origin:string ->

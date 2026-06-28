@@ -54,6 +54,13 @@ val is_known_session : string -> bool
     is populated on every POST regardless of [initialize]
     completion. *)
 
+val ensure_sse_backing_session_for_known_transport_session :
+  transport_session_id:string -> sse_session_id:string -> unit
+(** Ensures the legacy SSE session store contains [sse_session_id] only
+    when [transport_session_id] is already known to the streamable HTTP
+    transport. Unknown client-supplied ids must continue to fail SSE
+    registration instead of being minted implicitly. *)
+
 val remember_mcp_profile :
   ?otel_transport_context:Otel_dispatch_hook.transport_context ->
   string -> Server_mcp_transport_http_types.tool_profile -> unit

@@ -499,7 +499,7 @@ let meta_with_directive_paused_state ~(config : Workspace.config) directive meta
     updated_at = Keeper_meta_contract.now_iso ();
   }
 
-let should_persist_directive_paused_state directive meta paused =
+let should_persist_directive_paused_state directive (meta : Keeper_meta_contract.keeper_meta) paused =
   match directive with
   | `Resume -> true
   | `Pause | `Wakeup -> not (Bool.equal meta.paused paused)

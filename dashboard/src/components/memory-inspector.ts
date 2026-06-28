@@ -11,10 +11,10 @@
 //   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
 //   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance, TTL)
 //   압축 유지·요약        ← real memory_os.episodes.items (summary + terminal_marker)
-//   핀 고정 사실          ⓘ Phase 2 (operator pins — no backend source yet)
+//   핵심 회상 후보        ← real memory_os.facts.items where prompt_recallable=true
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
-// The remaining ⓘ sections render an honest "연결 예정" disclosure, never fabricated
-// rows (no-stub): they DISCLOSE absence rather than fake presence.
+// Any future-only section must render an honest disclosure rather than fabricated
+// rows (no-stub): disclose absence instead of faking presence.
 
 import { Fragment } from 'preact'
 import { html } from 'htm/preact'
@@ -455,13 +455,13 @@ function RecallCandidatePreview({
 }) {
   if (facts.length === 0) {
     return html`
-      <${DisclosureNote} text="operator 핀은 Phase 2에서 연결 예정 — 현재 표시할 prompt recall 후보도 없음." />
+      <${DisclosureNote} text="현재 표시할 prompt recall 후보 없음." />
     `
   }
   return html`
     <${Fragment}>
       <div class="mem-store">${facts.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>
-      <${DisclosureNote} text=${`operator 핀은 Phase 2에서 연결 예정 — 현재는 실제 prompt recall 후보 ${facts.length}/${total}개를 표시.`} />
+      <${DisclosureNote} text=${`실제 prompt recall 후보 ${facts.length}/${total}개를 표시.`} />
     </>`
 }
 

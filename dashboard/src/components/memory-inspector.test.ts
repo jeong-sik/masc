@@ -356,15 +356,16 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(recallSection?.querySelector('.mem-disclosure')).toBeFalsy()
   })
 
-  it('surfaces read_errors and renders honest disclosures for the unbacked pin section', async () => {
+  it('surfaces read_errors and renders recall candidates without pin placeholders', async () => {
     stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     // read_errors visible (no silent failure)
     expect(container.querySelector('.mem-read-error')?.textContent).toContain('one malformed row skipped')
-    // pins → Phase 2 disclosure, while the section still shows real recall candidates.
+    // The section shows real recall candidates without the old unbacked operator-pin disclosure.
     const disclosures = [...container.querySelectorAll('.mem-disclosure')].map(d => d.textContent ?? '')
-    expect(disclosures.some(t => t.includes('Phase 2'))).toBe(true)
+    expect(disclosures.some(t => t.includes('Phase 2'))).toBe(false)
+    expect(disclosures.some(t => t.includes('실제 prompt recall 후보 1/1개를 표시'))).toBe(true)
     expect(container.textContent).toContain('핵심 회상 후보')
     // no prototype fixture leakage
     expect(container.querySelector('.mem-pin')).toBeFalsy()

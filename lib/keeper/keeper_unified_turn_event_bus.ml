@@ -37,15 +37,20 @@ type event_bus_subscription =
 type t =
   { keeper_name : string
   ; turn_id : int
-  ; event_bus_subscription : event_bus_subscription
+  ; mutable event_bus_subscription : event_bus_subscription
   ; drain_cancel : drain_cancel_state Atomic.t
   ; state : event_bus_state Atomic.t
   ; on_pending_count_change : int -> unit
   }
 
-let create ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
+let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
+  let event_bus =
+    match event_bus with
+    | Some _ as bus -> bus
+    | None -> Keeper_event_bus.get ()
+  in
   let event_bus_subscription =
-    match Keeper_event_bus.get () with
+    match event_bus with
     | Some event_bus ->
       Subscribed
         { event_bus
@@ -275,10 +280,11 @@ let unsubscribe t =
          t.keeper_name
          msg));
   ignore (drain ~site:"unsubscribe_final" t);
-  match t.event_bus_subscription with
+  (match t.event_bus_subscription with
   | Subscribed { event_bus; event_bus_sub } ->
     Agent_sdk_metrics_bridge.unsubscribe event_bus event_bus_sub
-  | No_event_bus -> ()
+  | No_event_bus -> ());
+  t.event_bus_subscription <- No_event_bus
 ;;
 
 module For_testing = struct

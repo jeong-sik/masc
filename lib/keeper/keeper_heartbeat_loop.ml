@@ -397,8 +397,10 @@ let run_keepalive_unified_turn
           meta_after_triage)
         else if should_run_turn
         then (
+          let event_bus = Keeper_event_bus.get () in
           let meta_after_cycle =
             run_keeper_cycle
+              ?event_bus
               ~ctx
               ~meta_after_triage
               ~stop

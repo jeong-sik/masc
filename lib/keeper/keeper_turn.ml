@@ -247,11 +247,11 @@ module For_testing = struct
   let clear_direct_success_no_progress_pause =
     clear_direct_success_no_progress_pause
   let direct_empty_no_progress_retry_reason =
-    direct_empty_no_progress_retry_reason
+    Keeper_turn_runtime_budget.direct_empty_no_progress_retry_reason
   let direct_empty_no_progress_retry_decision =
-    next_direct_empty_no_progress_retry_decision
+    Keeper_turn_runtime_budget.direct_empty_no_progress_retry_decision
   let run_direct_empty_no_progress_retry_loop =
-    run_direct_empty_no_progress_retry_loop
+    Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
 end
 
 let resolve_turn_runtime_id (meta : keeper_meta) =

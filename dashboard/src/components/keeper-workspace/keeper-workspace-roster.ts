@@ -37,6 +37,7 @@ import {
   keeperPhaseLabel,
   type KeeperBucket,
 } from './keeper-workspace-shared'
+import { phasePulse } from '../v2/keeper-fsm'
 
 type RosterFilter = 'all' | 'run' | 'att'
 type RosterSort = 'status' | 'name' | 'att'
@@ -263,6 +264,7 @@ function RosterRow({
   const activityText = rosterActivityText(activity)
   const recentTool = keeperRecentTool(keeper)
   const phaseLabel = keeperPhaseLabel(keeper)
+  const beat = phasePulse(keeper.lifecycle_phase)
   const select = () => onSelect(keeper.name)
   return html`
     <div
@@ -280,7 +282,7 @@ function RosterRow({
         select()
       }}
     >
-      <${WorkspaceSigil} id=${keeper.name} size=${38} beat=${bucket === 'running'} />
+      <${WorkspaceSigil} id=${keeper.name} size=${38} beat=${beat} />
       <div class="kw-kp-meta">
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
@@ -337,8 +339,9 @@ function MiniRosterRow({
   onSelect: (name: string) => void
   onMenu: (keeper: Keeper, event: MouseEvent) => void
 }) {
-  const bucket = keeperBucket(keeper)
   const tone = keeperStatusTone(keeper)
+  const lifecycle = keeper.phase || keeper.lifecycle_phase
+  const beat = phasePulse(lifecycle)
   const label = `${keeper.name} · ${keeperPhaseLabel(keeper)}`
   return html`
     <button
@@ -350,8 +353,8 @@ function MiniRosterRow({
       onClick=${() => onSelect(keeper.name)}
       onContextMenu=${(event: MouseEvent) => onMenu(keeper, event)}
     >
-      <${WorkspaceSigil} id=${keeper.name} size=${38} beat=${bucket === 'running'} />
-      <${StatusDot} tone=${tone} pulse=${bucket === 'running'} />
+      <${WorkspaceSigil} id=${keeper.name} size=${38} beat=${beat} />
+      <${StatusDot} tone=${tone} pulse=${beat} />
     </button>
   `
 }

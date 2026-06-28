@@ -136,13 +136,53 @@ let test_empty_response_detail_uses_canonical_unknown_stop_reason () =
 ;;
 
 let test_panel_failure_yojson_accepts_legacy_empty_response () =
-  match Fusion_types.panel_failure_of_yojson (`String "Empty_response") with
-  | Ok (Fusion_types.Empty_response detail) ->
-    Alcotest.(check string) "legacy detail" "empty response" detail
-  | Ok other ->
-    Alcotest.failf "unexpected panel failure: %s"
-      (Fusion_types.show_panel_failure other)
-  | Error err -> Alcotest.fail err
+  let decode json =
+    match Fusion_types.panel_failure_of_yojson json with
+    | Ok failure -> failure
+    | Error err -> Alcotest.fail err
+  in
+  let legacy_detail =
+    match decode (`String "Empty_response") with
+    | Fusion_types.Empty_response detail -> detail
+    | other ->
+      Alcotest.failf "unexpected panel failure: %s"
+        (Fusion_types.show_panel_failure other)
+  in
+  Alcotest.(check string) "legacy detail" "empty response" legacy_detail;
+  Alcotest.(check string)
+    "legacy timeout"
+    (Fusion_types.show_panel_failure Fusion_types.Timeout)
+    (Fusion_types.show_panel_failure (decode (`String "Timeout")))
+;;
+
+let test_panel_failure_yojson_round_trips_current_shapes () =
+  let check_round_trip label failure =
+    let json = Fusion_types.panel_failure_to_yojson failure in
+    match Fusion_types.panel_failure_of_yojson json with
+    | Ok actual ->
+      Alcotest.(check string)
+        label
+        (Fusion_types.show_panel_failure failure)
+        (Fusion_types.show_panel_failure actual)
+    | Error err -> Alcotest.failf "%s failed to decode: %s" label err
+  in
+  check_round_trip "timeout" Fusion_types.Timeout;
+  check_round_trip "provider error"
+    (Fusion_types.Provider_error "Provider 'runtime': quota");
+  check_round_trip "empty response"
+    (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)");
+  check_round_trip "invalid max output tokens"
+    (Fusion_types.Invalid_max_output_tokens 0);
+  Alcotest.(check bool)
+    "detail empty response serializes as tagged payload, not legacy string"
+    true
+    (Yojson.Safe.equal
+       (`List
+         [ `String "Empty_response"
+         ; `String "empty response (stop_reason=max_tokens)"
+         ])
+       (Fusion_types.panel_failure_to_yojson
+          (Fusion_types.Empty_response "empty response (stop_reason=max_tokens)")))
 ;;
 
 let test_timeout_budget_does_not_set_total_execution_ceiling () =
@@ -201,6 +241,10 @@ let () =
             "panel failure yojson accepts legacy empty response"
             `Quick
             test_panel_failure_yojson_accepts_legacy_empty_response
+        ; Alcotest.test_case
+            "panel failure yojson round-trips current shapes"
+            `Quick
+            test_panel_failure_yojson_round_trips_current_shapes
         ; Alcotest.test_case
             "timeout budget does not arm OAS total execution ceiling"
             `Quick

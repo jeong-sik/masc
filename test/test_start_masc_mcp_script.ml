@@ -1145,7 +1145,7 @@ exit 1
         (contains_substring stderr
            "HTTP Port 9954 in use, waiting before build/init"))
 
-let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
+let test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in ()
     =
   with_temp_dir "start-loopback-script" (fun dir ->
       let repo_root = Filename.concat dir "repo-root" in
@@ -1166,7 +1166,7 @@ let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
             [
               ("FAKE_CAPTURE_FILE", capture_default);
               ("HOME", home_dir);
-              ("MASC_KEEPER_BOOTSTRAP_ENABLED", "");
+              ("MASC_KEEPER_BOOTSTRAP_ENABLED", "true");
             ]
           [ "--port"; "9961"; "--base-path"; repo_root ]
       in
@@ -1185,15 +1185,15 @@ let test_loopback_disables_keeper_autoboot_by_default_and_preserves_override ()
             [
               ("FAKE_CAPTURE_FILE", capture_override);
               ("HOME", home_dir);
-              ("MASC_KEEPER_BOOTSTRAP_ENABLED", "true");
+              ("MASC_KEEPER_BOOTSTRAP_ENABLED", "");
             ]
-          [ "--port"; "9962"; "--base-path"; repo_root ]
+          [ "--with-keeper-bootstrap"; "--port"; "9962"; "--base-path"; repo_root ]
       in
       if code_override <> 0 then
         failf "loopback script override failed (%d)\nstdout:\n%s\nstderr:\n%s"
           code_override stdout_override stderr_override;
       let captured_override = read_file capture_override in
-      check bool "loopback preserves explicit keeper autoboot override" true
+      check bool "loopback honors explicit keeper autoboot opt-in" true
         (contains_substring captured_override "MASC_KEEPER_BOOTSTRAP_ENABLED=true"))
 
 let () =
@@ -1261,8 +1261,8 @@ let () =
           test_case "worktree prefers local build over workspace build" `Quick
             test_worktree_prefers_local_build_over_workspace_build;
           test_case
-            "loopback disables keeper autoboot by default and preserves override"
+            "loopback disables keeper autoboot by default and requires opt-in"
             `Quick
-            test_loopback_disables_keeper_autoboot_by_default_and_preserves_override;
+            test_loopback_disables_keeper_autoboot_by_default_and_requires_opt_in;
         ] );
     ]

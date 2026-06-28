@@ -153,8 +153,8 @@ type surface =
 
 ### 4.3 Keepers Surface (기존 유지 + 강화)
 
-- List: name, generation, active model, composite phase, goal
-- Detail: identity, live context, model, runtime stats, behavior, timestamps
+- List: name, generation, runtime lane, composite phase, goal
+- Detail: identity, live context, runtime lane, runtime stats, behavior, timestamps
 - Logs: metrics JSONL tail
 - Message: chat stream
 

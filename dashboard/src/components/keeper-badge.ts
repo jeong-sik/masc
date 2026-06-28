@@ -18,16 +18,7 @@ export interface KeeperRegistryEntry {
   sigil: string
 }
 
-export const KEEPER_REGISTRY: Record<string, KeeperRegistryEntry> = {
-  // Canonical 5 — pinned slots for brand recall.
-  // These match the v0.2 alias targets in design-system tokens
-  // so visual identity is preserved across the v0.2→v0.3 migration.
-  'nick0cave':     { slot: 3,  sigil: 'NK' },  /* amber  */
-  'masc-improver': { slot: 6,  sigil: 'MS' },  /* jade   */
-  'sangsu':        { slot: 9,  sigil: 'SS' },  /* sky    */
-  'qa-king':       { slot: 2,  sigil: 'QA' },  /* clay   */
-  'rama':          { slot: 11, sigil: 'RM' },  /* violet */
-}
+export const KEEPER_REGISTRY: Record<string, KeeperRegistryEntry> = {}
 
 // FNV-1a 32-bit hash mapped onto 1..12 (avoids 0 so slot is 1-indexed).
 function hash12(str: string): number {

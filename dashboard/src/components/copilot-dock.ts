@@ -206,9 +206,7 @@ interface DockKeeper {
 function deriveDockKeepers(keeperRows: Keeper[]): DockKeeper[] {
   if (keeperRows.length === 0) {
     // Minimal fallback only when the store has not hydrated yet.
-    return [
-      { id: 'masc-improver', kr: 'MASC Improver', ns: 'fleet', phase: 'Running', status: 'run' },
-    ]
+    return []
   }
   return keeperRows.map(k => ({
     id: k.keeper_id ?? k.name,
@@ -221,7 +219,7 @@ function deriveDockKeepers(keeperRows: Keeper[]): DockKeeper[] {
 
 const dockOpen = persistentSignal<DockState>({
   key: 'dashboard:copilot-dock',
-  defaultValue: { open: false, mode: 'dock', keeperId: 'masc-improver', x: null, y: null },
+  defaultValue: { open: false, mode: 'dock', keeperId: '', x: null, y: null },
 })
 const dockThreads = signal<Record<string, DockMessage[]>>({})
 const dockStreaming = signal<DockStreaming | null>(null)

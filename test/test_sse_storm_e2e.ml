@@ -2,6 +2,7 @@ open Alcotest
 
 type http_result = {
   status: int option;
+  headers: (string * string) list;
   body: string;
   curl_exit: int;
   stderr: string;
@@ -83,7 +84,7 @@ let parse_headers raw =
       (status, headers)
   | Some [] -> (None, [])
 
-let run_curl ?(headers=[]) ?max_time ~port ~path () =
+let run_curl ?(headers=[]) ?max_time ?(method_="GET") ?body ~port ~path () =
   let header_file = Filename.temp_file "sse-storm-header-" ".txt" in
   let body_file = Filename.temp_file "sse-storm-body-" ".txt" in
   let url = Printf.sprintf "http://127.0.0.1:%d%s" port path in
@@ -97,20 +98,25 @@ let run_curl ?(headers=[]) ?max_time ~port ~path () =
       (fun (k, v) -> ["-H"; Printf.sprintf "%s: %s" k v])
       headers
   in
+  let body_args =
+    match body with
+    | None -> []
+    | Some body -> [ "--data-binary"; body ]
+  in
   let args =
     [|
       "curl";
       "-sS";
       "--http1.1";
       "-X";
-      "GET";
+      method_;
       "-o";
       body_file;
       "-D";
       header_file;
     |]
     |> Array.to_list
-    |> fun base -> base @ max_time_args @ header_args @ [url]
+    |> fun base -> base @ max_time_args @ header_args @ body_args @ [url]
     |> Array.of_list
   in
   let (ic, oc, ec) = Unix.open_process_args_full "curl" args (Unix.environment ()) in
@@ -127,8 +133,14 @@ let run_curl ?(headers=[]) ?max_time ~port ~path () =
   let body = read_file body_file in
   (try Sys.remove header_file with _ -> ());
   (try Sys.remove body_file with _ -> ());
-  let (status, _headers) = parse_headers header_raw in
-  { status; body; curl_exit; stderr }
+  let (status, headers) = parse_headers header_raw in
+  { status; headers; body; curl_exit; stderr }
+
+let header_value result name =
+  let name = String.lowercase_ascii name in
+  result.headers
+  |> List.find_map (fun (key, value) ->
+    if String.equal (String.lowercase_ascii key) name then Some value else None)
 
 let find_main_eio_exe () =
   let env_override = Sys.getenv_opt "MASC_MAIN_EIO_EXE" in
@@ -240,6 +252,40 @@ let dashboard_dev_token ~port =
       fail
         (Printf.sprintf
            "dashboard dev-token missing HTTP status (curl_exit=%d stderr=%s body=%s)"
+           result.curl_exit result.stderr result.body)
+
+let initialize_mcp_session ~port ~auth_token =
+  let body =
+    {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","clientInfo":{"name":"sse-storm-e2e","version":"1.0"},"capabilities":{}}}|}
+  in
+  let result =
+    run_curl
+      ~headers:
+        [
+          ("Content-Type", "application/json");
+          ("Accept", "application/json, text/event-stream");
+          ("Authorization", "Bearer " ^ auth_token);
+        ]
+      ~method_:"POST" ~body ~max_time:2.0 ~port ~path:"/mcp" ()
+  in
+  (match result.status with
+  | Some 200 -> ()
+  | Some code ->
+      fail
+        (Printf.sprintf
+           "initialize returned HTTP %d (curl_exit=%d stderr=%s body=%s)"
+           code result.curl_exit result.stderr result.body)
+  | None ->
+      fail
+        (Printf.sprintf
+           "initialize missing HTTP status (curl_exit=%d stderr=%s body=%s)"
+           result.curl_exit result.stderr result.body));
+  match header_value result "mcp-session-id" with
+  | Some sid when String.trim sid <> "" -> sid
+  | _ ->
+      fail
+        (Printf.sprintf
+           "initialize response missing Mcp-Session-Id (curl_exit=%d stderr=%s body=%s)"
            result.curl_exit result.stderr result.body)
 
 let merge_env_overrides overrides =
@@ -405,7 +451,7 @@ let check_status label expected result =
 
 let test_mcp_reconnect_stays_accepted () =
   with_server @@ fun ~port ~auth_token ->
-  let sid = Printf.sprintf "storm-mcp-%06d" (Random.int 1_000_000) in
+  let sid = initialize_mcp_session ~port ~auth_token in
   let headers =
     [
       ("Accept", "text/event-stream");
@@ -422,7 +468,7 @@ let test_mcp_reconnect_stays_accepted () =
 
 let test_ag_ui_rejects_reconnect_then_recovers () =
   with_server @@ fun ~port ~auth_token ->
-  let sid = Printf.sprintf "storm-agui-%06d" (Random.int 1_000_000) in
+  let sid = initialize_mcp_session ~port ~auth_token in
   (* /ag-ui/events uses the observer SSE auth path; mirror /mcp by passing the
      dashboard dev token explicitly. *)
   let headers =

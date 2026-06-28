@@ -524,10 +524,11 @@ let () =
       error "missing --runtime ID (required for a live run; use --list to inspect the corpus)";
     let base_path = resolve_base cfg.base in
     (* Fail fast: --record-verdicts must target an isolated store, never the live
-       ledger ($MASC_BASE_PATH/data/verdicts). Resolve before any heavy init. *)
+       ledger ($MASC_BASE_PATH/data/verdicts). Relative store paths resolve from
+       the explicit workspace base path, not ambient process cwd. *)
     let verdict_store =
       match
-        Cal.resolve_record_verdicts_store ~cwd:(Sys.getcwd ())
+        Cal.resolve_record_verdicts_store ~cwd:base_path
           ~record_verdicts:cfg.record_verdicts
           ~verdict_store_dir:cfg.verdict_store_dir
           ~live_store_dir:(Some (Filename.concat base_path "data/verdicts"))

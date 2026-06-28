@@ -36,6 +36,8 @@ function makeEntry(
     near_duplicate: 0,
     provider_slot_busy: 0,
     librarian_fallback_facts: 0,
+    librarian_fallback_empty_response_facts: 0,
+    librarian_fallback_nonempty_facts: 0,
     alerts: [],
     ...overrides,
   }
@@ -58,6 +60,8 @@ function makeResponse(
       near_duplicate: 0,
       provider_slot_busy: 0,
       librarian_fallback_facts: 0,
+      librarian_fallback_empty_response_facts: 0,
+      librarian_fallback_nonempty_facts: 0,
       ...totalsOverrides,
     },
     alert_summary: alertSummary ?? makeAlertSummary(),
@@ -290,6 +294,8 @@ describe('KeeperMemoryHealth', () => {
           makeEntry({
             keeper_id: 'fallback-heavy',
             librarian_fallback_facts: 2,
+            librarian_fallback_empty_response_facts: 1,
+            librarian_fallback_nonempty_facts: 1,
             alerts: [{
               code: 'librarian_fallback_facts',
               severity: 'warn',
@@ -300,7 +306,11 @@ describe('KeeperMemoryHealth', () => {
               threshold: 0,
             }],
           }),
-        ], { librarian_fallback_facts: 2 }),
+        ], {
+          librarian_fallback_facts: 2,
+          librarian_fallback_empty_response_facts: 1,
+          librarian_fallback_nonempty_facts: 1,
+        }),
         alert_summary: makeAlertSummary({
           total_alerts: 1,
           warn_alerts: 1,
@@ -313,6 +323,7 @@ describe('KeeperMemoryHealth', () => {
 
       expect(screen.getByText('폴백')).not.toBeNull()
       expect(statValue(container, 'librarian-fallback-facts')).toBe('2')
+      expect(container.textContent).toContain('빈 1 · 원문 1')
     })
   })
 

@@ -27,6 +27,8 @@ type keeper_health =
   ; near_duplicate : int
   ; provider_slot_busy : int
   ; librarian_fallback_facts : int
+  ; librarian_fallback_empty_response_facts : int
+  ; librarian_fallback_nonempty_facts : int
   }
 
 type alert_code =
@@ -226,14 +228,27 @@ let keeper_health ~keepers_dir ~now keeper_id =
     Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
   in
   let facts_count = List.length facts in
-  let librarian_fallback_facts =
+  let librarian_fallback_facts, librarian_fallback_empty_response_facts =
     facts
     |> List.fold_left
-         (fun count (fact : Keeper_memory_os_types.fact) ->
+         (fun (total, empty_response) (fact : Keeper_memory_os_types.fact) ->
            if Keeper_memory_os_types.legacy_unstructured_fallback_claim fact.claim
-           then count + 1
-           else count)
-         0
+           then (
+             let empty_response =
+               empty_response
+               + if
+                 Keeper_memory_os_types
+                 .legacy_unstructured_fallback_empty_response_claim
+                   fact.claim
+               then 1
+               else 0
+             in
+             total + 1, empty_response)
+           else (total, empty_response))
+         (0, 0)
+  in
+  let librarian_fallback_nonempty_facts =
+    librarian_fallback_facts - librarian_fallback_empty_response_facts
   in
   let facts_bytes =
     file_size_bytes
@@ -264,6 +279,8 @@ let keeper_health ~keepers_dir ~now keeper_id =
   ; near_duplicate = gc_report.dedup_removed
   ; provider_slot_busy = provider_slot_busy_for_keeper keeper_id
   ; librarian_fallback_facts
+  ; librarian_fallback_empty_response_facts
+  ; librarian_fallback_nonempty_facts
   }
 ;;
 
@@ -279,6 +296,9 @@ let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
     ; "near_duplicate", `Int h.near_duplicate
     ; "provider_slot_busy", `Int h.provider_slot_busy
     ; "librarian_fallback_facts", `Int h.librarian_fallback_facts
+    ; ( "librarian_fallback_empty_response_facts"
+      , `Int h.librarian_fallback_empty_response_facts )
+    ; "librarian_fallback_nonempty_facts", `Int h.librarian_fallback_nonempty_facts
     ; "alerts", `List (List.map keeper_alert_to_json alerts)
     ]
 ;;
@@ -328,6 +348,10 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
           ; "provider_slot_busy", `Int (sum (fun h -> h.provider_slot_busy))
           ; ( "librarian_fallback_facts"
             , `Int (sum (fun h -> h.librarian_fallback_facts)) )
+          ; ( "librarian_fallback_empty_response_facts"
+            , `Int (sum (fun h -> h.librarian_fallback_empty_response_facts)) )
+          ; ( "librarian_fallback_nonempty_facts"
+            , `Int (sum (fun h -> h.librarian_fallback_nonempty_facts)) )
           ] )
     ; ( "alert_summary"
       , `Assoc

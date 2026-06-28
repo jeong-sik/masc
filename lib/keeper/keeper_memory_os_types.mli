@@ -241,6 +241,10 @@ val legacy_unstructured_fallback_claim : string -> bool
 (** Whether a fact claim carries the historical librarian parse-failure fallback
     prefix. *)
 
+val legacy_unstructured_fallback_empty_response_claim : string -> bool
+(** Whether a legacy librarian parse-failure fallback claim records an empty
+    provider response. *)
+
 val legacy_unstructured_fallback_claim_key : string -> bool
 (** Whether a persisted pre-[Diagnostic] recall key identifies a legacy
     librarian parse-failure fallback fact. This centralizes the historical

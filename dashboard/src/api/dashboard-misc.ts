@@ -233,6 +233,8 @@ export interface KeeperMemoryHealthKeeperEntry {
   near_duplicate: number
   provider_slot_busy: number
   librarian_fallback_facts: number
+  librarian_fallback_empty_response_facts: number
+  librarian_fallback_nonempty_facts: number
   alerts: KeeperMemoryHealthAlert[]
 }
 
@@ -248,6 +250,8 @@ export interface KeeperMemoryHealthResponse {
     near_duplicate: number
     provider_slot_busy: number
     librarian_fallback_facts: number
+    librarian_fallback_empty_response_facts: number
+    librarian_fallback_nonempty_facts: number
   }
   alert_summary: {
     total_alerts: number

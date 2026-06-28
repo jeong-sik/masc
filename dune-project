@@ -55,9 +55,9 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned OAS main carries post-v0.207.10 provider fixes until the next
-  ;; published agent_sdk release carries them.
-  (agent_sdk (>= 0.207.10))
+  ;; Pinned to OAS v0.207.11 release; the release carries the provider
+  ;; reasoning-effort policy fix (#2188) previously pinned from main.
+  (agent_sdk (>= 0.207.11))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

@@ -401,6 +401,81 @@ let compute_section ~name ?section_timings_ref f =
       let status = if timed_out then "timeout" else "error" in
       full_health_component_placeholder ~error ~component_timed_out:true ~status name
 
+let assoc_member_opt name = function
+  | `Assoc fields -> List.assoc_opt name fields
+  | _ -> None
+
+let assoc_string_opt name json =
+  match assoc_member_opt name json with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let assoc_bool_opt name json =
+  match assoc_member_opt name json with
+  | Some (`Bool value) -> Some value
+  | _ -> None
+
+let health_status_rank = function
+  | "blocked" | "error" | "timeout" -> 3
+  | "degraded" | "stale" | "warning" | "unavailable" | "unknown" -> 2
+  | "warming" | "snapshot_not_ready" -> 1
+  | _ -> 0
+
+let max_health_status left right =
+  if health_status_rank left >= health_status_rank right then left else right
+
+let full_health_operator_summary ~keeper_fleet_safety
+    ~keeper_identity_drift_json ~reaction_ledger_json ~keeper_config_schema_status
+    ~keeper_config_schema_blocking ~keeper_config_schema_terminal_reason
+    ~keeper_config_operator_action_required ~lazy_task_boot_guard_fires_total =
+  let status = ref "ok" in
+  let reasons = ref [] in
+  let note_status component json fallback_reason =
+    let component_status =
+      match assoc_string_opt "status" json with
+      | Some value -> value
+      | None -> "unknown"
+    in
+    status := max_health_status !status component_status;
+    let action_required =
+      match assoc_bool_opt "operator_action_required" json with
+      | Some value -> value
+      | None -> false
+    in
+    if
+      action_required
+      || health_status_rank component_status >= 3
+      || String.equal component_status "unknown"
+    then
+      let reason =
+        match fallback_reason with
+        | Some value -> value
+        | None -> component_status
+      in
+      reasons := Printf.sprintf "%s:%s" component reason :: !reasons
+  in
+  note_status "keeper_fleet_safety" keeper_fleet_safety
+    (assoc_string_opt "blocker" keeper_fleet_safety);
+  note_status "keeper_identity_drift" keeper_identity_drift_json
+    (assoc_string_opt "terminal_reason" keeper_identity_drift_json);
+  note_status "keeper_reaction_ledger" reaction_ledger_json None;
+  status := max_health_status !status keeper_config_schema_status;
+  if keeper_config_operator_action_required || keeper_config_schema_blocking
+  then
+    reasons :=
+      Printf.sprintf "keeper_config_schema:%s" keeper_config_schema_terminal_reason
+      :: !reasons;
+  if lazy_task_boot_guard_fires_total > 0
+  then (
+    status := max_health_status !status "degraded";
+    reasons :=
+      Printf.sprintf
+        "lazy_task_boot_guard_fires_total:%d"
+        lazy_task_boot_guard_fires_total
+      :: !reasons);
+  let reasons = List.rev !reasons in
+  (!status, reasons <> [], reasons)
+
 let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
   let uptime_secs = health_uptime_secs () in
   let build = Build_identity.current () in
@@ -524,6 +599,23 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
             ~paused_keepers_json
             ())
   in
+  let lazy_task_boot_guard_fires_total =
+    int_of_float
+      (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")
+  in
+  let keeper_config_operator_action_required = keeper_config_schema_blocking in
+  let overall_status, operator_action_required, operator_action_reasons =
+    full_health_operator_summary
+      ~keeper_fleet_safety
+      ~keeper_identity_drift_json
+      ~reaction_ledger_json
+      ~keeper_config_schema_status:
+        (if keeper_config_schema_blocking then "blocked" else "ok")
+      ~keeper_config_schema_blocking
+      ~keeper_config_schema_terminal_reason
+      ~keeper_config_operator_action_required
+      ~lazy_task_boot_guard_fires_total
+  in
   Tool_args.ok_assoc [
     ("server", `String "masc");
     ("version", `String build.release_version);
@@ -552,6 +644,10 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ("feature_flags", let features = Dashboard_feature_health.get_all_features () in
       Dashboard_feature_health.overview_json features);
     ("gc", quick_gc_json ());
+    ("overall_status", `String overall_status);
+    ("operator_action_required", `Bool operator_action_required);
+    ( "operator_action_reasons",
+      `List (List.map (fun reason -> `String reason) operator_action_reasons) );
     ("keeper_fibers", `Int keeper_fibers);
     ( "keeper_fd_pressure"
     , Keeper_fd_pressure.runtime_state_json ~active_keepers:keeper_fibers
@@ -586,7 +682,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ( "keeper_config_schema_terminal_reason",
       `String keeper_config_schema_terminal_reason );
     ( "keeper_config_operator_action_required",
-      `Bool keeper_config_schema_blocking );
+      `Bool keeper_config_operator_action_required );
     (* P2 silent-failure fix: lazy_task_boot_guard fires when a keeper
        startup task exceeds the boot timeout (server_bootstrap_loops.ml:116).
        The Otel_metric_store counter `masc_lazy_task_boot_guard_fired_total`
@@ -595,8 +691,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
        silently failed to start.  Exposing the cumulative count here
        lets dashboards / health probes alert on a non-zero value. *)
     ("lazy_task_boot_guard_fires_total",
-     `Int (int_of_float
-             (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")));
+     `Int lazy_task_boot_guard_fires_total);
   ]
 
 (* [stale_since_ts] records the wall-clock time of the FIRST refresh
@@ -652,6 +747,9 @@ let with_full_health_snapshot_lock f =
 let full_health_cached_field_names =
   [
     "feature_flags";
+    "overall_status";
+    "operator_action_required";
+    "operator_action_reasons";
     "keeper_fibers";
     "keeper_fd_pressure";
     "fd_accountant";
@@ -680,6 +778,9 @@ let full_health_placeholder_fields ?error ?(component_timed_out = false)
     ( "feature_flags",
       full_health_component_placeholder ?error ~component_timed_out ~status
         "feature_flags" );
+    ("overall_status", `String status);
+    ("operator_action_required", `Bool false);
+    ("operator_action_reasons", `List []);
     ("keeper_fibers", `Int 0);
     ( "keeper_fd_pressure",
       full_health_component_placeholder ?error ~component_timed_out ~status

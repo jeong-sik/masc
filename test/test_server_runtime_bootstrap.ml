@@ -2001,6 +2001,17 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
+          Alcotest.(check string) "health overall status tracks fleet degradation"
+            "degraded"
+            (json |> member "overall_status" |> to_string);
+          Alcotest.(check bool) "health top-level asks for operator action" true
+            (json |> member "operator_action_required" |> to_bool);
+          Alcotest.(check bool) "health top-level names fleet blocker" true
+            (json |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_fleet_safety:reaction_capacity_below_target"));
           ())))
 
 let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity () =

@@ -952,14 +952,9 @@ let test_base_path_hash_relative_input_anchors_to_cwd_not_env_base () =
     ~finally:(fun () -> Sys.chdir saved_cwd)
     (fun () ->
        Sys.chdir cwd;
-       let expected =
-         Filename.concat
-           (Config_dir_resolver.current_working_dir ())
-           "relative-base"
-       in
        Alcotest.(check string)
          "relative base hash anchor"
-         expected
+         (Filename.concat (Unix.realpath cwd) "relative-base")
          (Keeper_sandbox_runtime.normalize_base_path_for_hash "relative-base"))
 
 let test_sandbox_container_label_args_include_managed_ttl () =

@@ -112,10 +112,9 @@ export function keeperPhaseLabel(keeper: Keeper): string {
 
 /** Health tone for the status dot + header pill. One-line closed-map lookup
  *  against the fleet-tone SSOT (PHASE_TONE) — no parallel Set<string>
- *  classifier. The fleet-tone module owns the KeeperPhase → tone mapping
- *  (lifted from the prototype's PHASE_TONE table at
- *  ~/Downloads/v2 4/project/keeper-v2/data.jsx:36-39), so adding a new
- *  phase forces the compiler to flag a missing entry there.
+ *  classifier. The repo-owned fleet-tone module owns the KeeperPhase →
+ *  tone mapping, so adding a new phase forces the compiler to flag a
+ *  missing entry there.
  *
  *  Distinct from keeperBucket, which only groups running/paused/offline
  *  for the roster: a Failing or Overflowed keeper is neither offline nor

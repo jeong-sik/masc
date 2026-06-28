@@ -8,10 +8,9 @@
 //   - dashboard/src/components/keeper-workspace/keeper-workspace-shared.ts
 //     (iter-2 PR #22466, DRAFT): local `DotTone = 'ok' | 'warn' | 'bad' | 'info' | 'idle'`
 //
-// The 'info' name is a drift — agent-roster already shipped 'busy', the
-// vendored fleet.css and the prototype (~/Downloads/v2 4/project/keeper-v2/
-// data.jsx:36-39 / fleet.jsx:28) both use 'busy'. Lifting the SSOT here
-// makes the broader convention win.
+// The 'info' name is a drift: agent-roster and the repo-owned keeper-v2
+// fleet.css already shipped 'busy'. Lifting the SSOT here makes that
+// checked-in convention win.
 
 /** 5-tone health vocabulary shared across the Fleet surfaces. */
 export type FleetTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'
@@ -34,10 +33,9 @@ export const FL_TONE_LABEL: Readonly<Record<FleetTone, string>> = {
  *
  *  Derivation: `KeeperPhase` (13 variants) collapses via `keeperLifecycleStatus`
  *  to 13 lowercase tokens, plus `unknown` for the fallback path. We
- *  promote `Zombie` to a first-class entry even though the prototype
- *  `PHASE_TONE` table only has 12 — the live wire emits `Zombie` as a
- *  distinct phase (`KeeperPhase | null`), so the closed sum must cover it.
- *  Zombie is classified as `bad` (degraded, operator must act).
+ *  promote `Zombie` to a first-class entry because the live wire emits it
+ *  as a distinct phase (`KeeperPhase | null`), so the closed sum must cover
+ *  it. Zombie is classified as `bad` (degraded, operator must act).
  */
 export type KeeperPhaseToken =
   | 'running'
@@ -58,17 +56,15 @@ export type KeeperPhaseToken =
 /** Closed tone map. Keys MUST match `KeeperPhaseToken` and MUST be kept in
  *  sync with `PHASE_LABEL_KO` below (same keyspace, different value shape).
  *
- *  Authoritative SSOT: the prototype (~/Downloads/v2 4/project/keeper-v2/
- *  data.jsx:36-39) `PHASE_TONE` table. Lowercased here to match the live
- *  `keeperDisplayStatus` wire tokens.
+ *  Runtime SSOT: this repo-owned table. Keys are lowercased to match the
+ *  live `keeperDisplayStatus` wire tokens, and consumers import this module
+ *  instead of keeping parallel string classifiers.
  *
- *  Notable divergence from prototype: prototype marks `Draining` as `warn`
- *  (operator-initiated destructive stop), while
- *  `monitoring-runtime.ts:171` `TRANSIENT_KEEPER_PHASES` treats it as a
- *  transient FSM phase. We follow the prototype — Draining is operator
- *  intent (the `stop` action's danger:true via-phase), not a working-
- *  through state. The RuntimeBand `transient` band divergence is out of
- *  scope here (deferred to a separate PR per the iter-3 plan).
+ *  `Draining` is `warn` here because it represents operator intent via
+ *  the `stop` action's danger:true via-phase. `monitoring-runtime.ts:171`
+ *  `TRANSIENT_KEEPER_PHASES` treats it as a transient FSM phase; that
+ *  RuntimeBand divergence is out of scope here and should be reconciled in
+ *  a separate typed-runtime-state change.
  *
  *  Why `Object.create(null)` instead of a plain object literal: the
  *  `isKeeperPhaseToken` guard uses own-property checks, and JS `in` /

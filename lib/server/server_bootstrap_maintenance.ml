@@ -313,48 +313,6 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* P0-1: per-keeper Memory OS reconcile. Runs after GC at the same coarse
-     cadence. The pass is opt-in while [Keeper_memory_os_reconcile] is only a
-     stub; each keeper is wrapped in try/with so one failure does not cancel
-     siblings. Gated by [MASC_KEEPER_MEMORY_OS_RECONCILE] (default false). *)
-  if Env_config.KeeperMemoryOs.reconcile_enabled () then
-    fork_logged_fiber
-      ~sw
-      ~on_error:(log_server_fiber_crash "memory_os_reconcile")
-      (fun () ->
-        let interval = 600.0 in
-        let reconcile_one keeper_id () =
-          try Keeper_memory_os_reconcile.reconcile_keeper ~keeper_id () with
-          | Eio.Cancel.Cancelled _ as e -> raise e
-          | exn ->
-            Log.Server.warn
-              "memory_os_reconcile: keeper=%s tick crashed: %s"
-              keeper_id
-              (Printexc.to_string exn)
-        in
-        let rec loop () =
-          let keeper_ids =
-            List.filter
-              (fun id -> not (String.equal id Keeper_memory_os_types.shared_store_id))
-              (Keeper_memory_os_io.list_fact_store_keeper_ids ())
-          in
-          Eio.Fiber.all
-            (List.map
-               (fun keeper_id () ->
-                  run_with_keeper_timeout
-                    ~clock:(Some clock)
-                    ~timeout_sec:120.0
-                    ~keeper_id
-                    ~on_timeout:(fun () ->
-                      Log.Server.warn
-                        "memory_os_reconcile: keeper=%s timeout after 120s"
-                        keeper_id)
-                    (reconcile_one keeper_id))
-               keeper_ids);
-          Eio.Time.sleep clock interval;
-          loop ()
-        in
-        loop ());
   (* RFC-0247 §2.3: per-keeper Memory OS consolidation. The librarian writes
      facts every cadence turn; without this pass a keeper's Tier-1 store only
      grows. Off the hot path: every [interval]s it asks the model to merge

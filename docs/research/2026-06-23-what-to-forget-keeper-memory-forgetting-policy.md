@@ -78,19 +78,19 @@ masc already forgets by **typed origin, deterministically — no score, no decay
 
 | Layer | File:line | What it does |
 |---|---|---|
-| Write-time horizon | `keeper_memory_os_types.ml:235` `fact_valid_until` | routes external_ref→volatile (86400s), Ephemeral→TTL, else durable(None) |
+| Write-time horizon | `keeper_memory_os_types.ml:235` `fact_valid_until` | routes Self_observation→short TTL, Ephemeral→TTL, else durable(None); external_ref is accepted for compatibility but context-only |
 | Category TTL | `keeper_memory_os_types.ml:217` `category_valid_until` | only Ephemeral finite; Fact/Constraint/Lesson/… → None |
 | Read-time recall filter | `keeper_memory_os_recall.ml:256, 274-277` `fact_is_current` | drops expired; **passes all durable** ← the echo gate |
 | Cap-path expiry | `keeper_memory_os_io.ml:544, 627` `partition_expired` | sheds expired before ranking |
 | Append-on-miss | `keeper_memory_os_io.ml:597` `merge_episode_facts` | **appends fresh-horizon row when `claim_identity` misses** ← the real 117× moot path |
 | GC sweep | `keeper_memory_os_gc.ml:24-128` | hard-expiry + dedup; default-OFF, 600s cadence |
-| Reconciler (external) | `keeper_memory_os_reconcile.ml:44-179` | Stale_open advances anchor; never deletes on Unknown |
+| Reconciler (external) | retired | The old GitHub grounding module was not compatible with the current context-only external_ref contract and was removed; there is no live external-state reconcile fiber. |
 | Consolidation gate | `keeper_memory_os_consolidator.ml:57` `eligible = is_promotable && external_ref=None` | volatile never promoted fleet-wide |
 | Anchor immutability | `keeper_memory_os_policy.ml:53-69` `reobserve_fact` | external_ref claim inherited whole; producer re-mint ≠ re-verification |
 
 **What this research changes about the map:**
 - The **load-bearing layer is the producer boundary** (write-time), not decay — masc already believes this for external state (RFC-0259 §3.7). Self-observation needs the same treatment: a `claim_kind` slot key (RFC-0285 L1) so re-mint **merges** at `merge_episode_facts:597` instead of appending.
-- The **missing reconciler** is symmetric: `keeper_memory_os_reconcile.ml` grounds external claims against GitHub. There is **no `keeper_memory_os_self_reconcile`** grounding self-observations against the keeper's action stream. That is the §3 finding's implementation home.
+- The **missing reconciler** is now only the structured self-observation case: there is **no `keeper_memory_os_self_reconcile`** grounding self-observations against the keeper's action stream. Any future implementation must use typed action events, not prose-derived external_ref inference.
 - The **recall filter** (`recall.ml:256`) is where an L0 "self-observation is audit-only, not recall-injected" routing would live.
 
 ---
@@ -134,7 +134,7 @@ masc already forgets by **typed origin, deterministically — no score, no decay
 ## 7. Recommended next steps (sequenced)
 
 1. **Ship RFC-0285 as the producer-boundary fix (L1), reframed.** The stable `claim_id` (supersession) + `claim_kind` (need-probability prior) are the load-bearing, theory-backed core. Keep L3 but **demote it in the RFC's own framing to a disuse-decay backstop**, not the headline mechanism. (This is mostly a framing + a decay-on-recency tweak over the merged RFC-0285 design.)
-2. **New RFC: self-observation action-stream reconciler (the real finding).** Symmetric to `keeper_memory_os_reconcile.ml` (external→GitHub): a `keeper_memory_os_self_reconcile` that invalidates a standing self-observation when a **structured** later action contradicts it (task-claim event ⇒ retract "no tasks"; tool-success ⇒ retract "tool timing out"). Closed typed action⇒claim-kind map, never a phrase matcher. **This is the part RFC-0285 §7 said was impossible and the research says is possible.**
+2. **New RFC: self-observation action-stream reconciler (the real finding).** A `keeper_memory_os_self_reconcile` would invalidate a standing self-observation when a **structured** later action contradicts it (task-claim event ⇒ retract "no tasks"; tool-success ⇒ retract "tool timing out"). Closed typed action⇒claim-kind map, never a phrase matcher. **This is the part RFC-0285 §7 said was impossible and the research says is possible.**
 3. **New RFC or §-amendment: L0 recall routing + `re-injection ≠ re-observation` invariant.** Self-observation defaults to audit-log, not recall-injection; only de-indexed consolidated lessons enter recall; staleness clocks never advance on prompt re-injection.
 4. **Build the memory-quality eval first (Harness-First).** Before tuning any decay constant, build the outcome eval. Otherwise every layer here is an unproven scoring layer. This is the gating prerequisite, not an afterthought.
 5. **Defer the decay constant.** Set it from the eval + transcript measurement, not from a guess in the RFC.

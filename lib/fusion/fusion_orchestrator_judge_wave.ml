@@ -9,19 +9,19 @@ type judge_run =
 
 type clock =
   { now_opt : unit -> float option
-  ; t0 : float
+  ; t0 : float option
   ; missing_clock_failure : Fusion_types.judge_failure
   }
 
 let make_clock ~now_opt ~missing_clock_failure =
-  let t0 = Option.value (now_opt ()) ~default:0.0 in
+  let t0 = now_opt () in
   { now_opt; t0; missing_clock_failure }
 ;;
 
 let elapsed_since_t0 clock =
-  match clock.now_opt () with
-  | Some now -> now -. clock.t0
-  | None -> 0.0
+  match clock.now_opt (), clock.t0 with
+  | Some now, Some t0 -> now -. t0
+  | _ -> 0.0
 ;;
 
 let missing_clock_result clock =

@@ -55,7 +55,19 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
+
+let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
+  match stim.payload with
+  | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
+  | Keeper_event_queue.No_progress_recovery ->
+    Some Keeper_world_observation.No_progress_recovery_stimulus
+  | Keeper_event_queue.Board_signal _
+  | Keeper_event_queue.Fusion_completed _
+  | Keeper_event_queue.Bg_completed _ ->
+    None
+;;
 
 let consume_single_heartbeat_stimulus
       ~(ctx : _ context)
@@ -163,6 +175,7 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
     | batch -> consume_board_stimulus_batch ~meta_after_triage batch, batch
   in
   let consumed_stimulus_count = List.length consumed_stimuli in
+  let event_queue_triggers = List.filter_map event_queue_trigger_of_stimulus consumed_stimuli in
   let pending_board_events =
     List.fold_left
       (fun acc (event : Keeper_world_observation.pending_board_event) ->
@@ -183,5 +196,5 @@ let heartbeat_event_intake ~ctx ~meta_after_triage ~pending_board_events =
       pending_board_events
       (List.rev queued_observations)
   in
-  { pending_board_events; consumed_stimulus_count; consumed_stimuli }
+  { pending_board_events; consumed_stimulus_count; consumed_stimuli; event_queue_triggers }
 ;;

@@ -83,9 +83,19 @@ export function phaseTokenFromKeeper(keeper: Keeper): KeeperPhaseToken {
  *  signature is intentionally permissive because callers pass through
  *  arbitrary backend status values), so we narrow here against the
  *  declared token union. New tokens from the wire that are not yet in
- *  `KeeperPhaseToken` collapse to `'unknown'` via this fallback. */
+ *  `KeeperPhaseToken` collapse to `'unknown'` via this fallback.
+ *
+ *  Why `Object.prototype.hasOwnProperty.call` instead of `value in PHASE_TONE`:
+ *  the `in` operator walks the prototype chain. Although `PHASE_TONE` is
+ *  now built with `Object.create(null)` (see `lib/fleet-tone.ts`) so
+ *  this specific leak no longer applies, the `hasOwnProperty` form is
+ *  defensive against future refactors that switch the map to a plain
+ *  object literal or a `Map`. Either backend leak mode would let a
+ *  wire token like `'constructor'` or `'toString'` slip past the
+ *  `'unknown'` fallback and surface inherited `Object.prototype`
+ *  members in `keeperStatusTone` / `keeperPhaseLabel`. */
 function isKeeperPhaseToken(value: string): value is KeeperPhaseToken {
-  return value in PHASE_TONE
+  return Object.prototype.hasOwnProperty.call(PHASE_TONE, value)
 }
 
 /** Phase label shown in the roster sub-row and the chat header state pill.

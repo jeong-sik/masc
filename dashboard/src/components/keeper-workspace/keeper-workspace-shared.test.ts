@@ -163,4 +163,19 @@ describe('phaseTokenFromKeeper', () => {
   it('returns unknown for tokens outside the closed sum', () => {
     expect(phaseTokenFromKeeper(mk({ status: 'bootstrapping' }))).toBe('unknown')
   })
+  it('rejects Object.prototype member names as wire tokens', () => {
+    // Regression: the prior guard was `value in PHASE_TONE`, which walks
+    // the prototype chain and accepts inherited property names like
+    // `constructor`, `toString`, `__proto__`. A backend that emits one of
+    // those strings (or any future JS reserved name) used to bypass the
+    // `'unknown'` fallback and surface inherited members in
+    // `keeperStatusTone` / `keeperPhaseLabel`. The new guard uses
+    // own-property checks against a null-prototype map, so all of these
+    // collapse to `'unknown'`.
+    expect(phaseTokenFromKeeper(mk({ status: 'constructor' }))).toBe('unknown')
+    expect(phaseTokenFromKeeper(mk({ status: 'toString' }))).toBe('unknown')
+    expect(phaseTokenFromKeeper(mk({ status: '__proto__' }))).toBe('unknown')
+    expect(phaseTokenFromKeeper(mk({ status: 'hasOwnProperty' }))).toBe('unknown')
+    expect(phaseTokenFromKeeper(mk({ status: 'valueOf' }))).toBe('unknown')
+  })
 })

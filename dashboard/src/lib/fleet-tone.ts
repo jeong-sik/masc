@@ -68,45 +68,66 @@ export type KeeperPhaseToken =
  *  transient FSM phase. We follow the prototype — Draining is operator
  *  intent (the `stop` action's danger:true via-phase), not a working-
  *  through state. The RuntimeBand `transient` band divergence is out of
- *  scope here (deferred to a separate PR per the iter-3 plan). */
-export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> = {
-  running: 'ok',
-  paused: 'warn',
-  draining: 'warn',
-  compacting: 'busy',
-  handoff: 'busy',
-  restarting: 'busy',
-  failing: 'bad',
-  overflowed: 'bad',
-  stopped: 'idle',
-  unbooted: 'idle',
-  crashed: 'bad',
-  dead: 'bad',
-  zombie: 'bad',
-  unknown: 'idle',
-}
+ *  scope here (deferred to a separate PR per the iter-3 plan).
+ *
+ *  Why `Object.create(null)` instead of a plain object literal: the
+ *  `isKeeperPhaseToken` guard uses own-property checks, and JS `in` /
+ *  bracket-access on a plain object leak `Object.prototype` members
+ *  (`constructor`, `toString`, `__proto__`, `hasOwnProperty`, …). A
+ *  malformed wire token like `'constructor'` would otherwise bypass
+ *  the `'unknown'` fallback and surface inherited members in
+ *  `keeperStatusTone` / `keeperPhaseLabel`. The null-prototype factory
+ *  closes that hole at the data-structure level so future lookup style
+ *  changes (e.g. switching from `hasOwnProperty` to `Map.get`) cannot
+ *  silently re-introduce it. The `Object.freeze` makes the map truly
+ *  immutable at runtime — there is no legitimate path that mutates it. */
+export const PHASE_TONE: Readonly<Record<KeeperPhaseToken, FleetTone>> =
+  Object.freeze(
+    Object.assign(Object.create(null), {
+      running: 'ok',
+      paused: 'warn',
+      draining: 'warn',
+      compacting: 'busy',
+      handoff: 'busy',
+      restarting: 'busy',
+      failing: 'bad',
+      overflowed: 'bad',
+      stopped: 'idle',
+      unbooted: 'idle',
+      crashed: 'bad',
+      dead: 'bad',
+      zombie: 'bad',
+      unknown: 'idle',
+    }) as Record<KeeperPhaseToken, FleetTone>,
+  )
 
 /** Korean phase label shown in roster sub-rows + chat header state pills.
  *  Keyed on the same lowercase tokens as `PHASE_TONE` so the two tables
  *  cannot drift. Previously lived at the bottom of `keeper-workspace-
  *  shared.ts` and missed `Overflowed` / `Restarting` variants; lifted here
- *  so agent-roster can share it. */
-export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> = {
-  running: '실행 중',
-  paused: '일시정지',
-  compacting: '압축 중',
-  handoff: '인계 중',
-  draining: '정리 중',
-  restarting: '재시작 중',
-  failing: '오류 발생',
-  overflowed: '컨텍스트 초과',
-  stopped: '중지됨',
-  unbooted: '미기동',
-  crashed: '비정상 종료',
-  dead: '종료됨',
-  zombie: '응답 없음',
-  unknown: '알 수 없음',
-}
+ *  so agent-roster can share it.
+ *
+ *  Same null-prototype + freeze rationale as `PHASE_TONE` — closed-sum
+ *  boundary must hold for arbitrary backend wire strings. */
+export const PHASE_LABEL_KO: Readonly<Record<KeeperPhaseToken, string>> =
+  Object.freeze(
+    Object.assign(Object.create(null), {
+      running: '실행 중',
+      paused: '일시정지',
+      compacting: '압축 중',
+      handoff: '인계 중',
+      draining: '정리 중',
+      restarting: '재시작 중',
+      failing: '오류 발생',
+      overflowed: '컨텍스트 초과',
+      stopped: '중지됨',
+      unbooted: '미기동',
+      crashed: '비정상 종료',
+      dead: '종료됨',
+      zombie: '응답 없음',
+      unknown: '알 수 없음',
+    }) as Record<KeeperPhaseToken, string>,
+  )
 
 // The runtime helper `phaseTokenFromPhase` is defined in the workspace
 // surface (keeper-workspace-shared.ts) because it depends on

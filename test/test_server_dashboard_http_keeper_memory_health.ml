@@ -30,6 +30,13 @@ let fact ?(valid_until = None) ~now claim =
   }
 ;;
 
+let librarian_fallback_fact ~now claim =
+  { (fact ~now claim) with
+    Types.category = Types.Ephemeral
+  ; claim_kind = Some Types.Diagnostic
+  }
+;;
+
 let keeper_ids json =
   match json with
   | `Assoc fields ->
@@ -177,6 +184,10 @@ let test_reports_per_keeper_metric_values () =
   Alcotest.(check int) "nothing expired" 0 (int_field "ttl_expired_on_disk" k);
   Alcotest.(check int) "no duplicates" 0 (int_field "near_duplicate" k);
   Alcotest.(check int) "no provider slot busy skips" 0 (int_field "provider_slot_busy" k);
+  Alcotest.(check int)
+    "no librarian fallback facts"
+    0
+    (int_field "librarian_fallback_facts" k);
   Alcotest.(check int) "no keeper alerts" 0 (List.length (list_field "alerts" k));
   Alcotest.(check int) "totals.facts" 2 (int_field "facts" (totals json));
   Alcotest.(check bool)
@@ -283,6 +294,51 @@ let test_reports_provider_slot_busy_metric_as_alert () =
   Alcotest.(check int) "summary total alerts" 1 (int_field "total_alerts" summary)
 ;;
 
+let test_reports_librarian_fallback_facts_as_alert () =
+  Eio_main.run
+  @@ fun _env ->
+  let now = test_now in
+  let base = fresh_dir "masc-memory-health-librarian-fallback" in
+  let keepers_dir = Config_dir_resolver.keepers_dir_for_base_path ~base_path:base in
+  let fallback_claim =
+    Types.librarian_unstructured_fallback_claim_prefix
+    ^ " (librarian provider returned empty response): <empty response>"
+  in
+  Io.rewrite_facts_atomically_for_keepers_dir
+    ~keepers_dir
+    ~keeper_id:"fallback"
+    [ fact ~now "ordinary durable row"; librarian_fallback_fact ~now fallback_claim ];
+  let json = Health.keeper_memory_health_http_json ~base_path:base in
+  let k = keeper_obj "fallback" json in
+  Alcotest.(check int)
+    "librarian fallback facts projected"
+    1
+    (int_field "librarian_fallback_facts" k);
+  Alcotest.(check int)
+    "totals librarian fallback facts"
+    1
+    (int_field "librarian_fallback_facts" (totals json));
+  let alerts = list_field "alerts" k in
+  Alcotest.(check (list string))
+    "librarian fallback alert code"
+    [ "librarian_fallback_facts" ]
+    (List.map (string_field "code") alerts);
+  Alcotest.(check (list string))
+    "librarian fallback alert target"
+    [ "librarian_fallback_facts" ]
+    (List.map (string_field "target") alerts);
+  Alcotest.(check (list string))
+    "librarian fallback alert label"
+    [ "폴백" ]
+    (List.map (string_field "label") alerts);
+  let summary = alert_summary json in
+  Alcotest.(check int)
+    "summary librarian fallback keepers"
+    1
+    (int_field "librarian_fallback_fact_keepers" summary);
+  Alcotest.(check int) "summary total alerts" 1 (int_field "total_alerts" summary)
+;;
+
 let test_sorts_keepers_by_facts_bytes_desc () =
   Eio_main.run
   @@ fun _env ->
@@ -358,6 +414,10 @@ let () =
             "reports provider slot busy metric as alert"
             `Quick
             test_reports_provider_slot_busy_metric_as_alert
+        ; Alcotest.test_case
+            "reports librarian fallback facts as alert"
+            `Quick
+            test_reports_librarian_fallback_facts_as_alert
         ; Alcotest.test_case
             "sorts keepers by facts_bytes descending"
             `Quick

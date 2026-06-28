@@ -35,6 +35,7 @@ function makeEntry(
     ttl_expired_on_disk: 0,
     near_duplicate: 0,
     provider_slot_busy: 0,
+    librarian_fallback_facts: 0,
     alerts: [],
     ...overrides,
   }
@@ -56,6 +57,7 @@ function makeResponse(
       ttl_expired_on_disk: 0,
       near_duplicate: 0,
       provider_slot_busy: 0,
+      librarian_fallback_facts: 0,
       ...totalsOverrides,
     },
     alert_summary: alertSummary ?? makeAlertSummary(),
@@ -73,11 +75,13 @@ function makeAlertSummary(
     near_duplicate_keepers: 0,
     high_event_ratio_keepers: 0,
     provider_slot_busy_keepers: 0,
+    librarian_fallback_fact_keepers: 0,
     thresholds: {
       ttl_expired_on_disk: 0,
       near_duplicate: 0,
       events_to_facts_ratio: 0,
       provider_slot_busy: 0,
+      librarian_fallback_facts: 0,
     },
     ...overrides,
   }
@@ -278,6 +282,37 @@ describe('KeeperMemoryHealth', () => {
 
       expect(screen.getByText('슬롯')).not.toBeNull()
       expect(statValue(container, 'provider-slot-busy')).toBe('3')
+    })
+
+    it('surfaces librarian fallback fact alerts per keeper', async () => {
+      mockFetch.mockResolvedValue({
+        ...makeResponse([
+          makeEntry({
+            keeper_id: 'fallback-heavy',
+            librarian_fallback_facts: 2,
+            alerts: [{
+              code: 'librarian_fallback_facts',
+              severity: 'warn',
+              target: 'librarian_fallback_facts',
+              label: '폴백',
+              message: 'Librarian fallback diagnostic fact rows remain on disk',
+              value: 2,
+              threshold: 0,
+            }],
+          }),
+        ], { librarian_fallback_facts: 2 }),
+        alert_summary: makeAlertSummary({
+          total_alerts: 1,
+          warn_alerts: 1,
+          keepers_with_alerts: 1,
+          librarian_fallback_fact_keepers: 1,
+        }),
+      })
+      const { container } = render(html`<${KeeperMemoryHealth} />`)
+      await waitFor(() => expect(screen.getByText('fallback-heavy')).not.toBeNull())
+
+      expect(screen.getByText('폴백')).not.toBeNull()
+      expect(statValue(container, 'librarian-fallback-facts')).toBe('2')
     })
   })
 

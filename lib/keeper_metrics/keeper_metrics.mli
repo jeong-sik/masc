@@ -46,6 +46,7 @@ type t =
   | PathRejection
   | IdeOrphanWrites
   | PathResolverIdentityMismatch
+  | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
   | HeartbeatFailures
   | CleanupTrackingFailures

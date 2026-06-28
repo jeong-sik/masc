@@ -64,8 +64,8 @@ val with_slot : kind:kind -> (unit -> 'a) -> 'a
     [Eio.Switch.on_release] counter-style callback: a parent-fibre
     cancellation can no longer leave the holding state stuck
     because [holding_state] is a typed variant with only two
-    valid transitions, performed under
-    [Eio.Mutex.use_rw ~protect:true]. *)
+    valid transitions, performed under a short
+    [Stdlib.Mutex]-protected critical section. *)
 
 val acquire_lifetime_slot : kind:kind -> unit -> (unit -> unit)
 (** [acquire_lifetime_slot ~kind ()] acquires a [kind]-typed slot and
@@ -160,7 +160,8 @@ val all_kinds : kind list
     (over-decrement, hidden by a [max 0 (... - 1)] clamp) or
     never fire (stuck positive).  The typed state machine is
     the only writer of [holding_state] and admits exactly two
-    transitions, both performed under the per-slot mutex:
+    transitions, both performed under a short
+    [Stdlib.Mutex]-protected critical section:
 
     - [Idle] -> [In_flight { acquired_at ; hold_id }] by
       {!mark_acquire}  (allocates the next [hold_id])
@@ -192,7 +193,8 @@ val read_holding : kind:kind -> int
 (** [read_holding ~kind] returns the current holding count
     as a pure projection of [kind]'s [holding_state]:
     [Idle] -> [0], [In_flight _] -> [1].  Does not mutate
-    state.  Thread-safe under the per-slot mutex. *)
+    state.  Thread-safe across Eio fibers, worker domains, and
+    watcher systhreads. *)
 
 val mark_acquire : kind:kind -> int
 (** Transitions [kind]'s [holding_state] from [Idle] to

@@ -15,7 +15,7 @@ let snapshot =
 let execution completion_contract_result =
   `Assoc
     [ "latest_receipt_present", `Bool true
-    ; "recorded_at", `String "2026-06-05T00:00:00Z"
+    ; "recorded_at", `String "2999-01-01T00:00:00Z"
     ; "completion_contract_result", `String completion_contract_result
     ; "operator_disposition", `String "pass_next_model"
     ; "operator_disposition_reason", `Null
@@ -93,8 +93,19 @@ let test_contract_blocker_marks_attention () =
   check
     (option string)
     "reason"
-    (Some "surface_mismatch")
+    (Some "completion_contract_result:surface_mismatch")
     attention.cra_reason
+;;
+
+let test_drifted_contract_label_is_not_normalized () =
+  let execution = execution " Surface_Mismatch " in
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention ~snapshot ~execution
+  in
+  check bool "blocked" false attention.cra_blocked;
+  check bool "needs_attention" false attention.cra_needs_attention;
+  check string "state" "ok" attention.cra_state;
+  check (option string) "reason" None attention.cra_reason
 ;;
 
 let test_contract_blocker_recommends_route_actions () =
@@ -154,7 +165,7 @@ let test_passive_budget_exhaustion_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "passive_only")
+    (Some "completion_contract_result:passive_only")
     attention.cra_reason
 ;;
 
@@ -170,7 +181,7 @@ let test_completed_passive_receipt_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "passive_only")
+    (Some "completion_contract_result:passive_only")
     attention.cra_reason
 ;;
 
@@ -186,7 +197,7 @@ let test_not_dispatched_budget_exhaustion_is_blocked () =
   check
     (option string)
     "reason"
-    (Some "not_dispatched")
+    (Some "completion_contract_result:not_dispatched")
     attention.cra_reason
 ;;
 
@@ -195,6 +206,8 @@ let () =
     "server_dashboard_composite_attention"
     [ ( "tool-route contract blockers"
       , [ test_case "marks runtime attention" `Quick test_contract_blocker_marks_attention
+        ; test_case "does not normalize drifted contract labels" `Quick
+            test_drifted_contract_label_is_not_normalized
         ; test_case "emits route actions" `Quick
             test_contract_blocker_recommends_route_actions
         ] )

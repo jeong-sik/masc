@@ -55,6 +55,7 @@ type t =
   | PathRejection
   | IdeOrphanWrites
   | PathResolverIdentityMismatch
+  | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
   | HeartbeatFailures
   | CleanupTrackingFailures
@@ -296,6 +297,7 @@ let to_string = function
   | PathRejection -> "masc_keeper_path_rejection_total"
   | IdeOrphanWrites -> "masc_ide_orphan_writes_total"
   | PathResolverIdentityMismatch -> "masc_keeper_path_resolver_identity_mismatch_total"
+  | KeeperMetaOverlayDrift -> "masc_keeper_meta_overlay_drift_total"
   | HeartbeatSuccesses -> "masc_keeper_heartbeat_successes_total"
   | HeartbeatFailures -> "masc_keeper_heartbeat_failures_total"
   | CleanupTrackingFailures -> "masc_keeper_cleanup_tracking_failures_total"
@@ -516,7 +518,7 @@ let all : t list =
     CompactionPairRepairDrops; EmergencyCompactRatioThreshold; OperatorCompact; OperatorClear;
     CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes;
     ToolUnderusedAllowedCount; ToolUnderusedAllowed; PathRejection; IdeOrphanWrites;
-    PathResolverIdentityMismatch; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
+    PathResolverIdentityMismatch; KeeperMetaOverlayDrift; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
     DispatchEventFailures; DirectiveFailures; ToolCallDuration; ToolCallDurationBucket; WriteMetaFailures;
     MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
     CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;

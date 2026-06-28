@@ -243,7 +243,7 @@ type snapshot = {
       (** Lifetime [consecutive_noop_count] from the proactive runtime.
           Increments per cycle that produced no text and only used
           observation-only tools; resets on substantive output. Reaching
-          ≥3 caps the noop backoff multiplier at 8x. *)
+          ≥2 caps the noop backoff multiplier at 4x. *)
   idle_seconds : int;
       (** Wall-clock seconds since the keeper last did something the
           metrics layer treated as substantive. Compared against

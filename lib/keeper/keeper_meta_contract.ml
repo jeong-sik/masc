@@ -111,7 +111,7 @@ type proactive_runtime =
           (board_list, context_status, other passive reads) were used with no
           substantive action.  Resets to 0 on any productive cycle.
           Used by [effective_scheduled_autonomous_cooldown] for exponential
-          backoff: cooldown *= 2^min(n, 3), capping at 8x. *)
+          backoff: cooldown *= 2^min(n, 2), capping at 4x. *)
   }
 
 (* ── Structured blocker classification ──────────────────────── *)

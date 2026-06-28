@@ -141,6 +141,11 @@ type dispatch_result =
 
 let inbound_of_json json =
   try
+    let () =
+      match json with
+      | `Assoc _ -> ()
+      | _ -> invalid_arg "expected object"
+    in
     let str key =
       Json_util.get_string json key
       |> Option.value ~default:""

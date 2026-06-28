@@ -298,6 +298,26 @@ let explicit_metadata : (string * metadata) list =
       hidden_runtime_tool
         "Keeper task-completion runtime tool; callable but hidden from the public MCP schema surface."
         complete_task_tool );
+    ( "keeper_board_search",
+      hidden_runtime_tool
+        "Keeper board-search runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
+    ( "keeper_tools_list",
+      hidden_runtime_tool
+        "Keeper tool-list runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
+    ( "tool_execute",
+      hidden_runtime_tool
+        "Typed command-execution runtime tool; callable but hidden from the public MCP schema surface."
+        destructive_tool );
+    ( "tool_read_file",
+      hidden_runtime_tool
+        "Structured file-read runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
+    ( "tool_search_files",
+      hidden_runtime_tool
+        "Structured code-search runtime tool; callable but hidden from the public MCP schema surface."
+        read_state_tool );
     ( "sidecar",
       {
         destructive_tool with

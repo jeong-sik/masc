@@ -12,9 +12,10 @@
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
-    Raises [Invalid_argument] when [timeout_s] is not positive or is [nan].
+    Raises [Invalid_argument] when [timeout_s] is not positive or is [NaN].
     [Float.infinity] is accepted only as an explicit no-wrapper timeout
-    value; checked-in production defaults in {!Env_config_oas_bridge}
+    budget for advisory callers whose protection lives at the provider
+    boundary; checked-in production defaults in {!Env_config_oas_bridge}
     should stay finite. A missing Eio environment fails closed without
     running [fn]. *)
 val run_safe

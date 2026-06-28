@@ -1296,11 +1296,11 @@ let test_librarian_runtime_requires_clock_for_provider_call () =
              inp
          with
          | Ok _ -> Alcotest.fail "expected missing clock to fail closed"
-         | Error msg ->
+         | Error err ->
            Alcotest.(check string)
              "explicit missing clock error"
              Librarian_runtime.librarian_provider_clock_unavailable_error
-             msg);
+             (Librarian_runtime.extraction_error_to_string err));
         Alcotest.(check bool) "provider not called without clock" false !called;
         Alcotest.(check bool)
           "generation counter not created without clock"
@@ -1353,7 +1353,8 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
             (value >= fallback_started_at && value <= fallback_finished_at +. 0.001)
         in
         (match fallback_result with
-         | Error msg -> Alcotest.fail msg
+         | Error err ->
+           Alcotest.fail (Librarian_runtime.extraction_error_to_string err)
          | Ok extraction ->
            let episode = extraction.Librarian_runtime.episode in
            let kind = extraction.Librarian_runtime.kind in
@@ -1365,6 +1366,10 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
              "fallback does not count as cadence success"
              false
              (Librarian_runtime.should_record_cadence_success kind);
+           Alcotest.(check bool)
+             "fallback defers the next cadence attempt"
+             true
+             (Librarian_runtime.should_record_cadence_backoff kind);
            fallback_created_at := Some episode.Types.created_at;
            check_in_clock_window
              "fallback created_at derives from injected clock"

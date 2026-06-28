@@ -154,8 +154,10 @@ let fresh_counter = -1
    - counter < 0 (fresh) is due immediately.
    - cadence <= 1 is always due with the counter pinned at 0.
    - When due, the counter is set to [cadence] and stays there until
-     [cadence_record_success] resets it to 0. This keeps the keeper due across
-     skipped or failed attempts instead of silently suppressing the next turns. *)
+     [cadence_record_success] or [cadence_record_attempt] resets it to 0. This
+     keeps the keeper due across skipped work, while completed non-success
+     provider attempts can defer the next attempt to the cadence window instead
+     of retrying on every keeper turn. *)
 let cadence_step ~cadence ~counter =
   if cadence <= 1
   then 0, true
@@ -196,6 +198,11 @@ let cadence_due ~keeper_id ~trace_id =
 ;;
 
 let cadence_record_success ~keeper_id ~trace_id =
+  Stdlib.Mutex.protect cadence_mu (fun () ->
+    Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
+;;
+
+let cadence_record_attempt ~keeper_id ~trace_id =
   Stdlib.Mutex.protect cadence_mu (fun () ->
     Hashtbl.replace cadence_counters keeper_id (trace_id, 0))
 ;;
@@ -374,15 +381,36 @@ let parse_retry_nudge =
         Keeper_librarian.wire_field_source_turn
     ]
 
+type extraction_error =
+  | Prompt_render_failed of string
+  | Provider_clock_unavailable
+  | Provider_timeout
+  | Provider_transport_failed of string
+  | Provider_empty_response
+  | Memory_fact_upsert_failed of string
+
+let librarian_provider_clock_unavailable_error =
+  "memory os librarian provider clock unavailable"
+;;
+
+let extraction_error_to_string = function
+  | Prompt_render_failed msg -> msg
+  | Provider_clock_unavailable -> librarian_provider_clock_unavailable_error
+  | Provider_timeout -> "librarian provider timed out"
+  | Provider_transport_failed msg -> msg
+  | Provider_empty_response -> "librarian provider returned empty response"
+  | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
+;;
+
 type attempt_outcome =
   | Parsed of Keeper_memory_os_types.episode
   | Unparseable of string
     (* provider returned output we could not parse into an episode — retryable *)
-  | Transport_failed of string (* timeout / HTTP error — not retried here *)
+  | Transport_failed of extraction_error (* timeout / HTTP error — not retried here *)
 
 type parse_retry_error =
   | Retry_exhausted_unparseable of string
-  | Retry_transport_failed of string
+  | Retry_transport_failed of extraction_error
 
 type extraction_kind =
   | Structured_episode
@@ -396,6 +424,20 @@ type extraction_result =
 let should_record_cadence_success = function
   | Structured_episode -> true
   | Unstructured_fallback -> false
+;;
+
+let should_record_cadence_backoff = function
+  | Structured_episode -> false
+  | Unstructured_fallback -> true
+;;
+
+let should_record_cadence_backoff_after_error = function
+  | Provider_clock_unavailable -> false
+  | Prompt_render_failed _
+  | Provider_timeout
+  | Provider_transport_failed _
+  | Provider_empty_response
+  | Memory_fact_upsert_failed _ -> true
 ;;
 
 let should_preserve_unstructured_fallback raw =
@@ -452,10 +494,6 @@ let messages_for_librarian (inp : Keeper_librarian.input) =
 let with_timeout ~clock ~timeout_sec f =
   try Some (Eio.Time.with_timeout_exn clock timeout_sec f) with
   | Eio.Time.Timeout -> None
-;;
-
-let librarian_provider_clock_unavailable_error =
-  "memory os librarian provider clock unavailable"
 ;;
 
 let unstructured_note_max_chars = 900
@@ -546,10 +584,10 @@ let extract_with_provider_classified
     (inp : Keeper_librarian.input)
   =
   match clock with
-  | None -> Error librarian_provider_clock_unavailable_error
+  | None -> Error Provider_clock_unavailable
   | Some clock -> (
   match messages_for_librarian inp with
-  | Error _ as e -> e
+  | Error msg -> Error (Prompt_render_failed msg)
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
     let last_unparseable_raw = ref None in
@@ -558,8 +596,9 @@ let extract_with_provider_classified
         with_timeout ~clock ~timeout_sec (fun () ->
           complete ~sw ~net ~clock ~config:provider_cfg ~messages ())
       with
-      | None -> Transport_failed "librarian provider timed out"
-      | Some (Error err) -> Transport_failed (Provider_http_error.to_message err)
+      | None -> Transport_failed Provider_timeout
+      | Some (Error err) ->
+        Transport_failed (Provider_transport_failed (Provider_http_error.to_message err))
       | Some (Ok response) ->
         let raw = Agent_sdk_response.text_of_response response |> String.trim in
         if String.equal raw ""
@@ -583,7 +622,7 @@ let extract_with_provider_classified
          messages
      with
      | Ok episode -> Ok { episode; kind = Structured_episode }
-     | Error (Retry_transport_failed msg) -> Error msg
+     | Error (Retry_transport_failed err) -> Error err
      | Error (Retry_exhausted_unparseable msg) ->
        let raw =
          match !last_unparseable_raw with
@@ -591,7 +630,7 @@ let extract_with_provider_classified
          | None -> ""
        in
        if not (should_preserve_unstructured_fallback raw)
-       then Error msg
+       then Error Provider_empty_response
        else (
          let now = Eio.Time.now clock in
          Log.Keeper.warn
@@ -617,7 +656,7 @@ let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~
       ~generation
       inp
   with
-  | Error _ as e -> e
+  | Error err -> Error (extraction_error_to_string err)
   | Ok { episode; kind = _ } -> Ok episode
 ;;
 
@@ -632,7 +671,7 @@ let extract_and_append_with_provider_classified
     inp
   =
   match clock with
-  | None -> Error librarian_provider_clock_unavailable_error
+  | None -> Error Provider_clock_unavailable
   | Some _ ->
     let generation =
       Keeper_memory_os_io.next_generation_with_floor
@@ -708,7 +747,7 @@ let extract_and_append_with_provider_classified
            (dark-by-default, no recall consumer), so the fact upsert above is the only
            post-merge work. *)
         Ok extraction
-      | Error message -> Error ("memory os fact upsert failed: " ^ message)))
+      | Error message -> Error (Memory_fact_upsert_failed message)))
 ;;
 
 let extract_and_append_with_provider
@@ -732,7 +771,7 @@ let extract_and_append_with_provider
       ~provider_cfg
       inp
   with
-  | Error _ as e -> e
+  | Error err -> Error (extraction_error_to_string err)
   | Ok { episode; kind = _ } -> Ok episode
 ;;
 
@@ -811,30 +850,33 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
              | Some (Ok { episode; kind }) ->
                if should_record_cadence_success kind
                then (
-                 (* Only structured extraction resets the cadence. Skipped,
-                    failed, or unstructured fallback attempts leave the keeper
-                    due on the next turn. *)
+                 (* Only structured extraction records semantic success. *)
                  cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
                  Log.Keeper.info ~keeper_name:keeper_id
                    "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
                    episode.Keeper_memory_os_types.trace_id
                    episode.generation
                    (List.length episode.claims))
-               else
+               else (
+                 if should_record_cadence_backoff kind
+                 then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
                  Log.Keeper.warn ~keeper_name:keeper_id
-                   "memory os librarian wrote unstructured fallback trace_id=%s generation=%d claims=%d; cadence remains due"
+                   "memory os librarian wrote unstructured fallback trace_id=%s generation=%d claims=%d; cadence deferred"
                    episode.Keeper_memory_os_types.trace_id
                    episode.generation
-                   (List.length episode.claims)
+                   (List.length episode.claims))
              | Some (Error err) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)
                  ~labels:[ "keeper", keeper_id; "site", "memory_os_librarian" ]
                  ();
+               if should_record_cadence_backoff_after_error err
+               then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
                Log.Keeper.warn ~keeper_name:keeper_id
-                 "memory os librarian failed runtime=%s: %s"
+                 "memory os librarian failed runtime=%s: %s; cadence deferred=%b"
                  runtime_id
-                 err)))
+                 (extraction_error_to_string err)
+                 (should_record_cadence_backoff_after_error err))))
       | _ ->
         Log.Keeper.warn ~keeper_name:keeper_id
           "memory os librarian skipped: Eio context unavailable runtime=%s"

@@ -78,7 +78,7 @@ let sample_episode () =
 
 let parse_retry_error_to_string = function
   | R.Retry_exhausted_unparseable e -> "unparseable: " ^ e
-  | R.Retry_transport_failed e -> "transport: " ^ e
+  | R.Retry_transport_failed e -> "transport: " ^ R.extraction_error_to_string e
 
 let nudge_count messages =
   List.length
@@ -130,19 +130,22 @@ let test_bounded_then_fails () =
    | Error (R.Retry_exhausted_unparseable e) ->
      check string "last error surfaced" "still bad" e
    | Error (R.Retry_transport_failed e) ->
-     Alcotest.failf "expected unparseable exhaustion, got transport %s" e);
+     Alcotest.failf
+       "expected unparseable exhaustion, got transport %s"
+       (R.extraction_error_to_string e));
   check int "initial attempt + max_retries" 3 !calls
 
 let test_transport_not_retried () =
   let calls = ref 0 in
   let attempt _msgs =
     incr calls;
-    R.Transport_failed "timeout"
+    R.Transport_failed R.Provider_timeout
   in
   (match R.run_with_parse_retries ~max_retries:2 ~attempt [] with
    | Ok _ -> Alcotest.fail "expected Error"
    | Error (R.Retry_transport_failed e) ->
-     check string "transport error surfaced" "timeout" e
+     check string "transport error surfaced" "librarian provider timed out"
+       (R.extraction_error_to_string e)
    | Error (R.Retry_exhausted_unparseable e) ->
      Alcotest.failf "expected transport error, got unparseable %s" e);
   check int "transport failure is not retried" 1 !calls
@@ -211,11 +214,37 @@ let test_cadence_record_success_resets () =
   check bool "after success the next turn is not due" false
     (R.cadence_due ~keeper_id:kid ~trace_id:tid)
 
+let test_cadence_record_attempt_defers () =
+  let kid = "test-cadence-record-attempt" and tid = "trace-record-attempt" in
+  check bool "fresh (keeper, trace) is due" true
+    (R.cadence_due ~keeper_id:kid ~trace_id:tid);
+  R.cadence_record_attempt ~keeper_id:kid ~trace_id:tid;
+  check bool "after a completed non-success attempt the next turn is not due" false
+    (R.cadence_due ~keeper_id:kid ~trace_id:tid)
+
 let test_cadence_success_policy () =
   check bool "structured extraction resets cadence" true
     (R.should_record_cadence_success R.Structured_episode);
-  check bool "unstructured fallback stays due" false
-    (R.should_record_cadence_success R.Unstructured_fallback)
+  check bool "unstructured fallback is not semantic success" false
+    (R.should_record_cadence_success R.Unstructured_fallback);
+  check bool "structured extraction uses success path, not backoff" false
+    (R.should_record_cadence_backoff R.Structured_episode);
+  check bool "unstructured fallback defers cadence" true
+    (R.should_record_cadence_backoff R.Unstructured_fallback)
+
+let test_cadence_error_backoff_policy () =
+  check bool "empty provider response defers cadence" true
+    (R.should_record_cadence_backoff_after_error R.Provider_empty_response);
+  check bool "provider timeout defers cadence" true
+    (R.should_record_cadence_backoff_after_error R.Provider_timeout);
+  check bool "provider transport failure defers cadence" true
+    (R.should_record_cadence_backoff_after_error
+       (R.Provider_transport_failed "http timeout"));
+  check bool "fact upsert failure defers cadence" true
+    (R.should_record_cadence_backoff_after_error
+       (R.Memory_fact_upsert_failed "permission denied"));
+  check bool "missing provider clock does not claim a completed attempt" false
+    (R.should_record_cadence_backoff_after_error R.Provider_clock_unavailable)
 
 let test_unstructured_fallback_preservation_policy () =
   check bool "empty response is not preserved" false
@@ -226,8 +255,8 @@ let test_unstructured_fallback_preservation_policy () =
     (R.should_preserve_unstructured_fallback "not json, but evidence")
 
 (* [cadence_due] drives the real per-(keeper, trace) counter table (the gate
-   [run_best_effort] uses). A fresh pair is due immediately, and failures are
-   left due until [cadence_record_success] is called. Asserted as
+   [run_best_effort] uses). A fresh pair is due immediately, and successful
+   structured extractions are due once per configured period. Asserted as
    period-invariants so they hold for any configured cadence. *)
 let test_cadence_due_periodic () =
   let kid = "test-cadence-due-periodic" and tid = "trace-periodic" in
@@ -249,13 +278,16 @@ let test_cadence_due_independent_keepers () =
   else (
     let ka = "test-cadence-due-ind-a" and ta = "trace-a"
     and kb = "test-cadence-due-ind-b" and tb = "trace-b" in
-    (* Put ka into a persistent due state without recording success. *)
+    (* Put ka into a persistent due state without recording a completed attempt. *)
     ignore (R.cadence_due ~keeper_id:ka ~trace_id:ta);
     (* Put kb at counter 0 by recording success on its fresh due turn. *)
     ignore (R.cadence_due ~keeper_id:kb ~trace_id:tb);
     R.cadence_record_success ~keeper_id:kb ~trace_id:tb;
-    (* ka remains due; kb is mid-cycle and not due. *)
-    check bool "ka stays due after failed/skipped attempt" true
+    (* ka remains due after skipped work; kb is mid-cycle and not due. *)
+    check bool "ka stays due after skipped attempt" true
+      (R.cadence_due ~keeper_id:ka ~trace_id:ta);
+    R.cadence_record_attempt ~keeper_id:ka ~trace_id:ta;
+    check bool "ka backs off after completed non-success attempt" false
       (R.cadence_due ~keeper_id:ka ~trace_id:ta);
     check bool "kb advances on its own counter, not due on ka's schedule" false
       (R.cadence_due ~keeper_id:kb ~trace_id:tb))
@@ -499,7 +531,9 @@ let () =
           test_case "cadence 1 always due" `Quick test_cadence_one_always_due;
           test_case "step transitions" `Quick test_cadence_step_transitions;
           test_case "record success resets" `Quick test_cadence_record_success_resets;
+          test_case "record attempt defers" `Quick test_cadence_record_attempt_defers;
           test_case "success policy excludes fallback" `Quick test_cadence_success_policy;
+          test_case "error backoff policy" `Quick test_cadence_error_backoff_policy;
           test_case "fallback preservation policy" `Quick
             test_unstructured_fallback_preservation_policy;
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;

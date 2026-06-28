@@ -26,9 +26,11 @@ val cadence_step : cadence:int -> counter:int -> int * bool
     (turns since last successful extraction) is [counter] under [cadence].
     [counter < 0] is treated as fresh and is due immediately.
     cadence<=1 is always due with the counter pinned at 0. When due, the updated
-    counter is set to [cadence] and stays there until [cadence_record_success]
-    resets it. Exposed for testing the cadence logic without the per-keeper
-    counter table. *)
+    counter is set to [cadence] and stays there until [cadence_record_success] or
+    [cadence_record_attempt] resets it. Skipped work leaves the counter due;
+    completed non-success attempts may be recorded to wait for the next cadence
+    window. Exposed for testing the cadence logic without the per-keeper counter
+    table. *)
 
 val cadence_step_keyed
   :  cadence:int
@@ -55,6 +57,13 @@ val cadence_record_success : keeper_id:string -> trace_id:string -> unit
     the cadence counter resets and the next cycle can begin. Must only be called
     after a due turn actually produced a structured episode; skipped, failed, or
     unstructured-fallback attempts must not call this. *)
+
+val cadence_record_attempt : keeper_id:string -> trace_id:string -> unit
+(** Record a completed non-success extraction attempt for [keeper_id] on
+    [trace_id] so transient provider failures and diagnostic fallbacks do not
+    immediately retry every keeper turn. This intentionally does not mark the
+    extraction as semantically successful. Skipped work such as a busy provider
+    slot must not call this, because no provider attempt happened. *)
 
 val cadence_counter_entries : unit -> int
 (** Number of live per-keeper cadence rows. Bounded by the number of keepers
@@ -107,14 +116,24 @@ val parse_retry_claim_fields : string list
 val parse_retry_nudge : string
 (** Corrective instruction appended to the message list on each parse-retry. *)
 
+type extraction_error =
+  | Prompt_render_failed of string
+  | Provider_clock_unavailable
+  | Provider_timeout
+  | Provider_transport_failed of string
+  | Provider_empty_response
+  | Memory_fact_upsert_failed of string
+
+val extraction_error_to_string : extraction_error -> string
+
 type attempt_outcome =
   | Parsed of Keeper_memory_os_types.episode
   | Unparseable of string
-  | Transport_failed of string
+  | Transport_failed of extraction_error
 
 type parse_retry_error =
   | Retry_exhausted_unparseable of string
-  | Retry_transport_failed of string
+  | Retry_transport_failed of extraction_error
 
 type extraction_kind =
   | Structured_episode
@@ -129,6 +148,15 @@ val should_record_cadence_success : extraction_kind -> bool
 (** Whether this extraction kind is allowed to reset the librarian cadence.
     Unstructured fallback episodes are durable diagnostics, but they mean the
     provider still failed to produce structured memory. *)
+
+val should_record_cadence_backoff : extraction_kind -> bool
+(** Whether this non-success extraction kind should defer the next attempt until
+    the next cadence window. Structured episodes use [cadence_record_success]
+    instead. *)
+
+val should_record_cadence_backoff_after_error : extraction_error -> bool
+(** Whether an extraction error represents enough completed work to defer the
+    next attempt until the next cadence window. *)
 
 val should_preserve_unstructured_fallback : string -> bool
 (** Whether raw unparseable provider output is worth preserving as a diagnostic
@@ -188,7 +216,7 @@ val extract_with_provider_classified
   -> provider_cfg:Llm_provider.Provider_config.t
   -> generation:int
   -> Keeper_librarian.input
-  -> (extraction_result, string) result
+  -> (extraction_result, extraction_error) result
 (** Provider-backed librarian extraction. [clock] stays optional at the API
     boundary because [run_best_effort] may be called from contexts that cannot
     supply an Eio clock; [None] returns
@@ -215,7 +243,7 @@ val extract_and_append_with_provider_classified
   -> keeper_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> Keeper_librarian.input
-  -> (extraction_result, string) result
+  -> (extraction_result, extraction_error) result
 
 val run_best_effort
   :  ?complete:complete_fn

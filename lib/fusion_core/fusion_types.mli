@@ -66,6 +66,7 @@ end
     격리하므로 한 패널 실패가 나머지를 죽이지 않는다. *)
 type panel_failure =
   | Timeout  (** 구조적 타임아웃 (Masc_oas_bridge) *)
+  | Bridge_error of string  (** MASC/OAS bridge bootstrap or wrapper error *)
   | Provider_error of string  (** provider/transport 에러, 메시지 보존 *)
   | Empty_response of string
       (** 모델이 빈 응답. detail에는 stop_reason/usage/content shape만 보존하고,
@@ -75,6 +76,8 @@ type panel_failure =
 [@@deriving to_yojson, show, eq]
 
 val panel_failure_of_yojson : Yojson.Safe.t -> (panel_failure, string) result
+(** Accepts the current ppx-style tagged-list encoding and the legacy bare
+    string encodings for [Timeout] / [Empty_response]. *)
 
 (** 성공한 패널 한 명의 답. (variant inline record는 ppx_deriving_yojson 비호환이라
     named record로 분리한다.) *)

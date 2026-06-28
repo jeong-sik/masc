@@ -217,6 +217,14 @@ let test_cadence_success_policy () =
   check bool "unstructured fallback stays due" false
     (R.should_record_cadence_success R.Unstructured_fallback)
 
+let test_unstructured_fallback_preservation_policy () =
+  check bool "empty response is not preserved" false
+    (R.should_preserve_unstructured_fallback "");
+  check bool "whitespace response is not preserved" false
+    (R.should_preserve_unstructured_fallback " \n\t ");
+  check bool "invalid text response is preserved" true
+    (R.should_preserve_unstructured_fallback "not json, but evidence")
+
 (* [cadence_due] drives the real per-(keeper, trace) counter table (the gate
    [run_best_effort] uses). A fresh pair is due immediately, and failures are
    left due until [cadence_record_success] is called. Asserted as
@@ -492,6 +500,8 @@ let () =
           test_case "step transitions" `Quick test_cadence_step_transitions;
           test_case "record success resets" `Quick test_cadence_record_success_resets;
           test_case "success policy excludes fallback" `Quick test_cadence_success_policy;
+          test_case "fallback preservation policy" `Quick
+            test_unstructured_fallback_preservation_policy;
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
           test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
           test_case "cadence_due resets on trace rollover" `Quick

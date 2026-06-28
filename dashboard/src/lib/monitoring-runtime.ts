@@ -170,9 +170,8 @@ function normalizeStage(stage: PipelineStage | string | null | undefined): strin
 // and `fleet-tone.ts:85` lifts that to the workspace tone SSOT. Including
 // Draining here would force the runtime band to `transient` → `busy` rail,
 // disagreeing with the workspace tone (`warn` dot/pill) on the same keeper.
-// The correct band for `Draining` is `paused`, reached via
-// `projection.opState.kind === 'paused'` (line below) — operator-initiated
-// stop routes through the paused branch, not the transient branch.
+// The correct non-offline display band for `Draining` is `paused`, reached
+// by a phase-direct branch in `keeperBand()` after typed offline routing.
 //
 // `satisfies readonly KeeperPhase[]` ties each literal to the closed sum: any
 // drift (typo or new transient variant) becomes a compile-time error instead
@@ -242,10 +241,11 @@ function keeperBand(projection: KeeperRuntimeProjection): RuntimeBand {
   // `pause` glyph / `warn` rail — that pairing is a display choice, not an
   // action-equivalence claim. `fleet-tone.ts:85` already lifts
   // `PHASE_TONE.draining = 'warn'`; this branch makes the runtime band
-  // agree with the workspace tone.
+  // agree with the workspace tone without letting Draining override typed
+  // offline truth.
   if (projection.opState.kind === 'paused') return 'paused'
-  if (projection.opState.phase === 'Draining') return 'paused'
   if (projection.opState.kind === 'offline') return 'offline'
+  if (projection.opState.phase === 'Draining') return 'paused'
   if (isTransientPhase(projection.opState.phase)) return 'transient'
   if (projection.signals.some(signal => signal.contributesToAttention)) {
     return 'attention'

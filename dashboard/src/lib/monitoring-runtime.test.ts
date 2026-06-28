@@ -459,17 +459,13 @@ describe('summarizeKeeperMonitoring', () => {
     // keeper that the backend has also flagged as offline (e.g. draining
     // timed out, then offline) still routes to `offline` first.
     it('offline beats Draining-→-paused band when both apply', () => {
-      const summary = summarizeKeeperMonitoring(
-        {
-          name: 'keeper-offline-draining',
-          status: 'offline',
-          phase: 'Offline',
-          pipeline_stage: 'draining',
-        } as Keeper,
-        { keeper: 'keeper-offline-draining', phase: 'offline' } as unknown as Parameters<
-          typeof summarizeKeeperMonitoring
-        >[1],
-      )
+      const summary = summarizeKeeperMonitoring({
+        name: 'keeper-offline-draining',
+        status: 'offline',
+        phase: 'Draining',
+        pipeline_stage: 'draining',
+        last_heartbeat: new Date().toISOString(),
+      } as Keeper)
       expect(summary.band.key).toBe('offline')
     })
 

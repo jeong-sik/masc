@@ -8,6 +8,8 @@ type finalized = {
 
 val stop_reason_label : Runtime_agent.stop_reason -> string
 
+val stop_reason_is_turn_budget_exhausted : Runtime_agent.stop_reason -> bool
+
 val finalize :
   reported_state_snapshot:Keeper_memory_policy.keeper_state_snapshot option ->
   keeper_name:string ->

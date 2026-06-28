@@ -51,6 +51,10 @@ val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
 
 val path_argument_values : string -> string list -> string list
 
+(** Filesystem path normalization and allowlist checks. Exposed so callers can
+    reach [validate_path] via [Exec_policy.Paths] (e.g. test keepers). *)
+module Paths = Exec_policy_paths
+
 (** [validate_path ~keeper_id ~base_path ~workdir path] checks [path] against
     the exec policy path rules (tmp/workspace scoping). Returns [true] when the
     path is admissible. *)

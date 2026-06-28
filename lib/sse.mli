@@ -149,7 +149,8 @@ val remove_external_subscribers : string list -> string list * int
 (** {1 Event Buffer} *)
 
 val clients : client_registry_state Atomic.t
-val event_buffer : (int * string * float) list Atomic.t
+type buffered_event = int * string * float
+
 val buffer_event : int -> string -> unit
 val get_events_after : int -> string list
 val get_events_after_for_kind : session_kind -> int -> string list
@@ -157,6 +158,9 @@ val get_events_after_for_kind : session_kind -> int -> string list
     replay only returns JSON-RPC messages; observer replay keeps all durable
     events; presence replay is empty. *)
 val cleanup_expired_events : unit -> int
+val event_buffer_events_for_test : unit -> buffered_event list
+val set_event_buffer_for_test : buffered_event list -> unit
+val rewrite_event_buffer_for_test : unit -> unit
 
 (** {1 Snapshots} *)
 

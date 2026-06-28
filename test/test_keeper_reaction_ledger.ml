@@ -489,7 +489,7 @@ let test_summary_cursor_ack_sweeps_covered_board_stimuli () =
   check_member_string "cursor-swept summary status" "ok" "status" swept_summary;
   check int "cursor-swept pending count" 0
     (swept_summary |> member "pending_stimulus_count" |> to_int);
-  check int "cursor sweep count" 1
+  check int "cursor sweep count" 2
     (swept_summary |> member "cursor_swept_stimulus_count" |> to_int);
   Keeper_reaction_ledger.record_event_queue_stimulus ~base_path ~keeper_name third;
   let future_summary =
@@ -605,6 +605,106 @@ let test_no_progress_recovery_reaction_clears_pending () =
     (reacted_summary |> member "pending_no_progress_recovery_count" |> to_int);
   check int "turn-start reaction counted" 1
     (reacted_summary |> member "turn_started_count" |> to_int)
+;;
+
+let test_no_progress_recovery_unrelated_reaction_does_not_clear_pending () =
+  with_temp_base @@ fun base_path ->
+  let config = Workspace.default_config base_path in
+  let keeper_name = "no-progress-unrelated-reaction-keeper" in
+  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let pending_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string "pending recovery summary status" "degraded" "status" pending_summary;
+  check int "recovery stimulus initially pending" 1
+    (pending_summary |> member "pending_no_progress_recovery_count" |> to_int);
+  let receipt_json =
+    `Assoc
+      [ "schema", `String "keeper.execution_receipt.v1"
+      ; "trace_id", `String "trace-later-reaction"
+      ; "outcome", `String "receipt_done"
+      ; "terminal_reason_code", `String "completed"
+      ; "operator_disposition", `String "pass"
+      ; "operator_disposition_reason", `String "healthy"
+      ; "completion_contract_result", `String "satisfied_execution"
+      ]
+  in
+  Keeper_reaction_ledger.record_execution_receipt_reaction
+    config
+    ~keeper_name
+    ~trace_id:"trace-later-reaction"
+    ~turn_count:1
+    ~current_task_id:None
+    ~goal_ids:[]
+    ~outcome:"receipt_done"
+    ~terminal_reason_code:"completed"
+    ~receipt_json
+    ();
+  let unrelated_reaction_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string
+    "unrelated reaction recovery summary remains degraded"
+    "degraded"
+    "status"
+    unrelated_reaction_summary;
+  check bool "unrelated reaction recovery still needs operator action" true
+    (unrelated_reaction_summary |> member "operator_action_required" |> to_bool);
+  check int "unrelated reaction leaves recovery stimulus pending" 1
+    (unrelated_reaction_summary |> member "pending_stimulus_count" |> to_int);
+  check int "unrelated reaction leaves no-progress recovery kind pending" 1
+    (unrelated_reaction_summary |> member "pending_no_progress_recovery_count" |> to_int);
+  check int "execution receipt reaction still counted" 1
+    (unrelated_reaction_summary |> member "execution_receipt_count" |> to_int)
+;;
+
+let test_no_progress_recovery_cursor_ack_does_not_clear_pending () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "no-progress-cursor-only-keeper" in
+  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let pending_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  let stimulus_id =
+    pending_summary
+    |> member "pending_no_progress_recovery_ids"
+    |> to_list
+    |> List.hd
+    |> to_string
+  in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~stimulus_id
+    ~cursor_ts:9999.0
+    ~post_id:(Some "cursor-only-post")
+    ();
+  let cursor_only_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string
+    "cursor-only recovery summary remains degraded"
+    "degraded"
+    "status"
+    cursor_only_summary;
+  check bool "cursor-only recovery still needs operator action" true
+    (cursor_only_summary |> member "operator_action_required" |> to_bool);
+  check int "cursor-only recovery stimulus remains pending" 1
+    (cursor_only_summary |> member "pending_stimulus_count" |> to_int);
+  check int "cursor-only recovery kind remains pending" 1
+    (cursor_only_summary |> member "pending_no_progress_recovery_count" |> to_int);
+  check int "cursor ack still counted" 1
+    (cursor_only_summary |> member "cursor_ack_count" |> to_int);
+  check int "cursor ack does not sweep non-board recovery stimulus" 0
+    (cursor_only_summary |> member "cursor_swept_stimulus_count" |> to_int)
 ;;
 
 let test_summary_links_passive_only_attention_to_pending_recovery () =
@@ -825,6 +925,14 @@ let () =
             "no-progress recovery reaction clears pending"
             `Quick
             test_no_progress_recovery_reaction_clears_pending
+        ; test_case
+            "unrelated keeper reaction does not clear no-progress recovery pending"
+            `Quick
+            test_no_progress_recovery_unrelated_reaction_does_not_clear_pending
+        ; test_case
+            "cursor ack alone does not clear no-progress recovery pending"
+            `Quick
+            test_no_progress_recovery_cursor_ack_does_not_clear_pending
         ; test_case
             "summary links passive-only attention to pending recovery"
             `Quick

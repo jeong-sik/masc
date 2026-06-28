@@ -705,9 +705,18 @@ export function countRuntimeKinds(
   // RFC-0295: transient band rows (Compacting / HandingOff / Restarting)
   // are now part of the breakdown. Exposed so consumers can reconcile
   // `keepers + pausedKeepers + transientKeepers + offlineKeepers` against
-  // `keeperRows` without guessing where the missing rows went. Draining is
-  // NOT counted here — it routes to the `paused` band (RFC-0295 §5.3),
-  // matching the prototype's `warn`/`pause` pairing in `data.jsx`.
+  // `keeperRows` without guessing where the missing rows went.
+  // RFC-0295 §5.3 (pixel-perfect Fleet tone rail, iter-6): Draining is
+  // counted under `pausedKeepers` here, NOT under `transientKeepers`.
+  // The Draining phase routes to the `paused` band in `keeperBand()`
+  // (`monitoring-runtime.ts`), and the rail paint, filter chip, and
+  // count chip are all derived from the same `band` SSOT — so the
+  // count must follow the band, not the raw `isKeeperPaused` predicate.
+  // `isKeeperPaused` is the *action*-layer predicate (it does not
+  // include operator-initiated Draining), while `band === 'paused'` is
+  // the *presentation*-layer predicate (it does, by design). The two
+  // remain deliberately orthogonal; this count is a presentation
+  // surface, so it follows the band.
   transientKeepers: number
   offlineKeepers: number
   keeperRows: number
@@ -717,10 +726,12 @@ export function countRuntimeKinds(
   const rosterAgents = buildAgentRoster(agentList, runtimeKeepers)
   const keeperLookup = buildKeeperRuntimeLookup(runtimeKeepers)
   const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeepers, 'keeper-only', keeperLookup)
-  // Hydrate the Keeper from the lookup before asking whether it is paused.
-  // Agent rows only carry `keeper_id`/`keeper_name`, not the full Keeper, so
-  // `a.keeper` was undefined here and `isKeeperPaused(undefined)` silently
-  // returned false, leaving the paused count stuck at 0.
+  // Drive the count from the same `band` SSOT that drives the rail paint
+  // (`runtimeBandMetaForAgent`) and the filter chip (`countAgentsByStatus`).
+  // Before iter-6 the `pausedKeepers` count used `isKeeperPaused(keeper)`
+  // while the rail/filter used `band === 'paused'`; the two diverged on
+  // Draining-phase keepers (rail+chip=2, count=1). Routing through `band`
+  // closes the gap so the chip count and the rail paint always agree.
   let pausedKeepers = 0
   let runningKeepers = 0
   let transientKeepers = 0
@@ -730,7 +741,7 @@ export function countRuntimeKinds(
     const band = keeper ? runtimeBandMetaForAgent(row, keeper, composite).key : null
     if (band === 'transient') {
       transientKeepers += 1
-    } else if (keeper && isKeeperPaused(keeper)) {
+    } else if (band === 'paused') {
       pausedKeepers += 1
     } else if (keeperRowLooksRunning(keeper)) {
       runningKeepers += 1
@@ -785,8 +796,11 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
     const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup)
-    // See countRuntimeKinds(): Agent rows expose only keeper identifiers, so
-    // `a.keeper` is undefined and isKeeperPaused needs the hydrated Keeper.
+    // Count via the same `band` SSOT that the rail paint and filter chip
+    // use. RFC-0295 §5.3 + iter-6 reconciliation: `Draining` phase
+    // contributes to `pausedCount` because `keeperBand()` routes it to
+    // the `paused` band. The duplicated count block in `countRuntimeKinds`
+    // carries the same logic; keep them structurally aligned.
     let pausedCount = 0
     let runningCount = 0
     let transientCount = 0
@@ -797,7 +811,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         : null
       if (band === 'transient') {
         transientCount += 1
-      } else if (keeper && isKeeperPaused(keeper)) {
+      } else if (band === 'paused') {
         pausedCount += 1
       } else if (keeperRowLooksRunning(keeper)) {
         runningCount += 1

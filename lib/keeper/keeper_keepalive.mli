@@ -2,6 +2,8 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+module StringMap = Set_util.StringMap
+
 (** Inject the shared Event_bus for keeper snapshot publishing. *)
 val set_bus : Agent_sdk.Event_bus.t -> unit
 
@@ -59,6 +61,23 @@ val visibility_gate_decision :
   last_heartbeat_cycle_ts:float ->
   Keeper_heartbeat_smart.decision ->
   Keeper_heartbeat_smart.decision
+
+val not_in_registry_warn_cooldown_s : float
+val not_in_registry_warn_max_entries : int
+
+type not_in_registry_warn_decision =
+  | Warn_unknown_keeper
+  | Debug_throttled_unknown_keeper
+
+val not_in_registry_warn_due :
+  ?cooldown_s:float -> previous:float option -> now:float -> unit -> bool
+
+val not_in_registry_warn_state_step :
+  ?max_entries:int ->
+  agent_name:string ->
+  now:float ->
+  float StringMap.t ->
+  not_in_registry_warn_decision * float StringMap.t
 
 val status_tick_usage_json : unit -> Yojson.Safe.t
 (** Usage payload for heartbeat/status metrics rows.  Status ticks are not

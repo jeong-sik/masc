@@ -271,31 +271,26 @@ let test_buffer_event_and_retrieve () =
   check bool "has event" true (List.length events >= 1)
 
 let test_buffer_event_timestamps_successful_commit_after_retry () =
-  let original_buffer = Atomic.get Sse.event_buffer in
+  let original_buffer = Sse.event_buffer_events_for_test () in
   let original_hook = Atomic.get Sse.buffer_commit_test_hook in
   let forced_retry = Atomic.make false in
   let retry_barrier = ref 0.0 in
   Fun.protect
     ~finally:(fun () ->
       Atomic.set Sse.buffer_commit_test_hook original_hook;
-      Atomic.set Sse.event_buffer original_buffer)
+      Sse.set_event_buffer_for_test original_buffer)
     (fun () ->
-      Atomic.set Sse.event_buffer [ (777_000, "marker", Unix.gettimeofday ()) ];
+      Sse.set_event_buffer_for_test [ (777_000, "marker", Unix.gettimeofday ()) ];
       Atomic.set Sse.buffer_commit_test_hook
         (Some (fun () ->
            if Atomic.compare_and_set forced_retry false true then begin
-             ignore
-               (Lockfree_atomic.update_with_commit Sse.event_buffer (fun buffer ->
-                    {
-                      next_state = List.map (fun item -> item) buffer;
-                      result = ();
-                    }));
+             Sse.rewrite_event_buffer_for_test ();
              ignore (Unix.select [] [] [] 0.02);
              retry_barrier := Unix.gettimeofday ()
            end));
       Sse.buffer_event 777_001 "fresh";
       check bool "forced retry triggered" true (Atomic.get forced_retry);
-      match Atomic.get Sse.event_buffer with
+      match Sse.event_buffer_events_for_test () with
       | (event_id, _event, ts) :: _ ->
           check int "new event inserted at head" 777_001 event_id;
           check bool "timestamp captured after retry barrier" true
@@ -304,22 +299,22 @@ let test_buffer_event_timestamps_successful_commit_after_retry () =
           fail "buffer should contain the fresh event")
 
 let test_get_events_after_filters () =
-  let original_buffer = Atomic.get Sse.event_buffer in
+  let original_buffer = Sse.event_buffer_events_for_test () in
   Fun.protect
-    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
     (fun () ->
-      Atomic.set Sse.event_buffer [];
+      Sse.set_event_buffer_for_test [];
       Sse.buffer_event 802_000 "event A";
       Sse.buffer_event 802_001 "event B";
       check (list string) "filtered exact replay" [ "event B" ]
         (Sse.get_events_after 802_000))
 
 let test_get_events_after_preserves_oldest_first_order () =
-  let original_buffer = Atomic.get Sse.event_buffer in
+  let original_buffer = Sse.event_buffer_events_for_test () in
   Fun.protect
-    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
     (fun () ->
-      Atomic.set Sse.event_buffer [];
+      Sse.set_event_buffer_for_test [];
       Sse.buffer_event 803_000 "event A";
       Sse.buffer_event 803_001 "event B";
       Sse.buffer_event 803_002 "event C";
@@ -330,16 +325,16 @@ let test_get_events_after_preserves_oldest_first_order () =
         (Sse.get_events_after 803_000))
 
 let test_buffer_event_caps_replay_buffer () =
-  let original_buffer = Atomic.get Sse.event_buffer in
+  let original_buffer = Sse.event_buffer_events_for_test () in
   Fun.protect
-    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
     (fun () ->
-      Atomic.set Sse.event_buffer [];
+      Sse.set_event_buffer_for_test [];
       let base = Sse.current_id () + Sse.max_buffer_size + 1 in
       for index = 0 to Sse.max_buffer_size + 4 do
         Sse.buffer_event (base + index) (Printf.sprintf "event-%d" index)
       done;
-      let buffered = Atomic.get Sse.event_buffer in
+      let buffered = Sse.event_buffer_events_for_test () in
       let expected_newest_first_indexes =
         List.init Sse.max_buffer_size (fun offset ->
           Sse.max_buffer_size + 4 - offset)
@@ -366,7 +361,7 @@ let test_get_events_after_empty () =
   check int "empty for future id" 0 (List.length events)
 
 let test_cleanup_expired_events_exact_under_domain_contention () =
-  let original_buffer = Atomic.get Sse.event_buffer in
+  let original_buffer = Sse.event_buffer_events_for_test () in
   let now = Unix.gettimeofday () in
   let expired_count = 32 in
   let expired_items =
@@ -375,15 +370,16 @@ let test_cleanup_expired_events_exact_under_domain_contention () =
        now -. Sse.buffer_ttl_seconds -. 10.0))
   in
   Fun.protect
-    ~finally:(fun () -> Atomic.set Sse.event_buffer original_buffer)
+    ~finally:(fun () -> Sse.set_event_buffer_for_test original_buffer)
     (fun () ->
-      Atomic.set Sse.event_buffer expired_items;
+      Sse.set_event_buffer_for_test expired_items;
       let total_removed = Atomic.make 0 in
       run_domains_together 2 (fun _index ->
         ignore (Atomic.fetch_and_add total_removed (Sse.cleanup_expired_events ())));
       check int "each expired event counted once" expired_count
         (Atomic.get total_removed);
-      check int "buffer emptied once" 0 (List.length (Atomic.get Sse.event_buffer)))
+      check int "buffer emptied once" 0
+        (List.length (Sse.event_buffer_events_for_test ())))
 
 (* ============================================================
    client Type Tests

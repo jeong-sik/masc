@@ -11,10 +11,10 @@
 //   컨텍스트 구성        ← real prompt-assembly block bytes (entries[latest].blocks)
 //   장기 메모리 스토어    ← real memory_os.facts.items (typed category, provenance, TTL)
 //   압축 유지·요약        ← real memory_os.episodes.items (summary + terminal_marker)
-//   핀 고정 사실          ⓘ Phase 2 (operator pins — no backend source yet)
+//   핵심 회상 후보        ← real memory_os.facts.items where prompt_recallable=true
 //   최근 회상·주입        ← real memory_os_recall prompt blocks (entries[*].blocks)
-// The remaining ⓘ sections render an honest "연결 예정" disclosure, never fabricated
-// rows (no-stub): they DISCLOSE absence rather than fake presence.
+// Any future-only section must render an honest disclosure rather than fabricated
+// rows (no-stub): disclose absence instead of faking presence.
 
 import { Fragment } from 'preact'
 import { html } from 'htm/preact'
@@ -22,6 +22,7 @@ import { useEffect } from 'preact/hooks'
 import { useSignal } from '@preact/signals'
 import { formatDateTimeKo, formatTimeAgo, formatTimeUntil } from '../lib/format-time'
 import { useManagedAsyncResource } from '../lib/use-managed-async-resource'
+import { isAbortError } from '../lib/async-state'
 import {
   MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER,
   fetchKeeperTurnRecords,
@@ -454,13 +455,13 @@ function RecallCandidatePreview({
 }) {
   if (facts.length === 0) {
     return html`
-      <${DisclosureNote} text="operator 핀은 Phase 2에서 연결 예정 — 현재 표시할 prompt recall 후보도 없음." />
+      <${DisclosureNote} text="현재 표시할 prompt recall 후보 없음." />
     `
   }
   return html`
     <${Fragment}>
       <div class="mem-store">${facts.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>
-      <${DisclosureNote} text=${`operator 핀은 Phase 2에서 연결 예정 — 현재는 실제 prompt recall 후보 ${facts.length}/${total}개를 표시.`} />
+      <${DisclosureNote} text=${`실제 prompt recall 후보 ${facts.length}/${total}개를 표시.`} />
     </>`
 }
 
@@ -676,26 +677,189 @@ function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
     </div>`
 }
 
-// Aggregate (전체) scope: real keeper roster (id + status dot are real) with an
-// honest note that per-keeper memory aggregation needs N× turn-records fetches
-// and lands later. No fabricated memory totals.
-function AggregateDeferred({ keepers }: { keepers: readonly MemoryKeeper[] }) {
+interface AggregateMemoryRow {
+  readonly keeper: MemoryKeeper
+  readonly memoryPresent: boolean
+  readonly error: string | null
+  readonly source: string
+  readonly recallableFacts: number
+  readonly diagnosticFacts: number
+  readonly shownFacts: number
+  readonly episodes: number
+  readonly fallbackEpisodes: number
+  readonly recallBlockBytes: number
+  readonly latestPrompt: string
+  readonly readErrors: number
+}
+
+function aggregateMemoryRowFromResponse(
+  keeper: MemoryKeeper,
+  response: TurnRecordsResponse,
+): AggregateMemoryRow {
+  const latestPromptRow = latestEntryWithBlocks(response.entries)
+  const memoryBlock = latestMemoryRecallBlock(latestPromptRow)
+  const latestPrompt = latestPromptRow
+    ? `${latestPromptRow.record.trace_id}#${latestPromptRow.record.absolute_turn}`
+    : 'none'
+  const snapshot = response.memory_os
+  if (!snapshot) {
+    return {
+      keeper,
+      memoryPresent: false,
+      error: null,
+      source: response.source ?? 'turn_record',
+      recallableFacts: 0,
+      diagnosticFacts: 0,
+      shownFacts: 0,
+      episodes: 0,
+      fallbackEpisodes: 0,
+      recallBlockBytes: memoryBlock?.bytes ?? 0,
+      latestPrompt,
+      readErrors: 0,
+    }
+  }
+  const recallableFacts = snapshot.facts.items.filter(isPromptRecallableFact).length
+  const diagnosticFacts = snapshot.facts.items.filter(isDiagnosticEvidenceFact).length
+  const fallbackEpisodes = snapshot.episodes.items
+    .filter(ep => ep.terminal_marker === MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
+    .length
+  return {
+    keeper,
+    memoryPresent: true,
+    error: null,
+    source: snapshot.source,
+    recallableFacts,
+    diagnosticFacts,
+    shownFacts: snapshot.facts.shown,
+    episodes: Math.max(0, snapshot.episodes.items.length - fallbackEpisodes),
+    fallbackEpisodes,
+    recallBlockBytes: memoryBlock?.bytes ?? 0,
+    latestPrompt,
+    readErrors: snapshot.read_errors.length,
+  }
+}
+
+function aggregateMemoryErrorRow(keeper: MemoryKeeper, error: unknown): AggregateMemoryRow {
+  return {
+    keeper,
+    memoryPresent: false,
+    error: error instanceof Error ? error.message : String(error),
+    source: 'fetch_error',
+    recallableFacts: 0,
+    diagnosticFacts: 0,
+    shownFacts: 0,
+    episodes: 0,
+    fallbackEpisodes: 0,
+    recallBlockBytes: 0,
+    latestPrompt: 'none',
+    readErrors: 0,
+  }
+}
+
+type AggregateRowsUpdate = (rows: readonly AggregateMemoryRow[]) => void
+
+function materializedAggregateRows(
+  rows: readonly (AggregateMemoryRow | null)[],
+): readonly AggregateMemoryRow[] {
+  return rows.filter((row): row is AggregateMemoryRow => row !== null)
+}
+
+async function fetchAggregateMemoryRows(
+  keepers: readonly MemoryKeeper[],
+  signal: AbortSignal,
+  onRows?: AggregateRowsUpdate,
+): Promise<readonly AggregateMemoryRow[]> {
+  let rows: readonly (AggregateMemoryRow | null)[] = keepers.map(() => null)
+  const publishRows = () => {
+    if (!signal.aborted) onRows?.(materializedAggregateRows(rows))
+  }
+  return Promise.all(keepers.map(async (keeper, index) => {
+    let row: AggregateMemoryRow
+    try {
+      const response = await fetchKeeperTurnRecords(keeper.id, 12, { signal })
+      row = aggregateMemoryRowFromResponse(keeper, response)
+    } catch (error) {
+      if (isAbortError(error)) throw error
+      row = aggregateMemoryErrorRow(keeper, error)
+    }
+    rows = rows.map((current, rowIndex) => rowIndex === index ? row : current)
+    publishRows()
+    return row
+  }))
+}
+
+function AggregateMemoryReal({
+  keepers,
+  rows,
+  loading,
+  error,
+}: {
+  keepers: readonly MemoryKeeper[]
+  rows: readonly AggregateMemoryRow[] | null
+  loading: boolean
+  error: string | null
+}) {
+  const data = rows ?? []
+  const loadedCount = data.length
+  const failedCount = data.filter(row => row.error != null).length
+  const noMemoryCount = data.filter(row => row.error == null && !row.memoryPresent).length
+  const recallableTotal = data.reduce((sum, row) => sum + row.recallableFacts, 0)
+  const shownTotal = data.reduce((sum, row) => sum + row.shownFacts, 0)
+  const diagnosticTotal = data.reduce((sum, row) => sum + row.diagnosticFacts, 0)
+  const episodeTotal = data.reduce((sum, row) => sum + row.episodes, 0)
+  const fallbackTotal = data.reduce((sum, row) => sum + row.fallbackEpisodes, 0)
+  const linkedCount = data.filter(row => row.recallBlockBytes > 0).length
+  const recallBytes = data.reduce((sum, row) => sum + row.recallBlockBytes, 0)
   return html`
     <${Fragment}>
       <div class="turn-sec">
-        <h4>전체 keeper</h4>
-        <${DisclosureNote} text="전체 집계는 keeper별 turn-records를 모아야 하므로 추후 연결 — 현재는 단일 keeper 실데이터만." />
+        <h4>전체 memory-os</h4>
+        <div class="mem-trust">
+          <div class="mem-trust-card">
+            <span class="mem-trust-k">keepers</span>
+            <span class="mem-trust-v mono">${loadedCount}/${keepers.length} loaded</span>
+            <span class="mem-trust-sub mono">${failedCount} failed · ${noMemoryCount} no memory_os</span>
+          </div>
+          <div class="mem-trust-card">
+            <span class="mem-trust-k">facts</span>
+            <span class="mem-trust-v mono">${recallableTotal}/${shownTotal} recallable</span>
+            <span class="mem-trust-sub mono">${diagnosticTotal} diagnostic/evidence</span>
+          </div>
+          <div class="mem-trust-card">
+            <span class="mem-trust-k">prompt links</span>
+            <span class="mem-trust-v mono">${linkedCount}/${loadedCount} linked</span>
+            <span class="mem-trust-sub mono">${memFmtBytes(recallBytes)} memory_os_recall</span>
+          </div>
+        </div>
+        ${loading ? html`<${DisclosureNote} text="전체 keeper memory-os 집계 불러오는 중." />` : null}
+        ${error ? html`<div class="mem-read-error" role="alert">${'⚠'} 전체 집계 실패 — ${error}</div>` : null}
       </div>
       <div class="turn-sec">
-        <h4>keeper 로스터 · ${keepers.length}</h4>
+        <h4>keeper별 메모리 · ${keepers.length}</h4>
         <div class="mem-table">
-          <div class="mem-tr mem-th"><span>keeper</span><span>상태</span></div>
-          ${keepers.map(k => html`
-            <div key=${k.id} class="mem-tr">
-              <span class="mem-td-id"><span class=${`mem-dot ${memDotState(k.status)}`}></span><span class="mono">${k.id}</span></span>
-              <span class="mono">${k.status}</span>
+          <div class="mem-tr mem-th"><span>keeper</span><span>회상</span><span>진단</span><span>episode</span><span>prompt link</span></div>
+          ${data.map(row => html`
+            <div key=${row.keeper.id} class="mem-tr" title=${row.error ?? row.source}>
+              <span class="mem-td-id"><span class=${`mem-dot ${memDotState(row.keeper.status)}`}></span><span class="mono">${row.keeper.id}</span></span>
+              ${row.error
+                ? html`
+                  <span class="mono">error</span>
+                  <span class="mono">-</span>
+                  <span class="mono">-</span>
+                  <span class="mono">${row.error}</span>
+                `
+                : html`
+                  <span class="mono">${row.recallableFacts}/${row.shownFacts}</span>
+                  <span class="mono">${row.diagnosticFacts}${row.readErrors > 0 ? html` · err ${row.readErrors}` : null}</span>
+                  <span class="mono">${row.episodes}${row.fallbackEpisodes > 0 ? html` +${row.fallbackEpisodes} diag` : null}</span>
+                  <span class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</span>
+                `}
             </div>`)}
         </div>
+        ${!loading && data.length === 0
+          ? html`<div class="mem-empty">집계할 keeper memory-os 행 없음.</div>`
+          : null}
+        <${DisclosureNote} text=${`전체 탭은 keeper별 turn-records를 직접 조회한 읽기 전용 집계 — episodes ${episodeTotal}, librarian fallback 진단 ${fallbackTotal}.`} />
       </div>
     </>`
 }
@@ -713,7 +877,9 @@ export function MemoryInspector({
 }: MemoryInspectorProps) {
   const scope = useSignal<'one' | 'all'>('one')
   const resource = useManagedAsyncResource<TurnRecordsResponse | null>(null)
+  const aggregateResource = useManagedAsyncResource<readonly AggregateMemoryRow[]>([])
   const activeId = keeper.id
+  const keepersKey = keepers.map(k => `${k.id}:${k.status}`).join('|')
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -734,8 +900,25 @@ export function MemoryInspector({
   }, [activeId, resource])
 
   const isOne = scope.value === 'one'
+
+  useEffect(() => {
+    if (isOne) {
+      aggregateResource.cancel()
+      return
+    }
+    aggregateResource.reset([])
+    void aggregateResource.load(async (signal) =>
+      fetchAggregateMemoryRows(keepers, signal, (rows) => {
+        aggregateResource.state.value = { data: rows, loading: true, error: null }
+      }))
+    return () => {
+      aggregateResource.cancel()
+    }
+  }, [isOne, keepersKey, aggregateResource])
+
   const state = resource.state.value
   const response = state.data
+  const aggregateState = aggregateResource.state.value
 
   return html`
     <div class="turn-overlay" onClick=${onClose}>
@@ -751,7 +934,12 @@ export function MemoryInspector({
         </div>
         <div class="turn-body">
           ${!isOne
-            ? html`<${AggregateDeferred} keepers=${keepers} />`
+            ? html`<${AggregateMemoryReal}
+                keepers=${keepers}
+                rows=${aggregateState.data}
+                loading=${aggregateState.loading}
+                error=${aggregateState.error}
+              />`
             : state.loading
               ? html`<div class="mem-empty">메모리 불러오는 중…</div>`
               : state.error

@@ -64,13 +64,22 @@ let provider_network_user_message ?provider ~kind ~detail () =
     (detail_suffix detail)
 ;;
 
+let structured_internal_error_user_message err =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some internal_error -> (
+    match Keeper_internal_error.summary_of_masc_internal_error internal_error with
+    | Some summary -> summary
+    | None -> Agent_sdk.Error.to_string err)
+  | None -> Agent_sdk.Error.to_string err
+;;
+
 let user_message_of_sdk_error = function
   | Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError { message; kind }) ->
     provider_network_user_message ~kind ~detail:message ()
   | Agent_sdk.Error.Provider
       (Llm_provider.Error.NetworkError { provider; kind; detail; _ }) ->
     provider_network_user_message ~provider ~kind ~detail ()
-  | err -> Agent_sdk.Error.to_string err
+  | err -> structured_internal_error_user_message err
 ;;
 
 type sdk_termination_semantics =

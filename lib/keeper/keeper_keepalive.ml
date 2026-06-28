@@ -33,6 +33,8 @@ include Keeper_keepalive_signal
 include Keeper_heartbeat_snapshot
 include Keeper_heartbeat_loop
 
+module StringMap = Set_util.StringMap
+
 (* OAS Event_bus — delegated to Keeper_event_bus to avoid dependency cycles. *)
 let set_bus bus = Keeper_event_bus.set bus
 let get_bus () = Keeper_event_bus.get ()
@@ -136,6 +138,75 @@ let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry
   updated_meta
 ;;
 
+(* Unknown-keeper directives can repeat while boot/crash truth is still
+   elsewhere. Keep WARN output low-cardinality; the caller-side
+   [DirectiveFailures] counter still records every miss. *)
+let not_in_registry_warn_cooldown_s = Masc_time_constants.minute
+let not_in_registry_warn_max_entries = 256
+
+type not_in_registry_warn_decision =
+  | Warn_unknown_keeper
+  | Debug_throttled_unknown_keeper
+
+let not_in_registry_warn_due ?(cooldown_s = not_in_registry_warn_cooldown_s) ~previous ~now () =
+  match previous with
+  | None -> true
+  | Some prev -> now < prev || now -. prev >= cooldown_s
+;;
+
+let not_in_registry_warn_prune ?(max_entries = not_in_registry_warn_max_entries)
+      ~now last_warns =
+  let cutoff = now -. not_in_registry_warn_cooldown_s in
+  let recent =
+    StringMap.filter (fun _ warned_at -> warned_at >= cutoff || warned_at > now) last_warns
+  in
+  if StringMap.cardinal recent <= max_entries
+  then recent
+  else
+    let rec take n = function
+      | _ when n <= 0 -> []
+      | [] -> []
+      | x :: xs -> x :: take (n - 1) xs
+    in
+    let newest =
+      recent
+      |> StringMap.bindings
+      |> List.sort (fun (name_a, ts_a) (name_b, ts_b) ->
+      let ts_cmp = Float.compare ts_b ts_a in
+      if ts_cmp <> 0 then ts_cmp else String.compare name_a name_b)
+      |> take max_entries
+    in
+    List.fold_left
+      (fun acc (name, warned_at) -> StringMap.add name warned_at acc)
+      StringMap.empty newest
+;;
+
+let not_in_registry_warn_state_step ?max_entries ~agent_name ~now last_warns =
+  let last_warns = not_in_registry_warn_prune ?max_entries ~now last_warns in
+  let previous = StringMap.find_opt agent_name last_warns in
+  let decision, updated =
+  if not_in_registry_warn_due ~previous ~now ()
+    then Warn_unknown_keeper, StringMap.add agent_name now last_warns
+    else Debug_throttled_unknown_keeper, last_warns
+  in
+  decision, not_in_registry_warn_prune ?max_entries ~now updated
+;;
+
+let not_in_registry_last_warn : float StringMap.t Atomic.t =
+  Atomic.make StringMap.empty
+;;
+
+let not_in_registry_warn_decision ~agent_name ~now =
+  let rec loop () =
+    let current = Atomic.get not_in_registry_last_warn in
+    let decision, updated = not_in_registry_warn_state_step ~agent_name ~now current in
+    if updated == current || Atomic.compare_and_set not_in_registry_last_warn current updated
+    then decision
+    else loop ()
+  in
+  loop ()
+;;
+
 let log_directive_agent_not_in_registry ~agent_name ~action =
   let known_keeper () =
     match Keeper_tool_shared_runtime.find_registry_meta ~keeper_name:agent_name ~source_layer:"directive" with
@@ -161,12 +232,26 @@ let log_directive_agent_not_in_registry ~agent_name ~action =
           ; "reason", `String "not_yet_registered"
           ])
       (Printf.sprintf "directive %s: agent %s not yet registered" action agent_name)
-  else
-    Log.Keeper.emit
-      Log.Warn
-      ~category:Log.Directive
-      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String action ])
-      (Printf.sprintf "directive %s: agent %s not in registry" action agent_name)
+  else (
+    match not_in_registry_warn_decision ~agent_name ~now:(Time_compat.now ()) with
+    | Warn_unknown_keeper ->
+      Log.Keeper.emit
+        Log.Warn
+        ~category:Log.Directive
+        ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String action ])
+        (Printf.sprintf "directive %s: agent %s not in registry" action agent_name)
+    | Debug_throttled_unknown_keeper ->
+      Log.Keeper.emit
+        Log.Debug
+        ~category:Log.Directive
+        ~details:
+          (`Assoc
+            [ "agent_name", `String agent_name
+            ; "action", `String action
+            ; "reason", `String "not_in_registry_throttled"
+            ])
+        (Printf.sprintf "directive %s: agent %s not in registry (throttled)" action agent_name)
+  )
 ;;
 
 let set_keeper_paused_state ~agent_name paused =

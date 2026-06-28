@@ -83,6 +83,9 @@ val validate_session_known :
   string ->
   (unit, string) result
 val is_known_session : string -> bool
+val ensure_sse_backing_session_for_known_transport_session :
+  transport_session_id:string -> sse_session_id:string -> unit
+
 val body_tools_call_name : string -> string option
 val protocol_version_from_body : string -> string option
 val get_session_id_query : string -> string option

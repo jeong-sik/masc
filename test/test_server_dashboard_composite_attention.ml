@@ -32,8 +32,8 @@ let completed_budget_execution =
     ; "recorded_at", `String "2999-01-01T00:00:00Z"
     ; "completion_contract_result", `Null
     ; "operator_disposition", `String "pass"
-    ; "operator_disposition_reason", `String "healthy"
-    ; "terminal_reason_code", `String "turn_budget_exhausted:1070/1070"
+    ; "operator_disposition_reason", `String "turn_budget_exhausted"
+    ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:1070/1070)"
     ; "error", `Null
     ; "claim_scope", `Assoc [ "status", `String "ok" ]
     ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
@@ -46,8 +46,8 @@ let passive_budget_execution =
     ; "recorded_at", `String "2999-01-01T00:00:00Z"
     ; "completion_contract_result", `String "passive_only"
     ; "operator_disposition", `String "pass"
-    ; "operator_disposition_reason", `String "healthy"
-    ; "terminal_reason_code", `String "turn_budget_exhausted:1070/1070"
+    ; "operator_disposition_reason", `String "turn_budget_exhausted"
+    ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:1070/1070)"
     ; "current_task_id", `Null
     ; "goal_ids", `List []
     ; "error", `Null
@@ -62,8 +62,8 @@ let active_passive_budget_execution =
     ; "recorded_at", `String "2999-01-01T00:00:00Z"
     ; "completion_contract_result", `String "passive_only"
     ; "operator_disposition", `String "pass"
-    ; "operator_disposition_reason", `String "healthy"
-    ; "terminal_reason_code", `String "turn_budget_exhausted:1070/1070"
+    ; "operator_disposition_reason", `String "turn_budget_exhausted"
+    ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:1070/1070)"
     ; "current_task_id", `String "TASK-1"
     ; "goal_ids", `List []
     ; "error", `Null
@@ -110,8 +110,8 @@ let not_dispatched_budget_execution =
     ; "recorded_at", `String "2999-01-01T00:00:00Z"
     ; "completion_contract_result", `String "not_dispatched"
     ; "operator_disposition", `String "pass"
-    ; "operator_disposition_reason", `String "healthy"
-    ; "terminal_reason_code", `String "turn_budget_exhausted:1070/1070"
+    ; "operator_disposition_reason", `String "turn_budget_exhausted"
+    ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:1070/1070)"
     ; "error", `Null
     ; "claim_scope", `Assoc [ "status", `String "ok" ]
     ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
@@ -273,7 +273,7 @@ let () =
         ] )
     ; ( "completed receipt semantics"
       , [ test_case
-            "pass/healthy turn-budget exhaustion is not blocked"
+            "pass turn-budget exhaustion is not blocked"
             `Quick
             test_completed_budget_exhaustion_is_not_blocked
         ; test_case

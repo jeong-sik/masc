@@ -51,12 +51,12 @@ module For_testing : sig
   (** Apply the direct-message success recovery that clears a no-progress
       forced pause without running a live LLM turn. *)
 
-  val direct_empty_no_progress_retry_reason :
+  val direct_no_progress_retry_reason :
     Agent_sdk.Error.sdk_error -> Keeper_error_classify.degraded_retry_reason option
-  (** Return [Some Empty_no_progress] only for direct-message accept rejections
+  (** Return a direct-message no-progress retry reason for accept rejections
       that are safe to rotate before surfacing an error. *)
 
-  val direct_empty_no_progress_retry_decision :
+  val direct_no_progress_retry_decision :
     base_runtime:string ->
     effective_runtime:string ->
     attempted_runtimes:string list ->
@@ -65,10 +65,11 @@ module For_testing : sig
     remaining_turn_budget_s:float ->
     Agent_sdk.Error.sdk_error ->
     Keeper_turn_runtime_budget.degraded_retry_budget_decision
-  (** Shared-budget retry decision for direct-message empty no-progress accept
-      rejections. Non-empty/read-only accept rejections remain terminal here. *)
+  (** Shared-budget retry decision for direct-message no-progress accept
+      rejections. Read-only no-progress remains terminal here because it
+      already consumed tool execution in the current attempt. *)
 
-  val run_direct_empty_no_progress_retry_loop :
+  val run_direct_no_progress_retry_loop :
     keeper_name:string ->
     base_runtime:string ->
     initial_runtime:string ->
@@ -111,7 +112,7 @@ module For_testing : sig
        ('a, Agent_sdk.Error.sdk_error) result) ->
     unit ->
     ('a * int, Agent_sdk.Error.sdk_error) result
-  (** Execute the direct-message empty-response retry loop with injected side
+  (** Execute the direct-message no-progress retry loop with injected side
       effects. Exposed only to verify that fallback selection reaches the next
       keeper run attempt. *)
 end

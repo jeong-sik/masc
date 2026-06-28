@@ -1180,7 +1180,18 @@ let test_dashboard_shell_separates_configured_and_persisted_keeper_counts () =
       Alcotest.(check int)
         "counts.persisted_keepers mirrors top-level persisted_keepers"
         0
-        (json |> member "counts" |> member "persisted_keepers" |> to_int))
+        (json |> member "counts" |> member "persisted_keepers" |> to_int);
+      write_file
+        (Filename.concat keepers_dir "base.toml")
+        "[keeper]\nautoboot_enabled = true\n";
+      Config_dir_resolver.reset ();
+      let json =
+        Server_dashboard_http_core.dashboard_shell_http_json ~light:true config
+      in
+      Alcotest.(check int)
+        "configured_keepers includes explicit autoboot base keeper"
+        3
+        (json |> member "configured_keepers" |> to_int))
 
 let test_dashboard_shell_light_counts_agents_from_summary_fields () =
   with_test_env @@ fun ~env:_ ~sw:_ ~config ->

@@ -102,10 +102,10 @@ let prompt_for_facts facts_json =
      [Printf.sprintf "%s\n\nFacts:\n%s" template facts_str] 였는데 template 이
      format string 이 아니라 *인자*라 template 내부의 %s 가 치환되지 않은 채
      LLM 에게 literal "%s" 로 전달되었다(schema 위반의 근본 원인).
-     치환은 printf format 이 아니라 문자열 split/concat 으로 처리한다 —
+     치환은 printf format 이 아니라 문자열 replace 로 처리한다 —
      markdown 에 literal % (예 백분율) 가 추가돼도 [sprintf] 의 Invalid_arg
      로 judge 가 크래시하지 않는다(리뷰 nit). *)
-  String.concat facts_str (String.split_on_string "%s" template)
+  String_util.replace_substring ~needle:"%s" ~by:facts_str template
 
 let compute_judgments ~build_facts =
   let runtime_id = Runtime.get_default_runtime_id () in

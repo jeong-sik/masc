@@ -6,14 +6,14 @@
 let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =
   Safe_ops.protect ~default:None (fun () ->
     let json = Yojson.Safe.from_string body in
-    let dur = Json_util.get_int json "duration_ms"
-              |> Option.value ~default:0 in
-    let tok = Json_util.get_int json "total_tokens"
-              |> Option.value ~default:0 in
-    if dur = 0 && tok = 0 then None
-    else
+    match
+      Json_util.get_int json "duration_ms",
+      Json_util.get_int json "total_tokens"
+    with
+    | Some dur, Some tok when dur > 0 || tok > 0 ->
       Some
-        { Gate_protocol.model_used = "runtime"; duration_ms = dur; tokens_used = tok })
+        { Gate_protocol.model_used = "runtime"; duration_ms = dur; tokens_used = tok }
+    | _ -> None)
 
 let extract_reply_text (body : string) : string =
   Safe_ops.protect ~default:body (fun () ->
@@ -43,15 +43,20 @@ let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata
       | Some value -> non_empty_opt value
     in
     let status =
-      Json_util.get_string json "status"
-      |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
-      |> Option.bind Gate_protocol.message_request_status_of_string
+      match Json_util.get_string json "status" with
+      | None -> None
+      | Some value ->
+          let normalized = String.lowercase_ascii (String.trim value) in
+          Gate_protocol.message_request_status_of_string normalized
     in
     match request_id, status with
     | Some request_id, Some status ->
         let destination_id =
           match Json_util.get_string json "keeper_name" with
-          | Some value -> Option.value (non_empty_opt value) ~default:keeper_name
+          | Some value ->
+            (match non_empty_opt value with
+             | Some trimmed -> trimmed
+             | None -> keeper_name)
           | None -> keeper_name
         in
         let request : Gate_protocol.message_request =
@@ -285,7 +290,7 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
     proc_mgr;
     net;
   } in
-  let start_time = Unix.gettimeofday () in
+  let start_mtime = Mtime_clock.now () in
   let on_text_delta =
     match on_text_snapshot with
     | None -> (fun _ -> ())
@@ -326,7 +331,9 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
   | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->
       let body = Tool_result.message result in
       let duration_ms =
-        int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
+        Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
+        |> Int64.div 1_000_000L
+        |> Int64.to_int
       in
       let message_request =
         extract_message_request_ack ~channel ~channel_user_id ~keeper_name
@@ -351,7 +358,9 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
   | `Streaming (Some result) when Tool_result.is_success result ->
       let body = Tool_result.message result in
       let duration_ms =
-        int_of_float ((Unix.gettimeofday () -. start_time) *. 1000.0)
+        Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
+        |> Int64.div 1_000_000L
+        |> Int64.to_int
       in
       let reply = extract_reply_text body |> redact_text in
       let structured = Option.map redact_json (extract_structured body) in

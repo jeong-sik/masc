@@ -4688,17 +4688,13 @@ let test_compaction_snapshot_event_classifier_covers_typed_events () =
          (expected_compaction_snapshot_event_class event)
          (Runtime_manifest.classify_compaction_snapshot_event event_name))
     Runtime_manifest.all_event_kinds;
-  check_compaction_snapshot_event_class
-    "legacy memory_injected"
-    Runtime_manifest.Compaction_snapshot_known_unrelated
-    (Runtime_manifest.classify_compaction_snapshot_event "memory_injected");
   List.iter
     (fun event_name ->
        check_compaction_snapshot_event_class
-         ("runtime manifest non-compaction event " ^ event_name)
+         ("untyped runtime manifest non-compaction event " ^ event_name)
          Runtime_manifest.Compaction_snapshot_known_unrelated
          (Runtime_manifest.classify_compaction_snapshot_event event_name))
-    [ "tool_lineage_recorded"; "tool_surface_selected"; "cascade_routed" ];
+    Runtime_manifest.known_unrelated_untyped_compaction_snapshot_events;
   check_compaction_snapshot_event_class
     "unknown typed-like future event"
     Runtime_manifest.Compaction_snapshot_unknown
@@ -4852,24 +4848,17 @@ let test_compaction_snapshots_json_skips_unrelated_manifest_events () =
         ()
     in
     let row_json = Runtime_manifest.to_json row in
-    let unrelated_json = runtime_manifest_json_with_event row_json "memory_injected" in
-    let tool_surface_json =
-      runtime_manifest_json_with_event row_json "tool_surface_selected"
+    let unrelated_jsons =
+      List.map
+        (runtime_manifest_json_with_event row_json)
+        Runtime_manifest.known_unrelated_untyped_compaction_snapshot_events
     in
-    let lineage_json = runtime_manifest_json_with_event row_json "tool_lineage_recorded" in
-    let cascade_json = runtime_manifest_json_with_event row_json "cascade_routed" in
     let path = Runtime_manifest.path_for_trace config ~keeper_name:keeper_id ~trace_id in
     write_text_file
       path
       (String.concat
          "\n"
-         [ Yojson.Safe.to_string unrelated_json
-         ; Yojson.Safe.to_string tool_surface_json
-         ; Yojson.Safe.to_string lineage_json
-         ; Yojson.Safe.to_string cascade_json
-         ; Yojson.Safe.to_string row_json
-         ; ""
-         ]);
+         (List.map Yojson.Safe.to_string (unrelated_jsons @ [ row_json ]) @ [ "" ]));
     let top =
       Server_dashboard_http_keeper_api.compaction_snapshots_json
         ~config

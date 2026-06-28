@@ -397,7 +397,37 @@ let test_read_descriptor_spells_out_path_basis () =
     (string_contains ~sub:"does not inherit Execute cwd" file_path_description)
 ;;
 
-
+let test_execute_descriptor_spells_out_argv_and_filesystem_basis () =
+  let descriptor = required_public_descriptor "Execute" in
+  let argv_description =
+    schema_property_description descriptor.input_schema "argv"
+    |> Option.value ~default:""
+  in
+  check_contains
+    "Execute description says filesystem access is policy-scoped"
+    ~sub:"sandbox/policy-scoped filesystem access"
+    descriptor.description;
+  check_contains
+    "Execute description says argv follows executable"
+    ~sub:"argv arguments after the executable"
+    descriptor.description;
+  check_contains
+    "Execute description forbids duplicate argv0"
+    ~sub:"Do not repeat executable as argv[0]"
+    descriptor.description;
+  check_contains
+    "Execute description includes git example"
+    ~sub:"executable='git' argv=['status', '--short']"
+    descriptor.description;
+  check_contains
+    "Execute argv schema repeats argv0 warning"
+    ~sub:"Do not repeat executable as argv[0]"
+    argv_description;
+  check_contains
+    "Execute argv schema includes grep example"
+    ~sub:"executable='grep', argv=['-rn', 'pattern', 'lib']"
+    argv_description
+;;
 
 let test_board_descriptions_disambiguate_post_id_flow () =
   let get_descriptor = required_internal_descriptor "keeper_board_post_get" in
@@ -934,7 +964,10 @@ let () =
             "Read path basis is explicit"
             `Quick
             test_read_descriptor_spells_out_path_basis
-
+        ; test_case
+            "Execute argv/filesystem basis is explicit"
+            `Quick
+            test_execute_descriptor_spells_out_argv_and_filesystem_basis
         ; test_case
             "Board get/list descriptions disambiguate post_id flow"
             `Quick

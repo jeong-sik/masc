@@ -613,6 +613,8 @@ let handle_get_mcp ~deps ?(profile = Full) ?(sse_kind = Sse.Agent_stream)
           stop_sse_session session_id;
           if Option.is_some last_event_id then
             Transport_metrics.inc_sse_reconnect ();
+          ensure_sse_backing_session_for_known_transport_session
+            ~transport_session_id:session_id ~sse_session_id:session_id;
           (match
              Sse.register ~kind:sse_kind ~auth session_id
                ~last_event_id:(Option.value ~default:0 last_event_id)

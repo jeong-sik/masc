@@ -972,3 +972,54 @@ judge_timeout_s = 300.0
 web_tools = false
 # 패널 모델당 최대 tool 호출 수 (0 = 무제한, OpenRouter Fusion 허용 범위 0..16).
 max_tool_calls_per_panel = 0
+
+[fusion.presets.staged_joj]
+# judge_of_judges 연쇄(staged): 1차 심판 6개(ollama_cloud 개별) → 그룹별 종합 →
+# 메타 심판 최종 종합. keeper가 fusion tool에 topology="staged_judge_of_judges"로 호출.
+panel = [
+  "ollama_cloud.deepseek-v4-flash",
+  "glm-coding.glm-5-turbo",
+  "ollama_cloud.minimax-m3",
+]
+judge = "deepseek.deepseek-v4-pro"
+panel_system_prompt = """
+You are an expert panelist. Answer the user's question directly and concisely \
+with your best independent analysis. Do not defer to other models; give your \
+own view.
+"""
+judge_system_prompt = """
+You are the final meta-judge. You are given per-group syntheses of a panel of \
+model answers. Reconcile them into one resolved answer: identify cross-group \
+consensus, contradictions, and the strongest synthesis, then give one resolved \
+answer. Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+panel_timeout_s = 300.0
+judge_timeout_s = 300.0
+web_tools = false
+max_tool_calls_per_panel = 0
+staged_judge_group_size = 3
+
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+label = "synthesizer"
+system_prompt = "Synthesize the panel answers: consensus, contradictions, partial coverage, unique insights, blind spots. Give one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.minimax-m3"
+label = "consensus-builder"
+system_prompt = "Focus on points of consensus across the panel; resolve contradictions conservatively. Give one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.kimi-k2-6"
+label = "devils-advocate"
+system_prompt = "Challenge the panel's dominant view; surface blind spots and unstated assumptions. Then give one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.ollama-cloud-glm-5-2"
+label = "evidence-checker"
+system_prompt = "Ground the synthesis in the panel's strongest evidence; flag unsupported claims. Give one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.ollama-cloud-gpt-oss-120b"
+label = "synthesizer-2"
+system_prompt = "Synthesize the panel answers: consensus, contradictions, unique insights. Give one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.ollama-cloud-gemini-3-flash-preview"
+label = "synthesizer-3"
+system_prompt = "Synthesize the panel answers into one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."

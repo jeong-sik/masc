@@ -60,6 +60,11 @@ val current_working_dir : unit -> string
 val base_path_or_cwd : unit -> string
 (** [MASC_BASE_PATH] from host config, or {!current_working_dir} when unset. *)
 
+val initial_env_home : string option
+(** Process-start [HOME] snapshot after shared env trimming. [None] when unset
+    or empty. Use this when path policy must not observe in-process HOME
+    mutation. *)
+
 val resolve : unit -> resolution
 (** Cached resolution. First call evaluates, subsequent calls return the cache. *)
 

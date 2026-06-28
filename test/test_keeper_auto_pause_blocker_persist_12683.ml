@@ -33,6 +33,61 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let write_file path content =
+  let oc = open_out path in
+  Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
+    output_string oc content)
+
+let runtime_toml_with_pause_threshold threshold =
+  Printf.sprintf
+    {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+
+[pause]
+turn_fail_streak_threshold = %d
+|}
+    threshold
+
+let with_runtime_config content f =
+  let config_dir = temp_dir "masc-runtime-pause-config-" in
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore runtime_snapshot;
+      (match prior with
+       | Some value -> Unix.putenv "MASC_CONFIG_DIR" value
+       | None -> Unix.putenv "MASC_CONFIG_DIR" "");
+      Config_dir_resolver.reset ();
+      cleanup_dir config_dir)
+    (fun () ->
+       let runtime_config_path =
+         Filename.concat config_dir Config_dir_resolver.runtime_toml_filename
+       in
+       write_file runtime_config_path content;
+       Unix.putenv "MASC_CONFIG_DIR" config_dir;
+       Config_dir_resolver.reset ();
+       (match Runtime.init_default ~config_path:runtime_config_path with
+        | Ok () -> ()
+        | Error err -> fail ("runtime init: " ^ err));
+       f ())
+
 let test_turn_timeout_blocker_class_roundtrip () =
   let cls = Keeper_meta_contract.Turn_timeout in
   let label = Keeper_meta_contract.blocker_class_to_string cls in
@@ -674,9 +729,53 @@ let test_idle_detected_repeated_failure_pauses_keeper () =
               "blocker detail"
               "idle loop detected: consecutive_idle_turns=4; auto-paused after repeated idle turns; operator resume clears the idle latch"
               detail
-          | Some _ -> fail "expected Sdk_idle_detected blocker"
-          | None -> fail "expected idle-detected blocker")
+       | Some _ -> fail "expected Sdk_idle_detected blocker"
+       | None -> fail "expected idle-detected blocker")
        | None -> fail "expected registered keeper")
+
+let test_runtime_pause_threshold_override_controls_idle_auto_pause () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_runtime_config (runtime_toml_with_pause_threshold 2) @@ fun () ->
+  let base_path = temp_dir "masc-idle-detected-runtime-threshold-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "idle-detected-runtime-threshold" in
+       let meta = make_meta keeper_name in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let err =
+         Agent_sdk.Error.Agent
+           (Agent_sdk.Error.IdleDetected { consecutive_idle_turns = 4 })
+       in
+       Masc.Keeper_unified_turn_failure.record_failure_and_maybe_escalate
+         ~config
+         ~meta
+         ~updated_meta:meta
+         ~is_auto_recoverable:false
+         ~err
+         ~error_text:(Agent_sdk.Error.to_string err);
+       (match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+        | Some entry ->
+          check bool "not paused before runtime threshold" false
+            entry.Masc.Keeper_registry.meta.paused
+        | None -> fail "expected registered keeper after first failure");
+       Masc.Keeper_unified_turn_failure.record_failure_and_maybe_escalate
+         ~config
+         ~meta
+         ~updated_meta:meta
+         ~is_auto_recoverable:false
+         ~err
+         ~error_text:(Agent_sdk.Error.to_string err);
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool "paused at runtime threshold" true
+           entry.Masc.Keeper_registry.meta.paused
+       | None -> fail "expected registered keeper after threshold")
 
 let test_legacy_last_blocker_pair_rejected () =
   let legacy_json =
@@ -760,5 +859,7 @@ let () =
         [
           test_case "repeated IdleDetected pauses keeper for manual resume" `Quick
             test_idle_detected_repeated_failure_pauses_keeper;
+          test_case "runtime [pause] threshold controls idle auto-pause" `Quick
+            test_runtime_pause_threshold_override_controls_idle_auto_pause;
         ] );
     ]

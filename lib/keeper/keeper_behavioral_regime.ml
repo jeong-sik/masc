@@ -41,14 +41,11 @@ type snapshot = {
   updated_at : float;
 }
 
-(* ── Thresholds (exposed for tests) ─────────────────────── *)
-(* SSOT: [config/runtime.toml] [\[pause\]] section, mirrored verbatim by
-   [Runtime_schema.pause_threshold_default]. The numbers below are the
-   in-code fallback only — runtime.toml override requires the Phase 2 caller
-   migration (separate PR) which changes these top-level vals into
-   [Keeper_behavioral_regime.config.pause_threshold.*] lookups.
-   Field names + types MUST stay in sync with [Runtime_schema.pause_threshold]
-   or the SSOT will silently desync. *)
+(* ── Thresholds (exposed for pure tests) ─────────────────────── *)
+(* Default fallback values mirrored by [Runtime_schema.pause_threshold_default].
+   Operational pause decision paths read the runtime.toml [pause] section via
+   [Runtime.pause_threshold]; keep these top-level vals as pure defaults for
+   legacy regime tests and call sites that do not carry runtime config. *)
 let turn_fail_streak_threshold = 3
 let recent_restart_window_sec = 300.0
 let recent_restart_count_threshold = 2

@@ -685,11 +685,9 @@ let parse_keeper_assignments (toml : Otoml.t)
 
    Fails soft: a malformed value (e.g. wrong type) is logged + ignored rather
    than aborting config load, mirroring the existing [runtime].media_failover
-   pattern above. Missing section / missing keys → [pause_threshold_default]
-   which mirrors the legacy hardcoded values in [Keeper_behavioral_regime.ml].
-   Phase 2 caller migration is deferred — the current top-level vals in
-   [Keeper_behavioral_regime] are untouched and still authoritative at
-   runtime. *)
+   pattern above. Missing section / missing keys → [pause_threshold_default],
+   which mirrors the legacy fallback values in [Keeper_behavioral_regime.ml].
+   Operational pause paths consume this through [Runtime.pause_threshold]. *)
 let parse_pause_threshold (toml : Otoml.t) : Runtime_schema.pause_threshold =
   let read_field ~path ~key ~getter =
     try

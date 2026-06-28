@@ -901,9 +901,8 @@ trigger_policy = "mention_or_thread"
 
 # ── Keeper pause / resume threshold knobs (Plan §runtime.toml [pause] SSOT) ──
 # lib/keeper/keeper_behavioral_regime.ml 의 hardcoded threshold 들을 외부 설정으로
-# 옮기기 위한 SSOT. 현재 구현은 default fallback 으로만 동작하며, 이 섹션이
-# 있어도 기존 behavior 와 동일 — 차이는 향후 caller 가 Env_config_pause.get_*
-# 호출로 변경될 때 override 로 적용된다는 점.
+# 옮기기 위한 SSOT. Runtime.pause_threshold() 를 통해 auto-pause decision path가
+# 이 값을 읽고, 누락/잘못된 타입은 default fallback 으로 동작한다.
 #
 # 변경 의미:
 # - turn_fail_streak_threshold: 동일 keeper 가 연속 turn_failure 를 N 회

@@ -241,9 +241,7 @@ type config =
         loaded record without an extra decoder. Missing from runtime.toml →
         [Pause_threshold.default]. Wrong-type value → load-time warn + fallback
         to default (fail-soft: wrong value is not catastrophic at boot).
-        Phase 2 caller migration (read [Keeper_behavioral_regime]'s constants
-        via [cfg.pause_threshold] instead of the top-level vals) is
-        intentionally deferred to a separate PR to keep this commit additive. *)
+        Operational callers read this through [Runtime.pause_threshold]. *)
   }
 [@@deriving show, eq]
 

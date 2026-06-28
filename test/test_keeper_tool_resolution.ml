@@ -62,23 +62,18 @@ let test_descriptor_registry_admits_masc_keeper_cluster () =
                   name (TR.string_of_tried tried)))
     [ "masc_keeper_msg"; "masc_keeper_msg_result"; "masc_keeper_msg_cancel"; "masc_keeper_msg_queue"; "masc_keeper_list"; "masc_keeper_status" ]
 
-let test_keeper_report_state_core_always () =
+let test_keeper_report_state_removed () =
   check bool
-    "keeper_report_state is core always"
-    true
+    "keeper_report_state is no longer core always"
+    false
     (Masc.Keeper_tool_registry.is_core_always_tool "keeper_report_state");
   match TR.resolve "keeper_report_state" with
-  | TR.Resolved { via = TR.Registry_core_tools; _ } -> ()
+  | TR.Unknown _ -> ()
   | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
       fail
         (Printf.sprintf
-           "keeper_report_state should resolve via Registry_core_tools, got via %s"
+           "keeper_report_state was removed; unexpected resolution via %s"
            (TR.string_of_tried_source via))
-  | TR.Unknown { tried; _ } ->
-      fail
-        (Printf.sprintf
-           "keeper_report_state should resolve, got Unknown (tried: %s)"
-           (TR.string_of_tried tried))
 
 let test_tool_execute_resolves () =
   (* Was "resolves via surface"; the per-actor Surface source was removed in
@@ -160,7 +155,7 @@ let policy_tool_names =
       "keeper_board_comment";
       "keeper_board_curation_read";
       "keeper_board_curation_submit";
-      "keeper_board_get";
+      "keeper_board_post_get";
       "keeper_board_list";
       "keeper_board_post";
       "keeper_board_search";
@@ -191,7 +186,6 @@ let policy_tool_names =
       "keeper_voice_speak";
       "masc_add_task";
       "masc_agent_card";
-      "masc_agents";
       "masc_batch_add_tasks";
       "masc_broadcast";
 
@@ -217,7 +211,6 @@ let policy_tool_names =
       "masc_transition";
       "masc_web_fetch";
       "masc_web_search";
-      "masc_agents";
       "tool_edit_file";
       "tool_execute";
       "tool_read_file";
@@ -321,7 +314,7 @@ let () =
         test_case "keeper_board_post resolves via registry" `Quick test_registry_admits_keeper_board_post;
         test_case "mcp prefix stripped and resolved" `Quick test_mcp_prefix_stripped;
         test_case "unknown returns tried list" `Quick test_unknown_returns_tried_list;
-        test_case "keeper_report_state is core-always structured state tool" `Quick test_keeper_report_state_core_always;
+        test_case "keeper_report_state is removed" `Quick test_keeper_report_state_removed;
         test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
         test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
         test_case "masc_board_post resolves" `Quick test_masc_board_post_resolves;

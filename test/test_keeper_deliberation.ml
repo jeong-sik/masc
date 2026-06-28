@@ -151,12 +151,15 @@ let test_triage_multiple_triggers () =
       direct_mention = true;
       unclaimed_task_count = 1;
       failed_task_count = 1;
+      keeper_fiber_count_changed = true;
     }
   in
   match D.triage obs with
   | D.Skip _ -> fail "expected multiple triggers"
   | D.Triggered triggers ->
-      check bool "at least 3 triggers" true (List.length triggers >= 3)
+      check bool "at least 3 triggers" true (List.length triggers >= 3);
+      check bool "failed_task is not actionable in multi-trigger triage" false
+        (List.mem D.FailedTask triggers)
 
 (* ---------- Action type tests ---------- *)
 

@@ -97,8 +97,8 @@ type proactive_runtime = {
       (** Consecutive autonomous cycles where only observation
           tools were used with no substantive action.  Used by
           [effective_scheduled_autonomous_cooldown] for
-          exponential backoff: cooldown *= 2^min(n, 3),
-          capping at 8x.  Resets on any productive cycle. *)
+          exponential backoff: cooldown *= 2^min(n, 2),
+          capping at 4x.  Resets on any productive cycle. *)
 }
 
 type usage_metrics = {

@@ -1090,6 +1090,24 @@ let exhaust_keeper_restart_budget config (meta : Keeper_meta_contract.keeper_met
       ("keeper restart-budget exhaustion failed: "
        ^ Keeper_state_machine.transition_error_to_string err)
 
+let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
+  match
+    Keeper_registry.dispatch_event
+      ~base_path:config.Workspace.base_path
+      meta.name
+      (Keeper_state_machine.Fiber_terminated
+         {
+           outcome = "stale_turn_timeout(idle_turn(2268s))";
+           provider_id = None;
+           http_status = None;
+         })
+  with
+  | Ok _ -> ()
+  | Error err ->
+    Alcotest.fail
+      ("keeper fiber termination failed: "
+       ^ Keeper_state_machine.transition_error_to_string err)
+
 let mark_keeper_dead_with_registry_cause config
     (meta : Keeper_meta_contract.keeper_meta) =
   let base_path = config.Workspace.base_path in
@@ -1764,6 +1782,20 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           make_keeper_meta ~name:"capacity-paused" ~trace_id:"trace-capacity-paused"
             ~paused:true ()
         in
+        let paused =
+          {
+            paused with
+            runtime =
+              {
+                paused.runtime with
+                last_blocker =
+                  Some
+                    (Keeper_meta_contract.blocker_info_of_class
+                       ~detail:"no_progress loop detected"
+                       Keeper_meta_contract.No_progress_loop);
+              };
+          }
+        in
         let running_a =
           make_keeper_meta ~name:"capacity-running-a"
             ~trace_id:"trace-capacity-running-a" ()
@@ -1828,6 +1860,18 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           Alcotest.(check string) "health suggests paused action"
             "resume_or_leave_paused"
             (blocked_detail "capacity-paused" |> member "action" |> to_string);
+          Alcotest.(check string) "health preserves paused blocker class"
+            "no_progress_loop"
+            (blocked_detail "capacity-paused"
+             |> member "last_blocker"
+             |> member "klass"
+             |> to_string);
+          Alcotest.(check string) "health preserves paused blocker detail"
+            "no_progress loop detected"
+            (blocked_detail "capacity-paused"
+             |> member "last_blocker"
+             |> member "detail"
+             |> to_string);
           Alcotest.(check string) "health suggests unregistered action"
             "start_or_recover_keeper"
             (blocked_detail "example" |> member "action" |> to_string);
@@ -2302,6 +2346,13 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
         write_keeper_meta_exn config failing;
         with_running_keeper_metas config [ failing ] (fun () ->
           mark_keeper_failing config failing;
+          Keeper_registry.set_failure_reason
+            ~base_path:config.Workspace.base_path
+            failing.name
+            (Some
+               (Keeper_registry.Stale_turn_timeout
+                  (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
+          terminate_keeper_fiber config failing;
           exhaust_keeper_restart_budget config failing;
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
@@ -2314,21 +2365,175 @@ let test_health_json_explains_nonrecoverable_failing_keeper () =
              |> List.map to_string);
           Alcotest.(check (list (pair string string)))
             "health explains nonrecoverable failing keeper"
-            [ ("capacity-failing", "phase_failing"); ("example", "not_registered") ]
+            [ ("capacity-failing", "phase_dead"); ("example", "not_registered") ]
             (fleet_safety |> member "blocked_keeper_reasons" |> to_list
              |> List.map (fun row ->
                   ( row |> member "keeper" |> to_string
                   , row |> member "reason" |> to_string )));
-          let failing_detail =
+          let capacity_row =
             fleet_safety |> member "blocked_keeper_reasons" |> to_list
-            |> List.find (fun row ->
-                 row |> member "keeper" |> to_string = "capacity-failing")
+            |> List.find_opt (fun row ->
+                 String.equal
+                   "capacity-failing"
+                   (row |> member "keeper" |> to_string))
           in
-          Alcotest.(check string) "health reports failing action"
-            "repair_failing_keeper"
-            (failing_detail |> member "action" |> to_string);
-          Alcotest.(check bool) "health marks failing phase non-terminal" false
-            (failing_detail |> member "terminal_phase" |> to_bool))))
+          match capacity_row with
+          | None -> Alcotest.fail "missing capacity-failing blocked row"
+          | Some row ->
+            Alcotest.(check string) "health exposes dead phase" "dead"
+              (row |> member "phase" |> to_string);
+            Alcotest.(check string) "health exposes typed stale failure reason"
+              "stale_turn_timeout(idle_turn(2268s))"
+              (row |> member "last_failure_reason" |> to_string);
+            Alcotest.(check string) "health recommends keeper recovery action"
+              "keeper_recover"
+              (row |> member "operator_action_type" |> to_string);
+            Alcotest.(check string) "health recommends recovery tool"
+              "masc_keeper_recover"
+              (row |> member "operator_tool_name" |> to_string);
+            Alcotest.(check bool) "health marks recovery as confirm-required"
+              true
+              (row |> member "operator_action_confirm_required" |> to_bool))))
+
+let test_health_json_redacts_registry_failure_reason () =
+  with_temp_dir "health-redacts-registry-failure-reason" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "secret-failing";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let failing =
+          make_keeper_meta ~name:"secret-failing" ~trace_id:"trace-secret" ()
+        in
+        write_keeper_meta_exn config failing;
+        with_running_keeper_metas config [ failing ] (fun () ->
+          let base_path = config.Workspace.base_path in
+          let keeper_secret = "keeper-secret-value" in
+          let secret_env_dir =
+            Filename.concat
+              (Keeper_secret_projection.secret_root ~base_path ~keeper_name:failing.name)
+              "env"
+          in
+          mkdir_p secret_env_dir;
+          write_file (Filename.concat secret_env_dir "TOKEN") keeper_secret;
+          mark_keeper_failing config failing;
+          Keeper_registry.set_failure_reason
+            ~base_path
+            failing.name
+            (Some
+               (Keeper_registry.Provider_runtime_error
+                  {
+                    code = "provider_failed";
+                    detail =
+                      Printf.sprintf
+                        "Bearer ghp_healthsecret %s path=%s"
+                        keeper_secret
+                        (Filename.concat base_path "private/token.txt");
+                    provider_id = Some "provider-internal";
+                    http_status = Some 500;
+                    runtime_id = Some "runtime-internal";
+                    reason = None;
+                  }));
+          terminate_keeper_fiber config failing;
+          exhaust_keeper_restart_budget config failing;
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          let failing_row =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find_opt (fun row ->
+                 String.equal
+                   "secret-failing"
+                   (row |> member "keeper" |> to_string))
+          in
+          match failing_row with
+          | None -> Alcotest.fail "missing secret-failing blocked row"
+          | Some row ->
+              let reason = row |> member "last_failure_reason" |> to_string in
+              Alcotest.(check bool) "redacts bearer token" false
+                (contains_substring reason "ghp_healthsecret");
+              Alcotest.(check bool) "redacts exact keeper secret" false
+                (contains_substring reason keeper_secret);
+              Alcotest.(check bool) "redacts workspace base path" false
+                (contains_substring reason base_path);
+              Alcotest.(check bool) "retains explicit redaction marker" true
+                (contains_substring reason "[REDACTED]");
+              Alcotest.(check bool) "retains workspace placeholder" true
+                (contains_substring reason "<workspace>"))))
+
+let test_health_json_uses_crash_log_when_restore_clears_failure_reason () =
+  with_temp_dir "health-restored-crash-log-keeper" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "restored-crash-log";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let restored =
+          make_keeper_meta ~name:"restored-crash-log"
+            ~trace_id:"trace-restored-crash-log" ()
+        in
+        write_keeper_meta_exn config restored;
+        with_running_keeper_metas config [ restored ] (fun () ->
+          let base_path = config.Workspace.base_path in
+          let stale_reason = "stale_turn_timeout(idle_turn(2268s))" in
+          mark_keeper_failing config restored;
+          Keeper_registry.set_failure_reason
+            ~base_path
+            restored.name
+            (Some
+               (Keeper_registry.Stale_turn_timeout
+                  (Keeper_registry.Idle_turn { stall_seconds = 2268.0 })));
+          terminate_keeper_fiber config restored;
+          Keeper_registry.record_crash ~base_path restored.name 1234.0 stale_reason;
+          exhaust_keeper_restart_budget config restored;
+          Keeper_registry.restore_supervisor_state
+            ~base_path
+            restored.name
+            ~restart_count:10
+            ~last_restart_ts:1234.0
+            ~crash_log:(Keeper_registry.crash_log_of ~base_path restored.name);
+          (match Keeper_registry.get ~base_path restored.name with
+           | Some entry ->
+             Alcotest.(check bool) "restore cleared typed failure reason" true
+               (Option.is_none entry.Keeper_registry.last_failure_reason)
+           | None -> Alcotest.fail "missing restored keeper registry entry");
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          let restored_row =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find_opt (fun row ->
+                 String.equal
+                   "restored-crash-log"
+                   (row |> member "keeper" |> to_string))
+          in
+          match restored_row with
+          | None -> Alcotest.fail "missing restored-crash-log blocked row"
+          | Some row ->
+            Alcotest.(check string) "health exposes dead phase after restore" "dead"
+              (row |> member "phase" |> to_string);
+            Alcotest.(check string)
+              "health falls back to restored crash-log failure reason"
+              stale_reason
+              (row |> member "last_failure_reason" |> to_string))))
 
 let test_health_json_reaction_ledger_cursor_sweep_clears_pending () =
   with_temp_dir "health-reaction-ledger-cursor-sweep" (fun dir ->
@@ -3912,6 +4117,13 @@ let () =
           Alcotest.test_case
             "health json explains nonrecoverable failing keeper"
             `Quick test_health_json_explains_nonrecoverable_failing_keeper;
+          Alcotest.test_case
+            "health json redacts registry failure reason"
+            `Quick test_health_json_redacts_registry_failure_reason;
+          Alcotest.test_case
+            "health json restores crash-log failure reason"
+            `Quick
+            test_health_json_uses_crash_log_when_restore_clears_failure_reason;
           Alcotest.test_case
             "health json reaction ledger cursor sweep clears pending"
             `Quick test_health_json_reaction_ledger_cursor_sweep_clears_pending;

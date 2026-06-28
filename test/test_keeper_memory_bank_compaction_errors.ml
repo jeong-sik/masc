@@ -18,6 +18,18 @@ let write_file path content =
   | Error msg -> Alcotest.fail msg
 ;;
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some old -> Unix.putenv key old
+      | None -> Unix.putenv key "")
+    (fun () ->
+      Unix.putenv key value;
+      f ())
+;;
+
 let progress_row ~trace_id ~text : string =
   `Assoc
     [ ("schema_version", `Int Policy.keeper_memory_schema_version)
@@ -34,21 +46,27 @@ let progress_row ~trace_id ~text : string =
 ;;
 
 let with_temp_dir f =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
   let marker = Filename.temp_file "memory-bank-compaction-" ".tmp" in
   Sys.remove marker;
   Unix.mkdir marker 0o700;
-  Fun.protect ~finally:(fun () ->
-    try
-      let rec rm path =
-        if Sys.is_directory path
-        then (
-          Sys.readdir path
-          |> Array.iter (fun name -> rm (Filename.concat path name));
-          Unix.rmdir path)
-        else Sys.remove path
-      in
-      rm marker
-    with _ -> ()) (fun () -> f marker)
+  Fun.protect
+    ~finally:(fun () ->
+      Fs_compat.clear_fs ();
+      try
+        let rec rm path =
+          if Sys.is_directory path
+          then (
+            Sys.readdir path
+            |> Array.iter (fun name -> rm (Filename.concat path name));
+            Unix.rmdir path)
+          else Sys.remove path
+        in
+        rm marker
+      with _ -> ())
+    (fun () -> f marker)
 ;;
 
 let with_eio_fs f () =
@@ -126,7 +144,10 @@ let test_write_failure_surfaces_typed_error () =
   Fun.protect
     ~finally:(fun () -> Unix.chmod keeper_dir original_perms)
     (fun () ->
-       let result = Bank.compact_memory_bank_if_needed config meta in
+       let result =
+         with_env "MASC_KEEPER_MEMORY_MAX_NOTES" "40" (fun () ->
+           Bank.compact_memory_bank_if_needed config meta)
+       in
        Alcotest.(check bool) "compaction was attempted" true result.Policy.performed;
        Alcotest.(check bool) "error is present" true (Option.is_some result.Policy.error);
        match result.Policy.error with

@@ -18,7 +18,7 @@
       "validator": "Valibot dashboard parser plus OCaml projection tests",
       "tests": [
         "dashboard/src/api/schemas/keeper-composite.test.ts",
-        "test/test_keeper_composite_observer.ml"
+        "test/test_event_priority_monotone_pbt.ml"
       ],
       "stability": "operator_internal",
       "version_field": null,
@@ -53,7 +53,10 @@
       "wire_or_artifact": ".masc/keepers/<keeper>/runtime-manifests/<trace_id>.jsonl",
       "schema_source": ["lib/keeper/keeper_runtime_manifest.mli"],
       "validator": "Keeper_runtime_manifest.of_json",
-      "tests": ["test/test_keeper_runtime_manifest.ml"],
+      "tests": [
+        "test/test_keeper_runtime_manifest_completeness.ml",
+        "test/test_keeper_runtime_manifest_clock_separation.ml"
+      ],
       "stability": "operator_internal",
       "version_field": "schema_version",
       "external_refs": ["oas.runtime_protocol.v1", "oas.event_bus.v1"],
@@ -117,7 +120,7 @@
       "wire_or_artifact": "MCP tools/list and /api/v1/openapi.json",
       "schema_source": [
         "lib/keeper/keeper_schema.mli",
-        "lib/tool_schema_dsl.mli",
+        "lib/tool_surface/tool_schema_dsl.mli",
         "docs/spec/09-server-transport.md"
       ],
       "validator": "Tool inventory and OpenAPI smoke tests",
@@ -139,7 +142,7 @@
         "docs/SYSTEM-EVENT-AND-SNAPSHOT-INVENTORY.md"
       ],
       "validator": "OAS integration bridge tests",
-      "tests": ["test/test_oas_integration.ml"],
+      "tests": ["test/test_keeper_execution_join.ml"],
       "stability": "operator_internal",
       "version_field": null,
       "external_refs": ["oas.event_bus.v1", "oas.runtime_protocol.v1"],

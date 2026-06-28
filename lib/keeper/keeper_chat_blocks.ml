@@ -157,6 +157,32 @@ let is_http_url url =
   | _ -> false
 ;;
 
+type dropped_http_url_reason =
+  | Missing_scheme
+  | Unsupported_scheme of string
+  | Invalid_url
+
+let dropped_http_url_reason_to_string = function
+  | Missing_scheme -> "missing_scheme"
+  | Unsupported_scheme scheme -> "unsupported_scheme:" ^ scheme
+  | Invalid_url -> "invalid_url"
+;;
+
+let redacted_http_url_opt ?on_drop url =
+  let url = Observability_redact.redact_text url in
+  let drop reason =
+    Option.iter (fun f -> f reason) on_drop;
+    None
+  in
+  try
+    match Uri.scheme (Uri.of_string url) with
+    | Some "http" | Some "https" -> Some url
+    | Some scheme -> drop (Unsupported_scheme scheme)
+    | None -> drop Missing_scheme
+  with
+  | _ -> drop Invalid_url
+;;
+
 let has_prefix ~prefix value =
   let prefix_len = String.length prefix in
   String.length value >= prefix_len && String.sub value 0 prefix_len = prefix

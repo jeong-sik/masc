@@ -929,6 +929,92 @@ let test_config_judges_parse () =
     Alcotest.failf "expected Ok, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
 
+let staged_joj_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "staged_joj"
+max_concurrent_panels = 2
+max_concurrent_judges = 3
+staged_judge_group_size = 3
+[fusion.presets.staged_joj]
+panel = [
+  "ollama_cloud.deepseek-v4-flash",
+  "glm-coding.glm-5-turbo",
+  "ollama_cloud.minimax-m3",
+]
+judge = "deepseek.deepseek-v4-pro"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "synthesize staged judge groups"
+panel_timeout_s = 300.0
+judge_timeout_s = 300.0
+web_tools = false
+max_tool_calls_per_panel = 0
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+label = "synthesizer"
+system_prompt = "Synthesize the panel answers."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.minimax-m3"
+label = "consensus-builder"
+system_prompt = "Focus on consensus."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.kimi-k2-6"
+label = "devils-advocate"
+system_prompt = "Challenge the dominant view."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.ollama-cloud-glm-5-2"
+label = "evidence-checker"
+system_prompt = "Check evidence."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.ollama-cloud-gpt-oss-120b"
+label = "synthesizer-2"
+system_prompt = "Synthesize again."
+[[fusion.presets.staged_joj.judges]]
+model = "ollama_cloud.ollama-cloud-gemini-3-flash-preview"
+label = "synthesizer-3"
+system_prompt = "Synthesize into one answer."
+|}
+
+let test_config_staged_joj_preset () =
+  match Fusion_config.of_toml (parse staged_joj_toml) with
+  | Ok p ->
+    Alcotest.(check bool) "enabled" true p.Fusion_policy.enabled;
+    Alcotest.(check string) "default preset" "staged_joj"
+      p.Fusion_policy.default_preset;
+    Alcotest.(check int) "judge concurrency" 3 p.Fusion_policy.max_concurrent_judges;
+    Alcotest.(check int) "staged group size" 3 p.Fusion_policy.staged_judge_group_size;
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       Alcotest.(check string) "preset name" "staged_joj" preset.Fusion_policy.name;
+       Alcotest.(check int) "panel size" 3
+         (List.length (Fusion_policy.preset_models preset));
+       Alcotest.(check (list string)) "judge labels"
+         [ "synthesizer"
+         ; "consensus-builder"
+         ; "devils-advocate"
+         ; "evidence-checker"
+         ; "synthesizer-2"
+         ; "synthesizer-3"
+         ]
+         (List.map (fun j -> j.Fusion_policy.jlabel) preset.Fusion_policy.judges);
+       (match
+          Fusion_policy.staged_judge_groups
+            ~group_size:p.Fusion_policy.staged_judge_group_size
+            preset.Fusion_policy.judges
+        with
+        | Ok groups ->
+          Alcotest.(check (list int)) "two full judge groups" [ 3; 3 ]
+            (List.map List.length groups)
+        | Error e ->
+          Alcotest.failf "expected staged groups, got %s"
+            (Fusion_policy.show_staged_judge_group_error e))
+     | _ -> Alcotest.fail "expected exactly one staged_joj preset")
+  | Error es ->
+    Alcotest.failf "expected Ok, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
 (* judges sub-table 없는 preset → preset.judges = [] (단일 심판 위상 config). *)
 let test_config_no_judges () =
   match Fusion_config.of_toml (parse golden_single_group_toml) with
@@ -1580,6 +1666,7 @@ let () =
         ; Alcotest.test_case "empty_default_preset" `Quick test_config_empty_default_preset
         ; Alcotest.test_case "disabled_with_preset" `Quick test_config_disabled_with_preset
         ; Alcotest.test_case "judges_parse" `Quick test_config_judges_parse
+        ; Alcotest.test_case "staged_joj_preset" `Quick test_config_staged_joj_preset
         ; Alcotest.test_case "no_judges" `Quick test_config_no_judges
         ; Alcotest.test_case "adaptive_timeout_parse" `Quick
             test_config_adaptive_timeout_parse

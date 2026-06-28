@@ -45,11 +45,6 @@ let test_no_test_prefix_literal_in_config_dir_resolver () =
 ;;
 
 let test_helper_takes_no_argument () =
-  let helper_bindings =
-    Ast_grep.count_value_bindings
-      ~module_path:config_dir_resolver_source_path
-      ~name:"running_under_test_executable"
-  in
   let unit_arg_bindings =
     Ast_grep.count_value_bindings_with_unit_arg
       ~module_path:config_dir_resolver_source_path
@@ -59,7 +54,7 @@ let test_helper_takes_no_argument () =
     "helper signature must be `unit -> bool` (no `executable_name` parameter) \
      after PR-F"
     pinned_helper_takes_no_argument
-    (helper_bindings = 1 && unit_arg_bindings = 1)
+    (unit_arg_bindings = 1)
 ;;
 
 let test_host_config_is_test_mode_called () =

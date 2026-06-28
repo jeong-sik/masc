@@ -50,7 +50,7 @@ The key split is intentional:
 
 | Group | Public Discovery Path | Canonical Examples | Notes |
 |------|------------------------|--------------------|-------|
-| Canonical MCP tools | `tools/list` | `masc_start`, `masc_transition`, `masc_keeper_status`, `masc_board_post` | Default surface for normal clients |
+| Canonical MCP tools | `tools/list` | `masc_start`, `masc_transition`, `masc_keeper_status`, `masc_keeper_up`, `masc_board_post` | Default surface for normal clients, including keeper lifecycle diagnosis/recovery |
 | Managed agent MCP | `/mcp/managed` | `masc_status`, `masc_tasks`, `masc_claim_next`, `masc_transition` | Internal managed-agent surface with canonical task-control tools plus curated passthrough tools; hidden call-only aliases are not supported |
 | Removed alias ghosts | Not discoverable; not supported | `masc_claim`, `experiment_start`, `masc_trpg_*` | Do not preserve or reintroduce; use canonical task-control tools and current public schemas |
 | MCP prompts | `prompts/list`, `prompts/get` | `tool_help` | Explanation/help layer, not runtime prompt registry |

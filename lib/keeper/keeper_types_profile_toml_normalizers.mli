@@ -28,7 +28,10 @@ val removed_keeper_input_key_names : string list
 val removed_keeper_msg_input_key_names : string list
 val present_json_keys : string list -> Yojson.Safe.t -> string list
 val reject_removed_keeper_input_keys :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
+  ?allow_sandbox_fields:bool ->
+  tool_name:string ->
+  Yojson.Safe.t ->
+  (unit, string) result
 val reject_removed_keeper_msg_input_keys :
   tool_name:string -> Yojson.Safe.t -> (unit, string) result
 val utf8_repair_string : string -> string

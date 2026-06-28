@@ -164,7 +164,8 @@ let parse_tool_access_input (args : Yojson.Safe.t) :
            (Json_util.kind_name other))
   | None -> Ok None
 
-let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) result =
+let parse ?(allow_sandbox_fields = false) (ctx : _ context) (args : Yojson.Safe.t) :
+    (parsed_args, tool_result) result =
   let name = get_string args "name" "" in
   if not (validate_name name) then
     Error (tool_result_error "invalid keeper name (allowed: [A-Za-z0-9._-])")
@@ -172,7 +173,10 @@ let parse (ctx : _ context) (args : Yojson.Safe.t) : (parsed_args, tool_result) 
     match Keeper_meta_contract.reject_removed_model_args ~tool_name:"masc_keeper_up" args with
     | Error e -> Error (tool_result_error e)
     | Ok () ->
-    match reject_removed_keeper_input_keys ~tool_name:"masc_keeper_up" args with
+    match
+      reject_removed_keeper_input_keys ~allow_sandbox_fields
+        ~tool_name:"masc_keeper_up" args
+    with
     | Error e -> Error (tool_result_error e)
     | Ok () ->
     let compaction_profile_opt_res =

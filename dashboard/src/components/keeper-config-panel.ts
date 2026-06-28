@@ -179,6 +179,12 @@ function formatRelativeTime(date: Date): string {
 }
 
 // Runtime config draft for sandbox/proactive/compaction/handoff inline editing
+export const MAX_CONTEXT_OVERRIDE_TOKENS = 1_000_000
+
+export function normalizeMaxContextOverrideDraft(value: number): number {
+  if (!Number.isFinite(value)) return 0
+  return Math.min(MAX_CONTEXT_OVERRIDE_TOKENS, Math.max(0, Math.trunc(value)))
+}
 
 export type RuntimeDraft = {
   runtime_id: string
@@ -266,7 +272,7 @@ export function initRuntimeDraftFromConfig(c: KeeperConfig): RuntimeDraft {
   return {
     runtime_id: c.execution.selected_runtime_id ?? '',
     autoboot_enabled: c.autoboot_enabled,
-    max_context_override: c.max_context_override ?? 0,
+    max_context_override: normalizeMaxContextOverrideDraft(c.max_context_override ?? 0),
     sandbox_profile: coerceSandboxProfile(c.sandbox_profile),
     active_goal_ids: c.workspace.active_goal_ids.length > 0
       ? c.workspace.active_goal_ids
@@ -298,8 +304,9 @@ export function buildRuntimePayload(draft: RuntimeDraft, orig: KeeperConfig): Ke
     : orig.active_goal_ids
   if (draft.runtime_id.trim() !== (orig.execution.selected_runtime_id ?? '').trim()) payload.runtime_id = draft.runtime_id.trim()
   if (draft.autoboot_enabled !== orig.autoboot_enabled) payload.autoboot_enabled = draft.autoboot_enabled
-  if (draft.max_context_override !== (orig.max_context_override ?? 0)) {
-    payload.max_context_override = draft.max_context_override > 0 ? Math.trunc(draft.max_context_override) : null
+  const draftMaxContextOverride = normalizeMaxContextOverrideDraft(draft.max_context_override)
+  if (draftMaxContextOverride !== (orig.max_context_override ?? 0)) {
+    payload.max_context_override = draftMaxContextOverride > 0 ? draftMaxContextOverride : null
   }
   if (!sameStringArray(draft.active_goal_ids, origActiveGoalIds)) payload.active_goal_ids = draft.active_goal_ids
   if (!sameStringArray(newMentionTargets, orig.workspace.mention_targets)) payload.mention_targets = newMentionTargets
@@ -1095,8 +1102,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       ]} />
       ${rd ? html`
         <${InlineNumberRow} label="컨텍스트 오버라이드" value=${rd.max_context_override}
-          onChange=${(v: number) => updateRuntimeDraft('max_context_override', Math.max(0, Math.trunc(v)))}
-          min=${0} max=${10000000} step=${1000} suffix="tok"
+          onChange=${(v: number) => updateRuntimeDraft('max_context_override', normalizeMaxContextOverrideDraft(v))}
+          min=${0} max=${MAX_CONTEXT_OVERRIDE_TOKENS} step=${1000} suffix="tok"
           dirty=${dirtyFlags.max_context_override} />
       ` : c.max_context_override != null ? html`
         <${ConfigRow} label="컨텍스트 오버라이드" value=${formatTokens(c.max_context_override)} />

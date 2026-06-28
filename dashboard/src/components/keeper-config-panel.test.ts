@@ -9,6 +9,7 @@ import {
   filterHookSlots,
   hookSlotDetails,
   initRuntimeDraftFromConfig,
+  MAX_CONTEXT_OVERRIDE_TOKENS,
   type HookSlotEntry,
   type RuntimeDraft,
 } from './keeper-config-panel'
@@ -531,6 +532,14 @@ describe('buildRuntimePayload — sandbox diffing', () => {
       max_context_override: 0,
     }), c)
     expect(payload.max_context_override).toBeNull()
+  })
+
+  it('clamps max_context_override to the backend keeper bound before PATCH', () => {
+    const c = makeKeeperConfigForSandbox({ max_context_override: null })
+    const payload = buildRuntimePayload(draftFrom(c, {
+      max_context_override: MAX_CONTEXT_OVERRIDE_TOKENS + 1,
+    }), c)
+    expect(payload.max_context_override).toBe(MAX_CONTEXT_OVERRIDE_TOKENS)
   })
 })
 

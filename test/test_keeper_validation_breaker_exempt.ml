@@ -15,6 +15,7 @@ module Dispatch = Masc.Keeper_tool_dispatch_runtime
 module Boundary = Masc.Keeper_tools_oas_failure_boundary
 module Response_text = Masc.Keeper_agent_run_response_text
 module State = Masc.Keeper_memory_policy
+module Receipt = Masc.Keeper_execution_receipt
 module U = Yojson.Safe.Util
 (* Tool_result lives in the leaf [masc_tool_types] lib (wrapped false), so
    it is referenced bare — not under [Masc.] — matching existing tests. *)
@@ -137,6 +138,7 @@ let test_state_block_reply_returns_state_snapshot () =
       ~keeper_name:"keeper-task-create-test"
       ~goal:"Keep runtime visible"
       ~actual_keeper_tool_names:[]
+      ~completion_contract_result:Receipt.Contract_satisfied_completion
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text
       ()

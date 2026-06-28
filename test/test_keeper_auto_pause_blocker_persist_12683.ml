@@ -551,9 +551,7 @@ let test_resume_directive_persist_failure_keeps_completion_contract_pause () =
                { detail = "completion contract violated" }));
        let keeper_json_path =
          Filename.concat
-           (Filename.concat
-              (Common.masc_dir_from_base_path ~base_path:config.base_path)
-              "keepers")
+           (Common.keepers_runtime_dir_of_base ~base_path:config.base_path)
            (keeper_name ^ ".json")
        in
        Unix.mkdir keeper_json_path 0o755;

@@ -191,14 +191,14 @@ let test_broadcast_all_excludes_presence_sessions ~auth () =
 
 let test_broadcast_presence_is_live_only ~auth () =
   reset ();
-  let original_buffer = Atomic.get Sse.event_buffer in
+  let original_buffer = Sse.event_buffer_events_for_test () in
   Fun.protect
     ~finally:(fun () ->
-      Atomic.set Sse.event_buffer original_buffer;
+      Sse.set_event_buffer_for_test original_buffer;
       Sse.unregister "s-presence";
       Sse.unregister "s-observer")
     (fun () ->
-      Atomic.set Sse.event_buffer [];
+      Sse.set_event_buffer_for_test [];
       ignore (register_exn ~auth ~kind:Presence "s-presence" ~last_event_id:0);
       ignore (register_exn ~auth ~kind:Observer "s-observer" ~last_event_id:0);
       let before_id = Sse.current_id () in

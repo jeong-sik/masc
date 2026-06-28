@@ -210,7 +210,7 @@ let tool_search_alias_entries =
   ; "tool_write_file", "파일 쓰기 저장 생성 덮어쓰기"
   ; "tool_search_files", "코드 검색 소스코드 grep rg 패턴 찾기 파일"
   ; ( "tool_execute"
-    , "명령어 실행 쉘 빌드 테스트 run dune build check compile compiles code git \
+    , "명령어 실행 쉘 빌드 테스트 run dune build check compile compiles code git github gh \
        status log diff" )
   ; ( "keeper_memory_search"
     , "기억 검색 대화 이전 메시지 memory previous earlier user said recall deployment" )

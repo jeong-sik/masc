@@ -3,6 +3,7 @@ import { useEffect, useState } from 'preact/hooks'
 import type { Goal, Keeper, Task } from '../../types'
 import { goals, keepers, tasks } from '../../store'
 import { firstNonEmptyString } from '../../lib/format-string'
+import { normalizeKeeperBlockerText } from '../../lib/keeper-runtime-display'
 import { KeeperBadge } from '../keeper-badge'
 import {
   formatProgressPct,
@@ -341,6 +342,17 @@ export function keeperWorkSummary(
   )
   const trust = keeper?.trust ?? null
   const latestTerminal = trust?.latest_terminal_reason ?? null
+  const terminalSummary = normalizeKeeperBlockerText(
+    firstNonEmptyString(
+      latestTerminal?.summary,
+      keeper?.runtime_blocker_summary,
+      trust?.attention_reason,
+      keeper?.attention_reason,
+    ),
+  )
+  const runtimeBlocker = normalizeKeeperBlockerText(
+    firstNonEmptyString(keeper?.runtime_blocker_summary, keeper?.last_blocker),
+  )
   return {
     displayName,
     keeper,
@@ -350,12 +362,7 @@ export function keeperWorkSummary(
     activeTasks,
     activeTaskCount: currentTaskId && activeTasks.length === 0 ? 1 : activeTasks.length,
     terminalCode: firstNonEmptyString(latestTerminal?.code, keeper?.runtime_blocker_class),
-    terminalSummary: firstNonEmptyString(
-      latestTerminal?.summary,
-      keeper?.runtime_blocker_summary,
-      trust?.attention_reason,
-      keeper?.attention_reason,
-    ),
+    terminalSummary,
     nextAction: firstNonEmptyString(
       latestTerminal?.next_action,
       trust?.latest_next_action,
@@ -368,7 +375,7 @@ export function keeperWorkSummary(
       keeper?.last_proactive_preview,
     ),
     recentTools: keeper?.recent_tool_names ?? keeper?.latest_tool_names ?? EMPTY_TOOLS,
-    runtimeBlocker: firstNonEmptyString(keeper?.runtime_blocker_summary, keeper?.last_blocker),
+    runtimeBlocker,
   }
 }
 

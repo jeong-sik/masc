@@ -382,6 +382,12 @@ let test_execute_aliases_exclude_repo_pr_workflow () =
     false (List.mem ("dra" ^ "ft") aliases);
   Alcotest.(check bool) "Execute aliases exclude PR request token"
     false (List.mem ("pu" ^ "ll") aliases);
+  Alcotest.(check bool) "Execute aliases exclude PR shorthand token"
+    false (List.mem "PR" aliases);
+  Alcotest.(check bool) "Execute aliases exclude push mutation token"
+    false (List.mem "push" aliases);
+  Alcotest.(check bool) "Execute aliases exclude commit mutation token"
+    false (List.mem "commit" aliases);
   Alcotest.(check bool) "Execute aliases omit Korean create intent"
     false (List.mem ("생" ^ "성") aliases)
 

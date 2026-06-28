@@ -82,6 +82,8 @@ services:
       - "8428:8428"
     command:
       - "-retentionPeriod=7d"
+    volumes:
+      - victoriametrics-data:/victoria-metrics-data
     restart: unless-stopped
 
   loki:
@@ -111,4 +113,6 @@ services:
 
 volumes:
   masc-state:
+    driver: local
+  victoriametrics-data:
     driver: local

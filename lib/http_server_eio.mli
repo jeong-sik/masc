@@ -92,8 +92,14 @@ end
     [httpun] streaming API.  Every helper closes the response
     body except the 304 path in [html_cached]. *)
 module Response : sig
+  (** JSON response content type used by {!json} and header-order
+      regression tests. *)
   val json_content_type : string
 
+  (** Build deterministic content headers around the mandatory
+      [content-type] / [content-length] pair.  Optional header segments
+      preserve caller order as [before_headers], core headers,
+      [after_headers], then [tail_headers]. *)
   val content_headers
     :  ?before_headers:(string * string) list
     -> ?after_headers:(string * string) list

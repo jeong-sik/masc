@@ -19,7 +19,8 @@ let is_idle_detected_error = function
 let idle_detected_blocker_detail = function
   | Agent_sdk.Error.Agent (Agent_sdk.Error.IdleDetected { consecutive_idle_turns }) ->
     Printf.sprintf
-      "idle loop detected: consecutive_idle_turns=%d; manual pause applied"
+      "idle loop detected: consecutive_idle_turns=%d; auto-paused after \
+       repeated idle turns; operator resume clears the idle latch"
       consecutive_idle_turns
   | Agent_sdk.Error.Api _
   | Agent_sdk.Error.Provider _
@@ -30,7 +31,8 @@ let idle_detected_blocker_detail = function
   | Agent_sdk.Error.Io _
   | Agent_sdk.Error.Orchestration _
   | Agent_sdk.Error.Internal _ ->
-    "idle loop detected; manual pause applied"
+    "idle loop detected; auto-paused after repeated idle turns; operator \
+     resume clears the idle latch"
 ;;
 
 let record_failure_and_maybe_escalate

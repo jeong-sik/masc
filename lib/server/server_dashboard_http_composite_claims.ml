@@ -346,8 +346,19 @@ let composite_execution_config_drift execution =
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
+let composite_execution_passive_only_without_work_scope execution =
+  match completion_contract_result_of_execution execution with
+  | Some Completion_contract_result.Passive_only ->
+    Option.is_none (json_string "current_task_id" execution)
+    && Json_util.json_string_list_member "goal_ids" execution = []
+  | Some _ | None -> false
+;;
+
 let composite_execution_completion_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
+  | Some Completion_contract_result.Passive_only
+    when composite_execution_passive_only_without_work_scope execution ->
+    None
   | Some
       ( Completion_contract_result.Violated
       | Completion_contract_result.Claim_only_after_owned_task
@@ -360,6 +371,9 @@ let composite_execution_completion_unsatisfied_reason execution =
 
 let composite_execution_budget_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
+  | Some Completion_contract_result.Passive_only
+    when composite_execution_passive_only_without_work_scope execution ->
+    None
   | Some
       (* TEL-OK: pure dashboard classifier; maps typed receipt labels to a
          display reason without performing an action. *)

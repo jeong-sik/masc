@@ -105,7 +105,11 @@ let classify_compaction_snapshot_typed_event = function
 
 let classify_compaction_snapshot_event event =
   match event with
-  | "memory_injected" | "memory_flushed" ->
+  | "memory_injected"
+  | "memory_flushed"
+  | "tool_lineage_recorded"
+  | "tool_surface_selected"
+  | "cascade_routed" ->
       Compaction_snapshot_known_unrelated
   | _ -> (
       match event_kind_of_string event with

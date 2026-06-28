@@ -7,6 +7,7 @@ import { firstNonEmptyString } from '../lib/format-string'
 import { normalizeStopCause } from '../lib/stop-cause'
 import {
   keeperActivityDisplay,
+  normalizeKeeperBlockerText,
   type KeeperActivitySource,
 } from '../lib/keeper-runtime-display'
 
@@ -397,9 +398,12 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
           const recentTools = keeperRecentTools(keeper)
           const toolCalls = keeperToolCallCount(keeper, toolQualityForKeeper?.calls)
           const activity = keeperActivityDisplay(keeper, keeper.agent?.last_seen)
+          const runtimeBlockerSummary = normalizeKeeperBlockerText(
+            firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker),
+          )
           const stopCause = keeper.stop_cause ?? normalizeStopCause({
             runtime_blocker_class: keeper.runtime_blocker_class ?? null,
-            runtime_blocker_summary: keeper.runtime_blocker_summary ?? keeper.last_blocker ?? null,
+            runtime_blocker_summary: runtimeBlockerSummary,
             terminal_reason_code: keeper.trust?.latest_terminal_reason?.code ?? null,
             terminal_reason_summary: keeper.trust?.latest_terminal_reason?.summary ?? null,
             terminal_reason_severity: keeper.trust?.latest_terminal_reason?.severity ?? null,
@@ -429,8 +433,7 @@ export function buildFleetRows(keepers: Keeper[], toolQuality: ToolQualityRespon
             tool_activity_known: keeperHasToolTelemetry(keeper, toolCalls, recentTools),
             recent_tools: recentTools,
             runtime_blocker_class: keeper.runtime_blocker_class ?? null,
-            runtime_blocker_summary:
-              firstNonEmptyString(keeper.runtime_blocker_summary, keeper.last_blocker) ?? null,
+            runtime_blocker_summary: runtimeBlockerSummary,
             runtime_trust_attention: keeper.trust?.needs_attention === true,
             runtime_trust_reason:
               firstNonEmptyString(

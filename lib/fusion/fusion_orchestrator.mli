@@ -13,7 +13,7 @@ type outcome =
   | Sink_failed of string  (** chat lane 기록 실패 *)
   | Completed of
       { panel : Fusion_types.panel_outcome list
-      ; judge : (Fusion_types.judge_synthesis, string) result
+      ; judge : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) result
       }
 
 (** 요청을 심의한다.

@@ -126,7 +126,13 @@ export function CompactionInspectorOverlay({
   keeper: Keeper
   onClose: () => void
 }): VNode {
-  const events = keeperCompactionSnapshots(keeper.name)
+  const globalEvents = keeperCompactionSnapshots(keeper.name)
+  const [hydratedState, setHydratedState] = useState<{ keeperName: string; events: CompactionSnapshot[] }>({
+    keeperName: keeper.name,
+    events: [],
+  })
+  const hydratedEvents = hydratedState.keeperName === keeper.name ? hydratedState.events : []
+  const events = globalEvents.length > 0 ? globalEvents : hydratedEvents
   const [idx, setIdx] = useState(0)
   const [side, setSide] = useState<'before' | 'after'>('after')
   const [loadState, setLoadState] = useState<CompactionSnapshotLoadState>({
@@ -158,10 +164,12 @@ export function CompactionInspectorOverlay({
       readErrors: [],
       scanTruncated: false,
     })
+    setHydratedState({ keeperName: keeper.name, events: [] })
     void fetchKeeperCompactionSnapshots(keeper.name, undefined, { signal: controller.signal })
       .then((payload) => {
         if (!active) return
-        hydrateCompactionSnapshots(keeper.name, payload.items)
+        const next = hydrateCompactionSnapshots(keeper.name, payload.items)
+        setHydratedState({ keeperName: keeper.name, events: next })
         setLoadState({
           loading: false,
           error: null,

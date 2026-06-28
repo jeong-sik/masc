@@ -2,7 +2,31 @@ open Repo_manager_types
 
 let ( let* ) = Result.bind
 
-let logged_mapping_errors : (string, unit) Hashtbl.t = Hashtbl.create 4
+module String_map = Map.Make (String)
+module String_set = Set.Make (String)
+
+(** Keep per-path/keeper auxiliary maps bounded. These maps are operational
+    caches, not correctness state: on overflow we drop the old contents and
+    keep the new entry so long-lived processes cannot grow without bound. *)
+let max_load_all_cache_entries = 256
+let max_logged_mapping_error_entries = 1024
+
+let bounded_add key value map ~max_entries =
+  let map =
+    if String_map.mem key map || String_map.cardinal map < max_entries
+    then map
+    else String_map.empty
+  in
+  String_map.add key value map
+;;
+
+(** Fiber/domain-safe set of keepers for whom a mapping load error has already
+    been logged. Using an immutable [Map] under [Atomic] avoids locking an
+    Eio fiber while still deduplicating warnings. *)
+let logged_mapping_errors : unit String_map.t Atomic.t =
+  Atomic.make String_map.empty
+
+let mappings_toml_basename = "keeper_repo_mappings.toml"
 
 let mappings_toml_path base_path =
   (* RFC-0121: layout SSOT via [Config_dir_resolver]. *)
@@ -13,7 +37,7 @@ let mapping_of_toml toml keeper_id =
   let* repository_ids =
     Otoml.Helpers.find_strings_result toml (path "repositories")
   in
-  Ok { keeper_id; repository_ids }
+  Ok (make_keeper_repo_mapping ~keeper_id ~repository_ids)
 
 let toml_of_mapping mapping =
   let fields =
@@ -25,43 +49,206 @@ let toml_of_mapping mapping =
   in
   Otoml.TomlTable fields
 
-let load_all ~base_path =
-  let path = mappings_toml_path base_path in
-  if not (Sys.file_exists path) then Ok []
-  else
-    match Otoml.Parser.from_file_result path with
-    | Error msg -> Error msg
-    | Ok toml -> (
-        match Otoml.find_result toml Fun.id ["mapping"] with
-        | Error _ -> Ok []
-        | Ok (Otoml.TomlTable fields | Otoml.TomlInlineTable fields) ->
-            let rec loop acc = function
-              | [] -> Ok (List.rev acc)
-              | (keeper_id, value) :: rest ->
-                  if is_toml_table value then
-                    let mapping_toml =
-                      Otoml.TomlTable [("mapping", Otoml.TomlTable [(keeper_id, value)])]
-                    in
-                    (match mapping_of_toml mapping_toml keeper_id with
-                    | Ok mapping -> loop (mapping :: acc) rest
-                    | Error msg -> Error msg)
-                  else
-                    Error (Printf.sprintf "mapping.%s must be a table" keeper_id)
+(** A [mapping_file_stamp] identifies one concrete version of the mapping file.
+    It carries inode and a content digest in addition to mtime/size so that
+    replacement edits that happen to preserve size and mtime still invalidate
+    the cache. *)
+type mapping_file_stamp =
+  { mtime : float
+  ; size : int
+  ; inode : int64
+  ; content_digest : string
+  }
+
+(** [file_snapshot] pairs the bytes read from disk with the metadata that was
+    observed at read time. *)
+type file_snapshot =
+  { stamp : mapping_file_stamp
+  ; content : string
+  }
+
+let log_mapping_file_warning path msg =
+  Log.Misc.warn
+    "[KeeperRepoMapping] mapping file %s unreadable — access denied fail-closed (%s)"
+    path msg
+;;
+
+let load_file_content path =
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+(** [read_mapping_file ~base_path] returns the current file snapshot, [None]
+    when the file is absent, or [Error] when it exists but cannot be read.
+    All [Unix.Unix_error] variants are caught so that a stat/read failure is
+    never propagated as an exception to enforcement callers. *)
+let read_mapping_file ~base_path : (file_snapshot option, string) result =
+  Eio_guard.run_in_systhread (fun () ->
+    let path = mappings_toml_path base_path in
+    match Unix.stat path with
+    | exception Unix.Unix_error ((Unix.ENOENT | Unix.ENOTDIR), _, _) -> Ok None
+    | exception Unix.Unix_error (e, _, _) ->
+        let msg = Unix.error_message e in
+        log_mapping_file_warning path msg;
+        Error msg
+    | exception Sys_error msg ->
+        log_mapping_file_warning path msg;
+        Error msg
+    | stat -> (
+        match load_file_content path with
+        | exception Sys_error msg when not (Sys.file_exists path) ->
+            (* The file disappeared between stat and read; treat as absent. *)
+            Ok None
+        | exception Sys_error msg ->
+            log_mapping_file_warning path msg;
+            Error msg
+        | exception End_of_file ->
+            let msg = "unexpected end of mapping file" in
+            log_mapping_file_warning path msg;
+            Error msg
+        | content ->
+            let stamp =
+              { mtime = stat.Unix.st_mtime
+              ; size = stat.Unix.st_size
+              ; inode = Int64.of_int stat.Unix.st_ino
+              ; content_digest = Digest.string content
+              }
             in
-            loop [] fields
-        | Ok (Otoml.TomlString _ | Otoml.TomlInteger _ | Otoml.TomlFloat _
-             | Otoml.TomlBoolean _ | Otoml.TomlOffsetDateTime _
-             | Otoml.TomlLocalDateTime _ | Otoml.TomlLocalDate _
-             | Otoml.TomlLocalTime _ | Otoml.TomlArray _ | Otoml.TomlTableArray _) ->
-            Ok [])
+            Ok (Some { stamp; content })))
+;;
+
+let toml_table_fields t =
+  try Some (Otoml.get_table t) with
+  | Otoml.Type_error _ -> None
+;;
+
+let parse_mapping_content content : (keeper_repo_mapping list, string) result =
+  match Otoml.Parser.from_string_result content with
+  | Error msg -> Error msg
+  | Ok toml -> (
+      match Otoml.find_opt toml Fun.id ["mapping"] with
+      | None -> Ok []
+      | Some mapping -> (
+          match toml_table_fields mapping with
+          | Some fields ->
+              let rec loop acc = function
+                | [] -> Ok (List.rev acc)
+                | (keeper_id, value) :: rest ->
+                    if is_toml_table value then
+                      let mapping_toml =
+                        Otoml.TomlTable [("mapping", Otoml.TomlTable [(keeper_id, value)])]
+                      in
+                      (match mapping_of_toml mapping_toml keeper_id with
+                       | Ok mapping -> loop (mapping :: acc) rest
+                       | Error msg -> Error msg)
+                    else
+                      Error (Printf.sprintf "mapping.%s must be a table" keeper_id)
+              in
+              loop [] fields
+          | None -> Error "mapping field must be a table"))
+
+let load_all ~base_path : (keeper_repo_mapping list, string) result =
+  let* snapshot = read_mapping_file ~base_path in
+  match snapshot with
+  | None -> Ok []
+  | Some { content; _ } -> parse_mapping_content content
+
+(** Cache for [load_all] results keyed by [base_path]. Each entry carries the
+    mapping file stamp so out-of-process TOML edits invalidate the cache before
+    access-control decisions reuse it. Writes through this module remove the
+    entry explicitly. The immutable [Map] + [Atomic] design is fiber-safe
+    without requiring an Eio mutex to be threaded through every caller. *)
+type load_all_cache_entry =
+  { stamp : mapping_file_stamp option
+  ; result : (keeper_repo_mapping list, string) result
+  }
+
+let stamp_equal left right =
+  Float.equal left.mtime right.mtime
+  && Int.equal left.size right.size
+  && Int64.equal left.inode right.inode
+  && String.equal left.content_digest right.content_digest
+;;
+
+let load_all_cache : load_all_cache_entry String_map.t Atomic.t =
+  Atomic.make String_map.empty
+;;
+
+let invalidate_load_all_cache ~base_path =
+  let rec loop () =
+    let current = Atomic.get load_all_cache in
+    let next = String_map.remove base_path current in
+    if Atomic.compare_and_set load_all_cache current next then () else loop ()
+  in
+  loop ()
+;;
+
+let update_load_all_cache ~base_path stamp result =
+  let entry = { stamp; result } in
+  let rec loop () =
+    let current = Atomic.get load_all_cache in
+    let next =
+      bounded_add base_path entry current ~max_entries:max_load_all_cache_entries
+    in
+    if Atomic.compare_and_set load_all_cache current next then ()
+    else loop ()
+  in
+  loop ()
+;;
+
+(** [load_all_cached_attempt ~base_path] returns the parsed mapping list, using
+    a per-[base_path] stamp-keyed cache. The file is read once; it is parsed;
+    then the file is read a second time to confirm the stamp has not changed
+    before the result is cached or returned. This closes the TOCTOU window
+    where a concurrent edit would serve stale access-control data. *)
+let rec load_all_cached_attempt ~remaining_attempts ~base_path
+  : (keeper_repo_mapping list, string) result
+  =
+  match read_mapping_file ~base_path with
+  | Error msg -> Error msg
+  | Ok None ->
+      invalidate_load_all_cache ~base_path;
+      Ok []
+  | Ok Some snapshot -> (
+      match String_map.find_opt base_path (Atomic.get load_all_cache) with
+      | Some { stamp = Some cached_stamp; result }
+        when stamp_equal cached_stamp snapshot.stamp ->
+          result
+      | _ ->
+          let result = parse_mapping_content snapshot.content in
+          (* Only cache the result if the on-disk version is still the one we
+             parsed. A mismatch means the file changed mid-read; we return the
+             result but leave the cache empty so the next call reads fresh. *)
+          (match read_mapping_file ~base_path with
+           | Error msg -> Error msg
+           | Ok (Some post) when stamp_equal post.stamp snapshot.stamp ->
+               update_load_all_cache ~base_path (Some snapshot.stamp) result;
+               result
+           | Ok _ ->
+               invalidate_load_all_cache ~base_path;
+               if remaining_attempts > 0
+               then
+                 load_all_cached_attempt ~remaining_attempts:(remaining_attempts - 1)
+                   ~base_path
+               else Error "mapping file changed while loading"))
+;;
+
+let load_all_cache_changed_file_retries = 1
+
+let load_all_cached ~base_path =
+  load_all_cached_attempt
+    ~remaining_attempts:load_all_cache_changed_file_retries ~base_path
+;;
 
 type mapping_lookup =
   | Mapping_found of keeper_repo_mapping
   | Mapping_missing of string
   | Mapping_load_error of string
 
-let lookup_mapping ~base_path keeper_id =
-  match load_all ~base_path with
+let lookup_mapping ~base_path ~keeper_id =
+  match load_all_cached ~base_path with
   | Error msg -> Mapping_load_error msg
   | Ok mappings -> (
       match
@@ -72,56 +259,115 @@ let lookup_mapping ~base_path keeper_id =
       | Some mapping -> Mapping_found mapping
       | None -> Mapping_missing keeper_id)
 
-let find_mapping ~base_path keeper_id =
-  match lookup_mapping ~base_path keeper_id with
+let find_mapping ~base_path ~keeper_id =
+  match lookup_mapping ~base_path ~keeper_id with
   | Mapping_found mapping -> Ok mapping
   | Mapping_missing keeper_id ->
       Error (Printf.sprintf "No mapping found for keeper: %s" keeper_id)
   | Mapping_load_error msg -> Error msg
 
 let allowed_repositories ~keeper_id ~base_path =
-  let* mapping = find_mapping ~base_path keeper_id in
+  let* mapping = find_mapping ~base_path ~keeper_id in
   Ok mapping.repository_ids
 
-let is_wildcard s = s = "*"
+type repository_scope = Repo_manager_types.repository_scope =
+  | All_repositories
+  | Selected_repositories of repository_id list
 
-(* Filter [repos] down to those whose id appears in [mapping.repository_ids],
-   with ["*"] as a wildcard that bypasses filtering entirely.
-   The Hashtbl materialisation is skipped when a wildcard short-circuits
-   the check, so the wildcard case avoids building the membership set
-   (the [is_wildcard] predicate itself is a fully-saturated function so
-   no closure is allocated per call, unlike [(String.equal "*")] which
-   would partially apply). *)
+let repository_scope_of_mapping (mapping : keeper_repo_mapping) =
+  mapping.repository_scope
+
+let mapping_allows_repository (mapping : keeper_repo_mapping) ~repository_id =
+  match repository_scope_of_mapping mapping with
+  | All_repositories -> true
+  | Selected_repositories repository_ids ->
+      List.exists (String.equal repository_id) repository_ids
+
+(* Filter [repos] down to those whose id appears in the parsed mapping scope.
+   Wildcard scope bypasses filtering, and selected scopes use an immutable set
+   so display/policy paths do not allocate mutable membership tables. *)
 let filter_repos_by_mapping (mapping : keeper_repo_mapping)
     (repos : repository list) : repository list =
-  if List.exists is_wildcard mapping.repository_ids then
-    repos
-  else
+  match repository_scope_of_mapping mapping with
+  | All_repositories -> repos
+  | Selected_repositories repository_ids ->
     let mapping_id_set =
-      let tbl = Hashtbl.create (List.length mapping.repository_ids) in
-      List.iter (fun id -> Hashtbl.replace tbl id ()) mapping.repository_ids;
-      tbl
+      List.fold_left
+        (fun set id -> String_set.add id set)
+        String_set.empty repository_ids
     in
     List.filter
-      (fun (r : repository) -> Hashtbl.mem mapping_id_set r.id)
+      (fun (r : repository) -> String_set.mem r.id mapping_id_set)
       repos
 
-let is_allowed ~keeper_id ~repository_id ~base_path =
-  match lookup_mapping ~base_path keeper_id with
-  | Mapping_missing _ -> false
-  | Mapping_load_error msg ->
-      if not (Hashtbl.mem logged_mapping_errors keeper_id) then begin
-        Hashtbl.add logged_mapping_errors keeper_id ();
+let log_mapping_load_error_if_new ~keeper_id msg =
+  let rec mark () =
+    let current = Atomic.get logged_mapping_errors in
+    if String_map.mem keeper_id current then ()
+    else
+      let next =
+        bounded_add keeper_id () current ~max_entries:max_logged_mapping_error_entries
+      in
+      if Atomic.compare_and_set logged_mapping_errors current next then
         Log.Misc.warn
-          "[KeeperRepoMapping] is_allowed: mapping load error for keeper %s \
+          "[KeeperRepoMapping] mapping load error for keeper %s \
            — access denied fail-closed (error: %s)"
           keeper_id msg
-      end;
+      else mark ()
+  in
+  mark ()
+;;
+
+type policy_decision =
+  | Policy_decision_missing
+  | Policy_decision_not_in_mapping
+  | Policy_decision_load_error
+  | Policy_decision_repository_identity_mismatch
+  | Policy_decision_repository_store_error
+
+let record_policy_decision ~keeper_id ?repository_id decision =
+  let metric, extra_labels =
+    match decision with
+    | Policy_decision_missing ->
+      (Keeper_metrics.KeeperRepoMappingDeniedMissing, [])
+    | Policy_decision_not_in_mapping ->
+      ( Keeper_metrics.KeeperRepoMappingDeniedNotInMapping
+      , match repository_id with
+        | None -> []
+        | Some r -> [("repository_id", r)] )
+    | Policy_decision_load_error ->
+      (Keeper_metrics.KeeperRepoMappingLoadError, [])
+    | Policy_decision_repository_identity_mismatch ->
+      ( Keeper_metrics.KeeperRepoMappingRepositoryIdentityMismatch
+      , match repository_id with
+        | None -> []
+        | Some r -> [("repository_id", r)] )
+    | Policy_decision_repository_store_error ->
+      ( Keeper_metrics.KeeperRepoMappingRepositoryStoreError
+      , match repository_id with
+        | None -> []
+        | Some r -> [("repository_id", r)] )
+  in
+  Otel_metric_store_core.inc_counter
+    ~labels:(("keeper_id", keeper_id) :: extra_labels)
+    Keeper_metrics.(to_string metric)
+    ()
+;;
+
+let is_allowed ~keeper_id ~repository_id ~base_path =
+  match lookup_mapping ~base_path ~keeper_id with
+  | Mapping_missing _ ->
+      record_policy_decision ~keeper_id Policy_decision_missing;
+      false
+  | Mapping_load_error msg ->
+      log_mapping_load_error_if_new ~keeper_id msg;
+      record_policy_decision ~keeper_id Policy_decision_load_error;
       false
   | Mapping_found mapping ->
-      List.exists
-        (fun id -> String.equal id repository_id || String.equal id "*")
-        mapping.repository_ids
+      if mapping_allows_repository mapping ~repository_id then true
+      else (
+        record_policy_decision ~keeper_id ~repository_id Policy_decision_not_in_mapping;
+        false)
 
 let validate_access ~keeper_id ~repository_id ~base_path =
   if is_allowed ~keeper_id ~repository_id ~base_path then Ok ()
@@ -141,32 +387,45 @@ let save_all ~base_path mappings =
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
   let content = Otoml.Printer.to_string toml in
-  try
-    let oc = open_out path in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc content);
-    Ok ()
-  with Sys_error msg -> Error msg
+  match Fs_compat.save_file_atomic path content with
+  | Ok () ->
+      invalidate_load_all_cache ~base_path;
+      Ok ()
+  | Error msg -> Error msg
 
 let save_mapping ~base_path mapping =
-  let* mappings = load_all ~base_path in
-  let filtered =
-    List.filter
-      (fun (m : keeper_repo_mapping) ->
-        not (String.equal m.keeper_id mapping.keeper_id))
-      mappings
+  let mapping =
+    make_keeper_repo_mapping ~keeper_id:mapping.keeper_id
+      ~repository_ids:mapping.repository_ids
   in
-  save_all ~base_path (mapping :: filtered)
+  let path = mappings_toml_path base_path in
+  try
+    Fs_compat.mkdir_p (Filename.dirname path);
+    File_lock_eio.with_lock path (fun () ->
+      let* mappings = load_all ~base_path in
+      let filtered =
+        List.filter
+          (fun (m : keeper_repo_mapping) ->
+            not (String.equal m.keeper_id mapping.keeper_id))
+          mappings
+      in
+      save_all ~base_path (mapping :: filtered))
+  with
+  | File_lock_eio.Flock_timeout { path; attempts; _ } ->
+      Error
+        (Printf.sprintf
+           "timed out acquiring keeper repo mapping lock %s after %d attempts"
+           path attempts)
+  | Sys_error msg -> Error msg
 
 let apply_mapping ~keeper_id ~base_path ~repositories =
-  match lookup_mapping ~base_path keeper_id with
-  | Mapping_missing _ -> []
+  match lookup_mapping ~base_path ~keeper_id with
+  | Mapping_missing _ ->
+      record_policy_decision ~keeper_id Policy_decision_missing;
+      []
   | Mapping_load_error msg ->
-      Log.Misc.warn
-        "[KeeperRepoMapping] apply_mapping: mapping load error for \
-         keeper %s — returning no repositories fail-closed (error: %s)"
-        keeper_id msg;
+      log_mapping_load_error_if_new ~keeper_id msg;
+      record_policy_decision ~keeper_id Policy_decision_load_error;
       []
   | Mapping_found mapping ->
       filter_repos_by_mapping mapping repositories
@@ -499,28 +758,16 @@ let unresolved_repository_segment_resolution ?repo_root ~segment repos =
   | Some mismatch -> Repository_identity_mismatch mismatch
   | None -> Repository segment
 
-let resolve_repository_id_segment ~base_path ?repo_root segment =
-  match Repo_store.load_all ~base_path with
-  | Error msg ->
-      Log.Misc.warn
-        "[KeeperRepoMapping] resolve_repository_id_segment: repo store load \
-         failed for segment %s — access denied fail-closed (error: %s)"
-        segment msg;
-      Repository_store_error msg
-  | Ok repos -> (
-      match
-        List.find_opt
-          (repository_matches_token ~base_path segment)
-          repos
-      with
-      | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
-      | None -> (
-          match Option.bind repo_root remote_origin_url_of_repo_root with
-          | None -> unresolved_repository_segment_resolution ?repo_root ~segment repos
-          | Some remote_url -> (
-              match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
-              | Some repo -> Repository repo.id
-              | None -> (
+let resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment repos =
+  match List.find_opt (repository_matches_token ~base_path segment) repos with
+  | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
+  | None -> (
+      match Option.bind repo_root remote_origin_url_of_repo_root with
+      | None -> unresolved_repository_segment_resolution ?repo_root ~segment repos
+      | Some remote_url -> (
+          match List.find_opt (fun repo -> String.equal repo.url remote_url) repos with
+          | Some repo -> Repository repo.id
+          | None -> (
               match List.find_opt (repository_matches_remote_url ~remote_url) repos with
               | Some repo -> repository_resolution_of_repo ?repo_root ~segment repo
               | None -> (
@@ -531,8 +778,20 @@ let resolve_repository_id_segment ~base_path ?repo_root segment =
                   with
                   | Some mismatch -> Repository_identity_mismatch mismatch
                   | None ->
-                      unresolved_repository_segment_resolution ?repo_root
-                        ~segment repos)))))
+                    unresolved_repository_segment_resolution ?repo_root
+                      ~segment repos))))
+;;
+
+let resolve_repository_id_segment ~base_path ?repo_root segment =
+  match Repo_store.load_all ~base_path with
+  | Error msg ->
+    Log.Misc.warn
+      "[KeeperRepoMapping] resolve_repository_id_segment: repo store load \
+       failed for segment %s — access denied fail-closed (error: %s)"
+      segment msg;
+    Repository_store_error msg
+  | Ok repos ->
+    resolve_repository_id_segment_from_catalog ~base_path ?repo_root segment repos
 
 (** [path_under_repo ~base_path repo path] returns [true] when [path]
     is equal to or strictly under [repo]'s resolved local_path. *)
@@ -548,25 +807,31 @@ let path_under_repo ~base_path repo path =
     declared repository whose URL basename contradicts its declared identity.
     Repository store load failures remain explicit so access callers can deny
     instead of treating an unknown repository catalog as "not a repository". *)
+let repository_resolution_of_path_from_catalog ~base_path ~path repos =
+  match playground_path_of_path ~base_path ~path with
+  | Some Playground_internal | Some Playground_repos_root -> No_repository
+  | Some (Playground_repo { segment; repo_root }) ->
+    resolve_repository_id_segment_from_catalog ~base_path ~repo_root segment repos
+  | None -> (
+    match List.find_opt (fun repo -> path_under_repo ~base_path repo path) repos with
+    | Some repo -> repository_resolution_of_repo ~segment:repo.id repo
+    | None -> No_repository)
+;;
+
 let repository_resolution_of_path ~base_path ~path =
   match playground_path_of_path ~base_path ~path with
   | Some Playground_internal | Some Playground_repos_root -> No_repository
   | Some (Playground_repo { segment; repo_root }) ->
-      resolve_repository_id_segment ~base_path ~repo_root segment
+    resolve_repository_id_segment ~base_path ~repo_root segment
   | None -> (
-  match Repo_store.load_all ~base_path with
-  | Error msg ->
+    match Repo_store.load_all ~base_path with
+    | Error msg ->
       Log.Misc.warn
         "[KeeperRepoMapping] repository_resolution_of_path: repo store load \
          failed for path %s — access denied fail-closed (error: %s)"
         path msg;
       Repository_store_error msg
-  | Ok repos -> (
-      match
-        List.find_opt (fun repo -> path_under_repo ~base_path repo path) repos
-      with
-      | Some repo -> repository_resolution_of_repo ~segment:repo.id repo
-      | None -> No_repository))
+    | Ok repos -> repository_resolution_of_path_from_catalog ~base_path ~path repos)
 
 (** [repository_id_of_path ~base_path ~path] returns the ID of the
     registered repository whose [local_path] contains [path], or [None]

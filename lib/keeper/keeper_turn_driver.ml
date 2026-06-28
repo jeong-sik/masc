@@ -398,4 +398,8 @@ module For_testing = struct
   let accept_no_progress_read_only_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing
     .accept_no_progress_read_only_should_try_next
+
+  let accept_rejected_result_should_try_next =
+    Keeper_turn_driver_try_runtime.For_testing
+    .accept_rejected_result_should_try_next
 end

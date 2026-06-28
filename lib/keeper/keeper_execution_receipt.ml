@@ -169,6 +169,17 @@ let completion_contract_unsatisfied = function
   | Contract_satisfied_execution -> false
 ;;
 
+let passive_only_without_work_scope receipt =
+  receipt.completion_contract_result = Contract_passive_only
+  && Option.is_none receipt.current_task_id
+  && receipt.goal_ids = []
+;;
+
+let terminal_reason_is_success receipt =
+  let code = String.lowercase_ascii (String.trim receipt.terminal_reason_code) in
+  String.equal code "completed" || String.equal code "success"
+;;
+
 let operator_disposition (receipt : t)
   : operator_disposition_kind * operator_disposition_reason
   =
@@ -318,8 +329,14 @@ let operator_disposition (receipt : t)
       | Other _ -> false
     then
       if completion_contract_satisfied receipt.completion_contract_result
+         || (passive_only_without_work_scope receipt && receipt.outcome = `Ok)
       then Disp_pass, Reason_turn_budget_exhausted
       else Disp_alert_exhausted, Reason_turn_budget_exhausted
+    else if passive_only_without_work_scope receipt
+            && receipt.outcome = `Ok
+            && receipt.runtime_outcome = Runtime_completed
+            && terminal_reason_is_success receipt
+    then Disp_pass, Reason_healthy
     else if completion_contract_unsatisfied receipt.completion_contract_result
     then Disp_pause_human, Reason_completion_contract_unsatisfied
     else if

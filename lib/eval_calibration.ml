@@ -181,6 +181,12 @@ let normalize_for_store_collision ?cwd raw =
   raw |> lexical_abs ?cwd |> realpath_existing_prefix |> lexical_normalize_abs
 ;;
 
+let absolute_workspace_base_path ?cwd raw =
+  raw
+  |> Env_config_core.normalize_masc_base_path_input
+  |> normalize_for_store_collision ?cwd
+;;
+
 let same_or_child_path ~parent child =
   String.equal child parent
   || (not (String.equal parent "/")

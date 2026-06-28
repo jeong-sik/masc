@@ -47,6 +47,21 @@ describe('IdeKeeperWorkPanel', () => {
     expect(summary.activeTaskCount).toBe(1)
   })
 
+  it('normalizes legacy no-progress blocker text in keeper work summaries', () => {
+    const summary = keeperWorkSummary(
+      'rondo',
+      [{
+        name: 'rondo',
+        status: 'paused',
+        last_blocker: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
+      } as Keeper],
+      [],
+    )
+
+    expect(summary.runtimeBlocker).toContain('progress-safety latch')
+    expect(summary.runtimeBlocker).not.toContain('manual pause applied')
+  })
+
   it('keeps runtime current_task visible when the task row is absent', () => {
     const summary = keeperWorkSummary('sangsu', [keeperFixture()], [])
 

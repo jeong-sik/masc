@@ -1,4 +1,4 @@
-# RFC-0297: Keeper Liveness SSOT — closed-sum FSM for no-progress / paused / resume
+# RFC: Keeper Liveness SSOT — closed-sum FSM for no-progress / paused / resume
 
 - Status: Draft
 - Audit finding: KLV-1 (P1) — structural root of "keepers keep stalling and never resume"

@@ -31,7 +31,7 @@ val run_first_judges
   -> Fusion_policy.judge_spec list
   -> judge_run list
 
-val first_judge_nodes : judge_run list -> Fusion_types.judge_node list
+val first_judge_nodes : judge_run list -> Fusion_types.judge_outcome list
 
 val successful_syntheses
   :  judge_run list
@@ -46,7 +46,7 @@ val firsts_usage : judge_run list -> Fusion_types.usage
 val all_fail_error_of_runs
   :  fallback:Fusion_types.judge_failure
   -> judge_run list
-  -> Fusion_types.judge_failure
+  -> Fusion_types.judge_failure * Fusion_types.usage
 
 val meta_budget_check
   :  preset:Fusion_policy.preset

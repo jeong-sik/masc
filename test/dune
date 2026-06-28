@@ -1602,7 +1602,7 @@
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
 
-(include stanzas/test_anti_rationalization_empty_liveness.inc)
+(include stanzas/test_anti_rationalization_empty_reject.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
 

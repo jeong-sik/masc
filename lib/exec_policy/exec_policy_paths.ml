@@ -3,7 +3,12 @@
 let normalize_path ?base_dir path =
   let abs =
     if Filename.is_relative path then
-      Filename.concat (Option.value ~default:(Sys.getcwd ()) base_dir) path
+      let base =
+        match base_dir with
+        | Some dir -> dir
+        | None -> Config_dir_resolver.current_working_dir ()
+      in
+      Filename.concat base path
     else
       path
   in
@@ -122,7 +127,8 @@ let validate_path ?keeper_id ?base_path ?workdir path =
       || registered_repo_allowed
   | None ->
       let cfg = Host_config.host () in
+      let cwd = Config_dir_resolver.current_working_dir () in
       is_within_dir ~dir:(resolve_path "/tmp") resolved
-      || is_within_dir ~dir:(resolve_path (Sys.getcwd ())) resolved
+      || is_within_dir ~dir:(resolve_path cwd) resolved
       || is_within_dir ~dir:(resolve_path cfg.sandbox_workspace_root) resolved
       || registered_repo_allowed

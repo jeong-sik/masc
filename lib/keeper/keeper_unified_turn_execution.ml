@@ -40,6 +40,7 @@ type ctx =
   ; committed_mutating_tools_snapshot : unit -> string list
   ; config : Workspace.config
   ; drain_turn_event_bus : ?site:string -> unit -> Keeper_turn_runtime_budget.turn_event_bus_summary
+  ; event_bus : Agent_sdk.Event_bus.t option
   ; event_bus_integrity_error_snapshot : unit -> Agent_sdk.Error.sdk_error option
   ; generation : int
   ; keeper_turn_id : int
@@ -86,6 +87,7 @@ let run (ctx : ctx)
       ; prompt_timeout_estimate_tokens
       ; cleanup
       ; drain_turn_event_bus
+      ; event_bus
       ; event_bus_integrity_error_snapshot
       ; committed_mutating_tools_snapshot
       ; attempt = _attempt
@@ -185,7 +187,7 @@ let run (ctx : ctx)
                  ~trajectory_acc
                  ~is_retry
                  ?shared_context
-                 ?event_bus:(Keeper_event_bus.get ())
+                 ?event_bus
                  ?trace_link:(trace_link ())
                  ()))
     in

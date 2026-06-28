@@ -37,15 +37,20 @@ type event_bus_subscription =
 type t =
   { keeper_name : string
   ; turn_id : int
-  ; event_bus_subscription : event_bus_subscription
+  ; event_bus_subscription : event_bus_subscription Atomic.t
   ; drain_cancel : drain_cancel_state Atomic.t
   ; state : event_bus_state Atomic.t
   ; on_pending_count_change : int -> unit
   }
 
-let create ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
+let create ?event_bus ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
+  let event_bus =
+    match event_bus with
+    | Some _ as bus -> bus
+    | None -> Keeper_event_bus.get ()
+  in
   let event_bus_subscription =
-    match Keeper_event_bus.get () with
+    match event_bus with
     | Some event_bus ->
       Subscribed
         { event_bus
@@ -59,7 +64,7 @@ let create ?(on_pending_count_change = fun _ -> ()) ~keeper_name ~turn_id () =
   in
   { keeper_name
   ; turn_id
-  ; event_bus_subscription
+  ; event_bus_subscription = Atomic.make event_bus_subscription
   ; drain_cancel = Atomic.make Inactive
   ; state =
       Atomic.make
@@ -142,7 +147,7 @@ let emit_fsm_transition ~keeper_name ~turn_id ~pending_count transition =
 
 let drain ?(site = "unspecified") t =
   let events =
-    match t.event_bus_subscription with
+    match Atomic.get t.event_bus_subscription with
     | Subscribed { event_bus_sub; _ } -> Agent_sdk_metrics_bridge.drain event_bus_sub
     | No_event_bus -> []
   in
@@ -207,7 +212,7 @@ let integrity_error t =
 ;;
 
 let start_background_drain ~clock t =
-  match t.event_bus_subscription, Eio_context.get_switch_opt () with
+  match Atomic.get t.event_bus_subscription, Eio_context.get_switch_opt () with
   | Subscribed _, Some sw ->
     Eio.Fiber.fork ~sw (fun () ->
       Eio.Cancel.sub (fun cc ->
@@ -275,10 +280,10 @@ let unsubscribe t =
          t.keeper_name
          msg));
   ignore (drain ~site:"unsubscribe_final" t);
-  match t.event_bus_subscription with
+  (match Atomic.exchange t.event_bus_subscription No_event_bus with
   | Subscribed { event_bus; event_bus_sub } ->
     Agent_sdk_metrics_bridge.unsubscribe event_bus event_bus_sub
-  | No_event_bus -> ()
+  | No_event_bus -> ())
 ;;
 
 module For_testing = struct

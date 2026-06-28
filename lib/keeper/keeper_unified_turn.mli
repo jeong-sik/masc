@@ -199,6 +199,7 @@ val run_keeper_cycle
   -> generation:int
   -> ?channel:Keeper_world_observation.keeper_cycle_channel
   -> ?shared_context:Agent_sdk.Context.t
+  -> ?event_bus:Agent_sdk.Event_bus.t
   -> unit
   -> (Keeper_meta_contract.keeper_meta, Agent_sdk.Error.sdk_error) result
 

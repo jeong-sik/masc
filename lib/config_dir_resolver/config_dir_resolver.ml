@@ -147,13 +147,19 @@ let current_working_dir () =
 
 let base_path_or_cwd () =
   match (Host_config.from_env ()).base_path with
+  | Some path when Filename.is_relative path ->
+    Filename.concat (current_working_dir ()) path
   | Some path -> path
   | None -> current_working_dir ()
 
+(** Prefer [absolute_path_from ~cwd] when the caller has an explicit anchor.
+    [absolute_path] falls back to the process cwd via [current_working_dir]. *)
 let absolute_path path =
   if Filename.is_relative path then Filename.concat (current_working_dir ()) path
   else path
 
+(** Resolve [path] relative to an explicit [cwd]. Absolute paths are returned
+    verbatim; this keeps the caller's anchor as the SSOT. *)
 let absolute_path_from ~cwd path =
   if Filename.is_relative path then Filename.concat cwd path else path
 

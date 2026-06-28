@@ -68,11 +68,38 @@ let env_values key env =
     else None)
 ;;
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some existing -> Unix.putenv key existing
+      | None -> Unix.putenv key "")
+    (fun () ->
+      (match value with
+       | Some next -> Unix.putenv key next
+       | None -> Unix.putenv key "");
+      f ())
+;;
+
 let with_temp_dir prefix f =
   let dir = Filename.temp_file prefix "" in
   Sys.remove dir;
   Unix.mkdir dir 0o755;
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+;;
+
+let with_env name value f =
+  let saved = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match saved with
+      | Some prior -> Unix.putenv name prior
+      | None -> Unix.putenv name "")
+    f
 ;;
 
 (* ---- Happy path: every known sidecar id is accepted verbatim. ---- *)
@@ -205,6 +232,28 @@ let test_resolve_existing_sidecar_dir_falls_back_to_project_root () =
       (Routes.resolve_existing_sidecar_dir ~project_root ~base_path "discord"))
 ;;
 
+let test_runtime_base_path_result_prefers_explicit_base_path () =
+  check
+    result_t
+    "explicit request base path wins"
+    (Ok "/tmp/runtime-root")
+    (Routes.runtime_base_path_result ~base_path:" /tmp/runtime-root " ())
+;;
+
+let test_runtime_base_path_result_fails_without_base_path () =
+  with_env Env_config_core.base_path_env_key None @@ fun () ->
+  with_env Env_config_core.base_path_input_env_key None @@ fun () ->
+  match Routes.runtime_sidecar_dir_result "discord" with
+  | Ok dir -> failf "expected missing base path error, got %s" dir
+  | Error msg ->
+    check bool "mentions request base path" true (contains_substring msg "base_path");
+    check
+      bool
+      "mentions env base path"
+      true
+      (contains_substring msg Env_config_core.base_path_env_key)
+;;
+
 let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
   let message =
     Routes.missing_sidecar_dir_message
@@ -232,6 +281,48 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
     "includes searched project path"
     true
     (contains_substring message "/tmp/project-root/sidecars/discord-bot")
+;;
+
+let test_runtime_base_path_uses_resolver_precedence () =
+  with_temp_dir "sidecar-runtime-base-ssot" (fun dir ->
+    let requested = Filename.concat dir "requested" in
+    let stale = Filename.concat dir "stale/.masc" in
+    with_env "MASC_BASE_PATH" (Some stale) (fun () ->
+      with_env
+        "MASC_BASE_PATH_INPUT"
+        (Some (Filename.concat requested ".masc"))
+        (fun () ->
+           Config_dir_resolver.reset ();
+           Fun.protect
+             ~finally:Config_dir_resolver.reset
+             (fun () ->
+                check
+                  string
+                  "input env wins and .masc collapses"
+                  requested
+                  (Routes.runtime_base_path ())))));
+  check
+    string
+    "explicit base_path still wins"
+    "/tmp/explicit-runtime"
+    (Routes.runtime_base_path ~base_path:" /tmp/explicit-runtime " ())
+;;
+
+let test_runtime_base_path_anchors_relative_env_base () =
+  with_temp_dir "sidecar-runtime-relative-env" (fun dir ->
+    let previous_cwd = Sys.getcwd () in
+    Fun.protect
+      ~finally:(fun () ->
+        Sys.chdir previous_cwd;
+        Config_dir_resolver.reset ())
+      (fun () ->
+         Sys.chdir dir;
+         with_env Env_config_core.base_path_input_env_key None (fun () ->
+           with_env Env_config_core.base_path_env_key (Some "relative-root") (fun () ->
+             Config_dir_resolver.reset ();
+             let expected = Ok (Filename.concat dir "relative-root") in
+             let actual = Routes.runtime_base_path_result () in
+             check result_t "relative env base anchors to cwd" expected actual))))
 ;;
 
 let test_status_file_prefers_existing_project_root_candidate () =
@@ -953,9 +1044,25 @@ let () =
             `Quick
             test_resolve_existing_sidecar_dir_falls_back_to_project_root
         ; test_case
+            "runtime base path prefers explicit request scope"
+            `Quick
+            test_runtime_base_path_result_prefers_explicit_base_path
+        ; test_case
+            "runtime base path fails closed without request or env base"
+            `Quick
+            test_runtime_base_path_result_fails_without_base_path
+        ; test_case
             "missing directory message includes setup hint"
             `Quick
             test_missing_sidecar_dir_message_mentions_sidecar_root_hint
+        ; test_case
+            "runtime base path follows resolver precedence"
+            `Quick
+            test_runtime_base_path_uses_resolver_precedence
+        ; test_case
+            "runtime base path anchors relative env base"
+            `Quick
+            test_runtime_base_path_anchors_relative_env_base
         ; test_case
             "status file falls back to project root candidate"
             `Quick

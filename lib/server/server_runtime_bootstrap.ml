@@ -75,9 +75,7 @@ let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
        let cwd =
          match cwd with
          | Some cwd when String.trim cwd <> "" -> cwd
-         | _ ->
-           (try Sys.getcwd () with
-            | Sys_error _ -> ".")
+         | _ -> Config_dir_resolver.base_path_or_cwd ()
        in
        let argv0 =
          match argv0 with

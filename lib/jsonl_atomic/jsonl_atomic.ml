@@ -24,7 +24,7 @@ let mutex_registry_mu = Stdlib.Mutex.create ()
 let canonicalize_path path =
   let absolute =
     if Filename.is_relative path
-    then Filename.concat (Sys.getcwd ()) path
+    then Filename.concat (Config_dir_resolver.current_working_dir ()) path
     else path
   in
   let parts = String.split_on_char '/' absolute in

@@ -199,7 +199,33 @@ let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
        let summary_after_unsubscribe =
          EB.drain ~site:"test_after_unsubscribe" t
        in
-       check int "captured subscription removed" 0 summary_after_unsubscribe.event_count)
+       check
+         int
+         "captured subscription removed without new events"
+         summary.event_count
+         summary_after_unsubscribe.event_count)
+;;
+
+let test_turn_event_bus_prefers_injected_bus_over_fallback () =
+  Eio_main.run @@ fun _env ->
+  let injected_bus = Agent_sdk.Event_bus.create () in
+  let fallback_bus = Agent_sdk.Event_bus.create () in
+  Keeper_event_bus.set fallback_bus;
+  let t = EB.create ~event_bus:injected_bus ~keeper_name:"a" ~turn_id:1 () in
+  Fun.protect
+    ~finally:(fun () ->
+      EB.unsubscribe t;
+      Keeper_event_bus.set fallback_bus)
+    (fun () ->
+       Agent_sdk.Event_bus.publish fallback_bus (tool_called "fallback");
+       Agent_sdk.Event_bus.publish injected_bus (tool_called "injected");
+       let summary = EB.drain ~site:"test_injected_bus" t in
+       check int "injected bus only" 1 summary.event_count;
+       check
+         int
+         "pending count from injected bus"
+         1
+         (EB.For_testing.get_state t).pending_tool_count)
 ;;
 
 let temp_dir prefix =
@@ -340,6 +366,8 @@ let () =
             test_keeper_event_bus_is_intentionally_process_wide
         ; test_case "turn event bus keeps creation bus" `Quick
             test_turn_event_bus_uses_creation_bus_after_fallback_changes
+        ; test_case "turn event bus prefers injected bus" `Quick
+            test_turn_event_bus_prefers_injected_bus_over_fallback
         ; test_case "keeper msg async submit uses captured event bus" `Quick
             test_keeper_msg_async_submit_uses_captured_event_bus
         ] )

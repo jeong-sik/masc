@@ -21,7 +21,7 @@ import {
   keeperFleetTone,
   keeperModelLabel,
   keeperPhaseLabel,
-  keeperPhaseToken,
+  phaseTokenFromKeeper,
   keeperRuntimeLabel,
 } from './keeper-workspace-shared'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
@@ -356,7 +356,7 @@ function compactionGatePct(keeper: Keeper): number {
 }
 
 function compactRequiresForce(keeper: Keeper): boolean {
-  const phase = keeperPhaseToken(keeper)
+  const phase = phaseTokenFromKeeper(keeper)
   if (phase === 'overflowed' || phase === 'paused' || phase === 'compacting') return false
   if (phase === 'running' || phase === 'failing') return true
   const status = keeper.status.toLowerCase()

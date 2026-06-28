@@ -34,8 +34,8 @@ type event =
       to_phase   : Keeper_state_machine.phase;
     }
       (** Fired from [Keeper_registry.dispatch_event_with_audit] for real
-          phase changes after the registry write commits. Hooks observe the
-          committed transition; they cannot veto. *)
+          phase changes after the registry write commits. Hooks observe an
+          applied transition; they cannot veto. *)
   | Tombstone_reaped
       (** Fired by [Keeper_supervisor.cleanup_dead_tombstone] after the
           registry unregister completes. The keeper is fully gone from

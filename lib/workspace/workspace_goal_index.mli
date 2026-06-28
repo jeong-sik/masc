@@ -68,6 +68,7 @@ val write_goal_task_links :
   Workspace_utils_backend_setup.config -> (string * string list) list -> unit
 
 val write_goal_task_links_result :
+  ?rollback_on_recovery_failure:bool ->
   ?previous_links:(string * string list) list ->
   Workspace_utils_backend_setup.config ->
   (string * string list) list ->

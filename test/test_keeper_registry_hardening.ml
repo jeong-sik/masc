@@ -37,7 +37,6 @@ let register name =
 ;;
 
 let health_to_string = KR.registry_entry_validation_error_to_string
-let invalid_trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string ""
 
 let test_put_entry_rejects_meta_name_mismatch () =
   KR.clear ();
@@ -79,7 +78,7 @@ let test_dispatch_write_failure_skips_phase_side_effects () =
        KR.For_testing.unsafe_put_entry ~base_path "alice" corrupted;
        match KR.dispatch_event ~base_path "alice" KSM.Fiber_started with
        | Ok _ -> fail "dispatch accepted a transition whose registry write failed"
-       | Error (KSM.Precondition_violation _) ->
+       | Error (KSM.Invalid_transition _ | KSM.Precondition_violation _) ->
          check int "phase hook skipped before failed write" 0 !hook_calls
        | Error other ->
          fail

@@ -4,6 +4,8 @@ module Lib = Masc
 
 open Alcotest
 
+let () = ignore Operator_tool.force_link
+
 (** Dashboard Mission read-model regression tests. *)
 
 let test_dir () =

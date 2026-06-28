@@ -338,6 +338,8 @@ describe('monitoring navigation labels', () => {
     expect(hiddenIds).toEqual([
       'transport-health',
       'feature-health',
+      'journey',
+      'cognition',
     ])
   })
 

@@ -395,6 +395,24 @@ let disp_pair_to_string (d, r) =
     (R.operator_disposition_reason_to_string r)
 ;;
 
+let intentional_passive_only_no_work_policy_change (receipt : R.t) got =
+  if
+    receipt.completion_contract_result = R.Contract_passive_only
+    && Option.is_none receipt.current_task_id
+    && receipt.goal_ids = []
+  then (
+    let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
+    match terminal_reason, receipt.outcome, got with
+    | code, `Ok, (R.Disp_pass, R.Reason_turn_budget_exhausted)
+      when String.starts_with ~prefix:"turn_budget_exhausted" code ->
+      true
+    | ("completed" | "success"), `Ok, (R.Disp_pass, R.Reason_healthy)
+      when receipt.runtime_outcome = R.Runtime_completed ->
+      true
+    | _ -> false)
+  else false
+;;
+
 (* To keep the product bounded we vary the most behaviour-determining axes
    fully and pin the others to representative values per code, plus a
    focused sub-matrix over the provider/route axes. *)
@@ -434,6 +452,10 @@ let () =
                                        R.operator_disposition receipt
                                      in
                                      if want <> got
+                                        && not
+                                             (intentional_passive_only_no_work_policy_change
+                                                receipt
+                                                got)
                                      then (
                                        incr mismatches;
                                        if !mismatches <= 20
@@ -501,10 +523,21 @@ let () =
     }
   in
   let got = R.operator_disposition passive_receipt in
+  let want = R.Disp_pass, R.Reason_turn_budget_exhausted in
+  check
+    (Printf.sprintf
+       "no-work passive turn budget exhaustion want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  let active_passive_receipt =
+    { passive_receipt with current_task_id = Some "TASK-1" }
+  in
+  let got = R.operator_disposition active_passive_receipt in
   let want = R.Disp_alert_exhausted, R.Reason_turn_budget_exhausted in
   check
     (Printf.sprintf
-       "passive turn budget exhaustion want=%s got=%s"
+       "active passive turn budget exhaustion want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
@@ -533,10 +566,19 @@ let () =
     }
   in
   let got = R.operator_disposition receipt in
+  let want = R.Disp_pass, R.Reason_healthy in
+  check
+    (Printf.sprintf
+       "completed no-work passive-only receipt want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  let active_receipt = { receipt with current_task_id = Some "TASK-1" } in
+  let got = R.operator_disposition active_receipt in
   let want = R.Disp_pause_human, R.Reason_completion_contract_unsatisfied in
   check
     (Printf.sprintf
-       "completed passive-only receipt want=%s got=%s"
+       "completed active passive-only receipt want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)

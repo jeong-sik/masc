@@ -135,7 +135,7 @@ const COMPLETION_CONTRACT_ATTENTION_REASON_LABELS: Record<AttentionCompletionCon
   violated: '완료 계약 위반',
   claim_only_after_owned_task: '작업 소유 없는 claim',
   needs_execution_progress: '실행 진행 증거 부족',
-  passive_only: '수동 응답만 있음',
+  passive_only: '진행 작업 없는 수동 응답',
   unknown: '완료 계약 결과 불명',
   not_dispatched: '도구 미실행',
   surface_mismatch: '실행 표면 불일치',

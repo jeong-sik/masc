@@ -16,7 +16,7 @@ let recovery_stimulus ~now ~keeper_name =
 let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   let detail =
     Printf.sprintf
-      "no_progress loop detected: streak=%d threshold=%d; keeper paused until operator resume clears the no-progress latch"
+      "no_progress loop detected: streak=%d threshold=%d; auto-paused after repeated no-evidence turns; operator resume clears the no-progress latch"
       streak
       threshold
   in
@@ -74,7 +74,7 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   with
   | Ok paused_meta ->
     Log.Keeper.warn
-      "%s: no_progress loop escalated to blocker and manual pause \
+      "%s: no_progress loop escalated to blocker and operator-resume pause \
        (streak=%d threshold=%d)"
       meta.name
       streak

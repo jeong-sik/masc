@@ -108,7 +108,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     }))
 
     const text = container.textContent ?? ''
-    expect(text).toContain('수동 응답만 있음')
+    expect(text).toContain('진행 작업 없는 수동 응답')
     expect(text).not.toContain('passive_only')
   })
 

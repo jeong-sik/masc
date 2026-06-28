@@ -128,7 +128,7 @@ function compareCompactionSnapshots(a: CompactionSnapshot, b: CompactionSnapshot
 export function hydrateCompactionSnapshots(
   keeperName: string,
   snapshots: readonly BackendCompactionSnapshot[],
-): void {
+): CompactionSnapshot[] {
   const existing = compactionSnapshots.value[keeperName] ?? []
   const optimistic = existing.filter(snapshot => snapshot.source !== 'backend')
   const byId = new Map<string, CompactionSnapshot>()
@@ -141,6 +141,7 @@ export function hydrateCompactionSnapshots(
     ...compactionSnapshots.value,
     [keeperName]: next,
   }
+  return next
 }
 
 export function recordManualCompaction(

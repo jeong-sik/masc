@@ -327,6 +327,59 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('trace-cmp#12')
   })
 
+  it('renders live durable compaction snapshots even when token counts are missing', async () => {
+    vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
+      schema: 'keeper.compaction_snapshots.v1',
+      keeper: 'masc-improver',
+      source: 'runtime_manifest|keeper_meta',
+      producer: 'keeper_runtime_manifest|keeper_meta_store',
+      limit: 25,
+      count: 1,
+      read_error_count: 1,
+      read_errors: [
+        { scope: 'runtime_manifest_row:trace-cmp.jsonl:1', error: 'unknown event: "old_event"' },
+      ],
+      scan_truncated: true,
+      items: [
+        {
+          id: 'manifest:trace-live:context_compacted:2026-06-03T11:01:24Z',
+          keeper: 'masc-improver',
+          ts_iso: '2026-06-03T11:01:24Z',
+          ts_unix: 1_780_464_084,
+          trace_id: 'trace-live',
+          keeper_turn_id: null,
+          source: 'runtime_manifest',
+          trigger: 'pre_dispatch_hygiene',
+          runtime_id: null,
+          display_runtime: 'pre_dispatch_hygiene',
+          before_tokens: null,
+          after_tokens: null,
+          saved_tokens: null,
+          compaction_id: null,
+          compaction_source: 'pre_dispatch_hygiene',
+          status: 'compacted',
+          links: { receipt_path: null, checkpoint_path: null, tool_call_log_path: null },
+        },
+      ],
+    })
+
+    const { container, findByTestId } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
+      el => el.textContent?.includes('before/after'),
+    ) as HTMLElement | undefined
+    expect(btn).toBeTruthy()
+    fireEvent.click(btn as HTMLElement)
+
+    const diagnostics = await findByTestId('compaction-scan-diagnostics')
+    expect(diagnostics.textContent).toContain('manifest row 1개')
+    expect(diagnostics.textContent).toContain('limit')
+    expect(container.textContent).toContain('pre_dispatch_hygiene')
+    expect(container.textContent).toContain('runtime_manifest · compacted')
+    expect(container.textContent).toContain('trace-live')
+    expect(container.textContent).toContain('before/after token count가 없습니다')
+    expect(container.textContent).not.toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
+  })
+
   it('surfaces compaction snapshot scan diagnostics when successful payload has no items', async () => {
     vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
       schema: 'keeper.compaction_snapshots.v1',

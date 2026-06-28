@@ -11,6 +11,7 @@
 module KMP = Masc.Keeper_memory_policy
 module KCC = Masc.Keeper_context_core
 module KRT = Masc.Keeper_agent_run_response_text
+module Receipt = Masc.Keeper_execution_receipt
 
 let contains_substring text needle =
   let text_len = String.length text in
@@ -178,6 +179,7 @@ let test_finalizer_uses_structured_state_source () =
       ~keeper_name:"test"
       ~goal:"Fix structured state"
       ~actual_keeper_tool_names:[ "masc_tasks" ]
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text:raw
       ()
@@ -232,6 +234,7 @@ let test_finalizer_prefers_reported_state_snapshot () =
       ~keeper_name:"test"
       ~goal:"Fallback goal"
       ~actual_keeper_tool_names:[ "keeper_report_state" ]
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text:"Visible reply"
       ()
@@ -431,6 +434,7 @@ let test_budget_finalizer_drops_synthetic_response_text () =
       ~keeper_name:"test"
       ~goal:"Fix task"
       ~actual_keeper_tool_names:[]
+      ~completion_contract_result:Receipt.Contract_satisfied_completion
       ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 })
       ~raw_response_text:
         "Continuation checkpoint saved; keeper remains scheduled"
@@ -467,6 +471,7 @@ let test_synthetic_finalizer_drops_raw_response_text () =
       ~keeper_name:"test"
       ~goal:"Monitor keeper work"
       ~actual_keeper_tool_names:["keeper_tasks_list"]
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
       ~stop_reason:Runtime_agent.Completed
       ~raw_response_text
       ()
@@ -483,6 +488,38 @@ let test_synthetic_finalizer_drops_raw_response_text () =
     "raw repeated text not persisted as response"
     false
     (contains_substring finalized.response_text "What should I do next?")
+
+let test_contract_attention_finalizer_drops_raw_response_text () =
+  let raw_response_text =
+    "Good. I will read the code, edit it, and commit it now.\n\
+     \n\
+     Good. I will read the code, edit it, and commit it now."
+  in
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"albini"
+      ~goal:"PM flow"
+      ~actual_keeper_tool_names:["keeper_context_status"]
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text
+      ()
+  in
+  Alcotest.(check string)
+    "contract attention suppresses visible response"
+    ""
+    finalized.response_text;
+  Alcotest.(check string)
+    "synthetic state source"
+    "synthesized"
+    (KMP.state_snapshot_source_to_string finalized.state_snapshot_source);
+  Alcotest.(check bool)
+    "raw repeated text not persisted as decision"
+    false
+    (List.exists
+       (fun text -> contains_substring text "edit it, and commit")
+       finalized.state_snapshot.decisions)
 
 (* ── Test runner ─────────────────────────────────────────────────── *)
 
@@ -541,5 +578,9 @@ let () =
             "synthetic finalizer drops raw response text"
             `Quick
             test_synthetic_finalizer_drops_raw_response_text;
+          Alcotest.test_case
+            "contract attention finalizer drops raw response text"
+            `Quick
+            test_contract_attention_finalizer_drops_raw_response_text;
         ] );
     ]

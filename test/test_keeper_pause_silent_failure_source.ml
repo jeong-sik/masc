@@ -193,6 +193,53 @@ let test_no_progress_clear_failure_observable () =
   check bool "directive no-progress clear failure is observable" true
     (count_occurrences ~needle:"no_progress_resume_clear" src >= 2)
 
+let test_klv2_directive_resume_no_progress_clear_best_effort () =
+  (* KLV-2 / RFC-0152: on operator resume, dropping the no-progress recovery
+     stimulus is a cosmetic cleanup. A transient disk failure there must NOT
+     gate the authoritative unpause. Previously the [Error] arm logged at
+     [error] level and short-circuited the whole [set_keeper_paused_state]
+     body, so the keeper never reached [persist_directive_meta_update] and
+     stayed paused forever (no_progress pause is [Manual_resume_required] — no
+     other recovery path exists). After the fix the clear result is bound into
+     [directive_source_meta] best-effort and execution always falls through to
+     the authoritative persist, which stays fail-closed.
+
+     Structural guard: the existing rationale for source-pattern over
+     integration applies (injecting a clear failure needs the full server +
+     event-queue harness). Non-vacuous — reverting the fix restores the
+     [..._result] binding name and the [error]-level short-circuit log, so both
+     the [let directive_source_meta =] and ["proceeding with unpause"] markers
+     disappear and these checks turn red. *)
+  let src = load_source "lib/keeper/keeper_keepalive.ml" in
+  check bool "resume no-progress clear is bound best-effort (not a gate)" true
+    (count_occurrences ~needle:"let directive_source_meta =" src >= 1);
+  check bool "resume clear failure proceeds with unpause (no short-circuit)"
+    true
+    (count_occurrences ~needle:"proceeding with unpause" src >= 1);
+  check int "fail-closed short-circuit error log on clear removed" 0
+    (count_occurrences
+       ~needle:"directive resume: no_progress clear failed for"
+       src);
+  check bool "authoritative unpause persist is still reached" true
+    (count_occurrences
+       ~needle:"persist_directive_meta_update entry ~updated_meta"
+       src
+     >= 1);
+  (* The cosmetic clear site is handled strictly before the authoritative
+     persist site, proving the two carry distinct failure policies. *)
+  (match
+     ( first_index ~needle:"no_progress_resume_clear" src,
+       first_index ~needle:"pause_resume_persist" src )
+   with
+   | Some clear_pos, Some persist_pos ->
+       check bool "best-effort clear site precedes fail-closed persist site"
+         true (clear_pos < persist_pos)
+   | _ -> Alcotest.failf "missing KLV-2 site markers in keeper_keepalive.ml");
+  (* Fail-closed preserved: the authoritative persist still rolls the registry
+     failure reason back on [Error] rather than swallowing it. *)
+  check bool "authoritative persist stays fail-closed (rolls back reason)" true
+    (count_occurrences ~needle:"previous_failure_reason" src >= 1)
+
 let test_counter_inc_calls () =
   let src = target_source () in
   (* The metric must actually be incremented at least 6 times: 2 in
@@ -332,6 +379,8 @@ let () =
             test_write_error_branch_observable
         ; test_case "no-progress clear failure observable" `Quick
             test_no_progress_clear_failure_observable
+        ; test_case "KLV-2 directive resume no-progress clear best-effort"
+            `Quick test_klv2_directive_resume_no_progress_clear_best_effort
         ; test_case "counter inc calls present" `Quick
             test_counter_inc_calls
         ; test_case "resume paths clear no-progress latch" `Quick

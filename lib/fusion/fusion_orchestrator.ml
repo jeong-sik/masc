@@ -85,11 +85,8 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                     }
                 ] )
           in
-          let env = Masc_eio_env.get () in
-          let now_opt () = Some (Eio.Time.now env.clock) in
           let clock =
-            Fusion_orchestrator_judge_wave.make_clock
-              ~now_opt
+            Fusion_orchestrator_judge_wave.make_runtime_clock
               ~missing_clock_failure:
                 (Fusion_types.Internal_error
                    "fusion adaptive timeout requires a wall clock; initialise Masc_eio_env with ~clock")

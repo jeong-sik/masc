@@ -16,6 +16,13 @@ val make_clock
   -> missing_clock_failure:Fusion_types.judge_failure
   -> clock
 
+val make_runtime_clock
+  :  missing_clock_failure:Fusion_types.judge_failure
+  -> clock
+(** Build a clock from the current domain-local {!Masc_eio_env}. Missing
+    runtime env is represented as [None] so callers can return the configured
+    [missing_clock_failure] instead of raising from {!Masc_eio_env.get}. *)
+
 val elapsed_since_t0 : clock -> float
 
 val run_first_judges

@@ -18,6 +18,15 @@ let make_clock ~now_opt ~missing_clock_failure =
   { now_opt; t0; missing_clock_failure }
 ;;
 
+let make_runtime_clock ~missing_clock_failure =
+  let now_opt () =
+    match Masc_eio_env.get_opt () with
+    | Some { Masc_eio_env.clock; _ } -> Some (Eio.Time.now clock)
+    | None -> None
+  in
+  make_clock ~now_opt ~missing_clock_failure
+;;
+
 let elapsed_since_t0 clock =
   match clock.now_opt (), clock.t0 with
   | Some now, Some t0 -> now -. t0

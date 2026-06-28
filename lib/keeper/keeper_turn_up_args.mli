@@ -74,7 +74,10 @@ val parse_tool_access_input :
 (** Top-level parser: project the [keeper_up] tool args JSON to a
     [parsed_args] record, or return a [tool_result] error envelope. *)
 val parse :
-  _ context -> Yojson.Safe.t -> (parsed_args, tool_result) result
+  ?allow_sandbox_fields:bool ->
+  _ context ->
+  Yojson.Safe.t ->
+  (parsed_args, tool_result) result
 
 (** Resolve mention targets with dedupe + blank filter. [None] falls through to
     [fallback_targets] → [[name]]; [Some []] is an explicit clear. *)

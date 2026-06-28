@@ -130,7 +130,8 @@ let present_json_keys (keys : string list) (json : Yojson.Safe.t) : string list 
       |> List.filter (fun key -> List.mem_assoc key fields)
   | _ -> []
 
-let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
+let reject_removed_keeper_input_keys ?(allow_sandbox_fields = false) ~tool_name
+    (args : Yojson.Safe.t) =
   let non_public = present_json_keys non_public_keeper_input_key_names args in
   (match non_public with
    | _ :: _ as fields ->
@@ -148,6 +149,8 @@ let reject_removed_keeper_input_keys ~tool_name (args : Yojson.Safe.t) =
          tool_name
          (String.concat ", " present))
   else
+    if allow_sandbox_fields then Ok ()
+    else
       let sandbox_fields =
         present_json_keys removed_keeper_sandbox_input_key_names args
       in

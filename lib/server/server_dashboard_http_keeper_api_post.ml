@@ -383,6 +383,240 @@ let refresh_keeper_execution_surfaces =
 
 let invalidate_keeper_execution_surfaces =
   Server_dashboard_http_keeper_api_lifecycle_post.invalidate_keeper_execution_surfaces
+
+let dashboard_config_string_fields =
+  [
+    "runtime_id";
+    "goal";
+    "instructions";
+    "compaction_profile";
+    "sandbox_profile";
+    "network_mode";
+  ]
+
+let dashboard_config_bool_fields =
+  [
+    "autoboot_enabled";
+    "proactive_enabled";
+    "auto_handoff";
+  ]
+
+let dashboard_config_int_fields =
+  [
+    "proactive_idle_sec";
+    "proactive_cooldown_sec";
+    "compaction_message_gate";
+    "compaction_token_gate";
+    "continuity_compaction_cooldown_sec";
+    "handoff_cooldown_sec";
+  ]
+
+let dashboard_config_float_fields =
+  [
+    "compaction_ratio_gate";
+    "handoff_threshold";
+  ]
+
+let dashboard_config_string_list_fields =
+  [
+    "active_goal_ids";
+    "mention_targets";
+    "allowed_paths";
+    "tool_access";
+    "tool_denylist";
+  ]
+
+let dashboard_config_patch_allowed_fields =
+  [ "name"; "max_context_override" ]
+  @
+  dashboard_config_string_fields
+  @ dashboard_config_bool_fields
+  @ dashboard_config_int_fields
+  @ dashboard_config_float_fields
+  @ dashboard_config_string_list_fields
+
+let dedupe_keep_order_strings values =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | value :: rest ->
+        if List.mem value seen then loop seen acc rest
+        else loop (value :: seen) (value :: acc) rest
+  in
+  loop [] [] values
+
+let duplicate_assoc_keys fields =
+  let rec loop seen dup = function
+    | [] -> dedupe_keep_order_strings (List.rev dup)
+    | (key, _) :: rest ->
+        if List.mem key seen then loop seen (key :: dup) rest
+        else loop (key :: seen) dup rest
+  in
+  loop [] [] fields
+
+let dashboard_field_type_error key expected value =
+  Error
+    (Printf.sprintf "%s must be %s (received %s)" key expected
+       (Json_util.kind_name value))
+
+let validate_dashboard_string_list_field key = function
+  | `List items ->
+      let rec loop index = function
+        | [] -> Ok ()
+        | `String _ :: rest -> loop (index + 1) rest
+        | bad :: _ ->
+            Error
+              (Printf.sprintf "%s[%d] must be a string (received %s)" key index
+                 (Json_util.kind_name bad))
+      in
+      loop 0 items
+  | other -> dashboard_field_type_error key "an array of strings" other
+
+let validate_dashboard_normalized_int key normalize value =
+  let normalized = normalize value in
+  if normalized = value then Ok ()
+  else
+    Error
+      (Printf.sprintf "%s is out of range for dashboard config: %d" key value)
+
+let validate_dashboard_normalized_float key normalize value =
+  let normalized = normalize value in
+  if normalized = value then Ok ()
+  else
+    Error
+      (Printf.sprintf "%s is out of range for dashboard config: %g" key value)
+
+let validate_dashboard_nonnegative_int key value =
+  if value >= 0 then Ok ()
+  else
+    Error
+      (Printf.sprintf "%s must be non-negative (received %d)" key value)
+
+let validate_dashboard_max_context_override = function
+  | `Null -> Ok ()
+  | `Int value ->
+      let min_context = Keeper_config.min_keeper_context_tokens in
+      let max_context = Keeper_config.max_keeper_context_tokens in
+      if value >= min_context && value <= max_context then Ok ()
+      else
+        Error
+          (Printf.sprintf
+             "max_context_override must be within %d..%d tokens (received %d)"
+             min_context max_context value)
+  | other -> dashboard_field_type_error "max_context_override" "an integer or null" other
+
+let validate_dashboard_config_field key value =
+  if key = "name" then
+    match value with
+    | `String _ -> Ok ()
+    | other -> dashboard_field_type_error key "a string" other
+  else if key = "max_context_override" then
+    validate_dashboard_max_context_override value
+  else if List.mem key dashboard_config_string_fields then
+    match value with
+    | `String _ -> Ok ()
+    | other -> dashboard_field_type_error key "a string" other
+  else if List.mem key dashboard_config_bool_fields then
+    match value with
+    | `Bool _ -> Ok ()
+    | other -> dashboard_field_type_error key "a boolean" other
+  else if List.mem key dashboard_config_int_fields then
+    match value with
+    | `Int value ->
+        (match key with
+         | "proactive_idle_sec" ->
+             validate_dashboard_normalized_int key
+               Keeper_config.normalize_proactive_idle_sec value
+         | "proactive_cooldown_sec" ->
+             validate_dashboard_normalized_int key
+               Keeper_config.normalize_proactive_cooldown_sec value
+         | "compaction_message_gate" ->
+             validate_dashboard_normalized_int key
+               Keeper_config.normalize_compaction_message_gate value
+         | "compaction_token_gate" ->
+             validate_dashboard_normalized_int key
+               Keeper_config.normalize_compaction_token_gate value
+         | "continuity_compaction_cooldown_sec" ->
+             validate_dashboard_normalized_int key
+               Keeper_config.normalize_continuity_compaction_cooldown_sec value
+         | "handoff_cooldown_sec" ->
+             validate_dashboard_nonnegative_int key value
+         | _ -> Ok ())
+    | other -> dashboard_field_type_error key "an integer" other
+  else if List.mem key dashboard_config_float_fields then
+    match value with
+    | `Int value ->
+        let f = float_of_int value in
+        if key = "handoff_threshold" then
+          if f >= 0.0 && f <= 1.0 then Ok ()
+          else Error "handoff_threshold must be within 0.0..1.0"
+        else
+          validate_dashboard_normalized_float key
+            Keeper_config.normalize_compaction_ratio_gate f
+    | `Float value ->
+        if key = "handoff_threshold" then
+          if value >= 0.0 && value <= 1.0 then Ok ()
+          else Error "handoff_threshold must be within 0.0..1.0"
+        else
+          validate_dashboard_normalized_float key
+            Keeper_config.normalize_compaction_ratio_gate value
+    | other -> dashboard_field_type_error key "a number" other
+  else if List.mem key dashboard_config_string_list_fields then
+    validate_dashboard_string_list_field key value
+  else Ok ()
+
+let validate_dashboard_tool_access_update ~meta fields =
+  match List.assoc_opt "tool_access" fields with
+  | None -> Ok ()
+  | Some access_json ->
+      (match
+         Keeper_meta_contract.tool_access_of_meta_json
+           (`Assoc [ ("tool_access", access_json) ])
+       with
+       | Error msg -> Error msg
+       | Ok requested ->
+           let lookup = Keeper_tool_policy.tool_access_lookup_of_meta meta in
+           (match
+              unknown_added_tool_names
+                ~candidate_names:lookup.Keeper_tool_policy.candidate_names
+                ~existing:meta.tool_access
+                ~requested
+            with
+            | [] -> Ok ()
+            | unknown ->
+                Error
+                  (Printf.sprintf "unknown tool name(s) in tool_access: %s"
+                     (String.concat ", " unknown))))
+
+let validate_dashboard_config_patch ~meta fields =
+  match duplicate_assoc_keys fields with
+  | _ :: _ as duplicates ->
+      Error
+        (Printf.sprintf "duplicate dashboard config field(s): %s"
+           (String.concat ", " duplicates))
+  | [] ->
+      let unknown =
+        fields
+        |> List.filter_map (fun (key, _) ->
+             if List.mem key dashboard_config_patch_allowed_fields then None
+             else Some key)
+        |> dedupe_keep_order_strings
+      in
+      if unknown <> [] then
+        Error
+          (Printf.sprintf "unsupported dashboard config field(s): %s"
+             (String.concat ", " unknown))
+      else
+        let rec validate_types = function
+          | [] -> Ok ()
+          | (key, value) :: rest ->
+              (match validate_dashboard_config_field key value with
+               | Error msg -> Error msg
+               | Ok () -> validate_types rest)
+        in
+        (match validate_types fields with
+         | Error msg -> Error msg
+         | Ok () -> validate_dashboard_tool_access_update ~meta fields)
+
 let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_config in
@@ -420,44 +654,56 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
                    (Printf.sprintf "keeper name mismatch: route=%S body=%S" name
                       (Option.value ~default:"" body_name))
                else
-                 let args_with_name =
-                   `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
-                 in
-                 let keeper_ctx : _ Keeper_tool_surface.context =
-                   {
-                     config;
-                     agent_name;
-                     sw;
-                     clock;
-                     proc_mgr = state.Mcp_server.proc_mgr;
-                     net = state.Mcp_server.net;
-                   }
-                 in
-                 (match Keeper_turn_up_args.parse keeper_ctx args_with_name with
-                 | Error result ->
-                     respond_error reqd (Keeper_types_profile.tool_result_body result)
-                 | Ok parsed ->
-                     (* Dashboard edits are user-initiated and win for the
-                        fields they touch; update_keeper now persists via a
-                        CAS merge ([heartbeat_fields_from_disk]) so a
-                        concurrent keeper turn's cumulative usage counters are
-                        not rewound by this snapshot-derived write.
-                        [preserve_prompt_defaults] keeps existing prompt fields
-                        when the request omits them. *)
-                     let result =
-                       Keeper_turn_up_update.update_keeper
-                         ~preserve_prompt_defaults:true keeper_ctx parsed meta0
-                     in
-                     if not (Keeper_types_profile.tool_result_success result) then
-                       respond_error reqd (Keeper_types_profile.tool_result_body result)
-                     else (
-                       Dashboard_cache.invalidate
-                         (keeper_config_cache_key config name);
-                       let (_st, json) =
-                         Dashboard_http_keeper.keeper_config_json config name
-                       in
-                       Http.Response.json_value ~compress:true ~request:req json reqd)
-                    )
+                 (match validate_dashboard_config_patch ~meta:meta0 fields with
+                  | Error msg -> respond_error reqd msg
+                  | Ok () ->
+                      let args_with_name =
+                        `Assoc (("name", `String name) :: List.remove_assoc "name" fields)
+                      in
+                      let keeper_ctx : _ Keeper_tool_surface.context =
+                        {
+                          config;
+                          agent_name;
+                          sw;
+                          clock;
+                          proc_mgr = state.Mcp_server.proc_mgr;
+                          net = state.Mcp_server.net;
+                        }
+                      in
+                      (match
+                         Keeper_turn_up_args.parse
+                           ~allow_sandbox_fields:true keeper_ctx args_with_name
+                       with
+                       | Error result ->
+                           respond_error reqd
+                             (Keeper_types_profile.tool_result_body result)
+                       | Ok parsed ->
+                           (* Dashboard edits are user-initiated and win for the
+                              fields they touch; update_keeper now persists via
+                              a CAS merge ([heartbeat_fields_from_disk]) so a
+                              concurrent keeper turn's cumulative usage counters
+                              are not rewound by this snapshot-derived write.
+                              [preserve_prompt_defaults] keeps existing prompt
+                              fields when the request omits them. *)
+                           let result =
+                             Keeper_turn_up_update.update_keeper
+                               ~preserve_prompt_defaults:true keeper_ctx parsed
+                               meta0
+                           in
+                           if not
+                                (Keeper_types_profile.tool_result_success result)
+                           then
+                             respond_error reqd
+                               (Keeper_types_profile.tool_result_body result)
+                           else (
+                             Dashboard_cache.invalidate
+                               (keeper_config_cache_key config name);
+                             let (_st, json) =
+                               Dashboard_http_keeper.keeper_config_json config
+                                 name
+                             in
+                             Http.Response.json_value ~compress:true
+                               ~request:req json reqd)))
            | None ->
                respond_error reqd "request body must be a JSON object"
          with Yojson.Json_error e ->

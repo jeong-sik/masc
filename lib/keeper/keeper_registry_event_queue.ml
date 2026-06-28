@@ -105,7 +105,7 @@ let ack_consumed ~base_path name stimuli =
 ;;
 
 let drop_by_post_id ~base_path name ~post_id =
-  let remove_live entry =
+  let remove_live (entry : Keeper_registry.registry_entry) =
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
       let removed, next = Keeper_event_queue.remove_by_post_id post_id cur in

@@ -63,20 +63,27 @@ let arg_get_string ctx key default =
 let arg_get_string_list ctx key =
   Safe_ops.json_string_list key ctx.arguments
 
+let expand_start_path_home ~path_syntax ~suffix =
+  match Config_dir_resolver.initial_env_home with
+  | Some home ->
+    Ok (if String.equal suffix "" then home else Filename.concat home suffix)
+  | None ->
+    Error (Printf.sprintf "HOME is required to expand '%s' in masc_start path" path_syntax)
+;;
+
 let expand_start_path ~config path =
   if String.length path >= 2 && Char.equal path.[0] '~' && Char.equal path.[1] '/'
-  then (
-    match Sys.getenv_opt "HOME" with
-    | Some home when not (String.equal (String.trim home) "") ->
-      Ok (Filename.concat home (String.sub path 2 (String.length path - 2)))
-    | _ -> Error "HOME is required to expand '~/' in masc_start path")
+  then
+    expand_start_path_home
+      ~path_syntax:"~/"
+      ~suffix:(String.sub path 2 (String.length path - 2))
   else if String.length path = 1 && Char.equal path.[0] '~'
-  then (
-    match Sys.getenv_opt "HOME" with
-    | Some home when not (String.equal (String.trim home) "") -> Ok home
-    | _ -> Error "HOME is required to expand '~' in masc_start path")
+  then expand_start_path_home ~path_syntax:"~" ~suffix:""
   else if Filename.is_relative path
   then (
+    (* Initialized sessions keep the active workspace as the relative-path
+       anchor. Only bootstrap calls without a workspace fall back to the
+       resolver/cwd bootstrap policy. *)
     let anchor =
       if Workspace.is_initialized config
       then config.base_path

@@ -9,4 +9,7 @@
 (test
  (name test_mcp_tool_runtime_workspace_path)
  (modules test_mcp_tool_runtime_workspace_path)
+ (action
+  (setenv HOME ""
+   (run %{test})))
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))

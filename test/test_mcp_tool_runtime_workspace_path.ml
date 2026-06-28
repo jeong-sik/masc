@@ -17,7 +17,7 @@ let restore_env name = function
   | None -> Unix.putenv name ""
 ;;
 
-let test_masc_start_tilde_rejects_empty_home () =
+let test_masc_start_tilde_rejects_empty_initial_home () =
   Eio_main.run
   @@ fun env ->
   Eio.Switch.run
@@ -31,7 +31,6 @@ let test_masc_start_tilde_rejects_empty_home () =
       restore_env "HOME" saved_home;
       restore_env "MASC_BASE_PATH" saved_base_path)
     (fun () ->
-      Unix.putenv "HOME" "";
       Unix.putenv "MASC_BASE_PATH" base_path;
       let fixture =
         Cases.make_fixture
@@ -64,9 +63,9 @@ let () =
     "mcp_tool_runtime_workspace_path"
     [ ( "masc_start"
       , [ Alcotest.test_case
-            "rejects tilde expansion when HOME is empty"
+            "rejects tilde expansion when initial HOME is empty"
             `Quick
-            test_masc_start_tilde_rejects_empty_home
+            test_masc_start_tilde_rejects_empty_initial_home
         ] )
     ]
 ;;

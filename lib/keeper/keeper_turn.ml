@@ -341,12 +341,12 @@ module For_testing = struct
   let surface_context_to_instructions = surface_context_to_instructions
   let clear_direct_success_no_progress_pause =
     clear_direct_success_no_progress_pause
-  let direct_empty_no_progress_retry_reason =
-    Keeper_turn_runtime_budget.direct_empty_no_progress_retry_reason
-  let direct_empty_no_progress_retry_decision =
-    Keeper_turn_runtime_budget.direct_empty_no_progress_retry_decision
-  let run_direct_empty_no_progress_retry_loop =
-    Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
+  let direct_no_progress_retry_reason =
+    Keeper_turn_runtime_budget.direct_no_progress_retry_reason
+  let direct_no_progress_retry_decision =
+    Keeper_turn_runtime_budget.direct_no_progress_retry_decision
+  let run_direct_no_progress_retry_loop =
+    Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
 end
 
 let resolve_turn_runtime_id (meta : keeper_meta) =
@@ -1010,7 +1010,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                    ~keeper_name:meta.name
 		                    ~turn_id:keeper_turn_id
 		                    (fun () ->
-		                       Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
+		                       Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
 		                         ~keeper_name:meta.name
 		                         ~base_runtime:turn_runtime_id
 		                         ~initial_runtime:turn_runtime_id
@@ -1046,7 +1046,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                                  retry.fallback_reason
 		                              in
 		                              Log.Keeper.warn
-		                                "%s: direct keeper_msg empty response \
+		                                "%s: direct keeper_msg no-progress response \
 		                                 from runtime=%s suggested retry to %s \
 		                                 (reason=%s), but retry setup failed: %s"
 		                                meta.name
@@ -1069,7 +1069,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                                      .terminal_reason_code_of_sdk_error
 		                                        fail_open_err))
 		                                ~activity_kind:
-		                                  "direct_empty_no_progress_retry_setup"
+		                                  "direct_no_progress_retry_setup"
 		                                ~trajectory_outcome:
 		                                  (Trajectory.Failed
 		                                     (Agent_sdk.Error.to_string
@@ -1089,7 +1089,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                                ())
 		                         ~before_retry:
 		                           Keeper_turn_runtime_budget
-		                           .yield_before_empty_no_progress_retry
+		                           .yield_before_direct_no_progress_retry
 		                         ~run_once:
 		                           (fun ~runtime_id ~max_context ~is_retry
 		                                ~degraded_retry_runtime ~fallback_reason

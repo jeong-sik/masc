@@ -33,6 +33,12 @@ let cleanup_dir dir =
   in
   try rm dir with _ -> ()
 
+let rec mkdir_p path =
+  if path = "" || path = "." || path = "/" || Sys.file_exists path then ()
+  else (
+    mkdir_p (Filename.dirname path);
+    Unix.mkdir path 0o755)
+
 let write_file path content =
   let oc = open_out path in
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () ->
@@ -300,7 +306,7 @@ let test_operator_resume_clears_no_progress_loop_latch () =
          true
          (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        check bool
-         "no synthetic recovery stimulus before resume"
+         "no recovery stimulus queued before resume"
          false
          (queue_contains_post_id
             (Masc.Keeper_registry_event_queue.snapshot
@@ -361,7 +367,7 @@ let test_operator_resume_clears_no_progress_loop_latch () =
           |> Yojson.Safe.Util.member "pending_no_progress_recovery_count"
           |> Yojson.Safe.Util.to_int);
        check int
-         "operator resume has no recovery-stimulus ledger reaction"
+         "operator resume has no recovery stimulus reaction"
          0
          (resumed_summary
           |> Yojson.Safe.Util.member "operator_escalation_count"
@@ -421,7 +427,7 @@ let test_operator_resume_keeps_no_progress_state_on_drop_failure () =
        let pending_path =
          event_queue_snapshot_path ~base_path:config.base_path ~keeper_name
        in
-       Fs_compat.mkdir_p (Filename.dirname pending_path);
+       mkdir_p (Filename.dirname pending_path);
        Unix.mkdir pending_path 0o755;
        (match
           Masc.Keeper_unified_turn_no_progress.clear_for_operator_resume

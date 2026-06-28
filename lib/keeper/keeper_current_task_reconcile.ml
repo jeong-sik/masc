@@ -45,7 +45,7 @@ let owned_active_tasks_for_meta ~(config : Workspace.config)
   let names = resolved_agent_names ~config ~agent_name:meta.agent_name in
   let matches assignee = List.mem assignee names in
   try
-    match Workspace.read_backlog_r config with
+    match Workspace_backlog.read_backlog_r config with
     | Error message ->
       Otel_metric_store.inc_counter
         Keeper_metrics.(to_string ReconcileFailures)

@@ -28,6 +28,7 @@ let goal_loop_broadcast_event_type = "goal_loop_status"
    TTL cache ([Dashboard_goal_loop.goal_loop_cache_ttl_s]); a shorter tick
    would only re-read the same cached value. *)
 let goal_loop_broadcast_interval_s = 5.0
+let goal_loop_broadcast_timeout_s = goal_loop_broadcast_interval_s *. 0.8
 
 (* Per-write volatiles excluded from the change fingerprint. The Python
    writer stamps a fresh [generated_at] on every write (and the OCaml read
@@ -94,9 +95,11 @@ let start_goal_loop_refresh_loop ~state ~sw ~clock =
   Proactive_refresh.start
     ~sw
     ~clock
-    ~config:
-      (Proactive_refresh.default_config
-         ~label:"goal_loop_status"
-         ~interval_s:goal_loop_broadcast_interval_s)
+	~config:
+	  { (Proactive_refresh.default_config
+	       ~label:"goal_loop_status"
+	       ~interval_s:goal_loop_broadcast_interval_s) with
+	    timeout_s = goal_loop_broadcast_timeout_s
+	  }
     ~compute:(fun () -> goal_loop_status_for_state state)
     ~on_result:(fun status -> ignore (broadcast_goal_loop_status status))

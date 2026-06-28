@@ -43,6 +43,10 @@ let finalize
     ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
     () =
+  let budget_exhausted =
+    Keeper_agent_run_response_text.stop_reason_is_turn_budget_exhausted
+      result.stop_reason
+  in
   let reported_state_snapshot =
     reported_state_snapshot_from_checkpoint result.checkpoint
   in
@@ -90,34 +94,42 @@ let finalize
       ~state_snapshot
       ~state_snapshot_source
       ~resume_merge
-      ~append_manifest
-      ()
+    ~append_manifest
+    ()
   in
-  receipt_response_text_present_ref := true;
+  receipt_response_text_present_ref := String.trim response_text <> "";
   let assistant_msg =
-    Agent_sdk.Types.make_message
-      ~role:Agent_sdk.Types.Assistant
-      ~metadata:
-        [ ( Keeper_memory_policy.replay_metadata_key
-          , Keeper_memory_policy.replay_metadata_of_snapshot
-              state_snapshot )
-        ]
-      [ Agent_sdk.Types.Text response_text ]
+    if budget_exhausted
+    then None
+    else
+      Some
+        (Agent_sdk.Types.make_message
+           ~role:Agent_sdk.Types.Assistant
+           ~metadata:
+             [ ( Keeper_memory_policy.replay_metadata_key
+               , Keeper_memory_policy.replay_metadata_of_snapshot
+                   state_snapshot )
+             ]
+           [ Agent_sdk.Types.Text response_text ])
   in
-  Keeper_context_runtime.persist_message
-    ~source:history_assistant_source
-    session
+  Option.iter
+    (Keeper_context_runtime.persist_message
+       ~source:history_assistant_source
+       session)
     assistant_msg;
   let saved_checkpoint_result =
     match result.checkpoint with
     | Some checkpoint ->
       let patched =
-        Keeper_context_core.patch_checkpoint_last_assistant
-          checkpoint
-          ~session_id:
-            (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-          ~response_text
-          ~snapshot:state_snapshot
+        if budget_exhausted
+        then checkpoint
+        else
+          Keeper_context_core.patch_checkpoint_last_assistant
+            checkpoint
+            ~session_id:
+              (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+            ~response_text
+            ~snapshot:state_snapshot
       in
       (match
          Keeper_checkpoint_store.save_oas_classified
@@ -187,7 +199,7 @@ let finalize
     let librarian_messages =
       match saved_checkpoint with
       | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages
-      | None -> [ assistant_msg ]
+      | None -> Option.to_list assistant_msg
     in
     Keeper_agent_run_post_turn_memory.run
       ~config

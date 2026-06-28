@@ -245,6 +245,53 @@ let test_smart_idle_sleep_refreshes_last_turn_ts () =
                 ~now
                 ~threshold)))
 
+let test_smart_idle_admission_refreshes_last_turn_ts_before_sleep () =
+  let bp = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir bp)
+    (fun () ->
+      let name = "smart-idle-admission-touch-keeper" in
+      let meta = make_meta name in
+      let entry = Reg.register ~base_path:bp name meta in
+      let stale_ts = 100.0 in
+      let now = 300.0 in
+      let threshold = 150.0 in
+      let stale_meta =
+        let runtime = entry.meta.runtime in
+        let usage = runtime.usage in
+        { entry.meta with
+          runtime = { runtime with usage = { usage with last_turn_ts = stale_ts } }
+        }
+      in
+      Reg.update_meta ~base_path:bp name stale_meta;
+      Observations.record_smart_idle_sleep_admission ~base_path:bp ~keeper_name:name;
+      match Reg.get ~base_path:bp name with
+      | None -> fail "keeper should still be registered after smart idle admission"
+      | Some entry ->
+        let fresh_ts = entry.meta.runtime.usage.last_turn_ts in
+        check bool "smart idle admission touch advances last_turn_ts" true
+          (fresh_ts > stale_ts);
+        (match entry.last_skip_observation with
+         | Some (skip_ts, reasons) ->
+           check bool "smart idle admission timestamp is fresh" true (skip_ts > stale_ts);
+           check
+             (list string)
+             "smart idle admission reasons recorded"
+             Observations.smart_idle_sleep_admission_reasons
+             reasons
+         | None -> fail "smart idle admission observation missing");
+        check bool
+          "after smart idle admission touch, assess_stale_run returns None"
+          true
+          (Option.is_none
+             (Sup.assess_stale_run
+                ~phase:KSM.Running
+                ~in_turn:None
+                ~last_turn_ts:fresh_ts
+                ~started_at:0.0
+                ~now
+                ~threshold)))
+
 let () =
   Alcotest.run
     "Keeper_idle_threshold_contract"
@@ -267,5 +314,9 @@ let () =
             "smart idle sleep refreshes last_turn_ts"
             `Quick
             test_smart_idle_sleep_refreshes_last_turn_ts
+        ; test_case
+            "smart idle admission refreshes last_turn_ts before sleep"
+            `Quick
+            test_smart_idle_admission_refreshes_last_turn_ts_before_sleep
         ] )
     ]

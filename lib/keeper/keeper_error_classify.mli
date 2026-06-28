@@ -72,7 +72,9 @@ val is_context_overflow : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the error is a completion contract violation.
     Contract violations should cap rotation because retrying the same
-    or different runtime will not satisfy the contract. *)
+    or different runtime will not satisfy the contract. Narrow no-progress
+    accept rejections that carry an explicit empty/read-only recovery hint are
+    handled by the degraded retry path instead. *)
 val is_completion_contract_violation : Agent_sdk.Error.sdk_error -> bool
 
 (** [true] when the error is an OAS [InputRequired] — the agent paused

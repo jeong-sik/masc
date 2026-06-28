@@ -24,8 +24,10 @@ val dispatch :
   metadata:(string * string) list ->
   content:string ->
   Gate_protocol.dispatch_result
-(** Build a keeper context, call [Keeper_tool_surface.dispatch], and parse
-    the response.  The [channel] and [channel_user_id] are used to
+(** Build a keeper context, call the keeper surface, and parse the response.
+    When the target keeper already has an admitted turn in flight, returns an
+    accepted async request envelope instead of blocking the connector HTTP
+    request behind that turn.  The [channel] and [channel_user_id] are used to
     construct the agent name ([gate:<channel>:<workspace_id>:<user_id>]).  The other
     connector fields are injected into the keeper-visible message body so
     external user identity survives memory and handoff boundaries. *)

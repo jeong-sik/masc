@@ -152,7 +152,12 @@ let sync_keeper_presence
       ~labels:[ "keeper", meta_current.name ]
       ();
     note_turn_failures_preserved_after_heartbeat ~ctx ~meta:meta_current;
-    match write_meta ctx.config synced with
+    match
+      write_meta_with_merge
+        ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+        ctx.config
+        synced
+    with
     | Ok () -> synced
     | Error e ->
       Otel_metric_store.inc_counter

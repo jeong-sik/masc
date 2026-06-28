@@ -87,18 +87,59 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
 let has_no_progress_loop_blocker (meta : keeper_meta) =
   match meta.runtime.last_blocker with
   | Some { klass = No_progress_loop; _ } -> true
-  | _ -> false
+  | Some
+      { klass =
+          ( Runtime_exhausted _
+          | Capacity_backpressure
+          | Ambiguous_post_commit_timeout
+          | Ambiguous_post_commit_failure
+          | Admission_queue_wait_timeout
+          | Turn_timeout_after_queue_wait
+          | Turn_timeout
+          | Turn_livelock_blocked
+          | Completion_contract_violation
+          | Fiber_unresolved
+          | Stale_turn_timeout
+          | Stale_fleet_batch
+          | Oas_agent_execution_timeout
+          | Sdk_max_turns_exceeded
+          | Sdk_token_budget_exceeded
+          | Sdk_cost_budget_exceeded
+          | Sdk_unrecognized_stop_reason
+          | Sdk_idle_detected
+          | Sdk_guardrail_violation
+          | Sdk_tripwire_violation
+          | Sdk_exit_condition_met
+          | Sdk_input_required )
+      ; _
+      } ->
+    false
+  | None -> false
 
 let is_no_progress_failure_reason = function
   | Some (Keeper_registry.Provider_runtime_error { code; _ }) ->
     String.equal code Keeper_unified_turn_no_progress.failure_reason_code
-  | _ -> false
+  | Some
+      ( Keeper_registry.Heartbeat_consecutive_failures _
+      | Keeper_registry.Turn_consecutive_failures _
+      | Keeper_registry.Stale_turn_timeout _
+      | Keeper_registry.Stale_termination_storm _
+      | Keeper_registry.Stale_fleet_batch _
+      | Keeper_registry.Provider_timeout_loop _
+      | Keeper_registry.Completion_contract_violation _
+      | Keeper_registry.Ambiguous_partial_commit _
+      | Keeper_registry.Fiber_unresolved _
+      | Keeper_registry.Exception _
+      | Keeper_registry.Turn_overflow_pause
+      | Keeper_registry.Turn_livelock_pause ) ->
+    false
+  | None -> false
 
 let has_no_progress_failure_reason ~base_path keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | Some { Keeper_registry.last_failure_reason; _ } ->
     is_no_progress_failure_reason last_failure_reason
-  | _ -> false
+  | None -> false
 
 let has_direct_success_no_progress_pause ~(config : Workspace.config)
     (meta : keeper_meta) =

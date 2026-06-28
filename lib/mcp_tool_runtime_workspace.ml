@@ -63,6 +63,36 @@ let arg_get_string ctx key default =
 let arg_get_string_list ctx key =
   Safe_ops.json_string_list key ctx.arguments
 
+let expand_start_path_home ~path_syntax ~suffix =
+  match Config_dir_resolver.initial_env_home with
+  | Some home ->
+    Ok (if String.equal suffix "" then home else Filename.concat home suffix)
+  | None ->
+    Error (Printf.sprintf "HOME is required to expand '%s' in masc_start path" path_syntax)
+;;
+
+let expand_start_path ~config path =
+  if String.length path >= 2 && Char.equal path.[0] '~' && Char.equal path.[1] '/'
+  then
+    expand_start_path_home
+      ~path_syntax:"~/"
+      ~suffix:(String.sub path 2 (String.length path - 2))
+  else if String.length path = 1 && Char.equal path.[0] '~'
+  then expand_start_path_home ~path_syntax:"~" ~suffix:""
+  else if Filename.is_relative path
+  then (
+    (* Initialized sessions keep the active workspace as the relative-path
+       anchor. Only bootstrap calls without a workspace fall back to the
+       resolver/cwd bootstrap policy. *)
+    let anchor =
+      if Workspace.is_initialized config
+      then config.base_path
+      else Config_dir_resolver.base_path_or_cwd ()
+    in
+    Ok (Filename.concat anchor path))
+  else Ok path
+;;
+
 (** masc_start — compound onboarding (set project root + bind session + optional task) *)
 let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result option =
   let config = ctx.config in
@@ -81,34 +111,22 @@ let handle_start ~tool_name ~start_time (ctx : context) : Tool_result.result opt
       else
         Error "path is required when no project scope is set. Provide the project directory path."
     end else begin
-      let expanded =
-        if String.length path >= 2 && Char.equal path.[0] '~' && Char.equal path.[1] '/' then
-          let home = match Sys.getenv_opt "HOME" with Some h -> h | None -> Filename.get_temp_dir_name () in
-          Filename.concat home (String.sub path 2 (String.length path - 2))
-        else if String.length path = 1 && Char.equal path.[0] '~' then
-          (match Sys.getenv_opt "HOME" with Some h -> h | None -> Filename.get_temp_dir_name ())
-        else if Filename.is_relative path then
-          let anchor =
-            if Workspace.is_initialized config then config.base_path
-            else Config_dir_resolver.base_path_or_cwd ()
-          in
-          Filename.concat anchor path
-        else
-          path
-      in
-      if not (Sys.file_exists expanded && Sys.is_directory expanded) then
-        Error (Printf.sprintf "Directory not found: %s" expanded)
-      else begin
-        let cfg = Workspace.default_config expanded in
-        if Workspace.is_initialized cfg then begin
-          Mcp_server.set_workspace_config state cfg;
-          Ok cfg
-        end else begin
-          let _msg = Workspace.init cfg ~agent_name:None in
-          Mcp_server.set_workspace_config state cfg;
-          Ok cfg
+      match expand_start_path ~config path with
+      | Error _ as err -> err
+      | Ok expanded ->
+        if not (Sys.file_exists expanded && Sys.is_directory expanded) then
+          Error (Printf.sprintf "Directory not found: %s" expanded)
+        else begin
+          let cfg = Workspace.default_config expanded in
+          if Workspace.is_initialized cfg then begin
+            Mcp_server.set_workspace_config state cfg;
+            Ok cfg
+          end else begin
+            let _msg = Workspace.init cfg ~agent_name:None in
+            Mcp_server.set_workspace_config state cfg;
+            Ok cfg
+          end
         end
-      end
     end
   in
   match workspace_result with

@@ -201,6 +201,7 @@ export type KeeperMemoryHealthAlertCode =
   | 'near_duplicate'
   | 'events_to_facts_ratio_high'
   | 'provider_slot_busy'
+  | 'librarian_fallback_facts'
 
 export type KeeperMemoryHealthAlertSeverity = 'warn'
 
@@ -209,6 +210,7 @@ export type KeeperMemoryHealthAlertTarget =
   | 'near_duplicate'
   | 'events_to_facts_ratio'
   | 'provider_slot_busy'
+  | 'librarian_fallback_facts'
 
 export interface KeeperMemoryHealthAlert {
   code: KeeperMemoryHealthAlertCode
@@ -230,6 +232,7 @@ export interface KeeperMemoryHealthKeeperEntry {
   ttl_expired_on_disk: number
   near_duplicate: number
   provider_slot_busy: number
+  librarian_fallback_facts: number
   alerts: KeeperMemoryHealthAlert[]
 }
 
@@ -244,6 +247,7 @@ export interface KeeperMemoryHealthResponse {
     ttl_expired_on_disk: number
     near_duplicate: number
     provider_slot_busy: number
+    librarian_fallback_facts: number
   }
   alert_summary: {
     total_alerts: number
@@ -253,11 +257,13 @@ export interface KeeperMemoryHealthResponse {
     near_duplicate_keepers: number
     high_event_ratio_keepers: number
     provider_slot_busy_keepers: number
+    librarian_fallback_fact_keepers: number
     thresholds: {
       ttl_expired_on_disk: number
       near_duplicate: number
       events_to_facts_ratio: number
       provider_slot_busy: number
+      librarian_fallback_facts: number
     }
   }
 }

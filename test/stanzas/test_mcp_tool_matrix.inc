@@ -5,3 +5,11 @@
  (modules test_mcp_tool_matrix)
  (deps tool_matrix_case_runner.exe)
  (libraries masc_test_deps keeper_tool_matrix_cases_lib))
+
+(test
+ (name test_mcp_tool_runtime_workspace_path)
+ (modules test_mcp_tool_runtime_workspace_path)
+ (action
+  (setenv HOME ""
+   (run %{test})))
+ (libraries masc_test_deps keeper_tool_matrix_cases_lib))

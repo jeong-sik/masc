@@ -117,6 +117,13 @@ let classify_tool_progress name =
     then Completion
     else if is_claim_context_tool_name name
     then Claim_context
+    else if
+      Keeper_tool_capability_axis.supports Board_activity name
+      ||
+      match effect_domain_for_tool_name name with
+      | Some (Tool_catalog.Playground_write | Tool_catalog.Host_repo_write) -> true
+      | Some Tool_catalog.Masc_workspace | Some Tool_catalog.Read_only | None -> false
+    then Execution
     else Passive_status)
 ;;
 

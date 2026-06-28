@@ -1,17 +1,8 @@
-(** No-progress loop recovery helpers for the unified keeper turn. *)
+(** No-progress loop pause helpers for the unified keeper turn. *)
 
 let failure_reason_code = "no_progress_loop"
 
-(* RFC-0020: the no-progress recovery stimulus carries no data — the consumer
-   only branches on the kind. streak/threshold are recorded in the failure
-   reason / blocker detail by the caller, not in the stimulus payload. *)
-let recovery_stimulus ~now ~keeper_name =
-  { Keeper_event_queue.post_id = "no-progress-loop:" ^ keeper_name
-  ; urgency = Keeper_event_queue.Immediate
-  ; arrived_at = now
-  ; payload = Keeper_event_queue.No_progress_recovery
-  }
-;;
+let recovery_post_id ~keeper_name = "no-progress-loop:" ^ keeper_name
 
 let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
   let detail =
@@ -34,25 +25,6 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
     ~base_path:config.base_path
     meta.Keeper_meta_contract.name
     (Some failure_reason);
-  let stimulus =
-    recovery_stimulus ~now:(Time_compat.now ()) ~keeper_name:meta.name
-  in
-  Keeper_registry_event_queue.enqueue
-    ~base_path:config.base_path
-    meta.name
-    stimulus;
-  (try
-     Keeper_reaction_ledger.record_event_queue_stimulus
-       ~base_path:config.base_path
-       ~keeper_name:meta.name
-       stimulus
-   with
-   | Eio.Cancel.Cancelled _ as exn -> raise exn
-   | exn ->
-     Log.Keeper.warn
-       "%s: failed to persist no-progress recovery stimulus in reaction ledger: %s"
-       meta.name
-         (Printexc.to_string exn));
   let blocked_meta =
     Keeper_meta_contract.map_runtime
     (fun rt ->
@@ -77,20 +49,20 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
       "%s: no_progress loop escalated to blocker and operator-resume pause \
        (streak=%d threshold=%d)"
       meta.name
-      streak
-      threshold;
-    paused_meta
+	      streak
+	      threshold;
+	    paused_meta
   | Error pause_err ->
-    (* RFC-0246 P2: this is the no-progress pause-fallback wake. If pause sync
-       failed we used to wake the keeper as a recovery stimulus — but at this
-       point the keeper is already latched in a no-progress loop, so re-waking
-       just reruns the same empty turn (pause-fail -> wake -> no-progress ->
-       pause-fail). Pass [~bypass_tombstone:false] so a latched keeper stays
-       blocked instead of self-waking forever; an operator can force-resume. *)
+    (* RFC-0246 P2: a latched keeper must not receive a synthetic
+       no-progress recovery wake. The stimulus carries no actionable data, so
+       queuing it after a failed pause just lets the event-queue override force
+       another empty turn (pause-fail -> queue -> no-progress -> pause-fail).
+       Pass [~bypass_tombstone:false] so an automatic wake stays suppressed;
+       an operator can still force-resume. *)
     Keeper_registry.wakeup ~bypass_tombstone:false ~base_path:config.base_path meta.name;
     Log.Keeper.error
-      "%s: no_progress loop pause sync failed: %s; recovery stimulus queued \
-       instead (streak=%d threshold=%d)"
+      "%s: no_progress loop pause sync failed: %s; automatic recovery wake \
+       suppressed (streak=%d threshold=%d)"
       meta.name
       pause_err
       streak
@@ -125,33 +97,69 @@ let clear_if_recovered ~(config : Workspace.config) meta ~previous_streak ~was_l
 
 let clear_for_operator_resume ~base_path meta =
   let keeper_name = meta.Keeper_meta_contract.name in
-  let was_latched = Keeper_no_progress_loop_detector.is_latched ~keeper_name in
-  Keeper_no_progress_loop_detector.reset ~keeper_name;
-  let cleared_failure_reason =
-    match Keeper_registry.get ~base_path keeper_name with
-    | Some { Keeper_registry.last_failure_reason =
-               Some (Keeper_registry.Provider_runtime_error { code; _ })
-           ; _
-           }
-      when String.equal code failure_reason_code ->
-      Keeper_registry.set_failure_reason ~base_path keeper_name None;
-      true
-    | _ -> false
-  in
-  let cleared_meta_blocker =
-    match meta.runtime.last_blocker with
-    | Some { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop; _ } ->
-      true
-    | _ -> false
-  in
-  if was_latched || cleared_failure_reason || cleared_meta_blocker then
-    Log.Keeper.info
-      "%s: operator resume cleared no_progress loop latch/blocker (latched=%b failure_reason=%b meta_blocker=%b)"
+  match
+    Keeper_registry_event_queue.drop_by_post_id
+      ~base_path
       keeper_name
+      ~post_id:(recovery_post_id ~keeper_name)
+  with
+  | Error msg ->
+    Log.Keeper.warn
+      "%s: operator resume kept no_progress latch/blocker because recovery stimulus removal failed: %s"
+      keeper_name
+      msg;
+    Error msg
+  | Ok dropped_recovery_stimuli ->
+    let was_latched = Keeper_no_progress_loop_detector.is_latched ~keeper_name in
+    Keeper_no_progress_loop_detector.reset ~keeper_name;
+    List.iter
+      (fun stimulus ->
+        try
+          Keeper_reaction_ledger.record_event_queue_reaction
+            ~base_path
+            ~keeper_name
+            ~reaction_kind:Keeper_reaction_ledger.Operator_escalation
+            stimulus
+        with
+        | Eio.Cancel.Cancelled _ as exn -> raise exn
+        | exn ->
+          Log.Keeper.warn
+            "%s: failed to persist operator-resume no-progress recovery reaction: %s"
+            keeper_name
+            (Printexc.to_string exn))
+      dropped_recovery_stimuli;
+    let cleared_failure_reason =
+      match Keeper_registry.get ~base_path keeper_name with
+      | Some { Keeper_registry.last_failure_reason =
+                 Some (Keeper_registry.Provider_runtime_error { code; _ })
+             ; _
+             }
+        when String.equal code failure_reason_code ->
+        Keeper_registry.set_failure_reason ~base_path keeper_name None;
+        true
+      | _ -> false
+    in
+    let cleared_meta_blocker =
+      match meta.runtime.last_blocker with
+      | Some { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop; _ } ->
+        true
+      | _ -> false
+    in
+    if
       was_latched
-      cleared_failure_reason
-      cleared_meta_blocker;
-  if cleared_meta_blocker then
-    Keeper_meta_contract.map_runtime (fun rt -> { rt with last_blocker = None }) meta
-  else meta
+      || cleared_failure_reason
+      || cleared_meta_blocker
+      || dropped_recovery_stimuli <> []
+    then
+      Log.Keeper.info
+        "%s: operator resume cleared no_progress loop latch/blocker (latched=%b failure_reason=%b meta_blocker=%b dropped_recovery_stimuli=%d)"
+        keeper_name
+        was_latched
+        cleared_failure_reason
+        cleared_meta_blocker
+        (List.length dropped_recovery_stimuli);
+    Ok
+      (if cleared_meta_blocker then
+         Keeper_meta_contract.map_runtime (fun rt -> { rt with last_blocker = None }) meta
+       else meta)
 ;;

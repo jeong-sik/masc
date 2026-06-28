@@ -8,10 +8,14 @@
     Atomic state primitive. CAS-successful mutations are mirrored to
     [Keeper_event_queue_persistence] for restart replay. *)
 
+open Keeper_registry_types
+
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
   | None -> false
-  | Some (head, rest) -> head = stimulus || queue_contains rest stimulus
+  | Some (head, rest) ->
+    Keeper_event_queue.stimulus_identity_equal head stimulus
+    || queue_contains rest stimulus
 ;;
 
 let enqueue_if_missing queue stimulus =
@@ -42,7 +46,7 @@ let enqueue ~base_path name stimulus =
     Keeper_event_queue_persistence.update
       ~base_path
       ~keeper_name:name
-      (fun cur -> Keeper_event_queue.enqueue cur stimulus);
+      (fun cur -> enqueue_if_missing cur stimulus);
     (match Keeper_registry.get ~base_path name with
      | None -> ()
      | Some entry ->
@@ -59,8 +63,10 @@ let enqueue ~base_path name stimulus =
   | Some entry ->
     let rec loop () =
       let cur = Atomic.get entry.event_queue in
-      let next = Keeper_event_queue.enqueue cur stimulus in
-      if Atomic.compare_and_set entry.event_queue cur next
+      let next = enqueue_if_missing cur stimulus in
+      if next = cur
+      then ()
+      else if Atomic.compare_and_set entry.event_queue cur next
       then persist_live_queue ~base_path entry name
       else loop ()
     in
@@ -100,6 +106,43 @@ let ack_consumed ~base_path name stimuli =
   | Ok () -> ()
   | Error msg ->
     Log.Keeper.warn "registry: ack_consumed failed name=%s: %s" name msg
+;;
+
+let drop_by_post_id ~base_path name ~post_id =
+  let remove_live (entry : Keeper_registry.registry_entry) =
+    let rec loop () =
+      let cur = Atomic.get entry.event_queue in
+      let removed, next = Keeper_event_queue.remove_by_post_id post_id cur in
+      if removed = []
+      then removed
+      else if Atomic.compare_and_set entry.event_queue cur next
+      then (
+        persist_live_queue ~base_path entry name;
+        removed)
+      else loop ()
+    in
+    loop ()
+  in
+  match
+    Keeper_event_queue_persistence.drop_by_post_id
+      ~base_path
+      ~keeper_name:name
+      ~post_id
+  with
+  | Error msg ->
+    Log.Keeper.warn
+      "registry: drop_by_post_id failed name=%s post_id=%s: %s"
+      name
+      post_id
+      msg;
+    Error msg
+  | Ok persisted_removed ->
+    let live_removed =
+      match Keeper_registry.get ~base_path name with
+      | None -> []
+      | Some entry -> remove_live entry
+    in
+    Ok (Keeper_event_queue.uniq_stimuli (live_removed @ persisted_removed))
 ;;
 
 let snapshot ~base_path name =

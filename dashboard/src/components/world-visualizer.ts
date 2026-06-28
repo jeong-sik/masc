@@ -3,7 +3,7 @@
 // using real keeper fleet data from SSE-driven signals (no Yjs dependency).
 
 import { html } from 'htm/preact'
-import { useRef, useState, useCallback } from 'preact/hooks'
+import { useRef, useState, useCallback, useEffect } from 'preact/hooks'
 import { keepers, messages, tasks } from '../store'
 import { kSlot, kSigil } from './keeper-badge'
 import { getPhaseStyle } from './keeper-phase-indicator'
@@ -34,41 +34,31 @@ function keeperColor(keeper: Keeper): string {
   return cssVar(`--color-keeper-${slot}`)
 }
 
-// ── Interaction strength metric ───────────────────────────────────
-// Measures how much two keepers interact via shared task assignments
-// and direct messages. Used for Local Sight edge weight.
-
-function interactionStrength(
-  a: Keeper,
-  b: Keeper,
-  taskList: { assignee?: string | null; claim?: string | null }[],
-  msgList: { from?: string | null; to?: string | null }[],
-): number {
-  const aName = a.name.toLowerCase()
-  const bName = b.name.toLowerCase()
-  let score = 0
-  for (const t of taskList) {
-    const assignee = (t.assignee ?? t.claim ?? '').toLowerCase()
-    if (!assignee) continue
-    // Both worked on the same task
-    if (assignee.includes(aName) || aName.includes(assignee)) score++
-    if (assignee.includes(bName) || bName.includes(assignee)) score++
+interface InteractionJudgeData {
+  judge_online?: boolean
+  refreshing?: boolean
+  last_error?: string | null
+  data?: {
+    stigmergy?: Record<string, number>
+    interactions?: { source: string; target: string; strength: number; reasoning?: string }[]
   }
-  for (const m of msgList) {
-    const from = (m.from ?? '').toLowerCase()
-    const to = (m.to ?? '').toLowerCase()
-    if ((from === aName && to === bName) || (from === bName && to === aName)) score += 2
-  }
-  return score
 }
 
-// ── Stigmergy intensity ───────────────────────────────────────────
-// log-scaled composite of action count + message activity.
-// Range: 0 (no activity) → ~1 (high activity).
+function getJudgeInteractionStrength(judgeData: InteractionJudgeData | null, a: Keeper, b: Keeper): number {
+  if (!judgeData || !judgeData.data || !judgeData.data.interactions) return 0
+  const aName = a.name.toLowerCase()
+  const bName = b.name.toLowerCase()
+  const match = judgeData.data.interactions.find(i => 
+    (i.source.toLowerCase() === aName && i.target.toLowerCase() === bName) ||
+    (i.source.toLowerCase() === bName && i.target.toLowerCase() === aName)
+  )
+  return match ? match.strength : 0
+}
 
-function stigmergyIntensity(keeper: Keeper, msgCount: number): number {
-  const actions = keeper.autonomous_action_count ?? 0
-  return Math.log1p(actions + msgCount * 2) / Math.log1p(100)
+function getJudgeStigmergy(judgeData: InteractionJudgeData | null, keeper: Keeper): number {
+  if (!judgeData || !judgeData.data || !judgeData.data.stigmergy) return 0
+  const val = judgeData.data.stigmergy[keeper.name] || judgeData.data.stigmergy[keeper.name.toLowerCase()]
+  return val ?? 0
 }
 
 // ── Free energy from active inference ─────────────────────────────
@@ -92,7 +82,25 @@ const KEEPER_RADIUS = 10
 export function WorldVisualizer() {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const [paletteVersion, setPaletteVersion] = useState(0)
+  const [judgeData, setJudgeData] = useState<InteractionJudgeData | null>(null)
   const animRef = useRef<number>(0)
+
+  useEffect(() => {
+    const fetchJudge = async () => {
+      try {
+        const res = await fetch('/api/v1/dashboard/interaction-judge')
+        if (res.ok) {
+          const json = await res.json()
+          setJudgeData(json)
+        }
+      } catch (e) {
+        console.warn('Failed to fetch interaction judge data', e)
+      }
+    }
+    fetchJudge()
+    const timer = setInterval(fetchJudge, 10000)
+    return () => clearInterval(timer)
+  }, [])
 
   // Theme change detection — invalidate CSS var cache on class/style mutation
   const refreshPalette = useCallback(() => {
@@ -155,7 +163,7 @@ export function WorldVisualizer() {
     let idx = 0
     for (const k of fleet) {
       const p = positions[idx]!
-      const intensity = stigmergyIntensity(k, msgCountByKeeper.get(k.name) ?? 0)
+      const intensity = getJudgeStigmergy(judgeData, k)
       if (intensity >= 0.05) {
         const color = keeperColor(k)
         const rings = Math.ceil(intensity * 4)
@@ -181,7 +189,7 @@ export function WorldVisualizer() {
       for (let j = 0; j < n; j++) {
         if (i === j) continue
         const kj = fleet[j]!
-        scored.push({ j, strength: interactionStrength(ki, kj, taskList, msgList) })
+        scored.push({ j, strength: getJudgeInteractionStrength(judgeData, ki, kj) })
       }
       scored.sort((a, b) => b.strength - a.strength)
 
@@ -329,6 +337,15 @@ export function WorldVisualizer() {
         </div>
         ${fleetSize > 0 ? html`
           <div class="flex items-center gap-3 text-3xs text-[var(--color-fg-muted)] font-mono">
+            ${judgeData && judgeData.judge_online === false ? html`
+              <span class="inline-flex items-center gap-1 text-[var(--color-status-warn)] border border-solid border-[var(--color-status-warn)] rounded-[var(--r-1)] px-1 py-0.5" title="Judge offline — interactions not computed">
+                <svg width="10" height="10" viewBox="0 0 16 16" fill="currentColor">
+                  <path d="M8 1.5a6.5 6.5 0 100 13 6.5 6.5 0 000-13zM0 8a8 8 0 1116 0A8 8 0 010 8z"></path>
+                  <path d="M11.854 4.146a.5.5 0 010 .708l-7 7a.5.5 0 01-.708-.708l7-7a.5.5 0 01.708 0z"></path>
+                </svg>
+                Judge Offline
+              </span>
+            ` : null}
             <span title="Fleet size">${fleetSize} keepers</span>
             <span title="Average convergence">${Math.round(avgConv * 100)}% conv</span>
           </div>

@@ -12,23 +12,6 @@
 import { html } from 'htm/preact'
 import type { VNode } from 'preact'
 import { MONO_STACK } from './common/font-stacks'
-
-export interface KeeperRegistryEntry {
-  slot: number
-  sigil: string
-}
-
-export const KEEPER_REGISTRY: Record<string, KeeperRegistryEntry> = {
-  // Canonical 5 — pinned slots for brand recall.
-  // These match the v0.2 alias targets in design-system tokens
-  // so visual identity is preserved across the v0.2→v0.3 migration.
-  'nick0cave':     { slot: 3,  sigil: 'NK' },  /* amber  */
-  'masc-improver': { slot: 6,  sigil: 'MS' },  /* jade   */
-  'sangsu':        { slot: 9,  sigil: 'SS' },  /* sky    */
-  'qa-king':       { slot: 2,  sigil: 'QA' },  /* clay   */
-  'rama':          { slot: 11, sigil: 'RM' },  /* violet */
-}
-
 // FNV-1a 32-bit hash mapped onto 1..12 (avoids 0 so slot is 1-indexed).
 function hash12(str: string): number {
   let h = 0x811c9dc5
@@ -40,14 +23,10 @@ function hash12(str: string): number {
 }
 
 export function kSlot(id: string): number {
-  const reg = KEEPER_REGISTRY[id]
-  if (reg) return reg.slot
   return hash12(String(id))
 }
 
 export function kSigil(id: string): string {
-  const reg = KEEPER_REGISTRY[id]
-  if (reg) return reg.sigil
   // Auto-derive: first letter + first letter after hyphen, else first 2.
   const s = String(id).replace(/[^a-z0-9-]/gi, '')
   const parts = s.split('-').filter(Boolean)

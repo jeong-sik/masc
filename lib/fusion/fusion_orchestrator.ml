@@ -86,11 +86,7 @@ let run ~sw ~net ~base_dir ~policy ~topology ~request () : outcome =
                 ] )
           in
           let env = Masc_eio_env.get () in
-          let now_opt () =
-            match env.clock with
-            | Some c -> Some (Eio.Time.now c)
-            | None -> None
-          in
+          let now_opt () = Some (Eio.Time.now env.clock) in
           let clock =
             Fusion_orchestrator_judge_wave.make_clock
               ~now_opt

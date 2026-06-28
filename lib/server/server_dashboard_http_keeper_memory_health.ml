@@ -26,7 +26,6 @@ type keeper_health =
   ; ttl_expired_on_disk : int
   ; near_duplicate : int
   ; provider_slot_busy : int
-  ; librarian_fallback_facts : int
   }
 
 type alert_code =
@@ -34,7 +33,6 @@ type alert_code =
   | Near_duplicate
   | Events_to_facts_ratio_high
   | Provider_slot_busy
-  | Librarian_fallback_facts
 
 type alert_severity = Warn
 
@@ -43,7 +41,6 @@ type alert_target =
   | Near_duplicate_target
   | Events_to_facts_ratio_target
   | Provider_slot_busy_target
-  | Librarian_fallback_facts_target
 
 type keeper_alert =
   { code : alert_code
@@ -67,7 +64,6 @@ let events_to_facts_ratio_warn_threshold =
 ;;
 
 let provider_slot_busy_threshold = 0.0
-let librarian_fallback_facts_threshold = 0.0
 
 let provider_slot_busy_metric = Keeper_metrics.(to_string MemoryLaneProviderSlotBusy)
 let provider_slot_busy_site = Keeper_librarian_runtime.memory_os_librarian_provider_slot_site
@@ -77,7 +73,6 @@ let alert_code_to_string = function
   | Near_duplicate -> "near_duplicate"
   | Events_to_facts_ratio_high -> "events_to_facts_ratio_high"
   | Provider_slot_busy -> "provider_slot_busy"
-  | Librarian_fallback_facts -> "librarian_fallback_facts"
 ;;
 
 let alert_severity_to_string = function
@@ -89,7 +84,6 @@ let alert_target_to_string = function
   | Near_duplicate_target -> "near_duplicate"
   | Events_to_facts_ratio_target -> "events_to_facts_ratio"
   | Provider_slot_busy_target -> "provider_slot_busy"
-  | Librarian_fallback_facts_target -> "librarian_fallback_facts"
 ;;
 
 (* Alert labels are endpoint-owned wire copy for this backend-defined diagnostic
@@ -100,7 +94,6 @@ let alert_label = function
   | Near_duplicate -> "중복"
   | Events_to_facts_ratio_high -> "비율"
   | Provider_slot_busy -> "슬롯"
-  | Librarian_fallback_facts -> "폴백"
 ;;
 
 let alert ~code ~target ~message ~value ~threshold =
@@ -152,18 +145,6 @@ let keeper_alerts h =
           "Memory OS librarian provider slot was busy; extraction was skipped and remains due."
         ~value:(float_of_int h.provider_slot_busy)
         ~threshold:provider_slot_busy_threshold
-      :: alerts
-    else alerts)
-  |> (fun alerts ->
-    if h.librarian_fallback_facts > 0
-    then
-      alert
-        ~code:Librarian_fallback_facts
-        ~target:Librarian_fallback_facts_target
-        ~message:
-          "Librarian fallback diagnostic fact rows remain on disk; they are hidden from prompt recall but indicate extraction failures."
-        ~value:(float_of_int h.librarian_fallback_facts)
-        ~threshold:librarian_fallback_facts_threshold
       :: alerts
     else alerts)
   |> List.rev
@@ -226,15 +207,6 @@ let keeper_health ~keepers_dir ~now keeper_id =
     Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
   in
   let facts_count = List.length facts in
-  let librarian_fallback_facts =
-    facts
-    |> List.fold_left
-         (fun count (fact : Keeper_memory_os_types.fact) ->
-           if Keeper_memory_os_types.legacy_unstructured_fallback_claim fact.claim
-           then count + 1
-           else count)
-         0
-  in
   let facts_bytes =
     file_size_bytes
       (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)
@@ -263,7 +235,6 @@ let keeper_health ~keepers_dir ~now keeper_id =
   ; ttl_expired_on_disk = gc_report.ttl_expired
   ; near_duplicate = gc_report.dedup_removed
   ; provider_slot_busy = provider_slot_busy_for_keeper keeper_id
-  ; librarian_fallback_facts
   }
 ;;
 
@@ -278,7 +249,6 @@ let keeper_health_entry_to_json (h, alerts) : Yojson.Safe.t =
     ; "ttl_expired_on_disk", `Int h.ttl_expired_on_disk
     ; "near_duplicate", `Int h.near_duplicate
     ; "provider_slot_busy", `Int h.provider_slot_busy
-    ; "librarian_fallback_facts", `Int h.librarian_fallback_facts
     ; "alerts", `List (List.map keeper_alert_to_json alerts)
     ]
 ;;
@@ -326,8 +296,6 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
           ; "ttl_expired_on_disk", `Int (sum (fun h -> h.ttl_expired_on_disk))
           ; "near_duplicate", `Int (sum (fun h -> h.near_duplicate))
           ; "provider_slot_busy", `Int (sum (fun h -> h.provider_slot_busy))
-          ; ( "librarian_fallback_facts"
-            , `Int (sum (fun h -> h.librarian_fallback_facts)) )
           ] )
     ; ( "alert_summary"
       , `Assoc
@@ -347,15 +315,12 @@ let keeper_memory_health_http_json ~base_path : Yojson.Safe.t =
           ; ( "high_event_ratio_keepers"
             , `Int (alert_count_by_code Events_to_facts_ratio_high) )
           ; "provider_slot_busy_keepers", `Int (alert_count_by_code Provider_slot_busy)
-          ; ( "librarian_fallback_fact_keepers"
-            , `Int (alert_count_by_code Librarian_fallback_facts) )
           ; ( "thresholds"
             , `Assoc
                 [ "ttl_expired_on_disk", `Float ttl_expired_on_disk_threshold
                 ; "near_duplicate", `Float near_duplicate_threshold
                 ; "events_to_facts_ratio", `Float events_to_facts_ratio_warn_threshold
                 ; "provider_slot_busy", `Float provider_slot_busy_threshold
-                ; "librarian_fallback_facts", `Float librarian_fallback_facts_threshold
                 ] )
           ] )
     ]

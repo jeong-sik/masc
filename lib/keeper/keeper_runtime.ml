@@ -322,6 +322,11 @@ let resynced_tool_access
 let drift_if label changed =
   if changed then Some label else None
 
+let goal_text_equal left right =
+  String.equal
+    (Keeper_types_profile.normalize_goal_text left)
+    (Keeper_types_profile.normalize_goal_text right)
+
 let keeper_meta_persistent_drift_categories
     ~(defaults : Keeper_types_profile.keeper_profile_defaults)
     ~(current : keeper_meta)
@@ -346,7 +351,7 @@ let keeper_meta_overlay_drift_categories
     [
       drift_if "proactive" (current.proactive <> target.proactive);
       drift_if "tool_denylist" (current.tool_denylist <> target.tool_denylist);
-      drift_if "goal" (not (goal_horizon_text_equal current.goal target.goal));
+      drift_if "goal" (not (goal_text_equal current.goal target.goal));
       drift_if "autoboot_enabled"
         (current.autoboot_enabled <> target.autoboot_enabled);
       drift_if "mention_targets"

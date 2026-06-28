@@ -760,6 +760,7 @@ let blocked_keeper_operator_action = function
   | Meta_read_error
   | Not_bootable
   | Boot_failure _
+  | Bootstrap_disabled
   | Phase
       ( Keeper_state_machine.Offline
       | Keeper_state_machine.Running

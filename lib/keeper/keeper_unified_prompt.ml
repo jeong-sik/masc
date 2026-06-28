@@ -648,7 +648,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
      under config/prompts/. The OCaml side only computes the boolean toggle
      for each bullet and loads the prose via Prompt_registry; the prose
      itself (and any future edits) stay in the markdown files alongside the
-     other keeper prompts. See lib/keeper_metrics/keeper_prompt_names.ml for
+     other keeper prompts. See lib/keeper_prompt_names/keeper_prompt_names.ml for
      the key set. *)
   let board_activity_guidance =
     load_externalized_bullet

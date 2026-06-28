@@ -92,6 +92,16 @@ end
     [httpun] streaming API.  Every helper closes the response
     body except the 304 path in [html_cached]. *)
 module Response : sig
+  val json_content_type : string
+
+  val content_headers
+    :  ?before_headers:(string * string) list
+    -> ?after_headers:(string * string) list
+    -> ?tail_headers:(string * string) list
+    -> content_type:string
+    -> string
+    -> Httpun.Headers.t
+
   (** Plain-text response.  Default status [`OK].  Sets
       [content-type: text/plain; charset=utf-8] +
       [content-length]. *)

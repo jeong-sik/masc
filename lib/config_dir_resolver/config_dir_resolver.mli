@@ -174,6 +174,13 @@ val config_signature_exists : string -> bool
     [MASC_TEST_ALLOW_CONFIG_PATH_OVERRIDE]. *)
 
 val current_env_base_path_opt : unit -> string option
+
+(** [absolute_path path] returns [path] as an absolute path, resolving
+    relative [path] against the process cwd via [current_working_dir]. Prefer
+    [absolute_path_from ~cwd] when the caller has an explicit anchor so the
+    anchor stays the SSOT. *)
+val absolute_path : string -> string
+
 val current_env_config_dir_opt : unit -> string option
 val current_env_personas_dir_opt : unit -> string option
 

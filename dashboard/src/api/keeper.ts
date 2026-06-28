@@ -479,16 +479,9 @@ function isStaleTokenAuthError(raw: string): boolean {
       return STALE_TOKEN_AUTH_CODES.has(code as DashboardAuthErrorCode)
     }
   } catch {
-    // Not JSON — fall through to the legacy substring fallback below.
+    return false
   }
-  // WORKAROUND: legacy server fallback for servers that predate the typed
-  // `auth_error_code` 401 body. The substring shape comes from
-  // `Auth_error.InvalidToken "Token mismatch"` rendered as
-  // "[AuthError] Invalid token: Token mismatch". removal target: next release.
-  const normalized = raw.toLowerCase()
-  return normalized.includes('autherror')
-    && normalized.includes('invalid token')
-    && normalized.includes('token mismatch')
+  return false
 }
 
 async function refreshLoopbackDevTokenAfterMismatch(): Promise<boolean> {

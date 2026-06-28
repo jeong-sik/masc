@@ -52,10 +52,11 @@ let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_to
 ;;
 
 let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
-  let is_structured_reply =
+  let is_structured_reply, is_synthesized =
     match (state_snapshot_source : Keeper_memory_policy.state_snapshot_source) with
-    | Structured_state_reply -> true
-    | Structured_state_tool | State_block | Synthesized -> false
+    | Structured_state_reply -> true, false
+    | Synthesized -> false, true
+    | Structured_state_tool | State_block -> false, false
   in
   let fallback =
     match
@@ -66,7 +67,7 @@ let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
       Some "State updated."
     | None -> None
   in
-  if is_structured_reply then
+  if is_structured_reply || is_synthesized then
     Keeper_text_processing.user_visible_reply_text ?fallback ""
   else
     match fallback with

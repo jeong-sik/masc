@@ -533,13 +533,17 @@ let string_set_of_list values =
 
 let json_string_list values = Json_util.json_string_list values
 
-let configured_keeper_is_materializable name =
+let configured_keeper_is_materializable ?base_path name =
   try
-    let defaults = Keeper_types_profile.load_keeper_profile_defaults name in
-    (* Exclude loader-only TOMLs such as base.toml from identity drift. *)
-    Option.is_some defaults.persona_name
-    || Option.is_some defaults.goal
-    || defaults.mention_targets <> []
+    let defaults =
+      match base_path with
+      | Some base_path ->
+        Keeper_types_profile.load_keeper_profile_defaults_for_base_path
+          ~base_path
+          name
+      | None -> Keeper_types_profile.load_keeper_profile_defaults name
+    in
+    Keeper_types_profile.keeper_profile_defaults_materializable defaults
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _ -> true
@@ -553,7 +557,8 @@ let keeper_identity_drift_scan config =
   in
   let materializable_configured_names =
     configured_names
-    |> List.filter configured_keeper_is_materializable
+    |> List.filter
+         (configured_keeper_is_materializable ~base_path:config.Workspace.base_path)
     |> sorted_unique_strings
   in
   let configured_set = string_set_of_list materializable_configured_names in

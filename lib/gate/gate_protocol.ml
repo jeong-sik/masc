@@ -50,6 +50,16 @@ let message_request_status_to_string = function
   | Lost -> "lost"
   | Cancelled -> "cancelled"
 
+let message_request_status_of_string = function
+  | "accepted" -> Some Accepted
+  | "queued" -> Some Queued
+  | "running" -> Some Running
+  | "done" -> Some Done
+  | "error" -> Some Failed
+  | "lost" -> Some Lost
+  | "cancelled" -> Some Cancelled
+  | _ -> None
+
 let string_list_json values =
   `List (List.map (fun value -> `String value) values)
 

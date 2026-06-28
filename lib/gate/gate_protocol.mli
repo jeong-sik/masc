@@ -65,6 +65,10 @@ type message_request = {
 }
 
 val message_request_status_to_string : message_request_status -> string
+(** Parse the canonical status labels emitted by [keeper_msg_async].
+    Unknown labels return [None] so callers fail closed instead of silently
+    treating protocol drift as acceptance. *)
+val message_request_status_of_string : string -> message_request_status option
 val message_request_to_json : message_request -> Yojson.Safe.t
 
 (** Successful response to send back to the consumer. *)

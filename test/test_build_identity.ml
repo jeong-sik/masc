@@ -62,6 +62,11 @@ let test_current_started_at_is_stable () =
   Alcotest.(check bool) "uptime monotonic" true
     (second.uptime_seconds >= first.uptime_seconds)
 
+let test_runtime_cwd_is_resolver_backed_snapshot () =
+  let cwd = Build_identity.For_testing.runtime_cwd () in
+  Alcotest.(check bool) "cwd snapshot populated" true (String.length cwd > 0);
+  Alcotest.(check bool) "cwd snapshot absolute" true (not (Filename.is_relative cwd))
+
 let test_current_json_exposes_runtime_binary_identity () =
   let current = Build_identity.current () in
   let json = Build_identity.to_yojson current in
@@ -207,6 +212,8 @@ let () =
             test_resolve_commit_details_marks_repo_head_fallback;
           Alcotest.test_case "current started_at stable" `Quick
             test_current_started_at_is_stable;
+          Alcotest.test_case "runtime cwd snapshot is resolver backed" `Quick
+            test_runtime_cwd_is_resolver_backed_snapshot;
           Alcotest.test_case "current JSON exposes runtime binary identity" `Quick
             test_current_json_exposes_runtime_binary_identity;
           Alcotest.test_case

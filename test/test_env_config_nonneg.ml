@@ -129,6 +129,61 @@ let test_gc_space_overhead_garbage_uses_default () =
   check_int "MASC_GC_SPACE_OVERHEAD garbage -> default 100" 100
     (C.get_int_nonneg ~default:100 "MASC_GC_SPACE_OVERHEAD")
 
+(* ── loud malformed handling (warn by default, strict raises) ──────────
+   A non-empty env value that does not parse is an operator misconfiguration,
+   not a silent fallback. By default the helpers warn and use [default];
+   [MASC_PARSE_WARN] escalates to [Config_error] (fail-fast boot). An empty
+   value stays "unset" (silent default). *)
+
+let raises_config_error f =
+  try
+    ignore (f ());
+    false
+  with C.Config_error _ -> true
+
+let test_get_bool_malformed_uses_default () =
+  with_env "MASC_TEST_PARSE_BOOL_BAD" "flase" @@ fun () ->
+  Alcotest.(check bool) "malformed bool → default true" true
+    (C.get_bool ~default:true "MASC_TEST_PARSE_BOOL_BAD");
+  Alcotest.(check bool) "malformed bool → default false" false
+    (C.get_bool ~default:false "MASC_TEST_PARSE_BOOL_BAD")
+
+let test_get_bool_case_insensitive_synonyms () =
+  with_env "MASC_TEST_PARSE_BOOL_ON" "ON" @@ fun () ->
+  Alcotest.(check bool) "ON → true" true
+    (C.get_bool ~default:false "MASC_TEST_PARSE_BOOL_ON");
+  with_env "MASC_TEST_PARSE_BOOL_OFF" "Off" @@ fun () ->
+  Alcotest.(check bool) "Off → false" false
+    (C.get_bool ~default:true "MASC_TEST_PARSE_BOOL_OFF")
+
+let test_empty_value_is_unset_default () =
+  with_env "MASC_TEST_PARSE_EMPTY_INT" "" @@ fun () ->
+  check_int "empty int → default (silent)" 5
+    (C.get_int ~default:5 "MASC_TEST_PARSE_EMPTY_INT");
+  with_env "MASC_TEST_PARSE_EMPTY_BOOL" "" @@ fun () ->
+  Alcotest.(check bool) "empty bool → default (silent)" true
+    (C.get_bool ~default:true "MASC_TEST_PARSE_EMPTY_BOOL")
+
+(* Non-vacuous: on the pre-fix code [get_int]/[get_bool] silently return the
+   default on a malformed value, so [raises_config_error] would be [false] and
+   these turn red. Strict mode is the behavioral change under test. *)
+let test_strict_mode_raises_on_malformed () =
+  with_env "MASC_PARSE_WARN" "1" @@ fun () ->
+  ( with_env "MASC_TEST_PARSE_STRICT_INT" "notanint" @@ fun () ->
+    Alcotest.(check bool) "strict + malformed int raises Config_error" true
+      (raises_config_error (fun () ->
+           C.get_int ~default:0 "MASC_TEST_PARSE_STRICT_INT")) );
+  with_env "MASC_TEST_PARSE_STRICT_BOOL" "definitely-not-bool" @@ fun () ->
+  Alcotest.(check bool) "strict + malformed bool raises Config_error" true
+    (raises_config_error (fun () ->
+         C.get_bool ~default:true "MASC_TEST_PARSE_STRICT_BOOL"))
+
+let test_non_strict_malformed_does_not_raise () =
+  with_env "MASC_PARSE_WARN" "0" @@ fun () ->
+  with_env "MASC_TEST_PARSE_NONSTRICT_INT" "notanint" @@ fun () ->
+  check_int "non-strict malformed int → default, no raise" 9
+    (C.get_int ~default:9 "MASC_TEST_PARSE_NONSTRICT_INT")
+
 (* ── runner ───────────────────────────────────────────────────────── *)
 
 let () =
@@ -172,5 +227,18 @@ let () =
             `Quick test_snapshot_interval_garbage_uses_default;
           Alcotest.test_case "MASC_GC_SPACE_OVERHEAD garbage → default"
             `Quick test_gc_space_overhead_garbage_uses_default;
+        ] );
+      ( "loud_malformed_handling",
+        [
+          Alcotest.test_case "malformed bool → default" `Quick
+            test_get_bool_malformed_uses_default;
+          Alcotest.test_case "bool case-insensitive synonyms" `Quick
+            test_get_bool_case_insensitive_synonyms;
+          Alcotest.test_case "empty value → default (silent)" `Quick
+            test_empty_value_is_unset_default;
+          Alcotest.test_case "strict mode raises on malformed" `Quick
+            test_strict_mode_raises_on_malformed;
+          Alcotest.test_case "non-strict malformed does not raise" `Quick
+            test_non_strict_malformed_does_not_raise;
         ] );
     ]

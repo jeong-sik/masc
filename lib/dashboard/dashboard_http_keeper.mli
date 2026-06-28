@@ -35,8 +35,9 @@ val keeper_count : Workspace.config -> int
 (** Total keepers visible in [config.base_path] meta. *)
 
 val configured_keeper_count : Workspace.config -> int
-(** Total declarative runtime keeper profiles discovered from keeper TOML.
-    Loader-level templates such as [base.toml] are excluded. *)
+(** Total materializable declarative runtime keeper profiles discovered from
+    keeper TOML. Loader-level templates are excluded only when they do not opt
+    into runtime materialization, e.g. via [autoboot_enabled=true]. *)
 
 val keeper_names : Workspace.config -> string list
 (** Keeper names visible in [config.base_path] meta. *)

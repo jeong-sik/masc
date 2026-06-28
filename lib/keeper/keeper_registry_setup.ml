@@ -589,6 +589,9 @@ let reload_meta_from_disk ~base_path name =
   | Error msg -> Error msg
   | Ok None -> Ok None
   | Ok (Some meta) -> (
+      let meta =
+        canonicalize_registry_meta ~operation:"reload_meta_from_disk" ~base_path name meta
+      in
       let defaults = load_keeper_profile_defaults_for_base_path ~base_path name in
       match effective_meta_of_profile_defaults defaults meta with
       | Error msg -> Error msg

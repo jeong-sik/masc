@@ -8,6 +8,8 @@ open Alcotest
 module DH = Discovery_history
 module P = Masc.Otel_metric_store
 
+let () = Masc.Workspace_metric_hooks.install ()
+
 let metric_discovery_history_failures = P.metric_discovery_history_failures
 
 let make ~models : DH.probe_record = {

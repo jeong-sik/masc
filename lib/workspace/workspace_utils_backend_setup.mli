@@ -34,6 +34,7 @@ val is_unresolved_template : string -> bool
 val env_opt : string -> string option
 val sanitize_namespace_segment : string -> string
 val backend_config_for : string -> Backend_types.config
+val memory_backend_fallback : Backend_types.config -> storage_backend
 val create_backend : Backend_types.config -> (storage_backend, Backend_types.error) result
 val reset_default_config_cache : unit -> unit
 val build_default_config : string -> config

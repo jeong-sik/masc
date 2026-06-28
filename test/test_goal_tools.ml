@@ -117,6 +117,12 @@ let get_string_field json field =
   | _ -> fail (field ^ " missing")
 ;;
 
+let get_error_message_field json =
+  match Yojson.Safe.Util.member "message" json with
+  | `String value -> value
+  | _ -> get_string_field json "error"
+;;
+
 let get_optional_string_field json field =
   match Yojson.Safe.Util.member field json with
   | `String value -> Some value
@@ -1303,7 +1309,7 @@ let test_goal_verify_rejects_inactive_request_id () =
   check string "inactive request rejected" "conflict"
     (get_string_field error_json "error_code");
   check string "inactive request error" "goal verification request is not active on this goal"
-    (get_string_field error_json "message");
+    (get_error_message_field error_json);
   let saved_request =
     match Goal_verification.find_request config ~request_id:request.id with
     | Some request -> request
@@ -1386,7 +1392,7 @@ let test_goal_verify_rejects_non_active_request_id () =
   check string "non-active request rejected" "conflict"
     (get_string_field error_json "error_code");
   check string "non-active request error" "goal verification request is not active on this goal"
-    (get_string_field error_json "message");
+    (get_error_message_field error_json);
   let saved_goal =
     match Goal_store.get_goal config ~goal_id:goal.id with
     | Some goal -> goal

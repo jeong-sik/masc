@@ -944,7 +944,11 @@ let test_self_cadence_tombstone_suppresses_autonomous_turn () =
    reasons. If the world did not request a turn, do not consult/report the
    tombstone — otherwise idle cycles look tombstoned in metrics. *)
 let test_self_cadence_tombstone_not_reported_when_no_turn_requested () =
-  let meta = make_meta "r2b-self-cadence-idle" in
+  let meta =
+    make_meta "r2b-self-cadence-idle"
+    |> Masc.Keeper_meta_contract.map_proactive_rt (fun rt ->
+      { rt with last_ts = Time_compat.now () })
+  in
   let suppress_everything ~origin:_ ~keeper_name:_ =
     Masc.Keeper_wake_tombstone.Suppressed
       Masc.Keeper_wake_tombstone.Tombstoned_no_progress_loop

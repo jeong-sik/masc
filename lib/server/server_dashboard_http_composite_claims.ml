@@ -20,6 +20,7 @@ let compact_receipt_runtime_json = Server_dashboard_compact_receipt_json.compact
 let json_number = Server_dashboard_http_json_utils.json_number
 let json_assoc = Server_dashboard_http_json_utils.json_assoc
 let string_has_prefix = Server_dashboard_http_json_utils.string_has_prefix
+module Completion_contract_result = Keeper_completion_contract_result_label
 
 let tool_call_output_text json =
   match json_member "output" json with
@@ -225,9 +226,7 @@ let lower_string_opt =
 
 let completion_contract_result_of_execution execution =
   match json_string "completion_contract_result" execution with
-  | Some raw ->
-    Keeper_execution_receipt_types.completion_contract_result_of_string
-      (String.lowercase_ascii (String.trim raw))
+  | Some raw -> Completion_contract_result.of_string raw
   | None -> None
 ;;
 
@@ -324,9 +323,12 @@ let composite_execution_contract_blocker_reason execution =
   then None
   else
     match completion_contract_result_of_execution execution with
-    | Some ((Contract_surface_mismatch | Contract_no_capable_provider) as result) ->
-      Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
-    | Some _ | None -> None
+    | Some
+        ( Completion_contract_result.Surface_mismatch
+        | Completion_contract_result.No_capable_provider as result ) ->
+      Some
+        ("completion_contract_result:" ^ Completion_contract_result.to_string result)
+    | _ -> None
 ;;
 
 let composite_execution_contract_blocked execution =
@@ -347,21 +349,31 @@ let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_a
 let composite_execution_completion_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
   | Some
-      ((Contract_violated | Contract_claim_only_after_owned_task
-       | Contract_needs_execution_progress | Contract_passive_only) as result) ->
-    Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
-  | Some _ | None -> None
+      ( Completion_contract_result.Violated
+      | Completion_contract_result.Claim_only_after_owned_task
+      | Completion_contract_result.Needs_execution_progress
+      | Completion_contract_result.Passive_only as result ) ->
+    Some ("completion_contract_result:" ^ Completion_contract_result.to_string result)
+  | Some _
+  | None -> None
 ;;
 
 let composite_execution_budget_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
   | Some
-      ((Contract_unknown | Contract_not_dispatched | Contract_violated
-       | Contract_surface_mismatch | Contract_no_capable_provider
-       | Contract_claim_only_after_owned_task | Contract_needs_execution_progress
-       | Contract_passive_only) as result) ->
-    Some (Keeper_execution_receipt_types.completion_contract_result_to_string result)
-  | Some _ | None -> None
+      (* TEL-OK: pure dashboard classifier; maps typed receipt labels to a
+         display reason without performing an action. *)
+      ( Completion_contract_result.Unknown
+      | Completion_contract_result.Not_dispatched (* TEL-OK: pure classifier. *)
+      | Completion_contract_result.Violated
+      | Completion_contract_result.Surface_mismatch
+      | Completion_contract_result.No_capable_provider
+      | Completion_contract_result.Claim_only_after_owned_task
+      | Completion_contract_result.Needs_execution_progress
+      | Completion_contract_result.Passive_only as result ) ->
+    Some ("completion_contract_result:" ^ Completion_contract_result.to_string result)
+  | Some _
+  | None -> None
 ;;
 
 let composite_execution_turn_budget_exhausted execution =

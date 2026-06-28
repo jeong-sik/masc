@@ -17,6 +17,9 @@ open Alcotest
 module Aek = Masc.Auth_error_kind
 module Sda = Masc.Silent_dashboard_actor_outcome
 
+let with_eio_runtime f =
+  Eio_main.run @@ fun _env -> f ()
+
 (* ----- Outcome_none: byte-equivalent log message --------------------- *)
 
 let test_outcome_none_log_message_byte_equivalent () =
@@ -262,7 +265,7 @@ let test_outcome_none_increments_counter () =
   let fb : Aek.dashboard_actor_fallback =
     { outcome = Aek.Outcome_none; token_hash_prefix = "feedface" }
   in
-  Server_auth.record_dashboard_actor_fallback fb;
+  with_eio_runtime (fun () -> Server_auth.record_dashboard_actor_fallback fb);
   let after =
     Metrics.metric_value_or_zero
       Metrics.metric_silent_dashboard_actor_fallback ~labels ()
@@ -291,7 +294,7 @@ let test_outcome_error_increments_counter_with_err_kind () =
     ; token_hash_prefix = "feedface"
     }
   in
-  Server_auth.record_dashboard_actor_fallback fb;
+  with_eio_runtime (fun () -> Server_auth.record_dashboard_actor_fallback fb);
   let after =
     Metrics.metric_value_or_zero
       Metrics.metric_silent_dashboard_actor_fallback ~labels ()

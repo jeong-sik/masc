@@ -403,11 +403,11 @@ let trace_row_of_group
     match a.ts, b.ts with
     | Some a_ts, Some b_ts ->
       let by_ts = Float.compare a_ts b_ts in
-      if by_ts <> 0 then by_ts else compare a.turn b.turn
+      if by_ts <> 0 then by_ts else Int.compare a.turn b.turn
     | Some _, None -> 1
     | None, Some _ -> -1
     | None, None ->
-      let by_turn = compare a.turn b.turn in
+      let by_turn = Int.compare a.turn b.turn in
       if by_turn <> 0 then by_turn else String.compare a.keeper_id b.keeper_id
   in
   let records = List.sort compare_record records in

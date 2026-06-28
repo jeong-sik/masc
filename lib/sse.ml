@@ -60,6 +60,7 @@ let registration_error_to_string = function
 
 (** Classification of an SSE session's traffic role. *)
 module SMap = Set_util.StringMap
+module IntMap = Map.Make (Int)
 
 (* Test-only hooks for forcing a CAS retry in white-box unit tests. *)
 let register_commit_test_hook : (unit -> unit) option Atomic.t = Atomic.make None
@@ -147,8 +148,6 @@ let session_kind_to_string = function
   | Observer -> "observer"
   | Agent_stream -> "agent_stream"
   | Presence -> "presence"
-
-let take = List.take
 
 (** Minimum interval between full transport snapshot computations (seconds).
     The snapshot iterates all SSE clients and builds per-session records;
@@ -256,8 +255,9 @@ let event_counter = Atomic.make 0
 
     [event_buffer] is written by every [broadcast_impl] / [send_to] and
     drained by the periodic [cleanup_expired_events] background fiber.
-    The buffer is a newest-first persistent list behind [Atomic.t];
-    all mutations are pure list rewrites committed via CAS.
+    The buffer is an immutable [event_id -> event] map plus a linearized
+    count behind one [Atomic.t]; all mutations are pure map rewrites committed
+    via CAS.
 
     Read from [MASC_SSE_REPLAY_BUFFER_SIZE] (default 1000, clamped 50..1000).
     Sized to bound replay work for clients reconnecting with [Last-Event-Id]
@@ -272,28 +272,57 @@ let max_buffer_size =
   clamp
     (Env_config_core.get_int ~default "MASC_SSE_REPLAY_BUFFER_SIZE")
 let buffer_ttl_seconds = Env_config.InternalTimers.sse_buffer_ttl_sec
-let event_buffer : (int * string * float) list Atomic.t = Atomic.make []
+
+type buffered_event = int * string * float
+
+type event_buffer_state = {
+  events_by_id : buffered_event IntMap.t;
+  count : int;
+}
+
+let empty_event_buffer_state = { events_by_id = IntMap.empty; count = 0 }
+
+let event_buffer : event_buffer_state Atomic.t =
+  Atomic.make empty_event_buffer_state
+
+let event_buffer_state_of_events events =
+  let events_by_id =
+    List.fold_left
+      (fun acc (((event_id, _, _) as event) : buffered_event) ->
+         IntMap.add event_id event acc)
+      IntMap.empty events
+  in
+  { events_by_id; count = IntMap.cardinal events_by_id }
+
+let event_buffer_events_newest_first state =
+  state.events_by_id |> IntMap.bindings |> List.rev_map snd
+
+let event_buffer_events_for_test () =
+  Atomic.get event_buffer |> event_buffer_events_newest_first
+
+let set_event_buffer_for_test events =
+  Atomic.set event_buffer (event_buffer_state_of_events events)
+
+let rewrite_event_buffer_for_test () =
+  Lockfree_atomic.update event_buffer (fun state ->
+    { state with count = state.count })
 
 (** Add event to buffer, maintaining max size *)
 let buffer_event event_id event_str =
-  Lockfree_atomic.update_with_commit event_buffer (fun lst ->
+  Lockfree_atomic.update_with_commit event_buffer (fun state ->
     run_test_hook buffer_commit_test_hook;
     let timestamp = Time_compat.now () in
-    let next = (event_id, event_str, timestamp) :: lst in
-    (* [buffer_event] runs on the broadcast hot path. [List.take] always
-       allocates a fresh list up to [max_buffer_size], so calling it
-       unconditionally pays an O(max_buffer_size) copy on every broadcast
-       even when the buffer is well below the cap (startup, after cleanup,
-       low-traffic periods). [List.compare_length_with] only walks the list
-       and short-circuits at the threshold with no allocation, so gate the
-       [take] copy behind it and reuse the existing list on the under-cap
-       path. *)
-    let trimmed =
-      if List.compare_length_with next max_buffer_size > 0 then
-        take max_buffer_size next
-      else next
+    let event = (event_id, event_str, timestamp) in
+    let replacing = IntMap.mem event_id state.events_by_id in
+    let events_by_id = IntMap.add event_id event state.events_by_id in
+    let count = if replacing then state.count else state.count + 1 in
+    let events_by_id, count =
+      if count <= max_buffer_size then events_by_id, count
+      else
+        let oldest_id, _oldest = IntMap.min_binding events_by_id in
+        IntMap.remove oldest_id events_by_id, count - 1
     in
-    { next_state = trimmed; result = () })
+    { next_state = { events_by_id; count }; result = () })
 
 let event_matches_session_kind kind event =
   match kind with
@@ -303,19 +332,9 @@ let event_matches_session_kind kind event =
 
 (** Get events after given ID for replay (MCP spec MUST) *)
 let get_events_after last_id =
-  let lst = Atomic.get event_buffer in
-  (* [event_buffer] is newest-first (each [buffer_event] [cons]es onto
-     the head).  Folding it left-to-right and prepending every match to
-     [acc] visits newest first and pushes oldest last, so [acc] ends as
-     oldest-first directly — no surrounding [List.rev] needed.
-
-     The previous shape was [List.rev lst |> fold prepend |> List.rev],
-     which walked the buffer three times to produce the same result.
-     Each SSE replay (client reconnect with [Last-Event-Id]) saves
-     2 × O(buffer) over the old form; max_buffer_size=1000. *)
-  List.fold_left (fun acc (id, ev, _ts) ->
-    if id > last_id then ev :: acc else acc
-  ) [] lst
+  let state = Atomic.get event_buffer in
+  let _older_or_equal, _at_last_id, newer = IntMap.split last_id state.events_by_id in
+  newer |> IntMap.bindings |> List.map (fun (_id, (_event_id, ev, _ts)) -> ev)
 
 let get_events_after_for_kind kind last_id =
   get_events_after last_id
@@ -325,18 +344,19 @@ let get_events_after_for_kind kind last_id =
     Returns count of evicted events. *)
 let cleanup_expired_events () =
   let now = Time_compat.now () in
-  Lockfree_atomic.update_with_commit event_buffer (fun lst ->
-    let remaining_oldest_first, evicted =
-      List.fold_left
-        (fun (kept, evicted) (((_id, _ev, ts) as item) : int * string * float) ->
+  Lockfree_atomic.update_with_commit event_buffer (fun state ->
+    let events_by_id, evicted =
+      IntMap.fold
+        (fun id (((_event_id, _ev, ts) as item) : buffered_event) (kept, evicted) ->
           if now -. ts > buffer_ttl_seconds then
             (kept, evicted + 1)
           else
-            (item :: kept, evicted))
-        ([], 0) lst
+            (IntMap.add id item kept, evicted))
+        state.events_by_id
+        (IntMap.empty, 0)
     in
     {
-      next_state = List.rev remaining_oldest_first;
+      next_state = { events_by_id; count = IntMap.cardinal events_by_id };
       result = evicted;
     })
 

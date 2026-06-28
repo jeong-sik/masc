@@ -32,6 +32,7 @@ let target_files =
 
 let status_detail_file = "lib/keeper/keeper_status_detail.ml"
 let keeper_up_update_file = "lib/keeper/keeper_turn_up_update.ml"
+let heartbeat_presence_file = "lib/keeper/keeper_heartbeat_loop_presence.ml"
 
 let metric_name = "Keeper_metrics.(to_string PausedStatePersistErrors)"
 
@@ -305,6 +306,18 @@ let test_keeper_status_disposition_mirrors_runtime_trust () =
        src
     >= 1)
 
+let test_heartbeat_presence_uses_cas_retry_merge () =
+  let src = load_source heartbeat_presence_file in
+  check bool "heartbeat presence uses CAS retry writer" true
+    (count_occurrences ~needle:"write_meta_with_merge" src >= 1);
+  check bool "heartbeat presence preserves disk-owned heartbeat fields" true
+    (count_occurrences
+       ~needle:"Keeper_meta_merge.heartbeat_fields_from_disk"
+       src
+     >= 1);
+  check int "plain heartbeat write_meta call removed" 0
+    (count_occurrences ~needle:"match write_meta ctx.config synced" src)
+
 let () =
   run "keeper_pause_silent_failure_source"
     [ ( "issue-8391-high-1"
@@ -331,5 +344,7 @@ let () =
             test_bulk_directive_partial_failure_observable
         ; test_case "keeper status mirrors runtime-trust disposition" `Quick
             test_keeper_status_disposition_mirrors_runtime_trust
+        ; test_case "heartbeat presence uses CAS retry merge" `Quick
+            test_heartbeat_presence_uses_cas_retry_merge
         ] )
     ]

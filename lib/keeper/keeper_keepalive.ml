@@ -369,6 +369,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
         ();
       log_directive_agent_not_in_registry ~agent_name ~action:"claim")
     (fun entry ->
+       let task_id_string = Keeper_id.Task_id.to_string task_id in
        let updated_meta =
          { entry.meta with current_task_id = Some task_id; updated_at = now_iso () }
        in
@@ -381,7 +382,7 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
          Log.Keeper.error
            "directive claim: meta persist failed for %s task=%s: %s"
            entry.name
-           task_id
+           task_id_string
            err
        | Ok () ->
          (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action

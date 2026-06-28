@@ -552,8 +552,7 @@ let test_resume_directive_persist_failure_keeps_completion_contract_pause () =
        let keeper_json_path =
          Filename.concat
            (Filename.concat
-              (Masc.Workspace_utils.masc_dir_from_base_path
-                 ~base_path:config.base_path)
+              (Common.masc_dir_from_base_path ~base_path:config.base_path)
               "keepers")
            (keeper_name ^ ".json")
        in

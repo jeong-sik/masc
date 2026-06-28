@@ -66,6 +66,24 @@ let test_rewrite_strips_repos_prefix_at_worktree () =
     (Some "path/inside")
     (rewrite ~cwd "repos/foo/path/inside")
 
+let test_rewrite_exact_repo_root_to_dot () =
+  let cwd = "/home/keeper/.masc/playground/cheolsu/repos/foo" in
+  check (option string)
+    "exact repos/<repo> duplicate prefix rewrites to dot"
+    (Some ".")
+    (rewrite ~cwd "repos/foo");
+  check (option string)
+    "exact repos/<repo>/ duplicate prefix rewrites to dot"
+    (Some ".")
+    (rewrite ~cwd "repos/foo/")
+
+let test_rewrite_rejects_parent_traversal_suffix () =
+  let cwd = "/home/keeper/.masc/playground/cheolsu/repos/foo" in
+  check (option string)
+    "duplicate prefix rewrite does not suggest traversal"
+    None
+    (rewrite ~cwd "repos/foo/../bar")
+
 let test_rewrite_noop_for_unrelated_path () =
   let cwd = "/home/keeper/.masc/playground/cheolsu/repos/foo" in
   check (option string)
@@ -113,6 +131,14 @@ let () =
             "strips duplicate repos prefix at worktree cwd"
             `Quick
             test_rewrite_strips_repos_prefix_at_worktree
+        ; test_case
+            "exact duplicate repo root rewrites to dot"
+            `Quick
+            test_rewrite_exact_repo_root_to_dot
+        ; test_case
+            "duplicate prefix traversal is not rewritten"
+            `Quick
+            test_rewrite_rejects_parent_traversal_suffix
         ; test_case
             "unrelated path is unchanged"
             `Quick

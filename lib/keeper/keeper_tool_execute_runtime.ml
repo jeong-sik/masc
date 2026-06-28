@@ -54,16 +54,39 @@ let path_contains_glob_meta s =
 let resolve_against_cwd ~cwd path =
   if Filename.is_relative path then Filename.concat cwd path else path
 
+let strip_trailing_slash s =
+  let len = String.length s in
+  if len > 0 && Char.equal s.[len - 1] '/' then String.sub s 0 (len - 1) else s
+
+let path_contains_parent_component path =
+  path_components path |> List.exists (String.equal "..")
+
 let repo_cwd_relative_rewrite ~cwd path_argument =
   let cwd = String.trim cwd in
   let path_argument = String.trim path_argument in
   match repo_root_public_prefix_from_cwd cwd with
-  | Some prefix
-    when Filename.is_relative path_argument
-         && String.starts_with ~prefix path_argument ->
-    Some
-      (String.sub path_argument (String.length prefix)
-         (String.length path_argument - String.length prefix))
+  | Some prefix when Filename.is_relative path_argument ->
+    let repo_root = strip_trailing_slash prefix in
+    let relative_path =
+      if String.equal path_argument repo_root || String.equal path_argument prefix
+      then Some "."
+      else if String.starts_with ~prefix path_argument
+      then
+        let suffix =
+          String.sub path_argument (String.length prefix)
+            (String.length path_argument - String.length prefix)
+        in
+        let suffix =
+          if String.starts_with ~prefix:"/" suffix
+          then String.sub suffix 1 (String.length suffix - 1)
+          else suffix
+        in
+        Some (if String.equal suffix "" then "." else suffix)
+      else None
+    in
+    (match relative_path with
+     | Some path when path_contains_parent_component path -> None
+     | other -> other)
   | Some _ | None -> None
 
 let path_mentions_masc_state path_argument =

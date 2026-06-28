@@ -5,6 +5,7 @@ module Memory_subsystems = Server_dashboard_http_memory_subsystems
 module Memory_io = Masc.Keeper_memory_os_io
 module P = Masc.Procedural_memory
 module Projection = Masc.Skill_candidate_projection
+module Recall_ledger = Masc.Keeper_recall_injection_ledger
 module Store = Masc.Skill_candidate_store
 module Delegation_request = Masc.Keeper_delegation_request
 module Delegation_store = Masc.Keeper_delegation_request_store
@@ -296,6 +297,191 @@ let shared_fact ?(observed_by = []) ?(last_verified_at = 10.0) claim : Types.fac
   }
 ;;
 
+let append_recall_record
+      ?failure_reason
+      ~(config : Workspace_utils.config)
+      ~keeper_id
+      ~trace_id
+      ~turn
+      ~injected_fact_keys
+      ~injected_episode_keys
+      ~n_facts_in_store
+      ()
+  =
+  let masc_root = Workspace_utils.masc_dir config in
+  let store =
+    Dated_jsonl.create
+      ~base_dir:(Recall_ledger.base_dir ~masc_root)
+      ()
+  in
+  Recall_ledger.to_json
+    ?failure_reason
+    ~keeper_id
+    ~trace_id
+    ~turn
+    ~injected_fact_keys
+    ~injected_episode_keys
+    ~n_facts_in_store
+    ~now:(float_of_int turn)
+    ()
+  |> Dated_jsonl.append store
+;;
+
+let append_malformed_recall_record ~(config : Workspace_utils.config) =
+  let masc_root = Workspace_utils.masc_dir config in
+  let store =
+    Dated_jsonl.create
+      ~base_dir:(Recall_ledger.base_dir ~masc_root)
+      ()
+  in
+  Dated_jsonl.append
+    store
+    (`Assoc
+      [ "keeper_id", `String "keeper-bad"
+      ; "injected_fact_keys", `List [ `Int 1 ]
+      ; "injected_episode_keys", `List []
+      ])
+;;
+
+let legacy_unstructured_fallback_fact_key () =
+  Types.claim_identity
+    (fact (Types.librarian_unstructured_fallback_claim_prefix ^ " (provider): raw"))
+;;
+
+let test_http_json_surfaces_memory_quality_summary () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       let fallback_key = legacy_unstructured_fallback_fact_key () in
+       append_recall_record
+         ~config
+         ~keeper_id:"keeper-a"
+         ~trace_id:"trace-1"
+         ~turn:1
+         ~injected_fact_keys:[ "id:stable"; fallback_key ]
+         ~injected_episode_keys:[]
+         ~n_facts_in_store:10
+         ();
+       append_recall_record
+         ~config
+         ~keeper_id:"keeper-a"
+         ~trace_id:"trace-2"
+         ~turn:2
+         ~injected_fact_keys:[ "id:stable" ]
+         ~injected_episode_keys:[ "trace-2:g0" ]
+         ~n_facts_in_store:10
+         ();
+       append_recall_record
+         ~failure_reason:"prompt_render_error"
+         ~config
+         ~keeper_id:"keeper-b"
+         ~trace_id:"trace-3"
+         ~turn:3
+         ~injected_fact_keys:[]
+         ~injected_episode_keys:[]
+         ~n_facts_in_store:0
+         ();
+       let json =
+         Memory_subsystems.dashboard_memory_subsystems_http_json
+           ~config
+           ~include_memory_entries:false
+           (request "/dashboard/memory-subsystems?limit=100")
+       in
+       let quality = Json.(json |> member "memory_quality") in
+       check string "quality schema" "masc.memory_quality.recall_ledger.v1"
+         Json.(quality |> member "schema" |> to_string);
+       check int "sampled records" 3
+         Json.(quality |> member "sampled_records" |> to_int);
+       check int "records with recall" 2
+         Json.(quality |> member "records_with_recall" |> to_int);
+       check int "empty recall records" 1
+         Json.(quality |> member "empty_recall_records" |> to_int);
+       check int "failure records" 1
+         Json.(quality |> member "failure_records" |> to_int);
+       check int "decode error records" 0
+         Json.(quality |> member "decode_error_records" |> to_int);
+       check bool "outcome not joined in dashboard summary" false
+         Json.(quality |> member "outcome_joined" |> to_bool);
+       let fact_injections = Json.(quality |> member "fact_injections") in
+       check int "total fact injections" 3
+         Json.(fact_injections |> member "total" |> to_int);
+       check int "unique fact keys" 2
+         Json.(fact_injections |> member "unique_fact_keys" |> to_int);
+       check int "echoed fact keys" 1
+         Json.(fact_injections |> member "echoed_fact_keys" |> to_int);
+       check int "max fact echo count" 2
+         Json.(fact_injections |> member "max_fact_echo_count" |> to_int);
+       check int "legacy diagnostic fallback injections" 1
+         Json.(fact_injections |> member "diagnostic_fallback_key_injections" |> to_int);
+       let echoed = Json.(fact_injections |> member "top_echoed_fact_keys" |> to_list) in
+       check int "one echoed top key" 1 (List.length echoed);
+       let top_echo = List.hd echoed in
+       check string "top echoed key" "id:stable"
+         Json.(top_echo |> member "key" |> to_string);
+       check int "top echoed count" 2
+         Json.(top_echo |> member "count" |> to_int);
+       let reasons = Json.(quality |> member "failure_reasons" |> to_list) in
+       check int "one failure reason" 1 (List.length reasons);
+       let reason = List.hd reasons in
+       check string "failure reason key" "prompt_render_error"
+         Json.(reason |> member "key" |> to_string);
+       check int "failure reason count" 1
+         Json.(reason |> member "count" |> to_int))
+;;
+
+let test_http_json_surfaces_memory_quality_decode_errors () =
+  let dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> rm_rf dir)
+    (fun () ->
+       let config = Workspace_utils.default_config dir in
+       append_recall_record
+         ~failure_reason:"free-form provider detail that must not become a label"
+         ~config
+         ~keeper_id:"keeper-a"
+         ~trace_id:"trace-1"
+         ~turn:1
+         ~injected_fact_keys:[ "id:stable" ]
+         ~injected_episode_keys:[]
+         ~n_facts_in_store:1
+         ();
+       append_malformed_recall_record ~config;
+       let json =
+         Memory_subsystems.dashboard_memory_subsystems_http_json
+           ~config
+           ~include_memory_entries:false
+           (request
+              "/dashboard/memory-subsystems?limit=100&memory_quality_limit=10&memory_quality_top_key_limit=1")
+       in
+       let quality = Json.(json |> member "memory_quality") in
+       check int "sample limit from query" 10
+         Json.(quality |> member "sample_limit" |> to_int);
+       check int "one decoded record" 1
+         Json.(quality |> member "sampled_records" |> to_int);
+       check int "one decode error record" 1
+         Json.(quality |> member "decode_error_records" |> to_int);
+       let reasons = Json.(quality |> member "failure_reasons" |> to_list) in
+       check int "one bounded failure reason" 1 (List.length reasons);
+       let reason = List.hd reasons in
+       check
+         string
+         "unknown reason is grouped"
+         Recall_ledger.failure_reason_unknown_label
+         Json.(reason |> member "key" |> to_string);
+       check int "unknown reason count" 1
+         Json.(reason |> member "count" |> to_int);
+       let top_echoed =
+         Json.(
+           quality
+           |> member "fact_injections"
+           |> member "top_echoed_fact_keys"
+           |> to_list)
+       in
+       check int "top key limit applies" 0 (List.length top_echoed))
+;;
+
 let test_http_json_hebbian_derives_from_shared_facts () =
   let dir = temp_dir () in
   Fun.protect
@@ -413,6 +599,14 @@ let () =
             "hebbian derives from shared facts"
             `Quick
             test_http_json_hebbian_derives_from_shared_facts
+        ; test_case
+            "surfaces memory quality summary"
+            `Quick
+            test_http_json_surfaces_memory_quality_summary
+        ; test_case
+            "surfaces memory quality decode errors"
+            `Quick
+            test_http_json_surfaces_memory_quality_decode_errors
         ; test_case
             "hebbian empty without shared facts"
             `Quick

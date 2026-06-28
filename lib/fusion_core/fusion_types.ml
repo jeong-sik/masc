@@ -72,6 +72,7 @@ type panel_failure =
 let panel_failure_of_yojson = function
   | `String "Timeout" -> Ok Timeout
   | `String "Empty_response" -> Ok (Empty_response "empty response")
+  | `List [ `String "Timeout" ] -> Ok Timeout
   | `List [ `String "Provider_error"; `String detail ] -> Ok (Provider_error detail)
   | `List [ `String "Empty_response"; `String detail ] -> Ok (Empty_response detail)
   | `List [ `String "Invalid_max_output_tokens"; `Int value ] ->

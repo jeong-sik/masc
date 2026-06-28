@@ -69,7 +69,7 @@ let test_local_tests_pass_runs_in_local_target () =
   check bool
     "local command evidence satisfied"
     true
-    (Probe.all_satisfied ~config ~meta [ tests_pass "pwd" ])
+    (Probe.all_satisfied ~config ~meta [ tests_pass "test 1 = 1" ])
 
 let test_docker_without_factory_does_not_fall_back_to_host () =
   with_fixture ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -77,7 +77,7 @@ let test_docker_without_factory_does_not_fall_back_to_host () =
   check bool
     "docker command evidence without factory stays indeterminate"
     false
-    (Probe.all_satisfied ~config ~meta [ tests_pass "pwd" ])
+    (Probe.all_satisfied ~config ~meta [ tests_pass "test 1 = 1" ])
 
 let () =
   run

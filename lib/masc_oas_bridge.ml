@@ -3,8 +3,8 @@
     Enforces strict structural timeouts, cancellation safety, and type isolation. *)
 
 (** Safe execution of a generic OAS operation.
-    Applies timeout handling when an Eio clock is available, and converts
-    [Eio.Time.Timeout] into an error result.
+    Requires a domain-local Eio clock, applies timeout handling, and
+    converts [Eio.Time.Timeout] into an error result.
     [Eio.Cancel.Cancelled] is always re-raised to preserve structured concurrency.
 
     [caller] (#10094) is a free-form identifier
@@ -14,7 +14,7 @@
     [~caller] explicitly or use {!run_with_caller}, which accepts a
     typed caller and pulls the configured budget from
     [Env_config_oas_bridge]. *)
-let min_timeout_s = 0.0
+let timeout_overshoot_warn_ratio = 2.0
 
 let run_safe ~caller ~timeout_s fn =
   if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0 then
@@ -23,36 +23,30 @@ let run_safe ~caller ~timeout_s fn =
          "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
           (got %.6g)"
          timeout_s);
-  let clock_opt =
-    match Masc_eio_env.get_opt () with
-    | Some { clock; _ } -> clock
-    | None -> None
-  in
-  let t0 =
-    match clock_opt with
-    | Some clock -> Eio.Time.now clock
-    | None -> Unix.gettimeofday ()
-  in
-  let elapsed () =
-    match clock_opt with
-    | Some clock -> Eio.Time.now clock -. t0
-    | None -> Unix.gettimeofday () -. t0
-  in
-  let do_timeout fn =
-    match clock_opt with
-    | Some clock -> Eio.Time.with_timeout_exn clock timeout_s fn
-    | None ->
-      (* #18476: defensive — server bootstrap always provides a clock,
-         but if reached without one, the timeout is unenforceable. *)
-      Log.Misc.warn
-        "masc_oas_bridge.run_safe: no Eio clock available, running \
-         without timeout enforcement (caller=%s, budget=%.1fs)"
-        caller timeout_s;
-      fn ()
-  in
-  try
-    do_timeout fn
-  with
+  match Masc_eio_env.get_opt () with
+  | None ->
+    let message =
+      Printf.sprintf
+        "Masc_oas_bridge.run_safe: Eio environment not initialized; refusing \
+         to run without timeout enforcement (caller=%s, budget=%.1fs)"
+        caller timeout_s
+    in
+    Log.Misc.error "%s" message;
+    Error
+      (Keeper_internal_error.sdk_error_of_masc_internal_error
+         (Keeper_internal_error.Internal_bridge_exception
+            { caller; exn_repr = message }))
+  | Some { Masc_eio_env.clock; _ } ->
+    let t0 = Eio.Time.now clock in
+    let elapsed () = Eio.Time.now clock -. t0 in
+    let do_timeout fn =
+      match Float.classify_float timeout_s with
+      | FP_infinite -> fn ()
+      | _ -> Eio.Time.with_timeout_exn clock timeout_s fn
+    in
+    try
+      do_timeout fn
+    with
   | Eio.Time.Timeout ->
     (* #10094: per-caller timeout counter so the operator can see
        WHICH caller is timing out at WHICH configured budget instead
@@ -71,7 +65,7 @@ let run_safe ~caller ~timeout_s fn =
        ratio so operators can distinguish "timeout fired at 45s" from
        "timeout fired but cleanup took 121s". *)
     let overshoot_ratio = wall /. timeout_s in
-    if overshoot_ratio > 2.0 then
+    if overshoot_ratio > timeout_overshoot_warn_ratio then
       Log.Misc.warn
         "masc_oas_bridge: timeout overshoot — budget=%.1fs wall=%.1fs \
          (ratio=%.1fx, caller=%s). Cancel propagation through runtime \

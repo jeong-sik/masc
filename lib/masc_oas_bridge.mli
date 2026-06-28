@@ -1,15 +1,23 @@
 (* lib/masc_oas_bridge.mli *)
 
 (** Centralized boundary between MASC subsystems and the OAS Agent SDK.
-    Enforces strict structural timeouts, cancellation safety, and type isolation. *)
+    Enforces strict structural timeouts, cancellation safety, and type isolation.
 
-(** Safe execution of a generic OAS operation with a mandatory timeout.
+    Migration and entrypoint requirements are documented in
+    [docs/oas-bridge-clock-timeout-contract.md]. This is intentionally
+    fail-closed: adding a default-off compatibility flag would restore the
+    clockless path that silently ignored configured wall-clock budgets. *)
+
+(** Safe execution of a generic OAS operation with a mandatory Eio clock.
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
     Raises [Invalid_argument] when [timeout_s] is not positive or is [NaN].
-    [Float.infinity] is accepted as an explicit no-wrapper-timeout budget for
-    advisory callers whose protection lives at the provider boundary. *)
+    [Float.infinity] is accepted only as an explicit no-wrapper timeout
+    budget for advisory callers whose protection lives at the provider
+    boundary; checked-in production defaults in {!Env_config_oas_bridge}
+    should stay finite. A missing Eio environment fails closed without
+    running [fn]. *)
 val run_safe
   :  caller:string
   -> timeout_s:float
@@ -23,13 +31,10 @@ val run_safe
     env-overridable per-caller budget.  See [Env_config_oas_bridge]
     for the per-caller default table, env-var layout, and invalid-env fallback.
 
-    Inherits the [Invalid_argument] contract from [run_safe]: if
-    [Env_config_oas_bridge.timeout_sec] returns a non-positive or [NaN] value
-    (e.g. an env override of ["0"], ["-1"], or ["nan"]), the resulting
-    [run_safe] call raises [Invalid_argument].
-    The env parser already clamps in the documented range, so this only
-    surfaces when an operator pins a misconfiguration that bypasses the
-    parser. *)
+    Inherits the [Invalid_argument] contract from [run_safe]. The env
+    parser accepts positive finite values and [Float.infinity], while
+    invalid values such as ["0"], ["-1"], or ["nan"] fall back before this
+    boundary. *)
 val run_with_caller
   :  caller:Env_config_oas_bridge.caller
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)

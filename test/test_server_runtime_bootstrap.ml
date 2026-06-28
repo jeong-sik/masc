@@ -1108,6 +1108,35 @@ let terminate_keeper_fiber config (meta : Keeper_meta_contract.keeper_meta) =
       ("keeper fiber termination failed: "
        ^ Keeper_state_machine.transition_error_to_string err)
 
+let mark_keeper_dead_with_registry_cause config
+    (meta : Keeper_meta_contract.keeper_meta) =
+  let base_path = config.Workspace.base_path in
+  Keeper_registry.record_restart ~base_path meta.name;
+  Keeper_registry.record_restart ~base_path meta.name;
+  Keeper_registry.set_failure_reason ~base_path meta.name
+    (Some
+       (Keeper_registry.Provider_runtime_error
+          {
+            code = "provider_http_500";
+            detail =
+              Printf.sprintf
+                "provider cancelled with sk-testsecret at %s/private/provider.json"
+                base_path;
+            provider_id = Some "runpod";
+            http_status = Some 500;
+            runtime_id = Some "runtime-a";
+            reason = None;
+          }));
+  Keeper_registry.set_last_error_entry ~base_path ~name:meta.name
+    (Printf.sprintf
+       "synthetic cancelled by parent sk-testsecret at %s/private/state.json"
+       base_path);
+  Keeper_registry.record_crash ~base_path meta.name 1780000000.0
+    (Printf.sprintf
+       "synthetic crash record github_pat_secret at %s/crash.log"
+       base_path);
+  Keeper_registry.mark_dead ~base_path meta.name ~at:1780000001.0
+
 let test_health_json_surfaces_durable_paused_keepers () =
   with_temp_dir "health-durable-paused-keepers" (fun dir ->
       let config_root = make_config_root dir in
@@ -1530,6 +1559,19 @@ let test_health_json_ignores_stale_active_task_alias_when_agent_executable () =
             recovering_names = [];
             executable_names = [ executor.name ];
             phase_values = [ (executor.name, Keeper_state_machine.Running) ];
+            phase_details =
+              [
+                ( executor.name
+                , {
+                    phase = "running";
+                    last_failure_reason = None;
+                    last_error = None;
+                    restart_count = 0;
+                    dead_since_ts = None;
+                    latest_crash_at = None;
+                    latest_crash_reason = None;
+                  } );
+              ];
           }
         in
         let fleet_safety =
@@ -1683,6 +1725,7 @@ let test_health_json_preserves_active_task_owner_meta_read_error () =
             recovering_names = [];
             executable_names = [];
             phase_values = [];
+            phase_details = [];
           }
         in
         let fleet_safety =
@@ -1761,15 +1804,20 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           make_keeper_meta ~name:"capacity-running-b"
             ~trace_id:"trace-capacity-running-b" ()
         in
-        List.iter (write_keeper_meta_exn config) [ paused; running_a; running_b ];
-        with_running_keeper_metas config [ running_a; running_b ] (fun () ->
+        let runtime_only =
+          make_keeper_meta ~name:"runtime-only" ~trace_id:"trace-runtime-only" ()
+        in
+        List.iter
+          (write_keeper_meta_exn config)
+          [ paused; running_a; running_b; runtime_only ];
+        with_running_keeper_metas config [ running_a; running_b; runtime_only ] (fun () ->
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
           let fleet_safety = json |> member "keeper_fleet_safety" in
-          Alcotest.(check int) "health exposes running reaction capacity" 2
+          Alcotest.(check int) "health exposes running reaction capacity" 3
             (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
-          Alcotest.(check int) "health exposes executable reaction capacity" 2
+          Alcotest.(check int) "health exposes executable reaction capacity" 3
             (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
           Alcotest.(check int) "health exposes failing keeper count" 0
             (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
@@ -1781,13 +1829,13 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "low_running_fiber_margin" |> to_bool);
           Alcotest.(check bool) "health marks capacity below target" true
             (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
-          Alcotest.(check int) "health exposes capacity shortfall" 2
+          Alcotest.(check int) "health exposes capacity shortfall" 1
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
-          Alcotest.(check int) "health exposes executable capacity shortfall" 2
+          Alcotest.(check int) "health exposes executable capacity shortfall" 1
             (fleet_safety
              |> member "executable_reaction_capacity_shortfall_count"
              |> to_int);
-          Alcotest.(check int) "health exposes blocked shortfall" 2
+          Alcotest.(check int) "health exposes blocked keeper count" 2
             (fleet_safety |> member "blocked_count" |> to_int);
           Alcotest.(check (list string)) "health exposes blocked keeper names"
             [ "capacity-paused"; "example" ]
@@ -1827,6 +1875,10 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           Alcotest.(check string) "health suggests unregistered action"
             "start_or_recover_keeper"
             (blocked_detail "example" |> member "action" |> to_string);
+          Alcotest.(check bool) "health reports bootstrap enabled" true
+            (fleet_safety |> member "keeper_bootstrap_enabled" |> to_bool);
+          Alcotest.(check bool) "health has no bootstrap blocker" true
+            (fleet_safety |> member "keeper_bootstrap_blocker" = `Null);
           Alcotest.(check string) "health marks fleet degraded" "degraded"
             (fleet_safety |> member "status" |> to_string);
           Alcotest.(check string) "health marks target-capacity blocker"
@@ -1886,6 +1938,76 @@ let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacit
               (fleet_safety |> member "blocked_count" |> to_int);
             Alcotest.(check int) "blocked_keepers alias matches names" 2
               (fleet_safety |> member "blocked_keepers" |> to_int))))
+
+let test_health_json_exposes_disabled_keeper_bootstrap_blocker () =
+  with_temp_dir "health-keeper-bootstrap-disabled" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "boot-disabled";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = (Mcp_server.workspace_config state) in
+        let phase_counts :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_counts =
+          { running = 0; failing = 0; recovering = 0; executable = 0 }
+        in
+        let phase_snapshot :
+            Server_routes_http_runtime_fleet_scan.keeper_phase_snapshot =
+          {
+            counts = phase_counts;
+            running_names = [];
+            recovering_names = [];
+            executable_names = [];
+            phase_values = [];
+            phase_details = [];
+          }
+        in
+        let paused_keepers_json =
+          Server_routes_http_runtime_fleet_scan.durable_paused_keeper_scan config
+          |> Server_routes_http_runtime_fleet_scan
+             .paused_keepers_health_json_of_scan
+               ~running_names:[]
+        in
+        let fleet_safety =
+          Server_routes_http_runtime_fleet_scan.keeper_fleet_safety_health_json
+            ~keeper_bootstrap_enabled:false
+            ~phase_snapshot
+            ~phase_counts
+            ~paused_keepers_json
+            ()
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "health selects disabled bootstrap blocker"
+          "keeper_bootstrap_disabled"
+          (fleet_safety |> member "blocker" |> to_string);
+        Alcotest.(check bool) "health reports bootstrap disabled" false
+          (fleet_safety |> member "keeper_bootstrap_enabled" |> to_bool);
+        Alcotest.(check string) "health exposes bootstrap blocker"
+          "keeper_bootstrap_disabled"
+          (fleet_safety |> member "keeper_bootstrap_blocker" |> to_string);
+        let blocked_detail name =
+          fleet_safety |> member "blocked_keeper_reasons" |> to_list
+          |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+        in
+        let detail = blocked_detail "boot-disabled" in
+        Alcotest.(check string) "health explains disabled bootstrap row"
+          "keeper_bootstrap_disabled"
+          (detail |> member "reason" |> to_string);
+        Alcotest.(check string) "health suggests bootstrap recovery"
+          "enable_keeper_bootstrap_or_start_manually"
+          (detail |> member "action" |> to_string);
+        Alcotest.(check bool) "row reports bootstrap disabled" false
+          (detail |> member "keeper_bootstrap_enabled" |> to_bool);
+        Alcotest.(check string) "row exposes bootstrap blocker"
+          "keeper_bootstrap_disabled"
+          (detail |> member "keeper_bootstrap_blocker" |> to_string)))
 
 let test_health_json_ignores_persisted_only_keeper_for_capacity_target () =
   with_temp_dir "health-persisted-only-keeper-target" (fun dir ->
@@ -1970,8 +2092,91 @@ let test_health_json_explains_phase_paused_capacity_blocker () =
             [ ("example", "not_registered"); ("phase-paused", "phase_paused") ]
             (fleet_safety |> member "blocked_keeper_reasons" |> to_list
              |> List.map (fun row ->
-                  ( row |> member "keeper" |> to_string
-                  , row |> member "reason" |> to_string ))))))
+	                  ( row |> member "keeper" |> to_string
+	                  , row |> member "reason" |> to_string ))))))
+
+let test_health_json_exposes_dead_keeper_registry_cause () =
+  with_temp_dir "health-phase-dead-registry-cause" (fun dir ->
+    let config_root = make_config_root dir in
+    write_config_root_keeper_toml config_root "phase-dead";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = (Mcp_server.workspace_config state) in
+        let phase_dead =
+          make_keeper_meta ~name:"phase-dead" ~trace_id:"trace-phase-dead" ()
+        in
+        write_keeper_meta_exn config phase_dead;
+        with_running_keeper_metas config [ phase_dead ] (fun () ->
+          mark_keeper_dead_with_registry_cause config phase_dead;
+          let request = Httpun.Request.create `GET "/health" in
+          let json = Server_routes_http_runtime.make_health_json request in
+          let open Yojson.Safe.Util in
+          let fleet_safety = json |> member "keeper_fleet_safety" in
+          let blocked_detail name =
+            fleet_safety |> member "blocked_keeper_reasons" |> to_list
+            |> List.find (fun row -> row |> member "keeper" |> to_string = name)
+          in
+          let detail = blocked_detail "phase-dead" in
+          Alcotest.(check string) "health explains dead keeper reason" "phase_dead"
+            (detail |> member "reason" |> to_string);
+          Alcotest.(check string) "health exposes dead phase" "dead"
+            (detail |> member "phase" |> to_string);
+          Alcotest.(check string) "health suggests dead keeper recovery"
+            "inspect_dead_keeper_root_cause"
+            (detail |> member "action" |> to_string);
+          let last_failure_reason =
+            detail |> member "last_failure_reason" |> to_string
+          in
+          Alcotest.(check bool) "health preserves failure reason class" true
+            (contains_substring last_failure_reason "provider_runtime_error");
+          Alcotest.(check bool) "health redacts failure reason token" false
+            (contains_substring last_failure_reason "sk-testsecret");
+          Alcotest.(check bool) "health redacts failure reason base path" false
+            (contains_substring last_failure_reason config.Workspace.base_path);
+          Alcotest.(check bool) "health marks redacted failure reason" true
+            (contains_substring last_failure_reason "[REDACTED]");
+          Alcotest.(check bool) "health marks redacted failure reason path" true
+            (contains_substring last_failure_reason "[REDACTED_PATH]");
+          let last_error = detail |> member "last_error" |> to_string in
+          Alcotest.(check bool) "health preserves last error class" true
+            (contains_substring last_error "synthetic cancelled by parent");
+          Alcotest.(check bool) "health redacts last error token" false
+            (contains_substring last_error "sk-testsecret");
+          Alcotest.(check bool) "health redacts last error base path" false
+            (contains_substring last_error config.Workspace.base_path);
+          Alcotest.(check bool) "health marks redacted last error" true
+            (contains_substring last_error "[REDACTED]");
+          Alcotest.(check bool) "health marks redacted last error path" true
+            (contains_substring last_error "[REDACTED_PATH]");
+          Alcotest.(check int) "health surfaces registry restart count" 2
+            (detail |> member "restart_count" |> to_int);
+          Alcotest.(check (option (float 0.0001)))
+            "health surfaces registry dead timestamp" (Some 1780000001.0)
+            (detail |> member "dead_since_ts" |> to_float_option);
+          Alcotest.(check (option (float 0.0001)))
+            "health surfaces latest crash timestamp" (Some 1780000000.0)
+            (detail |> member "latest_crash_at" |> to_float_option);
+          let latest_crash_reason =
+            detail |> member "latest_crash_reason" |> to_string
+          in
+          Alcotest.(check bool) "health preserves crash reason class" true
+            (contains_substring latest_crash_reason "synthetic crash record");
+          Alcotest.(check bool) "health redacts crash reason token" false
+            (contains_substring latest_crash_reason "github_pat_secret");
+          Alcotest.(check bool) "health redacts crash reason base path" false
+            (contains_substring latest_crash_reason config.Workspace.base_path);
+          Alcotest.(check bool) "health marks redacted crash reason" true
+            (contains_substring latest_crash_reason "[REDACTED]");
+          Alcotest.(check bool) "health marks redacted crash reason path" true
+            (contains_substring latest_crash_reason "[REDACTED_PATH]"))))
 
 let test_health_json_explains_terminal_capacity_blocker
     ~dir_name
@@ -3884,6 +4089,10 @@ let () =
             `Quick
             test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity;
           Alcotest.test_case
+            "health json exposes disabled keeper bootstrap blocker"
+            `Quick
+            test_health_json_exposes_disabled_keeper_bootstrap_blocker;
+          Alcotest.test_case
             "health json ignores persisted-only keeper for capacity target"
             `Quick
             test_health_json_ignores_persisted_only_keeper_for_capacity_target;
@@ -3899,6 +4108,9 @@ let () =
           Alcotest.test_case
             "health json explains zombie capacity blocker as terminal"
             `Quick test_health_json_explains_zombie_capacity_blocker_as_terminal;
+          Alcotest.test_case
+            "health json exposes dead keeper registry cause"
+            `Quick test_health_json_exposes_dead_keeper_registry_cause;
           Alcotest.test_case
             "health json distinguishes failing executable keepers"
             `Quick test_health_json_distinguishes_failing_executable_keepers;

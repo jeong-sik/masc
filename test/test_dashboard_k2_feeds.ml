@@ -21,44 +21,38 @@ let test_counter = ref 0
 let write_file path content =
   let oc = open_out path in
   Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
+    ~finally:(fun () -> close_out oc)
     (fun () -> output_string oc content)
 ;;
 
 let runtime_toml =
-  {|
-[runtime]
-default = "test_provider.test_model"
+  {|[runtime]
+default = "test.local"
 
-[providers.test_provider]
-display-name = "Test Provider"
+[providers.test]
+display-name = "Test"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 
-[models.test_model]
-api-name = "test-model"
-max-context = 8192
+[models.local]
+api-name = "local"
+max-context = 4096
 tools-support = true
 streaming = true
 
-[test_provider.test_model]
+[test.local]
 is-default = true
 max-concurrent = 1
 |}
 ;;
 
-let init_runtime_default_for_tests () =
-  let path = Filename.temp_file "dashboard_k2_feeds_runtime_" ".toml" in
-  Fun.protect
-    ~finally:(fun () -> try Sys.remove path with Sys_error _ -> ())
-    (fun () ->
-      write_file path runtime_toml;
-      match Runtime.init_default ~config_path:path with
-      | Ok () -> ()
-      | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
+let init_runtime_default () =
+  let path = Filename.temp_file "dashboard-k2-runtime" ".toml" in
+  write_file path runtime_toml;
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error err -> fail ("Runtime.init_default failed: " ^ err)
 ;;
-
-let () = init_runtime_default_for_tests ()
 
 let tmpdir prefix =
   incr test_counter;
@@ -81,6 +75,7 @@ let with_config f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  init_runtime_default ();
   let base_dir = tmpdir "dashboard_k2_feeds" in
   let config = Workspace.default_config base_dir in
   f config

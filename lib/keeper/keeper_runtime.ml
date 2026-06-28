@@ -322,11 +322,6 @@ let resynced_tool_access
 let drift_if label changed =
   if changed then Some label else None
 
-let goal_horizon_text_equal current target =
-  String.equal
-    (normalize_goal_text current)
-    (normalize_goal_text target)
-
 let keeper_meta_persistent_drift_categories
     ~(defaults : Keeper_types_profile.keeper_profile_defaults)
     ~(current : keeper_meta)
@@ -535,13 +530,22 @@ let ensure_keeper_meta_with_cause config name =
         "ensure_keeper_meta: re-syncing [%s] for %s"
         (String.concat "," cats)
         meta.name;
-      let updated = { overlayed with updated_at = now_iso () } in
-      match write_meta config updated with
-      | Ok () -> Ok { updated with meta_version = updated.meta_version + 1 }
+      let updated_at = now_iso () in
+      let effective_updated = { overlayed with updated_at } in
+      let persisted_updated =
+        { effective_updated with
+          active_goal_ids =
+            (match defaults.active_goal_ids with
+             | Some _ -> []
+             | None -> target_active_goal_ids)
+        }
+      in
+      match write_meta config persisted_updated with
+      | Ok () -> Ok { effective_updated with meta_version = effective_updated.meta_version + 1 }
       | Error e ->
         Otel_metric_store.inc_counter
           Keeper_metrics.(to_string WriteMetaFailures)
-          ~labels:[("keeper", updated.name); ("phase", "ensure_meta_resync")]
+          ~labels:[("keeper", effective_updated.name); ("phase", "ensure_meta_resync")]
           ();
         Log.Keeper.warn "ensure_keeper_meta: write_meta re-sync failed: %s" e;
         Ok overlayed

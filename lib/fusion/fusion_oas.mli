@@ -57,7 +57,7 @@ val panel_failure_code : Fusion_types.panel_failure -> string
 val panel_failure_detail : runtime_id:string -> Fusion_types.panel_failure -> string
 
 (** 이미 attribution된 실패를 재-attribution 없이 렌더 (sink 표시용). Provider_error는
-    detail 그대로(실패 시점에 raw model로 정규화됨), Timeout/Empty는 사람용 문자열.
+    detail 그대로(실패 시점에 raw model로 정규화됨), Timeout/Bridge/Empty는 사람용 문자열.
     panelist 정체성을 [Provider '...'] 슬롯에 다시 입히지 않는다 (RFC-0278). *)
 val panel_failure_text : Fusion_types.panel_failure -> string
 

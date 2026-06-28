@@ -118,6 +118,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-denylist-resync");
+            ("goal", `String "Test denylist resync");
             ( "tool_denylist",
               `List [ `String "old-stale-tool" ] );
           ])
@@ -189,6 +190,7 @@ active_goal_ids = ["goal-runtime"]
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-active-goal-resync");
+            ("goal", `String "Test active goal resync");
           ])
     with
     | Ok meta -> meta

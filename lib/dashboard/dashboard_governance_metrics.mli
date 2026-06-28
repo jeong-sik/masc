@@ -56,6 +56,13 @@ val inject_for_testing :
     the production [record_tool_skipped] path so tests can backdate
     [ts] for window-boundary assertions. *)
 
+val max_ring_size_for_testing : int
+(** Production ring cap, exposed only so tests do not duplicate the
+    bounded-buffer constant. *)
+
+val ring_size_for_testing : unit -> int
+(** Current bounded ring size. *)
+
 val record_tool_skipped_with_append_for_testing :
   append:(unit -> unit) ->
   keeper_name:string ->

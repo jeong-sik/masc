@@ -955,7 +955,7 @@ let test_base_path_hash_relative_input_anchors_to_cwd_not_env_base () =
        Alcotest.(check string)
          "relative base hash anchor"
          (Filename.concat cwd "relative-base")
-         (Keeper_sandbox_runtime.normalize_base_path_for_hash "relative-base"))
+         (Keeper_sandbox_runtime_setup.normalize_base_path_for_hash "relative-base"))
 
 let test_sandbox_container_label_args_include_managed_ttl () =
   let args =

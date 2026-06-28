@@ -211,11 +211,12 @@ async function loadActivity(task: Task): Promise<void> {
   try {
     const keeper = findKeeper(task.assignee)
     const timelineName = keeper?.agent_name ?? task.assignee
-    const trajectoryName = keeper?.name ?? null
+    const isKeeper = task.assignee_kind === 'keeper' || keeper !== null
+    const trajectoryName = isKeeper ? task.assignee : null
 
     const [timeline, trajectory] = await Promise.all([
       fetchAgentTimeline(timelineName, 24, 200),
-      trajectoryName ? fetchKeeperTrajectory(trajectoryName, 100) : Promise.resolve(null),
+      trajectoryName ? fetchKeeperTrajectory(trajectoryName, 100).catch(() => null) : Promise.resolve(null),
     ])
 
     if (activityFetchToken.value !== token) return
@@ -235,7 +236,7 @@ export function hasActivityTab(task: Task): boolean {
 
 /** Whether the assignee is a keeper (affects tool call visibility). */
 export function isKeeperAssignee(task: Task): boolean {
-  return task.assignee ? findKeeper(task.assignee) !== null : false
+  return task.assignee_kind === 'keeper' || (task.assignee ? findKeeper(task.assignee) !== null : false)
 }
 
 // -- Goal relationship (keeper's active goals) ----------------------

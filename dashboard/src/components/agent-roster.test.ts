@@ -839,15 +839,21 @@ describe('AgentRoster live-only cards', () => {
     expect(rows.every(r => valid.has(r.getAttribute('data-tone') ?? ''))).toBe(true)
     const toneByName = (name: string) =>
       rows.find(r => r.textContent?.includes(name))?.getAttribute('data-tone')
-    // band → tone: paused=warn, offline=idle (the unambiguous bands)
+    // band → tone: paused=warn, offline=idle (the unambiguous bands).
+    // RFC-0295 §5.3: Draining routes to `paused` band → warn rail (matches
+    // prototype `data.jsx:37,49` `pause` glyph / `warn` tone pairing). It
+    // is NOT in the transient group, so the transient-count chip drops
+    // from 4 to 3.
     expect(toneByName('rester')).toBe('warn')
     expect(toneByName('gone')).toBe('idle')
-    for (const name of ['compact', 'handoff', 'drain', 'restart']) {
+    expect(toneByName('drain')).toBe('warn')
+    for (const name of ['compact', 'handoff', 'restart']) {
       expect(toneByName(name)).toBe('busy')
     }
     const text = container.textContent ?? ''
-    expect(text).toContain('전이 중 · 4')
-    expect(text).toContain('전이 4')
+    expect(text).toContain('전이 중 · 3')
+    expect(text).toContain('일시정지 2')
+    expect(text).toContain('전이 3')
     expect(text).toContain('transient')
     expect(text).toContain('오프라인 1')
   })

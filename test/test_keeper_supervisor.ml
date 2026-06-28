@@ -468,6 +468,51 @@ let sweep_and_recover_no_materialize ctx =
     ~load_or_materialize_keeper_meta:noop_load_or_materialize_keeper_meta
     ctx
 
+let test_pending_hitl_approval_keeper_names_filters_persisted_pending () =
+  let base_dir = temp_dir () in
+  let approval_ids = ref [] in
+  Fun.protect
+    ~finally:(fun () ->
+      List.iter
+        (fun id ->
+          ignore
+            (AQ.resolve
+               ~id
+               ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
+        !approval_ids;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _workspace =
+        Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name)
+      in
+      let blocked = make_meta "hitl-blocked" in
+      let clear = make_meta "hitl-clear" in
+      List.iter
+        (fun meta ->
+          match Keeper_meta_store.write_meta config meta with
+          | Ok () -> ()
+          | Error err -> fail err)
+        [ blocked; clear ];
+      let submit keeper_name =
+        let id =
+          AQ.submit_pending
+            ~keeper_name
+            ~tool_name:"keeper_continue_after_reconcile"
+            ~input:(`Assoc [])
+            ~risk_level:AQ.Critical
+            ~base_path:config.base_path
+            ~on_resolution:(fun _ -> ())
+            ()
+        in
+        approval_ids := id :: !approval_ids
+      in
+      submit blocked.name;
+      submit "not-persisted";
+      check (list string) "only persisted pending keeper is surfaced"
+        [ blocked.name ]
+        (Sup.pending_hitl_approval_keeper_names config))
+
 (* Sweep paths that resolve a keeper's runtime id reach
    [Keeper_meta_contract.runtime_id_of_meta], which falls back to
    [Runtime.get_default_runtime_id ()] for keepers without an explicit
@@ -594,6 +639,11 @@ let keeper_runtime_context env sw config : _ Keeper_types_profile.context =
     proc_mgr = Some (Eio.Stdenv.process_mgr env);
     net = Some (Eio.Stdenv.net env);
   }
+
+let latest_log_seq () =
+  match Log.Ring.recent ~limit:1 () with
+  | (entry : Log.Ring.entry) :: _ -> entry.seq
+  | [] -> -1
 
 let test_declarative_boot_materializes_goal_from_instructions () =
   with_config_dir @@ fun config_dir ->
@@ -1210,6 +1260,78 @@ let test_sweep_restores_reconcile_gate_for_paused_keeper () =
         (Option.is_none resumed_meta.runtime.last_blocker);
       check bool "keeper registered after approval" true
         (Reg.is_registered ~base_path:config.base_path meta.name))
+
+let test_sweep_warns_for_pending_hitl_approval () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  let name = "hitl-visible-sweep" in
+  let approval_id = ref None in
+  Fun.protect
+    ~finally:(fun () ->
+      Option.iter
+        (fun id ->
+           ignore
+             (AQ.resolve
+                ~id
+                ~decision:(Agent_sdk.Hooks.Reject "test cleanup")))
+        !approval_id;
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      Log.set_level Log.Info;
+      let config = Masc.Workspace.default_config base_dir in
+      let _workspace = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let callback_result = ref None in
+      let id =
+        AQ.submit_pending
+          ~keeper_name:name
+          ~tool_name:"keeper_continue_after_partial_commit"
+          ~input:(`Assoc [ ("kind", `String "visibility_probe") ])
+          ~risk_level:AQ.Critical
+          ~base_path:config.base_path
+          ~on_resolution:(fun decision -> callback_result := Some decision)
+          ()
+      in
+      approval_id := Some id;
+      let baseline = latest_log_seq () in
+      let ctx = keeper_runtime_context env sw config in
+      sweep_and_recover_no_materialize ctx;
+      let expected =
+        Printf.sprintf
+          "keeper:%s blocked on 1 pending HITL approval(s); chat awaits operator \
+           decision"
+          name
+      in
+      let warning_seen =
+        Log.Ring.recent
+          ~limit:50
+          ~module_filter:"Keeper"
+          ~min_level:(Log.level_to_int Log.Warn)
+          ~since_seq:baseline
+          ()
+        |> List.exists (fun (entry : Log.Ring.entry) ->
+             String.equal entry.message expected)
+      in
+      check bool "pending HITL approval warning emitted" true warning_seen;
+      check bool "approval remains pending after visibility sweep" true
+        (AQ.has_pending_for_keeper ~keeper_name:name);
+      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> approval_id := None
+       | Error err -> fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+      match !callback_result with
+      | Some Agent_sdk.Hooks.Approve -> ()
+      | Some decision ->
+          fail
+            ("expected approve callback, got "
+             ^ AQ.approval_decision_to_string decision)
+      | None -> fail "expected approval callback")
 
 let test_restart_path_emits_attempt_and_started_outcome_metrics () =
   with_restart_launch_noop @@ fun () ->
@@ -3047,8 +3169,12 @@ let () =
         test_fiber_health_respects_max_restarts_override;
     ];
     "reconcile_gate_recovery", [
+      test_case "pending HITL approval names include only persisted keepers" `Quick
+        test_pending_hitl_approval_keeper_names_filters_persisted_pending;
       test_case "sweep restores reconcile gate for paused keeper" `Quick
         test_sweep_restores_reconcile_gate_for_paused_keeper;
+      test_case "sweep warns for pending HITL approval" `Quick
+        test_sweep_warns_for_pending_hitl_approval;
     ];
     "restart_metrics", [
       test_case "restart path emits attempt and started outcome metrics" `Quick

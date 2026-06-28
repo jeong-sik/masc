@@ -186,7 +186,7 @@ let run_command_with_status ?turn_sandbox_factory
                    ~raw_source:(String.concat " " argv)
                    ~summary:"keeper docker read sandboxed command"
                    ~env:(Env_keeper_scrub.filter_environment (Unix.environment ()))
-                   ~cwd:(Sys.getcwd ())
+                   ~cwd:(Config_dir_resolver.current_working_dir ())
                    ~timeout_sec
                    argv))
         in

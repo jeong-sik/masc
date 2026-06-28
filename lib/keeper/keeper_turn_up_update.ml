@@ -168,7 +168,14 @@ let update_keeper ?(preserve_prompt_defaults = false)
     Log.Keeper.warn
       "update_keeper kept %s paused because an approval/reconcile gate is pending"
       old.name;
-  let updated = { old with
+  let source_meta =
+    if resume_paused_keeper then
+      Keeper_unified_turn_no_progress.clear_for_operator_resume
+        ~base_path:ctx.config.base_path
+        old
+    else old
+  in
+  let updated = { source_meta with
     goal;
     instructions =
       (match p.instructions_arg with
@@ -194,10 +201,10 @@ let update_keeper ?(preserve_prompt_defaults = false)
     runtime =
       (if resume_paused_keeper then
          {
-           old.runtime with
+           source_meta.runtime with
            last_blocker = None;
          }
-       else old.runtime);
+       else source_meta.runtime);
     mention_targets;
     telemetry_feedback_enabled =
       Dashboard_utils.first_some p.profile_defaults.telemetry_feedback_enabled

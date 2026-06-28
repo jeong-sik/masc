@@ -78,6 +78,10 @@ jobs:
           set -euo pipefail
 
           if [ "${GITHUB_EVENT_NAME}" != "pull_request" ]; then
+            # This workflow only listens to branch pushes for main/develop
+            # (`on.push.branches` above) plus workflow_dispatch. Tag pushes do
+            # not start this workflow, so NON_PR here cannot force Build and
+            # Test for tags.
             echo "run_heavy=true" >> "$GITHUB_OUTPUT"
             echo "live_is_draft=false" >> "$GITHUB_OUTPUT"
             echo "live_state=NON_PR" >> "$GITHUB_OUTPUT"
@@ -308,6 +312,10 @@ jobs:
           fi
 
           if [ "${ci_core}" = true ]; then
+            # Self-reference guard: edits to this workflow or local actions
+            # set ci_core=true above, then force the core CI surfaces below.
+            # Therefore a PR changing ci.yml cannot avoid Build and Test via
+            # the path classifier it is editing.
             build=true
             lint=true
             health=true
@@ -555,11 +563,16 @@ jobs:
     timeout-minutes: 60
     needs: [pr-live-gate, changes]
     # Main-push safety-net (mirrors `dashboard` job below). Non-PR events
-    # (push to main/develop, workflow_dispatch) always run Build and Test so a
-    # lib/ regression introduced by a non-build-path change (e.g. a dashboard-only
+    # (branch push to main/develop, workflow_dispatch) always run Build and Test
+    # so a lib/ regression introduced by a non-build-path change (e.g. a dashboard-only
     # merge) is detected on the next main push instead of persisting silently
     # behind a green "CI Gate" — ci-gate check() treats a skipped required job as
-    # PASS. PR events keep the build-scope gate (cost saving) unchanged.
+    # PASS. Tag pushes do not start this workflow because `on.push.branches`
+    # excludes tags. PR events keep the build-scope gate (cost saving)
+    # unchanged. The `needs.changes.result == 'success'` clause is intentional:
+    # Build consumes `changes` outputs, so a failed/skipped changes job should
+    # not synthesize default build inputs even though `always()` keeps this
+    # condition evaluable.
     if: ${{ always() && !cancelled() && needs.pr-live-gate.outputs.run_heavy == 'true' && needs.changes.result == 'success' && (needs.changes.outputs.build == 'true' || needs.pr-live-gate.outputs.live_state == 'NON_PR') }}
     # Flake-handling policy (hard-required tests):
     #   - `continue-on-error` is intentionally absent: compile failures and

@@ -104,4 +104,5 @@ val parse_dune_project_version : string -> string option
 module For_testing : sig
   val observe_probe_failure : site:string -> exn -> unit
   val probe_commit_unix_ts : string option -> float option
+  val runtime_cwd : unit -> string
 end

@@ -180,7 +180,9 @@ export function attentionReasonLabel(reason: string | null, paused: boolean): st
 //     the corresponding attention_reason)
 //   - lib/keeper/keeper_turn_disposition.ml next_action
 //     (provide_input_or_decline, rerun_if_still_relevant, inspect_turn_timeout,
-//      inspect_runtime_attempts, reconcile_partial_commit, inspect_latest_error)
+//      inspect_runtime_attempts, inspect_completion_contract,
+//      resume_or_inspect_completion_contract, reconcile_partial_commit,
+//      inspect_turn_budget, inspect_latest_error)
 //   - lib/keeper_runtime/keeper_fd_pressure.ml ('restore_fd_headroom')
 //   - lib/dashboard/dashboard_goals.ml ('inspect_keeper_runtime_trust')
 //   - lib/keeper/keeper_status_bridge.ml runtime_trust fallback
@@ -198,7 +200,10 @@ export const NEXT_HUMAN_ACTIONS = [
   'provide_input_or_decline',
   'rerun_if_still_relevant',
   'inspect_turn_timeout',
+  'inspect_completion_contract',
+  'resume_or_inspect_completion_contract',
   'reconcile_partial_commit',
+  'inspect_turn_budget',
   'inspect_latest_error',
   'restore_fd_headroom',
   'inspect_keeper_runtime_trust',
@@ -218,7 +223,10 @@ const NEXT_HUMAN_ACTION_LABELS: Record<NextHumanAction, string> = {
   provide_input_or_decline: '입력 제공 또는 거절',
   rerun_if_still_relevant: '필요 시 재실행',
   inspect_turn_timeout: '턴 타임아웃 원인 확인',
+  inspect_completion_contract: '완료 계약 확인',
+  resume_or_inspect_completion_contract: '완료 계약 확인 후 재개',
   reconcile_partial_commit: '부분 커밋 정합성 확인',
+  inspect_turn_budget: '턴 예산 원인 확인',
   inspect_latest_error: '최근 오류 확인',
   restore_fd_headroom: 'FD 여유 확보',
   inspect_keeper_runtime_trust: '런타임 신뢰 스냅샷 확인',

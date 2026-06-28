@@ -155,14 +155,21 @@ module Response = struct
   let html_content_type = "text/html; charset=utf-8"
   let json_content_type = "application/json; charset=utf-8"
 
+  let rev_prepend_headers headers acc =
+    List.fold_left (fun acc header -> header :: acc) acc headers
+
   let content_headers ?(before_headers = []) ?(after_headers = [])
       ?(tail_headers = []) ~content_type body =
     let content_length = string_of_int (String.length body) in
-    Httpun.Headers.of_list
-      (before_headers
-       @ [("content-type", content_type); ("content-length", content_length)]
-       @ after_headers
-       @ tail_headers)
+    let headers_rev =
+      let base = rev_prepend_headers before_headers [] in
+      let base =
+        ("content-length", content_length) :: ("content-type", content_type) :: base
+      in
+      let base = rev_prepend_headers after_headers base in
+      rev_prepend_headers tail_headers base
+    in
+    Httpun.Headers.of_rev_list headers_rev
 
   let response ?before_headers ?after_headers ?tail_headers ~content_type status body =
     Httpun.Response.create

@@ -51,6 +51,10 @@ val simple_literal_args : Masc_exec.Shell_ir.simple -> string list option
 
 val path_argument_values : string -> string list -> string list
 
+(** Filesystem path normalization and allowlist checks. Exposed so callers can
+    reach [validate_path] via [Exec_policy.Paths] (e.g. test keepers). *)
+module Paths = Exec_policy_paths
+
 val existing_dir_path_values_of_shell_ir : Masc_exec.Shell_ir.t -> string list
 
 val existing_sibling_dirs_hint : ?workdir:string -> string -> string option

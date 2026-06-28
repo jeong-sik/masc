@@ -93,7 +93,12 @@ let invalidate_keeper_execution_surfaces ~config () =
    default (#8605). [Succeeded]/[Already_live] are successes (Info);
    [Rejected] (400) and [Dispatch_none] (500) are failures (Warn) — see
    docs/spec/18-log-severity-taxonomy.md § 3.6. *)
-type lifecycle_outcome = Succeeded | Already_live | Rejected | Dispatch_none
+type lifecycle_outcome =
+  | Succeeded
+  | Already_live
+  | Rejected
+  | Dispatch_none
+  | Persist_failed
 
 let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     state agent_name req reqd =
@@ -294,6 +299,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             | Already_live -> (Log.Info, "already_live")
             | Rejected -> (Log.Warn, "rejected")
             | Dispatch_none -> (Log.Warn, "dispatch_none")
+            | Persist_failed -> (Log.Warn, "persist_failed")
           in
           Log.Server.emit level
             (Printf.sprintf
@@ -348,41 +354,73 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               when Tool_result.is_success result
                    && (String.equal action "boot" || String.equal action "clear") ->
               let body = Tool_result.message result in
-              if String.equal action "boot"
-              then (
-                resume_booted_keeper_if_needed ();
-                refresh_keeper_execution_surfaces ~config ~name "started")
-              else (
-                (match Keeper_registry.get_phase ~base_path:config.base_path name with
-                 | Some Keeper_state_machine.Paused ->
-                   ignore (persist_keeper_paused_state true : bool)
-                 | Some _ | None -> ());
-                invalidate_keeper_execution_surfaces ~config ());
-              log_lifecycle_result Succeeded;
-              Http.Response.json_value ~compress:true ~request:req
-                (`Assoc
-                   [
-                     ("ok", `Bool true);
-                     ("action", `String action);
-                     ("name", `String name);
-                     ("detail", tool_detail_json body);
-                   ])
-                reqd
+              let post_action_result =
+                if String.equal action "boot"
+                then (
+                  resume_booted_keeper_if_needed ();
+                  refresh_keeper_execution_surfaces ~config ~name "started";
+                  Ok ())
+                else (
+                  match Keeper_registry.get_phase ~base_path:config.base_path name with
+                  | Some Keeper_state_machine.Paused
+                    when not (persist_keeper_paused_state true) ->
+                    Error "paused-state persist failed after clear"
+                  | Some Keeper_state_machine.Paused | Some _ | None ->
+                    invalidate_keeper_execution_surfaces ~config ();
+                    Ok ())
+              in
+              (match post_action_result with
+               | Error msg ->
+                 log_lifecycle_result Persist_failed;
+                 respond_error
+                   ~status:`Internal_server_error
+                   ~request:req
+                   ~ok:false
+                   reqd
+                   msg
+               | Ok () ->
+                 log_lifecycle_result Succeeded;
+                 Http.Response.json_value ~compress:true ~request:req
+                   (`Assoc
+                      [
+                        ("ok", `Bool true);
+                        ("action", `String action);
+                        ("name", `String name);
+                        ("detail", tool_detail_json body);
+                      ])
+                   reqd)
             | Some result when Tool_result.is_success result ->
-              (match action with
-               | "shutdown" ->
-                 persist_keeper_paused_state true;
-                 refresh_keeper_execution_surfaces ~config ~name "stopped"
-               | _ -> invalidate_keeper_execution_surfaces ~config ());
-              log_lifecycle_result Succeeded;
-              Http.Response.json_value ~compress:true ~request:req
-                (`Assoc
-                   [
-                     ("ok", `Bool true);
-                     ("action", `String action);
-                     ("name", `String name);
-                   ])
-                reqd
+              let post_action_result =
+                match action with
+                | "shutdown" ->
+                  if persist_keeper_paused_state true
+                  then (
+                    refresh_keeper_execution_surfaces ~config ~name "stopped";
+                    Ok ())
+                  else Error "paused-state persist failed after shutdown"
+                | _ ->
+                  invalidate_keeper_execution_surfaces ~config ();
+                  Ok ()
+              in
+              (match post_action_result with
+               | Error msg ->
+                 log_lifecycle_result Persist_failed;
+                 respond_error
+                   ~status:`Internal_server_error
+                   ~request:req
+                   ~ok:false
+                   reqd
+                   msg
+               | Ok () ->
+                 log_lifecycle_result Succeeded;
+                 Http.Response.json_value ~compress:true ~request:req
+                   (`Assoc
+                      [
+                        ("ok", `Bool true);
+                        ("action", `String action);
+                        ("name", `String name);
+                      ])
+                   reqd)
             | Some result ->
               let body = Tool_result.message result in
               log_lifecycle_result Rejected;

@@ -25,14 +25,6 @@ let requeue_missing_front queue stimuli =
   Keeper_event_queue.prepend_list missing queue
 ;;
 
-let uniq_stimuli stimuli =
-  List.fold_left
-    (fun acc stimulus -> if List.exists (( = ) stimulus) acc then acc else stimulus :: acc)
-    []
-    stimuli
-  |> List.rev
-;;
-
 let persist_live_queue ~base_path (entry : Keeper_registry.registry_entry) name =
   Keeper_event_queue_persistence.persist_snapshot
     ~base_path
@@ -144,7 +136,7 @@ let drop_by_post_id ~base_path name ~post_id =
       | None -> []
       | Some entry -> remove_live entry
     in
-    Ok (uniq_stimuli (live_removed @ persisted_removed))
+    Ok (Keeper_event_queue.uniq_stimuli (live_removed @ persisted_removed))
 ;;
 
 let snapshot ~base_path name =

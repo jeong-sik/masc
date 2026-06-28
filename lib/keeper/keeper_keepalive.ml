@@ -376,8 +376,9 @@ let process_directive ~agent_name directive =
        receipt, and current blocks may persist [meta.paused = true] after the
        guard fires.  In both cases a wakeup should start from a fresh counter
        instead of immediately re-blocking the same turn. *)
+    let entry_opt = keeper_entry_by_identity_opt agent_name in
     let entry_paused =
-      match keeper_entry_by_identity_opt agent_name with
+      match entry_opt with
       | Some e -> e.meta.paused
       | None ->
         (match Keeper_tool_shared_runtime.find_registry_meta
@@ -387,24 +388,27 @@ let process_directive ~agent_name directive =
          | Some meta -> meta.paused
          | None -> false)
     in
-    (match keeper_entry_by_identity_opt agent_name with
-     | Some e ->
-       Keeper_turn_livelock.reset_keeper_livelock
-         ~base_path:e.base_path
-         ~keeper:e.name;
-       (match clear_no_progress_loop_for_operator_resume e with
-        | Ok (_ : keeper_meta) -> ()
-        | Error err ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string DirectiveFailures)
-            ~labels:
-              [ "keeper", e.name; "site", "no_progress_wakeup_clear" ]
-            ();
-          Log.Keeper.error
-            "directive wakeup: no_progress clear failed for %s: %s"
-            e.name
-            err)
-     | None -> ());
+    let clear_wakeup_no_progress_if_needed () =
+      match entry_opt with
+      | None -> true
+      | Some e ->
+        Keeper_turn_livelock.reset_keeper_livelock
+          ~base_path:e.base_path
+          ~keeper:e.name;
+        (match clear_no_progress_loop_for_operator_resume e with
+         | Ok (_ : keeper_meta) -> true
+         | Error err ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string DirectiveFailures)
+             ~labels:
+               [ "keeper", e.name; "site", "no_progress_resume_clear" ]
+             ();
+           Log.Keeper.error
+             "directive wakeup: no_progress clear failed for %s: %s"
+             e.name
+           err;
+           false)
+    in
     if entry_paused
     then (
       Log.Keeper.emit
@@ -419,7 +423,8 @@ let process_directive ~agent_name directive =
         ~category:Log.Directive
         ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup" ])
         (Printf.sprintf "directive: waking up %s" agent_name);
-      wakeup_keeper_by_agent_name ~agent_name)
+      if clear_wakeup_no_progress_if_needed ()
+      then wakeup_keeper_by_agent_name ~agent_name)
   | s when String.length s > 6 && String.starts_with s ~prefix:"claim:" ->
     let task_id = String.sub s 6 (String.length s - 6) in
     (match Keeper_id.Task_id.of_string task_id with

@@ -1683,7 +1683,7 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Alcotest.(check bool) "health asks operator action" true
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
-let test_health_json_ignores_non_keeper_active_task_owner_without_binding () =
+let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
   with_temp_dir "health-non-keeper-active-task-owner" (fun dir ->
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
@@ -1729,14 +1729,29 @@ let test_health_json_ignores_non_keeper_active_task_owner_without_binding () =
           (fleet_safety |> member "status" |> to_string);
         Alcotest.(check (option string)) "health has no blocker" None
           (fleet_safety |> member "blocker" |> to_string_option);
-        Alcotest.(check bool) "health does not expose external client owner" false
+        Alcotest.(check bool) "external client owner is not a keeper blocker" false
           (fleet_safety
            |> member "active_task_owner_without_executable_fiber"
            |> to_bool);
-        Alcotest.(check int) "health exposes no external client owner rows" 0
+        Alcotest.(check int) "health exposes no blocking owner rows" 0
           (fleet_safety
            |> member "active_task_owner_without_executable_fiber_count"
            |> to_int);
+        Alcotest.(check int) "health exposes one advisory owner row" 1
+          (fleet_safety |> member "non_keeper_active_task_owner_count" |> to_int);
+        let owners =
+          fleet_safety |> member "non_keeper_active_task_owners" |> to_list
+        in
+        Alcotest.(check int) "one advisory owner row" 1 (List.length owners);
+        let owner = List.hd owners in
+        Alcotest.(check string) "advisory row agent" assignee
+          (owner |> member "agent_name" |> to_string);
+        Alcotest.(check string) "advisory row task id" "task-external-owner"
+          (owner |> member "task_id" |> to_string);
+        Alcotest.(check string) "advisory row owner kind" "non_keeper_client"
+          (owner |> member "owner_kind" |> to_string);
+        Alcotest.(check bool) "advisory row does not block fleet" false
+          (owner |> member "fleet_blocking" |> to_bool);
         Alcotest.(check (list string)) "health has no blocked keeper names"
           []
           (fleet_safety |> member "blocked_keeper_names" |> to_list
@@ -4139,9 +4154,9 @@ let () =
             `Quick
             test_health_json_degrades_on_active_task_owner_without_keeper_binding;
           Alcotest.test_case
-            "health json ignores non-keeper active task owner without binding"
+            "health json reports non-keeper active task owner as advisory"
             `Quick
-            test_health_json_ignores_non_keeper_active_task_owner_without_binding;
+            test_health_json_reports_non_keeper_active_task_owner_as_advisory;
           Alcotest.test_case
             "health json preserves active task owner meta read error"
             `Quick

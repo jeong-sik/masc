@@ -184,7 +184,7 @@ let test_runtime_toml_rejects_non_positive_provider_connect_timeout () =
 let test_runtime_toml_rejects_wrong_typed_provider_connect_timeout () =
   let content =
     runtime_toml_with_credentials
-      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = 600")
+      ~provider_extra:(Runtime_schema.connect_timeout_s_key ^ " = \"600\"")
       inline_credentials
   in
   match Runtime_toml.parse_string content with

@@ -65,7 +65,7 @@ val sort_paused_keeper_details :
 val keeper_fleet_meta_scan :
   ?include_paused_details:bool ->
   Workspace.config -> keeper_fleet_meta_scan
-val configured_keeper_is_materializable : ?base_path:string -> string -> bool
+val configured_keeper_is_materializable : Workspace.config -> string -> bool
 val keeper_identity_drift_scan : Workspace.config -> keeper_identity_drift_scan
 val keeper_identity_drift_health_json_of_scan :
   keeper_identity_drift_scan -> Yojson.Safe.t

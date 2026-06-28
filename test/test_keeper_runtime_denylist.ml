@@ -164,7 +164,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
         (before_overlay_drift +. 1.0)
         (overlay_drift_counter_value ~keeper:keeper_name ~field:"tool_denylist"))
 
-let test_ensure_keeper_meta_overlays_active_goal_ids_and_persists () =
+let test_ensure_keeper_meta_overlays_active_goal_ids_from_toml () =
   with_runtime_default @@ fun () ->
   with_temp_dir "keeper-runtime-active-goal-workspace" @@ fun workspace_dir ->
   with_config_dir @@ fun config_dir ->
@@ -202,6 +202,9 @@ active_goal_ids = ["goal-runtime"]
   let initial_persisted_version =
     (read_persisted_meta config keeper_name).Keeper_meta_contract.meta_version
   in
+  let before_overlay_drift =
+    overlay_drift_counter_value ~keeper:keeper_name ~field:"active_goal_ids"
+  in
   (match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -216,12 +219,16 @@ active_goal_ids = ["goal-runtime"]
       | Ok (Some persisted) ->
           check
             (list string)
-            "persisted meta stores TOML active_goal_ids"
-            [ "goal-runtime" ]
+            "persisted meta does not store TOML active_goal_ids"
+            []
             persisted.Keeper_meta_contract.active_goal_ids;
-          check int "TOML-owned active_goal_ids writes once"
-            (initial_persisted_version + 1)
-            persisted.Keeper_meta_contract.meta_version))
+          check int "no TOML-only active_goal_ids write bump"
+            initial_persisted_version persisted.Keeper_meta_contract.meta_version);
+      check
+        (float 0.0001)
+        "TOML-only active_goal_ids drift is observable"
+        (before_overlay_drift +. 1.0)
+        (overlay_drift_counter_value ~keeper:keeper_name ~field:"active_goal_ids"))
 
 let () =
   run "Keeper_runtime denylist resync"
@@ -233,8 +240,8 @@ let () =
             `Quick
             test_ensure_keeper_meta_overlays_denylist_from_toml;
           test_case
-            "overlays active_goal_ids from TOML and persists"
+            "overlays active_goal_ids from TOML without persisting config fields"
             `Quick
-            test_ensure_keeper_meta_overlays_active_goal_ids_and_persists;
+            test_ensure_keeper_meta_overlays_active_goal_ids_from_toml;
         ] );
     ]

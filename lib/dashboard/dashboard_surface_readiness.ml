@@ -219,6 +219,28 @@ let all_entries =
       ~tool_name:"masc_operator_snapshot"
       ()
   ; entry
+      ~id:"monitoring.journey"
+      ~label:"Journey Map"
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
+      ~rationale:"Execution-flow drill-down reachable from monitoring diagnostics."
+      ~route_hash:"#monitoring?section=journey"
+      ~live_spotcheck:"/api/v1/dashboard/journey"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
+      ~id:"monitoring.cognition"
+      ~label:"Keeper Cognition"
+      ~exposure_status:"diagnostic"
+      ~hidden_from_nav:true
+      ~meets_main_gate:false
+      ~rationale:"Keeper cognition and memory drill-down reachable from monitoring diagnostics."
+      ~route_hash:"#monitoring?section=cognition"
+      ~live_spotcheck:"/api/v1/dashboard/cognition"
+      ~tool_name:"masc_operator_snapshot"
+      ()
+  ; entry
       ~id:"keepers"
       ~label:"Keepers"
       ~exposure_status:"main"
@@ -269,61 +291,6 @@ let all_entries =
       ~rationale:"Panel and judge deliberation registry emitted by masc_fusion."
       ~route_hash:"#fusion"
       ~live_spotcheck:"/api/v1/dashboard/fusion-runs"
-      ()
-  ; entry
-      ~id:"keepers"
-      ~label:"Keepers"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Dedicated keeper roster, conversation, and context workspace."
-      ~route_hash:"#keepers"
-      ~live_spotcheck:"/api/v1/dashboard/keepers"
-      ~tool_name:"masc_keeper_list"
-      ()
-  ; entry
-      ~id:"board"
-      ~label:"Board"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Top-level board surface for human, agent, automation, and system posts."
-      ~route_hash:"#board"
-      ~live_spotcheck:"/api/v1/dashboard/board"
-      ~tool_name:"masc_board_list"
-      ()
-  ; entry
-      ~id:"schedule"
-      ~label:"Schedule"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Scheduled keeper automation and wake signals."
-      ~route_hash:"#schedule"
-      ~live_spotcheck:"/api/v1/dashboard/schedule"
-      ~tool_name:"masc_surface_audit"
-      ()
-  ; entry
-      ~id:"approvals"
-      ~label:"Approvals"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Keeper HITL approval queue and pending tool-call gates."
-      ~route_hash:"#approvals"
-      ~live_spotcheck:"/api/v1/dashboard/briefing"
-      ~tool_name:"masc_operator_snapshot"
-      ()
-  ; entry
-      ~id:"fusion"
-      ~label:"Fusion"
-      ~exposure_status:"main"
-      ~hidden_from_nav:false
-      ~meets_main_gate:true
-      ~rationale:"Panel and judge deliberations emitted by masc_fusion."
-      ~route_hash:"#fusion"
-      ~live_spotcheck:"/api/v1/dashboard/fusion"
-      ~tool_name:"masc_surface_audit"
       ()
   ; entry
       ~id:"command.operations"

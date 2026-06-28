@@ -1,6 +1,7 @@
 open Eio.Std
 
 let keeper_name = "interaction-judge"
+let prompt_dashboard_interaction_judge = "dashboard_interaction_judge"
 
 type interaction = {
   source : string;
@@ -94,30 +95,27 @@ let fresh_interactions_json ~base_path =
   )
 
 let prompt_for_facts facts_json =
-  let facts_str = Yojson.Safe.to_string facts_json in
-  let template =
-    In_channel.with_open_text "config/prompts/dashboard_interaction_judge.md" In_channel.input_all
-  in
-  (* template 은 facts 자리에 %s placeholder(L2)를 가진다. 이전 코드는
-     [Printf.sprintf "%s\n\nFacts:\n%s" template facts_str] 였는데 template 이
-     format string 이 아니라 *인자*라 template 내부의 %s 가 치환되지 않은 채
-     LLM 에게 literal "%s" 로 전달되었다(schema 위반의 근본 원인).
-     치환은 printf format 이 아니라 문자열 replace 로 처리한다 —
-     markdown 에 literal % (예 백분율) 가 추가돼도 [sprintf] 의 Invalid_arg
-     로 judge 가 크래시하지 않는다(리뷰 nit). *)
-  String_util.replace_substring ~needle:"%s" ~by:facts_str template
+  Prompt_registry.render_prompt_template prompt_dashboard_interaction_judge
+    [ ("facts_json", Yojson.Safe.to_string facts_json) ]
+  |> Result.map_error (fun msg ->
+         Agent_sdk.Error.Internal
+           ("dashboard_interaction_judge prompt render failed: " ^ msg))
 
 let compute_judgments ~build_facts =
   let runtime_id = Runtime.get_default_runtime_id () in
-  Masc_oas_bridge.run_with_caller ~caller:Env_config_oas_bridge.Operator_judge (fun () ->
-    let factual_json = build_facts () in
-    let prompt = prompt_for_facts factual_json in
-    Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
-      ~goal:prompt ~masc_tools:[] ~dispatch:(fun ~name ~args:_ -> Tool_result.error ~tool_name:name ~start_time:0.0 "no tools")
-      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
-      ~approval:Approval_callbacks.auto_approve
-      ()
-  )
+  Masc_oas_bridge.run_with_caller
+    ~caller:Env_config_oas_bridge.Operator_judge
+    (fun () ->
+      let factual_json = build_facts () in
+      match prompt_for_facts factual_json with
+      | Error err -> Error err
+      | Ok prompt ->
+          Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
+            ~goal:prompt ~masc_tools:[]
+            ~dispatch:(fun ~name ~args:_ ->
+              Tool_result.error ~tool_name:name ~start_time:0.0 "no tools")
+            ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+            ~approval:Approval_callbacks.auto_approve ())
 
 let refresh_once st build_facts =
   Eio_guard.with_mutex st.mu (fun () ->

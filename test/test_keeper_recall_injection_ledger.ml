@@ -158,6 +158,35 @@ let () =
   (* Deterministic round-trip: serialise then re-parse is structurally equal. *)
   let round_trip = Yojson.Safe.from_string (Yojson.Safe.to_string j) in
   check "round-trip equal" (Yojson.Safe.equal j round_trip);
+  (match Ledger.record_of_json_result round_trip with
+   | Ok record ->
+     check "typed decoder preserves keeper_id" (record.keeper_id = "alpha");
+     check
+       "typed decoder preserves fact keys"
+       (record.injected_fact_keys = [ "fact one"; "fact two" ])
+   | Error _ -> check "typed decoder accepts own schema" false);
+  (match Ledger.record_of_json_result (`Assoc []) with
+   | Error (`Missing_field "keeper_id") -> check "missing keeper_id is visible" true
+   | _ -> check "missing keeper_id is visible" false);
+  (match
+     Ledger.record_of_json_result
+       (`Assoc
+         [ "keeper_id", `String "alpha"
+         ; "injected_fact_keys", `List [ `Int 1 ]
+         ; "injected_episode_keys", `List []
+         ])
+   with
+   | Error (`Invalid_field "injected_fact_keys") ->
+     check "invalid fact key list is visible" true
+   | _ -> check "invalid fact key list is visible" false);
+  check
+    "known recall failure label stays stable"
+    (Ledger.bounded_failure_reason_label "prompt_render_error"
+     = "prompt_render_error");
+  check
+    "unknown recall failure label is bounded"
+    (Ledger.bounded_failure_reason_label "free-form provider detail"
+     = Ledger.failure_reason_unknown_label);
   test_append_does_not_prune_old_day_file ();
   test_prune_older_than_removes_old_day_file ();
   if !failed > 0

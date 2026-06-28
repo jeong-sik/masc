@@ -1317,6 +1317,9 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_config_root_keeper_toml config_root "mad-improver";
+    write_file
+      (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
+      "[keeper]\ngoal = \"operator\"\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -1330,6 +1333,8 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"masc-improver" ~trace_id:"trace-masc-improver" ());
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"operator" ~trace_id:"trace-operator" ());
         let json =
           Server_routes_http_runtime_fleet_scan.keeper_identity_drift_health_json
             config
@@ -1346,10 +1351,17 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
           (json |> member "terminal_reason" |> to_string);
         Alcotest.(check bool) "drift asks operator action" true
           (json |> member "operator_action_required" |> to_bool);
+        Alcotest.(check (list string)) "configured names include disabled keepers"
+          [ "mad-improver"; "operator" ]
+          (json |> member "configured_keeper_names" |> to_list
+           |> List.map to_string);
         Alcotest.(check (list string)) "materializable configured names"
           [ "mad-improver" ]
           (json |> member "materializable_configured_keeper_names" |> to_list
            |> List.map to_string);
+        Alcotest.(check (list string)) "persisted meta includes disabled keeper"
+          [ "masc-improver"; "operator" ]
+          (json |> member "persisted_meta_names" |> to_list |> List.map to_string);
         Alcotest.(check (list string)) "configured without meta"
           [ "mad-improver" ]
           (json |> member "configured_without_meta_names" |> to_list
@@ -2001,6 +2013,17 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
+          Alcotest.(check string) "health overall status tracks fleet degradation"
+            "degraded"
+            (json |> member "overall_status" |> to_string);
+          Alcotest.(check bool) "health top-level asks for operator action" true
+            (json |> member "operator_action_required" |> to_bool);
+          Alcotest.(check bool) "health top-level names fleet blocker" true
+            (json |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_fleet_safety:reaction_capacity_below_target"));
           ())))
 
 let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity () =

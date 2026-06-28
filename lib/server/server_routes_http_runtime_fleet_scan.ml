@@ -533,9 +533,17 @@ let string_set_of_list values =
 
 let json_string_list values = Json_util.json_string_list values
 
-let configured_keeper_is_materializable ?base_path name =
-  Keeper_types_profile.keeper_profile_defaults_materializable_for_name ?base_path
-    name
+let configured_keeper_is_materializable config name =
+  (* #22586: autoboot-disabled keepers carry no identity-drift materialization
+     pressure. *)
+  Keeper_meta_store.declarative_autoboot_enabled_by_default config name
+  &&
+  (* #22615: SSOT materializability predicate. #22616: the probe-load fallback
+     is surfaced via the ProfileLoadFailures counter + warn inside
+     Keeper_types_profile (replaces the previously silent inline check; the
+     Cancelled re-raise discipline is preserved inside the helper). *)
+  Keeper_types_profile.keeper_profile_defaults_materializable_for_name
+    ~base_path:config.Workspace.base_path name
 
 let keeper_identity_drift_scan config =
   let configured_names =
@@ -546,11 +554,10 @@ let keeper_identity_drift_scan config =
   in
   let materializable_configured_names =
     configured_names
-    |> List.filter
-         (configured_keeper_is_materializable ~base_path:config.Workspace.base_path)
+    |> List.filter (configured_keeper_is_materializable config)
     |> sorted_unique_strings
   in
-  let configured_set = string_set_of_list materializable_configured_names in
+  let configured_set = string_set_of_list configured_names in
   let persisted_set = string_set_of_list persisted_meta_names in
   {
     configured_names;

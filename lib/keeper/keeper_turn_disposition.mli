@@ -133,6 +133,11 @@ val to_wire : t -> string
     Otherwise [Unknown { raw_error = wire }] is returned. *)
 val of_wire : string -> t
 
+(** Compatibility predicate for consumers that must recognise older
+    ["turn_budget_exhausted:<used>/<limit>"] receipt wires without weakening
+    {!of_wire}'s fail-closed typed parser contract. *)
+val is_turn_budget_exhausted_wire : string -> bool
+
 (** {1 Layer projection} *)
 
 (** Canonical projection from runtime layer to operator layer. See

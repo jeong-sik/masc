@@ -247,6 +247,16 @@ let path_resolution_contract_json =
            tools before Read. For repo files, use cwd=\"repos/<repo>\" plus \
            file_path=\"lib/...\", or use file_path=\"repos/<repo>/lib/...\"."
       )
+    ; ( "execute_path_basis"
+      , `String
+          "Execute path arguments resolve against cwd. If cwd=\"repos/<repo>\" is set, \
+           pass repo-relative paths such as lib/...; do not repeat the repo prefix \
+           as repos/<repo>/lib/..." )
+    ; ( "masc_state_basis"
+      , `String
+          ".masc runtime state is not a sandbox filesystem target. Use keeper \
+           task/context tools for .masc state instead of Read/Grep/Execute paths \
+           under .masc." )
     ]
 
 let runtime_observability_contract_json_from_fields ~keeper_name ?agent_name ?trace_id

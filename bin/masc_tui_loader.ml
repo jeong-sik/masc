@@ -233,9 +233,40 @@ let add_event (state : state) event_type content =
     list, not that a malformed payload was silently dropped. *)
 let ( let* ) = Result.bind
 
+let decode_attention_severity raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "critical" -> Ok Attention_critical
+  | "bad" -> Ok Attention_bad
+  | "warn" | "warning" -> Ok Attention_warning
+  | "info" -> Ok Attention_info
+  | other ->
+      Error
+        (Printf.sprintf
+           "unknown attention severity %S (normalized %S)"
+           raw
+           other)
+
+let decode_workspace_health raw =
+  match String.lowercase_ascii (String.trim raw) with
+  | "critical" -> Ok Workspace_health_critical
+  | "bad" -> Ok Workspace_health_bad
+  | "risk" -> Ok Workspace_health_risk
+  | "warn" | "warning" | "watch" -> Ok Workspace_health_warning
+  | "degraded" | "interrupted" -> Ok Workspace_health_degraded
+  | "initializing" -> Ok Workspace_health_initializing
+  | "ok" | "good" | "healthy" -> Ok Workspace_health_ok
+  | "unknown" -> Ok Workspace_health_unknown
+  | other ->
+      Error
+        (Printf.sprintf
+           "unknown workspace health %S (normalized %S)"
+           raw
+           other)
+
 let decode_attention_item json =
   let* ai_kind = required_string_field json "kind" in
-  let* ai_severity = required_string_field json "severity" in
+  let* raw_severity = required_string_field json "severity" in
+  let* ai_severity = decode_attention_severity raw_severity in
   let* ai_summary = required_string_field json "summary" in
   let* ai_target_type = required_string_field json "target_type" in
   let* ai_target_id = optional_string_field json "target_id" in
@@ -377,6 +408,7 @@ let load_overview ~(host : string) ~(port : int) :
       in
       let* ov_workspace_health =
         required_string_field summary "workspace_health"
+        |> Result.bind decode_workspace_health
       in
       let* ov_cluster = required_string_field summary "cluster" in
       let* ov_project = required_string_field summary "project" in

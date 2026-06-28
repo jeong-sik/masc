@@ -4,6 +4,37 @@ open Masc_tui_types
 open Tui_decode
 open Masc_tui_ansi
 
+let workspace_health_label = function
+  | Workspace_health_critical -> "critical"
+  | Workspace_health_bad -> "bad"
+  | Workspace_health_risk -> "risk"
+  | Workspace_health_warning -> "warning"
+  | Workspace_health_degraded -> "degraded"
+  | Workspace_health_initializing -> "initializing"
+  | Workspace_health_ok -> "ok"
+  | Workspace_health_unknown -> "unknown"
+
+let workspace_health_color = function
+  | Workspace_health_critical
+  | Workspace_health_bad
+  | Workspace_health_risk -> Ansi.red
+  | Workspace_health_warning
+  | Workspace_health_degraded
+  | Workspace_health_initializing
+  | Workspace_health_unknown -> Ansi.yellow
+  | Workspace_health_ok -> Ansi.green
+
+let attention_severity_label = function
+  | Attention_critical -> "critical"
+  | Attention_bad -> "bad"
+  | Attention_warning -> "warn"
+  | Attention_info -> "info"
+
+let attention_severity_color = function
+  | Attention_critical | Attention_bad -> Ansi.red
+  | Attention_warning -> Ansi.yellow
+  | Attention_info -> Ansi.cyan
+
 (** Render the dashboard (original view) *)
 let render_dashboard (state : state) =
   let (rows, cols) = get_terminal_size () in
@@ -174,15 +205,10 @@ let render_overview (state : state) =
         Printf.sprintf "  %s(no overview data — press 'r' to refresh)%s"
           Ansi.dim Ansi.reset
     | Some o, None ->
-        let health_color =
-          match o.ov_workspace_health with
-          | "healthy" | "ok" -> Ansi.green
-          | "degraded" | "warning" -> Ansi.yellow
-          | "critical" -> Ansi.red
-          | _ -> Ansi.white
-        in
+        let health_color = workspace_health_color o.ov_workspace_health in
+        let health_label = workspace_health_label o.ov_workspace_health in
         Printf.sprintf "  Health: %s%s%s  Agents: %d  Approvals: %d  Incidents: %d"
-          health_color o.ov_workspace_health Ansi.reset
+          health_color health_label Ansi.reset
           o.ov_active_agents o.ov_pending_approvals o.ov_incident_count
   in
   box_line buf cols summary_line;
@@ -223,14 +249,10 @@ let render_overview (state : state) =
     let attention_str =
       if i < List.length attention_items then
         let a = List.nth attention_items i in
-        let sev_color =
-          match a.ai_severity with
-          | "critical" | "Critical" -> Ansi.red
-          | "warning" | "Warning" -> Ansi.yellow
-          | _ -> Ansi.white
-        in
+        let sev_color = attention_severity_color a.ai_severity in
+        let severity_label = attention_severity_label a.ai_severity in
         Printf.sprintf "%s[%s]%s %s"
-          sev_color (fit_width a.ai_severity 5) Ansi.reset
+          sev_color (fit_width severity_label 5) Ansi.reset
           (fit_width a.ai_summary (panel_width - 12))
       else ""
     in

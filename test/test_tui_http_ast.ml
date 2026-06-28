@@ -66,6 +66,47 @@ let test_planning_status_is_closed_sum () =
        ~needle:"unknown planning goal status")
 ;;
 
+let test_overview_state_domains_are_closed_sum () =
+  let workspace_health_constructors =
+    Ast_grep.constructor_names_of_type
+      ~module_path:"bin/masc_tui_types.ml"
+      ~type_name:"workspace_health"
+  in
+  let attention_severity_constructors =
+    Ast_grep.constructor_names_of_type
+      ~module_path:"bin/masc_tui_types.ml"
+      ~type_name:"attention_severity"
+  in
+  check (list string) "workspace health constructors"
+    [
+      "Workspace_health_critical";
+      "Workspace_health_bad";
+      "Workspace_health_risk";
+      "Workspace_health_warning";
+      "Workspace_health_degraded";
+      "Workspace_health_initializing";
+      "Workspace_health_ok";
+      "Workspace_health_unknown";
+    ]
+    workspace_health_constructors;
+  check (list string) "attention severity constructors"
+    [
+      "Attention_critical";
+      "Attention_bad";
+      "Attention_warning";
+      "Attention_info";
+    ]
+    attention_severity_constructors;
+  check int "loader has an explicit unknown health decode error" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~needle:"unknown workspace health");
+  check int "loader has an explicit unknown severity decode error" 1
+    (Ast_grep.count_string_literals
+       ~module_path:"bin/masc_tui_loader.ml"
+       ~needle:"unknown attention severity")
+;;
+
 let () =
   run "masc-tui-http-regression" [
     ( "tui-http",
@@ -80,6 +121,10 @@ let () =
           "planning status is closed-sum"
           `Quick
           test_planning_status_is_closed_sum;
+        test_case
+          "overview state domains are closed-sum"
+          `Quick
+          test_overview_state_domains_are_closed_sum;
       ]
     )
   ]

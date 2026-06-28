@@ -30,9 +30,15 @@ type msg_entry = {
 }
 
 (** Attention item for the Overview surface *)
+type attention_severity =
+  | Attention_critical
+  | Attention_bad
+  | Attention_warning
+  | Attention_info
+
 type attention_item = {
   ai_kind: string;
-  ai_severity: string;
+  ai_severity: attention_severity;
   ai_summary: string;
   ai_target_type: string;
   ai_target_id: string option;
@@ -96,8 +102,18 @@ type pending_approval_action = {
 }
 
 (** Overview snapshot from /api/v1/dashboard/briefing *)
+type workspace_health =
+  | Workspace_health_critical
+  | Workspace_health_bad
+  | Workspace_health_risk
+  | Workspace_health_warning
+  | Workspace_health_degraded
+  | Workspace_health_initializing
+  | Workspace_health_ok
+  | Workspace_health_unknown
+
 type overview_snapshot = {
-  ov_workspace_health: string;
+  ov_workspace_health: workspace_health;
   ov_cluster: string;
   ov_project: string;
   ov_active_agents: int;

@@ -36,9 +36,9 @@
 - 메모리 06-27(keeper Play→멈춤)과 동일 경로.
 
 ### P0-3: 운영 config(.masc/config)가 .gitignore → fresh deploy 회귀 (recurring)
-- `~/me/.masc/config/`가 `.gitignore`(L23)로 git 추적 제외.
+- `<base-path>/.masc/config/`가 `.gitignore`(L23)로 git 추적 제외.
 - fresh deploy/clone/base_path 재설정 순간 git 템플릿(masc repo `config/keepers/*.toml`, `autoboot_enabled=false`)으로 회귀한다.
-- 06-26 fix(autoboot_enabled=true)가 06-28 재발한 근본 — live override가 git 어디에도 기록되지 않아 재생성되면 날아간다. 비교: `workspace/.../masc/config/keepers/base.toml:11 = false` vs `~/me/.masc/config/keepers/base.toml = true`.
+- 06-26 fix(autoboot_enabled=true)가 06-28 재발한 근본 — live override가 git 어디에도 기록되지 않아 재생성되면 날아간다. 비교: `workspace/.../masc/config/keepers/base.toml:11 = false` vs `<base-path>/.masc/config/keepers/base.toml = true`.
 
 ## Problem (P1, 주요)
 

@@ -8,11 +8,9 @@
     Every consumer that needs to issue an HTTP call later reaches
     the captured handles via {!get} or {!get_opt}.
 
-    Internal storage is hidden. The current domain's [Domain.DLS]
-    value is preferred. A process-wide fallback preserves legacy
-    lookup semantics for domains that have not been explicitly
-    initialised yet; callers that use the returned [Eio.Switch] or net
-    handle across domains still need an ownership audit. *)
+    Internal storage is hidden and domain-local. There is no
+    process-wide fallback; an OCaml domain that performs OAS HTTP
+    calls must call {!init} with handles owned by that domain. *)
 
 type t = {
   sw : Eio.Switch.t;
@@ -32,9 +30,9 @@ val init :
   unit ->
   unit
 (** Capture the runtime handles for the current OCaml domain.
-    Last-writer-wins for both the domain-local slot and the process-wide
-    compatibility fallback. Intended to be called at startup; re-init is
-    permitted by harness tests and standalone executables. *)
+    Last-writer-wins for the current domain-local slot. Intended to be called
+    at startup; re-init is permitted by harness tests and standalone
+    executables. *)
 
 val reset_for_test : unit -> unit
 (** Clear the captured environment for direct test executable runs. *)
@@ -48,7 +46,7 @@ val get : unit -> t
 
 val get_opt : unit -> t option
 (** Read the captured environment without raising. Returns
-    [None] only when {!init} has not run in the process. Used by tests and
-    by code paths that must degrade gracefully (runtime catalog runtime,
+    [None] when {!init} has not run in the current OCaml domain. Used by tests
+    and by code paths that must degrade gracefully (runtime catalog runtime,
     masc_oas_bridge fallback, local-runtime probes, oas_worker_named
     scheduler). *)

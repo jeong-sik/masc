@@ -233,6 +233,11 @@ val fact_is_current : now:float -> fact -> bool
     Kept as the SSOT for the producer and the legacy recall-eligibility shim. *)
 val librarian_unstructured_fallback_claim_prefix : string
 
+(** Whether raw claim text carries the historical librarian parse-failure
+    fallback prefix. Read-only compatibility and operator evidence surfaces use
+    this; new producer-side rows should rely on [Diagnostic] claim_kind. *)
+val legacy_unstructured_fallback_claim : string -> bool
+
 (** Terminal marker used on episodes that preserve unstructured librarian output
     after strict JSON parsing fails. *)
 val librarian_unstructured_fallback_terminal_marker : string

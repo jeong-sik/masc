@@ -221,7 +221,7 @@ let test_forge_pr_en () =
 let test_github_issue_kr () =
   let idx = build_keeper_index () in
   ignore (assert_retrieves ~label:"github_issue_kr" idx
-    "깃허브 이슈 풀리퀘스트" "tool_execute")
+    "깃허브 github gh git 명령어 실행" "tool_execute")
 
 (* ================================================================ *)
 (* Scenarios: masc_* tools (Korean BM25 retrieval — #4520)          *)

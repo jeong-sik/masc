@@ -31,7 +31,8 @@ let max_ring_size = 43200
     43200 events at ~1 skip/sec sustained covers 12 hours, matching
     the largest dashboard window (720m). *)
 
-let ring_mu = Eio.Mutex.create ()
+let ring_mu = Mutex.create ()
+let with_ring_lock f = Mutex.protect ring_mu f
 
 type rejection_ring = {
   events : rejection_event list;
@@ -57,7 +58,7 @@ let record_tool_skipped_failure exn =
     (Printexc.to_string exn)
 
 let append_rejection_event event =
-  Eio.Mutex.use_rw ~protect:true ring_mu (fun () ->
+  with_ring_lock (fun () ->
     let current = !ring in
     if current.count < max_ring_size
     then ring := { events = event :: current.events; count = current.count + 1 }
@@ -93,11 +94,11 @@ let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
 (** Reset the ring. Test-only helper — exposed because the alcotest cases
     need to start from a clean state regardless of test order. *)
 let reset_for_testing () =
-  ring := empty_ring
+  with_ring_lock (fun () -> ring := empty_ring)
 
 let snapshot_ring () =
   Safe_ops.protect ~default:[] (fun () ->
-    Eio.Mutex.use_ro ring_mu (fun () -> (!ring).events))
+    with_ring_lock (fun () -> (!ring).events))
 
 let inject_for_testing ~keeper_name ~tool_name ~reason_code ~ts =
   let event = { ts; tool_name; reason_code; keeper_name } in
@@ -106,7 +107,7 @@ let inject_for_testing ~keeper_name ~tool_name ~reason_code ~ts =
 let max_ring_size_for_testing = max_ring_size
 
 let ring_size_for_testing () =
-  Eio.Mutex.use_ro ring_mu (fun () -> (!ring).count)
+  with_ring_lock (fun () -> (!ring).count)
 
 let record_tool_skipped_with_append_for_testing
     ~append ~keeper_name ~tool_name ~reason_code =

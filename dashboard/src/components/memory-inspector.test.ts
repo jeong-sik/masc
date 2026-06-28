@@ -180,6 +180,28 @@ function stubFetch(payload: unknown = turnRecordsPayload()) {
   return fetchMock
 }
 
+function turnRecordsPayloadWithEmptyFallbackFact() {
+  const payload = turnRecordsPayload()
+  const fact = {
+    claim: 'unstructured_note: librarian parse fallback (librarian provider returned empty response): <empty response>',
+    category: 'ephemeral',
+    source: { trace_id: 'trace-empty-fallback', turn: 9, tool_call_id: null },
+    first_seen: 1_789_800_000,
+    first_seen_iso: '2026-09-10T...Z',
+    reference_time: 1_789_800_000,
+    valid_until: null,
+    valid_until_iso: null,
+    last_verified_at: null,
+    current: true,
+    prompt_recallable: false,
+    claim_kind: 'diagnostic',
+  }
+  payload.memory_os.facts.items.splice(1, 0, fact)
+  payload.memory_os.facts.shown = 4
+  payload.memory_os.facts.current = 3
+  return payload
+}
+
 const improver: MemoryKeeper = { id: 'masc-improver', ctx: 0.86, status: 'run' }
 
 function renderInspector(keeper: MemoryKeeper = improver, onClose = vi.fn()) {
@@ -266,6 +288,23 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(container.textContent).not.toContain('amplitude 캐시는 만료됨')
     expect(container.textContent).toContain('진단 fallback · librarian')
     expect(container.textContent).toContain('librarian parse fallback')
+  })
+
+  it('does not leak empty librarian fallback categories into the default recall filter', async () => {
+    stubFetch(turnRecordsPayloadWithEmptyFallbackFact())
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+
+    expect(container.textContent).toContain('1/4 recallable')
+    expect(container.textContent).not.toContain('<empty response>')
+    expect([...container.querySelectorAll('.mem-filter')].map(b => b.textContent)).not.toContain('◌ 임시')
+
+    const diagnosticBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '진단/증거 2')
+    expect(diagnosticBtn).toBeTruthy()
+    fireEvent.click(diagnosticBtn!)
+
+    expect(container.textContent).toContain('<empty response>')
+    expect([...container.querySelectorAll('.mem-filter')].map(b => b.textContent)).toContain('◌ 임시')
   })
 
   it('surfaces selection policy and prompt digest lineage without claiming raw full-prompt storage', async () => {

@@ -1266,12 +1266,12 @@ let keeper_fleet_safety_health_json
     else
       blocked_keeper_names
       |> List.map
-             (fun name ->
-               blocked_keeper_detail_json
-                 ?base_path:runtime_base_path
-                 ?phase_detail:(phase_detail name)
-                 ~keeper_bootstrap_enabled
-                 ~bootable_set
+           (fun name ->
+             blocked_keeper_detail_json
+               ?base_path:runtime_base_path
+               ?phase_detail:(phase_detail name)
+               ~keeper_bootstrap_enabled
+               ~bootable_set
                ~capacity_set
                ~paused_set
                ~read_error_set

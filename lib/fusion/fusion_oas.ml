@@ -105,12 +105,14 @@ let provider_error_detail ~runtime_id detail =
 
 let panel_failure_code = function
   | Fusion_types.Timeout -> "timeout"
+  | Fusion_types.Bridge_error _ -> "bridge_error"
   | Fusion_types.Provider_error _ -> "provider_error"
   | Fusion_types.Empty_response _ -> "empty_response"
   | Fusion_types.Invalid_max_output_tokens _ -> "invalid_max_output_tokens"
 
 let panel_failure_detail ~runtime_id = function
   | Fusion_types.Timeout -> "timeout"
+  | Fusion_types.Bridge_error detail -> Printf.sprintf "Bridge error: %s" detail
   | Fusion_types.Provider_error detail -> provider_error_detail ~runtime_id detail
   | Fusion_types.Empty_response detail -> detail
   | Fusion_types.Invalid_max_output_tokens n ->
@@ -124,6 +126,7 @@ let panel_failure_detail ~runtime_id = function
    provider attribution은 detail 안에 이미 박혀 있는 raw model을 쓴다. *)
 let panel_failure_text = function
   | Fusion_types.Timeout -> "timeout"
+  | Fusion_types.Bridge_error detail -> Printf.sprintf "Bridge error: %s" detail
   | Fusion_types.Provider_error detail -> detail
   | Fusion_types.Empty_response detail -> detail
   | Fusion_types.Invalid_max_output_tokens n ->

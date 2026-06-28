@@ -412,9 +412,17 @@ let parse_decision_event ~keeper_name line : decision_event option =
     let summary = String.concat " \xc2\xb7 " summary_parts in
     let evidence_refs =
       let refs = Json_util.get_string_list json "evidence_refs" in
-      if refs <> []
-      then refs
-      else Json_util.get_string_list json "raw_evidence_refs"
+      let raw_refs =
+        if refs <> []
+        then refs
+        else Json_util.get_string_list json "raw_evidence_refs"
+      in
+      List.filter_map
+        (fun value ->
+           match String.trim value with
+           | "" -> None
+           | trimmed -> Some trimmed)
+        raw_refs
     in
     Some
       {

@@ -508,10 +508,18 @@ function OneKeeperMemoryReal({
   const fallbackEpisodes = allEpisodes
     .filter(ep => ep.terminal_marker === MEMORY_OS_LIBRARIAN_UNSTRUCTURED_FALLBACK_MARKER)
     .slice(0, 5)
-  // distinct categories present, in first-seen order, deduped by tag
+  const visibilityRows =
+    visibilityFilter.value === 'recallable'
+      ? recallableFacts
+      : visibilityFilter.value === 'diagnostic'
+        ? diagnosticFacts
+        : facts
+  // Category chips follow the current visibility lane. Otherwise diagnostic-only
+  // fallback categories (for example ephemeral librarian parse failures) still
+  // look selectable in the default recall view even though their rows are hidden.
   const seen = new Set<string>()
   const cats: MemoryOsFactCategory[] = []
-  for (const f of facts) {
+  for (const f of visibilityRows) {
     const tag = factTag(f)
     if (!seen.has(tag)) {
       seen.add(tag)
@@ -519,14 +527,9 @@ function OneKeeperMemoryReal({
     }
   }
   const filter = kindFilter.value
-  const visibilityRows =
-    visibilityFilter.value === 'recallable'
-      ? recallableFacts
-      : visibilityFilter.value === 'diagnostic'
-        ? diagnosticFacts
-        : facts
+  const effectiveFilter = filter === 'all' || seen.has(filter) ? filter : 'all'
   const storeRows =
-    filter === 'all' ? visibilityRows : visibilityRows.filter(f => factTag(f) === filter)
+    effectiveFilter === 'all' ? visibilityRows : visibilityRows.filter(f => factTag(f) === effectiveFilter)
   const visibleStoreRows = storeRows.slice(0, factRowLimit.value)
   const hiddenStoreRows = Math.max(0, storeRows.length - visibleStoreRows.length)
   const showFallbackEpisodes = visibilityFilter.value !== 'recallable'
@@ -567,18 +570,18 @@ function OneKeeperMemoryReal({
               <div class="mem-filters">
                 <button
                   class=${`mem-filter ${visibilityFilter.value === 'recallable' ? 'on' : ''}`}
-                  onClick=${() => { visibilityFilter.value = 'recallable'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
+                  onClick=${() => { visibilityFilter.value = 'recallable'; kindFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
                 >회상 ${recallableFacts.length}</button>
                 <button
                   class=${`mem-filter ${visibilityFilter.value === 'diagnostic' ? 'on' : ''}`}
-                  onClick=${() => { visibilityFilter.value = 'diagnostic'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
+                  onClick=${() => { visibilityFilter.value = 'diagnostic'; kindFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
                 >진단/증거 ${diagnosticFacts.length}</button>
                 <button
                   class=${`mem-filter ${visibilityFilter.value === 'all' ? 'on' : ''}`}
-                  onClick=${() => { visibilityFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
+                  onClick=${() => { visibilityFilter.value = 'all'; kindFilter.value = 'all'; factRowLimit.value = DEFAULT_FACT_ROW_LIMIT }}
                 >전체 ${facts.length}</button>
               </div>
-              <${CategoryFilters} cats=${cats} active=${filter} onPick=${(t: string) => { kindFilter.value = t }} />
+              <${CategoryFilters} cats=${cats} active=${effectiveFilter} onPick=${(t: string) => { kindFilter.value = t }} />
               <div class="mem-store">${visibleStoreRows.map(f => html`<${FactRow} key=${factTag(f) + f.source.trace_id + f.source.turn + f.claim} fact=${f} />`)}</div>
               ${hiddenStoreRows > 0
                 ? html`

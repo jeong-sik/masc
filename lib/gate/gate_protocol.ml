@@ -20,13 +20,6 @@ type turn_stats = {
   tokens_used : int;
 }
 
-type outbound_message = {
-  keeper_name : string;
-  content : string;
-  structured : Yojson.Safe.t option;
-  turn_stats : turn_stats option;
-}
-
 type message_request_status =
   | Accepted
   | Queued
@@ -81,6 +74,14 @@ let message_request_to_json request =
       ("metadata", string_assoc_json request.metadata);
     ]
 
+type outbound_message = {
+  keeper_name : string;
+  content : string;
+  structured : Yojson.Safe.t option;
+  turn_stats : turn_stats option;
+  message_request : message_request option;
+}
+
 (* ── Validation ──────────────────────────────────────────────── *)
 
 type validation_error =
@@ -133,7 +134,12 @@ let gate_error_to_string = function
 (* ── Dispatch Result ─────────────────────────────────────────── *)
 
 type dispatch_result =
-  | Reply of { content : string; structured : Yojson.Safe.t option; stats : turn_stats option }
+  | Reply of
+      { content : string
+      ; structured : Yojson.Safe.t option
+      ; stats : turn_stats option
+      ; message_request : message_request option
+      }
   | Keeper_error_result of string
   | Unavailable_result
 
@@ -200,7 +206,13 @@ let outbound_to_json out =
     | None -> base
     | Some json -> base @ [ ("structured", json) ]
   in
-  `Assoc with_structured
+  let with_message_request =
+    match out.message_request with
+    | None -> with_structured
+    | Some request ->
+        with_structured @ [ ("message_request", message_request_to_json request) ]
+  in
+  `Assoc with_message_request
 
 let error_json msg =
   `Assoc [ ("ok", `Bool false); ("error", `String msg) ]

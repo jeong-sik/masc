@@ -482,7 +482,7 @@ let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
     net = state.Mcp_server.net;
   }
 
-let meta_with_directive_paused_state ~config directive meta paused =
+let meta_with_directive_paused_state ~(config : Workspace.config) directive meta paused =
   let source_meta =
     match directive with
     | `Resume ->

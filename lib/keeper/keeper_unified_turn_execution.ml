@@ -403,65 +403,50 @@ let run (ctx : ctx)
         Error reclassified, turn_state)
       else (
         match
-          next_fail_open_runtime_for_turn_with_budget
+          Keeper_turn_runtime_budget.plan_degraded_retry_step
             ~base_runtime:(runtime_id_of_meta meta)
-            ~effective_runtime:execution_runtime_id
+            ~current_runtime_id:execution_runtime_id
             ~attempted_runtimes
             ~estimated_input_tokens:prompt_timeout_estimate_tokens
             ~time_spent_in_turn_s:
-              (timeout_sec -. remaining_turn_budget_s ())
+              (Some (timeout_sec -. remaining_turn_budget_s ()))
             ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-            err
+            ~attempt
+            ~err
+            ~allow_retry:(fun _ -> true)
+            ~publish_cascade_resolution:
+              (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt err ->
+                 Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
+                   ~keeper_name:meta.name
+                   ~runtime_id
+                   ~decision
+                   ~reason
+                   ~next_runtime
+                   ~attempt
+                   ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
+                   ~error_message:(Some (Agent_sdk.Error.to_string err)))
+            ~emit_runtime_selected:
+              (fun ~runtime_id ~fallback_reason ->
+                 Keeper_metrics.emit_runtime_selected
+                   ~keeper_name:meta.name
+                   ~runtime_id
+                   ~fallback_reason)
+            ~emit_runtime_rotation:
+              (fun ~from_runtime ~to_runtime ~reason ->
+                 Keeper_metrics.emit_runtime_rotation
+                   ~keeper_name:meta.name
+                   ~from_runtime
+                   ~to_runtime
+                   ~reason)
+            ~setup_runtime:
+              (fun runtime_id ->
+                 Keeper_unified_turn_pre_dispatch.build_runtime_execution
+                   ~meta
+                   ~profile_defaults
+                   ~runtime_id)
         with
-        | Degraded_retry_allowed degraded_retry ->
-          (match
-             Keeper_turn_runtime_budget.prepare_degraded_retry_allowed
-               ~current_runtime_id:execution.runtime_id
-               ~attempt
-               ~err
-               ~retry:degraded_retry
-               ~publish_cascade_resolution:
-                 (fun ~runtime_id ~decision ~reason ~next_runtime ~attempt err ->
-                    Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-                      ~keeper_name:meta.name
-                      ~runtime_id
-                      ~decision
-                      ~reason
-                      ~next_runtime
-                      ~attempt
-                      ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-                      ~error_message:(Some (Agent_sdk.Error.to_string err)))
-               ~emit_runtime_selected:
-                 (fun ~runtime_id ~fallback_reason ->
-                    Otel_metric_store.inc_counter
-                      Keeper_metrics.(to_string RuntimeSelected)
-                      ~labels:
-                        [ ("keeper", meta.name)
-                        ; ("runtime_id", runtime_id)
-                        ; ("source", "fallback")
-                        ; ("fallback_reason", fallback_reason)
-                        ]
-                      ())
-               ~emit_runtime_rotation:
-                 (fun ~from_runtime ~to_runtime ~reason ->
-                    Otel_metric_store.inc_counter
-                      Keeper_metrics.(to_string RuntimeRotation)
-                      ~labels:
-                        [ ("keeper", meta.name)
-                        ; ("from_runtime", from_runtime)
-                        ; ("to_runtime", to_runtime)
-                        ; ("reason", reason)
-                        ]
-                      ())
-               ~setup_runtime:
-                 (fun runtime_id ->
-                    Keeper_unified_turn_pre_dispatch.build_runtime_execution
-                      ~meta
-                      ~profile_defaults
-                      ~runtime_id)
-           with
-           | Keeper_turn_runtime_budget.Degraded_retry_setup_failed
-               { retry = degraded_retry; reason = fallback_reason; fail_open_err } ->
+        | Keeper_turn_runtime_budget.Degraded_retry_step_setup_failed
+            { retry = degraded_retry; reason = fallback_reason; fail_open_err } ->
              let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
                current_turn_phase_elapsed_ms turn_state.retry_phase_started_at
              in
@@ -488,8 +473,8 @@ let run (ctx : ctx)
                   (Agent_sdk.Error.to_string fail_open_err));
              mark_terminal_error fail_open_err;
              Error fail_open_err, turn_state
-           | Keeper_turn_runtime_budget.Degraded_retry_prepared
-               { retry = degraded_retry; reason = fallback_reason; next = next_execution } ->
+        | Keeper_turn_runtime_budget.Degraded_retry_step_prepared
+            { retry = degraded_retry; reason = fallback_reason; next = next_execution } ->
              let next_execution_runtime_id =
                next_execution.runtime_id
              in
@@ -545,17 +530,9 @@ let run (ctx : ctx)
                ; attempted_runtimes =
                    next_execution_runtime_id :: attempted_runtimes
                }
-               turn_state)
-        | Degraded_retry_slot_phase_exhausted degraded_retry ->
-          Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
-            ~keeper_name:meta.name
-            ~runtime_id:execution.runtime_id
-            ~decision:Degraded_retry_slot_phase_exhausted
-            ~reason:(EC.degraded_retry_reason_to_string degraded_retry.fallback_reason)
-            ~next_runtime:(Some degraded_retry.next_runtime)
-            ~attempt
-            ~error_kind:(Some (Keeper_agent_error.sdk_error_kind err))
-            ~error_message:(Some (Agent_sdk.Error.to_string err));
+               turn_state
+        | Keeper_turn_runtime_budget.Degraded_retry_step_slot_phase_exhausted
+            { retry = degraded_retry; _ } ->
           let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
             current_turn_phase_elapsed_ms turn_state.retry_phase_started_at
           in
@@ -585,7 +562,7 @@ let run (ctx : ctx)
             (short_preview (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
           Error err, turn_state
-        | No_degraded_retry
+        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed
           when EC.is_transient_network_error err
                && attempt <= EC.max_transient_retries () ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
@@ -638,7 +615,8 @@ let run (ctx : ctx)
             ; attempted_runtimes
             }
             turn_state
-        | No_degraded_retry when EC.is_context_overflow err ->
+        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed
+          when EC.is_context_overflow err ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id
@@ -686,7 +664,7 @@ let run (ctx : ctx)
             (short_preview (Agent_sdk.Error.to_string err));
           mark_terminal_error err;
           Error err, turn_state
-        | No_degraded_retry ->
+        | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed ->
           Keeper_unified_turn_cascade_resolution.publish_cascade_resolution
             ~keeper_name:meta.name
             ~runtime_id:execution.runtime_id

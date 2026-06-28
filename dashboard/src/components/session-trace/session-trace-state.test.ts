@@ -702,7 +702,7 @@ describe('buildTraceEvents', () => {
     )
     expect(events).toHaveLength(1)
     expect(events[0]!.kind).toBe('lifecycle')
-    expect(events[0]!.summary).toContain('CDAL inconclusive')
+    expect(events[0]!.summary).toContain('Contract verdict inconclusive')
     expect(events[0]!.summary).toContain('review_warning.json')
   })
 

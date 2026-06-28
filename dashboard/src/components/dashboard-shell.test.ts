@@ -979,7 +979,7 @@ describe('dashboardHealthChips', () => {
     })
   })
 
-  it('surfaces CDAL proof and task-scope blockers as a routed health chip', () => {
+  it('surfaces contract proof and task-scope blockers as a routed health chip', () => {
     const chips = dashboardHealthChips({
       connected: true,
       counts: { keepers: 2, configured_keepers: 2 },
@@ -1012,7 +1012,7 @@ describe('dashboardHealthChips', () => {
 
     const cdal = chips.find(c => c.key === 'cdal-runtime-health')
     expect(cdal).toMatchObject({
-      label: 'CDAL proof incomplete 6',
+      label: 'Contract proof incomplete 6',
       tone: 'bad',
       route: {
         tab: 'monitoring',

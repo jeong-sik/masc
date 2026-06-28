@@ -55,7 +55,7 @@ let test_workspace_projection_includes_messages_and_mentions () =
   let inbox = list_field "mentions_inbox" json in
   Alcotest.(check int) "two messages" 2 (List.length messages);
   Alcotest.(check int) "one mention" 1 (List.length inbox);
-  Alcotest.(check string) "workspace id" "root" (string_field "id" workspace);
+  Alcotest.(check string) "workspace id" "workspace" (string_field "id" workspace);
   Alcotest.(check bool)
     "participants include sangsu"
     true

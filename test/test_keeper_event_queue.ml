@@ -120,6 +120,9 @@ let () =
   let bootstrap_stim =
     { post_id = "bootstrap"; urgency = Normal; arrived_at = 0.0; payload = Bootstrap }
   in
+  let ghost_stim =
+    { post_id = "ghost"; urgency = Low; arrived_at = 0.0; payload = No_progress_recovery }
+  in
   let q = empty in
   assert (is_empty q);
   let q = enqueue q board_stim in
@@ -285,6 +288,64 @@ let () =
         match dequeue restored with
         | Some item -> item
         | None -> Alcotest.fail "partial ack should leave unrelated in-flight stimulus"
+      in
+      assert (String.equal remaining.post_id "bootstrap");
+      assert (is_empty rest));
+
+  (* --- A-fix (RFC: keeper-orphan-stimulus-persistence): a consumed stimulus
+         is drained from pending and inflight snapshots on the genuine-ack path.
+         [ack_inflight] clears the inflight file only (it is shared with
+         [requeue_front], which must leave the requeued stimulus in pending -
+         covered by the requeue-front test below). Here the stimulus lives in
+         the pending snapshot (event-queue.json), mirroring a bootstrap enqueued
+         by supervisor launch; after ack, [load] must be empty. Without the
+         A-fix this returns length 1 and accumulates across restarts. --- *)
+  let base_path = temp_dir "keeper-event-queue-ack-drains-pending" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-ack-drains-pending-test" in
+      Keeper_event_queue_persistence.persist
+        ~base_path ~keeper_name (enqueue empty bootstrap_stim);
+      assert (length (Keeper_event_queue_persistence.load ~base_path ~keeper_name) = 1);
+      (* Genuine-ack path: ack_consumed drains inflight AND pending snapshot. *)
+      Masc.Keeper_registry_event_queue.ack_consumed
+        ~base_path keeper_name [ bootstrap_stim ];
+      (* Before the A-fix this returned length 1 (pending snapshot untouched);
+         after the fix the pending snapshot is drained. *)
+      assert (is_empty (Keeper_event_queue_persistence.load ~base_path ~keeper_name)));
+
+  (* --- Genuine consumed-ack handles the realistic mixed state: pending can
+         contain duplicates while inflight still carries the consumed lease.
+         A partial ack removes all matching consumed copies from both snapshots,
+         ignores absent stimuli, and leaves unrelated pending/inflight work
+         replayable exactly once after [load]'s merge. --- *)
+  let base_path = temp_dir "keeper-event-queue-ack-mixed-partial" in
+  Fun.protect
+    ~finally:(fun () -> rm_rf base_path)
+    (fun () ->
+      let keeper_name = "keeper-ack-mixed-partial-test" in
+      let pending =
+        empty
+        |> fun q -> enqueue q board_stim
+        |> fun q -> enqueue q bootstrap_stim
+        |> fun q -> enqueue q board_stim
+      in
+      Keeper_event_queue_persistence.persist ~base_path ~keeper_name pending;
+      Keeper_event_queue_persistence.record_inflight
+        ~base_path
+        ~keeper_name
+        [ board_stim; bootstrap_stim ];
+      Masc.Keeper_registry_event_queue.ack_consumed
+        ~base_path
+        keeper_name
+        [ board_stim; ghost_stim ];
+      let restored = Keeper_event_queue_persistence.load ~base_path ~keeper_name in
+      assert (length restored = 1);
+      let remaining, rest =
+        match dequeue restored with
+        | Some item -> item
+        | None -> Alcotest.fail "partial consumed ack should leave unrelated stimulus"
       in
       assert (String.equal remaining.post_id "bootstrap");
       assert (is_empty rest));

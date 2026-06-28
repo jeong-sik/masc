@@ -3,7 +3,7 @@
     Closed sum type for evidence that can be checked without verifier
     judgment: PR merged, CI pass, command exit code, file existence,
     artifact size. Future RFC-0199 Phase B (Deterministic_evidence_evaluator)
-    would consume a [t list] and emit a typed CDAL verdict.
+    would consume a [t list] and emit a typed contract verdict.
 
     Status (2026-06-03): this schema is currently UNWIRED. The Phase A
     [task_contract.required_evidence_typed] field that was meant to carry

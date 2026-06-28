@@ -11,34 +11,6 @@ open Alcotest
 let pinned_tmp_agent_literal_count = 0
 let pinned_agent_runtime_root_binding_count = 0
 
-let read_file path =
-  match In_channel.with_open_text path In_channel.input_all with
-  | exception _ -> ""
-  | content -> content
-;;
-
-let count_substring ~haystack ~needle =
-  let rec loop i acc =
-    let next = String.index_from_opt haystack i needle.[0] in
-    match next with
-    | None -> acc
-    | Some j ->
-      let len = String.length needle in
-      if j + len <= String.length haystack
-         && String.sub haystack j len = needle
-      then loop (j + len) (acc + 1)
-      else loop (j + 1) acc
-  in
-  loop 0 0
-;;
-
-let count_across_files ~files ~needle =
-  List.fold_left
-    (fun acc path ->
-      acc + count_substring ~haystack:(read_file path) ~needle)
-    0 files
-;;
-
 let consumer_files =
   [ "lib/mcp_server_eio_execute.ml"
   ; "lib/mcp_tool_runtime_workspace.ml"
@@ -48,13 +20,17 @@ let consumer_files =
 let test_no_tmp_agent_literals_in_consumers () =
   (* Both prefix variants in one sweep. *)
   let needles =
-    [ {|"/tmp/.masc_agent_%s"|}
-    ; {|"/tmp/.masc_agent_mcp_%s"|}
+    [ "/tmp/.masc_agent_%s"
+    ; "/tmp/.masc_agent_mcp_%s"
     ]
   in
   let total =
     List.fold_left
-      (fun acc needle -> acc + count_across_files ~files:consumer_files ~needle)
+      (fun acc needle ->
+        acc
+        + Ast_grep.count_string_literals_across_files
+            ~module_paths:consumer_files
+            ~needle)
       0 needles
   in
   (check int)
@@ -65,8 +41,9 @@ let test_no_tmp_agent_literals_in_consumers () =
 
 let test_agent_runtime_root_binding_count () =
   let occurrences =
-    count_across_files ~files:consumer_files
-      ~needle:"Host_config.host ()"
+    Ast_grep.count_calls_across_files
+      ~module_paths:consumer_files
+      ~callee:"Host_config.host"
   in
   (check int)
     "dispatcher modules no longer bind Host_config.agent_runtime_root"

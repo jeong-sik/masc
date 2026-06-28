@@ -1,7 +1,7 @@
 (** Keeper_agent_run_finalize_response — Process provider text and finalize turn.
 
     Extracted from [Keeper_agent_run.run_turn]. Handles response text
-    finalization, sidecar persistence, checkpoint saving, CDAL proof
+    finalization, sidecar persistence, checkpoint saving, contract-verification proof
     evaluation, post-turn memory, and result construction. *)
 
 open Keeper_types
@@ -181,7 +181,7 @@ let finalize
   match saved_checkpoint_result with
   | Error e -> Error e
   | Ok saved_checkpoint ->
-    (* CDAL proof evaluation / verdict-ledger persistence removed: task/goal
+    (* Contract-verification proof evaluation / verdict-ledger persistence removed: task/goal
        completion is verified by [Cdal_evidence_gate] (evidence-substantiveness),
        not by an internal proof/verdict pipeline. *)
     let librarian_messages =

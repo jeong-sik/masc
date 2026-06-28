@@ -37,6 +37,9 @@ val sweep_and_recover :
 
 (** {1 Pure Helpers (exposed for testing)} *)
 
+val supervisor_agent_name : string
+(** Canonical actor name for supervisor-owned workspace operations. *)
+
 val backoff_delay : int -> float
 (** Compute exponential backoff delay for the given attempt number.
     Uses MASC_KEEPER_SUPERVISOR_BACKOFF_BASE_S and _MAX_S. *)

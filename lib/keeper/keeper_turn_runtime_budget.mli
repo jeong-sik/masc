@@ -94,6 +94,23 @@ type 'a degraded_retry_prepare_result =
       fail_open_err : Agent_sdk.Error.sdk_error;
     }
 
+type 'a degraded_retry_step =
+  | Degraded_retry_step_not_allowed
+  | Degraded_retry_step_slot_phase_exhausted of {
+      retry : EC.degraded_retry;
+      reason : string;
+    }
+  | Degraded_retry_step_setup_failed of {
+      retry : EC.degraded_retry;
+      reason : string;
+      fail_open_err : Agent_sdk.Error.sdk_error;
+    }
+  | Degraded_retry_step_prepared of {
+      retry : EC.degraded_retry;
+      reason : string;
+      next : 'a;
+    }
+
 val next_fail_open_runtime_for_turn_with_budget :
   base_runtime:string ->
   effective_runtime:string ->
@@ -124,6 +141,99 @@ val prepare_degraded_retry_allowed :
 (** Shared setup path for allowed degraded-runtime retries. The selector must
     provide a non-empty [next_runtime]; an empty target is converted into a
     setup failure instead of falling back to the current runtime. *)
+
+val plan_degraded_retry_step :
+  base_runtime:string ->
+  current_runtime_id:string ->
+  attempted_runtimes:string list ->
+  estimated_input_tokens:int ->
+  time_spent_in_turn_s:float option ->
+  remaining_turn_budget_s:float ->
+  attempt:int ->
+  err:Agent_sdk.Error.sdk_error ->
+  allow_retry:(EC.degraded_retry -> bool) ->
+  publish_cascade_resolution:
+    (runtime_id:string ->
+     decision:Keeper_unified_turn_cascade_resolution.cascade_decision_kind ->
+     reason:string ->
+     next_runtime:string option ->
+     attempt:int ->
+     Agent_sdk.Error.sdk_error ->
+     unit) ->
+  emit_runtime_selected:(runtime_id:string -> fallback_reason:string -> unit) ->
+  emit_runtime_rotation:(from_runtime:string -> to_runtime:string -> reason:string -> unit) ->
+  setup_runtime:(string -> ('a, Agent_sdk.Error.sdk_error) result) ->
+  'a degraded_retry_step
+(** Shared degraded-runtime retry step for unified turns and direct
+    empty-response turns. Callers supply their acceptance policy
+    ([allow_retry]) and retain ownership of terminal-error handling. *)
+
+val yield_before_empty_no_progress_retry : unit -> unit
+(** Cooperative spacing used between direct empty-response retry attempts.
+    Empty accept rejection is a response-contract miss rather than a transport
+    retry, so it intentionally yields without borrowing transient-network
+    backoff. *)
+
+val direct_empty_no_progress_retry_reason :
+  Agent_sdk.Error.sdk_error -> EC.degraded_retry_reason option
+(** Return [Some Empty_no_progress] only for direct-message accept rejections
+    that are safe to rotate before surfacing an error. *)
+
+val direct_empty_no_progress_retry_decision :
+  base_runtime:string ->
+  effective_runtime:string ->
+  attempted_runtimes:string list ->
+  estimated_input_tokens:int ->
+  ?time_spent_in_turn_s:float ->
+  remaining_turn_budget_s:float ->
+  Agent_sdk.Error.sdk_error ->
+  degraded_retry_budget_decision
+(** Shared-budget retry decision for direct-message empty no-progress accept
+    rejections. Non-empty/read-only accept rejections remain terminal here. *)
+
+val run_direct_empty_no_progress_retry_loop :
+  keeper_name:string ->
+  base_runtime:string ->
+  initial_runtime:string ->
+  initial_max_context:int ->
+  estimated_input_tokens:int ->
+  timeout_sec:float ->
+  remaining_turn_budget_s:(unit -> float) ->
+  current_turn_phase_elapsed_ms:(float option -> int * int option) ->
+  now_s:(unit -> float) ->
+  setup_retry_runtime:
+    (string -> (runtime_execution, Agent_sdk.Error.sdk_error) result) ->
+  publish_cascade_resolution:
+    (runtime_id:string ->
+     decision:Keeper_unified_turn_cascade_resolution.cascade_decision_kind ->
+     reason:string ->
+     next_runtime:string option ->
+     attempt:int ->
+     Agent_sdk.Error.sdk_error ->
+     unit) ->
+  emit_runtime_selected:(runtime_id:string -> fallback_reason:string -> unit) ->
+  emit_runtime_rotation:(from_runtime:string -> to_runtime:string -> reason:string -> unit) ->
+  record_retry_setup_failure:
+    (from_runtime:string ->
+     retry:EC.degraded_retry ->
+     rotation_attempt:Keeper_execution_receipt.runtime_rotation_attempt ->
+     fail_open_err:Agent_sdk.Error.sdk_error ->
+     unit) ->
+  before_retry:(unit -> unit) ->
+  run_once:
+    (runtime_id:string ->
+     max_context:int ->
+     is_retry:bool ->
+     degraded_retry_runtime:string option ->
+     fallback_reason:EC.degraded_retry_reason option ->
+     runtime_rotation_attempts:
+       Keeper_execution_receipt.runtime_rotation_attempt list ->
+     ('a, Agent_sdk.Error.sdk_error) result) ->
+  unit ->
+  ('a * int, Agent_sdk.Error.sdk_error) result
+(** Execute the direct-message empty-response retry loop with injected side
+    effects. This keeps direct-message retry orchestration on the same budget
+    and cascade path as unified degraded-runtime retries. *)
 
 type turn_event_bus_overflow = {
   estimated_tokens : int;

@@ -1322,7 +1322,7 @@ export interface KeeperOutcomes {
       unknown: number
       top_failure_reasons: string[]
     }
-    /** null until CDAL verdict gate (#7531) lands. */
+    /** null until the contract-verdict gate (#7531) lands. */
     cdal_gate: null | {
       pass: number
       reject: number

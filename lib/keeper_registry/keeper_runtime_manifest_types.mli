@@ -18,6 +18,14 @@ type event_kind =
 val all_event_kinds : event_kind list
 val event_kind_to_string : event_kind -> string
 val event_kind_of_string : string -> event_kind option
+
+type compaction_snapshot_event_class =
+  | Compaction_snapshot_relevant
+  | Compaction_snapshot_known_unrelated
+  | Compaction_snapshot_unknown
+
+val classify_compaction_snapshot_event : string -> compaction_snapshot_event_class
+
 type links = {
   receipt_path : string option;
   checkpoint_path : string option;

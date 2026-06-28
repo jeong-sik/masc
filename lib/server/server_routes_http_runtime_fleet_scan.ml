@@ -1158,12 +1158,6 @@ let keeper_fleet_safety_health_json
   let active_task_owner_without_executable_fiber =
     active_task_owner_without_executable_fiber_count > 0
   in
-  let phase_values =
-    match phase_snapshot with
-    | Some snapshot -> snapshot.phase_values
-    | None -> []
-  in
-  let phase_value name = List.assoc_opt name phase_values in
   let phase_details =
     match phase_snapshot with
     | Some snapshot -> snapshot.phase_details
@@ -1272,13 +1266,12 @@ let keeper_fleet_safety_health_json
     else
       blocked_keeper_names
       |> List.map
-           (fun name ->
-             blocked_keeper_detail_json
-               ?base_path:runtime_base_path
-               ?phase:(phase_value name)
-               ?phase_detail:(phase_detail name)
-               ~keeper_bootstrap_enabled
-               ~bootable_set
+             (fun name ->
+               blocked_keeper_detail_json
+                 ?base_path:runtime_base_path
+                 ?phase_detail:(phase_detail name)
+                 ~keeper_bootstrap_enabled
+                 ~bootable_set
                ~capacity_set
                ~paused_set
                ~read_error_set

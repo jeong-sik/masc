@@ -69,6 +69,8 @@ const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 
   err: { className: 'bad', title: '실패' },
 }
 
+export const CHAT_SUGGESTIONS_LABEL = '추천 후속 질문'
+
 function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'ok' | 'bad' | 'pending'; title: string } {
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']
 }
@@ -919,19 +921,22 @@ function ChatChartBlock({ title, series, labels, xLabel, yMax }: ChatChartBlock)
 }
 
 function ChatSuggestionsBlock({ items }: ChatSuggestionsBlock) {
+  const labelId = useId()
+  // Mirrors the keeper-v2 prototype suggestion block: label above a chip row.
+  // The label is a readability cue for inline message-bubble content.
   return html`
     <div class="chat-block-suggestions" data-chat-block="suggestions">
-      ${items.map((it, i) => html`
-        <button
-          key=${i}
-          type="button"
-          class="chat-block-suggestion-chip"
-          data-action=${it.action ?? ''}
-        >
-          <span class="chat-block-suggestion-pre">${it.icon ?? '▸'}</span>
-          <span class="chat-block-suggestion-label">${it.label}</span>
-        </button>
-      `)}
+      <span class="chat-block-suggestions-label" id=${labelId}>${CHAT_SUGGESTIONS_LABEL}</span>
+      <div class="chat-block-suggestions-row" role="group" aria-labelledby=${labelId}>
+        ${items.map((it, i) => html`
+          <${ChatSuggestionChip}
+            key=${i}
+            pre=${it.icon ?? '\u25b8'}
+            class="chat-block-suggestion-chip"
+            data-action=${it.action ?? ''}
+          >${it.label}<//>
+        `)}
+      </div>
     </div>
   `
 }
@@ -3003,6 +3008,9 @@ export function ChatTranscript({
 // Streaming with no SSE event for longer than this is surfaced as a
 // stall so the operator can tell "slow model" from "dead transport".
 export const STREAM_STALL_THRESHOLD_S = 15
+export const CHAT_COMPOSER_DEFAULT_KEEPER_LABEL = 'keeper'
+export const CHAT_COMPOSER_COMMAND_HEADER_SUFFIX = '명령'
+export const CHAT_COMPOSER_DROP_PLACEHOLDER = '여기에 놓아 첨부…'
 
 function escapeHtml(raw: string): string {
   return raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -3055,6 +3063,7 @@ export function ChatComposer({
   onAbort,
   layout = 'default',
   draftPersistKey,
+  keeperLabel,
 }: {
   draft?: string
   placeholder: string
@@ -3075,6 +3084,10 @@ export function ChatComposer({
   onSend: (payload: ChatComposerSendPayload) => void | Promise<void>
   onAbort?: () => void
   layout?: 'default' | 'primary'
+  /** Operator-facing keeper label for the slash-command menu header. This is
+   *  intentionally separate from [draftPersistKey], which may be an opaque
+   *  storage key. */
+  keeperLabel?: string
   /** When set (and uncontrolled), the composer persists its unsent draft
    *  per key across remounts via keeper-chat-store, so switching keepers
    *  keeps each keeper's own half-typed message without leaking it to
@@ -3094,6 +3107,7 @@ export function ChatComposer({
   const [attachments, setAttachments] = useState<KeeperConversationAttachment[]>([])
   const isControlled = typeof draftProp === 'string'
   const draftPersistStoreKey = draftPersistKey?.trim() ?? ''
+  const slashMenuKeeperLabel = keeperLabel?.trim() || CHAT_COMPOSER_DEFAULT_KEEPER_LABEL
   // Lazy initializer: on (re)mount restore this keeper's persisted draft so a
   // keeper switch (key=${keeperName} remount) does not drop a half-typed
   // message. Controlled callers manage their own draft, so skip persistence.
@@ -3381,7 +3395,7 @@ export function ChatComposer({
           ${slashOpen
             ? html`
                 <div class="slashmenu" role="listbox" aria-label="keeper slash commands">
-                  <div class="slashmenu-h">keeper · 명령</div>
+                  <div class="slashmenu-h">${slashMenuKeeperLabel} · ${CHAT_COMPOSER_COMMAND_HEADER_SUFFIX}</div>
                   ${slashMatches.map((command, index) => html`
                     <button
                       key=${`${command.group}:${command.id}`}
@@ -3441,7 +3455,7 @@ export function ChatComposer({
                 <textarea
                   ref=${textareaRef}
                   class="composer-textarea"
-                  placeholder=${placeholder}
+                  placeholder=${drag ? CHAT_COMPOSER_DROP_PLACEHOLDER : placeholder}
                   aria-label="메시지 입력"
                   value=${draft}
                   onInput=${grow}

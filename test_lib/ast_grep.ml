@@ -28,10 +28,18 @@ let parse_implementation path =
       try Ok (Parse.implementation lexbuf) with
       | Syntaxerr.Error _ as e ->
         close_in ic;
-        Error (Printexc.to_string e)
+        Error (Format.asprintf "%a" Location.report_exception e)
     in
     close_in ic;
     result
+;;
+
+let parse_implementation_or_fail path =
+  match parse_implementation path with
+  | Ok structure -> structure
+  | Error msg ->
+    failwith
+      (Printf.sprintf "Ast_grep failed to parse implementation %S: %s" path msg)
 ;;
 
 (* Flatten Longident.t into "M.N.field" / "name". *)
@@ -50,23 +58,28 @@ let rec longident_to_string : Longident.t -> string = function
    [callee] exactly (string form "Module.fn" or just "fn" for unqualified).
    Skips comments / docstrings (AST has no nodes for them). *)
 let count_calls ~module_path ~callee =
-  match parse_implementation module_path with
-  | Error _ -> 0
-  | Ok structure ->
-    let count = ref 0 in
-    let iter =
-      { Ast_iterator.default_iterator with
-        expr =
-          (fun self e ->
-            (match e.pexp_desc with
-             | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
-               if longident_to_string txt = callee then incr count
-             | _ -> ());
-            Ast_iterator.default_iterator.expr self e)
-      }
-    in
-    iter.structure iter structure;
-    !count
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self e ->
+          (match e.pexp_desc with
+           | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
+             if longident_to_string txt = callee then incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
+let count_calls_across_files ~module_paths ~callee =
+  List.fold_left
+    (fun acc module_path -> acc + count_calls ~module_path ~callee)
+    0
+    module_paths
 ;;
 
 (* Count value-binding patterns ([let name = ...] or [let rec name = ...])
@@ -78,83 +91,113 @@ let count_calls ~module_path ~callee =
    misleading [_xxx] underscore prefix, [count_value_bindings ~name:"_xxx"]
    must return 0 across the affected files. *)
 let count_value_bindings ~module_path ~name =
-  match parse_implementation module_path with
-  | Error _ -> 0
-  | Ok structure ->
-    let count = ref 0 in
-    let iter =
-      { Ast_iterator.default_iterator with
-        pat =
-          (fun self p ->
-            (match p.ppat_desc with
-             | Ppat_var { txt; _ } when txt = name -> incr count
-             | _ -> ());
-            Ast_iterator.default_iterator.pat self p)
-      }
-    in
-    iter.structure iter structure;
-    !count
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      pat =
+        (fun self p ->
+          (match p.ppat_desc with
+           | Ppat_var { txt; _ } when txt = name -> incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.pat self p)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
+let count_value_bindings_with_unit_arg ~module_path ~name =
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let has_unit_arg (expr : Parsetree.expression) =
+    match expr.pexp_desc with
+    | Pexp_function (param :: _, _, _) ->
+      (match param.pparam_desc with
+       | Pparam_val (_, _, pat) ->
+         (match pat.ppat_desc with
+          | Ppat_construct ({ txt = Lident "()"; _ }, _) -> true
+          | _ -> false)
+       | Pparam_newtype _ -> false)
+    | _ -> false
+  in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self vb ->
+          (match vb.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when txt = name && has_unit_arg vb.pvb_expr ->
+             incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self vb)
+    }
+  in
+  iter.structure iter structure;
+  !count
 ;;
 
 (* Count value bindings whose identifier starts with [prefix].
    Useful for prefix-purge regressions (e.g., [_tool_spec_*]). *)
 let count_value_bindings_with_prefix ~module_path ~prefix =
-  match parse_implementation module_path with
-  | Error _ -> 0
-  | Ok structure ->
-    let count = ref 0 in
-    let plen = String.length prefix in
-    let starts_with s =
-      String.length s >= plen && String.sub s 0 plen = prefix
-    in
-    let iter =
-      { Ast_iterator.default_iterator with
-        pat =
-          (fun self p ->
-            (match p.ppat_desc with
-             | Ppat_var { txt; _ } when starts_with txt -> incr count
-             | _ -> ());
-            Ast_iterator.default_iterator.pat self p)
-      }
-    in
-    iter.structure iter structure;
-    !count
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let plen = String.length prefix in
+  let starts_with s =
+    String.length s >= plen && String.sub s 0 plen = prefix
+  in
+  let iter =
+    { Ast_iterator.default_iterator with
+      pat =
+        (fun self p ->
+          (match p.ppat_desc with
+           | Ppat_var { txt; _ } when starts_with txt -> incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.pat self p)
+    }
+  in
+  iter.structure iter structure;
+  !count
 ;;
 
 (* Count string literals whose value contains [needle] as a substring.
    Excludes comments and docstrings — those are not Pconst_string
    nodes in the Parsetree. *)
 let count_string_literals ~module_path ~needle =
-  match parse_implementation module_path with
-  | Error _ -> 0
-  | Ok structure ->
-    let count = ref 0 in
-    let needle_len = String.length needle in
-    let contains haystack =
-      if needle_len = 0
-      then false
-      else (
-        let h_len = String.length haystack in
-        let rec scan i =
-          if i + needle_len > h_len
-          then false
-          else if String.sub haystack i needle_len = needle
-          then true
-          else scan (i + 1)
-        in
-        scan 0)
-    in
-    let iter =
-      { Ast_iterator.default_iterator with
-        expr =
-          (fun self e ->
-            (match e.pexp_desc with
-             | Pexp_constant { pconst_desc = Pconst_string (s, _, _); _ } ->
-               if contains s then incr count
-             | _ -> ());
-            Ast_iterator.default_iterator.expr self e)
-      }
-    in
-    iter.structure iter structure;
-    !count
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let needle_len = String.length needle in
+  let contains haystack =
+    if needle_len = 0
+    then false
+    else (
+      let h_len = String.length haystack in
+      let rec scan i =
+        if i + needle_len > h_len
+        then false
+        else if String.sub haystack i needle_len = needle
+        then true
+        else scan (i + 1)
+      in
+      scan 0)
+  in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self e ->
+          (match e.pexp_desc with
+           | Pexp_constant { pconst_desc = Pconst_string (s, _, _); _ } ->
+             if contains s then incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
+let count_string_literals_across_files ~module_paths ~needle =
+  List.fold_left
+    (fun acc module_path -> acc + count_string_literals ~module_path ~needle)
+    0
+    module_paths
 ;;

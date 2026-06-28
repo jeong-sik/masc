@@ -24,6 +24,20 @@ let failure_metric_value kind =
   Otel_metric_store.metric_value_or_zero Otel_metric_store.metric_telemetry_observe_failures
     ~labels:[("kind", kind)] ()
 
+let with_failure_metric_hook f =
+  let previous = Atomic.get Workspace_hooks.telemetry_observe_failure_fn in
+  Fun.protect
+    ~finally:(fun () -> Atomic.set Workspace_hooks.telemetry_observe_failure_fn previous)
+    (fun () ->
+       Atomic.set
+         Workspace_hooks.telemetry_observe_failure_fn
+         (fun kind ->
+            Otel_metric_store.inc_counter
+              Otel_metric_store.metric_telemetry_observe_failures
+              ~labels:[ "kind", kind ]
+              ());
+       f ())
+
 let test_observe_or_fail_returns_ok () =
   let result =
     Telemetry_observe.observe_or_fail ~kind:"test_ok" (fun () -> 42)
@@ -47,27 +61,29 @@ let test_observe_or_fail_returns_error () =
          with Not_found -> false)
 
 let test_observe_or_fail_counts_exception () =
-  let kind = "test_observe_or_fail_counts_exception" in
-  let before = failure_metric_value kind in
-  let result =
-    Telemetry_observe.observe_or_fail ~kind (fun () ->
-        raise (Failure "synthetic-metric-failure"))
-  in
-  (match result with
-  | Ok _ -> Alcotest.fail "expected Error, got Ok"
-  | Error _ -> ());
-  let after = failure_metric_value kind in
-  Alcotest.(check (float 0.0001))
-    "failure counter increments once" (before +. 1.0) after
+  with_failure_metric_hook (fun () ->
+    let kind = "test_observe_or_fail_counts_exception" in
+    let before = failure_metric_value kind in
+    let result =
+      Telemetry_observe.observe_or_fail ~kind (fun () ->
+          raise (Failure "synthetic-metric-failure"))
+    in
+    (match result with
+     | Ok _ -> Alcotest.fail "expected Error, got Ok"
+     | Error _ -> ());
+    let after = failure_metric_value kind in
+    Alcotest.(check (float 0.0001))
+      "failure counter increments once" (before +. 1.0) after)
 
 let test_observe_or_fail_success_does_not_count () =
-  let kind = "test_observe_or_fail_success_does_not_count" in
-  let before = failure_metric_value kind in
-  let result = Telemetry_observe.observe_or_fail ~kind (fun () -> 11) in
-  Alcotest.(check (result int string)) "Ok 11" (Ok 11) result;
-  let after = failure_metric_value kind in
-  Alcotest.(check (float 0.0001))
-    "success leaves failure counter unchanged" before after
+  with_failure_metric_hook (fun () ->
+    let kind = "test_observe_or_fail_success_does_not_count" in
+    let before = failure_metric_value kind in
+    let result = Telemetry_observe.observe_or_fail ~kind (fun () -> 11) in
+    Alcotest.(check (result int string)) "Ok 11" (Ok 11) result;
+    let after = failure_metric_value kind in
+    Alcotest.(check (float 0.0001))
+      "success leaves failure counter unchanged" before after)
 
 let test_observe_or_fail_reraises_cancelled () =
   let raised = ref false in
@@ -84,19 +100,20 @@ let test_observe_or_fail_reraises_cancelled () =
     true !raised
 
 let test_observe_or_fail_cancelled_does_not_count () =
-  let kind = "test_observe_or_fail_cancelled_does_not_count" in
-  let before = failure_metric_value kind in
-  (try
-     let _ =
-       Telemetry_observe.observe_or_fail ~kind (fun () ->
-           raise (Eio.Cancel.Cancelled (Failure "synthetic-cancel")))
-     in
-     ()
-   with
-  | Eio.Cancel.Cancelled _ -> ());
-  let after = failure_metric_value kind in
-  Alcotest.(check (float 0.0001))
-    "Cancelled leaves failure counter unchanged" before after
+  with_failure_metric_hook (fun () ->
+    let kind = "test_observe_or_fail_cancelled_does_not_count" in
+    let before = failure_metric_value kind in
+    (try
+       let _ =
+         Telemetry_observe.observe_or_fail ~kind (fun () ->
+             raise (Eio.Cancel.Cancelled (Failure "synthetic-cancel")))
+       in
+       ()
+     with
+     | Eio.Cancel.Cancelled _ -> ());
+    let after = failure_metric_value kind in
+    Alcotest.(check (float 0.0001))
+      "Cancelled leaves failure counter unchanged" before after)
 
 let test_observe_or_default_returns_value () =
   let v =

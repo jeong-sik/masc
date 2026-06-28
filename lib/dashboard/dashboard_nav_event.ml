@@ -38,6 +38,8 @@ let valid_sections =
       ; "fleet-health"
       ; "transport-health"
       ; "feature-health"
+      ; "journey"
+      ; "cognition"
       ] )
   ; "command", [ "operations" ]
   ; "connectors", [ "connector-status" ]

@@ -414,7 +414,7 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
     })
   })
 
-  it('parses CDAL proof and task-scope blocker fields', () => {
+  it('parses contract proof and task-scope blocker fields', () => {
     const result = normalizeDashboardRuntimeResolution(runtimeResolutionRaw({
       cdal: {
         writer_status: 'proof_store_incomplete',
@@ -440,8 +440,8 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
             missing_manifest_run_dirs: 6,
             missing_contract_run_dirs: 6,
             stale_incomplete_grace_seconds: 300,
-            sample_stale_incomplete_run_ids: ['cdal-stale-a'],
-            sample_terminal_incomplete_run_ids: ['cdal-abort-a'],
+            sample_stale_incomplete_run_ids: ['contract-stale-a'],
+            sample_terminal_incomplete_run_ids: ['contract-abort-a'],
           },
         },
         task_scope: {
@@ -468,8 +468,8 @@ describe('normalizeDashboardRuntimeResolution fleet safety', () => {
           incomplete_run_dirs: 6,
           stale_incomplete_run_dirs: 3,
           terminal_incomplete_run_dirs: 1,
-          sample_stale_incomplete_run_ids: ['cdal-stale-a'],
-          sample_terminal_incomplete_run_ids: ['cdal-abort-a'],
+          sample_stale_incomplete_run_ids: ['contract-stale-a'],
+          sample_terminal_incomplete_run_ids: ['contract-abort-a'],
         },
       },
       task_scope: {

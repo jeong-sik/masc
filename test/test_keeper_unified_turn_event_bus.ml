@@ -166,6 +166,42 @@ let test_keeper_event_bus_is_intentionally_process_wide () =
     (Domain.join worker)
 ;;
 
+let test_turn_event_bus_uses_creation_bus_after_fallback_changes () =
+  Eio_main.run @@ fun _env ->
+  let captured_bus = Agent_sdk.Event_bus.create () in
+  let later_bus = Agent_sdk.Event_bus.create () in
+  Keeper_event_bus.set captured_bus;
+  let t = EB.create ~keeper_name:"a" ~turn_id:1 () in
+  let unsubscribed = ref false in
+  let unsubscribe_once () =
+    if not !unsubscribed
+    then (
+      unsubscribed := true;
+      EB.unsubscribe t)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      unsubscribe_once ();
+      Keeper_event_bus.set captured_bus)
+    (fun () ->
+       Keeper_event_bus.set later_bus;
+       Agent_sdk.Event_bus.publish captured_bus (tool_called "captured");
+       Agent_sdk.Event_bus.publish later_bus (tool_called "later");
+       let summary = EB.drain ~site:"test_creation_bus" t in
+       check int "captured bus only" 1 summary.event_count;
+       check
+         int
+         "pending count from captured bus"
+         1
+         (EB.For_testing.get_state t).pending_tool_count;
+       unsubscribe_once ();
+       Agent_sdk.Event_bus.publish captured_bus (tool_called "after-unsubscribe");
+       let summary_after_unsubscribe =
+         EB.drain ~site:"test_after_unsubscribe" t
+       in
+       check int "captured subscription removed" 0 summary_after_unsubscribe.event_count)
+;;
+
 let temp_dir prefix =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
@@ -302,6 +338,8 @@ let () =
             test_state_pending_count_integrity_under_concurrent_updates
         ; test_case "event bus is intentionally process-wide" `Quick
             test_keeper_event_bus_is_intentionally_process_wide
+        ; test_case "turn event bus keeps creation bus" `Quick
+            test_turn_event_bus_uses_creation_bus_after_fallback_changes
         ; test_case "keeper msg async submit uses captured event bus" `Quick
             test_keeper_msg_async_submit_uses_captured_event_bus
         ] )

@@ -72,6 +72,7 @@ import {
 // the list while detail showed `턴 진행 중 · executing live`).
 import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
+import { FL_TONE_LABEL, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
 
@@ -311,17 +312,9 @@ export function rosterBlockerDisplay(
 // chip / rail / aside-state on a 5-value tone vocabulary
 // (ok/warn/bad/busy/idle). RFC-0295 brings masc's RuntimeBand to the same 5
 // values via ROSTER_BAND_TONE (transient → busy); the Korean tone label
-// below is the same `FL_TONE_LABEL` the prototype shipped, used for the
-// aside "selected runtime" state line.
-type FleetTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'
-
-const FL_TONE_LABEL: Record<FleetTone, string> = {
-  ok: '실행',
-  warn: '대기',
-  bad: '주의',
-  busy: '전이',
-  idle: '정지',
-}
+// is the SSOT `FL_TONE_LABEL` from `lib/fleet-tone.ts` (shared with
+// `keeper-workspace-shared.ts`), used for the aside "selected runtime"
+// state line. Do not redeclare here — see fleet-tone.ts.
 
 // CTX pressure threshold the prototype paints `hot` at (>=85%). Mirrors the
 // existing live threshold used in the aside CTX meter so both surfaces agree.

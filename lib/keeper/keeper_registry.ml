@@ -197,34 +197,60 @@ let record_skip_reasons ~base_path name ~reasons =
   if reasons <> []
   then (
     let now = Time_compat.now () in
-    ignore
-      (update_entry ~base_path name (fun e ->
-         { e with last_skip_observation = Some (now, reasons) })))
+    match
+      update_entry ~base_path name (fun e ->
+        { e with last_skip_observation = Some (now, reasons) })
+    with
+    | Ok () -> ()
+    | Error err ->
+      Log.Keeper.warn
+        "%s: failed to record skip reasons: %s"
+        name
+        (registry_entry_validation_error_to_string err))
 ;;
 
 let touch_last_turn_ts ~base_path name =
   let now = Time_compat.now () in
-  ignore
-    (update_entry ~base_path name (fun e ->
-       let runtime = e.meta.runtime in
-       let usage = runtime.usage in
-       { e with
-         meta =
-           { e.meta with
-             runtime = { runtime with usage = { usage with last_turn_ts = now } }
-           }
-       }))
+  match
+    update_entry ~base_path name (fun e ->
+      let runtime = e.meta.runtime in
+      let usage = runtime.usage in
+      { e with
+        meta =
+          { e.meta with
+            runtime = { runtime with usage = { usage with last_turn_ts = now } }
+          }
+      })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to touch last_turn_ts: %s"
+      name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 let increment_turn_failures ~base_path name =
-  ignore
-    (update_entry ~base_path name (fun e ->
-       { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 }))
+  match
+    update_entry ~base_path name (fun e ->
+      { e with turn_consecutive_failures = e.turn_consecutive_failures + 1 })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to increment turn failures: %s"
+      name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 let reset_turn_failures ~base_path name =
-  ignore
-    (update_entry ~base_path name (fun e -> { e with turn_consecutive_failures = 0 }))
+  match update_entry ~base_path name (fun e -> { e with turn_consecutive_failures = 0 }) with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to reset turn failures: %s"
+      name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 let get_turn_failures ~base_path name =
@@ -320,8 +346,13 @@ let started_at ~base_path name =
 ;;
 
 let set_started_at_for_test ~base_path name started_at =
-  (* fire-and-forget: test fixture helper mirrors other registry mutators. *)
-  ignore (update_entry ~base_path name (fun entry -> { entry with started_at }))
+  match update_entry ~base_path name (fun entry -> { entry with started_at }) with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to set started_at test fixture: %s"
+      name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 type spawn_slot_denial_reason = Spawn_slots.denial_reason =
@@ -470,23 +501,35 @@ let board_wakeup_allowed ~base_path name ~dedup_key ~debounce_sec =
        (match StringMap.find_opt dedup_key entry.board_wakeups with
         | Some last_ts when now_ts -. last_ts < debounce_sec -> false
         | _ ->
-          ignore
-            (update_entry ~base_path name (fun e ->
-               { e with board_wakeups = StringMap.add dedup_key now_ts e.board_wakeups }));
+          (match
+             update_entry ~base_path name (fun e ->
+               { e with board_wakeups = StringMap.add dedup_key now_ts e.board_wakeups })
+           with
+           | Ok () -> ()
+           | Error err ->
+             Log.Keeper.warn
+               "%s: failed to record board wakeup dedupe key: %s"
+               name
+               (registry_entry_validation_error_to_string err));
           true))
 ;;
 
 let clear_board_wakeups ~base_path name =
-  (* fire-and-forget: clearing debounce state is best-effort for missing keepers. *)
-  ignore (update_entry ~base_path name (fun e -> { e with board_wakeups = StringMap.empty }))
+  match update_entry ~base_path name (fun e -> { e with board_wakeups = StringMap.empty }) with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to clear board wakeups: %s"
+      name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 let cleanup_tracking ~base_path name =
   let key = registry_key ~base_path name in
   match StringMap.find_opt key (Atomic.get registry) with
   | Some entry ->
-    ignore
-      (put_entry
+    (match
+       put_entry
          ~base_path
          name
          { entry with
@@ -494,7 +537,14 @@ let cleanup_tracking ~base_path name =
          ; tool_usage = StringMap.empty
          ; board_cursor_ts = 0.0
          ; board_cursor_post_id = None
-         })
+         }
+     with
+     | Ok () -> ()
+     | Error err ->
+       Log.Keeper.warn
+         "%s: failed to cleanup registry tracking: %s"
+         name
+         (registry_entry_validation_error_to_string err))
   | None -> ()
 ;;
 
@@ -512,12 +562,19 @@ let get_board_cursor_ts ~base_path name =
 ;;
 
 let set_board_cursor_ts ~base_path name ts =
-  ignore
-    (update_entry ~base_path name (fun e ->
-       let board_cursor_post_id =
-         if Float.compare ts e.board_cursor_ts = 0 then e.board_cursor_post_id else None
-       in
-       { e with board_cursor_ts = ts; board_cursor_post_id }))
+  match
+    update_entry ~base_path name (fun e ->
+      let board_cursor_post_id =
+        if Float.compare ts e.board_cursor_ts = 0 then e.board_cursor_post_id else None
+      in
+      { e with board_cursor_ts = ts; board_cursor_post_id })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to set board cursor timestamp: %s"
+      name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 let get_board_cursor ~base_path name =
@@ -527,9 +584,16 @@ let get_board_cursor ~base_path name =
 ;;
 
 let set_board_cursor ~base_path name ts post_id =
-  ignore
-    (update_entry ~base_path name (fun e ->
-       { e with board_cursor_ts = ts; board_cursor_post_id = post_id }))
+  match
+    update_entry ~base_path name (fun e ->
+      { e with board_cursor_ts = ts; board_cursor_post_id = post_id })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to set board cursor: %s"
+      name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 (* -- Tool usage tracking ------------------------------------------- *)
@@ -538,21 +602,29 @@ let set_board_cursor ~base_path name ts post_id =
    keeper-turn OAS callbacks and runtime MCP server callbacks can both
    record usage for the same keeper without clobbering each other. *)
 let record_tool_use ~base_path name ~tool_name ~success =
-  ignore
-    (update_entry ~base_path name (fun entry ->
-       let e =
-         match StringMap.find_opt tool_name entry.tool_usage with
-         | Some e -> e
-         | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
-       in
-       let updated =
-         { count = e.count + 1
-         ; successes = (if success then e.successes + 1 else e.successes)
-         ; failures = (if success then e.failures else e.failures + 1)
-         ; last_used_at = Time_compat.now ()
-         }
-       in
-       { entry with tool_usage = StringMap.add tool_name updated entry.tool_usage }))
+  match
+    update_entry ~base_path name (fun entry ->
+      let e =
+        match StringMap.find_opt tool_name entry.tool_usage with
+        | Some e -> e
+        | None -> { count = 0; successes = 0; failures = 0; last_used_at = 0.0 }
+      in
+      let updated =
+        { count = e.count + 1
+        ; successes = (if success then e.successes + 1 else e.successes)
+        ; failures = (if success then e.failures else e.failures + 1)
+        ; last_used_at = Time_compat.now ()
+        }
+      in
+      { entry with tool_usage = StringMap.add tool_name updated entry.tool_usage })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to record tool use for %s: %s"
+      name
+      tool_name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 let tool_usage_of ~base_path name =
@@ -572,9 +644,17 @@ let tool_usage_of ~base_path name =
    [set_tool_usage_entry]. *)
 
 let set_tool_usage_entry ~base_path ~name ~tool_name (e : tool_call_entry) =
-  ignore
-    (update_entry ~base_path name (fun ent ->
-       { ent with tool_usage = StringMap.add tool_name e ent.tool_usage }))
+  match
+    update_entry ~base_path name (fun ent ->
+      { ent with tool_usage = StringMap.add tool_name e ent.tool_usage })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: failed to restore tool usage for %s: %s"
+      name
+      tool_name
+      (registry_entry_validation_error_to_string err)
 ;;
 
 (* ── RFC-0002 Event Dispatch ───────────────────────────── *)
@@ -654,73 +734,46 @@ let rec dispatch_event_with_audit
           ~event
           ~now
     in
-    Dashboard_attribution.record
-      (Keeper_state_machine.attribution_of_transition ~event result);
+    let record_transition_attribution tr =
+      Dashboard_attribution.record
+        (Keeper_state_machine.attribution_of_transition ~event (Ok tr))
+    in
+    let registry_write_error ~from_phase ~to_phase err =
+      Keeper_state_machine.Invalid_transition
+        { from_phase
+        ; to_phase
+        ; reason =
+            Printf.sprintf
+              "registry write validation failed for event=%s: %s"
+              (Keeper_state_machine.event_to_string event)
+              (registry_entry_validation_error_to_string err)
+        }
+    in
+    let reject_dispatch e =
+      Dashboard_attribution.record
+        (Keeper_state_machine.attribution_of_transition ~event (Error e));
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string LifecycleDispatchRejections)
+        ~labels:[ "event", Keeper_state_machine.event_to_string event ]
+        ();
+      let event_str = Keeper_state_machine.event_to_string event in
+      let error_str = Keeper_state_machine.transition_error_to_string e in
+      Log.Keeper.emit
+        Log.Warn
+        ~category:Log.Fsm
+        ~details:
+          (`Assoc
+            [ "event", `String event_str
+            ; "error", `String error_str
+            ])
+        (Printf.sprintf "registry: dispatch_event rejected name=%s error=%s" name error_str);
+      Error e
+    in
     (match result with
      | Ok tr when tr.new_phase <> tr.prev_phase ->
        let from_phase_str = Keeper_state_machine.phase_to_string tr.prev_phase in
        let to_phase_str = Keeper_state_machine.phase_to_string tr.new_phase in
        let event_str = Keeper_state_machine.event_to_string event in
-       Log.Keeper.emit
-         Log.Info
-         ~category:Log.Fsm
-         ~details:
-           (`Assoc
-             [ "from_phase", `String from_phase_str
-             ; "to_phase", `String to_phase_str
-             ; "event", `String event_str
-             ])
-         (Printf.sprintf
-            "registry: phase transition name=%s old=%s new=%s event=%s"
-            name
-            from_phase_str
-            to_phase_str
-            event_str);
-       (* Record transition in audit ring buffer for dashboard API *)
-       Keeper_transition_audit.record_transition
-         ~keeper_name:name
-         { snapshot
-         ; events_fired = Option.value events_fired ~default:[ event ]
-         ; selected_event = Option.value selected_event ~default:event
-         ; prev_phase = tr.prev_phase
-         ; new_phase = tr.new_phase
-         ; transition_outcome = "applied"
-         ; wall_clock_at_decision = now
-         };
-       Keeper_lifecycle_hooks.run
-         ~base_dir:base_path
-         ~meta:entry.meta
-         ~keeper_id:name
-         (Keeper_lifecycle_hooks.Phase_transition
-            { from_phase = tr.prev_phase; to_phase = tr.new_phase });
-       (* Broadcast phase transition to SSE subscribers *)
-       (try
-          Sse.broadcast
-            (`Assoc
-                [ "type", `String "keeper_phase_changed"
-                ; "name", `String name
-                ; ( "prev_phase"
-                  , `String (Keeper_state_machine.phase_to_string tr.prev_phase) )
-                ; "new_phase", `String (Keeper_state_machine.phase_to_string tr.new_phase)
-                ; "event", `String (Keeper_state_machine.event_to_string event)
-                ; "ts_unix", `Float now
-                ])
-        with
-        | Eio.Cancel.Cancelled _ as e -> raise e
-        | exn -> record_phase_broadcast_failure ~name exn);
-       (* Update running count based on phase transition *)
-       (match tr.prev_phase, tr.new_phase with
-        | Running, phase when phase <> Running -> decr_running_count_clamped ()
-        | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
-        | _ -> ());
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string LifecycleTransitions)
-         ~labels:
-           [ "keeper", name
-           ; "from_phase", Keeper_state_machine.phase_to_string tr.prev_phase
-           ; "to_phase", Keeper_state_machine.phase_to_string tr.new_phase
-           ]
-         ();
        (* Update dead_since_ts: always set to now on Dead transition *)
        let dead_since_ts =
          match tr.new_phase with
@@ -728,20 +781,8 @@ let rec dispatch_event_with_audit
          | _ -> None
        in
        let new_seq = entry.transition_seq + 1 in
-       (* TLA+ trace emission (MASC_TLA_TRACE=1) *)
-       if Keeper_trace_emit.enabled ()
-       then
-         Keeper_trace_emit.emit_transition
-           ~keeper_name:name
-           ~base_path
-           ~seq:new_seq
-           ~event
-           ~prev_phase:tr.prev_phase
-           ~new_phase:tr.new_phase
-           ~conditions_after:tr.updated_conditions
-           ~restart_count:entry.restart_count;
-       ignore
-         (put_entry
+       (match
+          put_entry
             ~base_path
             name
             { entry with
@@ -752,13 +793,97 @@ let rec dispatch_event_with_audit
             ; last_auto_rules
             ; pending_turn_measurement
             ; compaction_stage
-            });
-       List.iter
-         (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
-         tr.entry_actions;
-       List.iter
-         (fun followup_event ->
-            match dispatch_event_with_audit ~base_path name followup_event with
+            }
+        with
+        | Error err ->
+          reject_dispatch
+            (registry_write_error
+               ~from_phase:tr.prev_phase
+               ~to_phase:tr.new_phase
+               err)
+        | Ok () ->
+          record_transition_attribution tr;
+          Log.Keeper.emit
+            Log.Info
+            ~category:Log.Fsm
+            ~details:
+              (`Assoc
+                [ "from_phase", `String from_phase_str
+                ; "to_phase", `String to_phase_str
+                ; "event", `String event_str
+                ])
+            (Printf.sprintf
+               "registry: phase transition name=%s old=%s new=%s event=%s"
+               name
+               from_phase_str
+               to_phase_str
+               event_str);
+          (* Record transition in audit ring buffer for dashboard API. *)
+          (* DET-OK: absent audit selection falls back to this dispatch event. *)
+          let audit_events_fired = Option.value events_fired ~default:[ event ] in
+          let audit_selected_event = Option.value selected_event ~default:event in
+          Keeper_transition_audit.record_transition
+            ~keeper_name:name
+            { snapshot
+            ; events_fired = audit_events_fired
+            ; selected_event = audit_selected_event
+            ; prev_phase = tr.prev_phase
+            ; new_phase = tr.new_phase
+            ; transition_outcome = "applied"
+            ; wall_clock_at_decision = now
+            };
+          Keeper_lifecycle_hooks.run
+            ~base_dir:base_path
+            ~meta:entry.meta
+            ~keeper_id:name
+            (Keeper_lifecycle_hooks.Phase_transition
+               { from_phase = tr.prev_phase; to_phase = tr.new_phase });
+          (* Broadcast phase transition to SSE subscribers *)
+          (try
+             Sse.broadcast
+               (`Assoc
+                   [ "type", `String "keeper_phase_changed"
+                   ; "name", `String name
+                   ; ( "prev_phase"
+                     , `String (Keeper_state_machine.phase_to_string tr.prev_phase) )
+                   ; "new_phase", `String (Keeper_state_machine.phase_to_string tr.new_phase)
+                   ; "event", `String (Keeper_state_machine.event_to_string event)
+                   ; "ts_unix", `Float now
+                   ])
+           with
+           | Eio.Cancel.Cancelled _ as e -> raise e
+           | exn -> record_phase_broadcast_failure ~name exn);
+          (* Update running count based on phase transition *)
+          (match tr.prev_phase, tr.new_phase with
+           | Running, phase when phase <> Running -> decr_running_count_clamped ()
+           | phase, Running when phase <> Running -> Atomic.incr running_count_atomic
+           | _ -> ());
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string LifecycleTransitions)
+            ~labels:
+              [ "keeper", name
+              ; "from_phase", Keeper_state_machine.phase_to_string tr.prev_phase
+              ; "to_phase", Keeper_state_machine.phase_to_string tr.new_phase
+              ]
+            ();
+          (* TLA+ trace emission (MASC_TLA_TRACE=1) *)
+          if Keeper_trace_emit.enabled ()
+          then
+            Keeper_trace_emit.emit_transition
+              ~keeper_name:name
+              ~base_path
+              ~seq:new_seq
+              ~event
+              ~prev_phase:tr.prev_phase
+              ~new_phase:tr.new_phase
+              ~conditions_after:tr.updated_conditions
+              ~restart_count:entry.restart_count;
+          List.iter
+            (execute_entry_action_observability ~name ~phase:tr.new_phase ~ts_unix:now)
+            tr.entry_actions;
+          List.iter
+            (fun followup_event ->
+               match dispatch_event_with_audit ~base_path name followup_event with
             | Ok _ -> ()
             | Error
                 (Keeper_state_machine.Invalid_transition { from_phase; to_phase; reason })
@@ -809,32 +934,21 @@ let rec dispatch_event_with_audit
                    name
                    ev
                    reason))
-         (List.filter_map
-            (followup_event_of_entry_action ~phase:tr.new_phase)
-            tr.entry_actions);
-       (* Composite-lifecycle SSE envelope — RFC-0003 §6.
-          The body carries only the keeper name and observation timestamp;
-          subscribers re-fetch [/api/v1/keepers/:name/composite] for the
-          full snapshot so the spec's "single writer, pull observers"
-          invariant is preserved. *)
-       broadcast_composite_changed ~name ~ts_unix:now;
-       Ok tr
+            (List.filter_map
+               (followup_event_of_entry_action ~phase:tr.new_phase)
+               tr.entry_actions);
+          (* Composite-lifecycle SSE envelope — RFC-0003 §6.
+             The body carries only the keeper name and observation timestamp;
+             subscribers re-fetch [/api/v1/keepers/:name/composite] for the
+             full snapshot so the spec's "single writer, pull observers"
+             invariant is preserved. *)
+          broadcast_composite_changed ~name ~ts_unix:now;
+          Ok tr)
      | Ok tr ->
        (* No phase change — still update conditions *)
        let new_seq = entry.transition_seq + 1 in
-       if Keeper_trace_emit.enabled ()
-       then
-         Keeper_trace_emit.emit_transition
-           ~keeper_name:name
-           ~base_path
-           ~seq:new_seq
-           ~event
-           ~prev_phase:tr.prev_phase
-           ~new_phase:tr.new_phase
-           ~conditions_after:tr.updated_conditions
-           ~restart_count:entry.restart_count;
-       ignore
-         (put_entry
+       (match
+          put_entry
             ~base_path
             name
             { entry with
@@ -843,26 +957,30 @@ let rec dispatch_event_with_audit
             ; last_auto_rules
             ; pending_turn_measurement
             ; compaction_stage
-            });
-       broadcast_composite_changed ~name ~ts_unix:now;
-       Ok tr
-     | Error e ->
-       Otel_metric_store.inc_counter
-         Keeper_metrics.(to_string LifecycleDispatchRejections)
-         ~labels:[ "event", Keeper_state_machine.event_to_string event ]
-         ();
-       let event_str = Keeper_state_machine.event_to_string event in
-       let error_str = Keeper_state_machine.transition_error_to_string e in
-       Log.Keeper.emit
-         Log.Warn
-         ~category:Log.Fsm
-         ~details:
-           (`Assoc
-             [ "event", `String event_str
-             ; "error", `String error_str
-             ])
-         (Printf.sprintf "registry: dispatch_event rejected name=%s error=%s" name error_str);
-       Error e)
+            }
+        with
+        | Error err ->
+          reject_dispatch
+            (registry_write_error
+               ~from_phase:tr.prev_phase
+               ~to_phase:tr.new_phase
+               err)
+        | Ok () ->
+          record_transition_attribution tr;
+          if Keeper_trace_emit.enabled ()
+          then
+            Keeper_trace_emit.emit_transition
+              ~keeper_name:name
+              ~base_path
+              ~seq:new_seq
+              ~event
+              ~prev_phase:tr.prev_phase
+              ~new_phase:tr.new_phase
+              ~conditions_after:tr.updated_conditions
+              ~restart_count:entry.restart_count;
+          broadcast_composite_changed ~name ~ts_unix:now;
+          Ok tr)
+     | Error e -> reject_dispatch e)
 ;;
 
 let dispatch_event ~base_path ?(origin = Generic_dispatch) name event =

@@ -394,19 +394,33 @@ let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () 
   | `List _ -> failwith "missing task should have no history events"
   | _ -> failwith "task history payload must be a JSON list"
 )
-let () = test "masc_oas_bridge_runs_without_eio_env" (fun () ->
+let () = test "masc_oas_bridge_fails_closed_without_eio_env" (fun () ->
   match Masc_eio_env.get_opt () with
   | Some _ ->
     failwith
-      "masc_oas_bridge_runs_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
+      "masc_oas_bridge_fails_closed_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
   | None ->
+    let called = ref false in
     match
       Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
+        called := true;
         Ok "ok")
     with
-    | Ok "ok" -> ()
-    | Ok other -> failwith ("unexpected result: " ^ other)
-    | Error err -> failwith (Agent_sdk.Error.to_string err)
+    | Error error ->
+        if !called then failwith "run_safe called fn without an Eio env";
+        (match Keeper_internal_error.classify_masc_internal_error error with
+         | Some (Keeper_internal_error.Internal_bridge_exception { caller; _ }) ->
+             if caller <> "test_tool_task_coverage" then
+               failwith ("unexpected bridge caller: " ^ caller)
+         | Some other ->
+             failwith
+               ( "unexpected internal error: "
+               ^ Keeper_internal_error.kind_of_masc_internal_error other )
+         | None ->
+             failwith
+               ("expected typed internal bridge error, got: "
+               ^ Agent_sdk.Error.to_string error))
+    | Ok other -> failwith ("unexpected success: " ^ other)
 )
 
 (* Test dispatch transition claim *)
@@ -1117,7 +1131,7 @@ let () = test "handle_transition_done_prefers_ownership_error_over_cdal_gate" (f
   in
   assert (not (Tool_result.is_success result));
   assert (str_contains (Tool_result.message result) "currently owned by other-agent");
-  assert (not (str_contains (Tool_result.message result) "CDAL verdict"))
+  assert (not (str_contains (Tool_result.message result) "contract verdict"))
 )
 
 let () = test "handle_transition_done_on_awaiting_verification_is_explicit" (fun () ->
@@ -1705,7 +1719,7 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
    have been removed: their intent was the exact behaviour Phase E
    removes.  Phase E semantics is now pinned by
    [test/test_task_state_verification_phase_e.ml] (5 cases) and by
-   the typed CDAL verdict consultation in
+   the typed contract verdict consultation in
    [test/test_cdal_evidence_gate.ml] (10 cases).  See issue #18830
    Cluster A.1 for the triage record. *)
 
@@ -1778,7 +1792,7 @@ let () = test "transition_pr_url_top_level_is_retired" (fun () ->
    exists; this test's [str_contains "requires verification evidence"]
    assertion was the third lock-in of the retired behaviour and has
    been removed.  The remaining intent — contracted-task submit
-   rejection when no CDAL verdict and no substantive evidence — is
+   rejection when no contract verdict and no substantive evidence — is
    covered by [test/test_cdal_evidence_gate.ml]'s missing-verdict
    arm. See issue #18830 Cluster A.1. *)
 

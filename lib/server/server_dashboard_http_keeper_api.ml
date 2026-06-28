@@ -409,34 +409,30 @@ let read_runtime_manifest_tail_rows ~base_dir path =
           | _ -> None)
       | _ -> None
     in
-    let compaction_snapshot_manifest_event_is_relevant event =
-      String.equal
-        event
-        (Keeper_runtime_manifest.event_kind_to_string
-           Keeper_runtime_manifest.Event_bus_correlated)
-      || String.equal
-           event
-           (Keeper_runtime_manifest.event_kind_to_string
-              Keeper_runtime_manifest.Context_compacted)
-    in
-    let rec loop line_no rows read_errors = function
+    let rec parse_manifest_row line_no rows read_errors rest json =
+      match Keeper_runtime_manifest.of_json json with
+      | Ok row -> loop (line_no + 1) (row :: rows) read_errors rest
+      | Error msg ->
+        loop (line_no + 1) rows
+          (compaction_snapshot_read_error
+             ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
+             ~error:msg
+           :: read_errors)
+          rest
+    and loop line_no rows read_errors = function
       | [] -> List.rev rows, List.rev read_errors
       | line :: rest ->
       try
         let json = Yojson.Safe.from_string line in
-        match compaction_snapshot_manifest_event_name json with
-        | Some event when not (compaction_snapshot_manifest_event_is_relevant event) ->
-          loop (line_no + 1) rows read_errors rest
-        | _ -> (
-        match Keeper_runtime_manifest.of_json json with
-            | Ok row -> loop (line_no + 1) (row :: rows) read_errors rest
-            | Error msg ->
-              loop (line_no + 1) rows
-                (compaction_snapshot_read_error
-                   ~scope:(runtime_manifest_row_scope ~base_dir path line_no)
-                   ~error:msg
-                 :: read_errors)
-                rest)
+        (match compaction_snapshot_manifest_event_name json with
+         | Some event -> (
+           match Keeper_runtime_manifest.classify_compaction_snapshot_event event with
+           | Keeper_runtime_manifest.Compaction_snapshot_known_unrelated ->
+             loop (line_no + 1) rows read_errors rest
+           | Keeper_runtime_manifest.Compaction_snapshot_relevant
+           | Keeper_runtime_manifest.Compaction_snapshot_unknown ->
+             parse_manifest_row line_no rows read_errors rest json)
+         | None -> parse_manifest_row line_no rows read_errors rest json)
       with
           | Yojson.Json_error msg | Yojson.Safe.Util.Type_error (msg, _) ->
             loop (line_no + 1) rows
@@ -580,7 +576,38 @@ let compaction_event_bus_snapshot_json ~keeper_id (row : Keeper_runtime_manifest
          ; status = row.status
          ; links = compaction_snapshot_links_json row.links
          })
-  | _ -> None
+  | _ ->
+    (match Json_util.get_int row.decision "context_compacted_count" with
+     | Some count when count > 0 ->
+       let compaction_source =
+         compaction_snapshot_clock_string row.decision "compaction_source"
+       in
+       Some
+         (compaction_snapshot_item_json
+            { id =
+                Printf.sprintf "manifest:%s:%s:%s" row.trace_id
+                  (Keeper_runtime_manifest.event_kind_to_string row.event)
+                  row.ts
+            ; keeper_id
+            ; ts_iso = row.ts
+            ; ts_unix = Masc_domain.parse_iso8601_opt row.ts
+            ; trace_id = Some row.trace_id
+            ; keeper_turn_id = row.keeper_turn_id
+            ; source = "runtime_manifest"
+            ; trigger =
+                Option.value
+                  ~default:"event_bus_context_compacted"
+                  compaction_source
+            ; runtime_id = row.runtime_id
+            ; before_tokens = None
+            ; after_tokens = None
+            ; saved_tokens = None
+            ; compaction_id = compaction_snapshot_clock_string row.decision "compaction_id"
+            ; compaction_source
+            ; status = row.status
+            ; links = compaction_snapshot_links_json row.links
+            })
+     | Some _ | None -> None)
 ;;
 
 let compaction_context_snapshot_json ~keeper_id (row : Keeper_runtime_manifest.t) =

@@ -371,18 +371,25 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
 })
 
 describe('MemoryInspector — scope toggle', () => {
-  it('switches to the aggregate (전체) view showing the real roster + a deferral note', async () => {
-    stubFetch()
+  it('switches to the aggregate (전체) view and fetches real keeper memory rows', async () => {
+    const fetchMock = stubFetch()
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     const allBtn = [...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')
     expect(allBtn).toBeTruthy()
     fireEvent.click(allBtn!)
     expect(container.querySelector('.tid')?.textContent).toBe('전체 keeper')
-    // roster table = one row per default keeper (ids + status are real)
-    expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length).toBe(DEFAULT_MEMORY_KEEPERS.length)
-    // aggregate memory totals are deferred, disclosed — not fabricated
-    expect([...container.querySelectorAll('.mem-disclosure')].some(d => (d.textContent ?? '').includes('추후 연결'))).toBe(true)
+    await waitFor(() =>
+      expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length)
+        .toBe(DEFAULT_MEMORY_KEEPERS.length))
+    expect(fetchMock.mock.calls.some(call =>
+      String(call[0]).includes('/api/v1/keepers/nick0cave/turn-records?limit=12'))).toBe(true)
+    expect(container.textContent).toContain('전체 memory-os')
+    expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length}/${DEFAULT_MEMORY_KEEPERS.length} loaded`)
+    expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length}/18 recallable`)
+    expect(container.textContent).toContain('800B · trace-a#7')
+    expect([...container.querySelectorAll('.mem-disclosure')].some(d => (d.textContent ?? '').includes('읽기 전용 집계'))).toBe(true)
+    expect(container.textContent).not.toContain('추후 연결')
   })
 
   it('maps roster status to dot state run→ok / pause→idle / off→bad', async () => {
@@ -390,6 +397,9 @@ describe('MemoryInspector — scope toggle', () => {
     const { container } = renderInspector()
     await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
     fireEvent.click([...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!)
+    await waitFor(() =>
+      expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length)
+        .toBe(DEFAULT_MEMORY_KEEPERS.length))
     const dotClassFor = (id: string): string | undefined => {
       const row = [...container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)')].find(r =>
         (r.querySelector('.mem-td-id .mono')?.textContent ?? '') === id)

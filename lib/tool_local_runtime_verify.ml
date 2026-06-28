@@ -87,7 +87,15 @@ let probe_chat_completion_compatible
     ?(timeout_sec = 5)
     (endpoint : Discovery_cache.endpoint_info) =
   match Masc_eio_env.get_opt (), endpoint_model_id endpoint with
-  | None, _ -> (None, None)
+  | None, _ ->
+      let message =
+        "Eio environment not initialized; refusing chat-completions probe \
+         without timeout enforcement"
+      in
+      Log.Runtime_verify.error
+        "chat-completions probe failed caller_surface=runtime_verify endpoint=%s reason=eio_env_missing"
+        endpoint.url;
+      (Some false, Some message)
   | _, None ->
       Log.Runtime_verify.warn "chat-completions probe skipped caller_surface=runtime_verify endpoint=%s reason=missing_model_id"
         endpoint.url;
@@ -118,11 +126,8 @@ let probe_chat_completion_compatible
           ~config:provider_config ~messages ()
       in
       let outcome =
-        match env.clock with
-        | Some clock -> (
-            try Ok (Eio.Time.with_timeout_exn clock (Stdlib.Float.of_int timeout_sec) run_completion)
-            with Eio.Time.Timeout -> Error "timeout")
-        | None -> Ok (run_completion ())
+        try Ok (Eio.Time.with_timeout_exn env.clock (Stdlib.Float.of_int timeout_sec) run_completion)
+        with Eio.Time.Timeout -> Error "timeout"
       in
       match outcome with
       | Error message -> (Some false, Some message)

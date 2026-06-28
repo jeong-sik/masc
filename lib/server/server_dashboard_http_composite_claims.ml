@@ -390,10 +390,37 @@ let composite_execution_budget_unsatisfied_reason execution =
   | None -> None
 ;;
 
+(* Typed budget-exhausted classification.
+
+   The dashboard composite reads the wire [terminal_reason_code] field
+   from the typed execution schema. Rather than scanning substrings
+   (anti-pattern #2), we route the wire string through the typed
+   [Keeper_turn_disposition.of_wire] parser and match on the closed sum.
+   An unrecognised string falls through [Unknown _] and yields [false];
+   no permissive default, no silent accept. *)
+let execution_turn_budget_disposition execution =
+  json_string "terminal_reason_code" execution
+  |> Option.bind ~f:(fun raw ->
+    let trimmed = String.trim raw in
+    if String.is_empty trimmed
+    then None
+    else Some (Keeper_turn_disposition.of_wire (String.lowercase_ascii trimmed)))
+;;
+
+let execution_turn_budget_disposition_of_reason reason =
+  match reason with
+  | None -> None
+  | Some raw ->
+    let trimmed = String.trim raw in
+    if String.is_empty trimmed
+    then None
+    else Some (Keeper_turn_disposition.of_wire (String.lowercase_ascii trimmed))
+;;
+
 let composite_execution_turn_budget_exhausted execution =
-  string_opt_has_prefix
-    (json_string "terminal_reason_code" execution)
-    ~prefix:"turn_budget_exhausted"
+  match execution_turn_budget_disposition execution with
+  | Some Keeper_turn_disposition.Turn_budget_exhausted -> true
+  | Some _ | None -> false
 ;;
 
 let composite_execution_budget_exhausted_pass execution =
@@ -401,11 +428,13 @@ let composite_execution_budget_exhausted_pass execution =
   && composite_execution_turn_budget_exhausted execution
   && Option.is_none (composite_execution_budget_unsatisfied_reason execution)
   &&
-  match lower_string_opt (json_string "operator_disposition_reason" execution) with
+  match execution_turn_budget_disposition_of_reason
+          (lower_string_opt (json_string "operator_disposition_reason" execution)) with
   | None -> true
   | Some "" -> true
-  | Some "healthy" -> true
-  | Some reason -> string_has_prefix ~prefix:"turn_budget_exhausted" reason
+  | Some Keeper_turn_disposition.Turn_budget_exhausted -> true
+  | Some Keeper_turn_disposition.Unknown _ -> true
+  | Some _ -> false
 ;;
 
 let composite_execution_blocked execution =

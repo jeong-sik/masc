@@ -104,26 +104,29 @@ let terminal_reason_from_receipt receipt =
                    && (String.equal code "completed"
                        || String.equal code "success") ->
       Some
-        (Keeper_turn_terminal.of_code ~source:"execution_receipt"
-           "completion_contract_unsatisfied")
+        (Keeper_turn_terminal.of_disposition
+           ~source:"execution_receipt"
+           Keeper_turn_disposition.Completion_contract_unsatisfied)
   | Some code ->
       Some (Keeper_turn_terminal.of_code ~source:"execution_receipt" code)
   | None when receipt_requires_tool_attention ->
       Some
-        (Keeper_turn_terminal.of_code ~source:"execution_receipt"
-           "completion_contract_unsatisfied")
+        (Keeper_turn_terminal.of_disposition
+           ~source:"execution_receipt"
+           Keeper_turn_disposition.Completion_contract_unsatisfied)
   | None -> None
 
 let receipt_contract_attention_reason receipt =
   let completion_contract_result = completion_contract_result_from_receipt receipt in
-  let terminal_reason_code =
-    json_string_opt_member "terminal_reason_code" receipt
-    |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
-  in
   let turn_budget_exhausted =
-    match terminal_reason_code with
-    | Some code -> String.starts_with ~prefix:"turn_budget_exhausted" code
-    | None -> false
+    json_string_opt_member "terminal_reason_code" receipt
+    |> Option.map ~f:(fun value ->
+      String.lowercase_ascii (String.trim value))
+    |> Option.map ~f:Keeper_turn_disposition.of_wire
+    |> Option.value ~default:Keeper_turn_disposition.(Unknown { raw_error = "" })
+    |> function
+    | Keeper_turn_disposition.Turn_budget_exhausted _ -> true
+    | _ -> false
   in
   let attention_reason result =
     "completion_contract_result:" ^ Completion_contract_result.to_string result

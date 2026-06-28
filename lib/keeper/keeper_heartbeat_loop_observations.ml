@@ -12,6 +12,18 @@ let record_provider_timeout_observation ~base_path ~keeper_name =
   Keeper_registry.touch_last_turn_ts ~base_path keeper_name
 ;;
 
+let smart_idle_sleep_observation_reasons =
+  [ "smart_heartbeat_skip_idle"; "idle_sleep_timeout" ]
+;;
+
+let record_smart_idle_sleep_observation ~base_path ~keeper_name =
+  Keeper_registry.record_skip_reasons
+    ~base_path
+    keeper_name
+    ~reasons:smart_idle_sleep_observation_reasons;
+  Keeper_registry.touch_last_turn_ts ~base_path keeper_name
+;;
+
 let clear_provider_timeout_failure_reason ~base_path ~keeper_name =
   match Keeper_registry.get ~base_path keeper_name with
   | Some

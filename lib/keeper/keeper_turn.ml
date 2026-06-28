@@ -84,6 +84,99 @@ let update_direct_turn_meta (meta : keeper_meta) ~(latency_ms : int)
     ~total_cost_usd:updated_meta.runtime.usage.total_cost_usd;
   updated_meta
 
+let has_no_progress_loop_blocker (meta : keeper_meta) =
+  match meta.runtime.last_blocker with
+  | Some { klass = No_progress_loop; _ } -> true
+  | _ -> false
+
+let is_no_progress_failure_reason = function
+  | Some (Keeper_registry.Provider_runtime_error { code; _ }) ->
+    String.equal code Keeper_unified_turn_no_progress.failure_reason_code
+  | _ -> false
+
+let has_no_progress_failure_reason ~base_path keeper_name =
+  match Keeper_registry.get ~base_path keeper_name with
+  | Some { Keeper_registry.last_failure_reason; _ } ->
+    is_no_progress_failure_reason last_failure_reason
+  | _ -> false
+
+let has_direct_success_no_progress_pause ~(config : Workspace.config)
+    (meta : keeper_meta) =
+  meta.paused
+  && (has_no_progress_loop_blocker meta
+      || Keeper_no_progress_loop_detector.is_latched ~keeper_name:meta.name
+      || has_no_progress_failure_reason ~base_path:config.base_path meta.name)
+
+let persist_direct_success_no_progress_resume ~base_path (resumed_meta : keeper_meta) =
+  match
+    Keeper_registry.update_entry
+      ~base_path
+      resumed_meta.name
+      (fun entry ->
+        let last_failure_reason =
+          if is_no_progress_failure_reason entry.last_failure_reason
+          then None
+          else entry.last_failure_reason
+        in
+        { entry with
+          meta = resumed_meta
+        ; last_failure_reason
+        ; turn_consecutive_failures = 0
+        })
+  with
+  | Ok () -> ()
+  | Error err ->
+    Log.Keeper.warn
+      "%s: direct keeper_msg success could not persist no_progress resume state: %s"
+      resumed_meta.name
+      (Keeper_registry.registry_entry_validation_error_to_string err)
+
+let clear_direct_success_no_progress_pause
+      ~(config : Workspace.config)
+      ~(pre_turn_meta : keeper_meta)
+      (meta : keeper_meta)
+  : keeper_meta
+  =
+  if not (has_direct_success_no_progress_pause ~config pre_turn_meta)
+  then meta
+  else
+    match
+      Keeper_registry.dispatch_event_and_log
+        ~base_path:config.base_path
+        meta.name
+        Keeper_state_machine.Operator_resume
+    with
+    | Error err ->
+      Log.Keeper.warn
+        "%s: direct keeper_msg success could not dispatch Operator_resume after no_progress recovery signal: %s"
+        meta.name
+        (Keeper_state_machine.transition_error_to_string err);
+      meta
+    | Ok _ ->
+    let cleared_meta =
+      Keeper_unified_turn_no_progress.clear_for_operator_resume
+        ~base_path:config.base_path
+        meta
+    in
+    let resumed_meta =
+      { cleared_meta with
+        paused = false
+      ; auto_resume_after_sec = None
+      ; updated_at = now_iso ()
+      }
+    in
+    persist_direct_success_no_progress_resume
+      ~base_path:config.base_path
+      resumed_meta;
+    Keeper_turn_livelock.reset_keeper_livelock
+      ~base_path:config.base_path
+      ~keeper:resumed_meta.name;
+    Keeper_livelock_state.reset_for_keeper ~keeper:resumed_meta.name;
+    Log.Keeper.info
+      "%s: direct keeper_msg success cleared no_progress pause/blocker"
+      resumed_meta.name;
+    resumed_meta
+
 let direct_turn_observation ~(config : Workspace.config) (meta : keeper_meta) :
     Keeper_world_observation.world_observation =
   Keeper_world_observation.observe_direct_keeper_msg
@@ -195,262 +288,17 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
         (Printf.sprintf "[Co-view context]\n%s"
            (Yojson.Safe.pretty_to_string json))
 
-let direct_empty_no_progress_retry_reason err =
-  match Keeper_turn_driver.classify_masc_internal_error err with
-  | Some internal_error ->
-    (match Keeper_turn_driver.accept_no_progress_retry_kind internal_error with
-     | Some `Empty_no_progress ->
-       Some Keeper_error_classify.Empty_no_progress
-     | _ -> None)
-  | None -> None
-
-let retry_reason_is_empty_no_progress
-    (retry : Keeper_error_classify.degraded_retry) =
-  match retry.fallback_reason with
-  | Keeper_error_classify.Empty_no_progress -> true
-  | _ -> false
-
-let next_direct_empty_no_progress_retry_decision
-    ~base_runtime
-    ~effective_runtime
-    ~attempted_runtimes
-    ~estimated_input_tokens
-    ?time_spent_in_turn_s
-    ~remaining_turn_budget_s
-    err =
-  match direct_empty_no_progress_retry_reason err with
-  | None -> Keeper_turn_runtime_budget.No_degraded_retry
-  | Some Keeper_error_classify.Empty_no_progress ->
-    (match
-       Keeper_turn_runtime_budget.next_fail_open_runtime_for_turn_with_budget
-         ~base_runtime
-         ~effective_runtime
-         ~attempted_runtimes
-         ~estimated_input_tokens
-         ?time_spent_in_turn_s
-         ~remaining_turn_budget_s
-         err
-     with
-     | Keeper_turn_runtime_budget.Degraded_retry_allowed retry
-       when retry_reason_is_empty_no_progress retry ->
-       Keeper_turn_runtime_budget.Degraded_retry_allowed retry
-     | Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
-       when retry_reason_is_empty_no_progress retry ->
-       Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry
-     | _ -> Keeper_turn_runtime_budget.No_degraded_retry)
-  | _ -> Keeper_turn_runtime_budget.No_degraded_retry
-
-let run_direct_empty_no_progress_retry_loop
-      ~keeper_name
-      ~base_runtime
-      ~initial_runtime
-      ~initial_max_context
-      ~estimated_input_tokens
-      ~timeout_sec
-      ~remaining_turn_budget_s
-      ~current_turn_phase_elapsed_ms
-      ~now_s
-      ~(setup_retry_runtime :
-         string ->
-         (Keeper_turn_runtime_budget.runtime_execution, Agent_sdk.Error.sdk_error)
-         result)
-      ~publish_cascade_resolution
-      ~emit_runtime_selected
-      ~emit_runtime_rotation
-      ~record_retry_setup_failure
-      ~before_retry
-      ~run_once
-      ()
-  =
-  let rec run_attempt
-      ~runtime_id
-      ?runtime_execution
-      ~attempted_runtimes
-      ?degraded_retry
-      ~runtime_rotation_attempts
-      ~attempt
-      ~retry_phase_started_at
-      ~is_retry
-      ()
-    =
-    let degraded_retry_runtime =
-      Option.map
-        (fun (retry : Keeper_error_classify.degraded_retry) ->
-           retry.next_runtime)
-        degraded_retry
-    in
-    let fallback_reason =
-      Option.map
-        (fun (retry : Keeper_error_classify.degraded_retry) ->
-           retry.fallback_reason)
-        degraded_retry
-    in
-    let attempt_max_context =
-      match runtime_execution with
-      | Some execution -> execution.Keeper_turn_runtime_budget.max_context
-      | None -> initial_max_context
-    in
-    match
-      run_once
-        ~runtime_id
-        ~max_context:attempt_max_context
-        ~is_retry
-        ~degraded_retry_runtime
-        ~fallback_reason
-        ~runtime_rotation_attempts:(List.rev runtime_rotation_attempts)
-    with
-    | Ok result -> Ok (result, attempt_max_context)
-    | Error err as error ->
-      (match
-         next_direct_empty_no_progress_retry_decision
-           ~base_runtime
-           ~effective_runtime:runtime_id
-           ~attempted_runtimes
-           ~estimated_input_tokens
-           ~time_spent_in_turn_s:(timeout_sec -. remaining_turn_budget_s ())
-           ~remaining_turn_budget_s:(remaining_turn_budget_s ())
-           err
-       with
-       | Keeper_turn_runtime_budget.No_degraded_retry ->
-         let reason =
-           match direct_empty_no_progress_retry_reason err with
-           | Some retry_reason ->
-             Printf.sprintf
-               "terminal_%s_no_degraded_retry"
-               (Keeper_error_classify.degraded_retry_reason_to_string retry_reason)
-           | None -> "terminal_error_not_degraded_retry_eligible"
-         in
-         publish_cascade_resolution
-           ~runtime_id
-           ~decision:Keeper_unified_turn_cascade_resolution.No_degraded_retry
-           ~reason
-           ~next_runtime:None
-           ~attempt
-           err;
-         error
-       | Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted retry ->
-         let reason =
-           Keeper_error_classify.degraded_retry_reason_to_string
-             retry.fallback_reason
-         in
-         publish_cascade_resolution
-           ~runtime_id
-           ~decision:
-             Keeper_unified_turn_cascade_resolution
-             .Degraded_retry_slot_phase_exhausted
-           ~reason
-           ~next_runtime:(Some retry.next_runtime)
-           ~attempt
-           err;
-         Log.Keeper.warn
-           "%s: direct keeper_msg empty response from runtime=%s suggested \
-            retry to %s (reason=%s), but productive slot phase budget %.1fs \
-            is exhausted after %.1fs"
-           keeper_name
-           runtime_id
-           retry.next_runtime
-           reason
-           Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec
-           (timeout_sec -. remaining_turn_budget_s ());
-         error
-       | Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
-         (match
-            Keeper_turn_runtime_budget.prepare_degraded_retry_allowed
-              ~current_runtime_id:runtime_id
-              ~attempt
-              ~err
-              ~retry
-              ~publish_cascade_resolution
-              ~emit_runtime_selected
-              ~emit_runtime_rotation
-              ~setup_runtime:setup_retry_runtime
-          with
-          | Keeper_turn_runtime_budget.Degraded_retry_setup_failed
-              { retry; fail_open_err; _ } ->
-            let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
-              current_turn_phase_elapsed_ms retry_phase_started_at
-            in
-            let rotation_attempt =
-              Keeper_unified_turn_rotation_attempt.build
-                ~recorded_at:(now_iso ())
-                ~productive_phase_elapsed_ms
-                ?retry_phase_elapsed_ms
-                ~from_runtime:runtime_id
-                ~retry
-                ~outcome:Keeper_execution_receipt.Rotation_setup_failed
-                fail_open_err
-            in
-            record_retry_setup_failure
-              ~from_runtime:runtime_id
-              ~retry
-              ~rotation_attempt
-              ~fail_open_err;
-            Error fail_open_err
-          | Keeper_turn_runtime_budget.Degraded_retry_prepared
-              { retry; reason; next = next_execution } ->
-            let retry_phase_started_at =
-              match retry_phase_started_at with
-              | Some _ -> retry_phase_started_at
-              | None -> Some (now_s ())
-            in
-            let productive_phase_elapsed_ms, retry_phase_elapsed_ms =
-              current_turn_phase_elapsed_ms retry_phase_started_at
-            in
-            let rotation_attempt =
-              Keeper_unified_turn_rotation_attempt.build
-                ~recorded_at:(now_iso ())
-                ~productive_phase_elapsed_ms
-                ?retry_phase_elapsed_ms
-                ~from_runtime:runtime_id
-                ~retry
-                ~outcome:Keeper_execution_receipt.Rotation_retry_scheduled
-                err
-            in
-            let retry_resolution = next_execution.max_context_resolution in
-            Log.Keeper.warn
-              "%s: direct keeper_msg empty response from runtime=%s; retrying \
-               runtime=%s reason=%s max_context=%d context_budget=%d \
-               primary_budget=%d requested_override=%s"
-              keeper_name
-              runtime_id
-              next_execution.runtime_id
-              reason
-              next_execution.max_context
-              retry_resolution.effective_budget
-              retry_resolution.primary_budget
-              (match retry_resolution.requested_override with
-               | Some requested -> string_of_int requested
-               | None -> "none");
-            before_retry ();
-            run_attempt
-              ~runtime_id:next_execution.runtime_id
-              ~runtime_execution:next_execution
-              ~attempted_runtimes:(next_execution.runtime_id :: attempted_runtimes)
-              ~degraded_retry:retry
-              ~runtime_rotation_attempts:(rotation_attempt :: runtime_rotation_attempts)
-              ~attempt:1
-              ~retry_phase_started_at
-              ~is_retry:true
-              ()))
-  in
-  run_attempt
-    ~runtime_id:initial_runtime
-    ~attempted_runtimes:[ initial_runtime ]
-    ~runtime_rotation_attempts:[]
-    ~attempt:1
-    ~retry_phase_started_at:None
-    ~is_retry:false
-    ()
-
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
   let surface_context_to_instructions = surface_context_to_instructions
+  let clear_direct_success_no_progress_pause =
+    clear_direct_success_no_progress_pause
   let direct_empty_no_progress_retry_reason =
-    direct_empty_no_progress_retry_reason
+    Keeper_turn_runtime_budget.direct_empty_no_progress_retry_reason
   let direct_empty_no_progress_retry_decision =
-    next_direct_empty_no_progress_retry_decision
+    Keeper_turn_runtime_budget.direct_empty_no_progress_retry_decision
   let run_direct_empty_no_progress_retry_loop =
-    run_direct_empty_no_progress_retry_loop
+    Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
 end
 
 let resolve_turn_runtime_id (meta : keeper_meta) =
@@ -1114,7 +962,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                    ~keeper_name:meta.name
 		                    ~turn_id:keeper_turn_id
 		                    (fun () ->
-		                       run_direct_empty_no_progress_retry_loop
+		                       Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
 		                         ~keeper_name:meta.name
 		                         ~base_runtime:turn_runtime_id
 		                         ~initial_runtime:turn_runtime_id
@@ -1130,26 +978,17 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                           publish_direct_cascade_resolution
 		                         ~emit_runtime_selected:
 		                           (fun ~runtime_id ~fallback_reason ->
-		                              Otel_metric_store.inc_counter
-		                                Keeper_metrics.(to_string RuntimeSelected)
-		                                ~labels:
-		                                  [ ("keeper", meta.name)
-		                                  ; ("runtime_id", runtime_id)
-		                                  ; ("source", "fallback")
-		                                  ; ("fallback_reason", fallback_reason)
-		                                  ]
-		                                ())
+		                              Keeper_metrics.emit_runtime_selected
+		                                ~keeper_name:meta.name
+		                                ~runtime_id
+		                                ~fallback_reason)
 		                         ~emit_runtime_rotation:
 		                           (fun ~from_runtime ~to_runtime ~reason ->
-		                              Otel_metric_store.inc_counter
-		                                Keeper_metrics.(to_string RuntimeRotation)
-		                                ~labels:
-		                                  [ ("keeper", meta.name)
-		                                  ; ("from_runtime", from_runtime)
-		                                  ; ("to_runtime", to_runtime)
-		                                  ; ("reason", reason)
-		                                  ]
-		                                ())
+		                              Keeper_metrics.emit_runtime_rotation
+		                                ~keeper_name:meta.name
+		                                ~from_runtime
+		                                ~to_runtime
+		                                ~reason)
 		                         ~record_retry_setup_failure:
 		                           (fun ~from_runtime ~retry ~rotation_attempt
 		                                ~fail_open_err ->
@@ -1201,13 +1040,8 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
 		                                ~keeper_turn_id
 		                                ())
 		                         ~before_retry:
-		                           (fun () ->
-		                              (* Empty accept rejection is a response
-		                                 contract miss, not a transient network
-		                                 failure. Keep the existing cooperative
-		                                 yield instead of borrowing provider
-		                                 backoff reserved for transport errors. *)
-		                              Eio.Fiber.yield ())
+		                           Keeper_turn_runtime_budget
+		                           .yield_before_empty_no_progress_retry
 		                         ~run_once:
 		                           (fun ~runtime_id ~max_context ~is_retry
 		                                ~degraded_retry_runtime ~fallback_reason
@@ -1297,8 +1131,14 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                 ~config:ctx.config
                 ~keeper_name:meta.name
                 lifecycle;
+              let lifecycle_updated_meta =
+                clear_direct_success_no_progress_pause
+                  ~config:ctx.config
+                  ~pre_turn_meta:meta
+                  lifecycle.updated_meta
+              in
               let updated_meta =
-                update_direct_turn_meta lifecycle.updated_meta ~latency_ms result
+                update_direct_turn_meta lifecycle_updated_meta ~latency_ms result
               in
               (* #9733: keeper_msg turn-completion is the same race shape
                  as the unified-turn failure path — heartbeat updates

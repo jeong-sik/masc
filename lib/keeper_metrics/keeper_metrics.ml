@@ -55,6 +55,7 @@ type t =
   | PathRejection
   | IdeOrphanWrites
   | PathResolverIdentityMismatch
+  | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
   | HeartbeatFailures
   | CleanupTrackingFailures
@@ -240,6 +241,11 @@ type t =
   | KeeperToolCallRetryLoop     (* counter: consecutive identical tool calls with errors *)
   | AttemptWatchdogFired        (* counter: 1800s safety-cap watchdog killed a stuck attempt *)
   | ShellIrEffectTotal          (* counter: fine-grained Shell IR effect decomposition *)
+  | KeeperRepoMappingDeniedMissing      (* counter: keeper repo mapping decision: missing mapping *)
+  | KeeperRepoMappingDeniedNotInMapping (* counter: keeper repo mapping decision: repo not in mapping *)
+  | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
+  | KeeperRepoMappingRepositoryIdentityMismatch (* counter: repo identity mismatch in policy projection *)
+  | KeeperRepoMappingRepositoryStoreError       (* counter: repo catalog load failure in policy projection *)
 
 (** String conversion
 
@@ -296,6 +302,7 @@ let to_string = function
   | PathRejection -> "masc_keeper_path_rejection_total"
   | IdeOrphanWrites -> "masc_ide_orphan_writes_total"
   | PathResolverIdentityMismatch -> "masc_keeper_path_resolver_identity_mismatch_total"
+  | KeeperMetaOverlayDrift -> "masc_keeper_meta_overlay_drift_total"
   | HeartbeatSuccesses -> "masc_keeper_heartbeat_successes_total"
   | HeartbeatFailures -> "masc_keeper_heartbeat_failures_total"
   | CleanupTrackingFailures -> "masc_keeper_cleanup_tracking_failures_total"
@@ -497,6 +504,13 @@ let to_string = function
   | KeeperToolCallRetryLoop -> "masc_keeper_tool_call_retry_loop_total"
   | AttemptWatchdogFired -> "masc_keeper_attempt_watchdog_fired_total"
   | ShellIrEffectTotal -> "masc_keeper_shell_ir_effect_total"
+  | KeeperRepoMappingDeniedMissing -> "masc_keeper_repo_mapping_denied_missing_total"
+  | KeeperRepoMappingDeniedNotInMapping -> "masc_keeper_repo_mapping_denied_not_in_mapping_total"
+  | KeeperRepoMappingLoadError -> "masc_keeper_repo_mapping_load_error_total"
+  | KeeperRepoMappingRepositoryIdentityMismatch ->
+    "masc_keeper_repo_mapping_repository_identity_mismatch_total"
+  | KeeperRepoMappingRepositoryStoreError ->
+    "masc_keeper_repo_mapping_repository_store_error_total"
 ;;
 
 (* Every constructor of [t], in declaration order.  Consumed by
@@ -516,7 +530,7 @@ let all : t list =
     CompactionPairRepairDrops; EmergencyCompactRatioThreshold; OperatorCompact; OperatorClear;
     CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes;
     ToolUnderusedAllowedCount; ToolUnderusedAllowed; PathRejection; IdeOrphanWrites;
-    PathResolverIdentityMismatch; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
+    PathResolverIdentityMismatch; KeeperMetaOverlayDrift; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
     DispatchEventFailures; DirectiveFailures; ToolCallDuration; ToolCallDurationBucket; WriteMetaFailures;
     MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
     CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;
@@ -559,21 +573,55 @@ let all : t list =
     UsageAnomalyReason; ConfigEnvParseFailures; PostTurnWireinFailures; RecurringFailures;
     TurnCleanupFailures; MemoryBankLoadHistorySwallowedExceptions; MemoryRecallReadErrors; MemoryOsRecallUnavailable; RuntimeHttpProbeJsonParseFailures;
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
-    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal
+    KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal;
+  KeeperRepoMappingDeniedMissing; KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
+  KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError
   ]
+;;
+
+let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =
+  Otel_metric_store_core.inc_counter
+    (to_string RuntimeSelected)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "runtime_id", runtime_id
+      ; "source", "fallback"
+      ; "fallback_reason", fallback_reason
+      ]
+    ()
+;;
+
+let emit_runtime_rotation ~keeper_name ~from_runtime ~to_runtime ~reason =
+  Otel_metric_store_core.inc_counter
+    (to_string RuntimeRotation)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "from_runtime", from_runtime
+      ; "to_runtime", to_runtime
+      ; "reason", reason
+      ]
+    ()
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module
    init so each declared keeper counter exports 0 from process start.
    Without this a counter that never fired is indistinguishable in
    Grafana from a counter that is not wired.  Counter detection is by
-   [_total] suffix -- gauges/histograms in [t] do not use it and stay
-   lazy (a never-set gauge has no honest value). *)
+   [_total] suffix -- most gauges/histograms in [t] do not use it and
+   stay lazy (a never-set gauge has no honest value).
+
+   #10125: the supervisor last-sweep gauge is an exception.  Dashboards
+   alert on its absence after a server restart, so the unlabeled 0-cell
+   must be present from process start to prove the metric is wired. *)
 let () =
   List.iter
     (fun m ->
       let name = to_string m in
       if String.ends_with ~suffix:"_total" name then
         Otel_metric_store_core.register_counter ~name ~help:name ())
-    all
+    all;
+  Otel_metric_store_core.register_gauge
+    ~name:(to_string SupervisorLastSweepUnixtime)
+    ~help:"Unix timestamp of the last keeper supervisor sweep beat"
+    ()
 ;;

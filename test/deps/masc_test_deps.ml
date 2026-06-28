@@ -143,6 +143,10 @@ let read_file path =
 
 let read_source_file rel = read_file (source_path rel)
 
+let config_dir_resolver_source_path =
+  "lib/config_dir_resolver/config_dir_resolver.ml"
+;;
+
 let tla_quoted_strings content =
   let re = Str.regexp "\"\\([^\"]*\\)\"" in
   let acc = ref [] in

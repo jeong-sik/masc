@@ -19,6 +19,13 @@ type config_error =
   | Duplicate_judge of string * string  (** (preset 이름, 중복 judge 정체성) (RFC-0283) *)
   | Invalid_min_answered of string * int
       (** (preset 이름, min_answered): policy 허용 범위 밖 *)
+  | Invalid_meta_timeout of string * float
+      (** (preset 이름, meta_timeout_s): 양수 유한수가 아님. *)
+  | Invalid_judge_wave_budget of string * float
+      (** (preset 이름, judge_wave_budget_s): 0 미만이거나 최장 1차 심판 타임아웃/
+          meta_timeout_s보다 작음. *)
+  | Invalid_adaptive_timeout_factor of string * float
+      (** (preset 이름, adaptive_timeout_factor): 1.0 미만. *)
   | Toml_type_error of string
 [@@deriving show, eq]
 
@@ -68,6 +75,8 @@ let parse_judge_spec (tbl : Otoml.t) : Fusion_policy.judge_spec =
   ; jtimeout_s =
       Otoml.find_or ~default:Fusion_policy.default_timeout_s tbl Otoml.get_float
         [ "timeout_s" ]
+  ; jmax_timeout_s =
+      Otoml.find_opt tbl Otoml.get_float [ "max_timeout_s" ]
   }
 
 let parse_min_answered _name tbl =
@@ -95,10 +104,25 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
   let judge_max_output_tokens =
     Otoml.find_opt tbl Otoml.get_integer [ "judge_max_output_tokens" ]
   in
+  (* meta_timeout_s: 누락 시 judge_timeout_s와 byte-identical (legacy). *)
+  let meta_timeout_s =
+    Otoml.find_or ~default:judge_timeout_s tbl Otoml.get_float [ "meta_timeout_s" ]
+  in
   let judges =
     match Otoml.find_opt tbl (Otoml.get_array Otoml.get_value) [ "judges" ] with
     | Some entries -> List.map parse_judge_spec entries
     | None -> []
+  in
+  (* 1차 심판 wave 전체 wall-clock 예산. 누락 시 무제한(legacy byte-identical). *)
+  let judge_wave_budget_s =
+    Otoml.find_or ~default:Float.max_float tbl Otoml.get_float
+      [ "judge_wave_budget_s" ]
+  in
+  let adaptive_timeout_factor =
+    Otoml.find_or ~default:1.0 tbl Otoml.get_float [ "adaptive_timeout_factor" ]
+  in
+  let fallback_judge_model =
+    Otoml.find_opt tbl Otoml.get_string [ "fallback_judge_model" ]
   in
   (* 런타임 quorum. 미설정 시 [default_min_answered] = 기존 동작(>= 1 응답이면 심판 실행).
      허용 범위는 1 이상 패널 모델 총합 이하; 검증 SSOT는 Validated_preset.of_preset. *)
@@ -111,7 +135,11 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
       ; judge_timeout_s
       ; judge_max_output_tokens
       ; judges
+      ; meta_timeout_s
       ; min_answered
+      ; judge_wave_budget_s
+      ; adaptive_timeout_factor
+      ; fallback_judge_model
       }
     in
     (* 검증 SSOT는 Validated_preset.of_preset (RFC-0280). config는 그 [invalid]에 preset
@@ -138,7 +166,13 @@ let finish_preset name tbl (panels : Fusion_policy.panel_group list)
            Duplicate_judge (name, id)
          | Fusion_policy.Validated_preset.Min_answered_below_min v
          | Fusion_policy.Validated_preset.Min_answered_above_max v ->
-           Invalid_min_answered (name, v)))
+           Invalid_min_answered (name, v)
+         | Fusion_policy.Validated_preset.Bad_meta_timeout v ->
+           Invalid_meta_timeout (name, v)
+         | Fusion_policy.Validated_preset.Bad_judge_wave_budget v ->
+           Invalid_judge_wave_budget (name, v)
+         | Fusion_policy.Validated_preset.Bad_adaptive_factor v ->
+           Invalid_adaptive_timeout_factor (name, v)))
 
 (* preset 한 명 파싱. 두 문법 분기:
    - 새 문법 [[fusion.presets.NAME.panels]] (array-of-tables) → 그룹별 파싱.

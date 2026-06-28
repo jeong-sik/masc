@@ -2,6 +2,7 @@ import { marked, type Token, type Tokens } from 'marked'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
 import type { ChatBlock, ChatCalloutSeverity, ChatTableCellValue } from '../../types'
 import { linkifyHtmlReferences } from './chat-linkify'
+import { FENCE_OPEN_RE, STANDALONE_URL_RE, isSvgDocument } from './markdown-cue'
 
 function escapeHtml(raw: string): string {
   return raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
@@ -11,7 +12,6 @@ function escapeHtml(raw: string): string {
 // matching the line-based parser in lib/chat-blocks.ts so this rich parser is a
 // strict superset of it (no link-card regression when it supersedes the simple
 // parser on the assistant/system render path).
-const STANDALONE_URL_RE = /^https?:\/\/\S+$/i
 const IMAGE_URL_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'])
 
 function isImageUrl(url: string): boolean {
@@ -90,7 +90,7 @@ function parseParagraph(token: Tokens.Paragraph): ChatBlock | ChatBlock[] | null
     return { t: 'image', src: img.href, cap: img.text || img.title || undefined }
   }
   const trimmed = token.text.trim()
-  if (/^<svg\b[\s\S]*<\/svg>$/i.test(trimmed)) {
+  if (isSvgDocument(trimmed)) {
     return { t: 'svg', svg: trimmed, cap: undefined }
   }
   const urlBlock = standaloneUrlBlock(trimmed)
@@ -134,8 +134,6 @@ function parseParagraph(token: Tokens.Paragraph): ChatBlock | ChatBlock[] | null
 // marked, verified against 18.0.3) absorbs every following line — including
 // plain prose — into the single code token. The resulting code block traps the
 // prose in a monospace box, which is the user-reported symptom.
-const FENCE_OPEN_RE = /^ {0,3}(`{3,}|~{3,})/
-
 function hasMatchingClosingFence(raw: string, opener: string): boolean {
   const fenceChar = opener[0]
   const lines = raw.trimEnd().split(/\r?\n/)
@@ -201,7 +199,7 @@ function parseTable(token: Tokens.Table): ChatBlock {
 
 function parseHtml(token: Tokens.HTML): ChatBlock | null {
   const trimmed = token.text.trim()
-  if (/^<svg\b[\s\S]*<\/svg>$/i.test(trimmed)) {
+  if (isSvgDocument(trimmed)) {
     return { t: 'svg', svg: trimmed, cap: undefined }
   }
   // Treat other top-level HTML as a paragraph after sanitization.

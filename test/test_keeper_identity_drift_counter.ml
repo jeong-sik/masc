@@ -44,6 +44,13 @@ let counter_value ~source_layer ~field =
     ()
 ;;
 
+let invalid_entry_counter_value ~operation ~name ~reason =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string RegistryInvalidEntry)
+    ~labels:[ ("operation", operation); ("name", name); ("reason", reason) ]
+    ()
+;;
+
 let is_error_json raw =
   String.length raw > 0
   && (String.starts_with ~prefix:"{\"ok\":false" raw
@@ -71,15 +78,27 @@ let test_find_registry_meta_mismatch () =
     ~finally:(fun () -> cleanup_dir base)
     (fun () ->
        let meta = make_meta "real-name" in
-       (* Register under a different name than meta.name *)
+       let before_invalid =
+         invalid_entry_counter_value ~operation:"register" ~name:"alias-name"
+           ~reason:"name_mismatch"
+       in
+       (* Register under a different name than meta.name. The registry repairs
+          this at insert time, so the lookup layer should not see live drift. *)
        ignore (Keeper_registry.register ~base_path:base "alias-name" meta);
        let before = counter_value ~source_layer:"test_layer" ~field:"name_mismatch" in
        let result =
          KES.find_registry_meta ~keeper_name:"alias-name" ~source_layer:"test_layer"
        in
        check bool "mismatch returns Some" true (Option.is_some result);
-       check (float 0.0001) "name_mismatch counter +1"
-         (before +. 1.0)
+       (match result with
+        | Some meta -> check string "registered meta canonicalized" "alias-name" meta.name
+        | None -> fail "expected repaired registry meta");
+       check (float 0.0001) "registry invalid-entry counter +1"
+         (before_invalid +. 1.0)
+         (invalid_entry_counter_value ~operation:"register" ~name:"alias-name"
+            ~reason:"name_mismatch");
+       check (float 0.0001) "name_mismatch counter unchanged"
+         before
          (counter_value ~source_layer:"test_layer" ~field:"name_mismatch"))
 ;;
 
@@ -143,7 +162,7 @@ let () =
     [ ( "find_registry_meta"
       , [ test_case "missing entry increments registry_missing" `Quick
             test_find_registry_meta_missing
-        ; test_case "name mismatch increments name_mismatch" `Quick
+        ; test_case "name mismatch is repaired during registration" `Quick
             test_find_registry_meta_mismatch
         ; test_case "matching entry does not increment counters" `Quick
             test_find_registry_meta_match

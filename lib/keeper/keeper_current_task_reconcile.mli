@@ -1,5 +1,17 @@
 (** Reconcile keeper [current_task_id] with active backlog ownership. *)
 
+type owned_active_task = {
+  task_id : Keeper_id.Task_id.t;
+  task : Masc_domain.task;
+}
+
+(** Return every Claimed/InProgress backlog task owned by [meta]'s agent
+    binding. *)
+val owned_active_tasks_for_meta :
+  config:Workspace.config ->
+  meta:Keeper_meta_contract.keeper_meta ->
+  (owned_active_task list, string) result
+
 (** Find the deterministic active task a keeper should treat as current.
 
     Only [Claimed] and [InProgress] tasks are active bindings. Tasks awaiting

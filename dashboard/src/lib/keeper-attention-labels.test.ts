@@ -15,6 +15,7 @@ describe('keeper attention labels', () => {
 
     expect(completionContractAttentionReasonLabel('completion_contract_result:passive_only')).toBe('수동 응답만 있음')
     expect(attentionReasonLabel('completion_contract_result:passive_only', false)).toBe('수동 응답만 있음')
+    expect(attentionReasonLabel('completion_contract_result:no_capable_provider', false)).toBe('사용 가능한 provider 없음')
     expect(warn).not.toHaveBeenCalled()
   })
 

@@ -5,6 +5,7 @@ module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Consolidation = Masc.Keeper_memory_os_consolidation
 module Runtime = Masc.Keeper_memory_os_consolidation_runtime
+module Agent_sdk_response = Masc.Agent_sdk_response
 module Atypes = Agent_sdk.Types
 
 let now = 1_000_000.0
@@ -44,6 +45,14 @@ let fake_complete_with_config inspect canned : Runtime.complete_fn =
   fun ~sw:_ ~net:_ ?clock:_ ~config ~messages () ->
   inspect config messages;
   Ok (fake_response canned)
+;;
+
+let text_of_message (message : Atypes.message) =
+  message.content
+  |> List.filter_map (function
+    | Atypes.Text text -> Some text
+    | _ -> None)
+  |> String.concat "\n"
 ;;
 
 (* The fake completion ignores the config, so any valid one works. *)
@@ -295,7 +304,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                seen_response_format := Some config.Llm_provider.Provider_config.response_format;
                let rendered_prompt =
                  messages
-                 |> List.map Atypes.text_of_message
+                 |> List.map text_of_message
                  |> String.concat "\n"
                  |> String.trim
                in

@@ -260,7 +260,7 @@ let resolve_mention_targets ~mention_targets_opt ~fallback_targets ~name =
     | Some targets -> targets
     | None -> if fallback_targets <> [] then fallback_targets else [ name ]
   in
-  raw |> List.filter (fun s -> String.trim s <> "") |> dedupe_keep_order
+  raw |> List.filter_map String_util.trim_nonempty |> dedupe_keep_order
 
 let resolve_sandbox_profile ~fallback =
   fallback

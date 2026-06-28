@@ -43,6 +43,14 @@ module For_testing : sig
   (** Format a dashboard co-view context object ({ label, route, scene, fields })
       into turn instructions when no explicit [turn_instructions] is supplied. *)
 
+  val clear_direct_success_no_progress_pause :
+    config:Workspace.config ->
+    pre_turn_meta:Keeper_meta_contract.keeper_meta ->
+    Keeper_meta_contract.keeper_meta ->
+    Keeper_meta_contract.keeper_meta
+  (** Apply the direct-message success recovery that clears a no-progress
+      forced pause without running a live LLM turn. *)
+
   val direct_empty_no_progress_retry_reason :
     Agent_sdk.Error.sdk_error -> Keeper_error_classify.degraded_retry_reason option
   (** Return [Some Empty_no_progress] only for direct-message accept rejections
@@ -55,10 +63,10 @@ module For_testing : sig
     estimated_input_tokens:int ->
     ?time_spent_in_turn_s:float ->
     remaining_turn_budget_s:float ->
-	    Agent_sdk.Error.sdk_error ->
-	    Keeper_turn_runtime_budget.degraded_retry_budget_decision
-	  (** Shared-budget retry decision for direct-message empty no-progress accept
-	      rejections. Non-empty/read-only accept rejections remain terminal here. *)
+    Agent_sdk.Error.sdk_error ->
+    Keeper_turn_runtime_budget.degraded_retry_budget_decision
+  (** Shared-budget retry decision for direct-message empty no-progress accept
+      rejections. Non-empty/read-only accept rejections remain terminal here. *)
 
   val run_direct_empty_no_progress_retry_loop :
     keeper_name:string ->

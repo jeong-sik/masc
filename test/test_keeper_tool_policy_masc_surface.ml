@@ -19,7 +19,7 @@ let test_raw_board_wrappers_filtered_without_hiding_read_tools () =
     names;
   check_member "raw board delete filtered" "masc_board_delete" false names;
   check_member "board list remains visible" "masc_board_list" true names;
-  check_member "board get remains visible" "masc_board_get" true names;
+  check_member "board post get remains visible" "masc_board_post_get" true names;
   check_member "board stats remains visible" "masc_board_stats" true names
 
 let () =

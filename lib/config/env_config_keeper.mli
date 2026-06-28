@@ -88,6 +88,7 @@ module KeeperMemoryOs : sig
   val librarian_cadence_turns_default : int
   val librarian_max_messages_default : int
   val librarian_timeout_sec_default : float
+  val librarian_max_tokens_default : int
   val librarian_runtime_id_default : string option
   val librarian_global_slot_default : int
   val gc_enabled_default : bool

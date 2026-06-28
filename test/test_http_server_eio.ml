@@ -379,6 +379,46 @@ let test_request_header () =
     (Request.header request "x-custom")
 ;;
 
+let test_response_content_headers_preserve_all_segments () =
+  let headers =
+    Response.content_headers
+      ~before_headers:[ "vary", "accept-encoding" ]
+      ~after_headers:[ "etag", "\"abc\"" ]
+      ~tail_headers:[ "content-encoding", "zstd" ]
+      ~content_type:Response.json_content_type
+      "{}"
+  in
+  Alcotest.(check (list (pair string string)))
+    "header order"
+    [ "vary", "accept-encoding"
+    ; "content-type", Response.json_content_type
+    ; "content-length", "2"
+    ; "etag", "\"abc\""
+    ; "content-encoding", "zstd"
+    ]
+    (Httpun.Headers.to_list headers);
+  Alcotest.(check (option string))
+    "before header"
+    (Some "accept-encoding")
+    (Httpun.Headers.get headers "vary");
+  Alcotest.(check (option string))
+    "content-type"
+    (Some Response.json_content_type)
+    (Httpun.Headers.get headers "content-type");
+  Alcotest.(check (option string))
+    "content-length"
+    (Some "2")
+    (Httpun.Headers.get headers "content-length");
+  Alcotest.(check (option string))
+    "after header"
+    (Some "\"abc\"")
+    (Httpun.Headers.get headers "etag");
+  Alcotest.(check (option string))
+    "tail header"
+    (Some "zstd")
+    (Httpun.Headers.get headers "content-encoding")
+;;
+
 (* ===== Unit Tests for Compression (Compact Protocol v4) ===== *)
 
 let test_compression_skip_small () =
@@ -541,6 +581,13 @@ let request_tests =
   ]
 ;;
 
+let response_tests =
+  [ ( "content_headers preserve all header segments"
+    , `Quick
+    , test_response_content_headers_preserve_all_segments )
+  ]
+;;
+
 (* ===== Late_response classifier (#13059) ===== *)
 
 (* Behavioural regression for the cancellation-vs-late-write race.
@@ -636,6 +683,7 @@ let () =
       "router", router_tests
     ; "config", config_tests
     ; "request", request_tests
+    ; "response", response_tests
     ; "late_response", late_response_tests
     ]
 ;;

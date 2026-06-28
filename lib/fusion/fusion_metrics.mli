@@ -2,6 +2,7 @@
 
 val metric_fusion_invocations_total : string
 val metric_fusion_judge_executions_total : string
+val metric_fusion_adaptive_timeout_extensions_total : string
 
 val topology_label : Fusion_types.fusion_topology -> string
 val judge_role_label : Fusion_types.judge_role -> string
@@ -16,3 +17,7 @@ val record_judge_execution : topology:Fusion_types.fusion_topology -> Fusion_typ
 val record_invocation : topology:Fusion_types.fusion_topology -> [< `Denied | `Sink_failed | `Completed ] -> unit
 (** Emit a counter increment for one fusion invocation.
     Labels: [topology], [outcome] \in {denied, sink_failed, completed}. *)
+
+val record_adaptive_timeout : unit -> unit
+(** Emit a counter increment when an adaptive timeout extension is applied to a
+    first-judge recovery pass. *)

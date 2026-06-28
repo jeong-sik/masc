@@ -350,6 +350,9 @@ type decision_event = {
   evidence_refs : string list;
 }
 
+let normalize_evidence_refs refs =
+  refs |> List.map String.trim |> List.filter (fun value -> value <> "")
+
 let parse_decision_event ~keeper_name line : decision_event option =
   try
     let json = Yojson.Safe.from_string line in
@@ -411,10 +414,14 @@ let parse_decision_event ~keeper_name line : decision_event option =
     in
     let summary = String.concat " \xc2\xb7 " summary_parts in
     let evidence_refs =
-      let refs = Json_util.get_string_list json "evidence_refs" in
+      let refs =
+        Json_util.get_string_list json "evidence_refs" |> normalize_evidence_refs
+      in
       if refs <> []
       then refs
-      else Json_util.get_string_list json "raw_evidence_refs"
+      else
+        Json_util.get_string_list json "raw_evidence_refs"
+        |> normalize_evidence_refs
     in
     Some
       {

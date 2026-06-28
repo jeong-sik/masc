@@ -78,6 +78,12 @@ module Compression : sig
       compression is delegated to {!Compression_codec}, which owns
       compression failure diagnostics. *)
   val compress_zstd : ?level:int -> string -> string * bool
+
+  (** [compress_zstd_result ~original result] adapts the shared codec result to
+      the legacy HTTP zstd response contract. Dictionary-compressed payloads
+      cannot be advertised as plain [zstd], so they return [original, false]. *)
+  val compress_zstd_result :
+    original:string -> Compression_codec.compress_result -> string * bool
 end
 
 (** {1 Response helpers} *)

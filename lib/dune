@@ -191,7 +191,6 @@
   meta_cognition_interpret
   meta_cognition_digest
   keeper_recall_outcome_eval keeper_memory_os_gc keeper_memory_os_gc_dry_run_report
-  keeper_memory_os_hebbian
   keeper_memory_os_io keeper_user_model
   keeper_memory_os_recall)
  (libraries
@@ -313,7 +312,7 @@
   ;; literals in lib/runtime and lib/keeper through this leaf.
   masc.types_boundary
   masc.cdal_runtime
-  ;; RFC-0056 Phase 0 — CDAL Phase 1A evaluator extracted to lib/cdal/
+  ;; RFC-0056 Phase 0 — contract Phase 1A evaluator extracted to lib/cdal/
   ;; as its own sub-library. Hosts Cdal_types + Adversarial_eval +
   ;; Labeling. Phase 1 will move judge / eval_v1 / loader once their
   ;; root-namespace cycles (Proof_artifact_reader, Bounded, Session,

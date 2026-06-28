@@ -81,6 +81,13 @@ val personas_dirs_with : inputs -> resolution -> string list
 val keeper_toml_path_opt : string -> string option
 (** [keeper_toml_path_opt name] checks for [keepers/<name>.toml]. *)
 
+val base_path_config_root : cwd:string -> string -> string
+(** [base_path_config_root ~cwd base_path] returns
+    [<base_path>/.masc/config] after applying the same base-path normalization
+    used by resolver internals. This helper does not honor
+    [MASC_CONFIG_DIR]; callers that need env override semantics should use
+    {!resolve_for_base_path}. *)
+
 val resolve_for_base_path : base_path:string -> resolution
 (** Resolve the config root for an explicit workspace [base_path]. Explicit
     [MASC_CONFIG_DIR] and [MASC_PERSONAS_DIR] overrides are still honored, but

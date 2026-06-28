@@ -66,7 +66,7 @@ let test_noop_backoff_quadruples_cooldown () =
   check int "2 noops quadruples effective base" 7200 result
 ;;
 
-let test_noop_backoff_caps_at_8x () =
+let test_noop_backoff_caps_at_4x () =
   let result =
     WO.effective_scheduled_autonomous_cooldown
       ~base_cooldown:1800
@@ -74,7 +74,7 @@ let test_noop_backoff_caps_at_8x () =
       ~consecutive_noop_count:5
       ()
   in
-  check int "noop backoff caps at 8x" 14400 result
+  check int "noop backoff caps at 4x" 7200 result
 ;;
 
 let test_noop_backoff_zero_noops_unchanged () =
@@ -109,7 +109,7 @@ let () =
             "noop backoff: quadruples cooldown"
             `Quick
             test_noop_backoff_quadruples_cooldown
-        ; test_case "noop backoff: caps at 8x" `Quick test_noop_backoff_caps_at_8x
+        ; test_case "noop backoff: caps at 4x" `Quick test_noop_backoff_caps_at_4x
         ; test_case
             "noop backoff: zero noops unchanged"
             `Quick

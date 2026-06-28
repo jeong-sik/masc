@@ -1,6 +1,14 @@
 (** Runtime adapter for Memory OS librarian extraction. *)
 
-let librarian_max_tokens = 1024
+(* Cap on the librarian extraction output, applied as
+   [min provider_cfg.max_tokens librarian_max_tokens] at the complete call
+   (see [extract] below). The previous fixed cap of 1024 truncated episode
+   JSON mid-object whenever the summary plus facts exceeded ~1024 output
+   tokens, surfacing as "invalid_json: Unexpected end of input" and an
+   unstructured fallback every turn. 4096 covers realistic episode payloads
+   while staying well under the JSON-capable model context budget; tunable
+   via Env_config.KeeperMemoryOs. *)
+let librarian_max_tokens = Env_config.KeeperMemoryOs.librarian_max_tokens_default
 
 (* Memory extraction runs against a JSON-capable model with a long context
    window and is not constrained by the generic inference API budget (30s).
@@ -390,6 +398,10 @@ let should_record_cadence_success = function
   | Unstructured_fallback -> false
 ;;
 
+let should_preserve_unstructured_fallback raw =
+  not (String.equal (String.trim raw) "")
+;;
+
 let rec run_with_parse_retries ~max_retries ~attempt messages =
   match attempt messages with
   | Parsed episode -> Ok episode
@@ -578,16 +590,19 @@ let extract_with_provider_classified
          | Some raw -> raw
          | None -> ""
        in
-       let now = Eio.Time.now clock in
-       Log.Keeper.warn
-         "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
-         inp.trace_id
-         generation
-         msg;
-       Ok
-         { episode = unstructured_episode ~now ~generation inp ~reason:msg ~raw
-         ; kind = Unstructured_fallback
-         }))
+       if not (should_preserve_unstructured_fallback raw)
+       then Error msg
+       else (
+         let now = Eio.Time.now clock in
+         Log.Keeper.warn
+           "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
+           inp.trace_id
+           generation
+           msg;
+         Ok
+          { episode = unstructured_episode ~now ~generation inp ~reason:msg ~raw
+          ; kind = Unstructured_fallback
+          })))
 ;;
 
 let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp =

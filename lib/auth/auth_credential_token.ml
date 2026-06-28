@@ -185,6 +185,32 @@ let rec check_credential_collisions ~token_hash_prefix first = function
        Error (Auth (Auth_error.InvalidToken "Token hash collision detected")))
 ;;
 
+let credential_matches_live_disk config (cred : agent_credential) =
+  match load_credential config cred.agent_name with
+  | None -> false
+  | Some current ->
+    Option.equal Credential_id.equal current.id cred.id
+    && Option.equal Agent_id.equal current.agent_id cred.agent_id
+    && String.equal current.agent_name cred.agent_name
+    && current.role = cred.role
+    && String.equal current.created_at cred.created_at
+    && Option.equal String.equal current.expires_at cred.expires_at
+    && constant_time_string_equal current.token cred.token
+;;
+
+let fresh_matches_for_token_hash config token_hash matches =
+  if List.for_all (credential_matches_live_disk config) matches
+  then matches
+  else (
+    invalidate_credential_index_cache config;
+    let idx = credential_token_index config in
+    (* DET-OK: exact token-hash cache miss means there are no indexed
+       credential candidates; this does not infer state from ambiguous input. *)
+    match Hashtbl.find_opt idx token_hash with
+    | Some matches -> matches
+    | None -> [])
+;;
+
 (** Find credential by raw token (hash lookup + expiry check).
 
     #9786 runtime complement: when N>=2 credentials share the
@@ -202,6 +228,7 @@ let find_credential_by_token config ~token : (agent_credential, masc_error) resu
   let idx = credential_token_index config in
   let matches =
     Hashtbl.find_opt idx token_hash |> Option.value ~default:[]
+    |> fresh_matches_for_token_hash config token_hash
   in
   match matches with
   | [] -> Error (Auth (Auth_error.InvalidToken "Token mismatch"))
@@ -451,10 +478,10 @@ let missing_credential_error config ~agent_name ~token : masc_error =
     the supplied token itself resolves to that prefix. This keeps joined
     nickname continuity without letting an unrelated bearer token
     impersonate another generated family. Keeper transport aliases
-    (keeper-<name>-agent) additionally accept an existing stable keeper
-    token even after an exact alias credential has been bootstrapped,
-    because these aliases are transport identity, not separate runtime
-    actors. *)
+    (keeper-<name>-agent) may use an existing stable keeper token only
+    while no canonical alias credential exists. Once the canonical
+    credential is bootstrapped, a different bare-owner token is stale
+    dual-identity material and must not authenticate. *)
 let verify_token_owner_alias config ~agent_name ~token =
   match find_credential_by_token config ~token with
   | Ok owner when String.equal owner.agent_name (credential_agent_name agent_name) ->
@@ -482,10 +509,7 @@ let verify_token config ~agent_name ~token : (agent_credential, masc_error) resu
   | Some cred ->
     let token_hash = sha256_hash token in
     if cred.token <> token_hash
-    then
-      if Option.is_some (keeper_transport_alias_stable_name agent_name)
-      then verify_token_owner_alias config ~agent_name ~token
-      else Error (Auth (Auth_error.InvalidToken "Token mismatch"))
+    then Error (Auth (Auth_error.InvalidToken "Token mismatch"))
     else (
       (* Check expiry *)
       match cred.expires_at with

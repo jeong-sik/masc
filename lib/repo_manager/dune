@@ -19,9 +19,12 @@
   masc.config
   masc.config_dir_resolver
   masc.fs_compat
+  masc.masc_core
   masc.masc_exec
   masc.masc_log
   masc.masc_process
+  masc.keeper_metrics
+  masc.otel_metric_store
   digestif
   yojson
   otoml

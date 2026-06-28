@@ -4,6 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { shellAuthSummary, tasks } from '../../store'
 import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
+import { fetchKeeperCompactionSnapshots } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
@@ -268,7 +269,10 @@ describe('KeeperWorkspaceRail', () => {
 
   it('runs overflow compaction without force through the existing MCP tool', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Overflowed' })} />`)
+    // Use lifecycle_phase (the canonical wire field per Keeper type —
+    // `phaseTokenFromKeeper` reads `keeperDisplayStatus(keeper)` which
+    // routes through `lifecycle_phase`, not the deprecated `phase` alias).
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Overflowed' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
@@ -282,7 +286,7 @@ describe('KeeperWorkspaceRail', () => {
 
   it('confirms before forcing compaction on running keepers', async () => {
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => {
@@ -300,7 +304,7 @@ describe('KeeperWorkspaceRail', () => {
   it('does not compact running keepers when force confirmation is cancelled', async () => {
     vi.mocked(requestConfirm).mockResolvedValueOnce(false)
     shellAuthSummary.value = { effective_role: 'worker', default_role: 'worker' } as typeof shellAuthSummary.value
-    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, phase: 'Running' })} />`)
+    const { getByRole } = render(html`<${KeeperWorkspaceRail} keeper=${mkKeeper({ ...keeper, lifecycle_phase: 'Running' })} />`)
     fireEvent.click(getByRole('button', { name: /지금 컴팩트/ }))
 
     await waitFor(() => expect(requestConfirm).toHaveBeenCalled())
@@ -317,9 +321,41 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.querySelector('.turn-overlay')).toBeTruthy()
     expect(container.textContent).toContain('컴팩션 스냅샷')
     await waitFor(() => expect(container.textContent).toContain('210.0k'))
+    expect(container.querySelector('[data-testid="compaction-scan-diagnostics"]')).toBeNull()
     expect(container.textContent).toContain('proactive(85%)')
     expect(container.textContent).toContain('runtime_manifest · observed')
     expect(container.textContent).toContain('trace-cmp#12')
+  })
+
+  it('surfaces compaction snapshot scan diagnostics when successful payload has no items', async () => {
+    vi.mocked(fetchKeeperCompactionSnapshots).mockResolvedValueOnce({
+      schema: 'keeper.compaction_snapshots.v1',
+      keeper: 'masc-improver',
+      source: 'runtime_manifest|keeper_meta',
+      producer: 'keeper_runtime_manifest|keeper_meta_store',
+      limit: 25,
+      count: 0,
+      read_error_count: 2,
+      read_errors: [
+        { scope: 'runtime_manifest_row:trace-a.jsonl:1', error: 'unknown event: "memory_injected"' },
+        { scope: 'runtime_manifest_row:trace-a.jsonl:2', error: 'unknown event: "memory_flushed"' },
+      ],
+      scan_truncated: true,
+      items: [],
+    })
+
+    const { container, findByTestId } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
+      el => el.textContent?.includes('before/after'),
+    ) as HTMLElement | undefined
+    expect(btn).toBeTruthy()
+    fireEvent.click(btn as HTMLElement)
+
+    const diagnostics = await findByTestId('compaction-scan-diagnostics')
+    expect(diagnostics.textContent).toContain('manifest row 2개')
+    expect(diagnostics.textContent).toContain('unknown event: "memory_injected"')
+    expect(diagnostics.textContent).toContain('limit')
+    expect(container.textContent).toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
   })
 
   it('keeps newly recorded optimistic compactions above older durable snapshots', () => {

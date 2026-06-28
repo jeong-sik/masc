@@ -47,6 +47,19 @@ val cleanup_stale :
   unit ->
   Keeper_sandbox_runtime.cleanup_result
 
+type playground_policy_status =
+  | Policy_allowed
+  | Policy_denied_missing_mapping
+  | Policy_denied_not_in_mapping
+  | Policy_mapping_load_error
+  | Policy_repository_identity_mismatch
+  | Policy_repository_store_error
+
+val playground_policy_status_to_string : playground_policy_status -> string
+(** Wire-format label for the playground repo policy status.  Exposed so
+    tests and callers can assert against the same strings the JSON response
+    uses without duplicating them. *)
+
 val playground_repos_json :
   config:Workspace.config ->
   meta:keeper_meta ->

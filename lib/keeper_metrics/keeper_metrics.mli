@@ -46,6 +46,7 @@ type t =
   | PathRejection
   | IdeOrphanWrites
   | PathResolverIdentityMismatch
+  | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
   | HeartbeatFailures
   | CleanupTrackingFailures
@@ -230,8 +231,19 @@ type t =
   | KeeperToolCallRetryLoop
   | AttemptWatchdogFired
   | ShellIrEffectTotal
+  | KeeperRepoMappingDeniedMissing
+  | KeeperRepoMappingDeniedNotInMapping
+  | KeeperRepoMappingLoadError
+  | KeeperRepoMappingRepositoryIdentityMismatch
+  | KeeperRepoMappingRepositoryStoreError
 
 val to_string : t -> string
+
+val emit_runtime_selected :
+  keeper_name:string -> runtime_id:string -> fallback_reason:string -> unit
+
+val emit_runtime_rotation :
+  keeper_name:string -> from_runtime:string -> to_runtime:string -> reason:string -> unit
 
 (** Every constructor of [t] in declaration order.  Keep in sync when
     adding constructors (the [to_string] exhaustive match in the .ml

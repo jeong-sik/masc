@@ -68,9 +68,21 @@ let with_config_dir f =
       Config_dir_resolver.reset ();
       f config_dir)
 
+let read_persisted_meta config keeper_name =
+  match Keeper_meta_store.read_meta config keeper_name with
+  | Error e -> fail ("read_meta failed: " ^ e)
+  | Ok None -> fail "meta should exist"
+  | Ok (Some meta) -> meta
+
+let overlay_drift_counter_value ~keeper ~field =
+  Masc.Otel_metric_store.metric_value_or_zero
+    Keeper_metrics.(to_string KeeperMetaOverlayDrift)
+    ~labels:[("keeper", keeper); ("field", field)]
+    ()
+
 (** Regression test: ensure_keeper_meta must overlay a TOML-owned
-    tool_denylist at runtime without trying to persist it back into the
-    runtime-only JSON file on every reconcile tick.
+    tool_denylist at runtime without writing the TOML-owned value into
+    the runtime JSON file on every reconcile tick.
 
     Steps:
     1. Write a keeper TOML declaring tool_denylist = ["toml-tool-x", "toml-tool-y"]
@@ -106,6 +118,7 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-denylist-resync");
+            ("goal", `String "Test denylist resync");
             ( "tool_denylist",
               `List [ `String "old-stale-tool" ] );
           ])
@@ -116,6 +129,12 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
   (match Keeper_meta_store.write_meta config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
+  let initial_persisted_version =
+    (read_persisted_meta config keeper_name).Keeper_meta_contract.meta_version
+  in
+  let before_overlay_drift =
+    overlay_drift_counter_value ~keeper:keeper_name ~field:"tool_denylist"
+  in
   (* 3. Call ensure_keeper_meta — should overlay denylist from TOML *)
   (match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
@@ -137,10 +156,15 @@ tool_denylist = ["toml-tool-x", "toml-tool-y"]
             "persisted meta does not store TOML denylist"
             []
             persisted.Keeper_meta_contract.tool_denylist;
-          check int "no TOML-only write bump" (initial_meta.meta_version + 1)
-            persisted.Keeper_meta_contract.meta_version))
+          check int "no TOML-only write bump" initial_persisted_version
+            persisted.Keeper_meta_contract.meta_version);
+      check
+        (float 0.0001)
+        "TOML-only denylist drift is observable"
+        (before_overlay_drift +. 1.0)
+        (overlay_drift_counter_value ~keeper:keeper_name ~field:"tool_denylist"))
 
-let test_ensure_keeper_meta_overlays_active_goal_ids_without_persisting () =
+let test_ensure_keeper_meta_overlays_active_goal_ids_and_persists () =
   with_runtime_default @@ fun () ->
   with_temp_dir "keeper-runtime-active-goal-workspace" @@ fun workspace_dir ->
   with_config_dir @@ fun config_dir ->
@@ -166,6 +190,7 @@ active_goal_ids = ["goal-runtime"]
             ("name", `String keeper_name);
             ("agent_name", `String keeper_name);
             ("trace_id", `String "trace-active-goal-resync");
+            ("goal", `String "Test active goal resync");
           ])
     with
     | Ok meta -> meta
@@ -174,6 +199,9 @@ active_goal_ids = ["goal-runtime"]
   (match Keeper_meta_store.write_meta config initial_meta with
   | Error e -> fail ("write_meta failed: " ^ e)
   | Ok () -> ());
+  let initial_persisted_version =
+    (read_persisted_meta config keeper_name).Keeper_meta_contract.meta_version
+  in
   (match Keeper_runtime.ensure_keeper_meta config keeper_name with
   | Error e -> fail ("ensure_keeper_meta failed: " ^ e)
   | Ok updated ->
@@ -188,11 +216,11 @@ active_goal_ids = ["goal-runtime"]
       | Ok (Some persisted) ->
           check
             (list string)
-            "persisted meta does not duplicate TOML active_goal_ids"
-            []
+            "persisted meta stores TOML active_goal_ids"
+            [ "goal-runtime" ]
             persisted.Keeper_meta_contract.active_goal_ids;
-          check int "TOML-only active_goal_ids does not write runtime meta"
-            (initial_meta.meta_version + 1)
+          check int "TOML-owned active_goal_ids writes once"
+            (initial_persisted_version + 1)
             persisted.Keeper_meta_contract.meta_version))
 
 let () =
@@ -205,8 +233,8 @@ let () =
             `Quick
             test_ensure_keeper_meta_overlays_denylist_from_toml;
           test_case
-            "overlays active_goal_ids from TOML without persisting"
+            "overlays active_goal_ids from TOML and persists"
             `Quick
-            test_ensure_keeper_meta_overlays_active_goal_ids_without_persisting;
+            test_ensure_keeper_meta_overlays_active_goal_ids_and_persists;
         ] );
     ]

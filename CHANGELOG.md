@@ -6,6 +6,11 @@
 ### Changed
 - Bump OAS agent_sdk pin to latest main and bump masc version to 0.19.50.
 
+### Fixed
+- `keeper`: playground repo policy visibility now reuses the keeper-repository
+  mapping decision and reports `policy_source` consistently as
+  `keeper_repo_mappings.toml` (#22329).
+
 ### Deprecated
 - TBD
 

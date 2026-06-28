@@ -2,7 +2,7 @@
 
 import { html } from 'htm/preact'
 import { render, options } from 'preact'
-import { fireEvent } from '@testing-library/preact'
+import { fireEvent, waitFor } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
@@ -1369,6 +1369,7 @@ describe('ChatComposer multimodal', () => {
 
   afterEach(() => {
     render(null, container)
+    vi.runAllTimers()
     container.remove()
     vi.useRealTimers()
   })
@@ -1920,7 +1921,7 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(bundle?.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('곧 답합니다')
   })
 
-  it('renders thinking text as sanitized markdown with newlines preserved', () => {
+  it('renders thinking text as sanitized markdown with newlines preserved', async () => {
     render(
       html`<${ChatTranscript}
         entries=${[
@@ -1939,18 +1940,24 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
       container,
     )
 
-    const think = container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement
+    const findThink = () =>
+      container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement | null
+    const think = findThink()
     expect(think).not.toBeNull()
     // Newline-preserving container (raw interpolation folded these to one line).
-    expect(think.className).toContain('whitespace-pre-wrap')
-    expect(think.className).toContain('markdown-body')
+    expect(think?.className).toContain('whitespace-pre-wrap')
+    expect(think?.className).toContain('markdown-body')
     // Markdown is rendered, not shown as literal `**강조**`.
-    expect(think.querySelector('strong')?.textContent).toBe('강조')
+    await waitFor(
+      () => expect(findThink()?.querySelector('strong')?.textContent).toBe('강조'),
+      { timeout: 3000 },
+    )
+    const renderedThink = findThink()
     // Both source lines survive the round-trip.
-    expect(think.textContent).toContain('첫째 줄')
-    expect(think.textContent).toContain('둘째 줄')
+    expect(renderedThink?.textContent).toContain('첫째 줄')
+    expect(renderedThink?.textContent).toContain('둘째 줄')
     // Untrusted model markup is stripped (no executable script element).
-    expect(think.querySelector('script')).toBeNull()
+    expect(renderedThink?.querySelector('script')).toBeNull()
   })
 
   it('renders board post ids in assistant prose as board detail links', () => {
@@ -2542,7 +2549,7 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
     render(html`<${ChatTranscript} entries=${entries} emptyText="empty" />`, container)
   }
 
-  it('renders a code fence in assistant prose as a code block', () => {
+  it('renders a code fence in assistant prose as a code block', async () => {
     renderEntries([
       entry({
         id: 'a1',
@@ -2551,12 +2558,55 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
         text: 'Here you go:\n\n```ts\nconst x = 1\n```',
       }),
     ])
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull())
     const code = container.querySelector('[data-chat-block="code"]')
     expect(code).not.toBeNull()
     expect(code?.textContent).toContain('const x = 1')
   })
 
-  it('re-parses richly even when the backend supplied a degraded p-only block', () => {
+  it('routes inline markdown and lists through the rich parser', async () => {
+    renderEntries([
+      entry({
+        id: 'a-inline',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: 'Summary with **bold** and `code`.\n\n- first\n- second',
+      }),
+    ])
+
+    await waitFor(() => expect(container.querySelector('[data-chat-blocks] strong')?.textContent).toBe('bold'))
+    expect(container.querySelector('[data-chat-blocks] code')?.textContent).toBe('code')
+    const items = Array.from(container.querySelectorAll('[data-chat-blocks] li')).map((node) => node.textContent)
+    expect(items).toEqual(['first', 'second'])
+  })
+
+  it('keeps prior rich blocks visible while streaming text is re-parsed', async () => {
+    renderEntries([
+      entry({
+        id: 'a-stream',
+        role: 'assistant',
+        source: 'direct_assistant',
+        text: '```ts\nconst before = 1\n```',
+      }),
+    ])
+
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')?.textContent).toContain('before'))
+
+    renderEntries([
+      entry({
+        id: 'a-stream',
+        role: 'assistant',
+        source: 'direct_assistant',
+        delivery: 'streaming',
+        text: '```ts\nconst after = 2\n```',
+      }),
+    ])
+
+    expect(container.querySelector('[data-chat-block="code"]')?.textContent).toContain('before')
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')?.textContent).toContain('after'))
+  })
+
+  it('re-parses richly even when the backend supplied a degraded p-only block', async () => {
     // The backend persists a line-based parse (escaped <p>); the render path
     // must still recover the structured code block from the message text.
     renderEntries([
@@ -2572,7 +2622,7 @@ describe('ChatMessageBubble — rich markdown rendering of assistant prose', () 
         ],
       }),
     ])
-    expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull()
+    await waitFor(() => expect(container.querySelector('[data-chat-block="code"]')).not.toBeNull())
   })
 
   it('keeps server blocks as-is when the message carries a non-text card/clip', () => {

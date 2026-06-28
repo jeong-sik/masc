@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 // ChatMermaidBlock renders mermaid via DOMPurify + a viewport-gated render
-// (useMermaidInView). Under happy-dom DOMPurify fails its support check and
+// (useInViewOnce). Under happy-dom DOMPurify fails its support check and
 // IntersectionObserver never fires, so the diagram stays a placeholder. jsdom
 // (no IntersectionObserver -> immediate render, DOMPurify supported) exercises
 // the real render path, matching markdown-renderer.test.ts / dompurify.test.ts.

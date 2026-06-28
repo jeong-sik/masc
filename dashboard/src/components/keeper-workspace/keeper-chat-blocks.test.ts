@@ -4,7 +4,7 @@ import { html } from 'htm/preact'
 import { render } from 'preact'
 import { afterEach, describe, expect, it } from 'vitest'
 import type { ChatBlock, KeeperConversationEntry } from '../../types'
-import { ChatTranscript } from '../chat/primitives'
+import { CHAT_SUGGESTIONS_LABEL, ChatTranscript } from '../chat/primitives'
 
 function entry(
   overrides: Partial<KeeperConversationEntry> & Pick<KeeperConversationEntry, 'id' | 'text'>,
@@ -77,8 +77,16 @@ describe('Keeper chat rich blocks', () => {
 
     const suggestions = container.querySelector('[data-chat-block="suggestions"]')
     expect(suggestions).not.toBeNull()
-    const buttons = [...(suggestions?.querySelectorAll('button') ?? [])]
+    // Mirrors the prototype suggestion label above the chip row.
+    const label = suggestions?.querySelector('.chat-block-suggestions-label')
+    expect(label?.textContent).toBe(CHAT_SUGGESTIONS_LABEL)
+    const row = suggestions?.querySelector('.chat-block-suggestions-row')
+    expect(row).not.toBeNull()
+    expect(row?.getAttribute('role')).toBe('group')
+    expect(row?.getAttribute('aria-labelledby')).toBe(label?.id)
+    const buttons = [...(row?.querySelectorAll('button') ?? [])]
     expect(buttons).toHaveLength(3)
+    expect(buttons.every((b) => b.classList.contains('suggestion-chip'))).toBe(true)
     expect(buttons.map((b) => b.textContent?.trim())).toEqual([
       '▸PR #7763 열기',
       '✦open_fds 패널 추가',

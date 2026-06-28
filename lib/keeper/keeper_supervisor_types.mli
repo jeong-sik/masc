@@ -10,6 +10,9 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+val supervisor_agent_name : string
+(** Agent identity used by supervisor-owned Workspace mutations. *)
+
 val supervision_cohort_size : int
 (** Target keeper count per supervisor cohort.  The first 2-level
     supervision slice groups the 64-keeper fleet as 8 cohorts of 8. *)

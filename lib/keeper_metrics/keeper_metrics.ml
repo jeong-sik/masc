@@ -563,17 +563,49 @@ let all : t list =
   ]
 ;;
 
+let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =
+  Otel_metric_store_core.inc_counter
+    (to_string RuntimeSelected)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "runtime_id", runtime_id
+      ; "source", "fallback"
+      ; "fallback_reason", fallback_reason
+      ]
+    ()
+;;
+
+let emit_runtime_rotation ~keeper_name ~from_runtime ~to_runtime ~reason =
+  Otel_metric_store_core.inc_counter
+    (to_string RuntimeRotation)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "from_runtime", from_runtime
+      ; "to_runtime", to_runtime
+      ; "reason", reason
+      ]
+    ()
+;;
+
 (* Zero-fill: register the unlabeled 0-cell of every counter at module
    init so each declared keeper counter exports 0 from process start.
    Without this a counter that never fired is indistinguishable in
    Grafana from a counter that is not wired.  Counter detection is by
-   [_total] suffix -- gauges/histograms in [t] do not use it and stay
-   lazy (a never-set gauge has no honest value). *)
+   [_total] suffix -- most gauges/histograms in [t] do not use it and
+   stay lazy (a never-set gauge has no honest value).
+
+   #10125: the supervisor last-sweep gauge is an exception.  Dashboards
+   alert on its absence after a server restart, so the unlabeled 0-cell
+   must be present from process start to prove the metric is wired. *)
 let () =
   List.iter
     (fun m ->
       let name = to_string m in
       if String.ends_with ~suffix:"_total" name then
         Otel_metric_store_core.register_counter ~name ~help:name ())
-    all
+    all;
+  Otel_metric_store_core.register_gauge
+    ~name:(to_string SupervisorLastSweepUnixtime)
+    ~help:"Unix timestamp of the last keeper supervisor sweep beat"
+    ()
 ;;

@@ -160,7 +160,7 @@ module Transport : sig
   val startup_watchdog_sec : unit -> float
 end
 
-(** {1 CDAL gate} *)
+(** {1 Contract-verdict gate} *)
 
 module Cdal : sig
   val enabled : unit -> bool

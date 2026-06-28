@@ -533,9 +533,15 @@ let string_set_of_list values =
 
 let json_string_list values = Json_util.json_string_list values
 
-let configured_keeper_is_materializable name =
+let configured_keeper_is_materializable config name =
+  Keeper_meta_store.declarative_autoboot_enabled_by_default config name
+  &&
   try
-    let defaults = Keeper_types_profile.load_keeper_profile_defaults name in
+    let defaults =
+      Keeper_types_profile.load_keeper_profile_defaults_for_base_path
+        ~base_path:config.Workspace.base_path
+        name
+    in
     (* Exclude loader-only TOMLs such as base.toml from identity drift. *)
     Option.is_some defaults.persona_name
     || Option.is_some defaults.goal
@@ -553,7 +559,7 @@ let keeper_identity_drift_scan config =
   in
   let materializable_configured_names =
     configured_names
-    |> List.filter configured_keeper_is_materializable
+    |> List.filter (configured_keeper_is_materializable config)
     |> sorted_unique_strings
   in
   let configured_set = string_set_of_list materializable_configured_names in

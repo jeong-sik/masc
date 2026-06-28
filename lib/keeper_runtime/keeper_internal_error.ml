@@ -539,6 +539,18 @@ let accept_rejection_is_empty_no_progress
   && Option.is_none any_mutating_tool
   && tool_effects_seen = []
 
+let accept_rejection_is_thinking_only_no_progress
+    ~reason_kind
+    ~response_shape
+    ~last_tool_effect
+    ~any_mutating_tool
+    ~tool_effects_seen =
+  reason_kind = Some Accept_no_usable_progress
+  && response_shape = Some Accept_response_thinking_only
+  && Option.is_none last_tool_effect
+  && Option.is_none any_mutating_tool
+  && tool_effects_seen = []
+
 let accept_rejection_is_read_only_no_progress
     ~reason_kind
     ~response_shape
@@ -615,6 +627,26 @@ let summary_of_masc_internal_error = function
     Some
       (Printf.sprintf
          "Provider returned an empty assistant turn for runtime %s; no text or tool progress was produced."
+         (nonempty_or_unknown scope))
+  | Accept_rejected
+      {
+        scope;
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
+        tool_effects_seen = [];
+        _;
+      }
+    when accept_rejection_is_thinking_only_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen:[] ->
+    Some
+      (Printf.sprintf
+         "Provider returned a thinking-only assistant turn for runtime %s; no text or tool progress was produced."
          (nonempty_or_unknown scope))
   | Accept_rejected
       {
@@ -724,6 +756,22 @@ let accept_no_progress_retry_kind = function
     Some `Empty_no_progress
   | Accept_rejected
       {
+        reason_kind;
+        response_shape;
+        last_tool_effect;
+        any_mutating_tool;
+        tool_effects_seen;
+        _;
+      }
+    when accept_rejection_is_thinking_only_no_progress
+           ~reason_kind
+           ~response_shape
+           ~last_tool_effect
+           ~any_mutating_tool
+           ~tool_effects_seen ->
+    Some `Thinking_only_no_progress
+  | Accept_rejected
+      {
         tool_effects_seen;
         reason_kind;
         response_shape;
@@ -756,13 +804,16 @@ let accept_no_progress_retry_kind = function
 let accept_rejection_has_read_only_no_progress_retry_hint err =
   match accept_no_progress_retry_kind err with
   | Some `Read_only_no_progress -> true
-  | Some `Empty_no_progress
+  | Some (`Empty_no_progress | `Thinking_only_no_progress)
   | None ->
     false
 
 let accept_rejection_has_no_progress_retry_hint err =
   match accept_no_progress_retry_kind err with
-  | Some (`Empty_no_progress | `Read_only_no_progress) ->
+  | Some
+      ( `Empty_no_progress
+      | `Read_only_no_progress
+      | `Thinking_only_no_progress ) ->
     true
   | None -> false
 

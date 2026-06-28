@@ -543,11 +543,12 @@ let public_descriptors =
       ~public_name:"Execute"
       ~internal_name:"tool_execute"
       ~description:
-        "Execute one typed command through deterministic execution gates. Provide \
-         executable plus argv arguments after the executable, or pipeline. Do not \
-         repeat executable as argv[0]. Examples: executable='git' argv=['status', \
-         '--short']; executable='grep' argv=['-rn', 'pattern', 'lib']. Use cwd for \
-         repo-scoped git/gh commands."
+        "Execute one typed command through deterministic execution gates. Git and \
+         GitHub CLI (git, gh) are fully supported. Provide executable plus argv \
+         arguments after the executable, or pipeline. Do not repeat executable as \
+         argv[0]. Examples: executable='git' argv=['status', '--short']; \
+         executable='gh' argv=['pr', 'list', '--repo', 'owner/name']. Use cwd for \
+         repo-scoped operations."
       ~input_schema:execute_schema
       ~policy:
         (policy

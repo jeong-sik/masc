@@ -301,17 +301,18 @@ let is_debug_throttled_unknown_keeper = function
 
 let test_not_in_registry_warn_due_first_event () =
   check bool "first unknown-keeper directive warns" true
-    (KK.not_in_registry_warn_due ~previous:None ~now:1_000.0)
+    (KK.not_in_registry_warn_due ~previous:None ~now:1_000.0 ())
 
 let test_not_in_registry_warn_due_throttles_within_window () =
   check bool "same window throttles" false
     (KK.not_in_registry_warn_due
        ~previous:(Some 1_000.0)
-       ~now:(1_000.0 +. (KK.not_in_registry_warn_cooldown_s /. 2.0)))
+       ~now:(1_000.0 +. (KK.not_in_registry_warn_cooldown_s /. 2.0))
+       ())
 
 let test_not_in_registry_warn_due_recovers_on_clock_regression () =
   check bool "clock regression does not suppress forever" true
-    (KK.not_in_registry_warn_due ~previous:(Some 1_000.0) ~now:999.0)
+    (KK.not_in_registry_warn_due ~previous:(Some 1_000.0) ~now:999.0 ())
 
 let test_not_in_registry_warn_state_is_per_agent () =
   let open KK in
@@ -333,6 +334,32 @@ let test_not_in_registry_warn_state_is_per_agent () =
   check bool "different agent warns" true (is_warn_unknown_keeper decision_b);
   check bool "different agent recorded" true
     (Option.is_some (StringMap.find_opt "keeper-b-agent" updated))
+
+let test_not_in_registry_warn_state_is_bounded () =
+  let open KK in
+  let state =
+    List.fold_left
+      (fun acc i ->
+         StringMap.add
+           ("keeper-" ^ string_of_int i ^ "-agent")
+           (2_000.0 -. float_of_int i)
+           acc)
+      StringMap.empty
+      [ 0; 1; 2; 3; 4 ]
+  in
+  let decision, updated =
+    not_in_registry_warn_state_step
+      ~max_entries:3
+      ~agent_name:"keeper-new-agent"
+      ~now:2_001.0
+      state
+  in
+  check bool "new unknown keeper still warns" true (is_warn_unknown_keeper decision);
+  check int "warn throttle map is capped" 3 (StringMap.cardinal updated);
+  check bool "new unknown keeper is retained" true
+    (Option.is_some (StringMap.find_opt "keeper-new-agent" updated));
+  check bool "oldest unknown keeper is pruned" true
+    (Option.is_none (StringMap.find_opt "keeper-4-agent" updated))
 
 (* ── MissedWakeup gap regression guard (KeeperHeartbeat.tla) ───────
    Skip_idle + Woken must promote the gate to [true]. Without this,
@@ -577,6 +604,8 @@ let () =
         `Quick test_not_in_registry_warn_due_recovers_on_clock_regression;
       test_case "warn gate is per agent"
         `Quick test_not_in_registry_warn_state_is_per_agent;
+      test_case "warn gate state is bounded"
+        `Quick test_not_in_registry_warn_state_is_bounded;
     ];
     "board_wakeup_selection", [
       test_case "explicit mentions bypass and win"

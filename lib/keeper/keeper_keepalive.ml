@@ -142,21 +142,54 @@ let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry
    elsewhere. Keep WARN output low-cardinality; the caller-side
    [DirectiveFailures] counter still records every miss. *)
 let not_in_registry_warn_cooldown_s = Masc_time_constants.minute
+let not_in_registry_warn_max_entries = 256
 
 type not_in_registry_warn_decision =
   | Warn_unknown_keeper
   | Debug_throttled_unknown_keeper
 
-let not_in_registry_warn_due ?(cooldown_s = not_in_registry_warn_cooldown_s) ~previous ~now =
+let not_in_registry_warn_due ?(cooldown_s = not_in_registry_warn_cooldown_s) ~previous ~now () =
   match previous with
   | None -> true
   | Some prev -> now < prev || now -. prev >= cooldown_s
 ;;
 
-let not_in_registry_warn_state_step ~agent_name ~now last_warns =
-  if not_in_registry_warn_due ~previous:(StringMap.find_opt agent_name last_warns) ~now
-  then Warn_unknown_keeper, StringMap.add agent_name now last_warns
-  else Debug_throttled_unknown_keeper, last_warns
+let not_in_registry_warn_prune ?(max_entries = not_in_registry_warn_max_entries)
+      ~now last_warns =
+  let cutoff = now -. not_in_registry_warn_cooldown_s in
+  let recent =
+    StringMap.filter (fun _ warned_at -> warned_at >= cutoff || warned_at > now) last_warns
+  in
+  if StringMap.cardinal recent <= max_entries
+  then recent
+  else
+    let rec take n = function
+      | _ when n <= 0 -> []
+      | [] -> []
+      | x :: xs -> x :: take (n - 1) xs
+    in
+    let newest =
+      recent
+      |> StringMap.bindings
+      |> List.sort (fun (name_a, ts_a) (name_b, ts_b) ->
+      let ts_cmp = Float.compare ts_b ts_a in
+      if ts_cmp <> 0 then ts_cmp else String.compare name_a name_b)
+      |> take max_entries
+    in
+    List.fold_left
+      (fun acc (name, warned_at) -> StringMap.add name warned_at acc)
+      StringMap.empty newest
+;;
+
+let not_in_registry_warn_state_step ?max_entries ~agent_name ~now last_warns =
+  let last_warns = not_in_registry_warn_prune ?max_entries ~now last_warns in
+  let previous = StringMap.find_opt agent_name last_warns in
+  let decision, updated =
+  if not_in_registry_warn_due ~previous ~now ()
+    then Warn_unknown_keeper, StringMap.add agent_name now last_warns
+    else Debug_throttled_unknown_keeper, last_warns
+  in
+  decision, not_in_registry_warn_prune ?max_entries ~now updated
 ;;
 
 let not_in_registry_last_warn : float StringMap.t Atomic.t =

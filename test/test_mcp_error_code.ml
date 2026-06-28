@@ -9,6 +9,57 @@
 open Alcotest
 module C = Masc.Mcp_error_code
 
+let string_contains haystack needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen > hlen then false
+  else
+    let found = ref false in
+    for i = 0 to hlen - nlen do
+      if not !found && String.sub haystack i nlen = needle then found := true
+    done;
+    !found
+
+let index_of haystack needle =
+  let nlen = String.length needle in
+  let hlen = String.length haystack in
+  if nlen > hlen then None
+  else (
+    let found = ref None in
+    for i = 0 to hlen - nlen do
+      match !found with
+      | Some _ -> ()
+      | None ->
+          if String.sub haystack i nlen = needle then found := Some i
+    done;
+    !found)
+
+let read_file path =
+  let ic = open_in path in
+  Fun.protect ~finally:(fun () -> close_in_noerr ic) (fun () ->
+      In_channel.input_all ic)
+
+let rec find_source_root_from dir hops rel =
+  if hops > 8 then None
+  else if Sys.file_exists (Filename.concat dir rel) then Some dir
+  else
+    let parent = Filename.dirname dir in
+    if String.equal parent dir then None
+    else find_source_root_from parent (hops + 1) rel
+
+let source_root () =
+  let anchor = "dune-project" in
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root
+    when String.trim root <> "" && Sys.file_exists (Filename.concat root anchor) ->
+      root
+  | _ -> (
+      match find_source_root_from (Sys.getcwd ()) 0 anchor with
+      | Some root -> root
+      | None -> fail "could not locate repo source root")
+
+let read_source_file rel = read_file (Filename.concat (source_root ()) rel)
+
 (* JSON-RPC 2.0 §5.1: implementation-defined codes live in
    [-32000, -32099]; the well-known set occupies -32700, -32600..-32603. *)
 let in_jsonrpc_range code =
@@ -95,6 +146,36 @@ let test_http_status_quiet_is_ok () =
   | `OK -> ()
   | _ -> Alcotest.fail "Quiet must map to HTTP 200 OK"
 
+let test_sse_register_error_body_uses_jsonrpc_invalid_request () =
+  let open Yojson.Safe.Util in
+  let body =
+    Masc.Server_mcp_transport_http_respond.error_body
+      ~code:C.Invalid_request "unknown session stale-mcp"
+  in
+  check string "jsonrpc" "2.0" (body |> member "jsonrpc" |> to_string);
+  check string "id is null" "null" (body |> member "id" |> Yojson.Safe.to_string);
+  let error = body |> member "error" in
+  check int "invalid request code" (-32600) (error |> member "code" |> to_int);
+  check string "message" "unknown session stale-mcp"
+    (error |> member "message" |> to_string)
+
+let test_sse_get_registers_before_streaming_response () =
+  let http = read_source_file "lib/server/server_mcp_transport_http.ml" in
+  let agui = read_source_file "lib/server/server_mcp_transport_http_agui.ml" in
+  let assert_order label source =
+    match
+      ( index_of source "Sse.register"
+      , index_of source "Httpun.Reqd.respond_with_streaming" )
+    with
+    | Some register_at, Some stream_at ->
+        check bool label true (register_at < stream_at);
+        check bool (label ^ " has 404 register error responder") true
+          (string_contains source "respond_sse_register_error")
+    | _ -> fail (label ^ ": missing Sse.register or respond_with_streaming")
+  in
+  assert_order "generic SSE GET validates before 200 stream" http;
+  assert_order "AG-UI SSE validates before 200 stream" agui
+
 let () =
   Alcotest.run "Mcp_error_code"
     [
@@ -113,5 +194,9 @@ let () =
           test_case "default messages non-empty" `Quick
             test_default_messages_non_empty;
           test_case "Quiet -> 200 OK" `Quick test_http_status_quiet_is_ok;
+          test_case "SSE register error JSON-RPC body" `Quick
+            test_sse_register_error_body_uses_jsonrpc_invalid_request;
+          test_case "SSE GET validates before opening stream" `Quick
+            test_sse_get_registers_before_streaming_response;
         ] );
     ]

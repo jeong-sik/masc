@@ -238,8 +238,9 @@ val librarian_unstructured_fallback_claim_prefix : string
 val librarian_unstructured_fallback_terminal_marker : string
 
 val legacy_unstructured_fallback_claim : string -> bool
-(** Whether a fact claim carries the historical librarian parse-failure fallback
-    prefix. *)
+(** Whether a persisted fact claim is a legacy librarian parse-failure fallback.
+    Prefer typed [Diagnostic] facts for new records; this keeps read-only
+    compatibility surfaces from duplicating the historical prefix check. *)
 
 val legacy_unstructured_fallback_claim_key : string -> bool
 (** Whether a persisted pre-[Diagnostic] recall key identifies a legacy

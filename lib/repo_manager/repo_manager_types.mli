@@ -24,11 +24,26 @@ type repository = {
 }
 [@@deriving yojson, show, eq]
 
+type repository_scope =
+  | All_repositories
+  | Selected_repositories of repository_id list
+[@@deriving yojson, show, eq]
+
 type keeper_repo_mapping = {
   keeper_id : string;
   repository_ids : string list;
+  repository_scope : repository_scope [@default Selected_repositories []];
 }
 [@@deriving yojson, show, eq]
+
+val repository_scope_of_ids : repository_id list -> repository_scope
+(** [repository_scope_of_ids repository_ids] parses the raw repository list
+    from TOML/JSON into the closed access scope. *)
+
+val make_keeper_repo_mapping :
+  keeper_id:string -> repository_ids:repository_id list -> keeper_repo_mapping
+(** [make_keeper_repo_mapping ~keeper_id ~repository_ids] preserves the raw
+    IDs for serialization while storing the parsed access scope. *)
 
 (** [is_toml_table v] is [true] iff [v] is [Otoml.TomlTable] or
     [Otoml.TomlInlineTable].  Shared by the on-disk config loaders so the

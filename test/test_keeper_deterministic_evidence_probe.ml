@@ -64,14 +64,12 @@ let with_fixture ?sandbox f =
 let tests_pass command =
   Evidence_claim.Tests_pass { command; expected_exit = 0 }
 
-let known_safe_success_command = "printf ok"
-
 let test_local_tests_pass_runs_in_local_target () =
   with_fixture @@ fun ~config ~meta ->
   check bool
-    "known safe local command evidence satisfied"
+    "local command evidence satisfied"
     true
-    (Probe.all_satisfied ~config ~meta [ tests_pass known_safe_success_command ])
+    (Probe.all_satisfied ~config ~meta [ tests_pass "test 1 = 1" ])
 
 let test_docker_without_factory_does_not_fall_back_to_host () =
   with_fixture ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -79,7 +77,7 @@ let test_docker_without_factory_does_not_fall_back_to_host () =
   check bool
     "docker command evidence without factory stays indeterminate"
     false
-    (Probe.all_satisfied ~config ~meta [ tests_pass known_safe_success_command ])
+    (Probe.all_satisfied ~config ~meta [ tests_pass "test 1 = 1" ])
 
 let () =
   run

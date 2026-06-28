@@ -778,6 +778,7 @@ export function KeeperConversationPanel({
             <${ChatComposer}
               key=${keeperName}
               draftPersistKey=${keeperName}
+              keeperLabel=${keeperName}
               placeholder=${chatAccess.blocked
                 ? '현재 actor는 direct keeper chat 권한이 없습니다'
                 : sending
@@ -896,6 +897,7 @@ export function KeeperConversationPanel({
           <${ChatComposer}
             key=${keeperName}
             draftPersistKey=${keeperName}
+            keeperLabel=${keeperName}
             placeholder=${chatAccess.blocked
               ? '현재 actor는 direct keeper chat 권한이 없습니다'
               : sending
@@ -1012,6 +1014,7 @@ export function KeeperConversationPanel({
           <${ChatComposer}
             key=${keeperName}
             draftPersistKey=${keeperName}
+            keeperLabel=${keeperName}
             placeholder=${chatAccess.blocked
               ? '현재 actor는 direct keeper chat 권한이 없습니다'
               : sending

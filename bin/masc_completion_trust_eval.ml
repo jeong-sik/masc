@@ -542,8 +542,8 @@ let () =
     Eio.Switch.run @@ fun sw ->
     let net = Eio.Stdenv.net env in
     (* Capture the Eio handles the OAS call path reads via Masc_eio_env.get_opt.
-       Without this the live LLM call path finds no clock and runs without
-       timeout enforcement. *)
+       Without this the live LLM call path fails closed before starting the
+       trusted OAS call. *)
     Masc.Masc_eio_env.init ~sw ~net ~clock:(Eio.Stdenv.clock env) ();
     let config_path = runtime_toml_path ~base_path in
     (match Runtime.init_default_strict ~config_path with

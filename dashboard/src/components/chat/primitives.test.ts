@@ -6,7 +6,13 @@ import { fireEvent } from '@testing-library/preact'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ChatBlock, KeeperConversationAttachment, KeeperConversationEntry } from '../../types'
 import type { ToolCallEntry } from '../../api/dashboard'
-import { ChatComposer, ChatTranscript, type ChatComposerSendPayload } from './primitives'
+import {
+  CHAT_COMPOSER_COMMAND_HEADER_SUFFIX,
+  CHAT_COMPOSER_DROP_PLACEHOLDER,
+  ChatComposer,
+  ChatTranscript,
+  type ChatComposerSendPayload,
+} from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
 import { collectAttachments } from './attachments'
 import { recordToolCallOutputs, resetToolCallOutputs } from '../../tool-call-output-store'
@@ -2694,5 +2700,48 @@ describe('ChatComposer v2 prototype surface', () => {
     fireEvent.keyDown(textarea, { key: 'Enter' })
 
     expect(run).toHaveBeenCalledTimes(1)
+  })
+
+  it('shows the keeper label in the slash menu header', () => {
+    const keeperLabel = 'ocaml-multicore/eio'
+    render(
+      html`<${ChatComposer}
+        draft="/res"
+        placeholder="메시지 입력..."
+        disabled=${false}
+        streaming=${false}
+        draftPersistKey="draft:v1:internal:opaque"
+        keeperLabel=${keeperLabel}
+        commands=${[
+          { id: 'restart', group: 'lifecycle', label: 'Restart keeper', run: () => {} },
+        ]}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    const header = container.querySelector('.slashmenu-h')
+    expect(header?.textContent).toBe(`${keeperLabel} · ${CHAT_COMPOSER_COMMAND_HEADER_SUFFIX}`)
+  })
+
+  it('switches the textarea placeholder to the drop cue while files are dragged over', () => {
+    render(
+      html`<${ChatComposer}
+        draft=""
+        placeholder="ocaml-multicore/eio 에게 메시지…  (/ 명령 · ⌘+Enter 전송)"
+        disabled=${false}
+        streaming=${false}
+        onDraftChange=${() => {}}
+        onSend=${() => {}}
+      />`,
+      container,
+    )
+    const textarea = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    expect(textarea.placeholder).toBe('ocaml-multicore/eio 에게 메시지…  (/ 명령 · ⌘+Enter 전송)')
+
+    const composer = container.querySelector('.composer') as HTMLDivElement
+    fireEvent.dragOver(composer)
+    const textareaAfterDrag = container.querySelector('.composer-box textarea') as HTMLTextAreaElement
+    expect(textareaAfterDrag.placeholder).toBe(CHAT_COMPOSER_DROP_PLACEHOLDER)
   })
 })

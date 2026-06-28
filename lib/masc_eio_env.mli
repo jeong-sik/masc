@@ -8,17 +8,19 @@
     Every consumer that needs to issue an HTTP call later reaches
     the captured handles via {!get} or {!get_opt}.
 
-    Internal storage is hidden in [Domain.DLS]. No process-wide environment
-    is retained: every domain that issues OAS HTTP calls must call {!init}
-    with handles it owns, or fail closed through {!get}. *)
+    Internal storage is hidden and domain-local. There is no
+    process-wide fallback; an OCaml domain that performs OAS HTTP calls
+    must call {!init} with handles, including a clock, owned by that
+    domain. See [docs/oas-bridge-clock-timeout-contract.md] for the
+    migration contract. *)
 
 type t = {
   sw : Eio.Switch.t;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
   clock : float Eio.Time.clock_ty Eio.Resource.t;
 }
-(** Captured Eio handles. [clock] is mandatory; callers must supply
-    a valid clock at initialisation. *)
+(** Captured Eio handles. [clock] is mandatory because timeout-enforced
+    OAS calls cannot be represented safely without one. *)
 
 val init :
   sw:Eio.Switch.t ->
@@ -27,8 +29,8 @@ val init :
   unit ->
   unit
 (** Capture the runtime handles for the current OCaml domain.
-    Last-writer-wins for that domain-local slot. Intended to be called at
-    startup; re-init is permitted by harness tests and standalone
+    Last-writer-wins for the current domain-local slot. Intended to be called
+    at startup; re-init is permitted by harness tests and standalone
     executables. *)
 
 val reset_for_test : unit -> unit
@@ -42,7 +44,7 @@ val get : unit -> t
     {!init} should use {!get_opt} instead. *)
 
 val get_opt : unit -> t option
-(** Read the current domain's captured environment without raising. Returns
-    [None] when {!init} has not run in this domain. Used by tests and by
-    code paths that intentionally degrade before startup, such as runtime
-    catalog probes and local-runtime probes. *)
+(** Read the captured environment without raising. Returns
+    [None] when {!init} has not run in the current OCaml domain. Used by
+    tests and by code paths that must degrade explicitly rather than
+    borrowing another domain's switch/net/clock handles. *)

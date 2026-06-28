@@ -47,7 +47,7 @@ val create_server_state :
   base_path:string ->
   clock:float Eio.Time.clock_ty Eio.Resource.t ->
   mono_clock:Eio.Time.Mono.ty Eio.Resource.t ->
-  net:[> `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
+  net:[ `Generic | `Unix] Eio.Net.ty Eio.Resource.t ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t ->
   fs:Eio.Fs.dir_ty Eio.Path.t ->
   ?env:Eio_unix.Stdenv.base ->

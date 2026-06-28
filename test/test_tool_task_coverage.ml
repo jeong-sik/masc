@@ -394,34 +394,34 @@ let () = test "task_history_events_json_returns_empty_for_missing_task" (fun () 
   | `List _ -> failwith "missing task should have no history events"
   | _ -> failwith "task history payload must be a JSON list"
 )
-let () = test "masc_oas_bridge_rejects_without_eio_env" (fun () ->
-  let previous = Masc_eio_env.get_opt () in
-  Masc_eio_env.reset_for_test ();
-  Fun.protect
-    ~finally:(fun () ->
-      match previous with
-      | None -> Masc_eio_env.reset_for_test ()
-      | Some env ->
-        Masc_eio_env.init
-          ~sw:env.Masc_eio_env.sw
-          ~net:env.Masc_eio_env.net
-          ~clock:env.Masc_eio_env.clock
-          ())
-    (fun () ->
-      let called = ref false in
-      let result =
-        Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
-          called := true;
-          Ok "ok")
-      in
-      (match result with
-       | Error err ->
-         (match Keeper_internal_error.classify_masc_internal_error err with
-          | Some (Keeper_internal_error.Internal_contract_rejected _) -> ()
-          | _ -> failwith ("unexpected error: " ^ Agent_sdk.Error.to_string err))
-       | Ok _ -> failwith "expected missing env to return an error");
-      Alcotest.(check bool) "fn was not called" false !called))
-
+let () = test "masc_oas_bridge_fails_closed_without_eio_env" (fun () ->
+  match Masc_eio_env.get_opt () with
+  | Some _ ->
+    failwith
+      "masc_oas_bridge_fails_closed_without_eio_env requires Masc_eio_env.get_opt () = None before calling run_safe"
+  | None ->
+    let called = ref false in
+    match
+      Masc_oas_bridge.run_safe ~caller:"test_tool_task_coverage" ~timeout_s:0.1 (fun () ->
+        called := true;
+        Ok "ok")
+    with
+    | Error error ->
+        if !called then failwith "run_safe called fn without an Eio env";
+        (match Keeper_internal_error.classify_masc_internal_error error with
+         | Some (Keeper_internal_error.Internal_bridge_exception { caller; _ }) ->
+             if caller <> "test_tool_task_coverage" then
+               failwith ("unexpected bridge caller: " ^ caller)
+         | Some other ->
+             failwith
+               ( "unexpected internal error: "
+               ^ Keeper_internal_error.kind_of_masc_internal_error other )
+         | None ->
+             failwith
+               ("expected typed internal bridge error, got: "
+               ^ Agent_sdk.Error.to_string error))
+    | Ok other -> failwith ("unexpected success: " ^ other)
+)
 
 (* Test dispatch transition claim *)
 let () = test "dispatch_transition_claim" (fun () ->

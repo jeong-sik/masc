@@ -10,6 +10,7 @@ import {
   patchKeeperConfig,
   setKeeperToolPolicy,
 } from '../api/dashboard'
+import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
 import type { KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
@@ -212,6 +213,7 @@ export type RuntimeDraft = {
 
 const runtimeDraft = signal<RuntimeDraft | null>(null)
 const runtimeSaving = signal(false)
+const runtimeDirectiveSaving = signal<'pause' | 'resume' | 'wakeup' | null>(null)
 // Tool policy is saved via the separate /tools set_policy endpoint (not the
 // /config PATCH), so it has its own draft/saving state. null draft = "show the
 // live policy"; a string = the operator's in-progress edit.
@@ -228,6 +230,7 @@ function resetKeeperConfigPanelDrafts(): void {
   promptPreviewTab.value = 'blocks'
   runtimeDraft.value = null
   runtimeSaving.value = false
+  runtimeDirectiveSaving.value = null
   toolAccessDraftText.value = null
   denylistDraftText.value = null
   denylistSaving.value = false
@@ -799,6 +802,56 @@ function runtimeSelectionSummary(c: KeeperConfig): string {
   return `이 keeper는 runtime profile ${selected} 를 사용합니다. ${selectionPart}${canonicalPart}`
 }
 
+function recordValue(value: unknown): Record<string, unknown> | null {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) return null
+  return value as Record<string, unknown>
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === 'string' && value.trim() ? value : null
+}
+
+function stringField(record: Record<string, unknown> | null | undefined, key: string): string | null {
+  return record ? stringValue(record[key]) : null
+}
+
+function runtimeTrustHealthRows(c: KeeperConfig): Array<[string, string, boolean?]> {
+  const trust = c.runtime_trust
+  if (!trust) {
+    return [
+      ['실행 주의', '데이터 없음', true],
+      ['실행 판정', MISSING_DATA_DASH, true],
+      ['완료 계약', MISSING_DATA_DASH, true],
+    ]
+  }
+
+  const trustRecord = recordValue(trust)
+  const execution = recordValue(trust.execution)
+  const latestReceipt = recordValue(trustRecord?.latest_receipt)
+  const disposition = trust.disposition ?? MISSING_DATA_DASH
+  const reason = trust.attention_reason ?? trust.disposition_reason ?? MISSING_DATA_DASH
+  const completionContract =
+    stringField(execution, 'completion_contract_result')
+    ?? stringField(latestReceipt, 'completion_contract_result')
+    ?? MISSING_DATA_DASH
+  const receiptTask =
+    stringField(latestReceipt, 'current_task_id')
+    ?? stringField(trustRecord, 'current_task_id')
+    ?? '없음'
+  const latestReceiptAt =
+    stringField(execution, 'latest_receipt_at')
+    ?? stringField(latestReceipt, 'recorded_at')
+    ?? MISSING_DATA_DASH
+
+  return [
+    ['실행 주의', trust.needs_attention ? `ON · ${reason}` : 'OFF'],
+    ['실행 판정', disposition, true],
+    ['완료 계약', completionContract, true],
+    ['작업 scope', receiptTask, true],
+    ['최근 receipt', latestReceiptAt, true],
+  ]
+}
+
 // ── Main component ───────────────────────────────────────
 
 export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string; onClose?: () => void }) {
@@ -885,6 +938,30 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       showToast(msg, 'error')
     } finally {
       runtimeSaving.value = false
+    }
+  }
+
+  async function runRuntimeDirective(action: 'pause' | 'resume' | 'wakeup') {
+    runtimeDirectiveSaving.value = action
+    try {
+      const result =
+        action === 'pause'
+          ? await pauseKeeper(keeperName)
+          : action === 'resume'
+            ? await resumeKeeper(keeperName)
+            : await wakeKeeper(keeperName)
+      if (!result.ok) {
+        throw new Error(result.error || `${action} directive failed`)
+      }
+      runtimeDraft.value = null
+      await loadKeeperConfig(keeperName, { force: true })
+      const label =
+        action === 'pause' ? '일시정지' : action === 'resume' ? '재개' : '깨우기'
+      showToast(`keeper ${label} 요청 완료`, 'success')
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : 'directive 실패', 'error')
+    } finally {
+      runtimeDirectiveSaving.value = null
     }
   }
 
@@ -1466,15 +1543,46 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   })() : html`<div class="text-2xs text-[var(--color-fg-muted)] py-4">hook 정보가 없습니다.</div>`
 
   // health ◉ — runtime liveness / registry / fiber diagnostics
+  const directiveBusy = runtimeDirectiveSaving.value !== null
   const healthTab = html`
     <${KcfSec} title="런타임 상태" desc="이 keeper의 라이브니스 · 등록 · 파이버 진단입니다.">
       <${KcfFacts} rows=${[
         ['일시정지', c.runtime.paused ? 'ON' : 'OFF'],
-        ['자동 부팅 등록', c.runtime.registered ? 'ON' : 'OFF'],
+        ['자동 부팅 설정', c.autoboot_enabled ? 'ON' : 'OFF'],
+        ['레지스트리 등록', c.runtime.registered ? 'ON' : 'OFF'],
         ['킵얼라이브 실행', c.runtime.keepalive_running ? 'ON' : 'OFF'],
         ['레지스트리 상태', c.runtime.registry_state, true],
         ['파이버 상태', c.runtime.fiber_health, true],
       ]} />
+      <div class="mt-3">
+        <${KcfFacts} rows=${runtimeTrustHealthRows(c)} />
+      </div>
+      <div class="flex flex-wrap gap-2 mt-3 v2-monitoring-toolbar">
+        <button
+          type="button"
+          class="kcf-btn save v2-monitoring-action"
+          onClick=${() => { void runRuntimeDirective('resume') }}
+          disabled=${directiveBusy}
+          aria-label="keeper 재개 또는 등록"
+          title="재개: paused 상태를 해제하고 registry 누락 시 keeper를 다시 등록합니다"
+        >${runtimeDirectiveSaving.value === 'resume' ? '재개 중...' : '재개·등록'}</button>
+        <button
+          type="button"
+          class="kcf-btn ghost v2-monitoring-action"
+          onClick=${() => { void runRuntimeDirective('wakeup') }}
+          disabled=${directiveBusy || !c.runtime.keepalive_running}
+          aria-label="keeper 깨우기"
+          title="깨우기: 실행 중인 keepalive fiber에 즉시 wakeup directive를 보냅니다"
+        >${runtimeDirectiveSaving.value === 'wakeup' ? '깨우는 중...' : '깨우기'}</button>
+        <button
+          type="button"
+          class="kcf-btn ghost v2-monitoring-action"
+          onClick=${() => { void runRuntimeDirective('pause') }}
+          disabled=${directiveBusy || c.runtime.paused}
+          aria-label="keeper 일시정지"
+          title="일시정지: operator paused 상태를 저장하고 keepalive loop에 pause directive를 보냅니다"
+        >${runtimeDirectiveSaving.value === 'pause' ? '일시정지 중...' : '일시정지'}</button>
+      </div>
     </${KcfSec}>
   `
 

@@ -690,11 +690,9 @@ let summarize_rows ~keeper_name ~limit rows =
         note_reaction_kind (nested_string_field "reaction" "kind" row);
         note_completion_contract_attention row;
         mark_reacted id
-      | Some "cursor_ack", Some id ->
+      | Some "cursor_ack", Some _id ->
         incr reaction_count;
         incr cursor_ack_count;
-        note_reaction_time (float_field "recorded_at_unix" row);
-        mark_reacted id;
         (match nested_float_field "cursor" "cursor_ts" row with
          | Some cursor_ts ->
            let cursor_post_id =
@@ -710,7 +708,6 @@ let summarize_rows ~keeper_name ~limit rows =
       | Some "cursor_ack", None ->
         incr reaction_count;
         incr cursor_ack_count;
-        note_reaction_time (float_field "recorded_at_unix" row);
         (match nested_float_field "cursor" "cursor_ts" row with
          | Some cursor_ts ->
            let cursor_post_id =

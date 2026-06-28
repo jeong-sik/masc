@@ -658,6 +658,51 @@ let test_no_progress_recovery_later_reaction_clears_pending () =
     (reacted_summary |> member "execution_receipt_count" |> to_int)
 ;;
 
+let test_no_progress_recovery_cursor_ack_does_not_clear_pending () =
+  with_temp_base @@ fun base_path ->
+  let keeper_name = "no-progress-cursor-only-keeper" in
+  let stimulus = no_progress_recovery_stimulus ~keeper_name () in
+  Keeper_reaction_ledger.record_event_queue_stimulus
+    ~base_path
+    ~keeper_name
+    stimulus;
+  let pending_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  let stimulus_id =
+    pending_summary
+    |> member "pending_no_progress_recovery_ids"
+    |> to_list
+    |> List.hd
+    |> to_string
+  in
+  Keeper_reaction_ledger.record_board_cursor_ack
+    ~base_path
+    ~keeper_name
+    ~stimulus_id
+    ~cursor_ts:9999.0
+    ~post_id:(Some "cursor-only-post")
+    ();
+  let cursor_only_summary =
+    Keeper_reaction_ledger.summary_for_keeper ~base_path ~keeper_name ~limit:10
+  in
+  check_member_string
+    "cursor-only recovery summary remains degraded"
+    "degraded"
+    "status"
+    cursor_only_summary;
+  check bool "cursor-only recovery still needs operator action" true
+    (cursor_only_summary |> member "operator_action_required" |> to_bool);
+  check int "cursor-only recovery stimulus remains pending" 1
+    (cursor_only_summary |> member "pending_stimulus_count" |> to_int);
+  check int "cursor-only recovery kind remains pending" 1
+    (cursor_only_summary |> member "pending_no_progress_recovery_count" |> to_int);
+  check int "cursor ack still counted" 1
+    (cursor_only_summary |> member "cursor_ack_count" |> to_int);
+  check int "cursor ack does not sweep non-board recovery stimulus" 0
+    (cursor_only_summary |> member "cursor_swept_stimulus_count" |> to_int)
+;;
+
 let test_summary_links_passive_only_attention_to_pending_recovery () =
   with_temp_base @@ fun base_path ->
   let config = Workspace.default_config base_path in
@@ -880,6 +925,10 @@ let () =
             "later keeper reaction clears no-progress recovery pending"
             `Quick
             test_no_progress_recovery_later_reaction_clears_pending
+        ; test_case
+            "cursor ack alone does not clear no-progress recovery pending"
+            `Quick
+            test_no_progress_recovery_cursor_ack_does_not_clear_pending
         ; test_case
             "summary links passive-only attention to pending recovery"
             `Quick

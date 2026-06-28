@@ -114,15 +114,14 @@ val sandbox_turn_id_label_key : string
 (** Value of {!sandbox_component_label_key} ([= "keeper-sandbox"]). *)
 val sandbox_component_label_value : string
 
-(** [base_path_hash base_path] = the {!sandbox_base_path_hash_label_key}
-    label value: hex MD5 of the normalised base path. Pure. *)
-val normalize_base_path_for_hash : string -> string
-val base_path_hash : string -> string
-
 (** [normalize_base_path_for_hash base_path] resolves relative base paths
     against the current working directory before hashing. Pure apart from
     [Sys.getcwd] for relative inputs. *)
 val normalize_base_path_for_hash : string -> string
+
+(** [base_path_hash base_path] = the {!sandbox_base_path_hash_label_key}
+    label value: hex MD5 of the normalised base path. Pure. *)
+val base_path_hash : string -> string
 
 (** [sanitize_label_value v] maps any character outside
     [[A-Za-z0-9_.-]] to ['_']. Pure. *)

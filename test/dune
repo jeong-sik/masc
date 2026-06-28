@@ -1841,6 +1841,8 @@
 
 (include stanzas/test_keeper_invariant.inc)
 
+(include stanzas/test_keeper_latched_reason.inc)
+
 (include stanzas/test_keeper_long_turn_9943.inc)
 
 (include stanzas/test_keeper_execution_join.inc)
@@ -1917,6 +1919,8 @@
 
 (include stanzas/test_keeper_unified_tool_event_order_source.inc)
 
+(include stanzas/test_keeper_unified_turn_completion_contract.inc)
+
 (include stanzas/test_keeper_validation_breaker_exempt.inc)
 
 (include stanzas/test_keeper_turn_livelock_10121.inc)
@@ -1950,6 +1954,8 @@
 (include stanzas/test_masc_error_is_retryable.inc)
 
 (include stanzas/test_runtime_oas_eio_context_classify.inc)
+
+(include stanzas/test_runtime_pause_threshold_toml.inc)
 
 (include stanzas/test_keeper_response_feedback.inc)
 

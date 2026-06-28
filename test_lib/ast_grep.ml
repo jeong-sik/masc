@@ -189,7 +189,7 @@ let constructor_names_of_type ~module_path ~type_name =
       }
     in
     iter.structure iter structure;
-    List.rev !names
+    !names
 ;;
 
 (* Count string literals whose value contains [needle] as a substring.

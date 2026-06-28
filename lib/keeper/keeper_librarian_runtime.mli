@@ -52,8 +52,8 @@ val cadence_due : keeper_id:string -> trace_id:string -> bool
     cycle in place — bounding the table to one row per keeper. First call for an
     unseen keeper, or the first call after a rollover, is due immediately.
 
-    Must be called inside an [Eio] fiber context (acquires [Eio.Mutex.use_rw
-    ~protect:true]). *)
+    Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
+    focused pre-Eio tests keep a direct single-threaded path. *)
 
 val cadence_record_success : keeper_id:string -> trace_id:string -> unit
 (** Record a successful structured extraction for [keeper_id] on [trace_id] so
@@ -61,8 +61,8 @@ val cadence_record_success : keeper_id:string -> trace_id:string -> unit
     after a due turn actually produced a structured episode; skipped, failed, or
     unstructured-fallback attempts must not call this.
 
-    Must be called inside an [Eio] fiber context (acquires [Eio.Mutex.use_rw
-    ~protect:true]). *)
+    Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
+    focused pre-Eio tests keep a direct single-threaded path. *)
 
 val cadence_record_attempt : keeper_id:string -> trace_id:string -> unit
 (** Record a completed non-success extraction attempt for [keeper_id] on
@@ -71,8 +71,8 @@ val cadence_record_attempt : keeper_id:string -> trace_id:string -> unit
     extraction as semantically successful. Skipped work such as a busy provider
     slot must not call this, because no provider attempt happened.
 
-    Must be called inside an [Eio] fiber context (acquires [Eio.Mutex.use_rw
-    ~protect:true]). *)
+    Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
+    focused pre-Eio tests keep a direct single-threaded path. *)
 
 val cadence_counter_entries : unit -> int
 (** Number of live per-keeper cadence rows. Bounded by the number of keepers
@@ -80,8 +80,8 @@ val cadence_counter_entries : unit -> int
     leak-regression signal for the keeper-keyed cadence table and a memory-health
     metric for the dashboard. Read-only.
 
-    Must be called inside an [Eio] fiber context (acquires [Eio.Mutex.use_rw
-    ~protect:true]). *)
+    Uses [Eio_guard.with_mutex_ro] so runtime fibers take a cooperative mutex
+    while focused pre-Eio tests keep a direct single-threaded path. *)
 
 val memory_os_librarian_provider_slot_site : string
 (** OTel [site] label used when the fleet-wide librarian provider slot is busy.
@@ -201,8 +201,10 @@ val with_provider_slot
 (** Run [f] under the per-keeper librarian provider slot — the #21230/P0-4
     storm guard. At capacity N per keeper, the (N+1)-th concurrent entrant for
     the same keeper returns [None] after [provider_slot_wait_sec] (drop, not
-    block); capacity 0 disables the gate so [f] always runs ([Some]). Exposed
-    for storm-guard regression coverage (#21376). *)
+    block); capacity 0 disables the gate so [f] always runs ([Some]). The
+    provider slot registry is guarded through [Eio_guard.with_mutex], avoiding
+    blocking stdlib locks on keeper runtime fibers. Exposed for storm-guard
+    regression coverage (#21376). *)
 
 val librarian_provider_clock_unavailable_error : string
 (** Stable error returned before provider I/O when provider-backed librarian

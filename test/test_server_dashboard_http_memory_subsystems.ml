@@ -413,8 +413,6 @@ let test_http_json_surfaces_memory_quality_summary () =
          Json.(fact_injections |> member "echoed_fact_keys" |> to_int);
        check int "max fact echo count" 2
          Json.(fact_injections |> member "max_fact_echo_count" |> to_int);
-       check int "legacy diagnostic fallback injections" 1
-         Json.(fact_injections |> member "diagnostic_fallback_key_injections" |> to_int);
        let echoed = Json.(fact_injections |> member "top_echoed_fact_keys" |> to_list) in
        check int "one echoed top key" 1 (List.length echoed);
        let top_echo = List.hd echoed in

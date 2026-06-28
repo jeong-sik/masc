@@ -124,7 +124,7 @@ let test_contradiction_positions () =
    | _ -> fail "contradictions[0] missing")
 
 let test_error_branch () =
-  let a = assoc_of (Masc.Fusion_sink.judge_meta (Error "boom")) in
+  let a = assoc_of (Masc.Fusion_sink.judge_meta (Error (Provider_error "boom"))) in
   check (option string) "status failed" (Some "failed") (string_field a "status");
   check (option string) "error message" (Some "boom") (string_field a "error");
   check bool "no consensus on error" false (List.mem "consensus" (keys a))
@@ -256,8 +256,9 @@ let test_node_failed_keeps_identity () =
   let o =
     Judge_failed
       { failed_role = First "a (m)"
-      ; error = "boom"
+      ; failure = Provider_error "boom"
       ; usage = { input_tokens = 7; output_tokens = 8 }
+      ; elapsed_s = 1.5
       }
   in
   let a = assoc_of (Masc.Fusion_sink.judge_node_meta o) in

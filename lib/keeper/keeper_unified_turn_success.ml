@@ -61,11 +61,16 @@ let no_work_budget_threshold_override
     | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
   in
   let no_work_scope = (not has_current_task) && active_goal_ids = [] in
+  let actionable_signal =
+    Keeper_contract_classifier.classify_actionable_signal
+      (Keeper_contract_classifier.of_keeper_world_observation observation)
+  in
   if
     budget_exhausted
     && no_work_scope
     && (not strong_evidence)
     && surface_requires_evidence
+    && actionable_signal <> Keeper_contract_classifier.No_actionable_signal
     && Keeper_unified_metrics_support.is_scheduled_autonomous_cycle_of_observation
          observation
   then Some 1

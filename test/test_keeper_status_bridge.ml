@@ -20,6 +20,21 @@ let blocker_of_summary summary =
   Keeper_status_bridge.runtime_blocker_surface_opt config (meta_with_summary summary)
 ;;
 
+let blocker_of_typed_last_blocker klass ~detail =
+  let config = Workspace.default_config "/tmp/masc-test-status-bridge" in
+  let meta = meta_with_summary "" in
+  let meta =
+    { meta with
+      runtime =
+        { meta.runtime with
+          last_blocker =
+            Some (Keeper_meta_contract.blocker_info_of_class ~detail klass)
+        }
+    }
+  in
+  Keeper_status_bridge.runtime_blocker_surface_opt config meta
+;;
+
 let write_file path content =
   let oc = open_out path in
   Fun.protect
@@ -76,6 +91,30 @@ let test_synthetic_narrative_is_not_runtime_blocker_source () =
     (Option.map (fun b -> b.Keeper_status_bridge.blocker_class) (blocker_of_summary summary))
 ;;
 
+let test_no_progress_loop_summary_normalizes_legacy_detail () =
+  let legacy_detail =
+    "no_progress loop detected: streak=10 threshold=10; manual pause applied"
+  in
+  match
+    blocker_of_typed_last_blocker Keeper_meta_contract.No_progress_loop
+      ~detail:legacy_detail
+  with
+  | Some blocker ->
+    Alcotest.(check string)
+      "blocker class"
+      "no_progress_loop"
+      blocker.Keeper_status_bridge.blocker_class;
+    Alcotest.(check bool)
+      "normalizes legacy manual pause text"
+      false
+      (String_util.contains_substring_ci blocker.summary "manual pause");
+    Alcotest.(check bool)
+      "names progress safety latch"
+      true
+      (String_util.contains_substring_ci blocker.summary "progress-safety latch")
+  | None -> Alcotest.fail "expected no_progress_loop blocker"
+;;
+
 let defaults_with_prompt_fields =
   { Keeper_types_profile.empty_keeper_profile_defaults with
     manifest_path = Some "/tmp/keeper.toml";
@@ -130,6 +169,10 @@ let () =
             "synthetic narrative is not blocker source"
             `Quick
             test_synthetic_narrative_is_not_runtime_blocker_source;
+          Alcotest.test_case
+            "no-progress loop summary normalizes legacy detail"
+            `Quick
+            test_no_progress_loop_summary_normalizes_legacy_detail;
         ] );
       ( "profile default override provenance",
         [

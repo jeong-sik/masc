@@ -47,6 +47,14 @@ let fake_complete_with_config inspect canned : Runtime.complete_fn =
   Ok (fake_response canned)
 ;;
 
+let text_of_message (message : Atypes.message) =
+  message.content
+  |> List.filter_map (function
+    | Atypes.Text text -> Some text
+    | _ -> None)
+  |> String.concat "\n"
+;;
+
 (* The fake completion ignores the config, so any valid one works. *)
 let provider_cfg ?max_tokens () =
   Llm_provider.Provider_config.make
@@ -296,7 +304,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
                seen_response_format := Some config.Llm_provider.Provider_config.response_format;
                let rendered_prompt =
                  messages
-                 |> List.map Atypes.text_of_message
+                 |> List.map text_of_message
                  |> String.concat "\n"
                  |> String.trim
                in

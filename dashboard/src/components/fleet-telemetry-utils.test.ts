@@ -249,6 +249,23 @@ describe('buildFleetRows runtime labels', () => {
       summary: 'no provider can satisfy tool surface',
     })
   })
+
+  it('normalizes legacy no-progress blocker text before building fleet rows', () => {
+    const [row] = buildFleetRows([
+      {
+        name: 'latched-keeper',
+        status: 'paused',
+        keepalive_running: true,
+        runtime_blocker_class: 'no_progress_loop',
+        last_blocker: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
+      },
+    ], EMPTY_TOOL_QUALITY)
+
+    expect(row?.runtime_blocker_summary).toContain('progress-safety latch')
+    expect(row?.runtime_blocker_summary).not.toContain('manual pause applied')
+    expect(row?.stop_cause?.summary).toContain('progress-safety latch')
+    expect(row?.stop_cause?.summary).not.toContain('manual pause applied')
+  })
 })
 
 describe('uniqueStrings', () => {

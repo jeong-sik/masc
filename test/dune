@@ -746,6 +746,13 @@
  (modules test_fusion_sink_meta)
  (libraries masc_test_deps masc.fusion_core))
 
+; FUSION adaptive timeout / P0 hardening: config, pure timeout helper, metrics,
+; and sink meta JSON for failed judge nodes.
+(test
+ (name test_fusion_adaptive_timeout)
+ (modules test_fusion_adaptive_timeout)
+ (libraries masc_test_deps masc.fusion_core))
+
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 
 (test
@@ -1200,7 +1207,7 @@
 (test
  (name test_voice_config)
  (modules test_voice_config)
- (libraries alcotest yojson masc.voice_config))
+ (libraries alcotest yojson masc.voice_config unix))
 
 ; MCP HTTP session persistence: save/forget/load round-trip through the
 ; fd-safe write path (close_out_noerr finally guard).

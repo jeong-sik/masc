@@ -158,7 +158,9 @@ let lexical_normalize_abs abs =
 let lexical_abs ?cwd raw =
   let abs =
     if Filename.is_relative raw then
-      Filename.concat (match cwd with Some d -> d | None -> Sys.getcwd ()) raw
+      Filename.concat
+        (match cwd with Some d -> d | None -> Config_dir_resolver.current_working_dir ())
+        raw
     else
       raw
   in
@@ -177,6 +179,12 @@ let rec realpath_existing_prefix abs =
 
 let normalize_for_store_collision ?cwd raw =
   raw |> lexical_abs ?cwd |> realpath_existing_prefix |> lexical_normalize_abs
+;;
+
+let absolute_workspace_base_path ?cwd raw =
+  raw
+  |> Env_config_core.normalize_masc_base_path_input
+  |> normalize_for_store_collision ?cwd
 ;;
 
 let same_or_child_path ~parent child =

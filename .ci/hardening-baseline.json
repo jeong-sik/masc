@@ -1,25 +1,36 @@
 {
   "_comment": "Production hardening ratchet baseline. Regenerate with scripts/hardening-ratchet.sh --rebaseline.",
   "examples": {
+    "content_type_substring_checks": [],
     "direct_env_reads": [
       "bin/keeper_feature_proof_report.ml:29:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
       "bin/main_eio.ml:605:match Sys.getenv_opt \"MASC_BASE_PATH_RESOLUTION_SOURCE\" with",
       "bin/main_eio.ml:609:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/main_eio.ml:959:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
-      "bin/masc_compaction_audit.ml:53:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/masc_compaction_audit.ml:58:match Sys.getenv_opt \"MASC_COMPACTION_AUDIT_RETENTION_DAYS\" with",
+      "bin/main_eio.ml:1017:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
       "bin/masc_completion_trust_audit.ml:40:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/masc_cost.ml:21:match Sys.getenv_opt \"MASC_BASE_PATH\" with"
+      "lib/admission_queue.ml:91:{ counters = { max_slots = initial_max_concurrent_of_env Sys.getenv_opt; active = 0 }",
+      "lib/auth/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
+      "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with"
     ],
     "direct_env_reads_outside_env_boundary": [
       "bin/keeper_feature_proof_report.ml:29:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
       "bin/main_eio.ml:605:match Sys.getenv_opt \"MASC_BASE_PATH_RESOLUTION_SOURCE\" with",
       "bin/main_eio.ml:609:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/main_eio.ml:959:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
-      "bin/masc_compaction_audit.ml:53:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/masc_compaction_audit.ml:58:match Sys.getenv_opt \"MASC_COMPACTION_AUDIT_RETENTION_DAYS\" with",
+      "bin/main_eio.ml:1017:match Sys.getenv_opt \"OCAMLRUNPARAM\" with",
       "bin/masc_completion_trust_audit.ml:40:match Sys.getenv_opt \"MASC_BASE_PATH\" with",
-      "bin/masc_cost.ml:21:match Sys.getenv_opt \"MASC_BASE_PATH\" with"
+      "lib/admission_queue.ml:91:{ counters = { max_slots = initial_max_concurrent_of_env Sys.getenv_opt; active = 0 }",
+      "lib/auth/auth_credential_base.ml:97:match Sys.getenv_opt internal_keeper_token_env_key with",
+      "lib/auth/auth_strict_mode.ml:18:match Sys.getenv_opt \"MASC_AUTH_STRICT\" with"
+    ],
+    "env_config_unclassified_typed_getters": [
+      "lib/config/env_config_core.ml:470:get_bool ~default:true \"MASC_RELAY_CALIBRATION_ENABLED\"",
+      "lib/config/env_config_core.ml:494:(get_float ~default:120.0 git_fetch_timeout_sec_env_key)",
+      "lib/config/env_config_core.ml:511:get_bool ~default:true telemetry_enabled_env_key",
+      "lib/config/env_config_core.ml:515:get_bool ~default:false parse_warn_env_key",
+      "lib/config/env_config_core.ml:520:get_string ~default:\"production\" governance_level_env_key",
+      "lib/config/env_config_core.ml:539:get_int ~default:1000 \"MASC_PUBSUB_MAX_MESSAGES\"",
+      "lib/config/env_config_core.ml:546:get_string ~default:\"local\" \"MASC_KEEPER_DEFAULT_SANDBOX_PROFILE\"",
+      "lib/config/env_config_governance.ml:8:get_float ~default:30.0 \"MASC_INFERENCE_TIMEOUT_SEC\""
     ],
     "exception_message_classifiers": [
       "bin/fusion_run.ml:50:| Fusion_types.Timeout -> \"timeout\"",
@@ -34,9 +45,20 @@
     "local_workspace_path_literals": [],
     "stub_markers": [
       "lib/cdal/adversarial_eval.ml:240:(\"assert false\", \"runtime assertion instead of type safety\");",
+      "lib/keeper/keeper_tool_shared_runtime.ml:775:assert false",
       "lib/tool_types/tool_args.ml:72:| Not_implemented       (** Feature exists in schema but not in runtime *)",
       "lib/tool_types/tool_args.ml:84:| Not_implemented -> \"not_implemented\"",
       "lib/tool_types/tool_args.mli:59:| Not_implemented       (** Feature exists in schema but not in runtime. *)"
+    ],
+    "sys_getcwd_calls": [
+      "lib/build_identity.ml:37:let argv0 = if Array.length Sys.argv > 0 then Sys.argv.(0) else Sys.getcwd () in",
+      "lib/build_identity.ml:39:if Filename.is_relative argv0 then Filename.concat (Sys.getcwd ()) argv0 else argv0",
+      "lib/build_identity.ml:125:pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(Sys.getcwd ())",
+      "lib/build_identity.ml:133:pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(Sys.getcwd ())",
+      "lib/build_identity.ml:211:pick_repo_candidates ~exe_dir:(executable_dir ()) ~cwd:(Sys.getcwd ())",
+      "lib/config_dir_resolver/config_dir_resolver.ml:145:try Sys.getcwd () with",
+      "lib/dated_jsonl/dated_jsonl.ml:41:Filename.concat (Sys.getcwd ()) base_dir",
+      "lib/eval_calibration.ml:161:Filename.concat (match cwd with Some d -> d | None -> Sys.getcwd ()) raw"
     ],
     "wildcard_silent_defaults": [
       "bin/env_knob_catalog.ml:314:| _ -> ())",
@@ -50,8 +72,12 @@
     ]
   },
   "exemptionProcess": "A metric increase must either be removed or explicitly justified in the PR. Do not run --rebaseline only to silence CI; reviewer approval is required for accepted-risk increases.",
-  "lastUpdatedCommit": "5bc6966a817cd031053b60d24da54c960760f3ba",
+  "lastUpdatedCommit": "8e496303b021f1964112be266f2338de8c574317",
   "metricPolicies": {
+    "content_type_substring_checks": {
+      "acceptedRisk": false,
+      "severity": "critical"
+    },
     "direct_env_reads": {
       "acceptedRisk": true,
       "severity": "warning"
@@ -59,6 +85,10 @@
     "direct_env_reads_outside_env_boundary": {
       "acceptedRisk": false,
       "severity": "critical"
+    },
+    "env_config_unclassified_typed_getters": {
+      "acceptedRisk": true,
+      "severity": "warning"
     },
     "exception_message_classifiers": {
       "acceptedRisk": true,
@@ -72,18 +102,25 @@
       "acceptedRisk": true,
       "severity": "warning"
     },
+    "sys_getcwd_calls": {
+      "acceptedRisk": false,
+      "severity": "critical"
+    },
     "wildcard_silent_defaults": {
       "acceptedRisk": true,
       "severity": "warning"
     }
   },
   "metrics": {
-    "direct_env_reads": 188,
-    "direct_env_reads_outside_env_boundary": 160,
-    "exception_message_classifiers": 106,
+    "content_type_substring_checks": 0,
+    "direct_env_reads": 182,
+    "direct_env_reads_outside_env_boundary": 154,
+    "env_config_unclassified_typed_getters": 176,
+    "exception_message_classifiers": 108,
     "local_workspace_path_literals": 0,
-    "stub_markers": 4,
-    "wildcard_silent_defaults": 1994
+    "stub_markers": 5,
+    "sys_getcwd_calls": 34,
+    "wildcard_silent_defaults": 2016
   },
   "owner": "MASC CI meta gate owner",
   "rebaselineCadence": "No scheduled rebaseline. Rebaseline only in the PR that intentionally changes accepted debt, after the reviewer accepts the severity and exemption rationale."

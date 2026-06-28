@@ -3,6 +3,7 @@ import { signal } from '@preact/signals'
 import { ActionButton } from './common/button'
 import {
   keeperActivityDisplay,
+  normalizeKeeperBlockerText,
   keeperRuntimeBlockerLabel,
   keeperRuntimeBlockerHint,
 } from '../lib/keeper-runtime-display'
@@ -143,7 +144,7 @@ export function KeeperRuntimeAlertStrip({ keeper }: { keeper: Keeper }) {
   const persistedPolicyCount = keeper.approval_policy_effective?.persisted_rules
   const goalLinkedTasks = keeper.goal_progress?.linked_task_count
   const goalConvergence = keeper.goal_progress?.convergence
-  const blocker = keeper.last_blocker?.trim()
+  const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
   const pendingFirst = keeper.trust?.approval_state?.pending_first ?? null
   const pendingApprovalId = pendingFirst?.id?.trim() || null
   const pendingApprovalTool = pendingFirst?.tool_name?.trim() || null

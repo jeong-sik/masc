@@ -108,7 +108,7 @@ describe('KeeperRuntimeAlertStrip', () => {
     }))
 
     const text = container.textContent ?? ''
-    expect(text).toContain('수동 응답만 있음')
+    expect(text).toContain('진행 작업 없는 수동 응답')
     expect(text).not.toContain('passive_only')
   })
 
@@ -287,6 +287,23 @@ describe('KeeperRuntimeAlertStrip', () => {
     expect(text).toContain('재개하기')
     expect(text).not.toContain('일시정지하기')
     expect(text).not.toContain('깨우기')
+  })
+
+  it('normalizes legacy no-progress last_blocker text before rendering blocker details', () => {
+    const { container } = render(h(KeeperRuntimeAlertStrip, {
+      keeper: keeper({
+        paused: true,
+        keepalive_running: true,
+        needs_attention: true,
+        last_blocker: 'no_progress loop detected: streak=10 threshold=10; manual pause applied',
+      }),
+    }))
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('progress-safety latch')
+    expect(text).toContain('Resume')
+    expect(text).not.toContain('manual pause applied')
+    expect(text).not.toContain('no_progress loop detected')
   })
 
   it('uses lifecycle action visibility SSOT to show wake for non-paused blocked keepers', () => {

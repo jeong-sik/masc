@@ -359,12 +359,22 @@ function blockerClassText(row: DashboardPausedKeeperDetail): string | null {
   return klass?.name ?? null
 }
 
+const NO_PROGRESS_LOOP_DISPLAY =
+  'progress-safety latch · repeated no-evidence turns; resume clears the latch'
+
+function blockerClassDisplayText(row: DashboardPausedKeeperDetail): string | null {
+  const blockerClass = blockerClassText(row)
+  if (blockerClass === 'no_progress_loop') return 'no-progress safety pause'
+  return blockerClass
+}
+
 function blockerDetailText(row: DashboardPausedKeeperDetail): string | null {
+  if (blockerClassText(row) === 'no_progress_loop') return NO_PROGRESS_LOOP_DISPLAY
   return row.last_blocker?.detail ?? null
 }
 
 function pausedKindText(row: DashboardPausedKeeperDetail): string {
-  const blockerClass = blockerClassText(row)
+  const blockerClass = blockerClassDisplayText(row)
   const parts = [
     row.pause_kind ?? 'unknown',
     blockerClass ? `blocker=${blockerClass}` : null,

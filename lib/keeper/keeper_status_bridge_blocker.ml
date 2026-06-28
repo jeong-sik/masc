@@ -115,6 +115,10 @@ let is_fiber_unresolved_blocker_class blocker_class =
   String.equal blocker_class (blocker_class_to_string Fiber_unresolved)
 ;;
 
+let no_progress_loop_summary =
+  "Keeper auto-paused after repeated no-evidence turns; this is a progress-safety latch, not a provider failure. Operator resume clears the latch."
+;;
+
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
@@ -154,6 +158,7 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
       then
         "Provider response violated the completion contract after dispatch."
       else summary
+    | No_progress_loop -> no_progress_loop_summary
     (* All remaining blocker_class variants carry no class-specific summary
        transformation — fall back to the live summary or the typed name. *)
     | Ambiguous_post_commit_timeout
@@ -161,7 +166,6 @@ let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
     | Admission_queue_wait_timeout
     | Turn_timeout_after_queue_wait
     | Turn_timeout
-    | No_progress_loop
     | Stale_fleet_batch
     | Sdk_max_turns_exceeded
     | Sdk_token_budget_exceeded

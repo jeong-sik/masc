@@ -18,65 +18,52 @@ module Json = Yojson.Safe.Util
 
 let test_counter = ref 0
 
+let tmpdir prefix =
+  incr test_counter;
+  Filename.temp_dir (Printf.sprintf "%s_%d_" prefix !test_counter) ""
+;;
+
 let write_file path content =
   let oc = open_out path in
-  Fun.protect
-    ~finally:(fun () -> close_out oc)
-    (fun () -> output_string oc content)
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () -> output_string oc content)
 ;;
 
 let runtime_toml =
-  {|[runtime]
-default = "test.local"
+  {|
+[runtime]
+default = "test_provider.test_model"
 
-[providers.test]
-display-name = "Test"
+[providers.test_provider]
+display-name = "Test Provider"
 protocol = "openai-compatible-http"
 endpoint = "http://127.0.0.1:1"
 
-[models.local]
-api-name = "local"
-max-context = 4096
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
 tools-support = true
 streaming = true
 
-[test.local]
+[test_provider.test_model]
 is-default = true
 max-concurrent = 1
 |}
 ;;
 
-let init_runtime_default () =
-  let path = Filename.temp_file "dashboard-k2-runtime" ".toml" in
+let init_runtime_default_for_tests base_dir =
+  let path = Filename.concat base_dir "runtime.toml" in
   write_file path runtime_toml;
   match Runtime.init_default ~config_path:path with
   | Ok () -> ()
-  | Error err -> fail ("Runtime.init_default failed: " ^ err)
-;;
-
-let tmpdir prefix =
-  incr test_counter;
-  let dir =
-    Filename.concat
-      (Filename.get_temp_dir_name ())
-      (Printf.sprintf
-         "%s_%d_%d_%d"
-         prefix
-         (Unix.getpid ())
-         !test_counter
-         (int_of_float (Unix.gettimeofday () *. 1000.0)))
-  in
-  (try Unix.mkdir dir 0o755 with
-   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  dir
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 ;;
 
 let with_config f =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  init_runtime_default ();
   let base_dir = tmpdir "dashboard_k2_feeds" in
+  init_runtime_default_for_tests base_dir;
   let config = Workspace.default_config base_dir in
   f config
 ;;

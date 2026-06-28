@@ -939,6 +939,24 @@ let test_sandbox_container_label_args_include_owner_scope () =
   Alcotest.(check bool) "network label" true
     (has_label "masc.mcp.network=none")
 
+let test_base_path_hash_relative_input_anchors_to_cwd_not_env_base () =
+  let root = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir root) @@ fun () ->
+  let cwd = Filename.concat root "cwd" in
+  let env_base = Filename.concat root "env-base" in
+  Unix.mkdir cwd 0o755;
+  Unix.mkdir env_base 0o755;
+  let saved_cwd = Sys.getcwd () in
+  with_env "MASC_BASE_PATH" env_base @@ fun () ->
+  Fun.protect
+    ~finally:(fun () -> Sys.chdir saved_cwd)
+    (fun () ->
+       Sys.chdir cwd;
+       Alcotest.(check string)
+         "relative base hash anchor"
+         (Filename.concat cwd "relative-base")
+         (Keeper_sandbox_runtime.normalize_base_path_for_hash "relative-base"))
+
 let test_sandbox_container_label_args_include_managed_ttl () =
   let args =
     Keeper_sandbox_runtime.docker_label_args
@@ -2282,6 +2300,8 @@ let run_tests ~clock () =
             test_sandbox_container_label_args_include_managed_ttl;
           Alcotest.test_case "sandbox label args include owner scope" `Quick
             test_sandbox_container_label_args_include_owner_scope;
+          Alcotest.test_case "relative base hash anchors to cwd" `Quick
+            test_base_path_hash_relative_input_anchors_to_cwd_not_env_base;
           Alcotest.test_case "playground root maps to container root"
             `Quick test_container_path_root_maps;
           Alcotest.test_case "nested host path maps with suffix" `Quick

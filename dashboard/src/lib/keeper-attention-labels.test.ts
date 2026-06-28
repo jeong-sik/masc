@@ -13,16 +13,16 @@ describe('keeper attention labels', () => {
   it('labels known completion-contract composite reasons without warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
 
-    expect(completionContractAttentionReasonLabel('completion_contract_result:passive_only')).toBe('수동 응답만 있음')
-    expect(attentionReasonLabel('completion_contract_result:passive_only', false)).toBe('수동 응답만 있음')
+    expect(completionContractAttentionReasonLabel('completion_contract_result:passive_only')).toBe('진행 작업 없는 수동 응답')
+    expect(attentionReasonLabel('completion_contract_result:passive_only', false)).toBe('진행 작업 없는 수동 응답')
     expect(attentionReasonLabel('completion_contract_result:no_capable_provider', false)).toBe('사용 가능한 provider 없음')
     expect(warn).not.toHaveBeenCalled()
   })
 
   it('labels known bare completion-contract tokens without warning', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    expect(completionContractAttentionReasonLabel('passive_only')).toBe('수동 응답만 있음')
-    expect(attentionReasonLabel('passive_only', false)).toBe('수동 응답만 있음')
+    expect(completionContractAttentionReasonLabel('passive_only')).toBe('진행 작업 없는 수동 응답')
+    expect(attentionReasonLabel('passive_only', false)).toBe('진행 작업 없는 수동 응답')
     expect(warn).not.toHaveBeenCalled()
   })
 

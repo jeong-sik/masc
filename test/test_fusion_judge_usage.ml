@@ -33,8 +33,9 @@ let test_attach_usage_on_parse_failure () =
   (* 핵심 불변식: 파싱이 실패해도(심판이 응답을 생성하느라 토큰을 이미 태움)
      usage가 버려지지 않고 에러에 동반된다. *)
   match Fusion_judge.attach_usage (Error "bad json") sample_usage with
-  | Error (msg, usage) ->
-    check string "error message preserved" "bad json" msg;
+  | Error (failure, usage) ->
+    check string "error message preserved" "bad json"
+      (Fusion_types.judge_failure_text failure);
     check usage_t "parse failure still carries the consumed usage" sample_usage
       usage
   | Ok _ -> fail "expected Error with usage"

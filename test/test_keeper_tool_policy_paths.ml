@@ -48,6 +48,21 @@
 
 module P = Masc.Keeper_tool_policy
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  let rec rm_rf path =
+    if Sys.file_exists path then
+      if Sys.is_directory path then begin
+        Sys.readdir path
+        |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+        Unix.rmdir path
+      end else
+        Sys.remove path
+  in
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+
 (* ── (1) writable prefixes ───────────────────────────────────────── *)
 
 let test_playground_root_allowed () =
@@ -190,6 +205,18 @@ let test_playground_sibling_rejected () =
 let test_worktrees_sibling_rejected () =
   assert (not (P.is_masc_write_allowed ".worktrees-stale/x"))
 
+let test_exec_policy_validate_path_survives_deleted_cwd () =
+  with_temp_dir "exec-policy-deleted-cwd-" @@ fun root ->
+  let doomed = Filename.concat root "doomed" in
+  Unix.mkdir doomed 0o755;
+  let saved_cwd = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () -> Sys.chdir saved_cwd)
+    (fun () ->
+       Sys.chdir doomed;
+       Unix.rmdir doomed;
+       ignore (Exec_policy.Paths.validate_path "/not-under-tmp-or-workspace"))
+
 (* ── runner ──────────────────────────────────────────────────────── *)
 
 let () =
@@ -213,4 +240,5 @@ let () =
   test_decision_audit_sneaky_rejected ();
   test_playground_sibling_rejected ();
   test_worktrees_sibling_rejected ();
+  test_exec_policy_validate_path_survives_deleted_cwd ();
   print_endline "test_keeper_tool_policy_paths: all assertions passed"

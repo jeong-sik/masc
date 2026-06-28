@@ -24,6 +24,16 @@ let resume_keeper_after_reconcile_gate
     | Ok (Some latest) -> latest
     | _ -> meta
   in
+  (* RFC-0047 §3.2 / plan hypothesis B: clear the completion-contract
+     detector latch *before* the paused/last_blocker reset so the helper
+     sees the un-mutated disk klass. Otherwise the unconditional
+     [runtime.last_blocker = None] below hides the violation and the
+     helper becomes a no-op. *)
+  let latest_meta =
+    Keeper_unified_turn_completion_contract.clear_for_operator_resume
+      ~base_path:ctx.config.base_path
+      latest_meta
+  in
   let resumed_meta =
     { latest_meta with
       paused = false

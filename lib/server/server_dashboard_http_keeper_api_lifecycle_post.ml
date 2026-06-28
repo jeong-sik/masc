@@ -21,21 +21,71 @@ let tool_detail_json body =
   try Yojson.Safe.from_string body with
   | Yojson.Json_error _ -> `String body
 
+(* Surface refresh — invalidate ALL execution: dashboard caches so a pause /
+   resume action reflects on every parameterized view (actor / fixture / full
+   mode) immediately instead of waiting on TTL.
+
+   Plan 가설 D: 이전 구현은 "execution:default:light" 단일 키만 무효화하여
+   server_dashboard_http_execution_surfaces.ml:940-941 의
+   "execution:{actor}:{fixture}:{light|full}" parameterized 키는
+   deep_surface_cache_ttl_s 동안 stale 유지 → 대시보드가 최신 pause/resume
+   상태를 늦게 반영.
+
+   Similarly, dashboard_shell_cache_prefix 로 묶이는 per-keeper shell surface
+   cache (60s TTL) 도 별도 무효화 — meta_cognition 경로가 명시적으로 같은
+   prefix 를 invalidate 하는 것과 대칭을 맞춘다.
+
+   - Light cache + parameterized keys: [Dashboard_cache.invalidate_prefix "execution:"]
+   - Per-keeper shell surface: [dashboard_shell_cache_prefix config]
+   - Global execution surface object: [patch_keeper_dependent_caches] (covers
+     [execution_cache] typed-surface invalidation)
+   - Operator control snapshot cache: [Operator_control_snapshot.invalidate_snapshot_cache]
+   - Projection cache: [Dashboard_projection_cache.invalidate_snapshot_json] *)
 let refresh_keeper_execution_surfaces ~config ~name event =
   Operator_control_snapshot.invalidate_snapshot_cache ();
   Dashboard_projection_cache.invalidate_snapshot_json ~config;
-  (try Dashboard_cache.invalidate "execution:default:light" with
+  (try Dashboard_cache.invalidate_prefix "execution:" with
    | Eio.Cancel.Cancelled _ as e -> raise e
    | exn ->
        Log.Dashboard.warn
          "keeper %s %s: execution dashboard cache invalidate failed: %s"
          name event (Printexc.to_string exn));
+  (try
+     Dashboard_cache.invalidate_prefix
+       (Server_dashboard_http_core_meta_cognition.dashboard_shell_cache_prefix
+          config)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Dashboard.warn
+         "keeper %s %s: shell surface cache invalidate failed: %s"
+         name event (Printexc.to_string exn));
   Server_dashboard_http_execution_surfaces.patch_keeper_dependent_caches
     ~keeper_name:name ~event
 
+(* Wakeup / invalidate path — same cache-surface coverage as
+   [refresh_keeper_execution_surfaces]. Wakeup doesn't go through the directive
+   lifecycle, but the dashboard must still drop parameterized + shell-surface
+   entries so the wakeup reflects on every view. *)
 let invalidate_keeper_execution_surfaces ~config () =
   Operator_control_snapshot.invalidate_snapshot_cache ();
   Dashboard_projection_cache.invalidate_snapshot_json ~config;
+  (try Dashboard_cache.invalidate_prefix "execution:" with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Dashboard.warn
+         "keeper wakeup: execution dashboard cache invalidate failed: %s"
+         (Printexc.to_string exn));
+  (try
+     Dashboard_cache.invalidate_prefix
+       (Server_dashboard_http_core_meta_cognition.dashboard_shell_cache_prefix
+          config)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+       Log.Dashboard.warn
+         "keeper wakeup: shell surface cache invalidate failed: %s"
+         (Printexc.to_string exn));
   Server_dashboard_http_execution_surfaces.invalidate_execution_cache ()
 
 (* Typed outcome of a keeper lifecycle action, so the log severity is chosen by

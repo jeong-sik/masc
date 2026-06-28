@@ -183,7 +183,14 @@ let set_keeper_paused_state ~agent_name paused =
        let directive_source_meta =
          if paused then entry.meta else clear_no_progress_loop_for_operator_resume entry
        in
-       let updated_meta = directive_paused_meta directive_source_meta paused in
+       let cleared_completion_contract =
+         if paused then directive_source_meta
+         else
+           Keeper_unified_turn_completion_contract.clear_for_operator_resume
+             ~base_path:entry.base_path
+             directive_source_meta
+       in
+       let updated_meta = directive_paused_meta cleared_completion_contract paused in
        persist_directive_meta_update entry ~updated_meta;
        Keeper_registry.dispatch_event_unit
          ~base_path:entry.base_path

@@ -6,6 +6,17 @@
 // `Zombie`, so these tables map directly onto live keeper data. Unknown /
 // null phases fall back to the idle/off bucket (a total display default —
 // the prototype used the same `?? 'idle'` pattern), never throwing.
+//
+// All four lookup tables (PHASE_TONE / PHASE_PULSE / PHASE_INFO / FSM_ACTIONS)
+// key on `KeeperPhase` (PascalCase, 13 entries from types/core.ts:1090). The
+// closed-sum shape means: a future `KeeperPhase` variant added in core.ts
+// fails TypeScript compilation here until this surface catches up — which
+// is the whole point of the SSOT lift in iter-4. Public function signatures
+// still accept `string | null | undefined` so live callers (which may emit
+// unknown wire strings during rollout) keep working; the table access is
+// type-guarded at the read site.
+
+import type { KeeperPhase } from '../../types/core'
 
 export type KeeperTone = 'ok' | 'warn' | 'bad' | 'busy' | 'idle'
 export type KeeperCoarseStatus = 'run' | 'pause' | 'off'
@@ -42,7 +53,7 @@ export const FSM_STATES = [
 ] as const
 
 // phase → status-dot tone (12 phases collapse into 5 buckets).
-const PHASE_TONE: Readonly<Record<string, KeeperTone>> = {
+const PHASE_TONE: Readonly<Record<KeeperPhase, KeeperTone>> = {
   Running: 'ok',
   Paused: 'warn',
   Draining: 'warn',
@@ -59,16 +70,26 @@ const PHASE_TONE: Readonly<Record<string, KeeperTone>> = {
 }
 
 // phase → whether the dot breathes (active/transient phases only).
-const PHASE_PULSE: Readonly<Record<string, boolean>> = {
+// Verbatim from prototype data.jsx:43-45 — 5 of 13 phases pulse.
+const PHASE_PULSE: Readonly<Record<KeeperPhase, boolean>> = {
   Running: true,
   Compacting: true,
   HandingOff: true,
   Restarting: true,
   Failing: true,
+  Paused: false,
+  Draining: false,
+  Overflowed: false,
+  Crashed: false,
+  Dead: false,
+  Stopped: false,
+  Offline: false,
+  Zombie: false,
 }
 
-// phase → KR hover gloss.
-const PHASE_INFO: Readonly<Record<string, string>> = {
+// phase → KR hover gloss. 12 entries verbatim from prototype data.jsx:19-32
+// plus `Zombie` (live-wire-only; classified as bad by PHASE_TONE above).
+const PHASE_INFO: Readonly<Record<KeeperPhase, string>> = {
   Offline: '오프라인 — 실행 중이 아님',
   Restarting: '재시작 중',
   Running: '실행 중 — 작업/라운드 순환',
@@ -90,7 +111,7 @@ const A_STOP: FsmAction = { id: 'stop', label: '중지', glyph: '⏹', via: 'Dra
 // phase → ordered operator actions. Phases absent here (Compacting,
 // HandingOff, Draining, Restarting, Dead, Zombie) expose no action — they are
 // transient or terminal.
-const FSM_ACTIONS: Readonly<Record<string, readonly FsmAction[]>> = {
+const FSM_ACTIONS: Readonly<Partial<Record<KeeperPhase, readonly FsmAction[]>>> = {
   Running: [
     { id: 'pause', label: '일시정지', glyph: '⏸', to: 'Paused', hint: '슈퍼바이저가 잠시 멈춤 — 컨텍스트·소유 태스크 보존, 즉시 재개 가능' },
     { id: 'compact', label: '컴팩션', glyph: '◉', via: 'Compacting', to: 'Running', ms: 1700, hint: '컨텍스트를 지금 압축하고 실행 복귀' },
@@ -120,28 +141,60 @@ const FSM_ACTIONS: Readonly<Record<string, readonly FsmAction[]>> = {
   ],
 }
 
-const RUN_PHASES = new Set(['Running', 'Compacting', 'HandingOff', 'Restarting', 'Failing'])
-const PAUSE_PHASES = new Set(['Paused', 'Draining'])
+const RUN_PHASES: ReadonlySet<KeeperPhase> = new Set<KeeperPhase>([
+  'Running',
+  'Compacting',
+  'HandingOff',
+  'Restarting',
+  'Failing',
+])
+const PAUSE_PHASES: ReadonlySet<KeeperPhase> = new Set<KeeperPhase>(['Paused', 'Draining'])
 
 /** phase → coarse status bucket (mirrors prototype phaseStatus). */
 export function phaseStatus(phase: string | null | undefined): KeeperCoarseStatus {
-  if (phase && RUN_PHASES.has(phase)) return 'run'
-  if (phase && PAUSE_PHASES.has(phase)) return 'pause'
+  if (phase && isKeeperPhase(phase) && RUN_PHASES.has(phase)) return 'run'
+  if (phase && isKeeperPhase(phase) && PAUSE_PHASES.has(phase)) return 'pause'
   return 'off'
 }
 
 export function phaseTone(phase: string | null | undefined): KeeperTone {
-  return (phase && PHASE_TONE[phase]) || 'idle'
+  return (phase && isKeeperPhase(phase) && PHASE_TONE[phase]) || 'idle'
 }
 
 export function phasePulse(phase: string | null | undefined): boolean {
-  return !!(phase && PHASE_PULSE[phase])
+  return !!(phase && isKeeperPhase(phase) && PHASE_PULSE[phase])
 }
 
 export function phaseInfo(phase: string | null | undefined): string {
-  return (phase && PHASE_INFO[phase]) || phase || '알 수 없음'
+  return (phase && isKeeperPhase(phase) && PHASE_INFO[phase]) || phase || '알 수 없음'
 }
 
 export function fsmActions(phase: string | null | undefined): readonly FsmAction[] {
-  return (phase && FSM_ACTIONS[phase]) || []
+  return (phase && isKeeperPhase(phase) && FSM_ACTIONS[phase]) || []
 }
+
+// Closed-sum guard. `phase` arrives from the live wire as `string | null`; we
+// accept only the canonical 13 PascalCase tokens of `KeeperPhase`. Unknown /
+// null falls through to the function-level fallback. Own-property check via
+// a null-prototype registry keeps the closed-sum boundary honest (rejects
+// 'constructor', '__proto__', etc. that would otherwise pass `in KeeperPhase`).
+function isKeeperPhase(phase: string): phase is KeeperPhase {
+  return phase in KEEPER_PHASE_REGISTRY
+}
+const KEEPER_PHASE_REGISTRY: Readonly<Record<string, true>> = Object.freeze(
+  Object.assign(Object.create(null), {
+    Offline: true,
+    Restarting: true,
+    Running: true,
+    Compacting: true,
+    HandingOff: true,
+    Failing: true,
+    Overflowed: true,
+    Draining: true,
+    Paused: true,
+    Stopped: true,
+    Crashed: true,
+    Dead: true,
+    Zombie: true,
+  } as Record<string, true>),
+)

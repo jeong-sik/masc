@@ -455,4 +455,56 @@ describe('KeeperWorkspaceRoster', () => {
     fireEvent.scroll(document)
     expect(host.querySelector('[data-testid="kw-roster-menu"]')).toBeNull()
   })
+
+  // Regression coverage for the iter-4 PHASE_PULSE SSOT migration. The
+  // row head sigil and the row StatusDot must derive their pulse/beat state
+  // from `phasePulse(lifecycle_phase)` (closed-sum SSOT in keeper-fsm.ts),
+  // NOT from the coarse `status === 'running'` predicate. The Draining case
+  // is the load-bearing one: status='running' but lifecycle_phase='Draining'
+  // — the old coarse predicate would have incorrectly pulsed it.
+  it('does not pulse the row StatusDot or head sigil for a Draining keeper', () => {
+    keepers.value = [mk({ name: 'draining', status: 'running', lifecycle_phase: 'Draining' })]
+    render(html`<${KeeperWorkspaceRoster} activeName="draining" />`, host)
+
+    const row = host.querySelector('.kw-kp-row.kp-row') as HTMLElement
+    expect(row).not.toBeNull()
+
+    const dot = row.querySelector('.kw-kp-state > span') as HTMLElement
+    expect(dot).not.toBeNull()
+    expect(dot.className).toMatch(/\bkw-dot\b/)
+    expect(dot.className).not.toMatch(/\bpulse\b/)
+
+    const headSigil = row.querySelector(':scope > .kw-sigil') as HTMLElement
+    expect(headSigil).not.toBeNull()
+    expect(headSigil.className).toMatch(/\bkw-sigil\b/)
+    expect(headSigil.className).not.toMatch(/kw-sigil-beat/)
+  })
+
+  it('does not beat the menu-head WorkspaceSigil for a Draining keeper', () => {
+    keepers.value = [mk({ name: 'draining', status: 'running', lifecycle_phase: 'Draining' })]
+    render(html`<${KeeperWorkspaceRoster} activeName="draining" />`, host)
+
+    fireEvent.click(host.querySelector('[data-testid="kw-roster-menu-draining"]') as HTMLButtonElement)
+
+    const menuHead = host.querySelector('[data-testid="kw-roster-menu"] .kw-kp-menu-head') as HTMLElement
+    expect(menuHead).not.toBeNull()
+    const sigil = menuHead.querySelector('.kw-sigil') as HTMLElement
+    expect(sigil).not.toBeNull()
+    expect(sigil.className).toMatch(/\bkw-sigil\b/)
+    expect(sigil.className).not.toMatch(/kw-sigil-beat/)
+  })
+
+  it('pulses the row sigil and StatusDot for an actively Running keeper (positive control)', () => {
+    keepers.value = [mk({ name: 'active', status: 'running', lifecycle_phase: 'Running' })]
+    render(html`<${KeeperWorkspaceRoster} activeName="active" />`, host)
+
+    const row = host.querySelector('.kw-kp-row.kp-row') as HTMLElement
+    expect(row).not.toBeNull()
+
+    const headSigil = row.querySelector(':scope > .kw-sigil') as HTMLElement
+    expect(headSigil.className).toMatch(/kw-sigil-beat/)
+
+    const dot = row.querySelector('.kw-kp-state > span') as HTMLElement
+    expect(dot.className).toMatch(/\bpulse\b/)
+  })
 })

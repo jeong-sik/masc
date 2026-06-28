@@ -32,11 +32,11 @@ import { Pill } from '../v2/primitives-v2'
 import {
   WorkspaceSigil,
   StatusDot,
-  keeperBucket,
   keeperStatusTone,
   keeperPhaseLabel,
   statePillTone,
 } from './keeper-workspace-shared'
+import { phasePulse } from '../v2/keeper-fsm'
 
 const LazySharedTurnInspectorDrawer = lazy(async () => ({
   default: (await import('../keeper-turn-inspector-drawer')).TurnInspectorDrawer,
@@ -319,10 +319,9 @@ function ChatHeader({
   onOpenRail?: () => void
   onOpenConfig?: () => void
 }): VNode {
-  const bucket = keeperBucket(keeper)
   const tone = keeperStatusTone(keeper)
   const pill = statePillTone(tone)
-  const live = bucket === 'running'
+  const live = phasePulse(keeper.lifecycle_phase)
 
   // Single-row header: identity + status + actions only. Runtime / model /
   // throughput / scope live in the context rail (ThroughputSection) — the

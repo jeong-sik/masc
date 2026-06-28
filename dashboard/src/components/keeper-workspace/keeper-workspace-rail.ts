@@ -24,6 +24,7 @@ import {
   phaseTokenFromKeeper,
   keeperRuntimeLabel,
 } from './keeper-workspace-shared'
+import { phasePulse } from '../v2/keeper-fsm'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
@@ -177,16 +178,19 @@ function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
   const phase = keeperPhaseLabel(keeper)
   const model = keeperModelLabel(keeper)
   const runtime = keeperRuntimeLabel(keeper)
-  const bucket = keeperBucket(keeper)
   const tone = keeperFleetTone(keeper)
   const lifecycle = keeper.phase || keeper.lifecycle_phase || keeper.status
+  // Phase-driven beat (prototype PHASE_PULSE SSOT). Coarse `bucket === 'running'`
+  // used to mark Draining as beating, which is wrong: Draining is warn-tone
+  // but static. phasePulse is the canonical 5-phase pulsing set.
+  const beat = phasePulse(lifecycle)
   const actions = fleetLifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 3)
   const [pendingAction, setPendingAction] = useState<KeeperActionKey | null>(null)
 
   return html`
     <div class="kw-fleet-aside" data-tone=${tone}>
       <div class="kw-fleet-aside-head">
-        <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${bucket === 'running'} />
+        <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${beat} />
         <div class="kw-fleet-aside-title">
           <span class="kw-fleet-aside-kicker">Selected runtime</span>
           <strong title=${keeper.agent_name || keeper.name}>${keeper.koreanName || keeper.agent_name || keeper.name}</strong>

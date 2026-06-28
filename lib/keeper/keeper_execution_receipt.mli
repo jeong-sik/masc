@@ -313,6 +313,22 @@ val latest_json_by_keeper : Workspace.config -> string list -> (string * Yojson.
 type stale_broadcast_dedupe_key
 
 module For_testing : sig
+  val emit_operator_broadcast_dedupe_for_testing
+    :  ?turn_count:int
+    -> ?current_task_id:string
+    -> keeper_name:string
+    -> agent_name:string
+    -> trace_id:string
+    -> generation:int
+    -> disposition:operator_disposition_kind
+    -> reason:operator_disposition_reason
+    -> terminal_reason_code:string
+    -> emit:(unit -> unit)
+    -> unit
+    -> bool
+
+  val reset_operator_broadcast_dedupe : unit -> unit
+
   val stale_broadcast_dedupe_key
     :  keeper_name:string
     -> agent_name:string

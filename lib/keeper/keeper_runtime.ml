@@ -524,6 +524,13 @@ let ensure_keeper_meta_with_cause config name =
         ~target:overlayed
     in
     emit_keeper_meta_overlay_drift ~keeper_name:meta.name overlay_cats;
+    (* Keep the runtime snapshot honest as well as the live overlay.  The
+       previous overlay-only path made operators see stale JSON forever
+       (for example persona=analyst while TOML declared masc-improver),
+       which hid prompt/tool/autonomy drift from health and bootstrap
+       checks.  TOML-only policy lists such as [tool_denylist] and
+       [active_goal_ids] are overlaid in the returned meta but do not trigger
+       a runtime JSON rewrite by themselves. *)
     let cats =
       keeper_meta_persistent_drift_categories
         ~defaults

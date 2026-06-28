@@ -145,7 +145,7 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
       let index_path = dashboard_index_path () in
       match read_file index_path with
       | Ok body ->
-          let etag_value = "\"" ^ dashboard_etag () ^ "\"" in
+          let etag_value = "\"" ^ dashboard_etag_of_body body ^ "\"" in
           let if_none_match = H2.Headers.get h2_headers "if-none-match" in
           (match if_none_match with
            | Some inm when String.equal inm etag_value ->

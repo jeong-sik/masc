@@ -1,7 +1,6 @@
 open Alcotest
 
 module KAP = Masc.Keeper_alerting_path
-module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module KTU = Masc.Keeper_turn_up_args
 
 let make_meta ?(allowed_paths = []) ~name () =
@@ -18,7 +17,7 @@ let make_meta ?(allowed_paths = []) ~name () =
         ("allowed_paths", `List (List.map (fun path -> `String path) allowed_paths));
       ]
   in
-  match Keeper_meta_json_parse.meta_of_json json with
+  match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 

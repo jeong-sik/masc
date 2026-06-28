@@ -201,7 +201,7 @@ val make_health_probe_json :
     [/health] probe body.  It keeps liveness/readiness-facing fields such as
     [startup], [paths], [transport], [logs], and quick GC counters, but skips
     durable keeper scans, reaction-ledger JSONL reads, config TOML scans, and
-    CDAL ledger inspection. *)
+    contract-verdict ledger inspection. *)
 
 val make_health_response_json :
   ?listener:string -> Httpun.Request.t -> Yojson.Safe.t

@@ -102,11 +102,9 @@ let state_of kind = List.assoc kind _state_for_kind
 
 (* Typed-state transitions under the per-slot mutex.  The mutex scope is one
    record update; it does not span the caller's [f ()] so contention is
-   bounded.  [Stdlib.Mutex] is intentional here: snapshots run from dashboard
-   worker domains and lifetime-slot release runs from the [Bg_task] watcher
-   systhread, both outside an Eio effect handler.  The Eio semaphores remain
-   the runtime back-pressure primitive; this mutex only protects pure state
-   projection. *)
+   bounded.  This uses [Stdlib.Mutex], not [Eio_guard.with_mutex], because the
+   accountant is observed from both Eio fibers and non-Eio synchronous export
+   hooks; the lock must never disappear after [Eio_guard.enable ()]. *)
 (* Internal per-slot state-record form.  Not exported -- callers
    go through the kind-level entry points below. *)
 let with_slot_mutex state f =

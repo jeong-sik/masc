@@ -165,7 +165,7 @@ let verify_goal_task_links_write config ~path ~json ~expected_links ~label =
          (Printexc.to_string exn))
 ;;
 
-let write_goal_task_links_result ?previous_links config links =
+let write_goal_task_links_result ?(rollback_on_recovery_failure = true) ?previous_links config links =
   let json = links_to_yojson links in
   let primary_path = goal_task_links_path config in
   let recovery_path = goal_task_links_recovery_path config in
@@ -227,7 +227,7 @@ let write_goal_task_links_result ?previous_links config links =
     (match write_recovery () with
      | Ok () -> Ok ()
      | Error _ as error ->
-       rollback ();
+       if rollback_on_recovery_failure then rollback ();
        error)
 ;;
 
@@ -291,7 +291,11 @@ let prune_links_for_goal_result config ~goal_id =
       | Error _ as error -> error
       | Ok links ->
         let new_links = List.filter (fun (gid, _) -> not (String.equal gid goal_id)) links in
-        write_goal_task_links_result config ~previous_links:links new_links)
+        write_goal_task_links_result
+          config
+          ~rollback_on_recovery_failure:false
+          ~previous_links:links
+          new_links)
 ;;
 
 let prune_links_for_goal config ~goal_id =
@@ -331,7 +335,11 @@ let unlink_task_from_goal_result_impl config ~goal_id ~task_id =
       | Error _ as error -> error
       | Ok links ->
         let new_links = remove_link_from_links links ~goal_id ~task_id in
-        write_goal_task_links_result config ~previous_links:links new_links)
+        write_goal_task_links_result
+          config
+          ~rollback_on_recovery_failure:false
+          ~previous_links:links
+          new_links)
 ;;
 
 let unlink_task_from_goal_result config ~goal_id ~task_id =

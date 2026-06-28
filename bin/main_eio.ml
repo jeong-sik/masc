@@ -935,7 +935,9 @@ let init_cmd_exit base_path force =
   (* [init] seeds the explicitly requested workspace; runtime resolution may
      honor [MASC_CONFIG_DIR], but bootstrap materialization must not. *)
   let target_root =
-    Filename.concat (Config_dir_resolver.masc_root ~base_path) "config"
+    Config_dir_resolver.base_path_config_root
+      ~cwd:(Config_dir_resolver.current_working_dir ())
+      base_path
   in
   Fs_compat.mkdir_p target_root;
   let result =

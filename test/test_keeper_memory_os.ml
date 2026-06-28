@@ -4644,6 +4644,59 @@ let json_item_list label fields key =
   | None -> Alcotest.failf "%s.%s missing" label key
 ;;
 
+let compaction_snapshot_event_class_to_string = function
+  | Runtime_manifest.Compaction_snapshot_relevant -> "relevant"
+  | Runtime_manifest.Compaction_snapshot_known_unrelated -> "known_unrelated"
+  | Runtime_manifest.Compaction_snapshot_unknown -> "unknown"
+;;
+
+let check_compaction_snapshot_event_class label expected actual =
+  Alcotest.(check string)
+    label
+    (compaction_snapshot_event_class_to_string expected)
+    (compaction_snapshot_event_class_to_string actual)
+;;
+
+let expected_compaction_snapshot_event_class = function
+  | Runtime_manifest.Event_bus_correlated
+  | Runtime_manifest.Context_compacted ->
+    Runtime_manifest.Compaction_snapshot_relevant
+  | Runtime_manifest.Turn_started
+  | Runtime_manifest.Phase_gate_decided
+  | Runtime_manifest.Runtime_routed
+  | Runtime_manifest.Pre_dispatch_blocked
+  | Runtime_manifest.Provider_lane_resolved
+  | Runtime_manifest.Provider_attempt_started
+  | Runtime_manifest.Provider_attempt_finished
+  | Runtime_manifest.Context_injected
+  | Runtime_manifest.State_snapshot_sidecar_saved
+  | Runtime_manifest.Working_state_sidecar_saved
+  | Runtime_manifest.Checkpoint_loaded
+  | Runtime_manifest.Checkpoint_saved
+  | Runtime_manifest.Receipt_appended
+  | Runtime_manifest.Turn_finished ->
+    Runtime_manifest.Compaction_snapshot_known_unrelated
+;;
+
+let test_compaction_snapshot_event_classifier_covers_typed_events () =
+  List.iter
+    (fun event ->
+       let event_name = Runtime_manifest.event_kind_to_string event in
+       check_compaction_snapshot_event_class
+         event_name
+         (expected_compaction_snapshot_event_class event)
+         (Runtime_manifest.classify_compaction_snapshot_event event_name))
+    Runtime_manifest.all_event_kinds;
+  check_compaction_snapshot_event_class
+    "legacy memory_injected"
+    Runtime_manifest.Compaction_snapshot_known_unrelated
+    (Runtime_manifest.classify_compaction_snapshot_event "memory_injected");
+  check_compaction_snapshot_event_class
+    "unknown typed-like future event"
+    Runtime_manifest.Compaction_snapshot_unknown
+    (Runtime_manifest.classify_compaction_snapshot_event "context_compacted_v2")
+;;
+
 let test_compaction_snapshots_json_reads_runtime_manifest () =
   with_temp_workspace_config (fun config ->
     let keeper_id = "memory-panel-test" in
@@ -4749,6 +4802,16 @@ let test_compaction_snapshots_json_reads_runtime_manifest () =
       [ "before_prompt"; "after_prompt"; "prompt_text"; "context_text" ])
 ;;
 
+let runtime_manifest_json_with_event row_json event =
+  match row_json with
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) ->
+           if String.equal key "event" then key, `String event else key, value)
+         fields)
+  | _ -> Alcotest.fail "runtime manifest row must encode as object"
+
 let test_compaction_snapshots_json_skips_unrelated_manifest_events () =
   with_temp_workspace_config (fun config ->
     let keeper_id = "memory-panel-test" in
@@ -4782,15 +4845,7 @@ let test_compaction_snapshots_json_skips_unrelated_manifest_events () =
     in
     let row_json = Runtime_manifest.to_json row in
     let unrelated_json =
-      match row_json with
-      | `Assoc fields ->
-        `Assoc
-          (List.map
-             (fun (key, value) ->
-               if String.equal key "event" then key, `String "memory_injected"
-               else key, value)
-             fields)
-      | _ -> Alcotest.fail "runtime manifest row must encode as object"
+      runtime_manifest_json_with_event row_json "memory_injected"
     in
     let path = Runtime_manifest.path_for_trace config ~keeper_name:keeper_id ~trace_id in
     write_text_file
@@ -4811,6 +4866,62 @@ let test_compaction_snapshots_json_skips_unrelated_manifest_events () =
     Alcotest.(check int)
       "read error count"
       0
+      (json_int_field "compaction_snapshots" top "read_error_count"))
+;;
+
+let test_compaction_snapshots_json_surfaces_unknown_manifest_events () =
+  with_temp_workspace_config (fun config ->
+    let keeper_id = "memory-panel-test" in
+    let trace_id = "trace-compaction-dashboard-unknown-event" in
+    let row =
+      Runtime_manifest.make
+        ~ts:"2026-06-26T03:04:00Z"
+        ~keeper_name:keeper_id
+        ~trace_id
+        ~keeper_turn_id:13
+        ~event:Runtime_manifest.Event_bus_correlated
+        ~runtime_id:"oas-seoul-1"
+        ~status:"observed"
+        ~decision:
+          (Runtime_manifest.with_clock_refs
+             ~clock_refs:
+               (Runtime_manifest.clock_refs
+                  ~compaction_id:"cmp-unknown-event"
+                  ~compaction_source:"event_bus"
+                  ())
+             (`Assoc [ "context_compacted_count", `Int 1 ]))
+        ()
+    in
+    let row_json = Runtime_manifest.to_json row in
+    let unknown_event_json =
+      runtime_manifest_json_with_event row_json "context_compacted_v2"
+    in
+    let path = Runtime_manifest.path_for_trace config ~keeper_name:keeper_id ~trace_id in
+    write_text_file
+      path
+      (Yojson.Safe.to_string unknown_event_json ^ "\n" ^ Yojson.Safe.to_string row_json ^ "\n");
+    let top =
+      Server_dashboard_http_keeper_api.compaction_snapshots_json
+        ~config
+        ~keeper_id
+        ~limit:10
+      |> json_assoc "compaction_snapshots"
+    in
+    Alcotest.(check int) "count" 1 (json_int_field "compaction_snapshots" top "count");
+    let read_errors = json_item_list "compaction_snapshots" top "read_errors" in
+    Alcotest.(check int) "read errors" 1 (List.length read_errors);
+    let error_json = Yojson.Safe.to_string (`List read_errors) in
+    Alcotest.(check bool)
+      "unknown event is surfaced"
+      true
+      (contains "unknown event" error_json);
+    Alcotest.(check bool)
+      "unknown event name is surfaced"
+      true
+      (contains "context_compacted_v2" error_json);
+    Alcotest.(check int)
+      "read error count"
+      (List.length read_errors)
       (json_int_field "compaction_snapshots" top "read_error_count"))
 ;;
 
@@ -5021,6 +5132,10 @@ let () =
             `Quick
             test_dashboard_json_selection_policy_contract
         ; Alcotest.test_case
+            "dashboard compaction snapshot classifier covers typed events"
+            `Quick
+            test_compaction_snapshot_event_classifier_covers_typed_events
+        ; Alcotest.test_case
             "dashboard compaction snapshots read runtime manifest metadata only"
             `Quick
             test_compaction_snapshots_json_reads_runtime_manifest
@@ -5028,6 +5143,10 @@ let () =
             "dashboard compaction snapshots skip unrelated manifest events"
             `Quick
             test_compaction_snapshots_json_skips_unrelated_manifest_events
+        ; Alcotest.test_case
+            "dashboard compaction snapshots surface unknown manifest events"
+            `Quick
+            test_compaction_snapshots_json_surfaces_unknown_manifest_events
         ; Alcotest.test_case
             "dashboard compaction snapshots surface manifest read errors"
             `Quick

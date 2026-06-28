@@ -69,6 +69,13 @@ let with_temp_dir f =
     (fun () -> f marker)
 ;;
 
+let with_eio_fs f () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect ~finally:Fs_compat.clear_fs f
+;;
+
 let test_schema_mismatch_surfaces_typed_error () =
   with_temp_dir
   @@ fun base_path ->
@@ -122,9 +129,11 @@ let test_write_failure_surfaces_typed_error () =
   let config = Masc.Workspace.default_config base_path in
   let meta = make_meta "write-failure" in
   let path = Masc.Keeper_types_support.keeper_memory_bank_path config meta.name in
-  (* Enough identical rows to exceed the dedup threshold and force a rewrite. *)
+  (* Enough identical rows to exceed the compaction target and force a rewrite. *)
+  let target_notes = Bank.memory_compaction_target_notes () in
   let rows =
-    List.init 50 (fun i -> progress_row ~trace_id:("t" ^ string_of_int i) ~text:"duplicate")
+    List.init (target_notes + 30) (fun i ->
+      progress_row ~trace_id:("t" ^ string_of_int i) ~text:"duplicate")
   in
   let content = String.concat "\n" rows ^ "\n" in
   write_file path content;
@@ -157,15 +166,15 @@ let () =
       , [ Alcotest.test_case
             "schema mismatch surfaces typed error"
             `Quick
-            test_schema_mismatch_surfaces_typed_error
+            (with_eio_fs test_schema_mismatch_surfaces_typed_error)
         ; Alcotest.test_case
             "write failure surfaces typed error"
             `Quick
-            test_write_failure_surfaces_typed_error
+            (with_eio_fs test_write_failure_surfaces_typed_error)
         ; Alcotest.test_case
             "malformed json is not schema mismatch"
             `Quick
-            test_malformed_json_is_not_schema_mismatch
+            (with_eio_fs test_malformed_json_is_not_schema_mismatch)
         ] )
     ]
 ;;

@@ -10,6 +10,8 @@ let () =
   Dashboard_projection_cache.register_operator_digest_json
     { Dashboard_projection_cache.digest = Operator_control.digest_json }
 
+let () = ignore Operator_tool.force_link
+
 (** Dashboard Mission read-model regression tests. *)
 
 let test_dir () =

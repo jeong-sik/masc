@@ -7,6 +7,8 @@ open Keeper_types
 open Keeper_meta_contract
 open Keeper_types_profile
 
+let supervisor_agent_name = "keeper-supervisor"
+
 let supervision_cohort_size = 8
 
 type supervision_cohort =

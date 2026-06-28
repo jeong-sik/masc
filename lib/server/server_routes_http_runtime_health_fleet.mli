@@ -2,7 +2,7 @@
 
     Extracted from [server_routes_http_runtime.ml] during godfile decomposition.
     Contains keeper reaction ledger, FD accountant, fleet resolution,
-    runtime truth, and CDAL health JSON renderers. *)
+    runtime truth, and contract-verification health JSON renderers. *)
 
 val take : int -> 'a list -> 'a list
 

@@ -1,5 +1,5 @@
 ; RFC-OAS-011 — masc.cdal_runtime sublibrary: the agent-runtime/producer side
-; of CDAL, migrated out of OAS (agent_sdk) into masc.
+; of contract verification, migrated out of OAS (agent_sdk) into masc.
 ;
 ; Migration status (2026-06-24): MM-1~MM-4 landed 2026-05-08~11 — #14247
 ; (skeleton), #14248~#14264 (B1~B5 batches), #14267 (MM-3-rewire atomic flip
@@ -19,13 +19,13 @@
 ;   conformance      — session-proof conformance checks
 ;   runtime_evidence — telemetry + file evidence bundles
 ;
-; Intentionally separated from masc's CDAL Phase 1A evaluator (lib/cdal/,
+; Intentionally separated from masc's contract Phase 1A evaluator (lib/cdal/,
 ; masc.cdal, Adversarial_eval): different responsibility (producer vs
 ; consumer-side judge) and different deps (this needs agent_sdk; the evaluator
 ; needs none). NO dependency on the masc main library — the producer side must
 ; remain reusable independently.
 ;
-; @rfc RFC-OAS-011 (CDAL Migration to masc)
+; @rfc RFC-OAS-011 (contract verification migration to masc)
 ; @phase Implemented (post-#19469 maintenance)
 
 ; The parent [lib/dune] uses [(include_subdirs unqualified)] which would

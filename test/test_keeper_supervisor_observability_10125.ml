@@ -54,15 +54,15 @@ let last_sweep_for ~base_path =
     ()
 ;;
 
-(* The counter is declared at init via the keeper metric zero-fill sweep,
-   while the last-sweep gauge is intentionally lazy: a never-set gauge has
-   no honest numeric value before the first supervisor beat. Pins both
-   sides of the #10125 dashboard contract without erasing that boundary.
+(* The sweep-start counter is declared at init via zero-fill so
+   [get_metric_value ~labels:[] ()] returns [Some 0.0] if and only
+   if the registration block actually ran. The last-sweep timestamp is a gauge
+   and intentionally stays lazy until a sweep beat writes an honest value.
 
    Note: [metric_total] cannot be used as a registration check because
    it folds across all labelled variants and returns [0.0] for both
    "not registered" and "registered but no observations yet". *)
-let test_metrics_registered () =
+let test_counter_registered_and_gauge_lazy () =
   let starts =
     Metrics.get_metric_value Keeper_metrics.(to_string SupervisorSweepStarts) ()
   in
@@ -72,10 +72,7 @@ let test_metrics_registered () =
       ()
   in
   Alcotest.(check bool) "sweep_starts registered" true (Option.is_some starts);
-  Alcotest.(check (option (float 0.001)))
-    "last_sweep_unixtime remains absent before first beat"
-    None
-    last_sweep
+  Alcotest.(check bool) "last_sweep_unixtime lazy before set" true (Option.is_none last_sweep)
 ;;
 
 (* Helper returns [None] before the sweep gauge is set in
@@ -191,9 +188,9 @@ let () =
     "keeper_supervisor_observability_10125"
     [ ( "metrics-registered"
       , [ Alcotest.test_case
-            "both metrics registered at init"
+            "counter registered and gauge lazy at init"
             `Quick
-            test_metrics_registered
+            test_counter_registered_and_gauge_lazy
         ] )
     ; ( "age-helper"
       , [ Alcotest.test_case

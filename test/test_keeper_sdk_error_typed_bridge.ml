@@ -438,6 +438,51 @@ let read_only_no_progress_err ~scope =
        })
 ;;
 
+let generic_accept_rejected_err ~scope =
+  KTD.sdk_error_of_masc_internal_error
+    (KTD.Accept_rejected
+       { scope
+       ; model = None
+       ; reason_kind = Some KTD.Accept_predicate_rejected
+       ; response_shape = Some KTD.Accept_response_mixed_without_deliverable_content
+       ; last_tool_effect = None
+       ; any_mutating_tool = Some false
+       ; tool_effects_seen = []
+       ; reason =
+           "response rejected by accept: predicate failed without accepted \
+            deliverable content"
+       })
+;;
+
+let test_generic_accept_rejected_is_completion_contract_violation () =
+  let err = generic_accept_rejected_err ~scope:"same.a" in
+  Alcotest.(check bool)
+    "generic accept rejection is a contract violation"
+    true
+    (EC.is_completion_contract_violation err);
+  match EC.recoverable_runtime_failure_reason err with
+  | None -> ()
+  | Some reason ->
+    Alcotest.failf
+      "generic accept rejection should not be recoverable, got %s"
+      (EC.degraded_retry_reason_to_string reason)
+;;
+
+let test_read_only_no_progress_remains_recoverable_not_contract () =
+  let err = read_only_no_progress_err ~scope:"same.a" in
+  Alcotest.(check bool)
+    "read-only no-progress keeps recovery path"
+    false
+    (EC.is_completion_contract_violation err);
+  match EC.recoverable_runtime_failure_reason err with
+  | Some EC.Read_only_no_progress -> ()
+  | Some reason ->
+    Alcotest.failf
+      "expected read_only_no_progress, got %s"
+      (EC.degraded_retry_reason_to_string reason)
+  | None -> Alcotest.fail "expected read_only_no_progress recoverable reason"
+;;
+
 let test_soft_rate_limit_skips_same_credential_pool () =
   init_rate_limit_pool_runtime ();
   let retry =
@@ -679,6 +724,14 @@ let () =
             "provider unavailable records server_error cooldown"
             `Quick
             test_provider_unavailable_records_server_error_cooldown
+        ; Alcotest.test_case
+            "generic accept rejection is completion contract violation"
+            `Quick
+            test_generic_accept_rejected_is_completion_contract_violation
+        ; Alcotest.test_case
+            "read-only no-progress remains recoverable"
+            `Quick
+            test_read_only_no_progress_remains_recoverable_not_contract
         ; Alcotest.test_case
             "read-only no-progress accept rejection rotates to default runtime"
             `Quick

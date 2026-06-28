@@ -899,6 +899,31 @@ nick0cave = "ollama.gemma4-26b-a4b-qat"
 [discord]
 trigger_policy = "mention_or_thread"
 
+# ── Keeper pause / resume threshold knobs (Plan §runtime.toml [pause] SSOT) ──
+# lib/keeper/keeper_behavioral_regime.ml 의 hardcoded threshold 들을 외부 설정으로
+# 옮기기 위한 SSOT. 현재 구현은 default fallback 으로만 동작하며, 이 섹션이
+# 있어도 기존 behavior 와 동일 — 차이는 향후 caller 가 Env_config_pause.get_*
+# 호출로 변경될 때 override 로 적용된다는 점.
+#
+# 변경 의미:
+# - turn_fail_streak_threshold: 동일 keeper 가 연속 turn_failure 를 N 회
+#   겪으면 no_progress_loop regime 으로 분류. RFC-0225 §3.2 의 monotonic
+#   counter 보호와 직접 연결.
+# - recent_restart_window_sec / recent_restart_count_threshold: 짧은 시간 안에
+#   N 회 restart 가 발생하면 recent_restart_streak regime 으로 분류. 자체-preservation
+#   loop 보호.
+# - tool_failure_count_threshold / tool_failure_ratio_threshold: 도구 호출의
+#   연속 실패 횟수 + 비율이 임계치를 넘으면 unhealthy_tool_chain regime.
+#
+# 누락 시 default 값 사용 (현재 default 와 동일). 잘못된 type (예: string) 은
+# load 단계에서 warn + ignore.
+[pause]
+turn_fail_streak_threshold = 3
+recent_restart_window_sec = 300.0
+recent_restart_count_threshold = 2
+tool_failure_count_threshold = 3
+tool_failure_ratio_threshold = 0.7
+
 # ── Fusion 패널+심판 심의 (RFC-0252) ─────────────────────────────────
 # masc_fusion 도구의 out-of-band 심의 루프 설정. 개인 dev 카나리로 기본 ON.
 # harness(RFC-0252 §11) 미검증 — 카나리 출력(panel 답 + judge 종합)으로 사후 판단.

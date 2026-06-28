@@ -681,6 +681,65 @@ let parse_keeper_assignments (toml : Otoml.t)
       ]
 ;;
 
+(* [\[pause\]] section → typed [Runtime_schema.pause_threshold].
+
+   Fails soft: a malformed value (e.g. wrong type) is logged + ignored rather
+   than aborting config load, mirroring the existing [runtime].media_failover
+   pattern above. Missing section / missing keys → [pause_threshold_default]
+   which mirrors the legacy hardcoded values in [Keeper_behavioral_regime.ml].
+   Phase 2 caller migration is deferred — the current top-level vals in
+   [Keeper_behavioral_regime] are untouched and still authoritative at
+   runtime. *)
+let parse_pause_threshold (toml : Otoml.t) : Runtime_schema.pause_threshold =
+  let read_field ~path ~key ~getter =
+    try
+      Ok (Otoml.find_opt toml getter [ path; key ])
+    with
+    | Otoml.Type_error msg ->
+      Error (Printf.sprintf "[%s].%s: %s" path key msg)
+  in
+  let pick_int ~path ~key ~default =
+    match read_field ~path ~key ~getter:Otoml.get_integer with
+    | Ok (Some v) -> v
+    | Ok None -> default
+    | Error msg ->
+      Log.Runtime.warn
+        "runtime_toml: %s — using default %d" msg default;
+      default
+  in
+  let pick_float ~path ~key ~default =
+    match read_field ~path ~key ~getter:Otoml.get_float with
+    | Ok (Some v) -> v
+    | Ok None -> default
+    | Error msg ->
+      Log.Runtime.warn
+        "runtime_toml: %s — using default %g" msg default;
+      default
+  in
+  let d = Runtime_schema.pause_threshold_default in
+  { turn_fail_streak_threshold =
+      pick_int
+        ~path:"pause" ~key:"turn_fail_streak_threshold"
+        ~default:d.turn_fail_streak_threshold
+  ; recent_restart_window_sec =
+      pick_float
+        ~path:"pause" ~key:"recent_restart_window_sec"
+        ~default:d.recent_restart_window_sec
+  ; recent_restart_count_threshold =
+      pick_int
+        ~path:"pause" ~key:"recent_restart_count_threshold"
+        ~default:d.recent_restart_count_threshold
+  ; tool_failure_count_threshold =
+      pick_int
+        ~path:"pause" ~key:"tool_failure_count_threshold"
+        ~default:d.tool_failure_count_threshold
+  ; tool_failure_ratio_threshold =
+      pick_float
+        ~path:"pause" ~key:"tool_failure_ratio_threshold"
+        ~default:d.tool_failure_ratio_threshold
+  }
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
@@ -729,6 +788,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let bindings =
       extract_after_all_errors_guard ~label:"bindings" bindings_result
     in
+    let pause_threshold = parse_pause_threshold toml in
     Ok
       { Runtime_schema.providers
       ; models
@@ -738,6 +798,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover
+      ; pause_threshold
       })
 ;;
 

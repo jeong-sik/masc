@@ -29,7 +29,7 @@ let test_source_entries_non_list_returns_none () =
   check (option (list yojson)) "non-list sources return None" None result
 
 let test_source_entries_null_returns_none () =
-  (* "sources" is null instead of a list *)
+  (* "sources" is null: treat it as an omitted optional field. *)
   let args = args_of_list [ "sources", `Null ] in
   let result = Board_tool_format.source_entries_arg args in
   check (option (list yojson)) "null sources return None" None result

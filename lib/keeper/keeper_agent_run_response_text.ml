@@ -67,7 +67,8 @@ let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
       Some "State updated."
     | None -> None
   in
-  if is_structured_reply || is_synthesized then
+  if is_synthesized then ""
+  else if is_structured_reply then
     Keeper_text_processing.user_visible_reply_text ?fallback ""
   else
     match fallback with

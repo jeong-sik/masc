@@ -507,6 +507,92 @@ let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
           | _ -> fail "expected one persisted attachment")
       | [] -> fail "expected persisted chat messages")
 
+let test_keeper_chat_user_only_persists_attachment_refs_not_raw_media () =
+  let base_dir = temp_base_path "gate-keeper-media-user-only-history" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "multimodal-user-only-history-keeper" in
+      let raw_media = "data:image/png;base64,SECRET_RAW_MEDIA" in
+      K.append_user_message ~base_dir ~keeper_name
+        ~content:"inspect this"
+        ~attachments:
+          [
+            {
+              K.id = "att-img";
+              att_type = "image";
+              name = "screen.png";
+              size = 1024;
+              mime_type = "image/png";
+              data = raw_media;
+            };
+          ]
+        ();
+      let path =
+        Filename.concat
+          (Filename.concat
+             (Common.masc_dir_from_base_path ~base_path:base_dir)
+             "keeper_chat")
+          (keeper_name ^ ".jsonl")
+      in
+      let persisted = read_file path in
+      check bool "raw media omitted from user-only jsonl" false
+        (string_contains persisted raw_media);
+      check bool "attachment ref persisted on user-only row" true
+        (string_contains persisted "masc://attachment/att-img/");
+      match K.load ~base_dir ~keeper_name with
+      | [ user ] -> (
+          match user.K.attachments with
+          | Some [ att ] ->
+              check bool "loaded user-only attachment omits raw media" false
+                (String.equal raw_media att.K.data);
+              check bool "loaded user-only attachment has ref" true
+                (string_contains att.K.data "masc://attachment/att-img/")
+          | _ -> fail "expected one persisted user-only attachment")
+      | _ -> fail "expected one persisted user message")
+
+let test_extract_visible_reply_drops_empty_structured_envelope () =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("runtime_class", `String "keeper");
+          ("turn_outcome", `String "visible_reply");
+          ("reply", `String "");
+          ( "tool_call_evidence",
+            `List
+              [
+                `Assoc
+                  [
+                    ("name", `String "keeper_context_status");
+                    ("status", `String "ok");
+                  ];
+              ] );
+        ])
+  in
+  let payload_json_opt, visible_reply =
+    Server_routes_http_keeper_stream.For_testing.extract_visible_reply body
+  in
+  check bool "structured envelope parsed" true (Option.is_some payload_json_opt);
+  check string "empty reply does not fall back to envelope" "" visible_reply
+
+let test_extract_visible_reply_uses_typed_reply_field_only () =
+  let body =
+    Yojson.Safe.to_string
+      (`Assoc
+        [
+          ("runtime_class", `String "keeper");
+          ("turn_outcome", `String "visible_reply");
+          ("reply", `String "Done.\n\n[STATE]\n{}\n[/STATE]");
+          ("runtime_note", `String "must not be user-visible");
+        ])
+  in
+  let payload_json_opt, visible_reply =
+    Server_routes_http_keeper_stream.For_testing.extract_visible_reply body
+  in
+  check bool "structured envelope parsed" true (Option.is_some payload_json_opt);
+  check string "visible reply comes from reply field" "Done." visible_reply
+
 let vision_provider_cfg () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -1023,6 +1109,12 @@ let () =
             test_keeper_stream_args_preserve_user_blocks;
           test_case "chat history persists attachment refs not raw media" `Quick
             test_keeper_chat_history_persists_attachment_refs_not_raw_media;
+          test_case "user-only chat history persists attachment refs not raw media" `Quick
+            test_keeper_chat_user_only_persists_attachment_refs_not_raw_media;
+          test_case "visible reply drops empty structured envelope" `Quick
+            test_extract_visible_reply_drops_empty_structured_envelope;
+          test_case "visible reply uses typed reply field only" `Quick
+            test_extract_visible_reply_uses_typed_reply_field_only;
           test_case "runtime run_blocks appends multimodal input to OAS agent" `Quick
             test_runtime_run_blocks_appends_multimodal_input_to_oas_agent;
           test_case "runtime multimodal gate lists required modalities" `Quick

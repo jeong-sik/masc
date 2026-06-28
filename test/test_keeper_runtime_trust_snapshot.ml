@@ -217,7 +217,7 @@ let test_budget_not_dispatched_receipt_marks_attention () =
              [ "ended_at", `String "2026-06-01T00:00:00Z"
              ; "operator_disposition", `String "pass"
              ; "operator_disposition_reason", `String "healthy"
-             ; "terminal_reason_code", `String "turn_budget_exhausted:8/8"
+             ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:8/8)"
              ; "completion_contract_result", `String "not_dispatched"
              ]);
        let snapshot = K.snapshot_json ~config ~meta in

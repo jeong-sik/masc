@@ -424,6 +424,31 @@ let test_budget_synthesis_does_not_invent_next_items () =
     []
     snapshot.decisions
 
+let test_budget_finalizer_drops_synthetic_response_text () =
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"test"
+      ~goal:"Fix task"
+      ~actual_keeper_tool_names:[]
+      ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 })
+      ~raw_response_text:
+        "Continuation checkpoint saved; keeper remains scheduled"
+      ()
+  in
+  Alcotest.(check string)
+    "budget checkpoint has no model-authored response text"
+    ""
+    finalized.response_text;
+  Alcotest.(check string)
+    "synthetic state source"
+    "synthesized"
+    (KMP.state_snapshot_source_to_string finalized.state_snapshot_source);
+  Alcotest.(check (list string))
+    "budget continuation does not preserve synthetic text as a decision"
+    []
+    finalized.state_snapshot.decisions
+
 (* ── Test runner ─────────────────────────────────────────────────── *)
 
 let () =
@@ -473,5 +498,9 @@ let () =
             "budget synthesis does not invent next items"
             `Quick
             test_budget_synthesis_does_not_invent_next_items;
+          Alcotest.test_case
+            "budget finalizer drops synthetic response text"
+            `Quick
+            test_budget_finalizer_drops_synthetic_response_text;
         ] );
     ]

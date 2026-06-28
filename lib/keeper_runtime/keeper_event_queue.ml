@@ -99,6 +99,9 @@ let is_empty q = q.length = 0
 let enqueue (queue : t) (s : stimulus) : t =
   { queue with back_rev = s :: queue.back_rev; length = queue.length + 1 }
 
+let stimulus_identity_equal a b =
+  String.equal a.post_id b.post_id && a.urgency = b.urgency && a.payload = b.payload
+
 let to_list (queue : t) : stimulus list =
   match queue.back_rev with
   | [] -> queue.front
@@ -134,10 +137,15 @@ let remove_by_post_id post_id queue =
 
 let uniq_stimuli stimuli =
   List.fold_left
-    (fun acc stimulus -> if List.exists (( = ) stimulus) acc then acc else stimulus :: acc)
+    (fun acc stimulus ->
+       if List.exists (stimulus_identity_equal stimulus) acc
+       then acc
+       else stimulus :: acc)
     []
     stimuli
   |> List.rev
+
+let dedup_by_identity queue = queue |> to_list |> uniq_stimuli |> of_list
 
 let remove_by_post_id_pair post_id left right =
   let left_removed, left' = remove_by_post_id post_id left in

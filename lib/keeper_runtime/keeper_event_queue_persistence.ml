@@ -51,7 +51,9 @@ let inflight_path ~base_path ~keeper_name =
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
   | None -> false
-  | Some (head, rest) -> head = stimulus || queue_contains rest stimulus
+  | Some (head, rest) ->
+    Keeper_event_queue.stimulus_identity_equal head stimulus
+    || queue_contains rest stimulus
 
 let append_missing queue stimuli =
   List.fold_left
@@ -73,7 +75,11 @@ let remove_stimuli queue stimuli =
   match stimuli with
   | [] -> queue
   | _ ->
-    let remove stimulus = List.exists (fun target -> target = stimulus) stimuli in
+    let remove stimulus =
+      List.exists
+        (fun target -> Keeper_event_queue.stimulus_identity_equal target stimulus)
+        stimuli
+    in
     queue
     |> Keeper_event_queue.to_list
     |> List.filter (fun stimulus -> not (remove stimulus))
@@ -101,13 +107,24 @@ let load_from_path ~keeper_name path =
            msg;
          Keeper_event_queue.empty
        | Ok queue ->
-         if not (Keeper_event_queue.is_empty queue)
+         let deduped = Keeper_event_queue.dedup_by_identity queue in
+         let dropped =
+           Keeper_event_queue.length queue - Keeper_event_queue.length deduped
+         in
+         if dropped > 0
+         then
+           Log.Keeper.warn
+             "event_queue_snapshot: dropped %d duplicate stimulus identity rows for keeper=%s path=%s"
+             dropped
+             keeper_name
+             path;
+         if not (Keeper_event_queue.is_empty deduped)
          then
            Log.Keeper.info
              "event_queue_snapshot: restored %s for keeper=%s"
-             (Keeper_event_queue.summary queue)
+             (Keeper_event_queue.summary deduped)
              keeper_name;
-         queue))
+         deduped))
 
 let load_unlocked ~base_path ~keeper_name =
   match snapshot_path ~base_path ~keeper_name, inflight_path ~base_path ~keeper_name with

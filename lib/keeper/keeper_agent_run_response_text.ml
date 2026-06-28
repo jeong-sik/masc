@@ -15,6 +15,11 @@ let stop_reason_label = function
      | None -> "mutation_boundary")
 ;;
 
+let stop_reason_is_turn_budget_exhausted = function
+  | Runtime_agent.TurnBudgetExhausted _ -> true
+  | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
+;;
+
 let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names
       ~stop_reason ~raw_response_text
       ()
@@ -74,6 +79,8 @@ let finalize ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_nam
       ~stop_reason ~raw_response_text
       ()
   =
+  let budget_exhausted = stop_reason_is_turn_budget_exhausted stop_reason in
+  let raw_response_text = if budget_exhausted then "" else raw_response_text in
   let state_snapshot, state_snapshot_source =
     state_snapshot
       ~reported_state_snapshot
@@ -87,5 +94,8 @@ let finalize ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_nam
   let response_text =
     response_text ~state_snapshot ~state_snapshot_source ~raw_response_text
   in
-  { state_snapshot; state_snapshot_source; response_text }
+  { state_snapshot
+  ; state_snapshot_source
+  ; response_text = if budget_exhausted then "" else response_text
+  }
 ;;

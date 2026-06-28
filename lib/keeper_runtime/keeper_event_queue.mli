@@ -127,6 +127,11 @@ val is_empty : t -> bool
 val enqueue : t -> stimulus -> t
 (** [enqueue q s] appends [s] to the back of [q] in O(1). Always succeeds. *)
 
+val stimulus_identity_equal : stimulus -> stimulus -> bool
+(** [true] when two stimuli describe the same durable event. The comparison
+    intentionally ignores [arrived_at], so restart/bootstrap re-enqueues do
+    not create an unbounded backlog of otherwise identical stimuli. *)
+
 val to_list : t -> stimulus list
 (** Return the FIFO contents. *)
 
@@ -146,7 +151,11 @@ val remove_by_post_id : post_id -> t -> stimulus list * t
     removed stimuli in FIFO order plus the remaining queue. *)
 
 val uniq_stimuli : stimulus list -> stimulus list
-(** Remove duplicate stimuli while preserving the first occurrence order. *)
+(** Remove duplicate stimuli by {!stimulus_identity_equal} while preserving the
+    first occurrence order. *)
+
+val dedup_by_identity : t -> t
+(** Collapse duplicate durable-event identities in a queue. *)
 
 val remove_by_post_id_pair : post_id -> t -> t -> stimulus list * t * t
 (** Remove matching stimuli from two queues and return the de-duplicated

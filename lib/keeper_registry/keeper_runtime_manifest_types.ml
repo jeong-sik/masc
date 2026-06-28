@@ -85,6 +85,21 @@ type compaction_snapshot_event_class =
   | Compaction_snapshot_known_unrelated
   | Compaction_snapshot_unknown
 
+let known_unrelated_untyped_compaction_snapshot_events =
+  [ "memory_injected"
+  ; "memory_flushed"
+  ; "tool_lineage_recorded"
+  ; "tool_surface_selected"
+  ; "cascade_routed"
+  ]
+;;
+
+let is_known_unrelated_untyped_compaction_snapshot_event event =
+  List.exists
+    (String.equal event)
+    known_unrelated_untyped_compaction_snapshot_events
+;;
+
 let classify_compaction_snapshot_typed_event = function
   | Event_bus_correlated | Context_compacted -> Compaction_snapshot_relevant
   | Turn_started
@@ -104,17 +119,12 @@ let classify_compaction_snapshot_typed_event = function
       Compaction_snapshot_known_unrelated
 
 let classify_compaction_snapshot_event event =
-  match event with
-  | "memory_injected"
-  | "memory_flushed"
-  | "tool_lineage_recorded"
-  | "tool_surface_selected"
-  | "cascade_routed" ->
-      Compaction_snapshot_known_unrelated
-  | _ -> (
-      match event_kind_of_string event with
-      | Some typed_event -> classify_compaction_snapshot_typed_event typed_event
-      | None -> Compaction_snapshot_unknown)
+  if is_known_unrelated_untyped_compaction_snapshot_event event
+  then Compaction_snapshot_known_unrelated
+  else (
+    match event_kind_of_string event with
+    | Some typed_event -> classify_compaction_snapshot_typed_event typed_event
+    | None -> Compaction_snapshot_unknown)
 
 (* ── Record types ────────────────────────────────────────────────────── *)
 

@@ -13,12 +13,12 @@
 type t = {
   sw : Eio.Switch.t;
   net : [ `Generic | `Unix ] Eio.Net.ty Eio.Resource.t;
-  clock : float Eio.Time.clock_ty Eio.Resource.t option;
+  clock : float Eio.Time.clock_ty Eio.Resource.t;
 }
 
 let env_key : t option Domain.DLS.key = Domain.DLS.new_key (fun () -> None)
 
-let init ~sw ~net ?clock () =
+let init ~sw ~net ~clock () =
   Domain.DLS.set env_key (Some { sw; net; clock })
 
 let reset_for_test () =

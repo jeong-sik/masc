@@ -354,7 +354,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
                 refresh_keeper_execution_surfaces ~config ~name "started")
               else (
                 (match Keeper_registry.get_phase ~base_path:config.base_path name with
-                 | Some Keeper_state_machine.Paused -> persist_keeper_paused_state true
+                 | Some Keeper_state_machine.Paused ->
+                   ignore (persist_keeper_paused_state true : bool)
                  | Some _ | None -> ());
                 invalidate_keeper_execution_surfaces ~config ());
               log_lifecycle_result Succeeded;

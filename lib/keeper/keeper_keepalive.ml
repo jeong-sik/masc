@@ -392,8 +392,18 @@ let process_directive ~agent_name directive =
        Keeper_turn_livelock.reset_keeper_livelock
          ~base_path:e.base_path
          ~keeper:e.name;
-       let (_ : keeper_meta) = clear_no_progress_loop_for_operator_resume e in
-       ()
+       (match clear_no_progress_loop_for_operator_resume e with
+        | Ok (_ : keeper_meta) -> ()
+        | Error err ->
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string DirectiveFailures)
+            ~labels:
+              [ "keeper", e.name; "site", "no_progress_wakeup_clear" ]
+            ();
+          Log.Keeper.error
+            "directive wakeup: no_progress clear failed for %s: %s"
+            e.name
+            err)
      | None -> ());
     if entry_paused
     then (

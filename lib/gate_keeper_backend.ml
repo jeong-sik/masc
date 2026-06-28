@@ -43,9 +43,11 @@ let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata
       | Some value -> non_empty_opt value
     in
     let status =
-      Json_util.get_string json "status"
-      |> Option.map (fun value -> String.lowercase_ascii (String.trim value))
-      |> Option.bind Gate_protocol.message_request_status_of_string
+      match Json_util.get_string json "status" with
+      | None -> None
+      | Some value ->
+          let normalized = String.lowercase_ascii (String.trim value) in
+          Gate_protocol.message_request_status_of_string normalized
     in
     match request_id, status with
     | Some request_id, Some status ->

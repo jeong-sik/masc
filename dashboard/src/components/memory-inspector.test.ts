@@ -180,6 +180,22 @@ function stubFetch(payload: unknown = turnRecordsPayload()) {
   return fetchMock
 }
 
+function abortablePendingResponse(init?: RequestInit): Promise<Response> {
+  return new Promise((_, reject) => {
+    const signal = init?.signal
+    const abort = () => {
+      const error = new Error('Aborted')
+      error.name = 'AbortError'
+      reject(error)
+    }
+    if (signal?.aborted) {
+      abort()
+      return
+    }
+    signal?.addEventListener('abort', abort, { once: true })
+  })
+}
+
 function turnRecordsPayloadWithEmptyFallbackFact() {
   const payload = turnRecordsPayload()
   const fact = {
@@ -390,6 +406,34 @@ describe('MemoryInspector — scope toggle', () => {
     expect(container.textContent).toContain('800B · trace-a#7')
     expect([...container.querySelectorAll('.mem-disclosure')].some(d => (d.textContent ?? '').includes('읽기 전용 집계'))).toBe(true)
     expect(container.textContent).not.toContain('추후 연결')
+  })
+
+  it('shows completed aggregate rows while one keeper request is still pending', async () => {
+    const fetchMock = vi.fn().mockImplementation((input: RequestInfo | URL, init?: RequestInit) => {
+      const path = String(input)
+      if (path.includes('/api/v1/keepers/drifter/turn-records?limit=12')) {
+        return abortablePendingResponse(init)
+      }
+      return Promise.resolve(
+        new Response(JSON.stringify(turnRecordsPayload()), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        }),
+      )
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    fireEvent.click([...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!)
+
+    await waitFor(() =>
+      expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length)
+        .toBe(DEFAULT_MEMORY_KEEPERS.length - 1))
+    expect(container.textContent).toContain(`${DEFAULT_MEMORY_KEEPERS.length - 1}/${DEFAULT_MEMORY_KEEPERS.length} loaded`)
+    expect(container.textContent).toContain('전체 keeper memory-os 집계 불러오는 중')
+    expect([...container.querySelectorAll('.mem-td-id .mono')].map(cell => cell.textContent))
+      .not.toContain('drifter')
   })
 
   it('maps roster status to dot state run→ok / pause→idle / off→bad', async () => {

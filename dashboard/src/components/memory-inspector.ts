@@ -756,18 +756,35 @@ function aggregateMemoryErrorRow(keeper: MemoryKeeper, error: unknown): Aggregat
   }
 }
 
+type AggregateRowsUpdate = (rows: readonly AggregateMemoryRow[]) => void
+
+function materializedAggregateRows(
+  rows: readonly (AggregateMemoryRow | null)[],
+): readonly AggregateMemoryRow[] {
+  return rows.filter((row): row is AggregateMemoryRow => row !== null)
+}
+
 async function fetchAggregateMemoryRows(
   keepers: readonly MemoryKeeper[],
   signal: AbortSignal,
+  onRows?: AggregateRowsUpdate,
 ): Promise<readonly AggregateMemoryRow[]> {
-  return Promise.all(keepers.map(async keeper => {
+  let rows: readonly (AggregateMemoryRow | null)[] = keepers.map(() => null)
+  const publishRows = () => {
+    if (!signal.aborted) onRows?.(materializedAggregateRows(rows))
+  }
+  return Promise.all(keepers.map(async (keeper, index) => {
+    let row: AggregateMemoryRow
     try {
       const response = await fetchKeeperTurnRecords(keeper.id, 12, { signal })
-      return aggregateMemoryRowFromResponse(keeper, response)
+      row = aggregateMemoryRowFromResponse(keeper, response)
     } catch (error) {
       if (isAbortError(error)) throw error
-      return aggregateMemoryErrorRow(keeper, error)
+      row = aggregateMemoryErrorRow(keeper, error)
     }
+    rows = rows.map((current, rowIndex) => rowIndex === index ? row : current)
+    publishRows()
+    return row
   }))
 }
 
@@ -889,7 +906,11 @@ export function MemoryInspector({
       aggregateResource.cancel()
       return
     }
-    void aggregateResource.load(async (signal) => fetchAggregateMemoryRows(keepers, signal))
+    aggregateResource.reset([])
+    void aggregateResource.load(async (signal) =>
+      fetchAggregateMemoryRows(keepers, signal, (rows) => {
+        aggregateResource.state.value = { data: rows, loading: true, error: null }
+      }))
     return () => {
       aggregateResource.cancel()
     }

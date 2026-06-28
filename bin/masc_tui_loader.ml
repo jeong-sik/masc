@@ -407,8 +407,8 @@ let load_overview ~(host : string) ~(port : int) :
                 Result.map (fun item -> Some item) (decode_attention_item value))
       in
       let* ov_workspace_health =
-        required_string_field summary "workspace_health"
-        |> Result.bind decode_workspace_health
+        let* workspace_health = required_string_field summary "workspace_health" in
+        decode_workspace_health workspace_health
       in
       let* ov_cluster = required_string_field summary "cluster" in
       let* ov_project = required_string_field summary "project" in

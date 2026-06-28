@@ -36,6 +36,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
 (** [consume_single_heartbeat_stimulus ~ctx ~meta_after_triage stim]

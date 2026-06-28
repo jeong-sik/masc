@@ -237,6 +237,12 @@ val librarian_unstructured_fallback_claim_prefix : string
     after strict JSON parsing fails. *)
 val librarian_unstructured_fallback_terminal_marker : string
 
+val legacy_unstructured_fallback_claim_key : string -> bool
+(** Whether a persisted pre-[Diagnostic] recall key identifies a legacy
+    librarian parse-failure fallback fact. This centralizes the historical
+    [claim_identity] fallback-key shape so read-only compatibility surfaces do
+    not reconstruct ["claim:"] keys themselves. *)
+
 (** Structural prompt-recall eligibility. Callers still apply {!fact_is_current}
     for the time horizon; [Diagnostic] rows stay operator evidence, not prompt
     context. Legacy pre-[Diagnostic] librarian fallback rows are also excluded by

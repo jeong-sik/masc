@@ -245,7 +245,6 @@ function RosterRow({
   onMenu: (keeper: Keeper, event: MouseEvent) => void
   style?: string
 }) {
-  const bucket = keeperBucket(keeper)
   const tone = keeperFleetTone(keeper)
   const att = attentionCount(keeper)
   const scope = keeperScope(keeper)
@@ -286,7 +285,7 @@ function RosterRow({
       <div class="kw-kp-meta">
         <div class="kw-kp-name">${keeper.koreanName ?? keeper.name}</div>
         <div class="kw-kp-sub">
-          <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${bucket === 'running'} />${phaseLabel}</span>
+          <span class="kw-kp-state"><${StatusDot} tone=${tone} pulse=${beat} />${phaseLabel}</span>
           ${handle ? html`<span aria-hidden="true">·</span><span class="kw-kp-handle kp-handle" title=${handleTitle}>${handle}</span>` : null}
         </div>
         ${contextPct !== null
@@ -420,7 +419,7 @@ function KeeperRosterMenu({
       data-testid="kw-roster-menu"
     >
       <div class="kw-kp-menu-head v2-monitoring-toolbar">
-        <${WorkspaceSigil} id=${keeper.name} size=${22} beat=${keeperBucket(keeper) === 'running'} />
+        <${WorkspaceSigil} id=${keeper.name} size=${22} beat=${phasePulse(keeper.lifecycle_phase)} />
         <span>${keeper.name}</span>
       </div>
       <button type="button" role="menuitem" class="kw-kp-menu-item" onClick=${select} data-testid="kw-roster-menu-open-chat">

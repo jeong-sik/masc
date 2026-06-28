@@ -137,7 +137,10 @@ let is_known_session session_id =
 let ensure_sse_backing_session_for_known_transport_session
     ~transport_session_id ~sse_session_id =
   if is_known_session transport_session_id then
-    ignore (Session.McpSessionStore.get_or_create ~id:sse_session_id ())
+    let (_ : Session.McpSessionStore.mcp_session) =
+      Session.McpSessionStore.get_or_create ~id:sse_session_id ()
+    in
+    ()
 
 let remember_mcp_profile ?otel_transport_context session_id profile =
   atomic_update mcp_profile_by_session (fun map -> SMap.add session_id profile map);

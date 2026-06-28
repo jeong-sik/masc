@@ -465,7 +465,93 @@ let handle_keeper_config_post ~sw ~clock state agent_name req reqd body_str =
 
 let handle_keeper_lifecycle_post =
   Server_dashboard_http_keeper_api_lifecycle_post.handle_keeper_lifecycle_post
-let handle_keeper_directive_post state _agent_name req reqd body_str =
+
+let directive_action_to_string = function
+  | `Pause -> "pause"
+  | `Resume -> "resume"
+  | `Wakeup -> "wakeup"
+
+let keeper_ctx_of_dashboard_state ~sw ~clock state agent_name :
+    _ Keeper_tool_surface.context =
+  {
+    config = Mcp_server.workspace_config state;
+    agent_name;
+    sw;
+    clock;
+    proc_mgr = state.Mcp_server.proc_mgr;
+    net = state.Mcp_server.net;
+  }
+
+let meta_with_directive_paused_state ~(config : Workspace.config) directive meta paused =
+  let source_meta =
+    match directive with
+    | `Resume ->
+        Keeper_unified_turn_no_progress.clear_for_operator_resume
+          ~base_path:config.base_path
+          meta
+    | `Pause | `Wakeup -> meta
+  in
+  {
+    source_meta with
+    paused;
+    auto_resume_after_sec = None;
+    runtime = { source_meta.runtime with last_blocker = None };
+    updated_at = Keeper_meta_contract.now_iso ();
+  }
+
+let should_persist_directive_paused_state directive (meta : Keeper_meta_contract.keeper_meta) paused =
+  match directive with
+  | `Resume -> true
+  | `Pause | `Wakeup -> not (Bool.equal meta.paused paused)
+
+let persist_directive_paused_state ~config ~name ~action_str directive meta paused =
+  let updated_meta = meta_with_directive_paused_state ~config directive meta paused in
+  (* Pause/resume toggle via CAS merge: do not rewind a concurrent
+     turn's cumulative usage counters. *)
+  match
+    Keeper_meta_store.write_meta_with_merge
+      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+      config
+      updated_meta
+  with
+  | Ok () -> Ok ()
+  | Error err ->
+      Log.Keeper.warn
+        "directive %s: write_meta failed for %s: %s"
+        action_str
+        name
+        err;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string PausedStatePersistErrors)
+        ~labels:
+          [
+            ( "phase",
+              Keeper_paused_state_persist_phase.(to_label Directive) );
+            ("reason", "write_meta_error");
+          ]
+        ();
+      Error err
+
+let ensure_registered_for_resume ~sw ~clock state agent_name name =
+  let config = Mcp_server.workspace_config state in
+  match Keeper_registry.get ~base_path:config.base_path name with
+  | Some _ -> Ok `Already_registered
+  | None ->
+      let keeper_ctx = keeper_ctx_of_dashboard_state ~sw ~clock state agent_name in
+      let args = `Assoc [ ("name", `String name) ] in
+      (match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_up" ~args with
+       | Some result when Tool_result.is_success result ->
+           (match Keeper_registry.get ~base_path:config.base_path name with
+            | Some _ -> Ok `Booted_missing_registry
+            | None ->
+                Error
+                  (Printf.sprintf
+                     "resume boot for %s succeeded but no registry entry was created"
+                     name))
+       | Some result -> Error (Tool_result.message result)
+       | None -> Error "masc_keeper_up dispatch returned None")
+
+let handle_keeper_directive_post ~sw ~clock state agent_name req reqd body_str =
   let req_path = Http.Request.path req in
   let name = extract_keeper_name_for_post req_path keeper_suffix_directive in
   if String.length name = 0 then
@@ -491,12 +577,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
       respond_error ~ok:false reqd msg
     | Ok directive ->
         let config = (Mcp_server.workspace_config state) in
-        let action_str =
-          match directive with
-          | `Pause -> "pause"
-          | `Resume -> "resume"
-          | `Wakeup -> "wakeup"
-        in
+        let action_str = directive_action_to_string directive in
         (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from [Error _]
            (IO/parse failure). For pause/resume the operator expects state to
            change; silent 200 hides the failure. For wakeup we preserve the
@@ -513,59 +594,89 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
         in
         let persist_paused_state paused =
           match meta_opt with
-          | Some meta when not (Bool.equal meta.paused paused) ->
-              let updated_meta =
-                {
-                  meta with
-                  paused;
-                  auto_resume_after_sec = None;
-                  runtime = { meta.runtime with last_blocker = None };
-                  updated_at = Keeper_meta_contract.now_iso ();
-                }
-              in
-              (* Pause toggle via CAS merge: do not rewind a concurrent
-                 turn's cumulative usage counters. *)
-              (match
-                 Keeper_meta_store.write_meta_with_merge
-                   ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                   config updated_meta
-               with
-               | Ok () -> ()
-               | Error err ->
-                   Log.Keeper.warn
-                     "directive %s: write_meta failed for %s: %s"
-                     action_str
-                     name
-                     err)
-          | Some _ | None -> ()
+          | Some meta
+            when should_persist_directive_paused_state directive meta paused ->
+              persist_directive_paused_state
+                ~config
+                ~name
+                ~action_str
+                directive
+                meta
+                paused
+          | Some _ | None -> Ok ()
         in
         let proceed () =
-          (match directive with
-           | `Pause -> persist_paused_state true
-           | `Resume -> persist_paused_state false
-           | `Wakeup -> ());
-          let resolved_agent_name =
-            match Keeper_registry_lookup.find_by_name name with
-            | Some entry -> entry.meta.agent_name
-            | None -> (
-                match meta_opt with
-                | Some meta -> meta.agent_name
-                | None -> Keeper_identity.keeper_agent_name name)
+          let ensure_result =
+            match directive with
+            | `Resume -> ensure_registered_for_resume ~sw ~clock state agent_name name
+            | `Pause | `Wakeup -> Ok `Already_registered
           in
-          Keeper_keepalive.process_directive
-            ~agent_name:resolved_agent_name action_str;
-          (match directive with
-           | `Pause -> refresh_keeper_execution_surfaces ~config ~name "paused"
-           | `Resume -> refresh_keeper_execution_surfaces ~config ~name "resumed"
-           | `Wakeup -> invalidate_keeper_execution_surfaces ~config ());
-          Http.Response.json_value ~compress:true ~request:req
-            (`Assoc
-               [
-                 ("ok", `Bool true);
-                 ("action", `String action_str);
-                 ("name", `String name);
-               ])
-            reqd
+          match ensure_result with
+          | Error err ->
+              Log.Keeper.error
+                "directive %s: failed to ensure registered keeper for %s: %s"
+                action_str
+                name
+                err;
+              Http.Response.json_value ~status:`Internal_server_error ~request:req
+                (`Assoc
+                   [
+                     ("ok", `Bool false);
+                     ("action", `String action_str);
+                     ("name", `String name);
+                     ("error", `String err);
+                   ])
+                reqd
+          | Ok registration_state ->
+              let persist_result =
+                match directive, registration_state with
+                | `Pause, _ -> persist_paused_state true
+                | `Resume, `Already_registered -> persist_paused_state false
+                | `Resume, `Booted_missing_registry -> Ok ()
+                | `Wakeup, _ -> Ok ()
+              in
+              (match persist_result with
+              | Error err ->
+                  Log.Keeper.error
+                    "directive %s: failed to persist paused state for %s: %s"
+                    action_str
+                    name
+                    err;
+                  Http.Response.json_value
+                    ~status:`Internal_server_error
+                    ~request:req
+                    (`Assoc
+                       [
+                         ("ok", `Bool false);
+                         ("action", `String action_str);
+                         ("name", `String name);
+                         ("error", `String err);
+                       ])
+                    reqd
+              | Ok () ->
+                  let resolved_agent_name =
+                    match Keeper_registry_lookup.find_by_name name with
+                    | Some entry -> entry.meta.agent_name
+                    | None -> (
+                        match meta_opt with
+                        | Some meta -> meta.agent_name
+                        | None -> Keeper_identity.keeper_agent_name name)
+                  in
+                  Keeper_keepalive.process_directive
+                    ~agent_name:resolved_agent_name action_str;
+                  (match directive with
+                   | `Pause -> refresh_keeper_execution_surfaces ~config ~name "paused"
+                   | `Resume ->
+                       refresh_keeper_execution_surfaces ~config ~name "resumed"
+                   | `Wakeup -> invalidate_keeper_execution_surfaces ~config ());
+                  Http.Response.json_value ~compress:true ~request:req
+                    (`Assoc
+                       [
+                         ("ok", `Bool true);
+                         ("action", `String action_str);
+                         ("name", `String name);
+                       ])
+                    reqd)
         in
         let needs_meta_for_state_transition =
           match directive with
@@ -631,7 +742,7 @@ let handle_keeper_directive_post state _agent_name req reqd body_str =
     This avoids N round-trip latency and N×cache-rebuild cost when an
     operator wants to (re)pause the whole fleet from the dashboard.
     @since 0.20.0 *)
-let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
+let handle_keeper_bulk_directive_post ~sw ~clock state agent_name req reqd body_str =
   let parsed =
     try
       let json = Yojson.Safe.from_string body_str in
@@ -672,12 +783,7 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
         reqd
   | Ok (names, directive) ->
       let config = (Mcp_server.workspace_config state) in
-      let action_str =
-        match directive with
-        | `Pause -> "pause"
-        | `Resume -> "resume"
-        | `Wakeup -> "wakeup"
-      in
+      let action_str = directive_action_to_string directive in
       let needs_meta =
         match directive with `Pause | `Resume -> true | `Wakeup -> false
       in
@@ -711,46 +817,52 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
               | `Resume -> Some false
               | `Wakeup -> None
             in
-            (match target_paused, meta_opt with
-             | Some target, Some meta when not (Bool.equal meta.paused target)
-               ->
-                 let updated_meta =
-                   {
-                     meta with
-                     paused = target;
-                     auto_resume_after_sec = None;
-                     runtime = { meta.runtime with last_blocker = None };
-                     updated_at = Keeper_meta_contract.now_iso ();
-                   }
+            (match
+               match directive with
+               | `Resume -> ensure_registered_for_resume ~sw ~clock state agent_name name
+               | `Pause | `Wakeup -> Ok `Already_registered
+             with
+             | Error err ->
+                 `Assoc
+                   [ ("name", `String name); ("ok", `Bool false); ("error", `String err) ]
+             | Ok registration_state ->
+                 let persist_result =
+                   match directive, registration_state, target_paused, meta_opt with
+                   | `Resume, `Booted_missing_registry, _, _ -> Ok ()
+                   | _, _, Some target, Some meta
+                     when should_persist_directive_paused_state directive meta target
+                     ->
+                       persist_directive_paused_state
+                         ~config
+                         ~name
+                         ~action_str
+                         directive
+                         meta
+                         target
+                   | _ -> Ok ()
                  in
-                 (* Pause toggle via CAS merge: do not rewind a concurrent
-                    turn's cumulative usage counters. *)
-                 (match
-                    Keeper_meta_store.write_meta_with_merge
-                      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-                      config updated_meta
-                  with
-                  | Ok () -> ()
+                 (match persist_result with
                   | Error err ->
-                      Log.Keeper.warn
-                        "bulk_directive %s: write_meta failed for %s: %s"
-                        action_str name err)
-             | _ -> ());
-            let resolved_agent_name =
-              match Keeper_registry_lookup.find_by_name name with
-              | Some entry -> entry.meta.agent_name
-              | None -> (
-                  match meta_opt with
-                  | Some meta -> meta.agent_name
-                  | None -> Keeper_identity.keeper_agent_name name)
-            in
-            Keeper_keepalive.process_directive
-              ~agent_name:resolved_agent_name action_str;
-            `Assoc [ ("name", `String name); ("ok", `Bool true) ]
+                      `Assoc
+                        [
+                          ("name", `String name);
+                          ("ok", `Bool false);
+                          ("error", `String err);
+                        ]
+                  | Ok () ->
+                      let resolved_agent_name =
+                        match Keeper_registry_lookup.find_by_name name with
+                        | Some entry -> entry.meta.agent_name
+                        | None -> (
+                            match meta_opt with
+                            | Some meta -> meta.agent_name
+                            | None -> Keeper_identity.keeper_agent_name name)
+                      in
+                      Keeper_keepalive.process_directive
+                        ~agent_name:resolved_agent_name action_str;
+                      `Assoc [ ("name", `String name); ("ok", `Bool true) ]))
       in
       let results = List.map process_one names in
-      (* Single batch cache invalidate — the perf win over N×directive. *)
-      invalidate_keeper_execution_surfaces ~config ();
       let ok_count =
         List.fold_left
           (fun acc r ->
@@ -759,15 +871,24 @@ let handle_keeper_bulk_directive_post state _agent_name req reqd body_str =
             | _ -> acc)
           0 results
       in
-      Http.Response.json_value ~compress:true ~request:req
-        (`Assoc
-           [
-             ("ok", `Bool true);
-             ("action", `String action_str);
-             ("requested", `Int (List.length names));
-             ("succeeded", `Int ok_count);
-             ("results", `List results);
-           ])
-        reqd
+      let requested_count = List.length names in
+      let failed_count = requested_count - ok_count in
+      if ok_count > 0 then invalidate_keeper_execution_surfaces ~config ();
+      let response =
+        `Assoc
+          [
+            ("ok", `Bool (failed_count = 0));
+            ("action", `String action_str);
+            ("requested", `Int requested_count);
+            ("succeeded", `Int ok_count);
+            ("failed", `Int failed_count);
+            ("results", `List results);
+          ]
+      in
+      if failed_count = 0 then
+        Http.Response.json_value ~compress:true ~request:req response reqd
+      else
+        Http.Response.json_value ~status:`Internal_server_error ~compress:true
+          ~request:req response reqd
 
 (** Keeper GET sub-routes handler: /config, /chat/history, /trajectory. *)

@@ -91,6 +91,7 @@ val assess_stale_run :
      phase:Keeper_state_machine.phase
   -> in_turn:'a option
   -> last_turn_ts:float
+  -> started_at:float
   -> now:float
   -> threshold:float
   -> Keeper_registry.failure_reason option
@@ -98,8 +99,11 @@ val assess_stale_run :
     [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] — the
     [Idle_turn] variant's first real producer — when [phase = Running], the
     keeper is not in a turn ([in_turn = None]), has completed at least one
-    turn ([last_turn_ts > 0]), and [now] exceeds [last_turn_ts] by more than
-    [threshold]. [None] otherwise. Exposed for regression tests. *)
+    turn ([last_turn_ts > 0]), and [now] exceeds both [last_turn_ts] and the
+    current supervised lifetime [started_at] by more than [threshold]. The
+    lifetime gate prevents a restart from immediately inheriting stale metadata
+    and exhausting restart budget before one idle window elapses. [None]
+    otherwise. Exposed for regression tests. *)
 
 val assess_in_turn_progress :
      phase:Keeper_state_machine.phase

@@ -168,6 +168,7 @@ let test_runtime_admitted_skip_refreshes_last_turn_ts () =
            ~phase:KSM.Running
            ~in_turn:None
            ~last_turn_ts:stale_ts
+           ~started_at:0.0
            ~now
            ~threshold
        with
@@ -194,6 +195,7 @@ let test_runtime_admitted_skip_refreshes_last_turn_ts () =
                 ~phase:KSM.Running
                 ~in_turn:None
                 ~last_turn_ts:fresh_ts
+                ~started_at:0.0
                 ~now
                 ~threshold)))
 
@@ -239,6 +241,7 @@ let test_smart_idle_sleep_refreshes_last_turn_ts () =
                 ~phase:KSM.Running
                 ~in_turn:None
                 ~last_turn_ts:fresh_ts
+                ~started_at:0.0
                 ~now
                 ~threshold)))
 

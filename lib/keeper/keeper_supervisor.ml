@@ -22,25 +22,33 @@ include Keeper_supervisor_launch
     when the keeper is [Running], is not in a turn ([in_turn = None], the
     exact [Idle_turn] doc contract), has completed at least one turn
     ([last_turn_ts > 0], so a fresh-start keeper is not mis-stamped), and
-    [now] exceeds [last_turn_ts] by more than [threshold]. Returns [None]
-    otherwise (alive, in-turn, or fresh-start).
+    [now] exceeds both the last completed turn and the current supervised
+    lifetime by more than [threshold]. The lifetime gate prevents a restarted
+    fiber from immediately inheriting an old completed-turn timestamp and
+    burning its restart budget before it has had one stale window to make
+    progress. Returns [None] otherwise (alive, in-turn, fresh-start, or
+    recently restarted).
 
     Pure: the caller stamps the reason via [Keeper_registry.set_failure_reason]
     and invokes [Keeper_execution_receipt.emit_stale_keeper_broadcast]. Keys on
-    [last_turn_ts], never on active-tool duration, so it does not re-introduce
-    the deliberately-removed per-turn wall-clock watchdog. *)
+    [last_turn_ts] for the reported stall while using [started_at] only as a
+    current-lifetime grace anchor. It never keys on active-tool duration, so it
+    does not re-introduce the deliberately-removed per-turn wall-clock
+    watchdog. *)
 let assess_stale_run
     ~(phase : Keeper_state_machine.phase)
     ~(in_turn : 'a option)
     ~(last_turn_ts : float)
+    ~(started_at : float)
     ~(now : float)
     ~(threshold : float)
     : Keeper_registry.failure_reason option
   =
+  let idle_anchor_ts = Stdlib.Float.max last_turn_ts started_at in
   if Bool.( phase = Keeper_state_machine.Running
             && Option.is_none in_turn
             && last_turn_ts > 0.0
-            && now -. last_turn_ts > threshold )
+            && now -. idle_anchor_ts > threshold )
   then
     let stall = now -. last_turn_ts in
     Some
@@ -509,6 +517,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
                ~phase:entry.phase
                ~in_turn:entry.current_turn_observation
                ~last_turn_ts:entry.meta.runtime.usage.last_turn_ts
+               ~started_at:entry.started_at
                ~now
                ~threshold
          in

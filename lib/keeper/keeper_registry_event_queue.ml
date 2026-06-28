@@ -8,6 +8,8 @@
     Atomic state primitive. CAS-successful mutations are mirrored to
     [Keeper_event_queue_persistence] for restart replay. *)
 
+open Keeper_registry_types
+
 let rec queue_contains queue stimulus =
   match Keeper_event_queue.dequeue queue with
   | None -> false

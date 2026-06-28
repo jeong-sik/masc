@@ -93,7 +93,8 @@ let rec find_git_root path =
 let normalize_base_path path =
   let trimmed = Env_config_core.normalize_masc_base_path_input path in
   if trimmed = "" then ""
-  else if Filename.is_relative trimmed then Filename.concat (Sys.getcwd ()) trimmed
+  else if Filename.is_relative trimmed then
+    Filename.concat (Config_dir_resolver.current_working_dir ()) trimmed
   else trimmed
 
 let running_under_test_executable () =

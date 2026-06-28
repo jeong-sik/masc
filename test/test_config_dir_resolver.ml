@@ -114,8 +114,8 @@ let test_sanitize_inherited_test_env_opt_drops_captured_parent_shell_value () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
-      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
+      ~initial:(Some "/tmp/captured-shell/masc/config")
+      ~current:(Some "/tmp/captured-shell/masc/config")
   in
   check (option string) "same captured parent-shell value ignored" None actual
 
@@ -123,7 +123,7 @@ let test_sanitize_inherited_test_env_opt_keeps_runtime_override () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
+      ~initial:(Some "/tmp/captured-shell/masc/config")
       ~current:(Some "/tmp/test-config-root")
   in
   check (option string) "runtime override preserved"
@@ -133,9 +133,9 @@ let test_sanitize_inherited_test_base_path_opt_drops_captured_home_path () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_base_path_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/Users/dancer/me")
-      ~current:(Some "/Users/dancer/me")
-      ~home:(Some "/Users/dancer/me")
+      ~initial:(Some "/tmp/captured-home/me")
+      ~current:(Some "/tmp/captured-home/me")
+      ~home:(Some "/tmp/captured-home/me")
   in
   check (option string) "same captured MASC_BASE_PATH ignored" None actual
 
@@ -143,12 +143,12 @@ let test_sanitize_inherited_test_base_path_opt_keeps_sibling_prefix_path () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_base_path_opt
       ~running_under_test_executable:true ~allow_inherited:false
-      ~initial:(Some "/Users/dancer/me2")
-      ~current:(Some "/Users/dancer/me2")
-      ~home:(Some "/Users/dancer/me")
+      ~initial:(Some "/tmp/captured-home/me2")
+      ~current:(Some "/tmp/captured-home/me2")
+      ~home:(Some "/tmp/captured-home/me")
   in
   check (option string) "sibling path preserved"
-    (Some "/Users/dancer/me2") actual
+    (Some "/tmp/captured-home/me2") actual
 
 let test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path () =
   let actual =
@@ -156,7 +156,7 @@ let test_sanitize_inherited_test_base_path_opt_keeps_process_temp_path () =
       ~running_under_test_executable:true ~allow_inherited:false
       ~initial:(Some "/tmp/test-oas-worker-base")
       ~current:(Some "/tmp/test-oas-worker-base")
-      ~home:(Some "/Users/dancer/me")
+      ~home:(Some "/tmp/captured-home/me")
   in
   check (option string) "process temp base preserved"
     (Some "/tmp/test-oas-worker-base") actual
@@ -165,11 +165,11 @@ let test_sanitize_inherited_test_env_opt_keeps_value_with_opt_in () =
   let actual =
     Config_dir_resolver.sanitize_inherited_test_env_opt
       ~running_under_test_executable:true ~allow_inherited:true
-      ~initial:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
-      ~current:(Some "/Users/dancer/me/workspace/yousleepwhen/masc/config")
+      ~initial:(Some "/tmp/captured-shell/masc/config")
+      ~current:(Some "/tmp/captured-shell/masc/config")
   in
   check (option string) "opt-in preserves config-path override"
-    (Some "/Users/dancer/me/workspace/yousleepwhen/masc/config") actual
+    (Some "/tmp/captured-shell/masc/config") actual
 
 let test_inputs_from_env_honors_config_path_override_opt_in () =
   with_temp_dir "config-dir-inputs-env-config" @@ fun root ->
@@ -234,9 +234,9 @@ let test_inputs_from_env_survives_deleted_cwd () =
 let test_normalize_masc_base_path_input_canonicalizes_explicit_path () =
   let actual =
     Env_config_core.normalize_masc_base_path_input
-      "/Users/dancer/me/././/.masc//"
+      "/tmp/synthetic-masc-base/././/.masc//"
   in
-  check string "canonical explicit base path" "/Users/dancer/me" actual
+  check string "canonical explicit base path" "/tmp/synthetic-masc-base" actual
 
 let test_env_override_valid () =
   with_temp_dir "config-dir-env" @@ fun root ->
@@ -506,6 +506,62 @@ let test_rfc0121_masc_root_agrees_with_common () =
     (Common.masc_dir_from_base_path ~base_path:bp)
     (Config_dir_resolver.masc_root ~base_path:bp)
 
+let test_current_working_dir_returns_absolute () =
+  let cwd = Config_dir_resolver.current_working_dir () in
+  check bool "cwd is absolute" true (not (Filename.is_relative cwd))
+
+let test_current_working_dir_survives_deleted_cwd () =
+  with_temp_dir "config-dir-current-cwd-deleted" @@ fun root ->
+  let home = Filename.concat root "home" in
+  let doomed = Filename.concat root "doomed" in
+  Unix.mkdir home 0o755;
+  Unix.mkdir doomed 0o755;
+  with_env "MASC_BASE_PATH" None @@ fun () ->
+  with_env "MASC_BASE_PATH_INPUT" None @@ fun () ->
+  with_env "HOME" (Some home) @@ fun () ->
+  Config_dir_resolver.reset ();
+  let saved_cwd = Sys.getcwd () in
+  Unix.chdir doomed;
+  Fun.protect
+    ~finally:(fun () ->
+      Unix.chdir saved_cwd;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.rmdir doomed;
+      check string "deleted cwd falls back to HOME" home
+        (Config_dir_resolver.current_working_dir ()))
+
+let test_base_path_or_cwd_honors_env () =
+  with_env "MASC_BASE_PATH" (Some "/tmp/masc-base-from-env") (fun () ->
+    Config_dir_resolver.reset ();
+    check string "base_path_or_cwd uses env" "/tmp/masc-base-from-env"
+      (Config_dir_resolver.base_path_or_cwd ()))
+
+let test_base_path_or_cwd_anchors_relative_env_to_cwd () =
+  with_temp_dir "config-dir-relative-base" @@ fun root ->
+  let cwd = Filename.concat root "cwd" in
+  Unix.mkdir cwd 0o755;
+  with_env "MASC_BASE_PATH" (Some "relative-root") (fun () ->
+    with_env "MASC_BASE_PATH_INPUT" None (fun () ->
+      Config_dir_resolver.reset ();
+      let saved_cwd = Sys.getcwd () in
+      Unix.chdir cwd;
+      Fun.protect
+        ~finally:(fun () ->
+          Unix.chdir saved_cwd;
+          Config_dir_resolver.reset ())
+        (fun () ->
+          check string "base_path_or_cwd anchors relative env under cwd"
+            (Filename.concat cwd "relative-root")
+            (Config_dir_resolver.base_path_or_cwd ()))))
+
+let test_base_path_or_cwd_falls_back_to_cwd () =
+  with_env "MASC_BASE_PATH" None (fun () ->
+    Config_dir_resolver.reset ();
+    check string "base_path_or_cwd falls back to cwd"
+      (Config_dir_resolver.current_working_dir ())
+      (Config_dir_resolver.base_path_or_cwd ()))
+
 let () =
   run "config_dir_resolver"
     [
@@ -581,5 +637,18 @@ let () =
             test_rfc0121_keeper_repo_mappings_toml;
           test_case "masc_root agrees with Common" `Quick
             test_rfc0121_masc_root_agrees_with_common;
+        ] );
+      ( "path_ssot_helpers",
+        [
+          test_case "current_working_dir returns an absolute path" `Quick
+            test_current_working_dir_returns_absolute;
+          test_case "current_working_dir survives deleted cwd" `Quick
+            test_current_working_dir_survives_deleted_cwd;
+          test_case "base_path_or_cwd honors MASC_BASE_PATH" `Quick
+            test_base_path_or_cwd_honors_env;
+          test_case "base_path_or_cwd anchors relative MASC_BASE_PATH"
+            `Quick test_base_path_or_cwd_anchors_relative_env_to_cwd;
+          test_case "base_path_or_cwd falls back to cwd" `Quick
+            test_base_path_or_cwd_falls_back_to_cwd;
         ] );
     ]

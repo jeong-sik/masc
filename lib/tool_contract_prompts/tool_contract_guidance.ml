@@ -61,7 +61,7 @@ let rec find_seed_prompt_from dir key hops =
 ;;
 
 let seed_prompt_path key =
-  let cwd_candidate = find_seed_prompt_from (Sys.getcwd ()) key 0 in
+  let cwd_candidate = find_seed_prompt_from (Config_dir_resolver.current_working_dir ()) key 0 in
   match cwd_candidate with
   | Some _ as path -> path
   | None ->

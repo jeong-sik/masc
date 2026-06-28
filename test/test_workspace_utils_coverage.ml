@@ -118,6 +118,25 @@ let test_resolve_masc_base_path_prefers_requested_path_in_test () =
       check string "requested path wins in tests" requested
         (Workspace_utils.resolve_masc_base_path requested))
 
+let test_resolve_masc_base_path_relative_request_ignores_inherited_env () =
+  let scratch = Filename.temp_dir "workspace-utils-relative-request" "" in
+  let previous_cwd = Sys.getcwd () in
+  Fun.protect
+    ~finally:(fun () ->
+      Sys.chdir previous_cwd;
+      rm_rf scratch)
+    (fun () ->
+      Sys.chdir scratch;
+      let requested = "tmp-fixture" in
+      let expected = Filename.concat scratch requested in
+      with_envs
+        [ ("MASC_BASE_PATH", Some (inherited_env_base "inherited-relative"));
+          ("MASC_TEST_ALLOW_BASE_PATH_OVERRIDE", None) ]
+        (fun () ->
+          check string "relative requested path anchors to cwd in tests"
+            expected
+            (Workspace_utils.resolve_masc_base_path requested)))
+
 let test_resolve_masc_base_path_keeps_matching_explicit_env () =
   let requested =
     Filename.concat (Filename.get_temp_dir_name ()) "workspace-utils-matching"
@@ -631,6 +650,8 @@ let () =
         test_resolve_masc_base_path_ignores_inherited_env_in_test_by_default;
       test_case "prefers requested path in tests" `Quick
         test_resolve_masc_base_path_prefers_requested_path_in_test;
+      test_case "relative requested path ignores inherited env in tests" `Quick
+        test_resolve_masc_base_path_relative_request_ignores_inherited_env;
       test_case "keeps matching explicit env" `Quick
         test_resolve_masc_base_path_keeps_matching_explicit_env;
       test_case "collapses requested .masc path" `Quick

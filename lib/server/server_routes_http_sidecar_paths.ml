@@ -21,10 +21,7 @@ let trim_opt = Env_config_core.trim_opt
 let runtime_base_path ?base_path () =
   match trim_opt base_path with
   | Some path -> path
-  | None ->
-    (match Sys.getenv_opt Env_config_core.base_path_env_key with
-     | Some p when String.length (String.trim p) > 0 -> String.trim p
-     | _ -> Sys.getcwd ())
+  | None -> Config_dir_resolver.base_path_or_cwd ()
 ;;
 
 let request_base_path state = (Mcp_server.workspace_config state).base_path

@@ -75,6 +75,19 @@ let with_temp_dir prefix f =
   Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
 ;;
 
+let with_env name value f =
+  let saved = Sys.getenv_opt name in
+  (match value with
+   | Some v -> Unix.putenv name v
+   | None -> Unix.putenv name "");
+  Fun.protect
+    ~finally:(fun () ->
+      match saved with
+      | Some prior -> Unix.putenv name prior
+      | None -> Unix.putenv name "")
+    f
+;;
+
 (* ---- Happy path: every known sidecar id is accepted verbatim. ---- *)
 
 let test_validate_accepts_each_known_id () =
@@ -232,6 +245,31 @@ let test_missing_sidecar_dir_message_mentions_sidecar_root_hint () =
     "includes searched project path"
     true
     (contains_substring message "/tmp/project-root/sidecars/discord-bot")
+;;
+
+let test_runtime_base_path_uses_resolver_precedence () =
+  with_temp_dir "sidecar-runtime-base-ssot" (fun dir ->
+    let requested = Filename.concat dir "requested" in
+    let stale = Filename.concat dir "stale/.masc" in
+    with_env "MASC_BASE_PATH" (Some stale) (fun () ->
+      with_env
+        "MASC_BASE_PATH_INPUT"
+        (Some (Filename.concat requested ".masc"))
+        (fun () ->
+           Config_dir_resolver.reset ();
+           Fun.protect
+             ~finally:Config_dir_resolver.reset
+             (fun () ->
+                check
+                  string
+                  "input env wins and .masc collapses"
+                  requested
+                  (Routes.runtime_base_path ())))));
+  check
+    string
+    "explicit base_path still wins"
+    "/tmp/explicit-runtime"
+    (Routes.runtime_base_path ~base_path:" /tmp/explicit-runtime " ())
 ;;
 
 let test_status_file_prefers_existing_project_root_candidate () =
@@ -956,6 +994,10 @@ let () =
             "missing directory message includes setup hint"
             `Quick
             test_missing_sidecar_dir_message_mentions_sidecar_root_hint
+        ; test_case
+            "runtime base path follows resolver precedence"
+            `Quick
+            test_runtime_base_path_uses_resolver_precedence
         ; test_case
             "status file falls back to project root candidate"
             `Quick

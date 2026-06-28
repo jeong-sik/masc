@@ -9,6 +9,7 @@
     coverage does not become part of the public API. *)
 
 open Alcotest
+open Masc
 
 let prefix_of cwd =
   Keeper_tool_execute_runtime.For_testing.repo_root_public_prefix_from_cwd cwd

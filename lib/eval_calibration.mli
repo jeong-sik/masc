@@ -79,6 +79,11 @@ val set_store : base_dir:string -> unit
 val set_store_for_testing : base_dir:string -> unit
 (** Compatibility alias for [set_store] used by tests. *)
 
+val absolute_workspace_base_path : ?cwd:string -> string -> string
+(** Normalize a workspace base path into the absolute path expected by offline
+    eval runners before they derive verdict-store roots from it. Relative paths
+    resolve from [cwd] when supplied, or from the process cwd otherwise. *)
+
 val resolve_record_verdicts_store :
   ?cwd:string ->
   record_verdicts:bool ->

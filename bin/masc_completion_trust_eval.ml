@@ -497,10 +497,10 @@ let print_corpus (scenarios : EH.scenario list) =
 ;;
 
 let resolve_base = function
-  | Some p -> p
+  | Some p -> Cal.absolute_workspace_base_path p
   | None -> (
     match Config_dir_resolver.current_env_base_path_opt () with
-    | Some p -> p
+    | Some p -> Cal.absolute_workspace_base_path p
     | None ->
       error "no workspace base path: set MASC_BASE_PATH or pass --base PATH")
 ;;
@@ -524,10 +524,11 @@ let () =
       error "missing --runtime ID (required for a live run; use --list to inspect the corpus)";
     let base_path = resolve_base cfg.base in
     (* Fail fast: --record-verdicts must target an isolated store, never the live
-       ledger ($MASC_BASE_PATH/data/verdicts). Resolve before any heavy init. *)
+       ledger ($MASC_BASE_PATH/data/verdicts). Relative store paths resolve from
+       the explicit workspace base path, not ambient process cwd. *)
     let verdict_store =
       match
-        Cal.resolve_record_verdicts_store ~cwd:(Sys.getcwd ())
+        Cal.resolve_record_verdicts_store ~cwd:base_path
           ~record_verdicts:cfg.record_verdicts
           ~verdict_store_dir:cfg.verdict_store_dir
           ~live_store_dir:(Some (Filename.concat base_path "data/verdicts"))

@@ -53,6 +53,7 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
 let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
@@ -202,6 +203,7 @@ let run_keepalive_unified_turn
       let scheduling =
         decide_keepalive_scheduling
           ~reactive_wake
+          ~event_queue_triggers:event_intake.event_queue_triggers
           ~keeper_resilience_of_name:(fun keeper_name ->
             if Health.is_healthy ~agent_name:keeper_name then None
             else Some "unhealthy")

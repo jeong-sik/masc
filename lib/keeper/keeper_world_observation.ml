@@ -101,10 +101,17 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
+type event_queue_trigger =
+  Keeper_world_observation_turn_types.event_queue_trigger =
+  | Bootstrap_stimulus
+  | No_progress_recovery_stimulus
+
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
   | Board_event_pending
   | Scope_message_pending
+  | Bootstrap_stimulus_pending
+  | No_progress_recovery_stimulus_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of
@@ -135,6 +142,8 @@ type turn_verdict = Keeper_world_observation_turn_types.turn_verdict =
 
 let turn_reason_to_string =
   Keeper_world_observation_turn_types.turn_reason_to_string
+let turn_reason_of_event_queue_trigger =
+  Keeper_world_observation_turn_types.turn_reason_of_event_queue_trigger
 let skip_reason_to_string =
   Keeper_world_observation_turn_types.skip_reason_to_string
 let channel_to_string = Keeper_world_observation_turn_types.channel_to_string
@@ -995,9 +1004,13 @@ let effective_scheduled_autonomous_cooldown
 let keeper_cycle_decision
       ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
       ?(reactive_wake = false)
+      ?(event_queue_triggers = [])
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
+  let event_queue_reactive_triggers =
+    List.map turn_reason_of_event_queue_trigger event_queue_triggers
+  in
   let reactive_triggers =
     [ (if observation.pending_mentions <> [] then Some Mention_pending else None)
     ; (if observation.pending_board_events <> [] then Some Board_event_pending else None)
@@ -1006,6 +1019,7 @@ let keeper_cycle_decision
        else None)
     ]
     |> List.filter_map Fun.id
+    |> fun triggers -> triggers @ event_queue_reactive_triggers
   in
   let blocked_channel =
     match reactive_triggers with

@@ -18,6 +18,7 @@ val finalize :
   keeper_name:string ->
   goal:string ->
   actual_keeper_tool_names:string list ->
+  completion_contract_result:Keeper_execution_receipt.completion_contract_result ->
   stop_reason:Runtime_agent.stop_reason ->
   raw_response_text:string ->
   unit ->

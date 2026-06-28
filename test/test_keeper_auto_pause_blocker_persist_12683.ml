@@ -487,10 +487,10 @@ let test_direct_success_persist_failure_keeps_no_progress_pause () =
        in
        let paused_entry =
          { entry with
-           phase = Masc.Keeper_state_machine.Paused
+           phase = Keeper_state_machine.Paused
          ; conditions =
              { entry.conditions with
-               Masc.Keeper_state_machine.operator_paused = true
+               Keeper_state_machine.operator_paused = true
              }
          }
        in
@@ -548,11 +548,11 @@ let test_direct_success_persist_failure_keeps_no_progress_pause () =
         | Some _ -> ()
         | None -> fail "expected failed persistence to keep livelock state");
        (match Masc.Keeper_registry.get_phase ~base_path:config.base_path keeper_name with
-        | Some Masc.Keeper_state_machine.Paused -> ()
+        | Some Keeper_state_machine.Paused -> ()
         | Some phase ->
           fail
             ("expected failed persistence to avoid Operator_resume, got phase "
-             ^ Masc.Keeper_state_machine.phase_to_string phase)
+             ^ Keeper_state_machine.phase_to_string phase)
         | None -> fail "expected registry phase");
        match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
        | Some entry ->

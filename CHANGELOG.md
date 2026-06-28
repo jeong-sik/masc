@@ -1,20 +1,15 @@
 # Changelog
 
+## Unreleased
 
-## [0.19.50] - 2026-06-26
+## [0.19.51] - 2026-06-28
 
 ### Changed
-- Bump OAS agent_sdk pin to latest main and bump masc version to 0.19.50.
-
-### Fixed
-- `keeper`: playground repo policy visibility now reuses the keeper-repository
-  mapping decision and reports `policy_source` consistently as
-  `keeper_repo_mappings.toml` (#22329).
-
-### Deprecated
-- TBD
-
-## Unreleased
+- Bump OAS agent_sdk pin to 0.207.12 release and bump masc version to 0.19.51.
+- `dashboard`: Memory OS fact decoding now emits a development-console warning
+  when a legacy wire payload still carries `external_ref`. The field remains
+  intentionally absent from dashboard fact types/rendering; PR/issue text is
+  context for the model, not a machine-readable external-state status tag.
 
 ### Fixed
 - `gate`: Discord inbound messages now resolve `<@snowflake>` / `<@!snowflake>`
@@ -22,12 +17,6 @@
   makes Discord-originated chat in the dashboard show human-readable names
   instead of raw ids. The existing platform surface badge already identifies the
   message as coming from Discord.
-
-### Changed
-- `dashboard`: Memory OS fact decoding now emits a development-console warning
-  when a legacy wire payload still carries `external_ref`. The field remains
-  intentionally absent from dashboard fact types/rendering; PR/issue text is
-  context for the model, not a machine-readable external-state status tag.
 
 ### Removed
 - `runtime`: removed the temporary `MASC_SHELL_IR_PATH_JAIL_ENABLED`
@@ -46,6 +35,19 @@
 - `runtime`: removed the legacy runtime storage selector. Storage is now
   filesystem-only by construction; operator/test environments must remove old
   backend overrides instead of expecting an in-memory backend.
+
+## [0.19.50] - 2026-06-26
+
+### Changed
+- Bump OAS agent_sdk pin to latest main and bump masc version to 0.19.50.
+
+### Fixed
+- `keeper`: playground repo policy visibility now reuses the keeper-repository
+  mapping decision and reports `policy_source` consistently as
+  `keeper_repo_mappings.toml` (#22329).
+
+### Deprecated
+- TBD
 
 ## [0.19.49] - 2026-06-26
 

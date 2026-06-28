@@ -136,6 +136,24 @@ let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry
   updated_meta
 ;;
 
+(* Directive orphan livelock guard: when an upstream source (e.g. a gRPC
+   HeartbeatAck) re-emits a directive for a keeper that is not in the
+   registry, [log_directive_agent_not_in_registry] fired on every
+   [process_directive] call produced a per-second WARN storm — a livelock
+   that drowned the real boot/failure signal and kept the keeper from making
+   progress. Throttle the WARN to one per [not_in_registry_warn_cooldown_s]
+   per agent_name so the storm collapses to a single line per window; the
+   [DirectiveFailures] counter (incremented by the caller) still records every
+   attempt, so the rate stays observable without log spam. *)
+let not_in_registry_warn_cooldown_s = 60.0
+let not_in_registry_last_warn : (string, float) Hashtbl.t = Hashtbl.create 32
+let not_in_registry_warn_due ~agent_name ~now =
+  let prev = try Hashtbl.find not_in_registry_last_warn agent_name with Not_found -> 0.0 in
+  let due = now -. prev >= not_in_registry_warn_cooldown_s in
+  if due then Hashtbl.replace not_in_registry_last_warn agent_name now;
+  due
+;;
+
 let log_directive_agent_not_in_registry ~agent_name ~action =
   let known_keeper () =
     match Keeper_tool_shared_runtime.find_registry_meta ~keeper_name:agent_name ~source_layer:"directive" with
@@ -162,11 +180,29 @@ let log_directive_agent_not_in_registry ~agent_name ~action =
           ])
       (Printf.sprintf "directive %s: agent %s not yet registered" action agent_name)
   else
-    Log.Keeper.emit
-      Log.Warn
-      ~category:Log.Directive
-      ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String action ])
-      (Printf.sprintf "directive %s: agent %s not in registry" action agent_name)
+    (* Throttle the unknown-keeper WARN to one per cooldown window per agent
+       (see [not_in_registry_warn_due]); subsequent attempts in the window are
+       demoted to Debug so the directive orphan livelock no longer floods the
+       log, while the caller-side DirectiveFailures counter still records each
+       attempt. *)
+    if not_in_registry_warn_due ~agent_name ~now:(Time_compat.now ())
+    then
+      Log.Keeper.emit
+        Log.Warn
+        ~category:Log.Directive
+        ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String action ])
+        (Printf.sprintf "directive %s: agent %s not in registry" action agent_name)
+    else
+      Log.Keeper.emit
+        Log.Debug
+        ~category:Log.Directive
+        ~details:
+          (`Assoc
+            [ "agent_name", `String agent_name
+            ; "action", `String action
+            ; "reason", `String "not_in_registry_throttled"
+            ])
+        (Printf.sprintf "directive %s: agent %s not in registry (throttled)" action agent_name)
 ;;
 
 let set_keeper_paused_state ~agent_name paused =

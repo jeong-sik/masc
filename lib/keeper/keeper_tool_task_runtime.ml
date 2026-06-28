@@ -632,7 +632,7 @@ let handle_keeper_task_tool
           probe, complete it immediately — no LLM turn. Uses [force_done_task_r]
           so a deterministic check does not route through the non-deterministic
           anti-rationalization gate (force_done is the existing keeper-Done
-          path; Done_action is exempt from the CDAL substring gate). Guarded to
+          path; Done_action is exempt from the legacy substring gate). Guarded to
           Claimed/InProgress so it never hits the AwaitingVerification
           Invalid_transition; idempotent if another agent reached Done first. *)
        (match

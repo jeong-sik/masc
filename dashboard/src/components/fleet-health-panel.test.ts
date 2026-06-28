@@ -137,7 +137,7 @@ describe('FleetHealthPanel', () => {
     expect(screen.queryByTestId('governance-monitor')).toBeNull()
   })
 
-  it('renders runtime fleet and CDAL blocker drilldown on the operations board', () => {
+  it('renders runtime fleet and contract blocker drilldown on the operations board', () => {
     storeMock.shellRuntimeResolution.value = {
       status: 'ready',
       warnings: [],
@@ -216,8 +216,8 @@ describe('FleetHealthPanel', () => {
             missing_manifest_run_dirs: 6,
             missing_contract_run_dirs: 6,
             stale_incomplete_grace_seconds: 300,
-            sample_stale_incomplete_run_ids: ['cdal-stale-a'],
-            sample_terminal_incomplete_run_ids: ['cdal-abort-a'],
+            sample_stale_incomplete_run_ids: ['contract-stale-a'],
+            sample_terminal_incomplete_run_ids: ['contract-abort-a'],
           },
         },
         task_scope: {
@@ -243,12 +243,12 @@ describe('FleetHealthPanel', () => {
     expect(screen.getByText('capacity 8/17')).toBeTruthy()
     expect(screen.getByText('exec 13')).toBeTruthy()
     expect(screen.getByText('일시정지 3')).toBeTruthy()
-    expect(screen.getByText('CDAL proof_store_incomplete')).toBeTruthy()
+    expect(screen.getByText('Contract verification proof_store_incomplete')).toBeTruthy()
     expect(screen.getByTestId('runtime-blocker-board')).toBeTruthy()
     expect(screen.getByText('8/17')).toBeTruthy()
     expect(screen.getByText('analyst')).toBeTruthy()
     expect(screen.getAllByText('proof_store_incomplete').length).toBeGreaterThan(0)
-    expect(screen.getByText(/cdal-stale-a/)).toBeTruthy()
+    expect(screen.getByText(/contract-stale-a/)).toBeTruthy()
   })
 
   it('marks the runtime health pill as warn when runtime.status is not ready', () => {

@@ -1,4 +1,4 @@
-; RFC-0056 Phase 0 — extract CDAL Phase 1A evaluator from flat masc.
+; RFC-0056 Phase 0 — extract contract Phase 1A evaluator from flat masc.
 ; Mirrors lib/cdal_runtime/dune: (include_subdirs no) opts out of the
 ; parent's (include_subdirs unqualified), letting this directory compile
 ; as its own library. (wrapped false) keeps module names unqualified so

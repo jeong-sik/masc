@@ -11,10 +11,32 @@
 let eio_write_mu = Eio.Mutex.create ()
 let fallback_write_mu = Stdlib.Mutex.create ()
 
-let with_write_lock f =
-  match Eio_context.get_switch_opt () with
-  | Some _ -> Eio.Mutex.use_rw ~protect:true eio_write_mu f
-  | None -> Stdlib.Mutex.protect fallback_write_mu f
+(* [eio_write_mu] is process-global, so a poisoned mutex blocks durable
+   event-queue snapshots for EVERY keeper for the lifetime of the process
+   (audit 2026-06-29). [Eio.Mutex.use_rw] poisons the mutex permanently if the
+   critical section raises, so the failure must never cross the [use_rw]
+   boundary: a non-cancellation exception is captured inside the critical
+   section and re-raised — with its original backtrace — only after the lock is
+   released, leaving the mutex usable for the next keeper. [Eio.Cancel.Cancelled]
+   is re-raised in place so cancellation/shutdown is honoured and never swallowed
+   (CancelledNeverAbsorbed). The external contract is unchanged: [with_write_lock]
+   still returns [f ()] or re-raises its exception. *)
+let with_write_lock : type a. (unit -> a) -> a =
+ fun f ->
+  let guarded () =
+    match f () with
+    | v -> Ok v
+    | exception (Eio.Cancel.Cancelled _ as exn) -> raise exn
+    | exception exn -> Error (exn, Printexc.get_raw_backtrace ())
+  in
+  let outcome =
+    match Eio_context.get_switch_opt () with
+    | Some _ -> Eio.Mutex.use_rw ~protect:true eio_write_mu guarded
+    | None -> Stdlib.Mutex.protect fallback_write_mu guarded
+  in
+  match outcome with
+  | Ok v -> v
+  | Error (exn, bt) -> Printexc.raise_with_backtrace exn bt
 
 let valid_keeper_name name =
   let valid_char = function
@@ -23,12 +45,25 @@ let valid_keeper_name name =
   in
   (not (String.equal name "")) && String.for_all valid_char name
 
+(* [Fs_compat.mkdir_p] raises (Sys_error / Unix_error) on ENOSPC/EROFS/ENOTDIR
+   instead of returning a result, so route it through the same [(unit, string)
+   result] channel as [save_file_atomic]. This keeps [save_json_atomic] total:
+   it never raises for a disk failure, so the enclosing [with_write_lock]
+   critical section returns normally and the shared mutex is not poisoned.
+   [Eio.Cancel.Cancelled] is re-raised so cancellation is not flattened into a
+   string error. *)
 let save_json_atomic path json =
-  Fs_compat.mkdir_p (Filename.dirname path);
-  json
-  |> Safe_ops.sanitize_json_utf8
-  |> Yojson.Safe.pretty_to_string
-  |> Fs_compat.save_file_atomic path
+  match
+    (try Ok (Fs_compat.mkdir_p (Filename.dirname path)) with
+     | Eio.Cancel.Cancelled _ as exn -> raise exn
+     | exn -> Error (Printexc.to_string exn))
+  with
+  | Error _ as err -> err
+  | Ok () ->
+    json
+    |> Safe_ops.sanitize_json_utf8
+    |> Yojson.Safe.pretty_to_string
+    |> Fs_compat.save_file_atomic path
 
 let snapshot_path ~base_path ~keeper_name =
   if valid_keeper_name keeper_name

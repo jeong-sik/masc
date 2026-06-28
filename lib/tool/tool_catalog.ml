@@ -245,6 +245,12 @@ let explicit_metadata : (string * metadata) list =
     ("masc_goal_verify", broadcast_tool);
     ("masc_plan_init", broadcast_tool);
     ("masc_plan_update", broadcast_tool);
+    ("masc_keeper_list", read_state_tool);
+    ("masc_keeper_status", read_state_tool);
+    ("masc_keeper_up", broadcast_tool);
+    ( "masc_keeper_down",
+      with_semantic_flags ~destructive:true ~effect_domain:Masc_workspace
+        default_metadata );
     ("masc_plan_get_task", read_state_tool);
     ("masc_plan_clear_task", actor_broadcast_tool);
     ("masc_note_add", broadcast_tool);

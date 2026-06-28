@@ -955,11 +955,11 @@ model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 label = "synthesizer"
 system_prompt = "Synthesize the panel answers."
 [[fusion.presets.staged_joj.judges]]
-model = "ollama_cloud.minimax-m3"
+model = "ollama_cloud.ollama-cloud-minimax-m3"
 label = "consensus-builder"
 system_prompt = "Focus on consensus."
 [[fusion.presets.staged_joj.judges]]
-model = "ollama_cloud.kimi-k2-6"
+model = "ollama_cloud.ollama-cloud-kimi-k2-7-code"
 label = "devils-advocate"
 system_prompt = "Challenge the dominant view."
 [[fusion.presets.staged_joj.judges]]
@@ -999,6 +999,15 @@ let test_config_staged_joj_preset () =
          ; "synthesizer-3"
          ]
          (List.map (fun j -> j.Fusion_policy.jlabel) preset.Fusion_policy.judges);
+       Alcotest.(check (list string)) "judge model ids"
+         [ "ollama_cloud.ollama-cloud-deepseek-v4-pro"
+         ; "ollama_cloud.ollama-cloud-minimax-m3"
+         ; "ollama_cloud.ollama-cloud-kimi-k2-7-code"
+         ; "ollama_cloud.ollama-cloud-glm-5-2"
+         ; "ollama_cloud.ollama-cloud-gpt-oss-120b"
+         ; "ollama_cloud.ollama-cloud-gemini-3-flash-preview"
+         ]
+         (List.map (fun j -> j.Fusion_policy.jmodel) preset.Fusion_policy.judges);
        (match
           Fusion_policy.staged_judge_groups
             ~group_size:p.Fusion_policy.staged_judge_group_size

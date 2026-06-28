@@ -1004,11 +1004,11 @@ model = "ollama_cloud.ollama-cloud-deepseek-v4-pro"
 label = "synthesizer"
 system_prompt = "Synthesize the panel answers: consensus, contradictions, partial coverage, unique insights, blind spots. Give one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."
 [[fusion.presets.staged_joj.judges]]
-model = "ollama_cloud.minimax-m3"
+model = "ollama_cloud.ollama-cloud-minimax-m3"
 label = "consensus-builder"
 system_prompt = "Focus on points of consensus across the panel; resolve contradictions conservatively. Give one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."
 [[fusion.presets.staged_joj.judges]]
-model = "ollama_cloud.kimi-k2-6"
+model = "ollama_cloud.ollama-cloud-kimi-k2-7-code"
 label = "devils-advocate"
 system_prompt = "Challenge the panel's dominant view; surface blind spots and unstated assumptions. Then give one resolved answer. Respond with ONLY the requested JSON object, no prose, no code fences."
 [[fusion.presets.staged_joj.judges]]

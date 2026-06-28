@@ -48,6 +48,24 @@ let passive_budget_execution =
     ; "operator_disposition", `String "pass"
     ; "operator_disposition_reason", `String "healthy"
     ; "terminal_reason_code", `String "turn_budget_exhausted:1070/1070"
+    ; "current_task_id", `Null
+    ; "goal_ids", `List []
+    ; "error", `Null
+    ; "claim_scope", `Assoc [ "status", `String "ok" ]
+    ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
+    ]
+;;
+
+let active_passive_budget_execution =
+  `Assoc
+    [ "latest_receipt_present", `Bool true
+    ; "recorded_at", `String "2999-01-01T00:00:00Z"
+    ; "completion_contract_result", `String "passive_only"
+    ; "operator_disposition", `String "pass"
+    ; "operator_disposition_reason", `String "healthy"
+    ; "terminal_reason_code", `String "turn_budget_exhausted:1070/1070"
+    ; "current_task_id", `String "TASK-1"
+    ; "goal_ids", `List []
     ; "error", `Null
     ; "claim_scope", `Assoc [ "status", `String "ok" ]
     ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
@@ -62,6 +80,24 @@ let completed_passive_execution =
     ; "operator_disposition", `String "pass"
     ; "operator_disposition_reason", `String "healthy"
     ; "terminal_reason_code", `String "completed"
+    ; "current_task_id", `Null
+    ; "goal_ids", `List []
+    ; "error", `Null
+    ; "claim_scope", `Assoc [ "status", `String "ok" ]
+    ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
+    ]
+;;
+
+let active_completed_passive_execution =
+  `Assoc
+    [ "latest_receipt_present", `Bool true
+    ; "recorded_at", `String "2999-01-01T00:00:00Z"
+    ; "completion_contract_result", `String "passive_only"
+    ; "operator_disposition", `String "pass"
+    ; "operator_disposition_reason", `String "healthy"
+    ; "terminal_reason_code", `String "completed"
+    ; "current_task_id", `String "TASK-1"
+    ; "goal_ids", `List []
     ; "error", `Null
     ; "claim_scope", `Assoc [ "status", `String "ok" ]
     ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
@@ -153,11 +189,23 @@ let test_completed_budget_exhaustion_is_not_blocked () =
   check (option string) "reason" None attention.cra_reason
 ;;
 
-let test_passive_budget_exhaustion_is_blocked () =
+let test_passive_budget_exhaustion_without_work_scope_is_not_blocked () =
   let attention =
     Server_dashboard_http_composite.composite_runtime_attention
       ~snapshot
       ~execution:passive_budget_execution
+  in
+  check bool "blocked" false attention.cra_blocked;
+  check bool "needs_attention" false attention.cra_needs_attention;
+  check string "state" "ok" attention.cra_state;
+  check (option string) "reason" None attention.cra_reason
+;;
+
+let test_active_passive_budget_exhaustion_is_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:active_passive_budget_execution
   in
   check bool "blocked" true attention.cra_blocked;
   check bool "needs_attention" true attention.cra_needs_attention;
@@ -169,11 +217,23 @@ let test_passive_budget_exhaustion_is_blocked () =
     attention.cra_reason
 ;;
 
-let test_completed_passive_receipt_is_blocked () =
+let test_completed_passive_receipt_without_work_scope_is_not_blocked () =
   let attention =
     Server_dashboard_http_composite.composite_runtime_attention
       ~snapshot
       ~execution:completed_passive_execution
+  in
+  check bool "blocked" false attention.cra_blocked;
+  check bool "needs_attention" false attention.cra_needs_attention;
+  check string "state" "ok" attention.cra_state;
+  check (option string) "reason" None attention.cra_reason
+;;
+
+let test_active_completed_passive_receipt_is_blocked () =
+  let attention =
+    Server_dashboard_http_composite.composite_runtime_attention
+      ~snapshot
+      ~execution:active_completed_passive_execution
   in
   check bool "blocked" true attention.cra_blocked;
   check bool "needs_attention" true attention.cra_needs_attention;
@@ -217,13 +277,21 @@ let () =
             `Quick
             test_completed_budget_exhaustion_is_not_blocked
         ; test_case
-            "passive turn-budget exhaustion is blocked"
+            "passive turn-budget exhaustion without work scope is not blocked"
             `Quick
-            test_passive_budget_exhaustion_is_blocked
+            test_passive_budget_exhaustion_without_work_scope_is_not_blocked
         ; test_case
-            "completed passive receipt is blocked"
+            "active passive turn-budget exhaustion is blocked"
             `Quick
-            test_completed_passive_receipt_is_blocked
+            test_active_passive_budget_exhaustion_is_blocked
+        ; test_case
+            "completed passive receipt without work scope is not blocked"
+            `Quick
+            test_completed_passive_receipt_without_work_scope_is_not_blocked
+        ; test_case
+            "active completed passive receipt is blocked"
+            `Quick
+            test_active_completed_passive_receipt_is_blocked
         ; test_case
             "not-dispatched turn-budget exhaustion is blocked"
             `Quick

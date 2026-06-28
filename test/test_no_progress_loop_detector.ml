@@ -138,9 +138,15 @@ let test_threshold_override_fires_early () =
   Alcotest.(check int) "streak retained" 1 (D.current_streak ~keeper_name:k)
 
 let test_no_work_budget_override_predicate () =
-  Alcotest.(check (option int)) "scheduled no-work budget exhaustion fast-fails"
-    (Some 1)
+  Alcotest.(check (option int)) "scheduled no-work budget exhaustion keeps default threshold"
+    None
     (no_work_budget_override scheduled_observation);
+  let actionable_observation =
+    { scheduled_observation with claimable_task_count = 1 }
+  in
+  Alcotest.(check (option int)) "scheduled actionable budget exhaustion fast-fails"
+    (Some 1)
+    (no_work_budget_override actionable_observation);
   let reactive_observation =
     { scheduled_observation with pending_mentions = [ ("operator", "wake") ] }
   in

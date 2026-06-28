@@ -79,6 +79,20 @@ let accept_no_progress_read_only_should_try_next err =
       err
   | None -> false
 
+let accept_no_progress_retry_kind err =
+  match Keeper_internal_error.classify_masc_internal_error err with
+  | Some err -> Keeper_internal_error.accept_no_progress_retry_kind err
+  | None -> None
+
+let accept_rejected_result_should_try_next ~is_last err =
+  (not is_last) && accept_no_progress_should_try_next err
+
+let checkpoint_for_accept_rejected_retry ~resume_checkpoint ~checkpoint_after err =
+  match accept_no_progress_retry_kind err with
+  | Some `Empty_no_progress -> resume_checkpoint
+  | Some `Read_only_no_progress -> checkpoint_after
+  | None -> checkpoint_after
+
 let http_status_of_http_error = function
   | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
   | _ -> None
@@ -227,7 +241,21 @@ let run
            ~keeper_name:ctx.keeper_name
            candidate
            ~reason;
-         Error err
+         if accept_rejected_result_should_try_next ~is_last err
+         then
+           let checkpoint_for_retry =
+             checkpoint_for_accept_rejected_retry
+               ~resume_checkpoint
+               ~checkpoint_after
+               err
+           in
+           let next_last_err =
+             match sdk_error_to_http_error err with
+             | Some http_err -> Some http_err
+             | None -> last_err
+           in
+           loop checkpoint_for_retry next_last_err rest
+         else Error err
        | Error err ->
          Keeper_turn_driver_provider_attempt.record_candidate_health_error
            ~keeper_name:ctx.keeper_name
@@ -259,4 +287,7 @@ module For_testing = struct
 
   let accept_no_progress_read_only_should_try_next =
     accept_no_progress_read_only_should_try_next
+
+  let accept_rejected_result_should_try_next =
+    accept_rejected_result_should_try_next
 end

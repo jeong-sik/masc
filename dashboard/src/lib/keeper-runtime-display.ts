@@ -74,6 +74,22 @@ function trimmed(value: string | null | undefined): string | null {
   return text ? text : null
 }
 
+const NO_PROGRESS_LOOP_HINT =
+  '반복된 무증거 턴으로 자동 정지된 progress-safety latch입니다. provider 실패가 아니며 Resume이 latch를 해제합니다.'
+const IDLE_LOOP_HINT =
+  '반복 idle 턴으로 자동 정지되었습니다. provider 실패가 아니며 최근 실행 상태 확인 후 재개하세요.'
+
+export function normalizeKeeperBlockerText(value: string | null | undefined): string | null {
+  const text = trimmed(value)
+  if (!text) return null
+  const lower = text.toLowerCase()
+  if (lower.includes('no_progress loop detected') || lower.includes('no-progress loop')) {
+    return NO_PROGRESS_LOOP_HINT
+  }
+  if (lower.includes('idle loop detected')) return IDLE_LOOP_HINT
+  return text
+}
+
 export function keeperDisplayModel(
   _source: KeeperModelDisplaySource | null | undefined,
 ): KeeperModelDisplay | null {
@@ -383,7 +399,7 @@ function socialModelFallbackHint(keeper: Keeper): string | null {
 }
 
 function continueGateHint(keeper: Keeper): string {
-  const detail = keeper.runtime_blocker_summary?.trim()
+  const detail = normalizeKeeperBlockerText(keeper.runtime_blocker_summary)
   if (detail) return `계속 진행 승인 대기 · ${detail}`
   if (keeper.runtime_blocker_class === 'ambiguous_post_commit_timeout') {
     return '계속 진행 승인 대기 · 변경 이후 응답이 끊겨 상태 확인이 필요합니다.'
@@ -439,7 +455,7 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
   if (!keeper) return null
   if (keeper.runtime_blocker_continue_gate) return continueGateHint(keeper)
   const blockerClass = keeper.runtime_blocker_class
-  const runtimeBlocker = keeper.runtime_blocker_summary?.trim()
+  const runtimeBlocker = normalizeKeeperBlockerText(keeper.runtime_blocker_summary)
   if (runtimeBlocker && runtimeBlocker !== blockerClass) {
     return runtimeBlocker
   }
@@ -507,9 +523,7 @@ export function keeperRuntimeBlockerHint(keeper: Keeper | null | undefined): str
     return 'Keeper가 관찰 또는 대기만 계획하고 있어 다음 실행 지시가 필요할 수 있습니다.'
   }
   if (blockerClass === 'no_progress_loop') {
-    // keeper_unified_turn_no_progress.ml: consecutive no-progress turns above
-    // threshold latch the blocker. Auto-clears on first progress turn.
-    return 'Keeper가 연속으로 진행 없는 턴을 내고 있어 정지된 것 같습니다. 다음 실제 진행이 나오면 자동 해제됩니다.'
+    return NO_PROGRESS_LOOP_HINT
   }
   return null
 }
@@ -548,7 +562,7 @@ export function keeperRuntimeHint(keeper: Keeper | null | undefined): string | n
   }
   const socialFallback = socialModelFallbackHint(keeper)
   if (socialFallback) return socialFallback
-  const blocker = keeper.last_blocker?.trim()
+  const blocker = normalizeKeeperBlockerText(keeper.last_blocker)
   if (paused && autoRecover) return blocker ? `자동 재시도 대기 · ${blocker}` : '자동 재시도 대기'
   if (paused && blocker) return `일시정지 · ${blocker}`
   if (paused && keeper.keepalive_running) return '일시정지 · 하트비트만 유지 중'

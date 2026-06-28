@@ -572,7 +572,7 @@ describe('deriveKeeperAttentionReason', () => {
       name: 'composite',
       attention_reason: 'passive_only',
     }))
-    expect(reason.text).toBe('수동 응답만 있음')
+    expect(reason.text).toBe('진행 작업 없는 수동 응답')
   })
 })
 

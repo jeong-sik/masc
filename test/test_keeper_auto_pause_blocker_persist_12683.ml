@@ -165,15 +165,15 @@ let test_no_progress_loop_detection_pauses_keeper () =
        check bool "returned meta paused" true paused_meta.paused;
        check
          (option (float 0.001))
-         "manual pause has no auto-resume"
+         "safety pause has no auto-resume"
          None
-       paused_meta.auto_resume_after_sec;
+         paused_meta.auto_resume_after_sec;
        (match paused_meta.runtime.last_blocker with
         | Some { Keeper_meta_contract.klass = No_progress_loop; detail } ->
           check
             string
             "blocker detail"
-            "no_progress loop detected: streak=10 threshold=10; keeper paused until operator resume clears the no-progress latch"
+            "no_progress loop detected: streak=10 threshold=10; auto-paused after repeated no-evidence turns; operator resume clears the no-progress latch"
             detail
         | Some _ -> fail "expected No_progress_loop blocker"
         | None -> fail "expected no_progress loop blocker");
@@ -549,7 +549,7 @@ let test_idle_detected_repeated_failure_pauses_keeper () =
          check bool "registry meta paused" true paused_meta.paused;
          check
            (option (float 0.001))
-           "manual pause has no auto-resume"
+           "safety pause has no auto-resume"
            None
            paused_meta.auto_resume_after_sec;
          (match paused_meta.runtime.last_blocker with
@@ -557,7 +557,7 @@ let test_idle_detected_repeated_failure_pauses_keeper () =
             check
               string
               "blocker detail"
-              "idle loop detected: consecutive_idle_turns=4; manual pause applied"
+              "idle loop detected: consecutive_idle_turns=4; auto-paused after repeated idle turns; operator resume clears the idle latch"
               detail
           | Some _ -> fail "expected Sdk_idle_detected blocker"
           | None -> fail "expected idle-detected blocker")

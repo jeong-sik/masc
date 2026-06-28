@@ -55,6 +55,7 @@ type t =
   | PathRejection
   | IdeOrphanWrites
   | PathResolverIdentityMismatch
+  | KeeperMetaOverlayDrift
   | HeartbeatSuccesses
   | HeartbeatFailures
   | CleanupTrackingFailures
@@ -301,6 +302,7 @@ let to_string = function
   | PathRejection -> "masc_keeper_path_rejection_total"
   | IdeOrphanWrites -> "masc_ide_orphan_writes_total"
   | PathResolverIdentityMismatch -> "masc_keeper_path_resolver_identity_mismatch_total"
+  | KeeperMetaOverlayDrift -> "masc_keeper_meta_overlay_drift_total"
   | HeartbeatSuccesses -> "masc_keeper_heartbeat_successes_total"
   | HeartbeatFailures -> "masc_keeper_heartbeat_failures_total"
   | CleanupTrackingFailures -> "masc_keeper_cleanup_tracking_failures_total"
@@ -528,7 +530,7 @@ let all : t list =
     CompactionPairRepairDrops; EmergencyCompactRatioThreshold; OperatorCompact; OperatorClear;
     CompactionNoop; ToolPairRepair; ToolEmissionRegistrySize; ToolEmissionPushes;
     ToolUnderusedAllowedCount; ToolUnderusedAllowed; PathRejection; IdeOrphanWrites;
-    PathResolverIdentityMismatch; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
+    PathResolverIdentityMismatch; KeeperMetaOverlayDrift; HeartbeatSuccesses; HeartbeatFailures; CleanupTrackingFailures;
     DispatchEventFailures; DirectiveFailures; ToolCallDuration; ToolCallDurationBucket; WriteMetaFailures;
     MetaReadFailures; ApprovalQueueFailures; GuardsFailures; ProfileLoadFailures;
     CompactAuditFailures; CompactAuditRetentionParse; CompactAuditDrainBatches; CompactAuditDrainBatchSizeBucket;
@@ -575,6 +577,30 @@ let all : t list =
   KeeperRepoMappingDeniedMissing; KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError
   ]
+;;
+
+let emit_runtime_selected ~keeper_name ~runtime_id ~fallback_reason =
+  Otel_metric_store_core.inc_counter
+    (to_string RuntimeSelected)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "runtime_id", runtime_id
+      ; "source", "fallback"
+      ; "fallback_reason", fallback_reason
+      ]
+    ()
+;;
+
+let emit_runtime_rotation ~keeper_name ~from_runtime ~to_runtime ~reason =
+  Otel_metric_store_core.inc_counter
+    (to_string RuntimeRotation)
+    ~labels:
+      [ "keeper", keeper_name
+      ; "from_runtime", from_runtime
+      ; "to_runtime", to_runtime
+      ; "reason", reason
+      ]
+    ()
 ;;
 
 (* Zero-fill: register the unlabeled 0-cell of every counter at module

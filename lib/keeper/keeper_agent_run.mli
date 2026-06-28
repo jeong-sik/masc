@@ -34,6 +34,15 @@ module For_testing : sig
     :  ?guardrails:Agent_sdk.Guardrails.t
     -> unit
     -> Agent_sdk.Guardrails.t
+
+  val normalize_response_text_for_finalization
+    :  runtime_id:string
+    -> initial_messages:Agent_sdk.Types.message list
+    -> run_result:Runtime_agent.run_result
+    -> text:string
+    -> tool_names:string list
+    -> unit
+    -> (string, Agent_sdk.Error.sdk_error) result
 end
 
 val per_provider_timeout_for_turn

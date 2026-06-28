@@ -51,6 +51,14 @@ let escape_mrkdwn_text s =
 
 let truncate_block_text s = truncate_to_limit s slack_block_text_limit
 
+let redacted_http_url_opt url =
+  Keeper_chat_blocks.redacted_http_url_opt
+    ~on_drop:(fun reason ->
+      Log.Keeper.warn
+        "keeper_chat_slack: dropped non-http(s) chat block URL reason=%s"
+        (Keeper_chat_blocks.dropped_http_url_reason_to_string reason))
+    url
+
 let strip_trailing_slash s =
   let len = String.length s in
   if len > 0 && s.[len - 1] = '/' then String.sub s 0 (len - 1) else s
@@ -82,7 +90,11 @@ let link_block_json ~url ~title ~description =
     ]
 
 let image_block_json ~url ~caption =
-  let alt_text = Option.value caption ~default:"" in
+  let alt_text =
+    match caption with
+    | Some caption -> redact caption
+    | None -> ""
+  in
   `Assoc
     [ ("type", `String "image")
     ; ("image_url", `String url)
@@ -122,9 +134,13 @@ let tool_context_block_json ~name ~args_summary ~result_summary =
 
 let slack_block_of_chat_block = function
   | Keeper_chat_blocks.Image { src; cap } ->
-      Some (image_block_json ~url:src ~caption:cap)
+      Option.map
+        (fun url -> image_block_json ~url ~caption:cap)
+        (redacted_http_url_opt src)
   | Keeper_chat_blocks.Link { url; title; meta = _ } ->
-      Some (link_block_json ~url ~title ~description:None)
+      Option.map
+        (fun url -> link_block_json ~url ~title ~description:None)
+        (redacted_http_url_opt url)
   | Keeper_chat_blocks.Text _
   | Keeper_chat_blocks.Heading _
   | Keeper_chat_blocks.Unordered_list _
@@ -139,7 +155,6 @@ let slack_block_of_chat_block = function
 
 let content_blocks_of_text text =
   text
-  |> redact
   |> Keeper_chat_blocks.parse_text_to_blocks
   |> List.filter_map slack_block_of_chat_block
 

@@ -86,10 +86,16 @@ let with_temp_keepers_dir f =
 ;;
 
 let with_temp_workspace_config f =
-  let marker = Filename.temp_file "keeper-memory-os-workspace-" ".tmp" in
-  Sys.remove marker;
-  Unix.mkdir marker 0o700;
-  f (Masc.Workspace.default_config marker)
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Fun.protect
+    ~finally:Fs_compat.clear_fs
+    (fun () ->
+      let marker = Filename.temp_file "keeper-memory-os-workspace-" ".tmp" in
+      Sys.remove marker;
+      Unix.mkdir marker 0o700;
+      f (Masc.Workspace.default_config marker))
 ;;
 
 let write_text_file path contents =
@@ -899,6 +905,7 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
         ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
         ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
         ; timeout_env
+        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
         ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
         ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
         ; "MASC_KEEPER_MEMORY_OS_GC"
@@ -4826,7 +4833,15 @@ let test_compaction_snapshots_json_skips_unrelated_manifest_events () =
                   ~compaction_id:"cmp-unknown-skip"
                   ~compaction_source:"event_bus"
                   ())
-             (`Assoc [ "context_compacted_count", `Int 1 ]))
+             (`Assoc
+                [ ( "last_compaction"
+                  , `Assoc
+                      [ "before_tokens", `Int 210_000
+                      ; "after_tokens", `Int 120_000
+                      ; "phase_hint", `String "proactive(85%)"
+                      ] )
+                ; "context_compacted_count", `Int 1
+                ]))
         ()
     in
     let row_json = Runtime_manifest.to_json row in

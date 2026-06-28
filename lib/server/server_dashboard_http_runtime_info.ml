@@ -470,6 +470,7 @@ let runtime_resolution_json (config : Workspace.config) =
   let upstream_status =
     Option.bind server_repo_path Server_git_probe.git_upstream_status
     |> Option.value ~default:Server_git_probe.empty_git_upstream_status
+    (* NDT-OK: dashboard rendering fallback *)
   in
   let workspace_commit = Server_git_probe.git_rev_parse_short config.workspace_path in
   let resolved_base_commit = Server_git_probe.git_rev_parse_short config.base_path in

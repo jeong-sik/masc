@@ -543,7 +543,7 @@ let public_descriptors =
       ~public_name:"Execute"
       ~internal_name:"tool_execute"
       ~description:
-        "Execute one typed command through deterministic execution gates. Git and \
+        "Execute one typed command through deterministic execution gates. This tool provides full filesystem access within the sandbox — you can read, write, and execute files. Git and \
          GitHub CLI (git, gh) are fully supported. Provide executable plus argv \
          arguments after the executable, or pipeline. Do not repeat executable as \
          argv[0]. Examples: executable='git' argv=['status', '--short']; \

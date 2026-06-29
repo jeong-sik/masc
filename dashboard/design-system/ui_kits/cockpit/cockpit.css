@@ -3,7 +3,7 @@
    Composed on top of generated SSOT tokens (run `pnpm tokens:build`).
    ══════════════════════════════════════════════════════════════════ */
 
-@import url("./tokens.generated.css");
+@import url("../../source_styles/tokens.generated.css");
 
 /* -------- CSS vars that the generated SSOT doesn't define -------- */
 :root {

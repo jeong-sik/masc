@@ -6,7 +6,6 @@ let unix_iso_option_json = function
   | None -> `Null
   | Some ts -> unix_iso_json ts
 ;;
-
 let schedule_status_count schedules status =
   List.fold_left
     (fun count (request : Schedule_domain.schedule_request) ->
@@ -526,4 +525,3 @@ let scheduled_automation_dashboard_json (config : Workspace.config) : Yojson.Saf
              request_rows) )
     ]
 ;;
-

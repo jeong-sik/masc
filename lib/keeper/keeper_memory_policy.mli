@@ -352,15 +352,8 @@ val latest_state_snapshot_from_messages :
 val priority_for_kind : kind:string -> int
 (** Static priority floor for [kind]. *)
 
-val contains_any_ci : string -> string list -> bool
-(** [true] when [text] contains any of [needles] (case-insensitive). *)
-
-val signal_bonus : text:string -> int
-(** Bonus added to a memory line's priority when [text] hits known
-    high-signal keywords. *)
-
 val tuned_priority_for_candidate : kind:string -> text:string -> int
-(** [priority_for_kind] plus [signal_bonus]. *)
+(** Tuned candidate priority derived from [kind] and [text]. *)
 
 (** {1 Capacity caps} *)
 

@@ -789,7 +789,7 @@ let structured_state_snapshot_schema :
       [ structured_param
           ~name:"priority"
           ~description:"Self-evaluated priority score (1-100) for how critical the decisions and next steps in this generation are."
-          ~param_type:Agent_sdk.Types.Int
+          ~param_type:Agent_sdk.Types.Integer
           ~required:false
       ; structured_param
           ~name:"goal"
@@ -958,7 +958,8 @@ let synthesize_state_from_run_result
         [ Keeper_synthetic_marker.tag (Printf.sprintf "Last output: %s" hint) ]
       | None -> [ Keeper_synthetic_marker.tag "No visible output this generation" ])
   in
-  { goal = (let g = String.trim goal in if g = "" then None else Some g);
+  { priority = None;
+    goal = (let g = String.trim goal in if g = "" then None else Some g);
     progress;
     done_summary = (if budget_exhausted then None else progress);
     next_summary;

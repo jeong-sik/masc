@@ -25,35 +25,20 @@
       "override": "\"Cinzel\", \"Noto Sans KR\", \"EB Garamond\", serif",
       "reason": "Font stack quote-style / fallback-list variant (cosmetic or fallback diff)"
     },
-    "--radius-lg": {
-      "generated": "12px",
-      "override": "6px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
-    },
-    "--radius-md": {
-      "generated": "6px",
-      "override": "4px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
-    },
     "--radius-pill": {
       "generated": "999px",
       "override": "9999px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
-    },
-    "--radius-sm": {
-      "generated": "4px",
-      "override": "3px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (getComputedStyle 2026-06-30): .gd-board sets --radius-pill:9999px on the element (LIVE via self-declaration). :root renders 999px (skin-v2/generated). Not :root drift."
     },
     "--radius-xl": {
       "generated": "24px",
       "override": "8px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (getComputedStyle 2026-06-30): LIVE in app and preview — neither skin-v2 nor generated defines --radius-xl, so the :root 8px renders. Intentional kept-distinct, not drift."
     },
     "--radius-xs": {
       "generated": "2px",
       "override": "var(--r-0)",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (getComputedStyle 2026-06-30): .gd-board sets --radius-xs:2px on the element (LIVE via self-declaration); var(--r-0) alias resolves to 2px. Not :root drift."
     },
     "--scrim-strong": {
       "generated": "var(--color-scrim-strong)",

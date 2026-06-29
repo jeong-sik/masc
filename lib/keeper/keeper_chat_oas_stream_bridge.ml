@@ -23,6 +23,9 @@ let replace_tool bridge_state index tool =
 let remove_tool bridge_state index =
   { tools_by_index = List.remove_assoc index bridge_state.tools_by_index }
 
+let tool_start_is_replay existing tool =
+  String.equal existing.tool_call_id tool.tool_call_id
+
 let protocol_error ?index ?event_type ?reason ?raw_bytes kind =
   Keeper_chat_events.Oas_stream_protocol_error
     { kind; index; event_type; reason; raw_bytes }
@@ -78,18 +81,16 @@ let translate ~redact_text ~on_text_delta bridge_state
   | ContentBlockStart { index; tool_id = Some tid; tool_name = Some tname; _ }
     when String.trim tid <> "" && String.trim tname <> "" ->
       let tool = { tool_call_id = tid; tool_call_name = tname } in
-      let duplicate_event =
-        match stream_tool_for_index bridge_state index with
-        | None -> []
-        | Some _ ->
-            [ protocol_error ~index
-                ~reason:"content block start reused an active stream index"
-                Tool_start_duplicate_index ]
-      in
+      let existing_tool = stream_tool_for_index bridge_state index in
       { bridge_state = replace_tool bridge_state index tool;
         chat_events =
-          duplicate_event
-          @ [ Tool_call_start { tool_call_id = tid; tool_call_name = tname } ]
+          (match existing_tool with
+           | Some existing when tool_start_is_replay existing tool -> []
+           | Some existing ->
+               [ Tool_call_end { tool_call_id = existing.tool_call_id };
+                 Tool_call_start { tool_call_id = tid; tool_call_name = tname } ]
+           | None ->
+               [ Tool_call_start { tool_call_id = tid; tool_call_name = tname } ])
       }
   | ContentBlockStart { index; tool_id; tool_name; _ } ->
       let partial_tool_identity =

@@ -48,6 +48,13 @@ let translate_oas_stream_events events =
   in
   loop Keeper_chat_oas_stream_bridge.empty_state [] events
 
+let has_stream_protocol_error events =
+  List.exists
+    (function
+      | Keeper_chat_events.Oas_stream_protocol_error _ -> true
+      | _ -> false)
+    events
+
 let test_agent_name_for_channel_actor () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
@@ -524,6 +531,77 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
                 | Keeper_chat_events.Event_error _ -> "error"
                 | _ -> "other")
               events))
+
+let test_keeper_stream_bridge_ignores_replayed_tool_start () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "tc-repeat";
+            tool_name = Some "keeper_memory_search" };
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "tc-repeat";
+            tool_name = Some "keeper_memory_search" };
+        ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"q\":\"loop\"}" };
+        ContentBlockStop { index = 2 };
+      ]
+  in
+  check bool "no protocol error for replayed start" false
+    (has_stream_protocol_error events);
+  match events with
+  | [ Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
+      Keeper_chat_events.Tool_call_args { tool_call_id = args_id; delta };
+      Keeper_chat_events.Tool_call_end { tool_call_id = end_id } ] ->
+      check string "tool id" "tc-repeat" tool_call_id;
+      check string "tool name" "keeper_memory_search" tool_call_name;
+      check string "args id" "tc-repeat" args_id;
+      check string "args" "{\"q\":\"loop\"}" delta;
+      check string "end id" "tc-repeat" end_id
+  | _ -> fail "expected one start, one args delta, and one end"
+
+let test_keeper_stream_bridge_closes_tool_when_index_is_reused () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "tc-first";
+            tool_name = Some "keeper_memory_search" };
+        ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"q\":\"first\"}" };
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "tc-second";
+            tool_name = Some "keeper_memory_search" };
+        ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"q\":\"second\"}" };
+        ContentBlockStop { index = 2 };
+      ]
+  in
+  check bool "no protocol error for recoverable reused index" false
+    (has_stream_protocol_error events);
+  match events with
+  | [ Keeper_chat_events.Tool_call_start { tool_call_id = first_start; _ };
+      Keeper_chat_events.Tool_call_args { tool_call_id = first_args; delta = args_a };
+      Keeper_chat_events.Tool_call_end { tool_call_id = first_end };
+      Keeper_chat_events.Tool_call_start { tool_call_id = second_start; _ };
+      Keeper_chat_events.Tool_call_args { tool_call_id = second_args; delta = args_b };
+      Keeper_chat_events.Tool_call_end { tool_call_id = second_end } ] ->
+      check string "first start" "tc-first" first_start;
+      check string "first args id" "tc-first" first_args;
+      check string "first args" "{\"q\":\"first\"}" args_a;
+      check string "first implicit end" "tc-first" first_end;
+      check string "second start" "tc-second" second_start;
+      check string "second args id" "tc-second" second_args;
+      check string "second args" "{\"q\":\"second\"}" args_b;
+      check string "second end" "tc-second" second_end
+  | _ -> fail "expected previous tool to close before reused-index tool starts"
 
 let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
   let open Agent_sdk.Types in
@@ -1392,6 +1470,10 @@ let () =
             test_keeper_stream_args_preserve_user_blocks;
           test_case "stream bridge preserves interleaved thinking and tool" `Quick
             test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool;
+          test_case "stream bridge ignores replayed tool starts" `Quick
+            test_keeper_stream_bridge_ignores_replayed_tool_start;
+          test_case "stream bridge closes tool when index is reused" `Quick
+            test_keeper_stream_bridge_closes_tool_when_index_is_reused;
           test_case "stream bridge surfaces OAS message metadata" `Quick
             test_keeper_stream_bridge_surfaces_oas_message_metadata;
           test_case "stream bridge rejects tool args without start" `Quick

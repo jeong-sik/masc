@@ -563,6 +563,7 @@ let direct_reply_visible_text body =
     let json = Yojson.Safe.from_string body in
     match Keeper_turn_outcome.of_reply_payload (Some json) with
     | Keeper_turn_outcome.Continuation_checkpoint -> None
+    | Keeper_turn_outcome.No_visible_reply -> None
     | Keeper_turn_outcome.Visible_reply -> (
         match Json_util.get_string json "reply" with
         | None -> None

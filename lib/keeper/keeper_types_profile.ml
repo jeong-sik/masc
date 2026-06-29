@@ -546,6 +546,37 @@ let load_keeper_profile_defaults_for_base_path ~base_path name
       ~persona_dirs:(safe_persona_dirs ~base_path ())
       name
 
+let keeper_profile_defaults_materializable_for_name ?base_path name =
+  try
+    let defaults =
+      match base_path with
+      | Some base_path -> load_keeper_profile_defaults_for_base_path ~base_path name
+      | None -> load_keeper_profile_defaults name
+    in
+    keeper_profile_defaults_materializable defaults
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ProfileLoadFailures)
+        ~labels:
+          [
+            ( "site",
+              Keeper_profile_load_failure_site.(to_label Materializable_check) );
+          ]
+        ();
+      let base_path_detail =
+        match base_path with
+        | Some base_path -> Printf.sprintf " base_path=%s" base_path
+        | None -> ""
+      in
+      Log.Keeper.warn
+        "profile materializable check for %s failed%s: %s; keeping configured keeper visible"
+        name
+        base_path_detail
+        (Printexc.to_string exn);
+      true
+
 type keeper_default_source_snapshot = {
   source_kind : string option;
   defaults : keeper_profile_defaults;

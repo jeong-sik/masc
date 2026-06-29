@@ -261,7 +261,7 @@ type attention_item = {
 - `refresh_once`: `Keeper_turn_driver_wrappers.run_named_with_masc_tools`로 `"governance_judge"` runtime 호출 -> judgment 파싱 -> `Dated_jsonl` store에 append
 - **date-split store**: `.masc/governance/judgments/YYYY-MM/DD.jsonl` (legacy 단일 파일 fallback 지원)
 - `compute_judgments`: factual JSON을 prompt로 변환하고 LLM 호출. 결과에서 item별 judgment를 파싱하여 반환
-- **allowed_tool whitelist**: recommended_action의 resolved_tool은 active operator 도구만 허용 (`masc_operator_snapshot`, `masc_operator_action`, `masc_operator_confirm`, `masc_surface_audit`)
+- **allowed_tool whitelist**: recommended_action의 resolved_tool은 active operator 도구만 허용 (`masc_operator_snapshot`, `masc_operator_digest`, `masc_operator_action`, `masc_operator_confirm`, `masc_surface_audit`)
 - 상태: per-base_path mutable state (`judge_online`, `refreshing`, `generated_at`, `model_used`, `last_error`)
 
 ### 3.7. Execution Surface (`dashboard_execution.ml` + 하위 모듈)

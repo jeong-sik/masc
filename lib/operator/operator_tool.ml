@@ -342,8 +342,7 @@ let remote_schemas : tool_schema list =
     surface_audit_schema ~remote:true;
   ]
 
-let remote_tool_names : string list =
-  List.map (fun (schema : tool_schema) -> schema.name) remote_schemas
+let remote_tool_names : string list = Operator_remote_tool_name.all_strings
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

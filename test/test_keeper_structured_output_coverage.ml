@@ -316,9 +316,26 @@ let test_governance_judge_schema_uses_resolved_tool_ssot () =
   check
     (list string)
     "governance resolved_tool enum"
-    (List.sort String.compare
-       Keeper_structured_output_schema.governance_resolved_tool_tokens)
+    (List.sort String.compare Operator_remote_tool_name.all_strings)
     (enum_strings tool_schema)
+;;
+
+let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
+  let schema_names =
+    Operator_tool.remote_schemas
+    |> List.map (fun (schema : Masc_domain.tool_schema) -> schema.name)
+    |> List.sort String.compare
+  in
+  check
+    (list string)
+    "operator remote schema names"
+    (List.sort String.compare Operator_remote_tool_name.all_strings)
+    schema_names;
+  check
+    (list string)
+    "operator remote exported names"
+    (List.sort String.compare Operator_remote_tool_name.all_strings)
+    (List.sort String.compare Operator_tool.remote_tool_names)
 ;;
 
 let test_governance_judge_schema_allows_payload_objects () =
@@ -412,6 +429,10 @@ let () =
             "governance judge schema uses resolved-tool SSOT"
             `Quick
             test_governance_judge_schema_uses_resolved_tool_ssot
+        ; test_case
+            "operator remote tool-name SSOT matches remote schemas"
+            `Quick
+            test_operator_remote_tool_name_ssot_matches_remote_schemas
         ; test_case
             "governance judge schema admits payload objects"
             `Quick

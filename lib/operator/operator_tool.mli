@@ -77,7 +77,7 @@ val schemas : Masc_domain.tool_schema list
     and schema coverage checks. *)
 
 val remote_tool_names : string list
-(** [List.map (fun s -> s.name) remote_schemas].  Pre-computed for
-    O(1) membership checks in the auth gate. *)
+(** Operator-remote tool names from {!Operator_remote_tool_name.all_strings}.
+    Kept aligned with {!remote_schemas} by coverage tests. *)
 
 val force_link : unit

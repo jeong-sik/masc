@@ -132,8 +132,6 @@ let inference_entries =
       "Cache only temperatures at or below this value (0.0=deterministic only)";
     entry ~default:"300" "MASC_INFERENCE_CACHE_TTL_SEC"
       "Default TTL for inference response cache (seconds)";
-    entry ~default:"true" "MASC_RELAY_CALIBRATION_ENABLED"
-      "Relay token calibration mechanism (feature flag)";
     entry ~default:"safe_only" "MASC_SPAWN_CACHE_POLICY"
       "Spawn cache policy: off or safe_only";
   ]
@@ -734,12 +732,6 @@ let pulse_entries =
       "Max consecutive consumer failures before recovery (clamped >=1)";
   ]
 
-let relay_entries =
-  [
-    entry ~default:"auto" "MASC_RELAY_TARGET_AGENT"
-      "Relay target agent name";
-  ]
-
 let session_entries =
   [
     entry ~default:"3600.0" "MASC_SESSION_MAX_AGE_SEC"
@@ -909,7 +901,7 @@ let all_categories () =
     category "transport" transport_entries;
     category "storage" (storage_entries @ cache_entries @ memory_entries @ board_entries);
     category "runtime"
-      (runtime_entries @ relay_entries @ task_entries
+      (runtime_entries @ task_entries
        @ message_gc_entries @ pulse_entries @ internal_timer_entries
        @ timeout_entries @ sse_entries @ telemetry_entries
        @ tool_entries);

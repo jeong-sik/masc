@@ -167,11 +167,6 @@ let all_flags : flag list = [
     default = true; category = "inference";
     lifecycle = Active; since = "2.110.0" };
 
-  { env_name = "MASC_RELAY_CALIBRATION_ENABLED";
-    description = "Relay token calibration mechanism";
-    default = true; category = "inference";
-    lifecycle = Active; since = "2.120.0" };
-
   (* ── Runtime ──────────────────────────────────────────────── *)
   { env_name = Env_config_core.orchestrator_enabled_env_key;
     description = "Auto-orchestration background loop (superseded by zero-zombie cleanup)";

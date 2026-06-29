@@ -345,44 +345,6 @@ let keeper_handoff_pressure_threshold =
             min_value = Some (`Float 0.5); max_value = Some (`Float 0.99) }
     ()
 
-(* ── relay_heuristic surface (Low risk) ───────────────────────── *)
-
-let relay_tokens_per_user_msg =
-  register_int ~key:"relay.tokens_per_user_msg"
-    ~default:(fun () -> 150) ~min:10 ~max:5000 ()
-
-let relay_tokens_per_assistant_msg =
-  register_int ~key:"relay.tokens_per_assistant_msg"
-    ~default:(fun () -> 500) ~min:10 ~max:10000 ()
-
-let relay_tokens_per_tool_call =
-  register_int ~key:"relay.tokens_per_tool_call"
-    ~default:(fun () -> 200) ~min:10 ~max:5000 ()
-
-let relay_tokens_per_tool_result =
-  register_int ~key:"relay.tokens_per_tool_result"
-    ~default:(fun () -> 300) ~min:10 ~max:10000 ()
-
-let relay_cost_large_file_read =
-  register_int ~key:"relay.cost_large_file_read"
-    ~default:(fun () -> 10_000) ~min:1000 ~max:100_000 ()
-
-let relay_cost_per_file_edit =
-  register_int ~key:"relay.cost_per_file_edit"
-    ~default:(fun () -> 3_000) ~min:500 ~max:50_000 ()
-
-let relay_cost_long_running =
-  register_int ~key:"relay.cost_long_running"
-    ~default:(fun () -> 20_000) ~min:1000 ~max:200_000 ()
-
-let relay_cost_exploration =
-  register_int ~key:"relay.cost_exploration"
-    ~default:(fun () -> 15_000) ~min:1000 ~max:100_000 ()
-
-let relay_cost_simple =
-  register_int ~key:"relay.cost_simple"
-    ~default:(fun () -> 1_000) ~min:100 ~max:10_000 ()
-
 (* ── keeper_diagnostics surface (Medium risk) ─────────────────── *)
 
 let keeper_snapshot_sec =
@@ -545,17 +507,6 @@ let surfaces =
         "keeper.work_as_hb_max_silence_sec";
         "keeper.smart_hb_enabled";
         "keeper.stage_timing_ring_size";
-      ];
-    };
-    {
-      id = "relay_heuristic";
-      description = "Relay token estimation and task cost heuristics (not calibrated)";
-      risk = "low";
-      param_keys = [
-        "relay.tokens_per_user_msg"; "relay.tokens_per_assistant_msg";
-        "relay.tokens_per_tool_call"; "relay.tokens_per_tool_result";
-        "relay.cost_large_file_read"; "relay.cost_per_file_edit";
-        "relay.cost_long_running"; "relay.cost_exploration"; "relay.cost_simple";
       ];
     };
     {

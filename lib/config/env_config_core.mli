@@ -178,10 +178,6 @@ val personas_dir_env_key : string
 val data_dir_env_key : string
 val data_dir_opt : unit -> string option
 
-(** {1 Relay calibration} *)
-
-val relay_calibration_enabled : unit -> bool
-
 (** {1 Auth} *)
 
 val admin_token_env_key : string

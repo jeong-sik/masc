@@ -75,12 +75,6 @@ module Orchestrator : sig
   val enabled : bool
 end
 
-(** {1 Relay / CLI} *)
-
-module Relay : sig
-  val target_agent : string
-end
-
 (** {1 Spawn} *)
 
 module Spawn : sig

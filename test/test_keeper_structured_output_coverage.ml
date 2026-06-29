@@ -1,11 +1,7 @@
 open Alcotest
 
-let contains_substring ~needle haystack =
-  String_util.contains_substring haystack needle
-;;
-
 let rec ml_files_under rel =
-  let abs = Masc_test_deps.source_path rel in
+  let abs = Ast_grep.resolve_path rel in
   Sys.readdir abs
   |> Array.to_list
   |> List.sort String.compare
@@ -19,12 +15,10 @@ let rec ml_files_under rel =
     else [])
 ;;
 
-let source rel = Masc_test_deps.read_source_file rel
-
 let direct_completion_files_under rel =
   ml_files_under rel
   |> List.filter (fun rel ->
-    source rel |> contains_substring ~needle:"Llm_provider.Complete.complete")
+    Ast_grep.count_calls ~module_path:rel ~callee:"Llm_provider.Complete.complete" > 0)
   |> List.sort String.compare
 ;;
 
@@ -75,14 +69,13 @@ let test_keeper_direct_completions_are_enumerated () =
 let test_keeper_direct_completions_request_structured_output () =
   List.iter
     (fun rel ->
-       let text = source rel in
        check
-         bool
+         int
          (rel ^ " applies structured-output schema")
-         true
-         (contains_substring
-            ~needle:"Keeper_structured_output_schema.apply_to_provider_config"
-            text))
+         1
+         (Ast_grep.count_calls
+            ~module_path:rel
+            ~callee:"Keeper_structured_output_schema.apply_to_provider_config"))
     expected_structured_completion_files
 ;;
 

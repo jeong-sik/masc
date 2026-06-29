@@ -100,7 +100,6 @@
   test_keeper_execution_receipt_budget_wire
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
-  test_keeper_structured_output_coverage
   test_keeper_memory_os_gc_dry_run_report
   test_keeper_user_model
   test_keeper_recall_outcome_eval
@@ -427,7 +426,6 @@
   test_keeper_execution_receipt_budget_wire
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
-  test_keeper_structured_output_coverage
   test_keeper_memory_os_gc_dry_run_report
   test_keeper_user_model
   test_keeper_recall_outcome_eval
@@ -698,6 +696,11 @@
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
  (libraries masc_test_deps))
+
+(test
+ (name test_keeper_structured_output_coverage)
+ (modules test_keeper_structured_output_coverage)
+ (libraries alcotest ast_grep))
 
 ; Destructive-ops policy TOML loader + typed default catalogue.
 

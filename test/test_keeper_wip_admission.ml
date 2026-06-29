@@ -277,6 +277,32 @@ let test_active_items_only_include_claimed_or_in_progress () =
        (fun item -> Admission.category_to_string item.Admission.scope.category)
        active)
 
+let test_active_items_filter_by_claimed_by_assignee () =
+  let tasks =
+    [ task
+        ~status:(Masc_domain.Claimed { assignee = "keeper-a"; claimed_at = "now" })
+        "task-claimed-a"
+    ; task
+        ~status:
+          (Masc_domain.InProgress { assignee = "keeper-a"; started_at = "now" })
+        "task-progress-a"
+    ; task
+        ~status:(Masc_domain.Claimed { assignee = "keeper-b"; claimed_at = "now" })
+        "task-claimed-b"
+    ; task
+        ~status:
+          (Masc_domain.InProgress { assignee = "keeper-b"; started_at = "now" })
+        "task-progress-b"
+    ]
+  in
+  let active =
+    Admission.active_items_of_tasks ~claimed_by:"keeper-a"
+      ~default_repo:"fallback" tasks
+  in
+  check (list string) "keeper-a active ids"
+    [ "task-claimed-a"; "task-progress-a" ]
+    (List.map (fun item -> item.Admission.id) active)
+
 let test_goalless_task_exempt_from_goal_cap () =
   (* RFC-0245: a goalless claim must not be rejected by the per-goal cap even
      when the goalless ([None]) bucket is at/over [max_per_goal]. With
@@ -347,6 +373,8 @@ let () =
             test_keeper_task_claim_no_unclaimed_emits_no_work_outcome
         ; test_case "active items include active WIP only" `Quick
             test_active_items_only_include_claimed_or_in_progress
+        ; test_case "active items filter by claimed_by assignee" `Quick
+            test_active_items_filter_by_claimed_by_assignee
         ; test_case "goalless task exempt from goal cap" `Quick
             test_goalless_task_exempt_from_goal_cap
         ; test_case "goalless tasks never goal-capped" `Quick

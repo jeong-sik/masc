@@ -87,7 +87,7 @@ type active_item = {
   scope : scope;
 }
 
-let task_is_active_wip ?(claimed_by : string option) (task : Masc_domain.task) =
+let task_is_active_wip ?claimed_by (task : Masc_domain.task) =
   match task.task_status with
   | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } -> (
     match claimed_by with

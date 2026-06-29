@@ -55,10 +55,10 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.19 plus focused OAS #2248 provider-qualified
-  ;; capability lookup, #2244 assistant tool-content, and fail-closed unknown
-  ;; stream block handling.
-  (agent_sdk (>= 0.207.19))
+  ;; Pinned to OAS v0.207.20 plus focused OAS #2254 typed GLM tool-choice
+  ;; rejection, #2248 provider-qualified capability lookup, #2244 assistant
+  ;; tool-content, and fail-closed unknown stream block handling.
+  (agent_sdk (>= 0.207.20))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

@@ -15,6 +15,7 @@ module KT = Keeper_types
 module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_meta_json = Masc.Keeper_meta_json
+module Keeper_meta_store = Masc.Keeper_meta_store
 module MC = Masc.Keeper_meta_contract
 
 let temp_dir prefix =
@@ -211,6 +212,49 @@ let queue_contains_post_id queue post_id =
   |> List.exists (fun stimulus ->
     String.equal stimulus.Keeper_event_queue.post_id post_id)
 
+let task_id_of_created_task (created : Masc.Workspace.add_task_success) =
+  match Keeper_id.Task_id.of_string created.task_id with
+  | Ok task_id -> task_id
+  | Error err -> fail err
+
+let create_owned_active_task config meta =
+  let created =
+    match
+      Masc.Workspace.add_task_with_result
+        config
+        ~title:"no-progress release regression"
+        ~priority:1
+        ~description:"owned active task must release when no-progress pause latches"
+    with
+    | Ok created -> created
+    | Error err -> fail (Masc.Workspace.add_task_error_to_string err)
+  in
+  (match
+     Masc.Workspace.claim_task_r
+       config
+       ~agent_name:meta.Keeper_meta_contract.agent_name
+       ~task_id:created.task_id
+       ()
+   with
+   | Ok _ -> ()
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
+  (match
+     Masc.Workspace.transition_task_r
+       config
+       ~agent_name:meta.Keeper_meta_contract.agent_name
+       ~task_id:created.task_id
+       ~action:Masc_domain.Start
+       ()
+   with
+   | Ok _ -> ()
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
+  created
+
+let task_status_by_id config task_id =
+  Masc.Workspace.get_tasks_raw config
+  |> List.find (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  |> fun task -> task.Masc_domain.task_status
+
 let event_queue_snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
@@ -270,6 +314,49 @@ let test_no_progress_loop_detection_pauses_keeper () =
 	                 ~base_path:config.base_path
 	                 keeper_name))
 	       | None -> fail "expected registered keeper")
+
+let test_no_progress_loop_detection_releases_owned_active_task () =
+  let base_path = temp_dir "masc-no-progress-release-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let _init_msg = Masc.Workspace.init config ~agent_name:(Some "operator") in
+       let keeper_name = "no-progress-owner" in
+       let meta = make_meta keeper_name in
+       let created = create_owned_active_task config meta in
+       let current_task_id = task_id_of_created_task created in
+       let meta = { meta with current_task_id = Some current_task_id } in
+       Masc.Keeper_registry.clear ();
+       (match Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error err -> fail err);
+       let _entry =
+         Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta
+       in
+       let paused_meta =
+         Masc.Keeper_unified_turn_no_progress.mark_loop_detected
+           ~config
+           meta
+           ~streak:10
+           ~threshold:10
+       in
+       check (option string) "returned meta current_task_id cleared" None
+         (Option.map Keeper_id.Task_id.to_string paused_meta.current_task_id);
+       (match task_status_by_id config created.task_id with
+        | Masc_domain.Todo -> ()
+        | status ->
+          fail
+            (Printf.sprintf
+               "expected no-progress pause to release task to todo, got %s"
+               (Masc_domain.task_status_to_string status)));
+       match Keeper_meta_store.read_meta config keeper_name with
+       | Ok (Some persisted) ->
+         check bool "persisted meta paused" true persisted.paused;
+         check (option string) "persisted current_task_id cleared" None
+           (Option.map Keeper_id.Task_id.to_string persisted.current_task_id)
+       | Ok None -> fail "expected persisted keeper meta"
+       | Error err -> fail err)
 
 let test_operator_resume_clears_no_progress_loop_latch () =
   Eio_main.run
@@ -1085,6 +1172,8 @@ let () =
         [
           test_case "loop detection pauses keeper for manual resume" `Quick
             test_no_progress_loop_detection_pauses_keeper;
+          test_case "loop detection releases owned active task" `Quick
+            test_no_progress_loop_detection_releases_owned_active_task;
           test_case "operator resume clears no-progress latch" `Quick
             test_operator_resume_clears_no_progress_loop_latch;
           test_case

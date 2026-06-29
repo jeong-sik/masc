@@ -638,7 +638,7 @@ Unified keeper의 내부 decision record는 `{keeper_dir}/{name}.decisions.jsonl
 
 각 레코드에는:
 - `id`: 고유 결정 ID (`dec-{timestamp_ms}-{hash}`)
-- `trigger_signals`: turn 시점에 관찰된 트리거 후보 (`direct_mention`, `board_activity`, `new_unclaimed_task` 등)
+- `trigger_signals`: turn 시점에 관찰된 트리거 후보 (`direct_mention`, `board_activity`, `claimable_task` 등)
 - `observed_affordances`: 당시 가능한 액션 후보 (`task_claim`, `reply_in_workspace`, `board_post_or_comment` 등)
 - `turn_mode`: 실제 최종 결과 분류 (`tool_use`, `text_response`, `skip_text`, `noop`). 에러 여부는 `outcome`이 담당한다.
 - `tools_used`: 실제 호출된 tool 목록

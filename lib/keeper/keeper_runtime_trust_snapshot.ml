@@ -547,6 +547,8 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
       match latest_event_kind with
       | Some "auto_approved_always" -> "always_flag"
       | Some "auto_approved_rule_match" -> "always_rule"
+      | Some event when String.equal event Keeper_approval_queue.approval_audit_hard_forbidden_event ->
+        "hard_forbidden"
       | Some "resolved" -> "resolved"
       | Some "expired" | Some "approval_timeout" -> "expired"
       | Some "cancelled" -> "cancelled"

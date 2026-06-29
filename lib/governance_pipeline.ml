@@ -304,6 +304,18 @@ let auto_approval_hard_forbidden ~risk meta =
   risk = Critical || runtime_auto_approval_blocked meta
 ;;
 
+let hard_forbidden_reject_reason ~risk =
+  match risk with
+  | Critical -> "critical risk cannot be auto-approved"
+  | Low | Medium | High -> "runtime contract blocks auto-approval"
+;;
+
+let forbidden_without_approval_reject_reason ~risk ~hard_forbidden =
+  if hard_forbidden
+  then hard_forbidden_reject_reason ~risk
+  else "destructive tool/op cannot be auto-approved without HITL"
+;;
+
 let auto_approval_soft_forbidden ~tool_name ~input =
   destructive_tool_or_op ~tool_name ~input
 ;;
@@ -357,8 +369,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         tool_name
         (risk_level_to_string base_risk)
         (risk_level_to_string risk);
-    if requires_operator_approval
-    then (
+    let with_approval_context f =
       let turn_id =
         Option.map
           (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.runtime.usage.total_turns + 1)
@@ -395,6 +406,69 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
       let base_path = (config : Workspace.config).base_path in
+      f
+        ~turn_id
+        ~task_id
+        ~goal_id
+        ~goal_ids
+        ~runtime_contract
+        ~sandbox_profile
+        ~backend
+        ~sandbox_target
+        ~selected_model
+        ~risk_level
+        ~base_path
+    in
+    let reject_forbidden_without_approval
+        ~turn_id
+        ~task_id
+        ~goal_id
+        ~goal_ids
+        ~runtime_contract
+        ~sandbox_target
+        ~selected_model
+        ~risk_level
+        ~base_path
+      =
+      let reason = forbidden_without_approval_reject_reason ~risk ~hard_forbidden in
+      let decision = Agent_sdk.Hooks.Reject reason in
+      Keeper_approval_queue.audit_approval_event
+        ~base_path
+        ~event_type:Keeper_approval_queue.approval_audit_hard_forbidden_event
+        ~id:(Printf.sprintf "hard_forbidden_%s_%s" keeper_name tool_name)
+        ~keeper_name
+        ~tool_name
+        ~risk_level
+        ?turn_id
+        ?task_id
+        ?goal_id
+        ?goal_ids
+        ?sandbox_target
+        ?runtime_contract
+        ?selected_model
+        ~disposition:"Blocked"
+        ~disposition_reason:"hard_forbidden"
+        ~auto_approved:false
+        ~decision:(Keeper_approval_queue.Approval_resolved decision)
+        ();
+      decision
+    in
+    if needs_approval
+    then
+      with_approval_context
+        (fun
+          ~turn_id
+          ~task_id
+          ~goal_id
+          ~goal_ids
+          ~runtime_contract
+          ~sandbox_profile
+          ~backend
+          ~sandbox_target
+          ~selected_model
+          ~risk_level
+          ~base_path
+        ->
       let always_approve =
         Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false
@@ -426,7 +500,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
           ?turn_id
           ?task_id
           ?goal_id
-          ~goal_ids:(Option.value ~default:[] goal_ids)
+          ?goal_ids
           ?sandbox_target
           ?runtime_contract
           ?selected_model
@@ -448,7 +522,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
                ?turn_id
                ?task_id
                ?goal_id
-               ~goal_ids:(Option.value ~default:[] goal_ids)
+               ?goal_ids
                ?sandbox_target
                ?runtime_contract
                ?selected_model
@@ -478,5 +552,31 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
                ~risk_level
                ?clock
                ()))
+    else if hard_forbidden || soft_forbidden
+    then
+      with_approval_context
+        (fun
+          ~turn_id
+          ~task_id
+          ~goal_id
+          ~goal_ids
+          ~runtime_contract
+          ~sandbox_profile:_
+          ~backend:_
+          ~sandbox_target
+          ~selected_model
+          ~risk_level
+          ~base_path
+        ->
+          reject_forbidden_without_approval
+            ~turn_id
+            ~task_id
+            ~goal_id
+            ~goal_ids
+            ~runtime_contract
+            ~sandbox_target
+            ~selected_model
+            ~risk_level
+            ~base_path)
     else Agent_sdk.Hooks.Approve
 ;;

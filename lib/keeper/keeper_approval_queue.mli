@@ -175,6 +175,9 @@ val approval_audit_pending_event : string
 val approval_audit_resolved_event : string
 (** Event tag persisted when an approval is resolved. *)
 
+val approval_audit_hard_forbidden_event : string
+(** Event tag persisted when governance rejects a hard-forbidden approval. *)
+
 val recent_resolved_history_limit : int
 (** Default dashboard history length for resolved HITL approvals. *)
 

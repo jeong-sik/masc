@@ -589,7 +589,15 @@
   --color-icon-default:   var(--icon-default);
   --color-border:         var(--border-border);
   --color-alert-badge:    var(--bg-alert-badge);
-  --shadow-card:          0 1px 3px rgba(0, 0, 0, 0.04);
+  /* --shadow-card removed from :root — dead in every reachable theme.
+   * Verified via getComputedStyle across data-theme × data-volt (2026-06-30):
+   * the :root value never renders. skin-v2.css (html[data-skin=v2], specificity
+   * 0,3,1) wins :root for default/dark-fantasy (0 1px 3px/.5); paper and
+   * styleseed set their own; .gd-board declares its own on the element
+   * (0 2px 8px/.35, LIVE via self-declaration beating inheritance). The SSOT
+   * for card shadow is skin-v2.css — do not re-add a :root --shadow-card.
+   * shadow-elevated/modal stay: skin-v2 does not redefine them, so :root is
+   * the live source. */
   --shadow-elevated:      0 4px 12px rgba(0, 0, 0, 0.08);
   --shadow-modal:         0 8px 24px rgba(0, 0, 0, 0.12);
 }

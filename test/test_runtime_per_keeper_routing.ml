@@ -522,14 +522,14 @@ thinking-support = false
 streaming = true
 
 [models.thinkdefault]
-api-name = "qwen3-32b"
+api-name = "qwen36-35b-a3b-mtp"
 max-context = 128000
 tools-support = true
 thinking-support = true
 streaming = true
 
 [models.thinkexplicitoff]
-api-name = "qwen3-32b"
+api-name = "qwen36-35b-a3b-mtp"
 max-context = 128000
 tools-support = true
 thinking-support = true

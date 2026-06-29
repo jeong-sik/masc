@@ -365,6 +365,47 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_kwargs))
 
+let test_repo_oas_model_catalog_preserve_axes_resolve () =
+  with_repo_oas_model_catalog @@ fun catalog ->
+  let expect_catalog_field ~field_name ~get model_id expected =
+    match Llm_provider.Model_catalog.lookup catalog model_id with
+    | None -> failf "expected repo OAS catalog row for %s" model_id
+    | Some entry ->
+      check (option string) (model_id ^ " " ^ field_name) (Some expected)
+        (get entry)
+  in
+  let expect_request_side_preserve model_id =
+    expect_catalog_field
+      ~field_name:"preserve_thinking_control_format"
+      ~get:(fun entry -> entry.preserve_thinking_control_format)
+      model_id
+      "chat_template_kwargs_preserve_thinking";
+    match Llm_provider.Capabilities.for_model_id model_id with
+    | None -> failf "expected OAS capabilities for %s" model_id
+    | Some caps ->
+      check bool (model_id ^ " request-side preserve capability") true
+        (Llm_provider.Capabilities.(
+           caps.preserve_thinking_control_format
+           = Chat_template_kwargs_preserve_thinking))
+  in
+  let expect_preserve_always_replay model_id =
+    expect_catalog_field
+      ~field_name:"reasoning_replay"
+      ~get:(fun entry -> entry.reasoning_replay)
+      model_id
+      "preserve_always";
+    match Llm_provider.Capabilities.for_model_id model_id with
+    | None -> failf "expected OAS capabilities for %s" model_id
+    | Some caps ->
+      check bool (model_id ^ " reasoning replay override") true
+        (Llm_provider.Capabilities.(
+           caps.reasoning_replay_override = Force_preserve_always))
+  in
+  expect_request_side_preserve "runpod_mtp/qwen36-35b-a3b-mtp";
+  expect_request_side_preserve "qwen36-35b-a3b-mtp";
+  expect_preserve_always_replay "ollama_cloud/kimi-k2.6";
+  expect_preserve_always_replay "kimi-k2.6"
+
 let test_repo_runtime_bindings_resolve_through_oas_catalog () =
   with_repo_oas_model_catalog @@ fun catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
@@ -1022,6 +1063,9 @@ let () =
             test_runtime_json_not_in_repo_config;
           test_case "repo OAS catalog covers live RunPod MTP runtime" `Quick
             test_repo_oas_model_catalog_covers_live_runpod_mtp;
+          test_case
+            "repo OAS catalog preserves typed thinking/replay axes"
+            `Quick test_repo_oas_model_catalog_preserve_axes_resolve;
           test_case
             "repo runtime bindings resolve through the OAS catalog"
             `Quick test_repo_runtime_bindings_resolve_through_oas_catalog;

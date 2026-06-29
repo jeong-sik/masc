@@ -9,6 +9,13 @@ val record_provider_timeout_observation
 
 val smart_idle_sleep_observation_reasons : string list
 
+val smart_idle_sleep_admission_reasons : string list
+
+val record_smart_idle_sleep_admission
+  :  base_path:string
+  -> keeper_name:string
+  -> unit
+
 val record_smart_idle_sleep_observation
   :  base_path:string
   -> keeper_name:string

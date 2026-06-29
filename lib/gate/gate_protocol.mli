@@ -35,17 +35,6 @@ type turn_stats = {
   tokens_used : int;
 }
 
-(** Successful response to send back to the consumer. *)
-type outbound_message = {
-  keeper_name : string;
-  content : string;
-  structured : Yojson.Safe.t option;
-      (** Optional structured content blocks (opaque JSON).
-          Gate passes this through without interpretation.
-          See [docs/spec/structured-content-schema.md] for the JSON schema. *)
-  turn_stats : turn_stats option;
-}
-
 (** Durable MASC message request envelope.
 
     This is the layer shared by dashboard chat, Connectors, and future
@@ -76,7 +65,26 @@ type message_request = {
 }
 
 val message_request_status_to_string : message_request_status -> string
+(** Parse the canonical status labels emitted by [keeper_msg_async].
+    Unknown labels return [None] so callers fail closed instead of silently
+    treating protocol drift as acceptance. *)
+val message_request_status_of_string : string -> message_request_status option
 val message_request_to_json : message_request -> Yojson.Safe.t
+
+(** Successful response to send back to the consumer. *)
+type outbound_message = {
+  keeper_name : string;
+  content : string;
+  structured : Yojson.Safe.t option;
+      (** Optional structured content blocks (opaque JSON).
+          Gate passes this through without interpretation.
+          See [docs/spec/structured-content-schema.md] for the JSON schema. *)
+  turn_stats : turn_stats option;
+  message_request : message_request option;
+      (** Optional durable request envelope for accepted-but-not-final keeper
+          turns. Connectors can render this as queued/running progress instead
+          of treating a busy keeper as a hung request. *)
+}
 
 (** {1 Validation} *)
 
@@ -116,7 +124,12 @@ val gate_error_to_string : gate_error -> string
     Lives here so that [Channel_gate] does not depend on [Gate_keeper_backend]. *)
 
 type dispatch_result =
-  | Reply of { content : string; structured : Yojson.Safe.t option; stats : turn_stats option }
+  | Reply of
+      { content : string
+      ; structured : Yojson.Safe.t option
+      ; stats : turn_stats option
+      ; message_request : message_request option
+      }
   | Keeper_error_result of string
   | Unavailable_result
 

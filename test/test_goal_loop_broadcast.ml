@@ -38,6 +38,13 @@ let test_event_shape () =
         "event carries payload" true (List.mem_assoc "payload" fields)
   | _ -> Alcotest.fail "event must be a JSON object"
 
+let test_refresh_timeout_below_interval () =
+  Alcotest.(check bool)
+    "timeout stays below interval to avoid Proactive_refresh clamp"
+    true
+    (Broadcast.goal_loop_broadcast_timeout_s
+     < Broadcast.goal_loop_broadcast_interval_s)
+
 let drain session_id =
   let rec loop n =
     match Sse.try_pop session_id with Some _ -> loop (n + 1) | None -> n
@@ -94,7 +101,11 @@ let test_change_gated_broadcast () =
 
 let () =
   Alcotest.run "goal_loop_broadcast"
-    [ ("event", [ Alcotest.test_case "shape" `Quick test_event_shape ])
+    [ ( "event"
+      , [ Alcotest.test_case "shape" `Quick test_event_shape
+        ; Alcotest.test_case "refresh timeout below interval" `Quick
+            test_refresh_timeout_below_interval
+        ] )
     ; ( "change_gate"
       , [ Alcotest.test_case "broadcast" `Quick test_change_gated_broadcast ] )
     ]

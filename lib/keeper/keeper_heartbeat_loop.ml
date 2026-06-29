@@ -53,6 +53,7 @@ type heartbeat_event_intake = Stimulus_intake.heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
 let consume_single_heartbeat_stimulus = Stimulus_intake.consume_single_heartbeat_stimulus
@@ -202,6 +203,7 @@ let run_keepalive_unified_turn
       let scheduling =
         decide_keepalive_scheduling
           ~reactive_wake
+          ~event_queue_triggers:event_intake.event_queue_triggers
           ~keeper_resilience_of_name:(fun keeper_name ->
             if Health.is_healthy ~agent_name:keeper_name then None
             else Some "unhealthy")
@@ -605,6 +607,9 @@ let run_smart_heartbeat_gate
     | Keeper_heartbeat_smart.Skip_idle next_time ->
       let wait = Float.max 1.0 (next_time -. Time_compat.now ()) in
       Log.Keeper.debug "smart heartbeat: skip (idle, next in %.1fs)" wait;
+      Observations.record_smart_idle_sleep_admission
+        ~base_path:config.base_path
+        ~keeper_name:meta_current.name;
       let jitter = wait *. 0.1 *. Random.float 1.0 in
       let outcome =
         Keeper_keepalive_signal.interruptible_sleep ~clock ~stop ~wakeup (wait +. jitter)

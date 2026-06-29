@@ -74,13 +74,14 @@ let accept_no_progress_retry_kind_string err =
   Option.map
     (function
       | `Empty_no_progress -> "empty_no_progress"
-      | `Read_only_no_progress -> "read_only_no_progress")
+      | `Read_only_no_progress -> "read_only_no_progress"
+      | `Thinking_only_no_progress -> "thinking_only_no_progress")
     kind
 
-let direct_empty_no_progress_retry_reason_string err =
+let direct_no_progress_retry_reason_string err =
   Option.map
     Masc.Keeper_error_classify.degraded_retry_reason_to_string
-    (Masc.Keeper_turn_runtime_budget.direct_empty_no_progress_retry_reason err)
+    (Masc.Keeper_turn_runtime_budget.direct_no_progress_retry_reason err)
 
 let write_file path content =
   let oc = open_out path in
@@ -122,8 +123,8 @@ let with_direct_retry_runtime f =
        | Ok () -> f ()
        | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e)
 
-let direct_empty_no_progress_retry_decision ?time_spent_in_turn_s err =
-  Masc.Keeper_turn_runtime_budget.direct_empty_no_progress_retry_decision
+let direct_no_progress_retry_decision ?time_spent_in_turn_s err =
+  Masc.Keeper_turn_runtime_budget.direct_no_progress_retry_decision
     ~base_runtime:"test_provider.test_model"
     ~effective_runtime:"runtime.direct-empty"
     ~attempted_runtimes:[ "runtime.direct-empty" ]
@@ -280,14 +281,18 @@ let test_reject_reason_describes_thinking_only_response () =
     false
     (Masc.Keeper_error_classify.is_runtime_exhausted_error err);
   Alcotest.(check bool)
-    "thinking-only without read-only tool does not try next candidate"
+    "thinking-only without read-only tool is not a read-only retry"
     false
     (Masc.Keeper_turn_driver.For_testing
      .accept_no_progress_read_only_should_try_next
        err);
+  Alcotest.(check bool)
+    "thinking-only without tool can try next candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
   Alcotest.(check (option string))
-    "thinking-only without read-only tool is not runtime-recoverable"
-    None
+    "thinking-only without tool is runtime-recoverable"
+    (Some "thinking_only_no_progress")
     (Option.map
        Masc.Keeper_error_classify.degraded_retry_reason_to_string
        (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err))
@@ -793,7 +798,7 @@ let test_read_only_retry_uses_typed_context_not_reason_tokens () =
   Alcotest.(check (option string))
     "direct keeper_msg does not rotate read-only no-progress"
     None
-    (direct_empty_no_progress_retry_reason_string typed_err);
+    (direct_no_progress_retry_reason_string typed_err);
   let string_only_err =
     accept_rejected_sdk_error
       ~response_shape:None
@@ -816,7 +821,7 @@ let test_read_only_retry_uses_typed_context_not_reason_tokens () =
 	       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason
 	          string_only_err))
 
-let test_direct_empty_no_progress_retry_uses_shared_budget_decision () =
+let test_direct_no_progress_retry_uses_shared_budget_decision () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
       accept_rejected_sdk_error
@@ -825,7 +830,7 @@ let test_direct_empty_no_progress_retry_uses_shared_budget_decision () =
         ~reason:"shape=empty"
         ()
     in
-    (match direct_empty_no_progress_retry_decision empty_err with
+    (match direct_no_progress_retry_decision empty_err with
      | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
        Alcotest.(check string)
          "allowed reason"
@@ -840,7 +845,7 @@ let test_direct_empty_no_progress_retry_uses_shared_budget_decision () =
       Masc.Keeper_turn_runtime_budget.degraded_retry_slot_phase_budget_sec +. 1.0
     in
     (match
-       direct_empty_no_progress_retry_decision
+       direct_no_progress_retry_decision
          ~time_spent_in_turn_s:exhausted_after
          empty_err
      with
@@ -855,6 +860,25 @@ let test_direct_empty_no_progress_retry_uses_shared_budget_decision () =
        Alcotest.fail "exhausted direct empty retry should not rotate"
      | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
        Alcotest.fail "exhausted direct empty retry should report slot exhaustion");
+    let thinking_only_err =
+      accept_rejected_sdk_error
+        ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
+        ~last_tool_effect:None
+        ~reason:"shape=thinking_only"
+        ()
+    in
+    (match direct_no_progress_retry_decision thinking_only_err with
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
+       Alcotest.(check string)
+         "thinking-only allowed reason"
+         "thinking_only_no_progress"
+         (Masc.Keeper_error_classify.degraded_retry_reason_to_string
+            retry.fallback_reason)
+     | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
+       Alcotest.fail
+         "fresh direct thinking-only retry should not exhaust slot phase"
+     | Masc.Keeper_turn_runtime_budget.No_degraded_retry ->
+       Alcotest.fail "fresh direct thinking-only retry should rotate");
     let read_only_err =
       accept_rejected_sdk_error
         ~response_shape:(Some Keeper_internal_error.Accept_response_thinking_only)
@@ -867,7 +891,7 @@ let test_direct_empty_no_progress_retry_uses_shared_budget_decision () =
     Alcotest.(check bool)
       "direct read-only no-progress remains terminal"
       true
-      (match direct_empty_no_progress_retry_decision read_only_err with
+      (match direct_no_progress_retry_decision read_only_err with
        | Masc.Keeper_turn_runtime_budget.No_degraded_retry -> true
 	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed _
 	       | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
@@ -1039,7 +1063,7 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
         ()
     in
     let expected_retry_runtime =
-      match direct_empty_no_progress_retry_decision empty_err with
+      match direct_no_progress_retry_decision empty_err with
       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
         retry.next_runtime
       | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
@@ -1209,7 +1233,7 @@ let test_plan_degraded_retry_step_covers_direct_outcomes () =
        Alcotest.failf "expected one slot-exhausted cascade event, got %d"
          (List.length rows)))
 
-let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
+let test_direct_no_progress_retry_loop_runs_fallback_attempt () =
   with_direct_retry_runtime (fun () ->
     let empty_err =
       accept_rejected_sdk_error
@@ -1219,7 +1243,7 @@ let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
         ()
     in
     let expected_retry_runtime =
-      match direct_empty_no_progress_retry_decision empty_err with
+      match direct_no_progress_retry_decision empty_err with
       | Masc.Keeper_turn_runtime_budget.Degraded_retry_allowed retry ->
         retry.next_runtime
       | Masc.Keeper_turn_runtime_budget.Degraded_retry_slot_phase_exhausted _ ->
@@ -1253,7 +1277,7 @@ let test_direct_empty_no_progress_retry_loop_runs_fallback_attempt () =
       }
     in
     let result =
-      Masc.Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
+      Masc.Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
         ~keeper_name:"keeper-test"
         ~base_runtime:"test_provider.test_model"
         ~initial_runtime:"runtime.direct-empty"
@@ -1398,7 +1422,7 @@ let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
   let published = ref [] in
   let run_count = ref 0 in
   let result =
-    Masc.Keeper_turn_runtime_budget.run_direct_empty_no_progress_retry_loop
+    Masc.Keeper_turn_runtime_budget.run_direct_no_progress_retry_loop
       ~keeper_name:"keeper-test"
       ~base_runtime:"runtime.initial"
       ~initial_runtime:"runtime.initial"
@@ -1577,6 +1601,65 @@ let test_thinking_only_non_end_turn_response_is_rejected () =
     true
     (contains ~needle:"stop_reason=stop_sequence" reason)
 
+let test_thinking_only_no_tool_can_try_next_candidate () =
+  let result =
+    Masc.Keeper_turn_driver.For_testing.apply_accept
+      ~runtime_id:"runtime.thinking-only-no-tool"
+      ~accept:Keeper_tool_response.response_has_text_or_tool_progress
+      (run_result
+         ~content:
+           [
+             Agent_sdk.Types.Thinking
+               { thinking_type = "reasoning"; content = "internal chain" };
+           ]
+         ())
+  in
+  let err, reason_kind, reason = expect_accept_rejected result in
+  Alcotest.(check bool)
+    "reason kind is no usable progress"
+    true
+    (reason_kind = Some Keeper_internal_error.Accept_no_usable_progress);
+  Alcotest.(check bool)
+    "reason identifies thinking-only shape"
+    true
+    (contains ~needle:"shape=thinking_only" reason);
+  Alcotest.(check bool)
+    "thinking-only no-tool can try next provider candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_no_progress_should_try_next err);
+  Alcotest.(check bool)
+    "non-last thinking-only no-tool advances provider candidate"
+    true
+    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
+       ~is_last:false
+       err);
+  Alcotest.(check bool)
+    "last thinking-only no-tool stays in same-attempt loop terminal"
+    false
+    (Masc.Keeper_turn_driver.For_testing.accept_rejected_result_should_try_next
+       ~is_last:true
+       err);
+  Alcotest.(check bool)
+    "thinking-only no-tool is not a read-only retry"
+    false
+    (Masc.Keeper_turn_driver.For_testing
+     .accept_no_progress_read_only_should_try_next
+       err);
+  Alcotest.(check (option string))
+    "thinking-only no-tool classified by internal-error SSOT"
+    (Some "thinking_only_no_progress")
+    (accept_no_progress_retry_kind_string err);
+  Alcotest.(check (option string))
+    "thinking-only no-tool is runtime-recoverable"
+    (Some "thinking_only_no_progress")
+    (Option.map
+       Masc.Keeper_error_classify.degraded_retry_reason_to_string
+       (Masc.Keeper_error_classify.recoverable_runtime_failure_reason err));
+  Alcotest.(check (option string))
+    "direct keeper_msg rotates thinking-only no-progress"
+    (Some "thinking_only_no_progress")
+    (direct_no_progress_retry_reason_string err)
+
 let test_empty_non_end_turn_response_is_rejected () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -1658,7 +1741,7 @@ let test_empty_non_end_turn_response_is_rejected () =
   Alcotest.(check (option string))
     "direct keeper_msg rotates empty no-progress"
     (Some "empty_no_progress")
-    (direct_empty_no_progress_retry_reason_string err)
+    (direct_no_progress_retry_reason_string err)
 
 let test_empty_after_workspace_mutation_stays_terminal () =
   let checkpoint =
@@ -1706,7 +1789,7 @@ let test_empty_after_workspace_mutation_stays_terminal () =
   Alcotest.(check (option string))
     "direct keeper_msg does not rotate after mutation"
     None
-    (direct_empty_no_progress_retry_reason_string err)
+    (direct_no_progress_retry_reason_string err)
 
 let test_blank_text_non_end_turn_response_is_rejected () =
   let result =
@@ -1874,9 +1957,9 @@ let () =
             `Quick
             test_read_only_retry_uses_typed_context_not_reason_tokens;
 	          Alcotest.test_case
-	            "direct empty no-progress retry uses shared budget decision"
+	            "direct no-progress retry uses shared budget decision"
 	            `Quick
-	            test_direct_empty_no_progress_retry_uses_shared_budget_decision;
+	            test_direct_no_progress_retry_uses_shared_budget_decision;
           Alcotest.test_case
             "degraded retry rejects empty runtime target"
             `Quick
@@ -1890,9 +1973,9 @@ let () =
             `Quick
             test_plan_degraded_retry_step_covers_direct_outcomes;
 	          Alcotest.test_case
-	            "direct empty no-progress retry runs fallback attempt"
+	            "direct no-progress retry runs fallback attempt"
 	            `Quick
-	            test_direct_empty_no_progress_retry_loop_runs_fallback_attempt;
+	            test_direct_no_progress_retry_loop_runs_fallback_attempt;
           Alcotest.test_case
             "direct retry publishes terminal non-retry cascade"
             `Quick
@@ -1905,6 +1988,10 @@ let () =
             test_accept_contract_delegates_to_oas_response_shape;
           Alcotest.test_case "thinking-only non-end-turn response is rejected" `Quick
             test_thinking_only_non_end_turn_response_is_rejected;
+          Alcotest.test_case
+            "thinking-only no-tool response rotates typed no-progress"
+            `Quick
+            test_thinking_only_no_tool_can_try_next_candidate;
           Alcotest.test_case "empty non-end-turn response is rejected" `Quick
             test_empty_non_end_turn_response_is_rejected;
           Alcotest.test_case

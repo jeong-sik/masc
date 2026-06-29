@@ -605,7 +605,7 @@ export function dashboardHealthChips(input: DashboardHealthInput): DashboardHeal
         offlineKeepers: runtimeCounts.live.offlineKeepers,
         configuredKeepers: configured,
       }),
-      detail: `런타임 가동=${runningCountSource}; 일시정지=${pausedCountSource}; 오프라인=${offlineCountSource}; 설정=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
+      detail: `keeper 실행 fiber=${runningCountSource}; 일시정지 keeper=${pausedCountSource}; 오프라인 keeper=${offlineCountSource}; configured keeper=${configuredCountSourceLabel(runtimeCounts.configured.source)} keeper 설정.`,
       tone: 'muted',
     })
   }

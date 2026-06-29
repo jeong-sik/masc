@@ -1,14 +1,9 @@
 [keeper]
-# base.toml is a loader template referenced by other keeper TOMLs via
-# `base = "base.toml"` (see lib/keeper/keeper_types_profile.ml:846-855 +
-# loader_level_keeper_toml_key_names at line 652). It is not an
-# autoboot target — it has no persona_name, no goal, and no
-# mention_targets, so validate_keeper_inputs (keeper_tool_persona_runtime.ml:109)
-# rejects it with "goal is required" every autoboot cycle.
-# Suppress the failed materialize attempt (142 events/24h triplet) by
-# disabling autoboot for this file. discover_keepers_toml still loads it
-# as a profile-defaults source for downstream keepers.
-autoboot_enabled = false
+# base.toml is both the shared defaults source referenced by other keeper TOMLs
+# via `base = "base.toml"` and the default base keeper. Explicit autoboot keeps
+# the base keeper in the durable keepalive fleet; TOML overlays still inherit the
+# defaults below.
+autoboot_enabled = true
 # persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
 # selection (the parser now fail-loud rejects `runtime_id`/`model` keys).
 # keeper→runtime assignment is the sole responsibility of runtime.toml

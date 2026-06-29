@@ -125,6 +125,31 @@ let test_claim_contract_result_counts_initial_claim_as_execution () =
   ()
 ;;
 
+let test_execution_tools_satisfy_contract_progress () =
+  let result tools =
+    KAR.completion_contract_result_for_progress_evidence
+      ~had_owned_active_task_at_turn_start:true
+      ~actual_keeper_tool_names:tools
+    |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
+  in
+  check
+    string
+    "execute tool counts as execution progress"
+    "satisfied_execution"
+    (result [ "tool_execute" ]);
+  check
+    string
+    "board write counts as execution progress"
+    "satisfied_execution"
+    (result [ "keeper_board_post" ]);
+  check
+    string
+    "passive status tools remain passive"
+    "passive_only"
+    (result [ "keeper_tasks_list" ]);
+  ()
+;;
+
 let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   { tool_name
   ; provider = "test"
@@ -212,6 +237,10 @@ let () =
             "initial claim counts as contract progress"
             `Quick
             test_claim_contract_result_counts_initial_claim_as_execution
+        ; test_case
+            "execution tools satisfy contract progress"
+            `Quick
+            test_execution_tools_satisfy_contract_progress
         ; test_case
             "contract progress filters no-progress tool results"
             `Quick

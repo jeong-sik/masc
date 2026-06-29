@@ -1,6 +1,6 @@
-// MASC Dashboard — Keeper Fleet
-// Absorbs: agent-roster + execution + keeper-roster + FSM hub into one
-// operator-first board. Cognition stays available through keeper detail links.
+// MASC Dashboard — Keeper Fleet / Workspace Agents
+// The route hosts multiple live namespaces. Do not collapse workspace agents,
+// keeper runtime fibers, configured keepers, and task owners into one count.
 
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
@@ -37,10 +37,10 @@ const activeView = computed<AgentsView>(() => {
 })
 
 const CHIPS: { id: AgentsView; label: string; description: string }[] = [
-  { id: 'all', label: 'Keeper Ops', description: '키퍼와 일반 에이전트를 attention-first 운영 목록으로 봅니다.' },
-  { id: 'agents', label: 'Agents', description: '키퍼가 연결되지 않은 일반 에이전트만 봅니다.' },
-  { id: 'keepers', label: 'Keepers', description: '키퍼만 따로 봅니다.' },
-  { id: 'fsm', label: 'FSM', description: '키퍼 composite FSM lifecycle 상태를 봅니다.' },
+  { id: 'all', label: 'Runtime Ops', description: 'workspace agents와 keeper runtime 행을 함께 보되 count surface는 분리합니다.' },
+  { id: 'agents', label: 'Workspace Agents', description: '/api/v1/agents workspace presence만 봅니다. keeper fiber나 task owner가 아닙니다.' },
+  { id: 'keepers', label: 'Keeper Runtime', description: 'keeper 실행 fiber, runtime detail row, configured keeper inventory를 봅니다.' },
+  { id: 'fsm', label: 'Keeper FSM', description: '키퍼 composite FSM lifecycle 상태를 봅니다.' },
 ]
 
 export function AgentsUnified() {
@@ -93,7 +93,7 @@ export function AgentsUnified() {
   })
   function chipCount(id: AgentsView): number | string | null {
     if (id === 'all') return formatRuntimeRosterCount(runtimeCounts)
-    if (id === 'agents') return `런타임 가동 ${runtimeCounts.live.agents}`
+    if (id === 'agents') return `workspace agents ${runtimeCounts.live.agents}`
     if (id === 'keepers') return formatKeeperRosterCount(runtimeCounts)
     return null
   }

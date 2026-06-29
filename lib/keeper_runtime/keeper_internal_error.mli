@@ -154,7 +154,7 @@ val runtime_id_of_masc_internal_error : masc_internal_error -> string
 
 val accept_no_progress_retry_kind :
   masc_internal_error ->
-  [ `Empty_no_progress | `Read_only_no_progress ] option
+  [ `Empty_no_progress | `Read_only_no_progress | `Thinking_only_no_progress ] option
 
 val accept_rejection_has_no_progress_retry_hint : masc_internal_error -> bool
 

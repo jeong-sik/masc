@@ -1317,6 +1317,9 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
     let config_root = make_config_root dir in
     Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
     write_config_root_keeper_toml config_root "mad-improver";
+    write_file
+      (Filename.concat (Filename.concat config_root "keepers") "operator.toml")
+      "[keeper]\ngoal = \"operator\"\nautoboot_enabled = false\n";
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -1330,6 +1333,8 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
         let config = Mcp_server.workspace_config state in
         write_keeper_meta_exn config
           (make_keeper_meta ~name:"masc-improver" ~trace_id:"trace-masc-improver" ());
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"operator" ~trace_id:"trace-operator" ());
         let json =
           Server_routes_http_runtime_fleet_scan.keeper_identity_drift_health_json
             config
@@ -1346,10 +1351,17 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
           (json |> member "terminal_reason" |> to_string);
         Alcotest.(check bool) "drift asks operator action" true
           (json |> member "operator_action_required" |> to_bool);
+        Alcotest.(check (list string)) "configured names include disabled keepers"
+          [ "mad-improver"; "operator" ]
+          (json |> member "configured_keeper_names" |> to_list
+           |> List.map to_string);
         Alcotest.(check (list string)) "materializable configured names"
           [ "mad-improver" ]
           (json |> member "materializable_configured_keeper_names" |> to_list
            |> List.map to_string);
+        Alcotest.(check (list string)) "persisted meta includes disabled keeper"
+          [ "masc-improver"; "operator" ]
+          (json |> member "persisted_meta_names" |> to_list |> List.map to_string);
         Alcotest.(check (list string)) "configured without meta"
           [ "mad-improver" ]
           (json |> member "configured_without_meta_names" |> to_list
@@ -1366,6 +1378,45 @@ let test_keeper_identity_drift_health_json_surfaces_config_meta_split () =
         Alcotest.(check string) "health exposes drift status" "blocked"
           (health |> member "keeper_identity_drift" |> member "status"
            |> to_string)))
+
+let test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable
+    () =
+  with_temp_dir "keeper-identity-drift-base-autoboot" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    write_file
+      (Filename.concat (Filename.concat config_root "keepers") "base.toml")
+      "[keeper]\nautoboot_enabled = true\ninstructions = \"default keeper\"\n";
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        write_keeper_meta_exn config
+          (make_keeper_meta ~name:"base" ~trace_id:"trace-base" ());
+        let json =
+          Server_routes_http_runtime_fleet_scan.keeper_identity_drift_health_json
+            config
+        in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "drift status" "ok"
+          (json |> member "status" |> to_string);
+        Alcotest.(check bool) "base meta does not block drift" false
+          (json |> member "blocking" |> to_bool);
+        Alcotest.(check (list string)) "materializable configured names"
+          [ "base" ]
+          (json |> member "materializable_configured_keeper_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check (list string)) "meta without config"
+          []
+          (json |> member "meta_without_config_names" |> to_list
+           |> List.map to_string)))
 
 let test_health_json_keeps_timeout_pause_without_policy_manual () =
   with_temp_dir "health-timeout-paused-without-policy" (fun dir ->
@@ -1683,6 +1734,82 @@ let test_health_json_degrades_on_active_task_owner_without_keeper_binding () =
         Alcotest.(check bool) "health asks operator action" true
           (fleet_safety |> member "operator_action_required" |> to_bool)))
 
+let test_health_json_reports_non_keeper_active_task_owner_as_advisory () =
+  with_temp_dir "health-non-keeper-active-task-owner" (fun dir ->
+    let config_root = make_config_root dir in
+    Sys.remove (Filename.concat (Filename.concat config_root "keepers") "example.toml");
+    with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
+    let previous_state = !Server_auth.server_state in
+    Config_dir_resolver.reset ();
+    Fun.protect
+      ~finally:(fun () ->
+        Server_auth.server_state := previous_state;
+        Config_dir_resolver.reset ())
+      (fun () ->
+        let state = Mcp_server.create_state ~base_path:dir in
+        Server_auth.server_state := Some state;
+        let config = Mcp_server.workspace_config state in
+        let assignee = "codex-mcp-client" in
+        (match
+           Auth.save_raw_token_credential
+             config.Workspace_utils_backend_setup.base_path
+             ~agent_name:assignee ~role:Masc_domain.Worker
+             ~raw_token:"codex-mcp-client-token"
+         with
+        | Ok _ -> ()
+        | Error err ->
+            Alcotest.failf "failed to seed external client credential: %s"
+              (Masc_domain.masc_error_to_string err));
+        let task =
+          make_task
+            ~id:"task-external-owner"
+            ~title:"External client-owned task"
+            ~status:
+              (Types.InProgress
+                 { assignee; started_at = "2026-06-26T00:00:01Z" })
+            ()
+        in
+        Workspace.write_backlog config
+          { Types.tasks = [ task ]; last_updated = "2026-06-26T00:00:02Z"; version = 2 };
+        let request = Httpun.Request.create `GET "/health" in
+        let json = Server_routes_http_runtime.make_health_json request in
+        let open Yojson.Safe.Util in
+        let fleet_safety = json |> member "keeper_fleet_safety" in
+        Alcotest.(check string) "health ignores external client task owner"
+          "ok"
+          (fleet_safety |> member "status" |> to_string);
+        Alcotest.(check (option string)) "health has no blocker" None
+          (fleet_safety |> member "blocker" |> to_string_option);
+        Alcotest.(check bool) "external client owner is not a keeper blocker" false
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber"
+           |> to_bool);
+        Alcotest.(check int) "health exposes no blocking owner rows" 0
+          (fleet_safety
+           |> member "active_task_owner_without_executable_fiber_count"
+           |> to_int);
+        Alcotest.(check int) "health exposes one advisory owner row" 1
+          (fleet_safety |> member "non_keeper_active_task_owner_count" |> to_int);
+        let owners =
+          fleet_safety |> member "non_keeper_active_task_owners" |> to_list
+        in
+        Alcotest.(check int) "one advisory owner row" 1 (List.length owners);
+        let owner = List.hd owners in
+        Alcotest.(check string) "advisory row agent" assignee
+          (owner |> member "agent_name" |> to_string);
+        Alcotest.(check string) "advisory row task id" "task-external-owner"
+          (owner |> member "task_id" |> to_string);
+        Alcotest.(check string) "advisory row owner kind" "non_keeper_client"
+          (owner |> member "owner_kind" |> to_string);
+        Alcotest.(check bool) "advisory row does not block fleet" false
+          (owner |> member "fleet_blocking" |> to_bool);
+        Alcotest.(check (list string)) "health has no blocked keeper names"
+          []
+          (fleet_safety |> member "blocked_keeper_names" |> to_list
+           |> List.map to_string);
+        Alcotest.(check bool) "health does not ask operator action" false
+          (fleet_safety |> member "operator_action_required" |> to_bool)))
+
 let test_health_json_preserves_active_task_owner_meta_read_error () =
   with_temp_dir "health-active-task-owner-meta-read-error" (fun dir ->
     let config_root = make_config_root dir in
@@ -1886,6 +2013,17 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
+          Alcotest.(check string) "health overall status keeps strongest action state"
+            "blocked"
+            (json |> member "overall_status" |> to_string);
+          Alcotest.(check bool) "health top-level asks for operator action" true
+            (json |> member "operator_action_required" |> to_bool);
+          Alcotest.(check bool) "health top-level names fleet blocker" true
+            (json |> member "operator_action_reasons" |> to_list
+             |> List.map to_string
+             |> List.exists
+                  (String.equal
+                     "keeper_fleet_safety:reaction_capacity_below_target"));
           ())))
 
 let test_health_json_blocked_count_matches_blocked_names_with_non_target_capacity () =
@@ -4063,6 +4201,10 @@ let () =
             `Quick
             test_keeper_identity_drift_health_json_surfaces_config_meta_split;
           Alcotest.test_case
+            "health json treats explicit autoboot base as materializable"
+            `Quick
+            test_keeper_identity_drift_treats_explicit_autoboot_base_as_materializable;
+          Alcotest.test_case
             "health json keeps timeout pause without policy manual"
             `Quick test_health_json_keeps_timeout_pause_without_policy_manual;
           Alcotest.test_case
@@ -4077,6 +4219,10 @@ let () =
             "health json degrades on active task owner without keeper binding"
             `Quick
             test_health_json_degrades_on_active_task_owner_without_keeper_binding;
+          Alcotest.test_case
+            "health json reports non-keeper active task owner as advisory"
+            `Quick
+            test_health_json_reports_non_keeper_active_task_owner_as_advisory;
           Alcotest.test_case
             "health json preserves active task owner meta read error"
             `Quick

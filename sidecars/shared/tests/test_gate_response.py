@@ -19,6 +19,11 @@ class TestFromJson:
                 "tokens_used": 120,
             },
             "structured": {"blocks": [{"type": "card", "description": "test"}]},
+            "message_request": {
+                "request_id": "req-123",
+                "destination_id": "sangsu",
+                "status": "queued",
+            },
         }
         resp = GateResponse.from_json(data)
         assert resp.ok is True
@@ -28,6 +33,8 @@ class TestFromJson:
         assert resp.duration_ms == 4500
         assert resp.tokens_used == 120
         assert resp.structured is not None
+        assert resp.message_request is not None
+        assert resp.message_request["request_id"] == "req-123"
         assert resp.error == ""
 
     def test_handles_missing_turn_stats(self) -> None:
@@ -48,6 +55,11 @@ class TestFromJson:
         resp = GateResponse.from_json(data)
         assert resp.structured is None
 
+    def test_handles_non_dict_message_request(self) -> None:
+        data = {"ok": True, "reply": "hi", "message_request": "not a dict"}
+        resp = GateResponse.from_json(data)
+        assert resp.message_request is None
+
     def test_defaults_for_empty_data(self) -> None:
         resp = GateResponse.from_json({})
         assert resp.ok is False
@@ -56,7 +68,12 @@ class TestFromJson:
         assert resp.error == ""
 
     def test_uses_destination_id_when_present(self) -> None:
-        data = {"ok": True, "destination_id": "new-key", "keeper_name": "old-key", "reply": "hi"}
+        data = {
+            "ok": True,
+            "destination_id": "new-key",
+            "keeper_name": "old-key",
+            "reply": "hi",
+        }
         resp = GateResponse.from_json(data)
         assert resp.keeper_name == "new-key"
 
@@ -79,6 +96,7 @@ class TestFromError:
         assert resp.reply == ""
         assert resp.keeper_name == ""
         assert resp.structured is None
+        assert resp.message_request is None
 
     def test_frozen_dataclass(self) -> None:
         resp = GateResponse.from_error("test")

@@ -201,14 +201,12 @@ let provider_slot_busy_for_keeper keeper_id =
 ;;
 
 let keeper_health ~keepers_dir ~now keeper_id =
-  let facts_count =
+  let facts =
     (* [read_facts_all] raises on malformed JSONL — treated as a read failure
        for this keeper; the caller catches and skips it. *)
-    let fs =
-      Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
-    in
-    List.length fs
+    Keeper_memory_os_io.read_facts_all_for_keepers_dir ~keepers_dir ~keeper_id
   in
+  let facts_count = List.length facts in
   let facts_bytes =
     file_size_bytes
       (Keeper_memory_os_io.facts_path_for_keepers_dir ~keepers_dir ~keeper_id)

@@ -232,45 +232,47 @@ describe('navigate', () => {
     expect(route.value.params.mode).toBe('Cognition')
   })
 
-  it('maps cockpit cognition subtabs to explicit agents views', () => {
+  it('does not map retired cockpit cognition subtabs to legacy views', () => {
     window.location.hash = '#mode=Cognition&tab=dc-str'
     window.dispatchEvent(new HashChangeEvent('hashchange'))
 
     expect(route.value.tab).toBe('monitoring')
     expect(route.value.params.section).toBe('agents')
-    expect(route.value.params.view).toBe('decisions')
+    expect(route.value.params.view).toBeUndefined()
+    expect(route.value.params.tab).toBe('dc-str')
     expect(window.location.hash).toContain('section=agents')
-    expect(window.location.hash).toContain('view=decisions')
+    expect(window.location.hash).toContain('tab=dc-str')
   })
 
-  it('maps observe safe-auto subtabs across surfaces without dropping context', () => {
+  it('does not map retired observe safe-auto subtabs across surfaces', () => {
     window.location.hash = '#repo=viewer&mode=Observe&tab=sa-dash'
-    window.dispatchEvent(new HashChangeEvent('hashchange'))
-
-    expect(route.value.tab).toBe('command')
-    expect(route.value.params.section).toBe('operations')
-    expect(route.value.params.view).toBe('safety')
-    expect(route.value.params.repo).toBe('viewer')
-  })
-
-  it.each([
-    ['ct-agt', 'agent'],
-    ['ct-mtx', 'matrix'],
-    ['ct-lat', 'latency'],
-  ])('maps observe cost subtab %s without dropping context', (tab, focus) => {
-    window.location.hash = `#repo=viewer&mode=Observe&tab=${tab}&q=latency`
     window.dispatchEvent(new HashChangeEvent('hashchange'))
 
     expect(route.value.tab).toBe('monitoring')
     expect(route.value.params.section).toBe('runtime')
-    expect(route.value.params.view).toBe('cost')
-    expect(route.value.params.focus).toBe(focus)
+    expect(route.value.params.view).toBeUndefined()
     expect(route.value.params.repo).toBe('viewer')
     expect(route.value.params.mode).toBe('Observe')
-    expect(route.value.params.tab).toBe(tab)
-    expect(route.value.params.q).toBe('latency')
-    expect(window.location.hash).toContain(`tab=${tab}`)
+    expect(route.value.params.tab).toBe('sa-dash')
   })
+
+  it.each(['ct-agt', 'ct-mtx', 'ct-lat'])(
+    'does not map retired observe cost subtab %s to cost focus',
+    tab => {
+      window.location.hash = `#repo=viewer&mode=Observe&tab=${tab}&q=latency`
+      window.dispatchEvent(new HashChangeEvent('hashchange'))
+
+      expect(route.value.tab).toBe('monitoring')
+      expect(route.value.params.section).toBe('runtime')
+      expect(route.value.params.view).toBeUndefined()
+      expect(route.value.params.focus).toBeUndefined()
+      expect(route.value.params.repo).toBe('viewer')
+      expect(route.value.params.mode).toBe('Observe')
+      expect(route.value.params.tab).toBe(tab)
+      expect(route.value.params.q).toBe('latency')
+      expect(window.location.hash).toContain(`tab=${tab}`)
+    },
+  )
 
   it('replaceRoute writes a canonical hash while preserving the current search params', () => {
     window.history.replaceState(null, '', '/dashboard?theme=paper#overview')

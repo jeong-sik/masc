@@ -61,6 +61,14 @@ let restore_env name = function
   | Some value -> Unix.putenv name value
   | None -> Unix.putenv name ""
 
+let with_env name value f =
+  let original = Sys.getenv_opt name in
+  Fun.protect
+    ~finally:(fun () -> restore_env name original)
+    (fun () ->
+      Unix.putenv name value;
+      f ())
+
 let with_config_dir f =
   let dir = temp_dir () in
   let config_dir = Filename.concat dir "config" in
@@ -2154,6 +2162,10 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
+      Reg.set_started_at_for_test
+        ~base_path:config.base_path
+        name
+        (Unix.time () -. 3600.0);
       let max_restarts =
         Masc.Runtime_params.get
           Masc.Governance_registry.keeper_supervisor_max_restarts
@@ -2176,13 +2188,15 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
           net = Some (Eio.Stdenv.net env);
         }
       in
+      with_env "MASC_KEEPER_STALE_RUN_SEC" "0.001" @@ fun () ->
+      Unix.sleepf 0.02;
       sweep_and_recover_no_materialize ctx;
-      check bool "stale sweep requests watchdog stop"
-        true (Atomic.get reg.fiber_stop);
-      check bool "stale sweep wakes keeper"
-        true (Atomic.get reg.fiber_wakeup);
-      check bool "first stale sweep leaves done unresolved"
-        true (Option.is_none (Eio.Promise.peek reg.done_p));
+      check bool "stale sweep requests watchdog stop" true
+        (Atomic.get reg.fiber_stop);
+      check bool "stale sweep wakes keeper" true
+        (Atomic.get reg.fiber_wakeup);
+      check bool "first stale sweep leaves done unresolved" true
+        (Option.is_none (Eio.Promise.peek reg.done_p));
       (match Reg.get ~base_path:config.base_path name with
        | Some updated ->
          (match updated.last_failure_reason with

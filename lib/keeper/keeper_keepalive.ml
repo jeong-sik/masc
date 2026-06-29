@@ -65,7 +65,7 @@ let with_keeper_entry_by_identity ~identity ~on_missing f =
 let persist_directive_meta_update
       (entry : Keeper_registry.registry_entry)
       ~(updated_meta : keeper_meta)
-  : unit
+  : (unit, string) result
   =
   let keeper_filename = entry.name ^ ".json" in
   let masc_root = Workspace_utils.masc_dir_from_base_path ~base_path:entry.base_path in
@@ -103,7 +103,8 @@ let persist_directive_meta_update
   in
   match Keeper_fs.save_json_atomic persisted_path (Keeper_meta_json.meta_to_json updated_meta) with
   | Ok () ->
-    Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta
+    Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta;
+    Ok ()
   | Error msg ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string WriteMetaFailures)
@@ -114,7 +115,7 @@ let persist_directive_meta_update
       ~category:Log.Heartbeat
       ~details:(`Assoc [ "keeper", `String entry.name; "error", `String msg ])
       (Printf.sprintf "directive meta persist failed for %s: %s" entry.name msg);
-    Keeper_registry.update_meta ~base_path:entry.base_path entry.name updated_meta
+    Error msg
 ;;
 
 let directive_paused_meta (meta : keeper_meta) paused =
@@ -128,14 +129,35 @@ let directive_paused_meta (meta : keeper_meta) paused =
 ;;
 
 let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry_entry) =
-  let updated_meta =
+  let was_latched =
+    Keeper_no_progress_loop_detector.is_latched ~keeper_name:entry.name
+  in
+  let previous_failure_reason = entry.last_failure_reason in
+  match
     Keeper_unified_turn_no_progress.clear_for_operator_resume
       ~base_path:entry.base_path
       entry.meta
-  in
-  if not (updated_meta == entry.meta) then
-    persist_directive_meta_update entry ~updated_meta;
-  updated_meta
+  with
+  | Error _ as err -> err
+  | Ok updated_meta ->
+    if updated_meta == entry.meta then Ok updated_meta
+    else (
+      match persist_directive_meta_update entry ~updated_meta with
+      | Ok () -> Ok updated_meta
+      | Error msg ->
+        Keeper_registry.set_failure_reason
+          ~base_path:entry.base_path
+          entry.name
+          previous_failure_reason;
+        if was_latched
+        then
+          ignore
+            (Keeper_no_progress_loop_detector.record_turn
+               ~threshold_override:1
+               ~keeper_name:entry.name
+               ~made_progress:false
+               ());
+        Error msg)
 ;;
 
 (* Unknown-keeper directives can repeat while boot/crash truth is still
@@ -265,35 +287,74 @@ let set_keeper_paused_state ~agent_name paused =
         ();
       log_directive_agent_not_in_registry ~agent_name ~action)
     (fun entry ->
+       let previous_failure_reason = entry.last_failure_reason in
+       (* On resume, dropping the no-progress recovery stimulus is a cosmetic
+          cleanup that must NOT gate the authoritative unpause. A disk failure in
+          [clear_no_progress_loop_for_operator_resume] used to short-circuit the
+          resume and leave the keeper paused forever: no_progress pause is
+          [Manual_resume_required], so there is no other recovery path. Run it
+          best-effort and always fall through to the paused-state write below;
+          the authoritative [persist_directive_meta_update] stays fail-closed.
+          KLV-2 / RFC-0152. *)
        let directive_source_meta =
-         if paused then entry.meta else clear_no_progress_loop_for_operator_resume entry
+         if paused then entry.meta
+         else (
+           match clear_no_progress_loop_for_operator_resume entry with
+           | Ok cleared_meta -> cleared_meta
+           | Error err ->
+             Otel_metric_store.inc_counter
+               Keeper_metrics.(to_string DirectiveFailures)
+               ~labels:[ "keeper", entry.name; "site", "no_progress_resume_clear" ]
+               ();
+             Log.Keeper.warn
+               "directive resume: best-effort no_progress clear failed for %s; \
+                proceeding with unpause: %s"
+               entry.name
+               err;
+             entry.meta)
        in
        let cleared_completion_contract =
          if paused then directive_source_meta
-         else
-           Keeper_unified_turn_completion_contract.clear_for_operator_resume
-             ~base_path:entry.base_path
-             directive_source_meta
+       else
+         Keeper_unified_turn_completion_contract.clear_for_operator_resume
+           ~base_path:entry.base_path
+           directive_source_meta
        in
        let updated_meta = directive_paused_meta cleared_completion_contract paused in
-       persist_directive_meta_update entry ~updated_meta;
-       Keeper_registry.dispatch_event_unit
-         ~base_path:entry.base_path
-         entry.name
-         (if paused
-          then Keeper_state_machine.Operator_pause
-          else Keeper_state_machine.Operator_resume);
-       if not paused
-       then (
-         Keeper_turn_livelock.reset_keeper_livelock
-           ~base_path:entry.base_path
-           ~keeper:entry.name;
-         (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
-         Atomic.set entry.fiber_wakeup true;
-         (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
-            The [@@fsm_guard] PPX routes the assertion through
-            [wrap_unit ~stage:"guard"] automatically. *)
-         post_wakeup_signal ~wakeup:entry.fiber_wakeup))
+       (match persist_directive_meta_update entry ~updated_meta with
+        | Error err ->
+          Keeper_registry.set_failure_reason
+            ~base_path:entry.base_path
+            entry.name
+            previous_failure_reason;
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string DirectiveFailures)
+            ~labels:
+              [ "keeper", entry.name; "site", "pause_resume_persist" ]
+            ();
+          Log.Keeper.error
+            "directive %s: meta persist failed for %s: %s"
+            (if paused then "pause" else "resume")
+            entry.name
+            err
+        | Ok () ->
+          Keeper_registry.dispatch_event_unit
+            ~base_path:entry.base_path
+            entry.name
+            (if paused
+             then Keeper_state_machine.Operator_pause
+             else Keeper_state_machine.Operator_resume);
+          if not paused
+          then (
+            Keeper_turn_livelock.reset_keeper_livelock
+              ~base_path:entry.base_path
+              ~keeper:entry.name;
+            (* tla-lint: allow-mutation: fiber signal — Atomic flag wakes the keeper from Eio.Promise.await *)
+            Atomic.set entry.fiber_wakeup true;
+            (* Cycle 43: KeeperHeartbeat.tla WakeupSignal post-condition.
+               The [@@fsm_guard] PPX routes the assertion through
+               [wrap_unit ~stage:"guard"] automatically. *)
+            post_wakeup_signal ~wakeup:entry.fiber_wakeup)))
 ;;
 
 let wakeup_keeper_by_agent_name ~agent_name =
@@ -318,17 +379,29 @@ let assign_keeper_task_from_directive ~agent_name ~task_id =
         ();
       log_directive_agent_not_in_registry ~agent_name ~action:"claim")
     (fun entry ->
+       let task_id_string = Keeper_id.Task_id.to_string task_id in
        let updated_meta =
          { entry.meta with current_task_id = Some task_id; updated_at = now_iso () }
        in
-       persist_directive_meta_update entry ~updated_meta;
-       (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action
-          guard pins that the directive successfully attached the
-          [task_id] to the keeper's meta. The [@@fsm_guard] PPX
-          routes the assertion through [wrap_unit ~stage:"guard"]
-          automatically. *)
-       post_submit_task ~meta:updated_meta ~task_id;
-       wakeup_keeper ~base_path:entry.base_path entry.name)
+       match persist_directive_meta_update entry ~updated_meta with
+       | Error err ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string DirectiveFailures)
+           ~labels:[ "keeper", entry.name; "site", "claim_persist" ]
+           ();
+         Log.Keeper.error
+           "directive claim: meta persist failed for %s task=%s: %s"
+           entry.name
+           task_id_string
+           err
+       | Ok () ->
+         (* Cycle 44: KeeperTaskAcquisition.tla SubmitTask post-action
+            guard pins that the directive successfully attached the
+            [task_id] to the keeper's meta. The [@@fsm_guard] PPX
+            routes the assertion through [wrap_unit ~stage:"guard"]
+            automatically. *)
+         post_submit_task ~meta:updated_meta ~task_id;
+         wakeup_keeper ~base_path:entry.base_path entry.name)
 ;;
 
 (** Process a single directive received from a gRPC HeartbeatAck.
@@ -362,8 +435,9 @@ let process_directive ~agent_name directive =
        receipt, and current blocks may persist [meta.paused = true] after the
        guard fires.  In both cases a wakeup should start from a fresh counter
        instead of immediately re-blocking the same turn. *)
+    let entry_opt = keeper_entry_by_identity_opt agent_name in
     let entry_paused =
-      match keeper_entry_by_identity_opt agent_name with
+      match entry_opt with
       | Some e -> e.meta.paused
       | None ->
         (match Keeper_tool_shared_runtime.find_registry_meta
@@ -373,14 +447,27 @@ let process_directive ~agent_name directive =
          | Some meta -> meta.paused
          | None -> false)
     in
-    (match keeper_entry_by_identity_opt agent_name with
-     | Some e ->
-       Keeper_turn_livelock.reset_keeper_livelock
-         ~base_path:e.base_path
-         ~keeper:e.name;
-       let (_ : keeper_meta) = clear_no_progress_loop_for_operator_resume e in
-       ()
-     | None -> ());
+    let clear_wakeup_no_progress_if_needed () =
+      match entry_opt with
+      | None -> true
+      | Some e ->
+        Keeper_turn_livelock.reset_keeper_livelock
+          ~base_path:e.base_path
+          ~keeper:e.name;
+        (match clear_no_progress_loop_for_operator_resume e with
+         | Ok (_ : keeper_meta) -> true
+         | Error err ->
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string DirectiveFailures)
+             ~labels:
+               [ "keeper", e.name; "site", "no_progress_resume_clear" ]
+             ();
+           Log.Keeper.error
+             "directive wakeup: no_progress clear failed for %s: %s"
+             e.name
+           err;
+           false)
+    in
     if entry_paused
     then (
       Log.Keeper.emit
@@ -395,7 +482,8 @@ let process_directive ~agent_name directive =
         ~category:Log.Directive
         ~details:(`Assoc [ "agent_name", `String agent_name; "action", `String "wakeup" ])
         (Printf.sprintf "directive: waking up %s" agent_name);
-      wakeup_keeper_by_agent_name ~agent_name)
+      if clear_wakeup_no_progress_if_needed ()
+      then wakeup_keeper_by_agent_name ~agent_name)
   | s when String.length s > 6 && String.starts_with s ~prefix:"claim:" ->
     let task_id = String.sub s 6 (String.length s - 6) in
     (match Keeper_id.Task_id.of_string task_id with

@@ -47,10 +47,8 @@ let apply_lifecycle ~config ~base_dir ~meta ~final_execution ~current_turn_block
   lifecycle
 ;;
 
-let no_work_budget_threshold_override
+let budget_exhausted_no_progress_threshold_override
       ~stop_reason
-      ~has_current_task
-      ~active_goal_ids
       ~strong_evidence
       ~surface_requires_evidence
       ~observation
@@ -60,17 +58,10 @@ let no_work_budget_threshold_override
     | Runtime_agent.TurnBudgetExhausted _ -> true
     | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
   in
-  let no_work_scope = (not has_current_task) && active_goal_ids = [] in
-  let actionable_signal =
-    Keeper_contract_classifier.classify_actionable_signal
-      (Keeper_contract_classifier.of_keeper_world_observation observation)
-  in
   if
     budget_exhausted
-    && no_work_scope
     && (not strong_evidence)
     && surface_requires_evidence
-    && actionable_signal <> Keeper_contract_classifier.No_actionable_signal
     && Keeper_unified_metrics_support.is_scheduled_autonomous_cycle_of_observation
          observation
   then Some 1
@@ -282,10 +273,8 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
     || legitimate_no_work_passive_only
   in
   let threshold_override =
-    no_work_budget_threshold_override
+    budget_exhausted_no_progress_threshold_override
       ~stop_reason:result.Keeper_agent_run.stop_reason
-      ~has_current_task:(Option.is_some updated_meta.Keeper_meta_contract.current_task_id)
-      ~active_goal_ids:updated_meta.Keeper_meta_contract.active_goal_ids
       ~strong_evidence
       ~surface_requires_evidence
       ~observation
@@ -313,7 +302,8 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
 ;;
 
 module For_testing = struct
-  let no_work_budget_threshold_override = no_work_budget_threshold_override
+  let budget_exhausted_no_progress_threshold_override =
+    budget_exhausted_no_progress_threshold_override
 
   type nonrec turn_delivery = turn_delivery =
     | Peer_only
@@ -590,6 +580,20 @@ let emit_usage_metrics_and_log
     outcome_str
 ;;
 
+type decision_outcome =
+  | Decision_success
+  | Decision_checkpoint
+
+let decision_outcome_of_stop_reason = function
+  | Runtime_agent.Completed -> Decision_success
+  | Runtime_agent.TurnBudgetExhausted _
+  | Runtime_agent.MutationBoundaryReached _ ->
+    Decision_checkpoint
+
+let decision_outcome_to_label = function
+  | Decision_success -> "success"
+  | Decision_checkpoint -> "checkpoint"
+
 let persist_success_meta ~config ~original_meta ~updated_meta =
   let updated_meta =
     if updated_meta.auto_resume_after_sec <> None
@@ -636,11 +640,11 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
   in
   match result.Keeper_agent_run.stop_reason with
   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-    Log.Keeper.info ~keeper_name:updated_meta.name
-      "turn budget exhausted (%d/%d), checkpoint saved — will resume next cycle"
+    Log.Keeper.warn ~keeper_name:updated_meta.name
+      "turn budget exhausted (%d/%d), checkpoint saved; not recording health success \
+       or clearing turn-failure state"
       turns_used
-      limit;
-    reset_failure_state ()
+      limit
   | Runtime_agent.MutationBoundaryReached { tool_name; _ } ->
     Log.Keeper.info ~keeper_name:updated_meta.name
       "mutation boundary reached after %s, checkpoint saved — will resume next cycle"
@@ -735,7 +739,9 @@ let handle
     ~turn_ctx_cell
     ~observation
     ~latency_ms
-    ~outcome:"success"
+    ~outcome:
+      (decision_outcome_to_label
+         (decision_outcome_of_stop_reason result.Keeper_agent_run.stop_reason))
     ~degraded_retry_applied
     ?degraded_retry_runtime
     ?fallback_reason:(Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)

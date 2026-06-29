@@ -768,6 +768,36 @@ describe('AgentRoster live-only cards', () => {
     expect(container.textContent).not.toContain('old blocker that should stay out of the roster')
   })
 
+  it('labels workspace agents, keeper fibers, configured keepers, and task owners as separate surfaces', async () => {
+    agents.value = [
+      makeAgent({
+        name: 'dashboard',
+        status: 'active',
+      }),
+    ]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        pipeline_stage: 'idle',
+        keepalive_running: true,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} />`, container)
+    })
+    await flushUi()
+
+    const text = container.textContent ?? ''
+    expect(text).toContain('workspace agents ≠ keeper fibers')
+    expect(text).toContain('configured keeper ≠ running fiber')
+    expect(text).toContain('task owner ≠ live agent')
+    expect(text).toContain('runtime rows')
+  })
+
   it('treats keeper-only rows as first-class runtime rows when agent registry is empty', async () => {
     agents.value = []
     keepers.value = [
@@ -906,10 +936,10 @@ describe('AgentRoster live-only cards', () => {
     }
     const text = container.textContent ?? ''
     expect(text).toContain('전이 중 · 3')
-    expect(text).toContain('일시정지 2')
-    expect(text).toContain('전이 3')
+    expect(text).toContain('일시정지 rows 2')
+    expect(text).toContain('전이 rows 3')
     expect(text).toContain('transient')
-    expect(text).toContain('오프라인 1')
+    expect(text).toContain('오프라인 rows 1')
   })
 
   it('does not show keeper boot hints on offline non-keeper agent rows', async () => {

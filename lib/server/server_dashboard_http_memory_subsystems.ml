@@ -303,7 +303,6 @@ type recall_quality_summary =
   ; fact_counts : int StringMap.t
   ; failure_counts : int StringMap.t
   ; total_fact_injections : int
-  ; diagnostic_fallback_key_injections : int
   ; error : string option
   }
 
@@ -315,7 +314,6 @@ let empty_recall_quality_summary ~decode_error_records ~error =
   ; fact_counts = StringMap.empty
   ; failure_counts = StringMap.empty
   ; total_fact_injections = 0
-  ; diagnostic_fallback_key_injections = 0
   ; error
   }
 ;;
@@ -336,18 +334,10 @@ let summarize_recall_quality ({ records; decode_error_records } : memory_quality
        let has_recall =
          record.injected_fact_keys <> [] || record.injected_episode_keys <> []
        in
-       let fact_counts, total_fact_injections, diagnostic_fallback_key_injections =
+       let fact_counts, total_fact_injections =
          List.fold_left
-           (fun (counts, total, diagnostic_total) key ->
-              let diagnostic_total =
-                if Keeper_memory_os_types.legacy_unstructured_fallback_claim_key key
-                then diagnostic_total + 1
-                else diagnostic_total
-              in
-              increment_count key counts, total + 1, diagnostic_total)
-           ( summary.fact_counts
-           , summary.total_fact_injections
-           , summary.diagnostic_fallback_key_injections )
+           (fun (counts, total) key -> increment_count key counts, total + 1)
+           (summary.fact_counts, summary.total_fact_injections)
            record.injected_fact_keys
        in
        { summary with
@@ -360,7 +350,6 @@ let summarize_recall_quality ({ records; decode_error_records } : memory_quality
        ; failure_counts
        ; fact_counts
        ; total_fact_injections
-       ; diagnostic_fallback_key_injections
        })
     initial
     records
@@ -396,8 +385,6 @@ let recall_quality_summary_json ~sample_limit ~top_key_limit summary =
           ; "unique_fact_keys", `Int (List.length fact_count_rows)
           ; "echoed_fact_keys", `Int echoed_fact_keys
           ; "max_fact_echo_count", `Int max_fact_echo_count
-          ; ( "diagnostic_fallback_key_injections"
-            , `Int summary.diagnostic_fallback_key_injections )
           ; ( "top_echoed_fact_keys"
             , `List
                 (count_rows_by

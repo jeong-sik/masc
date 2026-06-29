@@ -32,6 +32,7 @@ let target_files =
 
 let status_detail_file = "lib/keeper/keeper_status_detail.ml"
 let keeper_up_update_file = "lib/keeper/keeper_turn_up_update.ml"
+let heartbeat_presence_file = "lib/keeper/keeper_heartbeat_loop_presence.ml"
 
 let metric_name = "Keeper_metrics.(to_string PausedStatePersistErrors)"
 
@@ -97,7 +98,7 @@ let test_happy_path_preserved () =
      closures so successful pause/resume keeps returning 200. *)
   check bool "persist_keeper_paused_state happy arm present" true
     (count_occurrences
-       ~needle:"Ok (Some meta) when Bool.equal meta.paused paused -> ()"
+       ~needle:"Ok (Some meta) when Bool.equal meta.paused paused -> true"
        src
      >= 1);
   check bool "resume_booted_keeper_if_needed happy arm present" true
@@ -175,12 +176,77 @@ let test_write_error_branch_observable () =
   check bool "write_meta error counter labelled write_meta_error" true
     (count_occurrences ~needle:"write_meta_error" src >= 1)
 
+let test_no_progress_clear_failure_observable () =
+  let src =
+    String.concat
+      "\n"
+      [
+        target_source ();
+        load_source keeper_up_update_file;
+        load_source "lib/keeper/keeper_keepalive.ml";
+      ]
+  in
+  check bool "no-progress clear error labelled in pause/resume metrics" true
+    (count_occurrences ~needle:"no_progress_clear_error" src >= 2);
+  check bool "keeper_up no-progress clear site is typed" true
+    (count_occurrences ~needle:"No_progress_resume_clear" src >= 1);
+  check bool "directive no-progress clear failure is observable" true
+    (count_occurrences ~needle:"no_progress_resume_clear" src >= 2)
+
+let test_klv2_directive_resume_no_progress_clear_best_effort () =
+  (* KLV-2 / RFC-0152: on operator resume, dropping the no-progress recovery
+     stimulus is a cosmetic cleanup. A transient disk failure there must NOT
+     gate the authoritative unpause. Previously the [Error] arm logged at
+     [error] level and short-circuited the whole [set_keeper_paused_state]
+     body, so the keeper never reached [persist_directive_meta_update] and
+     stayed paused forever (no_progress pause is [Manual_resume_required] — no
+     other recovery path exists). After the fix the clear result is bound into
+     [directive_source_meta] best-effort and execution always falls through to
+     the authoritative persist, which stays fail-closed.
+
+     Structural guard: the existing rationale for source-pattern over
+     integration applies (injecting a clear failure needs the full server +
+     event-queue harness). Non-vacuous — reverting the fix restores the
+     [..._result] binding name and the [error]-level short-circuit log, so both
+     the [let directive_source_meta =] and ["proceeding with unpause"] markers
+     disappear and these checks turn red. *)
+  let src = load_source "lib/keeper/keeper_keepalive.ml" in
+  check bool "resume no-progress clear is bound best-effort (not a gate)" true
+    (count_occurrences ~needle:"let directive_source_meta =" src >= 1);
+  check bool "resume clear failure proceeds with unpause (no short-circuit)"
+    true
+    (count_occurrences ~needle:"proceeding with unpause" src >= 1);
+  check int "fail-closed short-circuit error log on clear removed" 0
+    (count_occurrences
+       ~needle:"directive resume: no_progress clear failed for"
+       src);
+  check bool "authoritative unpause persist is still reached" true
+    (count_occurrences
+       ~needle:"persist_directive_meta_update entry ~updated_meta"
+       src
+     >= 1);
+  (* The cosmetic clear site is handled strictly before the authoritative
+     persist site, proving the two carry distinct failure policies. *)
+  (match
+     ( first_index ~needle:"no_progress_resume_clear" src,
+       first_index ~needle:"pause_resume_persist" src )
+   with
+   | Some clear_pos, Some persist_pos ->
+       check bool "best-effort clear site precedes fail-closed persist site"
+         true (clear_pos < persist_pos)
+   | _ -> Alcotest.failf "missing KLV-2 site markers in keeper_keepalive.ml");
+  (* Fail-closed preserved: the authoritative persist still rolls the registry
+     failure reason back on [Error] rather than swallowing it. *)
+  check bool "authoritative persist stays fail-closed (rolls back reason)" true
+    (count_occurrences ~needle:"previous_failure_reason" src >= 1)
+
 let test_counter_inc_calls () =
   let src = target_source () in
-  (* The metric must actually be incremented at least 4 times: 2 in
+  (* The metric must actually be incremented at least 6 times: 2 in
      [persist_keeper_paused_state] (Ok None / Error), 2 in
      [resume_booted_keeper_if_needed] (Ok None / Error), 2 in the
-     directive endpoint (Ok None / Error) — total 6. *)
+     directive endpoint (Ok None / Error), plus resume-clear failure
+     branches. *)
   check bool "Otel_metric_store.inc_counter called for new metric >= 6 times"
     true
     (count_occurrences
@@ -287,6 +353,18 @@ let test_keeper_status_disposition_mirrors_runtime_trust () =
        src
     >= 1)
 
+let test_heartbeat_presence_uses_cas_retry_merge () =
+  let src = load_source heartbeat_presence_file in
+  check bool "heartbeat presence uses CAS retry writer" true
+    (count_occurrences ~needle:"write_meta_with_merge" src >= 1);
+  check bool "heartbeat presence preserves disk-owned heartbeat fields" true
+    (count_occurrences
+       ~needle:"Keeper_meta_merge.heartbeat_fields_from_disk"
+       src
+     >= 1);
+  check int "plain heartbeat write_meta call removed" 0
+    (count_occurrences ~needle:"match write_meta ctx.config synced" src)
+
 let () =
   run "keeper_pause_silent_failure_source"
     [ ( "issue-8391-high-1"
@@ -299,6 +377,10 @@ let () =
             test_error_branch_observable
         ; test_case "write_meta error branch observable" `Quick
             test_write_error_branch_observable
+        ; test_case "no-progress clear failure observable" `Quick
+            test_no_progress_clear_failure_observable
+        ; test_case "KLV-2 directive resume no-progress clear best-effort"
+            `Quick test_klv2_directive_resume_no_progress_clear_best_effort
         ; test_case "counter inc calls present" `Quick
             test_counter_inc_calls
         ; test_case "resume paths clear no-progress latch" `Quick
@@ -311,5 +393,7 @@ let () =
             test_bulk_directive_partial_failure_observable
         ; test_case "keeper status mirrors runtime-trust disposition" `Quick
             test_keeper_status_disposition_mirrors_runtime_trust
+        ; test_case "heartbeat presence uses CAS retry merge" `Quick
+            test_heartbeat_presence_uses_cas_retry_merge
         ] )
     ]

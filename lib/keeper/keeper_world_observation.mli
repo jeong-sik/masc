@@ -153,12 +153,18 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
+type event_queue_trigger =
+  | Bootstrap_stimulus
+  | No_progress_recovery_stimulus
+
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
 type turn_reason =
   | Mention_pending
   | Board_event_pending
   | Scope_message_pending
+  | Bootstrap_stimulus_pending
+  | No_progress_recovery_stimulus_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }
@@ -190,6 +196,9 @@ type turn_verdict =
     The tag is a stable snake_case form of the typed variant.
     Variant payloads are intentionally omitted. *)
 val turn_reason_to_string : turn_reason -> string
+
+(** Convert an Event Queue stimulus trigger into the corresponding run reason. *)
+val turn_reason_of_event_queue_trigger : event_queue_trigger -> turn_reason
 
 (** Convert a single skip reason to a flat string tag.
     The tag is a stable snake_case form of the typed variant.
@@ -370,6 +379,7 @@ val keeper_cycle_decision :
   ?provider_cooldown_remaining_sec:
     (keeper_name:string -> runtime_id:string -> int option) ->
   ?reactive_wake:bool ->
+  ?event_queue_triggers:event_queue_trigger list ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 (** [reactive_wake] (default [false]) marks evaluations triggered by an external
     broadcast wakeup rather than the keeper's own cadence timer. When set, a

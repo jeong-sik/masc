@@ -93,7 +93,7 @@ let record_tool_skipped ~keeper_name ~tool_name ~reason_code =
 (** Reset the ring. Test-only helper — exposed because the alcotest cases
     need to start from a clean state regardless of test order. *)
 let reset_for_testing () =
-  ring := empty_ring
+  Eio.Mutex.use_rw ~protect:true ring_mu (fun () -> ring := empty_ring)
 
 let snapshot_ring () =
   Safe_ops.protect ~default:[] (fun () ->

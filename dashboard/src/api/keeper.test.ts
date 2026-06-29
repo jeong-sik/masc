@@ -398,8 +398,7 @@ describe('streamKeeperMessage', () => {
 
   it('refreshes a stale loopback dev token once and retries on typed invalid_token code', async () => {
     stubStaleToken()
-    // The message is a generic string that would NOT match the legacy
-    // substring matcher; the typed auth_error_code drives the retry.
+    // The message is generic; the typed auth_error_code drives the retry.
     const fetchMock = stubStreamRetryFetch({
       error: 'authentication failed',
       auth_error_code: 'invalid_token',
@@ -466,17 +465,17 @@ describe('streamKeeperMessage', () => {
     ])
   })
 
-  it('falls back to the legacy substring match for servers without auth_error_code', async () => {
+  it('does NOT retry servers without typed auth_error_code', async () => {
     stubStaleToken()
     const fetchMock = stubStreamRetryFetch({
       error: '[AuthError] Invalid token: Token mismatch',
     })
 
-    await streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} })
+    await expect(
+      streamKeeperMessage('sangsu', 'ping', { onEvent: () => {} }),
+    ).rejects.toThrow()
 
     expect(fetchMock.mock.calls.map(([url]) => url)).toEqual([
-      '/api/v1/keepers/chat/stream',
-      '/api/v1/dashboard/dev-token',
       '/api/v1/keepers/chat/stream',
     ])
   })

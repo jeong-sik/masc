@@ -68,6 +68,11 @@ let public_mcp_surface_tools =
   ; "masc_plan_update"
   ; (* Heartbeat *)
     "masc_heartbeat"
+  ; (* Keeper runtime front door. *)
+    "masc_keeper_list"
+  ; "masc_keeper_status"
+  ; "masc_keeper_up"
+  ; "masc_keeper_down"
   ; (* Persona authoring is operator-visible. *)
     "masc_persona_list"
   ; (* Board. [masc_board_reaction] is intentionally public: it is the

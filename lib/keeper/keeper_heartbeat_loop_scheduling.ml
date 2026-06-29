@@ -29,13 +29,18 @@ let decide_keepalive_scheduling
       ?(runtime_resilience_of_name = fun _ -> None)
       ?(keeper_resilience_of_name = fun _ -> None)
       ?(reactive_wake = false)
+      ?(event_queue_triggers = [])
       ?(wake_tombstone_decide = Keeper_wake_tombstone.decide)
       ~stop
       ~meta
       obs
   =
   let turn_decision =
-    Keeper_world_observation.keeper_cycle_decision ~reactive_wake ~meta obs
+    Keeper_world_observation.keeper_cycle_decision
+      ~reactive_wake
+      ~event_queue_triggers
+      ~meta
+      obs
   in
   let requested_should_run_turn =
     (not (Atomic.get stop)) && turn_decision.should_run

@@ -42,7 +42,8 @@ let runtime_entries =
     entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
     entry ~default:"debug" Env_config_core.log_routine_level_env_key
       "Routine telemetry log level override (debug|info|warn|error|off)";
-    entry ~default:"false" Env_config_core.parse_warn_env_key "Enable JSON parse warnings";
+    entry ~default:"false" Env_config_core.parse_warn_env_key
+      "Escalate malformed env parses to Config_error";
     entry ~default:"production" Env_config_core.governance_level_env_key
       "Governance enforcement level";
     entry ~default:"(none)" "MASC_SLOT_YIELD_ENABLED"
@@ -800,7 +801,7 @@ let telemetry_entries =
     entry ~default:"debug" Env_config_core.log_routine_level_env_key
       "Routine telemetry level (debug|info|warn|error|off)";
     entry ~default:"false" Env_config_core.parse_warn_env_key
-      "Whether to log parse warnings";
+      "Whether malformed env parses fail fast";
     entry ~default:"(none)" "MASC_OTEL_ENABLED"
       "Enable OpenTelemetry span collection";
   ]

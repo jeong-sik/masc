@@ -15,6 +15,11 @@ let stop_reason_label = function
      | None -> "mutation_boundary")
 ;;
 
+let stop_reason_is_turn_budget_exhausted = function
+  | Runtime_agent.TurnBudgetExhausted _ -> true
+  | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
+;;
+
 let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names
       ~stop_reason ~raw_response_text
       ()
@@ -47,10 +52,11 @@ let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_to
 ;;
 
 let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
-  let is_structured_reply =
+  let is_structured_reply, is_synthesized =
     match (state_snapshot_source : Keeper_memory_policy.state_snapshot_source) with
-    | Structured_state_reply -> true
-    | Structured_state_tool | State_block | Synthesized -> false
+    | Structured_state_reply -> true, false
+    | Synthesized -> false, true
+    | Structured_state_tool | State_block -> false, false
   in
   let fallback =
     match
@@ -61,7 +67,8 @@ let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
       Some "State updated."
     | None -> None
   in
-  if is_structured_reply then
+  if is_synthesized then ""
+  else if is_structured_reply then
     Keeper_text_processing.user_visible_reply_text ?fallback ""
   else
     match fallback with
@@ -71,9 +78,16 @@ let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
 ;;
 
 let finalize ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names
-      ~stop_reason ~raw_response_text
+      ~completion_contract_result ~stop_reason ~raw_response_text
       ()
   =
+  let budget_exhausted = stop_reason_is_turn_budget_exhausted stop_reason in
+  let contract_requires_attention =
+    Keeper_execution_receipt.completion_contract_result_requires_attention
+      completion_contract_result
+  in
+  let suppress_response_text = budget_exhausted || contract_requires_attention in
+  let raw_response_text = if suppress_response_text then "" else raw_response_text in
   let state_snapshot, state_snapshot_source =
     state_snapshot
       ~reported_state_snapshot
@@ -87,5 +101,8 @@ let finalize ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_nam
   let response_text =
     response_text ~state_snapshot ~state_snapshot_source ~raw_response_text
   in
-  { state_snapshot; state_snapshot_source; response_text }
+  { state_snapshot
+  ; state_snapshot_source
+  ; response_text = if suppress_response_text then "" else response_text
+  }
 ;;

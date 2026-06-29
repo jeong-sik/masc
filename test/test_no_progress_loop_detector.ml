@@ -65,18 +65,14 @@ let scheduled_observation : WO.world_observation =
   ; connected_surfaces = []
   }
 
-let no_work_budget_override
+let budget_exhausted_no_progress_override
       ?(stop_reason = Runtime_agent.TurnBudgetExhausted { turns_used = 1; limit = 1 })
-      ?(has_current_task = false)
-      ?(active_goal_ids = [])
       ?(strong_evidence = false)
       ?(surface_requires_evidence = true)
       observation
   =
-  Success.no_work_budget_threshold_override
+  Success.budget_exhausted_no_progress_threshold_override
     ~stop_reason
-    ~has_current_task
-    ~active_goal_ids
     ~strong_evidence
     ~surface_requires_evidence
     ~observation
@@ -138,36 +134,34 @@ let test_threshold_override_fires_early () =
   Alcotest.(check int) "streak retained" 1 (D.current_streak ~keeper_name:k)
 
 let test_no_work_budget_override_predicate () =
-  Alcotest.(check (option int)) "scheduled no-work budget exhaustion keeps default threshold"
-    None
-    (no_work_budget_override scheduled_observation);
+  Alcotest.(check (option int)) "scheduled no-evidence budget exhaustion fast-fails"
+    (Some 1)
+    (budget_exhausted_no_progress_override scheduled_observation);
   let actionable_observation =
     { scheduled_observation with claimable_task_count = 1 }
   in
   Alcotest.(check (option int)) "scheduled actionable budget exhaustion fast-fails"
     (Some 1)
-    (no_work_budget_override actionable_observation);
+    (budget_exhausted_no_progress_override actionable_observation);
   let reactive_observation =
     { scheduled_observation with pending_mentions = [ ("operator", "wake") ] }
   in
   Alcotest.(check (option int)) "reactive observation keeps default threshold"
     None
-    (no_work_budget_override reactive_observation);
-  Alcotest.(check (option int)) "active task keeps default threshold"
-    None
-    (no_work_budget_override ~has_current_task:true scheduled_observation);
-  Alcotest.(check (option int)) "active goal keeps default threshold"
-    None
-    (no_work_budget_override ~active_goal_ids:[ "goal-1" ] scheduled_observation);
+    (budget_exhausted_no_progress_override reactive_observation);
   Alcotest.(check (option int)) "strong evidence keeps default threshold"
     None
-    (no_work_budget_override ~strong_evidence:true scheduled_observation);
+    (budget_exhausted_no_progress_override ~strong_evidence:true scheduled_observation);
   Alcotest.(check (option int)) "visible reply keeps default threshold"
     None
-    (no_work_budget_override ~surface_requires_evidence:false scheduled_observation);
+    (budget_exhausted_no_progress_override
+       ~surface_requires_evidence:false
+       scheduled_observation);
   Alcotest.(check (option int)) "completed stop keeps default threshold"
     None
-    (no_work_budget_override ~stop_reason:Runtime_agent.Completed scheduled_observation)
+    (budget_exhausted_no_progress_override
+       ~stop_reason:Runtime_agent.Completed
+       scheduled_observation)
 
 let test_latched_no_repeat_while_streak_grows () =
   D.reset_all_for_test ();

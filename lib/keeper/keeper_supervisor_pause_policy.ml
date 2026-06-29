@@ -353,6 +353,7 @@ let failure_reason_policy_decision
                ~liveness:Keeper_failure_policy.Unknown_liveness
                timeout))
      | Keeper_provider_runtime_boundary.Not_provider_runtime_failure -> None)
+  | Some (Keeper_registry.Completion_contract_violation _) -> None
   | Some _ | None ->
     None
 ;;

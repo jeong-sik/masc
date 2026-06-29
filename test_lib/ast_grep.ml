@@ -95,12 +95,12 @@ let count_value_bindings ~module_path ~name =
   let count = ref 0 in
   let iter =
     { Ast_iterator.default_iterator with
-      pat =
-        (fun self p ->
-          (match p.ppat_desc with
+      value_binding =
+        (fun self vb ->
+          (match vb.pvb_pat.ppat_desc with
            | Ppat_var { txt; _ } when txt = name -> incr count
            | _ -> ());
-          Ast_iterator.default_iterator.pat self p)
+          Ast_iterator.default_iterator.value_binding self vb)
     }
   in
   iter.structure iter structure;
@@ -157,6 +157,39 @@ let count_value_bindings_with_prefix ~module_path ~prefix =
   in
   iter.structure iter structure;
   !count
+;;
+
+let constructor_names_of_type ~module_path ~type_name =
+  match parse_implementation module_path with
+  | Error _ -> []
+  | Ok structure ->
+    let names = ref [] in
+    let iter =
+      { Ast_iterator.default_iterator with
+        structure_item =
+          (fun self item ->
+            (match item.pstr_desc with
+             | Pstr_type (_, declarations) ->
+               List.iter
+                 (fun (declaration : Parsetree.type_declaration) ->
+                    if declaration.ptype_name.txt = type_name then
+                      match declaration.ptype_kind with
+                      | Ptype_variant constructors ->
+                        let constructor_names =
+                          List.map
+                            (fun (constructor : Parsetree.constructor_declaration) ->
+                               constructor.pcd_name.txt)
+                            constructors
+                        in
+                        names := constructor_names @ !names
+                      | _ -> ())
+                 declarations
+             | _ -> ());
+            Ast_iterator.default_iterator.structure_item self item)
+      }
+    in
+    iter.structure iter structure;
+    !names
 ;;
 
 (* Count string literals whose value contains [needle] as a substring.

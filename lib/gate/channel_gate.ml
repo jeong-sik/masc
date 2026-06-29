@@ -29,6 +29,7 @@ type outbound_message = Gate_protocol.outbound_message = {
   content : string;
   structured : Yojson.Safe.t option;
   turn_stats : turn_stats option;
+  message_request : Gate_protocol.message_request option;
 }
 
 type validation_error = Gate_protocol.validation_error =
@@ -202,7 +203,7 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
           ~content:(String.trim msg.content)
       in
       (match result with
-       | Gate_protocol.Reply { content = reply; structured; stats } ->
+       | Gate_protocol.Reply { content = reply; structured; stats; message_request } ->
            let duration_ms = match stats with
              | Some s -> s.duration_ms
              | None -> 0
@@ -213,7 +214,13 @@ let handle_inbound_with ~dispatch (msg : inbound_message) =
              ~keeper
              ~duration_ms
              Channel_gate_metrics.Success;
-           Ok { keeper_name = keeper; content = reply; structured; turn_stats = stats }
+           Ok
+             { keeper_name = keeper
+             ; content = reply
+             ; structured
+             ; turn_stats = stats
+             ; message_request
+             }
        | Gate_protocol.Keeper_error_result err ->
            Channel_gate_metrics.record_attempt
              ~channel

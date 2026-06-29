@@ -39,6 +39,7 @@ type outbound_message = Gate_protocol.outbound_message = {
   content : string;
   structured : Yojson.Safe.t option;
   turn_stats : turn_stats option;
+  message_request : Gate_protocol.message_request option;
 }
 
 (** {1 Validation} *)

@@ -533,13 +533,20 @@ let string_set_of_list values =
 
 let json_string_list values = Json_util.json_string_list values
 
-let configured_keeper_is_materializable name =
+let configured_keeper_is_materializable config name =
+  (* #22586: autoboot-disabled keepers carry no identity-drift materialization
+     pressure. *)
+  Keeper_meta_store.declarative_autoboot_enabled_by_default config name
+  &&
   try
-    let defaults = Keeper_types_profile.load_keeper_profile_defaults name in
-    (* Exclude loader-only TOMLs such as base.toml from identity drift. *)
-    Option.is_some defaults.persona_name
-    || Option.is_some defaults.goal
-    || defaults.mention_targets <> []
+    let defaults =
+      Keeper_types_profile.load_keeper_profile_defaults_for_base_path
+        ~base_path:config.Workspace.base_path
+        name
+    in
+    (* #22615: SSOT materializability predicate (replaces the inline
+       persona/goal/mention check). *)
+    Keeper_types_profile.keeper_profile_defaults_materializable defaults
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | _ -> true
@@ -553,10 +560,10 @@ let keeper_identity_drift_scan config =
   in
   let materializable_configured_names =
     configured_names
-    |> List.filter configured_keeper_is_materializable
+    |> List.filter (configured_keeper_is_materializable config)
     |> sorted_unique_strings
   in
-  let configured_set = string_set_of_list materializable_configured_names in
+  let configured_set = string_set_of_list configured_names in
   let persisted_set = string_set_of_list persisted_meta_names in
   {
     configured_names;
@@ -826,8 +833,10 @@ let phase_supports_crash_log_failure_reason = function
       false
 
 let active_task_owner_fiber_scan_semantics =
-  "reports active task owners without executable keeper fibers; disabled \
-   keepers are excluded; matching rows can degrade fleet status"
+  "reports keeper-shaped active task owners without executable keeper fibers; \
+   disabled keepers are excluded; matching keeper rows can degrade fleet \
+   status; credentialed non-keeper client task owners are reported separately \
+   as advisory rows"
 
 let paused_keeper_last_blocker_json paused_keepers_json name =
   match paused_keepers_json with
@@ -1043,15 +1052,23 @@ type active_task_owner_without_executable_fiber = {
   task_status : string;
 }
 
+type non_keeper_active_task_owner = {
+  agent_name : string;
+  task_id : string;
+  task_status : string;
+}
+
 type active_task_owner_fiber_scan = {
   active_task_owner_without_executable_fibers :
     active_task_owner_without_executable_fiber list;
+  non_keeper_active_task_owners : non_keeper_active_task_owner list;
   active_task_owner_scan_errors : (string * string) list;
 }
 
 let empty_active_task_owner_fiber_scan =
   {
     active_task_owner_without_executable_fibers = [];
+    non_keeper_active_task_owners = [];
     active_task_owner_scan_errors = [];
   }
 
@@ -1066,6 +1083,10 @@ let compare_active_task_owner_without_executable_fiber left right =
     let cmp = String.compare left.agent_name right.agent_name in
     if cmp <> 0 then cmp
     else String.compare left.task_id right.task_id
+
+let compare_non_keeper_active_task_owner left right =
+  let cmp = String.compare left.agent_name right.agent_name in
+  if cmp <> 0 then cmp else String.compare left.task_id right.task_id
 
 let active_task_assignment (task : Masc_domain.task) =
   Masc_domain.task_assignee_of_status task.task_status
@@ -1088,6 +1109,17 @@ let active_task_owner_without_executable_fiber_json row =
       ("task_status", `String row.task_status);
       ("executable", `Bool false);
       ("action", `String action);
+    ]
+
+let non_keeper_active_task_owner_json row =
+  `Assoc
+    [
+      ("agent_name", `String row.agent_name);
+      ("task_id", `String row.task_id);
+      ("task_status", `String row.task_status);
+      ("owner_kind", `String "non_keeper_client");
+      ("fleet_blocking", `Bool false);
+      ("action", `String "track_client_task_or_release_when_done");
     ]
 
 type keeper_agent_binding_scan = {
@@ -1139,6 +1171,13 @@ let keeper_names_for_agent agent_bindings assignee =
        if String.equal agent_name assignee then Some keeper_name else None)
   |> sorted_unique_strings
 
+let is_credentialed_external_client config assignee =
+  (not (Keeper_identity.is_keeper_principal_agent_name assignee))
+  &&
+  match Auth.load_credential config.Workspace_utils_backend_setup.base_path assignee with
+  | Some _ -> true
+  | None -> false
+
 let active_task_owner_fiber_scan config ~executable_names =
   let executable_set = string_set_of_list executable_names in
   let binding_scan = keeper_agent_bindings config in
@@ -1148,51 +1187,73 @@ let active_task_owner_fiber_scan config ~executable_names =
   | Error err ->
       {
         active_task_owner_without_executable_fibers = [];
+        non_keeper_active_task_owners = [];
         active_task_owner_scan_errors =
           ("backlog", err) :: meta_read_errors;
       }
   | Ok backlog ->
-      let rows =
+      let blocking_rows, non_keeper_rows =
         backlog.tasks
-        |> List.map (fun task ->
+        |> List.fold_left
+             (fun (blocking_rows, non_keeper_rows) task ->
              match active_task_assignment task with
-             | None -> []
+             | None -> (blocking_rows, non_keeper_rows)
              | Some (assignee, task_status) ->
                  let keeper_names = keeper_names_for_agent agent_bindings assignee in
                  if
                    List.exists
                      (fun keeper_name -> String_set.mem keeper_name executable_set)
                      keeper_names
-                 then []
+                 then (blocking_rows, non_keeper_rows)
                  else (
                    match keeper_names with
                    | []
+                     when is_credentialed_external_client config assignee ->
+                       ( blocking_rows
+                       , {
+                           agent_name = assignee;
+                           task_id = task.id;
+                           task_status;
+                         }
+                         :: non_keeper_rows )
+                   | []
                      when List.mem assignee binding_scan.disabled_agent_names
                           || meta_read_errors <> [] ->
-                       []
+                       (blocking_rows, non_keeper_rows)
                    | [] ->
-                       [
-                         {
+                       ( {
                            keeper_name = None;
                            agent_name = assignee;
                            task_id = task.id;
                            task_status;
-                         };
-                       ]
+                         }
+                         :: blocking_rows
+                       , non_keeper_rows )
                    | keeper_names ->
-                       keeper_names
-                       |> List.map (fun keeper_name ->
-                             {
-                               keeper_name = Some keeper_name;
-                               agent_name = assignee;
-                               task_id = task.id;
-                               task_status;
-                            })))
-        |> List.concat
+                       ( keeper_names
+                         |> List.fold_left
+                              (fun rows keeper_name ->
+                                {
+                                  keeper_name = Some keeper_name;
+                                  agent_name = assignee;
+                                  task_id = task.id;
+                                  task_status;
+                                }
+                                :: rows)
+                              blocking_rows
+                       , non_keeper_rows )))
+             ([], [])
+      in
+      let rows =
+        blocking_rows
         |> List.sort_uniq compare_active_task_owner_without_executable_fiber
+      in
+      let non_keeper_rows =
+        non_keeper_rows |> List.sort_uniq compare_non_keeper_active_task_owner
       in
       {
         active_task_owner_without_executable_fibers = rows;
+        non_keeper_active_task_owners = non_keeper_rows;
         active_task_owner_scan_errors = meta_read_errors;
       }
 
@@ -1300,6 +1361,9 @@ let keeper_fleet_safety_health_json
   in
   let active_task_owner_without_executable_fiber_count =
     List.length active_task_owner_scan.active_task_owner_without_executable_fibers
+  in
+  let non_keeper_active_task_owner_count =
+    List.length active_task_owner_scan.non_keeper_active_task_owners
   in
   let active_task_owner_without_executable_fiber =
     active_task_owner_without_executable_fiber_count > 0
@@ -1484,6 +1548,17 @@ let keeper_fleet_safety_health_json
           (List.map
              active_task_owner_without_executable_fiber_json
              active_task_owner_scan.active_task_owner_without_executable_fibers) )
+    ; ( "non_keeper_active_task_owner_count"
+      , `Int non_keeper_active_task_owner_count )
+    ; ( "non_keeper_active_task_owners"
+      , `List
+          (List.map
+             non_keeper_active_task_owner_json
+             active_task_owner_scan.non_keeper_active_task_owners) )
+    ; ( "non_keeper_active_task_owner_semantics"
+      , `String
+          "active tasks owned by credentialed non-keeper clients; visible for \
+           operators but not keeper fleet blockers" )
     ; ( "active_task_owner_fiber_scan_semantics"
       , `String active_task_owner_fiber_scan_semantics )
     ; ( "active_task_owner_scan_error_count"

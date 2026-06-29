@@ -9,6 +9,12 @@ val generate_trace_id : ?now:float -> unit -> string
 val keeper_name_from_agent_name : string -> string option
 val is_keeper_agent_alias : string -> bool
 val canonical_keeper_name_from_agent_name : string -> string option
+val is_keeper_principal_agent_name : string -> bool
+(** [is_keeper_principal_agent_name name] returns true for task-owner
+    principals that should be treated as keeper-owned work: canonical
+    [keeper-<name>-agent] aliases and dictionary-generated keeper nicknames.
+    It intentionally rejects arbitrary three-part client names such as
+    [codex-mcp-client]. *)
 val canonical_keeper_name : string -> string option
 
 val strip_keeper_prefix : string -> string option

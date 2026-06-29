@@ -4,10 +4,16 @@ type keeper_cycle_channel =
   | Reactive
   | Scheduled_autonomous
 
+type event_queue_trigger =
+  | Bootstrap_stimulus
+  | No_progress_recovery_stimulus
+
 type turn_reason =
   | Mention_pending
   | Board_event_pending
   | Scope_message_pending
+  | Bootstrap_stimulus_pending
+  | No_progress_recovery_stimulus_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of
@@ -37,6 +43,7 @@ type turn_verdict =
   | Skip of { reasons : skip_reason * skip_reason list }
 
 val turn_reason_to_string : turn_reason -> string
+val turn_reason_of_event_queue_trigger : event_queue_trigger -> turn_reason
 val skip_reason_to_string : skip_reason -> string
 val channel_to_string : keeper_cycle_channel -> string
 

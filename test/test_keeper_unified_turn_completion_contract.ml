@@ -4,8 +4,8 @@
 
     Pinned invariants:
     1. Boundary: the function clears ONLY the completion-contract latch
-       pair — [last_failure_reason] when its code is
-       ["completion_contract_violation"] and the meta
+       pair — typed [last_failure_reason] when it is
+       [Completion_contract_violation] and the meta
        [last_blocker] when its klass is [Completion_contract_violation].
        It must not touch [paused] (owned by the resume_reconcile_gate).
     2. Idempotence: running it twice on a clean meta is a no-op (no
@@ -13,12 +13,10 @@
     3. Cross-klass safety: a meta whose [last_blocker.klass] is
        [No_progress_loop] (or any other klass) is left untouched,
        even when [last_failure_reason] carries the
-       completion-contract code. The function reads them
+       completion-contract variant. The function reads them
        independently.
-    4. Failure-reason cross-code safety: a
-       [last_failure_reason] whose code is NOT
-       ["completion_contract_violation"] (e.g. another
-       [Provider_runtime_error] code) is left alone. *)
+    4. Failure-reason cross-kind safety: an unrelated
+       [Provider_runtime_error] failure reason is left alone. *)
 
 open Alcotest
 
@@ -62,15 +60,8 @@ let make_meta name =
   | Error err -> fail ("parse base: " ^ err)
 ;;
 
-let completion_contract_provider_runtime ?(detail = "completion contract violated") () =
-  KR.Provider_runtime_error
-    { code = CC.failure_reason_code
-    ; detail
-    ; provider_id = None
-    ; http_status = None
-    ; runtime_id = None
-    ; reason = None
-    }
+let completion_contract_failure_reason ?(detail = "completion contract violated") () =
+  KR.Completion_contract_violation { detail }
 ;;
 
 let unrelated_provider_runtime code =
@@ -111,17 +102,17 @@ let test_clears_both_latches_when_both_set () =
        Masc.Keeper_registry.set_failure_reason
          ~base_path:config.base_path
          keeper_name
-         (Some (completion_contract_provider_runtime ()));
+         (Some (completion_contract_failure_reason ()));
        (* Sanity: both latches set before resume *)
        (match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
         | Some entry ->
           (match entry.Masc.Keeper_registry.last_failure_reason with
-           | Some (KR.Provider_runtime_error { code; _ }) ->
+           | Some (KR.Completion_contract_violation _) ->
              check string
-               "pre-resume: failure reason code is completion_contract_violation"
+               "pre-resume: failure reason is completion_contract_violation"
                CC.failure_reason_code
-               code
-           | Some _ -> fail "expected Provider_runtime_error pre-resume"
+               CC.failure_reason_code
+           | Some _ -> fail "expected Completion_contract_violation pre-resume"
            | None -> fail "expected Some failure_reason pre-resume");
           check bool
             "pre-resume: meta last_blocker klass is Completion_contract_violation"
@@ -204,7 +195,7 @@ let test_preserves_unrelated_blocker_klass () =
        Masc.Keeper_registry.set_failure_reason
          ~base_path:config.base_path
          keeper_name
-         (Some (completion_contract_provider_runtime ()));
+         (Some (completion_contract_failure_reason ()));
        let resumed_meta = CC.clear_for_operator_resume ~base_path:config.base_path meta in
        (match resumed_meta.runtime.last_blocker with
         | Some { KMR.klass = KMR.No_progress_loop; _ } -> ()
@@ -286,7 +277,7 @@ let test_failure_reason_does_not_touch_meta_blocker () =
        Masc.Keeper_registry.set_failure_reason
          ~base_path:config.base_path
          keeper_name
-         (Some (completion_contract_provider_runtime ()));
+         (Some (completion_contract_failure_reason ()));
        let resumed_meta = CC.clear_for_operator_resume ~base_path:config.base_path meta in
        check bool
          "returned meta byte-identical when meta blocker absent"
@@ -352,7 +343,7 @@ let test_does_not_touch_paused () =
        Masc.Keeper_registry.set_failure_reason
          ~base_path:config.base_path
          keeper_name
-         (Some (completion_contract_provider_runtime ()));
+         (Some (completion_contract_failure_reason ()));
        let resumed_meta = CC.clear_for_operator_resume ~base_path:config.base_path meta in
        check bool "paused preserved" true resumed_meta.paused;
        (* Registry-side paused state also untouched. *)

@@ -89,7 +89,7 @@ let accept_rejected_result_should_try_next ~is_last err =
 
 let checkpoint_for_accept_rejected_retry ~resume_checkpoint ~checkpoint_after err =
   match accept_no_progress_retry_kind err with
-  | Some `Empty_no_progress -> resume_checkpoint
+  | Some (`Empty_no_progress | `Thinking_only_no_progress) -> resume_checkpoint
   | Some `Read_only_no_progress -> checkpoint_after
   | None -> checkpoint_after
 

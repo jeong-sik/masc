@@ -37,6 +37,7 @@ type failure_reason =
       runtime_id : string option;
       reason : Keeper_meta_contract.runtime_exhaustion_reason option;
     }
+  | Completion_contract_violation of { detail : string; }
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved of fiber_drop_cause
   | Exception of string

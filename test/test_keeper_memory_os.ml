@@ -2202,16 +2202,6 @@ let test_render_if_enabled_omits_diagnostic_memory () =
           ; Types.valid_until = Some (now +. 3600.0)
           }
         in
-        let legacy_fact =
-          let prefix = Types.librarian_unstructured_fallback_claim_prefix in
-          { (fact_fixture ~now ()) with
-            Types.claim =
-              Printf.sprintf "%s (invalid_json): raw model text" prefix
-          ; Types.category = Types.Ephemeral
-          ; Types.claim_kind = None
-          ; Types.valid_until = Some (now +. 3600.0)
-          }
-        in
         let diagnostic_episode =
           { Types.trace_id = "trace-diagnostic-recall"
           ; Types.generation = 1
@@ -2227,15 +2217,7 @@ let test_render_if_enabled_omits_diagnostic_memory () =
           ; Types.schema_version = Types.schema_version
           }
         in
-        let legacy_episode =
-          { diagnostic_episode with
-            Types.trace_id = "trace-legacy-diagnostic-recall"
-          ; Types.episode_summary = "legacy diagnostic-only episode should not enter recall"
-          ; Types.claims = [ legacy_fact ]
-          }
-        in
         Memory_io.append_episode_bundle ~keeper_id diagnostic_episode;
-        Memory_io.append_episode_bundle ~keeper_id legacy_episode;
         match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
         | None -> ()
         | Some block ->
@@ -4434,15 +4416,13 @@ let test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable () =
   | _ -> Alcotest.fail "prompt_recallable must be a bool"
 ;;
 
-let test_dashboard_fact_json_marks_legacy_diagnostic_not_prompt_recallable () =
+let test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable () =
   let now = 1_000_000.0 in
   let fact =
-    let prefix = Types.librarian_unstructured_fallback_claim_prefix in
     { (fact_fixture ~now ()) with
-      Types.claim =
-        Printf.sprintf "%s (invalid_json): raw model text" prefix
+      Types.claim = "Raw parse-failure fallback should not enter prompt recall"
     ; Types.category = Types.Ephemeral
-    ; Types.claim_kind = None
+    ; Types.claim_kind = Some Types.Diagnostic
     ; Types.valid_until = Some (now +. 3600.0)
     }
   in
@@ -4451,14 +4431,18 @@ let test_dashboard_fact_json_marks_legacy_diagnostic_not_prompt_recallable () =
     | `Assoc fields -> fields
     | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
   in
+  (* The producer tags fallback notes as [Diagnostic] at the write boundary, so
+     recall eligibility is decided by [claim_kind] — not by string-matching
+     [claim]. Rows lacking [claim_kind] are ordinary recallable facts; their
+     [valid_until] horizon bounds any stale pre-[Diagnostic] rows on disk. *)
   Alcotest.(check bool)
-    "legacy diagnostic remains untyped"
-    false
+    "diagnostic is typed via claim_kind"
+    true
     (List.mem_assoc "claim_kind" fields);
   match List.assoc_opt "prompt_recallable" fields with
   | Some (`Bool b) ->
     Alcotest.(check bool)
-      "legacy diagnostic fact is not prompt recallable"
+      "diagnostic fact is not prompt recallable"
       false
       b
   | _ -> Alcotest.fail "prompt_recallable must be a bool"
@@ -5129,7 +5113,7 @@ let () =
         ; Alcotest.test_case
             "dashboard fact json marks legacy diagnostic rows as not prompt recallable"
             `Quick
-            test_dashboard_fact_json_marks_legacy_diagnostic_not_prompt_recallable
+            test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable
         ; Alcotest.test_case
             "dashboard json wires one facts.items row per persisted fact"
             `Quick

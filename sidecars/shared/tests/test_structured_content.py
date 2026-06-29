@@ -134,3 +134,26 @@ class TestResponseText:
         )
 
         assert response_text(response) == "plain reply"
+
+    def test_renders_message_request_when_reply_is_ack_only(self) -> None:
+        response = GateResponse(
+            ok=True,
+            keeper_name="sangsu",
+            reply='{"request_id":"req-123","status":"queued"}',
+            model_used="",
+            duration_ms=0,
+            tokens_used=0,
+            error="",
+            structured=None,
+            message_request={
+                "request_id": "req-123",
+                "destination_id": "sangsu",
+                "status": "queued",
+                "metadata": {"in_flight_lane": "autonomous"},
+            },
+        )
+
+        assert (
+            response_text(response)
+            == "sangsu is busy; your message is queued (request_id=req-123). Current turn: autonomous."
+        )

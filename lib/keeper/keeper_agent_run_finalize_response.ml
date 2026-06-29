@@ -43,6 +43,25 @@ let finalize
     ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
     () =
+  let budget_exhausted =
+    Keeper_agent_run_response_text.stop_reason_is_turn_budget_exhausted
+      result.stop_reason
+  in
+  let completion_contract_result = acc.receipt_completion_contract_result in
+  let contract_requires_attention =
+    Keeper_execution_receipt.completion_contract_result_requires_attention
+      completion_contract_result
+  in
+  let suppress_visible_response = budget_exhausted || contract_requires_attention in
+  let raw_response_text_present =
+    (not budget_exhausted) && String.trim raw_response_text <> ""
+  in
+  if contract_requires_attention && raw_response_text_present
+  then
+    Log.Keeper.info ~keeper_name:meta.name
+      "suppressing keeper-visible response for completion_contract_result=%s"
+      (Keeper_execution_receipt.completion_contract_result_to_string
+         completion_contract_result);
   let reported_state_snapshot =
     reported_state_snapshot_from_checkpoint result.checkpoint
   in
@@ -57,6 +76,7 @@ let finalize
       ~keeper_name:meta.name
       ~goal:meta.goal
       ~actual_keeper_tool_names
+      ~completion_contract_result
       ~stop_reason:result.stop_reason
       ~raw_response_text
       ()
@@ -90,23 +110,28 @@ let finalize
       ~state_snapshot
       ~state_snapshot_source
       ~resume_merge
-      ~append_manifest
-      ()
+    ~append_manifest
+    ()
   in
-  receipt_response_text_present_ref := true;
+  receipt_response_text_present_ref := raw_response_text_present;
   let assistant_msg =
-    Agent_sdk.Types.make_message
-      ~role:Agent_sdk.Types.Assistant
-      ~metadata:
-        [ ( Keeper_memory_policy.replay_metadata_key
-          , Keeper_memory_policy.replay_metadata_of_snapshot
-              state_snapshot )
-        ]
-      [ Agent_sdk.Types.Text response_text ]
+    if suppress_visible_response || String.trim response_text = ""
+    then None
+    else
+      Some
+        (Agent_sdk.Types.make_message
+           ~role:Agent_sdk.Types.Assistant
+           ~metadata:
+             [ ( Keeper_memory_policy.replay_metadata_key
+               , Keeper_memory_policy.replay_metadata_of_snapshot
+                   state_snapshot )
+             ]
+           [ Agent_sdk.Types.Text response_text ])
   in
-  Keeper_context_runtime.persist_message
-    ~source:history_assistant_source
-    session
+  Option.iter
+    (Keeper_context_runtime.persist_message
+       ~source:history_assistant_source
+       session)
     assistant_msg;
   let saved_checkpoint_result =
     match result.checkpoint with
@@ -187,7 +212,7 @@ let finalize
     let librarian_messages =
       match saved_checkpoint with
       | Some checkpoint -> checkpoint.Agent_sdk.Checkpoint.messages
-      | None -> [ assistant_msg ]
+      | None -> Option.to_list assistant_msg
     in
     Keeper_agent_run_post_turn_memory.run
       ~config

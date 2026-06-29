@@ -91,6 +91,7 @@ type failure_reason =
               instead of reparsing [code]. [None] for non-exhaustion
               provider/runtime errors. *)
       }
+  | Completion_contract_violation of { detail : string }
   | Ambiguous_partial_commit of ambiguous_partial_commit
   | Fiber_unresolved of fiber_drop_cause
   (** Fiber exited without resolving [done_r].
@@ -130,6 +131,8 @@ let failure_reason_to_string = function
         ~some:(Printf.sprintf " http=%d")
     in
     Printf.sprintf "provider_runtime_error(%s:%s%s%s)" code detail prov http
+  | Completion_contract_violation { detail } ->
+    Printf.sprintf "completion_contract_violation(%s)" detail
   | Ambiguous_partial_commit { kind; detail } ->
     Printf.sprintf
       "ambiguous_partial_commit(%s:%s)"
@@ -167,6 +170,7 @@ let failure_reason_cohort_key = function
   | Some (Stale_fleet_batch _) -> "stale_fleet_batch"
   | Some (Provider_timeout_loop _) -> "provider_timeout_loop"
   | Some (Provider_runtime_error _) -> "provider_runtime_error"
+  | Some (Completion_contract_violation _) -> "completion_contract_violation"
   | Some (Ambiguous_partial_commit _) -> "ambiguous_partial_commit"
   | Some (Fiber_unresolved Graceful_shutdown) -> "fiber_unresolved_graceful"
   | Some (Fiber_unresolved Cancelled_by_parent) -> "fiber_unresolved_cancelled"
@@ -188,6 +192,7 @@ let stale_kill_failure_reason ~prior ~kill_class =
   | Some
       ( Provider_timeout_loop _
       | Provider_runtime_error _
+      | Completion_contract_violation _
       | Ambiguous_partial_commit _
       | Turn_consecutive_failures _
       | Turn_overflow_pause

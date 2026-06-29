@@ -52,6 +52,7 @@ type heartbeat_event_intake = {
   pending_board_events : Keeper_world_observation.pending_board_event list;
   consumed_stimulus_count : int;
   consumed_stimuli : Keeper_event_queue.stimulus list;
+  event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
 val heartbeat_event_intake :
@@ -74,6 +75,7 @@ val decide_keepalive_scheduling :
   ?runtime_resilience_of_name:(string -> string option) ->
   ?keeper_resilience_of_name:(string -> string option) ->
   ?reactive_wake:bool ->
+  ?event_queue_triggers:Keeper_world_observation.event_queue_trigger list ->
   ?wake_tombstone_decide:
     (origin:Keeper_wake_tombstone.wake_origin ->
      keeper_name:string ->

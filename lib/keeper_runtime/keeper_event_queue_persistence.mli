@@ -49,3 +49,12 @@ val ack_consumed :
 (** Remove consumed stimuli from pending and in-flight snapshots under one
     persistence lock. Returns [Error _] when durable acknowledgement fails so
     the caller can avoid treating the stimuli as acknowledged. *)
+
+val drop_by_post_id :
+  base_path:string
+  -> keeper_name:string
+  -> post_id:string
+  -> (Keeper_event_queue.stimulus list, string) result
+(** Remove matching stimuli from pending and in-flight snapshots under one
+    persistence lock, returning the exact removed stimuli for ledger
+    acknowledgement. *)

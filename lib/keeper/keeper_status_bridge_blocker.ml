@@ -119,6 +119,34 @@ let no_progress_loop_summary =
   "Keeper auto-paused after repeated no-evidence turns; this is a progress-safety latch, not a provider failure. Operator resume clears the latch."
 ;;
 
+let runtime_blocker_surface_of_masc_internal_error = function
+  | Keeper_turn_driver.Accept_rejected _ as err ->
+    let summary =
+      Option.value
+        ~default:"Provider response violated the completion contract after dispatch."
+        (Keeper_turn_driver.summary_of_masc_internal_error err)
+    in
+    Some
+      { blocker_class =
+          runtime_blocker_class_label Completion_contract_violation
+      ; summary
+      ; continue_gate =
+          blocker_class_continue_gate Completion_contract_violation
+      }
+  | Keeper_turn_driver.Runtime_exhausted _
+  | Keeper_turn_driver.Capacity_backpressure _
+  | Keeper_turn_driver.Resumable_cli_session _
+  | Keeper_turn_driver.Admission_queue_timeout _
+  | Keeper_turn_driver.Admission_queue_rejected _
+  | Keeper_turn_driver.Turn_timeout _
+  | Keeper_turn_driver.Provider_timeout _
+  | Keeper_turn_driver.Max_tokens_ceiling_violation _
+  | Keeper_turn_driver.Ambiguous_post_commit _
+  | Keeper_turn_driver.Internal_unhandled_exception _
+  | Keeper_turn_driver.Internal_bridge_exception _
+  | Keeper_turn_driver.Internal_contract_rejected _ ->
+    None
+
 let runtime_blocker_surface_of_typed_class ?(summary = "") (cls : blocker_class)
   : runtime_blocker_surface
   =
@@ -261,6 +289,14 @@ let runtime_blocker_surface_of_failure_reason (reason : Keeper_registry.failure_
                window; keeper was auto-paused before restart loop."
               distinct_count)
          Stale_fleet_batch)
+  | Keeper_registry.Completion_contract_violation { detail } ->
+    Some
+      (runtime_blocker_surface_of_typed_class
+         ~summary:
+           (if String.trim detail = ""
+            then "Provider response violated the completion contract after dispatch."
+            else detail)
+         Completion_contract_violation)
   | Keeper_registry.Provider_runtime_error { code; detail; _ } ->
     (match
        Keeper_provider_runtime_boundary.classify_provider_runtime_error_record

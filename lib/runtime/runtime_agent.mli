@@ -35,10 +35,12 @@ type stop_reason = Runtime_agent_context.stop_reason =
     }
 (** Why this single OAS call yielded control. [Completed] is the
     model's success path; [TurnBudgetExhausted] means the per-call
-    turn budget checkpoint was reached and the keeper should continue
-    from the persisted checkpoint on the next cycle; [MutationBoundaryReached]
-    fires when the keeper hit a mutation tool while in read-only mode
-    (the [tool_name] surfaces which tool triggered the gate). *)
+    turn budget checkpoint was reached. It is not a completed
+    deliverable; callers must classify it from typed stop reason plus
+    durable-progress evidence before deciding whether to continue from
+    the persisted checkpoint. [MutationBoundaryReached] fires when the
+    keeper hit a mutation tool while in read-only mode (the [tool_name]
+    surfaces which tool triggered the gate). *)
 
 (** {1 Config} *)
 

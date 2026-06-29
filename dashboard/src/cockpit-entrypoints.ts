@@ -163,59 +163,9 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   },
 ]
 
-export const COCKPIT_LEGACY_ENTRYPOINTS: CockpitEntrypoint[] = [
-  // Work Plane legacy design subtabs.
-  { mode: 'work', aliases: ['goal-h', 'goal-t', 'goal-tree'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['goal-d', 'goal-snapshot', 'goal-snapshot-diff'], target: { tab: 'workspace', params: { section: 'planning', view: 'goal-tree', focus: 'snapshot' } }, coverage: 'backend-blocked' },
-  { mode: 'work', aliases: ['task-bl', 'task-backlog'], target: { tab: 'workspace', params: { section: 'planning', view: 'default' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['task-st', 'task-stale'], target: { tab: 'workspace', params: { section: 'planning', view: 'default', focus: 'stale' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['task-w', 'task-wall'], target: { tab: 'workspace', params: { section: 'planning', view: 'default' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['acc-led', 'accountability-ledger'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-ledger' } }, coverage: 'covered' },
-  { mode: 'work', aliases: ['acc-mtx', 'accountability-matrix'], target: { tab: 'workspace', params: { section: 'planning', focus: 'accountability-matrix' } }, coverage: 'covered' },
-
-  // Comms Plane legacy design subtabs.
-  { mode: 'comms', aliases: ['bd-feed'], target: { tab: 'board' }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['bd-thr', 'board-thread'], target: { tab: 'board', params: { focus: 'thread' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['bd-tog', 'board-direct-automation'], target: { tab: 'board', params: { focus: 'automation' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['ms-rm', 'messages-workspace'], target: { tab: 'board', params: { focus: 'messages-workspace' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['ms-inb', 'messages-mention-inbox'], target: { tab: 'board', params: { focus: 'mention-inbox' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['ms-st', 'messages-state-block'], target: { tab: 'board', params: { focus: 'state-block' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['cm-bc', 'composer-broadcast'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'broadcast' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['cm-mn', 'composer-mention'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'mention' } }, coverage: 'covered' },
-  { mode: 'comms', aliases: ['cm-st', 'composer-state'], target: { tab: 'command', params: { section: 'operations', view: 'ops', focus: 'state' } }, coverage: 'covered' },
-
-  // Observe Plane legacy design subtabs.
-  { mode: 'observe', aliases: ['cs-deep', 'runtime-deep-dive'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'deep-dive' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['cs-cmp', 'runtime-compare'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'inspector', focus: 'compare' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['au-led', 'audit-ledger'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['au-act', 'audit-by-actor'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'actor' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['au-sum', 'audit-summary'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'audit', focus: 'summary' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['sa-dash', 'safe-auto-dashboard'], target: { tab: 'command', params: { section: 'operations', view: 'safety' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['sa-kpr', 'safe-auto-by-keeper'], target: { tab: 'command', params: { section: 'operations', view: 'safety', focus: 'keeper' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['sa-trd', 'safe-auto-trend'], target: { tab: 'command', params: { section: 'operations', view: 'safety', focus: 'trend' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['ct-agt', 'cost-per-agent'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'agent' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['ct-mtx', 'cost-matrix'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'matrix' } }, coverage: 'covered' },
-  { mode: 'observe', aliases: ['ct-lat', 'cost-latency'], target: { tab: 'monitoring', params: { section: 'runtime', view: 'cost', focus: 'latency' } }, coverage: 'covered' },
-
-  // Cognition Plane legacy design subtabs.
-  { mode: 'cognition', aliases: ['ki-bdi', 'keeper-bdi'], target: { tab: 'monitoring', params: { section: 'agents', view: 'keeper', focus: 'bdi' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ki-acc', 'keeper-tool-access'], target: { tab: 'monitoring', params: { section: 'agents', view: 'keeper', focus: 'tool-access' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ki-stat', 'keeper-token-stats'], target: { tab: 'monitoring', params: { section: 'agents', view: 'token-stats' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['dc-str', 'decisions-stream'], target: { tab: 'monitoring', params: { section: 'agents', view: 'decisions' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['dc-mem', 'memory-entries'], target: { tab: 'monitoring', params: { section: 'agents', view: 'memory', focus: 'entries' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ep-card', 'episodes-cards'], target: { tab: 'monitoring', params: { section: 'agents', view: 'episodes' } }, coverage: 'covered' },
-  { mode: 'cognition', aliases: ['ep-lrn', 'episodes-learnings'], target: { tab: 'monitoring', params: { section: 'agents', view: 'episodes' } }, coverage: 'covered' },
-
-  // IDE Plane legacy design subtabs.
-  { mode: 'ide', aliases: ['edit'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source' } }, coverage: 'covered' },
-  { mode: 'ide', aliases: ['review', 'pr-thread'], target: { tab: 'code', params: { section: 'ide-shell', view: 'unified', focus: 'review' } }, coverage: 'covered' },
-  { mode: 'ide', aliases: ['merge', 'split', 'split-diff'], target: { tab: 'code', params: { section: 'ide-shell', view: 'split-diff' } }, coverage: 'covered' },
-  { mode: 'ide', aliases: ['search', 'find'], target: { tab: 'code', params: { section: 'ide-shell', view: 'source', find: 'open' } }, coverage: 'covered' },
-]
-
 const ENTRYPOINT_TARGETS = new Map<string, CockpitRouteTarget>()
 
-for (const entrypoint of [...COCKPIT_ENTRYPOINTS, ...COCKPIT_LEGACY_ENTRYPOINTS]) {
+for (const entrypoint of COCKPIT_ENTRYPOINTS) {
   for (const alias of entrypoint.aliases) {
     ENTRYPOINT_TARGETS.set(`${entrypoint.mode}:${normalizeCockpitEntrypoint(alias)}`, entrypoint.target)
   }

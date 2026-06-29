@@ -312,7 +312,7 @@ describe('KeeperWorkspaceRail', () => {
   })
 
   it('opens the compaction inspector overlay from the context rail and hydrates durable snapshots', async () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
+    const { container, findByTestId } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     const btn = Array.from(container.querySelectorAll('.cmp-open')).find(
       el => el.textContent?.includes('before/after'),
     ) as HTMLElement | undefined
@@ -322,6 +322,10 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('컴팩션 스냅샷')
     await waitFor(() => expect(container.textContent).toContain('210.0k'))
     expect(container.querySelector('[data-testid="compaction-scan-diagnostics"]')).toBeNull()
+    const coverage = await findByTestId('compaction-coverage-status')
+    expect(coverage.textContent).toContain('표시 1/1')
+    expect(coverage.textContent).toContain('source=runtime_manifest|keeper_meta')
+    expect(coverage.textContent).toContain('producer=keeper_runtime_manifest|keeper_meta_store')
     expect(container.textContent).toContain('proactive(85%)')
     expect(container.textContent).toContain('runtime_manifest · observed')
     expect(container.textContent).toContain('trace-cmp#12')
@@ -372,7 +376,10 @@ describe('KeeperWorkspaceRail', () => {
 
     const diagnostics = await findByTestId('compaction-scan-diagnostics')
     expect(diagnostics.textContent).toContain('manifest row 1개')
-    expect(diagnostics.textContent).toContain('limit')
+    expect(diagnostics.textContent).toContain('scan budget')
+    const coverage = await findByTestId('compaction-coverage-status')
+    expect(coverage.textContent).toContain('표시 1/1')
+    expect(coverage.textContent).toContain('더 오래된 snapshot은 누락')
     expect(container.textContent).toContain('pre_dispatch_hygiene')
     expect(container.textContent).toContain('runtime_manifest · compacted')
     expect(container.textContent).toContain('trace-live')
@@ -407,7 +414,9 @@ describe('KeeperWorkspaceRail', () => {
     const diagnostics = await findByTestId('compaction-scan-diagnostics')
     expect(diagnostics.textContent).toContain('manifest row 2개')
     expect(diagnostics.textContent).toContain('unknown event: "memory_injected"')
-    expect(diagnostics.textContent).toContain('limit')
+    expect(diagnostics.textContent).toContain('scan budget')
+    const coverage = await findByTestId('compaction-coverage-status')
+    expect(coverage.textContent).toContain('표시 0/0')
     expect(container.textContent).toContain('아직 이 keeper에서 durable compaction snapshot이 없습니다.')
     expect(container.textContent).toContain('api_count=0 · decoded=0')
   })
@@ -434,6 +443,7 @@ describe('KeeperWorkspaceRail', () => {
     fireEvent.click(btn as HTMLElement)
 
     await waitFor(() => expect(container.textContent).toContain('API는 masc-improver snapshot 2건을 보고'))
+    expect(container.querySelector('[data-testid="compaction-coverage-status"]')?.textContent).toContain('표시 0/2')
     expect(container.textContent).toContain('api_count=2 · decoded=0')
     expect(container.textContent).toContain('source=runtime_manifest|keeper_meta')
   })

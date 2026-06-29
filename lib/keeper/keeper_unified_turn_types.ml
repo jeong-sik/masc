@@ -200,6 +200,9 @@ let registry_failure_reason_of_terminal_reason
          ; runtime_id = None
          ; reason = None
          })
+  | Keeper_turn_disposition.Completion_contract_unsatisfied
+  | Keeper_turn_disposition.Completion_contract_no_progress ->
+    Some (Keeper_registry.Completion_contract_violation { detail })
   | Keeper_turn_disposition.Runtime_attempts_exhausted ->
     Some
       (Keeper_registry.Provider_runtime_error
@@ -214,8 +217,6 @@ let registry_failure_reason_of_terminal_reason
   | Keeper_turn_disposition.External_cancel
   | Keeper_turn_disposition.Input_required
   | Keeper_turn_disposition.Turn_wall_clock_timeout
-  | Keeper_turn_disposition.Completion_contract_unsatisfied
-  | Keeper_turn_disposition.Completion_contract_no_progress
   | Keeper_turn_disposition.Turn_budget_exhausted _
   | Keeper_turn_disposition.Post_commit_ambiguous
   | Keeper_turn_disposition.Unknown _ -> None
@@ -259,10 +260,12 @@ let pop_turn_tool_input tracker tool_name =
     let pending =
       match rest with
       | [] -> StringMap.remove tool_name tracker.pending_tool_inputs
-      | _ -> StringMap.add tool_name rest tracker.pending_tool_inputs
+      | head :: tail ->
+        StringMap.add tool_name (head :: tail) tracker.pending_tool_inputs
     in
     Some input, { tracker with pending_tool_inputs = pending }
-  | _ -> None, tracker
+  | Some [] -> None, tracker
+  | None -> None, tracker
 ;;
 
 let record_unmatched_tool_completed

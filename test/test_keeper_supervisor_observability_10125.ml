@@ -54,15 +54,15 @@ let last_sweep_for ~base_path =
     ()
 ;;
 
-(* The sweep-start counter is declared at init via zero-fill so
-   [get_metric_value ~labels:[] ()] returns [Some 0.0] if and only
-   if the registration block actually ran. The last-sweep timestamp is a gauge
-   and intentionally stays lazy until a sweep beat writes an honest value.
+(* The sweep-start counter and unlabeled last-sweep gauge cell are declared at
+   init via zero-fill so [get_metric_value ~labels:[] ()] returns [Some 0.0] if
+   and only if the registration block actually ran. Labelled [base_path] gauge
+   cells intentionally stay lazy until a sweep beat writes an honest value.
 
    Note: [metric_total] cannot be used as a registration check because
    it folds across all labelled variants and returns [0.0] for both
    "not registered" and "registered but no observations yet". *)
-let test_counter_registered_and_gauge_lazy () =
+let test_counter_and_unlabeled_gauge_registered () =
   let starts =
     Metrics.get_metric_value Keeper_metrics.(to_string SupervisorSweepStarts) ()
   in
@@ -72,7 +72,10 @@ let test_counter_registered_and_gauge_lazy () =
       ()
   in
   Alcotest.(check bool) "sweep_starts registered" true (Option.is_some starts);
-  Alcotest.(check bool) "last_sweep_unixtime lazy before set" true (Option.is_none last_sweep)
+  Alcotest.(check (option (float 0.001)))
+    "last_sweep_unixtime registered at zero"
+    (Some 0.0)
+    last_sweep
 ;;
 
 (* Helper returns [None] before the sweep gauge is set in
@@ -188,9 +191,9 @@ let () =
     "keeper_supervisor_observability_10125"
     [ ( "metrics-registered"
       , [ Alcotest.test_case
-            "counter registered and gauge lazy at init"
+            "counter and unlabeled gauge registered at init"
             `Quick
-            test_counter_registered_and_gauge_lazy
+            test_counter_and_unlabeled_gauge_registered
         ] )
     ; ( "age-helper"
       , [ Alcotest.test_case

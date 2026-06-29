@@ -38,7 +38,11 @@ let append_decision_record
   in
   let response_preview =
     match result with
-    | Some r when String.trim r.response_text <> "" ->
+    | Some r
+      when String.trim r.response_text <> ""
+           && Keeper_turn_outcome.equal
+                (Keeper_turn_outcome.of_stop_reason r.stop_reason)
+                Keeper_turn_outcome.Visible_reply ->
         Some (short_preview r.response_text)
     | _ -> None
   in

@@ -93,7 +93,12 @@ let invalidate_keeper_execution_surfaces ~config () =
    default (#8605). [Succeeded]/[Already_live] are successes (Info);
    [Rejected] (400) and [Dispatch_none] (500) are failures (Warn) — see
    docs/spec/18-log-severity-taxonomy.md § 3.6. *)
-type lifecycle_outcome = Succeeded | Already_live | Rejected | Dispatch_none
+type lifecycle_outcome =
+  | Succeeded
+  | Already_live
+  | Rejected
+  | Dispatch_none
+  | Persist_failed
 
 let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     state agent_name req reqd =
@@ -131,35 +136,55 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
     in
     let persist_keeper_paused_state paused =
       match Keeper_meta_store.read_meta config name with
-      | Ok (Some meta) when Bool.equal meta.paused paused -> ()
+      | Ok (Some meta) when Bool.equal meta.paused paused -> true
       | Ok (Some meta) ->
-          let source_meta =
-            if paused then meta
-            else
-              Keeper_unified_turn_no_progress.clear_for_operator_resume
-                ~base_path:config.base_path
-                meta
-          in
-          let updated_meta =
-            {
-              source_meta with
-              paused;
-              auto_resume_after_sec =
-                (if paused then source_meta.auto_resume_after_sec else None);
-              updated_at = Keeper_meta_contract.now_iso ();
-            }
-          in
-          (match
-             Keeper_meta_store.write_meta_with_merge
-               ~merge:Keeper_meta_merge.caller_wins config updated_meta
-           with
-           | Ok () -> ()
-           | Error err ->
-               Log.Keeper.warn
-                 "keeper %s %s: write_meta failed: %s"
-                 name
-                 (if paused then "pause" else "resume")
-                 err)
+        let source_meta_result =
+          if paused
+          then Ok meta
+          else
+            Keeper_unified_turn_no_progress.clear_for_operator_resume
+              ~base_path:config.base_path
+              meta
+        in
+        (match source_meta_result with
+         | Error err ->
+           Log.Keeper.error
+             "keeper %s %s: no_progress resume clear failed: %s"
+             name
+             (if paused then "pause" else "resume")
+             err;
+           Otel_metric_store.inc_counter
+             Keeper_metrics.(to_string PausedStatePersistErrors)
+             ~labels:
+               [ ( "phase"
+                 , Keeper_paused_state_persist_phase.(to_label Boot_resume_persist)
+                 )
+               ; ("reason", "no_progress_clear_error")
+               ]
+             ();
+           false
+         | Ok source_meta ->
+           let updated_meta =
+             {
+               source_meta with
+               paused;
+               auto_resume_after_sec =
+                 (if paused then source_meta.auto_resume_after_sec else None);
+               updated_at = Keeper_meta_contract.now_iso ();
+             }
+           in
+           (match
+              Keeper_meta_store.write_meta_with_merge
+                ~merge:Keeper_meta_merge.caller_wins config updated_meta
+            with
+            | Ok () -> true
+            | Error err ->
+              Log.Keeper.warn
+                "keeper %s %s: write_meta failed: %s"
+                name
+                (if paused then "pause" else "resume")
+                err;
+              false))
       (* Issue #8391 HIGH #1: split [Ok None] (meta vanished) from
          [Error _] (IO/parse failure) so silent failures become visible.
          The boot HTTP contract is unchanged — auto-resume cleanup is a
@@ -173,7 +198,8 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "meta_missing")]
-            ()
+            ();
+          false
       | Error err ->
           Log.Keeper.error
             "keeper %s %s: read_meta failed: %s"
@@ -184,21 +210,21 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             Keeper_metrics.(to_string PausedStatePersistErrors)
             ~labels:[("phase", Keeper_paused_state_persist_phase.(to_label Boot_resume_persist));
                      ("reason", "read_meta_error")]
-            ()
+            ();
+          false
     in
     let resume_booted_keeper_if_needed () =
       match Keeper_meta_store.read_meta config name with
       | Ok (Some meta) when meta.paused ->
-          persist_keeper_paused_state false;
-          (match resolve_keeper_agent_name () with
-           | Some keeper_agent_name ->
-               Keeper_keepalive.process_directive
-                 ~agent_name:keeper_agent_name
-                 "resume"
-           | None ->
-               Log.Keeper.warn
-                 "keeper boot: agent_name not found for paused keeper %s"
-                 name)
+          if persist_keeper_paused_state false
+          then (
+            match resolve_keeper_agent_name () with
+            | Some keeper_agent_name ->
+              Keeper_keepalive.process_directive ~agent_name:keeper_agent_name "resume"
+            | None ->
+              Log.Keeper.warn
+                "keeper boot: agent_name not found for paused keeper %s"
+                name)
       | Ok (Some _) -> ()
       (* Issue #8391 HIGH #1: split [Ok None] from [Error _] — boot itself
          already succeeded via Keeper_tool_surface.dispatch, so we don't change the
@@ -273,6 +299,7 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
             | Already_live -> (Log.Info, "already_live")
             | Rejected -> (Log.Warn, "rejected")
             | Dispatch_none -> (Log.Warn, "dispatch_none")
+            | Persist_failed -> (Log.Warn, "persist_failed")
           in
           Log.Server.emit level
             (Printf.sprintf
@@ -327,40 +354,73 @@ let handle_keeper_lifecycle_post ?body_str ~sw ~clock ~tool_name ~action
               when Tool_result.is_success result
                    && (String.equal action "boot" || String.equal action "clear") ->
               let body = Tool_result.message result in
-              if String.equal action "boot"
-              then (
-                resume_booted_keeper_if_needed ();
-                refresh_keeper_execution_surfaces ~config ~name "started")
-              else (
-                (match Keeper_registry.get_phase ~base_path:config.base_path name with
-                 | Some Keeper_state_machine.Paused -> persist_keeper_paused_state true
-                 | Some _ | None -> ());
-                invalidate_keeper_execution_surfaces ~config ());
-              log_lifecycle_result Succeeded;
-              Http.Response.json_value ~compress:true ~request:req
-                (`Assoc
-                   [
-                     ("ok", `Bool true);
-                     ("action", `String action);
-                     ("name", `String name);
-                     ("detail", tool_detail_json body);
-                   ])
-                reqd
+              let post_action_result =
+                if String.equal action "boot"
+                then (
+                  resume_booted_keeper_if_needed ();
+                  refresh_keeper_execution_surfaces ~config ~name "started";
+                  Ok ())
+                else (
+                  match Keeper_registry.get_phase ~base_path:config.base_path name with
+                  | Some Keeper_state_machine.Paused
+                    when not (persist_keeper_paused_state true) ->
+                    Error "paused-state persist failed after clear"
+                  | Some Keeper_state_machine.Paused | Some _ | None ->
+                    invalidate_keeper_execution_surfaces ~config ();
+                    Ok ())
+              in
+              (match post_action_result with
+               | Error msg ->
+                 log_lifecycle_result Persist_failed;
+                 respond_error
+                   ~status:`Internal_server_error
+                   ~request:req
+                   ~ok:false
+                   reqd
+                   msg
+               | Ok () ->
+                 log_lifecycle_result Succeeded;
+                 Http.Response.json_value ~compress:true ~request:req
+                   (`Assoc
+                      [
+                        ("ok", `Bool true);
+                        ("action", `String action);
+                        ("name", `String name);
+                        ("detail", tool_detail_json body);
+                      ])
+                   reqd)
             | Some result when Tool_result.is_success result ->
-              (match action with
-               | "shutdown" ->
-                 persist_keeper_paused_state true;
-                 refresh_keeper_execution_surfaces ~config ~name "stopped"
-               | _ -> invalidate_keeper_execution_surfaces ~config ());
-              log_lifecycle_result Succeeded;
-              Http.Response.json_value ~compress:true ~request:req
-                (`Assoc
-                   [
-                     ("ok", `Bool true);
-                     ("action", `String action);
-                     ("name", `String name);
-                   ])
-                reqd
+              let post_action_result =
+                match action with
+                | "shutdown" ->
+                  if persist_keeper_paused_state true
+                  then (
+                    refresh_keeper_execution_surfaces ~config ~name "stopped";
+                    Ok ())
+                  else Error "paused-state persist failed after shutdown"
+                | _ ->
+                  invalidate_keeper_execution_surfaces ~config ();
+                  Ok ()
+              in
+              (match post_action_result with
+               | Error msg ->
+                 log_lifecycle_result Persist_failed;
+                 respond_error
+                   ~status:`Internal_server_error
+                   ~request:req
+                   ~ok:false
+                   reqd
+                   msg
+               | Ok () ->
+                 log_lifecycle_result Succeeded;
+                 Http.Response.json_value ~compress:true ~request:req
+                   (`Assoc
+                      [
+                        ("ok", `Bool true);
+                        ("action", `String action);
+                        ("name", `String name);
+                      ])
+                   reqd)
             | Some result ->
               let body = Tool_result.message result in
               log_lifecycle_result Rejected;

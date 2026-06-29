@@ -352,15 +352,17 @@ let librarian_unstructured_fallback_terminal_marker =
   "librarian_unstructured_fallback"
 ;;
 
-let legacy_unstructured_fallback_claim (claim : string) =
-  String.starts_with ~prefix:librarian_unstructured_fallback_claim_prefix claim
-;;
-
 let fact_prompt_recallable (fact : fact) =
+  (* [claim_kind] is the sole recall-eligibility signal: the producer
+     ([Keeper_librarian_runtime.unstructured_episode]) tags fallback notes as
+     [Diagnostic] at the write boundary, so recall excludes them by type without
+     string-matching [claim]. Rows lacking [claim_kind] are ordinary recallable
+     facts; their [valid_until] horizon ([fact_is_current]) bounds any stale
+     pre-[Diagnostic] rows still on disk. *)
   match fact.claim_kind with
   | Some Diagnostic -> false
   | Some Self_observation | Some External_state | Some Durable_knowledge -> true
-  | None -> not (legacy_unstructured_fallback_claim fact.claim)
+  | None -> true
 ;;
 
 (* RFC-0259 §3.6 (P5): split a fact list into (live, expired-at-[now]) on the
@@ -559,12 +561,6 @@ let claim_identity (f : fact) =
   match Option.bind f.claim_id normalize_claim_id with
   | Some id -> "id:" ^ id
   | None -> claim_identity_of_claim_text f.claim
-;;
-
-let legacy_unstructured_fallback_claim_key key =
-  String.starts_with
-    ~prefix:(claim_identity_of_claim_text librarian_unstructured_fallback_claim_prefix)
-    key
 ;;
 
 let optional_float_field key = function

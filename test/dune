@@ -329,6 +329,7 @@
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
+  test_keeper_event_queue_persist_poison
   test_keeper_relevance_check
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
@@ -653,6 +654,7 @@
   test_auth_strict_mode
   test_keeper_turn_fsm_emit
   test_keeper_event_queue
+  test_keeper_event_queue_persist_poison
   test_keeper_relevance_check
   test_actionable_path_action
   test_workspace_routes_keeper
@@ -1607,7 +1609,7 @@
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
 
-(include stanzas/test_anti_rationalization_empty_liveness.inc)
+(include stanzas/test_anti_rationalization_empty_reject.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
@@ -1831,6 +1833,8 @@
 (include stanzas/test_keeper_failure_policy.inc)
 
 (include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
+
+(include stanzas/test_keeper_tool_execute_path_rewrite.inc)
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 
@@ -2556,3 +2560,11 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries masc_test_deps masc.runtime))
+
+(test
+ (name test_tui_http_ast)
+ (modules test_tui_http_ast)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../lib)
+  (source_tree ../bin)))

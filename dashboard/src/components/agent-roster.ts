@@ -1,6 +1,7 @@
-// MASC Dashboard — Unified Agent Roster
-// All entities are agents. Keeper = agent with persistent runtime.
-// Keeper state (CTX gauge, autonomy) shown inline on the card.
+// MASC Dashboard — Runtime Roster
+// Workspace agents, keeper runtime fibers, configured keepers, and task owners
+// are separate surfaces. This roster may display them together, but labels
+// must not imply they are the same namespace.
 
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
@@ -967,7 +968,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         configuredKeepers,
       })
     : keeperFilter === 'agent-only'
-      ? `일반 에이전트 런타임 가동 ${runtimeCounts.live.agents}`
+      ? `workspace agents ${runtimeCounts.live.agents}`
       : formatRuntimeRosterCount(runtimeCounts)
   const keeperStateHints = (
     keeperFilter === 'keeper-only'
@@ -1243,16 +1244,21 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
 
   return html`
     <div class="v2-monitoring-surface fl-shell agent-page">
-      <section class="monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="에이전트 디렉터리">
+      <section class="monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="runtime surface directory">
         <div class="flex flex-col gap-5">
           <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
             <div class="flex min-w-0 flex-col gap-2.5">
               <div class="fl-health">
-                <span class="fl-hpill ok">런타임 가동 <b>${healthRun}</b></span>
-                ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 <b>${healthTransient}</b></span>` : null}
-                <span class="fl-hpill warn">일시정지 <b>${healthPaused}</b></span>
-                <span class="fl-hpill">오프라인 <b>${healthOffline}</b></span>
+                <span class="fl-hpill ok">실행 rows <b>${healthRun}</b></span>
+                ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 rows <b>${healthTransient}</b></span>` : null}
+                <span class="fl-hpill warn">일시정지 rows <b>${healthPaused}</b></span>
+                <span class="fl-hpill">오프라인 rows <b>${healthOffline}</b></span>
                 ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
+              </div>
+              <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
+                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">workspace agents ≠ keeper fibers</span>
+                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">configured keeper ≠ running fiber</span>
+                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">task owner ≠ live agent</span>
               </div>
               <span class="inline-flex w-fit items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
             </div>
@@ -1262,9 +1268,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <${TextInput}
                 class="rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-4 py-3 text-base text-[var(--color-fg-primary)] shadow-[inset_0_1px_0_var(--color-border-default)] focus:border-[var(--color-accent-fg)] focus:shadow-[0_0_0_2px_var(--color-accent-soft)]"
                 name="agent_search"
-                ariaLabel="에이전트 이름 · 작업 검색"
+                ariaLabel="runtime row 이름 · task owner 검색"
                 autoComplete="off"
-                placeholder="이름 · 작업으로 찾기"
+                placeholder="이름 · task owner로 찾기"
                 value=${search}
                 onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
               />
@@ -1338,10 +1344,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
               <div class="px-6 py-10">
                 <${EmptyState}
                   message=${normalizedSearch && scopedAgents.length > 0
-                    ? `필터 결과 없음 (${scopedAgents.length} items)`
+                      ? `필터 결과 없음 (${scopedAgents.length} items)`
                     : showExecutionFallbackState && expectedScopedCount > 0
                       ? `${fallbackStateTitle}: ${scopeLabel}가 있지만, 현재 조건에 맞는 항목은 아직 없습니다.`
-                      : '조건에 맞는 에이전트가 없습니다.'}
+                      : '조건에 맞는 runtime row가 없습니다.'}
                   compact
                 />
               </div>
@@ -1352,7 +1358,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         <aside class="fl-aside monitor-surface-card monitor-surface-card-medium v2-monitoring-panel" aria-label="Selected keeper detail">
           ${selectedRow ? html`
             <div class="fl-as-head">
-              <span class="fl-as-ey">selected runtime</span>
+              <span class="fl-as-ey">${selectedRow.isKeeper ? 'selected keeper runtime' : 'selected workspace agent'}</span>
               <span class="fl-as-state">
                 <span class="inline-block h-1.5 w-1.5 rounded-full" style="background:currentColor" aria-hidden="true"></span>
                 ${FL_TONE_LABEL[selectedTone]}
@@ -1514,10 +1520,10 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       </div>
 
       <div class="fl-foot">
-        <span class="fl-tick"><span class="k">keepers</span><span class="v">fresh ${healthRun}/${rosterRows.length}</span></span>
-        <span class="fl-tick"><span class="k">transient</span><span class="v">${healthTransient}</span></span>
-        <span class="fl-tick"><span class="k">paused</span><span class="v">${healthPaused}</span></span>
-        <span class="fl-tick"><span class="k">offline</span><span class="v">${healthOffline}</span></span>
+        <span class="fl-tick"><span class="k">runtime rows</span><span class="v">active ${healthRun}/${rosterRows.length}</span></span>
+        <span class="fl-tick"><span class="k">transient rows</span><span class="v">${healthTransient}</span></span>
+        <span class="fl-tick"><span class="k">paused rows</span><span class="v">${healthPaused}</span></span>
+        <span class="fl-tick"><span class="k">offline rows</span><span class="v">${healthOffline}</span></span>
         <span class="fl-tick"><span class="k">attention</span><span class="v ${healthAttention ? 'warn' : 'ok'}">${healthAttention}</span></span>
       </div>
     </div>

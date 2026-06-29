@@ -859,7 +859,7 @@ let run_duration_ms_since started_at =
 
 let dashboard_status_of_stop_reason = function
   | Completed -> Dashboard_oas_bridge.Success
-  | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Success
+  | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Error { transient = false }
   | MutationBoundaryReached _ ->
       Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
 

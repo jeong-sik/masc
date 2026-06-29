@@ -168,13 +168,30 @@ let update_keeper ?(preserve_prompt_defaults = false)
     Log.Keeper.warn
       "update_keeper kept %s paused because an approval/reconcile gate is pending"
       old.name;
-  let source_meta =
+  let source_meta_result =
     if resume_paused_keeper then
       Keeper_unified_turn_no_progress.clear_for_operator_resume
         ~base_path:ctx.config.base_path
         old
-    else old
+    else Ok old
   in
+  match source_meta_result with
+  | Error err ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string TurnUpUpdateFailures)
+      ~labels:
+        [ ( "keeper", p.name )
+        ; ( "site"
+          , Keeper_turn_up_update_failure_site.(to_label No_progress_resume_clear)
+          )
+        ]
+      ();
+    Log.Keeper.warn
+      "update_keeper failed no_progress resume clear for %s: %s"
+      p.name
+      err;
+    tool_result_error err
+  | Ok source_meta ->
   let updated = { source_meta with
     goal;
     instructions =

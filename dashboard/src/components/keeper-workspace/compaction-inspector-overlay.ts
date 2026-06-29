@@ -28,6 +28,7 @@ type CompactionSnapshotLoadState = {
   readonly decodedCount: number | null
   readonly payloadSource: string | null
   readonly payloadProducer: string | null
+  readonly payloadLimit: number | null
   readonly readErrorCount: number
   readonly readErrors: readonly CompactionReadError[]
   readonly scanTruncated: boolean
@@ -108,7 +109,7 @@ function CompactionScanDiagnostics({
     <div class="mem-read-error" role="status" data-testid="compaction-scan-diagnostics">
       <strong>스캔 진단</strong>
       ${loadState.readErrorCount > 0 ? html`<span>manifest row ${loadState.readErrorCount}개를 읽지 못했습니다.</span>` : null}
-      ${loadState.scanTruncated ? html`<span>응답이 limit에 의해 잘렸습니다.</span>` : null}
+      ${loadState.scanTruncated ? html`<span>manifest scan budget에 도달했습니다.</span>` : null}
       ${shownErrors.length > 0
         ? html`
           <ul>
@@ -119,6 +120,35 @@ function CompactionScanDiagnostics({
         `
         : null}
       ${hiddenErrorCount > 0 ? html`<span class="mono">+${hiddenErrorCount} more</span>` : null}
+    </div>
+  `
+}
+
+function CompactionCoverageStatus({
+  loadState,
+}: {
+  loadState: CompactionSnapshotLoadState
+}): VNode | null {
+  if (loadState.loading || loadState.error) return null
+  const payloadCount = loadState.payloadCount ?? 0
+  const decodedCount = loadState.decodedCount ?? 0
+  const source = loadState.payloadSource ?? 'unknown_source'
+  const producer = loadState.payloadProducer ?? 'unknown_producer'
+  const limit = loadState.payloadLimit ?? 0
+  return html`
+    <div class=${`cmp-coverage${loadState.scanTruncated ? ' warn' : ''}`} data-testid="compaction-coverage-status">
+      <div class="cmp-coverage-main">
+        <strong>durable hydrate</strong>
+        <span>표시 ${decodedCount}/${payloadCount}</span>
+        <span class="mono">source=${source}</span>
+      </div>
+      <div class="cmp-coverage-meta">
+        <span class="mono">producer=${producer}</span>
+        <span class="mono">limit=${limit}</span>
+      </div>
+      ${loadState.scanTruncated
+        ? html`<div class="cmp-coverage-note">manifest scan이 모두 끝나기 전에 중단되어 더 오래된 snapshot은 누락될 수 있습니다.</div>`
+        : null}
     </div>
   `
 }
@@ -170,6 +200,7 @@ export function CompactionInspectorOverlay({
     decodedCount: null,
     payloadSource: null,
     payloadProducer: null,
+    payloadLimit: null,
     readErrorCount: 0,
     readErrors: [],
     scanTruncated: false,
@@ -196,6 +227,7 @@ export function CompactionInspectorOverlay({
       decodedCount: null,
       payloadSource: null,
       payloadProducer: null,
+      payloadLimit: null,
       readErrorCount: 0,
       readErrors: [],
       scanTruncated: false,
@@ -213,6 +245,7 @@ export function CompactionInspectorOverlay({
           decodedCount: payload.items.length,
           payloadSource: payload.source,
           payloadProducer: payload.producer,
+          payloadLimit: payload.limit,
           readErrorCount: payload.read_error_count,
           readErrors: payload.read_errors,
           scanTruncated: payload.scan_truncated,
@@ -228,6 +261,7 @@ export function CompactionInspectorOverlay({
           decodedCount: null,
           payloadSource: null,
           payloadProducer: null,
+          payloadLimit: null,
           readErrorCount: 0,
           readErrors: [],
           scanTruncated: false,
@@ -254,6 +288,7 @@ export function CompactionInspectorOverlay({
               : loadState.error
                 ? html`<div class="mem-read-error" role="alert">${'⚠'} 컴팩션 스냅샷 불러오기 실패 — ${loadState.error}</div>`
                 : html`
+                  <${CompactionCoverageStatus} loadState=${loadState} />
                   <${CompactionScanDiagnostics} loadState=${loadState} />
                   <${CompactionEmptyState} keeperName=${keeper.name} loadState=${loadState} />
                 `}
@@ -296,7 +331,10 @@ export function CompactionInspectorOverlay({
             ? html`<div class="mem-empty mem-disclosure">durable snapshot 새로고침 중…</div>`
             : loadState.error
               ? html`<div class="mem-read-error" role="alert">${'⚠'} durable snapshot 새로고침 실패 — ${loadState.error}</div>`
-              : html`<${CompactionScanDiagnostics} loadState=${loadState} />`}
+              : html`
+                <${CompactionCoverageStatus} loadState=${loadState} />
+                <${CompactionScanDiagnostics} loadState=${loadState} />
+              `}
           <div class="cmp-trigger"><span class="sub-k">트리거</span>${ev.trigger}</div>
           <div class="cmp-trigger"><span class="sub-k">수행 런타임</span><span class="mono">${ev.runtime}</span></div>
           <div class="cmp-trigger"><span class="sub-k">소스</span><span class="mono">${ev.detailSource ?? ev.source}${ev.status ? ` · ${ev.status}` : ''}</span></div>

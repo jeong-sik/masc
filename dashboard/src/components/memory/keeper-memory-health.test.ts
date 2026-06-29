@@ -279,6 +279,7 @@ describe('KeeperMemoryHealth', () => {
       expect(screen.getByText('슬롯')).not.toBeNull()
       expect(statValue(container, 'provider-slot-busy')).toBe('3')
     })
+
   })
 
   // ── render states ─────────────────────────────────────

@@ -2,11 +2,27 @@
 
 ## Unreleased
 
+### Changed
+- Bump OAS agent_sdk pin to the 0.207.21 main release (`39a7d139`),
+  carrying #2254 typed GLM forced-tool-choice rejection, #2248
+  provider-qualified capability lookup, #2244 assistant tool-content, and
+  fail-closed unknown-stream-block handling.
+
 ### Fixed
+- Resolve runtime capability validation and default preserve-thinking decisions
+  through OAS provider-qualified provider/model capabilities instead of bare
+  model ids, so overlapping ids such as Ollama Cloud Kimi do not need
+  bare-id manifest workarounds.
+- Prune synthetic empty keeper replay suffixes from OAS checkpoints and record a
+  typed prune reason, preventing no-visible-output state snapshots from being
+  replayed as durable assistant context.
 - Stabilize keeper quick-suite tests under Dune sandboxing by resolving
   source-file assertions through `DUNE_SOURCEROOT`.
 - Stabilize `keeper_msg_async` async persistence coverage by waiting for
   disk persistence before recovery/GC assertions.
+- Default keeper preserve-thinking from OAS typed request-side preserve
+  capabilities instead of treating every thinking-capable runtime as
+  preserve-capable.
 
 ## [0.19.54] - 2026-06-29
 

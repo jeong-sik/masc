@@ -383,6 +383,282 @@ let test_patch_without_state_block_keeps_text_and_no_metadata () =
       Alcotest.(check bool) "metadata absent without snapshot"
         true (KMP.snapshot_of_message_metadata last = None)
 
+let checkpoint_msg role content =
+  Agent_sdk.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
+
+let replay_test_checkpoint messages =
+  let cp = make_test_checkpoint ~response_text:"old answer" () in
+  { cp with Agent_sdk.Checkpoint.messages; working_context = Some (`Assoc []) }
+
+let has_tool_use (msg : Agent_sdk.Types.message) =
+  List.exists
+    (function
+      | Agent_sdk.Types.ToolUse _ -> true
+      | _ -> false)
+    msg.Agent_sdk.Types.content
+
+let replay_snapshot_msg role content =
+  let snapshot =
+    { KMP.empty_keeper_state_snapshot with goal = Some "resume goal" }
+  in
+  checkpoint_msg role content |> fun msg -> KMP.with_snapshot_metadata msg snapshot
+
+let test_drop_empty_replay_snapshot_suffix () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let empty_replay_1 = replay_snapshot_msg Assistant [ Text "" ] in
+  let empty_replay_2 = replay_snapshot_msg Assistant [ Text "  " ] in
+  let kept =
+    KMP.drop_empty_replay_snapshot_suffix
+      [ old_user; old_assistant; empty_replay_1; empty_replay_2 ]
+  in
+  Alcotest.(check int) "suffix replay messages dropped" 2
+    (List.length kept);
+  (match List.rev kept with
+   | last :: _ ->
+       Alcotest.(check string)
+         "last kept assistant preserved"
+         "old answer"
+         (Agent_sdk.Types.text_of_message last)
+   | [] -> Alcotest.fail "expected retained history");
+  let middle_replay =
+    KMP.drop_empty_replay_snapshot_suffix
+      [ old_user; empty_replay_1; checkpoint_msg User [ Text "new user" ] ]
+  in
+  Alcotest.(check int) "non-suffix replay message remains" 3
+    (List.length middle_replay);
+  let visible_replay =
+    replay_snapshot_msg Assistant [ Text "visible answer" ]
+  in
+  Alcotest.(check int)
+    "visible replay message remains"
+    1
+    (KMP.drop_empty_replay_snapshot_suffix [ visible_replay ] |> List.length);
+  let tool_replay =
+    replay_snapshot_msg Assistant
+      [ ToolUse { id = "tool-1"; name = "keeper_tasks_list"; input = `Assoc [] } ]
+  in
+  Alcotest.(check int)
+    "tool replay message remains"
+    1
+    (KMP.drop_empty_replay_snapshot_suffix [ tool_replay ] |> List.length)
+
+let prune_reason_to_string reason =
+  Option.map
+    Masc.Keeper_agent_run_finalize_response.For_testing.replay_suffix_prune_reason_to_string
+    reason
+
+let expect_checkpoint_for_replay = function
+  | Ok checkpoint -> checkpoint
+  | Error detail -> Alcotest.fail detail
+
+let test_attention_checkpoint_prunes_current_turn_suffix () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let current_tool_use =
+    checkpoint_msg Assistant
+      [ ToolUse
+          { id = "tool-1"
+          ; name = "keeper_context_status"
+          ; input = `Assoc []
+          }
+      ]
+  in
+  let current_tool_result =
+    checkpoint_msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"
+          ; content = "status"
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let current_final = checkpoint_msg Assistant [ Text "" ] in
+  let cp =
+    replay_test_checkpoint
+      [ old_user; old_assistant; current_user; current_tool_use
+      ; current_tool_result; current_final
+      ]
+  in
+  let pre_turn_working_context = Some (`Assoc [ "pre_turn", `Bool true ]) in
+  let patched, pruned =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_messages:[ old_user; old_assistant ]
+      ~pre_turn_working_context
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~session_id:"new-session"
+      ~response_text:"synthetic no-progress"
+      ~state_snapshot_source:KMP.State_block
+      ~state_snapshot:None
+      cp
+    |> expect_checkpoint_for_replay
+  in
+  Alcotest.(check (option string))
+    "suffix pruned"
+    (Some "completion_contract_requires_attention")
+    (prune_reason_to_string pruned);
+  Alcotest.(check int) "only prior history remains" 2
+    (List.length patched.messages);
+  Alcotest.(check bool) "pre-turn working context restored" true
+    (patched.working_context = pre_turn_working_context);
+  match List.rev patched.messages with
+  | last :: _ ->
+      Alcotest.(check string) "prior assistant not overwritten" "old answer"
+        (Agent_sdk.Types.text_of_message last)
+  | [] -> Alcotest.fail "expected prior messages"
+
+let test_attention_checkpoint_refuses_mismatched_history_prefix () =
+  let open Agent_sdk.Types in
+  let expected_old_user = checkpoint_msg User [ Text "expected old user" ] in
+  let actual_old_user = checkpoint_msg User [ Text "actual old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let current_final = checkpoint_msg Assistant [ Text "" ] in
+  let cp =
+    replay_test_checkpoint [ actual_old_user; old_assistant; current_user; current_final ]
+  in
+  let result =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_messages:[ expected_old_user; old_assistant ]
+      ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~session_id:"new-session"
+      ~response_text:"synthetic no-progress"
+      ~state_snapshot_source:KMP.State_block
+      ~state_snapshot:None
+      cp
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "expected replay prefix mismatch refusal"
+   | Error detail ->
+       Alcotest.(check string)
+         "prefix mismatch refuses checkpoint save"
+         "refusing to save checkpoint: replay suffix prune reason=completion_contract_requires_attention but checkpoint messages do not match pre-turn history prefix"
+         detail)
+
+let test_synthetic_empty_checkpoint_prunes_current_turn_suffix () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let current_tool_use =
+    checkpoint_msg Assistant
+      [ ToolUse
+          { id = "tool-1"
+          ; name = "keeper_tasks_list"
+          ; input = `Assoc []
+          }
+      ]
+  in
+  let current_tool_result =
+    checkpoint_msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"
+          ; content = "[]"
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let current_final = checkpoint_msg Assistant [ Text "" ] in
+  let cp =
+    replay_test_checkpoint
+      [ old_user; old_assistant; current_user; current_tool_use
+      ; current_tool_result; current_final
+      ]
+  in
+  let pre_turn_working_context = Some (`Assoc [ "pre_turn", `Bool true ]) in
+  let patched, pruned =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_messages:[ old_user; old_assistant ]
+      ~pre_turn_working_context
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~session_id:"new-session"
+      ~response_text:""
+      ~state_snapshot_source:KMP.Synthesized
+      ~state_snapshot:None
+      cp
+    |> expect_checkpoint_for_replay
+  in
+  Alcotest.(check (option string))
+    "synthetic empty suffix pruned"
+    (Some "synthetic_empty_state_snapshot")
+    (prune_reason_to_string pruned);
+  Alcotest.(check int) "only prior history remains" 2
+    (List.length patched.messages);
+  Alcotest.(check bool) "pre-turn working context restored" true
+    (patched.working_context = pre_turn_working_context);
+  Alcotest.(check bool)
+    "current tool replay is not persisted"
+    false
+    (List.exists has_tool_use patched.messages)
+
+let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let current_tool_use =
+    checkpoint_msg Assistant
+      [ ToolUse
+          { id = "tool-1"
+          ; name = "keeper_context_status"
+          ; input = `Assoc []
+          }
+      ]
+  in
+  let current_tool_result =
+    checkpoint_msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"
+          ; content = "status"
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let current_final = checkpoint_msg Assistant [ Text "draft answer" ] in
+  let cp =
+    replay_test_checkpoint
+      [ old_user; old_assistant; current_user; current_tool_use
+      ; current_tool_result; current_final
+      ]
+  in
+  let patched, pruned =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_messages:[ old_user; old_assistant ]
+      ~pre_turn_working_context:None
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~session_id:"new-session"
+      ~response_text:"visible answer"
+      ~state_snapshot_source:KMP.State_block
+      ~state_snapshot:None
+      cp
+    |> expect_checkpoint_for_replay
+  in
+  Alcotest.(check (option string)) "suffix kept" None
+    (prune_reason_to_string pruned);
+  Alcotest.(check int) "turn transcript remains" 6
+    (List.length patched.messages);
+  Alcotest.(check bool) "tool use remains" true
+    (List.exists has_tool_use patched.messages);
+  match List.rev patched.messages with
+  | last :: _ ->
+      Alcotest.(check string) "final assistant patched" "visible answer"
+        (Agent_sdk.Types.text_of_message last)
+  | [] -> Alcotest.fail "expected messages"
+
 (* ── Dual-source read test ───────────────────────────────────────── *)
 
 let test_text_parse_matches_json_parse () =
@@ -580,6 +856,26 @@ let () =
           Alcotest.test_case "stores replay metadata and clears wc" `Quick test_patch_stores_replay_metadata_and_clears_working_context;
           Alcotest.test_case "drops legacy state sidecar from wc" `Quick test_patch_drops_legacy_state_working_context_sidecar;
           Alcotest.test_case "no [STATE] keeps text and no metadata" `Quick test_patch_without_state_block_keeps_text_and_no_metadata;
+          Alcotest.test_case
+            "attention result prunes current replay suffix"
+            `Quick
+            test_attention_checkpoint_prunes_current_turn_suffix;
+          Alcotest.test_case
+            "attention result refuses mismatched replay prefix"
+            `Quick
+            test_attention_checkpoint_refuses_mismatched_history_prefix;
+          Alcotest.test_case
+            "synthetic empty result prunes current replay suffix"
+            `Quick
+            test_synthetic_empty_checkpoint_prunes_current_turn_suffix;
+          Alcotest.test_case
+            "satisfied result keeps tool replay suffix"
+            `Quick
+            test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final;
+          Alcotest.test_case
+            "drops persisted empty replay snapshot suffix"
+            `Quick
+            test_drop_empty_replay_snapshot_suffix;
         ] );
       ( "dual_source",
         [

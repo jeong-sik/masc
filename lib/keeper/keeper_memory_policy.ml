@@ -754,6 +754,36 @@ let snapshot_of_message
   | None ->
       parse_state_snapshot_from_reply (Agent_sdk.Types.text_of_message msg)
 
+let replay_snapshot_empty_text_only
+    (msg : Agent_sdk.Types.message) : bool =
+  match msg.Agent_sdk.Types.role with
+  | Agent_sdk.Types.Assistant ->
+      Option.is_some (snapshot_of_message_metadata msg)
+      && List.for_all
+           (function
+             | Agent_sdk.Types.Text text -> String.trim text = ""
+             | Agent_sdk.Types.Thinking _
+             | Agent_sdk.Types.RedactedThinking _
+             | Agent_sdk.Types.ToolUse _
+             | Agent_sdk.Types.ToolResult _
+             | Agent_sdk.Types.Image _
+             | Agent_sdk.Types.Document _
+             | Agent_sdk.Types.Audio _ ->
+                 false)
+           msg.content
+  | Agent_sdk.Types.System
+  | Agent_sdk.Types.User
+  | Agent_sdk.Types.Tool ->
+      false
+
+let drop_empty_replay_snapshot_suffix
+    (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =
+  let rec drop = function
+    | msg :: rest when replay_snapshot_empty_text_only msg -> drop rest
+    | rev_messages -> rev_messages
+  in
+  messages |> List.rev |> drop |> List.rev
+
 (** Extract a [keeper_state_snapshot] from the structured JSON stored in
     [Checkpoint.working_context].  Returns [None] if the JSON does not
     contain a valid version-1 state_snapshot. *)

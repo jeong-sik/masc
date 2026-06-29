@@ -340,6 +340,13 @@ val snapshot_of_message :
 (** [snapshot_of_message_metadata] then fallback to parsing the
     message body's [STATE] block. *)
 
+val drop_empty_replay_snapshot_suffix :
+  Agent_sdk.Types.message list -> Agent_sdk.Types.message list
+(** Drop a trailing run of assistant replay-snapshot messages whose
+    content contains only empty text blocks. This normalizes
+    already-persisted replay history before it is sent back to a
+    provider. *)
+
 val snapshot_of_structured_working_context :
   Yojson.Safe.t -> keeper_state_snapshot option
 

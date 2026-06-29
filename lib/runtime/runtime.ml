@@ -173,8 +173,15 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
          (String.concat ", " (List.map fst unknown)))
 ;;
 
-(* Every runtime binding's model must be known to the OAS capability catalog
-   ({!Llm_provider.Capabilities.for_model_id}). *)
+let capabilities_for_runtime (rt : t) =
+  Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config
+;;
+
+(* Every runtime binding's provider/model pair must be known to the OAS
+   capability catalog. Use the materialized [Provider_config.t] so
+   provider-qualified catalog rows are considered before bare model rows; this
+   keeps overlapping ids such as native Kimi vs Ollama Cloud Kimi from requiring
+   bare-id manifest workarounds. *)
 let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
   : (unit, string) result
   =
@@ -183,8 +190,7 @@ let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t li
     (List.map
        (fun (r : t) ->
           ( Printf.sprintf "%s (model=%s)" r.id r.provider_config.model_id
-          , Option.is_some
-              (Llm_provider.Capabilities.for_model_id r.provider_config.model_id) ))
+          , Option.is_some (capabilities_for_runtime r) ))
        runtimes)
 ;;
 
@@ -390,10 +396,27 @@ let thinking_support_of_runtime_id (id : string) : bool option =
   | None -> None
 ;;
 
+let default_preserve_thinking_for_model (rt : t) : bool option =
+  if not rt.model.thinking_support
+  then None
+  else (
+    match capabilities_for_runtime rt with
+    | None -> None
+    | Some caps ->
+      (match caps.preserve_thinking_control_format with
+       | Llm_provider.Capabilities.Thinking_object_keep_all
+       | Llm_provider.Capabilities.Chat_template_kwargs_preserve_thinking
+       | Llm_provider.Capabilities.Top_level_preserve_thinking -> Some true
+       | Llm_provider.Capabilities.No_preserve_thinking_control
+       | Llm_provider.Capabilities.Always_preserved_thinking -> None))
+;;
+
 let preserve_thinking_of_runtime_id (id : string) : bool option =
   match get_runtime_by_id id with
-  | Some rt when rt.model.preserve_thinking -> Some true
-  | Some _ -> None
+  | Some rt ->
+    (match rt.model.preserve_thinking with
+     | Some _ as explicit -> explicit
+     | None -> default_preserve_thinking_for_model rt)
   | None -> None
 ;;
 

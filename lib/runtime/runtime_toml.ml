@@ -447,17 +447,8 @@ let parse_model (id : string) (tbl : Otoml.t)
     let thinking_support =
       Otoml.find_or ~default:false tbl Otoml.get_boolean [ "thinking-support" ]
     in
-    (* Default preserve-thinking to thinking-support: a model that can think
-       should preserve its thinking trace for the dashboard interleaving unless
-       it explicitly opts out. Previously this defaulted to false, so 28/30
-       thinking-capable models in the catalog left it unset and the dashboard
-       thinking-interleaving wiring stayed dormant (oas requests the provider
-       without preserve/clear_thinking=false, so the provider clears or omits
-       thinking and no ThinkingDelta reaches the SSE stream). Explicit
-       preserve-thinking=false still opts out (e.g. Gemma4's own <|think|>
-       chat-template path). *)
     let preserve_thinking =
-      Otoml.find_or ~default:thinking_support tbl Otoml.get_boolean [ "preserve-thinking" ]
+      Otoml.find_opt tbl Otoml.get_boolean [ "preserve-thinking" ]
     in
     let max_thinking_budget =
       Otoml.find_opt tbl Otoml.get_integer [ "max-thinking-budget" ]

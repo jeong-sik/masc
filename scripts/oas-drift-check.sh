@@ -91,13 +91,20 @@ resolve_source_dir() {
   if ! GIT_DIR="${scratch}/bare" git init -q --bare; then
     echo "git init bare failed" >&2; return 1
   fi
-  if ! GIT_DIR="${scratch}/bare" git fetch -q --no-tags --depth=1 \
-         "${OAS_AGENT_SDK_URL}" "${OAS_AGENT_SDK_SHA}" 2>/dev/null; then
-    echo "git fetch of ${OAS_AGENT_SDK_SHA} from ${OAS_AGENT_SDK_URL} failed" >&2
+  if ! GIT_DIR="${scratch}/bare" git fetch -q --no-tags --depth=128 \
+         "${OAS_AGENT_SDK_URL}" \
+         "+refs/heads/${OAS_AGENT_SDK_TRACK_REF}:refs/heads/${OAS_AGENT_SDK_TRACK_REF}" \
+         2>/dev/null; then
+    echo "git fetch of ${OAS_AGENT_SDK_TRACK_REF} from ${OAS_AGENT_SDK_URL} failed" >&2
+    return 1
+  fi
+  if ! GIT_DIR="${scratch}/bare" git cat-file -e "${OAS_AGENT_SDK_SHA}^{commit}" \
+        2>/dev/null; then
+    echo "pinned OAS SHA ${OAS_AGENT_SDK_SHA} is not present in fetched ${OAS_AGENT_SDK_TRACK_REF}" >&2
     return 1
   fi
   mkdir -p "${scratch}/tree"
-  if ! GIT_DIR="${scratch}/bare" git archive --format=tar FETCH_HEAD \
+  if ! GIT_DIR="${scratch}/bare" git archive --format=tar "${OAS_AGENT_SDK_SHA}" \
         | tar -x -C "${scratch}/tree"; then
     echo "git archive extract failed" >&2
     return 1

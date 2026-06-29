@@ -297,8 +297,10 @@ let assert_ollama_cloud_seed_runtime runtimes case =
       runtime.model.tools_support;
     check bool (case.runtime_id ^ " thinking") case.thinking
       runtime.model.thinking_support;
-    check bool (case.api_name ^ " known to OAS catalog") true
-      (Option.is_some (Llm_provider.Capabilities.for_model_id case.api_name));
+    check bool (case.runtime_id ^ " known to provider-qualified OAS catalog") true
+      (Option.is_some
+         (Llm_provider.Provider_config.capabilities_for_config_model
+            runtime.provider_config));
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
@@ -365,8 +367,57 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_kwargs))
 
-let test_repo_runtime_bindings_resolve_through_oas_catalog () =
+let test_repo_oas_model_catalog_preserve_axes_resolve () =
   with_repo_oas_model_catalog @@ fun catalog ->
+  let expect_catalog_field ~field_name ~get model_id expected =
+    match Llm_provider.Model_catalog.lookup catalog model_id with
+    | None -> failf "expected repo OAS catalog row for %s" model_id
+    | Some entry ->
+      check (option string) (model_id ^ " " ^ field_name) (Some expected)
+        (get entry)
+  in
+  let expect_request_side_preserve model_id =
+    expect_catalog_field
+      ~field_name:"preserve_thinking_control_format"
+      ~get:(fun entry -> entry.preserve_thinking_control_format)
+      model_id
+      "chat_template_kwargs_preserve_thinking";
+    match Llm_provider.Capabilities.for_model_id model_id with
+    | None -> failf "expected OAS capabilities for %s" model_id
+    | Some caps ->
+      check bool (model_id ^ " request-side preserve capability") true
+        (Llm_provider.Capabilities.(
+           caps.preserve_thinking_control_format
+           = Chat_template_kwargs_preserve_thinking))
+  in
+  let expect_preserve_always_replay model_id =
+    expect_catalog_field
+      ~field_name:"reasoning_replay"
+      ~get:(fun entry -> entry.reasoning_replay)
+      model_id
+      "preserve_always";
+    match Llm_provider.Capabilities.for_model_id model_id with
+    | None -> failf "expected OAS capabilities for %s" model_id
+    | Some caps ->
+      check bool (model_id ^ " reasoning replay override") true
+        (Llm_provider.Capabilities.(
+           caps.reasoning_replay_override = Force_preserve_always))
+  in
+  let reject_bare_ollama_cloud_replay model_id =
+    match Llm_provider.Capabilities.for_model_id model_id with
+    | None -> ()
+    | Some caps ->
+      check bool (model_id ^ " must not inherit Ollama Cloud replay") false
+        (Llm_provider.Capabilities.(
+           caps.reasoning_replay_override = Force_preserve_always))
+  in
+  expect_request_side_preserve "runpod_mtp/qwen36-35b-a3b-mtp";
+  expect_request_side_preserve "qwen36-35b-a3b-mtp";
+  expect_preserve_always_replay "ollama_cloud/kimi-k2.6";
+  reject_bare_ollama_cloud_replay "kimi-k2.6"
+
+let test_repo_runtime_bindings_resolve_through_oas_catalog () =
+  with_repo_oas_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
@@ -374,12 +425,18 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
     check bool "at least one runtime binding" true (List.length runtimes > 0);
     List.iter
       (fun (runtime : Runtime.t) ->
-         let model_id = runtime.model.api_name in
-         match Llm_provider.Model_catalog.lookup catalog model_id with
+         match
+           Llm_provider.Provider_config.capabilities_for_config_model
+             runtime.provider_config
+         with
          | None ->
            failf
-             "runtime binding %s model %s must resolve through repo OAS catalog"
-             runtime.id model_id
+             "runtime binding %s provider/model %s/%s must resolve through repo \
+              OAS catalog"
+             runtime.id
+             (Llm_provider.Provider_config.capability_provider_label
+                runtime.provider_config)
+             runtime.provider_config.model_id
          | Some _ -> ())
       runtimes
 
@@ -460,7 +517,7 @@ let test_repo_runtime_toml_loads () =
      | None -> fail "expected Gemma4 Ollama runtime in seed"
      | Some runtime ->
        check bool "Gemma4 thinking enabled" true runtime.model.thinking_support;
-       check bool "Gemma4 thinking not preserved" false
+       check (option bool) "Gemma4 thinking not preserved" (Some false)
          runtime.model.preserve_thinking;
        (match runtime.model.capabilities with
         | Some caps ->
@@ -488,7 +545,7 @@ let test_repo_runtime_toml_loads () =
        check int "GLM Coding Plan context" 200000 runtime.model.max_context;
        check bool "GLM Coding Plan thinking enabled" true
          runtime.model.thinking_support;
-       check bool "GLM Coding Plan preserves thinking" true
+       check (option bool) "GLM Coding Plan preserves thinking" (Some true)
          runtime.model.preserve_thinking;
        (match runtime.model.capabilities with
         | Some caps ->
@@ -862,6 +919,69 @@ let with_fake_runtime_model_catalog f =
          Llm_provider.Model_catalog.set_global catalog;
          f ())
 
+let with_model_catalog_content content f =
+  let path = Filename.temp_file "oas-provider-qualified-models" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+       Llm_provider.Model_catalog.clear_global ();
+       (try Sys.remove path with
+        | _ -> ())
+       )
+    (fun () ->
+       match Llm_provider.Model_catalog.load_file path with
+       | Error msg -> failf "provider-qualified OAS model catalog should load: %s" msg
+       | Ok catalog ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f ())
+
+let test_runtime_capability_gate_uses_provider_qualified_catalog () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"ollama_cloud/shared-thinking\"\n\
+     base = \"ollama_cloud\"\n\
+     max_context_tokens = 1024\n\
+     supports_tools = true\n\
+     supports_reasoning = true\n\
+     supports_extended_thinking = true\n\
+     supports_reasoning_budget = true\n\
+     thinking_control_format = \"chat_template_kwargs\"\n\
+     preserve_thinking_control_format = \"chat_template_kwargs_preserve_thinking\"\n"
+  in
+  let runtime_toml =
+    "[providers.ollama_cloud]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://ollama.com/v1\"\n\
+     \n\
+     [models.shared]\n\
+     api-name = \"shared-thinking\"\n\
+     max-context = 1024\n\
+     tools-support = true\n\
+     thinking-support = true\n\
+     \n\
+     [ollama_cloud.shared]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama_cloud.shared\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml (fun path ->
+         match Runtime.init_default_strict ~config_path:path with
+         | Error msg ->
+           failf
+             "provider-qualified catalog row should satisfy strict runtime \
+              capability gate: %s"
+             msg
+         | Ok () ->
+           check (option bool) "provider-qualified preserve default" (Some true)
+             (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
+
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_fake_runtime_model_catalog @@ fun () ->
   let content =
@@ -1023,6 +1143,9 @@ let () =
           test_case "repo OAS catalog covers live RunPod MTP runtime" `Quick
             test_repo_oas_model_catalog_covers_live_runpod_mtp;
           test_case
+            "repo OAS catalog preserves typed thinking/replay axes"
+            `Quick test_repo_oas_model_catalog_preserve_axes_resolve;
+          test_case
             "repo runtime bindings resolve through the OAS catalog"
             `Quick test_repo_runtime_bindings_resolve_through_oas_catalog;
           test_case
@@ -1049,6 +1172,9 @@ let () =
             test_runtime_toml_rejects_unknown_runtime_key;
           test_case "runtime table allows profile tables" `Quick
             test_runtime_toml_allows_runtime_profile_tables;
+          test_case
+            "runtime capability gate uses provider-qualified OAS catalog rows"
+            `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;
           test_case "atomic runtime getters are consistent after init" `Quick
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick

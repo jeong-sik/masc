@@ -17,6 +17,127 @@ let reported_state_snapshot_from_checkpoint
   ignore (checkpoint : Agent_sdk.Checkpoint.t option);
   None
 
+let completion_contract_drops_current_turn_replay
+    (completion_contract_result :
+       Keeper_execution_receipt.completion_contract_result)
+  =
+  Keeper_execution_receipt.completion_contract_result_requires_attention
+    completion_contract_result
+;;
+
+type replay_suffix_prune_reason =
+  | Completion_contract_requires_attention
+  | Synthetic_empty_state_snapshot
+
+let replay_suffix_prune_reason_to_string = function
+  | Completion_contract_requires_attention ->
+    "completion_contract_requires_attention"
+  | Synthetic_empty_state_snapshot -> "synthetic_empty_state_snapshot"
+;;
+
+let synthetic_empty_state_drops_current_turn_replay
+      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
+      ~response_text
+  =
+  Keeper_memory_policy.state_snapshot_source_is_synthetic state_snapshot_source
+  && String.trim response_text = ""
+;;
+
+let replay_suffix_prune_reason
+      ~completion_contract_result
+      ~state_snapshot_source
+      ~response_text
+  =
+  if completion_contract_drops_current_turn_replay completion_contract_result
+  then Some Completion_contract_requires_attention
+  else if
+    synthetic_empty_state_drops_current_turn_replay
+      ~state_snapshot_source
+      ~response_text
+  then Some Synthetic_empty_state_snapshot
+  else None
+;;
+
+let rec messages_prefix_equal expected actual =
+  match expected, actual with
+  | [], _ -> true
+  | expected_msg :: expected_rest, actual_msg :: actual_rest ->
+    expected_msg = actual_msg && messages_prefix_equal expected_rest actual_rest
+  | _ :: _, [] -> false
+;;
+
+let prune_current_turn_replay
+      ~(history_messages : Agent_sdk.Types.message list)
+      ~(pre_turn_working_context : Yojson.Safe.t option)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  if
+    messages_prefix_equal history_messages checkpoint.Agent_sdk.Checkpoint.messages
+    && List.length checkpoint.Agent_sdk.Checkpoint.messages > List.length history_messages
+  then
+    let messages =
+      Keeper_context_core.repair_broken_tool_call_pairs history_messages
+    in
+    Some
+      { checkpoint with
+        Agent_sdk.Checkpoint.messages
+      ; working_context = pre_turn_working_context
+      }
+  else None
+;;
+
+let checkpoint_for_replay_persistence
+      ~(history_messages : Agent_sdk.Types.message list)
+      ~(pre_turn_working_context : Yojson.Safe.t option)
+      ~(completion_contract_result :
+         Keeper_execution_receipt.completion_contract_result)
+      ~(session_id : string)
+      ~(response_text : string)
+      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
+      ~(state_snapshot : Keeper_memory_policy.keeper_state_snapshot option)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  match
+    replay_suffix_prune_reason
+      ~completion_contract_result
+      ~state_snapshot_source
+      ~response_text
+  with
+  | Some reason ->
+    let pruned =
+      prune_current_turn_replay
+        ~history_messages
+        ~pre_turn_working_context
+        checkpoint
+    in
+    (match pruned with
+    | Some checkpoint -> Ok (checkpoint, Some reason)
+    | None ->
+      Error
+        (Printf.sprintf
+           "refusing to save checkpoint: replay suffix prune reason=%s but \
+            checkpoint messages do not match pre-turn history prefix"
+           (replay_suffix_prune_reason_to_string reason)))
+  | None ->
+    Ok
+      ( Keeper_context_core.patch_checkpoint_last_assistant
+          checkpoint
+          ~session_id
+          ~response_text
+          ?snapshot:state_snapshot
+      , None )
+;;
+
+module For_testing = struct
+  let completion_contract_drops_current_turn_replay =
+    completion_contract_drops_current_turn_replay
+
+  let replay_suffix_prune_reason_to_string =
+    replay_suffix_prune_reason_to_string
+
+  let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
+end
+
 let finalize
     ~config
     ~meta
@@ -32,6 +153,8 @@ let finalize
     ~checkpoint_persistence_error
     ~post_turn_t0
     ~runtime_id_string
+    ~history_messages
+    ~pre_turn_working_context
     ~prompt_metrics
     ~ctx_composition
     ~usage
@@ -136,19 +259,30 @@ let finalize
   let saved_checkpoint_result =
     match result.checkpoint with
     | Some checkpoint ->
-      let patched =
-        Keeper_context_core.patch_checkpoint_last_assistant
-          checkpoint
+      let checkpoint_for_save_result =
+        checkpoint_for_replay_persistence
+          ~history_messages
+          ~pre_turn_working_context
+          ~completion_contract_result
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
-          ~snapshot:state_snapshot
+          ~state_snapshot_source
+          ~state_snapshot:(Some state_snapshot)
+          checkpoint
       in
-      (match
-         Keeper_checkpoint_store.save_oas_classified
-           ~session_dir:session.session_dir
-           patched
-       with
+      (match checkpoint_for_save_result with
+       | Error detail ->
+         Error
+           (checkpoint_persistence_error
+              ~keeper_name:meta.name
+              ~detail)
+       | Ok (patched, replay_suffix_pruned) ->
+         (match
+            Keeper_checkpoint_store.save_oas_classified
+              ~session_dir:session.session_dir
+              patched
+          with
        | Ok (Keeper_checkpoint_store.Saved _) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
@@ -160,9 +294,21 @@ let finalize
            ~decision:
              (`Assoc
                [
-                 ("session_id", `String patched.session_id);
-                 ("turns", `Int result.turns);
-                 ("model", `String model);
+                ("session_id", `String patched.session_id);
+                ("turns", `Int result.turns);
+                ("model", `String model);
+                ( "replay_suffix_pruned"
+                , `Bool (Option.is_some replay_suffix_pruned) );
+                ( "replay_suffix_prune_reason"
+                , (match replay_suffix_pruned with
+                   | Some reason ->
+                     `String (replay_suffix_prune_reason_to_string reason)
+                   | None -> `Null) );
+                ( "completion_contract_result"
+                , `String
+                    (Keeper_execution_receipt
+                      .completion_contract_result_to_string
+                        completion_contract_result) );
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok (Some patched)
@@ -189,7 +335,7 @@ let finalize
          Error
            (checkpoint_persistence_error
               ~keeper_name:meta.name
-              ~detail:("OAS checkpoint save failed: " ^ e)))
+              ~detail:("OAS checkpoint save failed: " ^ e))))
     | None ->
       Log.Keeper.error ~keeper_name:meta.name
         "runtime=%s missing OAS checkpoint after run"

@@ -65,13 +65,18 @@ describe('mobile surface padding compresses per density tier (≤900px)', () => 
   // Desktop tiers (craft.css): spacious 42px / regular 26px / compact 18px
   // inline padding. On the single-column mobile shell these are disproportionate
   // (spacious 42px + 12px shell pad ≈ 27% of a 406px viewport).
-  const DESKTOP_INLINE: Record<string, number> = { spacious: 42, regular: 26, compact: 18 }
+  const DESKTOP_INLINE: Record<'spacious' | 'regular' | 'compact', number> = {
+    spacious: 42,
+    regular: 26,
+    compact: 18,
+  }
 
   for (const tier of ['spacious', 'regular', 'compact'] as const) {
     it(`tightens --pad-surface inline padding for data-density="${tier}"`, () => {
       const decls = mediaRuleDecls(craftCss, `.v2-app[data-density="${tier}"]`, SHELL_MOBILE_CHROME_BREAKPOINT)
       const pad = decls['--pad-surface']
-      expect(pad).toBeDefined()
+      if (pad === undefined)
+        throw new Error(`--pad-surface declaration missing for data-density="${tier}"`)
       expect(px(inlinePad(pad))).toBeLessThan(DESKTOP_INLINE[tier])
     })
   }

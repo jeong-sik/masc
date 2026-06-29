@@ -397,6 +397,53 @@ let has_tool_use (msg : Agent_sdk.Types.message) =
       | _ -> false)
     msg.Agent_sdk.Types.content
 
+let replay_snapshot_msg role content =
+  let snapshot =
+    { KMP.empty_keeper_state_snapshot with goal = Some "resume goal" }
+  in
+  checkpoint_msg role content |> fun msg -> KMP.with_snapshot_metadata msg snapshot
+
+let test_drop_empty_replay_snapshot_suffix () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let empty_replay_1 = replay_snapshot_msg Assistant [ Text "" ] in
+  let empty_replay_2 = replay_snapshot_msg Assistant [ Text "  " ] in
+  let kept =
+    KMP.drop_empty_replay_snapshot_suffix
+      [ old_user; old_assistant; empty_replay_1; empty_replay_2 ]
+  in
+  Alcotest.(check int) "suffix replay messages dropped" 2
+    (List.length kept);
+  (match List.rev kept with
+   | last :: _ ->
+       Alcotest.(check string)
+         "last kept assistant preserved"
+         "old answer"
+         (Agent_sdk.Types.text_of_message last)
+   | [] -> Alcotest.fail "expected retained history");
+  let middle_replay =
+    KMP.drop_empty_replay_snapshot_suffix
+      [ old_user; empty_replay_1; checkpoint_msg User [ Text "new user" ] ]
+  in
+  Alcotest.(check int) "non-suffix replay message remains" 3
+    (List.length middle_replay);
+  let visible_replay =
+    replay_snapshot_msg Assistant [ Text "visible answer" ]
+  in
+  Alcotest.(check int)
+    "visible replay message remains"
+    1
+    (KMP.drop_empty_replay_snapshot_suffix [ visible_replay ] |> List.length);
+  let tool_replay =
+    replay_snapshot_msg Assistant
+      [ ToolUse { id = "tool-1"; name = "keeper_tasks_list"; input = `Assoc [] } ]
+  in
+  Alcotest.(check int)
+    "tool replay message remains"
+    1
+    (KMP.drop_empty_replay_snapshot_suffix [ tool_replay ] |> List.length)
+
 let prune_reason_to_string reason =
   Option.map
     Masc.Keeper_agent_run_finalize_response.For_testing.replay_suffix_prune_reason_to_string
@@ -820,6 +867,10 @@ let () =
             "satisfied result keeps tool replay suffix"
             `Quick
             test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final;
+          Alcotest.test_case
+            "drops persisted empty replay snapshot suffix"
+            `Quick
+            test_drop_empty_replay_snapshot_suffix;
         ] );
       ( "dual_source",
         [

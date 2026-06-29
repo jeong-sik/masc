@@ -971,22 +971,10 @@ let synthesize_state_from_run_result
     else None
   in
   let decisions =
-    if budget_exhausted
-    then []
-    else (
-      let response_hint =
-        let trimmed = String.trim response_text in
-        if trimmed = ""
-        then None
-        else
-          Some
-            (String_util.utf8_safe ~max_bytes:103 ~suffix:"..." trimmed
-             |> String_util.to_string)
-      in
-      match response_hint with
-      | Some hint ->
-        [ Keeper_synthetic_marker.tag (Printf.sprintf "Last output: %s" hint) ]
-      | None -> [ Keeper_synthetic_marker.tag "No visible output this generation" ])
+    (* The visible reply is persisted as an assistant message. Synthetic state
+       must not replay an unstructured preview as a durable decision. *)
+    ignore response_text;
+    []
   in
   { priority = None;
     goal = (let g = String.trim goal in if g = "" then None else Some g);

@@ -679,6 +679,7 @@ let prompt_for_facts facts_json =
 let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
+    ~base_path
     ~build_facts =
   let runtime_id =
     Runtime.get_default_runtime_id ()
@@ -695,7 +696,7 @@ let compute_judgments
       let factual_json = build_facts () in
       let prompt = prompt_for_facts factual_json in
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
-        ~goal:prompt ~masc_tools ~dispatch 
+        ~base_path ~goal:prompt ~masc_tools ~dispatch
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve
         ()
@@ -987,7 +988,7 @@ let refresh_once ~sw ~net
         Eio.Switch.run ~name:"governance_judge.compute" (fun _sw ->
             try
               Ok
-                (compute_judgments ~masc_tools ~dispatch ~build_facts)
+                (compute_judgments ~masc_tools ~dispatch ~base_path ~build_facts)
             with
             | Eio.Cancel.Cancelled _ as exn ->
                 ignore

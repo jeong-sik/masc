@@ -3,19 +3,6 @@ open Masc
 
 let tr_ok body = Tool_result.ok ~tool_name:"keeper-test" ~start_time:0.0 body
 
-let wait_for_done request_id =
-  let rec loop remaining =
-    match Keeper_msg_async.poll request_id with
-    | Keeper_msg_async.Found ({ status = Done _; _ } as entry) -> entry
-    | _ when remaining <= 0 ->
-      failwith (Printf.sprintf "request %s did not complete" request_id)
-    | _ ->
-      Eio.Fiber.yield ();
-      loop (remaining - 1)
-  in
-  loop 200
-;;
-
 let wait_for_done_with_clock clock request_id =
   let rec loop remaining =
     match Keeper_msg_async.poll request_id with
@@ -25,6 +12,33 @@ let wait_for_done_with_clock clock request_id =
     | _ ->
       Eio.Time.sleep clock 0.01;
       loop (remaining - 1)
+  in
+  loop 100
+;;
+
+let wait_for_persisted_done_with_clock clock ~base_path request_id =
+  let rec loop remaining =
+    match Keeper_msg_async.For_testing.load_record ~base_path ~request_id with
+    | Keeper_msg_async.Found ({ status = Done _; _ } as entry) -> entry
+    | _ when remaining <= 0 ->
+      failwith (Printf.sprintf "request %s did not persist done" request_id)
+    | _ ->
+      Eio.Time.sleep clock 0.01;
+      loop (remaining - 1)
+  in
+  loop 100
+;;
+
+let wait_for_active_switch_count clock expected =
+  let rec loop remaining =
+    let actual = Keeper_msg_async.For_testing.active_switch_count () in
+    if actual = expected
+    then ()
+    else if remaining <= 0
+    then Alcotest.failf "active_switch_count expected %d, got %d" expected actual
+    else (
+      Eio.Time.sleep clock 0.01;
+      loop (remaining - 1))
   in
   loop 100
 ;;
@@ -86,6 +100,23 @@ let contains_substring ~needle value =
     loop 0)
 ;;
 
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let len = in_channel_length ic in
+       really_input_string ic len)
+;;
+
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+;;
+
+let source_file path = Filename.concat (source_root ()) path
+
 let temp_dir prefix =
   let path = Filename.temp_file prefix "" in
   Sys.remove path;
@@ -117,9 +148,10 @@ let with_eio_env f =
 
 let test_keeper_msg_async_roundtrip () =
   with_eio_env
-  @@ fun _env ->
+  @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
   let base_path = temp_dir "keeper-msg-async-roundtrip-" in
   let request_id =
     Keeper_msg_async.submit
@@ -131,7 +163,7 @@ let test_keeper_msg_async_roundtrip () =
         tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
       ()
   in
-  let entry = wait_for_done request_id in
+  let entry = wait_for_done_with_clock clock request_id in
   Alcotest.(check bool)
     "request completed"
     true
@@ -146,9 +178,10 @@ let test_keeper_msg_async_roundtrip () =
 
 let test_keeper_msg_async_recovers_done_from_disk () =
   with_eio_env
-  @@ fun _env ->
+  @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
   let base_path = temp_dir "keeper-msg-async-done-" in
   let request_id =
     Keeper_msg_async.submit
@@ -160,13 +193,16 @@ let test_keeper_msg_async_recovers_done_from_disk () =
         tr_ok (Yojson.Safe.to_string (`Assoc [ "kind", `String "done" ])))
       ()
   in
-  let entry = wait_for_done request_id in
+  let entry = wait_for_done_with_clock clock request_id in
   Alcotest.(check bool)
     "request completed before recovery"
     true
     (match entry.Keeper_msg_async.status with
      | Done { ok = true; _ } -> true
      | _ -> false);
+  ignore
+    (wait_for_persisted_done_with_clock clock ~base_path request_id
+      : Keeper_msg_async.entry);
   Keeper_msg_async.For_testing.forget request_id;
   match Keeper_msg_async.poll ~base_path request_id with
   | Keeper_msg_async.Found { Keeper_msg_async.status = Done { ok = true; body }; _ } ->
@@ -307,6 +343,10 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
   @@ fun sw ->
   let clock = Eio.Stdenv.clock env in
   let base_path = temp_dir "keeper-msg-async-timeout-" in
+  Alcotest.(check int)
+    "no active switches before timeout request"
+    0
+    (Keeper_msg_async.For_testing.active_switch_count ());
   let release_late, notify_release_late = Eio.Promise.create () in
   let request_id =
     Keeper_msg_async.submit
@@ -347,6 +387,11 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
           | `String value -> Some value
           | _ -> None))
    | _ -> Alcotest.fail "expected timeout body JSON object");
+  Alcotest.(check bool)
+    "cancel after terminal timeout returns false"
+    false
+    (Keeper_msg_async.cancel ~base_path request_id);
+  wait_for_active_switch_count clock 0;
   Eio.Promise.resolve notify_release_late ();
   Eio.Time.sleep clock 0.05;
   match Keeper_msg_async.poll request_id with
@@ -362,9 +407,10 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
 
 let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
   with_eio_env
-  @@ fun _env ->
+  @@ fun env ->
   Eio.Switch.run
   @@ fun sw ->
+  let clock = Eio.Stdenv.clock env in
   let base_path = temp_dir "keeper-msg-async-gc-" in
   let request_id =
     Keeper_msg_async.submit
@@ -376,7 +422,10 @@ let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
         tr_ok "{}")
       ()
   in
-  let entry = wait_for_done request_id in
+  let entry = wait_for_done_with_clock clock request_id in
+  ignore
+    (wait_for_persisted_done_with_clock clock ~base_path request_id
+      : Keeper_msg_async.entry);
   let path =
     match Keeper_msg_async.For_testing.record_path ~base_path ~request_id with
     | Some path -> path
@@ -598,6 +647,24 @@ let test_voice_output_turn_serializes_speakers () =
     (Atomic.get second_entered)
 ;;
 
+let test_keeper_msg_async_persists_outside_global_mutex () =
+  let source = read_file (source_file "lib/keeper/keeper_msg_async.ml") in
+  Alcotest.(check bool)
+    "set_status computes optional persist entry"
+    true
+    (contains_substring ~needle:"let to_persist =" source);
+  Alcotest.(check bool)
+    "persist happens after lock returns"
+    true
+    (contains_substring ~needle:"Option.iter persist_entry to_persist" source);
+  Alcotest.(check bool)
+    "status update does not persist while holding lock"
+    false
+    (contains_substring
+       ~needle:"Hashtbl.replace pending request_id updated;\n      persist_entry updated"
+       source)
+;;
+
 let () =
   run
     "keeper_mutex_coverage"
@@ -647,6 +714,10 @@ let () =
             "load_record unknown status is Unreadable"
             `Quick
             test_keeper_msg_async_load_record_unknown_status_is_unreadable
+        ; test_case
+            "persistence outside global mutex"
+            `Quick
+            test_keeper_msg_async_persists_outside_global_mutex
         ] )
     ; ( "eio_guard"
       , [ test_case

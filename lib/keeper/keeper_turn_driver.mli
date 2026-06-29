@@ -96,6 +96,7 @@ val provider_attempt_finished_decision :
 val run_named :
   runtime_id:string ->
   ?keeper_name:string ->
+  base_path:string ->
   goal:string ->
   ?goal_blocks:Agent_sdk.Types.content_block list ->
   ?priority:Llm_provider.Request_priority.t ->
@@ -166,6 +167,9 @@ module For_testing : sig
     accept:(Agent_sdk_response.api_response -> bool) ->
     Runtime_agent.run_result ->
     (Runtime_agent.run_result, Agent_sdk.Error.sdk_error) result
+
+  val max_execution_time_for_attempt :
+    ?per_provider_timeout_s:float -> unit -> float option
 
   val last_tool_progress_context_string_of_messages :
     Agent_sdk.Types.message list -> string option

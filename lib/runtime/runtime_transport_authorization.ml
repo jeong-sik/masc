@@ -51,11 +51,10 @@ let authorization_header_from_policy
     policy.servers
 ;;
 
-let per_keeper_authorization_header ~agent_name =
+let per_keeper_authorization_header ~base_path ~agent_name =
   match keeper_name_of_agent_name agent_name with
   | None -> None
   | Some _ ->
-    let base_path = Env_config_core.base_path () in
     Auth.load_raw_token base_path ~agent_name
     |> Option.map (fun raw -> "Authorization", "Bearer " ^ raw)
 ;;

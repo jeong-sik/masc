@@ -98,10 +98,9 @@ val host_path_of_visible_path :
     For Docker keepers this is the in-container path
     ({!container_root}); for Local keepers this is the host path
     ({!host_root_abs_of_meta}). Use this in runtime_contract and
-    other LLM-facing surfaces; surfacing the host path to a Docker
-    keeper makes the LLM emit [cd /Users/.../.masc/playground/...]
-    inside the container, which fails because that path does not
-    exist there. *)
+    other LLM-facing surfaces; surfacing a host-absolute workspace
+    path to a Docker keeper makes the LLM emit host paths inside the
+    container, which fails because those paths do not exist there. *)
 val keeper_visible_root_abs_of_meta :
   config:Workspace.config ->
   Keeper_meta_contract.keeper_meta ->
@@ -132,10 +131,9 @@ val allowed_root_rel_of_meta :
 (** [keeper_visible_root_abs t] is the absolute path the keeper LLM
     should treat as its working root.  For Docker keepers this is the
     in-container path ({!container_root}); for Local keepers this is
-    {!host_root_abs}.  Surfacing the host path to a Docker keeper makes
-    the LLM emit [cd /Users/.../.masc/playground/...] inside the
-    container, which fails because that path does not exist there
-    (#10650). *)
+    {!host_root_abs}.  Surfacing a host-absolute workspace path to a
+    Docker keeper makes the LLM emit host paths inside the container,
+    which fails because that path does not exist there (#10650). *)
 val keeper_visible_root_abs : t -> string
 
 (** {1 Dashboard / status output} *)

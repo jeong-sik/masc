@@ -69,12 +69,15 @@ val keeper_agent_name_opt : string -> string option
     Requires {!set_keeper_name_xlat} to have run. *)
 
 val runtime_mcp_policy_for_tools :
-  keeper_name:string -> Agent_sdk.Tool.t list ->
+  base_path:string ->
+  keeper_name:string ->
+  Agent_sdk.Tool.t list ->
   Llm_provider.Llm_transport.runtime_mcp_policy option
 (** Build a runtime MCP policy from the tool list, honouring public MCP tools
     and agent-internal surface classifications. *)
 
 val runtime_mcp_policy_for_provider :
+  base_path:string ->
   keeper_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->
@@ -83,6 +86,7 @@ val runtime_mcp_policy_for_provider :
     keeper's agent name when applicable. *)
 
 val codex_cli_cannot_carry_keeper_bound_runtime_mcp :
+  base_path:string ->
   keeper_name:string ->
   provider_cfg:Llm_provider.Provider_config.t ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->

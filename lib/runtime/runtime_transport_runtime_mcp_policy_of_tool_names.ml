@@ -37,19 +37,19 @@ let dedupe_preserve_order (items : string list) =
    used only by this sibling. *)
 ;;
 
-let workspace_auth_requires_bearer () =
+let workspace_auth_requires_bearer ~base_path =
   try
-    let base_path = Env_config_core.base_path () in
     let auth_config = Auth.load_auth_config base_path in
     auth_config.Masc_domain.enabled && auth_config.Masc_domain.require_token
   with
-  | Env_config_core.Config_error _ ->
+  | Sys_error _ | Unix.Unix_error _ ->
     (* No resolvable workspace auth state means we cannot safely build an
        unauthenticated local-MASC runtime policy. *)
     true
 ;;
 
 let runtime_mcp_policy_of_tool_names
+      ~base_path
       ?agent_name
       ?(allow_agent_internal = false)
       (tool_names : string list)
@@ -96,7 +96,6 @@ let runtime_mcp_policy_of_tool_names
           let per_keeper_token =
             match env_token, agent_name with
             | None, Some name ->
-              let base_path = Env_config_core.base_path () in
               Auth.load_raw_token base_path ~agent_name:name
             | _ -> None
           in
@@ -116,7 +115,7 @@ let runtime_mcp_policy_of_tool_names
                ~provider_label:"masc"
                ~outcome:resolved;
              Some [ "Authorization", "Bearer " ^ raw ]
-           | Error _ when workspace_auth_requires_bearer () -> None
+           | Error _ when workspace_auth_requires_bearer ~base_path -> None
            | Error _ -> Some [])
       in
       Option.map
@@ -137,8 +136,8 @@ let runtime_mcp_policy_of_tool_names
         masc_headers)
 ;;
 
-let public_mcp_runtime_policy_of_tool_names ?agent_name (tool_names : string list)
+let public_mcp_runtime_policy_of_tool_names ~base_path ?agent_name (tool_names : string list)
   : Llm_provider.Llm_transport.runtime_mcp_policy option
   =
-  runtime_mcp_policy_of_tool_names ?agent_name tool_names
+  runtime_mcp_policy_of_tool_names ~base_path ?agent_name tool_names
 ;;

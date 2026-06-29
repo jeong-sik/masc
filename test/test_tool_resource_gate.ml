@@ -192,8 +192,51 @@ let test_snapshot_exposes_gate_state () =
   match Gate.snapshot_json () with
   | `Assoc fields ->
     check bool "enabled field" true (List.mem_assoc "enabled" fields);
+    check bool "wait timeout field" true (List.mem_assoc "wait_timeout_sec" fields);
+    check
+      bool
+      "execution timeout field"
+      true
+      (List.mem_assoc "execution_timeout_sec" fields);
     check bool "gates field" true (List.mem_assoc "gates" fields)
   | _ -> fail "expected snapshot object"
+;;
+
+let test_execution_timeout_releases_permit () =
+  Eio_main.run (fun env ->
+    Fun.protect
+      ~finally:Gate.For_testing.reset
+      (fun () ->
+         Gate.For_testing.set_limits ~shell:1 ();
+         with_env "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" "1.0" (fun () ->
+           with_env "MASC_TOOL_GATE_EXEC_TIMEOUT_SEC" "0.05" (fun () ->
+             let clock = Eio.Stdenv.clock env in
+             let first =
+               Gate.with_permit
+                 ~clock
+                 ~tool_name:"tool_execute"
+                 ~arguments:(`Assoc [ "cmd", `String "sleep 999" ])
+                 ~is_read_only:false
+                 ~start_time:(Eio.Time.now clock)
+                 (fun () ->
+                    Eio.Time.sleep clock 1.0;
+                    tool_ok ~tool_name:"tool_execute" "unexpected")
+             in
+             check bool "first call timed out" false (Tool_result.is_success first);
+             let second =
+               Gate.with_permit
+                 ~clock
+                 ~tool_name:"tool_execute"
+                 ~arguments:(`Assoc [ "cmd", `String "echo after-timeout" ])
+                 ~is_read_only:false
+                 ~start_time:(Eio.Time.now clock)
+                 (fun () -> tool_ok ~tool_name:"tool_execute" "after-timeout")
+             in
+             check
+               bool
+               "second call acquired released permit"
+               true
+               (Tool_result.is_success second)))))
 ;;
 
 let atomic_inc a =
@@ -364,6 +407,8 @@ let () =
     ; ( "admission"
       , [ test_case "rejects saturated shell lane" `Quick
             test_gate_rejects_when_lane_is_saturated
+        ; test_case "execution timeout releases permit" `Quick
+            test_execution_timeout_releases_permit
         ; test_case "snapshot exposes gate state" `Quick test_snapshot_exposes_gate_state
         ; test_case "24 tool execute burst stays bounded" `Quick
             test_24_tool_search_files_burst_stays_bounded

@@ -95,9 +95,11 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
     let runtime_id =
       Runtime.get_default_runtime_id ()
     in
+    let base_path = Env_config_core.base_path () in
     match
       Keeper_turn_driver_wrappers.run_named_with_masc_tools
         ~runtime_id
+        ~base_path
         ~goal:prompt
         ~masc_tools:[ Core.report_verdict_schema ]
         ~dispatch

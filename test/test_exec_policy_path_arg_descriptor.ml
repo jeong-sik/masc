@@ -17,6 +17,36 @@
 open Masc
 module D = Exec_policy_path_arg_descriptor
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let source_file path = Filename.concat (source_root ()) path
+
+let read_file path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> In_channel.input_all ic)
+
+let contains_substring ~needle value =
+  let needle_len = String.length needle in
+  let value_len = String.length value in
+  if needle_len = 0
+  then true
+  else if needle_len > value_len
+  then false
+  else (
+    let rec loop i =
+      if i + needle_len > value_len
+      then false
+      else if String.equal (String.sub value i needle_len) needle
+      then true
+      else loop (i + 1)
+    in
+    loop 0)
+
 let test_is_path_flag_closed_set () =
   List.iter
     (fun flag ->
@@ -125,6 +155,17 @@ let test_grep_context_flags_are_not_path_args () =
   Alcotest.(check bool) "grep context count skipped" false
     (List.mem "3" values)
 
+let test_sandbox_backend_is_not_fake_success () =
+  let source = read_file (source_file "lib/exec_policy/sandbox_backend.ml") in
+  Alcotest.(check bool)
+    "no simulated success text"
+    false
+    (contains_substring ~needle:"Structured sandbox run" source);
+  Alcotest.(check bool)
+    "unsupported marker is explicit"
+    true
+    (contains_substring ~needle:"not a production sandbox executor" source)
+
 let () =
   Alcotest.run "exec_policy_path_arg_descriptor"
     [ ( "separated flag form"
@@ -151,5 +192,9 @@ let () =
             test_rg_context_flags_are_not_path_args
         ; Alcotest.test_case "grep context flags are not paths" `Quick
             test_grep_context_flags_are_not_path_args
+        ] )
+    ; ( "sandbox backend"
+      , [ Alcotest.test_case "no fake success" `Quick
+            test_sandbox_backend_is_not_fake_success
         ] )
     ]

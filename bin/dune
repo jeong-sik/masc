@@ -55,8 +55,9 @@
  (public_name masc-stdio)
  (package masc)
  (libraries
-  masc
-  masc.server
+ masc
+ masc.server
+  masc.config
   masc_core
   cmdliner
   eio

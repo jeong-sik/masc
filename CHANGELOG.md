@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+- Stabilize keeper quick-suite tests under Dune sandboxing by resolving
+  source-file assertions through `DUNE_SOURCEROOT`.
+- Stabilize `keeper_msg_async` async persistence coverage by waiting for
+  disk persistence before recovery/GC assertions.
+
 ## [0.19.54] - 2026-06-29
 
 ### Changed

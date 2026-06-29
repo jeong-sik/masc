@@ -66,7 +66,7 @@ let parse_grounded_verdict_from_text text =
    tool, with a structured JSON fallback if the model answers in free text.
    The judgment itself is the model's; this only routes its structured output
    back as a typed [Verifier_core.verdict]. *)
-let run_grounded_review ~runtime_id (input : review_input) :
+let run_grounded_review ~base_path ~runtime_id (input : review_input) :
     (Verifier_core.grounded_verdict, string) result =
   match build_prompt input with
   | Error msg ->
@@ -99,6 +99,7 @@ let run_grounded_review ~runtime_id (input : review_input) :
     in
     match
       Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
+        ~base_path
         ~goal:prompt
         ~masc_tools:[ Verifier_core.report_verdict_schema ]
         ~dispatch
@@ -114,9 +115,9 @@ let run_grounded_review ~runtime_id (input : review_input) :
         parse_grounded_verdict_from_text text)
     | Error err -> Error (Agent_sdk.Error.to_string err)
 
-let run_review ~runtime_id (input : review_input) :
+let run_review ~base_path ~runtime_id (input : review_input) :
     (Verifier_core.verdict, string) result =
-  match run_grounded_review ~runtime_id input with
+  match run_grounded_review ~base_path ~runtime_id input with
   | Ok grounded -> Ok grounded.Verifier_core.verdict
   | Error msg -> Error msg
 
@@ -193,7 +194,7 @@ let act_on_grounded_verdict ~base_path ~(input : review_input)
 
 let review_and_wake_on_fail ~base_path ~runtime_id (input : review_input) :
     (Verifier_core.verdict, string) result =
-  match run_grounded_review ~runtime_id input with
+  match run_grounded_review ~base_path ~runtime_id input with
   | Error msg -> Error msg
   | Ok grounded ->
     Result.map

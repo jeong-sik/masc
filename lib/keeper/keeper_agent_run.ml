@@ -502,13 +502,13 @@ let run_turn
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
               let call_run_named ~initial_messages =
-                (* This path must not impose a cumulative OAS bridge timeout.
-                   Progressing streams are bounded by stream idle and attempt
-                   liveness; completed attempts are bounded before retry by
-                   turn-budget admission. *)
-                Keeper_turn_driver.run_named
-                  ~runtime_id:runtime_id_string
-                    ~keeper_name:meta.name
+                (* The keeper turn deadline must own the OAS Agent.run switch.
+                   Stream/body idle budgets catch liveness gaps; this hard
+                   ceiling is the final guard that releases a stuck turn slot. *)
+	                Keeper_turn_driver.run_named
+	                  ~runtime_id:runtime_id_string
+	                  ~base_path:config.base_path
+	                    ~keeper_name:meta.name
                     ~goal:user_message
                     ?goal_blocks:user_blocks
                     ~priority

@@ -9,6 +9,7 @@ type t =
   | Claim_task
   | Board_activity
   | Shell_command_input
+  | Polling_read
 
 
 
@@ -41,10 +42,15 @@ let shell_command_input_tool_names =
   [ "tool_execute" ]
 ;;
 
+let polling_read_tool_names =
+  Keeper_tool_descriptor.polling_read_internal_names ()
+;;
+
 let tool_names = function
   | Claim_task -> claim_task_tool_names
   | Board_activity -> board_activity_tool_names
   | Shell_command_input -> shell_command_input_tool_names
+  | Polling_read -> polling_read_tool_names
 ;;
 
 let supports capability name =

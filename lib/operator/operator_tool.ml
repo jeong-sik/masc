@@ -342,7 +342,7 @@ let remote_schemas : tool_schema list =
     surface_audit_schema ~remote:true;
   ]
 
-let remote_tool_names : string list = Operator_remote_tool_name.all_strings
+let remote_tool_names : string list = Tool_name.Operator_remote_name.all_strings
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)

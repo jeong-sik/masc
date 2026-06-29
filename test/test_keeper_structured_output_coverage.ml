@@ -316,7 +316,7 @@ let test_governance_judge_schema_uses_resolved_tool_ssot () =
   check
     (list string)
     "governance resolved_tool enum"
-    (List.sort String.compare Operator_remote_tool_name.all_strings)
+    (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
     (enum_strings tool_schema)
 ;;
 
@@ -329,12 +329,12 @@ let test_operator_remote_tool_name_ssot_matches_remote_schemas () =
   check
     (list string)
     "operator remote schema names"
-    (List.sort String.compare Operator_remote_tool_name.all_strings)
+    (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
     schema_names;
   check
     (list string)
     "operator remote exported names"
-    (List.sort String.compare Operator_remote_tool_name.all_strings)
+    (List.sort String.compare Tool_name.Operator_remote_name.all_strings)
     (List.sort String.compare Operator_tool.remote_tool_names)
 ;;
 

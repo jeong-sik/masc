@@ -73,6 +73,18 @@ module Operator_name : sig
   val pp : Stdlib.Format.formatter -> t -> unit
 end
 
+module Operator_remote_name : sig
+  type t =
+    | Operator_tool of Operator_name.t
+    | Surface_audit
+
+  val to_string : t -> string
+  val of_string : string -> t option
+  val all : t list
+  val all_strings : string list
+  val pp : Stdlib.Format.formatter -> t -> unit
+end
+
 (** Domain_tool — single domain-owned grouping of Task/Board/Goal/Operator tool
     names. This module owns only names and string round-tripping; dispatch,
     effect, risk, and resource policy live in their own registries. *)

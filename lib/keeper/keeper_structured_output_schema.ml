@@ -101,7 +101,7 @@ let operator_judge_output_schema =
 
 let governance_kind_tokens = [ "case"; "agent_health"; "workspace_state" ]
 
-let governance_resolved_tool_tokens = Operator_remote_tool_name.all_strings
+let governance_resolved_tool_tokens = Tool_name.Operator_remote_name.all_strings
 
 let governance_recommended_action_schema =
   let fields =

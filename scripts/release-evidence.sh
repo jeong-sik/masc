@@ -35,6 +35,7 @@ cd "$repo_root"
 
 [[ -x "$BINARY" ]] || { echo "release-evidence: binary not executable: $BINARY" >&2; exit 1; }
 [[ -f config/tool_policy.toml ]] || { echo "release-evidence: config/tool_policy.toml missing" >&2; exit 1; }
+[[ -f oas-models.toml ]] || { echo "release-evidence: oas-models.toml missing" >&2; exit 1; }
 
 mkdir -p "$(dirname "$OUTFILE")"
 out_dir="$(cd "$(dirname "$OUTFILE")" && pwd)"
@@ -291,6 +292,7 @@ env \
   MASC_WS_ENABLED=0 \
   MASC_WEBRTC_ENABLED=0 \
   MASC_KEEPER_BOOTSTRAP_ENABLED=false \
+  OAS_MODEL_CATALOG="$repo_root/oas-models.toml" \
   "$BINARY" --base-path "$base_path" --port "$PORT" >"$server_log" 2>&1 &
 SERVER_PID=$!
 

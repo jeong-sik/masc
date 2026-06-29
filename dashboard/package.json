@@ -17,7 +17,7 @@
     "test": "vitest run --config vitest.config.ts --no-file-parallelism --maxWorkers=1 && vitest run --config vitest.solid.config.ts --no-file-parallelism --maxWorkers=1",
     "test:serial": "pnpm test",
     "test:watch": "vitest",
-    "tokens:build": "test ! -f design-system/tokens/build.ts || tsx design-system/tokens/build.ts",
+    "tokens:build": "tsx design-system/tokens/build.ts",
     "tokens:check": "node design-system/tokens/scripts/check-equivalence.mjs"
   },
   "dependencies": {

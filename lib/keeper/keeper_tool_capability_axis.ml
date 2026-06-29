@@ -31,9 +31,24 @@ let claim_task_tool_names =
 ;;
 
 let board_activity_tool_names =
+  (* #22042 / RFC-0299 Phase 4 — canonical-form membership.
+
+     [supports]/[candidate_names] canonicalize the *incoming* name before
+     [List.mem], so every entry here must be a canonical form the runtime can
+     actually present. [broadcast] has an asymmetric registration: the
+     descriptor (keeper.task.broadcast) carries the internal name
+     "keeper_broadcast", while "masc_broadcast" is a
+     [public_mcp_non_descriptor_name] (routing_table miss -> known_runtime
+     identity, stays unchanged). The two representations therefore canonicalize
+     to two different strings, so both must be listed or the internal form
+     classifies as Passive_status and silently resets the RFC-0239 anti-thrash
+     streak. [keeper_msg] is symmetric (public_name = internal_name =
+     "masc_keeper_msg" via [masc_keeper_descriptor]) so its single entry
+     already covers every representation. *)
   [ Keeper_tool_name.(to_string Board_post)
   ; Keeper_tool_name.(to_string Board_comment)
-  ; "masc_broadcast"
+  ; Keeper_tool_name.(to_string Broadcast) (* internal canonical = "keeper_broadcast" *)
+  ; "masc_broadcast" (* non-descriptor public form; canonicalizes to itself *)
   ; "masc_keeper_msg"
   ]
 ;;

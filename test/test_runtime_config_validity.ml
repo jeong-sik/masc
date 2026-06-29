@@ -425,6 +425,7 @@ let test_repo_oas_model_catalog_modality_priorities_resolve () =
     rows
 
 let test_repo_runtime_toml_loads () =
+  with_repo_oas_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
   match Runtime.load_list ~config_path:path with

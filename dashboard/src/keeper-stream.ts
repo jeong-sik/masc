@@ -1,4 +1,8 @@
-import { normalizeKeeperConversationDetails, formatKeeperVisibleReply } from './keeper-message'
+import {
+  formatKeeperVisibleReply,
+  keeperTurnOutcomeSuppressesReply,
+  normalizeKeeperConversationDetails,
+} from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import type { KeeperChatStreamEvent } from './api'
 import {
@@ -223,13 +227,13 @@ export function applyKeeperStreamEvent(
         if (details) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
             const rawText = details.replyText ?? entry.rawText ?? entry.text
-            if (details.turnOutcome === 'continuation_checkpoint') {
+            if (keeperTurnOutcomeSuppressesReply(details.turnOutcome)) {
               return {
                 ...entry,
                 details,
                 rawText,
                 text: '',
-                delivery: 'queued',
+                delivery: details.turnOutcome === 'no_visible_reply' ? 'no_reply' : 'queued',
                 streamState: null,
               }
             }

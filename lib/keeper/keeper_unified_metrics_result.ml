@@ -63,7 +63,8 @@ let update_metrics_from_result (meta : keeper_meta) ~(latency_ms : int)
      still drives the visible/noop/autonomous counters unchanged. *)
   let is_visible_reply =
     Keeper_turn_outcome.equal
-      (Keeper_turn_outcome.of_stop_reason result.stop_reason)
+      (Keeper_turn_outcome.of_result_surface
+         ~response_text:result.response_text result.stop_reason)
       Keeper_turn_outcome.Visible_reply
   in
   let validated_evidence = visible_run_validation result in

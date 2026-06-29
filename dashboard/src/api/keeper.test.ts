@@ -220,6 +220,25 @@ describe('fetchQueuedKeeperMessageResult', () => {
       'Continuation checkpoint saved; keeper remains scheduled for the next cycle.',
     )
   })
+
+  it('suppresses queued no-visible replies as non-visible replies', () => {
+    const result = {
+      requestId: 'kmsg_sangsu_4',
+      keeperName: 'sangsu',
+      status: 'done' as const,
+      ok: true,
+      result: {
+        reply: '',
+        turn_outcome: 'no_visible_reply',
+      },
+    }
+
+    const reply = queuedKeeperMessageToReply(result)
+
+    expect(reply.text).toBe('')
+    expect(reply.details?.turnOutcome).toBe('no_visible_reply')
+    expect(reply.details?.replyText).toBeNull()
+  })
 })
 
 describe('streamKeeperMessage', () => {

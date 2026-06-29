@@ -122,6 +122,7 @@ type t =
   | CycleExceptions
   | SnapshotWriteFailures
   | StateSnapshotSkippedNoState
+  | StateSnapshotInvalidGoal
   | PromptUnknownToolTokens
   | PromptTokenStripped
   | ProgressUpdatedLineFailures
@@ -373,6 +374,8 @@ let to_string = function
   | SnapshotWriteFailures -> "masc_keeper_snapshot_write_failures_total"
   | StateSnapshotSkippedNoState ->
     "masc_keeper_state_snapshot_skipped_no_state_total"
+  | StateSnapshotInvalidGoal ->
+    "masc_keeper_state_snapshot_invalid_goal_total"
   | PromptUnknownToolTokens ->
     "masc_keeper_prompt_unknown_tool_tokens_total"
   | PromptTokenStripped ->
@@ -546,7 +549,7 @@ let all : t list =
     ReconcileFailures; DecisionAuditFlushFailures; OasCancel;
     ClaimAutoProvision; TomlInvalid; PersonaDriftMissing; WorkspaceInitFailures;
     PresenceSyncFailures; SelfPreservationUniversal; StaleStormPaused; ProviderTimeoutLoopPaused;
-    CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; PromptUnknownToolTokens;
+    CycleExceptions; SnapshotWriteFailures; StateSnapshotSkippedNoState; StateSnapshotInvalidGoal; PromptUnknownToolTokens;
     PromptTokenStripped;
     ProgressUpdatedLineFailures;
     SseBroadcastFailures; WorkspaceHeartbeatFailures; TurnMetricsSnapshotFailures; OasExecutionErrors;

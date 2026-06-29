@@ -497,82 +497,22 @@ let resolve_turn_intent_block substitutions =
         observe_turn_intent_render_failure msg;
         raw)
 
-(** In-binary fallback prose for the externalized turn-intent and user-prompt
-    bullet files under [config/prompts/]. Used only when the registry returns
-    an empty body (missing file, frontmatter-only file, or markdown_dir not
-    set in tests). The in-binary copy is kept byte-for-byte equal to the
-    canonical markdown body (post-trim, single trailing newline injected by
-    [load_externalized_bullet]) so that a degraded prompt config still emits
-    the same guidance text. Edits should land in both places to keep them
-    aligned with the keeper.* markdown files. *)
-let fallback_externalized_bullet key =
-  if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_a then
-    Some
-      "- Claimable backlog is visible and you do not already hold a task. \
-       `keeper_task_claim {}` is available, not mandatory; use \
-       `keeper_task_claim { \"task_id\": \"task-123\" }` when a user, mention, \
-       board item, or task list row points to a specific task. Claim only when \
-       the work fits your current goal, persona, and capacity. Use \
-       `keeper_tasks_list` when you need to inspect backlog state before deciding."
-  else if String.equal key Keeper_prompt_names.turn_intent_claim_guidance_b then
-    Some
-      "- Repo and remote PR/issue inspection is observation, not progress by itself. \
-       If you decide to do code-changing task work, claim first, then use \
-       only the visible file, edit, and Execute tools from the repo \
-       checkout. Do not invent hidden shell or repo-hosting tools when they are \
-       not listed."
-  else if String.equal key Keeper_prompt_names.turn_intent_board_activity_guidance then
-    Some
-      "- See board activity? Use the listed post_id. If no post_id is \
-       listed, call keeper_board_list or keeper_board_search to discover one \
-       before any keeper_board_post_get, comment, or vote. Never call \
-       keeper_board_post_get with {} or without post_id. If the preview is enough, \
-       comment directly with keeper_board_comment. If you need the full post, \
-       call keeper_board_post_get with that post_id; pair it with \
-       keeper_board_comment in the same response only when the full post gives \
-       you a concrete reply. keeper_board_post_get alone is passive and fails \
-       actionable turns."
-  else if String.equal key Keeper_prompt_names.turn_intent_board_post_guidance then
-    Some
-      "- Have a substantive finding or update? Call keeper_board_post with \
-       concrete content. If you have nothing specific to share this turn, \
-       skip the post entirely — do NOT emit placeholder strings like \
-       \"empty\", \"ok\", \"nothing\", or \"n/a\". An absent post is \
-       preferable to a content-less one (other keepers waste turns \
-       responding to noise)."
-  else if String.equal key Keeper_prompt_names.turn_intent_board_curation_guidance then
-    Some
-      "- See enough board activity to summarize or route? Call \
-       keeper_board_curation_submit with a concise snapshot."
-  else if String.equal key Keeper_prompt_names.turn_intent_broadcast_guidance then
-    Some "- Need to share broadly? Call keeper_broadcast."
-  else if String.equal key Keeper_prompt_names.turn_intent_task_create_guidance then
-    Some
-      "- Active goal work is present but no claimable task is available. \
-       If the goal has a concrete next step, create it with \
-       `keeper_task_create` using a clear title, description, priority, and \
-       the goal link. Do not wait for a human to pre-split obvious goal work \
-       into tasks."
-  else if String.equal key Keeper_prompt_names.immediate_task_move then
-    Some
-      "- Claimable backlog exists. `keeper_task_claim {}` may claim the next \
-       eligible unclaimed task; when a user, mention, board item, or \
-       `keeper_tasks_list` row names a specific task, use `keeper_task_claim { \
-       \"task_id\": \"task-123\" }` instead. Claiming is an intake option \
-       rather than a required move.\n\
-       - Use keeper_tasks_list to inspect backlog state, diagnose missing \
-       work, or verify task lifecycle before deciding. Never substitute \
-       Execute probes (ls/cat/find against .masc/, backlog.json, or \
-       repo-local task files) for keeper_tasks_list; the runtime blocks \
-       those with `task_state_file_probe_blocked`.\n\
-       - Prefer the strongest live signal: pending mention, board activity, \
-       active goal, or submitted verification evidence may be better than \
-       claiming unrelated work.\n\
-       - If you choose to take code-changing task work, claim first and then \
-       work through the visible file, edit, and Execute tools from the repo \
-       checkout. Create or update a remote PR only after the branch is \
-       prepared and the task requires it."
-  else None
+(** Render an explicit marker when an externalized prompt bullet is missing.
+    The marker keeps prompt authority in [config/prompts/] instead of reviving
+    stale in-binary copies of operator-facing prose. *)
+let externalized_bullet_config_drift key =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string PromptFailures)
+    ~labels:[("prompt", key)]
+    ();
+  Log.Keeper.error
+    "externalized prompt '%s' resolved empty; rendering config-drift marker"
+    key;
+  Printf.sprintf
+    "- Externalized prompt config drift: missing or empty config/prompts/%s.md. \
+     Do not improvise replacement guidance for this missing bullet; continue \
+     only from visible tools, live state, and the remaining prompt text."
+    key
 
 (** Load a turn-intent or user-prompt bullet from [config/prompts/].
     Returns the body with a single trailing newline so multiple bullets
@@ -585,21 +525,7 @@ let load_externalized_bullet ~enabled key =
       String.trim (Prompt_registry.get_prompt key)
     in
     if String.equal trimmed "" then
-      match fallback_externalized_bullet key with
-      | Some prose ->
-          Otel_metric_store.inc_counter
-            Keeper_metrics.(to_string PromptFailures)
-            ~labels:[("prompt", key)]
-            ();
-          Log.Keeper.warn
-            "externalized prompt '%s' resolved empty; using in-binary fallback"
-            key;
-          prose ^ "\n"
-      | None ->
-          Log.Keeper.warn
-            "externalized prompt '%s' resolved empty and no fallback registered"
-            key;
-          ""
+      externalized_bullet_config_drift key ^ "\n"
     else trimmed ^ "\n"
 
 let autonomous_trigger_lines
@@ -722,8 +648,8 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
      under config/prompts/. The OCaml side only computes the boolean toggle
      for each bullet and loads the prose via Prompt_registry; the prose
      itself (and any future edits) stay in the markdown files alongside the
-     other keeper prompts. See lib/keeper_prompt_names/keeper_prompt_names.ml for the
-     key set and fallback_externalized_bullet above for in-binary fallbacks. *)
+     other keeper prompts. See lib/keeper_prompt_names/keeper_prompt_names.ml for
+     the key set. *)
   let board_activity_guidance =
     load_externalized_bullet
       ~enabled:(tool_allowed "keeper_board_post_get"
@@ -962,8 +888,7 @@ let build_prompt ~(meta : Keeper_meta_contract.keeper_meta) ~(base_path : string
     (* 10. Claimable work — advisory operational guidance. Body lives at
        config/prompts/keeper.immediate_task_move.md. The OCaml side only owns
        the section header and the trailing blank line; the bullet prose stays in
-       the markdown file alongside the other keeper prompts (see
-       fallback_externalized_bullet for the in-binary mirror). *)
+       the markdown file alongside the other keeper prompts. *)
     | Keeper_context_layers.Claimable_work ->
       if show_claim_guidance then
         Some

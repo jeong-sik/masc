@@ -231,6 +231,24 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.delivery).toBe('queued')
   })
 
+  it('suppresses a declared no-visible reply without marking it queued', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        reply: 'hidden runtime-only observation',
+        turn_outcome: 'no_visible_reply',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('')
+    expect(entry?.rawText).toBe('hidden runtime-only observation')
+    expect(entry?.delivery).toBe('no_reply')
+    expect(entry?.streamState).toBeNull()
+  })
+
   it('extracts error messages from events', () => {
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'RUN_ERROR',

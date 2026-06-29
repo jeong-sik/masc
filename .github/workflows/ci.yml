@@ -283,7 +283,7 @@ jobs:
             lib_deps=true
           fi
 
-          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
+          if has_match '^(docs/|README\.md$|ROADMAP\.md$|CHANGELOG\.md$|dune-project$|.*\.opam$|scripts/check-doc-truth\.sh$|scripts/check-version-truth\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/sync-oas-pin-manifests\.sh$|scripts/release-binary-smoke\.sh$|scripts/release-evidence\.sh$|scripts/install\.sh$)'; then
             doc_truth=true
           fi
 
@@ -291,7 +291,7 @@ jobs:
             tla=true
           fi
 
-          if has_match '^(ci/check-oas-pin\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|dune-project$|.*\.opam$|docs/KEEPER-USER-MANUAL\.md$|docs/OAS-UTILIZATION-AUDIT\.md$)'; then
+          if has_match '^(ci/check-oas-pin\.sh$|scripts/check-oas-pin\.sh$|scripts/oas-agent-sdk-pin\.sh$|scripts/sync-oas-pin-docs\.sh$|scripts/sync-oas-pin-manifests\.sh$|dune-project$|.*\.opam$|docs/KEEPER-USER-MANUAL\.md$|docs/OAS-UTILIZATION-AUDIT\.md$)'; then
             oas_pin=true
           fi
 

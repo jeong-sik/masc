@@ -267,6 +267,19 @@ tbody tr:hover {
   padding: var(--spacing-card);
 }
 
+/* The rule above is ID-specificity (1,0,1), so it outranks the shell's
+   `p-4`/`max-[900px]:px-2` utility classes — those never reach this element.
+   On the single-column mobile shell the 12px gutter (--spacing-card) stacks on
+   top of the surface inner padding (--pad-surface), wasting horizontal space.
+   Step the inline gutter down one semantic tier (card 12px → element 6px); the
+   surface padding owns the content inset, so the outer gutter only needs to
+   clear the #main-content border. Block (top/bottom) padding is left untouched. */
+@media (max-width: 900px) {
+  #main-content > div {
+    padding-inline: var(--spacing-element);
+  }
+}
+
 /* Tone border utilities — applied via toneClass() helper */
 @utility ok { border-color: var(--ok-22); }
 @utility warn { border-color: var(--warn-soft); }

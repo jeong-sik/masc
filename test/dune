@@ -1,4 +1,5 @@
 ; Test Environment Configuration
+
 (env
  (_
   (env-vars
@@ -732,12 +733,14 @@
 
 ; 적대 리뷰 #22087 §1 — Fusion_judge.attach_usage가 파싱 실패 시에도 심판 usage를
 ; 보존함을 핀한다 (refine degrade 비용 undercount 회귀 방지).
+
 (test
  (name test_fusion_judge_usage)
  (modules test_fusion_judge_usage)
  (libraries masc_test_deps masc.fusion_core))
 
 ; RFC-0284 — Fusion deliberation OTel metrics: label wiring + counter emission.
+
 (test
  (name test_fusion_metrics)
  (modules test_fusion_metrics)
@@ -754,6 +757,7 @@
 
 ; FUSION adaptive timeout / P0 hardening: config, pure timeout helper, metrics,
 ; and sink meta JSON for failed judge nodes.
+
 (test
  (name test_fusion_adaptive_timeout)
  (modules test_fusion_adaptive_timeout)
@@ -1283,6 +1287,7 @@
 ; --recall-dir <dir> [--keepers-dir <dir>] [--top N] [--json] -> live baseline
 ;   report of echo rate / churn / near-duplicate slots / fact composition.
 ;   dune exec test/memory_quality_eval.exe -- --recall-dir <base>/.masc/recall_injections
+
 (test
  (name memory_quality_eval)
  (modules memory_quality_eval)
@@ -1506,7 +1511,9 @@
  (modules test_sse_registration_auth)
  (libraries masc_test_deps)
  (action
-  (setenv MASC_SESSION_MAX_AGE_SEC "0.5"
+  (setenv
+   MASC_SESSION_MAX_AGE_SEC
+   "0.5"
    (run %{test}))))
 
 ; Special: Multi-module test suites
@@ -2496,6 +2503,7 @@
 ; config_field_names" invariant (config/runtime split). As (executable) it was
 ; never run by `dune runtest`, so the multimodal_policy scrub regression shipped
 ; uncaught. (test) runs it under @runtest; it exits 1 on a leaked key.
+
 (test
  (name test_config_runtime_split)
  (modules test_config_runtime_split)
@@ -2552,6 +2560,7 @@
  (libraries masc_test_deps))
 
 ; RFC-keeper-vision-delegation-tool §2.6 — analyze_image pure core
+
 (test
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)

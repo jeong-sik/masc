@@ -150,13 +150,7 @@
  (modules masc_compaction_audit)
  (public_name masc-compaction-audit)
  (package masc)
- (libraries
-  masc
-  masc_core
-  masc.config_dir_resolver
-  unix
-  eio
-  eio_main))
+ (libraries masc masc_core masc.config_dir_resolver unix eio eio_main))
 
 ;; Completion-trust audit CLI (RFC-0262 §9): fold .masc/events/ transition log
 ;; for foreign-task completions. Pure auditor only — no masc runtime link.
@@ -171,6 +165,7 @@
 ;; RFC-0262 §9 PR-C: live-LLM behavioural eval for completion-trust.
 ;; Drives a real keeper through the masc runtime, so it links the same
 ;; live-LLM bootstrap as fusion_run (Eio + runtime init + provider path).
+
 (executable
  (name masc_completion_trust_eval)
  (modules masc_completion_trust_eval)
@@ -334,6 +329,7 @@
 ;; Offline Shell IR pipeline probe — read-only. Feeds a command string through
 ;; parse / command-gate / capabilities / approval verdict / path-jail and prints
 ;; each layer's outcome. Dev/test tool: run via `dune exec bin/masc_shell_ir_probe.exe`.
+
 (executable
  (name masc_shell_ir_probe)
  (modules masc_shell_ir_probe)

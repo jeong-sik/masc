@@ -236,11 +236,14 @@ let memory_candidates_from_snapshot
         let text = String.trim text in
         if text = "" || not (is_meaningful_memory_text text) then acc
         else
+          let priority =
+            match snapshot.priority with
+            | Some p -> max 1 (min 100 p)
+            | None -> tuned_priority_for_candidate ~kind ~text
+          in
           ( kind,
             text,
-            tuned_priority_for_candidate
-              ~kind
-              ~text )
+            priority )
           :: acc
   in
   let add_list kind values acc =
@@ -249,11 +252,14 @@ let memory_candidates_from_snapshot
         let item = String.trim item in
         if item = "" || not (is_meaningful_memory_text item) then acc
         else
+          let priority =
+            match snapshot.priority with
+            | Some p -> max 1 (min 100 p)
+            | None -> tuned_priority_for_candidate ~kind ~text:item
+          in
           ( kind,
             item,
-            tuned_priority_for_candidate
-              ~kind
-              ~text:item )
+            priority )
           :: acc)
       acc values
   in

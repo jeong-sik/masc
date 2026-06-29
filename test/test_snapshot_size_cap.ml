@@ -11,6 +11,7 @@ module KMP = Masc.Keeper_memory_policy
 let long_string n ch = String.make n ch
 
 let make_snapshot
+    ?(priority = None)
     ?(goal = Some "short goal")
     ?(progress = None)
     ?(done_summary = None)
@@ -20,7 +21,7 @@ let make_snapshot
     ?(open_questions = [])
     ?(constraints = [])
     () : KMP.keeper_state_snapshot =
-  { goal; progress; done_summary; next_summary;
+  { priority; goal; progress; done_summary; next_summary;
     next_items; decisions; open_questions; constraints }
 
 let test_short_snapshot_unchanged () =

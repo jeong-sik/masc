@@ -5,7 +5,4 @@
  (public_name masc.tool_contract_prompts)
  (wrapped false)
  (modules tool_contract_guidance tool_contract_prompt_names)
- (libraries
-  fs_compat
-  masc.config_dir_resolver
-  masc.prompt_registry))
+ (libraries fs_compat masc.config_dir_resolver masc.prompt_registry))

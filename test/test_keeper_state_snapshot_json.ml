@@ -27,6 +27,7 @@ let contains_substring text needle =
 (* ── Round-trip tests ────────────────────────────────────────────── *)
 
 let make_snapshot
+    ?(priority = None)
     ?(goal = Some "Fix the build")
     ?(progress = Some "Compiled 3/5 modules")
     ?(done_summary = Some "Module A compiled")
@@ -36,7 +37,7 @@ let make_snapshot
     ?(open_questions = ["How to handle Eio?"])
     ?(constraints = ["Must pass CI"])
     () : KMP.keeper_state_snapshot =
-  { goal; progress; done_summary; next_summary;
+  { priority; goal; progress; done_summary; next_summary;
     next_items; decisions; open_questions; constraints }
 
 let test_round_trip_full () =

@@ -12,6 +12,14 @@
  ; masc_types has no board/keeper edge, so this is cycle-safe; the origin
  ; source stays a string (Surface_ref.lane_label) because Surface_ref lives
  ; in the masc umbrella, which already depends on masc_board.
- (libraries yojson re re.str re.pcre eio masc_random_id masc.config masc_types)
+ (libraries
+  yojson
+  re
+  re.str
+  re.pcre
+  eio
+  masc_random_id
+  masc.config
+  masc_types)
  (preprocess
   (pps ppx_deriving.show ppx_deriving.eq ppx_tla)))

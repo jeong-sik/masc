@@ -1079,6 +1079,7 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
    [keeper_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
 let cluster_descriptor ?(polling_read = false) ~id ~name ~description ~handler ~readonly
       ~inline_safe ~maintenance_only
+      ()
   =
   if polling_read && not readonly then
     invalid_arg "polling_read descriptors must declare readonly=true";
@@ -1117,6 +1118,7 @@ let board_descriptor name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let masc_board_descriptor (schema : Masc_domain.tool_schema) =
@@ -1165,6 +1167,7 @@ let voice_descriptor name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let task_descriptor id name description ~readonly =
@@ -1176,6 +1179,7 @@ let task_descriptor id name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 (* RFC-0182 §3.1 — additional masc_* cluster descriptor helpers (task /
@@ -1194,6 +1198,7 @@ let masc_task_descriptor id name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let masc_plan_descriptor id name description ~readonly =
@@ -1205,6 +1210,7 @@ let masc_plan_descriptor id name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let masc_run_descriptor name description ~readonly =
@@ -1217,6 +1223,7 @@ let masc_run_descriptor name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let masc_agent_descriptor id name description ~readonly =
@@ -1228,6 +1235,7 @@ let masc_agent_descriptor id name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let masc_workspace_descriptor ?(maintenance_only = false) id
@@ -1241,6 +1249,7 @@ let masc_workspace_descriptor ?(maintenance_only = false) id
     ~readonly
     ~inline_safe:false
     ~maintenance_only
+    ()
 ;;
 
 (* RFC-0182 §3.1 — additional cluster descriptor helpers (Phase 3:
@@ -1254,6 +1263,7 @@ let masc_misc_descriptor id name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let masc_control_descriptor id name description ~readonly =
@@ -1265,6 +1275,7 @@ let masc_control_descriptor id name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let masc_agent_timeline_descriptor name description ~readonly =
@@ -1276,6 +1287,7 @@ let masc_agent_timeline_descriptor name description ~readonly =
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
@@ -1287,7 +1299,8 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
        ~handler:Tool_masc_schedule_dispatch
        ~readonly:definition.read_only
        ~inline_safe:false
-       ~maintenance_only:false)
+       ~maintenance_only:false
+       ())
     with
     input_schema = schema.input_schema
   }
@@ -1303,6 +1316,7 @@ let masc_keeper_descriptor ?(polling_read = false) id name description ~readonly
     ~readonly
     ~inline_safe:false
     ~maintenance_only:false
+    ()
 ;;
 
 let internal_descriptors : t list =
@@ -1742,6 +1756,7 @@ let internal_descriptors : t list =
       ~readonly:true
       ~inline_safe:false
       ~maintenance_only:false
+      ()
   ]
   @ masc_board_descriptors
 ;;

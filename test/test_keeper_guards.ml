@@ -593,6 +593,44 @@ let test_readonly_observation_duplicate_allows_retry_after_error () =
   check string "same read after failed output -> Continue"
     "Continue" (decision_kind retry)
 
+let test_readonly_observation_duplicate_preserves_success_after_other_read_error () =
+  let hook = readonly_observation_hook () in
+  let input_a = `Assoc [ ("limit", `Int 15) ] in
+  let input_b = `Assoc [ ("limit", `Int 20) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_a ())
+  in
+  check string "first read-only observation A -> Continue"
+    "Continue" (decision_kind first);
+  let post_a =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_a ())
+  in
+  check string "successful read-only observation A is recorded"
+    "Continue" (decision_kind post_a);
+  let second =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_b ())
+  in
+  check string "different read-only observation B -> Continue"
+    "Continue" (decision_kind second);
+  let failed_output =
+    Error
+      ({ TT.message = "transient failure"; recoverable = true; error_class = None }
+       : TT.tool_error)
+  in
+  let post_b =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_b
+         ~output:failed_output ())
+  in
+  check string "failed read-only observation B clears only pending B"
+    "Continue" (decision_kind post_b);
+  let repeated_a =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_a ())
+  in
+  check string "failed B did not clear prior successful A"
+    "Override" (decision_kind repeated_a)
+
 let test_readonly_observation_duplicate_resets_after_write_tool () =
   let hook = readonly_observation_hook () in
   let input = `Assoc [ ("limit", `Int 15) ] in
@@ -892,6 +930,8 @@ let () = run "Keeper_guards" [
       test_readonly_observation_duplicate_allows_different_input;
     test_case "allows retry after errored output" `Quick
       test_readonly_observation_duplicate_allows_retry_after_error;
+    test_case "preserves previous success after other read error" `Quick
+      test_readonly_observation_duplicate_preserves_success_after_other_read_error;
     test_case "resets after write tool" `Quick
       test_readonly_observation_duplicate_resets_after_write_tool;
     test_case "does not reset after failed write output" `Quick

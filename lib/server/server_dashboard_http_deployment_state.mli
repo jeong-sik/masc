@@ -3,6 +3,6 @@ val deployment_state_json :
   -> server_repo_commit:string option
   -> workspace_commit:string option
   -> resolved_base_commit:string option
-  -> upstream_status:Server_git_probe.upstream_status
+  -> upstream_status:Server_git_probe.git_upstream_status
   -> source_mismatch:bool
   -> Yojson.Safe.t

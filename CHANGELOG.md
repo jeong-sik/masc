@@ -6,7 +6,7 @@
 
 ### Changed
 - Bump OAS agent_sdk pin to 0.207.19 plus the focused OAS #2248
-  `679490a` provider-qualified capability lookup and #2244 assistant
+  `e5f368e` provider-qualified capability lookup and #2244 assistant
   tool-content / GLM forced-tool / fail-closed unknown-stream-block branch
   SHA.
 - Bump MASC version to 0.19.55.

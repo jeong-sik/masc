@@ -276,6 +276,16 @@ let adapter_loop ~token ~channel ~events ?base_url () =
     | Custom { name; value = _ } ->
         Log.Keeper.debug "keeper_chat_slack: custom event %s" name;
         loop ~acc_text ~acc_blocks ~run_id_opt
+    | Oas_stream_connected
+    | Oas_stream_message_start _
+    | Oas_stream_message_delta _
+    | Oas_stream_message_stop
+    | Oas_stream_ping
+    | Oas_thinking_delta _
+    | Oas_thinking_signature_delta _
+    | Oas_media_delta _
+    | Oas_stream_protocol_error _ ->
+        loop ~acc_text ~acc_blocks ~run_id_opt
     | Tool_call_start _ | Tool_call_args _ | Tool_call_end _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Link_block { url; title; description; image = _ } ->

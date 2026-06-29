@@ -655,243 +655,16 @@ type keeper_stream_worker_event =
       ; body : string
       }
 
-type keeper_stream_tool_ref =
-  { tool_call_id : string
-  ; tool_call_name : string
-  }
-
-type keeper_stream_bridge_state =
-  { tools_by_index : (int * keeper_stream_tool_ref) list }
+type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 
 type translated_keeper_stream_event =
+  Keeper_chat_oas_stream_bridge.translated_event =
   { bridge_state : keeper_stream_bridge_state
   ; chat_events : Keeper_chat_events.keeper_chat_event list
   }
 
-let empty_keeper_stream_bridge_state = { tools_by_index = [] }
-
-let stream_tool_for_index bridge_state index =
-  List.assoc_opt index bridge_state.tools_by_index
-
-let stream_bridge_replace_tool bridge_state index tool =
-  { tools_by_index =
-      (index, tool) :: List.remove_assoc index bridge_state.tools_by_index
-  }
-
-let stream_bridge_remove_tool bridge_state index =
-  { tools_by_index = List.remove_assoc index bridge_state.tools_by_index }
-
-let json_opt key value =
-  match value with
-  | None -> []
-  | Some value -> [ (key, value) ]
-
-let keeper_stream_usage_json (usage : Agent_sdk.Types.api_usage) =
-  `Assoc
-    ([
-       ("input_tokens", `Int usage.input_tokens);
-       ("output_tokens", `Int usage.output_tokens);
-       ("total_tokens", `Int (Agent_sdk.Types.total_tokens usage));
-       ("cache_creation_input_tokens", `Int usage.cache_creation_input_tokens);
-       ("cache_read_input_tokens", `Int usage.cache_read_input_tokens);
-     ]
-     @ json_opt "cost_usd"
-         (Option.map (fun value -> `Float value) usage.cost_usd))
-
-let keeper_stream_protocol_error ?index ?event_type ?reason ?raw_bytes kind =
-  let fields =
-    [ ("kind", `String kind) ]
-    @ json_opt "index" (Option.map (fun value -> `Int value) index)
-    @ json_opt "event_type" (Option.map (fun value -> `String value) event_type)
-    @ json_opt "reason" (Option.map (fun value -> `String value) reason)
-    @ json_opt "raw_bytes" (Option.map (fun value -> `Int value) raw_bytes)
-  in
-  Keeper_chat_events.Custom
-    { name = "KEEPER_STREAM_PROTOCOL_ERROR"; value = `Assoc fields }
-
-let translate_oas_stream_event ~redact_text ~text_accum bridge_state
-    (evt : Agent_sdk.Types.sse_event) =
-  let open Agent_sdk.Types in
-  let no_events = { bridge_state; chat_events = [] } in
-  match evt with
-  | Connected ->
-      { bridge_state;
-        chat_events =
-          [ Custom { name = "KEEPER_CONNECTED"; value = `Null } ]
-      }
-  | MessageStart { id; model; usage } ->
-      { bridge_state;
-        chat_events =
-          [ Custom
-              { name = "KEEPER_STREAM_MESSAGE_START";
-                value =
-                  `Assoc
-                    ([ ("provider_message_id", `String id); ("model", `String model) ]
-                     @ json_opt "usage"
-                         (Option.map keeper_stream_usage_json usage)) } ]
-      }
-  | MessageDelta { stop_reason; usage } ->
-      { bridge_state;
-        chat_events =
-          [ Custom
-              { name = "KEEPER_STREAM_MESSAGE_DELTA";
-                value =
-                  `Assoc
-                    (json_opt "stop_reason"
-                       (Option.map
-                          (fun reason ->
-                            `String (Agent_sdk.Types.stop_reason_to_string reason))
-                          stop_reason)
-                     @ json_opt "usage"
-                         (Option.map keeper_stream_usage_json usage)) } ]
-      }
-  | MessageStop ->
-      { bridge_state;
-        chat_events =
-          [ Custom { name = "KEEPER_STREAM_MESSAGE_STOP"; value = `Null } ]
-      }
-  | Ping ->
-      { bridge_state;
-        chat_events =
-          [ Custom { name = "KEEPER_STREAM_PING"; value = `Null } ]
-      }
-  | Timeout reason ->
-      { bridge_state;
-        chat_events =
-          [ Event_error { message = redact_text ("Timeout: " ^ reason) } ]
-      }
-  | ContentBlockDelta { delta = TextDelta text; _ } ->
-      { bridge_state;
-        chat_events =
-          [ Text_delta
-              (Keeper_stream_text_accum.on_delta text_accum
-                 ~redact:redact_text text)
-          ]
-      }
-  | ContentBlockDelta { delta = ThinkingDelta text; _ } ->
-      { bridge_state;
-        chat_events =
-          [ Custom
-              { name = "KEEPER_THINKING_DELTA";
-                value = `Assoc [ ("delta", `String (redact_text text)) ] }
-          ]
-      }
-  | ContentBlockDelta { delta = ThinkingSignatureDelta signature; _ } ->
-      { bridge_state;
-        chat_events =
-          [ Custom
-              { name = "KEEPER_THINKING_SIGNATURE_DELTA";
-                value =
-                  `Assoc [ ("signature_bytes", `Int (String.length signature)) ] }
-          ]
-      }
-  | ContentBlockDelta { delta = MediaDelta { media_type; source_type; data }; _ } ->
-      { bridge_state;
-        chat_events =
-          [ Custom
-              { name = "KEEPER_MEDIA_DELTA";
-                value =
-                  `Assoc
-                    [ ("media_type", `String media_type);
-                      ("source_type", `String source_type);
-                      ("bytes", `Int (String.length data)) ] }
-          ]
-      }
-  | ContentBlockStart { index; tool_id = Some tid; tool_name = Some tname; _ }
-    when String.trim tid <> "" && String.trim tname <> "" ->
-      let tool = { tool_call_id = tid; tool_call_name = tname } in
-      let duplicate_event =
-        match stream_tool_for_index bridge_state index with
-        | None -> []
-        | Some _ ->
-            [ keeper_stream_protocol_error ~index
-                ~reason:"content block start reused an active stream index"
-                "tool_start_duplicate_index" ]
-      in
-      { bridge_state = stream_bridge_replace_tool bridge_state index tool;
-        chat_events =
-          duplicate_event
-          @ [ Tool_call_start { tool_call_id = tid; tool_call_name = tname } ]
-      }
-  | ContentBlockStart { index; tool_id; tool_name; _ } ->
-      let partial_tool_identity =
-        match tool_id, tool_name with
-        | None, None -> false
-        | _ -> true
-      in
-      if partial_tool_identity then
-        { bridge_state;
-          chat_events =
-            [ keeper_stream_protocol_error ~index
-                ~reason:"tool content block start missed tool id or name"
-                "tool_start_missing_identity" ]
-        }
-      else no_events
-  | ContentBlockDelta { index; delta = InputJsonDelta args } -> (
-      match stream_tool_for_index bridge_state index with
-      | Some tool ->
-          { bridge_state;
-            chat_events =
-              [ Tool_call_args
-                  { tool_call_id = tool.tool_call_id; delta = redact_text args } ]
-          }
-      | None ->
-          { bridge_state;
-            chat_events =
-              [ keeper_stream_protocol_error ~index
-                  ~reason:"tool argument delta arrived before tool start"
-                  "tool_args_without_start" ]
-          })
-  | ContentBlockStop { index } -> (
-      match stream_tool_for_index bridge_state index with
-      | Some tool ->
-          { bridge_state = stream_bridge_remove_tool bridge_state index;
-            chat_events = [ Tool_call_end { tool_call_id = tool.tool_call_id } ]
-          }
-      | None ->
-          { bridge_state;
-            chat_events =
-              [ keeper_stream_protocol_error ~index
-                  ~reason:"tool block stop arrived before tool start"
-                  "tool_stop_without_start" ]
-          })
-  | SSEError { message; error_type; raw = _ } ->
-      let reason =
-        match error_type with
-        | None -> message
-        | Some error_type -> error_type ^ ": " ^ message
-      in
-      { bridge_state;
-        chat_events =
-          [ keeper_stream_protocol_error ?event_type:error_type
-              ~reason:(redact_text message) "sse_error";
-            Event_error
-              { message = redact_text ("Provider stream error: " ^ reason) } ]
-      }
-  | SSEParseFailed { raw; reason } ->
-      { bridge_state;
-        chat_events =
-          [ keeper_stream_protocol_error ~reason:(redact_text reason)
-              ~raw_bytes:(String.length raw) "sse_parse_failed";
-            Event_error
-              { message =
-                  redact_text ("Provider stream parse failed: " ^ reason) } ]
-      }
-  | SSEUnknownEventType { event_type; raw } ->
-      { bridge_state;
-        chat_events =
-          [ keeper_stream_protocol_error ~event_type
-              ~raw_bytes:(String.length raw) "sse_unknown_event_type" ]
-      }
-  | StreamIncomplete { reason } ->
-      { bridge_state;
-        chat_events =
-          [ keeper_stream_protocol_error ~reason:(redact_text reason)
-              "sse_stream_incomplete";
-            Event_error
-              { message =
-                  redact_text ("Provider stream incomplete: " ^ reason) } ]
-      }
+let empty_keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.empty_state
+let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
 
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     ~client_disconnects
@@ -1139,7 +912,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     | Stream_client_disconnected -> ()
     | Stream_event evt ->
         let translated =
-          translate_oas_stream_event ~redact_text ~text_accum bridge_state evt
+          translate_oas_stream_event ~redact_text
+            ~on_text_delta:
+              (Keeper_stream_text_accum.on_delta text_accum ~redact:redact_text)
+            bridge_state evt
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
@@ -1284,6 +1060,19 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                    ~custom_value:(Some (`Assoc [ ("message", `String message) ]))
                    Run_error))
     in
+    let json_opt key value =
+      match value with
+      | None -> []
+      | Some value -> [ (key, value) ]
+    in
+    let send_custom name value =
+      keeper_stream_send_event ~on_closed writer mutex closed
+        Ag_ui.(
+          make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+            ~custom_name:(Some name)
+            ~custom_value:(Some (redact_json value))
+            Custom)
+    in
     let rec loop () =
       if not !closed then
         match Keeper_chat_events.subscribe events with
@@ -1325,15 +1114,62 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                   make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
                     ~message_id:!current_message_id Text_message_end)
             then loop ()
-        | Custom { name; value } ->
+        | Oas_stream_connected ->
+            if send_custom "KEEPER_CONNECTED" `Null then loop ()
+        | Oas_stream_message_start { provider_message_id; model; usage } ->
+            let value =
+              `Assoc
+                ([
+                   ("provider_message_id", `String provider_message_id);
+                   ("model", `String model);
+                 ]
+                @ json_opt "usage"
+                    (Option.map Keeper_chat_events.api_usage_to_json usage))
+            in
+            if send_custom "KEEPER_STREAM_MESSAGE_START" value then loop ()
+        | Oas_stream_message_delta { stop_reason; usage } ->
+            let value =
+              `Assoc
+                (json_opt "stop_reason"
+                   (Option.map
+                      (fun reason ->
+                        `String (Agent_sdk.Types.stop_reason_to_string reason))
+                      stop_reason)
+                @ json_opt "usage"
+                    (Option.map Keeper_chat_events.api_usage_to_json usage))
+            in
+            if send_custom "KEEPER_STREAM_MESSAGE_DELTA" value then loop ()
+        | Oas_stream_message_stop ->
+            if send_custom "KEEPER_STREAM_MESSAGE_STOP" `Null then loop ()
+        | Oas_stream_ping ->
+            if send_custom "KEEPER_STREAM_PING" `Null then loop ()
+        | Oas_thinking_delta { delta } ->
             if
-              keeper_stream_send_event ~on_closed writer mutex closed
-                Ag_ui.(
-                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
-                    ~custom_name:(Some name)
-                    ~custom_value:(Some (redact_json value))
-                    Custom)
+              send_custom "KEEPER_THINKING_DELTA"
+                (`Assoc [ ("delta", `String delta) ])
             then loop ()
+        | Oas_thinking_signature_delta { signature_bytes } ->
+            if
+              send_custom "KEEPER_THINKING_SIGNATURE_DELTA"
+                (`Assoc [ ("signature_bytes", `Int signature_bytes) ])
+            then loop ()
+        | Oas_media_delta { media_type; source_type; bytes } ->
+            if
+              send_custom "KEEPER_MEDIA_DELTA"
+                (`Assoc
+                  [
+                    ("media_type", `String media_type);
+                    ("source_type", `String source_type);
+                    ("bytes", `Int bytes);
+                  ])
+            then loop ()
+        | Oas_stream_protocol_error error ->
+            if
+              send_custom "KEEPER_STREAM_PROTOCOL_ERROR"
+                (Keeper_chat_events.stream_protocol_error_to_json error)
+            then loop ()
+        | Custom { name; value } ->
+            if send_custom name value then loop ()
         | Tool_call_start { tool_call_id; tool_call_name } ->
             if
               keeper_stream_send_event ~on_closed writer mutex closed

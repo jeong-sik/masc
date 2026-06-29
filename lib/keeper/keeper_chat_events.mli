@@ -10,6 +10,24 @@
 
 type role = User | Assistant
 
+type stream_protocol_error_kind =
+  | Tool_start_duplicate_index
+  | Tool_start_missing_identity
+  | Tool_args_without_start
+  | Tool_stop_without_start
+  | Sse_error
+  | Sse_parse_failed
+  | Sse_unknown_event_type
+  | Sse_stream_incomplete
+
+type stream_protocol_error = {
+  kind : stream_protocol_error_kind;
+  index : int option;
+  event_type : string option;
+  reason : string option;
+  raw_bytes : int option;
+}
+
 type keeper_chat_event =
   | Run_started of { run_id : string; thread_id : string }
   | Text_message_start of { message_id : string; role : role }
@@ -18,6 +36,26 @@ type keeper_chat_event =
   | Run_finished of { run_id : string }
   | Event_error of { message : string }
   | Custom of { name : string; value : Yojson.Safe.t }
+  | Oas_stream_connected
+  | Oas_stream_message_start of
+      { provider_message_id : string
+      ; model : string
+      ; usage : Agent_sdk.Types.api_usage option
+      }
+  | Oas_stream_message_delta of
+      { stop_reason : Agent_sdk.Types.stop_reason option
+      ; usage : Agent_sdk.Types.api_usage option
+      }
+  | Oas_stream_message_stop
+  | Oas_stream_ping
+  | Oas_thinking_delta of { delta : string }
+  | Oas_thinking_signature_delta of { signature_bytes : int }
+  | Oas_media_delta of
+      { media_type : string
+      ; source_type : string
+      ; bytes : int
+      }
+  | Oas_stream_protocol_error of stream_protocol_error
   | Tool_call_start of { tool_call_id : string; tool_call_name : string }
   | Tool_call_args of { tool_call_id : string; delta : string }
   | Tool_call_end of { tool_call_id : string }
@@ -53,3 +91,7 @@ val publish : keeper_chat_event Eio.Stream.t -> keeper_chat_event -> unit
 
 (** [subscribe stream] blocks until an event is available, then returns it. *)
 val subscribe : keeper_chat_event Eio.Stream.t -> keeper_chat_event
+
+val api_usage_to_json : Agent_sdk.Types.api_usage -> Yojson.Safe.t
+val stream_protocol_error_kind_to_string : stream_protocol_error_kind -> string
+val stream_protocol_error_to_json : stream_protocol_error -> Yojson.Safe.t

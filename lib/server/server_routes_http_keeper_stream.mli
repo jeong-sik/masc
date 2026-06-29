@@ -164,11 +164,12 @@ val process_single_turn :
 
 (** {1 Testing helpers} *)
 
-type keeper_stream_bridge_state
+type keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.state
 (** Per-stream OAS event bridge state. Abstract outside tests so callers cannot
     construct synthetic stream correlation state. *)
 
-type translated_keeper_stream_event = {
+type translated_keeper_stream_event =
+  Keeper_chat_oas_stream_bridge.translated_event = {
   bridge_state : keeper_stream_bridge_state;
   chat_events : Keeper_chat_events.keeper_chat_event list;
 }
@@ -191,7 +192,7 @@ module For_testing : sig
   val empty_stream_bridge_state : keeper_stream_bridge_state
   val translate_oas_stream_event :
     redact_text:(string -> string) ->
-    text_accum:Keeper_stream_text_accum.t ->
+    on_text_delta:(string -> string) ->
     keeper_stream_bridge_state ->
     Agent_sdk.Types.sse_event ->
     translated_keeper_stream_event

@@ -80,14 +80,14 @@ describe('KeeperWorkspaceRail', () => {
     tasks.value = [makeTask()]
     const container = renderInto(html`<${KeeperWorkspaceRail} keeper=${makeKeeper()} onToggleDetail=${() => {}} />`)
 
-    // v2 rail split the old combined '런타임 · 처리량' card into separate
-    // 런타임 (RuntimeSection / .rtc-card) and 처리량 (ThroughputSection) sections,
-    // each with its own .ctx-sec h4 header. The 처리량 header is now a collapse
-    // toggle (.ctx-h-toggle) whose text bundles the caret + an idle/rate summary
-    // (e.g. '▸처리량유휴'), so match it by substring rather than exact text.
+    // v2 rail renders 런타임 (RuntimeSection / .rtc-card), 컨텍스트, and 소유 태스크
+    // sections, each with its own .ctx-sec h4 header. The standalone 처리량
+    // (ThroughputSection) header was removed from the keeper rail (see
+    // keeper-workspace-rail.test.ts, which asserts textContent no longer contains
+    // '처리량'), so it must not appear as a .ctx-sec h4 here either.
     const sectionHeaders = Array.from(container.querySelectorAll('.ctx-sec h4')).map(h => h.textContent)
     expect(sectionHeaders).toContain('런타임')
-    expect(sectionHeaders.some(h => h?.includes('처리량'))).toBe(true)
+    expect(sectionHeaders.some(h => h?.includes('처리량'))).toBe(false)
     expect(container.textContent).toContain('claude-sonnet-4')
     expect(container.textContent).toContain('oas-seoul-1')
     expect(container.textContent).toContain('62%')

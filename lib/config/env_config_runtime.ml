@@ -117,13 +117,6 @@ module Orchestrator = struct
     Feature_flag_registry.get_bool Env_config_core.orchestrator_enabled_env_key
 end
 
-(** {1 Relay Configuration} *)
-
-module Relay = struct
-  let target_agent =
-    get_string ~default:"auto" "MASC_RELAY_TARGET_AGENT"
-end
-
 (** {1 Spawn Configuration} *)
 
 module Spawn = struct

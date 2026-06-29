@@ -509,12 +509,6 @@ let data_dir_env_key = "MASC_DATA_DIR"
 let data_dir_opt () =
   raw_value_opt data_dir_env_key |> trim_opt
 
-(** {1 Relay Calibration} *)
-
-(** Whether relay token calibration is enabled. Default: true. *)
-let relay_calibration_enabled () =
-  get_bool ~default:true "MASC_RELAY_CALIBRATION_ENABLED"
-
 (** {1 Auth} *)
 
 (** SSOT for auth env-var names (issue 8352). *)

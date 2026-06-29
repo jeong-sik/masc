@@ -61,11 +61,16 @@ REGISTERED=$(grep -o '"MASC_[A-Z_]*"' "$REGISTRY" \
   | tr -d '"' \
   | sort -u)
 
-# Extract boolean env vars from config modules (excluding registry itself)
+# Extract boolean env vars from config modules (excluding registry itself).
+# grep exits 1 when a pattern has zero matches; that is a valid "none here"
+# result (e.g. env_config_core.ml legitimately has no boolean MASC_* flag once
+# the last one is retired). The trailing `|| true` keeps that empty case from
+# crashing the check under `set -e`/`pipefail`. Real errors are not silenced:
+# missing files surface via grep's stderr and the explicit REGISTRY -f guard.
 CONFIG_BOOLS=$( ( \
-    grep -rh "Feature_flag_registry.get_bool \"MASC_" "$CONFIG_DIR" | grep -o "\"MASC_[A-Z_]*\"" | tr -d "\"" ; \
-    grep -rh "get_bool ~default:\(true\|false\) \"MASC_" "$CONFIG_DIR/env_config_core.ml" | grep -o "\"MASC_[A-Z_]*\"" | tr -d "\"" \
-  ) | sort -u)
+    { grep -rh "Feature_flag_registry.get_bool \"MASC_" "$CONFIG_DIR" || true; } | grep -o "\"MASC_[A-Z_]*\"" | tr -d "\"" ; \
+    { grep -rh "get_bool ~default:\(true\|false\) \"MASC_" "$CONFIG_DIR/env_config_core.ml" || true; } | grep -o "\"MASC_[A-Z_]*\"" | tr -d "\"" \
+  ) | sort -u || true)
 
 MISSING=0
 for var in $CONFIG_BOOLS; do

@@ -17,8 +17,6 @@
       (medium risk)
     - [keeper_diagnostics] — snapshot / hb tuning / profiling ring
       (medium risk)
-    - [relay_heuristic] — token + cost estimates (low risk, not
-      empirically calibrated)
     - [drift_guard] — handoff drift classification thresholds
       (low risk, initial estimates)
     - [keeper_turn] / [keeper_compaction] / [keeper_proactive] /
@@ -93,36 +91,6 @@ val keeper_smart_hb_enabled : bool Runtime_params.param
 val keeper_stage_timing_ring_size : int Runtime_params.param
 (** Stage-timing ring buffer size.  Applied on fiber restart only —
     runtime mutation requires keeper restart.  Range \[10, 1000]. *)
-
-(** {1 Relay heuristic (uncalibrated)} *)
-
-val relay_tokens_per_user_msg : int Runtime_params.param
-(** Token estimate for a user message.  Default 150.
-    Order-of-magnitude guess, no formal benchmark. *)
-
-val relay_tokens_per_assistant_msg : int Runtime_params.param
-(** Token estimate for an assistant message.  Default 500. *)
-
-val relay_tokens_per_tool_call : int Runtime_params.param
-(** Token estimate for a tool call.  Default 200. *)
-
-val relay_tokens_per_tool_result : int Runtime_params.param
-(** Token estimate for a tool result.  Default 300. *)
-
-val relay_cost_large_file_read : int Runtime_params.param
-(** Token cost estimate for a large-file read task.  Default 10000. *)
-
-val relay_cost_per_file_edit : int Runtime_params.param
-(** Token cost estimate per file edit.  Default 3000. *)
-
-val relay_cost_long_running : int Runtime_params.param
-(** Token cost estimate for a long-running task.  Default 20000. *)
-
-val relay_cost_exploration : int Runtime_params.param
-(** Token cost estimate for an exploration task.  Default 15000. *)
-
-val relay_cost_simple : int Runtime_params.param
-(** Token cost estimate for a simple task.  Default 1000. *)
 
 (** {1 Drift guard (uncalibrated)} *)
 

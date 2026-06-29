@@ -17,6 +17,7 @@ import {
   recordToolCallOutputs,
 } from './tool-call-output-store'
 import { asString, isRecord } from './components/common/normalize'
+import { keeperTurnOutcomeSuppressesReply } from './keeper-message'
 import { invalidateDashboardCache, refreshDashboard } from './store'
 import { isAbortError } from './lib/async-state'
 import type {
@@ -513,6 +514,8 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
 
       const reply = queuedKeeperMessageToReply(result)
       const isCheckpoint = reply.details?.turnOutcome === 'continuation_checkpoint'
+      const isNoVisibleReply = reply.details?.turnOutcome === 'no_visible_reply'
+      const suppressReply = keeperTurnOutcomeSuppressesReply(reply.details?.turnOutcome)
       const isCancelled = result.status === 'cancelled'
       const isError = !isCancelled && (result.status !== 'done' || result.ok === false)
       const errorMessage = isError ? queuedKeeperMessageError(result) : null
@@ -527,6 +530,8 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         assistantDelivery = 'cancelled'
       } else if (isCheckpoint) {
         assistantDelivery = 'queued'
+      } else if (isNoVisibleReply) {
+        assistantDelivery = 'no_reply'
       } else if (isError) {
         assistantDelivery = 'error'
       }
@@ -535,7 +540,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         error: errorMessage,
       })
       finalizeAssistantEntry(request.keeperName, assistantId, {
-        text: isCheckpoint ? '' : reply.text,
+        text: suppressReply ? '' : reply.text,
         rawText: reply.details?.replyText ?? reply.text,
         delivery: assistantDelivery,
         streamState: null,

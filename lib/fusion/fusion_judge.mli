@@ -1,10 +1,9 @@
 (** Fusion — 심판. 패널 답들을 judge 모델에 넘겨 구조화 종합({!Fusion_types.judge_synthesis})을 받는다.
 
-    v1: native structured-output([Structured.extract]) 대신 일반 에이전트 실행 +
-    {!Fusion_judge_parse}(LLM-facing JSON 파서)를 쓴다. 이유: [Structured.extract]는
-    미지원 provider에서 fail-fast인데, MASC 기본 모델(RunPod qwen3.6 등 로컬계열)이
-    native structured output을 보장하지 않는다. 일반 실행 + tolerant 파서는 모든
-    provider에서 작동한다.
+    Judge 실행은 provider-native structured output schema를 요청한다. 응답 텍스트는
+    여전히 {!Fusion_judge_parse}(LLM-facing JSON 파서)로 검증해 parser wire contract와
+    usage accounting 경로를 단일화한다. 패널 실행은 자유 텍스트이며 이 schema hook을 쓰지
+    않는다.
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
 
@@ -15,7 +14,8 @@ val compose_prompt : question:string -> panel:Fusion_types.panel_outcome list ->
 (** 심판 모델을 실행해 구조화 종합을 받는다.
 
     [judge_model]: runtime_id("provider.model"). [question]/[panel]로 프롬프트를
-    구성해 실행하고, 응답 텍스트를 {!Fusion_judge_parse.of_string}으로 파싱한다.
+    구성해 실행하고, provider-native schema를 요청한 응답 텍스트를
+    {!Fusion_judge_parse.of_string}으로 파싱한다.
     [web_tools=true]면 심판 에이전트에 web_search/web_fetch를 주입한다.
     [max_tool_calls]: 0이면 무제한, 양수면 심판의 [max_turns]로 근approximate.
     [max_tokens]는 출력 토큰 예산이다. 생략하면 Runtime_agent 기본값을 보존한다.

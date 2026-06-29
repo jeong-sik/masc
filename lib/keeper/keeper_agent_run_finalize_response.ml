@@ -17,6 +17,61 @@ let reported_state_snapshot_from_checkpoint
   ignore (checkpoint : Agent_sdk.Checkpoint.t option);
   None
 
+let rec take_messages n messages =
+  if n <= 0 then []
+  else
+    match messages with
+    | [] -> []
+    | msg :: rest -> msg :: take_messages (n - 1) rest
+;;
+
+let completion_contract_drops_current_turn_replay
+    (completion_contract_result :
+       Keeper_execution_receipt.completion_contract_result)
+  =
+  Keeper_execution_receipt.completion_contract_result_requires_attention
+    completion_contract_result
+;;
+
+let prune_current_turn_replay
+      ~(history_message_count : int)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  let messages =
+    checkpoint.Agent_sdk.Checkpoint.messages
+    |> take_messages history_message_count
+    |> Keeper_context_core.repair_broken_tool_call_pairs
+  in
+  { checkpoint with Agent_sdk.Checkpoint.messages; working_context = None }
+;;
+
+let checkpoint_for_replay_persistence
+      ~(history_message_count : int)
+      ~(completion_contract_result :
+         Keeper_execution_receipt.completion_contract_result)
+      ~(session_id : string)
+      ~(response_text : string)
+      ~(state_snapshot : Keeper_memory_policy.keeper_state_snapshot option)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  if completion_contract_drops_current_turn_replay completion_contract_result
+  then prune_current_turn_replay ~history_message_count checkpoint, true
+  else
+    ( Keeper_context_core.patch_checkpoint_last_assistant
+        checkpoint
+        ~session_id
+        ~response_text
+        ?snapshot:state_snapshot
+    , false )
+;;
+
+module For_testing = struct
+  let completion_contract_drops_current_turn_replay =
+    completion_contract_drops_current_turn_replay
+
+  let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
+end
+
 let finalize
     ~config
     ~meta
@@ -32,6 +87,7 @@ let finalize
     ~checkpoint_persistence_error
     ~post_turn_t0
     ~runtime_id_string
+    ~history_message_count
     ~prompt_metrics
     ~ctx_composition
     ~usage
@@ -136,13 +192,15 @@ let finalize
   let saved_checkpoint_result =
     match result.checkpoint with
     | Some checkpoint ->
-      let patched =
-        Keeper_context_core.patch_checkpoint_last_assistant
-          checkpoint
+      let patched, replay_suffix_pruned =
+        checkpoint_for_replay_persistence
+          ~history_message_count
+          ~completion_contract_result
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
-          ~snapshot:state_snapshot
+          ~state_snapshot:(Some state_snapshot)
+          checkpoint
       in
       (match
          Keeper_checkpoint_store.save_oas_classified
@@ -163,6 +221,12 @@ let finalize
                  ("session_id", `String patched.session_id);
                  ("turns", `Int result.turns);
                  ("model", `String model);
+                 ("replay_suffix_pruned", `Bool replay_suffix_pruned);
+                 ( "completion_contract_result"
+                 , `String
+                     (Keeper_execution_receipt
+                      .completion_contract_result_to_string
+                        completion_contract_result) );
                ])
            Keeper_runtime_manifest.Checkpoint_saved;
          Ok (Some patched)

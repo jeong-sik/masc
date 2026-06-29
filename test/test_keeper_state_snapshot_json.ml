@@ -383,6 +383,126 @@ let test_patch_without_state_block_keeps_text_and_no_metadata () =
       Alcotest.(check bool) "metadata absent without snapshot"
         true (KMP.snapshot_of_message_metadata last = None)
 
+let checkpoint_msg role content =
+  Agent_sdk.Types.{ role; content; name = None; tool_call_id = None; metadata = [] }
+
+let replay_test_checkpoint messages =
+  let cp = make_test_checkpoint ~response_text:"old answer" () in
+  { cp with Agent_sdk.Checkpoint.messages; working_context = Some (`Assoc []) }
+
+let has_tool_use (msg : Agent_sdk.Types.message) =
+  List.exists
+    (function
+      | Agent_sdk.Types.ToolUse _ -> true
+      | _ -> false)
+    msg.Agent_sdk.Types.content
+
+let test_attention_checkpoint_prunes_current_turn_suffix () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let current_tool_use =
+    checkpoint_msg Assistant
+      [ ToolUse
+          { id = "tool-1"
+          ; name = "keeper_context_status"
+          ; input = `Assoc []
+          }
+      ]
+  in
+  let current_tool_result =
+    checkpoint_msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"
+          ; content = "status"
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let current_final = checkpoint_msg Assistant [ Text "" ] in
+  let cp =
+    replay_test_checkpoint
+      [ old_user; old_assistant; current_user; current_tool_use
+      ; current_tool_result; current_final
+      ]
+  in
+  let patched, pruned =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_message_count:2
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~session_id:"new-session"
+      ~response_text:"synthetic no-progress"
+      ~state_snapshot:None
+      cp
+  in
+  Alcotest.(check bool) "suffix pruned" true pruned;
+  Alcotest.(check int) "only prior history remains" 2
+    (List.length patched.messages);
+  Alcotest.(check bool) "working context cleared" true
+    (patched.working_context = None);
+  match List.rev patched.messages with
+  | last :: _ ->
+      Alcotest.(check string) "prior assistant not overwritten" "old answer"
+        (Agent_sdk.Types.text_of_message last)
+  | [] -> Alcotest.fail "expected prior messages"
+
+let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let current_tool_use =
+    checkpoint_msg Assistant
+      [ ToolUse
+          { id = "tool-1"
+          ; name = "keeper_context_status"
+          ; input = `Assoc []
+          }
+      ]
+  in
+  let current_tool_result =
+    checkpoint_msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"
+          ; content = "status"
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let current_final = checkpoint_msg Assistant [ Text "draft answer" ] in
+  let cp =
+    replay_test_checkpoint
+      [ old_user; old_assistant; current_user; current_tool_use
+      ; current_tool_result; current_final
+      ]
+  in
+  let patched, pruned =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_message_count:2
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~session_id:"new-session"
+      ~response_text:"visible answer"
+      ~state_snapshot:None
+      cp
+  in
+  Alcotest.(check bool) "suffix kept" false pruned;
+  Alcotest.(check int) "turn transcript remains" 6
+    (List.length patched.messages);
+  Alcotest.(check bool) "tool use remains" true
+    (List.exists has_tool_use patched.messages);
+  match List.rev patched.messages with
+  | last :: _ ->
+      Alcotest.(check string) "final assistant patched" "visible answer"
+        (Agent_sdk.Types.text_of_message last)
+  | [] -> Alcotest.fail "expected messages"
+
 (* ── Dual-source read test ───────────────────────────────────────── *)
 
 let test_text_parse_matches_json_parse () =
@@ -580,6 +700,14 @@ let () =
           Alcotest.test_case "stores replay metadata and clears wc" `Quick test_patch_stores_replay_metadata_and_clears_working_context;
           Alcotest.test_case "drops legacy state sidecar from wc" `Quick test_patch_drops_legacy_state_working_context_sidecar;
           Alcotest.test_case "no [STATE] keeps text and no metadata" `Quick test_patch_without_state_block_keeps_text_and_no_metadata;
+          Alcotest.test_case
+            "attention result prunes current replay suffix"
+            `Quick
+            test_attention_checkpoint_prunes_current_turn_suffix;
+          Alcotest.test_case
+            "satisfied result keeps tool replay suffix"
+            `Quick
+            test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final;
         ] );
       ( "dual_source",
         [

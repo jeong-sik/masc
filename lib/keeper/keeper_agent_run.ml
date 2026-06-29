@@ -644,6 +644,7 @@ let run_turn
                           ~actual_keeper_tool_names
                           ~result ~checkpoint_persistence_error
                           ~post_turn_t0 ~runtime_id_string
+                          ~history_message_count:(List.length history_messages)
                           ~prompt_metrics ~ctx_composition ~usage
                           ~receipt_response_text_present_ref ~history_assistant_source
                           ~pre_dispatch_compacted:ctx.pre_dispatch_compacted

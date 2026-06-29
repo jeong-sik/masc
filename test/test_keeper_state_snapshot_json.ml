@@ -202,8 +202,8 @@ let test_finalizer_uses_structured_state_source () =
     (Some "Structured progress")
     state_snapshot.progress;
   Alcotest.(check string)
-    "visible response"
-    "Structured progress"
+    "structured state is not a visible reply"
+    ""
     response_text;
   Alcotest.(check (list string))
     "decisions"
@@ -215,6 +215,62 @@ let test_finalizer_uses_structured_state_source () =
     (List.exists
        (fun text -> contains_substring text "[SYNTHETIC]")
        state_snapshot.decisions)
+
+let test_finalizer_keeps_visible_text_outside_state_block () =
+  let raw =
+    "Visible work summary.\n\
+     \n\
+     [STATE]\n\
+     Goal: Keep metadata\n\
+     DONE: Stored in metadata\n\
+     [/STATE]"
+  in
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"test"
+      ~goal:"Keep metadata"
+      ~actual_keeper_tool_names:[]
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text:raw
+      ()
+  in
+  Alcotest.(check string)
+    "state block source"
+    "model_state_block"
+    (KMP.state_snapshot_source_to_string finalized.state_snapshot_source);
+  Alcotest.(check string)
+    "visible response"
+    "Visible work summary."
+    finalized.response_text
+
+let test_finalizer_drops_state_only_visible_fallback () =
+  let raw =
+    "[STATE]\n\
+     Goal: Keep metadata\n\
+     DONE: No tools used this generation\n\
+     [/STATE]"
+  in
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"test"
+      ~goal:"Keep metadata"
+      ~actual_keeper_tool_names:[]
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text:raw
+      ()
+  in
+  Alcotest.(check string)
+    "state block source"
+    "model_state_block"
+    (KMP.state_snapshot_source_to_string finalized.state_snapshot_source);
+  Alcotest.(check string)
+    "state-only metadata is not visible reply"
+    ""
+    finalized.response_text
 
 let test_finalizer_prefers_reported_state_snapshot () =
   let reported_state_snapshot =
@@ -846,6 +902,14 @@ let () =
             "finalizer keeps structured source"
             `Quick
             test_finalizer_uses_structured_state_source;
+          Alcotest.test_case
+            "finalizer keeps visible text outside state block"
+            `Quick
+            test_finalizer_keeps_visible_text_outside_state_block;
+          Alcotest.test_case
+            "finalizer drops state-only visible fallback"
+            `Quick
+            test_finalizer_drops_state_only_visible_fallback;
           Alcotest.test_case
             "finalizer prefers reported state"
             `Quick

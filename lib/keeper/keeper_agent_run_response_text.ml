@@ -51,30 +51,11 @@ let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_to
           (synth, Keeper_memory_policy.Synthesized)))
 ;;
 
-let response_text ~state_snapshot ~state_snapshot_source ~raw_response_text =
-  let is_structured_reply, is_synthesized =
-    match (state_snapshot_source : Keeper_memory_policy.state_snapshot_source) with
-    | Structured_state_reply -> true, false
-    | Synthesized -> false, true
-    | Structured_state_tool | State_block -> false, false
-  in
-  let fallback =
-    match
-      Keeper_text_processing.state_snapshot_reply_fallback (Some state_snapshot)
-    with
-    | Some _ as fallback -> fallback
-    | None when is_structured_reply ->
-      Some "State updated."
-    | None -> None
-  in
-  if is_synthesized then ""
-  else if is_structured_reply then
-    Keeper_text_processing.user_visible_reply_text ?fallback ""
-  else
-    match fallback with
-    | Some fallback ->
-      Keeper_text_processing.user_visible_reply_text ~fallback raw_response_text
-    | None -> Keeper_text_processing.user_visible_reply_text raw_response_text
+let response_text ~state_snapshot_source ~raw_response_text =
+  match (state_snapshot_source : Keeper_memory_policy.state_snapshot_source) with
+  | Synthesized | Structured_state_reply -> ""
+  | Structured_state_tool | State_block ->
+    Keeper_text_processing.strip_internal_reply_markup raw_response_text
 ;;
 
 let finalize ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names
@@ -99,7 +80,7 @@ let finalize ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_nam
       ()
   in
   let response_text =
-    response_text ~state_snapshot ~state_snapshot_source ~raw_response_text
+    response_text ~state_snapshot_source ~raw_response_text
   in
   { state_snapshot
   ; state_snapshot_source

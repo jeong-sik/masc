@@ -151,7 +151,7 @@ let test_state_block_reply_returns_state_snapshot () =
     state_snapshot.next_items;
   check (list string) "state keeps constraints" [ "Use worktrees" ]
     state_snapshot.constraints;
-  check string "visible response falls back to goal" "Keep runtime visible"
+  check string "state-only block is not a visible response" ""
     response_text
 
 (* RFC-0239 / audit D1: a rejected keeper_task_done must carry a typed

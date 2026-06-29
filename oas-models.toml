@@ -846,52 +846,38 @@ supports_image_input = false
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "kimi-k2.5"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-reasoning_replay = "preserve_always"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "kimi-k2.6"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-reasoning_replay = "preserve_always"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
+id_prefix = "kimi-k2"
+base = "kimi"
+max_context_tokens = 256000
+input_per_million = 0.0
+output_per_million = 0.0
 
 [[models]]
 id_prefix = "kimi-k2.7-code"
-base = "ollama_cloud"
-max_context_tokens = 262144
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-reasoning_replay = "preserve_always"
-supports_multimodal_inputs = true
-supports_image_input = true
-modality_priority = "visual_first"
-supports_native_streaming = true
+base = "kimi"
+max_context_tokens = 256000
+supports_reasoning_budget = false
+thinking_control_format = "none"
+preserve_thinking_control_format = "always_preserved"
+input_per_million = 0.0
+output_per_million = 0.0
+
+# Bare kimi-k2.* ids are native Kimi. Ollama Cloud's overlapping Kimi ids are
+# represented only by provider-qualified ollama_cloud/kimi-* rows so a bare
+# native route does not silently inherit Ollama Cloud wire semantics.
+[[models]]
+id_prefix = "kimi-k2.5:cloud"
+base = "kimi"
+max_context_tokens = 256000
+input_per_million = 0.0
+output_per_million = 0.0
+
+[[models]]
+id_prefix = "kimi-k2.6:cloud"
+base = "kimi"
+max_context_tokens = 256000
+input_per_million = 0.0
+output_per_million = 0.0
 
 [[models]]
 id_prefix = "minimax-m2.1"

@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.19.54)
+(version 0.19.55)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -55,8 +55,9 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.19 plus focused OAS #2244 assistant tool-content
-  ;; and fail-closed unknown stream block handling.
+  ;; Pinned to OAS v0.207.19 plus focused OAS #2248 provider-qualified
+  ;; capability lookup, #2244 assistant tool-content, and fail-closed unknown
+  ;; stream block handling.
   (agent_sdk (>= 0.207.19))
   (uri (>= 4.4))
   (tls (>= 2.0))

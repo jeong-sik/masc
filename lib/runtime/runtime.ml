@@ -177,10 +177,11 @@ let capabilities_for_runtime (rt : t) =
   Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config
 ;;
 
-(* Every runtime binding's provider-qualified model must be known to the OAS
-   capability catalog.  Use the materialized [Provider_config.t] so provider
-   namespaces such as Z.AI GLM and Ollama Cloud GLM do not collapse onto the
-   same bare model id. *)
+(* Every runtime binding's provider/model pair must be known to the OAS
+   capability catalog. Use the materialized [Provider_config.t] so
+   provider-qualified catalog rows are considered before bare model rows; this
+   keeps overlapping ids such as native Kimi vs Ollama Cloud Kimi from requiring
+   bare-id manifest workarounds. *)
 let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
   : (unit, string) result
   =

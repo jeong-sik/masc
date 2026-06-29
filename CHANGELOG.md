@@ -2,12 +2,20 @@
 
 ## Unreleased
 
+## [0.19.55] - 2026-06-29
+
 ### Changed
-- Bump OAS agent_sdk pin to 0.207.19 plus the focused OAS #2244
-  `b7148b8` assistant tool-content, GLM forced-tool, and fail-closed unknown-stream-block
-  branch SHA.
+- Bump OAS agent_sdk pin to 0.207.19 plus the focused OAS #2248
+  `679490a` provider-qualified capability lookup and #2244 assistant
+  tool-content / GLM forced-tool / fail-closed unknown-stream-block branch
+  SHA.
+- Bump MASC version to 0.19.55.
 
 ### Fixed
+- Resolve runtime capability validation and default preserve-thinking decisions
+  through OAS provider-qualified provider/model capabilities instead of bare
+  model ids, so overlapping ids such as Ollama Cloud Kimi do not need
+  bare-id manifest workarounds.
 - Prune synthetic empty keeper replay suffixes from OAS checkpoints and record a
   typed prune reason, preventing no-visible-output state snapshots from being
   replayed as durable assistant context.

@@ -58,6 +58,22 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 ;;
 
+let with_model_catalog_content content f =
+  let path = Filename.temp_file "runtime-thinking-oas-models" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      Llm_provider.Model_catalog.clear_global ();
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+      write_file path content;
+      match Llm_provider.Model_catalog.load_file path with
+      | Error msg -> Alcotest.failf "test OAS model catalog should load: %s" msg
+      | Ok catalog ->
+        Llm_provider.Model_catalog.set_global catalog;
+        f ())
+;;
+
 let string_contains haystack needle =
   let haystack_len = String.length haystack in
   let needle_len = String.length needle in
@@ -565,14 +581,36 @@ max-concurrent = 1
 |}
 ;;
 
+let runtime_thinking_model_catalog =
+  {|
+[[models]]
+id_prefix = "qwen36-35b-a3b-mtp"
+base = "openai_chat"
+max_context_tokens = 131072
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "chat_template_kwargs"
+preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+|}
+;;
+
 let with_runtime_thinking f =
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
   with_temp_dir "runtime-thinking-gate" @@ fun dir ->
-  let path = Filename.concat dir "runtime.toml" in
-  write_file path runtime_config_thinking;
-  (match Runtime.init_default ~config_path:path with
-   | Ok () -> ()
-   | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
-  f ()
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+      with_model_catalog_content runtime_thinking_model_catalog @@ fun () ->
+      let path = Filename.concat dir "runtime.toml" in
+      write_file path runtime_config_thinking;
+      (match Runtime.init_default ~config_path:path with
+       | Ok () -> ()
+       | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+      f ())
 ;;
 
 let test_thinking_support_true_enables_thinking_and_preserves () =

@@ -416,6 +416,14 @@ let test_operator_resume_keeps_no_progress_state_on_drop_failure () =
          "detector latched before failed resume"
          true
          (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       check bool
+         "no synthetic recovery stimulus before failed resume"
+         false
+         (queue_contains_post_id
+            (Masc.Keeper_registry_event_queue.snapshot
+               ~base_path:config.base_path
+               keeper_name)
+            recovery_post_id);
        let pending_path =
          event_queue_snapshot_path ~base_path:config.base_path ~keeper_name
        in

@@ -1594,10 +1594,23 @@ let test_keeper_tool_hint_contracts_match_required_fields () =
     read_source_file "config/prompts/keeper.turn_intent.claim_guidance_a.md"
   in
   let capabilities = read_source_file "config/prompts/keeper.capabilities.md" in
+  let core_behavior = read_source_file "config/prompts/keeper.core_behavior.md" in
   assert_contains
     "keeper_task_claim hint names optional task_id"
     claim_guidance
     "`keeper_task_claim { \"task_id\": \"task-123\" }`";
+  assert_contains
+    "Execute core behavior forbids duplicate argv0"
+    core_behavior
+    "never put the executable name in `argv[0]`";
+  assert_contains
+    "Execute core behavior gives corrected git argv"
+    core_behavior
+    "`argv=[\"status\", \"--short\"]`";
+  assert_contains
+    "Execute core behavior gives bad git argv contrast"
+    core_behavior
+    "not `argv=[\"git\", \"status\", \"--short\"]`";
   assert_contains
     "keeper_task_done hint names task_id"
     capabilities

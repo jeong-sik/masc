@@ -17,11 +17,23 @@
     [tool_call_events], [keeper_cdal_events],
     [turn_completed_events]), and [handle_agent_timeline] (the
     dispatch handler that reaches {!build_timeline}).  All
-    consumed only inside {!build_timeline} or {!dispatch}. *)
+    consumed only inside {!build_timeline} or {!dispatch}.
+
+    Exposed for unit testing: {!identity_matches}, the single
+    keeper-identity predicate shared by every source extractor. *)
 
 (** {1 Tool result + context} *)
 
 type tool_result = Tool_result.result
+
+val identity_matches : agent_name:string -> string -> bool
+(** [identity_matches ~agent_name candidate] is [true] when [candidate]
+    denotes [agent_name] in any of the forms the stores persist: the short
+    handle ([agent_name]), the full actor id ([keeper-<agent_name>-agent]),
+    or the [keeper:<agent_name>] prefix form.  Every source extractor routes
+    its identity comparison through this predicate so a live agent's rows are
+    not silently dropped when a store wrote the full actor id while the tool
+    was queried by the short handle.  Exposed for unit testing. *)
 
 type context = {
   config : Workspace.config;

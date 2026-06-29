@@ -108,13 +108,26 @@ let event_to_json (e : timeline_event) : Yojson.Safe.t =
 
 let keeper_actor_id agent_name = "keeper-" ^ agent_name ^ "-agent"
 
+(* Keeper identity is persisted in two string forms across the stores: the
+   short handle ("albini") and the full actor id ("keeper-albini-agent");
+   some call sites also use the "keeper:albini" prefix form. A single agent's
+   rows must match whichever form the store wrote, so every identity
+   comparison routes through this one predicate.
+
+   Root cause: keeper identity has no typed canonical representation — the
+   short handle and actor id are two untyped strings used interchangeably.
+   The surgical fix unifies the comparison the activity path already did;
+   the proper fix is a typed [Keeper_id] with one canonical form plus
+   explicit projections (RFC-scale, tracked separately). *)
+let identity_matches ~(agent_name : string) (candidate : string) : bool =
+  String.equal candidate agent_name
+  || String.equal candidate (keeper_actor_id agent_name)
+  || String.equal candidate ("keeper:" ^ agent_name)
+
 let activity_event_matches_agent ~(agent_name : string) (e : Activity_graph.event) =
   let actor_matches =
     match e.actor with
-    | Some a ->
-        String.equal a.id agent_name
-        || String.equal a.id (keeper_actor_id agent_name)
-        || String.equal a.id ("keeper:" ^ agent_name)
+    | Some a -> identity_matches ~agent_name a.id
     | None -> false
   in
   actor_matches
@@ -127,7 +140,7 @@ let agent_events (config : Workspace.config) ~agent_name :
     timeline_event list =
   let agents = Workspace.get_active_agents config in
   agents
-  |> List.filter (fun (a : Masc_domain.agent) -> String.equal a.name agent_name)
+  |> List.filter (fun (a : Masc_domain.agent) -> identity_matches ~agent_name a.name)
   |> List.filter_map (fun (a : Masc_domain.agent) ->
          match parse_iso_timestamp a.session_bound_at with
          | Some ts ->
@@ -155,7 +168,7 @@ let task_events (config : Workspace.config) ~agent_name :
   |> List.filter_map (fun (task : Masc_domain.task) ->
          match task.task_status with
          | Masc_domain.Claimed { assignee; claimed_at }
-           when String.equal assignee agent_name -> (
+           when identity_matches ~agent_name assignee -> (
              match parse_iso_timestamp claimed_at with
              | Some ts ->
                  Some
@@ -173,7 +186,7 @@ let task_events (config : Workspace.config) ~agent_name :
                    }
              | None -> None)
          | Masc_domain.InProgress { assignee; started_at }
-           when String.equal assignee agent_name -> (
+           when identity_matches ~agent_name assignee -> (
              match parse_iso_timestamp started_at with
              | Some ts ->
                  Some
@@ -191,7 +204,7 @@ let task_events (config : Workspace.config) ~agent_name :
                    }
              | None -> None)
          | Masc_domain.Done { assignee; completed_at; notes }
-           when String.equal assignee agent_name -> (
+           when identity_matches ~agent_name assignee -> (
              match parse_iso_timestamp completed_at with
              | Some ts ->
                  Some
@@ -210,7 +223,7 @@ let task_events (config : Workspace.config) ~agent_name :
                    }
              | None -> None)
          | Masc_domain.Cancelled { cancelled_by; cancelled_at; reason }
-           when String.equal cancelled_by agent_name -> (
+           when identity_matches ~agent_name cancelled_by -> (
              match parse_iso_timestamp cancelled_at with
              | Some ts ->
                  Some
@@ -237,7 +250,7 @@ let message_events (config : Workspace.config) ~agent_name ~limit :
   in
   messages
   |> List.filter (fun (m : Masc_domain.message) ->
-         String.equal m.from_agent agent_name)
+         identity_matches ~agent_name m.from_agent)
   |> List.filter_map (fun (m : Masc_domain.message) ->
          match parse_iso_timestamp m.timestamp with
          | Some ts ->

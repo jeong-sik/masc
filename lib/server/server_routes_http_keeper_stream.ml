@@ -1159,7 +1159,10 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                 (`Assoc
                   [
                     ("media_type", `String media_type);
-                    ("source_type", `String source_type);
+                    ( "source_type",
+                      `String
+                        (Agent_sdk.Types.media_source_kind_to_string source_type)
+                    );
                     ("bytes", `Int bytes);
                   ])
             then loop ()

@@ -296,8 +296,7 @@ let test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks () =
       ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64"
-        (Agent_sdk.Types.media_source_kind_to_string source_type);
+      check bool "source type" true (source_type = Agent_sdk.Types.Base64);
       check string "text" "describe this" text
   | Ok _ -> fail "expected image then text OAS blocks"
   | Error err -> fail ("expected OAS block conversion: " ^ err)
@@ -330,8 +329,7 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
   | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64"
-        (Agent_sdk.Types.media_source_kind_to_string source_type)
+      check bool "source type" true (source_type = Agent_sdk.Types.Base64)
   | Ok _ -> fail "expected image OAS block"
   | Error err -> fail ("expected mixed-case data URL conversion: " ^ err)
 
@@ -363,8 +361,7 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
   | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64"
-        (Agent_sdk.Types.media_source_kind_to_string source_type)
+      check bool "source type" true (source_type = Agent_sdk.Types.Base64)
   | Ok _ -> fail "expected image OAS block"
   | Error err -> fail ("expected inferred data URL MIME conversion: " ^ err)
 
@@ -648,6 +645,34 @@ let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
       check int "delta total tokens" 12
         (Agent_sdk.Types.total_tokens delta_usage)
   | _ -> fail "expected OAS message lifecycle metadata events"
+
+let test_keeper_stream_bridge_preserves_typed_media_source () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockDelta
+          {
+            index = 0;
+            delta =
+              MediaDelta
+                {
+                  media_type = "image/png";
+                  source_type = Base64;
+                  data = "abcd";
+                };
+          };
+      ]
+  in
+  match events with
+  | [
+      Keeper_chat_events.Oas_media_delta
+        { media_type; source_type; bytes };
+    ] ->
+      check string "media type" "image/png" media_type;
+      check bool "source type" true (source_type = Base64);
+      check int "bytes" 4 bytes
+  | _ -> fail "expected typed OAS media delta"
 
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_sdk.Types in
@@ -937,8 +962,7 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
               check string "text preserved" "Inspect this" text;
               check string "image media type" "image/png" media_type;
               check string "image data" "img" data;
-              check string "source type" "base64"
-                (Agent_sdk.Types.media_source_kind_to_string source_type)
+              check bool "source type" true (source_type = Agent_sdk.Types.Base64)
           | _ -> fail "stored user input lost multimodal block shape")
       | _ -> fail "missing appended OAS user message")
 
@@ -1499,6 +1523,8 @@ let () =
             test_keeper_stream_bridge_closes_tool_when_index_is_reused;
           test_case "stream bridge surfaces OAS message metadata" `Quick
             test_keeper_stream_bridge_surfaces_oas_message_metadata;
+          test_case "stream bridge preserves typed media source" `Quick
+            test_keeper_stream_bridge_preserves_typed_media_source;
           test_case "stream bridge rejects tool args without start" `Quick
             test_keeper_stream_bridge_rejects_tool_args_without_start;
           test_case "stream protocol error summary includes diagnostics" `Quick

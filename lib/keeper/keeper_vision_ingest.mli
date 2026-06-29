@@ -32,7 +32,7 @@ val evict_blocks
   -> Agent_sdk.Types.content_block list
 (** Site 1. Evict every [Image] in the list when [policy = Mm_delegate]; return
     the list unchanged otherwise. Images are fail-closed before store on
-    source_type, base64 payload, size, and media type. [Eager] consults the
+    base64 payload, size, and media type. [Eager] consults the
     fiber-local Eio context for one bounded sub-call; with none present (tests)
     it falls back to an unread placeholder, so eviction still holds. *)
 

@@ -52,7 +52,7 @@ type keeper_chat_event =
   | Oas_thinking_signature_delta of { signature_bytes : int }
   | Oas_media_delta of
       { media_type : string
-      ; source_type : string
+      ; source_type : Agent_sdk.Types.media_source_kind
       ; bytes : int
       }
   | Oas_stream_protocol_error of stream_protocol_error

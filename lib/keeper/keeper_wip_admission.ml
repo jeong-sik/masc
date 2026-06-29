@@ -87,10 +87,11 @@ type active_item = {
   scope : scope;
 }
 
-let task_is_active_wip ?(claimed_by : string option) (task : Masc_domain.task) =
+let task_is_active_wip ?claimed_by (task : Masc_domain.task) =
   let matches_claimed_by agent_name =
     match claimed_by with
-    | Some name -> String.equal name agent_name
+    | Some (Some name) -> String.equal name agent_name
+    | Some None
     | None -> true
   in
   match task.task_status with

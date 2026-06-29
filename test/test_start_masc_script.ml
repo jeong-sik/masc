@@ -1008,10 +1008,11 @@ let test_default_build_lock_is_worktree_local () =
 
 let test_stdio_entrypoint_uses_shared_base_path_guard () =
   let source = read_file (source_file "bin/main_stdio_eio.ml") in
-  check bool "stdio guards self repo base path" true
-    (contains_substring source "Server_base_path_guard.guard_self_repo_base_path");
-  check bool "stdio rejects implicit base path" true
-    (contains_substring source "Server_base_path_guard.guard_implicit_base_path")
+  check bool "stdio resolves base path through shared guard" true
+    (contains_substring source
+       "Server_base_path_guard.resolve_startup_base_path");
+  check bool "stdio enforces shared base path guard" true
+    (contains_substring source "Server_base_path_guard.enforce")
 
 let test_stdio_skips_dashboard_build_and_http_preflight () =
   with_temp_dir "start-masc-script-stdio" (fun dir ->

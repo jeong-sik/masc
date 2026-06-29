@@ -856,6 +856,7 @@
   test_server_runtime_bootstrap
   test_server_hibernation
   test_server_base_path_diagnostics
+  test_server_base_path_guard
   test_server_timing
   test_server_startup_takeover
   test_keeper_meta_cas_retry
@@ -1045,6 +1046,7 @@
   test_server_runtime_bootstrap
   test_server_hibernation
   test_server_base_path_diagnostics
+  test_server_base_path_guard
   test_server_timing
   test_server_startup_takeover
   test_keeper_meta_cas_retry

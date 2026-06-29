@@ -698,7 +698,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-BASE_PATH_RESOLUTION_SOURCE="implicit_repo_root"
+BASE_PATH_RESOLUTION_SOURCE="implicit_base_path"
 if [ "$BASE_PATH_EXPLICIT" = "1" ]; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_cli"
 elif [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && is_absolute_path "$BASE_PATH"; then

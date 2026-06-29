@@ -489,6 +489,12 @@ let base_path =
   in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
 
+let run_base_path =
+  let doc =
+    "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
+  in
+  Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc)
+
 let login_json =
   let doc = "Emit machine-readable JSON instead of text output" in
   Arg.(value & flag & info ["json"] ~doc)
@@ -567,41 +573,23 @@ let acquire_base_path_lock base_path =
            pid base_path pid);
       exit 1
 
-let run_cmd host port base_path =
+let run_cmd host port cli_base_path =
   Printexc.record_backtrace true;
-  let raw_base_path = String.trim base_path in
-  let normalized_base_path =
-    Env_config.normalize_masc_base_path_input base_path
+  let resolved_base_path =
+    Server_base_path_guard.resolve_startup_base_path ~cli_base_path
+      ~default_base_path ()
   in
+  Server_base_path_guard.exit_on_violation
+    (Server_base_path_guard.enforce resolved_base_path);
+  let raw_base_path = resolved_base_path.raw_base_path in
+  let normalized_base_path = resolved_base_path.normalized_base_path in
   let resolution_source =
-    match Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE" with
-    | Some source when String.trim source <> "" -> String.trim source
-    | _ ->
-        let inherited_env_matches =
-          match Sys.getenv_opt "MASC_BASE_PATH" with
-          | Some existing ->
-              String.equal
-                (Env_config.normalize_masc_base_path_input existing)
-                normalized_base_path
-          | None -> false
-        in
-        if inherited_env_matches then
-          "explicit_env"
-        else
-          let default_path =
-            Env_config.normalize_masc_base_path_input (default_base_path ())
-          in
-          if String.equal default_path normalized_base_path then
-            Server_base_path_guard.implicit_base_path_resolution_source
-          else
-            "explicit_cli"
+    Server_base_path_guard.resolution_source_label
+      resolved_base_path.resolution_source
   in
   let stripped_base_path =
-    Env_config.strip_path_trailing_slashes (String.trim base_path)
+    Env_config.strip_path_trailing_slashes (String.trim raw_base_path)
   in
-  Server_base_path_guard.guard_self_repo_base_path normalized_base_path;
-  Server_base_path_guard.guard_implicit_base_path ~resolution_source
-    ~normalized_base_path;
   let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
   Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;
@@ -617,7 +605,7 @@ let run_cmd host port base_path =
   then
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
-      base_path normalized_base_path;
+      raw_base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" normalized_base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path normalized_base_path;
@@ -774,7 +762,7 @@ let run_cmd host port base_path =
             ()
             in
             Eio.Fiber.first
-            (fun () -> run_server ~sw ~env ~host ~port ~base_path)
+            (fun () -> run_server ~sw ~env ~host ~port ~base_path:normalized_base_path)
             await_shutdown_signal;
             (* Server stopped; close SSE connections after server is down. *)
             (try close_all_sse_connections ()
@@ -988,7 +976,7 @@ let setup_gc () =
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
-  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
+  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ run_base_path)
     info [ init_cmd; login_cmd; memory_os_gc_dry_run_cmd ]
 
 let () =

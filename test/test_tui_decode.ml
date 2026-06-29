@@ -201,6 +201,42 @@ let test_parse_keeper_chat_response_sse_delta () =
   | Ok text -> Alcotest.(check string) "delta text" "hello world" text
   | Error err -> Alcotest.fail err
 
+let test_parse_keeper_chat_response_ag_ui_sse () =
+  let response =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+     data: {\"type\":\"RUN_STARTED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n\
+     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"default\",\"runId\":\"run-1\",\"delta\":\"hello\"}\n\n\
+     data: {\"type\":\"TEXT_MESSAGE_CONTENT\",\"threadId\":\"default\",\"runId\":\"run-1\",\"delta\":\" world\"}\n\n\
+     data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n"
+  in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.(check string) "AG-UI delta text" "hello world" text
+  | Error err -> Alcotest.fail err
+
+let test_parse_keeper_chat_response_ag_ui_error () =
+  let response =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+     data: {\"type\":\"RUN_ERROR\",\"threadId\":\"default\",\"runId\":\"run-1\",\"message\":\"boom\"}\n\n"
+  in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.failf "expected RUN_ERROR failure, got %S" text
+  | Error err -> Alcotest.(check string) "AG-UI error message" "boom" err
+
+let test_parse_keeper_chat_response_ag_ui_empty_terminal () =
+  let response =
+    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\n\r\n\
+     data: {\"type\":\"RUN_FINISHED\",\"threadId\":\"default\",\"runId\":\"run-1\"}\n\n"
+  in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.(check string) "empty terminal response" "" text
+  | Error err -> Alcotest.fail err
+
+let test_parse_keeper_chat_response_body_json () =
+  let response = "{\"result\":{\"text\":\"hello body\"}}" in
+  match Tui_decode.parse_keeper_chat_response response with
+  | Ok text -> Alcotest.(check string) "body text" "hello body" text
+  | Error err -> Alcotest.fail err
+
 let test_parse_keeper_chat_response_json_error () =
   let response =
     "HTTP/1.1 500 Internal Server Error\r\nContent-Type: application/json\r\n\r\n\
@@ -209,6 +245,51 @@ let test_parse_keeper_chat_response_json_error () =
   match Tui_decode.parse_keeper_chat_response response with
   | Ok _ -> Alcotest.fail "expected parse failure"
   | Error err -> Alcotest.(check string) "error message" "boom" err
+
+let test_decode_json_http_response_rejects_error_status () =
+  let response =
+    "HTTP/1.1 400 Bad Request\r\nContent-Type: application/json\r\n\r\n\
+     {\"error\":\"bad confirm\"}"
+  in
+  match Tui_decode.decode_json_http_response ~allow_empty:true response with
+  | Ok _ -> Alcotest.fail "expected HTTP 400 to fail"
+  | Error err ->
+      Alcotest.(check string)
+        "http error" "HTTP 400: {\"error\":\"bad confirm\"}" err
+
+let test_decode_json_http_response_allows_empty_success_post () =
+  let response = "HTTP/1.1 204 No Content\r\nContent-Length: 0\r\n\r\n" in
+  match Tui_decode.decode_json_http_response ~allow_empty:true response with
+  | Ok (`Assoc []) -> ()
+  | Ok json ->
+      Alcotest.failf "expected empty object, got %s" (Yojson.Safe.to_string json)
+  | Error err -> Alcotest.fail err
+
+let test_decode_json_response_body_rejects_error_status () =
+  match
+    Tui_decode.decode_json_response_body ~allow_empty:true ~status_code:400
+      ~body:"{\"error\":\"bad confirm\"}"
+  with
+  | Ok _ -> Alcotest.fail "expected HTTP 400 to fail"
+  | Error err ->
+      Alcotest.(check string)
+        "http error" "HTTP 400: {\"error\":\"bad confirm\"}" err
+
+type parent_node = {
+  node_id : string;
+  parent_id : string option;
+}
+
+let test_bounded_parent_depth_stops_on_cycle () =
+  let a = { node_id = "a"; parent_id = Some "b" } in
+  let b = { node_id = "b"; parent_id = Some "a" } in
+  let depth =
+    Tui_decode.bounded_parent_depth
+      ~id_of:(fun n -> n.node_id)
+      ~parent_id_of:(fun n -> n.parent_id)
+      [ a; b ] a
+  in
+  Alcotest.(check int) "cycle stops at first repeated parent" 1 depth
 
 let () =
   Alcotest.run "tui_decode" [
@@ -252,7 +333,29 @@ let () =
       [
         Alcotest.test_case "sse delta" `Quick
           test_parse_keeper_chat_response_sse_delta;
+        Alcotest.test_case "AG-UI SSE" `Quick
+          test_parse_keeper_chat_response_ag_ui_sse;
+        Alcotest.test_case "AG-UI error" `Quick
+          test_parse_keeper_chat_response_ag_ui_error;
+        Alcotest.test_case "AG-UI empty terminal" `Quick
+          test_parse_keeper_chat_response_ag_ui_empty_terminal;
+        Alcotest.test_case "body json" `Quick
+          test_parse_keeper_chat_response_body_json;
         Alcotest.test_case "json error" `Quick
           test_parse_keeper_chat_response_json_error;
+      ] );
+    ( "http_response",
+      [
+        Alcotest.test_case "rejects error status" `Quick
+          test_decode_json_http_response_rejects_error_status;
+        Alcotest.test_case "allows empty success post" `Quick
+          test_decode_json_http_response_allows_empty_success_post;
+        Alcotest.test_case "body rejects error status" `Quick
+          test_decode_json_response_body_rejects_error_status;
+      ] );
+    ( "bounded_parent_depth",
+      [
+        Alcotest.test_case "stops on cycle" `Quick
+          test_bounded_parent_depth_stops_on_cycle;
       ] );
   ]

@@ -2013,8 +2013,8 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
             (fleet_safety |> member "blocker" |> to_string);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
-          Alcotest.(check string) "health overall status tracks fleet degradation"
-            "degraded"
+          Alcotest.(check string) "health overall status keeps strongest action state"
+            "blocked"
             (json |> member "overall_status" |> to_string);
           Alcotest.(check bool) "health top-level asks for operator action" true
             (json |> member "operator_action_required" |> to_bool);

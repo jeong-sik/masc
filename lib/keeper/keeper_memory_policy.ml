@@ -945,7 +945,7 @@ let synthesize_state_from_run_result
   let budget_exhausted = String.equal stop_reason "budget_exhausted" in
   let progress =
     match tools_used with
-    | [] -> Some "No tools used this generation"
+    | [] -> None
     | ts ->
       let unique = List.sort_uniq String.compare ts in
       Some (Printf.sprintf "Used: %s" (String.concat ", " unique))

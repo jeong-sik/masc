@@ -47,7 +47,7 @@
   display: flex; gap: var(--sp-3);
   padding: 0 var(--sp-3); border-left: 1px solid var(--line-1);
   height: 100%; align-items: center;
-  font-size: 10px; color: var(--fg-3); font-family: var(--font-mono); flex-shrink: 0;
+  font-size: var(--fs-10); color: var(--fg-3); font-family: var(--font-mono); flex-shrink: 0;
 }
 .lifeline-legend .lg { display: flex; align-items: center; gap: 4px; }
 .lifeline-legend .sw { width: 8px; height: 8px; border-radius: 1px; }

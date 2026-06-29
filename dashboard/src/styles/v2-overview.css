@@ -156,7 +156,7 @@
   list-style: none;
   padding: 10px 14px;
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.14em;
   color: var(--text-mid);
   text-transform: uppercase;

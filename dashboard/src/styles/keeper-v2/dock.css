@@ -40,7 +40,7 @@
 .dock-head.drag:active { cursor: grabbing; }
 .dock-title {
   display: flex; align-items: center; gap: var(--sp-2);
-  font-family: var(--font-display); font-weight: 600; font-size: 13px;
+  font-family: var(--font-display); font-weight: 600; font-size: var(--fs-13);
   letter-spacing: 0.02em; color: var(--text-bright);
 }
 .dock-spark { width: 16px; height: 16px; color: var(--volt-strong); }
@@ -48,7 +48,7 @@
 .dock-iconbtn {
   width: 28px; height: 28px; display: flex; align-items: center; justify-content: center;
   border-radius: var(--radius-sm); border: 1px solid transparent; background: transparent;
-  color: var(--text-dim); cursor: pointer; transition: 0.14s; font-size: 13px;
+  color: var(--text-dim); cursor: pointer; transition: 0.14s; font-size: var(--fs-13);
 }
 .dock-iconbtn:hover { color: var(--text-bright); background: var(--bg-card); }
 
@@ -62,7 +62,7 @@
 }
 .dock-picker-btn:hover { border-color: var(--border-highlight); }
 .dock-picker-btn .nm { font-size: 11.5px; color: var(--text-bright); font-weight: 600; white-space: nowrap; }
-.dock-picker-btn .cv { color: var(--text-dim); font-size: 9px; }
+.dock-picker-btn .cv { color: var(--text-dim); font-size: var(--fs-9); }
 .dock-idrow-hint { font-size: 10.5px; color: var(--text-dim); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .dock-idrow-hint .mono { font-family: var(--font-mono); color: var(--text-mid); }
 
@@ -75,9 +75,9 @@
 .dock-menu-row:hover { background: var(--bg-card); }
 .dock-menu-row.on { background: var(--bg-card); box-shadow: inset 0 0 0 1px var(--volt-wash); }
 .dock-menu-row .minfo { min-width: 0; flex: 1; }
-.dock-menu-row .nm { font-size: 12px; color: var(--text-bright); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.dock-menu-row .nm .h { color: var(--text-dim); font-weight: 400; font-size: 10px; }
-.dock-menu-row .sub { display: flex; align-items: center; gap: 5px; font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); margin-top: 2px; }
+.dock-menu-row .nm { font-size: var(--fs-12); color: var(--text-bright); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.dock-menu-row .nm .h { color: var(--text-dim); font-weight: 400; font-size: var(--fs-10); }
+.dock-menu-row .sub { display: flex; align-items: center; gap: 5px; font-size: var(--fs-10); color: var(--text-dim); font-family: var(--font-mono); margin-top: 2px; }
 
 /* ── co-view context card ── */
 .dock-coview {
@@ -86,13 +86,13 @@
   background: color-mix(in oklab, var(--info) 6%, var(--bg-sunken));
 }
 .dock-coview-h { display: flex; align-items: center; gap: var(--sp-2); margin-bottom: var(--sp-2); }
-.dock-coview-h .lbl { font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase; color: var(--info); font-weight: 600; }
+.dock-coview-h .lbl { font-size: var(--fs-9); letter-spacing: 0.18em; text-transform: uppercase; color: var(--info); font-weight: 600; }
 .dock-coview-h .route { margin-left: auto; font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); }
 .dock-coview .scene { font-size: 12.5px; color: var(--text-bright); font-weight: 600; margin-bottom: var(--sp-2); }
 .dock-coview-fields { display: flex; flex-wrap: wrap; gap: 5px; }
 .dock-field {
   display: inline-flex; align-items: center; gap: 5px; white-space: nowrap;
-  font-family: var(--font-mono); font-size: 10px; padding: 2px 7px;
+  font-family: var(--font-mono); font-size: var(--fs-10); padding: 2px 7px;
   border-radius: var(--radius-pill); border: 1px solid var(--border-main);
   background: var(--bg-deep); color: var(--text-mid);
 }
@@ -116,12 +116,12 @@
 .dmsg.user { grid-template-columns: 1fr 26px; }
 .dmsg.user .dmsg-col { order: 0; }
 .dmsg.user .dmsg-av { order: 1; }
-.dmsg-av.op { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: 9px; color: var(--volt-ink); background: var(--volt); }
+.dmsg-av.op { width: 26px; height: 26px; display: flex; align-items: center; justify-content: center; border-radius: var(--radius-sm); font-family: var(--font-mono); font-size: var(--fs-9); color: var(--volt-ink); background: var(--volt); }
 .dmsg-col { min-width: 0; }
 .dmsg.user .dmsg-hd { justify-content: flex-end; }
 .dmsg-hd { display: flex; align-items: center; gap: 6px; margin-bottom: 4px; }
-.dmsg-hd .who { font-family: var(--font-display); font-weight: 600; font-size: 11px; color: var(--text-bright); }
-.dmsg-hd .ts { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); }
+.dmsg-hd .who { font-family: var(--font-display); font-weight: 600; font-size: var(--fs-11); color: var(--text-bright); }
+.dmsg-hd .ts { font-family: var(--font-mono); font-size: var(--fs-9); color: var(--text-dim); }
 .dbubble {
   background: var(--bg-card); border: 1px solid var(--border-main);
   border-radius: 3px var(--radius-md) var(--radius-md) var(--radius-md);
@@ -130,7 +130,7 @@
 .dmsg.user .dbubble { background: var(--volt-wash); border-color: var(--volt-dim); border-radius: var(--radius-md) 3px var(--radius-md) var(--radius-md); color: var(--text-bright); }
 .dbubble p { margin: 0 0 7px; }
 .dbubble p:last-child { margin-bottom: 0; }
-.dbubble code { font-family: var(--font-mono); font-size: 11px; background: var(--bg-sunken); border: 1px solid var(--border-soft); padding: 0 4px; border-radius: var(--radius-xs); color: var(--volt-strong); }
+.dbubble code { font-family: var(--font-mono); font-size: var(--fs-11); background: var(--bg-sunken); border: 1px solid var(--border-soft); padding: 0 4px; border-radius: var(--radius-xs); color: var(--volt-strong); }
 .dbubble strong { color: var(--text-bright); font-weight: 600; }
 .dcaret { display: inline-block; width: 7px; height: 13px; background: var(--volt); margin-left: 2px; vertical-align: -2px; animation: dcaret 1s steps(2) infinite; }
 @keyframes dcaret { 0%, 100% { opacity: 1; } 50% { opacity: 0; } }
@@ -155,12 +155,12 @@
 .dock-comp-box.focus { border-color: var(--volt-dim); box-shadow: 0 0 0 3px var(--volt-wash); }
 .dock-comp-box textarea { flex: 1; resize: none; border: 0; outline: 0; background: transparent; color: var(--text-bright); font-family: var(--font-ui); font-size: 12.5px; line-height: 1.5; padding: 7px 0; max-height: 120px; min-height: 20px; }
 .dock-comp-box textarea::placeholder { color: var(--text-dim); }
-.dock-send { width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm); border: 1px solid var(--volt); background: var(--volt); color: var(--volt-ink); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: 14px; transition: 0.14s; }
+.dock-send { width: 30px; height: 30px; flex: none; border-radius: var(--radius-sm); border: 1px solid var(--volt); background: var(--volt); color: var(--volt-ink); cursor: pointer; display: flex; align-items: center; justify-content: center; font-size: var(--fs-14); transition: 0.14s; }
 .dock-send:hover:not(:disabled) { background: var(--volt-strong); box-shadow: 0 0 14px var(--volt-glow); }
 .dock-send:disabled { opacity: 0.4; cursor: default; }
-.dock-foot { display: flex; align-items: center; gap: var(--sp-3); margin-top: 7px; font-size: 10px; color: var(--text-dim); }
+.dock-foot { display: flex; align-items: center; gap: var(--sp-3); margin-top: 7px; font-size: var(--fs-10); color: var(--text-dim); }
 .dock-foot b { color: var(--volt-strong); font-family: var(--font-mono); font-weight: 600; }
-.dock-foot kbd { font-family: var(--font-mono); font-size: 9px; background: var(--bg-card); border: 1px solid var(--border-main); border-bottom-width: 2px; border-radius: var(--radius-xs); padding: 1px 4px; color: var(--text-mid); }
+.dock-foot kbd { font-family: var(--font-mono); font-size: var(--fs-9); background: var(--bg-card); border: 1px solid var(--border-main); border-bottom-width: 2px; border-radius: var(--radius-xs); padding: 1px 4px; color: var(--text-mid); }
 
 /* ── triggers: FAB + top-bar button ── */
 .dock-fab {
@@ -173,18 +173,18 @@
 }
 .dock-fab:hover { background: var(--volt-strong); transform: translateY(-1px); }
 .dock-fab .spark { width: 17px; height: 17px; }
-.dock-fab kbd { font-family: var(--font-mono); font-size: 9px; padding: 1px 5px; border-radius: var(--radius-xs); background: color-mix(in oklab, var(--volt-ink) 16%, transparent); }
+.dock-fab kbd { font-family: var(--font-mono); font-size: var(--fs-9); padding: 1px 5px; border-radius: var(--radius-xs); background: color-mix(in oklab, var(--volt-ink) 16%, transparent); }
 
 .topbar-copilot {
   display: flex; align-items: center; gap: 7px; height: 30px; padding: 0 10px;
   border-radius: var(--radius-pill); border: 1px solid var(--border-main);
   background: var(--bg-panel-alt); color: var(--text-mid); cursor: pointer;
-  font-family: var(--font-ui); font-size: 11px; transition: 0.14s; white-space: nowrap;
+  font-family: var(--font-ui); font-size: var(--fs-11); transition: 0.14s; white-space: nowrap;
 }
 .topbar-copilot:hover { border-color: var(--volt-dim); color: var(--volt-strong); }
 .topbar-copilot.on { border-color: var(--volt); color: var(--volt-strong); background: var(--volt-wash); }
 .topbar-copilot .spark { width: 14px; height: 14px; }
-.topbar-copilot kbd { font-family: var(--font-mono); font-size: 9px; padding: 1px 4px; border-radius: var(--radius-xs); background: var(--bg-card); border: 1px solid var(--border-main); color: var(--text-dim); }
+.topbar-copilot kbd { font-family: var(--font-mono); font-size: var(--fs-9); padding: 1px 4px; border-radius: var(--radius-xs); background: var(--bg-card); border: 1px solid var(--border-main); color: var(--text-dim); }
 
 /* The Keepers surface IS a chat — a floating co-view "Chat" FAB there is
    redundant and overlaps the composer's send button. Hide it on Keepers. */

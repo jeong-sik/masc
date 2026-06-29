@@ -26,7 +26,7 @@
   border-radius: var(--r-2);
   background: var(--fus-panel);
   color: var(--fus-text);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 700;
   line-height: 1;
   padding: 0 12px;
@@ -66,7 +66,7 @@
 
 .v2-fusion-surface .fus-kpi-k {
   color: var(--fus-muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-weight: 700;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -130,7 +130,7 @@
   justify-content: space-between;
   border-bottom: 1px solid var(--fus-line);
   color: var(--fus-muted);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 800;
   padding: 12px 14px;
   text-transform: uppercase;
@@ -197,14 +197,14 @@
 .v2-fusion-surface .fus-detail-meta,
 .v2-fusion-surface .fus-panel-foot {
   color: var(--fus-muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   gap: 8px;
 }
 
 .v2-fusion-surface .fus-run-id {
   color: var(--fus-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--fs-11);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -212,7 +212,7 @@
 
 .v2-fusion-surface .fus-row-question {
   color: var(--fus-text);
-  font-size: 13px;
+  font-size: var(--fs-13);
   font-weight: 700;
   line-height: 1.35;
 }
@@ -236,7 +236,7 @@
   background: var(--color-bg-surface);
   color: var(--fus-muted);
   flex: 0 0 auto;
-  font-size: 10px;
+  font-size: var(--fs-10);
   font-weight: 800;
   line-height: 1;
   padding: 4px 6px;
@@ -315,7 +315,7 @@
 
 .v2-fusion-surface .fus-pipe-arr {
   color: var(--fus-muted);
-  font-size: 13px;
+  font-size: var(--fs-13);
   font-weight: 800;
 }
 
@@ -339,7 +339,7 @@
 .v2-fusion-surface .fus-resolved p,
 .v2-fusion-surface .fus-sink p {
   color: var(--fus-text);
-  font-size: 14px;
+  font-size: var(--fs-14);
   line-height: 1.55;
   margin: 6px 0 0;
   overflow-wrap: anywhere;
@@ -347,7 +347,7 @@
 
 .v2-fusion-surface .fus-label {
   color: var(--fus-muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -360,14 +360,14 @@
 
 .v2-fusion-surface .fus-section-head h3 {
   color: var(--fus-text);
-  font-size: 14px;
+  font-size: var(--fs-14);
   font-weight: 800;
   margin: 0;
 }
 
 .v2-fusion-surface .fus-section-head span {
   color: var(--fus-muted);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 700;
 }
 
@@ -398,7 +398,7 @@
 
 .v2-fusion-surface .fus-panel-model {
   color: var(--fus-text);
-  font-size: 13px;
+  font-size: var(--fs-13);
   font-weight: 800;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -408,7 +408,7 @@
 .v2-fusion-surface .fus-panel-body {
   color: var(--fus-text);
   flex: 1;
-  font-size: 13px;
+  font-size: var(--fs-13);
   line-height: 1.52;
   margin: 0;
   overflow-wrap: anywhere;
@@ -423,7 +423,7 @@
 .v2-fusion-surface .fus-synthesis {
   color: var(--fus-text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.55;
   margin: 10px 0 0;
   max-height: 320px;
@@ -449,7 +449,7 @@
 .v2-fusion-surface .fus-judge-evidence-head {
   border-top: 1px solid var(--fus-line);
   color: var(--fus-muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-weight: 800;
   padding-top: 12px;
   text-transform: uppercase;
@@ -457,7 +457,7 @@
 
 .v2-fusion-surface .fus-judge-evidence-head span:last-child {
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 10px;
+  font-size: var(--fs-10);
   font-weight: 700;
   text-transform: none;
 }
@@ -469,7 +469,7 @@
 
 .v2-fusion-surface .fus-jgroup h4 {
   color: var(--fus-text);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 800;
   margin: 0 0 8px;
 }
@@ -483,7 +483,7 @@
   color: var(--fus-text);
   display: grid;
   gap: 6px;
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.45;
   overflow-wrap: anywhere;
 }
@@ -518,7 +518,7 @@
   border-radius: var(--r-1);
   color: var(--fus-muted);
   display: inline-flex;
-  font-size: 10px;
+  font-size: var(--fs-10);
   font-weight: 800;
   line-height: 1;
 }
@@ -543,7 +543,7 @@
 .v2-fusion-surface .fus-position span:first-child {
   color: var(--fus-muted);
   font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace;
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 
 .v2-fusion-surface .fus-empty-inline,
@@ -590,7 +590,7 @@
 }
 
 .v2-fusion-surface .fus-empty p {
-  font-size: 14px;
+  font-size: var(--fs-14);
   line-height: 1.5;
   margin: 0;
   max-width: 520px;
@@ -616,7 +616,7 @@
 .v2-fusion-surface .fus-reconcile-head h2 {
   margin: 0;
   color: var(--fus-text);
-  font-size: 13px;
+  font-size: var(--fs-13);
   font-weight: 800;
   letter-spacing: 0.02em;
   text-transform: uppercase;
@@ -625,7 +625,7 @@
 .v2-fusion-surface .fus-reconcile-head p {
   margin: 4px 0 0;
   color: var(--fus-muted);
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.45;
 }
 
@@ -636,7 +636,7 @@
   background: var(--fus-panel-strong);
   color: var(--fus-muted);
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 11px;
+  font-size: var(--fs-11);
   padding: 6px 8px;
   white-space: nowrap;
 }
@@ -669,7 +669,7 @@
 
 .v2-fusion-surface .fus-reconcile-col-head b {
   color: var(--fus-text);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .v2-fusion-surface .fus-reconcile-rows {
@@ -723,7 +723,7 @@ button.fus-reconcile-row:hover {
 .v2-fusion-surface .fus-reconcile-note {
   grid-column: 1 / -1;
   color: var(--fus-muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.35;
   overflow-wrap: anywhere;
 }
@@ -805,7 +805,7 @@ button.fus-reconcile-row:hover {
 }
 
 .v2-fusion-surface .fus-runs-head h2 {
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 800;
   letter-spacing: 0.04em;
   text-transform: uppercase;
@@ -823,7 +823,7 @@ button.fus-reconcile-row:hover {
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-weight: 700;
   color: var(--warn-fg);
 }
@@ -837,13 +837,13 @@ button.fus-reconcile-row:hover {
 }
 
 .v2-fusion-surface .fus-runs-count {
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 700;
   color: var(--fus-muted);
 }
 
 .v2-fusion-surface .fus-runs-empty {
-  font-size: 12px;
+  font-size: var(--fs-12);
   color: var(--fus-muted);
   margin: 0;
   padding: 4px 0;
@@ -876,7 +876,7 @@ button.fus-reconcile-row:hover {
 
 .v2-fusion-surface .fus-runs-id {
   font-family: var(--font-mono, ui-monospace, monospace);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 700;
   color: var(--fus-text);
   overflow: hidden;
@@ -889,7 +889,7 @@ button.fus-reconcile-row:hover {
   align-items: center;
   gap: 10px;
   margin-left: auto;
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--fus-muted);
   flex: 0 0 auto;
 }
@@ -910,7 +910,7 @@ button.fus-reconcile-row:hover {
   gap: 6px;
   min-width: 0;
   color: var(--fus-muted);
-  font-size: 10px;
+  font-size: var(--fs-10);
   font-weight: 800;
   text-transform: uppercase;
 }
@@ -974,7 +974,7 @@ button.fus-reconcile-row:hover {
   padding: 2px 6px;
   font-weight: 700;
   text-transform: uppercase;
-  font-size: 10px;
+  font-size: var(--fs-10);
 }
 
 @keyframes fus-runs-pulse {
@@ -1024,7 +1024,7 @@ button.fus-reconcile-row:hover {
   border-radius: var(--r-1);
   background: var(--fus-panel-strong);
   padding: 4px 8px;
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 
 .v2-fusion-surface .fus-param .k {

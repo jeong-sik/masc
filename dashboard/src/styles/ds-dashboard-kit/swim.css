@@ -14,10 +14,10 @@
 }
 .swim-head .spacer {
   padding: 8px 12px; border-right: 1px solid var(--hair);
-  font-size: 9px; letter-spacing: 0.24em; text-transform: uppercase; color: var(--text-dim);
+  font-size: var(--fs-9); letter-spacing: 0.24em; text-transform: uppercase; color: var(--text-dim);
   display: flex; align-items: center;
 }
-.swim-axis { position: relative; height: 28px; background: linear-gradient(180deg, #140d08, #0e0806); font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.swim-axis { position: relative; height: 28px; background: linear-gradient(180deg, #140d08, #0e0806); font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); }
 .swim-axis .tk { position: absolute; top: 0; bottom: 0; border-left: 1px solid var(--hair); }
 .swim-axis .tk.maj { border-left-color: var(--hair-strong); }
 .swim-axis .tk span { position: absolute; top: 8px; left: 4px; white-space: nowrap; }
@@ -40,10 +40,10 @@
 .lane-meta .row1 { display: flex; align-items: center; gap: 8px; }
 .lane-meta .pw img { width: 18px; height: 18px; object-fit: cover; border: 1px solid var(--border-main); filter: sepia(0.15) contrast(1.05) brightness(0.92); display: block; opacity: 0.9; }
 .lane.dead .lane-meta .pw img { filter: grayscale(1) contrast(1.1) brightness(0.5); border-color: var(--bad); }
-.lane-meta .n { font-family: var(--font-display); font-size: 11px; letter-spacing: 0.04em; font-weight: 600; color: var(--text-bright); text-transform: none; line-height: 1.1; }
+.lane-meta .n { font-family: var(--font-display); font-size: var(--fs-11); letter-spacing: 0.04em; font-weight: 600; color: var(--text-bright); text-transform: none; line-height: 1.1; }
 .lane.dead .lane-meta .n { color: var(--text-dim); text-decoration: line-through; text-decoration-color: var(--bad); }
-.lane-meta .sub { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); margin-top: 1px; }
-.lane-meta .row2 { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: 9px; font-variant-numeric: tabular-nums; margin-top: 3px; }
+.lane-meta .sub { font-family: var(--font-mono); font-size: var(--fs-9); color: var(--text-dim); margin-top: 1px; }
+.lane-meta .row2 { display: flex; align-items: center; gap: 6px; font-family: var(--font-mono); font-size: var(--fs-9); font-variant-numeric: tabular-nums; margin-top: 3px; }
 .lane-meta .row2 .ctx { color: var(--text-bright); }
 .lane-meta .row2 .ctx.warn { color: var(--warn); }
 .lane-meta .row2 .ctx.bad { color: var(--bad); }
@@ -129,13 +129,13 @@
 }
 .crosshair-lbl {
   position: fixed; transform: translate(-50%, -120%);
-  font-family: var(--font-mono); font-size: 10px; color: var(--text-bright);
+  font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-bright);
   background: #0c0806; padding: 2px 7px; border: 1px solid var(--hair-strong);
   white-space: nowrap; pointer-events: none; z-index: 10; display: none;
 }
 
 /* legend */
-.legend { display: inline-flex; gap: 12px; font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); align-items: center; flex-wrap: wrap; }
+.legend { display: inline-flex; gap: 12px; font-family: var(--font-mono); font-size: var(--fs-9); color: var(--text-dim); align-items: center; flex-wrap: wrap; }
 .legend .lg-i { display: inline-flex; align-items: center; gap: 4px; letter-spacing: 0.04em; }
 .legend .sw { width: 10px; height: 8px; display: inline-block; border: 1px solid rgba(0,0,0,0.3); }
 .legend .di { width: 9px; height: 9px; display: inline-block; background: var(--t-judge); transform: rotate(45deg); }
@@ -151,7 +151,7 @@
   padding: 8px 4px;
   margin-bottom: 6px;
 }
-.legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.legend { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); }
 .lg-i { display: inline-flex; align-items: center; gap: 5px; }
 .lg-i .sw { width: 10px; height: 10px; border-radius: 2px; display: inline-block; }
 .lg-i .di { width: 7px; height: 7px; border-radius: 50%; background: var(--ok); display: inline-block; }

@@ -14,10 +14,10 @@
 }
 .brand { display: flex; align-items: center; gap: 10px; cursor: default; }
 .brand svg { width: 20px; height: 20px; color: var(--accent-brass); }
-.wm { font-family: 'Cinzel', 'Pretendard Variable', serif; font-size: 13px; letter-spacing: 0.28em; color: var(--text-bright); text-transform: uppercase; }
+.wm { font-family: 'Cinzel', 'Pretendard Variable', serif; font-size: var(--fs-13); letter-spacing: 0.28em; color: var(--text-bright); text-transform: uppercase; }
 .wm .blood { color: var(--accent-blood); text-shadow: 0 0 6px var(--accent-blood-glow); }
 
-.crumbs { display: flex; align-items: center; gap: 8px; font-size: 10px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-dim); }
+.crumbs { display: flex; align-items: center; gap: 8px; font-size: var(--fs-10); letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-dim); }
 .crumbs .sep { color: var(--border-highlight); }
 .crumbs strong { color: var(--accent-brass); font-weight: 400; }
 
@@ -29,19 +29,19 @@
 }
 .rg-stat { display: flex; flex-direction: column; line-height: 1; }
 .rg-stat .lbl { font-size: 8px; letter-spacing: 0.24em; color: var(--text-dim); text-transform: uppercase; }
-.rg-stat .val { font-family: var(--font-mono); font-size: 13px; color: var(--text-bright); margin-top: 3px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
+.rg-stat .val { font-family: var(--font-mono); font-size: var(--fs-13); color: var(--text-bright); margin-top: 3px; font-variant-numeric: tabular-nums; letter-spacing: 0.02em; }
 .rg-stat .val.ok   { color: var(--ok); }
 .rg-stat .val.warn { color: var(--warn); }
 .rg-stat .val.bad  { color: var(--bad); }
 .rg-stat .val.brass{ color: var(--accent-brass); }
 
 .top-right { margin-left: auto; display: flex; align-items: center; gap: 8px; }
-.clock { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; letter-spacing: 0.08em; white-space: nowrap; }
+.clock { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-dim); font-variant-numeric: tabular-nums; letter-spacing: 0.08em; white-space: nowrap; }
 .clock b { color: var(--text-bright); font-weight: 400; }
 
 .pill {
   display: inline-flex; align-items: center; gap: 6px;
-  font-size: 9px; letter-spacing: 0.18em; text-transform: uppercase;
+  font-size: var(--fs-9); letter-spacing: 0.18em; text-transform: uppercase;
   padding: 4px 9px; border: 1px solid var(--border-main);
   background: rgba(14,10,8,0.6); color: var(--text-primary); cursor: default;
   font-family: var(--font-ui);
@@ -53,7 +53,7 @@
 .pill.brass{ color: var(--accent-brass); border-color: var(--hair-brass); }
 
 .pill .k { color: var(--text-dim); letter-spacing: 0.15em; }
-.pill .v { font-family: var(--font-mono); font-size: 10px; letter-spacing: 0.04em; text-transform: none; }
+.pill .v { font-family: var(--font-mono); font-size: var(--fs-10); letter-spacing: 0.04em; text-transform: none; }
 
 /* v5 refinements */
 /* ─── Topbar refinements ─── */
@@ -62,7 +62,7 @@
   background: var(--bg-ink);
 }
 .topbar .crumbs,
-.topbar .crumbs strong { font-size: 11px; }
+.topbar .crumbs strong { font-size: var(--fs-11); }
 .top-right .pill {
   background: transparent;
   border-color: var(--border);

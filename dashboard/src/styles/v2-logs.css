@@ -59,7 +59,7 @@
 .v2-logs-sub {
   margin: 6px 0 0;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.04em;
 }
 
@@ -119,7 +119,7 @@
 }
 
 .v2-logs-filter-chip.log-f {
-  font-size: 12px;
+  font-size: var(--fs-12);
   letter-spacing: 0;
   text-transform: none;
   padding: 6px 12px;
@@ -148,7 +148,7 @@
   border-radius: var(--radius-pill);
   color: var(--text-mid);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-12);
   list-style: none;
 }
 
@@ -181,7 +181,7 @@
   flex-wrap: wrap;
   gap: 10px;
   color: var(--color-fg-muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 
 .v2-logs-attention {
@@ -192,7 +192,7 @@
   color: var(--text-mid);
   cursor: pointer;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--fs-12);
   transition: color .18s ease, border-color .18s ease, background .18s ease;
 }
 
@@ -212,7 +212,7 @@
   border: 1px solid var(--border-main);
   border-radius: var(--radius-pill);
   color: var(--text-mid);
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-variant-numeric: tabular-nums;
 }
 
@@ -221,7 +221,7 @@
   align-items: center;
   gap: 8px;
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 
 .v2-logs-live .dot {
@@ -369,7 +369,7 @@
 
 .v2-logs-time {
   color: var(--text-mid);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-variant-numeric: tabular-nums;
 }
 
@@ -400,7 +400,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--fs-13);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -453,7 +453,7 @@
   min-width: 0;
   overflow: hidden;
   color: var(--text-primary);
-  font-size: 13px;
+  font-size: var(--fs-13);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -493,7 +493,7 @@
 .v2-logs-detail-grid span {
   color: var(--text-dim);
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -501,7 +501,7 @@
 .v2-logs-detail-grid b {
   color: var(--text-bright);
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 500;
 }
 
@@ -520,7 +520,7 @@
   background: var(--bg-card);
   color: var(--color-accent-fg);
   cursor: pointer;
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-weight: 600;
 }
 
@@ -557,7 +557,7 @@
   padding: 8px 12px;
   color: var(--text-mid);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-12);
   list-style: none;
 }
 
@@ -568,7 +568,7 @@
 .v2-logs-diagnostics > summary::before {
   content: ">";
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: var(--fs-10);
   transition: transform 120ms ease;
 }
 

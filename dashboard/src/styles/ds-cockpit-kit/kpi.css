@@ -18,7 +18,7 @@
 .kpi-cell:last-child { border-right: none; }
 .kpi-cell:hover { background: var(--bg-2); }
 .kpi-label {
-  font-size: 10px; font-weight: 600; letter-spacing: .08em;
+  font-size: var(--fs-10); font-weight: 600; letter-spacing: .08em;
   text-transform: uppercase; color: var(--fg-3); line-height: 1;
 }
 .kpi-row { display: flex; align-items: baseline; gap: 6px; min-width: 0; }
@@ -27,8 +27,8 @@
   color: var(--fg-1); font-variant-numeric: tabular-nums; line-height: 1;
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap; min-width: 0;
 }
-.kpi-unit { font-size: 10px; color: var(--fg-3); text-transform: uppercase; letter-spacing: .06em; }
-.kpi-delta { font-family: var(--font-mono); font-size: 10px; font-variant-numeric: tabular-nums; }
+.kpi-unit { font-size: var(--fs-10); color: var(--fg-3); text-transform: uppercase; letter-spacing: .06em; }
+.kpi-delta { font-family: var(--font-mono); font-size: var(--fs-10); font-variant-numeric: tabular-nums; }
 .kpi-delta.up { color: var(--ok); }
 .kpi-delta.down { color: var(--err); }
 .kpi-delta.flat { color: var(--fg-4); }

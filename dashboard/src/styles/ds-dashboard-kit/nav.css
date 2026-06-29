@@ -20,7 +20,7 @@
 
 .nav a {
   display: flex; align-items: center; gap: 10px;
-  padding: 6px 16px; color: var(--text-primary); font-size: 11px;
+  padding: 6px 16px; color: var(--text-primary); font-size: var(--fs-11);
   text-decoration: none; letter-spacing: 0.08em;
   border-left: 2px solid transparent; cursor: pointer; position: relative;
   transition: background 120ms ease, color 120ms ease;
@@ -34,7 +34,7 @@
 }
 .nav a.active svg { color: var(--accent-brass); }
 .nav a .tail {
-  margin-left: auto; font-family: var(--font-mono); font-size: 10px;
+  margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-10);
   color: var(--text-dim); font-variant-numeric: tabular-nums;
 }
 .nav a .tail.bad { color: var(--bad); }
@@ -55,7 +55,7 @@
 .mini-keeper.selected { background: rgba(138,106,40,0.08); }
 .mini-keeper .mkimg { width: 14px; height: 14px; object-fit: cover; border: 1px solid var(--border-main); filter: sepia(0.15) contrast(1.05) brightness(0.92); flex-shrink: 0; opacity: 0.88; }
 .mini-keeper .mkmain { flex: 1; min-width: 0; line-height: 1.1; }
-.mini-keeper .mknm { font-family: var(--font-display); font-size: 11px; letter-spacing: 0.02em; font-weight: 600; color: var(--text-bright); text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mini-keeper .mknm { font-family: var(--font-display); font-size: var(--fs-11); letter-spacing: 0.02em; font-weight: 600; color: var(--text-bright); text-transform: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .mini-keeper .mksub { font-family: var(--font-mono); font-size: 8.5px; color: var(--text-dim); margin-top: 1px; }
 .mini-keeper .mkst { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
 .mini-keeper .mkst.running    { background: var(--ok);    box-shadow: 0 0 5px var(--ok); }
@@ -86,7 +86,7 @@
 }
 .nav-brand .nb-s {
   font-family: var(--font-display);
-  font-size: 14px;
+  font-size: var(--fs-14);
   color: var(--text-bright);
   font-weight: 500;
   margin-top: 2px;
@@ -103,7 +103,7 @@
   padding: 7px 10px;
   gap: 9px;
   color: var(--text);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 .nav a:hover { background: rgba(255,255,255,0.025); }
 .nav a.active {

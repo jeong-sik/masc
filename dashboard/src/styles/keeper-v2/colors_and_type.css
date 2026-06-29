@@ -231,14 +231,14 @@ h1, h2, h3, h4, .display {
 
 h1 { font-size: 42px; letter-spacing: 0.2em; text-shadow: 0 0 40px var(--accent-glow); }
 h2 { font-size: 24px; letter-spacing: 0.14em; color: var(--accent-brass); }
-h3 { font-size: 16px; letter-spacing: 0.12em; color: var(--accent-brass); }
-h4 { font-size: 13px; letter-spacing: 0.1em;  color: var(--text-primary); }
+h3 { font-size: var(--fs-16); letter-spacing: 0.12em; color: var(--accent-brass); }
+h4 { font-size: var(--fs-13); letter-spacing: 0.1em;  color: var(--text-primary); }
 
 p, li { font-family: var(--font-body); color: var(--text-primary); }
 
 .overline, .eyebrow {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.25em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -247,7 +247,7 @@ p, li { font-family: var(--font-body); color: var(--text-primary); }
 code, pre, .mono, .tabular-nums {
   font-family: var(--font-mono);
   font-variant-numeric: tabular-nums;
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 a { color: var(--accent-brass); text-decoration: none; border-bottom: 1px dotted var(--accent-brass-dim); }
@@ -285,7 +285,7 @@ hr {
   align-items: center;
   gap: var(--space-1);
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.15em;
   text-transform: uppercase;
   padding: 3px 8px;
@@ -301,7 +301,7 @@ hr {
 
 .btn {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.15em;
   text-transform: uppercase;
   padding: 6px 14px;
@@ -326,7 +326,7 @@ hr {
 
 .input {
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--fs-12);
   padding: 6px 10px;
   background: var(--bg-panel-alt);
   border: 1px solid var(--border-main);

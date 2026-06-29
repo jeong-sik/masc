@@ -25,7 +25,7 @@
 .palette-bar svg { width: 14px; height: 14px; color: var(--accent-brass); }
 .palette-input {
   flex: 1; background: transparent; border: 0; color: var(--text-bright);
-  font-family: var(--font-ui); font-size: 14px; outline: none;
+  font-family: var(--font-ui); font-size: var(--fs-14); outline: none;
   letter-spacing: 0.02em;
 }
 .palette-input::placeholder { color: var(--text-dim); }
@@ -47,15 +47,15 @@
 .palette-item.action .kind { color: var(--accent-brass); }
 .palette-item.nav .kind    { color: #7aa3d4; }
 .palette-item.set .kind    { color: var(--text-dim); }
-.palette-item .t { font-size: 13px; color: var(--text-bright); }
-.palette-item .sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-top: 1px; }
-.palette-item .chord { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); padding: 2px 6px; border: 1px solid var(--border-main); letter-spacing: 0.08em; }
+.palette-item .t { font-size: var(--fs-13); color: var(--text-bright); }
+.palette-item .sub { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); margin-top: 1px; }
+.palette-item .chord { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); padding: 2px 6px; border: 1px solid var(--border-main); letter-spacing: 0.08em; }
 .palette-foot {
   display: flex; gap: 14px; padding: 8px 14px; border-top: 1px solid var(--border-main);
   font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim);
 }
 .palette-foot kbd {
-  font-family: var(--font-mono); font-size: 9px; padding: 1px 5px;
+  font-family: var(--font-mono); font-size: var(--fs-9); padding: 1px 5px;
   border: 1px solid var(--border-main); background: rgba(14,10,8,0.6);
   color: var(--text-primary); margin-right: 3px;
 }

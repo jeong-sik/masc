@@ -15,7 +15,7 @@
   border-right: 1px solid var(--hair); padding: 10px 12px;
   display: flex; align-items: center; gap: 9px;
 }
-.pressure-row .p-lbl .pt { font-family: var(--font-display); font-size: 11px; letter-spacing: 0.18em; color: var(--accent-brass); text-transform: uppercase; }
-.pressure-row .p-lbl .pm { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); margin-left: auto; font-variant-numeric: tabular-nums; }
+.pressure-row .p-lbl .pt { font-family: var(--font-display); font-size: var(--fs-11); letter-spacing: 0.18em; color: var(--accent-brass); text-transform: uppercase; }
+.pressure-row .p-lbl .pm { font-family: var(--font-mono); font-size: var(--fs-9); color: var(--text-dim); margin-left: auto; font-variant-numeric: tabular-nums; }
 .pressure-row .p-svg { height: 56px; }
 .pressure-row svg { display: block; width: 100%; height: 100%; }

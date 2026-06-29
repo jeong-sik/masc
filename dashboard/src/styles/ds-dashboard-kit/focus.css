@@ -9,11 +9,11 @@
 .focus-in { position: relative; z-index: 1; }
 .focus .who { display: flex; align-items: center; gap: 10px; }
 .focus .who img { width: 24px; height: 24px; object-fit: cover; border: 1px solid var(--accent-brass-dim); filter: sepia(0.15) contrast(1.05) brightness(0.92); opacity: 0.92; }
-.focus .fn { font-family: var(--font-display); font-size: 14px; color: var(--accent-brass); letter-spacing: 0.06em; font-weight: 600; text-transform: none; line-height: 1.05; }
-.focus .fr { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-top: 2px; letter-spacing: 0.04em; }
+.focus .fn { font-family: var(--font-display); font-size: var(--fs-14); color: var(--accent-brass); letter-spacing: 0.06em; font-weight: 600; text-transform: none; line-height: 1.05; }
+.focus .fr { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); margin-top: 2px; letter-spacing: 0.04em; }
 .focus .stats { display: grid; grid-template-columns: 1fr 1fr; gap: 6px 10px; margin-top: 10px; }
 .focus .stat .l { font-size: 8px; letter-spacing: 0.2em; color: var(--text-dim); text-transform: uppercase; }
-.focus .stat .v { font-family: var(--font-mono); font-size: 11px; color: var(--text-bright); margin-top: 1px; font-variant-numeric: tabular-nums; }
+.focus .stat .v { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-bright); margin-top: 1px; font-variant-numeric: tabular-nums; }
 .focus .stat .v.bad { color: var(--bad); }
 .focus .stat .v.ok  { color: var(--ok); }
 .focus .stat .v.warn{ color: var(--warn); }

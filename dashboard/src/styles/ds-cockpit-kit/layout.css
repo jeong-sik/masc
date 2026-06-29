@@ -93,7 +93,7 @@
 .pane-head .label { color: var(--fg-2); }
 .pane-head .pane-meta {
   margin-left: auto; color: var(--fg-3);
-  font-family: var(--font-mono); font-size: 10px;
+  font-family: var(--font-mono); font-size: var(--fs-10);
 }
 .pane-body { flex: 1; min-height: 0; overflow: auto; background: var(--bg-0); }
 

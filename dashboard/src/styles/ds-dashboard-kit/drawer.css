@@ -29,7 +29,7 @@
 .drawer-head .meta { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); margin-top: 2px; letter-spacing: 0.06em; }
 .drawer-head .close {
   background: transparent; border: 1px solid var(--border-main); color: var(--text-dim);
-  width: 28px; height: 28px; font-family: var(--font-mono); font-size: 14px; cursor: pointer;
+  width: 28px; height: 28px; font-family: var(--font-mono); font-size: var(--fs-14); cursor: pointer;
   transition: all 140ms ease;
 }
 .drawer-head .close:hover { color: var(--bad); border-color: var(--bad); }
@@ -41,12 +41,12 @@
 .drawer-stats > div { padding: 9px 12px; border-right: 1px solid var(--border-main); }
 .drawer-stats > div:last-child { border-right: 0; }
 .drawer-stats .k { font-size: 8.5px; letter-spacing: 0.24em; color: var(--text-dim); text-transform: uppercase; }
-.drawer-stats .v { font-family: var(--font-display); font-size: 14px; color: var(--text-bright); margin-top: 2px; font-weight: 600; }
+.drawer-stats .v { font-family: var(--font-display); font-size: var(--fs-14); color: var(--text-bright); margin-top: 2px; font-weight: 600; }
 .drawer-stats .s { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); margin-top: 1px; }
 
 .drawer-body { flex: 1; overflow: auto; padding: 14px 16px 20px; }
 .drawer-sec-title {
-  font-family: var(--font-display); font-size: 10px; letter-spacing: 0.26em; font-weight: 600;
+  font-family: var(--font-display); font-size: var(--fs-10); letter-spacing: 0.26em; font-weight: 600;
   color: var(--accent-brass); text-transform: uppercase; margin: 6px 0 8px;
   display: flex; align-items: center; gap: 9px;
 }
@@ -71,7 +71,7 @@
 .trace-turn.fail::before  { background: var(--bad); }
 .trace-turn.overflow::before,
 .trace-turn.compact::before { background: var(--accent-brass); }
-.trace-turn .n { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.trace-turn .n { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .trace-turn .tag {
   font-family: var(--font-display); font-size: 8.5px; font-weight: 700;
   letter-spacing: 0.22em; text-transform: uppercase; padding: 2px 6px;
@@ -91,6 +91,6 @@
 .drawer-bars { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
 .drawer-bar { border: 1px solid var(--hair); padding: 8px 10px; }
 .drawer-bar .lbl { font-size: 8.5px; letter-spacing: 0.24em; color: var(--text-dim); text-transform: uppercase; }
-.drawer-bar .val { font-family: var(--font-display); font-size: 13px; color: var(--text-bright); margin-top: 2px; font-weight: 600; }
+.drawer-bar .val { font-family: var(--font-display); font-size: var(--fs-13); color: var(--text-bright); margin-top: 2px; font-weight: 600; }
 .drawer-bar .bar { height: 3px; background: rgba(14,10,8,0.8); border: 1px solid var(--border-main); margin-top: 5px; position: relative; overflow: hidden; }
 .drawer-bar .bar b { position: absolute; left: 0; top: 0; bottom: 0; background: var(--accent-brass); display: block; }

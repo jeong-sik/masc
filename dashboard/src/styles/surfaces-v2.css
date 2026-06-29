@@ -74,7 +74,7 @@
 
 .surf-head .eyebrow {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -83,7 +83,7 @@
 
 .surf-sub {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--fs-12);
   color: var(--text-dim);
 }
 
@@ -153,7 +153,7 @@
   background: var(--bg-card);
   border: 1px solid var(--border-main);
   color: var(--text-dim);
-  font-size: 10px;
+  font-size: var(--fs-10);
   padding: 0;
   transition: 0.15s;
 }
@@ -244,7 +244,7 @@
 
 .ov-sub {
   margin-top: 6px;
-  font-size: 12px;
+  font-size: var(--fs-12);
   color: var(--text-dim);
 }
 
@@ -260,7 +260,7 @@
 .ov-eyebrow {
   display: inline-block;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -285,7 +285,7 @@
 }
 
 .ov-clock span {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   letter-spacing: 0.14em;
 }
@@ -331,7 +331,7 @@
 }
 
 .ov-kpi-v small {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
 }
 
@@ -369,7 +369,7 @@
 .ov-card-h h3 {
   font-family: var(--font-display);
   font-weight: 500;
-  font-size: 12px;
+  font-size: var(--fs-12);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-mid);
@@ -379,7 +379,7 @@
 
 .ov-count {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--status-bad);
   background: color-mix(in oklab, var(--status-bad) 14%, transparent);
   border: 1px solid color-mix(in oklab, var(--status-bad) 35%, transparent);
@@ -388,13 +388,13 @@
 }
 
 .ov-legend {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
 }
 
 .ov-link {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--volt-strong);
   background: none;
   border: 0;
@@ -437,7 +437,7 @@
 .ov-attn-name {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--text-bright);
   display: flex;
   gap: 10px;
@@ -445,7 +445,7 @@
 }
 
 .ov-attn-ns {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   font-weight: 400;
 }
@@ -465,7 +465,7 @@
 .ov-attn-act {
   flex: none;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-11);
   padding: 6px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-main);
@@ -485,7 +485,7 @@
   padding: 26px 0;
   text-align: center;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .ov-bars {
@@ -517,7 +517,7 @@
 }
 
 .ov-tel-stat .k {
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.14em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -525,7 +525,7 @@
 }
 
 .ov-tel-stat .v {
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--text-mid);
   margin-top: 3px;
   display: block;
@@ -581,7 +581,7 @@
   align-items: center;
   gap: 6px;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -601,7 +601,7 @@
 }
 
 .ov-keeper-ns {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   margin-top: 8px;
   white-space: nowrap;
@@ -614,7 +614,7 @@
   align-items: center;
   gap: 8px;
   margin-top: 8px;
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
 }
 
@@ -649,7 +649,7 @@
 .ov-section-h {
   font-family: var(--font-display);
   font-weight: 500;
-  font-size: 12px;
+  font-size: var(--fs-12);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -727,7 +727,7 @@
 .ov-dlink {
   margin-left: auto;
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--volt-strong);
   background: none;
   border: 0;
@@ -788,7 +788,7 @@
 }
 
 .ov-goal-due {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   flex: none;
 }
@@ -808,7 +808,7 @@
 }
 
 .ov-goal-sub {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
 }
 
@@ -821,7 +821,7 @@
 }
 
 .ov-urg-sev {
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   display: inline-block;
@@ -852,7 +852,7 @@
 }
 
 .ov-urg-by {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   margin-top: 4px;
 }
@@ -893,7 +893,7 @@
 }
 
 .ov-fus-run {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-mid);
 }
 
@@ -902,13 +902,13 @@
 }
 
 .ov-fus-by {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   margin-top: 5px;
 }
 
 .ov-fus-foot {
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 
 .ov-fus-live {
@@ -943,7 +943,7 @@
 .ov-stat-row .v {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-14);
   color: var(--text-bright);
 }
 
@@ -967,7 +967,7 @@
 }
 
 .ov-conn-pill .g {
-  font-size: 9px;
+  font-size: var(--fs-9);
 }
 
 .ov-conn-pill.ok {
@@ -986,7 +986,7 @@
 }
 
 .ov-conn-warn {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--status-warn);
   margin-top: 4px;
 }
@@ -1020,7 +1020,7 @@
 .ov-fleet-stat .v.bad { color: var(--status-bad); }
 
 .ov-fleet-stat .k {
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);

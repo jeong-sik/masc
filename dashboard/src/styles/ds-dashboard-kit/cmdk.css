@@ -10,7 +10,7 @@
   padding: 7px 11px; border: 1px solid var(--accent-brass-dim);
   background: linear-gradient(180deg, #1c140e, #120b07);
   color: var(--accent-brass); font-family: var(--font-display);
-  font-size: 10px; letter-spacing: 0.22em; font-weight: 600;
+  font-size: var(--fs-10); letter-spacing: 0.22em; font-weight: 600;
   cursor: pointer; box-shadow: 0 4px 12px rgba(0,0,0,0.5), inset 0 1px 0 rgba(138,106,40,0.2);
   transition: all 140ms ease;
 }

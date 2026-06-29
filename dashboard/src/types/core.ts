@@ -705,6 +705,7 @@ export type KeeperConversationDelivery =
   | 'sending'
   | 'streaming'
   | 'delivered'
+  | 'no_reply'
   | 'timeout'
   | 'cancelled'
   | 'error'
@@ -720,8 +721,12 @@ interface KeeperConversationUsage {
 
 // RFC-0232 P2: producer-typed turn outcome carried in the reply payload
 // (`turn_outcome`). `continuation_checkpoint` marks the synthetic
-// resume-next-cycle notice; everything else is model output.
-export type KeeperTurnOutcome = 'visible_reply' | 'continuation_checkpoint'
+// resume-next-cycle notice; `no_visible_reply` marks a completed runtime
+// turn with no assistant text for the chat surface.
+export type KeeperTurnOutcome =
+  | 'visible_reply'
+  | 'continuation_checkpoint'
+  | 'no_visible_reply'
 
 export interface KeeperConversationDetails {
   traceId?: string | null

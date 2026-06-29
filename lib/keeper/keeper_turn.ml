@@ -1291,7 +1291,8 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                   ( Keeper_turn_outcome.wire_key,
                     `String
                       (Keeper_turn_outcome.to_label
-                         (Keeper_turn_outcome.of_stop_reason
+                         (Keeper_turn_outcome.of_result_surface
+                            ~response_text:result.response_text
                             result.stop_reason)) );
                   ("model", `String surface_model_used);
                   ("model_used_raw", `String surface_model_used);

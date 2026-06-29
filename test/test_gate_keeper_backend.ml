@@ -33,6 +33,33 @@ let string_contains haystack needle =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let translate_oas_stream_events events =
+  let redact_text text = text in
+  let text_accum = Keeper_stream_text_accum.create () in
+  let rec loop bridge_state acc = function
+    | [] -> List.rev acc
+    | event :: rest ->
+        let translated =
+          Server_routes_http_keeper_stream.For_testing.translate_oas_stream_event
+            ~redact_text ~text_accum bridge_state event
+        in
+        loop translated.bridge_state
+          (List.rev_append translated.chat_events acc) rest
+  in
+  loop
+    Server_routes_http_keeper_stream.For_testing.empty_stream_bridge_state []
+    events
+
+let assoc_string key fields =
+  match List.assoc_opt key fields with
+  | Some (`String value) -> Some value
+  | _ -> None
+
+let assoc_int key fields =
+  match List.assoc_opt key fields with
+  | Some (`Int value) -> Some value
+  | _ -> None
+
 let test_agent_name_for_channel_actor () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
@@ -461,6 +488,103 @@ let test_keeper_stream_args_preserve_user_blocks () =
              | _ -> None)
       | _ -> fail "expected user_blocks and attachment payload in keeper args")
   | _ -> fail "expected keeper args object"
+
+let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockDelta { index = 0; delta = ThinkingDelta "think A" };
+        ContentBlockStart
+          { index = 1;
+            content_type = "tool_use";
+            tool_id = Some "tc-1";
+            tool_name = Some "keeper_board_list" };
+        ContentBlockDelta { index = 1; delta = InputJsonDelta "{\"limit\":" };
+        ContentBlockDelta { index = 1; delta = InputJsonDelta "1}" };
+        ContentBlockStop { index = 1 };
+        ContentBlockDelta { index = 2; delta = ThinkingDelta "think B" };
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Custom
+        { name = "KEEPER_THINKING_DELTA"; value = `Assoc first };
+      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
+      Keeper_chat_events.Tool_call_args { tool_call_id = args_id_a; delta = args_a };
+      Keeper_chat_events.Tool_call_args { tool_call_id = args_id_b; delta = args_b };
+      Keeper_chat_events.Tool_call_end { tool_call_id = end_id };
+      Keeper_chat_events.Custom
+        { name = "KEEPER_THINKING_DELTA"; value = `Assoc last } ] ->
+      check (option string) "first thinking" (Some "think A")
+        (assoc_string "delta" first);
+      check string "tool id" "tc-1" tool_call_id;
+      check string "tool name" "keeper_board_list" tool_call_name;
+      check string "args id a" "tc-1" args_id_a;
+      check string "args id b" "tc-1" args_id_b;
+      check string "args a" "{\"limit\":" args_a;
+      check string "args b" "1}" args_b;
+      check string "end id" "tc-1" end_id;
+      check (option string) "last thinking" (Some "think B")
+        (assoc_string "delta" last)
+  | _ ->
+      failf "unexpected stream bridge events: %s"
+        (String.concat ", "
+           (List.map
+              (function
+                | Keeper_chat_events.Custom { name; _ } -> "custom:" ^ name
+                | Keeper_chat_events.Tool_call_start _ -> "tool_start"
+                | Keeper_chat_events.Tool_call_args _ -> "tool_args"
+                | Keeper_chat_events.Tool_call_end _ -> "tool_end"
+                | Keeper_chat_events.Text_delta _ -> "text"
+                | Keeper_chat_events.Event_error _ -> "error"
+                | _ -> "other")
+              events))
+
+let test_keeper_stream_bridge_rejects_tool_args_without_start () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [ ContentBlockDelta { index = 7; delta = InputJsonDelta "{\"x\":1}" } ]
+  in
+  match events with
+  | [ Keeper_chat_events.Custom
+        { name = "KEEPER_STREAM_PROTOCOL_ERROR"; value = `Assoc fields } ] ->
+      check (option string) "kind" (Some "tool_args_without_start")
+        (assoc_string "kind" fields);
+      check (option int) "index" (Some 7) (assoc_int "index" fields);
+      check bool "no tool event forged" true
+        (not
+           (List.exists
+              (function
+                | Keeper_chat_events.Tool_call_args _ -> true
+                | _ -> false)
+              events))
+  | _ -> fail "expected a stream protocol error for missing tool start"
+
+let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        SSEUnknownEventType { event_type = "response.future"; raw = "{\"x\":1}" };
+        StreamIncomplete { reason = "max_output_tokens" };
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Custom
+        { name = "KEEPER_STREAM_PROTOCOL_ERROR"; value = `Assoc unknown };
+      Keeper_chat_events.Custom
+        { name = "KEEPER_STREAM_PROTOCOL_ERROR"; value = `Assoc incomplete };
+      Keeper_chat_events.Event_error { message } ] ->
+      check (option string) "unknown kind" (Some "sse_unknown_event_type")
+        (assoc_string "kind" unknown);
+      check (option string) "unknown event type" (Some "response.future")
+        (assoc_string "event_type" unknown);
+      check (option string) "incomplete kind" (Some "sse_stream_incomplete")
+        (assoc_string "kind" incomplete);
+      check string "incomplete is visible error"
+        "Provider stream incomplete: max_output_tokens" message
+  | _ -> fail "expected visible events for unknown/incomplete provider stream"
 
 let test_keeper_chat_history_persists_attachment_refs_not_raw_media () =
   let base_dir = temp_base_path "gate-keeper-media-history" in
@@ -1207,6 +1331,12 @@ let () =
             test_keeper_multimodal_input_rejects_malformed_data_url;
           test_case "stream args preserve user blocks" `Quick
             test_keeper_stream_args_preserve_user_blocks;
+          test_case "stream bridge preserves interleaved thinking and tool" `Quick
+            test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool;
+          test_case "stream bridge rejects tool args without start" `Quick
+            test_keeper_stream_bridge_rejects_tool_args_without_start;
+          test_case "stream bridge surfaces unknown and incomplete events" `Quick
+            test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events;
           test_case "chat history persists attachment refs not raw media" `Quick
             test_keeper_chat_history_persists_attachment_refs_not_raw_media;
           test_case "user-only chat history persists attachment refs not raw media" `Quick

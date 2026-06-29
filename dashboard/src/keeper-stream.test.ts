@@ -379,19 +379,42 @@ describe('applyKeeperStreamEvent tool calls', () => {
     ])
   })
 
-  it('routes args to the last started tool call when toolCallId is missing', () => {
+  it('records a protocol error instead of guessing the tool when toolCallId is missing', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
-      toolCallId: 'tc-fallback',
+      toolCallId: 'tc-no-fallback',
       toolCallName: 'keeper_board_post',
     })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_ARGS', delta: '{"post_id":"p-1"}' })
     applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TOOL_CALL_END' })
 
-    const tool = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-fallback')
-    expect(tool?.text).toBe('{"post_id":"p-1"}')
-    expect(tool?.delivery).toBe('delivered')
+    const tool = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-no-fallback')
+    expect(tool?.text).toBe('')
+    expect(tool?.delivery).toBe('streaming')
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.rawText).toContain('[stream protocol] TOOL_CALL_ARGS missing toolCallId')
+    expect(reply?.rawText).toContain('[stream protocol] TOOL_CALL_END missing toolCallId')
+    expect(reply?.error).toBe('TOOL_CALL_END missing toolCallId')
+  })
+
+  it('records server stream protocol errors on the assistant entry', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: {
+        kind: 'tool_args_without_start',
+        index: 2,
+        reason: 'tool argument delta arrived before tool start',
+      },
+    })
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.error).toBe(
+      'tool_args_without_start | index=2 | tool argument delta arrived before tool start',
+    )
+    expect(reply?.rawText).toContain('[stream protocol] tool_args_without_start')
   })
 
   it('keeps duplicate TOOL_CALL_START events idempotent', () => {

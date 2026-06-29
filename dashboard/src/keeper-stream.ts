@@ -31,15 +31,37 @@ import { toolEntryIdFromCallId } from './tool-call-output-store'
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 
-// Most recent TOOL_CALL_START id per keeper — fallback target for
-// TOOL_CALL_ARGS / TOOL_CALL_END events that omit toolCallId.
-const lastToolCallIds = new Map<string, string>()
-
 export interface KeeperThreadAbortResult {
   readonly keeperName: string
   readonly entryId: string | null
   readonly requestId: string | null
   readonly controllerAborted: boolean
+}
+
+function streamProtocolMessage(value: unknown, fallback: string): string {
+  if (!isRecord(value)) return fallback
+  const kind = asString(value.kind, '').trim()
+  const reason = asString(value.reason, '').trim()
+  const eventType = asString(value.event_type, '').trim()
+  const index = typeof value.index === 'number' ? `index=${value.index}` : ''
+  return [kind || fallback, eventType ? `event=${eventType}` : '', index, reason]
+    .filter(part => part.trim() !== '')
+    .join(' | ')
+}
+
+function recordStreamProtocolError(
+  keeperName: string,
+  assistantEntryId: string,
+  message: string,
+): void {
+  updateThreadEntry(keeperName, assistantEntryId, entry => {
+    const line = `[stream protocol] ${message}`
+    return {
+      ...entry,
+      rawText: entry.rawText?.trim() ? `${entry.rawText}\n${line}` : line,
+      error: message,
+    }
+  })
 }
 
 export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult | null {
@@ -96,9 +118,16 @@ export function applyKeeperStreamEvent(
       setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
       return null
     case 'TOOL_CALL_START': {
-      const toolCallId = event.toolCallId ?? `tc-${keeperName}-${Date.now()}`
-      lastToolCallIds.set(keeperName, toolCallId)
-      const toolName = event.toolCallName ?? event.name ?? 'tool'
+      const toolCallId = event.toolCallId?.trim()
+      const toolName = (event.toolCallName ?? event.name)?.trim()
+      if (!toolCallId || !toolName) {
+        recordStreamProtocolError(
+          keeperName,
+          assistantEntryId,
+          'TOOL_CALL_START missing toolCallId or toolCallName',
+        )
+        return null
+      }
       appendAssistantToolTraceStep(keeperName, assistantEntryId, {
         toolCallId,
         name: toolName,
@@ -120,7 +149,15 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TOOL_CALL_ARGS': {
-      const toolCallId = event.toolCallId ?? lastToolCallIds.get(keeperName)
+      const toolCallId = event.toolCallId?.trim()
+      if (!toolCallId) {
+        recordStreamProtocolError(
+          keeperName,
+          assistantEntryId,
+          'TOOL_CALL_ARGS missing toolCallId',
+        )
+        return null
+      }
       if (toolCallId && typeof event.delta === 'string' && event.delta) {
         appendAssistantToolTraceArgsDelta(keeperName, assistantEntryId, toolCallId, event.delta)
         updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
@@ -132,7 +169,15 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TOOL_CALL_END': {
-      const toolCallId = event.toolCallId ?? lastToolCallIds.get(keeperName)
+      const toolCallId = event.toolCallId?.trim()
+      if (!toolCallId) {
+        recordStreamProtocolError(
+          keeperName,
+          assistantEntryId,
+          'TOOL_CALL_END missing toolCallId',
+        )
+        return null
+      }
       if (toolCallId) {
         markAssistantToolTraceEnded(keeperName, assistantEntryId, toolCallId)
         updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
@@ -140,9 +185,6 @@ export function applyKeeperStreamEvent(
           delivery: 'delivered',
           streamState: null,
         }))
-        if (lastToolCallIds.get(keeperName) === toolCallId) {
-          lastToolCallIds.delete(keeperName)
-        }
       }
       return null
     }
@@ -159,6 +201,22 @@ export function applyKeeperStreamEvent(
             : undefined
         if (delta) appendAssistantThinkingDelta(keeperName, assistantEntryId, delta)
         else setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
+        return null
+      }
+      if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {
+        recordStreamProtocolError(
+          keeperName,
+          assistantEntryId,
+          streamProtocolMessage(event.value, 'stream protocol error'),
+        )
+        return null
+      }
+      if (event.name === 'KEEPER_THINKING_SIGNATURE_DELTA') {
+        setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
+        return null
+      }
+      if (event.name === 'KEEPER_MEDIA_DELTA') {
+        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
         return null
       }
       if (event.name === 'KEEPER_QUEUE_REQUEST') {

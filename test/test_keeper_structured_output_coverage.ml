@@ -55,6 +55,32 @@ let expected_structured_dashboard_agent_run_json_judges =
 
 let expected_structured_fusion_json_judges = [ "lib/fusion/fusion_judge.ml" ];;
 
+let expected_structured_tool_agent_runs =
+  List.sort
+    String.compare
+    [ "lib/keeper/keeper_adversarial_review.ml"
+    ; "lib/verifier_oas.ml"
+    ; "lib/workspace_metric_hooks.ml"
+    ]
+;;
+
+let expected_masc_tool_agent_run_files =
+  List.sort
+    String.compare
+    (expected_structured_dashboard_agent_run_json_judges
+     @ expected_structured_tool_agent_runs)
+;;
+
+let masc_tool_agent_run_files_under rel =
+  ml_files_under rel
+  |> List.filter (fun rel ->
+    Ast_grep.count_calls
+      ~module_path:rel
+      ~callee:"Keeper_turn_driver_wrappers.run_named_with_masc_tools"
+    > 0)
+  |> List.sort String.compare
+;;
+
 let expected_all_direct_completion_files =
   List.sort
     String.compare
@@ -139,6 +165,44 @@ let test_fusion_agent_run_json_judges_use_provider_config_transform () =
             ~callee:"Fusion_oas.build_agent"
             ~label:"provider_config_transform"))
     expected_structured_fusion_json_judges
+;;
+
+let test_all_masc_tool_agent_runs_are_classified () =
+  check
+    (list string)
+    "all run_named_with_masc_tools files"
+    expected_masc_tool_agent_run_files
+    (masc_tool_agent_run_files_under "lib")
+;;
+
+let test_structured_tool_agent_runs_use_tool_schema_output () =
+  let parser_expectations =
+    [ ( "lib/keeper/keeper_adversarial_review.ml"
+      , "Verifier_core.parse_grounded_verdict_from_json" )
+    ; "lib/verifier_oas.ml", "Core.parse_verdict_from_json"
+    ; ( "lib/workspace_metric_hooks.ml"
+      , "Task.Anti_rationalization.parse_review_verdict_from_json" )
+    ]
+  in
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " wires MASC tool schemas into Agent.run")
+         1
+         (Ast_grep.count_calls_with_label
+            ~module_path:rel
+            ~callee:"Keeper_turn_driver_wrappers.run_named_with_masc_tools"
+            ~label:"masc_tools"))
+    expected_structured_tool_agent_runs;
+  List.iter
+    (fun (rel, parser) ->
+       check
+         int
+         (rel ^ " parses structured tool arguments via " ^ parser)
+         1
+         (Ast_grep.count_calls ~module_path:rel ~callee:parser))
+    parser_expectations
 ;;
 
 let test_model_label_wrappers_can_receive_provider_config_transform () =
@@ -366,6 +430,16 @@ let () =
             "fusion judge schema uses parser wire contract"
             `Quick
             test_fusion_judge_schema_uses_parser_wire_contract
+        ] )
+    ; ( "structured tool Agent.run"
+      , [ test_case
+            "run_named_with_masc_tools files are classified"
+            `Quick
+            test_all_masc_tool_agent_runs_are_classified
+        ; test_case
+            "tool-output Agent.run paths parse structured tool arguments"
+            `Quick
+            test_structured_tool_agent_runs_use_tool_schema_output
         ] )
     ; ( "model-label wrappers"
       , [ test_case

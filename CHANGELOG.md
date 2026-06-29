@@ -3,8 +3,9 @@
 ## Unreleased
 
 ### Changed
-- Bump OAS agent_sdk pin to 0.207.19 plus the OAS #2243 `7a90978`
-  fail-closed unknown-stream-block follow-up SHA.
+- Bump OAS agent_sdk pin to 0.207.19 plus the OAS #2232/#2243
+  `8506fec` assistant tool-content and fail-closed unknown-stream-block
+  follow-up SHA.
 
 ### Fixed
 - Stabilize keeper quick-suite tests under Dune sandboxing by resolving

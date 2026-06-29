@@ -55,9 +55,10 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.19 plus the OAS #2243 follow-up SHA. The pinned
-  ;; source includes typed reasoning replay, GLM preserved-thinking replay
-  ;; gating, and fail-closed unknown stream block handling.
+  ;; Pinned to OAS v0.207.19 plus the OAS #2232/#2243 follow-up SHA. The
+  ;; pinned source includes typed reasoning replay, GLM preserved-thinking
+  ;; replay gating, assistant tool-content wire-format capability, and
+  ;; fail-closed unknown stream block handling.
   (agent_sdk (>= 0.207.19))
   (uri (>= 4.4))
   (tls (>= 2.0))

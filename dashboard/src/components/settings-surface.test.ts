@@ -368,6 +368,54 @@ describe('SettingsSurface', () => {
     expect(never?.getAttribute('data-active')).toBe('true')
   })
 
+  it('local preview text inputs are editable and reflected in dependent text', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="settings-mcp-endpoint-input"]')
+    expect(input).toBeTruthy()
+    expect(input?.readOnly).toBe(false)
+
+    await fireEvent.input(input as HTMLInputElement, {
+      target: { value: 'http://127.0.0.1:7777/mcp' },
+    })
+
+    expect(input?.value).toBe('http://127.0.0.1:7777/mcp')
+    expect(container.querySelector('.set-mcp-detail')?.textContent).toContain('POST http://127.0.0.1:7777/mcp')
+    expect(container.querySelector('[data-testid="settings-preview-badge"]')?.textContent).toBe('local only')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement)
+
+    expect(container.querySelector<HTMLInputElement>('[data-testid="settings-mcp-endpoint-input"]')?.value).toBe('http://127.0.0.1:7777/mcp')
+  })
+
+  it('sandbox allowlist and gate base local inputs are editable', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-sandbox"]') as HTMLElement)
+
+    const allowlistInput = container.querySelector<HTMLInputElement>('[data-testid="settings-allowed-domains-input"]')
+    expect(allowlistInput).toBeTruthy()
+    expect(allowlistInput?.readOnly).toBe(false)
+
+    await fireEvent.input(allowlistInput as HTMLInputElement, {
+      target: { value: 'github.com, example.test' },
+    })
+    expect(allowlistInput?.value).toBe('github.com, example.test')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
+
+    const gateInput = container.querySelector<HTMLInputElement>('[data-testid="settings-gate-base-input"]')
+    expect(gateInput).toBeTruthy()
+    expect(gateInput?.readOnly).toBe(false)
+
+    await fireEvent.input(gateInput as HTMLInputElement, {
+      target: { value: 'https://gate.example.test' },
+    })
+    expect(gateInput?.value).toBe('https://gate.example.test')
+  })
+
   it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 

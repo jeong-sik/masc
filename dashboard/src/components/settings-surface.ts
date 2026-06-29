@@ -29,6 +29,7 @@ type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
+const SETTINGS_LOCAL_STORAGE_PREFIX = 'masc.settings.local.'
 
 const SET_SECTIONS: [SectionId, string, string][] = [
   ['account', 'Account', '계정'],
@@ -80,6 +81,33 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .filter(item => item.surfaces.includes(MCP_PUBLIC_SURFACE))
     .map(item => item.name)
     .sort((a, b) => a.localeCompare(b))
+}
+
+function readLocalPreviewString(key: string, fallback: string): string {
+  try {
+    if (typeof sessionStorage === 'undefined') return fallback
+    return sessionStorage.getItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writeLocalPreviewString(key: string, value: string) {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    sessionStorage.setItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`, value)
+  } catch {
+    // Local preview settings are best-effort; blocked storage should not break Settings.
+  }
+}
+
+function useLocalPreviewString(key: string, initialValue: string): [string, (next: string) => void] {
+  const [value, setValue] = useState(() => readLocalPreviewString(key, initialValue))
+  const setStoredValue = (next: string) => {
+    setValue(next)
+    writeLocalPreviewString(key, next)
+  }
+  return [value, setStoredValue]
 }
 
 // [fusion] preset shape from config/runtime.toml [fusion] — keeper-v2
@@ -298,7 +326,7 @@ function SetSlider({
   `
 }
 
-function PreviewBadge({ label = 'API 미연결' }: { label?: string }) {
+function PreviewBadge({ label = 'local only' }: { label?: string }) {
   return html`
     <span
       class="set-preview-badge"
@@ -529,7 +557,7 @@ export function SettingsSurface() {
   const [sessionExpiry, setSessionExpiry] = useState('8시간')
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
-  const [mcpUrl, setMcpUrl] = useState('https://masc.local/mcp')
+  const [mcpUrl, setMcpUrl] = useLocalPreviewString('mcpUrl', 'https://masc.local/mcp')
   const [transport, setTransport] = useState('http')
   const [mcpTools, setMcpTools] = useState<string[]>([])
   const [tools, setTools] = useState<Record<string, boolean>>({})
@@ -617,20 +645,20 @@ export function SettingsSurface() {
   const [onOverflow, setOnOverflow] = useState('자동 compact')
 
   // gate / paths
-  const [gateBase, setGateBase] = useState('https://gate.masc.local')
+  const [gateBase, setGateBase] = useLocalPreviewString('gateBase', 'https://gate.masc.local')
   const [gateOn, setGateOn] = useState<Record<string, boolean>>({
     Slack: true,
     Discord: true,
     Amplitude: true,
     GitHub: false,
   })
-  const [wtBase, setWtBase] = useState('~/wt')
-  const [storeUrl, setStoreUrl] = useState('postgres://masc.local:5432/masc')
+  const [wtBase, setWtBase] = useLocalPreviewString('wtBase', '~/wt')
+  const [storeUrl, setStoreUrl] = useLocalPreviewString('storeUrl', 'postgres://masc.local:5432/masc')
 
   // sandbox
   const [isolation, setIsolation] = useState('container')
   const [egress, setEgress] = useState('허용목록')
-  const [allowlist, setAllowlist] = useState('github.com, opam.ocaml.org, *.masc.local')
+  const [allowlist, setAllowlist] = useLocalPreviewString('allowlist', 'github.com, opam.ocaml.org, *.masc.local')
   const [fsScope, setFsScope] = useState('worktree')
   const [shellOn, setShellOn] = useState(true)
   const [blockRisky, setBlockRisky] = useState(true)
@@ -653,7 +681,7 @@ export function SettingsSurface() {
   const [annoAutoLink, setAnnoAutoLink] = useState(true)
   const [embedTerminal, setEmbedTerminal] = useState(true)
   const [searchIndex, setSearchIndex] = useState(true)
-  const [ideRepo, setIdeRepo] = useState('masc/masc-mcp')
+  const [ideRepo, setIdeRepo] = useLocalPreviewString('ideRepo', 'masc/masc-mcp')
 
   // logs
   const [traceKeep, setTraceKeep] = useState('30일')
@@ -777,7 +805,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-mcp-endpoint-input"
                     value=${mcpUrl}
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
@@ -1023,7 +1051,7 @@ export function SettingsSurface() {
                 <${SetRow} label="Allowed domains" hint="Comma-separated">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-allowed-domains-input"
                     style=${{ width: '260px' }}
                     value=${allowlist}
                     onInput=${(e: Event) => setAllowlist((e.target as HTMLInputElement).value)}
@@ -1109,7 +1137,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-ide-repo-input"
                     value=${ideRepo}
                     onInput=${(e: Event) => setIdeRepo((e.target as HTMLInputElement).value)}
                   />
@@ -1133,7 +1161,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-gate-base-input"
                     value=${gateBase}
                     onInput=${(e: Event) => setGateBase((e.target as HTMLInputElement).value)}
                   />
@@ -1178,7 +1206,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-mcp-endpoint-input"
                     value=${mcpUrl}
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
@@ -1189,7 +1217,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-store-url-input"
                     value=${storeUrl}
                     onInput=${(e: Event) => setStoreUrl((e.target as HTMLInputElement).value)}
                   />
@@ -1200,7 +1228,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-worktree-base-input"
                     value=${wtBase}
                     onInput=${(e: Event) => setWtBase((e.target as HTMLInputElement).value)}
                   />

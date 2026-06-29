@@ -11,6 +11,9 @@ val librarian_episode_output_schema : Yojson.Safe.t
 val consolidation_plan_output_schema : Yojson.Safe.t
 (** JSON object the per-keeper consolidation provider must return. *)
 
+val memory_bank_summary_output_schema : Yojson.Safe.t
+(** JSON object the memory-bank summary provider must return. *)
+
 val apply_to_provider_config
   :  Yojson.Safe.t
   -> Llm_provider.Provider_config.t

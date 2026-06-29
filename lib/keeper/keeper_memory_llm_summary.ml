@@ -63,9 +63,9 @@ let provider_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
     temperature = Some 0.0;
     tool_choice = None;
     disable_parallel_tool_use = true;
-    response_format = Agent_sdk.Types.Off;
-    output_schema = None;
   }
+  |> Keeper_memory_os_structured_schema.apply_to_provider_config
+       Keeper_memory_os_structured_schema.memory_bank_summary_output_schema
 
 let text_block text : Agent_sdk.Types.content_block =
   Agent_sdk.Types.Text text
@@ -85,20 +85,22 @@ let messages_for_summary ~trace_id ~texts =
     "You summarize keeper progress notes into one durable memory-bank entry. \
      Preserve concrete code paths, commands, decisions, blockers, and next \
      steps. Do not invent facts. Do not include [STATE] blocks or markdown \
-     fences. Output only the summary text."
+     fences. Output only a JSON object with a non-empty string field named \
+     summary."
   in
   let user =
     Printf.sprintf
       "trace_id: %s\n\
        notes:\n\
        %s\n\n\
-       Write a concise durable summary for future keeper code work."
+       Write a concise durable summary for future keeper code work. Return \
+       {\"summary\":\"...\"} only."
       trace_id
       (bounded_notes_text texts)
   in
   [ message Agent_sdk.Types.System system; message Agent_sdk.Types.User user ]
 
-let response_text (response : Agent_sdk.Types.api_response) : string option =
+let raw_response_text (response : Agent_sdk.Types.api_response) : string option =
   let text =
     response.content
     |> List.filter_map (function Agent_sdk.Types.Text s -> Some s | _ -> None)
@@ -108,6 +110,30 @@ let response_text (response : Agent_sdk.Types.api_response) : string option =
     |> String.trim
   in
   if text = "" then None else Some text
+
+let summary_text_of_raw_text raw =
+  try
+    match Yojson.Safe.from_string raw with
+    | `Assoc fields ->
+      (match List.assoc_opt "summary" fields with
+       | Some (`String summary) ->
+         let summary = String.trim summary in
+         if summary = "" then None else Some summary
+       | Some _
+       | None -> None)
+    | _ -> None
+  with Yojson.Json_error _ -> None
+;;
+
+let summary_text_of_response response =
+  match raw_response_text response with
+  | None -> None
+  | Some raw -> summary_text_of_raw_text raw
+;;
+
+module For_testing = struct
+  let summary_text_of_response = summary_text_of_response
+end
 
 let with_timeout ?clock ~timeout_sec f =
   match clock with
@@ -153,7 +179,7 @@ let summarize_with_provider
           trace_id provider_cfg.model_id timeout_sec;
         None, Keeper_memory_llm_summary_outcome.Timed_out
     | Some (Ok response) ->
-        (match response_text response with
+        (match summary_text_of_response response with
          | Some _ as summary ->
              summary, Keeper_memory_llm_summary_outcome.Ok_summary
          | None ->

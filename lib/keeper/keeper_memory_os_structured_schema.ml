@@ -89,6 +89,11 @@ let consolidation_plan_output_schema =
   object_schema ~required:(List.map fst fields) fields
 ;;
 
+let memory_bank_summary_output_schema =
+  let fields = [ "summary", string_schema ] in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
 let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with
     response_format = Agent_sdk.Types.JsonSchema schema

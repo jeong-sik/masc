@@ -6,6 +6,7 @@ module Memory_io = Masc.Keeper_memory_os_io
 module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
+module Memory_summary = Masc.Keeper_memory_llm_summary
 module Structured_schema = Masc.Keeper_memory_os_structured_schema
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
@@ -1146,6 +1147,49 @@ let test_librarian_rejects_invalid_claims () =
        ; "constraints", `List []
        ; "preserved_tool_refs", `List []
        ])
+;;
+
+let test_memory_llm_summary_provider_requests_json_schema () =
+  let provider_cfg = Memory_summary.provider_for_summary (test_provider_cfg ()) in
+  let expected_schema = Structured_schema.memory_bank_summary_output_schema in
+  Alcotest.(check (option int))
+    "summary max tokens capped"
+    (Some Memory_summary.summary_max_tokens)
+    provider_cfg.Llm_provider.Provider_config.max_tokens;
+  Alcotest.(check bool)
+    "summary json schema response format"
+    true
+    (match provider_cfg.response_format with
+     | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
+     | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
+  Alcotest.(check (option bool))
+    "summary output schema mirrors response format"
+    (Some true)
+    (Option.map
+       (Yojson.Safe.equal expected_schema)
+       provider_cfg.Llm_provider.Provider_config.output_schema)
+;;
+
+let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
+  let parse raw =
+    Memory_summary.For_testing.summary_text_of_response (fake_response raw)
+  in
+  Alcotest.(check (option string))
+    "valid summary json"
+    (Some "Remember exact command.")
+    (parse {|{"summary":" Remember exact command.  "}|});
+  Alcotest.(check (option string))
+    "plain text rejected"
+    None
+    (parse "Remember exact command.");
+  Alcotest.(check (option string))
+    "empty summary rejected"
+    None
+    (parse {|{"summary":"   "}|});
+  Alcotest.(check (option string))
+    "wrong field rejected"
+    None
+    (parse {|{"text":"Remember exact command."}|})
 ;;
 
 let json_episode_file_count ~keeper_id =
@@ -5166,6 +5210,14 @@ let () =
             "librarian rejects invalid claims"
             `Quick
             test_librarian_rejects_invalid_claims
+        ; Alcotest.test_case
+            "memory llm summary requests json schema"
+            `Quick
+            test_memory_llm_summary_provider_requests_json_schema
+        ; Alcotest.test_case
+            "memory llm summary accepts only summary json"
+            `Quick
+            test_memory_llm_summary_response_parser_accepts_only_summary_json
         ; Alcotest.test_case
             "librarian runtime appends episode bundle"
             `Quick

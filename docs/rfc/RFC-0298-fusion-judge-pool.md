@@ -54,8 +54,53 @@ limit      = 6
    - routing(`[ollama_cloud.<key>]`) → `api-name` → `[models.<api-name>.capabilities]`.
    - `supports-*` flag.
 3. `require` **모두** 만족 + `exclude` glob에 안 걸림.
-4. deterministic 정렬(정의 순서) 후 `limit`까지.
+4. deterministic 정렬(String.compare, 정의 순서) 후 `limit`까지(`0` = 무제한).
 5. 결과: judge 후보 runtime_ids.
+
+**의사코드** (구현 가이드; 본인이 `Runtime_schema` 실제 API에 맞춰 조정):
+
+```ocaml
+(* list-then-capability: jp_models <> [] → list mode, [] → capability mode *)
+let resolve_pool (pool : judge_pool) (cfg : Runtime_schema.config)
+  : (string list, resolve_error) result =
+  if pool.jp_models <> [] then Ok pool.jp_models
+  else
+    let candidates =
+      cfg.Runtime_schema.providers
+      |> List.filter (fun p -> String.equal p.Runtime_schema.id pool.jp_provider)
+      |> List.concat_map routed_runtime_ids_of_provider  (* ["ollama_cloud.<key>"; ...] *)
+    in
+    let judged =
+      List.filter_map
+        (fun rid ->
+           match capability_flags_of_runtime_id cfg rid with
+           | None -> None               (* capability source 없음 → 제외 *)
+           | Some caps ->
+             let req_ok  = List.for_all (fun r -> List.mem r caps) pool.jp_require in
+             let excluded = List.exists (fun g -> glob_match g rid) pool.jp_exclude in
+             if req_ok && not excluded then Some rid else None)
+        candidates
+    in
+    let sorted  = List.sort_uniq String.compare judged in
+    let limited = if pool.jp_limit > 0 then take pool.jp_limit sorted else sorted in
+    match limited with
+    | [] -> Error (Empty_pool pool.jp_name)   (* fail-fast; silent fallback 금지 *)
+    | xs -> Ok xs
+
+(* capability_flags_of_runtime_id: rid → provider → model_spec → supports-* flags
+   경로(runtime_id "ollama_cloud.minimax-m3" 예):
+     rid "ollama_cloud.minimax-m3"
+       → provider="ollama_cloud", key="minimax-m3"
+       → [ollama_cloud.minimax-m3] routing → model api-name "minimax-m3"
+       → [models.minimax-m3.capabilities]
+       → supports-response-format-json=true, supports-reasoning-budget=true
+       → flags = ["supports-response-format-json"; "supports-reasoning-budget"]
+   capability source가 없는 rid → None (제외). *)
+and capability_flags_of_runtime_id cfg rid = ...
+(* glob_match: 단순 '*' wildcard (String). 예 "ministral-*" → "ministral-X" 매치. *)
+and glob_match pattern s = ...
+```
+
 
 **경계**:
 - 빈 결과 → **fail-fast** (preset 사용 시 명시 에러. silent fallback 금지).

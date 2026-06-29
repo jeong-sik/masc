@@ -1,5 +1,7 @@
 let default_keep_recent = 3
 
+module Canonical_tool = Agent_sdk.Canonical_tool
+
 let keep_recent_from_env () =
   match Sys.getenv_opt "MASC_TOOL_HYDRATE_RECENT" with
   | None -> default_keep_recent
@@ -27,21 +29,32 @@ let try_hydrate ~store ~sha256 ~marker =
 
 let hydrate_block ~store ~remaining
     (block : Agent_sdk.Types.content_block) : Agent_sdk.Types.content_block =
-  match block with
-  | Agent_sdk.Types.ToolResult
-      { tool_use_id; content; is_error; json; content_blocks } ->
+  match Canonical_tool.tool_result_of_block block with
+  | Some result ->
       if !remaining = 0 then block
       else
-        (match Tool_output.decode_from_oas content with
+        (match Tool_output.decode_from_oas result.Canonical_tool.content with
          | Tool_output.Stored { sha256; _ } ->
-             (match try_hydrate ~store ~sha256 ~marker:content with
+             (match
+                try_hydrate ~store ~sha256 ~marker:result.Canonical_tool.content
+              with
               | Some bytes ->
                   decr remaining;
                   Agent_sdk.Types.ToolResult
-                    { tool_use_id; content = bytes; is_error; json; content_blocks }
+                    { tool_use_id = result.Canonical_tool.call_id
+                    ; content = bytes
+                    ; is_error = result.Canonical_tool.is_error
+                    ; json = result.Canonical_tool.structured_content
+                    ; content_blocks = result.Canonical_tool.content_blocks
+                    }
               | None -> block)
          | Tool_output.Inline _ -> block)
-  | _ -> block
+  | None -> (
+      match block with
+      | Agent_sdk.Types.ToolResult _ ->
+          invalid_arg
+            "keeper_artifact_hydrator: OAS canonical tool-result projection unavailable"
+      | _ -> block)
 
 let hydrate_messages ~store ~keep_recent
     (messages : Agent_sdk.Types.message list) : Agent_sdk.Types.message list =

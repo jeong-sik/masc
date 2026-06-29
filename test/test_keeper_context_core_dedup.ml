@@ -206,6 +206,59 @@ let test_roundtrip_preserves_thinking_type () =
       Alcotest.(check string) "text" "done" text
   | _ -> Alcotest.fail "expected thinking, thinking, redacted thinking, text"
 
+let test_thinking_block_json_uses_oas_signature () =
+  let original : T.message =
+    {
+      T.role = T.Assistant;
+      content =
+        [ T.Thinking { thinking_type = "anthropic-signature"; content = "signed" } ];
+      name = None;
+      tool_call_id = None;
+      metadata = [];
+    }
+  in
+  match C.message_to_json original with
+  | `Assoc fields -> (
+      match List.assoc_opt "content_blocks" fields with
+      | Some (`List [ `Assoc block_fields ]) ->
+          Alcotest.(check bool)
+            "uses OAS canonical signature carrier" true
+            (List.mem_assoc "signature" block_fields);
+          Alcotest.(check bool)
+            "does not emit legacy thinking_type carrier" false
+            (List.mem_assoc "thinking_type" block_fields);
+          Alcotest.(check string)
+            "signature preserved"
+            "anthropic-signature"
+            (Yojson.Safe.Util.member "signature" (`Assoc block_fields)
+             |> Yojson.Safe.Util.to_string)
+      | _ -> Alcotest.fail "expected one content block")
+  | _ -> Alcotest.fail "expected message object"
+
+let test_legacy_thinking_type_still_reads () =
+  let json : Yojson.Safe.t =
+    `Assoc
+      [
+        ("role", `String "assistant");
+        ( "content_blocks",
+          `List
+            [
+              `Assoc
+                [
+                  ("type", `String "thinking");
+                  ("thinking", `String "signed");
+                  ("thinking_type", `String "legacy-signature");
+                ];
+            ] );
+      ]
+  in
+  let parsed = C.message_of_json json in
+  match parsed.content with
+  | [ T.Thinking { thinking_type; content } ] ->
+      Alcotest.(check string) "legacy thinking type" "legacy-signature" thinking_type;
+      Alcotest.(check string) "content" "signed" content
+  | _ -> Alcotest.fail "expected legacy thinking block"
+
 let () =
   Alcotest.run "keeper_context_core_dedup"
     [
@@ -226,6 +279,10 @@ let () =
             test_roundtrip_text_preserved;
           Alcotest.test_case "round-trip thinking type preserved" `Quick
             test_roundtrip_preserves_thinking_type;
+          Alcotest.test_case "thinking block JSON uses OAS signature" `Quick
+            test_thinking_block_json_uses_oas_signature;
+          Alcotest.test_case "legacy thinking_type still reads" `Quick
+            test_legacy_thinking_type_still_reads;
         ] );
       ( "text_of_history_jsonl_json",
         [

@@ -3,10 +3,12 @@
 ## Unreleased
 
 ### Changed
-- Bump OAS agent_sdk pin to the 0.207.21 main release (`39a7d139`),
+- Bump OAS agent_sdk pin to the 0.207.22 main release (`c7413246`),
   carrying #2254 typed GLM forced-tool-choice rejection, #2248
-  provider-qualified capability lookup, #2244 assistant tool-content, and
-  fail-closed unknown-stream-block handling.
+  provider-qualified capability lookup, #2244 assistant tool-content,
+  fail-closed unknown-stream-block handling, #2258 Ollama native
+  `think` dialect support, and #2261 fail-closed handling of malformed
+  streamed tool arguments.
 
 ### Fixed
 - Resolve runtime capability validation and default preserve-thinking decisions

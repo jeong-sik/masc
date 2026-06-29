@@ -55,10 +55,13 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.21 main release plus focused OAS #2254 typed
-  ;; GLM tool-choice rejection, #2248 provider-qualified capability lookup,
-  ;; #2244 assistant tool-content, and fail-closed unknown stream block handling.
-  (agent_sdk (>= 0.207.21))
+  ;; Pinned to OAS v0.207.22 main release. Carries v0.207.21's focused OAS
+  ;; #2254 typed GLM tool-choice rejection, #2248 provider-qualified capability
+  ;; lookup, #2244 assistant tool-content, fail-closed unknown stream block, and
+  ;; adds #2258 Ollama native think dialect (Ollama_think). The floor tracks the
+  ;; pinned version via scripts/oas-agent-sdk-pin.sh; CI check-oas-pin enforces
+  ;; dune-project floor == OAS_AGENT_SDK_MIN_VERSION, so do not lower it alone.
+  (agent_sdk (>= 0.207.22))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

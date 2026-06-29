@@ -437,7 +437,14 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
     let result =
       try
         Eio.Switch.run (fun req_sw ->
-          with_lock (fun () -> Hashtbl.replace active_switches request_id req_sw);
+          let should_abort =
+            with_lock (fun () ->
+              Hashtbl.replace active_switches request_id req_sw;
+              match Hashtbl.find_opt pending request_id with
+              | Some { status = Cancelled _; _ } -> true
+              | _ -> false)
+          in
+          if should_abort then raise CancelledByOperator;
           let result = run_worker_with_timeout () in
           Done { ok = tool_result_success result; body = tool_result_body result })
       with
@@ -534,19 +541,24 @@ let entry_to_json (e : entry) : Yojson.Safe.t =
 ;;
 
 let cancel ?base_path request_id : bool =
-  let sw_opt =
+  let sw_opt, in_memory =
     with_lock (fun () ->
-      match Hashtbl.find_opt pending request_id, Hashtbl.find_opt active_switches request_id with
-      | Some entry, Some sw when not (is_terminal_status entry.status) -> Some sw
-      | _ -> None)
+      match Hashtbl.find_opt pending request_id with
+      | Some entry when not (is_terminal_status entry.status) ->
+        Hashtbl.find_opt active_switches request_id, true
+      | Some _ -> None, false
+      | None -> None, false)
   in
-  match sw_opt with
-  | Some sw ->
+  match sw_opt, in_memory with
+  | Some sw, _ ->
     set_status_protected ~preserve_terminal:true request_id (operator_cancelled_status ());
     Eio.Switch.fail sw CancelledByOperator;
     with_lock (fun () -> Hashtbl.remove active_switches request_id);
     true
-  | None ->
+  | None, true ->
+    set_status_protected ~preserve_terminal:true request_id (operator_cancelled_status ());
+    true
+  | None, false ->
     match base_path with
     | None -> false
     | Some base_path ->

@@ -1499,7 +1499,19 @@ let test_librarian_runtime_keeps_nonempty_fallback_across_empty_retries () =
              Alcotest.(check bool)
                "fallback claim keeps first non-empty provider text"
                true
-               (contains "first invalid librarian payload" fact.Types.claim)
+               (contains "first invalid librarian payload" fact.Types.claim);
+             Alcotest.(check bool)
+               "fallback claim keeps invalid-json reason"
+               true
+               (contains
+                  "librarian provider returned invalid episode JSON"
+                  fact.Types.claim);
+             Alcotest.(check bool)
+               "fallback claim does not use later empty retry reason"
+               false
+               (contains
+                  "librarian provider returned empty response"
+                  fact.Types.claim)
            | facts -> Alcotest.failf "expected one fallback fact, got %d" (List.length facts)))))
 ;;
 

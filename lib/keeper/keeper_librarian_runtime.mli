@@ -138,13 +138,23 @@ type extraction_error =
 
 val extraction_error_to_string : extraction_error -> string
 
+type unparseable_response =
+  { reason : string
+  ; raw_evidence : string option
+  }
+
+val unparseable_response : ?raw_evidence:string -> string -> unparseable_response
+(** Typed retry diagnostic. [raw_evidence] is present only when the provider
+    returned non-empty output that can be preserved as an unstructured fallback;
+    [reason] describes that same response. *)
+
 type attempt_outcome =
   | Parsed of Keeper_memory_os_types.episode
-  | Unparseable of string
+  | Unparseable of unparseable_response
   | Transport_failed of extraction_error
 
 type parse_retry_error =
-  | Retry_exhausted_unparseable of string
+  | Retry_exhausted_unparseable of unparseable_response
   | Retry_transport_failed of extraction_error
 
 type extraction_kind =
@@ -184,9 +194,11 @@ val run_with_parse_retries
 (** Drive [attempt] over a growing message list. Returns immediately on [Parsed].
     [Transport_failed] returns [Retry_transport_failed] without retry. On
     [Unparseable], appends {!parse_retry_nudge} and retries up to [max_retries]
-    times before returning [Retry_exhausted_unparseable]. Pure given a pure
-    [attempt] — the provider side effect lives in the [attempt] supplied by
-    {!extract_with_provider}. *)
+    times before returning [Retry_exhausted_unparseable]. If any retry produced
+    non-empty fallback evidence, the exhausted diagnostic preserves that
+    evidence with its matching reason instead of pairing it with a later empty
+    retry. Pure given a pure [attempt] — the provider side effect lives in the
+    [attempt] supplied by {!extract_with_provider}. *)
 
 val per_keeper_slot_capacity : unit -> int
 (** Per-keeper librarian provider slot capacity from

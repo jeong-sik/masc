@@ -406,14 +406,21 @@ let extraction_error_to_string = function
   | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
 ;;
 
+type unparseable_response =
+  { reason : string
+  ; raw_evidence : string option
+  }
+
+let unparseable_response ?raw_evidence reason = { reason; raw_evidence }
+
 type attempt_outcome =
   | Parsed of Keeper_memory_os_types.episode
-  | Unparseable of string
+  | Unparseable of unparseable_response
     (* provider returned output we could not parse into an episode — retryable *)
   | Transport_failed of extraction_error (* timeout / HTTP error — not retried here *)
 
 type parse_retry_error =
-  | Retry_exhausted_unparseable of string
+  | Retry_exhausted_unparseable of unparseable_response
   | Retry_transport_failed of extraction_error
 
 type extraction_kind =
@@ -445,18 +452,32 @@ let should_preserve_unstructured_fallback raw =
   not (String.equal (String.trim raw) "")
 ;;
 
-let rec run_with_parse_retries ~max_retries ~attempt messages =
-  match attempt messages with
-  | Parsed episode -> Ok episode
-  | Transport_failed msg -> Error (Retry_transport_failed msg)
-  | Unparseable msg ->
-    if max_retries <= 0
-    then Error (Retry_exhausted_unparseable msg)
-    else
-      run_with_parse_retries
-        ~max_retries:(max_retries - 1)
-        ~attempt
-        (messages @ [ message Agent_sdk.Types.User parse_retry_nudge ])
+let prefer_unparseable_response prior current =
+  match current.raw_evidence with
+  | Some raw when should_preserve_unstructured_fallback raw -> current
+  | Some _ | None ->
+    (match prior with
+     | Some best -> best
+     | None -> current)
+;;
+
+let run_with_parse_retries ~max_retries ~attempt messages =
+  let rec loop ~remaining_retries ~best_unparseable messages =
+    match attempt messages with
+    | Parsed episode -> Ok episode
+    | Transport_failed msg -> Error (Retry_transport_failed msg)
+    | Unparseable diagnostic ->
+      let selected = prefer_unparseable_response best_unparseable diagnostic in
+      let best_unparseable = Some selected in
+      if remaining_retries <= 0
+      then Error (Retry_exhausted_unparseable selected)
+      else
+        loop
+          ~remaining_retries:(remaining_retries - 1)
+          ~best_unparseable
+          (messages @ [ message Agent_sdk.Types.User parse_retry_nudge ])
+  in
+  loop ~remaining_retries:max_retries ~best_unparseable:None messages
 ;;
 
 let render_prompt key variables =
@@ -591,7 +612,6 @@ let extract_with_provider_classified
   | Error msg -> Error (Prompt_render_failed msg)
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
-    let last_nonempty_unparseable_raw = ref None in
     let attempt messages =
       match
         with_timeout ~clock ~timeout_sec (fun () ->
@@ -603,16 +623,17 @@ let extract_with_provider_classified
       | Some (Ok response) ->
         let raw = Agent_sdk_response.text_of_response response |> String.trim in
         if String.equal raw ""
-        then Unparseable "librarian provider returned empty response"
+        then Unparseable (unparseable_response "librarian provider returned empty response")
         else (
           match Keeper_librarian.episode_of_output_result ~generation inp raw with
           | Ok episode -> Parsed episode
           | Error error ->
-            last_nonempty_unparseable_raw := Some raw;
             Unparseable
-              (Printf.sprintf
-                 "librarian provider returned invalid episode JSON (%s)"
-                 (Keeper_librarian.parse_error_to_string error)))
+              (unparseable_response
+                 ~raw_evidence:raw
+                 (Printf.sprintf
+                    "librarian provider returned invalid episode JSON (%s)"
+                    (Keeper_librarian.parse_error_to_string error))))
     in
     (match
        run_with_parse_retries
@@ -622,9 +643,9 @@ let extract_with_provider_classified
      with
      | Ok episode -> Ok { episode; kind = Structured_episode }
      | Error (Retry_transport_failed err) -> Error err
-     | Error (Retry_exhausted_unparseable msg) ->
+     | Error (Retry_exhausted_unparseable diagnostic) ->
        let raw =
-         match !last_nonempty_unparseable_raw with
+         match diagnostic.raw_evidence with
          | Some raw -> raw
          | None -> ""
        in
@@ -636,9 +657,9 @@ let extract_with_provider_classified
            "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
            inp.trace_id
            generation
-           msg;
+           diagnostic.reason;
          Ok
-          { episode = unstructured_episode ~now ~generation inp ~reason:msg ~raw
+          { episode = unstructured_episode ~now ~generation inp ~reason:diagnostic.reason ~raw
           ; kind = Unstructured_fallback
           })))
 ;;

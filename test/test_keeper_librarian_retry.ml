@@ -77,8 +77,11 @@ let sample_episode () =
   | None -> Alcotest.fail "fixture episode failed to parse"
 
 let parse_retry_error_to_string = function
-  | R.Retry_exhausted_unparseable e -> "unparseable: " ^ e
+  | R.Retry_exhausted_unparseable e -> "unparseable: " ^ e.R.reason
   | R.Retry_transport_failed e -> "transport: " ^ R.extraction_error_to_string e
+
+let unparseable ?raw_evidence reason =
+  R.Unparseable (R.unparseable_response ?raw_evidence reason)
 
 let nudge_count messages =
   List.length
@@ -109,7 +112,7 @@ let test_retries_then_succeeds () =
   let calls = ref 0 in
   let attempt _msgs =
     incr calls;
-    if !calls < 2 then R.Unparseable "bad json" else R.Parsed ep
+    if !calls < 2 then unparseable "bad json" else R.Parsed ep
   in
   (match R.run_with_parse_retries ~max_retries:2 ~attempt [] with
    | Ok _ -> ()
@@ -123,12 +126,12 @@ let test_bounded_then_fails () =
   let calls = ref 0 in
   let attempt _msgs =
     incr calls;
-    R.Unparseable "still bad"
+    unparseable "still bad"
   in
   (match R.run_with_parse_retries ~max_retries:2 ~attempt [] with
    | Ok _ -> Alcotest.fail "expected Error after exhausting retries"
    | Error (R.Retry_exhausted_unparseable e) ->
-     check string "last error surfaced" "still bad" e
+     check string "last error surfaced" "still bad" e.R.reason
    | Error (R.Retry_transport_failed e) ->
      Alcotest.failf
        "expected unparseable exhaustion, got transport %s"
@@ -147,7 +150,7 @@ let test_transport_not_retried () =
      check string "transport error surfaced" "librarian provider timed out"
        (R.extraction_error_to_string e)
    | Error (R.Retry_exhausted_unparseable e) ->
-     Alcotest.failf "expected transport error, got unparseable %s" e);
+     Alcotest.failf "expected transport error, got unparseable %s" e.R.reason);
   check int "transport failure is not retried" 1 !calls
 
 let test_nudge_appended_each_retry () =
@@ -157,12 +160,40 @@ let test_nudge_appended_each_retry () =
   let attempt msgs =
     incr calls;
     seen := msgs :: !seen;
-    if !calls < 3 then R.Unparseable "bad" else R.Parsed ep
+    if !calls < 3 then unparseable "bad" else R.Parsed ep
   in
   let _ = R.run_with_parse_retries ~max_retries:3 ~attempt [] in
   (* Attempt 1 sees 0 nudges, attempt 2 sees 1, attempt 3 sees 2. *)
   let counts = List.rev_map nudge_count !seen in
   check (list int) "one nudge added per retry" [ 0; 1; 2 ] counts
+
+let test_nonempty_unparseable_evidence_outlives_empty_retry () =
+  let calls = ref 0 in
+  let attempt _msgs =
+    incr calls;
+    match !calls with
+    | 1 ->
+      unparseable
+        ~raw_evidence:"first invalid librarian payload"
+        "librarian provider returned invalid episode JSON"
+    | _ -> unparseable "librarian provider returned empty response"
+  in
+  match R.run_with_parse_retries ~max_retries:2 ~attempt [] with
+  | Ok _ -> Alcotest.fail "expected Error after exhausting retries"
+  | Error (R.Retry_transport_failed e) ->
+    Alcotest.failf
+      "expected unparseable exhaustion, got transport %s"
+      (R.extraction_error_to_string e)
+  | Error (R.Retry_exhausted_unparseable e) ->
+    check string
+      "reason stays paired with preserved evidence"
+      "librarian provider returned invalid episode JSON"
+      e.R.reason;
+    check (option string)
+      "raw evidence is preserved"
+      (Some "first invalid librarian payload")
+      e.R.raw_evidence;
+    check int "initial attempt + max_retries" 3 !calls
 
 (* Drive [cadence_step] sequentially from a fresh keeper (counter -1) for
    [turns] turns, collecting the [due] decision each turn. When a turn is due
@@ -528,6 +559,8 @@ let () =
           test_case "bounded then fails" `Quick test_bounded_then_fails;
           test_case "transport not retried" `Quick test_transport_not_retried;
           test_case "nudge appended each retry" `Quick test_nudge_appended_each_retry;
+          test_case "non-empty unparseable evidence outlives empty retry" `Quick
+            test_nonempty_unparseable_evidence_outlives_empty_retry;
         ] );
       ( "cadence",
         [

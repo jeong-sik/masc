@@ -37,6 +37,7 @@ let agent_capabilities_of_llm_capabilities
   ; max_output_tokens = caps.max_output_tokens
   ; supports_tools = caps.supports_tools
   ; supports_tool_choice = caps.supports_tool_choice
+  ; supports_named_tool_choice = caps.supports_named_tool_choice
   ; supports_parallel_tool_calls = caps.supports_parallel_tool_calls
   ; supports_runtime_mcp_tools = caps.supports_runtime_mcp_tools
   ; supports_runtime_tool_events = caps.supports_runtime_tool_events

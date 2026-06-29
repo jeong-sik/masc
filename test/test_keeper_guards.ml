@@ -11,6 +11,7 @@ open Alcotest
 module KG = Masc.Keeper_guards
 module HK = Masc.Keeper_hooks_oas
 module P = Masc.Otel_metric_store
+module TT = Agent_sdk.Types
 
 (* ----------------------------------------------------------------- *)
 (* Helpers                                                             *)
@@ -35,6 +36,8 @@ let pre_tool_use_event
     ?(input = `Assoc [])
     ?(accumulated_cost_usd = 0.0)
     ?(turn = 1)
+    ?(batch_index = 0)
+    ?(batch_size = 1)
     ()
   : Agent_sdk.Hooks.hook_event =
   Agent_sdk.Hooks.PreToolUse {
@@ -43,6 +46,28 @@ let pre_tool_use_event
     input;
     accumulated_cost_usd;
     turn;
+    schedule = {
+      planned_index = 0;
+      batch_index;
+      batch_size;
+      concurrency_class = "parallel_read";
+      batch_kind = "parallel";
+    };
+  }
+
+let post_tool_use_event
+    ~(tool_name : string)
+    ?(input = `Assoc [])
+    ?(output = Ok ({ TT.content = {|{"ok":true}|}; _meta = None } : TT.tool_output))
+    ()
+  : Agent_sdk.Hooks.hook_event =
+  Agent_sdk.Hooks.PostToolUse {
+    tool_use_id = "toolu_test_" ^ tool_name;
+    tool_name;
+    input;
+    output;
+    result_bytes = 2;
+    duration_ms = 1.0;
     schedule = {
       planned_index = 0;
       batch_index = 0;
@@ -55,6 +80,12 @@ let pre_tool_use_event
 let invoke (hooks : Agent_sdk.Hooks.hooks) (event : Agent_sdk.Hooks.hook_event)
   : Agent_sdk.Hooks.hook_decision =
   Agent_sdk.Hooks.invoke hooks.pre_tool_use event
+
+let invoke_post_tool_use
+    (hooks : Agent_sdk.Hooks.hooks)
+    (event : Agent_sdk.Hooks.hook_event)
+  : Agent_sdk.Hooks.hook_decision =
+  Agent_sdk.Hooks.invoke hooks.post_tool_use event
 
 let decision_kind (d : Agent_sdk.Hooks.hook_decision) : string =
   match d with
@@ -397,6 +428,323 @@ let test_streak_state_manual_reset () =
   let d = invoke hook (pre_tool_use_event ~tool_name:"t" ()) in
   check string "after reset -> Continue" "Continue" (decision_kind d)
 
+let readonly_observation_hook () =
+  let meta_ref = make_meta_ref "test_keeper" in
+  let state = KG.make_readonly_observation_state () in
+  KG.readonly_observation_duplicate_guard
+    ~meta_ref ~on_gate_decision:no_gate_observer ~state
+
+let test_readonly_observation_duplicate_blocks_same_input () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "first read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "successful read-only observation is recorded"
+    "Continue" (decision_kind post);
+  let second =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "duplicate read-only observation -> Override"
+    "Override" (decision_kind second);
+  let text = override_text second in
+  check bool "override mentions readonly duplicate" true
+    (contains_substring text "code=readonly_observation_duplicate")
+
+let test_readonly_observation_duplicate_blocks_pending_same_input () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "first pending read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let second =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "duplicate pending read-only observation -> Override"
+    "Override" (decision_kind second)
+
+let test_readonly_observation_duplicate_drains_pending_on_batch_change () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ~batch_index:0
+         ~batch_size:2 ())
+  in
+  check string "first pending read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let next_batch =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ~batch_index:1
+         ~batch_size:1 ())
+  in
+  check string "stale pending state is scoped to one tool batch"
+    "Continue" (decision_kind next_batch)
+
+let test_readonly_observation_duplicate_canonicalizes_input_order () =
+  let hook = readonly_observation_hook () in
+  let first_input =
+    `Assoc [ ("limit", `Int 15); ("status", `String "open") ]
+  in
+  let second_input =
+    `Assoc [ ("status", `String "open"); ("limit", `Int 15) ]
+  in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:first_input ())
+  in
+  check string "first reordered observation -> Continue"
+    "Continue" (decision_kind first);
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input:first_input ())
+  in
+  check string "successful reordered observation is recorded"
+    "Continue" (decision_kind post);
+  let second =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:second_input ())
+  in
+  check string "same object with reordered fields -> Override"
+    "Override" (decision_kind second)
+
+let test_readonly_observation_duplicate_preserves_duplicate_key_order () =
+  let hook = readonly_observation_hook () in
+  let first_input =
+    `Assoc [ ("duplicate", `Int 1); ("limit", `Int 15); ("duplicate", `Int 2) ]
+  in
+  let same_input =
+    `Assoc [ ("limit", `Int 15); ("duplicate", `Int 1); ("duplicate", `Int 2) ]
+  in
+  let different_duplicate_order =
+    `Assoc [ ("limit", `Int 15); ("duplicate", `Int 2); ("duplicate", `Int 1) ]
+  in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:first_input ())
+  in
+  check string "first duplicate-key observation -> Continue"
+    "Continue" (decision_kind first);
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input:first_input ())
+  in
+  check string "successful duplicate-key observation is recorded"
+    "Continue" (decision_kind post);
+  let same =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:same_input ())
+  in
+  check string "same duplicate-key relative order -> Override"
+    "Override" (decision_kind same);
+  let different =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"keeper_tasks_list"
+         ~input:different_duplicate_order
+         ())
+  in
+  check string "different duplicate-key relative order -> Continue"
+    "Continue" (decision_kind different)
+
+let test_readonly_observation_duplicate_allows_different_input () =
+  let hook = readonly_observation_hook () in
+  let first =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"keeper_tasks_list"
+         ~input:(`Assoc [ ("limit", `Int 15) ])
+         ())
+  in
+  check string "first read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let second =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"keeper_tasks_list"
+         ~input:(`Assoc [ ("limit", `Int 20) ])
+         ())
+  in
+  check string "different input -> Continue" "Continue" (decision_kind second)
+
+let test_readonly_observation_duplicate_allows_retry_after_error () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "first read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let failed_output =
+    Error
+      ({ TT.message = "transient failure"; recoverable = true; error_class = None }
+       : TT.tool_error)
+  in
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input ~output:failed_output ())
+  in
+  check string "failed read-only observation clears pending state"
+    "Continue" (decision_kind post);
+  let retry =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "same read after failed output -> Continue"
+    "Continue" (decision_kind retry)
+
+let test_readonly_observation_duplicate_preserves_success_after_other_read_error () =
+  let hook = readonly_observation_hook () in
+  let input_a = `Assoc [ ("limit", `Int 15) ] in
+  let input_b = `Assoc [ ("limit", `Int 20) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_a ())
+  in
+  check string "first read-only observation A -> Continue"
+    "Continue" (decision_kind first);
+  let post_a =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_a ())
+  in
+  check string "successful read-only observation A is recorded"
+    "Continue" (decision_kind post_a);
+  let second =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_b ())
+  in
+  check string "different read-only observation B -> Continue"
+    "Continue" (decision_kind second);
+  let failed_output =
+    Error
+      ({ TT.message = "transient failure"; recoverable = true; error_class = None }
+       : TT.tool_error)
+  in
+  let post_b =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_b
+         ~output:failed_output ())
+  in
+  check string "failed read-only observation B clears only pending B"
+    "Continue" (decision_kind post_b);
+  let repeated_a =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:input_a ())
+  in
+  check string "failed B did not clear prior successful A"
+    "Override" (decision_kind repeated_a)
+
+let test_readonly_observation_duplicate_resets_after_write_tool () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "first read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let write =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"masc_keeper_msg_cancel"
+         ~input:(`Assoc [ ("request_id", `String "req-1") ])
+         ())
+  in
+  check string "write tool pre-use does not reset observation state"
+    "Continue" (decision_kind write);
+  let write_post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"masc_keeper_msg_cancel"
+         ~input:(`Assoc [ ("request_id", `String "req-1") ])
+         ())
+  in
+  check string "successful write tool resets observation state"
+    "Continue" (decision_kind write_post);
+  let after_write =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "same read after write -> Continue"
+    "Continue" (decision_kind after_write)
+
+let test_readonly_observation_duplicate_does_not_reset_after_failed_write_output () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "first read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "successful read-only observation is recorded"
+    "Continue" (decision_kind post);
+  let failed_output =
+    Error
+      ({ TT.message = "write failed"; recoverable = true; error_class = None }
+       : TT.tool_error)
+  in
+  let failed_write_post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"masc_keeper_msg_cancel"
+         ~input:(`Assoc [ ("request_id", `String "req-1") ])
+         ~output:failed_output
+         ())
+  in
+  check string "failed write output does not reset observation state"
+    "Continue" (decision_kind failed_write_post);
+  let repeated =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "failed write did not clear prior read-only success"
+    "Override" (decision_kind repeated)
+
+let test_readonly_observation_duplicate_does_not_reset_on_denied_non_read_tool () =
+  let meta_ref = make_meta_ref "test_keeper" in
+  let state = KG.make_readonly_observation_state () in
+  let hook =
+    KG.compose_all [
+      KG.readonly_observation_duplicate_guard
+        ~meta_ref ~on_gate_decision:no_gate_observer ~state;
+      KG.deny_guard
+        ~meta_ref ~on_gate_decision:no_gate_observer
+        ~denied:["masc_keeper_msg_cancel"];
+    ]
+  in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "first read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "successful read-only observation is recorded"
+    "Continue" (decision_kind post);
+  let denied =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"masc_keeper_msg_cancel"
+         ~input:(`Assoc [ ("request_id", `String "req-1") ])
+         ())
+  in
+  check string "denied non-read tool is blocked"
+    "Override" (decision_kind denied);
+  let repeated =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "denied non-read tool did not clear prior read-only success"
+    "Override" (decision_kind repeated)
+
+let test_readonly_observation_duplicate_exempts_polling_read () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("request_id", `String "req-1") ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"masc_keeper_msg_result" ~input ())
+  in
+  check string "first poll -> Continue" "Continue" (decision_kind first);
+  let second =
+    invoke hook (pre_tool_use_event ~tool_name:"masc_keeper_msg_result" ~input ())
+  in
+  check string "same poll remains allowed" "Continue" (decision_kind second)
+
 let test_custom_guard_blocks () =
   let meta_ref = make_meta_ref "test_keeper" in
   let guard ~tool_name ~input:_ =
@@ -566,6 +914,32 @@ let () = run "Keeper_guards" [
     test_case "at threshold -> override" `Quick test_streak_guard_at_threshold;
     test_case "resets on different tool" `Quick test_streak_guard_resets_on_different_tool;
     test_case "manual state reset" `Quick test_streak_state_manual_reset;
+  ];
+  "readonly_observation_duplicate_guard", [
+    test_case "blocks same read-only input" `Quick
+      test_readonly_observation_duplicate_blocks_same_input;
+    test_case "blocks same pending read-only input" `Quick
+      test_readonly_observation_duplicate_blocks_pending_same_input;
+    test_case "drains pending on batch change" `Quick
+      test_readonly_observation_duplicate_drains_pending_on_batch_change;
+    test_case "canonicalizes input object order" `Quick
+      test_readonly_observation_duplicate_canonicalizes_input_order;
+    test_case "preserves duplicate key order" `Quick
+      test_readonly_observation_duplicate_preserves_duplicate_key_order;
+    test_case "allows different input" `Quick
+      test_readonly_observation_duplicate_allows_different_input;
+    test_case "allows retry after errored output" `Quick
+      test_readonly_observation_duplicate_allows_retry_after_error;
+    test_case "preserves previous success after other read error" `Quick
+      test_readonly_observation_duplicate_preserves_success_after_other_read_error;
+    test_case "resets after write tool" `Quick
+      test_readonly_observation_duplicate_resets_after_write_tool;
+    test_case "does not reset after failed write output" `Quick
+      test_readonly_observation_duplicate_does_not_reset_after_failed_write_output;
+    test_case "does not reset on denied non-read tool" `Quick
+      test_readonly_observation_duplicate_does_not_reset_on_denied_non_read_tool;
+    test_case "exempts polling reads" `Quick
+      test_readonly_observation_duplicate_exempts_polling_read;
   ];
   "custom_guard", [
     test_case "user blocks" `Quick test_custom_guard_blocks;

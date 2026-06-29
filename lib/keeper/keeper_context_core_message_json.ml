@@ -21,22 +21,19 @@ let role_of_string_opt = function
 
 let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
-  `List
-    (List.map
-       (function
-        | Agent_sdk.Types.Thinking { thinking_type; content } ->
-          `Assoc
-            [ ("type", `String "thinking")
-            ; ("thinking", `String content)
-            ; ("thinking_type", `String thinking_type)
-            ]
-        | Agent_sdk.Types.RedactedThinking text ->
-          `Assoc
-            [ ("type", `String "redacted_thinking")
-            ; ("data", `String text)
-            ]
-        | block -> Agent_sdk.Api.content_block_to_json block)
-       blocks)
+  `List (List.map Agent_sdk.Api.content_block_to_json blocks)
+
+let thinking_type_of_json (json : Yojson.Safe.t) =
+  match Json_util.get_string json "signature" with
+  | Some signature -> signature
+  | None -> (
+      match Json_util.get_string json "thinking_type" with
+      | Some thinking_type -> thinking_type
+      | None ->
+          (* DET-OK: older context/checkpoint JSON predates the OAS
+             canonical [signature] carrier; "thinking" is the historical wire
+             value for those persisted rows. *)
+          "thinking")
 
 let content_blocks_of_json
     (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
@@ -48,15 +45,7 @@ let content_blocks_of_json
            | Some "thinking" ->
              (match Json_util.get_string j "thinking" with
               | Some content ->
-                let thinking_type =
-                  match Json_util.get_string j "thinking_type" with
-                  | Some thinking_type -> thinking_type
-                  | None ->
-                    (* DET-OK: older context/checkpoint JSON predates the
-                       explicit carrier tag; "thinking" is the historical
-                       wire value for those persisted rows. *)
-                    "thinking"
-                in
+                let thinking_type = thinking_type_of_json j in
                 Some (Agent_sdk.Types.Thinking { thinking_type; content })
               | None -> None)
            | Some "redacted_thinking" ->

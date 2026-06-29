@@ -1,3 +1,5 @@
+module Canonical_tool = Agent_sdk.Canonical_tool
+
 let role_to_string = Agent_sdk.Types.role_to_string
 
 (* Issue #8623: returns [Some] only for the 4 wire-format names.
@@ -64,17 +66,9 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
         match m.role with
         | Agent_sdk.Types.Tool ->
             List.find_map
-              (function
-                | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
-                    Some tool_use_id
-                (* Other content_block variants do not carry a tool_use_id. *)
-                | Agent_sdk.Types.Text _
-                | Agent_sdk.Types.Thinking _
-                | Agent_sdk.Types.RedactedThinking _
-                | Agent_sdk.Types.ToolUse _
-                | Agent_sdk.Types.Image _
-                | Agent_sdk.Types.Document _
-                | Agent_sdk.Types.Audio _ -> None)
+              (fun block ->
+                Canonical_tool.tool_result_of_block block
+                |> Option.map (fun result -> result.Canonical_tool.call_id))
               m.content
         (* Non-Tool roles never own a tool_call_id. *)
         | Agent_sdk.Types.System

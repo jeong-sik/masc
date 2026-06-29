@@ -1,5 +1,7 @@
 (** Prompt metrics and adaptive inference helpers for keeper Agent.run turns. *)
 
+module Canonical_tool = Agent_sdk.Canonical_tool
+
 let adaptive_thinking_budget
       ~enabled
       ~is_retry
@@ -147,20 +149,27 @@ let metric_of_block
     ~(role : Agent_sdk.Types.role)
     (block : Agent_sdk.Types.content_block) : prompt_segment_metrics =
   let bytes =
-    match block with
+    match Canonical_tool.tool_result_of_block block with
+    | Some result ->
+        String.length
+          (Inference_utils.sanitize_text_utf8 result.Canonical_tool.call_id)
+        + String.length
+            (Inference_utils.sanitize_text_utf8 result.Canonical_tool.content)
+        + (match result.Canonical_tool.structured_content with
+           | Some value -> String.length (Yojson.Safe.to_string value)
+           | None -> 0)
+    | None -> (
+      match block with
     | Agent_sdk.Types.Text text ->
         String.length (Inference_utils.sanitize_text_utf8 text)
     | Agent_sdk.Types.ToolUse { id; name; input } ->
         String.length (Inference_utils.sanitize_text_utf8 id)
         + String.length (Inference_utils.sanitize_text_utf8 name)
         + String.length (Yojson.Safe.to_string input)
-    | Agent_sdk.Types.ToolResult { tool_use_id; content; json; _ } ->
-        String.length (Inference_utils.sanitize_text_utf8 tool_use_id)
-        + String.length (Inference_utils.sanitize_text_utf8 content)
-        + (match json with
-           | Some value -> String.length (Yojson.Safe.to_string value)
-           | None -> 0)
-    | _ -> 0
+    | Agent_sdk.Types.ToolResult _ ->
+        invalid_arg
+          "keeper_agent_prompt_metrics: OAS canonical tool-result projection unavailable"
+    | _ -> 0)
   in
   let msg : Agent_sdk.Types.message =
     {

@@ -2,6 +2,8 @@
 
 open Keeper_memory_os_types
 
+module Canonical_tool = Agent_sdk.Canonical_tool
+
 type input =
   { trace_id : string
   ; generation : int
@@ -30,27 +32,28 @@ let trim_nonempty s =
   if String.equal s "" then None else Some s
 ;;
 
-let role_to_string = function
-  | Agent_sdk.Types.User -> "user"
-  | Agent_sdk.Types.Assistant -> "assistant"
-  | Agent_sdk.Types.System -> "system"
-  | Agent_sdk.Types.Tool -> "tool"
-;;
+let role_to_string = Agent_sdk.Types.role_to_string
 
-let text_of_content = function
-  | Agent_sdk.Types.Text s -> trim_nonempty s
-  | Agent_sdk.Types.ToolUse { id; name; _ } ->
-    Some (Printf.sprintf "[tool use omitted: id=%s name=%s]" id name)
-  | Agent_sdk.Types.ToolResult { tool_use_id; is_error; _ } ->
+let text_of_content block =
+  match Canonical_tool.tool_result_of_block block with
+  | Some result ->
     Some
       (Printf.sprintf
          "[tool result omitted: id=%s is_error=%b]"
-         tool_use_id
-         is_error)
+         result.Canonical_tool.call_id
+         result.Canonical_tool.is_error)
+  | None -> (
+    match block with
+  | Agent_sdk.Types.Text s -> trim_nonempty s
+  | Agent_sdk.Types.ToolUse { id; name; _ } ->
+    Some (Printf.sprintf "[tool use omitted: id=%s name=%s]" id name)
+  | Agent_sdk.Types.ToolResult _ ->
+    invalid_arg
+      "keeper_librarian: OAS canonical tool-result projection unavailable"
   | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> None
   | Agent_sdk.Types.Image _ -> Some "[image omitted]"
   | Agent_sdk.Types.Document _ -> Some "[document omitted]"
-  | Agent_sdk.Types.Audio _ -> Some "[audio omitted]"
+  | Agent_sdk.Types.Audio _ -> Some "[audio omitted]")
 ;;
 
 let message_to_text ~turn (m : Agent_sdk.Types.message) : string =

@@ -198,8 +198,39 @@ let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path (
         resolution.Server_runtime_bootstrap.source;
       Alcotest.(check string)
         "path"
-        catalog
-        resolution.Server_runtime_bootstrap.path)
+        (canonical_path catalog)
+        (canonical_path resolution.Server_runtime_bootstrap.path))
+
+let test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd () =
+  with_temp_dir "model-catalog-bootstrap-relative" (fun dir ->
+    let repo = Filename.concat dir "repo" in
+    let bin_dir = Filename.concat repo "_build/default/bin" in
+    mkdir_p bin_dir;
+    let outside = Filename.concat dir "base-path" in
+    Unix.mkdir outside 0o755;
+    let catalog = Filename.concat repo "oas-models.toml" in
+    write_file catalog "# repo-local OAS catalog\n";
+    let env _ = None in
+    with_cwd repo @@ fun () ->
+    match
+      Server_runtime_bootstrap.resolve_oas_model_catalog_path
+        ~env
+        ~cwd:outside
+        ~argv0:"./_build/default/bin/main_eio.exe"
+        ()
+    with
+    | None ->
+      Alcotest.fail
+        "expected repo oas-models.toml from relative executable argv0"
+    | Some resolution ->
+      Alcotest.(check string)
+        "source"
+        "argv0-parent:oas-models.toml"
+        resolution.Server_runtime_bootstrap.source;
+      Alcotest.(check string)
+        "path"
+        (canonical_path catalog)
+        (canonical_path resolution.Server_runtime_bootstrap.path))
 
 let write_config_root_keeper_toml config_root name =
   write_file
@@ -4141,6 +4172,10 @@ let () =
             "model catalog resolution falls back to executable parent"
             `Quick
             test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path;
+          Alcotest.test_case
+            "model catalog resolution uses process cwd for relative argv0"
+            `Quick
+            test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd;
           Alcotest.test_case
             "bootstrap base-path config copies shared seed only"
             `Quick

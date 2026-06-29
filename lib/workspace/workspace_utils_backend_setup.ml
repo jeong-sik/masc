@@ -178,15 +178,16 @@ let resolve_masc_base_path path =
     match (Host_config.from_env ()).base_path with
     | Some explicit
       when running_under_test_executable ()
-           && not (test_base_path_override_enabled ()) ->
-        log_once_info
-          "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
-          explicit path;
-        requested
-    | Some explicit
-      when running_under_test_executable ()
            && not (test_base_path_override_enabled ())
            && not (String.equal explicit requested) ->
+        (* Test executable, override not opted in, and the inherited
+           [MASC_BASE_PATH] diverges from the requested path: ignore it. A
+           matching override ([explicit = requested]) is intentionally left to
+           fall through to the [Some explicit] arm below, which keeps it — the
+           docstring's "ignored unless it matches the requested path". The
+           former broad arm (same body, no equality guard) shadowed this
+           narrower one, leaving it unreachable; OCaml does not flag
+           [when]-guard redundancy, so the dead arm compiled silently. *)
         log_once_info
           "Ignoring test MASC_BASE_PATH override=%s for requested path %s"
           explicit path;

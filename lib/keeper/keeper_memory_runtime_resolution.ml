@@ -13,7 +13,8 @@ let provider_for_runtime ~runtime_id =
   match Runtime.get_runtime_by_id runtime_id with
   | Some rt -> Ok rt.Runtime.provider_config
   | None ->
-    (match Runtime.get_default_runtime () with
-     | Some rt -> Ok rt.Runtime.provider_config
-     | None -> Error "no runtime configured for memory LLM producer")
+    Error
+      (Printf.sprintf
+         "runtime %S is not configured for memory LLM producer"
+         runtime_id)
 ;;

@@ -751,6 +751,52 @@ let test_librarian_runtime_override_env () =
          (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
 ;;
 
+let memory_runtime_resolution_toml =
+  {|
+[runtime]
+default = "p0.default"
+
+[providers.p0]
+protocol = "openai-compatible-http"
+endpoint = "https://p0.example/v1"
+
+[models.default]
+api-name = "default"
+max-context = 4096
+
+[p0.default]
+|}
+;;
+
+let with_runtime_config_toml content f =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "keeper-memory-runtime-" ".toml" in
+  write_text_file path content;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+       match Runtime.init_default ~config_path:path with
+       | Error msg -> Alcotest.failf "Runtime.init_default failed: %s" msg
+       | Ok () -> f ())
+;;
+
+let test_librarian_provider_for_runtime_errors_on_missing_id () =
+  with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
+    match Librarian_runtime.provider_for_runtime ~runtime_id:"missing.runtime" with
+    | Ok provider ->
+      Alcotest.failf
+        "missing runtime silently resolved to provider base_url=%s"
+        provider.Llm_provider.Provider_config.base_url
+    | Error msg ->
+      Alcotest.(check bool)
+        "error names missing runtime"
+        true
+        (contains "missing.runtime" msg))
+;;
+
 let with_memory_os_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -5246,6 +5292,10 @@ let () =
             "librarian runtime override env"
             `Quick
             test_librarian_runtime_override_env
+        ; Alcotest.test_case
+            "librarian provider resolution rejects missing runtime id"
+            `Quick
+            test_librarian_provider_for_runtime_errors_on_missing_id
         ; Alcotest.test_case
             "memory os bool env accepts enabled disabled"
             `Quick

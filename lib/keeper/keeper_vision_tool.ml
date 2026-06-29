@@ -66,6 +66,11 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   |> Keeper_structured_output_schema.apply_to_provider_config
        Keeper_structured_output_schema.vision_analyze_output_schema
 
+let vision_schema_supported provider_cfg =
+  Keeper_structured_output_schema.provider_config_accepts_schema
+    Keeper_structured_output_schema.vision_analyze_output_schema
+    provider_cfg
+
 let message_of_request (req : Va.request) : Agent_sdk.Types.message =
   let query =
     Printf.sprintf
@@ -107,7 +112,15 @@ let vision_runtime_candidates () : (string * Runtime.t) list =
   |> List.filter_map (fun (rt : Runtime.t) ->
        let caps = Runtime_agent.input_capabilities_of_runtime rt in
        if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
-       then Some (rt.Runtime.id, rt)
+       then
+         if vision_schema_supported rt.Runtime.provider_config
+         then Some (rt.Runtime.id, rt)
+         else (
+           Log.Keeper.warn
+             "vision runtime skipped runtime=%s provider=%s: provider does not support native structured output"
+             rt.Runtime.id
+             rt.Runtime.provider_config.Llm_provider.Provider_config.model_id;
+           None)
        else None)
 
 let vision_runtime_ids () : string list =
@@ -116,7 +129,7 @@ let vision_runtime_ids () : string list =
 let first_vision_runtime_id () : (string, string) result =
   match vision_runtime_ids () with
   | id :: _ -> Ok id
-  | [] -> Error "no image-capable runtime configured"
+  | [] -> Error "no schema-capable image runtime configured"
 
 (* Per-keeper content-addressed store dir. Phase 2 ingestion (§2.3) will write
    incoming images here under the same path. *)
@@ -334,7 +347,7 @@ let run_candidates
        | None ->
          err_json
            ~failure_class:Tool_result.Runtime_failure
-           ~detail:"no image-capable runtime configured"
+           ~detail:"no schema-capable image runtime configured"
            "no_capable_runtime"
        | Some (`Timeout runtime_id) ->
          err_json
@@ -425,7 +438,7 @@ let run_candidates_outcome
   let rec loop ~last_error ~attempt_index = function
     | [] ->
       (match last_error with
-       | None -> Vo_no_runtime "no image-capable runtime configured"
+       | None -> Vo_no_runtime "no schema-capable image runtime configured"
        | Some (`Timeout _runtime_id) -> Vo_timeout
        | Some (`Provider_error err) ->
          Vo_provider

@@ -68,9 +68,9 @@ val provider_for_vision
     when the selected runtime has not configured one. *)
 
 val vision_runtime_ids : unit -> string list
-(** Ordered image-capable runtime ids: [\[runtime\].media_failover] order first,
-    then declaration order. The handler tries these candidates in order for
-    timeout/provider failures within one cumulative tool deadline. *)
+(** Ordered schema-capable image runtime ids: [\[runtime\].media_failover] order
+    first, then declaration order. The handler tries these candidates in order
+    for timeout/provider failures within one cumulative tool deadline. *)
 
 val first_vision_runtime_id : unit -> (string, string) result
 (** Compatibility helper returning the first entry of {!vision_runtime_ids}, or

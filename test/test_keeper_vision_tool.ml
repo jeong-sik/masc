@@ -493,11 +493,11 @@ default = "p1.vision-a"
 media_failover = ["p1.vision-a", "p2.vision-b"]
 
 [providers.p1]
-protocol = "openai-compatible-http"
+protocol = "ollama-http"
 endpoint = "https://p1.example/v1"
 
 [providers.p2]
-protocol = "openai-compatible-http"
+protocol = "ollama-http"
 endpoint = "https://p2.example/v1"
 
 [models.vision-a]
@@ -528,7 +528,7 @@ default = "p3.vision-c"
 media_failover = ["p3.vision-c"]
 
 [providers.p3]
-protocol = "openai-compatible-http"
+protocol = "ollama-http"
 endpoint = "https://p3.example/v1"
 
 [models.vision-c]
@@ -542,6 +542,27 @@ supports-multimodal-inputs = true
 [p3.vision-c]
 |}
 
+let schema_unsupported_vision_runtime_toml =
+  {|
+[runtime]
+default = "local.vision"
+media_failover = ["local.vision"]
+
+[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.vision]
+api-name = "vision"
+max-context = 4096
+
+[models.vision.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[local.vision]
+|}
+
 let test_temp_runtime_toml_restores_runtime_cache () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     let before = Runtime.get_runtime_ids () in
@@ -549,6 +570,33 @@ let test_temp_runtime_toml_restores_runtime_cache () =
       assert (Runtime.get_runtime_ids () = [ "p3.vision-c" ]));
     assert (Runtime.get_runtime_ids () = before));
   assert (Vt.vision_runtime_ids () = [])
+
+let test_schema_unsupported_vision_runtime_is_skipped_before_provider_call () =
+  with_temp_runtime_toml schema_unsupported_vision_runtime_toml (fun () ->
+    assert (Vt.vision_runtime_ids () = []);
+    (match Vt.first_vision_runtime_id () with
+     | Ok runtime_id ->
+       failwith ("schema-unsupported vision runtime was admitted: " ^ runtime_id)
+     | Error msg ->
+       assert (contains_substring msg "schema-capable image runtime"));
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-schema-admission" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete:complete_should_not_run
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (String.equal (assoc_string "error" json) "no_capable_runtime");
+      assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
 
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
@@ -926,6 +974,7 @@ let () =
   test_unknown_magic_bytes_are_policy_rejection ();
   test_oversize_image_is_runtime_failure_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
+  test_schema_unsupported_vision_runtime_is_skipped_before_provider_call ();
   test_retryable_provider_error_tries_next_runtime ();
   test_deadline_exhaustion_preserves_provider_error ();
   test_non_retryable_provider_error_stops_without_trying_next_runtime ();

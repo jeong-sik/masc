@@ -2,31 +2,39 @@
 # masc installer — download prebuilt binary, seed minimum config, smoke-check.
 #
 # Usage:
+#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh -o /tmp/masc-install.sh
+#   less /tmp/masc-install.sh
+#   bash /tmp/masc-install.sh --version <release-tag>
 #   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
-#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash -s -- --version v0.8.0 --prefix /usr/local/bin
+#   curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash -s -- --version <release-tag> --prefix /usr/local/bin
 #
 # Flags:
 #   --version vX.Y.Z   Pin a specific release (default: latest)
 #   --prefix DIR       Install dir for the binary (default: $HOME/.local/bin)
 #   --base-path DIR    .masc seed target (default: $PWD)
-#   --no-seed          Skip writing default tool_policy.toml
+#   --no-seed          Skip writing default config files
 #   --force            Overwrite existing binary / config
 #   --dry-run          Print what would happen, do not write
+#   --allow-unverified Continue if SHA256SUMS cannot be fetched (unsafe)
 #
 # Env:
 #   MASC_VERSION   Same as --version
 #   MASC_PREFIX    Same as --prefix
 #   MASC_REPO      Override repo (default: jeong-sik/masc)
+#   MASC_PORT      Port used in the post-install local-start hint (default: 8935)
+#   MASC_ALLOW_UNVERIFIED=1  Same as --allow-unverified
 
 set -euo pipefail
 
 REPO="${MASC_REPO:-jeong-sik/masc}"
 VERSION="${MASC_VERSION:-}"
 PREFIX="${MASC_PREFIX:-$HOME/.local/bin}"
+MASC_PORT="${MASC_PORT:-8935}"
 BASE_PATH=""
 SEED_CONFIG=1
 FORCE=0
 DRY_RUN=0
+ALLOW_UNVERIFIED="${MASC_ALLOW_UNVERIFIED:-0}"
 
 c_red=$(printf '\033[31m'); c_yel=$(printf '\033[33m'); c_grn=$(printf '\033[32m')
 c_dim=$(printf '\033[2m'); c_off=$(printf '\033[0m')
@@ -36,7 +44,7 @@ log()  { printf '%s==>%s %s\n' "$c_grn" "$c_off" "$*"; }
 warn() { printf '%swarn:%s %s\n' "$c_yel" "$c_off" "$*" >&2; }
 die()  { printf '%serror:%s %s\n' "$c_red" "$c_off" "$*" >&2; exit 1; }
 
-usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
+usage() { sed -n '2,/^$/p' "$0" | sed 's/^# \{0,1\}//'; exit 0; }
 
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -46,10 +54,16 @@ while [ $# -gt 0 ]; do
     --no-seed) SEED_CONFIG=0; shift ;;
     --force)   FORCE=1; shift ;;
     --dry-run) DRY_RUN=1; shift ;;
+    --allow-unverified) ALLOW_UNVERIFIED=1; shift ;;
     -h|--help) usage ;;
     *) die "unknown flag: $1 (try --help)" ;;
   esac
 done
+
+case "$ALLOW_UNVERIFIED" in
+  0|1) ;;
+  *) die "MASC_ALLOW_UNVERIFIED must be 0 or 1" ;;
+esac
 
 [ -z "$BASE_PATH" ] && BASE_PATH="$PWD"
 
@@ -58,6 +72,49 @@ require curl
 require uname
 require chmod
 require mkdir
+require mktemp
+
+# --- checksum helpers ---------------------------------------------------------
+has_sha256sum() { command -v sha256sum >/dev/null 2>&1; }
+has_shasum()    { command -v shasum    >/dev/null 2>&1; }
+
+sha256_file() {
+  if has_sha256sum; then
+    sha256sum "$1" | awk '{print $1}'
+  elif has_shasum; then
+    shasum -a 256 "$1" | awk '{print $1}'
+  else
+    echo ""
+  fi
+}
+
+expected_hash() {
+  local file="$1"
+  awk -v f="$file" '$2 == f {print $1; exit}' "$CHECKSUMS_FILE"
+}
+
+verify_checksum() {
+  local file="$1" name="$2"
+  if [ "$CHECKSUMS_AVAILABLE" -ne 1 ]; then
+    [ "$ALLOW_UNVERIFIED" = "1" ] \
+      || die "release checksums unavailable; refusing to install unverified $name (pass --allow-unverified or set MASC_ALLOW_UNVERIFIED=1 to override)"
+    warn "skipping checksum for $name because unverified install override is enabled"
+    return 0
+  fi
+  local expected actual
+  expected=$(expected_hash "$name")
+  if [ -z "$expected" ]; then
+    die "no checksum entry for $name in SHA256SUMS"
+  fi
+  actual=$(sha256_file "$file")
+  if [ -z "$actual" ]; then
+    die "cannot compute sha256 for $name (missing sha256sum/shasum)"
+  fi
+  if [ "$actual" != "$expected" ]; then
+    die "checksum mismatch for $name (expected $expected, got $actual)"
+  fi
+  log "verified $name checksum"
+}
 
 # --- 1. detect platform -------------------------------------------------------
 detect_asset() {
@@ -75,17 +132,42 @@ detect_asset() {
 ASSET=$(detect_asset)
 log "platform: $ASSET"
 
+
 # --- 2. resolve version -------------------------------------------------------
 resolve_version() {
   if [ -n "$VERSION" ]; then echo "$VERSION"; return; fi
   log "resolving latest release from github.com/$REPO ..." >&2
   local api="https://api.github.com/repos/$REPO/releases/latest"
-  curl -fsSL "$api" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1
+  local tag
+  if command -v jq >/dev/null 2>&1; then
+    tag=$(curl -fsSL --max-time 30 --retry 3 "$api" | jq -er '.tag_name // empty') \
+      || die "could not parse latest release tag from GitHub API response"
+  else
+    tag=$(curl -fsSL --max-time 30 --retry 3 "$api" | sed -n 's/.*"tag_name": *"\([^"]*\)".*/\1/p' | head -n1)
+    [ -n "$tag" ] || die "could not parse latest release tag from GitHub API response (fallback regex failed)"
+  fi
+  echo "$tag"
 }
 
 VERSION=$(resolve_version)
 [ -n "$VERSION" ] || die "could not resolve version (network or rate limit?)"
 log "version: $VERSION"
+
+# --- 2b. fetch release checksums ----------------------------------------------
+CHECKSUMS_FILE="$(mktemp)"
+cleanup_checksums() { rm -f "$CHECKSUMS_FILE"; }
+trap cleanup_checksums EXIT
+CHECKSUMS_AVAILABLE=0
+CHECKSUMS_URL="https://github.com/$REPO/releases/download/$VERSION/SHA256SUMS"
+if curl -fsSL --max-time 30 --retry 3 -o "$CHECKSUMS_FILE" "$CHECKSUMS_URL"; then
+  CHECKSUMS_AVAILABLE=1
+elif [ "$DRY_RUN" -eq 1 ]; then
+  warn "could not fetch release checksums ($CHECKSUMS_URL); dry-run only, no files will be written"
+elif [ "$ALLOW_UNVERIFIED" = "1" ]; then
+  warn "could not fetch release checksums ($CHECKSUMS_URL); continuing because unverified install override is enabled"
+else
+  die "could not fetch release checksums ($CHECKSUMS_URL); refusing unverified install (pass --allow-unverified or set MASC_ALLOW_UNVERIFIED=1 to override)"
+fi
 
 # --- 3. download binary -------------------------------------------------------
 URL="https://github.com/$REPO/releases/download/$VERSION/$ASSET"
@@ -117,8 +199,9 @@ if [ "$SKIP_DL" -ne 1 ]; then
   else
     mkdir -p "$PREFIX"
     tmp="$DEST.partial"
-    curl -fL --progress-bar -o "$tmp" "$URL" \
+    curl -fL --max-time 300 --retry 3 --progress-bar -o "$tmp" "$URL" \
       || die "download failed (asset missing for $VERSION?)"
+    verify_checksum "$tmp" "$ASSET"
     chmod +x "$tmp"
     mv "$tmp" "$DEST"
     log "installed: $DEST"
@@ -129,18 +212,37 @@ fi
 if [ "$SEED_CONFIG" -eq 1 ]; then
   CONFIG_DIR="$BASE_PATH/.masc/config"
   CONFIG_FILE="$CONFIG_DIR/tool_policy.toml"
-  RAW="https://raw.githubusercontent.com/$REPO/$VERSION/config/tool_policy.toml"
+  RUNTIME_FILE="$CONFIG_DIR/runtime.toml"
 
-  if [ -e "$CONFIG_FILE" ] && [ "$FORCE" -eq 0 ]; then
-    log "config already present at $CONFIG_FILE, skipping seed"
+  if [ -e "$CONFIG_FILE" ] && [ -e "$RUNTIME_FILE" ] && [ "$FORCE" -eq 0 ]; then
+    log "config already present at $CONFIG_DIR, skipping seed"
   elif [ "$DRY_RUN" -eq 1 ]; then
-    log "[dry-run] would seed $CONFIG_FILE from $RAW"
+    log "[dry-run] would seed configs to $CONFIG_DIR from release"
   else
-    log "seeding $CONFIG_FILE"
+    log "seeding configs to $CONFIG_DIR"
     mkdir -p "$CONFIG_DIR"
-    curl -fsSL -o "$CONFIG_FILE.partial" "$RAW" \
-      || die "config seed failed (raw fetch from $RAW)"
-    mv "$CONFIG_FILE.partial" "$CONFIG_FILE"
+
+    seed_config() {
+      local name="$1" dest="$2"
+      local raw="https://raw.githubusercontent.com/$REPO/$VERSION/config/$name"
+      local tmp="$dest.partial"
+      curl -fsSL --max-time 60 --retry 3 -o "$tmp" "$raw" \
+        || die "config seed failed (raw fetch from $raw)"
+      verify_checksum "$tmp" "$name"
+      mv "$tmp" "$dest"
+    }
+
+    seed_config_if_missing() {
+      local name="$1" dest="$2"
+      if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then
+        log "config already present: $dest, skipping seed"
+      else
+        seed_config "$name" "$dest"
+      fi
+    }
+
+    seed_config_if_missing "tool_policy.toml" "$CONFIG_FILE"
+    seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"
   fi
 fi
 
@@ -172,10 +274,13 @@ ${c_grn}masc ${VERSION} installed.${c_off}
 
 Next:
   ${c_dim}# start server (loopback only)${c_off}
-  $DEST --base-path "$BASE_PATH" --port 8935
+  $DEST --base-path "$BASE_PATH"
+
+  ${c_dim}# if runtime.toml uses cloud providers, export their required API keys first${c_off}
+  See: https://github.com/$REPO/blob/main/docs/runtime-tunables.md
 
   ${c_dim}# in another shell, sanity check${c_off}
-  curl http://127.0.0.1:8935/health
+  curl http://127.0.0.1:${MASC_PORT}/health
 
   ${c_dim}# wire up your MCP client (local agent)${c_off}
   See: https://github.com/$REPO#mcp-client-setup

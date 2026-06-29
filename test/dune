@@ -1987,6 +1987,8 @@
 
 (include stanzas/test_normalized_actor.inc)
 
+(include stanzas/test_dashboard_interaction_judge_contract.inc)
+
 (include stanzas/test_oas_bridge_judge_callers_9629.inc)
 
 (include stanzas/test_oas_bridge_timeout_ssot_10094.inc)
@@ -2567,6 +2569,11 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries masc_test_deps masc.runtime))
+
+(test
+ (name test_install_script)
+ (modules test_install_script)
+ (libraries alcotest))
 
 (test
  (name test_tui_http_ast)

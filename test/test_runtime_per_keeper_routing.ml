@@ -18,6 +18,20 @@ open Masc
 module J = Yojson.Safe.Util
 module KMC = Keeper_meta_contract
 
+(* Test hermeticity: the per-model thinking gate resolves capabilities through
+   the OAS [Model_catalog], which is loaded once (memoized via Atomic) from the
+   [OAS_MODEL_CATALOG] env var.  Production seeds this in
+   server_runtime_bootstrap; without it [Model_catalog.global ()] is [None], so
+   qwen36's [preserve_thinking_control_format] misses the catalog row and the
+   gate defaults [preserve_thinking] to [None] instead of [Some true].  Set at
+   module top so it precedes the first [global ()] access regardless of test
+   ordering, and only when unset so an external/CI value is honored. *)
+let () =
+  match Sys.getenv_opt "OAS_MODEL_CATALOG" with
+  | Some _ -> ()
+  | None ->
+    Unix.putenv "OAS_MODEL_CATALOG" (Masc_test_deps.source_path "oas-models.toml")
+
 (* ---- temp config-dir + keeper TOML fixtures
    (helper shape mirrors test_keeper_runtime_denylist.ml) ---- *)
 

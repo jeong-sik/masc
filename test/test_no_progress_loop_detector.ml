@@ -309,15 +309,17 @@ let test_classify_delivery_mapping () =
 
      vs the removed social-model [inferred_tool_surface] set
      {keeper_board_comment, keeper_board_post, keeper_broadcast}: this set adds
-     [masc_keeper_msg] (keeper->keeper message; [masc_broadcast] is the public
-     name of the same [keeper_broadcast] tool). That is an intentional, more
-     complete peer-surface definition (RFC-0276 §2.4 / §3.2 behavior change): a
-     turn that only sends a peer message with no durable evidence now accrues
-     the streak, matching RFC-0239's "only posts to peers without evidence"
-     intent, where the old social model let a bare keeper-msg turn reset it. *)
+     [masc_keeper_msg] (keeper->keeper message) and keeps both
+     [keeper_broadcast] (internal canonical) and [masc_broadcast] (public MCP
+     alias). That is an intentional, more complete peer-surface definition
+     (RFC-0276 §2.4 / §3.2 behavior change): a turn that only sends a peer
+     message with no durable evidence now accrues the streak, matching
+     RFC-0239's "only posts to peers without evidence" intent, where the old
+     social model let a bare keeper-msg turn reset it. *)
   let expected_peer_tools =
     [ "keeper_board_comment"
     ; "keeper_board_post"
+    ; "keeper_broadcast"
     ; "masc_broadcast"
     ; "masc_keeper_msg"
     ]

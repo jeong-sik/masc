@@ -818,48 +818,6 @@ modality_priority = "visual_first"
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "glm-5"
-base = "ollama_cloud"
-max_context_tokens = 202752
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "glm-5.1"
-base = "ollama_cloud"
-max_context_tokens = 202752
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
-id_prefix = "glm-5.2"
-base = "ollama_cloud"
-max_context_tokens = 1000000
-supports_tools = true
-supports_tool_choice = false
-supports_reasoning = true
-supports_extended_thinking = true
-supports_reasoning_budget = true
-thinking_control_format = "reasoning_effort"
-supports_multimodal_inputs = false
-supports_image_input = false
-supports_native_streaming = true
-
-[[models]]
 id_prefix = "gpt-oss:20b"
 base = "ollama_cloud"
 max_context_tokens = 131072

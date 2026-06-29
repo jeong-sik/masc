@@ -173,8 +173,14 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
          (String.concat ", " (List.map fst unknown)))
 ;;
 
-(* Every runtime binding's model must be known to the OAS capability catalog
-   ({!Llm_provider.Capabilities.for_model_id}). *)
+let capabilities_for_runtime (rt : t) =
+  Llm_provider.Provider_config.capabilities_for_config_model rt.provider_config
+;;
+
+(* Every runtime binding's provider-qualified model must be known to the OAS
+   capability catalog.  Use the materialized [Provider_config.t] so provider
+   namespaces such as Z.AI GLM and Ollama Cloud GLM do not collapse onto the
+   same bare model id. *)
 let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
   : (unit, string) result
   =
@@ -183,8 +189,7 @@ let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t li
     (List.map
        (fun (r : t) ->
           ( Printf.sprintf "%s (model=%s)" r.id r.provider_config.model_id
-          , Option.is_some
-              (Llm_provider.Capabilities.for_model_id r.provider_config.model_id) ))
+          , Option.is_some (capabilities_for_runtime r) ))
        runtimes)
 ;;
 
@@ -394,7 +399,7 @@ let default_preserve_thinking_for_model (rt : t) : bool option =
   if not rt.model.thinking_support
   then None
   else (
-    match Llm_provider.Capabilities.for_model_id rt.provider_config.model_id with
+    match capabilities_for_runtime rt with
     | None -> None
     | Some caps ->
       (match caps.preserve_thinking_control_format with

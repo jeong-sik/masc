@@ -297,8 +297,10 @@ let assert_ollama_cloud_seed_runtime runtimes case =
       runtime.model.tools_support;
     check bool (case.runtime_id ^ " thinking") case.thinking
       runtime.model.thinking_support;
-    check bool (case.api_name ^ " known to OAS catalog") true
-      (Option.is_some (Llm_provider.Capabilities.for_model_id case.api_name));
+    check bool (case.runtime_id ^ " known to provider-qualified OAS catalog") true
+      (Option.is_some
+         (Llm_provider.Provider_config.capabilities_for_config_model
+            runtime.provider_config));
     (match runtime.model.capabilities with
      | None -> failf "expected capabilities for %s" case.runtime_id
      | Some caps ->
@@ -407,7 +409,7 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
   expect_preserve_always_replay "kimi-k2.6"
 
 let test_repo_runtime_bindings_resolve_through_oas_catalog () =
-  with_repo_oas_model_catalog @@ fun catalog ->
+  with_repo_oas_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
@@ -415,12 +417,18 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
     check bool "at least one runtime binding" true (List.length runtimes > 0);
     List.iter
       (fun (runtime : Runtime.t) ->
-         let model_id = runtime.model.api_name in
-         match Llm_provider.Model_catalog.lookup catalog model_id with
+         match
+           Llm_provider.Provider_config.capabilities_for_config_model
+             runtime.provider_config
+         with
          | None ->
            failf
-             "runtime binding %s model %s must resolve through repo OAS catalog"
-             runtime.id model_id
+             "runtime binding %s provider/model %s/%s must resolve through repo \
+              OAS catalog"
+             runtime.id
+             (Llm_provider.Provider_config.capability_provider_label
+                runtime.provider_config)
+             runtime.provider_config.model_id
          | Some _ -> ())
       runtimes
 

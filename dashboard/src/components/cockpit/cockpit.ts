@@ -179,7 +179,7 @@ function PlaneSection({ plane, entries }: { plane: CockpitPlane; entries: Cockpi
             aria-label=${`Open ${displayLabel(entrypoint)} in ${routeCaption(entrypoint)}`}
           >
             <div class="cp-route-top">
-              <span class="min-w-0">
+              <span class="cp-route-label">
                 <span class="rl">${displayLabel(entrypoint)}</span>
                 <span class="rc">${routeCaption(entrypoint)}</span>
               </span>

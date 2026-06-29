@@ -214,13 +214,22 @@ let fake_response raw : Agent_sdk.Types.api_response =
 
 let test_provider_cfg () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~kind:Llm_provider.Provider_config.Anthropic
     ~model_id:"fake-librarian-model"
-    ~base_url:"http://127.0.0.1:1"
+    ~base_url:"https://api.anthropic.com"
     ~max_tokens:4096
     ~enable_thinking:true
     ~preserve_thinking:true
     ~thinking_budget:512
+    ()
+;;
+
+let invalid_schema_provider_cfg () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"fake-librarian-model"
+    ~base_url:"http://127.0.0.1:1"
+    ~max_tokens:4096
     ()
 ;;
 
@@ -1167,7 +1176,19 @@ let test_memory_llm_summary_provider_requests_json_schema () =
     (Some true)
     (Option.map
        (Yojson.Safe.equal expected_schema)
-       provider_cfg.Llm_provider.Provider_config.output_schema)
+       provider_cfg.Llm_provider.Provider_config.output_schema);
+  Alcotest.(check bool)
+    "summary schema config accepted by OAS"
+    true
+    (Result.is_ok
+       (Llm_provider.Provider_config.validate_output_schema_request provider_cfg))
+;;
+
+let test_memory_llm_summary_rejects_invalid_schema_provider () =
+  Alcotest.(check bool)
+    "localhost OpenAI-compatible schema provider rejected"
+    false
+    (Memory_summary.summary_schema_supported (invalid_schema_provider_cfg ()))
 ;;
 
 let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
@@ -1316,6 +1337,49 @@ let test_librarian_runtime_appends_episode_bundle () =
             "Strict librarian claim survives parsing"
             fact.Types.claim
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
+;;
+
+let test_librarian_runtime_rejects_invalid_schema_provider_before_call () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let called = ref false in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          called := true;
+          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-invalid-schema-provider"
+          ; generation = 1
+          ; messages = [ text_message "Please remember schema validation." ]
+          }
+        in
+        match
+          Librarian_runtime.extract_with_provider_classified
+            ~complete
+            ~clock
+            ~timeout_sec:1.0
+            ~sw
+            ~net
+            ~provider_cfg:(invalid_schema_provider_cfg ())
+            ~generation:1
+            inp
+        with
+        | Ok _ -> Alcotest.fail "expected invalid schema provider to fail closed"
+        | Error (Librarian_runtime.Provider_config_rejected msg) ->
+          Alcotest.(check bool)
+            "fake complete was not called"
+            false
+            !called;
+          Alcotest.(check bool)
+            "rejection cites native structured output"
+            true
+            (contains "native structured output" msg)
+        | Error err ->
+          Alcotest.fail
+            (Printf.sprintf
+               "expected provider config rejection, got %s"
+               (Librarian_runtime.extraction_error_to_string err)))))
 ;;
 
 let test_librarian_runtime_requires_clock_for_provider_call () =
@@ -5215,6 +5279,10 @@ let () =
             `Quick
             test_memory_llm_summary_provider_requests_json_schema
         ; Alcotest.test_case
+            "memory llm summary rejects invalid schema provider"
+            `Quick
+            test_memory_llm_summary_rejects_invalid_schema_provider
+        ; Alcotest.test_case
             "memory llm summary accepts only summary json"
             `Quick
             test_memory_llm_summary_response_parser_accepts_only_summary_json
@@ -5222,6 +5290,10 @@ let () =
             "librarian runtime appends episode bundle"
             `Quick
             test_librarian_runtime_appends_episode_bundle
+        ; Alcotest.test_case
+            "librarian runtime rejects invalid schema provider before call"
+            `Quick
+            test_librarian_runtime_rejects_invalid_schema_provider_before_call
         ; Alcotest.test_case
             "librarian runtime requires clock for provider call"
             `Quick

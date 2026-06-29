@@ -67,6 +67,11 @@ let provider_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
   |> Keeper_structured_output_schema.apply_to_provider_config
        Keeper_structured_output_schema.memory_bank_summary_output_schema
 
+let summary_schema_supported provider_cfg =
+  Keeper_structured_output_schema.provider_config_accepts_schema
+    Keeper_structured_output_schema.memory_bank_summary_output_schema
+    provider_cfg
+
 let text_block text : Agent_sdk.Types.content_block =
   Agent_sdk.Types.Text text
 
@@ -243,32 +248,34 @@ let make
     match Eio_context.get_switch_opt (), Eio_context.get_net_opt () with
     | Some sw, Some net ->
         let clock = Eio_context.get_clock_opt () in
-        (* RFC-0206: named-runtime provider resolution is gone; the memory
-           summary uses the single default runtime's provider config. *)
+        let provider_runtime_id =
+          Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
+        in
         (match
-           (match Runtime.get_default_runtime () with
-            | Some r -> Ok [ r.Runtime.provider_config ]
-            | None -> Error "no default runtime configured")
+           Keeper_memory_runtime_resolution.provider_for_runtime
+             ~runtime_id:provider_runtime_id
          with
          | Error err ->
              Log.Keeper.warn ~keeper_name:keeper_name
                "memory LLM summary provider resolution failed runtime=%s: %s"
-               runtime_id err;
+               provider_runtime_id err;
              None
-         | Ok providers ->
+         | Ok provider ->
              let providers =
-               List.filter is_direct_completion_provider providers
+               [ provider ]
+               |> List.filter is_direct_completion_provider
+               |> List.filter summary_schema_supported
              in
              if providers = [] then begin
                Log.Keeper.warn ~keeper_name:keeper_name
-                 "memory LLM summary has no direct completion providers runtime=%s"
-                 runtime_id;
+                 "memory LLM summary has no schema-capable direct completion providers runtime=%s"
+                 provider_runtime_id;
                None
              end else
                Some
                  (fun ~trace_id ~texts ->
                    summarize_with_providers ?complete ?clock ?timeout_sec
-                     ~runtime_id ~sw ~net ~providers ~trace_id ~texts ()))
+                     ~runtime_id:provider_runtime_id ~sw ~net ~providers ~trace_id ~texts ()))
     | _ ->
         Log.Keeper.warn ~keeper_name:keeper_name
           "memory LLM summary skipped: Eio context unavailable runtime=%s"

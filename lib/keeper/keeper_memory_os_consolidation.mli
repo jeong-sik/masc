@@ -11,6 +11,12 @@
 
 open Keeper_memory_os_types
 
+val wire_field_member_indices : string
+val wire_field_consolidated_claim : string
+val wire_field_category : string
+val wire_field_groups : string
+val wire_field_drop_indices : string
+
 type merge_group =
   { member_indices : int list
   ; consolidated_claim : string

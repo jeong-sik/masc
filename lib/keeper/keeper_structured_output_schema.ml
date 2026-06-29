@@ -69,10 +69,10 @@ let librarian_episode_output_schema =
 
 let consolidation_group_schema =
   let fields =
-    [ ( "member_indices"
+    [ ( Keeper_memory_os_consolidation.wire_field_member_indices
       , `Assoc [ "type", `String "array"; "items", integer_schema ] )
-    ; "consolidated_claim", string_schema
-    ; "category", enum_schema category_tokens
+    ; Keeper_memory_os_consolidation.wire_field_consolidated_claim, string_schema
+    ; Keeper_memory_os_consolidation.wire_field_category, enum_schema category_tokens
     ]
   in
   object_schema ~required:(List.map fst fields) fields
@@ -80,9 +80,9 @@ let consolidation_group_schema =
 
 let consolidation_plan_output_schema =
   let fields =
-    [ ( "groups"
+    [ ( Keeper_memory_os_consolidation.wire_field_groups
       , `Assoc [ "type", `String "array"; "items", consolidation_group_schema ] )
-    ; ( "drop_indices"
+    ; ( Keeper_memory_os_consolidation.wire_field_drop_indices
       , `Assoc [ "type", `String "array"; "items", integer_schema ] )
     ]
   in
@@ -104,4 +104,16 @@ let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config
     response_format = Agent_sdk.Types.JsonSchema schema
   ; output_schema = Some schema
   }
+;;
+
+let validate_provider_config schema provider_cfg =
+  provider_cfg
+  |> apply_to_provider_config schema
+  |> Llm_provider.Provider_config.validate_output_schema_request
+;;
+
+let provider_config_accepts_schema schema provider_cfg =
+  match validate_provider_config schema provider_cfg with
+  | Ok () -> true
+  | Error _ -> false
 ;;

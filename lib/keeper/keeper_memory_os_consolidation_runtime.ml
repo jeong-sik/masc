@@ -101,6 +101,10 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
          Keeper_structured_output_schema.consolidation_plan_output_schema
 ;;
 
+let validate_provider_for_consolidation provider_cfg =
+  Llm_provider.Provider_config.validate_output_schema_request provider_cfg
+;;
+
 let messages_for_consolidation facts =
   let numbered = Consolidation.render_numbered_facts facts in
   match
@@ -156,6 +160,9 @@ let consolidate_keeper
       | Error msg -> Unparseable msg
       | Ok messages ->
         let config = provider_for_consolidation provider_cfg in
+        (match validate_provider_for_consolidation config with
+         | Error msg -> Transport_failed ("consolidation provider config rejected: " ^ msg)
+         | Ok () ->
         (match
            with_timeout ?clock ~timeout_sec (fun () ->
              complete ~sw ~net ?clock ~config ~messages ())
@@ -182,4 +189,5 @@ let consolidate_keeper
                      ~before
                      ~after
                      ())))
+        )
 ;;

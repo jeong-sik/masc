@@ -22,3 +22,15 @@ val apply_to_provider_config
   -> Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
 (** Set both OAS structured-output fields for [schema]. *)
+
+val validate_provider_config
+  :  Yojson.Safe.t
+  -> Llm_provider.Provider_config.t
+  -> (unit, string) result
+(** Validate that [provider_cfg] can accept [schema] at the OAS boundary. *)
+
+val provider_config_accepts_schema
+  :  Yojson.Safe.t
+  -> Llm_provider.Provider_config.t
+  -> bool
+(** True when [validate_provider_config] accepts [provider_cfg]. *)

@@ -21,7 +21,7 @@ if [[ -n "${1:-}" ]]; then
 elif [[ "${GITHUB_ACTIONS:-}" != "true" && -x "scripts/dune-local.sh" ]]; then
   TEST_CMD="scripts/dune-local.sh test"
 else
-  TEST_CMD="opam exec -- dune test"
+  TEST_CMD="opam exec -- dune test --root ."
 fi
 TEST_TIMEOUT_SEC="${CI_TEST_TIMEOUT_SEC:-1200}"
 HEARTBEAT_SEC="${CI_TEST_HEARTBEAT_SEC:-30}"

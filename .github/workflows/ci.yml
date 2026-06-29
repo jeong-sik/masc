@@ -649,7 +649,7 @@ jobs:
         run: |
           set -euo pipefail
 
-          opam exec -- dune build &
+          opam exec -- dune build --root . &
           build_pid=$!
 
           (
@@ -704,7 +704,7 @@ jobs:
         # second source of truth.
         # See: test/test_runtime_config_validity.ml.
         run: |
-          opam exec -- dune build @test/runtest-test_runtime_config_validity
+          opam exec -- dune build --root . @test/runtest-test_runtime_config_validity
 
       - name: Shell IR differential-safety harness gate
         # RFC-0208: the differential harness asserts the monotone-safety
@@ -718,7 +718,7 @@ jobs:
         # commit drop silently from #19762. This focused gate is the fix.
         # See: lib/exec/test/test_shell_ir_differential.ml.
         run: |
-          opam exec -- dune build @lib/exec/test/runtest-test_shell_ir_differential
+          opam exec -- dune build --root . @lib/exec/test/runtest-test_shell_ir_differential
 
       - name: Env knob catalog drift gate
         # Detects when lib/config/env_config_*.ml has been edited
@@ -727,7 +727,7 @@ jobs:
         # is purely derivative and should never drift from source.
         # See: bin/env_knob_catalog.ml, issue #10733.
         run: |
-          opam exec -- dune exec ./bin/env_knob_catalog.exe -- \
+          opam exec -- dune exec --root . ./bin/env_knob_catalog.exe -- \
             docs/runtime-tunables.md
           if ! git diff --exit-code docs/runtime-tunables.md; then
             echo "::error::docs/runtime-tunables.md is stale relative to lib/config/env_config_*.ml. Run 'dune exec ./bin/env_knob_catalog.exe -- docs/runtime-tunables.md' locally and commit the result."
@@ -775,7 +775,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune test"
+          scripts/ci-run-tests.sh "opam exec -- dune test --root ."
 
       - name: Upload test diagnostics on failure
         if: ${{ failure() && steps.quick_suite.outcome == 'failure' }}
@@ -818,7 +818,7 @@ jobs:
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
           operator_targets="@test/runtest-test_operator_control_snapshot_state @test/runtest-test_operator_control_snapshot @test/runtest-test_operator_control_snapshot_cache"
-          scripts/ci-run-tests.sh "opam exec -- dune build ${operator_targets}"
+          scripts/ci-run-tests.sh "opam exec -- dune build --root . ${operator_targets}"
 
       - name: Run SSE reconnect e2e
         id: sse_reconnect_e2e
@@ -833,7 +833,7 @@ jobs:
         run: |
           mkdir -p /tmp/me
           chmod +x scripts/ci-run-tests.sh
-          scripts/ci-run-tests.sh "opam exec -- dune exec ./test/test_sse_storm_e2e.exe"
+          scripts/ci-run-tests.sh "opam exec -- dune exec --root . ./test/test_sse_storm_e2e.exe"
 
       - name: Run transport harness suite
         id: transport_harness_suite
@@ -1006,7 +1006,7 @@ jobs:
 
       - name: Build with warnings as errors
         run: |
-          opam exec -- dune build @install --force
+          opam exec -- dune build --root . @install --force
         env:
           OCAMLPARAM: "_,warn-error=+a"
 

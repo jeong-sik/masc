@@ -141,6 +141,23 @@ let test_fusion_agent_run_json_judges_use_provider_config_transform () =
     expected_structured_fusion_json_judges
 ;;
 
+let test_model_label_wrappers_can_receive_provider_config_transform () =
+  let rel = "lib/keeper/keeper_turn_driver_wrappers.ml" in
+  check
+    int
+    "model-label wrappers forward provider_config_transform to config_for_label"
+    2
+    (Ast_grep.count_calls_with_label
+       ~module_path:rel
+       ~callee:"config_for_label"
+       ~label:"provider_config_transform");
+  check
+    int
+    "config_for_label applies provider_config_transform"
+    1
+    (Ast_grep.count_calls ~module_path:rel ~callee:"transform")
+;;
+
 let schema_member key = function
   | `Assoc fields -> List.assoc_opt key fields
   | _ -> None
@@ -349,6 +366,12 @@ let () =
             "fusion judge schema uses parser wire contract"
             `Quick
             test_fusion_judge_schema_uses_parser_wire_contract
+        ] )
+    ; ( "model-label wrappers"
+      , [ test_case
+            "model-label wrappers can receive provider config transforms"
+            `Quick
+            test_model_label_wrappers_can_receive_provider_config_transform
         ] )
     ]
 ;;

@@ -31,12 +31,18 @@ let config_for_label
     ?context_reducer
     ?enable_thinking
     ?compact_ratio
+    ?provider_config_transform
     ?approval
     ~(description : string option)
     () : (Runtime_agent.config, Agent_sdk.Error.sdk_error) result =
   let* provider =
     Runtime_agent.resolve_provider_config_of_label model_label
     |> Result.map_error Runtime_agent.label_resolution_error_to_sdk_error
+  in
+  let* provider =
+    match provider_config_transform with
+    | None -> Ok provider
+    | Some transform -> transform provider
   in
   Ok
     {
@@ -78,6 +84,7 @@ let run_model_by_label
     ?context_reducer
     ?enable_thinking
     ?compact_ratio
+    ?provider_config_transform
     ?on_event
     ?transport
     ?sw
@@ -91,6 +98,7 @@ let run_model_by_label
       ~max_idle_turns ?stream_idle_timeout_s ?guardrails ?hooks ?context_reducer
       ?enable_thinking
       ?compact_ratio
+      ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in
@@ -222,6 +230,7 @@ let run_model_with_masc_tools
     ?hooks
     ?enable_thinking
     ?compact_ratio
+    ?provider_config_transform
     ?raw_trace
     ?on_event
     ?transport
@@ -235,6 +244,7 @@ let run_model_with_masc_tools
       ~tools:[] ~max_tokens ~temperature
       ?stream_idle_timeout_s ?guardrails ?hooks ?enable_thinking
       ?compact_ratio
+      ?provider_config_transform
       ~description:(Some (Printf.sprintf "model_label:%s" model_label))
       ()
   in

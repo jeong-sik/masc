@@ -25,6 +25,9 @@ val run_model_by_label :
   ?context_reducer:Agent_sdk.Context_reducer.t ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
+  ?provider_config_transform:
+    (Llm_provider.Provider_config.t ->
+    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->
   ?sw:Eio.Switch.t ->
@@ -85,6 +88,9 @@ val run_model_with_masc_tools :
   ?hooks:Agent_sdk.Hooks.hooks ->
   ?enable_thinking:bool ->
   ?compact_ratio:float ->
+  ?provider_config_transform:
+    (Llm_provider.Provider_config.t ->
+    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
   ?raw_trace:Agent_sdk.Raw_trace.t ->
   ?on_event:(Agent_sdk.Types.sse_event -> unit) ->
   ?transport:Masc_grpc_transport.t ->

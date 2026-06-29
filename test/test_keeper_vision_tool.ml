@@ -202,7 +202,8 @@ let test_truncated_of_stop_reason () =
     ]
 
 (* One User message [text query; image]; image data is base64 of the raw bytes
-   (NOT the raw bytes), media_type preserved, source_type "base64". *)
+   (NOT the raw bytes), media_type preserved, source_type "base64". The JSON
+   response contract is carried by [provider_for_vision], not prompt prose. *)
 let test_message_of_request () =
   let bytes = "\x89PNG\r\n\x1a\n\x00raw\xffbytes" in
   match
@@ -216,7 +217,6 @@ let test_message_of_request () =
     (match msg.Agent_sdk.Types.content with
      | [ Agent_sdk.Types.Text q; Agent_sdk.Types.Image img ] ->
        assert (contains_substring q "what color?");
-       assert (contains_substring q "\"text\"");
        assert (String.equal img.media_type "image/png");
        assert (
          String.equal

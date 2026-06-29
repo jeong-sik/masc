@@ -403,18 +403,33 @@ let test_repo_oas_model_catalog_preserve_axes_resolve () =
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
-  let reject_bare_ollama_cloud_replay model_id =
+  let expect_bare_native_kimi_wire_semantics model_id =
+    (match Llm_provider.Model_catalog.lookup catalog model_id with
+     | None -> failf "expected repo OAS catalog row for %s" model_id
+     | Some entry ->
+       check (option string) (model_id ^ " native base") (Some "kimi")
+         entry.base_label;
+       check (option string) (model_id ^ " no catalog thinking override") None
+         entry.thinking_control_format;
+       check (option string) (model_id ^ " no catalog replay override") None
+         entry.reasoning_replay);
     match Llm_provider.Capabilities.for_model_id model_id with
-    | None -> ()
+    | None -> failf "expected OAS capabilities for %s" model_id
     | Some caps ->
-      check bool (model_id ^ " must not inherit Ollama Cloud replay") false
+      check bool (model_id ^ " native no request thinking knob") true
+        (Llm_provider.Capabilities.(
+           caps.thinking_control_format = No_thinking_control));
+      check bool (model_id ^ " native always preserves reasoning") true
+        (Llm_provider.Capabilities.(
+           caps.preserve_thinking_control_format = Always_preserved_thinking));
+      check bool (model_id ^ " native preserves reasoning replay") true
         (Llm_provider.Capabilities.(
            caps.reasoning_replay_override = Force_preserve_always))
   in
   expect_request_side_preserve "runpod_mtp/qwen36-35b-a3b-mtp";
   expect_request_side_preserve "qwen36-35b-a3b-mtp";
   expect_preserve_always_replay "ollama_cloud/kimi-k2.6";
-  reject_bare_ollama_cloud_replay "kimi-k2.6"
+  expect_bare_native_kimi_wire_semantics "kimi-k2.6"
 
 let test_repo_runtime_bindings_resolve_through_oas_catalog () =
   with_repo_oas_model_catalog @@ fun _catalog ->

@@ -533,16 +533,19 @@ let string_set_of_list values =
 
 let json_string_list values = Json_util.json_string_list values
 
-let configured_keeper_is_materializable ?base_path name =
+let configured_keeper_is_materializable config name =
+  (* #22586: autoboot-disabled keepers carry no identity-drift materialization
+     pressure. *)
+  Keeper_meta_store.declarative_autoboot_enabled_by_default config name
+  &&
   try
     let defaults =
-      match base_path with
-      | Some base_path ->
-        Keeper_types_profile.load_keeper_profile_defaults_for_base_path
-          ~base_path
-          name
-      | None -> Keeper_types_profile.load_keeper_profile_defaults name
+      Keeper_types_profile.load_keeper_profile_defaults_for_base_path
+        ~base_path:config.Workspace.base_path
+        name
     in
+    (* #22615: SSOT materializability predicate (replaces the inline
+       persona/goal/mention check). *)
     Keeper_types_profile.keeper_profile_defaults_materializable defaults
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -557,11 +560,10 @@ let keeper_identity_drift_scan config =
   in
   let materializable_configured_names =
     configured_names
-    |> List.filter
-         (configured_keeper_is_materializable ~base_path:config.Workspace.base_path)
+    |> List.filter (configured_keeper_is_materializable config)
     |> sorted_unique_strings
   in
-  let configured_set = string_set_of_list materializable_configured_names in
+  let configured_set = string_set_of_list configured_names in
   let persisted_set = string_set_of_list persisted_meta_names in
   {
     configured_names;

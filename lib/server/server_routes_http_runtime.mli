@@ -129,6 +129,8 @@ val make_health_json :
     [build] / [protocol] (default + listener + supported list) /
     [transport] / [paths] / [internal_mcp_auth] / [uptime] /
     [sse_clients] / [startup] / [subsystems] / [feature_flags] / [gc] /
+    [overall_status] / [operator_action_required] /
+    [operator_action_reasons] /
     [keeper_fibers] / [keeper_fd_pressure] / [fd_accountant] /
     [keeper_fleet_safety] / [keeper_reaction_ledger] / [paused_keepers] /
     [keeper_config_parse_error_count] / [keeper_config_parse_errors] /
@@ -137,6 +139,12 @@ val make_health_json :
     [keeper_config_schema_terminal_reason] /
     [keeper_config_operator_action_required] /
     [lazy_task_boot_guard_fires_total].
+
+    [status] is the HTTP OK envelope/readiness status.  Full-health
+    operator diagnostics are summarized by [overall_status],
+    [operator_action_required], and [operator_action_reasons], so a live
+    server can remain probe-OK while still surfacing degraded keeper fleet
+    state at the top level.
 
     {2 paused_keepers contract}
 

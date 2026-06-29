@@ -1602,7 +1602,7 @@
 ; add one (include stanzas/test_name.inc) line below,
 ; sorted alphabetically.
 
-(include stanzas/test_anti_rationalization_empty_liveness.inc)
+(include stanzas/test_anti_rationalization_empty_reject.inc)
 
 (include stanzas/test_exec_policy_cwd_hint.inc)
 
@@ -1826,6 +1826,8 @@
 (include stanzas/test_keeper_failure_policy.inc)
 
 (include stanzas/test_keeper_tool_command_runtime_cwd_response.inc)
+
+(include stanzas/test_keeper_tool_execute_path_rewrite.inc)
 
 (include stanzas/test_keeper_tool_dispatch_runtime.inc)
 

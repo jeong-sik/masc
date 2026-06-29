@@ -70,7 +70,7 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.90.0" };
 
   { env_name = Env_config_core.parse_warn_env_key;
-    description = "Log JSON parse warnings";
+    description = "Escalate malformed env parses to Config_error";
     default = false; category = "tool";
     lifecycle = Active; since = "2.60.0" };
 

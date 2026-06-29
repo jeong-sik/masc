@@ -345,6 +345,21 @@ let test_turn_context_fields_stored () =
       ["/tmp/k-sandbox"; "/tmp/shared"]
       Yojson.Safe.Util.(
         runtime_contract |> member "allowed_paths" |> to_list |> List.map to_string);
+    let path_resolution =
+      Yojson.Safe.Util.member "path_resolution" runtime_contract
+    in
+    Alcotest.(check bool)
+      "runtime contract explains Execute repo cwd path basis"
+      true
+      (String_util.contains_substring
+         Yojson.Safe.Util.(member "execute_path_basis" path_resolution |> to_string)
+         "do not repeat the repo prefix");
+    Alcotest.(check bool)
+      "runtime contract points .masc state at task/context tools"
+      true
+      (String_util.contains_substring
+         Yojson.Safe.Util.(member "masc_state_basis" path_resolution |> to_string)
+         "Use keeper task/context tools");
     let omits_field name =
       match runtime_contract with
       | `Assoc fields -> not (List.mem_assoc name fields)

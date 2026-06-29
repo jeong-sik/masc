@@ -538,18 +538,12 @@ let configured_keeper_is_materializable config name =
      pressure. *)
   Keeper_meta_store.declarative_autoboot_enabled_by_default config name
   &&
-  try
-    let defaults =
-      Keeper_types_profile.load_keeper_profile_defaults_for_base_path
-        ~base_path:config.Workspace.base_path
-        name
-    in
-    (* #22615: SSOT materializability predicate (replaces the inline
-       persona/goal/mention check). *)
-    Keeper_types_profile.keeper_profile_defaults_materializable defaults
-  with
-  | Eio.Cancel.Cancelled _ as exn -> raise exn
-  | _ -> true
+  (* #22615: SSOT materializability predicate. #22616: the probe-load fallback
+     is surfaced via the ProfileLoadFailures counter + warn inside
+     Keeper_types_profile (replaces the previously silent inline check; the
+     Cancelled re-raise discipline is preserved inside the helper). *)
+  Keeper_types_profile.keeper_profile_defaults_materializable_for_name
+    ~base_path:config.Workspace.base_path name
 
 let keeper_identity_drift_scan config =
   let configured_names =

@@ -65,6 +65,7 @@ let decision_kind (d : Agent_sdk.Hooks.hook_decision) : string =
   | AdjustParams _ -> "AdjustParams"
   | ElicitInput _ -> "ElicitInput"
   | Nudge _ -> "Nudge"
+  | HookFailed _ -> "HookFailed"
 
 let override_text (d : Agent_sdk.Hooks.hook_decision) : string =
   match d with

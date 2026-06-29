@@ -864,6 +864,45 @@ let with_config_dir f =
       Config_dir_resolver.reset ();
       f config_dir)
 
+let test_profile_defaults_materializable_for_name_uses_base_path () =
+  let original_config = Sys.getenv_opt "MASC_CONFIG_DIR" in
+  let original_personas = Sys.getenv_opt "MASC_PERSONAS_DIR" in
+  let original_base_path = Sys.getenv_opt "MASC_BASE_PATH" in
+  Fun.protect
+    ~finally:(fun () ->
+      restore_env "MASC_CONFIG_DIR" original_config;
+      restore_env "MASC_PERSONAS_DIR" original_personas;
+      restore_env "MASC_BASE_PATH" original_base_path;
+      Config_dir_resolver.reset ())
+    (fun () ->
+      Unix.putenv "MASC_CONFIG_DIR" "";
+      Unix.putenv "MASC_PERSONAS_DIR" "";
+      Unix.putenv "MASC_BASE_PATH" "";
+      Config_dir_resolver.reset ();
+      with_temp_dir "keeper-materializable" @@ fun base_path ->
+      let config_dir =
+        Filename.concat (Filename.concat base_path ".masc") "config"
+      in
+      let keepers_dir = Filename.concat config_dir "keepers" in
+      mkdir_p keepers_dir;
+      write_file (Filename.concat config_dir "runtime.toml") "";
+      write_file
+        (Filename.concat keepers_dir "runtime.toml")
+        "[keeper]\nautoboot_enabled = true\ninstructions = \"runtime keeper\"\n";
+      write_file
+        (Filename.concat keepers_dir "template.toml")
+        "[keeper]\ninstructions = \"loader-only template\"\n";
+      check bool
+        "explicit autoboot keeper is materializable"
+        true
+        (KTP.keeper_profile_defaults_materializable_for_name ~base_path
+           "runtime");
+      check bool
+        "loader-only template is not materializable"
+        false
+        (KTP.keeper_profile_defaults_materializable_for_name ~base_path
+           "template"))
+
 (* persona⊥{model,runtime}: keeper TOML no longer carries a runtime/model
    selection; a [keeper.runtime_id] (or legacy [keeper.model]) key is rejected
    at load, pointing the operator at runtime.toml [[runtime.assignments]]. *)
@@ -1716,6 +1755,8 @@ let () =
           test_case "with files" `Quick test_discover_with_files;
           test_case "nonexistent dir" `Quick test_discover_nonexistent_dir;
           test_case "skips bad files" `Quick test_discover_skips_bad_files;
+          test_case "materializable helper uses base path" `Quick
+            test_profile_defaults_materializable_for_name_uses_base_path;
           test_case "bundled keeper profiles resolve prompt self-model" `Quick
             test_bundled_keeper_profiles_resolve_prompt_self_model;
           test_case "bundled issue_king uses local sandbox" `Quick

@@ -152,8 +152,6 @@ val snapshot_of_structured_working_context :
 val latest_state_snapshot_from_messages :
   Agent_sdk.Types.message list -> keeper_state_snapshot option
 val priority_for_kind : kind:string -> int
-val contains_any_ci : string -> string list -> bool
-val signal_bonus : text:string -> int
 val tuned_priority_for_candidate : kind:string -> text:string -> int
 val total_cap : unit -> int
 val kind_caps : unit -> (string * int) list

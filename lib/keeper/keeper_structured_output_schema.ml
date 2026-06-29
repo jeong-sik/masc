@@ -1,4 +1,4 @@
-(** Provider-native JSON schemas for Memory OS LLM producers. *)
+(** Provider-native JSON schemas for keeper LLM sub-call producers. *)
 
 let string_schema = `Assoc [ "type", `String "string" ]
 let integer_schema = `Assoc [ "type", `String "integer" ]
@@ -91,6 +91,11 @@ let consolidation_plan_output_schema =
 
 let memory_bank_summary_output_schema =
   let fields = [ "summary", string_schema ] in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let vision_analyze_output_schema =
+  let fields = [ "text", string_schema ] in
   object_schema ~required:(List.map fst fields) fields
 ;;
 

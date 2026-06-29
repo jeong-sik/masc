@@ -14,6 +14,7 @@
 module Vt = Masc.Keeper_vision_tool
 module Vi = Masc.Keeper_vision_ingest
 module Va = Multimodal.Vision_analyze
+module Structured_schema = Masc.Keeper_structured_output_schema
 module Store = Multimodal.Vision_artifact_store
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
@@ -95,10 +96,13 @@ let artifact_handle_of_placeholder text =
     String.sub text start (stop start - start)
 
 let ok_response text : Agent_sdk.Types.api_response =
+  let text_json =
+    Yojson.Safe.to_string (`Assoc [ "text", `String text ])
+  in
   { id = "vision-test"
   ; model = "vision-test-model"
   ; stop_reason = Agent_sdk.Types.EndTurn
-  ; content = [ Agent_sdk.Types.Text text ]
+  ; content = [ Agent_sdk.Types.Text text_json ]
   ; usage = None
   ; telemetry = None
   }
@@ -202,7 +206,8 @@ let test_message_of_request () =
     assert (msg.Agent_sdk.Types.role = Agent_sdk.Types.User);
     (match msg.Agent_sdk.Types.content with
      | [ Agent_sdk.Types.Text q; Agent_sdk.Types.Image img ] ->
-       assert (String.equal q "what color?");
+       assert (contains_substring q "what color?");
+       assert (contains_substring q "\"text\"");
        assert (String.equal img.media_type "image/png");
        assert (
          String.equal
@@ -230,7 +235,16 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
   let configured = Vt.provider_for_vision { base with max_tokens = Some 4096 } in
   assert (configured.max_tokens = Some 4096);
   let fallback = Vt.provider_for_vision { base with max_tokens = None } in
-  assert (fallback.max_tokens = Some Vt.vision_default_max_tokens)
+  assert (fallback.max_tokens = Some Vt.vision_default_max_tokens);
+  let expected_schema = Structured_schema.vision_analyze_output_schema in
+  (match configured.response_format with
+   | Agent_sdk.Types.JsonSchema schema ->
+     assert (Yojson.Safe.equal schema expected_schema)
+   | Agent_sdk.Types.JsonMode
+   | Agent_sdk.Types.Off -> failwith "vision provider must request JsonSchema");
+  (match configured.output_schema with
+   | Some schema -> assert (Yojson.Safe.equal schema expected_schema)
+   | None -> failwith "vision provider must mirror output_schema")
 
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->

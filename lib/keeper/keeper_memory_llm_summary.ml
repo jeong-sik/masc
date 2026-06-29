@@ -64,8 +64,8 @@ let provider_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
     tool_choice = None;
     disable_parallel_tool_use = true;
   }
-  |> Keeper_memory_os_structured_schema.apply_to_provider_config
-       Keeper_memory_os_structured_schema.memory_bank_summary_output_schema
+  |> Keeper_structured_output_schema.apply_to_provider_config
+       Keeper_structured_output_schema.memory_bank_summary_output_schema
 
 let text_block text : Agent_sdk.Types.content_block =
   Agent_sdk.Types.Text text

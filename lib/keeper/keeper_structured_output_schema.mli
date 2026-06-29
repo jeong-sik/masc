@@ -1,4 +1,4 @@
-(** Provider-native JSON schemas for Memory OS LLM producers.
+(** Provider-native JSON schemas for keeper LLM sub-call producers.
 
     These schemas are used as [response_format = JsonSchema _] /
     [output_schema = Some _] at the OAS provider boundary. The existing
@@ -13,6 +13,9 @@ val consolidation_plan_output_schema : Yojson.Safe.t
 
 val memory_bank_summary_output_schema : Yojson.Safe.t
 (** JSON object the memory-bank summary provider must return. *)
+
+val vision_analyze_output_schema : Yojson.Safe.t
+(** JSON object the one-shot vision analyzer provider must return. *)
 
 val apply_to_provider_config
   :  Yojson.Safe.t

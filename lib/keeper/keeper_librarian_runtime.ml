@@ -278,8 +278,8 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
   ; thinking_budget = None
   ; clear_thinking = Some true
   }
-  |> Keeper_memory_os_structured_schema.apply_to_provider_config
-       Keeper_memory_os_structured_schema.librarian_episode_output_schema
+    |> Keeper_structured_output_schema.apply_to_provider_config
+         Keeper_structured_output_schema.librarian_episode_output_schema
 ;;
 
 let message role text =

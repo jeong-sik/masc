@@ -58,18 +58,26 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   ; temperature = Some 0.0
   ; tool_choice = None
   ; disable_parallel_tool_use = true
-  ; response_format = Agent_sdk.Types.Off
-  ; output_schema = None
   ; enable_thinking = Some false
   ; preserve_thinking = Some false
   ; thinking_budget = None
   ; clear_thinking = Some true
   }
+  |> Keeper_structured_output_schema.apply_to_provider_config
+       Keeper_structured_output_schema.vision_analyze_output_schema
 
 let message_of_request (req : Va.request) : Agent_sdk.Types.message =
+  let query =
+    Printf.sprintf
+      "Analyze the attached image for this request:\n\
+       %s\n\n\
+       Return only a JSON object with a non-empty string field named text. Do \
+       not include markdown fences or prose outside the JSON object."
+      req.Va.query
+  in
   Agent_sdk.Types.make_message
     ~role:Agent_sdk.Types.User
-    [ Agent_sdk.Types.text_block req.Va.query
+    [ Agent_sdk.Types.text_block query
     ; Agent_sdk.Types.image_block
         ~source_type:Agent_sdk.Types.Base64
         ~media_type:req.Va.image_media_type
@@ -247,8 +255,21 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
+let vision_text_of_response (response : Agent_sdk.Types.api_response) =
+  let raw = String.trim (Agent_sdk_response.text_of_response response) in
+  try
+    match Yojson.Safe.from_string raw with
+    | `Assoc fields ->
+      (match List.assoc_opt "text" fields with
+       | Some (`String text) -> String.trim text
+       | Some _
+       | None -> "")
+    | _ -> ""
+  with Yojson.Json_error _ -> ""
+;;
+
 let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
-  let text = Agent_sdk_response.text_of_response response in
+  let text = vision_text_of_response response in
   let truncated = truncated_of_stop_reason response.stop_reason in
   match Va.classify ~truncated ~content:text with
   | Ok t -> ok_json t
@@ -258,7 +279,7 @@ let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
     err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
 
 let outcome_of_response (response : Agent_sdk.Types.api_response) =
-  let text = Agent_sdk_response.text_of_response response in
+  let text = vision_text_of_response response in
   let truncated = truncated_of_stop_reason response.stop_reason in
   match Va.classify ~truncated ~content:text with
   | Ok t -> Vo_ok t

@@ -992,24 +992,28 @@ let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
 (* RFC-OAS-026 §4.6: a configured stream-idle deadline with no resolvable clock
    must fail loudly rather than silently disarm the only I2-legitimate
    streaming timeout. *)
-let test_clock_failfast_raises_when_idle_set_without_clock () =
-  try
-    let _ =
-      Runtime_agent.For_testing.decide_clock_for_idle
-        ~stream_idle_timeout_s:(Some 120.0)
-        ~process_clock:(Error "process runtime not initialised")
-        ~ctx_clock:None
-    in
-    fail "expected failure when idle is configured but no clock resolves"
+let test_clock_failfast_returns_typed_error_when_idle_set_without_clock () =
+  match
+    Runtime_agent.For_testing.decide_clock_for_idle
+      ~stream_idle_timeout_s:(Some 120.0)
+      ~process_clock:(Error "process runtime not initialised")
+      ~ctx_clock:None
   with
-  | Failure msg ->
+  | Error (Agent_sdk.Error.Config (Agent_sdk.Error.InvalidConfig { field; detail })) ->
+    check string "field" "stream_idle_timeout_s" field;
     check
       bool
       "message identifies the configured idle deadline with no clock"
       true
       (String.starts_with
          ~prefix:"runtime_agent: stream_idle_timeout_s configured"
-         msg)
+         detail)
+  | Error err ->
+    fail
+      (Printf.sprintf
+         "expected InvalidConfig stream_idle_timeout_s, got %s"
+         (Agent_sdk.Error.to_string err))
+  | Ok _ -> fail "expected typed error when idle is configured but no clock resolves"
 
 let test_clock_failfast_opt_out_when_no_idle_no_clock () =
   (* Legitimate opt-out: no idle deadline + no clock stays None, no raise. *)
@@ -1019,7 +1023,10 @@ let test_clock_failfast_opt_out_when_no_idle_no_clock () =
       ~process_clock:(Error "no runtime")
       ~ctx_clock:None
   in
-  check bool "no idle + no clock -> None" true (Option.is_none clock)
+  check bool "no idle + no clock -> None" true
+    (match clock with
+     | Ok None -> true
+     | Ok (Some _) | Error _ -> false)
 
 (* ── Runtime.decide_capability_gate (OAS catalog binding gate) ── *)
 
@@ -1169,7 +1176,7 @@ let () =
         ; test_case
             "clock fail-fast raises when idle set without clock (RFC-OAS-026)"
             `Quick
-            test_clock_failfast_raises_when_idle_set_without_clock
+            test_clock_failfast_returns_typed_error_when_idle_set_without_clock
         ; test_case
             "clock fail-fast opt-out when no idle no clock"
             `Quick

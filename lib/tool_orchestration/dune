@@ -11,11 +11,6 @@
  (name masc_tool_orchestration)
  (public_name masc.tool_orchestration)
  (wrapped false)
- (libraries
-  masc.masc_tool_dispatch
-  masc.tool_types
-  yojson
-  uuidm
-  digestif)
+ (libraries masc.masc_tool_dispatch masc.tool_types yojson uuidm digestif)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

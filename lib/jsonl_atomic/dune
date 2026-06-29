@@ -7,10 +7,4 @@
  ; RFC-0071 §3.4 Phase 5 ratchet (warning 4)
  (flags
   (:standard -w +4))
- (libraries
-  eio
-  eio.unix
-  unix
-  yojson
-  masc_log
-  masc.config_dir_resolver))
+ (libraries eio eio.unix unix yojson masc_log masc.config_dir_resolver))

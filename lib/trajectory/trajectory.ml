@@ -269,7 +269,13 @@ let next_round ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string
                   let json = Yojson.Safe.from_string line in
                   let entry_turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0) in
                   if entry_turn = turn then acc + 1 else acc
-                with _ -> acc
+                with
+                | Yojson.Json_error msg ->
+                    Log.Keeper.warn "Failed to parse trajectory JSON during next_round (trace_id=%s): %s" trace_id msg;
+                    acc
+                | exn ->
+                    Log.Keeper.warn "Unexpected error reading trajectory line (trace_id=%s): %s" trace_id (Printexc.to_string exn);
+                    acc
               ) 0
     in
     let next = current + 1 in

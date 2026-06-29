@@ -39,6 +39,7 @@ val run_model_by_label :
 val run_named_with_masc_tools :
   runtime_id:string ->
   goal:string ->
+  base_path:string ->
   ?priority:Llm_provider.Request_priority.t ->
   ?system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
@@ -69,6 +70,7 @@ val run_named_with_masc_tools :
 val run_model_with_masc_tools :
   model_label:string ->
   goal:string ->
+  base_path:string ->
   ?system_prompt:string ->
   masc_tools:Masc_domain.tool_schema list ->
   dispatch:(name:string -> args:Yojson.Safe.t -> Tool_result.result) ->

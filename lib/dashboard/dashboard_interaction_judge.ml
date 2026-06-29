@@ -221,6 +221,8 @@ let mark_disabled st =
       };
     st.last_json <- empty_interactions_json)
 
-let start ~sw:_ ~clock:_ ~base_path ~build_facts:_ =
+let start ~sw ~clock:_ ~base_path ~build_facts:_ =
   let st = get_state base_path in
-  mark_disabled st
+  mark_disabled st;
+  Eio.Switch.on_release sw (fun () ->
+      Eio_guard.with_mutex outer_mu (fun () -> Hashtbl.remove states base_path))

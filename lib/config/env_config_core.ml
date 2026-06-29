@@ -327,7 +327,7 @@ let host_fd_pressure_state_file_env_key = "MASC_HOST_FD_PRESSURE_STATE_FILE"
 let legacy_host_fd_pressure_state_file_env_key = "MASC_SYSMON_PRESSURE_STATE"
 let host_fd_pressure_poller_disabled_env_key = "MASC_HOST_FD_PRESSURE_POLLER_DISABLED"
 let host_fd_pressure_poll_interval_sec_env_key = "MASC_HOST_FD_PRESSURE_POLL_INTERVAL_SEC"
-let default_host_fd_pressure_state_file_path = "/tmp/masc-host-pressure.state"
+let default_host_fd_pressure_state_file_path = Filename.get_temp_dir_name () ^ "/masc-host-pressure.state"
 
 let host_fd_pressure_state_file_path_opt () =
   raw_value_opt host_fd_pressure_state_file_env_key |> trim_opt

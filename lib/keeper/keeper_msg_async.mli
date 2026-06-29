@@ -96,4 +96,5 @@ module For_testing : sig
   val record_path : base_path:string -> request_id:string -> string option
   val load_record : base_path:string -> request_id:string -> load_result
   val gc_stale_disk : base_path:string -> int
+  val active_switch_count : unit -> int
 end

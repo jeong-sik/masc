@@ -57,6 +57,7 @@ val effective_attempt_timeout_s :
   is_last:bool -> configured_timeout_s:float option -> t -> float option
 
 val resolve_tool_lane_for_oas_tools :
+  base_path:string ->
   ?agent_name:string ->
   tools:Agent_sdk.Tool.t list ->
   t ->
@@ -66,6 +67,7 @@ val resolve_tool_lane_for_oas_tools :
   result
 
 val runtime_mcp_policy_for_agent :
+  base_path:string ->
   agent_name:string ->
   t ->
   Llm_provider.Llm_transport.runtime_mcp_policy option ->

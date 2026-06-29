@@ -26,6 +26,7 @@ type gate =
   ; waiting : int Atomic.t
   ; acquired_total : int Atomic.t
   ; rejected_total : int Atomic.t
+  ; timed_out_total : int Atomic.t
   }
 
 type gates =
@@ -81,6 +82,7 @@ let make_gate resource_class env_var default_limit =
   ; waiting = Atomic.make 0
   ; acquired_total = Atomic.make 0
   ; rejected_total = Atomic.make 0
+  ; timed_out_total = Atomic.make 0
   }
 ;;
 
@@ -126,6 +128,7 @@ let all_gates () =
 
 let enabled () = not (env_bool "MASC_TOOL_RESOURCE_GATE_DISABLED")
 let wait_timeout_sec () = env_float "MASC_TOOL_GATE_WAIT_TIMEOUT_SEC" 20.0
+let execution_timeout_sec () = env_float "MASC_TOOL_GATE_EXEC_TIMEOUT_SEC" 1800.0
 
 let classify = Tool_resource_axis.classify
 
@@ -140,13 +143,26 @@ let gate_timeout_message gate wait_timeout =
     gate.env_var
 ;;
 
+let gate_execution_timeout_message gate execution_timeout =
+  Printf.sprintf
+    "Tool resource gate execution lease expired after %.1fs: class=%s limit=%d. \
+     The permit was released to prevent one stuck tool call from blocking the \
+     Keeper fleet; either fix the stuck tool or raise MASC_TOOL_GATE_EXEC_TIMEOUT_SEC \
+     deliberately."
+    execution_timeout
+    gate.label
+    gate.limit
+;;
+
 let with_permit_raw
       ?wait_timeout_override_sec
+      ?execution_timeout_override_sec
       ~clock
       ~tool_name
       ~arguments
       ~is_read_only
       ~on_reject
+      ~on_execution_timeout
       f =
   let resource_class = classify ~tool_name ~arguments ~is_read_only in
   if (not (enabled ())) || resource_class = Ungated
@@ -181,7 +197,23 @@ let with_permit_raw
         on_reject message)
       else (
         Atomic.incr gate.acquired_total;
-        Eio_guard.protect ~finally:(fun () -> Eio.Semaphore.release gate.semaphore) f))
+        let execution_timeout =
+          match execution_timeout_override_sec with
+          | Some seconds -> max 0.001 seconds
+          | None -> execution_timeout_sec ()
+        in
+        Eio_guard.protect
+          ~finally:(fun () -> Eio.Semaphore.release gate.semaphore)
+          (fun () ->
+             try Eio.Time.with_timeout_exn clock execution_timeout f with
+             | Eio.Time.Timeout ->
+               Atomic.incr gate.timed_out_total;
+               let message = gate_execution_timeout_message gate execution_timeout in
+               Log.Mcp.warn
+                 "tool resource gate execution timeout: tool=%s %s"
+                 tool_name
+                 message;
+               on_execution_timeout message)))
 ;;
 
 let with_permit ~clock ~tool_name ~arguments ~is_read_only ~start_time f =
@@ -191,6 +223,12 @@ let with_permit ~clock ~tool_name ~arguments ~is_read_only ~start_time f =
     ~arguments
     ~is_read_only
     ~on_reject:(fun message ->
+      Tool_result.error
+        ~failure_class:(Some Tool_result.Transient_error)
+        ~tool_name
+        ~start_time
+        message)
+    ~on_execution_timeout:(fun message ->
       Tool_result.error
         ~failure_class:(Some Tool_result.Transient_error)
         ~tool_name
@@ -211,6 +249,7 @@ let gate_json gate =
     ; "waiting", `Int (Atomic.get gate.waiting)
     ; "acquired_total", `Int (Atomic.get gate.acquired_total)
     ; "rejected_total", `Int (Atomic.get gate.rejected_total)
+    ; "timed_out_total", `Int (Atomic.get gate.timed_out_total)
     ]
 ;;
 
@@ -218,6 +257,7 @@ let snapshot_json () =
   `Assoc
     [ "enabled", `Bool (enabled ())
     ; "wait_timeout_sec", `Float (wait_timeout_sec ())
+    ; "execution_timeout_sec", `Float (execution_timeout_sec ())
     ; "gates", `List (List.map gate_json (all_gates ()))
     ]
 ;;
@@ -246,6 +286,7 @@ module For_testing = struct
       ; waiting = Atomic.make 0
       ; acquired_total = Atomic.make 0
       ; rejected_total = Atomic.make 0
+      ; timed_out_total = Atomic.make 0
       }
     in
     gates_ref :=

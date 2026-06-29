@@ -355,7 +355,7 @@ let record_self_owned_verdict (scenario : EH.scenario) ~args ~sw
   ()
 ;;
 
-let run_one (scenario : EH.scenario) ~runtime_id ~run_index ~sw ~record_verdicts
+let run_one (scenario : EH.scenario) ~runtime_id ~base_path ~run_index ~sw ~record_verdicts
     ~(evaluator_runtime : string option) : EH.eval_run =
   let calls = ref [] in
   let dispatch ~name ~args =
@@ -377,7 +377,7 @@ let run_one (scenario : EH.scenario) ~runtime_id ~run_index ~sw ~record_verdicts
   let goal = build_goal scenario in
   let t0 = Unix.gettimeofday () in
   let res =
-    KTDW.run_named_with_masc_tools ~runtime_id ~goal
+    KTDW.run_named_with_masc_tools ~runtime_id ~base_path ~goal
       ~system_prompt:eval_system_prompt ~masc_tools:completion_tools ~dispatch
       ~temperature:Runtime_provider_defaults.deterministic_temperature
       ~approval:Masc.Approval_callbacks.auto_approve
@@ -389,12 +389,12 @@ let run_one (scenario : EH.scenario) ~runtime_id ~run_index ~sw ~record_verdicts
   build_eval_run scenario ~run_index ~res ~calls ~duration_ms
 ;;
 
-let run_scenario (scenario : EH.scenario) ~runtime_id ~k ~sw ~record_verdicts
+let run_scenario (scenario : EH.scenario) ~runtime_id ~base_path ~k ~sw ~record_verdicts
     ~(evaluator_runtime : string option) : EH.eval_result =
   Printf.eprintf "running scenario %s (k=%d)...\n%!" scenario.EH.id k;
   let runs =
     List.init k (fun i ->
-        run_one scenario ~runtime_id ~run_index:i ~sw ~record_verdicts
+        run_one scenario ~runtime_id ~base_path ~run_index:i ~sw ~record_verdicts
           ~evaluator_runtime)
   in
   EH.summarize_runs ~scenario ~k runs
@@ -589,7 +589,7 @@ let () =
     let results =
       List.map
         (fun s ->
-          run_scenario s ~runtime_id:cfg.runtime_id ~k:cfg.k ~sw
+          run_scenario s ~runtime_id:cfg.runtime_id ~base_path ~k:cfg.k ~sw
             ~record_verdicts:cfg.record_verdicts
             ~evaluator_runtime)
         scenarios

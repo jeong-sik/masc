@@ -714,10 +714,10 @@ let readonly_observation_duplicate_guard
     ~on_gate_decision
     ~(state : readonly_observation_state)
   : Agent_sdk.Hooks.hooks =
-  let pre_tool_use
-      (Agent_sdk.Hooks.PreToolUse
-         { tool_name; input; accumulated_cost_usd; turn; schedule; _ })
-    =
+  let pre_tool_use event =
+    match event with
+    | Agent_sdk.Hooks.PreToolUse
+        { tool_name; input; accumulated_cost_usd; turn; schedule; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).name in
       if not (read_only_snapshot_observation ~tool_name ~input) then
@@ -758,10 +758,11 @@ let readonly_observation_duplicate_guard
                ~tool_name ~reason_code:"readonly_observation_duplicate"
                ~reason_text)
         | Readonly_observation_continue -> Agent_sdk.Hooks.Continue
+    | _ -> Agent_sdk.Hooks.Continue
   in
-  let post_tool_use
-      (Agent_sdk.Hooks.PostToolUse { tool_name; input; output; _ })
-    =
+  let post_tool_use event =
+    match event with
+    | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; _ } ->
       (if read_only_snapshot_observation ~tool_name ~input then
         let key = readonly_observation_key ~tool_name ~input in
         (match output with
@@ -774,14 +775,16 @@ let readonly_observation_duplicate_guard
         | Ok _
         | Error _ -> ());
       Agent_sdk.Hooks.Continue
+    | _ -> Agent_sdk.Hooks.Continue
   in
-  let post_tool_use_failure
-      (Agent_sdk.Hooks.PostToolUseFailure { tool_name; input; _ })
-    =
+  let post_tool_use_failure event =
+    match event with
+    | Agent_sdk.Hooks.PostToolUseFailure { tool_name; input; _ } ->
       (if read_only_snapshot_observation ~tool_name ~input then
         let key = readonly_observation_key ~tool_name ~input in
         readonly_observation_record_failure state key);
       Agent_sdk.Hooks.Continue
+    | _ -> Agent_sdk.Hooks.Continue
   in
   { Agent_sdk.Hooks.empty with
     pre_tool_use = Some pre_tool_use;

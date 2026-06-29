@@ -97,7 +97,10 @@ val present_json_keys : string list -> Yojson.Safe.t -> string list
 
 (** Reject removed keeper input keys.  Returns [Error msg] listing the offending fields. *)
 val reject_removed_keeper_input_keys :
-  tool_name:string -> Yojson.Safe.t -> (unit, string) result
+  ?allow_sandbox_fields:bool ->
+  tool_name:string ->
+  Yojson.Safe.t ->
+  (unit, string) result
 
 (** Reject removed keeper message input keys. *)
 val reject_removed_keeper_msg_input_keys :

@@ -120,10 +120,7 @@ let receipt_contract_attention_reason receipt =
   let completion_contract_result = completion_contract_result_from_receipt receipt in
   let turn_budget_exhausted =
     match json_string_opt_member "terminal_reason_code" receipt with
-    | Some value ->
-      (match Keeper_turn_disposition.of_wire (String.lowercase_ascii (String.trim value)) with
-       | Keeper_turn_disposition.Turn_budget_exhausted _ -> true
-       | _ -> false)
+    | Some value -> Keeper_turn_disposition.is_turn_budget_exhausted_wire value
     | None -> false
   in
   let attention_reason result =

@@ -34,45 +34,95 @@ let non_empty_opt value =
   | "" -> None
   | trimmed -> Some trimmed
 
-let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata body =
-  Safe_ops.protect ~default:None (fun () ->
-    let json = Yojson.Safe.from_string body in
-    let request_id =
-      match Json_util.get_string json "request_id" with
-      | None -> None
-      | Some value -> non_empty_opt value
-    in
-    let status =
-      match Json_util.get_string json "status" with
-      | None -> None
-      | Some value ->
-          let normalized = String.lowercase_ascii (String.trim value) in
-          Gate_protocol.message_request_status_of_string normalized
-    in
-    match request_id, status with
-    | Some request_id, Some status ->
-        let destination_id =
-          match Json_util.get_string json "keeper_name" with
-          | Some value ->
-            (match non_empty_opt value with
-             | Some trimmed -> trimmed
-             | None -> keeper_name)
-          | None -> keeper_name
-        in
-        let request : Gate_protocol.message_request =
-          { request_id
-          ; destination_type = "keeper"
-          ; destination_id
-          ; channel
-          ; actor_id = non_empty_opt channel_user_id
-          ; status
-          ; modalities = [ "text" ]
-          ; transport = non_empty_opt channel
-          ; metadata = ("status_source", "keeper_msg_async") :: metadata
-          }
-        in
-        Some request
-    | _ -> None)
+(** Typed parse failures for the async ACK envelope.
+
+    The previous [Safe_ops.protect ~default:None] wrapper collapsed two
+    distinct failure modes into a single [None]: the keeper returned a
+    legitimate reply *without* an ACK contract (queued, running — handled
+    separately by the [Streaming] arm of the dispatch match), and the
+    backend could not parse the ACK contract at all (malformed JSON,
+    missing request_id, missing status, unknown future status). The
+    connector could not distinguish "queued" from "parse failed".
+
+    Exposing the failure as a typed sum lets the dispatch site surface
+    a deliberate degraded/error ACK shape and log the backend drift,
+    rather than silently substituting the keeper's reply text. *)
+type ack_parse_failure =
+  | Invalid_json of string
+  | Missing_request_id
+  | Empty_request_id
+  | Missing_status
+  | Invalid_status of string
+
+let ack_parse_failure_to_string = function
+  | Invalid_json detail ->
+      Printf.sprintf "invalid json: %s" detail
+  | Missing_request_id -> "missing request_id"
+  | Empty_request_id -> "empty request_id"
+  | Missing_status -> "missing status"
+  | Invalid_status raw ->
+      Printf.sprintf "unknown status %S (not in the closed status set)" raw
+
+(** Parse the async ACK envelope from a keeper tool response body.
+
+    Returns [Ok request] when the body is a valid JSON object with both
+    a non-empty [request_id] and a [status] that maps to one of the
+    closed [Gate_protocol.message_request_status] variants.
+
+    Returns [Error reason] otherwise. JSON parse failures are isolated
+    from the closed-sum status check so that a malformed envelope is
+    surfaced as a backend-degraded path, distinct from a legitimately
+    absent ACK field. *)
+let extract_message_request_ack ~channel ~channel_user_id ~keeper_name ~metadata body :
+    (Gate_protocol.message_request, ack_parse_failure) result =
+  let json =
+    try Ok (Yojson.Safe.from_string body)
+    with Yojson.Json_error detail -> Error (Invalid_json detail)
+  in
+  match json with
+  | Error failure -> Error failure
+  | Ok json ->
+      let request_id =
+        match Json_util.get_string json "request_id" with
+        | None -> None
+        | Some value -> non_empty_opt value
+      in
+      (match request_id with
+       | None ->
+           (match Json_util.get_string json "request_id" with
+            | Some _ -> Error Empty_request_id
+            | None -> Error Missing_request_id)
+       | Some trimmed_request_id -> (
+           match Json_util.get_string json "status" with
+           | None -> Error Missing_status
+           | Some raw ->
+               let normalized = String.lowercase_ascii (String.trim raw) in
+               (match
+                  Gate_protocol.message_request_status_of_string normalized
+                with
+               | Some status ->
+                   let destination_id =
+                     match Json_util.get_string json "keeper_name" with
+                     | Some value ->
+                       (match non_empty_opt value with
+                        | Some trimmed -> trimmed
+                        | None -> keeper_name)
+                     | None -> keeper_name
+                   in
+                   let request : Gate_protocol.message_request =
+                     { request_id = trimmed_request_id
+                     ; destination_type = "keeper"
+                     ; destination_id
+                     ; channel
+                     ; actor_id = non_empty_opt channel_user_id
+                     ; status
+                     ; modalities = [ "text" ]
+                     ; transport = non_empty_opt channel
+                     ; metadata = ("status_source", "keeper_msg_async") :: metadata
+                     }
+                   in
+                   Ok request
+               | None -> Error (Invalid_status normalized))))
 
 let in_flight_metadata (info : Keeper_turn_admission.in_flight_info option) =
   match info with
@@ -325,9 +375,7 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
           (Keeper_tool_surface.dispatch_stream ~on_text_delta keeper_ctx
              ~name:"masc_keeper_msg" ~args)
   in
-  match
-    dispatch_result
-  with
+  match dispatch_result with
   | `Async_ack (in_flight, Some result) when Tool_result.is_success result ->
       let body = Tool_result.message result in
       let duration_ms =
@@ -335,15 +383,41 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
         |> Int64.div 1_000_000L
         |> Int64.to_int
       in
-      let message_request =
+      let ack_with_in_flight =
         extract_message_request_ack ~channel ~channel_user_id ~keeper_name
           ~metadata:(metadata @ in_flight_metadata (Some in_flight))
           body
       in
-      let reply =
-        match message_request with
-        | Some request -> busy_ack_reply_text ~in_flight request
-        | None -> extract_reply_text body
+      let message_request, reply =
+        match ack_with_in_flight with
+        | Ok request ->
+            ( Some request
+            , busy_ack_reply_text ~in_flight request )
+        | Error failure ->
+            (* Backend drift: the keeper accepted the message into its
+               async queue but the wire envelope we expected is missing or
+               malformed. Do not silently substitute the keeper's reply
+               body — that collapses the queued state with a degraded
+               parse path and breaks the connector's "is this queued?"
+               decision. Log the parse failure with the same
+               [status_source=keeper_msg_async] surface so on-call can
+               triage whether the keeper contract regressed or the body
+               was truncated mid-flight, and emit a degraded reply that
+               names the parse failure without leaking the raw body. *)
+            Log.Server.warn
+              "channel gate async ACK parse failure (keeper=%s, lane=%s, \
+               request_id_context=%s, failure=%s): connector will see a \
+               degraded ACK, not the keeper's reply body."
+              keeper_name lane (extract_reply_text body |> String.length |> string_of_int)
+              (ack_parse_failure_to_string failure);
+            ( None
+            , Printf.sprintf
+                "%s is busy; the gate could not parse the async ACK \
+                 envelope (%s). Your message was forwarded to the keeper, \
+                 but no durable request id is available. Treat this as a \
+                 transient backend degradation rather than a queued reply."
+                keeper_name
+                (ack_parse_failure_to_string failure) )
       in
       let reply = redact_text reply in
       let structured = Option.map redact_json (extract_structured body) in

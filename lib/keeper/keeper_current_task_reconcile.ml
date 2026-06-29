@@ -44,8 +44,37 @@ let owned_active_tasks_for_meta ~(config : Workspace.config)
     ~(meta : Keeper_meta_contract.keeper_meta) =
   let names = resolved_agent_names ~config ~agent_name:meta.agent_name in
   let matches assignee = List.mem assignee names in
-  match Workspace_backlog.read_backlog_r config with
-  | Error message ->
+  try
+    match Workspace_backlog.read_backlog_r config with
+    | Error message ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string ReconcileFailures)
+        ~labels:[("keeper", meta.name); ("phase", "owned_tasks_query")]
+        ();
+      Log.Keeper.warn ~keeper_name:meta.name
+        "owned task reconciliation failed: %s"
+        message;
+      Error message
+    | Ok backlog ->
+      backlog.tasks
+      |> List.filter_map (fun (task : Masc_domain.task) ->
+           match task.task_status with
+           | Masc_domain.Claimed { assignee; _ }
+           | Masc_domain.InProgress { assignee; _ }
+             when matches assignee ->
+               task_id_of_owned_active_task ~keeper_name:meta.name task
+               |> Option.map (fun task_id -> { task_id; task })
+           | Masc_domain.Claimed _
+           | Masc_domain.InProgress _
+           | Masc_domain.AwaitingVerification _
+           | Masc_domain.Todo
+           | Masc_domain.Done _
+           | Masc_domain.Cancelled _ -> None)
+      |> fun tasks -> Ok tasks
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    let message = Printexc.to_string exn in
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string ReconcileFailures)
       ~labels:[("keeper", meta.name); ("phase", "owned_tasks_query")]
@@ -54,22 +83,6 @@ let owned_active_tasks_for_meta ~(config : Workspace.config)
       "owned task reconciliation failed: %s"
       message;
     Error message
-  | Ok backlog ->
-    backlog.tasks
-    |> List.filter_map (fun (task : Masc_domain.task) ->
-         match task.task_status with
-         | Masc_domain.Claimed { assignee; _ }
-         | Masc_domain.InProgress { assignee; _ }
-           when matches assignee ->
-             task_id_of_owned_active_task ~keeper_name:meta.name task
-             |> Option.map (fun task_id -> { task_id; task })
-         | Masc_domain.Claimed _
-         | Masc_domain.InProgress _
-         | Masc_domain.AwaitingVerification _
-         | Masc_domain.Todo
-         | Masc_domain.Done _
-         | Masc_domain.Cancelled _ -> None)
-    |> fun tasks -> Ok tasks
 
 let active_status_rank = function
   | Masc_domain.InProgress _ -> 0

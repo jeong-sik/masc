@@ -17,6 +17,7 @@
       is caught here. *)
 
 module R = Masc.Keeper_execution_receipt
+module C = Masc.Keeper_contract_classifier
 module Tr = Keeper_terminal_reason
 
 let failures = ref []
@@ -319,6 +320,10 @@ let base_receipt : R.t =
   ; response_text_present = false
   ; model_used = None
   ; completion_contract_result = R.Contract_unknown
+  ; actionable_signal = Some C.No_actionable_signal
+    (* Root B (#22710): the base receipt represents an idle keeper with nothing
+       actionable, the same "no-work" baseline the prior [goal_ids = []] default
+       expressed. The passive-only carve-out now reads this signal. *)
   ; tool_surface = base_tool_surface
   ; sandbox_kind = Keeper_types_profile_sandbox.Local
   ; sandbox_root = None
@@ -399,7 +404,7 @@ let intentional_passive_only_no_work_policy_change (receipt : R.t) got =
   if
     receipt.completion_contract_result = R.Contract_passive_only
     && Option.is_none receipt.current_task_id
-    && receipt.goal_ids = []
+    && receipt.actionable_signal = Some C.No_actionable_signal
   then (
     let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
     match terminal_reason, receipt.outcome, got with
@@ -607,6 +612,58 @@ let () =
   check
     (Printf.sprintf
        "completed active passive-only receipt want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want)
+;;
+
+(* Root B (#22710) regression: a coordination keeper always carries goals
+   (goal_ids <> []), yet may have nothing actionable in a given turn. The
+   passive-only carve-out must key on the world-observation [actionable_signal],
+   not on goal presence; otherwise such a keeper fails the healthy carve-out and
+   re-emits [operator_broadcast_required] every idle turn (albini, 85/day). *)
+let () =
+  let coordination_passive ?(actionable_signal = Some C.No_actionable_signal) () =
+    { base_receipt with
+      terminal_reason_code = "completed"
+    ; outcome = `Ok
+    ; runtime_outcome = R.Runtime_completed
+    ; completion_contract_result = R.Contract_passive_only
+    ; goal_ids = [ "GOAL-1" ]
+    ; actionable_signal
+    }
+  in
+  let got = R.operator_disposition (coordination_passive ()) in
+  let want = R.Disp_pass, R.Reason_healthy in
+  check
+    (Printf.sprintf
+       "coordination keeper with goals + no actionable signal is healthy want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "healthy idle coordination turn does not need an operator broadcast"
+    (not (R.needs_operator_broadcast (fst got)));
+  let got =
+    R.operator_disposition
+      (coordination_passive ~actionable_signal:(Some C.Has_unclaimed_tasks) ())
+  in
+  let want = R.Disp_pause_human, R.Reason_completion_contract_unsatisfied in
+  check
+    (Printf.sprintf
+       "coordination keeper with unclaimed tasks still pages an operator want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want);
+  check
+    "unclaimed-task passive turn needs an operator broadcast"
+    (R.needs_operator_broadcast (fst got));
+  let got = R.operator_disposition (coordination_passive ~actionable_signal:None ()) in
+  let want = R.Disp_pause_human, R.Reason_completion_contract_unsatisfied in
+  check
+    (Printf.sprintf
+       "coordination keeper with no observation falls back to broadcast-required \
+        want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)

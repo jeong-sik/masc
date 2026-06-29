@@ -170,9 +170,21 @@ let completion_contract_unsatisfied = function
 ;;
 
 let passive_only_without_work_scope receipt =
+  (* Root B (#22710): a passive-only turn is healthy iff the keeper held no
+     claimed task AND the world genuinely offered nothing actionable. The old
+     [goal_ids = []] proxy conflated "has no goals" with "has nothing to do":
+     a coordination keeper always carries goals, so it could never pass this
+     carve-out and re-emitted [operator_broadcast_required] every idle turn.
+     [actionable_signal] is the real per-turn signal (no unclaimed tasks, no
+     board activity). [None] (no world observation threaded) is treated as not
+     healthy-passive, preserving the prior broadcast-required behavior. *)
   receipt.completion_contract_result = Contract_passive_only
   && Option.is_none receipt.current_task_id
-  && receipt.goal_ids = []
+  && (match receipt.actionable_signal with
+      | Some Keeper_contract_classifier.No_actionable_signal -> true
+      | Some Keeper_contract_classifier.Has_unclaimed_tasks
+      | Some Keeper_contract_classifier.Has_board_activity
+      | None -> false)
 ;;
 
 let terminal_reason_is_success receipt =
@@ -474,6 +486,10 @@ let to_json (receipt : t) =
     ; "model_used", `Null
     ; ( "completion_contract_result"
       , `String (completion_contract_result_to_string receipt.completion_contract_result) )
+    ; ( "actionable_signal"
+      , match receipt.actionable_signal with
+        | Some signal -> `String (Keeper_contract_classifier.actionable_signal_label signal)
+        | None -> `Null )
     ; ( "tool_surface"
       , `Assoc
           [ ( "turn_lane"
@@ -787,6 +803,10 @@ let operator_broadcast_payload (receipt : t) ~disposition ~reason =
     ; "runtime_outcome", `String (runtime_outcome_to_string receipt.runtime_outcome)
     ; ( "completion_contract_result"
       , `String (completion_contract_result_to_string receipt.completion_contract_result) )
+    ; ( "actionable_signal"
+      , match receipt.actionable_signal with
+        | Some signal -> `String (Keeper_contract_classifier.actionable_signal_label signal)
+        | None -> `Null )
     ; ( "contract_violation_detail"
       , match decode_contract_violation_reason terminal_reason_code with
         | None -> `Null

@@ -277,6 +277,15 @@ type t =
   ; response_text_present : bool
   ; model_used : string option
   ; completion_contract_result : completion_contract_result
+  ; actionable_signal : Keeper_contract_classifier.actionable_signal option
+    (* Root B (#22710): the world-observation actionable signal captured at
+       turn time, consumed by [operator_disposition] to decide whether a
+       passive-only turn is healthy. Replaces the [goal_ids = []] structural
+       proxy in [passive_only_without_work_scope]: a coordination keeper always
+       carries goals yet may legitimately have nothing actionable in a given
+       turn. [None] when no world observation was threaded, in which case the
+       disposition falls back to the prior broadcast-required behavior
+       (conservative; a needed broadcast is never silently suppressed). *)
   ; tool_surface : tool_surface
   ; sandbox_kind : Keeper_types_profile_sandbox.sandbox_profile
   ; sandbox_root : string option

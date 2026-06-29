@@ -237,6 +237,10 @@ let record_pre_dispatch_terminal_observation
     ; response_text_present = false
     ; model_used = None
     ; completion_contract_result = Keeper_execution_receipt.Contract_not_dispatched
+    ; actionable_signal = None
+      (* Pre-dispatch receipt: the turn never ran, so no world observation was
+         captured. [Contract_not_dispatched] never reaches the
+         [passive_only_without_work_scope] carve-out, so [None] is inert here. *)
     ; tool_surface = pre_dispatch_tool_surface
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta
     ; sandbox_root = Some (Keeper_sandbox.host_root_abs_of_meta ~config meta)

@@ -149,29 +149,27 @@ let round_trippable : (string * D.t) list =
   ; "Completion_contract_no_progress", D.Completion_contract_no_progress
   ; ( "Turn_budget_exhausted/Turns/Oas"
     , D.Turn_budget_exhausted
-        { dimension = Some `Turns; used = 10; limit = 10; source = Some `Oas_sdk } )
+        { detail = Some { dimension = `Turns; source = `Oas_sdk }; used = 10; limit = 10 } )
   ; ( "Turn_budget_exhausted/WallClock/User"
     , D.Turn_budget_exhausted
-        { dimension = Some `Wall_clock_seconds
+        { detail = Some { dimension = `Wall_clock_seconds; source = `User_config }
         ; used = 95
         ; limit = 90
-        ; source = Some `User_config
         } )
   ; ( "Turn_budget_exhausted/Idle/Keeper"
     , D.Turn_budget_exhausted
-        { dimension = Some `Idle_turns
+        { detail = Some { dimension = `Idle_turns; source = `Keeper_runtime }
         ; used = 3
         ; limit = 2
-        ; source = Some `Keeper_runtime
         } )
   ; (* Detail-less form: the receipt producer
        ([Runtime_agent.TurnBudgetExhausted {turns_used; limit}]) carries no
        dimension/source, so [to_wire] emits "turn_budget_exhausted(<used>/<limit>)"
-       and [of_wire] round-trips it to [None]/[None]. This is the form whose
+       and [of_wire] round-trips it to [detail = None]. This is the form whose
        drift (#22618 colon producer vs paren consumer) misreported the dashboard
        budget state. *)
     ( "Turn_budget_exhausted/detail-less"
-    , D.Turn_budget_exhausted { dimension = None; used = 1070; limit = 1070; source = None } )
+    , D.Turn_budget_exhausted { detail = None; used = 1070; limit = 1070 } )
   ; "Unknown empty", D.Unknown { raw_error = "" }
   ; "Unknown raw", D.Unknown { raw_error = "fresh_unmapped_label" }
   ; (* Runtime wires that Code.of_wire recognises losslessly (no payload
@@ -233,14 +231,14 @@ let test_turn_budget_lossy_wires_fail_closed () =
    full-detail form both map to the documented typed value. *)
 let test_of_wire_parses_both_forms () =
   (match D.of_wire "turn_budget_exhausted(1070/1070)" with
-   | D.Turn_budget_exhausted { dimension = None; used; limit; source = None } ->
+   | D.Turn_budget_exhausted { detail = None; used; limit } ->
      Alcotest.(check int) "detail-less used" 1070 used;
      Alcotest.(check int) "detail-less limit" 1070 limit
    | other ->
      Alcotest.failf "detail-less form: expected None/None fields, got %a" D.pp other);
   match D.of_wire "turn_budget_exhausted(turns:oas_sdk:8/8)" with
   | D.Turn_budget_exhausted
-      { dimension = Some `Turns; used; limit; source = Some `Oas_sdk } ->
+      { detail = Some { dimension = `Turns; source = `Oas_sdk }; used; limit } ->
     Alcotest.(check int) "full-detail used" 8 used;
     Alcotest.(check int) "full-detail limit" 8 limit
   | other ->
@@ -289,10 +287,9 @@ let test_turn_budget_exhausted_severity_is_bad () =
     (typed_severity_str
        (D.severity
           (D.Turn_budget_exhausted
-             { dimension = Some `Turns
+             { detail = Some { dimension = `Turns; source = `Oas_sdk }
              ; used = 10
              ; limit = 10
-             ; source = Some `Oas_sdk
              })))
 ;;
 

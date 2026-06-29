@@ -32,10 +32,10 @@ let () =
     (Printf.sprintf "producer emits paren detail-less form (got %S)" wire)
     (String.equal wire (Printf.sprintf "turn_budget_exhausted(%d/%d)" used limit));
   (* 2. Producer output round-trips through the consumer to the typed value the
-     dashboard reads. dimension/source are None because [Runtime_agent] carries
-     no such detail. *)
+     dashboard reads. [detail] is None because [Runtime_agent] carries no such
+     detail. *)
   (match D.of_wire wire with
-   | D.Turn_budget_exhausted { dimension = None; used = u; limit = l; source = None } ->
+   | D.Turn_budget_exhausted { detail = None; used = u; limit = l } ->
      check "round-trip used" (u = used);
      check "round-trip limit" (l = limit)
    | other ->

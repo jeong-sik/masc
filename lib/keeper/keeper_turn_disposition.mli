@@ -24,6 +24,17 @@
     @stability Evolving
     @since 0.193.3 *)
 
+type turn_budget_detail =
+  { dimension : [ `Turns | `Wall_clock_seconds | `Idle_turns ]
+  ; source : [ `Oas_sdk | `Keeper_runtime | `User_config ]
+  }
+
+type turn_budget_exhausted =
+  { detail : turn_budget_detail option
+  ; used : int
+  ; limit : int
+  }
+
 type t =
   | Success (** Turn completed normally. *)
   | External_cancel
@@ -53,22 +64,16 @@ type t =
   | Post_commit_ambiguous
   (** Provider failed after a mutating tool may have committed side
           effects. Reconcile required. *)
-  | Turn_budget_exhausted of
-      { dimension : [ `Turns | `Wall_clock_seconds | `Idle_turns ] option
-      ; used : int
-      ; limit : int
-      ; source : [ `Oas_sdk | `Keeper_runtime | `User_config ] option
-      }
+  | Turn_budget_exhausted of turn_budget_exhausted
   (** Typed vocabulary for the legacy "turn_budget_exhausted(%d/%d)"
       free-text label that was emitted across 4+ call sites. The
       dimension/source tags make it impossible to misattribute a
       keeper-runtime cooloff to an OAS SDK max-turns ceiling.
 
-      [dimension] and [source] are optional because not every producer
-      carries that detail: [Runtime_agent.TurnBudgetExhausted] holds only
-      {used; limit}, so the receipt producer emits the detail-less form.
-      Both are [Some] or both are [None] (the wire grammar admits no mixed
-      form); [None] is rendered without the leading tags.
+      [detail] is optional because not every producer carries dimension/source:
+      [Runtime_agent.TurnBudgetExhausted] holds only {used; limit}, so the
+      receipt producer emits the detail-less form. Dimension and source are
+      grouped in one optional record so the mixed state is not representable.
 
       Wire form (single SSOT, see {!to_wire}/{!of_wire}):
       - with detail: ["turn_budget_exhausted(<dim>:<source>:<used>/<limit>)"]

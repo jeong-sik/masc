@@ -239,7 +239,7 @@ let outcome_of_stop (sr : Runtime_agent.stop_reason) : Trajectory.trajectory_out
     Trajectory.Gated
       (Masc.Keeper_turn_disposition.to_wire
          (Masc.Keeper_turn_disposition.Turn_budget_exhausted
-            { dimension = None; used = turns_used; limit; source = None }))
+            { detail = None; used = turns_used; limit }))
   | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
     let t = match tool_name with Some s -> s | None -> "none" in
     Trajectory.Gated

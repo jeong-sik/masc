@@ -25,6 +25,17 @@ let chop_suffix ~suffix value =
   else None
 ;;
 
+type turn_budget_detail =
+  { dimension : [ `Turns | `Wall_clock_seconds | `Idle_turns ]
+  ; source : [ `Oas_sdk | `Keeper_runtime | `User_config ]
+  }
+
+type turn_budget_exhausted =
+  { detail : turn_budget_detail option
+  ; used : int
+  ; limit : int
+  }
+
 type t =
   | Success
   | External_cancel
@@ -34,12 +45,7 @@ type t =
   | Completion_contract_unsatisfied
   | Completion_contract_no_progress
   | Post_commit_ambiguous
-  | Turn_budget_exhausted of
-      { dimension : [ `Turns | `Wall_clock_seconds | `Idle_turns ] option
-      ; used : int
-      ; limit : int
-      ; source : [ `Oas_sdk | `Keeper_runtime | `User_config ] option
-      }
+  | Turn_budget_exhausted of turn_budget_exhausted
   | Provider_error of Code.t
   | Unknown of { raw_error : string }
 
@@ -77,7 +83,7 @@ let summary = function
     "no progress was made on the contract; operator resume clears the no-progress latch"
   | Post_commit_ambiguous ->
     "provider failed after a mutating tool may have committed side effects"
-  | Turn_budget_exhausted { dimension; used; limit; source } ->
+  | Turn_budget_exhausted { detail; used; limit } ->
     let dim_label = function
       | `Turns -> "turn"
       | `Wall_clock_seconds -> "wall_clock_seconds"
@@ -88,8 +94,8 @@ let summary = function
       | `Keeper_runtime -> "keeper_runtime"
       | `User_config -> "user_config"
     in
-    (match dimension, source with
-     | Some dim, Some src ->
+    (match detail with
+     | Some { dimension = dim; source = src } ->
        Printf.sprintf
          "%s budget exhausted (%d/%d, source=%s)"
          (dim_label dim)
@@ -128,7 +134,7 @@ let to_wire = function
   | Completion_contract_unsatisfied -> "completion_contract_unsatisfied"
   | Completion_contract_no_progress -> "completion_contract_no_progress"
   | Post_commit_ambiguous -> "post_commit_ambiguous"
-  | Turn_budget_exhausted { dimension; used; limit; source } ->
+  | Turn_budget_exhausted { detail; used; limit } ->
     let dim_wire = function
       | `Turns -> "turns"
       | `Wall_clock_seconds -> "wall_clock_seconds"
@@ -139,8 +145,8 @@ let to_wire = function
       | `Keeper_runtime -> "keeper_runtime"
       | `User_config -> "user_config"
     in
-    (match dimension, source with
-     | Some dim, Some src ->
+    (match detail with
+     | Some { dimension = dim; source = src } ->
        Printf.sprintf
          "turn_budget_exhausted(%s:%s:%d/%d)"
          (dim_wire dim)
@@ -149,9 +155,9 @@ let to_wire = function
          limit
      (* Detail-less SSOT form: a producer that knows only used/limit (the
         receipt path) round-trips through this and {!of_wire}. dimension and
-        source are all-or-nothing, so a mixed value (never produced) collapses
-        here too rather than emitting a half-tagged wire. *)
-     | _ -> Printf.sprintf "turn_budget_exhausted(%d/%d)" used limit)
+        source are grouped in [detail], so half-tagged typed values are not
+        representable. *)
+     | None -> Printf.sprintf "turn_budget_exhausted(%d/%d)" used limit)
   | Provider_error code -> Code.to_wire code
   | Unknown { raw_error = "" } -> "unknown_error"
   | Unknown { raw_error } -> raw_error
@@ -195,7 +201,7 @@ let of_termination_code (c : Code.t) : t =
 
    The detail-less form is what the receipt producer emits when it only
    has {used; limit} (e.g. [Runtime_agent.TurnBudgetExhausted]); it maps to
-   [{ dimension = None; source = None; … }]. Unknown dimension/source tags,
+   [{ detail = None; … }]. Unknown dimension/source tags,
    a mixed/partial tag set, or unparseable integers fall back to [None] —
    fail-closed, never permissive.
 
@@ -234,12 +240,14 @@ let of_wire_turn_budget_exhausted wire =
         | [ dim_str; src_str; counts_str ] ->
           (match parse_dimension dim_str, parse_source src_str, parse_counts counts_str with
            | Some dim, Some src, Some (used, limit) ->
-             Some (Turn_budget_exhausted { dimension = Some dim; used; limit; source = Some src })
+             Some
+               (Turn_budget_exhausted
+                  { detail = Some { dimension = dim; source = src }; used; limit })
            | _ -> None)
         | [ counts_str ] ->
           (match parse_counts counts_str with
            | Some (used, limit) ->
-             Some (Turn_budget_exhausted { dimension = None; used; limit; source = None })
+             Some (Turn_budget_exhausted { detail = None; used; limit })
            | None -> None)
         | _ -> None))
 ;;
@@ -284,10 +292,9 @@ let equal a b =
   | Completion_contract_no_progress, Completion_contract_no_progress
   | Post_commit_ambiguous, Post_commit_ambiguous -> true
   | Turn_budget_exhausted a, Turn_budget_exhausted b ->
-    a.dimension = b.dimension
+    a.detail = b.detail
     && a.used = b.used
     && a.limit = b.limit
-    && a.source = b.source
   | Provider_error a, Provider_error b -> String.equal (Code.to_wire a) (Code.to_wire b)
   | Unknown a, Unknown b -> String.equal a.raw_error b.raw_error
   | ( Success

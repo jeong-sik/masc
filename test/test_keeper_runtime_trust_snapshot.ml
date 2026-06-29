@@ -219,8 +219,8 @@ let test_budget_not_dispatched_receipt_marks_attention () =
              ; "operator_disposition_reason", `String "healthy"
                (* Detail-less wire form: the producer
                   ([Keeper_execution_receipt_types.stop_reason_to_string] via
-                  [Keeper_turn_disposition.to_wire]) emits no dimension/source
-                  for [Runtime_agent.TurnBudgetExhausted {turns_used; limit}].
+                  [Keeper_turn_disposition.to_wire]) emits no [detail] for
+                  [Runtime_agent.TurnBudgetExhausted {turns_used; limit}].
                   #22618 fabricated a full-detail form no producer emits. *)
              ; "terminal_reason_code", `String "turn_budget_exhausted(8/8)"
              ; "completion_contract_result", `String "not_dispatched"

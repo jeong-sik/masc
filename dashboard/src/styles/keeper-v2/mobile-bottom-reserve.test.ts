@@ -14,6 +14,7 @@ import { parse } from 'postcss'
 
 const v2Css = readFileSync(resolve(__dirname, 'v2.css'), 'utf-8')
 const craftCss = readFileSync(resolve(__dirname, 'craft.css'), 'utf-8')
+const appSource = readFileSync(resolve(__dirname, '../../app.ts'), 'utf-8')
 
 const SHELL_MOBILE_CHROME_BREAKPOINT = '900px'
 
@@ -61,18 +62,37 @@ describe('mobile bottom-bar reserve (data-reading, not dead data-mpane)', () => 
   })
 })
 
+describe('mobile shell gutter is tightened (≤900px)', () => {
+  it('overrides the shell horizontal padding on the mobile branch', () => {
+    // The surface scroll container owns the inner card padding (--pad-surface);
+    // the shell `dashboard-main-scroll p-4` adds the outer gutter. On desktop
+    // both read 12px+; on mobile the outer gutter is tightened via
+    // `max-[900px]:px-2` so card surfaces sit closer to the screen edge while
+    // bare surfaces (e.g. board `.bd-body`, which relies on the shell gutter)
+    // keep a minimal inset. Asserted on the shell branch className.
+    const shellBranch = appSource.match(/dashboard-main-scroll[^'"`]*/)?.[0] ?? ''
+    expect(shellBranch).toContain('p-4')
+    expect(shellBranch).toContain('max-[900px]:px-2')
+    expect(shellBranch).toContain('max-[900px]:pb-16')
+  })
+})
+
 describe('mobile surface padding compresses per density tier (≤900px)', () => {
   // Desktop tiers (craft.css): spacious 42px / regular 26px / compact 18px
   // inline padding. On the single-column mobile shell these are disproportionate
   // (spacious 42px + 12px shell pad ≈ 27% of a 406px viewport).
-  const DESKTOP_INLINE: Record<string, number> = { spacious: 42, regular: 26, compact: 18 }
+  const TIERS = [
+    { tier: 'spacious', desktopInline: 42 },
+    { tier: 'regular', desktopInline: 26 },
+    { tier: 'compact', desktopInline: 18 },
+  ] as const
 
-  for (const tier of ['spacious', 'regular', 'compact'] as const) {
+  for (const { tier, desktopInline } of TIERS) {
     it(`tightens --pad-surface inline padding for data-density="${tier}"`, () => {
       const decls = mediaRuleDecls(craftCss, `.v2-app[data-density="${tier}"]`, SHELL_MOBILE_CHROME_BREAKPOINT)
-      const pad = decls['--pad-surface']
-      expect(pad).toBeDefined()
-      expect(px(inlinePad(pad))).toBeLessThan(DESKTOP_INLINE[tier])
+      const pad = decls['--pad-surface'] ?? ''
+      expect(pad).not.toBe('')
+      expect(px(inlinePad(pad))).toBeLessThan(desktopInline)
     })
   }
 })

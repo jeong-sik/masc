@@ -128,7 +128,11 @@ let keeper_agent_name_opt (keeper_name : string) =
   then None
   else Some ((require_keeper_name_xlat ()).keeper_agent_name keeper_name)
 
-let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool.t list) =
+let runtime_mcp_policy_for_tools
+      ~base_path
+      ~(keeper_name : string)
+      (tools : Agent_sdk.Tool.t list)
+  =
   let agent_name = keeper_agent_name_opt keeper_name in
   (* The Agent_internal surface was empty, so the runtime tool set is exactly
      the public MCP tools and [allow_agent_internal] is always [false].
@@ -140,10 +144,11 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool
     |> List.map (fun (tool : Agent_sdk.Tool.t) -> tool.schema.name)
   in
   match
-    ( Runtime_agent.runtime_mcp_policy_of_tool_names
-        ?agent_name
-        ~allow_agent_internal:false
-        runtime_tool_names
+	    ( Runtime_agent.runtime_mcp_policy_of_tool_names
+	        ~base_path
+	        ?agent_name
+	        ~allow_agent_internal:false
+	        runtime_tool_names
     , agent_name )
   with
   | Some policy, Some agent_name ->
@@ -152,14 +157,16 @@ let runtime_mcp_policy_for_tools ~(keeper_name : string) (tools : Agent_sdk.Tool
   | None, _ -> None
 
 let runtime_mcp_policy_for_provider
+      ~base_path
       ~(keeper_name : string)
       ~(provider_cfg : Llm_provider.Provider_config.t)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
   =
   let agent_name = keeper_agent_name_opt keeper_name |> Option.value ~default:"" in
-  Runtime_agent.runtime_mcp_policy_for_provider ~provider_cfg ~agent_name policy_opt
+  Runtime_agent.runtime_mcp_policy_for_provider ~base_path ~provider_cfg ~agent_name policy_opt
 
 let codex_cli_cannot_carry_keeper_bound_runtime_mcp
+      ~base_path
       ~(keeper_name : string)
       ~(provider_cfg : Llm_provider.Provider_config.t)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
@@ -175,9 +182,9 @@ let codex_cli_cannot_carry_keeper_bound_runtime_mcp
     match keeper_agent_name_opt keeper_name, policy_opt with
     | Some agent_name, Some policy
       when Option.is_some
-             ((require_keeper_name_xlat ()).keeper_name_from_agent_name agent_name) ->
+	             ((require_keeper_name_xlat ()).keeper_name_from_agent_name agent_name) ->
       (not
-         (Runtime_agent.codex_cli_can_auth_keeper_bound_runtime_mcp ~agent_name policy))
+         (Runtime_agent.codex_cli_can_auth_keeper_bound_runtime_mcp ~base_path ~agent_name policy))
       && List.exists
            Runtime_agent.runtime_mcp_tool_requires_bound_actor
            policy.allowed_tool_names

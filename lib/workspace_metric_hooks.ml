@@ -486,12 +486,14 @@ let install () =
           (Printf.sprintf "Invalid verdict format: %s" msg)
     in
     match
-      Masc_oas_bridge.run_with_caller
-        ~caller:Env_config_oas_bridge.Anti_rationalization
-        (fun () ->
-           Keeper_turn_driver_wrappers.run_named_with_masc_tools
-             ~runtime_id:evaluator_runtime
-             ~goal:prompt
+	      Masc_oas_bridge.run_with_caller
+	        ~caller:Env_config_oas_bridge.Anti_rationalization
+	        (fun () ->
+	           let base_path = Env_config_core.base_path () in
+	           Keeper_turn_driver_wrappers.run_named_with_masc_tools
+	             ~runtime_id:evaluator_runtime
+	             ~base_path
+	             ~goal:prompt
              ~masc_tools:[ report_tool_schema ]
              ~dispatch
              

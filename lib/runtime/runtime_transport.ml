@@ -65,8 +65,11 @@ let add_masc_authorization_header = Runtime_transport_authorization.add_masc_aut
 
 (* Per-keeper authorization bridging extracted to
    [Runtime_transport_auth_bridging] (godfile decomp). *)
-let codex_cli_can_auth_keeper_bound_runtime_mcp = Runtime_transport_auth_bridging.codex_cli_can_auth_keeper_bound_runtime_mcp
-let bridged_runtime_mcp_policy_for_agent = Runtime_transport_auth_bridging.bridged_runtime_mcp_policy_for_agent
+let codex_cli_can_auth_keeper_bound_runtime_mcp =
+  Runtime_transport_auth_bridging.codex_cli_can_auth_keeper_bound_runtime_mcp
+
+let bridged_runtime_mcp_policy_for_agent =
+  Runtime_transport_auth_bridging.bridged_runtime_mcp_policy_for_agent
 
 (* Provider-driven runtime MCP policy resolver extracted to
    [Runtime_transport_runtime_policy_provider] (godfile decomp). *)
@@ -111,6 +114,7 @@ let provider_label (provider_cfg : Llm_provider.Provider_config.t) =
 ;;
 
 let resolve_tool_lane_for_oas_tools
+      ~base_path
       ?agent_name
       ~(provider_cfg : Llm_provider.Provider_config.t)
       ~(tools : Agent_sdk.Tool.t list)
@@ -137,7 +141,7 @@ let resolve_tool_lane_for_oas_tools
     | Some agent_name
       when requires_per_keeper_bridging
            && Option.is_some (keeper_name_of_agent_name agent_name) ->
-      Option.is_some (per_keeper_authorization_header ~agent_name)
+      Option.is_some (per_keeper_authorization_header ~base_path ~agent_name)
     | _ -> false
   in
   let omitted_keeper_bound_actor_tools =
@@ -186,7 +190,6 @@ let resolve_tool_lane_for_oas_tools
         let per_keeper_token =
           match env_token, requested_agent_name with
           | None, Some name ->
-            let base_path = Env_config_core.base_path () in
             Auth.load_raw_token base_path ~agent_name:name
           | _ -> None
         in
@@ -211,14 +214,17 @@ let resolve_tool_lane_for_oas_tools
           ; disable_builtin_tools = false
           }
         |> runtime_mcp_policy_for_provider
+             ~base_path
              ~provider_cfg
              ~agent_name:(Option.value ~default:"" requested_agent_name))
       else
         runtime_mcp_policy_of_tool_names
+          ~base_path
           ?agent_name:requested_agent_name
           ~allow_agent_internal:(agent_internal_tool_names <> [])
           runtime_tool_names
         |> runtime_mcp_policy_for_provider
+             ~base_path
              ~provider_cfg
              ~agent_name:(Option.value ~default:"" requested_agent_name)
     in

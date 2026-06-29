@@ -307,6 +307,23 @@ let test_provider_timeout_catch_all_maps_to_turn_timeout () =
   check bool "no continue gate" false surface.KSB.continue_gate
 ;;
 
+let test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout () =
+  let surface =
+    provider_runtime_surface_exn
+      ~reason:None
+      ~code:"provider_error"
+      ~detail:
+        "Provider 'unknown' timeout phase=http_operation: HTTP operation exceeded wall-clock timeout"
+      ()
+  in
+  check
+    string
+    "detail-only timeout text is not trusted"
+    "provider_runtime_error"
+    surface.KSB.blocker_class;
+  check bool "no continue gate" false surface.KSB.continue_gate
+;;
+
 let completion_contract_surface_exn ?(detail = "completion contract violated") () =
   match
     KSB.runtime_blocker_surface_of_failure_reason
@@ -385,6 +402,10 @@ let () =
             test_reason_none_provider_error_falls_through
         ; test_case "provider timeout catch-all maps to timeout" `Quick
             test_provider_timeout_catch_all_maps_to_turn_timeout
+        ; test_case
+            "provider timeout detail without code stays provider runtime"
+            `Quick
+            test_provider_timeout_detail_without_code_does_not_map_to_turn_timeout
         ; test_case "typed completion contract maps to completion contract" `Quick
             test_typed_completion_contract_maps_to_completion_contract
         ; test_case "provider runtime detail is not reparsed" `Quick

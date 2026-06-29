@@ -1239,6 +1239,37 @@ let test_docker_shell_missing_image_fails_before_run () =
     Alcotest.(check bool) "docker run skipped" false
       (contains_substring log "\nrun ")
 
+let test_docker_shell_ir_parse_failure_blocks_before_run () =
+  with_fake_docker fake_docker_echo_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
+  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  match
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"echo \"unterminated"
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
+  with
+  | Ok _ -> Alcotest.fail "expected unsupported shell syntax to block before docker"
+  | Error msg ->
+    Alcotest.(check bool)
+      "parse failure is explicit"
+      true
+      (contains_substring msg "unsupported shell command shape");
+    Alcotest.(check bool)
+      "blocked command is attached"
+      true
+      (contains_substring msg "[blocked_cmd=echo \"unterminated]");
+    Alcotest.(check bool)
+      "docker preflight not reached"
+      false
+      (Sys.file_exists log_path)
+
 let test_execute_missing_image_falls_back_to_local_playground () =
   with_fake_docker fake_docker_missing_image_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -2264,6 +2295,10 @@ let () =
             `Quick test_docker_shell_mounts_masc_config_runtime_paths;
           Alcotest.test_case "docker shell missing image fails before run" `Quick
             test_docker_shell_missing_image_fails_before_run;
+          Alcotest.test_case
+            "docker shell parse failure blocks before run"
+            `Quick
+            test_docker_shell_ir_parse_failure_blocks_before_run;
           Alcotest.test_case "tool_execute missing image falls back locally" `Quick
             test_execute_missing_image_falls_back_to_local_playground;
           Alcotest.test_case

@@ -73,6 +73,7 @@ let media_degrade_manifest_decision ~(runtime_id : string)
 let run_named
     ~runtime_id
     ?(keeper_name = "")
+    ~base_path
     ~goal
     ?goal_blocks
     ?priority
@@ -131,7 +132,7 @@ let run_named
      candidate, and run a single provider attempt.  A failed runtime surfaces
      its [sdk_error] directly — there is nothing left to "exhaust". *)
   let runtime_id = String.trim runtime_id in
-  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~keeper_name tools in
+  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~base_path ~keeper_name tools in
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
   let enable_thinking =
     match runtime_seed.thinking_enabled with
@@ -314,10 +315,11 @@ let run_named
      accounting. Passing [None] keeps the previous behavior without exposing a
      dead compatibility knob. *)
   let execution_idle_timeout_s = None in
-  let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
-    runtime_id;
-    error_runtime_id;
-    keeper_name;
+	  let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
+	    runtime_id;
+	    error_runtime_id;
+	    base_path;
+	    keeper_name;
     name;
     goal;
     goal_blocks;
@@ -382,6 +384,9 @@ module For_testing = struct
   let success_selected_model_raw = success_selected_model_raw
   let record_candidate_health_error = record_candidate_health_error
   let apply_accept = Keeper_turn_driver_try_provider.For_testing.apply_accept
+  let max_execution_time_for_attempt =
+    Keeper_turn_driver_try_provider.For_testing.max_execution_time_for_attempt
+
   let last_tool_progress_context_string_of_messages messages =
     messages
     |> Keeper_turn_driver_try_provider.For_testing.last_tool_progress_context_of_messages

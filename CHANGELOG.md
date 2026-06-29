@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+## [0.19.53] - 2026-06-29
+
+### Fixed
+- Fix `keeper_msg_async` race conditions causing tests `#4 operator cancel is terminal` and `#6 gc removes stale terminal disk record` to fail.
+- Fix docs drift and update `shell_parse_site_baseline.txt`.
+
 ## [0.19.52] - 2026-06-29
 
 ### Changed

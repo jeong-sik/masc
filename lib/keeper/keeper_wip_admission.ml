@@ -101,7 +101,7 @@ let task_is_active_wip ?claimed_by (task : Masc_domain.task) =
 let active_item_of_task ?task_goal_index ~default_repo (task : Masc_domain.task) =
   { id = task.id; scope = scope_of_task ?task_goal_index ~default_repo task }
 
-let active_items_of_tasks ?task_goal_index ?claimed_by ~default_repo tasks =
+let active_items_of_tasks ?claimed_by ?task_goal_index ~default_repo tasks =
   tasks
   |> List.filter (task_is_active_wip ?claimed_by)
   |> List.map (active_item_of_task ?task_goal_index ~default_repo)

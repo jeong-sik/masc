@@ -169,7 +169,7 @@ let meta_with_active_goal goal_id =
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
 
-let test_keeper_task_claim_wip_cap_reports_claim_admission () =
+let test_keeper_task_claim_ignores_other_keepers_wip () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
@@ -185,44 +185,21 @@ let test_keeper_task_claim_wip_cap_reports_claim_admission () =
          add_goal_task config ~goal_id:goal.id
            ~title:(Printf.sprintf "fix: WIP cap fixture %d" i)
        done;
+       let meta = meta_with_active_goal goal.id in
        claim_task_exn config ~agent_name:"keeper-a-agent" ~task_id:"task-001";
        claim_task_exn config ~agent_name:"keeper-b-agent" ~task_id:"task-002";
        claim_task_exn config ~agent_name:"keeper-c-agent" ~task_id:"task-003";
        let payload =
          Task_runtime.handle_keeper_task_tool ~config
-           ~meta:(meta_with_active_goal goal.id)
-           ~name:"keeper_task_claim" ~args:(`Assoc [])
+           ~meta ~name:"keeper_task_claim" ~args:(`Assoc [])
        in
        let json = Yojson.Safe.from_string payload in
        check bool "claim result present" true
          (json |> U.member "result" <> `Null);
-       check string "wip kind" "claim_wip_admission"
-         (json |> U.member "wip_admission" |> U.member "kind" |> U.to_string);
-       check string "top-level action"
-         "finish_or_release_existing_wip_before_claiming_more"
-         (json |> U.member "wip_admission" |> U.member "action" |> U.to_string);
-       let rejection =
-         match
-           json |> U.member "wip_admission" |> U.member "rejections" |> U.to_list
-         with
-         | first :: _ -> first
-         | [] -> fail "expected at least one WIP rejection"
-       in
-       check string "rejection reason" "goal_cap"
-         (rejection |> U.member "reason" |> U.to_string);
-       check string "rejection axis" "goal"
-         (rejection |> U.member "axis" |> U.to_string);
-       check string "cap kind" "wip_claim_admission"
-         (rejection |> U.member "cap_kind" |> U.to_string);
-       check string "rejection action"
-         "finish_or_release_existing_wip_before_claiming_more"
-         (rejection |> U.member "action" |> U.to_string);
-       check bool "scope note distinguishes claim cap" true
-         (Astring.String.is_infix ~affix:"not a request to create a new repo"
-            (rejection |> U.member "scope_note" |> U.to_string));
-       check bool "message tells keeper not to bypass with new work" true
-         (Astring.String.is_infix ~affix:"do not create unrelated repos"
-            (json |> U.member "result" |> U.to_string)))
+       check bool "other keepers WIP does not emit admission rejection" true
+         (json |> U.member "wip_admission" = `Null);
+       check string "claimed remaining task" "task-004"
+         (json |> U.member "claimed_task" |> U.member "task_id" |> U.to_string))
 
 let test_keeper_task_claim_no_unclaimed_emits_no_work_outcome () =
   Eio_main.run @@ fun env ->
@@ -367,8 +344,8 @@ let () =
             test_decision_json_rejects_with_scope_key
         ; test_case "task scope uses repo goal and title category" `Quick
             test_scope_of_task_uses_repo_goal_and_title_category
-        ; test_case "keeper_task_claim reports WIP claim admission cap" `Quick
-            test_keeper_task_claim_wip_cap_reports_claim_admission
+        ; test_case "keeper_task_claim ignores other keepers WIP" `Quick
+            test_keeper_task_claim_ignores_other_keepers_wip
         ; test_case "keeper_task_claim no-unclaimed emits no-work outcome" `Quick
             test_keeper_task_claim_no_unclaimed_emits_no_work_outcome
         ; test_case "active items include active WIP only" `Quick

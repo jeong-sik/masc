@@ -352,7 +352,13 @@ describe('CopilotDock', () => {
 
     const rows = container.querySelectorAll('.dock-menu-row')
     expect(rows.length).toBeGreaterThan(1)
-    ;(rows[1] as HTMLDivElement).click()
+    // a11y (audit #6): rows are keyboard-operable native <button>s with an
+    // accessible name; the current keeper row is marked aria-current.
+    rows.forEach(r => expect(r.tagName).toBe('BUTTON'))
+    expect((rows[0] as HTMLButtonElement).getAttribute('aria-label')).toContain('전환')
+    const onRow = container.querySelector('.dock-menu-row.on')
+    if (onRow) expect(onRow.getAttribute('aria-current')).toBe('true')
+    ;(rows[1] as HTMLButtonElement).click()
 
     expect(dock.state.value.keeperId).not.toBe('masc-improver')
   })

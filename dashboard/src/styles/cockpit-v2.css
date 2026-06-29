@@ -408,6 +408,16 @@
   min-width: 0;
 }
 
+/* The label wrapper must be a block-level flex column: as a bare inline <span>
+ * its children .rl/.rc laid out inline, so .rc margin-top and both spans'
+ * text-overflow:ellipsis were ignored and the caption glued onto the label on
+ * one line, overflowing the card (audit #1). */
+.cp-route .cp-route-label {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .cp-route .rl {
   font-size: 12.5px;
   font-weight: 600;

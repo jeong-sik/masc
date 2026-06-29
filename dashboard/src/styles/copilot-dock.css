@@ -69,13 +69,18 @@
   background: var(--bg-panel); border: 1px solid var(--border-highlight);
   border-radius: var(--radius-md); box-shadow: var(--shadow-pop); z-index: 8; padding: 6px;
 }
-.dock-menu-row { display: flex; align-items: center; gap: var(--sp-3); padding: 8px 8px; border-radius: var(--radius-sm); cursor: pointer; transition: 0.12s; }
+/* Native <button> (keyboard + screen-reader accessible). Reset button chrome
+   so the row renders identically to the former <div>. */
+.dock-menu-row { display: flex; align-items: center; gap: var(--sp-3); padding: 8px 8px; border-radius: var(--radius-sm); cursor: pointer; transition: 0.12s; width: 100%; text-align: left; background: transparent; border: 0; color: inherit; font: inherit; }
 .dock-menu-row:hover { background: var(--bg-card); }
 .dock-menu-row.on { background: var(--bg-card); box-shadow: inset 0 0 0 1px var(--volt-wash); }
 .dock-menu-row .minfo { min-width: 0; flex: 1; }
 .dock-menu-row .nm { font-size: 12px; color: var(--text-bright); font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .dock-menu-row .nm .h { color: var(--text-dim); font-weight: 400; font-size: 10px; }
 .dock-menu-row .sub { display: flex; align-items: center; gap: 6px; font-size: 10px; color: var(--text-dim); font-family: var(--font-mono); margin-top: 2px; }
+/* Keyboard focus ring (placed after .on so it wins on the current row). */
+.dock-menu-row:focus-visible { outline: none; box-shadow: var(--focus-ring); }
+.dock-picker-btn:focus-visible { outline: none; box-shadow: var(--focus-ring); }
 
 /* ── co-view context card ── */
 .dock-coview {

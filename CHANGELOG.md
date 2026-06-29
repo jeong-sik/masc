@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+## [0.19.54] - 2026-06-29
+
+### Changed
+- Bump OAS agent_sdk pin to `main@35d99906` (`v0.207.16`) and raise the dependency floor to `agent_sdk >= 0.207.16`.
+- Bump masc version truth to 0.19.54 across release manifests and front-door docs.
+- Refresh the OAS API surface fingerprint for the typed reasoning replay / Kimi K2 replay pin.
+
 ## [0.19.52] - 2026-06-29
 
 ### Changed

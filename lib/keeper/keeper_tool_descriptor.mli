@@ -76,6 +76,7 @@ type policy =
   ; cwd_scope : string option
   ; inline_safe : bool
   ; maintenance_only : bool
+  ; polling_read : bool
   }
 
 type t =
@@ -158,6 +159,10 @@ val keeper_safe_inline_names : unit -> string list
 (** Descriptor-owned maintenance-only projection. The returned names are
     internal MASC tools excluded from ordinary keeper candidate sets. *)
 val keeper_maintenance_only_names : unit -> string list
+
+(** Descriptor-owned projection for read-only tools whose legitimate progress
+    is polling a prior async request rather than taking a new snapshot. *)
+val polling_read_internal_names : unit -> string list
 
 val public_input_schema : string -> Yojson.Safe.t option
 val translate_input : public:string -> Yojson.Safe.t -> Yojson.Safe.t

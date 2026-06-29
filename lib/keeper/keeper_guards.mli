@@ -144,7 +144,11 @@ type streak_state = { mutable entry : string * int }
 
 val make_streak_state : unit -> streak_state
 
-(** Mutable state for consecutive duplicate read-only observations. *)
+(** Mutex-protected per-hook state for consecutive duplicate read-only
+    observations. Pending reads are represented as a duplicate-free set of
+    in-flight tool/input keys scoped to the current OAS tool batch, so the
+    pending bound is the current [tool_schedule.batch_size]. Pending entries
+    are drained on PostToolUse, failure, batch change, and turn-boundary reset. *)
 type readonly_observation_state
 
 val make_readonly_observation_state : unit -> readonly_observation_state
@@ -177,7 +181,9 @@ val streak_guard :
 (** Block a consecutive duplicate read-only snapshot observation with the same
     canonical tool/input. Same-batch duplicates are blocked while pending;
     completed observations are recorded only after successful PostToolUse.
-    Descriptor-classified polling reads are exempt. *)
+    The state belongs to one keeper hook closure; internal locking protects
+    concurrent hook invocations without serializing other keepers. Descriptor-
+    classified polling reads are exempt. *)
 val readonly_observation_duplicate_guard :
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   on_gate_decision:(gate_decision_event -> unit) ->

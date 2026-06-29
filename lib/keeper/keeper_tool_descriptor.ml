@@ -71,6 +71,7 @@ type policy =
   ; cwd_scope : string option
   ; inline_safe : bool
   ; maintenance_only : bool
+  ; polling_read : bool
   }
 
 type t =
@@ -172,7 +173,7 @@ let discovery_example ~label ?cwd ~executable ~argv () =
 
 let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
       ?effect_domain ?(approval = Policy_selected) ?cwd_scope ?(retryable = false)
-      ?(inline_safe = false) ?(maintenance_only = false) ()
+      ?(inline_safe = false) ?(maintenance_only = false) ?(polling_read = false) ()
   =
   let readonly_of_input =
     match readonly_of_input with
@@ -188,6 +189,7 @@ let policy ?(visibility = Tool_catalog.Default) ?readonly ?readonly_of_input
   ; cwd_scope
   ; inline_safe
   ; maintenance_only
+  ; polling_read
   }
 ;;
 
@@ -1026,7 +1028,7 @@ let analyze_image_schema =
 ;;
 
 let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = false)
-      ?(visibility = Tool_catalog.Hidden) ()
+      ?(polling_read = false) ?(visibility = Tool_catalog.Hidden) ()
   =
   policy
     ~visibility
@@ -1036,6 +1038,7 @@ let read_only_in_process_policy ?(inline_safe = false) ?(maintenance_only = fals
     ~retryable:true
     ~inline_safe
     ~maintenance_only
+    ~polling_read
     ()
 ;;
 
@@ -1074,14 +1077,16 @@ let in_process_descriptor ~id ~name ~description ~input_schema ~policy ~handler 
    [runtime_handler] variant but expose distinct [internal_name]s so each
    tool retains its own descriptor entry and receipt evidence. The
    [keeper_tool_in_process_runtime] handler routes by descriptor.internal_name. *)
-let cluster_descriptor ~id ~name ~description ~handler ~readonly
+let cluster_descriptor ?(polling_read = false) ~id ~name ~description ~handler ~readonly
       ~inline_safe ~maintenance_only
   =
+  if polling_read && not readonly then
+    invalid_arg "polling_read descriptors must declare readonly=true";
   if inline_safe && not readonly then
     invalid_arg "inline_safe descriptors must declare readonly=true";
   let policy =
     if readonly
-    then read_only_in_process_policy ~inline_safe ~maintenance_only ()
+    then read_only_in_process_policy ~inline_safe ~maintenance_only ~polling_read ()
     else write_in_process_policy ~inline_safe ~maintenance_only ()
   in
   let input_schema =
@@ -1288,8 +1293,9 @@ let masc_schedule_descriptor (definition : Tool_schemas_schedule.definition) =
   }
 ;;
 
-let masc_keeper_descriptor id name description ~readonly =
+let masc_keeper_descriptor ?(polling_read = false) id name description ~readonly =
   cluster_descriptor
+    ~polling_read
     ~id:("masc.keeper." ^ id)
     ~name
     ~description
@@ -1697,6 +1703,7 @@ let internal_descriptors : t list =
       "List configured keepers with optional detailed metadata." ~readonly:true
   ; masc_keeper_descriptor "msg_result" "masc_keeper_msg_result"
       "Poll an async keeper_msg dispatch by request_id." ~readonly:true
+      ~polling_read:true
   ; masc_keeper_descriptor "msg_cancel" "masc_keeper_msg_cancel"
       "Cancel a running async keeper_msg turn by request_id." ~readonly:false
   ; masc_keeper_descriptor "msg_queue" "masc_keeper_msg_queue"
@@ -1807,6 +1814,13 @@ let keeper_maintenance_only_names () =
   |> List.sort_uniq String.compare
 ;;
 
+let polling_read_internal_names () =
+  all_descriptors ()
+  |> List.concat_map (fun d ->
+       if d.policy.polling_read then internal_names d else [])
+  |> List.sort_uniq String.compare
+;;
+
 let public_name_for_internal internal_name =
   match public_descriptors_for_internal internal_name with
   | [] -> None
@@ -1851,6 +1865,7 @@ let common_policy_json_fields ~readonly_key policy =
   ; "cwd_scope", Json_util.string_opt_to_json policy.cwd_scope
   ; "inline_safe", `Bool policy.inline_safe
   ; "maintenance_only", `Bool policy.maintenance_only
+  ; "polling_read", `Bool policy.polling_read
   ]
 ;;
 

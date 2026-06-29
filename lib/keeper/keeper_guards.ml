@@ -461,24 +461,54 @@ let make_streak_state () : streak_state = { entry = ("", 0) }
     [previous_success] is confirmed only from a successful PostToolUse event;
     [pending] catches same-batch duplicate reads before the first result lands.
     The input is stored as canonical JSON, not a lossy digest, so equality is
-    exact after object-key normalization. *)
+    exact after object-key normalization.
+
+    State is per keeper hook closure, not process-global. The mutex protects
+    only pure state transitions and is not held across logging, event emission,
+    or any other effectful hook work. *)
+module Readonly_observation_key = struct
+  type t = string * string
+
+  let compare = Stdlib.compare
+end
+
+module Readonly_observation_key_set =
+  Stdlib.Set.Make (Readonly_observation_key)
+
+type readonly_observation_key = Readonly_observation_key.t
+
 type readonly_observation_state = {
-  mutable previous_success : (string * string) option;
-  mutable pending : (string * string) list;
+  mutex : Stdlib.Mutex.t;
+  mutable previous_success : readonly_observation_key option;
+  mutable pending : Readonly_observation_key_set.t;
+  mutable pending_batch : (int * int) option;
 }
 
 let make_readonly_observation_state () : readonly_observation_state =
-  { previous_success = None; pending = [] }
+  {
+    mutex = Stdlib.Mutex.create ();
+    previous_success = None;
+    pending = Readonly_observation_key_set.empty;
+    pending_batch = None;
+  }
+
+let with_readonly_observation_state state f =
+  Stdlib.Mutex.lock state.mutex;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock state.mutex)
+    f
 
 let reset_readonly_observation_state state =
-  state.previous_success <- None;
-  state.pending <- []
+  with_readonly_observation_state state (fun () ->
+    state.previous_success <- None;
+    state.pending <- Readonly_observation_key_set.empty;
+    state.pending_batch <- None)
 
 let rec canonical_json = function
   | `Assoc fields ->
     fields
     |> List.map (fun (key, value) -> key, canonical_json value)
-    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    |> List.stable_sort (fun (left, _) (right, _) -> String.compare left right)
     |> fun fields -> `Assoc fields
   | `List values -> `List (List.map canonical_json values)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json -> json
@@ -505,15 +535,46 @@ let readonly_observation_key ~tool_name ~input =
   canonical_tool_name, canonical_input_string input
 
 let readonly_observation_remove_pending state key =
-  state.pending <- List.filter (fun pending -> pending <> key) state.pending
+  state.pending <- Readonly_observation_key_set.remove key state.pending
+
+type readonly_observation_pre_decision =
+  | Readonly_observation_continue
+  | Readonly_observation_duplicate
 
 let readonly_observation_record_success state key =
-  readonly_observation_remove_pending state key;
-  state.previous_success <- Some key
+  with_readonly_observation_state state (fun () ->
+    readonly_observation_remove_pending state key;
+    state.previous_success <- Some key)
 
 let readonly_observation_record_failure state key =
-  readonly_observation_remove_pending state key;
-  state.previous_success <- None
+  with_readonly_observation_state state (fun () ->
+    readonly_observation_remove_pending state key;
+    state.previous_success <- None)
+
+let readonly_observation_record_pre_tool_use
+      state
+      ~(turn : int)
+      ~(schedule : Agent_sdk.Hooks.tool_schedule)
+      key
+  =
+  with_readonly_observation_state state (fun () ->
+    let batch = Some (turn, schedule.batch_index) in
+    if state.pending_batch <> batch then (
+      state.pending <- Readonly_observation_key_set.empty;
+      state.pending_batch <- batch);
+    let duplicate_pending =
+      Readonly_observation_key_set.mem key state.pending
+    in
+    let duplicate_success =
+      match state.previous_success with
+      | Some previous -> previous = key
+      | None -> false
+    in
+    if duplicate_pending || duplicate_success
+    then Readonly_observation_duplicate
+    else (
+      state.pending <- Readonly_observation_key_set.add key state.pending;
+      Readonly_observation_continue))
 
 (* -------------------------------------------------------------- *)
 (* Timing guard — records tool_start_time for post_tool_use use    *)
@@ -649,7 +710,7 @@ let readonly_observation_duplicate_guard
   let pre_tool_use event =
     match event with
     | Agent_sdk.Hooks.PreToolUse
-        { tool_name; input; accumulated_cost_usd; turn; _ } ->
+        { tool_name; input; accumulated_cost_usd; turn; schedule; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).name in
       if not (read_only_snapshot_observation ~tool_name ~input) then (
@@ -657,14 +718,8 @@ let readonly_observation_duplicate_guard
         Agent_sdk.Hooks.Continue)
       else
         let key = readonly_observation_key ~tool_name ~input in
-        let duplicate_pending = List.mem key state.pending in
-        let duplicate_success =
-          match state.previous_success with
-          | Some previous -> previous = key
-          | None -> false
-        in
-        if duplicate_pending || duplicate_success
-        then (
+        match readonly_observation_record_pre_tool_use state ~turn ~schedule key with
+        | Readonly_observation_duplicate ->
           let reason_text =
             Printf.sprintf
               "%s repeated the same read-only observation with identical input. Use the prior observation, choose a different tool/input, mutate state, or finish with a direct no-work/blocker response"
@@ -695,10 +750,8 @@ let readonly_observation_duplicate_guard
             (render_inline_skip_reason_with_source
                ~source_path ~source_line
                ~tool_name ~reason_code:"readonly_observation_duplicate"
-               ~reason_text))
-        else (
-          state.pending <- key :: state.pending;
-          Agent_sdk.Hooks.Continue)
+               ~reason_text)
+        | Readonly_observation_continue -> Agent_sdk.Hooks.Continue
     | _ -> Agent_sdk.Hooks.Continue
   in
   let post_tool_use event =

@@ -36,6 +36,8 @@ let pre_tool_use_event
     ?(input = `Assoc [])
     ?(accumulated_cost_usd = 0.0)
     ?(turn = 1)
+    ?(batch_index = 0)
+    ?(batch_size = 1)
     ()
   : Agent_sdk.Hooks.hook_event =
   Agent_sdk.Hooks.PreToolUse {
@@ -46,8 +48,8 @@ let pre_tool_use_event
     turn;
     schedule = {
       planned_index = 0;
-      batch_index = 0;
-      batch_size = 1;
+      batch_index;
+      batch_size;
       concurrency_class = "parallel_read";
       batch_kind = "parallel";
     };
@@ -469,6 +471,24 @@ let test_readonly_observation_duplicate_blocks_pending_same_input () =
   check string "duplicate pending read-only observation -> Override"
     "Override" (decision_kind second)
 
+let test_readonly_observation_duplicate_drains_pending_on_batch_change () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ~batch_index:0
+         ~batch_size:2 ())
+  in
+  check string "first pending read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let next_batch =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ~batch_index:1
+         ~batch_size:1 ())
+  in
+  check string "stale pending state is scoped to one tool batch"
+    "Continue" (decision_kind next_batch)
+
 let test_readonly_observation_duplicate_canonicalizes_input_order () =
   let hook = readonly_observation_hook () in
   let first_input =
@@ -493,6 +513,42 @@ let test_readonly_observation_duplicate_canonicalizes_input_order () =
   in
   check string "same object with reordered fields -> Override"
     "Override" (decision_kind second)
+
+let test_readonly_observation_duplicate_preserves_duplicate_key_order () =
+  let hook = readonly_observation_hook () in
+  let first_input =
+    `Assoc [ ("duplicate", `Int 1); ("limit", `Int 15); ("duplicate", `Int 2) ]
+  in
+  let same_input =
+    `Assoc [ ("limit", `Int 15); ("duplicate", `Int 1); ("duplicate", `Int 2) ]
+  in
+  let different_duplicate_order =
+    `Assoc [ ("limit", `Int 15); ("duplicate", `Int 2); ("duplicate", `Int 1) ]
+  in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:first_input ())
+  in
+  check string "first duplicate-key observation -> Continue"
+    "Continue" (decision_kind first);
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input:first_input ())
+  in
+  check string "successful duplicate-key observation is recorded"
+    "Continue" (decision_kind post);
+  let same =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input:same_input ())
+  in
+  check string "same duplicate-key relative order -> Override"
+    "Override" (decision_kind same);
+  let different =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"keeper_tasks_list"
+         ~input:different_duplicate_order
+         ())
+  in
+  check string "different duplicate-key relative order -> Continue"
+    "Continue" (decision_kind different)
 
 let test_readonly_observation_duplicate_allows_different_input () =
   let hook = readonly_observation_hook () in
@@ -746,8 +802,12 @@ let () = run "Keeper_guards" [
       test_readonly_observation_duplicate_blocks_same_input;
     test_case "blocks same pending read-only input" `Quick
       test_readonly_observation_duplicate_blocks_pending_same_input;
+    test_case "drains pending on batch change" `Quick
+      test_readonly_observation_duplicate_drains_pending_on_batch_change;
     test_case "canonicalizes input object order" `Quick
       test_readonly_observation_duplicate_canonicalizes_input_order;
+    test_case "preserves duplicate key order" `Quick
+      test_readonly_observation_duplicate_preserves_duplicate_key_order;
     test_case "allows different input" `Quick
       test_readonly_observation_duplicate_allows_different_input;
     test_case "allows retry after errored output" `Quick

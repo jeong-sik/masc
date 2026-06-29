@@ -43,7 +43,7 @@ let shell_command_input_tool_names =
 ;;
 
 let polling_read_tool_names =
-  [ "masc_keeper_msg_result" ]
+  Keeper_tool_descriptor.polling_read_internal_names ()
 ;;
 
 let tool_names = function

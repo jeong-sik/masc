@@ -427,6 +427,23 @@ let test_budget_synthesis_does_not_invent_next_items () =
     []
     snapshot.decisions
 
+let test_no_tool_synthesis_does_not_invent_progress_text () =
+  let snapshot =
+    KMP.synthesize_state_from_run_result
+      ~goal:"Monitor keepers"
+      ~tools_used:[]
+      ~stop_reason:"completed"
+      ~response_text:""
+  in
+  Alcotest.(check (option string))
+    "no synthetic no-tool progress prose"
+    None
+    snapshot.progress;
+  Alcotest.(check (option string))
+    "no synthetic no-tool done summary"
+    None
+    snapshot.done_summary
+
 let test_budget_finalizer_drops_synthetic_response_text () =
   let finalized =
     KRT.finalize
@@ -453,7 +470,7 @@ let test_budget_finalizer_drops_synthetic_response_text () =
     []
     finalized.state_snapshot.decisions
 
-let test_synthetic_finalizer_drops_raw_response_text () =
+let test_synthetic_finalizer_drops_generated_response_text () =
   let raw_response_text =
     String.concat
       "\n"
@@ -481,8 +498,8 @@ let test_synthetic_finalizer_drops_raw_response_text () =
     "synthesized"
     (KMP.state_snapshot_source_to_string finalized.state_snapshot_source);
   Alcotest.(check string)
-    "synthetic response uses typed fallback instead of raw text"
-    "Used: keeper_tasks_list"
+    "synthetic source is not a user-visible reply"
+    ""
     finalized.response_text;
   Alcotest.(check bool)
     "raw repeated text not persisted as response"
@@ -571,13 +588,17 @@ let () =
             `Quick
             test_budget_synthesis_does_not_invent_next_items;
           Alcotest.test_case
+            "no-tool synthesis does not invent progress text"
+            `Quick
+            test_no_tool_synthesis_does_not_invent_progress_text;
+          Alcotest.test_case
             "budget finalizer drops synthetic response text"
             `Quick
             test_budget_finalizer_drops_synthetic_response_text;
           Alcotest.test_case
-            "synthetic finalizer drops raw response text"
+            "synthetic finalizer drops generated response text"
             `Quick
-            test_synthetic_finalizer_drops_raw_response_text;
+            test_synthetic_finalizer_drops_generated_response_text;
           Alcotest.test_case
             "contract attention finalizer drops raw response text"
             `Quick

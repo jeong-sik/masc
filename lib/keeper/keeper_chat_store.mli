@@ -241,9 +241,9 @@ val append_assistant_message :
   unit ->
   unit
 
-(** [append_user_message ~base_dir ~keeper_name ~content ?source
-    ?conversation_id ?external_message_id ?speaker ()] appends one inbound user line with no paired
-    assistant turn (RFC-0226). Written at delivery time by the inbound
+(** [append_user_message ~base_dir ~keeper_name ~content ?attachments
+    ?surface ?conversation_id ?external_message_id ?speaker ()] appends one
+    inbound user line with no paired assistant turn (RFC-0226). Written at delivery time by the inbound
     recorder — the Discord gateway's ambient arm and the gate dispatch
     boundary — so the line lands whether or not a turn starts or
     replies. Same failure policy as {!append_turn}. *)
@@ -251,6 +251,7 @@ val append_user_message :
   base_dir:string ->
   keeper_name:string ->
   content:string ->
+  ?attachments:attachment list ->
   ?surface:Surface_ref.t ->
   ?conversation_id:string ->
   ?external_message_id:string ->

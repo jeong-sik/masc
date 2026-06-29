@@ -2552,3 +2552,11 @@
  (name test_keeper_vision_tool)
  (modules test_keeper_vision_tool)
  (libraries masc_test_deps masc.runtime))
+
+(test
+ (name test_tui_http_ast)
+ (modules test_tui_http_ast)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../lib)
+  (source_tree ../bin)))

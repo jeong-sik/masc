@@ -30,11 +30,21 @@ let protocol_error ?index ?event_type ?reason ?raw_bytes kind =
   Keeper_chat_events.Oas_stream_protocol_error
     { kind; index; event_type; reason; raw_bytes }
 
+let content_block_start_event ~index ~content_type ~tool_id ~tool_name =
+  Keeper_chat_events.Oas_content_block_start
+    { index
+    ; content_type
+    ; tool_call_id = tool_id
+    ; tool_call_name = tool_name
+    }
+
+let content_block_stop_event ~index =
+  Keeper_chat_events.Oas_content_block_stop { index }
+
 let translate ~redact_text ~on_text_delta bridge_state
     (evt : Agent_sdk.Types.sse_event) =
   let open Agent_sdk.Types in
   let open Keeper_chat_events in
-  let no_events = { bridge_state; chat_events = [] } in
   match evt with
   | Connected ->
       { bridge_state; chat_events = [ Oas_stream_connected ] }
@@ -61,33 +71,37 @@ let translate ~redact_text ~on_text_delta bridge_state
       }
   | ContentBlockDelta { delta = TextDelta text; _ } ->
       { bridge_state; chat_events = [ Text_delta (on_text_delta text) ] }
-  | ContentBlockDelta { delta = ThinkingDelta text; _ } ->
+  | ContentBlockDelta { index; delta = ThinkingDelta text } ->
       { bridge_state;
         chat_events =
-          [ Oas_thinking_delta { delta = redact_text text } ]
+          [ Oas_thinking_delta { index; delta = redact_text text } ]
       }
-  | ContentBlockDelta { delta = ThinkingSignatureDelta signature; _ } ->
+  | ContentBlockDelta { index; delta = ThinkingSignatureDelta signature } ->
       { bridge_state;
         chat_events =
           [ Oas_thinking_signature_delta
-              { signature_bytes = String.length signature } ]
+              { index; signature_bytes = String.length signature } ]
       }
-  | ContentBlockDelta { delta = MediaDelta { media_type; source_type; data }; _ } ->
+  | ContentBlockDelta
+      { index; delta = MediaDelta { media_type; source_type; data } } ->
       { bridge_state;
         chat_events =
           [ Oas_media_delta
-              { media_type;
-                source_type = media_source_kind_to_string source_type;
-                bytes = String.length data
-              } ]
+              { index; media_type; source_type; bytes = String.length data } ]
       }
-  | ContentBlockStart { index; tool_id = Some tid; tool_name = Some tname; _ }
+  | ContentBlockStart
+      { index; content_type; tool_id = Some tid; tool_name = Some tname }
     when String.trim tid <> "" && String.trim tname <> "" ->
       let tool = { tool_call_id = tid; tool_call_name = tname } in
       let existing_tool = stream_tool_for_index bridge_state index in
+      let block_start =
+        content_block_start_event ~index ~content_type ~tool_id:(Some tid)
+          ~tool_name:(Some tname)
+      in
       { bridge_state = replace_tool bridge_state index tool;
         chat_events =
-          (match existing_tool with
+          block_start
+          :: (match existing_tool with
            | Some existing when tool_start_is_replay existing tool -> []
            | Some existing ->
                [ Tool_call_end { tool_call_id = existing.tool_call_id };
@@ -95,7 +109,10 @@ let translate ~redact_text ~on_text_delta bridge_state
            | None ->
                [ Tool_call_start { tool_call_id = tid; tool_call_name = tname } ])
       }
-  | ContentBlockStart { index; tool_id; tool_name; _ } ->
+  | ContentBlockStart { index; content_type; tool_id; tool_name } ->
+      let block_start =
+        content_block_start_event ~index ~content_type ~tool_id ~tool_name
+      in
       let partial_tool_identity =
         match tool_id, tool_name with
         | None, None -> false
@@ -104,11 +121,12 @@ let translate ~redact_text ~on_text_delta bridge_state
       if partial_tool_identity then
         { bridge_state;
           chat_events =
-            [ protocol_error ~index
+            [ block_start;
+              protocol_error ~index
                 ~reason:"tool content block start missed tool id or name"
                 Tool_start_missing_identity ]
         }
-      else no_events
+      else { bridge_state; chat_events = [ block_start ] }
   | ContentBlockDelta { index; delta = InputJsonDelta args } -> (
       match stream_tool_for_index bridge_state index with
       | Some tool ->
@@ -125,18 +143,15 @@ let translate ~redact_text ~on_text_delta bridge_state
                   Tool_args_without_start ]
           })
   | ContentBlockStop { index } -> (
+      let block_stop = content_block_stop_event ~index in
       match stream_tool_for_index bridge_state index with
       | Some tool ->
           { bridge_state = remove_tool bridge_state index;
-            chat_events = [ Tool_call_end { tool_call_id = tool.tool_call_id } ]
+            chat_events =
+              [ block_stop; Tool_call_end { tool_call_id = tool.tool_call_id } ]
           }
       | None ->
-          { bridge_state;
-            chat_events =
-              [ protocol_error ~index
-                  ~reason:"tool block stop arrived before tool start"
-                  Tool_stop_without_start ]
-          })
+          { bridge_state; chat_events = [ block_stop ] })
   | SSEError { message; error_type; raw = _ } ->
       let reason =
         match error_type with

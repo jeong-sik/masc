@@ -1143,23 +1143,50 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
             if send_custom "KEEPER_STREAM_MESSAGE_STOP" `Null then loop ()
         | Oas_stream_ping ->
             if send_custom "KEEPER_STREAM_PING" `Null then loop ()
-        | Oas_thinking_delta { delta } ->
+        | Oas_content_block_start
+            { index; content_type; tool_call_id; tool_call_name } ->
+            if
+              send_custom "KEEPER_CONTENT_BLOCK_START"
+                (`Assoc
+                  ([
+                     ("index", `Int index);
+                     ("content_type", `String content_type);
+                   ]
+                  @ json_opt "tool_call_id"
+                      (Option.map (fun value -> `String value) tool_call_id)
+                  @ json_opt "tool_call_name"
+                      (Option.map (fun value -> `String value) tool_call_name)))
+            then loop ()
+        | Oas_content_block_stop { index } ->
+            if
+              send_custom "KEEPER_CONTENT_BLOCK_STOP"
+                (`Assoc [ ("index", `Int index) ])
+            then loop ()
+        | Oas_thinking_delta { index; delta } ->
             if
               send_custom "KEEPER_THINKING_DELTA"
-                (`Assoc [ ("delta", `String delta) ])
+                (`Assoc [ ("index", `Int index); ("delta", `String delta) ])
             then loop ()
-        | Oas_thinking_signature_delta { signature_bytes } ->
+        | Oas_thinking_signature_delta { index; signature_bytes } ->
             if
               send_custom "KEEPER_THINKING_SIGNATURE_DELTA"
-                (`Assoc [ ("signature_bytes", `Int signature_bytes) ])
+                (`Assoc
+                  [
+                    ("index", `Int index);
+                    ("signature_bytes", `Int signature_bytes);
+                  ])
             then loop ()
-        | Oas_media_delta { media_type; source_type; bytes } ->
+        | Oas_media_delta { index; media_type; source_type; bytes } ->
             if
               send_custom "KEEPER_MEDIA_DELTA"
                 (`Assoc
                   [
+                    ("index", `Int index);
                     ("media_type", `String media_type);
-                    ("source_type", `String source_type);
+                    ( "source_type",
+                      `String
+                        (Agent_sdk.Types.media_source_kind_to_string source_type)
+                    );
                     ("bytes", `Int bytes);
                   ])
             then loop ()

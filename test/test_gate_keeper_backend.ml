@@ -296,8 +296,7 @@ let test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks () =
       ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64"
-        (Agent_sdk.Types.media_source_kind_to_string source_type);
+      check bool "source type" true (source_type = Agent_sdk.Types.Base64);
       check string "text" "describe this" text
   | Ok _ -> fail "expected image then text OAS blocks"
   | Error err -> fail ("expected OAS block conversion: " ^ err)
@@ -330,8 +329,7 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
   | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64"
-        (Agent_sdk.Types.media_source_kind_to_string source_type)
+      check bool "source type" true (source_type = Agent_sdk.Types.Base64)
   | Ok _ -> fail "expected image OAS block"
   | Error err -> fail ("expected mixed-case data URL conversion: " ^ err)
 
@@ -363,8 +361,7 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
   | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64"
-        (Agent_sdk.Types.media_source_kind_to_string source_type)
+      check bool "source type" true (source_type = Agent_sdk.Types.Base64)
   | Ok _ -> fail "expected image OAS block"
   | Error err -> fail ("expected inferred data URL MIME conversion: " ^ err)
 
@@ -505,20 +502,33 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Oas_thinking_delta { delta = first };
+  | [ Keeper_chat_events.Oas_thinking_delta { index = first_index; delta = first };
+      Keeper_chat_events.Oas_content_block_start
+        { index = tool_index;
+          content_type;
+          tool_call_id = Some block_tool_id;
+          tool_call_name = Some block_tool_name };
       Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
       Keeper_chat_events.Tool_call_args { tool_call_id = args_id_a; delta = args_a };
       Keeper_chat_events.Tool_call_args { tool_call_id = args_id_b; delta = args_b };
+      Keeper_chat_events.Oas_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id };
-      Keeper_chat_events.Oas_thinking_delta { delta = last } ] ->
+      Keeper_chat_events.Oas_thinking_delta { index = last_index; delta = last } ] ->
+      check int "first thinking index" 0 first_index;
       check string "first thinking" "think A" first;
+      check int "tool block index" 1 tool_index;
+      check string "content type" "tool_use" content_type;
+      check string "block tool id" "tc-1" block_tool_id;
+      check string "block tool name" "keeper_board_list" block_tool_name;
       check string "tool id" "tc-1" tool_call_id;
       check string "tool name" "keeper_board_list" tool_call_name;
       check string "args id a" "tc-1" args_id_a;
       check string "args id b" "tc-1" args_id_b;
       check string "args a" "{\"limit\":" args_a;
       check string "args b" "1}" args_b;
+      check int "tool stop index" 1 stop_index;
       check string "end id" "tc-1" end_id;
+      check int "last thinking index" 2 last_index;
       check string "last thinking" "think B" last
   | _ ->
       failf "unexpected stream bridge events: %s"
@@ -526,6 +536,10 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
            (List.map
               (function
                 | Keeper_chat_events.Custom { name; _ } -> "custom:" ^ name
+                | Keeper_chat_events.Oas_content_block_start _ ->
+                    "oas_block_start"
+                | Keeper_chat_events.Oas_content_block_stop _ ->
+                    "oas_block_stop"
                 | Keeper_chat_events.Oas_thinking_delta _ -> "oas_thinking"
                 | Keeper_chat_events.Tool_call_start _ -> "tool_start"
                 | Keeper_chat_events.Tool_call_args _ -> "tool_args"
@@ -557,15 +571,27 @@ let test_keeper_stream_bridge_ignores_replayed_tool_start () =
   check bool "no protocol error for replayed start" false
     (has_stream_protocol_error events);
   match events with
-  | [ Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
+  | [ Keeper_chat_events.Oas_content_block_start
+        { index = first_index; tool_call_id = Some first_block_id; _ };
+      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
+      Keeper_chat_events.Oas_content_block_start
+        { index = replay_index; tool_call_id = Some replay_block_id; _ };
       Keeper_chat_events.Tool_call_args { tool_call_id = args_id; delta };
+      Keeper_chat_events.Oas_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id } ] ->
+      check int "first block index" 2 first_index;
+      check string "first block tool id" "tc-repeat" first_block_id;
       check string "tool id" "tc-repeat" tool_call_id;
       check string "tool name" "keeper_memory_search" tool_call_name;
+      check int "replay block index" 2 replay_index;
+      check string "replay block tool id" "tc-repeat" replay_block_id;
       check string "args id" "tc-repeat" args_id;
       check string "args" "{\"q\":\"loop\"}" delta;
+      check int "stop index" 2 stop_index;
       check string "end id" "tc-repeat" end_id
-  | _ -> fail "expected one start, one args delta, and one end"
+  | _ ->
+      fail
+        "expected replayed block start, one tool start, one args delta, and one end"
 
 let test_keeper_stream_bridge_closes_tool_when_index_is_reused () =
   let open Agent_sdk.Types in
@@ -590,19 +616,29 @@ let test_keeper_stream_bridge_closes_tool_when_index_is_reused () =
   check bool "no protocol error for recoverable reused index" false
     (has_stream_protocol_error events);
   match events with
-  | [ Keeper_chat_events.Tool_call_start { tool_call_id = first_start; _ };
+  | [ Keeper_chat_events.Oas_content_block_start
+        { index = first_block_index; tool_call_id = Some first_block_id; _ };
+      Keeper_chat_events.Tool_call_start { tool_call_id = first_start; _ };
       Keeper_chat_events.Tool_call_args { tool_call_id = first_args; delta = args_a };
+      Keeper_chat_events.Oas_content_block_start
+        { index = second_block_index; tool_call_id = Some second_block_id; _ };
       Keeper_chat_events.Tool_call_end { tool_call_id = first_end };
       Keeper_chat_events.Tool_call_start { tool_call_id = second_start; _ };
       Keeper_chat_events.Tool_call_args { tool_call_id = second_args; delta = args_b };
+      Keeper_chat_events.Oas_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = second_end } ] ->
+      check int "first block index" 2 first_block_index;
+      check string "first block id" "tc-first" first_block_id;
       check string "first start" "tc-first" first_start;
       check string "first args id" "tc-first" first_args;
       check string "first args" "{\"q\":\"first\"}" args_a;
+      check int "second block index" 2 second_block_index;
+      check string "second block id" "tc-second" second_block_id;
       check string "first implicit end" "tc-first" first_end;
       check string "second start" "tc-second" second_start;
       check string "second args id" "tc-second" second_args;
       check string "second args" "{\"q\":\"second\"}" args_b;
+      check int "stop index" 2 stop_index;
       check string "second end" "tc-second" second_end
   | _ -> fail "expected previous tool to close before reused-index tool starts"
 
@@ -648,6 +684,61 @@ let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
       check int "delta total tokens" 12
         (Agent_sdk.Types.total_tokens delta_usage)
   | _ -> fail "expected OAS message lifecycle metadata events"
+
+let test_keeper_stream_bridge_preserves_typed_media_source () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockDelta
+          {
+            index = 0;
+            delta =
+              MediaDelta
+                {
+                  media_type = "image/png";
+                  source_type = Base64;
+                  data = "abcd";
+                };
+          };
+      ]
+  in
+  match events with
+  | [
+      Keeper_chat_events.Oas_media_delta
+        { index; media_type; source_type; bytes };
+    ] ->
+      check int "block index" 0 index;
+      check string "media type" "image/png" media_type;
+      check bool "source type" true (source_type = Base64);
+      check int "bytes" 4 bytes
+  | _ -> fail "expected typed OAS media delta"
+
+let test_keeper_stream_bridge_preserves_non_tool_block_lifecycle () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockStart
+          { index = 4;
+            content_type = "text";
+            tool_id = None;
+            tool_name = None };
+        ContentBlockStop { index = 4 };
+      ]
+  in
+  check bool "no protocol error for non-tool block stop" false
+    (has_stream_protocol_error events);
+  match events with
+  | [ Keeper_chat_events.Oas_content_block_start
+        { index = start_index; content_type; tool_call_id; tool_call_name };
+      Keeper_chat_events.Oas_content_block_stop { index = stop_index } ] ->
+      check int "start index" 4 start_index;
+      check string "content type" "text" content_type;
+      check (option string) "tool id" None tool_call_id;
+      check (option string) "tool name" None tool_call_name;
+      check int "stop index" 4 stop_index
+  | _ -> fail "expected non-tool OAS block start and stop events"
 
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_sdk.Types in
@@ -937,8 +1028,7 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
               check string "text preserved" "Inspect this" text;
               check string "image media type" "image/png" media_type;
               check string "image data" "img" data;
-              check string "source type" "base64"
-                (Agent_sdk.Types.media_source_kind_to_string source_type)
+              check bool "source type" true (source_type = Agent_sdk.Types.Base64)
           | _ -> fail "stored user input lost multimodal block shape")
       | _ -> fail "missing appended OAS user message")
 
@@ -1499,6 +1589,10 @@ let () =
             test_keeper_stream_bridge_closes_tool_when_index_is_reused;
           test_case "stream bridge surfaces OAS message metadata" `Quick
             test_keeper_stream_bridge_surfaces_oas_message_metadata;
+          test_case "stream bridge preserves typed media source" `Quick
+            test_keeper_stream_bridge_preserves_typed_media_source;
+          test_case "stream bridge preserves non-tool block lifecycle" `Quick
+            test_keeper_stream_bridge_preserves_non_tool_block_lifecycle;
           test_case "stream bridge rejects tool args without start" `Quick
             test_keeper_stream_bridge_rejects_tool_args_without_start;
           test_case "stream protocol error summary includes diagnostics" `Quick

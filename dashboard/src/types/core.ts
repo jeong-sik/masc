@@ -841,7 +841,7 @@ export type ChatMermaidBlock = { t: 'mermaid'; source: string; caption?: string 
 // `ts` (ISO-8601) records when the trace event arrived. Live streams preserve
 // think/tool order structurally in this array; persisted legacy rows may omit
 // timestamps and still render in stored order.
-export type ChatTraceThinkStep = { kind: 'think'; text: string; ts?: string }
+export type ChatTraceThinkStep = { kind: 'think'; text: string; ts?: string; oasBlockIndex?: number }
 export type ChatTraceReasonStep = { kind: 'reason'; text: string; detail?: string; ts?: string }
 export type ChatTraceToolStep = {
   kind: 'tool'
@@ -852,6 +852,7 @@ export type ChatTraceToolStep = {
   args?: string
   result?: string
   ts?: string
+  oasBlockIndex?: number
 }
 export type ChatTraceStep = ChatTraceThinkStep | ChatTraceReasonStep | ChatTraceToolStep
 export type ChatTraceBlock = { t: 'trace'; trace: ChatTraceStep[] }

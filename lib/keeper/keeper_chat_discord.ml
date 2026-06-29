@@ -423,6 +423,8 @@ let adapter_loop ~token ~channel_id ~events ?base_url () =
     | Oas_stream_message_delta _
     | Oas_stream_message_stop
     | Oas_stream_ping
+    | Oas_content_block_start _
+    | Oas_content_block_stop _
     | Oas_thinking_delta _
     | Oas_thinking_signature_delta _
     | Oas_media_delta _ ->

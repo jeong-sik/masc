@@ -89,7 +89,10 @@ type active_item = {
 
 let task_is_active_wip ?(claimed_by : string option) (task : Masc_domain.task) =
   match task.task_status with
-  | Masc_domain.Claimed agent_name | Masc_domain.InProgress agent_name -> (match claimed_by with Some name -> String.equal name agent_name | None -> true)
+  | Masc_domain.Claimed { assignee; _ } | Masc_domain.InProgress { assignee; _ } -> (
+    match claimed_by with
+    | Some name -> String.equal name assignee
+    | None -> true)
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _

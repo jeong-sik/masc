@@ -1,4 +1,4 @@
-# RFC-0297: fusion judge pool — judge 모델을 preset에서 분리
+# RFC-0298: fusion judge pool — judge 모델을 preset에서 분리
 
 | | |
 |---|---|

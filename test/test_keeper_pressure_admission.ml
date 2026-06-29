@@ -64,27 +64,47 @@ let edge_tag : Obs.edge -> string = function
 
 let test_enter_block_edge () =
   let _phase, edge =
-    Obs.classify ~prev:Obs.Admitting ~admitted_kind:(Some "disk:x") ~now:100.0
+    Obs.classify
+      ~prev:Obs.Admitting
+      ~block:(Some { Obs.kind = "disk:x"; summary = "disk floor: free 1GiB < 40GiB" })
+      ~now:100.0
   in
-  check string "admitting -> blocked = entered" "entered" (edge_tag edge)
+  check string "admitting -> blocked = entered" "entered" (edge_tag edge);
+  (* The typed-edge invariant: a block edge carries the summary verbatim, so
+     the log site needs no option fallback. *)
+  match edge with
+  | Obs.Entered_block { summary; _ } ->
+    check string "entered edge carries block summary" "disk floor: free 1GiB < 40GiB"
+      summary
+  | _ -> fail "expected Entered_block"
 ;;
 
 let test_repeat_block_no_edge () =
   (* The anti-flood guard: a second identical block must NOT re-log. *)
   let prev = Obs.Blocked_phase { kind = "disk:x"; since = 100.0 } in
-  let _phase, edge = Obs.classify ~prev ~admitted_kind:(Some "disk:x") ~now:130.0 in
+  let _phase, edge =
+    Obs.classify
+      ~prev
+      ~block:(Some { Obs.kind = "disk:x"; summary = "disk floor: free 1GiB < 40GiB" })
+      ~now:130.0
+  in
   check string "same-kind repeat = no edge" "none" (edge_tag edge)
 ;;
 
 let test_kind_change_edge () =
   let prev = Obs.Blocked_phase { kind = "disk:x"; since = 100.0 } in
-  let _phase, edge = Obs.classify ~prev ~admitted_kind:(Some "fd:y") ~now:130.0 in
+  let _phase, edge =
+    Obs.classify
+      ~prev
+      ~block:(Some { Obs.kind = "fd:y"; summary = "fd budget exhausted" })
+      ~now:130.0
+  in
   check string "block reason change = changed" "changed" (edge_tag edge)
 ;;
 
 let test_resume_edge () =
   let prev = Obs.Blocked_phase { kind = "disk:x"; since = 100.0 } in
-  let phase, edge = Obs.classify ~prev ~admitted_kind:None ~now:160.0 in
+  let phase, edge = Obs.classify ~prev ~block:None ~now:160.0 in
   check string "blocked -> admit = resumed" "resumed" (edge_tag edge);
   match phase with
   | Obs.Admitting -> ()
@@ -92,7 +112,7 @@ let test_resume_edge () =
 ;;
 
 let test_admit_repeat_no_edge () =
-  let _phase, edge = Obs.classify ~prev:Obs.Admitting ~admitted_kind:None ~now:100.0 in
+  let _phase, edge = Obs.classify ~prev:Obs.Admitting ~block:None ~now:100.0 in
   check string "admit while admitting = no edge" "none" (edge_tag edge)
 ;;
 

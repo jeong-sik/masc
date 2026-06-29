@@ -2,10 +2,20 @@ type phase =
   | Admitting
   | Blocked_phase of { kind : string; since : float }
 
+(* A block's display projection: its canonical kind tag and the rich
+   typed-number [summary] line, both present exactly when the decision is
+   [Blocked]. Carrying [summary] in the block edges makes "a block edge always
+   has a summary" a type invariant, so [log_edge] needs no option fallback
+   default — that fallback was both dead (block edges only arise from [Blocked])
+   and flagged by the DET deterministic-boundary ratchet as a permissive
+   option-default at a value boundary. Eliminating it is the parse-don't-validate
+   fix, not a rephrase to dodge the text scan. *)
+type block_view = { kind : string; summary : string }
+
 type edge =
   | No_edge
-  | Entered_block of { kind : string }
-  | Kind_changed of { from_kind : string; to_kind : string }
+  | Entered_block of { kind : string; summary : string }
+  | Kind_changed of { from_kind : string; to_kind : string; summary : string }
   | Resumed of { was_kind : string; blocked_for_sec : float }
 
 (* One process-global phase shared by the whole fleet. The CAS in [observe]
@@ -13,41 +23,32 @@ type edge =
    phase and classify [No_edge]. *)
 let phase_state : phase Atomic.t = Atomic.make Admitting
 
-let classify ~prev ~admitted_kind ~now =
-  match prev, admitted_kind with
+let classify ~prev ~block ~now =
+  match prev, block with
   | Admitting, None -> Admitting, No_edge
-  | Admitting, Some kind -> Blocked_phase { kind; since = now }, Entered_block { kind }
+  | Admitting, Some { kind; summary } ->
+    Blocked_phase { kind; since = now }, Entered_block { kind; summary }
   | Blocked_phase { kind = was_kind; since }, None ->
     Admitting, Resumed { was_kind; blocked_for_sec = now -. since }
-  | Blocked_phase { kind = from_kind; since }, Some to_kind ->
+  | Blocked_phase { kind = from_kind; since }, Some { kind = to_kind; summary } ->
     if String.equal from_kind to_kind
     then Blocked_phase { kind = from_kind; since }, No_edge
     else
-      Blocked_phase { kind = to_kind; since = now }, Kind_changed { from_kind; to_kind }
+      Blocked_phase { kind = to_kind; since = now }
+      , Kind_changed { from_kind; to_kind; summary }
 ;;
 
-(* [summary] is the rich typed-number line for the *current* block, available
-   only when the decision is [Blocked]; resume edges carry no block so they log
-   the kind alone. *)
-let log_edge ~summary edge =
-  let summary_or fallback =
-    match summary with
-    | Some text -> text
-    | None -> fallback
-  in
+let log_edge edge =
   match edge with
   | No_edge -> ()
-  | Entered_block { kind } ->
-    Log.Keeper.warn
-      "turn admission: fleet turns suspended (%s): %s"
-      kind
-      (summary_or kind)
-  | Kind_changed { from_kind; to_kind } ->
+  | Entered_block { kind; summary } ->
+    Log.Keeper.warn "turn admission: fleet turns suspended (%s): %s" kind summary
+  | Kind_changed { from_kind; to_kind; summary } ->
     Log.Keeper.warn
       "turn admission: block reason changed %s -> %s: %s"
       from_kind
       to_kind
-      (summary_or to_kind)
+      summary
   | Resumed { was_kind; blocked_for_sec } ->
     Log.Keeper.warn
       "turn admission: fleet turns resumed after %.0fs (was %s)"
@@ -57,21 +58,23 @@ let log_edge ~summary edge =
 
 let observe decision =
   let now = Time_compat.now () in
-  let admitted_kind, summary =
+  let block =
     match decision with
-    | Keeper_pressure_admission.Admitted -> None, None
+    | Keeper_pressure_admission.Admitted -> None
     | Keeper_pressure_admission.Blocked block ->
-      ( Some (Keeper_pressure_admission.block_kind block)
-      , Some (Keeper_pressure_admission.block_summary block) )
+      Some
+        { kind = Keeper_pressure_admission.block_kind block
+        ; summary = Keeper_pressure_admission.block_summary block
+        }
   in
   let rec attempt () =
     let prev = Atomic.get phase_state in
-    let next, edge = classify ~prev ~admitted_kind ~now in
+    let next, edge = classify ~prev ~block ~now in
     match edge with
     | No_edge -> ()
     | Entered_block _ | Kind_changed _ | Resumed _ ->
       if Atomic.compare_and_set phase_state prev next
-      then log_edge ~summary edge
+      then log_edge edge
       else attempt ()
   in
   attempt ()

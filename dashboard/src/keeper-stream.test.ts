@@ -231,6 +231,62 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.details?.turnRef).toBe('trace-live#42')
   })
 
+  it('keeps OAS stream message metadata through reply details', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_START',
+      value: {
+        provider_message_id: 'msg-oas-1',
+        model: 'gpt-5.5',
+        usage: {
+          input_tokens: 10,
+          output_tokens: 1,
+          total_tokens: 11,
+        },
+      },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_MESSAGE_DELTA',
+      value: {
+        stop_reason: 'end_turn',
+        usage: {
+          input_tokens: 10,
+          output_tokens: 2,
+          total_tokens: 12,
+          cache_creation_input_tokens: 3,
+          cache_read_input_tokens: 4,
+          cost_usd: 0.125,
+        },
+      },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        reply: 'done',
+        turn_ref: 'trace-live#43',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('done')
+    expect(entry?.turnRef).toBe('trace-live#43')
+    expect(entry?.details?.providerMessageId).toBe('msg-oas-1')
+    expect(entry?.details?.modelUsed).toBe('gpt-5.5')
+    expect(entry?.details?.stopReason).toBe('end_turn')
+    expect(entry?.details?.costUsd).toBe(0.125)
+    expect(entry?.details?.usage).toEqual({
+      inputTokens: 10,
+      outputTokens: 2,
+      totalTokens: 12,
+      cacheCreationInputTokens: 3,
+      cacheReadInputTokens: 4,
+      costUsd: 0.125,
+    })
+  })
+
   it('suppresses a declared checkpoint regardless of reply text', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

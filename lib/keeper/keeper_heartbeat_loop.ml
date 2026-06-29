@@ -360,45 +360,14 @@ let run_keepalive_unified_turn
       let meta_after_cycle =
         if Atomic.get stop
         then meta_after_triage
-        else if should_run_turn && Keeper_fd_pressure.active ()
-        then (
-          Log.Keeper.debug
-            "%s: skipping turn while fd-pressure circuit breaker is active (remaining=%.0fs)"
-            meta_after_triage.name
-            (Keeper_fd_pressure.remaining_sec ());
-          meta_after_triage)
-        else if should_run_turn && Keeper_disk_pressure.active ()
-        then (
-          Log.Keeper.debug
-            "%s: skipping turn while disk-pressure circuit breaker is active \
-             (remaining=%.0fs)"
-            meta_after_triage.name
-            (Keeper_disk_pressure.remaining_sec ());
-          meta_after_triage)
-        else if
-          should_run_turn
-          && not
-               (Keeper_fd_pressure.admit_turn
-                  ~active_keepers:(Keeper_registry.count_running ())
-                  ())
-        then (
-          Log.Keeper.debug
-            "%s: skipping turn because projected FD budget is exhausted before pressure"
-            meta_after_triage.name;
-          meta_after_triage)
-        else if
-          should_run_turn
-          && not
-               (Keeper_disk_pressure.admit_turn
-                  ~masc_root:(Workspace.masc_root_dir ctx.config)
-                  ())
-        then (
-          Log.Keeper.debug
-            "%s: skipping turn because disk free-space budget is below fleet floor"
-            meta_after_triage.name;
-          meta_after_triage)
         else if should_run_turn
         then (
+          (* fd/disk pressure is pre-checked by the caller's turn-admission gate
+             (Keeper_turn_admission_observer.decide_observed in run_heartbeat_loop)
+             BEFORE stimulus intake, so this branch is reached only when a turn is
+             admitted. The four prior inline pressure gates here were removed: they
+             ran AFTER intake had already consumed the stimulus, forcing a
+             consume/requeue churn loop, and logged only at DEBUG (a silent skip). *)
           let event_bus = Keeper_event_bus.get () in
           let meta_after_cycle =
             run_keeper_cycle
@@ -849,40 +818,77 @@ let run_heartbeat_loop
           proactive_warmup_sec <= 0
           || now_ts -. keepalive_started_ts >= float_of_int proactive_warmup_sec
         in
+        (* Turn-admission precondition (fd/disk pressure) is evaluated ONCE here,
+           BEFORE board collection and stimulus intake. A pressure-blocked keeper
+           therefore neither advances the board cursor (collect_keepalive_board_events
+           acks board posts with no requeue) nor dequeues+requeues its event-queue
+           stimulus every cycle — eliminating the consume/requeue churn and its log
+           noise at the source instead of skipping after the work is already done.
+           The fleet observer logs one WARN per pressure episode (was four per-turn
+           DEBUG gates inside run_keepalive_unified_turn, now removed). last_turn_ts
+           is refreshed on the blocked path so the RFC-0250 stale-turn watchdog
+           (Keeper_supervisor.assess_stale_run) does not crash-restart a keeper that
+           is correctly suspended by a shared circuit breaker rather than stalled. *)
+        let turn_admission =
+          Keeper_turn_admission_observer.decide_observed
+            ~masc_root:(Workspace.masc_root_dir ctx.config)
+            ~active_keepers:(Keeper_registry.count_running ())
+            ()
+        in
+        let admitted_turn =
+          match turn_admission with
+          | Keeper_turn_admission.Admitted -> true
+          | Keeper_turn_admission.Blocked _ -> false
+        in
+        (match turn_admission with
+         | Keeper_turn_admission.Admitted -> ()
+         | Keeper_turn_admission.Blocked block ->
+           Keeper_registry.record_skip_reasons
+             ~base_path:ctx.config.base_path
+             meta_current.name
+             ~reasons:[ Keeper_turn_admission.skip_reason block ];
+           Keeper_registry.touch_last_turn_ts
+             ~base_path:ctx.config.base_path
+             meta_current.name);
         let pending_board_events, meta_after_triage =
-          collect_keepalive_board_events ~ctx ~meta_current ~proactive_warmup_elapsed
+          if admitted_turn
+          then collect_keepalive_board_events ~ctx ~meta_current ~proactive_warmup_elapsed
+          else [], meta_current
         in
         let t_board_end = Time_compat.now () in
         let t_turn_start = t_board_end in
         let turn_outcome =
-          (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
-             [turn_running] flag toggles around the dispatch and the
-             pre/post guards mirror the spec's [turn_state] transition
-             "running" -> "idle". *)
-          turn_running := true;
-          (* [Woken] => this cycle was triggered by an external broadcast, not
-             the keeper's own cadence; suppress global-backlog-driven turns to
-             avoid the all-keeper stampede. *)
-          let reactive_wake =
-            match !last_wake_source with
-            | Keeper_keepalive_signal.Woken -> true
-            | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
-              false
-          in
-          let r =
-            run_keepalive_unified_turn
-              ~ctx
-              ~meta_after_triage
-              ~pending_board_events
-              ~stop
-              ~proactive_warmup_elapsed
-              ~reactive_wake
-              ~shared_context
-          in
-          Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
-          turn_running := false;
-          Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;
-          r
+          if not admitted_turn
+          then { meta = meta_current; cycle_crashed = false }
+          else (
+            (* Cycle 43: KeeperHeartbeat.tla TurnComplete bracket — the
+               [turn_running] flag toggles around the dispatch and the
+               pre/post guards mirror the spec's [turn_state] transition
+               "running" -> "idle". *)
+            turn_running := true;
+            (* [Woken] => this cycle was triggered by an external broadcast, not
+               the keeper's own cadence; suppress global-backlog-driven turns to
+               avoid the all-keeper stampede. *)
+            let reactive_wake =
+              match !last_wake_source with
+              | Keeper_keepalive_signal.Woken -> true
+              | Keeper_keepalive_signal.Timeout | Keeper_keepalive_signal.Stopped ->
+                false
+            in
+            let r =
+              run_keepalive_unified_turn
+                ~ctx
+                ~meta_after_triage
+                ~pending_board_events
+                ~stop
+                ~proactive_warmup_elapsed
+                ~reactive_wake
+                ~shared_context
+            in
+            Keeper_keepalive_signal.pre_turn_complete_heartbeat ~turn_running;
+            turn_running := false;
+            Keeper_keepalive_signal.post_turn_complete_heartbeat ~turn_running;
+            r)
         in
         let meta_after_proactive = turn_outcome.meta in
         (* Turn failure threshold: registry tracks count (via unified_turn,

@@ -722,7 +722,7 @@ let readonly_observation_duplicate_guard
       let keeper_name = (!meta_ref).name in
       if not (read_only_snapshot_observation ~tool_name ~input) then
         Agent_sdk.Hooks.Continue
-      else (
+      else begin
         let key = readonly_observation_key ~tool_name ~input in
         match readonly_observation_record_pre_tool_use state ~turn ~schedule key with
         | Readonly_observation_duplicate ->
@@ -757,7 +757,8 @@ let readonly_observation_duplicate_guard
                ~source_path ~source_line
                ~tool_name ~reason_code:"readonly_observation_duplicate"
                ~reason_text)
-        | Readonly_observation_continue -> Agent_sdk.Hooks.Continue)
+        | Readonly_observation_continue -> Agent_sdk.Hooks.Continue
+      end
     | _ -> Agent_sdk.Hooks.Continue
   in
   let post_tool_use event =

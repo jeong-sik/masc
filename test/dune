@@ -2556,3 +2556,11 @@
  (name test_install_script)
  (modules test_install_script)
  (libraries alcotest))
+
+(test
+ (name test_tui_http_ast)
+ (modules test_tui_http_ast)
+ (libraries alcotest ast_grep)
+ (deps
+  (source_tree ../lib)
+  (source_tree ../bin)))

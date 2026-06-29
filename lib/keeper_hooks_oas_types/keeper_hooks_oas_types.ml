@@ -276,14 +276,9 @@ let stop_reason_to_label : Agent_sdk.Types.stop_reason -> string = function
   | Agent_sdk.Types.ContextWindowExceeded -> "model_context_window_exceeded"
   | Agent_sdk.Types.Unknown _ -> stop_reason_label_unknown
 
-let zero_usage : Agent_sdk.Types.api_usage =
-  {
-    input_tokens = 0;
-    output_tokens = 0;
-    cache_creation_input_tokens = 0;
-    cache_read_input_tokens = 0;
-    cost_usd = None;
-  }
+(* F4 canonical projection consumption: delegate to OAS instead of re-spelling
+   the api_usage record literal (SSOT — OAS owns the zero marker). *)
+let zero_usage = Agent_sdk.Types.zero_api_usage
 
 let telemetry_has_canonical_model_id
     (telemetry : Agent_sdk.Types.inference_telemetry option) =

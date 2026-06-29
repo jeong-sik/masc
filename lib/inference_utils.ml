@@ -23,17 +23,18 @@ let int_of_env_default name ~default ~min_v ~max_v =
 (* Usage helpers                                                     *)
 (* ================================================================ *)
 
-(** Compute total tokens from OAS api_usage. *)
-let total_tokens (u : Agent_sdk.Types.api_usage) = u.input_tokens + u.output_tokens
+(** Total tokens — delegates to OAS [Agent_sdk.Types.total_tokens] (F12 canonical
+    projection consumption: OAS owns api_usage arithmetic, MASC consumes). *)
+let total_tokens = Agent_sdk.Types.total_tokens
 
 (** CJK-aware token estimate delegated to OAS Context_reducer. *)
 let estimate_tokens (s : string) : int =
   if s = "" then 0 else Agent_sdk.Context_reducer.estimate_char_tokens s
 
-(** Zero usage marker — delegates to OAS Masc_domain.zero_api_usage.
+(** Zero usage marker — delegates to OAS [Agent_sdk.Types.zero_api_usage] (F4
+    canonical projection consumption: removes re-spelled record literal).
     @since 2.123.0 — delegated to OAS *)
-let zero_usage : Agent_sdk.Types.api_usage =
-  { input_tokens = 0; output_tokens = 0; cache_read_input_tokens = 0; cache_creation_input_tokens = 0; cost_usd = None }
+let zero_usage = Agent_sdk.Types.zero_api_usage
 
 (** Extract usage from an api_response, defaulting to zero.
     @since 2.123.0 *)

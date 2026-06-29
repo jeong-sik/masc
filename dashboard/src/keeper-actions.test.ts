@@ -25,7 +25,7 @@ const {
     || result.status === 'cancelled'
   )),
   queuedKeeperMessageError: vi.fn((result: { status: string }) => `request ${result.status}`),
-  queuedKeeperMessageToReply: vi.fn((result: { result?: { reply?: string } }) => ({
+  queuedKeeperMessageToReply: vi.fn((result: { result?: { reply?: string } }): KeeperToolReply => ({
     text: result.result?.reply ?? '(empty reply)',
     details: null,
   })),
@@ -92,6 +92,7 @@ import {
   toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
 import type { KeeperChatStreamEvent } from './api'
+import type { KeeperToolReply } from './api/keeper'
 import type { ToolCallEntry } from './api/dashboard'
 import type { KeeperConversationAttachment, KeeperStatusDetail } from './types'
 
@@ -261,7 +262,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     queuedKeeperMessageError.mockClear()
     queuedKeeperMessageToReply.mockClear()
     queuedKeeperMessageError.mockImplementation((result: { status: string }) => `request ${result.status}`)
-    queuedKeeperMessageToReply.mockImplementation((result: { result?: { reply?: string } }) => ({
+    queuedKeeperMessageToReply.mockImplementation((result: { result?: { reply?: string } }): KeeperToolReply => ({
       text: result.result?.reply ?? '(empty reply)',
       details: null,
     }))
@@ -753,6 +754,30 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(fetchKeeperToolCalls).toHaveBeenCalledWith('echo', 200)
   })
 
+  it('marks a terminal no-visible reply as error instead of empty reply text', async () => {
+    streamKeeperMessage.mockImplementation(emitting([
+      { type: 'RUN_STARTED' },
+      {
+        type: 'CUSTOM',
+        name: 'KEEPER_REPLY_DETAILS',
+        value: {
+          runtime_class: 'keeper',
+          reply: '',
+          turn_outcome: 'no_visible_reply',
+        },
+      },
+      { type: 'RUN_FINISHED' },
+    ], true))
+
+    await sendKeeperThreadMessage('echo', '뭐함')
+
+    const reply = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+    expect(reply?.delivery).toBe('error')
+    expect(reply?.text).toContain('표시할 답변')
+    expect(reply?.text).not.toBe('(empty reply)')
+    expect(keeperActionErrors.value.echo).toContain('표시할 답변')
+  })
+
   it('derives text and media user blocks when only attachments are supplied', async () => {
     streamKeeperMessage.mockImplementation(emitting([
       { type: 'RUN_STARTED' },
@@ -920,6 +945,60 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       ['assistant', '여기까지 했습니다.', 'delivered'],
     ])
     expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+  })
+
+  it('resumes a no-visible pending request as error instead of blank assistant text', async () => {
+    upsertPendingKeeperChatRequest({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      message: '뭐함',
+      submittedAt: Date.UTC(2026, 5, 15, 9, 0, 0),
+    })
+    fetchQueuedKeeperMessageResult.mockResolvedValue({
+      requestId: 'kmsg_echo_1',
+      keeperName: 'echo',
+      status: 'done',
+      ok: true,
+      result: {
+        reply: '',
+        turn_outcome: 'no_visible_reply',
+      },
+    })
+    queuedKeeperMessageToReply.mockImplementation(() => ({
+      text: '',
+      details: {
+        traceId: null,
+        turnRef: null,
+        providerMessageId: null,
+        generation: null,
+        modelUsed: null,
+        stopReason: null,
+        latencyMs: null,
+        costUsd: null,
+        usage: null,
+        skillPrimary: null,
+        skillReason: null,
+        stateBlock: null,
+        replyText: null,
+        turnOutcome: 'no_visible_reply',
+        rawPayload: {
+          reply: '',
+          turn_outcome: 'no_visible_reply',
+        },
+      },
+    }))
+    fetchKeeperChatHistory.mockResolvedValue([])
+
+    await resumePendingKeeperChatRequests('echo')
+
+    expect(pendingKeeperChatRequestsForKeeper('echo')).toEqual([])
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread.map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', '뭐함', 'error'],
+      ['assistant', expect.stringContaining('표시할 답변'), 'error'],
+    ])
+    expect(thread.find(entry => entry.role === 'assistant')?.text).not.toBe('(empty reply)')
+    expect(keeperActionErrors.value.echo).toContain('표시할 답변')
   })
 
   it('resumes repeated same-message sends as distinct request ids', async () => {

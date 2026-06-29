@@ -619,6 +619,17 @@ let persisted_error_reply err =
   in
   "Keeper request failed: " ^ detail
 
+let empty_direct_reply_error =
+  "Keeper completed without a visible reply; the runtime returned only thinking or internal state."
+
+let direct_reply_terminal_error payload_json_opt visible_reply =
+  let turn_outcome = Keeper_turn_outcome.of_reply_payload payload_json_opt in
+  match (turn_outcome, String_util.trim_to_option visible_reply) with
+  | Keeper_turn_outcome.Continuation_checkpoint, _ -> None
+  | Keeper_turn_outcome.No_visible_reply, _ -> Some empty_direct_reply_error
+  | Keeper_turn_outcome.Visible_reply, None -> Some empty_direct_reply_error
+  | Keeper_turn_outcome.Visible_reply, Some _ -> None
+
 let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
     ?(message = "") () =
   let fields =
@@ -1022,31 +1033,41 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
               Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
             in
             let visible_reply = String.trim visible_reply in
-            (match
-               ( Keeper_turn_outcome.of_reply_payload payload_json_opt,
-                 String_util.trim_to_option visible_reply )
-             with
-            | Keeper_turn_outcome.Continuation_checkpoint, _
-            | Keeper_turn_outcome.No_visible_reply, _ ->
-                persist_user_message_only ()
-            | Keeper_turn_outcome.Visible_reply, None -> persist_user_message_only ()
-            | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
-                Keeper_chat_store.append_turn
-                  ~base_dir:base_path
-                  ~keeper_name:payload.name
-                  ~user_content:payload.message
-                  ~user_attachments:payload.attachments
-                  ~surface:chat_surface
-                  ~speaker:chat_speaker
-                  ~assistant_content:visible_reply
-                  ?turn_ref
-                  ();
-                Keeper_chat_broadcast.chat_appended
-                  ~keeper_name:payload.name ~source:chat_source
-                  ~content:visible_reply
-                  ());
-            push_worker_event (Stream_terminal { ok = true; status = "done"; body });
-            Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
+            (match direct_reply_terminal_error payload_json_opt visible_reply with
+             | Some err ->
+                 persist_failure_reply err;
+                 push_worker_event
+                   (Stream_terminal { ok = false; status = "error"; body = err });
+                 Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
+             | None ->
+                 (match
+                    ( Keeper_turn_outcome.of_reply_payload payload_json_opt,
+                      String_util.trim_to_option visible_reply )
+                  with
+                 | Keeper_turn_outcome.Continuation_checkpoint, _ ->
+                     persist_user_message_only ()
+                 | Keeper_turn_outcome.No_visible_reply, _ ->
+                     persist_user_message_only ()
+                 | Keeper_turn_outcome.Visible_reply, None ->
+                     persist_user_message_only ()
+                 | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
+                     Keeper_chat_store.append_turn
+                       ~base_dir:base_path
+                       ~keeper_name:payload.name
+                       ~user_content:payload.message
+                       ~user_attachments:payload.attachments
+                       ~surface:chat_surface
+                       ~speaker:chat_speaker
+                       ~assistant_content:visible_reply
+                       ?turn_ref
+                       ();
+                     Keeper_chat_broadcast.chat_appended
+                       ~keeper_name:payload.name ~source:chat_source
+                       ~content:visible_reply
+                       ());
+                 push_worker_event
+                   (Stream_terminal { ok = true; status = "done"; body });
+                 Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body)
         | Ok (false, err) ->
             persist_failure_reply err;
             push_worker_event (Stream_terminal { ok = false; status = "error"; body = err });
@@ -1407,6 +1428,7 @@ module For_testing = struct
   let args_of_request = args_of_request
   let modalities_for_request = modalities_for_request
   let extract_visible_reply = extract_visible_reply
+  let direct_reply_terminal_error = direct_reply_terminal_error
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let empty_stream_bridge_state = empty_keeper_stream_bridge_state

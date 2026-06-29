@@ -776,6 +776,37 @@ let test_extract_visible_reply_uses_typed_reply_field_only () =
   check bool "structured envelope parsed" true (Option.is_some payload_json_opt);
   check string "visible reply comes from reply field" "Done." visible_reply
 
+let test_direct_reply_terminal_error_rejects_no_visible_reply () =
+  let payload_json =
+    `Assoc
+      [
+        ("runtime_class", `String "keeper");
+        ("turn_outcome", `String "no_visible_reply");
+        ("reply", `String "");
+      ]
+  in
+  let err =
+    Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
+      (Some payload_json) ""
+  in
+  check bool "thinking-only direct reply is terminal error" true
+    (Option.is_some err)
+
+let test_direct_reply_terminal_error_allows_checkpoint () =
+  let payload_json =
+    `Assoc
+      [
+        ("runtime_class", `String "keeper");
+        ("turn_outcome", `String "continuation_checkpoint");
+        ("reply", `String "");
+      ]
+  in
+  let err =
+    Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
+      (Some payload_json) ""
+  in
+  check bool "checkpoint can stay user-only" true (Option.is_none err)
+
 let vision_provider_cfg () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -1406,6 +1437,10 @@ let () =
             test_extract_visible_reply_drops_empty_structured_envelope;
           test_case "visible reply uses typed reply field only" `Quick
             test_extract_visible_reply_uses_typed_reply_field_only;
+          test_case "direct reply rejects no visible reply" `Quick
+            test_direct_reply_terminal_error_rejects_no_visible_reply;
+          test_case "direct reply allows continuation checkpoint" `Quick
+            test_direct_reply_terminal_error_allows_checkpoint;
           test_case "runtime run_blocks appends multimodal input to OAS agent" `Quick
             test_runtime_run_blocks_appends_multimodal_input_to_oas_agent;
           test_case "runtime multimodal gate lists required modalities" `Quick

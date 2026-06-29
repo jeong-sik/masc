@@ -599,17 +599,15 @@ let extract_visible_reply body =
           Json_util.get_string payload_json "reply"
           |> Option.value ~default:""
         in
-        let visible =
-          if String.trim reply_raw = "" then String.trim body
-          else strip_keeper_visible_reply reply_raw
-        in
+        let visible = strip_keeper_visible_reply reply_raw in
         if visible = "" then
-          Option.value ~default:"(empty reply)"
-            (match payload_json with `String s -> Some s | _ -> None)
+          match payload_json with
+          | `String s -> strip_keeper_visible_reply s
+          | _ -> ""
         else visible
     | None ->
         let visible = strip_keeper_visible_reply body in
-        if visible = "" then "(empty reply)" else visible
+        visible
   in
   (payload_json_opt, visible_reply)
 
@@ -700,33 +698,6 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                 "keeper_stream: worker event push failed: %s"
                 (Printexc.to_string exn)
   in
-  (* Mirror tool-call SDK events flowing through [on_event] so the
-     completed turn persists tool lines alongside the user/assistant
-     pair (the dashboard re-renders tool cards after a reload). The
-     accumulator runs in the worker fiber and is collected after
-     dispatch returns in that same fiber, so no synchronisation is
-     needed. The non-streaming fallback path emits no events and
-     therefore persists no tool lines. *)
-  let tool_call_cells : (int, Buffer.t) Hashtbl.t = Hashtbl.create 4 in
-  let tool_calls_rev : (string * string * Buffer.t) list ref = ref [] in
-  let record_tool_event = function
-    | Agent_sdk.Types.ContentBlockStart
-        { index; tool_id = Some tool_id; tool_name = Some tool_name; _ } ->
-        let buf = Buffer.create 64 in
-        Hashtbl.replace tool_call_cells index buf;
-        tool_calls_rev := (tool_id, tool_name, buf) :: !tool_calls_rev
-    | Agent_sdk.Types.ContentBlockDelta { index; delta = InputJsonDelta args } ->
-        (match Hashtbl.find_opt tool_call_cells index with
-         | Some buf -> Buffer.add_string buf args
-         | None -> ())
-    | _ -> ()
-  in
-  let collected_tool_calls () =
-    List.rev_map
-      (fun (call_id, call_name, buf) ->
-        { Keeper_chat_store.call_id; call_name; args = Buffer.contents buf })
-      !tool_calls_rev
-  in
   (* RFC-0232 P5: the typed surface is the write-side truth; the label
      [chat_source] is its derivation, used for broadcast metadata. *)
   let chat_surface = chat_surface_of_request payload in
@@ -738,8 +709,17 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
      while recording the Gate surface label. *)
   let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
   let on_event evt =
-    record_tool_event evt;
     push_worker_event (Stream_event evt)
+  in
+  let persist_user_message_only () =
+    Keeper_chat_store.append_user_message
+      ~base_dir:base_path
+      ~keeper_name:payload.name
+      ~content:payload.message
+      ~attachments:payload.attachments
+      ~surface:chat_surface
+      ~speaker:chat_speaker
+      ()
   in
   let persist_failure_reply err =
     (* The failure marker is typed, not an utterance: it renders for the
@@ -755,7 +735,6 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       ~keeper_name:payload.name
       ~user_content:payload.message
       ~user_attachments:payload.attachments
-      ~tool_calls:(collected_tool_calls ())
       ~surface:chat_surface
       ~speaker:chat_speaker
       ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
@@ -804,24 +783,28 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
             let turn_ref =
               Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
             in
-            (match Keeper_turn_outcome.of_reply_payload payload_json_opt with
-            | Keeper_turn_outcome.Continuation_checkpoint -> ()
-            | Keeper_turn_outcome.Visible_reply ->
-              Keeper_chat_store.append_turn
-                ~base_dir:base_path
-                ~keeper_name:payload.name
-                ~user_content:payload.message
-                ~user_attachments:payload.attachments
-                ~tool_calls:(collected_tool_calls ())
-                ~surface:chat_surface
-                ~speaker:chat_speaker
-                ~assistant_content:visible_reply
-                ?turn_ref
-                ();
-              Keeper_chat_broadcast.chat_appended
-                ~keeper_name:payload.name ~source:chat_source
-                ~content:visible_reply
-                ());
+            let visible_reply = String.trim visible_reply in
+            (match
+               ( Keeper_turn_outcome.of_reply_payload payload_json_opt,
+                 String_util.trim_to_option visible_reply )
+             with
+            | Keeper_turn_outcome.Continuation_checkpoint, _ -> persist_user_message_only ()
+            | Keeper_turn_outcome.Visible_reply, None -> persist_user_message_only ()
+            | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
+                Keeper_chat_store.append_turn
+                  ~base_dir:base_path
+                  ~keeper_name:payload.name
+                  ~user_content:payload.message
+                  ~user_attachments:payload.attachments
+                  ~surface:chat_surface
+                  ~speaker:chat_speaker
+                  ~assistant_content:visible_reply
+                  ?turn_ref
+                  ();
+                Keeper_chat_broadcast.chat_appended
+                  ~keeper_name:payload.name ~source:chat_source
+                  ~content:visible_reply
+                  ());
             push_worker_event (Stream_terminal { ok = true; status = "done"; body });
             Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body
         | Ok (false, err) ->
@@ -1199,6 +1182,7 @@ module For_testing = struct
   let turn_instructions_for_request = turn_instructions_for_request
   let args_of_request = args_of_request
   let modalities_for_request = modalities_for_request
+  let extract_visible_reply = extract_visible_reply
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
 end

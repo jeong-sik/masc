@@ -590,6 +590,25 @@ let test_keeper_stream_bridge_rejects_tool_args_without_start () =
               events))
   | _ -> fail "expected a stream protocol error for missing tool start"
 
+let test_stream_protocol_error_summary_includes_diagnostics () =
+  let summary =
+    Keeper_chat_events.stream_protocol_error_summary
+      {
+        kind = Keeper_chat_events.Tool_args_without_start;
+        index = Some 2;
+        event_type = Some "response.future";
+        reason = Some "tool argument delta arrived before tool start";
+        raw_bytes = Some 7;
+      }
+  in
+  check bool "kind" true (string_contains summary "tool_args_without_start");
+  check bool "index" true (string_contains summary "index=2");
+  check bool "event type" true
+    (string_contains summary "event_type=response.future");
+  check bool "reason" true
+    (string_contains summary "tool argument delta arrived before tool start");
+  check bool "raw bytes" true (string_contains summary "raw_bytes=7")
+
 let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
   let open Agent_sdk.Types in
   let events =
@@ -1396,6 +1415,8 @@ let () =
             test_keeper_stream_bridge_surfaces_oas_message_metadata;
           test_case "stream bridge rejects tool args without start" `Quick
             test_keeper_stream_bridge_rejects_tool_args_without_start;
+          test_case "stream protocol error summary includes diagnostics" `Quick
+            test_stream_protocol_error_summary_includes_diagnostics;
           test_case "stream bridge surfaces unknown and incomplete events" `Quick
             test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events;
           test_case "chat history persists attachment refs not raw media" `Quick

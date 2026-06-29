@@ -1,6 +1,7 @@
 open Alcotest
 
 module Axis = Masc.Keeper_tool_capability_axis
+module Descriptor = Masc.Keeper_tool_descriptor
 module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Tool_catalog = Tool_catalog
 
@@ -28,6 +29,22 @@ let test_polling_read_supports_descriptor_projection () =
   check_support Axis.Polling_read "masc_keeper_msg_result" true;
   check_support Axis.Polling_read "mcp__masc__masc_keeper_msg_result" true;
   check_support Axis.Polling_read "keeper_tasks_list" false
+;;
+
+let test_polling_read_axis_matches_descriptor_policy () =
+  let descriptor_projection = Descriptor.polling_read_internal_names () in
+  check (list string) "axis polling list is descriptor projection"
+    descriptor_projection Axis.polling_read_tool_names;
+  Descriptor.all_descriptors ()
+  |> List.iter (fun descriptor ->
+    let expected = descriptor.Descriptor.policy.polling_read in
+    Descriptor.internal_names descriptor
+    @ Descriptor.public_names_of_descriptor descriptor
+    |> List.iter (fun tool_name ->
+      check bool
+        (tool_name ^ " polling axis matches descriptor policy")
+        expected
+        (Axis.supports Axis.Polling_read tool_name)))
 ;;
 
 let test_polling_read_projection_is_descriptor_read_only () =
@@ -65,6 +82,10 @@ let () =
             "polling read supports descriptor projection names"
             `Quick
             test_polling_read_supports_descriptor_projection
+        ; test_case
+            "polling read axis matches descriptor policy"
+            `Quick
+            test_polling_read_axis_matches_descriptor_policy
         ; test_case
             "polling read projection is descriptor read-only"
             `Quick

@@ -509,16 +509,19 @@ let append_assistant_message ~base_dir ~keeper_name ~(content : string)
    independent of) any turn. A single user line — the assistant reply,
    if one ever comes, is appended separately by the reply path. *)
 let append_user_message ~base_dir ~keeper_name ~(content : string)
-    ?surface ?conversation_id ?external_message_id ?speaker
+    ?(attachments = []) ?surface ?conversation_id ?external_message_id ?speaker
     ?(extra_mentions = []) () =
   try
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
+    let attachments = List.map (redact_attachment redaction) attachments in
+    let persisted_attachments = List.map persisted_attachment attachments in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =
       encode_line ~role:Role.User ~content ~ts ?surface ?conversation_id
+        ~attachments:persisted_attachments
         ?external_message_id ?speaker
         ~mentions:(user_line_mentions ~extra_mentions content) ()
     in

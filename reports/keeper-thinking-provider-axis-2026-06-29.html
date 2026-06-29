@@ -120,7 +120,7 @@
       <tr>
         <td>OAS bump / MASC bump / OAS pin</td>
         <td>pin script, opam, docs, API surface fingerprint 동기화</td>
-        <td class="ok">MASC <code>0.19.54</code> 유지, OAS <code>agent_sdk 0.207.19</code> / <code>b5a4406...</code>로 갱신</td>
+        <td class="ok">MASC <code>0.19.54</code> 유지, OAS <code>agent_sdk 0.207.19</code> / <code>ac4e50b...</code>로 갱신</td>
       </tr>
     </tbody>
   </table>
@@ -147,7 +147,7 @@
         <td><span class="badge p1">P1</span></td>
         <td>OAS pin이 #2227 시점에 머물러 stream/replay 후속 수정(#2237/#2238)을 못 받음</td>
         <td><code>scripts/oas-agent-sdk-pin.sh</code>: <code>0.207.16</code>, <code>35d9990...</code></td>
-        <td class="ok"><code>0.207.19</code>, <code>b5a4406...</code>로 갱신. #2237 fail-open은 OAS #2243 follow-up SHA로 교체</td>
+        <td class="ok"><code>0.207.19</code>, <code>ac4e50b...</code>로 갱신. #2237 fail-open은 OAS #2243 follow-up SHA로 교체</td>
       </tr>
       <tr>
         <td><span class="badge p2">P2</span></td>
@@ -177,7 +177,7 @@
       <tr><td><code>git diff --check</code></td><td class="ok">PASS</td><td>whitespace check</td></tr>
       <tr><td><code>ocamlformat --check ...</code></td><td class="ok">PASS</td><td>changed OCaml files only</td></tr>
       <tr><td><code>scripts/sync-oas-pin-docs.sh --check</code></td><td class="ok">PASS</td><td>generated OAS pin docs aligned</td></tr>
-      <tr><td><code>scripts/oas-drift-check.sh</code></td><td class="ok">PASS</td><td>OAS API surface matches <code>b5a4406...</code></td></tr>
+      <tr><td><code>scripts/oas-drift-check.sh</code></td><td class="ok">PASS</td><td>OAS API surface matches <code>ac4e50b...</code></td></tr>
       <tr><td><code>scripts/check-doc-truth.sh</code></td><td class="ok">PASS</td><td>package/doc version truth aligned</td></tr>
       <tr><td><code>scripts/check-oas-pin.sh --local-only</code></td><td class="risk">LOCAL FAIL</td><td>local opam switch still has <code>agent_sdk 0.207.16</code>; branch requires <code>0.207.19</code></td></tr>
     </tbody>

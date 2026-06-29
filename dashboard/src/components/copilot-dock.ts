@@ -497,9 +497,12 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
             ? html`
                 <div class="dock-menu" onMouseDown=${(e: MouseEvent) => e.stopPropagation()}>
                   ${keeperRows.map(k => html`
-                    <div
+                    <button
+                      type="button"
                       key=${k.id}
                       class=${`dock-menu-row ${k.id === keeper.id ? 'on' : ''}`}
+                      aria-current=${k.id === keeper.id ? 'true' : undefined}
+                      aria-label=${`${k.kr}로 전환`}
                       onClick=${() => { dock.setKeeper(k.id); setPickOpen(false) }}
                     >
                       <${KeeperBadge} id=${k.id} name=${k.kr} variant="sigil" size="lg" beat=${statusLooksRunning(k.status)} />
@@ -507,7 +510,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
                         <div class="nm">${k.kr} <span class="h">${k.id}</span></div>
                         <div class="sub"><${StatusDot} status=${k.status} />${k.phase} · ${k.ns}</div>
                       </div>
-                    </div>
+                    </button>
                   `)}
                 </div>
               `

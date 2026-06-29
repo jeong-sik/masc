@@ -169,6 +169,8 @@ export function AgentLiveTimeline({ name }: { name: string }) {
             class="v2-monitoring-action px-2 py-0.5 rounded-[var(--r-1)] text-3xs border cursor-pointer transition-[background-color,border-color,box-shadow] duration-[var(--t-med)] ${autoScroll.value
               ? 'border-[var(--ok-border)] text-[var(--color-status-ok)] bg-[var(--color-bg-elevated)]'
               : 'border-[var(--color-border-default)] text-[var(--color-fg-disabled)] bg-[var(--color-bg-elevated)]'}"
+            aria-pressed=${autoScroll.value}
+            aria-label="자동 스크롤"
             onClick=${() => { autoScroll.value = !autoScroll.value }}
             title=${autoScroll.value ? '자동 스크롤 ON' : '자동 스크롤 OFF'}
           >

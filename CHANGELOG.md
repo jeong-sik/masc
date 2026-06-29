@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+## [0.19.53] - 2026-06-29
+
+### Changed
+- Bump OAS agent_sdk pin to 0.207.15 release and bump masc version to 0.19.53.
+
 ## [0.19.52] - 2026-06-29
 
 ### Changed

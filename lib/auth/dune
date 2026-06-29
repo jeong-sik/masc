@@ -4,9 +4,7 @@
  (name masc_auth)
  (public_name masc.auth)
  (wrapped false)
- (private_modules
-  auth_credential_base
-  auth_metric_store)
+ (private_modules auth_credential_base auth_metric_store)
  (libraries
   yojson
   unix

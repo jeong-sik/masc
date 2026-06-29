@@ -66,8 +66,15 @@ let merge_keeper_trace_lines ~(config : Workspace.config) ~(trace_id : string)
   : Trajectory.trajectory_line list
   =
   let internal_lines = read_internal_history_lines ~config ~trace_id in
+  (* [stable_sort], not [sort]: the comparator returns 0 for two lines of the
+     same kind at the same timestamp, and [List.sort] does not guarantee those
+     keep their original order (only [stable_sort] does, per the OCaml 5.4
+     manual). Stability preserves the deterministic merge order
+     ([trajectory_lines] then [internal_lines]) so repeated same-timestamp
+     thinking/tool lines render in a fixed sequence rather than an arbitrary
+     one. *)
   dedupe_thinking_lines (trajectory_lines @ internal_lines)
-  |> List.sort (fun left right ->
+  |> List.stable_sort (fun left right ->
     let cmp = Float.compare (line_ts left) (line_ts right) in
     if cmp <> 0
     then cmp

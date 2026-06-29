@@ -2,13 +2,10 @@
 
 ## Unreleased
 
-## [0.19.53] - 2026-06-29
+## [0.19.54] - 2026-06-29
 
 ### Changed
-- Bump OAS agent_sdk pin to 0.207.15 release and keep the mascot package
-  version aligned at 0.19.53.
-- Refresh the release-train metadata after the 0.207.15 pin landed on `main`
-  so generated opam metadata and documentation truth surfaces agree.
+- Bump OAS agent_sdk pin to 0.207.16 and bump masc version to 0.19.54.
 
 ## [0.19.52] - 2026-06-29
 

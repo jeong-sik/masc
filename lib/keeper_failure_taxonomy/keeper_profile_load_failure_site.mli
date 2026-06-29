@@ -10,6 +10,7 @@ type t =
   | Personas_dirs_resolve (** Failed to resolve one or more configured personas dirs. *)
   | Toml_skip (** TOML parse skipped because the file was unreadable / invalid. *)
   | Toml_fallback (** TOML load fell back to defaults after a soft error. *)
+  | Materializable_check (** Runtime materialization probe failed open visibly. *)
   | Load_persona_extended (** Extended persona body failed to load. *)
   | Agent_md_read (** AGENT.md sidecar read failed. *)
   | List_persona_summaries (** Building the persona-summary listing raised an error. *)

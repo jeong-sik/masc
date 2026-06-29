@@ -144,6 +144,16 @@ type streak_state = { mutable entry : string * int }
 
 val make_streak_state : unit -> streak_state
 
+(** Mutex-protected per-hook state for consecutive duplicate read-only
+    observations. Pending reads are represented as a duplicate-free set of
+    in-flight tool/input keys scoped to the current OAS tool batch, so the
+    pending bound is the current [tool_schedule.batch_size]. Pending entries
+    are drained on PostToolUse, failure, batch change, and turn-boundary reset. *)
+type readonly_observation_state
+
+val make_readonly_observation_state : unit -> readonly_observation_state
+val reset_readonly_observation_state : readonly_observation_state -> unit
+
 (** Record [tool_start_time] so the post_tool_use phase can compute
     latency. Always returns [Continue]. Compose FIRST so the
     timestamp is set even when a later guard returns [Override]. *)
@@ -166,6 +176,18 @@ val streak_guard :
   on_gate_decision:(gate_decision_event -> unit) ->
   state:streak_state ->
   threshold:int ->
+  Agent_sdk.Hooks.hooks
+
+(** Block a consecutive duplicate read-only snapshot observation with the same
+    canonical tool/input. Same-batch duplicates are blocked while pending;
+    completed observations are recorded only after successful PostToolUse.
+    The state belongs to one keeper hook closure; internal locking protects
+    concurrent hook invocations without serializing other keepers. Descriptor-
+    classified polling reads are exempt. *)
+val readonly_observation_duplicate_guard :
+  meta_ref:Keeper_meta_contract.keeper_meta ref ->
+  on_gate_decision:(gate_decision_event -> unit) ->
+  state:readonly_observation_state ->
   Agent_sdk.Hooks.hooks
 
 (** Reject every tool name in [denied]. *)
@@ -200,12 +222,13 @@ val governance_approval_guard :
   Agent_sdk.Hooks.hooks
 
 (** Build the full keeper pre_tool_use chain in canonical order:
-    timing -> custom -> streak -> deny -> cost -> destructive ->
-    governance_approval. *)
+    timing -> custom -> read-only observation duplicate -> streak -> deny ->
+    cost -> destructive -> governance_approval. *)
 val build_chain :
   meta_ref:Keeper_meta_contract.keeper_meta ref ->
   tool_start_time:float ref ->
   streak_state:streak_state ->
+  readonly_observation_state:readonly_observation_state ->
   streak_threshold:int ->
   denied:string list ->
   max_cost_usd:float option ->

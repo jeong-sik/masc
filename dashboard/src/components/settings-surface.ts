@@ -28,6 +28,11 @@ import type { ComponentChildren } from 'preact'
 type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
+type PathCheckTarget = 'mcp' | 'store' | 'worktree'
+type PathCheckResult = {
+  readonly ok: boolean
+  readonly message: string
+}
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 const SETTINGS_LOCAL_STORAGE_PREFIX = 'masc.settings.local.'
 
@@ -81,6 +86,57 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .filter(item => item.surfaces.includes(MCP_PUBLIC_SURFACE))
     .map(item => item.name)
     .sort((a, b) => a.localeCompare(b))
+}
+
+export function checkSettingsMcpEndpoint(value: string): PathCheckResult {
+  const trimmed = value.trim()
+  if (trimmed === '') return { ok: false, message: 'URL required' }
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return { ok: false, message: 'expected http(s) URL' }
+    }
+    if (url.hostname.trim() === '') return { ok: false, message: 'host required' }
+    if (!url.pathname.toLowerCase().includes('mcp')) {
+      return { ok: false, message: 'path should include /mcp' }
+    }
+    return { ok: true, message: 'valid MCP URL' }
+  } catch {
+    return { ok: false, message: 'invalid URL' }
+  }
+}
+
+export function checkSettingsStoreUrl(value: string): PathCheckResult {
+  const trimmed = value.trim()
+  if (trimmed === '') return { ok: false, message: 'URL required' }
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+      return { ok: false, message: 'expected postgres URL' }
+    }
+    if (url.hostname.trim() === '') return { ok: false, message: 'host required' }
+    return { ok: true, message: 'valid store URL' }
+  } catch {
+    return { ok: false, message: 'invalid URL' }
+  }
+}
+
+export function checkSettingsWorktreeBase(value: string): PathCheckResult {
+  const trimmed = value.trim()
+  if (trimmed === '') return { ok: false, message: 'path required' }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    return { ok: false, message: 'expected filesystem path' }
+  }
+  if (
+    trimmed.startsWith('~/') ||
+    trimmed === '~' ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('./') ||
+    trimmed.startsWith('../')
+  ) {
+    return { ok: true, message: 'valid local path' }
+  }
+  return { ok: false, message: 'use absolute, ./, ../, or ~/' }
 }
 
 function readLocalPreviewString(key: string, fallback: string): string {
@@ -333,6 +389,25 @@ function PreviewBadge({ label = 'local only' }: { label?: string }) {
       data-testid="settings-preview-badge"
     >
       ${label}
+    </span>
+  `
+}
+
+function PathCheckBadge({
+  result,
+  target,
+}: {
+  result: PathCheckResult | undefined
+  target: PathCheckTarget
+}) {
+  if (!result) return null
+  return html`
+    <span
+      class=${`set-path-check-result ${result.ok ? 'ok' : 'fail'}`}
+      data-testid=${`settings-path-check-result-${target}`}
+      data-ok=${result.ok ? 'true' : 'false'}
+    >
+      ${result.message}
     </span>
   `
 }
@@ -654,6 +729,23 @@ export function SettingsSurface() {
   })
   const [wtBase, setWtBase] = useLocalPreviewString('wtBase', '~/wt')
   const [storeUrl, setStoreUrl] = useLocalPreviewString('storeUrl', 'postgres://masc.local:5432/masc')
+  const [pathChecks, setPathChecks] = useState<Partial<Record<PathCheckTarget, PathCheckResult>>>({})
+
+  function runPathCheck(target: PathCheckTarget) {
+    let result: PathCheckResult
+    switch (target) {
+      case 'mcp':
+        result = checkSettingsMcpEndpoint(mcpUrl)
+        break
+      case 'store':
+        result = checkSettingsStoreUrl(storeUrl)
+        break
+      case 'worktree':
+        result = checkSettingsWorktreeBase(wtBase)
+        break
+    }
+    setPathChecks(current => ({ ...current, [target]: result }))
+  }
 
   // sandbox
   const [isolation, setIsolation] = useState('container')
@@ -1200,7 +1292,7 @@ export function SettingsSurface() {
 
             ${sec === 'paths' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Server·store basepaths and keeper worktree root. Each item can be verified.
+                Server·store basepaths and keeper worktree root. Local preview values can be format-checked only.
               </div>
               <${SetRow} label="MCP endpoint" hint="/mcp HTTP entrypoint">
                 <div class="set-path">
@@ -1211,6 +1303,15 @@ export function SettingsSurface() {
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
                   <${PreviewBadge} />
+                  <button
+                    type="button"
+                    class="set-verify"
+                    data-testid="settings-path-check-mcp"
+                    onClick=${() => runPathCheck('mcp')}
+                  >
+                    Check
+                  </button>
+                  <${PathCheckBadge} target="mcp" result=${pathChecks.mcp} />
                 </div>
               <//>
               <${SetRow} label="Store (DB)" hint="trace·audit persistence">
@@ -1222,6 +1323,15 @@ export function SettingsSurface() {
                     onInput=${(e: Event) => setStoreUrl((e.target as HTMLInputElement).value)}
                   />
                   <${PreviewBadge} />
+                  <button
+                    type="button"
+                    class="set-verify"
+                    data-testid="settings-path-check-store"
+                    onClick=${() => runPathCheck('store')}
+                  >
+                    Check
+                  </button>
+                  <${PathCheckBadge} target="store" result=${pathChecks.store} />
                 </div>
               <//>
               <${SetRow} label="Default worktree basepath" hint="keeper worktree root — e.g. ~/wt/<keeper>">
@@ -1233,6 +1343,15 @@ export function SettingsSurface() {
                     onInput=${(e: Event) => setWtBase((e.target as HTMLInputElement).value)}
                   />
                   <${PreviewBadge} />
+                  <button
+                    type="button"
+                    class="set-verify"
+                    data-testid="settings-path-check-worktree"
+                    onClick=${() => runPathCheck('worktree')}
+                  >
+                    Check
+                  </button>
+                  <${PathCheckBadge} target="worktree" result=${pathChecks.worktree} />
                 </div>
               <//>
             `}

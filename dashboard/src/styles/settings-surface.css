@@ -403,11 +403,27 @@
 .set-path {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
 }
 
 .set-path .set-input {
   width: 260px;
+  max-width: 100%;
+}
+
+.set-path-check-result {
+  font-size: 11px;
+  font-family: var(--font-mono);
+  line-height: 1;
+}
+
+.set-path-check-result.ok {
+  color: var(--status-ok);
+}
+
+.set-path-check-result.fail {
+  color: var(--status-fail);
 }
 
 .set-rolepill {

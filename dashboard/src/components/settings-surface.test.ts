@@ -5,6 +5,9 @@ import { html } from 'htm/preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import {
   SettingsSurface,
+  checkSettingsMcpEndpoint,
+  checkSettingsStoreUrl,
+  checkSettingsWorktreeBase,
   mcpExposedToolNames,
   logEntryToSysRow,
   logRowStatus,
@@ -414,6 +417,35 @@ describe('SettingsSurface', () => {
       target: { value: 'https://gate.example.test' },
     })
     expect(gateInput?.value).toBe('https://gate.example.test')
+  })
+
+  it('paths local preview values can be format-checked without claiming live verification', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement)
+
+    expect(container.textContent).toContain('format-checked only')
+    expect(container.textContent).not.toContain('Each item can be verified')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-path-check-mcp"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-path-check-store"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-path-check-worktree"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="settings-path-check-result-mcp"]')?.textContent).toBe('valid MCP URL')
+    expect(container.querySelector('[data-testid="settings-path-check-result-mcp"]')?.getAttribute('data-ok')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-path-check-result-store"]')?.textContent).toBe('valid store URL')
+    expect(container.querySelector('[data-testid="settings-path-check-result-store"]')?.getAttribute('data-ok')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-path-check-result-worktree"]')?.textContent).toBe('valid local path')
+    expect(container.querySelector('[data-testid="settings-path-check-result-worktree"]')?.getAttribute('data-ok')).toBe('true')
+
+    const storeInput = container.querySelector<HTMLInputElement>('[data-testid="settings-store-url-input"]')
+    await fireEvent.input(storeInput as HTMLInputElement, {
+      target: { value: 'not-a-url' },
+    })
+    await fireEvent.click(container.querySelector('[data-testid="settings-path-check-store"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="settings-path-check-result-store"]')?.textContent).toBe('invalid URL')
+    expect(container.querySelector('[data-testid="settings-path-check-result-store"]')?.getAttribute('data-ok')).toBe('false')
   })
 
   it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {
@@ -850,6 +882,39 @@ describe('SettingsSurface shell route', () => {
 })
 
 describe('settings read-surface helpers', () => {
+  it('checks Settings path preview values by format only', () => {
+    expect(checkSettingsMcpEndpoint('https://masc.local/mcp')).toEqual({
+      ok: true,
+      message: 'valid MCP URL',
+    })
+    expect(checkSettingsMcpEndpoint('ftp://masc.local/mcp')).toEqual({
+      ok: false,
+      message: 'expected http(s) URL',
+    })
+    expect(checkSettingsMcpEndpoint('https://masc.local/api')).toEqual({
+      ok: false,
+      message: 'path should include /mcp',
+    })
+
+    expect(checkSettingsStoreUrl('postgres://masc.local:5432/masc')).toEqual({
+      ok: true,
+      message: 'valid store URL',
+    })
+    expect(checkSettingsStoreUrl('https://masc.local/db')).toEqual({
+      ok: false,
+      message: 'expected postgres URL',
+    })
+
+    expect(checkSettingsWorktreeBase('~/wt')).toEqual({
+      ok: true,
+      message: 'valid local path',
+    })
+    expect(checkSettingsWorktreeBase('http://masc.local/wt')).toEqual({
+      ok: false,
+      message: 'expected filesystem path',
+    })
+  })
+
   it('mcpExposedToolNames keeps only public_mcp tools, sorted', () => {
     const names = mcpExposedToolNames([
       makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),

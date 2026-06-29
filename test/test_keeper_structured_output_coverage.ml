@@ -55,6 +55,10 @@ let expected_structured_dashboard_agent_run_json_judges =
 
 let expected_structured_fusion_json_judges = [ "lib/fusion/fusion_judge.ml" ];;
 
+let expected_unstructured_fusion_agent_build_exemptions =
+  [ "lib/fusion/fusion_panel.ml" ]
+;;
+
 let expected_structured_tool_agent_runs =
   List.sort
     String.compare
@@ -69,6 +73,20 @@ let expected_masc_tool_agent_run_files =
     String.compare
     (expected_structured_dashboard_agent_run_json_judges
      @ expected_structured_tool_agent_runs)
+;;
+
+let fusion_agent_build_files () =
+  ml_files_under "lib/fusion"
+  |> List.filter (fun rel ->
+    Ast_grep.count_calls ~module_path:rel ~callee:"Fusion_oas.build_agent" > 0)
+  |> List.sort String.compare
+;;
+
+let expected_all_fusion_agent_build_files =
+  List.sort
+    String.compare
+    (expected_structured_fusion_json_judges
+     @ expected_unstructured_fusion_agent_build_exemptions)
 ;;
 
 let masc_tool_agent_run_files_under rel =
@@ -165,6 +183,14 @@ let test_fusion_agent_run_json_judges_use_provider_config_transform () =
             ~callee:"Fusion_oas.build_agent"
             ~label:"provider_config_transform"))
     expected_structured_fusion_json_judges
+;;
+
+let test_all_fusion_agent_build_files_are_classified () =
+  check
+    (list string)
+    "all Fusion_oas.build_agent files"
+    expected_all_fusion_agent_build_files
+    (fusion_agent_build_files ())
 ;;
 
 let test_all_masc_tool_agent_runs_are_classified () =
@@ -440,6 +466,10 @@ let () =
         ] )
     ; ( "fusion json judges"
       , [ test_case
+            "Fusion agent build files are classified as structured or exempt"
+            `Quick
+            test_all_fusion_agent_build_files_are_classified
+        ; test_case
             "fusion JSON judges request structured output"
             `Quick
             test_fusion_agent_run_json_judges_request_structured_output

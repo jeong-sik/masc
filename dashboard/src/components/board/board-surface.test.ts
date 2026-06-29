@@ -299,6 +299,9 @@ describe('BoardSurface Component', () => {
     expect(normalizeBoardDetailWidth(333.6)).toBe(334)
     expect(normalizeBoardDetailWidth(800)).toBe(BOARD_DETAIL_WIDTH_MAX)
     expect(normalizeBoardDetailWidth('bad')).toBe(BOARD_DETAIL_WIDTH_DEFAULT)
+    // The widened range now admits 700px (was clamped to the old 520 max).
+    expect(BOARD_DETAIL_WIDTH_MAX).toBeGreaterThanOrEqual(700)
+    expect(normalizeBoardDetailWidth(700)).toBe(700)
   })
 
   it('hydrates the persisted Board detail rail width into the grid and resize handle', () => {
@@ -333,7 +336,8 @@ describe('BoardSurface Component', () => {
     expect(handle).toHaveAttribute('aria-valuenow', '440')
     expect(getLocalStorageItem(BOARD_DETAIL_WIDTH_STORAGE_KEY)).toBe('440')
 
-    fireEvent.pointerMove(window, { clientX: 760 })
+    // Drag well past the cap (360 + (1000 - 500) = 860) → clamps to MAX (760).
+    fireEvent.pointerMove(window, { clientX: 500 })
     expect(surface?.getAttribute('data-detail-width')).toBe(String(BOARD_DETAIL_WIDTH_MAX))
     fireEvent.pointerCancel(window)
 

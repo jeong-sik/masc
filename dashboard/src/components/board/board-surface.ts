@@ -94,7 +94,10 @@ import type { BoardPost, ContentCategory, ParsedStateBlock } from './board-state
 export const BOARD_DETAIL_WIDTH_STORAGE_KEY = 'dashboard:board-detail-width'
 export const BOARD_DETAIL_WIDTH_DEFAULT = 360
 export const BOARD_DETAIL_WIDTH_MIN = 290
-export const BOARD_DETAIL_WIDTH_MAX = 520
+// Raised 520 → 760: threads carry root-cause analyses with code blocks that
+// read poorly at 520px. The feed column is minmax(0, 1fr) so the user drives
+// the trade-off via the resize handle; the cap just lets it go wider.
+export const BOARD_DETAIL_WIDTH_MAX = 760
 
 export function normalizeBoardDetailWidth(value: unknown): number {
   const numeric = typeof value === 'number' ? value : Number(value)

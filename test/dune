@@ -193,6 +193,7 @@
   test_keeper_accountability
   test_reputation_ledger_v2
   test_reputation_multi_dim
+  test_reputation_identity_undercount
   test_accountability_emit_skip_10314
   test_keeper_adaptive_thinking
   test_keeper_lifecycle_registry_dispatch
@@ -518,6 +519,7 @@
   test_keeper_accountability
   test_reputation_ledger_v2
   test_reputation_multi_dim
+  test_reputation_identity_undercount
   test_accountability_emit_skip_10314
   test_keeper_adaptive_thinking
   test_keeper_lifecycle_registry_dispatch

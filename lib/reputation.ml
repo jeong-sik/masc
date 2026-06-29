@@ -124,11 +124,38 @@ let load_jsonl_safe (path : string) : Yojson.Safe.t list =
 
 (** {1 Task Counting from Workspace State} *)
 
+(** Canonical keeper name used for identity comparison.  Shared with
+    {!accountability_metrics} so both metrics fold an identity the same way:
+    via [Keeper_identity.canonical_keeper_name_from_agent_name], which unwraps
+    the full actor id and resolves a generated-nickname alias to its agent
+    type, falling back to the trimmed input for non-keeper principals.
+
+    Known residual: this canonicalizer collapses 3+-part hyphenated non-keeper
+    ids (e.g. "codex-mcp-client" -> "client") onto their last segment, so such
+    principals can share a canonical form.  Resolving that needs registry-aware
+    typed identity (RFC-0038 Phase 2); it does not affect single-token keeper
+    names, which are the subject of the undercount fixed below. *)
+let keeper_name_of_agent agent_name =
+  match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
+  | Some keeper_name -> keeper_name
+  | None -> String.trim agent_name
+
 (** Count tasks claimed and completed by an agent from the task backlog.
     Reads the canonical Workspace backlog so reputation follows the same storage
-    path as task transitions. *)
+    path as task transitions.
+
+    Identity is compared on the canonical keeper name (see
+    {!keeper_name_of_agent}).  Previously a raw [String.equal assignee
+    agent_name] was used: because the backlog persists [assignee] as the full
+    actor id the claiming keeper used ("keeper-taskmaster-agent") while
+    reputation is computed per short handle ("taskmaster"), every full-actor-id
+    row was silently dropped, undercounting a keeper's claims/completions. *)
 let count_tasks_from_backlog (config : Workspace.config) ~(agent_name : string)
     : int * int =
+  let owner = keeper_name_of_agent agent_name in
+  let assignee_is_owner assignee =
+    String.equal (keeper_name_of_agent assignee) owner
+  in
   let claimed = ref 0 in
   let completed = ref 0 in
   Workspace.get_tasks_safe config
@@ -137,9 +164,9 @@ let count_tasks_from_backlog (config : Workspace.config) ~(agent_name : string)
          | Masc_domain.Claimed { assignee; _ }
          | Masc_domain.InProgress { assignee; _ }
          | Masc_domain.AwaitingVerification { assignee; _ }
-           when String.equal assignee agent_name ->
+           when assignee_is_owner assignee ->
              Stdlib.incr claimed
-         | Masc_domain.Done { assignee; _ } when String.equal assignee agent_name ->
+         | Masc_domain.Done { assignee; _ } when assignee_is_owner assignee ->
              Stdlib.incr claimed;
              Stdlib.incr completed
          | Masc_domain.Todo
@@ -261,11 +288,6 @@ let compute_overall_score ~completion_rate ~response_rate
   +. (weight_thompson *. thompson_confidence)
 
 (** {1 Accountability Penalty} *)
-
-let keeper_name_of_agent agent_name =
-  match Keeper_identity.canonical_keeper_name_from_agent_name agent_name with
-  | Some keeper_name -> keeper_name
-  | None -> String.trim agent_name
 
 let accountability_metrics (config : Workspace.config) ~(agent_name : string) =
   let keeper_name = keeper_name_of_agent agent_name in

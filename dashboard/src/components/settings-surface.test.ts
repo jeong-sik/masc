@@ -334,11 +334,12 @@ describe('SettingsSurface', () => {
     })
   })
 
-  it('marks unbacked settings sections as previews instead of fake saved actions', async () => {
+  it('marks unbacked settings sections as local preview controls instead of fake saved actions', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('preview only')
-    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.textContent).not.toContain('Save changes')
     expect(container.textContent).not.toContain('Reissue')
     expect(container.textContent).not.toContain('Log out')
@@ -348,10 +349,23 @@ describe('SettingsSurface', () => {
     const gateNav = container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement
     await fireEvent.click(gateNav)
 
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('preview only')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
     expect(container.textContent).not.toContain('＋ Add gate')
     expect(container.querySelector('[data-testid="settings-preview-badge"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="set-verify"]')).toBeNull()
+  })
+
+  it('local preview segmented controls update visible state when clicked', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const never = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === '안 함')
+    expect(never).toBeTruthy()
+    expect(never?.disabled).toBe(false)
+
+    await fireEvent.click(never as HTMLButtonElement)
+
+    expect(never?.getAttribute('data-active')).toBe('true')
   })
 
   it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {
@@ -562,6 +576,37 @@ describe('SettingsSurface', () => {
       // internal-only tools are not exposed over public MCP.
       expect(labels).not.toContain('internal_only')
     })
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live inventory + local controls')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
+  })
+
+  it('MCP exposed-tool toggles are clickable local controls', async () => {
+    apiMock.fetchDashboardTools.mockResolvedValue({
+      tool_inventory: {
+        count: 2,
+        tools: [
+          makeToolItem({ name: 'masc_handoff', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),
+        ],
+      },
+    })
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+    await waitFor(() => {
+      expect(container.textContent).toContain('Exposed tools (2/2)')
+    })
+
+    const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
+    expect(toggles.length).toBe(2)
+    expect(toggles[0]!.disabled).toBe(false)
+    expect(toggles[0]!.getAttribute('aria-checked')).toBe('true')
+
+    await fireEvent.click(toggles[0]!)
+
+    expect(toggles[0]!.getAttribute('aria-checked')).toBe('false')
+    expect(container.textContent).toContain('Exposed tools (1/2)')
   })
 
   it('renders the fusion preset section (panel families + judge) read-only', async () => {
@@ -578,7 +623,8 @@ describe('SettingsSurface', () => {
     expect(models).toContain('glm-coding.glm-5-turbo')
     expect(models).toContain('ollama_cloud.minimax-m3')
     expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('deepseek.deepseek-v4-pro')
-    expect(container.querySelector('[data-testid="set-toggle"]')?.getAttribute('aria-disabled')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
+    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).disabled).toBe(false)
     expect(container.querySelector('[data-testid="fusion-settings-editor"]')).toBeNull()
     expect(container.textContent).not.toContain('per_hour_budget')
   })
@@ -650,9 +696,14 @@ describe('SettingsSurface', () => {
     expect(triggers().length).toBe(4)
     const vals = triggers().map(t => t.querySelector('.mono')?.textContent)
     expect(vals).toEqual(['mention_or_thread', 'mention_only', 'all', 'user_only'])
-    // default selection is mention_or_thread; controls are read-only previews.
+    // default selection is mention_or_thread; local preview radios can be changed.
     expect(triggers()[0]!.classList.contains('on')).toBe(true)
-    expect((triggers()[0] as HTMLButtonElement).disabled).toBe(true)
+    expect((triggers()[0] as HTMLButtonElement).disabled).toBe(false)
+
+    await fireEvent.click(triggers()[2] as HTMLButtonElement)
+
+    expect(triggers()[0]!.getAttribute('data-active')).toBe('false')
+    expect(triggers()[2]!.getAttribute('data-active')).toBe('true')
   })
 
   it('opens the live runtime.toml editor from runtime management', async () => {

@@ -201,8 +201,6 @@ function SetToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => vo
       class=${`set-toggle ${on ? 'on' : ''}`}
       role="switch"
       aria-checked=${on}
-      aria-disabled="true"
-      disabled
       data-testid="set-toggle"
       onClick=${() => onChange(!on)}
     >
@@ -228,8 +226,7 @@ function SetSeg({
           key=${o}
           class=${`set-seg-b ${value === o ? 'on' : ''}`}
           data-active=${value === o ? 'true' : 'false'}
-          aria-disabled="true"
-          disabled
+          aria-pressed=${value === o}
           onClick=${() => onChange(o)}
         >
           ${o}
@@ -264,9 +261,9 @@ function SetStepper({
 }) {
   return html`
     <div class="set-stepper" data-testid="set-stepper">
-      <button type="button" aria-disabled="true" disabled onClick=${() => set(Math.max(min, v - 1))}>−</button>
+      <button type="button" disabled=${v <= min} onClick=${() => set(Math.max(min, v - 1))}>−</button>
       <span class="mono">${v}</span>
-      <button type="button" aria-disabled="true" disabled onClick=${() => set(Math.min(max, v + 1))}>+</button>
+      <button type="button" disabled=${v >= max} onClick=${() => set(Math.min(max, v + 1))}>+</button>
     </div>
   `
 }
@@ -294,8 +291,6 @@ function SetSlider({
         max=${max}
         step=${step ?? 1}
         value=${value}
-        disabled
-        aria-disabled="true"
         onInput=${(e: Event) => onChange(Number((e.target as HTMLInputElement).value))}
       />
       <span class="mono">${value}${suffix ?? ''}</span>
@@ -390,17 +385,22 @@ function RuntimeCatalogCard({
   `
 }
 
+type SettingsSectionMode = 'live' | 'local'
+
 function settingsSectionState(
   section: SectionId,
   fusionSettingsWritable: boolean,
-): { live: boolean; label: string } {
-  if (section === 'runtime') return { live: true, label: 'runtime.toml live-backed' }
-  if (section === 'runtimes') return { live: true, label: 'runtime.toml live-backed' }
-  if (section === 'prompts') return { live: true, label: 'prompt registry live-backed' }
+): { mode: SettingsSectionMode; label: string } {
+  if (section === 'runtime') return { mode: 'live', label: 'runtime.toml live-backed' }
+  if (section === 'runtimes') return { mode: 'live', label: 'runtime.toml live-backed' }
+  if (section === 'routing') return { mode: 'live', label: 'runtime.toml live-backed' }
+  if (section === 'prompts') return { mode: 'live', label: 'prompt registry live-backed' }
   if (section === 'fusion' && fusionSettingsWritable) {
-    return { live: true, label: 'runtime.toml live-backed' }
+    return { mode: 'live', label: 'runtime.toml live-backed' }
   }
-  return { live: false, label: 'preview only' }
+  if (section === 'mcp') return { mode: 'local', label: 'live inventory + local controls' }
+  if (section === 'logs') return { mode: 'local', label: 'live logs + local controls' }
+  return { mode: 'local', label: 'local preview only' }
 }
 
 function LogFilter({
@@ -728,14 +728,14 @@ export function SettingsSurface() {
             </div>
           `)}
           <!-- keeper-v2 settings.jsx:262 — KO nav-note copy. -->
-          <div class="set-nav-note">프로토타입 — 변경은 로컬에만 적용됩니다.</div>
+          <div class="set-nav-note">live-backed 섹션은 API에 저장됩니다. local preview 섹션은 이 브라우저 세션에서만 바뀝니다.</div>
         </nav>
 
         <div class="set-content">
           <header class="set-content-h">
             <h1 data-testid="settings-section-title">${cur[2]}</h1>
             <span
-              class=${`set-section-state ${sectionState.live ? 'live' : 'preview'}`}
+              class=${`set-section-state ${sectionState.mode}`}
               data-testid="settings-section-state"
             >
               ${sectionState.label}
@@ -744,7 +744,8 @@ export function SettingsSurface() {
 
           <div
             class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'runtimes' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
-            data-preview-locked=${sectionState.live ? 'false' : 'true'}
+            data-preview-locked="false"
+            data-settings-mode=${sectionState.mode}
           >
             ${sec === 'account' && html`
               <${SetRow} label="Operator" hint="Currently logged-in operator">
@@ -1156,8 +1157,7 @@ export function SettingsSurface() {
                     class=${`set-trigger ${discordTrigger === val ? 'on' : ''}`}
                     data-testid="set-trigger"
                     data-active=${discordTrigger === val ? 'true' : 'false'}
-                    aria-disabled="true"
-                    disabled
+                    aria-pressed=${discordTrigger === val}
                     onClick=${() => setDiscordTrigger(val)}
                   >
                     <span class="set-trigger-radio"></span>

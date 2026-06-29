@@ -222,6 +222,11 @@
   border-color: color-mix(in oklab, var(--status-ok) 45%, transparent);
 }
 
+.set-section-state.local {
+  color: var(--status-warn);
+  border-color: color-mix(in oklab, var(--status-warn) 45%, transparent);
+}
+
 .set-preview-badge {
   padding: 6px 12px;
   border-style: dashed;

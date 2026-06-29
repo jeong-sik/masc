@@ -1,5 +1,5 @@
 {
-  "_doc": "Reviewed baseline of generated↔variables.css token divergences. The app imports src/styles/tokens.generated.css (@theme, @generated) then src/styles/variables.css (:root), which re-defines these tokens to different RENDERED values. tokens:check (Gate 2) ratchets this set: any NEW divergence, or a value change on a listed entry, or a listed entry that no longer diverges, fails the gate. Entries marked UNREVIEWED are pre-existing drift pending a reconcile decision (chunk F). Scope: variables.css only (the last-winning override layer); styleseed-tokens.css is an earlier layer not yet covered.",
+  "_doc": "Reviewed baseline of generated↔variables.css token divergences. The app imports src/styles/tokens.generated.css (@theme, @generated) then src/styles/variables.css (:root), which re-defines these tokens to different RENDERED values. tokens:check (Gate 2) ratchets this set: any NEW divergence, or a value change on a listed entry, or a listed entry that no longer diverges, fails the gate. Entries marked UNREVIEWED are pre-existing drift pending a reconcile decision (chunk F). Scope: this baseline compares generated vs variables.css :root ONLY. CAVEAT (discovered chunk F): variables.css is NOT always the last-winning layer — scoped blocks ([data-theme=dark-fantasy], html[data-skin=v2] in skin-v2.css, .gd-board, .wk-surface, keeper-v2) carry higher specificity than :root and override it for some tokens (radius is the documented case: skin-v2 wins). So a listed 'override' value is the variables.css :root decl, not necessarily the rendered value. styleseed-tokens.css is an earlier layer not yet covered.",
   "scope": {
     "generated": "src/styles/tokens.generated.css",
     "override": "src/styles/variables.css"
@@ -8,12 +8,12 @@
     "--color-accent-glow": {
       "generated": "var(--brass-glow)",
       "override": "var(--accent-glow)",
-      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
+      "reason": "DEFERRED (chunk F, pending design pass): real color/value diff between generated and the variables.css :root re-point; value kept gated. Reconcile direction is a design decision (which value is canonical), not a mechanical token edit, so it is intentionally left to a dedicated color/contrast review."
     },
     "--color-info": {
       "generated": "#6a8eb0",
       "override": "var(--text-info)",
-      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
+      "reason": "DEFERRED (chunk F, pending design pass): real color/value diff between generated and the variables.css :root re-point; value kept gated. Reconcile direction is a design decision (which value is canonical), not a mechanical token edit, so it is intentionally left to a dedicated color/contrast review."
     },
     "--font-body": {
       "generated": "'EB Garamond', 'Noto Sans KR', Georgia, serif",
@@ -28,42 +28,42 @@
     "--radius-lg": {
       "generated": "12px",
       "override": "6px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (chunk F): this generated-vs-variables :root drift is SHADOWED in the default app, so it has no in-app render effect. The active skin layer html[data-skin=v2] (skin-v2.css, specificity 0,3,1 > :root 0,1,0) wins for xs/sm/md/lg, rendering 3/4/6/10px (neither generated nor variables.css). xl/pill fall to variables.css :root (8px/9999px) since skin-v2 omits them; generated :root never renders. Changing generated (source.ts) would not change in-app rendering and would only diverge the preview surfaces (which load generated alone). True reconcile = consolidating radius across 6+ scopes (generated/:root + variables :root + [data-theme=dark-fantasy] + html[data-skin=v2] + .gd-board/.wk-surface + keeper-v2) — a design-system task, not a token value edit. Value kept gated."
     },
     "--radius-md": {
       "generated": "6px",
       "override": "4px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (chunk F): this generated-vs-variables :root drift is SHADOWED in the default app, so it has no in-app render effect. The active skin layer html[data-skin=v2] (skin-v2.css, specificity 0,3,1 > :root 0,1,0) wins for xs/sm/md/lg, rendering 3/4/6/10px (neither generated nor variables.css). xl/pill fall to variables.css :root (8px/9999px) since skin-v2 omits them; generated :root never renders. Changing generated (source.ts) would not change in-app rendering and would only diverge the preview surfaces (which load generated alone). True reconcile = consolidating radius across 6+ scopes (generated/:root + variables :root + [data-theme=dark-fantasy] + html[data-skin=v2] + .gd-board/.wk-surface + keeper-v2) — a design-system task, not a token value edit. Value kept gated."
     },
     "--radius-pill": {
       "generated": "999px",
       "override": "9999px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (chunk F): this generated-vs-variables :root drift is SHADOWED in the default app, so it has no in-app render effect. The active skin layer html[data-skin=v2] (skin-v2.css, specificity 0,3,1 > :root 0,1,0) wins for xs/sm/md/lg, rendering 3/4/6/10px (neither generated nor variables.css). xl/pill fall to variables.css :root (8px/9999px) since skin-v2 omits them; generated :root never renders. Changing generated (source.ts) would not change in-app rendering and would only diverge the preview surfaces (which load generated alone). True reconcile = consolidating radius across 6+ scopes (generated/:root + variables :root + [data-theme=dark-fantasy] + html[data-skin=v2] + .gd-board/.wk-surface + keeper-v2) — a design-system task, not a token value edit. Value kept gated."
     },
     "--radius-sm": {
       "generated": "4px",
       "override": "3px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (chunk F): this generated-vs-variables :root drift is SHADOWED in the default app, so it has no in-app render effect. The active skin layer html[data-skin=v2] (skin-v2.css, specificity 0,3,1 > :root 0,1,0) wins for xs/sm/md/lg, rendering 3/4/6/10px (neither generated nor variables.css). xl/pill fall to variables.css :root (8px/9999px) since skin-v2 omits them; generated :root never renders. Changing generated (source.ts) would not change in-app rendering and would only diverge the preview surfaces (which load generated alone). True reconcile = consolidating radius across 6+ scopes (generated/:root + variables :root + [data-theme=dark-fantasy] + html[data-skin=v2] + .gd-board/.wk-surface + keeper-v2) — a design-system task, not a token value edit. Value kept gated."
     },
     "--radius-xl": {
       "generated": "24px",
       "override": "8px",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (chunk F): this generated-vs-variables :root drift is SHADOWED in the default app, so it has no in-app render effect. The active skin layer html[data-skin=v2] (skin-v2.css, specificity 0,3,1 > :root 0,1,0) wins for xs/sm/md/lg, rendering 3/4/6/10px (neither generated nor variables.css). xl/pill fall to variables.css :root (8px/9999px) since skin-v2 omits them; generated :root never renders. Changing generated (source.ts) would not change in-app rendering and would only diverge the preview surfaces (which load generated alone). True reconcile = consolidating radius across 6+ scopes (generated/:root + variables :root + [data-theme=dark-fantasy] + html[data-skin=v2] + .gd-board/.wk-surface + keeper-v2) — a design-system task, not a token value edit. Value kept gated."
     },
     "--radius-xs": {
       "generated": "2px",
       "override": "var(--r-0)",
-      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+      "reason": "DIAGNOSED (chunk F): this generated-vs-variables :root drift is SHADOWED in the default app, so it has no in-app render effect. The active skin layer html[data-skin=v2] (skin-v2.css, specificity 0,3,1 > :root 0,1,0) wins for xs/sm/md/lg, rendering 3/4/6/10px (neither generated nor variables.css). xl/pill fall to variables.css :root (8px/9999px) since skin-v2 omits them; generated :root never renders. Changing generated (source.ts) would not change in-app rendering and would only diverge the preview surfaces (which load generated alone). True reconcile = consolidating radius across 6+ scopes (generated/:root + variables :root + [data-theme=dark-fantasy] + html[data-skin=v2] + .gd-board/.wk-surface + keeper-v2) — a design-system task, not a token value edit. Value kept gated."
     },
     "--scrim-strong": {
       "generated": "var(--color-scrim-strong)",
       "override": "rgba(0, 0, 0, 0.6)",
-      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
+      "reason": "DEFERRED (chunk F, pending design pass): real color/value diff between generated and the variables.css :root re-point; value kept gated. Reconcile direction is a design decision (which value is canonical), not a mechanical token edit, so it is intentionally left to a dedicated color/contrast review."
     },
     "--shadow-card": {
       "generated": "0 1px 4px rgba(0, 0, 0, 0.5)",
       "override": "0 1px 3px rgba(0, 0, 0, 0.04)",
-      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
+      "reason": "DEFERRED (chunk F, pending design pass): real visual diff, value kept gated. CASCADE NOTE: --shadow-card is declared TWICE in variables.css (L592 = 0 1px 3px rgba(0,0,0,0.04); L662 = 0 2px 8px rgba(0,0,0,0.35)) plus scoped theme/skin layers; the collector captured the L592 decl but the actually-rendered value depends on selector/source order and needs getComputedStyle confirmation before any reconcile."
     },
     "--spacing-card": {
       "generated": "16px",

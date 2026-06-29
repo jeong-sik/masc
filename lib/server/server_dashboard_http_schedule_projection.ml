@@ -228,6 +228,8 @@ let schedule_keeper_next_tool_status_json = function
         (fun (schema : Masc_domain.tool_schema) -> String.equal schema.name tool_name)
         Config.raw_all_tool_schemas
     in
+    (* TEL-OK: read-side dashboard projection only; schedule execution telemetry
+       remains on the dispatcher path. *)
     let dispatch_registered = Option.is_some (Tool_dispatch.lookup_tag tool_name) in
     let metadata = Tool_catalog.metadata tool_name in
     let surfaces = tool_projection_surfaces_for tool_name in

@@ -40,8 +40,9 @@ type active_item = {
 val task_is_active_wip : ?claimed_by:string -> Masc_domain.task -> bool
 val active_item_of_task :
   ?task_goal_index:(string, string list) Hashtbl.t -> default_repo:string -> Masc_domain.task -> active_item
-val active_items_of_tasks : ?claimed_by:string ->
-  ?task_goal_index:(string, string list) Hashtbl.t -> default_repo:string -> Masc_domain.task list -> active_item list
+val active_items_of_tasks :
+  ?task_goal_index:(string, string list) Hashtbl.t ->
+  ?claimed_by:string -> default_repo:string -> Masc_domain.task list -> active_item list
 
 type reject_reason =
   | Global_cap

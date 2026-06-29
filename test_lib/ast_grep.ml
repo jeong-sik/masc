@@ -88,8 +88,8 @@ let count_calls_with_label ~module_path ~callee ~label =
   let has_label args =
     List.exists
       (function
-        | (Labelled arg | Optional arg), _ -> String.equal arg label
-        | Nolabel, _ -> false)
+        | (Asttypes.Labelled arg | Asttypes.Optional arg), _ -> String.equal arg label
+        | Asttypes.Nolabel, _ -> false)
       args
   in
   let iter =

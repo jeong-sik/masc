@@ -51,6 +51,37 @@ let cleanup_dir dir =
   in
   rm dir
 
+let runtime_toml =
+  {|
+[runtime]
+default = "test_provider.test_model"
+
+[providers.test_provider]
+display-name = "Test Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.test_model]
+api-name = "test-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[test_provider.test_model]
+is-default = true
+max-concurrent = 1
+|}
+
+let init_runtime_default_for_tests () =
+  let path = Filename.temp_file "keeper_schedule_observation_runtime_" ".toml" in
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc runtime_toml);
+  match Runtime.init_default ~config_path:path with
+  | Ok () -> ()
+  | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
+
 let with_repo_root_cwd f =
   let original_cwd = Sys.getcwd () in
   (* Test runs out of [_build/default/test]; walk up until we find the
@@ -81,6 +112,7 @@ let with_repo_root_cwd f =
       Prompt_registry.clear ();
       Prompt_registry.set_markdown_dir (Filename.concat config_dir "prompts");
       Lib.Prompt_defaults.init ();
+      init_runtime_default_for_tests ();
       Fun.protect
         ~finally:(fun () ->
           Sys.chdir original_cwd;

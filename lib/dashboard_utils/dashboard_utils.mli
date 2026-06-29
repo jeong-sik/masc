@@ -93,18 +93,11 @@ val take : int -> 'a list -> 'a list
 
 (** {1 Health level} *)
 
-(** Health severity, ordered by intent (worst → best). Parsed from
+(** Health severity, ordered by {!Health_status.rank}. Parsed from
     dashboard/operator JSON via {!health_level_of_string}, then used in
     typed predicates ({!is_health_critical} etc.) instead of string
     matching. *)
-type health_level =
-  | HL_critical
-  | HL_bad
-  | HL_risk
-  | HL_warn
-  | HL_degraded
-  | HL_ok
-  | HL_unknown  (** Unparseable or missing health string. *)
+type health_level = Health_status.t
 
 val health_level_of_string : string -> health_level
 val string_of_health_level : health_level -> string

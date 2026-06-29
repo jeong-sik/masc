@@ -834,6 +834,11 @@
 
 ; Focused single-module tests
 
+(test
+ (name test_health_status)
+ (modules test_health_status)
+ (libraries alcotest masc.masc_types masc.dashboard_utils))
+
 ; Group 3: Eio-native tests (single-module, standard deps)
 ; Merged from ~100 individual (test ...) stanzas.
 

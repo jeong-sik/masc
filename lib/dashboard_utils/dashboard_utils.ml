@@ -108,41 +108,16 @@ let session_recent_events session_json =
 let event_detail_json event_json =
   member_assoc "detail" event_json
 
-(** Health severity level — ordered from worst to best.
+(** Health severity level — ordered by {!Health_status.rank}.
     Parsed from dashboard/operator JSON at the call site via
     [health_level_of_string], then used in typed predicates below. *)
-type health_level =
-  | HL_critical
-  | HL_bad
-  | HL_risk
-  | HL_warn
-  | HL_degraded
-  | HL_ok
-  | HL_unknown  (** Unparseable or missing health string *)
+type health_level = Health_status.t
 
-let health_level_of_string s =
-  match String.lowercase_ascii (String.trim s) with
-  | "critical" -> HL_critical
-  | "bad" -> HL_bad
-  | "risk" -> HL_risk
-  | "warn" | "watch" -> HL_warn
-  | "degraded" | "interrupted" -> HL_degraded
-  | "ok" | "good" | "healthy" -> HL_ok
-  | _ -> HL_unknown
+let health_level_of_string = Health_status.of_string
 
-let string_of_health_level = function
-  | HL_critical -> "critical"
-  | HL_bad -> "bad"
-  | HL_risk -> "risk"
-  | HL_warn -> "warn"
-  | HL_degraded -> "degraded"
-  | HL_ok -> "ok"
-  | HL_unknown -> unknown_status_label
+let string_of_health_level = Health_status.to_string
 
-let severity_rank_of_health_level = function
-  | HL_critical | HL_bad | HL_risk -> 2
-  | HL_warn | HL_degraded -> 1
-  | HL_ok | HL_unknown -> 0
+let severity_rank_of_health_level = Health_status.rank
 
 (** Session lifecycle — parsed from session JSON at call sites.
     The variant makes the different terminal sets visible:
@@ -192,17 +167,14 @@ let string_of_session_lifecycle = function
 let is_keeper_offline status =
   List.mem status [ "offline"; "inactive"; "error" ]
 
-let is_health_critical = function
-  | HL_bad | HL_critical -> true
-  | HL_risk | HL_warn | HL_degraded | HL_ok | HL_unknown -> false
+let is_health_critical = Health_status.requires_operator_action
 
-let is_health_warning = function
-  | HL_warn | HL_degraded -> true
-  | HL_critical | HL_bad | HL_risk | HL_ok | HL_unknown -> false
+let is_health_warning health =
+  match Health_status.rank health with
+  | 1 | 2 -> true
+  | _ -> false
 
-let is_health_at_risk = function
-  | HL_bad | HL_risk | HL_critical -> true
-  | HL_warn | HL_degraded | HL_ok | HL_unknown -> false
+let is_health_at_risk health = Health_status.rank health >= 2
 
 let is_session_terminal = function
   | SL_completed | SL_cancelled | SL_failed | SL_stopped -> true

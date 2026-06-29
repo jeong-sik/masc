@@ -415,14 +415,9 @@ let assoc_bool_opt name json =
   | Some (`Bool value) -> Some value
   | _ -> None
 
-let health_status_rank = function
-  | "blocked" | "error" | "timeout" -> 3
-  | "degraded" | "stale" | "warning" | "unavailable" | "unknown" -> 2
-  | "warming" | "snapshot_not_ready" -> 1
-  | _ -> 0
+let health_status_rank = Health_status.rank_string
 
-let max_health_status left right =
-  if health_status_rank left >= health_status_rank right then left else right
+let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety
     ~keeper_identity_drift_json ~reaction_ledger_json ~keeper_config_schema_status
@@ -442,10 +437,11 @@ let full_health_operator_summary ~keeper_fleet_safety
       | Some value -> value
       | None -> false
     in
+    let parsed_component_status = Health_status.of_string component_status in
     if
       action_required
-      || health_status_rank component_status >= 3
-      || String.equal component_status "unknown"
+      || Health_status.requires_operator_action parsed_component_status
+      || Health_status.equal parsed_component_status Health_status.Unknown
     then
       let reason =
         match fallback_reason with

@@ -83,6 +83,10 @@ let pending_id_for_keeper ~keeper_name =
       entries
   | _ -> None
 
+let approval_decision_is_reject = function
+  | Agent_sdk.Hooks.Reject _ -> true
+  | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ -> false
+
 let with_env key value f =
   let old = Sys.getenv_opt key in
   Unix.putenv key value;
@@ -1290,6 +1294,104 @@ let test_runtime_trust_classifies_always_approve_flag () =
         "auto_approved_always"
         (approval |> member "latest_event_kind" |> to_string))
 
+let test_hard_forbidden_blocks_critical_risk () =
+  with_test_config @@ fun config ->
+  let meta =
+    meta_from_json
+      (`Assoc [
+        ("name", `String "test-keeper");
+        ("trace_id", `String "test-trace");
+        ("sandbox_profile", `String "docker");
+        ("network_mode", `String "inherit");
+        ("always_approve", `Bool true);
+      ])
+  in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+  in
+  let decision =
+    cb ~tool_name:"tool_edit_file"
+      ~input:(`Assoc [("path", `String "/etc/passwd")])
+  in
+  Alcotest.(check bool) "critical risk tool is hard_forbidden and blocked"
+    true (approval_decision_is_reject decision)
+
+let test_hard_forbidden_blocks_destructive_tool () =
+  with_test_config @@ fun config ->
+  let meta =
+    meta_from_json
+      (`Assoc [
+        ("name", `String "test-keeper");
+        ("trace_id", `String "test-trace");
+        ("sandbox_profile", `String "docker");
+        ("network_mode", `String "inherit");
+        ("always_approve", `Bool true);
+      ])
+  in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+  in
+  let decision =
+    cb ~tool_name:"tool_delete_file"
+      ~input:(`Assoc [("path", `String "/safe/path")])
+  in
+  Alcotest.(check bool) "destructive tool is hard_forbidden and blocked"
+    true (approval_decision_is_reject decision)
+
+let test_always_approve_bypasses_only_when_not_hard_forbidden () =
+  with_test_config @@ fun config ->
+  let meta =
+    meta_from_json
+      (`Assoc [
+        ("name", `String "test-keeper");
+        ("trace_id", `String "test-trace");
+        ("sandbox_profile", `String "docker");
+        ("network_mode", `String "inherit");
+        ("always_approve", `Bool true);
+      ])
+  in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+  in
+  let decision =
+    cb ~tool_name:"tool_read_file"
+      ~input:(`Assoc [("path", `String "/safe/path")])
+  in
+  Alcotest.(check bool) "safe tool with always_approve is auto-approved"
+    true (decision = Agent_sdk.Hooks.Approve)
+
+let test_hard_forbidden_hoisted_outside_needs_approval () =
+  with_test_config @@ fun config ->
+  let meta =
+    meta_from_json
+      (`Assoc [
+        ("name", `String "test-keeper");
+        ("trace_id", `String "test-trace");
+        ("sandbox_profile", `String "docker");
+        ("network_mode", `String "inherit");
+        ("always_approve", `Bool true);
+      ])
+  in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+  in
+  let decision1 =
+    cb ~tool_name:"tool_edit_file"
+      ~input:(`Assoc [("path", `String "/etc/passwd")])
+  in
+  let decision2 =
+    cb ~tool_name:"tool_read_file"
+      ~input:(`Assoc [("path", `String "/safe/path")])
+  in
+  Alcotest.(check bool) "critical tool blocked"
+    true (approval_decision_is_reject decision1);
+  Alcotest.(check bool) "safe tool approved"
+    true (decision2 = Agent_sdk.Hooks.Approve)
+
 let test_callback_always_approve_respects_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1602,5 +1704,13 @@ let () =
         test_callback_always_approve_respects_forbidden;
       Alcotest.test_case "HITL disabled still gates forbidden tools" `Quick
         test_callback_hitl_disabled_forbidden_requires_approval;
+      Alcotest.test_case "hard_forbidden blocks critical risk" `Quick
+        test_hard_forbidden_blocks_critical_risk;
+      Alcotest.test_case "hard_forbidden blocks destructive tool" `Quick
+        test_hard_forbidden_blocks_destructive_tool;
+      Alcotest.test_case "always_approve bypasses only when not hard_forbidden" `Quick
+        test_always_approve_bypasses_only_when_not_hard_forbidden;
+      Alcotest.test_case "hard_forbidden hoisted outside needs_approval" `Quick
+        test_hard_forbidden_hoisted_outside_needs_approval;
     ]);
   ]

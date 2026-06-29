@@ -273,13 +273,13 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
   ; temperature = Some 0.0
   ; tool_choice = None
   ; disable_parallel_tool_use = true
-  ; response_format = Agent_sdk.Types.JsonMode
-  ; output_schema = None
   ; enable_thinking = Some false
   ; preserve_thinking = Some false
   ; thinking_budget = None
   ; clear_thinking = Some true
   }
+  |> Keeper_memory_os_structured_schema.apply_to_provider_config
+       Keeper_memory_os_structured_schema.librarian_episode_output_schema
 ;;
 
 let message role text =

@@ -96,9 +96,9 @@ let provider_for_consolidation (provider_cfg : Llm_provider.Provider_config.t) =
   ; temperature = Some 0.0
   ; tool_choice = None
   ; disable_parallel_tool_use = true
-  ; response_format = Agent_sdk.Types.JsonMode
-  ; output_schema = None
   }
+  |> Keeper_memory_os_structured_schema.apply_to_provider_config
+       Keeper_memory_os_structured_schema.consolidation_plan_output_schema
 ;;
 
 let messages_for_consolidation facts =

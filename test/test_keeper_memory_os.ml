@@ -6,6 +6,7 @@ module Memory_io = Masc.Keeper_memory_os_io
 module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
+module Structured_schema = Masc.Keeper_memory_os_structured_schema
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
@@ -1222,10 +1223,19 @@ let test_librarian_runtime_appends_episode_bundle () =
              "thinking preservation disabled"
              (Some false)
              provider_cfg.Llm_provider.Provider_config.preserve_thinking;
+           let expected_schema = Structured_schema.librarian_episode_output_schema in
            Alcotest.(check bool)
-             "json mode"
+             "librarian json schema response format"
              true
-             (provider_cfg.response_format = Agent_sdk.Types.JsonMode);
+             (match provider_cfg.response_format with
+              | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
+              | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
+           Alcotest.(check (option bool))
+             "librarian output schema mirrors response format"
+             (Some true)
+             (Option.map
+                (Yojson.Safe.equal expected_schema)
+                provider_cfg.Llm_provider.Provider_config.output_schema);
            Alcotest.(check int) "system+user prompt" 2 (List.length messages);
            let rendered_prompt = messages |> List.map message_text |> String.concat "\n" in
            Alcotest.(check bool)

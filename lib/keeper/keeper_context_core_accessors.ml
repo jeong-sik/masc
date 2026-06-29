@@ -211,6 +211,7 @@ let text_of_history_jsonl_json = Message_json.text_of_history_jsonl_json
 let tool_use_ids_of_message = Keeper_context_tool_message_pairs.tool_use_ids_of_message
 let tool_result_ids_of_message = Keeper_context_tool_message_pairs.tool_result_ids_of_message
 let has_tool_result_block = Keeper_context_tool_message_pairs.has_tool_result_block
+let has_tool_use_block = Keeper_context_tool_message_pairs.has_tool_use_block
 let trim_messages_preserving_pairs = Keeper_context_tool_message_pairs.trim_messages_preserving_pairs
 
 (* Tool block text renderers extracted to
@@ -325,7 +326,8 @@ let filter_group_message_content
       (function
         | Agent_sdk.Types.ToolUse { id; name; _ }
           when mode.drop_dangling_uses
-               && not (List.mem id matched_tool_result_ids) ->
+               && (msg.role <> Agent_sdk.Types.Assistant
+                   || not (List.mem id matched_tool_result_ids)) ->
             record_dropped_tool_use stats id name;
             None
         | Agent_sdk.Types.ToolResult { tool_use_id; _ } as block
@@ -348,15 +350,22 @@ let filter_orphan_result_message_content
     mode
     (msg : Agent_sdk.Types.message)
     : Agent_sdk.Types.content_block list * tool_pair_repair_stats =
-  if not mode.drop_orphan_results
+  let drop_non_assistant_tool_use =
+    mode.drop_dangling_uses && msg.role <> Agent_sdk.Types.Assistant
+  in
+  if (not mode.drop_orphan_results) && not drop_non_assistant_tool_use
   then msg.content, empty_tool_pair_repair_stats
   else
     let stats = ref empty_tool_pair_repair_stats in
     let content =
       List.filter_map
         (function
-          | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
+          | Agent_sdk.Types.ToolResult { tool_use_id; _ }
+            when mode.drop_orphan_results ->
               record_dropped_tool_result stats tool_use_id;
+              None
+          | Agent_sdk.Types.ToolUse { id; name; _ } when drop_non_assistant_tool_use ->
+              record_dropped_tool_use stats id name;
               None
           | other -> Some other)
         msg.content
@@ -458,6 +467,9 @@ let repair_tool_call_pairs_with_stats
           in
           loop acc_stats acc rest
         else if has_tool_result_block msg
+                || (mode.drop_dangling_uses
+                    && msg.role <> Agent_sdk.Types.Assistant
+                    && has_tool_use_block msg)
         then
           let content, stats = filter_orphan_result_message_content mode msg in
           let acc = append_repaired acc stats msg content in

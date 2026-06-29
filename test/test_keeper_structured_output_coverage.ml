@@ -45,13 +45,15 @@ let expected_unstructured_completion_exemptions =
     ]
 ;;
 
-let expected_structured_agent_run_json_judges =
+let expected_structured_dashboard_agent_run_json_judges =
   List.sort
     String.compare
     [ "lib/dashboard/dashboard_governance_judge.ml"
     ; "lib/dashboard/dashboard_operator_judge.ml"
     ]
 ;;
+
+let expected_structured_fusion_json_judges = [ "lib/fusion/fusion_judge.ml" ];;
 
 let expected_all_direct_completion_files =
   List.sort
@@ -88,7 +90,7 @@ let test_keeper_direct_completions_request_structured_output () =
     expected_structured_completion_files
 ;;
 
-let test_agent_run_json_judges_request_structured_output () =
+let test_agent_run_json_judges_request_structured_output rels =
   List.iter
     (fun rel ->
        check
@@ -98,10 +100,20 @@ let test_agent_run_json_judges_request_structured_output () =
          (Ast_grep.count_calls
             ~module_path:rel
             ~callee:"Keeper_structured_output_schema.apply_to_provider_config"))
-    expected_structured_agent_run_json_judges
+    rels
 ;;
 
-let test_agent_run_json_judges_use_provider_config_transform () =
+let test_dashboard_agent_run_json_judges_request_structured_output () =
+  test_agent_run_json_judges_request_structured_output
+    expected_structured_dashboard_agent_run_json_judges
+;;
+
+let test_fusion_agent_run_json_judges_request_structured_output () =
+  test_agent_run_json_judges_request_structured_output
+    expected_structured_fusion_json_judges
+;;
+
+let test_dashboard_agent_run_json_judges_use_provider_config_transform () =
   List.iter
     (fun rel ->
        check
@@ -112,7 +124,21 @@ let test_agent_run_json_judges_use_provider_config_transform () =
             ~module_path:rel
             ~callee:"Keeper_turn_driver_wrappers.run_named_with_masc_tools"
             ~label:"provider_config_transform"))
-    expected_structured_agent_run_json_judges
+    expected_structured_dashboard_agent_run_json_judges
+;;
+
+let test_fusion_agent_run_json_judges_use_provider_config_transform () =
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " wires provider_config_transform")
+         1
+         (Ast_grep.count_calls_with_label
+            ~module_path:rel
+            ~callee:"Fusion_oas.build_agent"
+            ~label:"provider_config_transform"))
+    expected_structured_fusion_json_judges
 ;;
 
 let schema_member key = function
@@ -144,6 +170,17 @@ let enum_strings schema =
       | _ -> None)
     |> List.sort String.compare
   | _ -> fail "schema has no enum member"
+;;
+
+let required_strings schema =
+  match schema_member "required" schema with
+  | Some (`List values) ->
+    values
+    |> List.filter_map (function
+      | `String value -> Some value
+      | _ -> None)
+    |> List.sort String.compare
+  | _ -> fail "schema has no required member"
 ;;
 
 let allows_additional_properties schema =
@@ -211,6 +248,49 @@ let test_governance_judge_schema_allows_payload_objects () =
     (allows_additional_properties payload_schema)
 ;;
 
+let test_fusion_judge_schema_uses_parser_wire_contract () =
+  let schema = Keeper_structured_output_schema.fusion_judge_output_schema in
+  check
+    (list string)
+    "fusion judge required fields"
+    (List.sort
+       String.compare
+       [ Fusion_judge_parse.wire_field_decision
+       ; Fusion_judge_parse.wire_field_resolved_answer
+       ])
+    (required_strings schema);
+  let decision_kind_schema =
+    schema
+    |> schema_property Fusion_judge_parse.wire_field_decision
+    |> schema_property Fusion_judge_parse.wire_field_decision_kind
+  in
+  check
+    (list string)
+    "fusion decision enum"
+    (List.sort
+       String.compare
+       [ Fusion_judge_parse.wire_decision_answer
+       ; Fusion_judge_parse.wire_decision_insufficient
+       ; Fusion_judge_parse.wire_decision_recommend
+       ])
+    (enum_strings decision_kind_schema);
+  let _consensus_text_schema =
+    schema
+    |> schema_property Fusion_judge_parse.wire_field_consensus
+    |> schema_items
+    |> schema_property Fusion_judge_parse.wire_field_consensus_text
+  in
+  let _position_stance_schema =
+    schema
+    |> schema_property Fusion_judge_parse.wire_field_contradictions
+    |> schema_items
+    |> schema_property Fusion_judge_parse.wire_field_positions
+    |> schema_items
+    |> schema_property Fusion_judge_parse.wire_field_stance
+  in
+  check bool "fusion schema exposes parser wire fields" true true
+;;
+
 let () =
   run
     "keeper-structured-output-coverage"
@@ -234,11 +314,11 @@ let () =
       , [ test_case
             "dashboard Agent.run JSON judges request structured output"
             `Quick
-            test_agent_run_json_judges_request_structured_output
+            test_dashboard_agent_run_json_judges_request_structured_output
         ; test_case
             "dashboard Agent.run JSON judges use provider config transform"
             `Quick
-            test_agent_run_json_judges_use_provider_config_transform
+            test_dashboard_agent_run_json_judges_use_provider_config_transform
         ; test_case
             "operator judge schema uses action approval SSOT"
             `Quick
@@ -255,6 +335,20 @@ let () =
             "governance judge schema admits payload objects"
             `Quick
             test_governance_judge_schema_allows_payload_objects
+        ] )
+    ; ( "fusion json judges"
+      , [ test_case
+            "fusion JSON judges request structured output"
+            `Quick
+            test_fusion_agent_run_json_judges_request_structured_output
+        ; test_case
+            "fusion JSON judges use provider config transform"
+            `Quick
+            test_fusion_agent_run_json_judges_use_provider_config_transform
+        ; test_case
+            "fusion judge schema uses parser wire contract"
+            `Quick
+            test_fusion_judge_schema_uses_parser_wire_contract
         ] )
     ]
 ;;

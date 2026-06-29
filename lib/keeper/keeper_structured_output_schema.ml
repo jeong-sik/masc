@@ -10,6 +10,8 @@ let string_array_schema =
   `Assoc [ "type", `String "array"; "items", string_schema ]
 ;;
 
+let array_schema item = `Assoc [ "type", `String "array"; "items", item ]
+
 let enum_schema values =
   `Assoc
     [ "type", `String "string"
@@ -219,6 +221,91 @@ let memory_bank_summary_output_schema =
 let vision_analyze_output_schema =
   let fields = [ "text", string_schema ] in
   object_schema ~required:(List.map fst fields) fields
+;;
+
+let fusion_position_schema =
+  let fields =
+    [ Fusion_judge_parse.wire_field_model, string_schema
+    ; Fusion_judge_parse.wire_field_stance, string_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let fusion_claim_schema =
+  let fields =
+    [ Fusion_judge_parse.wire_field_consensus_text, string_schema
+    ; Fusion_judge_parse.wire_field_supporting_models, string_array_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let fusion_contradiction_schema =
+  let fields =
+    [ Fusion_judge_parse.wire_field_topic, string_schema
+    ; Fusion_judge_parse.wire_field_positions, array_schema fusion_position_schema
+    ; Fusion_judge_parse.wire_field_evidence, string_array_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let fusion_coverage_schema =
+  let fields =
+    [ Fusion_judge_parse.wire_field_topic, string_schema
+    ; Fusion_judge_parse.wire_field_addressed_by, string_array_schema
+    ; Fusion_judge_parse.wire_field_missing, string_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let fusion_insight_schema =
+  let fields =
+    [ Fusion_judge_parse.wire_field_consensus_text, string_schema
+    ; Fusion_judge_parse.wire_field_model, string_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let fusion_decision_schema =
+  let fields =
+    [ Fusion_judge_parse.wire_field_decision_kind
+    , enum_schema
+        [ Fusion_judge_parse.wire_decision_answer
+        ; Fusion_judge_parse.wire_decision_recommend
+        ; Fusion_judge_parse.wire_decision_insufficient
+        ]
+    ; Fusion_judge_parse.wire_field_answer, string_schema
+    ; Fusion_judge_parse.wire_field_recommend_action, string_schema
+    ; Fusion_judge_parse.wire_field_recommend_rationale, string_schema
+    ; Fusion_judge_parse.wire_field_missing, string_array_schema
+    ]
+  in
+  object_schema ~required:[ Fusion_judge_parse.wire_field_decision_kind ] fields
+;;
+
+let fusion_judge_output_schema =
+  let fields =
+    [ Fusion_judge_parse.wire_field_consensus, array_schema fusion_claim_schema
+    ; ( Fusion_judge_parse.wire_field_contradictions
+      , array_schema fusion_contradiction_schema )
+    ; ( Fusion_judge_parse.wire_field_partial_coverage
+      , array_schema fusion_coverage_schema )
+    ; Fusion_judge_parse.wire_field_unique_insights, array_schema fusion_insight_schema
+    ; Fusion_judge_parse.wire_field_blind_spots, string_array_schema
+    ; Fusion_judge_parse.wire_field_resolved_answer, string_schema
+    ; Fusion_judge_parse.wire_field_decision, fusion_decision_schema
+    ]
+  in
+  object_schema
+    ~required:
+      [ Fusion_judge_parse.wire_field_resolved_answer
+      ; Fusion_judge_parse.wire_field_decision
+      ]
+    fields
 ;;
 
 let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config.t) =

@@ -150,8 +150,17 @@ let web_tool_bundle () : Agent_sdk.Tool.t list =
   |> List.concat
   |> List.filter_map oas_tool_of_descriptor
 
-let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
-    ?timeout_s ?max_tokens ?name (model : string)
+let build_agent
+    ~sw
+    ~net
+    ~system_prompt
+    ?(tools = [])
+    ?(max_tool_calls = 0)
+    ?timeout_s
+    ?max_tokens
+    ?name
+    ?provider_config_transform
+    (model : string)
   : (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
   =
   (* 카드명(Async_agent.all이 결과 키로 반환)은 패널 정체성([name], 예 "skeptic (claude)").
@@ -164,7 +173,17 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
   | Error e -> Error (Fusion_types.Provider_error e)
   | Ok [] -> Error (Fusion_types.Provider_error (model ^ ": no provider config"))
   | Ok (provider_cfg :: _) ->
+    let provider_cfg =
+      match provider_config_transform with
+      | None -> Ok provider_cfg
+      | Some transform ->
+        Result.map_error
+          (fun detail ->
+             Fusion_types.Provider_error (provider_error_detail ~runtime_id:model detail))
+          (transform provider_cfg)
+    in
     (* v1: runtime이 여러 provider를 주면 첫 번째만(단일 provider 가정). *)
+    Result.bind provider_cfg (fun provider_cfg ->
     let base_config =
       Runtime_agent.default_config ~name:card_name ~provider_cfg ~system_prompt ~tools
     in
@@ -188,7 +207,7 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
      | Error e ->
        Error
          (Fusion_types.Provider_error
-            (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e)))))
+            (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e))))))
 
 module For_testing = struct
   let apply_timeout_budget = apply_timeout_budget

@@ -1,4 +1,4 @@
-(** Provider-native JSON schemas for keeper LLM sub-call producers.
+(** Provider-native JSON schemas for MASC LLM sub-call producers.
 
     These schemas are used as [response_format = JsonSchema _] /
     [output_schema = Some _] at the OAS provider boundary. The existing
@@ -22,6 +22,9 @@ val operator_judge_output_schema : Yojson.Safe.t
 
 val governance_judge_output_schema : Yojson.Safe.t
 (** JSON object the dashboard governance judge provider must return. *)
+
+val fusion_judge_output_schema : Yojson.Safe.t
+(** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 
 val governance_resolved_tool_tokens : string list
 (** Resolved tool names accepted by the dashboard governance judge. The

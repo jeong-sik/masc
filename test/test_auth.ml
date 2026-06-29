@@ -66,6 +66,13 @@ let contains_substring text needle =
     in
     loop 0
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let source_file path = Filename.concat (source_root ()) path
+
 let read_file path =
   let ic = open_in_bin path in
   Fun.protect
@@ -73,8 +80,8 @@ let read_file path =
     (fun () -> really_input_string ic (in_channel_length ic))
 
 let test_parent_auth_facade_is_leaf_reexport () =
-  let parent = read_file "lib/auth.ml" in
-  let leaf_reexport = read_file "lib/auth/auth_leaf.ml" in
+  let parent = read_file (source_file "lib/auth.ml") in
+  let leaf_reexport = read_file (source_file "lib/auth/auth_leaf.ml") in
   check bool "parent Auth includes leaf re-export" true
     (contains_substring parent "include Auth_leaf");
   check

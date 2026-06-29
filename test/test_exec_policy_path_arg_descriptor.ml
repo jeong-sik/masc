@@ -17,6 +17,13 @@
 open Masc
 module D = Exec_policy_path_arg_descriptor
 
+let source_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None -> Sys.getcwd ()
+
+let source_file path = Filename.concat (source_root ()) path
+
 let read_file path =
   let ic = open_in path in
   Fun.protect
@@ -149,7 +156,7 @@ let test_grep_context_flags_are_not_path_args () =
     (List.mem "3" values)
 
 let test_sandbox_backend_is_not_fake_success () =
-  let source = read_file "lib/exec_policy/sandbox_backend.ml" in
+  let source = read_file (source_file "lib/exec_policy/sandbox_backend.ml") in
   Alcotest.(check bool)
     "no simulated success text"
     false

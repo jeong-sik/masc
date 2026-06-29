@@ -17,13 +17,8 @@ let with_env name value f =
 ;;
 
 let with_workspace f =
-  let unique =
-    Printf.sprintf
-      "masc-runtime-mcp-policy-auth-%d-%d"
-      (Unix.getpid ())
-      (int_of_float (Unix.gettimeofday () *. 1000.))
-  in
-  let dir = Filename.concat (Filename.get_temp_dir_name ()) unique in
+  let dir = Filename.temp_file "masc-runtime-mcp-policy-auth-" "" in
+  Sys.remove dir;
   Unix.mkdir dir 0o755;
   let masc_dir = Filename.concat dir Common.masc_dirname in
   Unix.mkdir masc_dir 0o755;
@@ -152,7 +147,7 @@ let test_policy_uses_explicit_base_path_not_ambient_env () =
         ~agent_name:"keeper-rondo-agent"
         ~raw_token:"ambient-env-token";
       with_env "MASC_BASE_PATH" (Some ambient_dir) (fun () ->
-        with_env "MASC_TOKEN" None (fun () ->
+        let build_policy () =
           match
             Policy.runtime_mcp_policy_of_tool_names
               ~base_path:dir
@@ -166,7 +161,10 @@ let test_policy_uses_explicit_base_path_not_ambient_env () =
               (option string)
               "authorization header comes from explicit base path"
               (Some "Bearer explicit-base-token")
-              (find_header "Authorization" headers)))))
+              (find_header "Authorization" headers)
+        in
+        with_env "MASC_INTERNAL_MCP_TOKEN" None (fun () ->
+          with_env "MASC_TOKEN" None build_policy))))
 ;;
 
 let () =

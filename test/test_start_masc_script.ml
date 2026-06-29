@@ -5,11 +5,13 @@ let source_root () =
   | Some root -> root
   | None -> Sys.getcwd ()
 
+let source_file path = Filename.concat (source_root ()) path
+
 let script_path () =
-  Filename.concat (source_root ()) "start-masc.sh"
+  source_file "start-masc.sh"
 
 let loopback_script_path () =
-  Filename.concat (source_root ()) "scripts/start-loopback.sh"
+  source_file "scripts/start-loopback.sh"
 
 let quote = Filename.quote
 
@@ -1005,7 +1007,7 @@ let test_default_build_lock_is_worktree_local () =
     (contains_substring source "MASC_BUILD_LOCK_PATH:-/tmp/masc-build.lock")
 
 let test_stdio_entrypoint_uses_shared_base_path_guard () =
-  let source = read_file "bin/main_stdio_eio.ml" in
+  let source = read_file (source_file "bin/main_stdio_eio.ml") in
   check bool "stdio guards self repo base path" true
     (contains_substring source "Server_base_path_guard.guard_self_repo_base_path");
   check bool "stdio rejects implicit base path" true

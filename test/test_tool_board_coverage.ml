@@ -11,8 +11,14 @@ let _test_base_path =
   dir
 
 (** Clear all Board global state for test isolation.
-    Must call inside Eio_main.run since Board.store contains Eio.Mutex. *)
+    Must call inside [with_eio] since Board.store contains Eio.Mutex. *)
 let rng_initialized = ref false
+let current_eio_env = ref None
+
+let with_eio f =
+  match !current_eio_env with
+  | Some env -> f env
+  | None -> Eio_main.run f
 
 let rec remove_path path =
   if Sys.file_exists path then
@@ -123,7 +129,7 @@ let test_moderation_http_identity_bound_to_auth_source () =
 (** {2 Group 1: Helper / Formatting Functions} *)
 
 let test_visibility_of_string () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Alcotest.(check string) "public" "public"
@@ -148,7 +154,7 @@ let test_visibility_of_string () =
    "unknown defaults to Hot" behavior is now an explicit Error so
    garbage input is surfaced instead of swallowed. *)
 let test_sort_order_of_string () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let check name expected input =
@@ -167,7 +173,7 @@ let test_sort_order_of_string () =
     (match Board_tool.parse_sort_order "xyz" with Error _ -> true | Ok _ -> false)
 
 let test_board_error_to_string () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let s = Board_tool.board_error_to_string (Board.Post_not_found "test-id") in
@@ -176,7 +182,7 @@ let test_board_error_to_string () =
   Alcotest.(check bool) "validation_error" true (String.contains s2 'b')
 
 let test_is_agent () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   (* is_agent uses agent_lookup_hook — returns false when no hook installed *)
@@ -193,7 +199,7 @@ let test_is_agent () =
       (Board_tool.is_agent ""))
 
 let test_format_timestamp_relative () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let now = Time_compat.now () in
@@ -237,7 +243,7 @@ let json_has_member json key =
   | _ -> true
 
 let test_board_actor_identity_canonicalizes_keeper_alias () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let json = Server_utils.board_actor_identity_json "keeper-analyst-agent" in
@@ -252,7 +258,7 @@ let test_board_actor_identity_canonicalizes_keeper_alias () =
     (json_member_string json "runtime_agent_name")
 
 let test_board_actor_identity_keeps_non_keeper_agent () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let json = Server_utils.board_actor_identity_json "codex" in
@@ -263,7 +269,7 @@ let test_board_actor_identity_keeps_non_keeper_agent () =
     (json_member_string json "source")
 
 let test_board_dashboard_json_embeds_reaction_summaries () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let post =
@@ -331,7 +337,7 @@ let test_board_dashboard_json_embeds_reaction_summaries () =
     (json_member_bool comment_summary "has_reacted")
 
 let test_board_dashboard_json_embeds_moderation_projection () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let post =
@@ -393,7 +399,7 @@ let test_board_dashboard_json_embeds_moderation_projection () =
     (json_member_string comment_json "moderation_status")
 
 let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let post =
@@ -474,7 +480,7 @@ let test_board_dashboard_json_hides_unvoted_scores_when_blind () =
     (json_member_int revealed_comment_json "score")
 
 let test_board_dashboard_json_embeds_contributor_quality () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let post =
@@ -562,7 +568,7 @@ let test_inline_board_post_author_accepts_matching_alias () =
 (** {2 Group 2: JSON helper functions} *)
 
 let test_get_string () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let args = make_args [("key", `String "value")] in
@@ -572,7 +578,7 @@ let test_get_string () =
     (Tool_args.get_string args "missing" "default")
 
 let test_get_string_opt () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let args = make_args [("key", `String "value")] in
@@ -582,7 +588,7 @@ let test_get_string_opt () =
     (Tool_args.get_string_opt args "missing")
 
 let test_get_int () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let args = make_args [("n", `Int 42)] in
@@ -592,7 +598,7 @@ let test_get_int () =
     (Tool_args.get_int args "missing" 0)
 
 let test_get_bool () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let args = make_args [("flag", `Bool true)] in
@@ -604,7 +610,7 @@ let test_get_bool () =
 (** {2 Group 3: Post Create / List / Get} *)
 
 let test_post_create_success () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
@@ -613,7 +619,7 @@ let test_post_create_success () =
   Alcotest.(check bool) "body has post" true (String.length body > 0)
 
 let test_post_create_structured_payload () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
@@ -651,7 +657,7 @@ let test_post_create_structured_payload () =
    inspects [Tool_result.data] directly and fails on the `String shape. Guards
    against reverting to [make_ok ~data:(`String "Post created:\n...")]. *)
 let test_post_create_data_is_structured () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let result =
@@ -672,7 +678,7 @@ let test_post_create_data_is_structured () =
        (Yojson.Safe.to_string other))
 
 let test_post_create_judgment_roundtrip () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let summary =
@@ -702,7 +708,7 @@ let test_post_create_judgment_roundtrip () =
 (** Judgment as JSON List (e.g. [{summary: "...", confidence: 0.9}])
     was silently dropped before the fix. Issue #16300. *)
 let test_post_create_judgment_list_roundtrip () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body =
@@ -728,7 +734,7 @@ let test_post_create_judgment_list_roundtrip () =
     silently produce a valid post with judgment absent. They are coerced
     to strings so the data is preserved. Issue #16300. *)
 let test_post_create_judgment_scalar_types_ignored () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let scalars =
     [
@@ -763,7 +769,7 @@ let test_post_create_judgment_scalar_types_ignored () =
     scalars
 
 let test_post_create_sources_footer_and_meta () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body =
@@ -798,7 +804,7 @@ let test_post_create_sources_footer_and_meta () =
     Yojson.Safe.Util.(json |> member "meta" |> member "has_external_sources" |> to_bool)
 
 let test_keeper_board_post_preserves_meta_reason () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"judge-keeper" () in
@@ -832,7 +838,7 @@ let test_keeper_board_post_preserves_meta_reason () =
     Yojson.Safe.Util.(json |> member "author" |> to_string)
 
 let test_keeper_board_post_rejects_quantitative_line_claim_without_evidence () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
@@ -862,7 +868,7 @@ let test_keeper_board_post_rejects_quantitative_line_claim_without_evidence () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_post_rejects_keyword_only_quantitative_evidence () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
@@ -888,7 +894,7 @@ let test_keeper_board_post_rejects_keyword_only_quantitative_evidence () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_post_rejects_numeric_line_claim_without_keyword () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
@@ -914,7 +920,7 @@ let test_keeper_board_post_rejects_numeric_line_claim_without_keyword () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_post_accepts_inline_quantitative_command_evidence () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
@@ -937,7 +943,7 @@ let test_keeper_board_post_accepts_inline_quantitative_command_evidence () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_post_accepts_quantitative_line_claim_with_evidence () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"audit-keeper" () in
@@ -974,7 +980,7 @@ let test_keeper_board_post_accepts_quantitative_line_claim_with_evidence () =
     (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_keeper_board_dispatch_uses_typed_tool_names () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let keeper_meta = make_keeper_meta ~name:"typed-keeper" () in
@@ -1062,7 +1068,7 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
     Yojson.Safe.Util.(submit_json |> member "summary" |> to_string)
 
 let test_board_curation_read_empty_returns_json_null () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_curation_read" (make_args []) in
@@ -1070,7 +1076,7 @@ let test_board_curation_read_empty_returns_json_null () =
   Alcotest.(check string) "empty curation snapshot is JSON null" "null" body
 
 let test_board_curation_submit_roundtrips_to_read () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let missing_ok, missing_body =
@@ -1201,7 +1207,7 @@ let require_mcp_runtime_result ~sw ~clock name args =
   | None -> Alcotest.failf "%s not routed by MCP runtime board dispatch" name
 
 let test_board_curation_mcp_runtime_routes_read_and_submit () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Eio.Switch.run @@ fun sw ->
@@ -1234,7 +1240,7 @@ let test_board_curation_mcp_runtime_routes_read_and_submit () =
       Yojson.Safe.from_string read2_body |> member "summary" |> to_string)
 
 let test_post_create_accepts_automation_rejects_system () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok_auto, _body_auto = dispatch "masc_board_post"
@@ -1259,7 +1265,7 @@ let test_post_create_accepts_automation_rejects_system () =
     (contains_substring body_sys "reserved")
 
 let test_post_create_empty_content () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
@@ -1271,7 +1277,7 @@ let test_post_create_empty_content () =
       (String.length body > 0)
 
 let test_post_create_empty_title_rejected () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
@@ -1283,7 +1289,7 @@ let test_post_create_empty_title_rejected () =
     (contains_substring body "title" || contains_substring body "Title")
 
 let test_post_create_missing_author_rejected () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
@@ -1293,7 +1299,7 @@ let test_post_create_missing_author_rejected () =
     (contains_substring body "author")
 
 let test_post_create_anonymous_author_rejected () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
@@ -1303,7 +1309,7 @@ let test_post_create_anonymous_author_rejected () =
     (contains_substring body "author")
 
 let test_post_list_empty () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_list" (make_args []) in
@@ -1312,7 +1318,7 @@ let test_post_list_empty () =
     (String.length body > 0)
 
 let test_cleanup_clears_persisted_jsonl () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok1, _ =
@@ -1327,7 +1333,7 @@ let test_cleanup_clears_persisted_jsonl () =
     (contains_substring body "persist me")
 
 let test_post_list_with_posts () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok1, _ = dispatch "masc_board_post"
@@ -1343,7 +1349,7 @@ let test_post_list_with_posts () =
     (String.length body > 20)
 
 let test_post_list_limit_clamping () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   (* Create 3 posts *)
@@ -1358,7 +1364,7 @@ let test_post_list_limit_clamping () =
   Alcotest.(check bool) "body has posts" true (String.length body > 0)
 
 let test_post_list_sort_orders () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (dispatch "masc_board_post"
@@ -1372,7 +1378,7 @@ let test_post_list_sort_orders () =
   ) sorts
 
 let test_post_list_invalid_sort_rejected () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (dispatch "masc_board_post"
@@ -1384,7 +1390,7 @@ let test_post_list_invalid_sort_rejected () =
     (contains_substring body "invalid sort. Valid: hot, trending, recent, updated, discussed")
 
 let test_post_list_filter_combinations () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (dispatch "masc_board_post"
@@ -1424,7 +1430,7 @@ let test_post_list_filter_combinations () =
     (contains_substring body3 "dashboard-harness-bot")
 
 let test_dispatch_delete_success () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let _ok, body = dispatch "masc_board_post"
@@ -1441,7 +1447,7 @@ let test_dispatch_delete_success () =
     (contains_substring msg_del post_id)
 
 let test_dispatch_delete_not_found () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_delete"
@@ -1451,7 +1457,7 @@ let test_dispatch_delete_not_found () =
     (contains_substring body "Delete failed")
 
 let test_dispatch_delete_empty_id () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_delete"
@@ -1461,7 +1467,7 @@ let test_dispatch_delete_empty_id () =
     (contains_substring body "required")
 
 let test_post_get_success () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post"
@@ -1479,7 +1485,7 @@ let test_post_get_success () =
   Alcotest.(check bool) "get has content" true (String.length body2 > 0)
 
 let test_post_get_not_found () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_post_get"
@@ -1491,7 +1497,7 @@ let test_post_get_not_found () =
 (** {2 Group 4: Voting} *)
 
 let test_vote_not_found () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let result =
@@ -1512,7 +1518,7 @@ let test_vote_not_found () =
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 let test_vote_rejects_legacy_direction_fallbacks () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let empty_direction =
@@ -1553,7 +1559,7 @@ let test_vote_rejects_legacy_direction_fallbacks () =
 (** {2 Group 5: Comment} *)
 
 let test_comment_add_missing_post () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let result =
@@ -1574,7 +1580,7 @@ let test_comment_add_missing_post () =
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 let test_comment_add_missing_author_rejected () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_comment"
@@ -1584,7 +1590,7 @@ let test_comment_add_missing_author_rejected () =
     (contains_substring body "author")
 
 let test_comment_add_anonymous_author_rejected () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_comment"
@@ -1595,7 +1601,7 @@ let test_comment_add_anonymous_author_rejected () =
     (contains_substring body "author")
 
 let test_comment_vote_missing () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_comment_vote"
@@ -1604,7 +1610,7 @@ let test_comment_vote_missing () =
   Alcotest.(check bool) "error msg" true (String.length body > 0)
 
 let test_comment_vote_not_found () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let result =
@@ -1627,7 +1633,7 @@ let test_comment_vote_not_found () =
 (** {2 Group 6: Search / Stats / Profile / Hearths} *)
 
 let test_search_empty_query () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_search"
@@ -1636,7 +1642,7 @@ let test_search_empty_query () =
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 let test_search_no_results () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_search"
@@ -1645,7 +1651,7 @@ let test_search_no_results () =
   Alcotest.(check bool) "no results msg" true (String.length body > 0)
 
 let test_stats () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_stats" (make_args []) in
@@ -1653,7 +1659,7 @@ let test_stats () =
   Alcotest.(check bool) "stats has content" true (String.length body > 0)
 
 let test_profile_empty_agent () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_profile"
@@ -1662,7 +1668,7 @@ let test_profile_empty_agent () =
   Alcotest.(check bool) "has error" true (String.length body > 0)
 
 let test_profile_with_posts () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (dispatch "masc_board_post"
@@ -1675,7 +1681,7 @@ let test_profile_with_posts () =
      with Not_found -> false)
 
 let test_hearth_list_empty () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_hearths" (make_args []) in
@@ -1685,7 +1691,7 @@ let test_hearth_list_empty () =
 (** {2 Group 7: Dispatch Routing} *)
 
 let test_dispatch_unknown_tool () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let ok, body = dispatch "masc_board_nonexistent" (make_args []) in
@@ -1697,13 +1703,13 @@ let test_dispatch_unknown_tool () =
 (** {2 Group 8: Tool Schema Definitions} *)
 
 let test_tools_count () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   Alcotest.(check int) "19 tool schemas" 19 (List.length Board_tool.tools)
 
 let test_tools_names_unique () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let names = List.map (fun (t : Masc_domain.tool_schema) -> t.name) Board_tool.tools in
@@ -1711,7 +1717,7 @@ let test_tools_names_unique () =
   Alcotest.(check int) "all names unique" (List.length names) (List.length unique)
 
 let test_tools_all_have_descriptions () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   List.iter (fun (t : Masc_domain.tool_schema) ->
@@ -1765,7 +1771,7 @@ let rate_add_comment store post_id idx =
     ~content:(Printf.sprintf "comment #%d" idx) ()
 
 let test_rate_under_limit_succeeds () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let store = Board.create_store () in
@@ -1778,7 +1784,7 @@ let test_rate_under_limit_succeeds () =
   done
 
 let test_rate_at_limit_rejects () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let store = Board.create_store () in
@@ -1792,7 +1798,7 @@ let test_rate_at_limit_rejects () =
    | Error e -> Alcotest.failf "unexpected error: %s" (Board.show_board_error e))
 
 let test_rate_different_authors_independent () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let store = Board.create_store () in
@@ -1807,7 +1813,7 @@ let test_rate_different_authors_independent () =
    | Error e -> Alcotest.failf "author-b rejected: %s" (Board.show_board_error e))
 
 let test_rate_retry_after_positive () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let store = Board.create_store () in
@@ -1821,7 +1827,7 @@ let test_rate_retry_after_positive () =
    | _ -> Alcotest.fail "expected Rate_limited error")
 
 let test_rate_dedup_does_not_consume_quota () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let store = Board.create_store () in
@@ -1836,7 +1842,7 @@ let test_rate_dedup_does_not_consume_quota () =
    | Error e -> Alcotest.failf "dedup-consumed quota: %s" (Board.show_board_error e))
 
 let test_rate_window_expiry_allows_more () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   let store = Board.create_store () in
@@ -1850,7 +1856,7 @@ let test_rate_window_expiry_allows_more () =
    | Error e -> Alcotest.failf "window expiry rejected: %s" (Board.show_board_error e))
 
 let test_rate_disabled_when_limit_zero () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   ignore (Board.create_store ());
@@ -1859,7 +1865,7 @@ let test_rate_disabled_when_limit_zero () =
    | Some _ -> Alcotest.fail "unknown author should not be rate-limited")
 
 let test_rate_dispatch_error_message () =
-  Eio_main.run @@ fun env ->
+  with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
   (* Use dispatch (Board.global) for everything so post exists in the right store *)
@@ -1898,8 +1904,13 @@ let test_rate_dispatch_error_message () =
 (** {1 Test Runner} *)
 
 let () =
-  Alcotest.run "Board_tool_coverage"
-    [
+  Eio_main.run @@ fun env ->
+  current_eio_env := Some env;
+  Fun.protect
+    ~finally:(fun () -> current_eio_env := None)
+    (fun () ->
+      Alcotest.run "Board_tool_coverage"
+        [
       ( "helpers",
         [
           Alcotest.test_case "visibility_of_string" `Quick test_visibility_of_string;
@@ -2046,7 +2057,7 @@ let () =
       ( "post_kind_registry",
         [
           Alcotest.test_case "no hook: defaults to direct" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.set_agent_lookup_none ();
@@ -2059,7 +2070,7 @@ let () =
               Yojson.Safe.Util.(
                 parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "with hook: agent classified as automation" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.set_agent_lookup (fun name -> name = "claude-agent");
@@ -2072,7 +2083,7 @@ let () =
               Yojson.Safe.Util.(
                 parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "with hook: non-agent stays direct" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.set_agent_lookup (fun _name -> false);
@@ -2085,7 +2096,7 @@ let () =
               Yojson.Safe.Util.(
                 parse_create_response_json msg |> member "post_kind" |> to_string));
           Alcotest.test_case "human post_kind alias is rejected" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.set_agent_lookup (fun _name -> true);
@@ -2101,7 +2112,7 @@ let () =
       ( "board_list_cache",
         [
           Alcotest.test_case "cache hit returns same result" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.invalidate_board_list_cache ();
@@ -2120,7 +2131,7 @@ let () =
             Alcotest.(check bool) "second list ok" true ok2;
             Alcotest.(check string) "cache hit returns identical body" body1 body2);
           Alcotest.test_case "mutation invalidates cache" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.invalidate_board_list_cache ();
@@ -2140,7 +2151,7 @@ let () =
             Alcotest.(check bool) "cache invalidated — different result"
               true (body1 <> body2));
           Alcotest.test_case "different args produce independent entries" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.invalidate_board_list_cache ();
@@ -2158,7 +2169,7 @@ let () =
             Alcotest.(check bool) "hot result non-empty" true
               (String.length body_hot > 0));
           Alcotest.test_case "random=true bypasses cache" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.invalidate_board_list_cache ();
@@ -2173,7 +2184,7 @@ let () =
             let (ok1, _body1) = dispatch "masc_board_list" args in
             Alcotest.(check bool) "random list ok" true ok1);
           Alcotest.test_case "delete invalidates cache" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.invalidate_board_list_cache ();
@@ -2195,7 +2206,7 @@ let () =
             Alcotest.(check bool) "cache invalidated after delete" true
               (not (contains_substring body2 "to-delete")));
           Alcotest.test_case "comment invalidates cache" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.invalidate_board_list_cache ();
@@ -2218,7 +2229,7 @@ let () =
             Alcotest.(check bool) "cache invalidated after comment" true
               (body1 <> body2));
           Alcotest.test_case "vote invalidates cache" `Quick (fun () ->
-            Eio_main.run @@ fun env ->
+            with_eio @@ fun env ->
             Fs_compat.set_fs (Eio.Stdenv.fs env);
             cleanup ();
             Board_tool.invalidate_board_list_cache ();
@@ -2253,4 +2264,4 @@ let () =
           Alcotest.test_case "disabled when limit zero" `Quick test_rate_disabled_when_limit_zero;
           Alcotest.test_case "dispatch error message" `Quick test_rate_dispatch_error_message;
         ] );
-    ]
+        ])

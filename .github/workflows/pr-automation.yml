@@ -1,0 +1,230 @@
+name: PR Automation
+
+# Ported from jeong-sik/oas .github/workflows/pr-automation.yml (Draft Auto-Merge Guard).
+# Purpose: close the mascot main-protection gap diagnosed on 2026-06-29 — mascot had
+# required_status_checks=[CI Gate] only, enforce_admins:false, required_approving_review_count:0,
+# and no workflow-layer guard, so PR #22669 merged with 3 required checks FAILURE + CI Gate
+# CANCELLED. oas prevents this via this guard (ready PR without a bypass label is forced back
+# to draft, auto-merge disabled). This file mirrors that guard for mascot.
+#
+# Labels (already present on mascot):
+#   human-approved-ready  -> bypass (human approved merge)
+#   do-not-merge          -> hard-stop (block + revert to draft)
+# Configurable via repo variables:
+#   vars.MASC_DRAFT_GUARD_BYPASS_LABELS     (default: human-approved-ready)
+#   vars.MASC_DRAFT_GUARD_HARD_STOP_LABELS  (default: do-not-merge)
+#   secrets.MASC_DRAFT_GUARD_TOKEN          (optional fine-scoped token; falls back to GITHUB_TOKEN)
+
+on:
+  pull_request_target:
+    types:
+      - opened
+      - reopened
+      - synchronize
+      - ready_for_review
+      - converted_to_draft
+      - auto_merge_enabled
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+
+concurrency:
+  group: pr-automation-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  draft-automerge-guard:
+    name: Draft Auto-Merge Guard
+    runs-on: ubuntu-latest
+    if: ${{ github.event.pull_request.state != 'closed' }}
+    steps:
+      - name: Keep draft PRs draft-only until explicit approval
+        uses: actions/github-script@v9
+        env:
+          MASC_DRAFT_GUARD_BYPASS_LABELS: ${{ vars.MASC_DRAFT_GUARD_BYPASS_LABELS }}
+          MASC_DRAFT_GUARD_HARD_STOP_LABELS: ${{ vars.MASC_DRAFT_GUARD_HARD_STOP_LABELS }}
+        with:
+          # `GITHUB_TOKEN` can read/write pull requests but may still be forbidden from
+          # GraphQL draft-conversion mutations in some integration contexts. Repos that want
+          # self-repair can provide a fine-scoped token; otherwise the script falls back to
+          # the default token and records any mutation denial as an explicit guard failure.
+          github-token: ${{ secrets.MASC_DRAFT_GUARD_TOKEN || github.token }}
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const pr = context.payload.pull_request;
+            const pullNumber = pr.number;
+
+            // `allow-auto-merge` is the GitHub-builtin label that simply *enables* auto-merge
+            // — it is not an approval signal. Strip it from the bypass list so a
+            // misconfiguration cannot turn the builtin into a draft-guard bypass. Operators
+            // who want to bypass the guard must use a distinct label such as
+            // `human-approved-ready`.
+            const RESERVED_BYPASS_LABELS = new Set(["allow-auto-merge"]);
+            const rawBypassLabels = (process.env.MASC_DRAFT_GUARD_BYPASS_LABELS || "human-approved-ready")
+              .split(",")
+              .map((label) => label.trim().toLowerCase())
+              .filter(Boolean);
+            const ignoredBypass = rawBypassLabels.filter((label) => RESERVED_BYPASS_LABELS.has(label));
+            if (ignoredBypass.length > 0) {
+              core.warning(
+                `Ignoring reserved label(s) in MASC_DRAFT_GUARD_BYPASS_LABELS: ${ignoredBypass.join(", ")}. ` +
+                  `These are GitHub-builtin and do not signal human approval.`
+              );
+            }
+            const bypassLabels = rawBypassLabels.filter((label) => !RESERVED_BYPASS_LABELS.has(label));
+            const hardStopLabels = (process.env.MASC_DRAFT_GUARD_HARD_STOP_LABELS || "do-not-merge")
+              .split(",")
+              .map((label) => label.trim().toLowerCase())
+              .filter(Boolean);
+
+            // GraphQL for PR metadata (id needed for mutations); labels via REST `paginate`
+            // so PRs with >100 labels still see every entry.
+            const query = `
+              query($owner: String!, $repo: String!, $number: Int!) {
+                repository(owner: $owner, name: $repo) {
+                  pullRequest(number: $number) {
+                    id
+                    number
+                    closed
+                    merged
+                    isDraft
+                    autoMergeRequest { enabledAt }
+                  }
+                }
+              }
+            `;
+
+            const loadLivePr = async () => {
+              const data = await github.graphql(query, { owner, repo, number: pullNumber });
+              return data.repository.pullRequest;
+            };
+
+            const live = await loadLivePr();
+            if (!live || live.closed || live.merged) {
+              core.info(`PR #${pullNumber} is already closed or merged; skipping.`);
+              return;
+            }
+
+            const labelNodes = await github.paginate(github.rest.issues.listLabelsOnIssue, {
+              owner,
+              repo,
+              issue_number: pullNumber,
+              per_page: 100
+            });
+            const labels = labelNodes.map((label) => label.name.toLowerCase());
+            const hasBypass = labels.some((label) => bypassLabels.includes(label));
+            const hardStops = labels.filter((label) => hardStopLabels.includes(label));
+            const hasHardStop = hardStops.length > 0;
+            const actions = [];
+            const repairFailures = [];
+            let violation = false;
+
+            const summarizeGraphqlError = (error) => {
+              if (Array.isArray(error?.errors) && error.errors.length > 0) {
+                return error.errors.map((entry) => entry.message || String(entry)).join("; ");
+              }
+              return error?.message || String(error);
+            };
+
+            const runRepairMutation = async ({ action, failureAction, mutation, variables }) => {
+              try {
+                await github.graphql(mutation, variables);
+                actions.push(action);
+                return true;
+              } catch (error) {
+                const summary = summarizeGraphqlError(error);
+                const failure = `${failureAction}: ${summary}`;
+                core.warning(failure);
+                actions.push(failureAction);
+                repairFailures.push(failure);
+                return false;
+              }
+            };
+
+            if (live.autoMergeRequest && (hasHardStop || !hasBypass)) {
+              violation = true;
+              await runRepairMutation({
+                action: "disabled auto-merge",
+                failureAction: "failed to disable auto-merge",
+                mutation: `mutation($pullRequestId: ID!) {
+                  disablePullRequestAutoMerge(input: { pullRequestId: $pullRequestId }) {
+                    pullRequest { number }
+                  }
+                }`,
+                variables: { pullRequestId: live.id }
+              });
+            }
+
+            if (!live.isDraft && (hasHardStop || !hasBypass)) {
+              violation = true;
+              await runRepairMutation({
+                action: "converted PR back to draft",
+                failureAction: "failed to convert PR back to draft",
+                mutation: `mutation($pullRequestId: ID!) {
+                  convertPullRequestToDraft(input: { pullRequestId: $pullRequestId }) {
+                    pullRequest { number }
+                  }
+                }`,
+                variables: { pullRequestId: live.id }
+              });
+            }
+
+            if (actions.length === 0) {
+              if (hasBypass && !hasHardStop) {
+                core.info(`PR #${pullNumber} has an explicit bypass label; no repair needed.`);
+              } else {
+                core.info(`PR #${pullNumber} is draft-only with no auto-merge request; no repair needed.`);
+              }
+              return;
+            }
+
+            const marker = "<!-- masc-draft-automerge-guard -->";
+            const commentBody = [
+              marker,
+              "Draft PR guard repaired unsafe merge state.",
+              "",
+              `Actions: ${actions.join(", ")}.`,
+              repairFailures.length > 0 ? `Repair failures: ${repairFailures.join("; ")}.` : "",
+              `Bypass labels: ${bypassLabels.join(", ") || "<none>"}.`,
+              hasHardStop ? `Hard-stop labels present: ${hardStops.join(", ")}.` : "",
+              "",
+              "Keep the PR draft-only until a human adds an approved bypass label and required checks are green."
+            ].filter(Boolean).join("\n");
+
+            const comments = await github.paginate(github.rest.issues.listComments, {
+              owner,
+              repo,
+              issue_number: pullNumber,
+              per_page: 100
+            });
+            const previous = comments.find((comment) =>
+              comment.user?.type === "Bot" && comment.body?.includes(marker)
+            );
+            if (previous) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: previous.id,
+                body: commentBody
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: pullNumber,
+                body: commentBody
+              });
+            }
+
+            if (violation) {
+              core.setFailed(
+                repairFailures.length > 0
+                  ? "Draft/auto-merge guard could not fully repair unsafe PR state."
+                  : "Draft/auto-merge guard repaired unsafe PR state."
+              );
+            }

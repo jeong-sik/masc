@@ -21,14 +21,16 @@ let rec ml_files_under rel =
 
 let source rel = Masc_test_deps.read_source_file rel
 
-let keeper_direct_completion_files () =
-  ml_files_under "lib/keeper"
+let direct_completion_files_under rel =
+  ml_files_under rel
   |> List.filter (fun rel ->
     source rel |> contains_substring ~needle:"Llm_provider.Complete.complete")
   |> List.sort String.compare
 ;;
 
-let expected_direct_completion_files =
+let keeper_direct_completion_files () = direct_completion_files_under "lib/keeper"
+
+let expected_structured_completion_files =
   List.sort
     String.compare
     [ "lib/keeper/keeper_librarian_runtime.ml"
@@ -38,11 +40,35 @@ let expected_direct_completion_files =
     ]
 ;;
 
+let expected_unstructured_completion_exemptions =
+  List.sort
+    String.compare
+    [ (* Protocol probe: verifies plain OpenAI chat-completions compatibility. *)
+      "lib/tool_local_runtime_verify.ml"
+    ; (* Benchmark: measures arbitrary prompt latency/throughput. *)
+      "lib/tool_local_runtime_bench.ml"
+    ]
+;;
+
+let expected_all_direct_completion_files =
+  List.sort
+    String.compare
+    (expected_structured_completion_files @ expected_unstructured_completion_exemptions)
+;;
+
+let test_all_direct_completions_are_classified () =
+  check
+    (list string)
+    "all direct completion files"
+    expected_all_direct_completion_files
+    (direct_completion_files_under "lib")
+;;
+
 let test_keeper_direct_completions_are_enumerated () =
   check
     (list string)
     "keeper direct completion files"
-    expected_direct_completion_files
+    expected_structured_completion_files
     (keeper_direct_completion_files ())
 ;;
 
@@ -57,13 +83,19 @@ let test_keeper_direct_completions_request_structured_output () =
          (contains_substring
             ~needle:"Keeper_structured_output_schema.apply_to_provider_config"
             text))
-    expected_direct_completion_files
+    expected_structured_completion_files
 ;;
 
 let () =
   run
     "keeper-structured-output-coverage"
-    [ ( "direct completion"
+    [ ( "all direct completion"
+      , [ test_case
+            "direct completion files are classified as structured or exempt"
+            `Quick
+            test_all_direct_completions_are_classified
+        ] )
+    ; ( "keeper direct completion"
       , [ test_case
             "lib/keeper direct completion files are enumerated"
             `Quick

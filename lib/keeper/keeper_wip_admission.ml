@@ -87,16 +87,10 @@ type active_item = {
   scope : scope;
 }
 
-let task_is_active_wip ?claimed_by (task : Masc_domain.task) =
-  let matches_claimed_by agent_name =
-    match claimed_by with
-    | Some (Some name) -> String.equal name agent_name
-    | Some None
-    | None -> true
-  in
+let task_is_active_wip (task : Masc_domain.task) =
   match task.task_status with
-  | Masc_domain.Claimed { assignee; _ } -> matches_claimed_by assignee
-  | Masc_domain.InProgress { assignee; _ } -> matches_claimed_by assignee
+  | Masc_domain.Claimed _
+  | Masc_domain.InProgress _ -> true
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _
@@ -105,9 +99,9 @@ let task_is_active_wip ?claimed_by (task : Masc_domain.task) =
 let active_item_of_task ?task_goal_index ~default_repo (task : Masc_domain.task) =
   { id = task.id; scope = scope_of_task ?task_goal_index ~default_repo task }
 
-let active_items_of_tasks ?claimed_by ?task_goal_index ~default_repo tasks =
+let active_items_of_tasks ?task_goal_index ~default_repo tasks =
   tasks
-  |> List.filter (task_is_active_wip ?claimed_by)
+  |> List.filter task_is_active_wip
   |> List.map (active_item_of_task ?task_goal_index ~default_repo)
 
 type reject_reason =

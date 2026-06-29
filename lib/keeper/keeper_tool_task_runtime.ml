@@ -515,7 +515,7 @@ let handle_keeper_task_tool
         Keeper_wip_admission.active_items_of_tasks
           ~task_goal_index
           ~default_repo:wip_default_repo
-          ~claimed_by:(Some meta.agent_name) active_tasks
+          active_tasks
       in
       let scope =
         Keeper_wip_admission.scope_of_task ~task_goal_index ~default_repo:wip_default_repo task

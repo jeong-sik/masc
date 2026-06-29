@@ -83,6 +83,11 @@ val admission_decision :
 val admission_block_to_json : admission_block -> Yojson.Safe.t
 val admission_decision_to_json : admission_decision -> Yojson.Safe.t
 val admission_block_kind : admission_block -> string
+
+(** Human-readable one-line summary with the typed numbers (no re-probe);
+    mirrors {!Keeper_disk_pressure.admission_block_summary}. *)
+val admission_block_summary : admission_block -> string
+
 val runtime_state_json :
   ?soft_limit:int option ->
   ?open_fds:int option ->

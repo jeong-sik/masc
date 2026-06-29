@@ -349,6 +349,36 @@ let admission_block_to_json = function
       ]
 ;;
 
+(* Stable, exhaustive kind tag per block constructor — mirrors
+   [Keeper_fd_pressure.admission_block_kind]. Display/skip-reason only; the sum
+   type stays the source of truth, the string is never parsed back. *)
+let admission_block_kind = function
+  | Disk_pressure_cooldown _ -> "disk_pressure_cooldown"
+  | Disk_probe_error _ -> "disk_probe_error"
+  | Disk_free_space_low _ -> "disk_free_space_low"
+;;
+
+(* Human-readable one-line summary carrying the typed numbers (no df re-probe).
+   Used by the fleet admission observer's edge WARN so operators see the actual
+   free/floor/short figures instead of a bare DEBUG skip. *)
+let admission_block_summary block =
+  let gib bytes = float_of_int bytes /. 1024. /. 1024. /. 1024. in
+  match block with
+  | Disk_pressure_cooldown remaining_sec ->
+    Printf.sprintf "disk pressure cooldown (remaining=%.0fs)" remaining_sec
+  | Disk_probe_error { detail } -> Printf.sprintf "disk probe error (%s)" detail
+  | Disk_free_space_low
+      { path; available_bytes; effective_min_free_bytes; available_percent; _ } ->
+    Printf.sprintf
+      "disk free-space below fleet floor: free=%.2fGiB (%.2f%%) floor=%.2fGiB \
+       short=%.2fGiB path=%s"
+      (gib available_bytes)
+      available_percent
+      (gib effective_min_free_bytes)
+      (gib (effective_min_free_bytes - available_bytes))
+      path
+;;
+
 let admission_decision_to_json = function
   | Admit -> `Assoc [ "admitted", `Bool true; "reason", `String "ok" ]
   | Block block ->

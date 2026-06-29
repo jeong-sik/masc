@@ -276,13 +276,19 @@ let append_decision_record
                   match r.stop_reason with
                   | Runtime_agent.Completed -> "completed"
                   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
+                      (* Detail-less wire form via the single SSOT [to_wire]:
+                         [Runtime_agent.TurnBudgetExhausted] carries only
+                         {turns_used; limit}, so dimension/source are None — the
+                         same form the receipt producer emits. The previous
+                         hardcoded {`Turns; `Oas_sdk} fabricated tags the variant
+                         does not carry and drifted from the receipt path. *)
                       Keeper_turn_disposition.(
                         to_wire
                           (Turn_budget_exhausted
-                             { dimension = `Turns
+                             { dimension = None
                              ; used = turns_used
                              ; limit
-                             ; source = `Oas_sdk
+                             ; source = None
                              }))
                   | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
                       (match tool_name with

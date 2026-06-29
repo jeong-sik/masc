@@ -308,11 +308,16 @@ type t =
 let stop_reason_to_string = function
   | Runtime_agent.Completed -> "completed"
   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-    Printf.sprintf
-      "%s:%d/%d"
-      Keeper_terminal_reason.terminal_prefix_turn_budget_exhausted
-      turns_used
-      limit
+    (* Single SSOT for the budget-exhausted wire grammar: serialise through
+       [Keeper_turn_disposition.to_wire] so this producer and the dashboard /
+       runtime-trust [of_wire] consumers cannot drift. [Runtime_agent]'s variant
+       carries only used/limit, so the detail-less form is emitted (dimension /
+       source are [None]). The previous hand-rolled "%s:%d/%d" used a colon that
+       [of_wire] (paren grammar) rejected → Unknown → dashboards misreported the
+       budget state (re-coupled by test_keeper_execution_receipt_budget_wire). *)
+    Keeper_turn_disposition.to_wire
+      (Keeper_turn_disposition.Turn_budget_exhausted
+         { dimension = None; used = turns_used; limit; source = None })
   | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
     (match tool_name with
      | Some tool -> Printf.sprintf "mutation_boundary:%s:%d" tool turns_used

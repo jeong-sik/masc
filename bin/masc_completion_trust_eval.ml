@@ -232,7 +232,14 @@ let outcome_of_stop (sr : Runtime_agent.stop_reason) : Trajectory.trajectory_out
   match sr with
   | Runtime_agent.Completed -> Trajectory.Completed
   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
-    Trajectory.Gated (Printf.sprintf "turn_budget_exhausted:%d/%d" turns_used limit)
+    (* Same SSOT wire grammar as the runtime receipt path: serialise through
+       [Keeper_turn_disposition.to_wire] rather than hand-rolling the colon form,
+       so this eval-harness gated reason matches the runtime [terminal_reason_code]
+       a real keeper turn would carry. *)
+    Trajectory.Gated
+      (Masc.Keeper_turn_disposition.to_wire
+         (Masc.Keeper_turn_disposition.Turn_budget_exhausted
+            { dimension = None; used = turns_used; limit; source = None }))
   | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
     let t = match tool_name with Some s -> s | None -> "none" in
     Trajectory.Gated

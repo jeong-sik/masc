@@ -54,18 +54,29 @@ type t =
   (** Provider failed after a mutating tool may have committed side
           effects. Reconcile required. *)
   | Turn_budget_exhausted of
-      { dimension : [ `Turns | `Wall_clock_seconds | `Idle_turns ]
+      { dimension : [ `Turns | `Wall_clock_seconds | `Idle_turns ] option
       ; used : int
       ; limit : int
-      ; source : [ `Oas_sdk | `Keeper_runtime | `User_config ]
+      ; source : [ `Oas_sdk | `Keeper_runtime | `User_config ] option
       }
   (** Typed vocabulary for the legacy "turn_budget_exhausted(%d/%d)"
       free-text label that was emitted across 4+ call sites. The
       dimension/source tags make it impossible to misattribute a
       keeper-runtime cooloff to an OAS SDK max-turns ceiling.
 
-      Wire form: ["turn_budget_exhausted(<dim>:<source>:<used>/<limit>)"]
-      for backward-compatibility with dashboards and OTEL queries. *)
+      [dimension] and [source] are optional because not every producer
+      carries that detail: [Runtime_agent.TurnBudgetExhausted] holds only
+      {used; limit}, so the receipt producer emits the detail-less form.
+      Both are [Some] or both are [None] (the wire grammar admits no mixed
+      form); [None] is rendered without the leading tags.
+
+      Wire form (single SSOT, see {!to_wire}/{!of_wire}):
+      - with detail: ["turn_budget_exhausted(<dim>:<source>:<used>/<limit>)"]
+      - without detail: ["turn_budget_exhausted(<used>/<limit>)"]
+
+      Every producer of this disposition serialises through {!to_wire} and
+      every consumer parses through {!of_wire}, so the producer and the
+      dashboard/runtime-trust consumers cannot drift apart. *)
   | Provider_error of Keeper_turn_terminal_code.t
   (** Runtime-layer termination promoted to operator-facing
           disposition. The inner code preserves the typed runtime cause
@@ -133,9 +144,12 @@ val to_wire : t -> string
     Otherwise [Unknown { raw_error = wire }] is returned. *)
 val of_wire : string -> t
 
-(** Compatibility predicate for consumers that must recognise older
-    ["turn_budget_exhausted:<used>/<limit>"] receipt wires without weakening
-    {!of_wire}'s fail-closed typed parser contract. *)
+(** True iff {!of_wire} classifies [wire] as [Turn_budget_exhausted]. Strict:
+    only the single paren grammar is recognised. The pre-fix colon form
+    ["turn_budget_exhausted:<used>/<limit>"] is deliberately NOT tolerated —
+    there is no second consumer grammar. Receipts persisted in the colon form
+    before the producer was fixed read as not-budget and self-heal on the
+    keeper's next turn (no migration). *)
 val is_turn_budget_exhausted_wire : string -> bool
 
 (** {1 Layer projection} *)

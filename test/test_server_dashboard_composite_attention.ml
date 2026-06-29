@@ -26,6 +26,15 @@ let execution completion_contract_result =
     ]
 ;;
 
+(* The [terminal_reason_code] fixtures use the detail-less wire form
+   ["turn_budget_exhausted(<used>/<limit>)"] because that is exactly what the
+   receipt producer emits: [Runtime_agent.TurnBudgetExhausted] carries only
+   {turns_used; limit}, so [Keeper_execution_receipt_types.stop_reason_to_string]
+   serialises through [Keeper_turn_disposition.to_wire] with dimension/source
+   = None. A prior change (#22618) replaced the original colon form with a
+   fabricated full-detail "turn_budget_exhausted(turns:oas_sdk:1070/1070)" that
+   no producer emits, decoupling this test from the producer. The producer↔wire
+   round-trip is pinned in test_keeper_execution_receipt_budget_wire. *)
 let completed_budget_execution =
   `Assoc
     [ "latest_receipt_present", `Bool true
@@ -33,7 +42,7 @@ let completed_budget_execution =
     ; "completion_contract_result", `Null
     ; "operator_disposition", `String "pass"
     ; "operator_disposition_reason", `String "turn_budget_exhausted"
-    ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:1070/1070)"
+    ; "terminal_reason_code", `String "turn_budget_exhausted(1070/1070)"
     ; "error", `Null
     ; "claim_scope", `Assoc [ "status", `String "ok" ]
     ; "config_drift", `Assoc [ "runtime_override", `Bool false ]
@@ -47,7 +56,7 @@ let passive_budget_execution =
     ; "completion_contract_result", `String "passive_only"
     ; "operator_disposition", `String "pass"
     ; "operator_disposition_reason", `String "turn_budget_exhausted"
-    ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:1070/1070)"
+    ; "terminal_reason_code", `String "turn_budget_exhausted(1070/1070)"
     ; "current_task_id", `Null
     ; "goal_ids", `List []
     ; "error", `Null
@@ -63,7 +72,7 @@ let active_passive_budget_execution =
     ; "completion_contract_result", `String "passive_only"
     ; "operator_disposition", `String "pass"
     ; "operator_disposition_reason", `String "turn_budget_exhausted"
-    ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:1070/1070)"
+    ; "terminal_reason_code", `String "turn_budget_exhausted(1070/1070)"
     ; "current_task_id", `String "TASK-1"
     ; "goal_ids", `List []
     ; "error", `Null
@@ -111,7 +120,7 @@ let not_dispatched_budget_execution =
     ; "completion_contract_result", `String "not_dispatched"
     ; "operator_disposition", `String "pass"
     ; "operator_disposition_reason", `String "turn_budget_exhausted"
-    ; "terminal_reason_code", `String "turn_budget_exhausted(turns:oas_sdk:1070/1070)"
+    ; "terminal_reason_code", `String "turn_budget_exhausted(1070/1070)"
     ; "error", `Null
     ; "claim_scope", `Assoc [ "status", `String "ok" ]
     ; "config_drift", `Assoc [ "runtime_override", `Bool false ]

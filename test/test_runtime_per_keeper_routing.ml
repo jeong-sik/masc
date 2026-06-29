@@ -521,11 +521,21 @@ tools-support = true
 thinking-support = false
 streaming = true
 
+[models.thinkdefault]
+api-name = "thinkdefault"
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
 [ollama_cloud.think]
 is-default = true
 max-concurrent = 1
 
 [ollama_cloud.nothink]
+max-concurrent = 1
+
+[ollama_cloud.thinkdefault]
 max-concurrent = 1
 |}
 ;;
@@ -549,6 +559,15 @@ let test_thinking_support_true_enables_thinking_and_preserves () =
       seed.Runtime_inference.thinking_enabled;
     Alcotest.(check (option bool))
       "preserve-thinking true emits Some true"
+      (Some true)
+      seed.Runtime_inference.preserve_thinking)
+;;
+
+let test_thinking_support_true_defaults_preserve_when_unset () =
+  with_runtime_thinking (fun () ->
+    let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.thinkdefault" in
+    Alcotest.(check (option bool))
+      "thinking-support true without preserve-thinking defaults preserve to Some true"
       (Some true)
       seed.Runtime_inference.preserve_thinking)
 ;;
@@ -658,6 +677,10 @@ let () =
             "thinking-support=true enables thinking and preserve-thinking"
             `Quick
             test_thinking_support_true_enables_thinking_and_preserves
+        ; Alcotest.test_case
+            "thinking-support=true w/o preserve-thinking defaults preserve on"
+            `Quick
+            test_thinking_support_true_defaults_preserve_when_unset
         ; Alcotest.test_case
             "thinking-support=false forces thinking off (Some false)"
             `Quick

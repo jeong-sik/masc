@@ -425,8 +425,13 @@ let adapter_loop ~token ~channel_id ~events ?base_url () =
     | Oas_stream_ping
     | Oas_thinking_delta _
     | Oas_thinking_signature_delta _
-    | Oas_media_delta _
-    | Oas_stream_protocol_error _ ->
+    | Oas_media_delta _ ->
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
+    | Oas_stream_protocol_error error ->
+        send_message ~token ~channel_id
+          ~content:
+            ("Keeper stream protocol: "
+             ^ Keeper_chat_events.stream_protocol_error_summary error);
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Tool_call_start { tool_call_id; tool_call_name } ->
         let tool_msgs =

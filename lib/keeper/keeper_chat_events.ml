@@ -102,6 +102,19 @@ let stream_protocol_error_kind_to_string = function
   | Sse_unknown_event_type -> "sse_unknown_event_type"
   | Sse_stream_incomplete -> "sse_stream_incomplete"
 
+let stream_protocol_error_summary error =
+  let parts =
+    [
+      Some (stream_protocol_error_kind_to_string error.kind);
+      Option.map (Printf.sprintf "index=%d") error.index;
+      Option.map (Printf.sprintf "event_type=%s") error.event_type;
+      error.reason;
+      Option.map (Printf.sprintf "raw_bytes=%d") error.raw_bytes;
+    ]
+    |> List.filter_map Fun.id
+  in
+  String.concat " | " parts
+
 let stream_protocol_error_to_json error =
   let fields =
     [

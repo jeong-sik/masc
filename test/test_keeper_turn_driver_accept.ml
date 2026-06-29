@@ -1878,6 +1878,12 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
   let open Agent_sdk.Types in
   let kind event = Masc.Keeper_agent_run_turn_helpers.sse_event_progress_kind event in
   Alcotest.(check (option string))
+    "tool block start follows SDK stream classifier"
+    (Some "sse_tool_block_start")
+    (kind
+       (ContentBlockStart
+          { index = 0; content_type = "tool_use"; tool_id = None; tool_name = None }));
+  Alcotest.(check (option string))
     "text delta"
     (Some "sse_text_delta")
     (kind (ContentBlockDelta { index = 0; delta = TextDelta "visible" }));
@@ -1893,6 +1899,21 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
     "tool arg snapshot"
     (Some "sse_tool_arg_delta")
     (kind (ContentBlockDelta { index = 0; delta = InputJsonSnapshot "{}" }));
+  Alcotest.(check (option string))
+    "media delta"
+    (Some "sse_media_delta")
+    (kind
+       (ContentBlockDelta
+          {
+            index = 0;
+            delta =
+              MediaDelta
+                { media_type = "image/png"; source_type = Base64; data = "abcd" };
+          }));
+  Alcotest.(check (option string))
+    "empty text delta falls back to carrier progress"
+    (Some "sse_content_delta")
+    (kind (ContentBlockDelta { index = 0; delta = TextDelta "" }));
   Alcotest.(check (option string))
     "stream incomplete"
     (Some "sse_stream_incomplete")

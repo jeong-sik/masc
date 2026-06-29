@@ -6,6 +6,7 @@ module Memory_io = Masc.Keeper_memory_os_io
 module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
+module Runtime_resolution = Masc.Keeper_memory_runtime_resolution
 module Memory_summary = Masc.Keeper_memory_llm_summary
 module Structured_schema = Masc.Keeper_structured_output_schema
 module Prompt_names = Keeper_prompt_names
@@ -785,7 +786,7 @@ let with_runtime_config_toml content f =
 
 let test_librarian_provider_for_runtime_errors_on_missing_id () =
   with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
-    match Librarian_runtime.provider_for_runtime ~runtime_id:"missing.runtime" with
+    match Runtime_resolution.provider_for_runtime ~runtime_id:"missing.runtime" with
     | Ok provider ->
       Alcotest.failf
         "missing runtime silently resolved to provider base_url=%s"

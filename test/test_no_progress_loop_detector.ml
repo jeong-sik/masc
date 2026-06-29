@@ -318,6 +318,12 @@ let test_classify_delivery_mapping () =
   let expected_peer_tools =
     [ "keeper_board_comment"
     ; "keeper_board_post"
+    (* #22708/#22042: broadcast registers asymmetrically, so the axis lists both
+       canonical forms — the descriptor internal name [keeper_broadcast] and the
+       non-descriptor public name [masc_broadcast]. Both are peer-surface tools;
+       a broadcast-only turn (either form) accrues the RFC-0239 anti-thrash
+       streak rather than resetting it. *)
+    ; "keeper_broadcast"
     ; "masc_broadcast"
     ; "masc_keeper_msg"
     ]

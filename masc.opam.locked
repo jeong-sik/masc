@@ -218,7 +218,7 @@ dev-repo: "git+https://github.com/jeong-sik/masc.git"
 pin-depends: [
   [
   "agent_sdk.0.207.25"
-  "git+https://github.com/jeong-sik/oas.git#d8395b9a357d134518c74ca72dbb8af2089e0a02"
+  "git+https://github.com/jeong-sik/oas.git#b6b2ae6c887afbdce7dd069fc03f6ac1bba721e0"
 ]
   [
     "bisect_ppx.2.8.3"

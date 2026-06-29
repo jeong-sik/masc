@@ -1037,22 +1037,36 @@ function mergeLocalAssistantTraceSteps(
   historyEntry: KeeperConversationEntry,
   localEntries: KeeperConversationEntry[],
   // Tracks local trace sources already claimed by an earlier history row.
-  // Without it, two identical-text assistant history rows both match the FIRST
-  // local source via the role+text fallback in sameConversationEntry, so the
-  // second turn inherits the first turn's trace (#21748). Each source is
-  // consumed at most once → 1:1 distribution.
-  // Contract: localEntries are in append order, which mirrors the chronological
-  // order of historyEntries, so the Nth identical-text history row maps to the
-  // Nth local source. A server-minted id handshake (R3, not yet landed) would
-  // make this exact without the ordering assumption; until then local
-  // optimistic entries carry no turn_ref, so id-keyed matching is not possible.
+  // When OAS/MASC provides turn_ref on both the live reply details and the
+  // persisted history row, that value is the exact join key. The role+text
+  // fallback remains only for legacy rows without turn_ref; `consumed` keeps
+  // those fallback matches 1:1 instead of letting duplicate assistant text reuse
+  // the first local trace source (#21748).
   consumed: Set<string>,
 ): KeeperConversationEntry {
   if (historyEntry.role !== 'assistant') return historyEntry
+  const historyTurnRef = historyEntry.turnRef?.trim()
+  const localTraceSourceByTurnRef = historyTurnRef
+    ? localEntries.find(
+        entry =>
+          entry.role === 'assistant'
+          && (entry.traceSteps?.length ?? 0) > 0
+          && !consumed.has(entry.id)
+          && entry.turnRef?.trim() === historyTurnRef,
+      )
+    : undefined
+  if (localTraceSourceByTurnRef?.traceSteps?.length) {
+    consumed.add(localTraceSourceByTurnRef.id)
+    return {
+      ...historyEntry,
+      traceSteps: localTraceSourceByTurnRef.traceSteps,
+    }
+  }
   const localTraceSource = localEntries.find(
     entry =>
       entry.role === 'assistant'
       && (entry.traceSteps?.length ?? 0) > 0
+      && !(entry.turnRef?.trim())
       && !consumed.has(entry.id)
       && sameConversationEntry(entry, historyEntry),
   )

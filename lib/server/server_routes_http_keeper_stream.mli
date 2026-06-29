@@ -164,6 +164,16 @@ val process_single_turn :
 
 (** {1 Testing helpers} *)
 
+type keeper_stream_bridge_state
+(** Per-stream OAS event bridge state. Abstract outside tests so callers cannot
+    construct synthetic stream correlation state. *)
+
+type translated_keeper_stream_event = {
+  bridge_state : keeper_stream_bridge_state;
+  chat_events : Keeper_chat_events.keeper_chat_event list;
+}
+(** Result of translating one typed OAS stream event into keeper chat events. *)
+
 module For_testing : sig
   val parse_request : string -> (keeper_chat_stream_request, string) result
   val has_connector_context : keeper_chat_stream_request -> bool
@@ -177,4 +187,11 @@ module For_testing : sig
   val extract_visible_reply : string -> Yojson.Safe.t option * string
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
+  val empty_stream_bridge_state : keeper_stream_bridge_state
+  val translate_oas_stream_event :
+    redact_text:(string -> string) ->
+    text_accum:Keeper_stream_text_accum.t ->
+    keeper_stream_bridge_state ->
+    Agent_sdk.Types.sse_event ->
+    translated_keeper_stream_event
 end

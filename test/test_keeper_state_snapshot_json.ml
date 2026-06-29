@@ -449,6 +449,10 @@ let prune_reason_to_string reason =
     Masc.Keeper_agent_run_finalize_response.For_testing.replay_suffix_prune_reason_to_string
     reason
 
+let expect_checkpoint_for_replay = function
+  | Ok checkpoint -> checkpoint
+  | Error detail -> Alcotest.fail detail
+
 let test_attention_checkpoint_prunes_current_turn_suffix () =
   let open Agent_sdk.Types in
   let old_user = checkpoint_msg User [ Text "old user" ] in
@@ -493,6 +497,7 @@ let test_attention_checkpoint_prunes_current_turn_suffix () =
       ~state_snapshot_source:KMP.State_block
       ~state_snapshot:None
       cp
+    |> expect_checkpoint_for_replay
   in
   Alcotest.(check (option string))
     "suffix pruned"
@@ -518,7 +523,7 @@ let test_attention_checkpoint_refuses_mismatched_history_prefix () =
   let cp =
     replay_test_checkpoint [ actual_old_user; old_assistant; current_user; current_final ]
   in
-  let patched, pruned =
+  let result =
     Masc.Keeper_agent_run_finalize_response.For_testing
     .checkpoint_for_replay_persistence
       ~history_messages:[ expected_old_user; old_assistant ]
@@ -530,15 +535,13 @@ let test_attention_checkpoint_refuses_mismatched_history_prefix () =
       ~state_snapshot:None
       cp
   in
-  Alcotest.(check (option string))
-    "mismatched prefix is not pruned"
-    None
-    (prune_reason_to_string pruned);
-  Alcotest.(check int) "checkpoint messages kept" 4 (List.length patched.messages);
-  Alcotest.(check bool)
-    "working context not replaced without a verified prefix"
-    true
-    (patched.working_context = cp.working_context)
+  (match result with
+   | Ok _ -> Alcotest.fail "expected replay prefix mismatch refusal"
+   | Error detail ->
+       Alcotest.(check string)
+         "prefix mismatch refuses checkpoint save"
+         "refusing to save checkpoint: replay suffix prune reason=completion_contract_requires_attention but checkpoint messages do not match pre-turn history prefix"
+         detail)
 
 let test_synthetic_empty_checkpoint_prunes_current_turn_suffix () =
   let open Agent_sdk.Types in
@@ -584,6 +587,7 @@ let test_synthetic_empty_checkpoint_prunes_current_turn_suffix () =
       ~state_snapshot_source:KMP.Synthesized
       ~state_snapshot:None
       cp
+    |> expect_checkpoint_for_replay
   in
   Alcotest.(check (option string))
     "synthetic empty suffix pruned"
@@ -641,6 +645,7 @@ let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
       ~state_snapshot_source:KMP.State_block
       ~state_snapshot:None
       cp
+    |> expect_checkpoint_for_replay
   in
   Alcotest.(check (option string)) "suffix kept" None
     (prune_reason_to_string pruned);

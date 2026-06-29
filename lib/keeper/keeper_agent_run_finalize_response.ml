@@ -111,15 +111,21 @@ let checkpoint_for_replay_persistence
         checkpoint
     in
     (match pruned with
-    | Some checkpoint -> checkpoint, Some reason
-    | None -> checkpoint, None)
+    | Some checkpoint -> Ok (checkpoint, Some reason)
+    | None ->
+      Error
+        (Printf.sprintf
+           "refusing to save checkpoint: replay suffix prune reason=%s but \
+            checkpoint messages do not match pre-turn history prefix"
+           (replay_suffix_prune_reason_to_string reason)))
   | None ->
-    ( Keeper_context_core.patch_checkpoint_last_assistant
-        checkpoint
-        ~session_id
-        ~response_text
-        ?snapshot:state_snapshot
-    , None )
+    Ok
+      ( Keeper_context_core.patch_checkpoint_last_assistant
+          checkpoint
+          ~session_id
+          ~response_text
+          ?snapshot:state_snapshot
+      , None )
 ;;
 
 module For_testing = struct
@@ -253,7 +259,7 @@ let finalize
   let saved_checkpoint_result =
     match result.checkpoint with
     | Some checkpoint ->
-      let patched, replay_suffix_pruned =
+      let checkpoint_for_save_result =
         checkpoint_for_replay_persistence
           ~history_messages
           ~pre_turn_working_context
@@ -265,11 +271,18 @@ let finalize
           ~state_snapshot:(Some state_snapshot)
           checkpoint
       in
-      (match
-         Keeper_checkpoint_store.save_oas_classified
-           ~session_dir:session.session_dir
-           patched
-       with
+      (match checkpoint_for_save_result with
+       | Error detail ->
+         Error
+           (checkpoint_persistence_error
+              ~keeper_name:meta.name
+              ~detail)
+       | Ok (patched, replay_suffix_pruned) ->
+         (match
+            Keeper_checkpoint_store.save_oas_classified
+              ~session_dir:session.session_dir
+              patched
+          with
        | Ok (Keeper_checkpoint_store.Saved _) ->
          append_manifest ~site:"checkpoint_saved"
            ~keeper_turn_id:manifest_keeper_turn_id
@@ -322,7 +335,7 @@ let finalize
          Error
            (checkpoint_persistence_error
               ~keeper_name:meta.name
-              ~detail:("OAS checkpoint save failed: " ^ e)))
+              ~detail:("OAS checkpoint save failed: " ^ e))))
     | None ->
       Log.Keeper.error ~keeper_name:meta.name
         "runtime=%s missing OAS checkpoint after run"

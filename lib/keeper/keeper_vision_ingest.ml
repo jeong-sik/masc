@@ -75,6 +75,15 @@ let raw_bytes_of_image_data data =
   | Error (`Msg m) -> Error m
 ;;
 
+let image_source_is_base64 source_type =
+  (* Use the SDK's serializer instead of matching future constructors by name:
+     the pinned SDK exposes [Base64], while newer local switches may add more
+     source kinds. This stays exhaustive across both shapes. *)
+  String.equal
+    (Agent_sdk.Types.media_source_kind_to_string source_type)
+    (Agent_sdk.Types.media_source_kind_to_string Agent_sdk.Types.Base64)
+;;
+
 (* Eager extraction through the shared vision core, only when an Eio context is
    present (prod turn). Absent (tests / pre-bootstrap) -> [None]; the caller then
    emits an unread placeholder. Bounded by [run_vision]'s [with_timeout]. *)
@@ -113,7 +122,7 @@ let eager_read ~media_type ~bytes : (string, string) result option =
 let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_sdk.Types.content_block) =
   match block with
   | Agent_sdk.Types.Image { media_type; data; source_type } ->
-    if not (match source_type with Agent_sdk.Types.Base64 -> true) then (
+    if not (image_source_is_base64 source_type) then (
       record_eviction ~mode ~result:"error" ~reason:"invalid_source_type";
       Agent_sdk.Types.Text
         (image_store_failed_placeholder ~reason:"unsupported image source"))

@@ -5,6 +5,7 @@ import {
 } from './keeper-message'
 import { parseTextToChatBlocks } from './lib/chat-blocks'
 import type { KeeperChatStreamEvent } from './api'
+import type { KeeperConversationDetails } from './types'
 import {
   appendAssistantDelta,
   appendAssistantThinkingDelta,
@@ -25,7 +26,7 @@ import {
   keeperStreamStartedAt,
   setRecordValue,
 } from './keeper-state'
-import { isRecord, asString } from './components/common/normalize'
+import { isRecord, asNumber, asString } from './components/common/normalize'
 import { toolEntryIdFromCallId } from './tool-call-output-store'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
@@ -62,6 +63,42 @@ function recordStreamProtocolError(
       error: message,
     }
   })
+}
+
+function normalizeStreamUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
+  if (!isRecord(raw)) return null
+  const usage: NonNullable<KeeperConversationDetails['usage']> = {
+    inputTokens: asNumber(raw.input_tokens) ?? null,
+    outputTokens: asNumber(raw.output_tokens) ?? null,
+    totalTokens: asNumber(raw.total_tokens) ?? null,
+  }
+  const cacheCreationInputTokens = asNumber(raw.cache_creation_input_tokens)
+  const cacheReadInputTokens = asNumber(raw.cache_read_input_tokens)
+  const costUsd = asNumber(raw.cost_usd)
+  if (cacheCreationInputTokens !== undefined) {
+    usage.cacheCreationInputTokens = cacheCreationInputTokens
+  }
+  if (cacheReadInputTokens !== undefined) {
+    usage.cacheReadInputTokens = cacheReadInputTokens
+  }
+  if (costUsd !== undefined) usage.costUsd = costUsd
+  return usage
+}
+
+function mergeAssistantStreamDetails(
+  keeperName: string,
+  assistantEntryId: string,
+  patch: Partial<KeeperConversationDetails>,
+): void {
+  updateThreadEntry(keeperName, assistantEntryId, entry => ({
+    ...entry,
+    details: {
+      ...(entry.details ?? {}),
+      ...patch,
+      usage: patch.usage ?? entry.details?.usage ?? null,
+      rawPayload: entry.details?.rawPayload,
+    },
+  }))
 }
 
 export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult | null {
@@ -189,6 +226,40 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'CUSTOM':
+      if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
+        const value = isRecord(event.value) ? event.value : null
+        const patch: Partial<KeeperConversationDetails> = {}
+        const providerMessageId = asString(value?.provider_message_id)
+        const modelUsed = asString(value?.model)
+        const usage = normalizeStreamUsage(value?.usage)
+        if (providerMessageId) patch.providerMessageId = providerMessageId
+        if (modelUsed) patch.modelUsed = modelUsed
+        if (usage) patch.usage = usage
+        if (usage?.costUsd !== undefined) patch.costUsd = usage.costUsd
+        if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
+        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        return null
+      }
+      if (event.name === 'KEEPER_STREAM_MESSAGE_DELTA') {
+        const value = isRecord(event.value) ? event.value : null
+        const patch: Partial<KeeperConversationDetails> = {}
+        const stopReason = asString(value?.stop_reason)
+        const usage = normalizeStreamUsage(value?.usage)
+        if (stopReason) patch.stopReason = stopReason
+        if (usage) patch.usage = usage
+        if (usage?.costUsd !== undefined) patch.costUsd = usage.costUsd
+        if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
+        if (stopReason) setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+        return null
+      }
+      if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
+        setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+        return null
+      }
+      if (event.name === 'KEEPER_STREAM_PING') {
+        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        return null
+      }
       if (event.name === 'KEEPER_THINKING_DELTA') {
         const delta = isRecord(event.value)
           ? (typeof event.value.delta === 'string'
@@ -284,15 +355,24 @@ export function applyKeeperStreamEvent(
         const details = normalizeKeeperConversationDetails(event.value)
         if (details) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
-            const rawText = details.replyText ?? entry.rawText ?? entry.text
-            if (keeperTurnOutcomeSuppressesReply(details.turnOutcome)) {
+            const mergedDetails: KeeperConversationDetails = {
+              ...(entry.details ?? {}),
+              ...details,
+              providerMessageId: details.providerMessageId ?? entry.details?.providerMessageId ?? null,
+              modelUsed: details.modelUsed ?? entry.details?.modelUsed ?? null,
+              stopReason: details.stopReason ?? entry.details?.stopReason ?? null,
+              costUsd: details.costUsd ?? entry.details?.costUsd ?? null,
+              usage: details.usage ?? entry.details?.usage ?? null,
+            }
+            const rawText = mergedDetails.replyText ?? entry.rawText ?? entry.text
+            if (keeperTurnOutcomeSuppressesReply(mergedDetails.turnOutcome)) {
               return {
                 ...entry,
-                details,
-                turnRef: details.turnRef ?? entry.turnRef,
+                details: mergedDetails,
+                turnRef: mergedDetails.turnRef ?? entry.turnRef,
                 rawText,
                 text: '',
-                delivery: details.turnOutcome === 'no_visible_reply' ? 'no_reply' : 'queued',
+                delivery: mergedDetails.turnOutcome === 'no_visible_reply' ? 'no_reply' : 'queued',
                 streamState: null,
               }
             }
@@ -300,8 +380,8 @@ export function applyKeeperStreamEvent(
             const blocks = entry.blocks?.length ? entry.blocks : parseTextToChatBlocks(text)
             return {
               ...entry,
-              details,
-              turnRef: details.turnRef ?? entry.turnRef,
+              details: mergedDetails,
+              turnRef: mergedDetails.turnRef ?? entry.turnRef,
               rawText,
               text,
               blocks,

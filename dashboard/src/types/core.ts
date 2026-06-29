@@ -717,6 +717,9 @@ interface KeeperConversationUsage {
   inputTokens?: number | null
   outputTokens?: number | null
   totalTokens?: number | null
+  cacheCreationInputTokens?: number | null
+  cacheReadInputTokens?: number | null
+  costUsd?: number | null
 }
 
 // RFC-0232 P2: producer-typed turn outcome carried in the reply payload
@@ -731,8 +734,10 @@ export type KeeperTurnOutcome =
 export interface KeeperConversationDetails {
   traceId?: string | null
   turnRef?: string | null
+  providerMessageId?: string | null
   generation?: number | null
   modelUsed?: string | null
+  stopReason?: string | null
   latencyMs?: number | null
   costUsd?: number | null
   usage?: KeeperConversationUsage | null

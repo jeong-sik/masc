@@ -58,6 +58,26 @@ function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
   }
 }
 
+function normalizeKeeperUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
+  if (!isRecord(raw)) return null
+  const usage: NonNullable<KeeperConversationDetails['usage']> = {
+    inputTokens: asNumber(raw.input_tokens) ?? null,
+    outputTokens: asNumber(raw.output_tokens) ?? null,
+    totalTokens: asNumber(raw.total_tokens) ?? null,
+  }
+  const cacheCreationInputTokens = asNumber(raw.cache_creation_input_tokens)
+  const cacheReadInputTokens = asNumber(raw.cache_read_input_tokens)
+  const costUsd = asNumber(raw.cost_usd)
+  if (cacheCreationInputTokens !== undefined) {
+    usage.cacheCreationInputTokens = cacheCreationInputTokens
+  }
+  if (cacheReadInputTokens !== undefined) {
+    usage.cacheReadInputTokens = cacheReadInputTokens
+  }
+  if (costUsd !== undefined) usage.costUsd = costUsd
+  return usage
+}
+
 export function keeperTurnOutcomeSuppressesReply(
   outcome: KeeperTurnOutcome | null | undefined,
 ): boolean {
@@ -74,21 +94,17 @@ export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversa
 
   const reply = asString(payload.reply) ?? ''
   const stateBlock = reply ? extractStateBlock(reply) : null
-  const usage = isRecord(payload.usage)
-    ? {
-        inputTokens: asNumber(payload.usage.input_tokens) ?? null,
-        outputTokens: asNumber(payload.usage.output_tokens) ?? null,
-        totalTokens: asNumber(payload.usage.total_tokens) ?? null,
-      }
-    : null
+  const usage = normalizeKeeperUsage(payload.usage)
 
   return {
     traceId: asString(payload.trace_id) ?? null,
     turnRef: asString(payload.turn_ref) ?? null,
+    providerMessageId: asString(payload.provider_message_id) ?? null,
     generation: asNumber(payload.generation) ?? null,
-    modelUsed: null,
+    modelUsed: asString(payload.model_used) ?? asString(payload.model) ?? null,
+    stopReason: asString(payload.stop_reason) ?? null,
     latencyMs: asNumber(payload.latency_ms) ?? null,
-    costUsd: asNumber(payload.cost_usd) ?? null,
+    costUsd: asNumber(payload.cost_usd) ?? usage?.costUsd ?? null,
     usage,
     skillPrimary: asString(payload.skill_primary) ?? null,
     skillReason: asString(payload.skill_reason) ?? null,

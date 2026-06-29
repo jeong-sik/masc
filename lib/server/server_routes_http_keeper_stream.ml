@@ -675,6 +675,18 @@ let json_opt key value =
   | None -> []
   | Some value -> [ (key, value) ]
 
+let keeper_stream_usage_json (usage : Agent_sdk.Types.api_usage) =
+  `Assoc
+    ([
+       ("input_tokens", `Int usage.input_tokens);
+       ("output_tokens", `Int usage.output_tokens);
+       ("total_tokens", `Int (Agent_sdk.Types.total_tokens usage));
+       ("cache_creation_input_tokens", `Int usage.cache_creation_input_tokens);
+       ("cache_read_input_tokens", `Int usage.cache_read_input_tokens);
+     ]
+     @ json_opt "cost_usd"
+         (Option.map (fun value -> `Float value) usage.cost_usd))
+
 let keeper_stream_protocol_error ?index ?event_type ?reason ?raw_bytes kind =
   let fields =
     [ ("kind", `String kind) ]
@@ -695,6 +707,42 @@ let translate_oas_stream_event ~redact_text ~text_accum bridge_state
       { bridge_state;
         chat_events =
           [ Custom { name = "KEEPER_CONNECTED"; value = `Null } ]
+      }
+  | MessageStart { id; model; usage } ->
+      { bridge_state;
+        chat_events =
+          [ Custom
+              { name = "KEEPER_STREAM_MESSAGE_START";
+                value =
+                  `Assoc
+                    ([ ("provider_message_id", `String id); ("model", `String model) ]
+                     @ json_opt "usage"
+                         (Option.map keeper_stream_usage_json usage)) } ]
+      }
+  | MessageDelta { stop_reason; usage } ->
+      { bridge_state;
+        chat_events =
+          [ Custom
+              { name = "KEEPER_STREAM_MESSAGE_DELTA";
+                value =
+                  `Assoc
+                    (json_opt "stop_reason"
+                       (Option.map
+                          (fun reason ->
+                            `String (Agent_sdk.Types.stop_reason_to_string reason))
+                          stop_reason)
+                     @ json_opt "usage"
+                         (Option.map keeper_stream_usage_json usage)) } ]
+      }
+  | MessageStop ->
+      { bridge_state;
+        chat_events =
+          [ Custom { name = "KEEPER_STREAM_MESSAGE_STOP"; value = `Null } ]
+      }
+  | Ping ->
+      { bridge_state;
+        chat_events =
+          [ Custom { name = "KEEPER_STREAM_PING"; value = `Null } ]
       }
   | Timeout reason ->
       { bridge_state;
@@ -833,7 +881,6 @@ let translate_oas_stream_event ~redact_text ~text_accum bridge_state
               { message =
                   redact_text ("Provider stream incomplete: " ^ reason) } ]
       }
-  | MessageStart _ | MessageDelta _ | MessageStop | Ping -> no_events
 
 let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     ~client_disconnects

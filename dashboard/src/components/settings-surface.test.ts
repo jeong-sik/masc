@@ -10,7 +10,13 @@ import {
   logRowStatus,
   normalizeSettingsSection,
 } from './settings-surface'
-import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard'
+import type {
+  DashboardRuntimeProviderSnapshot,
+  DashboardRuntimeProvidersResponse,
+  DashboardToolInventoryItem,
+  LogEntry,
+  RuntimeDefaultsResponse,
+} from '../api/dashboard'
 import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
@@ -24,6 +30,7 @@ const apiMock = vi.hoisted(() => ({
   fetchLogs: vi.fn(),
   fetchDashboardTools: vi.fn(),
   fetchRuntimeDefaults: vi.fn(),
+  fetchRuntimeProviders: vi.fn(),
 }))
 
 const promptApiMock = vi.hoisted(() => ({
@@ -59,6 +66,7 @@ vi.mock('../api/dashboard.js', async () => {
     fetchLogs: apiMock.fetchLogs,
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
+    fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
   }
 })
 
@@ -132,6 +140,69 @@ function makeRuntimeDefaults(
   }
 }
 
+function makeRuntimeProvider(
+  overrides: Partial<DashboardRuntimeProviderSnapshot> = {},
+): DashboardRuntimeProviderSnapshot {
+  return {
+    provider: 'rt-a',
+    runtime_id: 'rt-a',
+    provider_id: 'provider-a',
+    provider_display_name: 'Provider A',
+    model_id: 'm1',
+    model_api_name: 'm1',
+    protocol: 'openai-http',
+    transport: 'http',
+    kind: 'cloud',
+    runtime_kind: 'cloud',
+    auth_kind: 'env',
+    status: 'configured',
+    available: true,
+    is_default_runtime: true,
+    max_context: 128000,
+    tools_support: true,
+    thinking_support: false,
+    streaming: true,
+    model_count: 1,
+    models: ['m1'],
+    source: 'runtime.toml',
+    endpoint_url: 'https://runtime.example/v1',
+    note: null,
+    discovery: null,
+    ...overrides,
+  }
+}
+
+function makeRuntimeProviders(
+  overrides: Partial<DashboardRuntimeProvidersResponse> = {},
+): DashboardRuntimeProvidersResponse {
+  return {
+    updated_at: '2026-06-21T00:00:00Z',
+    summary: {
+      providers: 1,
+      runtimes: 2,
+      local_models: 0,
+      cloud_models: 2,
+      cli_models: 0,
+      default_runtime_id: 'rt-a',
+    },
+    providers: [
+      makeRuntimeProvider(),
+      makeRuntimeProvider({
+        provider: 'rt-b',
+        runtime_id: 'rt-b',
+        provider_display_name: 'Provider B',
+        model_id: 'm2',
+        model_api_name: 'm2',
+        is_default_runtime: false,
+        thinking_support: true,
+      }),
+    ],
+    assignment_governance: null,
+    config_path: '/cfg/runtime.toml',
+    ...overrides,
+  }
+}
+
 function stubRuntimeDefaults(value: RuntimeDefaultsResponse = makeRuntimeDefaults()) {
   apiMock.fetchRuntimeDefaults.mockResolvedValue(value)
 }
@@ -140,6 +211,7 @@ function stubEmptyApi() {
   apiMock.fetchLogs.mockResolvedValue({ total: 0, entries: [] })
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
   stubRuntimeDefaults()
+  apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders())
 }
 
 const navigate = vi.fn()
@@ -163,6 +235,7 @@ describe('SettingsSurface', () => {
     apiMock.fetchLogs.mockReset()
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.fetchRuntimeProviders.mockReset()
     promptApiMock.clearPromptOverride.mockClear()
     promptApiMock.fetchDashboardPrompts.mockClear()
     promptApiMock.savePromptOverride.mockClear()
@@ -281,57 +354,92 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="set-verify"]')).toBeNull()
   })
 
-  it('keeps preview toggle controls read-only instead of mutating local state', async () => {
-    render(html`<${SettingsSurface} />`, container)
-
-    const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
-    await fireEvent.click(runtimeNav)
-
-    const toggle = () => container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement
-    expect(toggle().getAttribute('aria-checked')).toBe('true')
-    expect(toggle().disabled).toBe(true)
-    expect(toggle().getAttribute('aria-disabled')).toBe('true')
-
-    await fireEvent.click(toggle())
-    expect(toggle().getAttribute('aria-checked')).toBe('true')
-  })
-
-  it('keeps preview segmented controls read-only instead of mutating local state', async () => {
-    render(html`<${SettingsSurface} />`, container)
-
-    const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
-    await fireEvent.click(runtimeNav)
-
-    const seg = () => container.querySelector('[data-testid="set-seg"]') as HTMLElement
-    // The Default runtime segmented control renders from resolved runtime config.
-    await waitFor(() => expect(seg()).not.toBeNull())
-    const buttons = () => Array.from(seg().querySelectorAll('button'))
-    expect(buttons().length).toBeGreaterThanOrEqual(3)
-    expect(buttons()[0]!.getAttribute('data-active')).toBe('true')
-    expect(buttons()[0]!.disabled).toBe(true)
-    expect(buttons()[2]!.disabled).toBe(true)
-
-    await fireEvent.click(buttons()[2]!)
-    expect(buttons()[0]!.getAttribute('data-active')).toBe('true')
-    expect(buttons()[2]!.getAttribute('data-active')).toBe('false')
-  })
-
-  it('Default runtime/model options come from the resolved runtime config', async () => {
+  it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
     await fireEvent.click(runtimeNav)
 
     await waitFor(() => {
-      const segLabels = Array.from(
-        container.querySelectorAll('[data-testid="set-seg"] button'),
-      ).map(b => b.textContent?.trim())
-      // runtime ids from the mocked registry, not the old hardcoded oas-* strings
-      expect(segLabels).toContain('rt-a')
-      expect(segLabels).toContain('rt-b')
-      expect(segLabels).toContain('rt-c')
-      expect(segLabels).not.toContain('oas·seoul-1')
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
+      expect(container.querySelector('[data-testid="runtime-settings-live"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-settings-edit"]')).not.toBeNull()
     })
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
+    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
+  })
+
+  it('opens runtime management from the runtime overview entry point', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+      const requestUrl =
+        typeof input === 'string'
+          ? input
+          : input instanceof URL
+            ? input.href
+            : typeof (input as { url?: unknown }).url === 'string'
+              ? (input as { url: string }).url
+              : ''
+      const path = requestUrl.startsWith('http')
+        ? new URL(requestUrl).pathname
+        : requestUrl.split('?')[0] ?? requestUrl
+      if (path === '/api/v1/dashboard/dev-token') {
+        return new Response(JSON.stringify({ token: 'dev-token', actor: 'dashboard' }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (path === '/api/v1/runtime/config/raw') {
+        return new Response(JSON.stringify({
+          ok: true,
+          path: MOCK_RUNTIME_PATH,
+          file_name: 'runtime.toml',
+          source_text: '[runtime]\ndefault = "rt-a"\n',
+          reloaded: false,
+        }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response(JSON.stringify({ message: `unexpected ${path}` }), {
+        status: 500,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
+    await fireEvent.click(runtimeNav)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-settings-edit"]')).not.toBeNull()
+    })
+    await fireEvent.click(container.querySelector('[data-testid="runtime-settings-edit"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임 관리')
+    expect(navigate).toHaveBeenLastCalledWith('settings', { section: 'runtimes' })
+  })
+
+  it('runtime overview shows resolved defaults and the live provider catalog', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const runtimeNav = container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement
+    await fireEvent.click(runtimeNav)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-default-runtime"]')?.textContent).toBe('rt-a')
+      expect(container.querySelector('[data-testid="runtime-default-model"]')?.textContent).toBe('m1')
+      expect(container.querySelector('[data-testid="runtime-settings-config-path"]')?.textContent).toContain('/cfg/runtime.toml')
+      const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
+      expect(cards.length).toBe(2)
+      expect(cards.map(card => card.textContent)).toEqual([
+        expect.stringContaining('Provider A'),
+        expect.stringContaining('Provider B'),
+      ])
+      expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')
+    })
+    expect(container.textContent).not.toContain('oas·seoul-1')
   })
 
   it('routing section shows resolved keeper assignments read-only', async () => {
@@ -615,6 +723,7 @@ describe('SettingsSurface shell route', () => {
     apiMock.fetchLogs.mockReset()
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.fetchRuntimeProviders.mockReset()
     stubEmptyApi()
     dashboardLoading.value = false
     connected.value = true

@@ -270,6 +270,25 @@
   padding: 6px 8px;
 }
 
+.settings-runtime-catalog {
+  display: grid;
+  gap: 12px;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+}
+
+.settings-runtime-catalog .set-rt {
+  margin-top: 0;
+  min-width: 0;
+}
+
+.set-runtime-transport {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 @media (max-width: 900px) {
   .settings-surf .set-card-b.set-card-b-wide {
     max-width: 100%;
@@ -449,6 +468,54 @@
 
 .set-rt-row .set-input {
   flex: 1;
+}
+
+.set-rt-launch {
+  border: 1px solid var(--border-main);
+  border-radius: var(--radius-md);
+  background: var(--bg-card);
+  padding: 16px 18px;
+}
+
+.set-rt-launch-stats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 22px;
+  margin-bottom: 12px;
+}
+
+.set-rt-launch-stat .v {
+  display: block;
+  font-size: 17px;
+  color: var(--text-bright);
+}
+
+.set-rt-launch-stat .k {
+  display: block;
+  font-family: var(--font-ui);
+  font-size: 9.5px;
+  letter-spacing: 0.08em;
+  margin-top: 2px;
+  text-transform: uppercase;
+  color: var(--text-dim);
+}
+
+.set-rt-open {
+  font-family: var(--font-ui);
+  font-size: 13px;
+  padding: 9px 18px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--volt-dim);
+  background: var(--volt-wash);
+  color: var(--volt);
+  cursor: pointer;
+  transition: 0.14s;
+  white-space: nowrap;
+}
+
+.set-rt-open:hover {
+  background: var(--volt);
+  color: var(--volt-ink);
 }
 
 /* system log viewer */

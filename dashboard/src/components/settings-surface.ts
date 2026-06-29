@@ -10,8 +10,14 @@ import {
   type SettingsRouteSectionId,
 } from '../config/navigation'
 import { navigate, route } from '../router'
-import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults } from '../api/dashboard.js'
-import type { DashboardToolInventoryItem, LogEntry, RuntimeDefaultsResponse } from '../api/dashboard.js'
+import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults, fetchRuntimeProviders } from '../api/dashboard.js'
+import type {
+  DashboardRuntimeProviderSnapshot,
+  DashboardRuntimeProvidersResponse,
+  DashboardToolInventoryItem,
+  LogEntry,
+  RuntimeDefaultsResponse,
+} from '../api/dashboard.js'
 import { envBool } from '../config/env'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
@@ -312,10 +318,83 @@ function RolePill({ children }: { children: ComponentChildren }) {
   return html`<span class="set-rolepill">${children}</span>`
 }
 
+function formatRuntimeContext(value: number | null | undefined): string {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return 'ctx 미수집'
+  if (value >= 1_000_000) return `${Number.parseFloat((value / 1_000_000).toFixed(1))}M ctx`
+  if (value >= 1_000) return `${Math.round(value / 1_000)}K ctx`
+  return `${value} ctx`
+}
+
+function runtimeCatalogKey(item: DashboardRuntimeProviderSnapshot): string {
+  return item.runtime_id?.trim() || item.provider.trim()
+}
+
+function findRuntimeCatalogSnapshot(
+  catalog: readonly DashboardRuntimeProviderSnapshot[],
+  runtimeId: string | null | undefined,
+): DashboardRuntimeProviderSnapshot | null {
+  const needle = runtimeId?.trim() ?? ''
+  if (needle === '') return null
+  return catalog.find(item => runtimeCatalogKey(item) === needle || item.provider_id === needle) ?? null
+}
+
+function RuntimeCatalogCapability({ label, value }: { label: string; value: boolean | undefined }) {
+  const isOn = value === true
+  return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
+}
+
+function RuntimeCatalogCard({
+  item,
+  defaultRuntimeId,
+}: {
+  item: DashboardRuntimeProviderSnapshot
+  defaultRuntimeId: string | null | undefined
+}) {
+  const runtimeId = runtimeCatalogKey(item)
+  const providerName = item.provider_display_name ?? item.provider_id ?? item.provider
+  const modelName = item.model_api_name ?? item.model_id ?? item.models[0] ?? 'model 미수집'
+  const transport = item.endpoint_url ?? item.transport ?? item.kind ?? 'transport 미수집'
+  const status = item.available === false ? 'unavailable' : item.status ?? 'configured'
+  const isDefault = runtimeId === (defaultRuntimeId ?? '')
+
+  return html`
+    <div class="set-rt" data-testid="runtime-catalog-card">
+      <div class="set-rt-top">
+        <span class="set-rt-name mono">${runtimeId}</span>
+        <span class="set-rt-kind">${item.runtime_kind ?? item.kind ?? 'runtime'}</span>
+        ${isDefault ? html`<span class="set-rt-kind" data-testid="runtime-catalog-default">default</span>` : null}
+        <span class="set-rt-keepers">${status}</span>
+      </div>
+      <div class="set-rt-row">
+        <span class="sub-k">provider</span>
+        <span class="mono">${providerName}</span>
+      </div>
+      <div class="set-rt-row">
+        <span class="sub-k">model</span>
+        <span class="mono">${modelName}</span>
+      </div>
+      <div class="set-rt-row">
+        <span class="sub-k">context</span>
+        <span class="mono">${formatRuntimeContext(item.max_context)}</span>
+      </div>
+      <div class="rt-caps">
+        <${RuntimeCatalogCapability} label="tools" value=${item.tools_support} />
+        <${RuntimeCatalogCapability} label="thinking" value=${item.thinking_support} />
+        <${RuntimeCatalogCapability} label="streaming" value=${item.streaming} />
+      </div>
+      <div class="set-rt-row">
+        <span class="sub-k">transport</span>
+        <span class="mono set-runtime-transport">${transport}</span>
+      </div>
+    </div>
+  `
+}
+
 function settingsSectionState(
   section: SectionId,
   fusionSettingsWritable: boolean,
 ): { live: boolean; label: string } {
+  if (section === 'runtime') return { live: true, label: 'runtime.toml live-backed' }
   if (section === 'runtimes') return { live: true, label: 'runtime.toml live-backed' }
   if (section === 'prompts') return { live: true, label: 'prompt registry live-backed' }
   if (section === 'fusion' && fusionSettingsWritable) {
@@ -479,11 +558,8 @@ export function SettingsSurface() {
 
   // runtime defaults / model routing — resolved from runtime.toml (SSOT)
   const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
-  const [defRuntime, setDefRuntime] = useState('')
-  const [defModel, setDefModel] = useState('')
-  const [maxPar, setMaxPar] = useState(6)
-  const [compactAt, setCompactAt] = useState(85)
-  const [autoCompact, setAutoCompact] = useState(true)
+  const [runtimeProviders, setRuntimeProviders] = useState<DashboardRuntimeProvidersResponse | null>(null)
+  const [runtimeCatalogStatus, setRuntimeCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading')
 
   useEffect(() => {
     let active = true
@@ -492,13 +568,27 @@ export function SettingsSurface() {
         const resp = await fetchRuntimeDefaults()
         if (!active) return
         setRuntimeDefaults(resp)
-        // Seed the selectors with the resolved defaults (unknown → left blank,
-        // never a fabricated default).
-        if (resp.default_runtime_id) setDefRuntime(resp.default_runtime_id)
-        if (resp.default_model) setDefModel(resp.default_model)
       } catch {
         if (!active) return
         setRuntimeDefaults(null)
+      }
+    })()
+    return () => { active = false }
+  }, [])
+
+  useEffect(() => {
+    let active = true
+    setRuntimeCatalogStatus('loading')
+    void (async () => {
+      try {
+        const resp = await fetchRuntimeProviders()
+        if (!active) return
+        setRuntimeProviders(resp)
+        setRuntimeCatalogStatus('ready')
+      } catch {
+        if (!active) return
+        setRuntimeProviders(null)
+        setRuntimeCatalogStatus('error')
       }
     })()
     return () => { active = false }
@@ -591,9 +681,17 @@ export function SettingsSurface() {
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
-  const runtimeIdOptions = runtimeEntries.map(r => r.id)
-  const runtimeModelOptions = [...new Set(runtimeEntries.map(r => r.model))]
+  const runtimeCatalogEntries = runtimeProviders?.providers ?? []
+  const runtimeConfigPath = runtimeProviders?.config_path ?? runtimeDefaults?.config_path ?? null
+  const defaultRuntimeId = runtimeDefaults?.default_runtime_id ?? runtimeProviders?.summary?.default_runtime_id ?? null
+  const defaultCatalogEntry = findRuntimeCatalogSnapshot(runtimeCatalogEntries, defaultRuntimeId)
   const keeperAssignments = runtimeDefaults?.model_routing.keeper_assignments ?? []
+  const runtimeCount = runtimeEntries.length > 0
+    ? runtimeEntries.length
+    : runtimeProviders?.summary?.runtimes ?? runtimeCatalogEntries.length
+  const keeperAssignmentCount = keeperAssignments.length > 0
+    ? keeperAssignments.length
+    : runtimeProviders?.assignment_governance?.assignment_count ?? 0
   const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
   const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
 
@@ -645,7 +743,7 @@ export function SettingsSurface() {
           </header>
 
           <div
-            class=${`set-card-b mx-6 my-6 ${sec === 'runtimes' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
+            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'runtimes' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
             data-preview-locked=${sectionState.live ? 'false' : 'true'}
           >
             ${sec === 'account' && html`
@@ -707,27 +805,74 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtime' && html`
-              <${SetRow} label="Default runtime" hint="Resolved from runtime.toml [runtime].default">
-                ${runtimeIdOptions.length === 0
-                  ? html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`
-                  : html`<${SetSeg} value=${defRuntime} options=${runtimeIdOptions} onChange=${setDefRuntime} />`}
-              <//>
-              <${SetRow} label="Default model" hint="API model of the default runtime">
-                ${runtimeModelOptions.length === 0
-                  ? html`<span class="set-hint">—</span>`
-                  : html`<${SetSeg} value=${defModel} options=${runtimeModelOptions} onChange=${setDefModel} />`}
-              <//>
-              <${SetRow} label="Max concurrent keepers" hint="In this namespace">
-                <${SetStepper} v=${maxPar} set=${setMaxPar} min=${1} max=${12} />
-              <//>
-              <${SetRow} label="Auto compaction" hint=${`Compact at ${compactAt}% context`}>
-                <${SetToggle} on=${autoCompact} onChange=${setAutoCompact} />
-              <//>
-              ${autoCompact && html`
-                <${SetRow} label="Compaction threshold" hint="Window usage basis">
-                  <${SetSlider} value=${compactAt} min=${60} max=${95} suffix="%" onChange=${setCompactAt} />
-                <//>
-              `}
+              <div class="settings-runtime-live" data-testid="runtime-settings-live">
+                <div class="settings-runtime-live-h">
+                  <div>
+                    <div class="set-sub-h">runtime.toml</div>
+                    <div class="set-hint">현재 서버가 해석한 런타임 기본값과 provider 카탈로그입니다.</div>
+                  </div>
+                  <button
+                    type="button"
+                    class="set-rt-open"
+                    data-testid="runtime-settings-edit"
+                    onClick=${() => openSection('runtimes')}
+                  >
+                    런타임 관리 열기
+                  </button>
+                </div>
+                <div class="settings-runtime-live-source mono" data-testid="runtime-settings-config-path">
+                  ${runtimeConfigPath ?? 'runtime.toml 경로 미확인'}
+                </div>
+
+                <div class="set-rt-launch" data-testid="runtime-settings-summary">
+                  <div class="set-rt-launch-stats">
+                    <div class="set-rt-launch-stat">
+                      <span class="v mono">${runtimeCount}</span>
+                      <span class="k">resolved runtimes</span>
+                    </div>
+                    <div class="set-rt-launch-stat">
+                      <span class="v mono">${runtimeCatalogEntries.length}</span>
+                      <span class="k">catalog entries</span>
+                    </div>
+                    <div class="set-rt-launch-stat">
+                      <span class="v mono">${keeperAssignmentCount}</span>
+                      <span class="k">keeper assignments</span>
+                    </div>
+                  </div>
+                  <${SetRow} label="Default runtime" hint="[runtime].default">
+                    ${defaultRuntimeId
+                      ? html`<span class="mono" data-testid="runtime-default-runtime">${defaultRuntimeId}</span>`
+                      : html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`}
+                  <//>
+                  <${SetRow} label="Default model" hint="Resolved model API name">
+                    <span class="mono" data-testid="runtime-default-model">${runtimeDefaults?.default_model ?? defaultCatalogEntry?.model_api_name ?? '—'}</span>
+                  <//>
+                  <${SetRow} label="Default context" hint="Resolved context window">
+                    <span class="mono" data-testid="runtime-default-context">
+                      ${formatRuntimeContext(runtimeDefaults?.default_max_context ?? defaultCatalogEntry?.max_context ?? null)}
+                    </span>
+                  <//>
+                </div>
+
+                <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
+                ${runtimeCatalogStatus === 'loading'
+                  ? html`<div class="set-hint" data-testid="runtime-catalog-loading">runtime catalog 불러오는 중...</div>`
+                  : runtimeCatalogStatus === 'error'
+                    ? html`<div class="set-hint" data-testid="runtime-catalog-error">runtime catalog를 불러오지 못했습니다.</div>`
+                    : runtimeCatalogEntries.length === 0
+                      ? html`<div class="set-hint" data-testid="runtime-catalog-empty">표시할 runtime catalog entry가 없습니다.</div>`
+                      : html`
+                        <div class="settings-runtime-catalog" data-testid="runtime-catalog-summary">
+                          ${runtimeCatalogEntries.map(item => html`
+                            <${RuntimeCatalogCard}
+                              key=${runtimeCatalogKey(item)}
+                              item=${item}
+                              defaultRuntimeId=${defaultRuntimeId}
+                            />
+                          `)}
+                        </div>
+                      `}
+              </div>
             `}
 
             ${sec === 'runtimes' && html`

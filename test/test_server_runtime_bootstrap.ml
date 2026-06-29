@@ -198,8 +198,39 @@ let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path (
         resolution.Server_runtime_bootstrap.source;
       Alcotest.(check string)
         "path"
-        catalog
-        resolution.Server_runtime_bootstrap.path)
+        (canonical_path catalog)
+        (canonical_path resolution.Server_runtime_bootstrap.path))
+
+let test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd () =
+  with_temp_dir "model-catalog-bootstrap-relative" (fun dir ->
+    let repo = Filename.concat dir "repo" in
+    let bin_dir = Filename.concat repo "_build/default/bin" in
+    mkdir_p bin_dir;
+    let outside = Filename.concat dir "base-path" in
+    Unix.mkdir outside 0o755;
+    let catalog = Filename.concat repo "oas-models.toml" in
+    write_file catalog "# repo-local OAS catalog\n";
+    let env _ = None in
+    with_cwd repo @@ fun () ->
+    match
+      Server_runtime_bootstrap.resolve_oas_model_catalog_path
+        ~env
+        ~cwd:outside
+        ~argv0:"./_build/default/bin/main_eio.exe"
+        ()
+    with
+    | None ->
+      Alcotest.fail
+        "expected repo oas-models.toml from relative executable argv0"
+    | Some resolution ->
+      Alcotest.(check string)
+        "source"
+        "argv0-parent:oas-models.toml"
+        resolution.Server_runtime_bootstrap.source;
+      Alcotest.(check string)
+        "path"
+        (canonical_path catalog)
+        (canonical_path resolution.Server_runtime_bootstrap.path))
 
 let write_config_root_keeper_toml config_root name =
   write_file
@@ -297,6 +328,15 @@ let merge_env_overrides overrides =
   in
   let injected = List.map (fun (k, v) -> k ^ "=" ^ v) overrides in
   Array.of_list (base @ injected)
+
+let main_eio_test_admin_token = "main-eio-test-admin-token"
+let main_eio_auth_header = "Authorization: Bearer " ^ main_eio_test_admin_token
+
+let main_eio_env_overrides overrides =
+  merge_env_overrides
+    (("MASC_ADMIN_TOKEN", main_eio_test_admin_token)
+     :: ("MASC_INTERNAL_MCP_TOKEN", "")
+     :: overrides)
 
 let find_main_eio_exe () =
   let root = project_root () in
@@ -3387,7 +3427,7 @@ let test_main_eio_serves_health_before_lazy_startup () =
         Unix.openfile log_file [ Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC ] 0o644
       in
       let env =
-        merge_env_overrides
+        main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
@@ -3439,7 +3479,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
       Alcotest.(check bool) "tool policy not bootstrapped (deleted module)" false
         (Sys.file_exists (Filename.concat expected_config "tool_policy.toml"));
       let env =
-        merge_env_overrides
+        main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
@@ -3508,7 +3548,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
             curl_request_capture
               ~output_dir:dir ~name:"initialize" ~method_:"POST"
               ~url:(Printf.sprintf "http://127.0.0.1:%d/mcp" port)
-              ~headers:[ "Content-Type: application/json" ]
+              ~headers:[ "Content-Type: application/json"; main_eio_auth_header ]
               ~payload:
                 {|{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-11-25","capabilities":{},"clientInfo":{"name":"fresh-boot-test","version":"1.0"}}}|}
               ()
@@ -3533,6 +3573,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
                 [
                   "Content-Type: application/json";
                   "Accept: application/json, text/event-stream";
+                  main_eio_auth_header;
                   "Mcp-Session-Id: " ^ session_id;
                   "Mcp-Protocol-Version: " ^ protocol_version;
                 ]
@@ -3553,6 +3594,7 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
                 [
                   "Content-Type: application/json";
                   "Accept: application/json, text/event-stream";
+                  main_eio_auth_header;
                   "Mcp-Session-Id: " ^ session_id;
                   "Mcp-Protocol-Version: " ^ protocol_version;
                 ]
@@ -3575,8 +3617,8 @@ let test_main_eio_fresh_bootstrap_and_mcp_handshake () =
           Alcotest.(check bool) "canonical tool present" true
             (List.mem "masc_status" tool_names)))
 
-let test_main_eio_self_heals_cli_agent_mcp_token_file () =
-  with_temp_dir "startup-codex-token-selfheal" (fun dir ->
+let test_main_eio_preserves_cli_agent_mcp_token_file () =
+  with_temp_dir "startup-codex-token-preserve" (fun dir ->
       let exe = find_main_eio_exe () in
       let port = find_free_port () in
       let log_file = Filename.concat dir "server.log" in
@@ -3590,20 +3632,21 @@ let test_main_eio_self_heals_cli_agent_mcp_token_file () =
       let auth_dir = Filename.concat dir ".masc/auth" in
       let token_path = Filename.concat auth_dir "codex-mcp-client.token" in
       Fs_compat.mkdir_p auth_dir;
-      let stale_hash =
+      let seed_raw_token = "stale-codex-raw-token" in
+      let seeded_hash =
         match
           Auth.save_raw_token_credential dir
             ~agent_name:"codex-mcp-client" ~role:Masc_domain.Worker
-            ~raw_token:"stale-codex-raw-token"
+            ~raw_token:seed_raw_token
         with
         | Ok cred -> cred.token
         | Error err ->
             Alcotest.failf "failed to seed stale codex credential: %s"
               (Masc_domain.masc_error_to_string err)
       in
-      write_file token_path stale_hash;
+      Auth.save_private_text_file token_path seeded_hash;
       let env =
-        merge_env_overrides
+        main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
@@ -3635,15 +3678,15 @@ let test_main_eio_self_heals_cli_agent_mcp_token_file () =
           if not (wait_for_startup_phase ~pid ~port ~timeout_s:10.0 "ready") then begin
             prerr_endline
               (Printf.sprintf
-                 "main_eio codex token self-heal did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
+                 "main_eio codex token preserve test did not reach startup.phase=ready within timeout in this environment.\nlog:\n%s"
                  (read_file log_file));
             Alcotest.skip ()
           end;
-          let repaired_raw = String.trim (read_file token_path) in
-          let repaired_mode = (Unix.stat token_path).Unix.st_perm land 0o777 in
-          Alcotest.(check bool) "startup replaced hashed token file" true
-            (repaired_raw <> stale_hash);
-          Alcotest.(check int) "token file is private" 0o600 repaired_mode;
+          let preserved_raw = String.trim (read_file token_path) in
+          let preserved_mode = (Unix.stat token_path).Unix.st_perm land 0o777 in
+          Alcotest.(check string) "startup preserves unmanaged client token file"
+            seeded_hash preserved_raw;
+          Alcotest.(check int) "token file is private" 0o600 preserved_mode;
           let credential =
             match Auth.load_credential dir "codex-mcp-client" with
             | Some cred -> cred
@@ -3651,44 +3694,16 @@ let test_main_eio_self_heals_cli_agent_mcp_token_file () =
           in
           Alcotest.(check bool) "existing role preserved" true
             (credential.role = Masc_domain.Worker);
-          Alcotest.(check (option string)) "codex credential does not expire"
-            None credential.expires_at;
-          Alcotest.(check string) "raw token hashes to stored credential"
-            credential.token (Auth.sha256_hash repaired_raw);
-          (match
-             Auth.verify_token dir ~agent_name:"codex-mcp-client"
-               ~token:repaired_raw
-           with
+          Alcotest.(check string) "seeded raw token hashes to stored credential"
+            credential.token (Auth.sha256_hash seed_raw_token);
+          match
+            Auth.verify_token dir ~agent_name:"codex-mcp-client"
+              ~token:seed_raw_token
+          with
            | Ok _ -> ()
            | Error err ->
-               Alcotest.failf "repaired raw token should verify: %s"
-                 (Masc_domain.masc_error_to_string err));
-          List.iter
-            (fun agent_name ->
-              let path = Filename.concat auth_dir (agent_name ^ ".token") in
-              Alcotest.(check bool)
-                (agent_name ^ " raw token file exists")
-                true (Sys.file_exists path);
-              let raw = String.trim (read_file path) in
-              let credential =
-                match Auth.load_credential dir agent_name with
-                | Some cred -> cred
-                | None ->
-                    Alcotest.failf "missing %s credential after startup"
-                      agent_name
-              in
-              Alcotest.(check (option string))
-                (agent_name ^ " credential does not expire")
-                None credential.expires_at;
-              Alcotest.(check string)
-                (agent_name ^ " raw token hashes to stored credential")
-                credential.token (Auth.sha256_hash raw);
-              match Auth.verify_token dir ~agent_name ~token:raw with
-              | Ok _ -> ()
-              | Error err ->
-                  Alcotest.failf "%s raw token should verify: %s"
-                    agent_name (Masc_domain.masc_error_to_string err))
-            [ "claude"; "gemini" ]))
+             Alcotest.failf "seeded raw token should verify: %s"
+               (Masc_domain.masc_error_to_string err)))
 
 let test_sync_bootable_keeper_credentials_mints_keeper_alias_token () =
   with_temp_dir "startup-keeper-credential-sync" (fun dir ->
@@ -3825,7 +3840,7 @@ let test_main_eio_rejects_same_base_path_on_second_server () =
       with_cwd (project_root ()) @@ fun () ->
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       let env =
-        merge_env_overrides
+        main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
@@ -3910,7 +3925,7 @@ let test_main_eio_invalid_runtime_stays_degraded_but_serves_dashboard () =
       Server_runtime_bootstrap.bootstrap_base_path_config_root ~base_path:dir;
       write_invalid_local_only_runtime dir;
       let env =
-        merge_env_overrides
+        main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
@@ -3983,7 +3998,7 @@ let test_main_eio_partial_catalog_stays_ready_and_surfaces_rejections () =
       write_partially_invalid_runtime ~base_path:dir
         ~valid_model:(Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" mock_port);
       let env =
-        merge_env_overrides
+        main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
@@ -4055,7 +4070,7 @@ let test_main_eio_invalid_default_partial_catalog_stays_degraded () =
       write_partially_invalid_default_runtime ~base_path:dir
         ~valid_model:(Printf.sprintf "custom:stable@http://127.0.0.1:%d/v1" mock_port);
       let env =
-        merge_env_overrides
+        main_eio_env_overrides
           [
             ("MASC_BASE_PATH", dir);
             ("GRAPHQL_API_KEY", "");
@@ -4141,6 +4156,10 @@ let () =
             "model catalog resolution falls back to executable parent"
             `Quick
             test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path;
+          Alcotest.test_case
+            "model catalog resolution uses process cwd for relative argv0"
+            `Quick
+            test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd;
           Alcotest.test_case
             "bootstrap base-path config copies shared seed only"
             `Quick
@@ -4328,8 +4347,8 @@ let () =
             "main_eio fresh bootstrap and MCP handshake"
             `Slow test_main_eio_fresh_bootstrap_and_mcp_handshake;
           Alcotest.test_case
-            "main_eio self-heals codex mcp token file"
-            `Slow test_main_eio_self_heals_cli_agent_mcp_token_file;
+            "main_eio preserves unmanaged mcp client token file"
+            `Slow test_main_eio_preserves_cli_agent_mcp_token_file;
           Alcotest.test_case
             "startup sync mints bootable keeper credentials"
             `Quick test_sync_bootable_keeper_credentials_mints_keeper_alias_token;

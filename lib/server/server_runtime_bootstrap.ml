@@ -72,10 +72,13 @@ let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
     (match nonempty_env env "MASC_MODEL_CATALOG" with
      | Some path -> Some { path; source = "MASC_MODEL_CATALOG" }
      | None ->
-       let cwd =
+       let search_cwd =
          match cwd with
          | Some cwd when String.trim cwd <> "" -> cwd
          | _ -> Config_dir_resolver.base_path_or_cwd ()
+       in
+       let process_cwd =
+         try Sys.getcwd () with Sys_error _ -> search_cwd
        in
        let argv0 =
          match argv0 with
@@ -85,10 +88,10 @@ let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
             | head :: _ -> head
             | [] -> "")
        in
-       (match find_catalog_in_parents ~source:"cwd-parent" cwd with
+       (match find_catalog_in_parents ~source:"cwd-parent" search_cwd with
         | Some _ as found -> found
         | None ->
-          (match argv0_parent_dir ~cwd argv0 with
+          (match argv0_parent_dir ~cwd:process_cwd argv0 with
            | Some dir -> find_catalog_in_parents ~source:"argv0-parent" dir
            | None -> None)))
 

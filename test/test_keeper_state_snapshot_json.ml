@@ -429,10 +429,12 @@ let test_attention_checkpoint_prunes_current_turn_suffix () =
       ; current_tool_result; current_final
       ]
   in
+  let pre_turn_working_context = Some (`Assoc [ "pre_turn", `Bool true ]) in
   let patched, pruned =
     Masc.Keeper_agent_run_finalize_response.For_testing
     .checkpoint_for_replay_persistence
-      ~history_message_count:2
+      ~history_messages:[ old_user; old_assistant ]
+      ~pre_turn_working_context
       ~completion_contract_result:Receipt.Contract_passive_only
       ~session_id:"new-session"
       ~response_text:"synthetic no-progress"
@@ -442,13 +444,41 @@ let test_attention_checkpoint_prunes_current_turn_suffix () =
   Alcotest.(check bool) "suffix pruned" true pruned;
   Alcotest.(check int) "only prior history remains" 2
     (List.length patched.messages);
-  Alcotest.(check bool) "working context cleared" true
-    (patched.working_context = None);
+  Alcotest.(check bool) "pre-turn working context restored" true
+    (patched.working_context = pre_turn_working_context);
   match List.rev patched.messages with
   | last :: _ ->
       Alcotest.(check string) "prior assistant not overwritten" "old answer"
         (Agent_sdk.Types.text_of_message last)
   | [] -> Alcotest.fail "expected prior messages"
+
+let test_attention_checkpoint_refuses_mismatched_history_prefix () =
+  let open Agent_sdk.Types in
+  let expected_old_user = checkpoint_msg User [ Text "expected old user" ] in
+  let actual_old_user = checkpoint_msg User [ Text "actual old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let current_final = checkpoint_msg Assistant [ Text "" ] in
+  let cp =
+    replay_test_checkpoint [ actual_old_user; old_assistant; current_user; current_final ]
+  in
+  let patched, pruned =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_messages:[ expected_old_user; old_assistant ]
+      ~pre_turn_working_context:(Some (`Assoc [ "pre_turn", `Bool true ]))
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~session_id:"new-session"
+      ~response_text:"synthetic no-progress"
+      ~state_snapshot:None
+      cp
+  in
+  Alcotest.(check bool) "mismatched prefix is not pruned" false pruned;
+  Alcotest.(check int) "checkpoint messages kept" 4 (List.length patched.messages);
+  Alcotest.(check bool)
+    "working context not replaced without a verified prefix"
+    true
+    (patched.working_context = cp.working_context)
 
 let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
   let open Agent_sdk.Types in
@@ -485,7 +515,8 @@ let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
   let patched, pruned =
     Masc.Keeper_agent_run_finalize_response.For_testing
     .checkpoint_for_replay_persistence
-      ~history_message_count:2
+      ~history_messages:[ old_user; old_assistant ]
+      ~pre_turn_working_context:None
       ~completion_contract_result:Receipt.Contract_satisfied_execution
       ~session_id:"new-session"
       ~response_text:"visible answer"
@@ -704,6 +735,10 @@ let () =
             "attention result prunes current replay suffix"
             `Quick
             test_attention_checkpoint_prunes_current_turn_suffix;
+          Alcotest.test_case
+            "attention result refuses mismatched replay prefix"
+            `Quick
+            test_attention_checkpoint_refuses_mismatched_history_prefix;
           Alcotest.test_case
             "satisfied result keeps tool replay suffix"
             `Quick

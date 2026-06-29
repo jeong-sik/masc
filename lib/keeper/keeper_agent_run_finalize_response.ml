@@ -17,14 +17,6 @@ let reported_state_snapshot_from_checkpoint
   ignore (checkpoint : Agent_sdk.Checkpoint.t option);
   None
 
-let rec take_messages n messages =
-  if n <= 0 then []
-  else
-    match messages with
-    | [] -> []
-    | msg :: rest -> msg :: take_messages (n - 1) rest
-;;
-
 let completion_contract_drops_current_turn_replay
     (completion_contract_result :
        Keeper_execution_receipt.completion_contract_result)
@@ -33,20 +25,37 @@ let completion_contract_drops_current_turn_replay
     completion_contract_result
 ;;
 
+let rec messages_prefix_equal expected actual =
+  match expected, actual with
+  | [], _ -> true
+  | expected_msg :: expected_rest, actual_msg :: actual_rest ->
+    expected_msg = actual_msg && messages_prefix_equal expected_rest actual_rest
+  | _ :: _, [] -> false
+;;
+
 let prune_current_turn_replay
-      ~(history_message_count : int)
+      ~(history_messages : Agent_sdk.Types.message list)
+      ~(pre_turn_working_context : Yojson.Safe.t option)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
-  let messages =
-    checkpoint.Agent_sdk.Checkpoint.messages
-    |> take_messages history_message_count
-    |> Keeper_context_core.repair_broken_tool_call_pairs
-  in
-  { checkpoint with Agent_sdk.Checkpoint.messages; working_context = None }
+  if
+    messages_prefix_equal history_messages checkpoint.Agent_sdk.Checkpoint.messages
+    && List.length checkpoint.Agent_sdk.Checkpoint.messages > List.length history_messages
+  then
+    let messages =
+      Keeper_context_core.repair_broken_tool_call_pairs history_messages
+    in
+    Some
+      { checkpoint with
+        Agent_sdk.Checkpoint.messages
+      ; working_context = pre_turn_working_context
+      }
+  else None
 ;;
 
 let checkpoint_for_replay_persistence
-      ~(history_message_count : int)
+      ~(history_messages : Agent_sdk.Types.message list)
+      ~(pre_turn_working_context : Yojson.Safe.t option)
       ~(completion_contract_result :
          Keeper_execution_receipt.completion_contract_result)
       ~(session_id : string)
@@ -55,7 +64,15 @@ let checkpoint_for_replay_persistence
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
   if completion_contract_drops_current_turn_replay completion_contract_result
-  then prune_current_turn_replay ~history_message_count checkpoint, true
+  then
+    match
+      prune_current_turn_replay
+        ~history_messages
+        ~pre_turn_working_context
+        checkpoint
+    with
+    | Some checkpoint -> checkpoint, true
+    | None -> checkpoint, false
   else
     ( Keeper_context_core.patch_checkpoint_last_assistant
         checkpoint
@@ -87,7 +104,8 @@ let finalize
     ~checkpoint_persistence_error
     ~post_turn_t0
     ~runtime_id_string
-    ~history_message_count
+    ~history_messages
+    ~pre_turn_working_context
     ~prompt_metrics
     ~ctx_composition
     ~usage
@@ -194,7 +212,8 @@ let finalize
     | Some checkpoint ->
       let patched, replay_suffix_pruned =
         checkpoint_for_replay_persistence
-          ~history_message_count
+          ~history_messages
+          ~pre_turn_working_context
           ~completion_contract_result
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)

@@ -3,8 +3,8 @@
 ## Unreleased
 
 ### Changed
-- Bump OAS agent_sdk pin to 0.207.19 plus the OAS #2232/#2243
-  `8506fec` assistant tool-content and fail-closed unknown-stream-block
+- Bump OAS agent_sdk pin to 0.207.19 plus the integrated OAS #2232/#2243
+  `d1b46c3` assistant tool-content and fail-closed unknown-stream-block
   follow-up SHA.
 
 ### Fixed

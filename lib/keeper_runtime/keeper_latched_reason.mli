@@ -30,20 +30,7 @@ type t =
   | Completion_contract_violation of contract_violation_detail
   | Idle_detected of { consecutive_idle_turns : int }
   | Runtime_exhausted of runtime_exhaustion_reason
-  | Turn_budget_exhausted of
-      { dimension :
-          [ `Turns                       (** OAS SDK [max_turns] cap *)
-          | `Wall_clock_seconds          (** env-sourced turn_timeout_sec *)
-          | `Idle_turns                  (** env-sourced idle watchdog *)
-          ]
-      ; used : int
-      ; limit : int
-      ; source :
-          [ `Oas_sdk
-          | `Keeper_runtime
-          | `User_config
-          ]
-      }
+  | Turn_budget_exhausted of turn_budget_exhausted
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
   | Operator_paused of { operator_actor : string }
@@ -63,6 +50,25 @@ and runtime_exhaustion_reason =
   | No_providers_available
   | Structural_attempt_timeout of { stage : string }
   | Unspecified_runtime
+
+and turn_budget_exhausted =
+  { detail : turn_budget_detail
+  ; used : int
+  ; limit : int
+  }
+
+and turn_budget_detail =
+  { dimension :
+      [ `Turns                       (** OAS SDK [max_turns] cap *)
+      | `Wall_clock_seconds          (** env-sourced turn_timeout_sec *)
+      | `Idle_turns                  (** env-sourced idle watchdog *)
+      ]
+  ; source :
+      [ `Oas_sdk
+      | `Keeper_runtime
+      | `User_config
+      ]
+  }
 
 (** {1 Wire format}
 

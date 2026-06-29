@@ -50,6 +50,7 @@ let member_summary = "summary"
 let member_confidence = "confidence"
 let member_recommended_action = "recommended_action"
 let member_disagreement_with_truth = "disagreement_with_truth"
+let field_allowed_action_types = "allowed_action_types"
 let key_action_type = "action_type"
 let key_target_type = "target_type"
 let key_target_id = "target_id"
@@ -182,7 +183,9 @@ let build_recommended_action ~actor ~target_type ~target_id json =
 let prompt_for_facts facts_json =
   match
     Prompt_registry.render_prompt_template prompt_dashboard_operator_judge
-      [ (field_facts_json, Yojson.Safe.to_string facts_json) ]
+      [ field_facts_json, Yojson.Safe.to_string facts_json
+      ; field_allowed_action_types, String.concat ", " Operator_approval.allowed_actions
+      ]
   with
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt prompt_dashboard_operator_judge

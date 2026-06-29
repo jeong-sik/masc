@@ -23,6 +23,10 @@ val operator_judge_output_schema : Yojson.Safe.t
 val governance_judge_output_schema : Yojson.Safe.t
 (** JSON object the dashboard governance judge provider must return. *)
 
+val governance_resolved_tool_tokens : string list
+(** Resolved tool names accepted by the dashboard governance judge. The
+    provider schema and runtime parser both consume this list. *)
+
 val apply_to_provider_config
   :  Yojson.Safe.t
   -> Llm_provider.Provider_config.t

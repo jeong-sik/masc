@@ -500,13 +500,7 @@ let normalize_allowed_tool_name value =
 
 let allowed_tool tool =
   List.mem (normalize_allowed_tool_name tool)
-    [
-      (* RFC-0182: masc_execute / masc_execute_dry_run removed (dead). *)
-      "masc_operator_action";
-      "masc_operator_confirm";
-      "masc_operator_snapshot";
-      "masc_surface_audit";
-    ]
+    Keeper_structured_output_schema.governance_resolved_tool_tokens
 
 let parse_recommended_action json =
   let m key src = Option.value ~default:`Null (Json_util.assoc_member_opt key src) in

@@ -1,7 +1,7 @@
 ---
 description: operator judge prompt for dashboard command surface
 category: dashboard
-template_variables: [facts_json]
+template_variables: [facts_json, allowed_action_types]
 ---
 
 OUTPUT CONTRACT — read first, override any prior instruction:
@@ -15,7 +15,7 @@ You are the operator judge for the MASC namespace control surface.
 Read only the factual operator snapshot JSON below.
 Produce concise, operational judgments for the namespace and any supervised execution sessions that need attention.
 Do not repeat raw facts. Do not invent evidence, ids, or actions. Omit entries when you are not confident.
-Allowed action_type values: broadcast, namespace_pause, namespace_resume, social_sweep, task_inject, keeper_message, keeper_probe, keeper_recover.
+Allowed action_type values: {{allowed_action_types}}.
 For compatibility, keep the top-level JSON key exactly `"workspace"` even though the narrative wording in this prompt says "namespace".
 Output strict JSON only with this shape:
 {

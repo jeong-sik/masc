@@ -42,19 +42,11 @@ let nullable_object_schema ~required properties =
     ]
 ;;
 
-let empty_object_schema = object_schema ~required:[] []
-
-let operator_action_tokens =
-  [ "broadcast"
-  ; "namespace_pause"
-  ; "namespace_resume"
-  ; "social_sweep"
-  ; "task_inject"
-  ; "keeper_message"
-  ; "keeper_probe"
-  ; "keeper_recover"
-  ]
+let generic_object_schema =
+  `Assoc [ "type", `String "object"; "additionalProperties", `Bool true ]
 ;;
+
+let operator_action_tokens = Operator_approval.allowed_actions
 
 let operator_severity_tokens = [ "warn"; "bad" ]
 
@@ -63,7 +55,7 @@ let operator_recommended_action_schema =
     [ "action_type", enum_schema operator_action_tokens
     ; "severity", enum_schema operator_severity_tokens
     ; "reason", string_schema
-    ; "suggested_payload", empty_object_schema
+    ; "suggested_payload", generic_object_schema
     ]
   in
   nullable_object_schema ~required:(List.map fst fields) fields
@@ -107,7 +99,7 @@ let operator_judge_output_schema =
 
 let governance_kind_tokens = [ "case"; "agent_health"; "workspace_state" ]
 
-let governance_tool_tokens =
+let governance_resolved_tool_tokens =
   [ "masc_operator_action"
   ; "masc_operator_confirm"
   ; "masc_operator_snapshot"
@@ -118,11 +110,11 @@ let governance_tool_tokens =
 let governance_recommended_action_schema =
   let fields =
     [ "action_kind", string_schema
-    ; "resolved_tool", nullable_enum_schema governance_tool_tokens
+    ; "resolved_tool", nullable_enum_schema governance_resolved_tool_tokens
     ; "target_type", string_schema
     ; "target_id", nullable_string_schema
     ; "reason", string_schema
-    ; "payload_preview", empty_object_schema
+    ; "payload_preview", generic_object_schema
     ]
   in
   nullable_object_schema ~required:(List.map fst fields) fields

@@ -31,10 +31,12 @@ let round_trippable =
   ; "runtime unspecified", R.Runtime_exhausted R.Unspecified_runtime
   ; ( "turn budget exhausted"
     , R.Turn_budget_exhausted
-        { dimension = `Wall_clock_seconds
+        { detail =
+            { dimension = `Wall_clock_seconds
+            ; source = `User_config
+            }
         ; used = 95
         ; limit = 90
-        ; source = `User_config
         } )
   ; "stale storm", R.Stale_storm
   ; "provider timeout loop", R.Provider_timeout_loop { consecutive_timeouts = 2 }
@@ -97,27 +99,29 @@ let test_poly_variants_distinguish_via_equal () =
      polymorphic-variant field. *)
   let base =
     R.Turn_budget_exhausted
-      { dimension = `Turns; used = 10; limit = 10; source = `Oas_sdk }
+      { detail = { dimension = `Turns; source = `Oas_sdk }; used = 10; limit = 10 }
   in
   let with_different_dim =
     R.Turn_budget_exhausted
-      { dimension = `Wall_clock_seconds
+      { detail =
+          { dimension = `Wall_clock_seconds
+          ; source = `Oas_sdk
+          }
       ; used = 10
       ; limit = 10
-      ; source = `Oas_sdk
       }
   in
   let with_different_source =
     R.Turn_budget_exhausted
-      { dimension = `Turns; used = 10; limit = 10; source = `User_config }
+      { detail = { dimension = `Turns; source = `User_config }; used = 10; limit = 10 }
   in
   let with_different_used =
     R.Turn_budget_exhausted
-      { dimension = `Turns; used = 11; limit = 10; source = `Oas_sdk }
+      { detail = { dimension = `Turns; source = `Oas_sdk }; used = 11; limit = 10 }
   in
   let with_different_limit =
     R.Turn_budget_exhausted
-      { dimension = `Turns; used = 10; limit = 11; source = `Oas_sdk }
+      { detail = { dimension = `Turns; source = `Oas_sdk }; used = 10; limit = 11 }
   in
   Alcotest.(check bool) "Turns = Turns (reflexive)" true (R.equal base base);
   Alcotest.(check bool)

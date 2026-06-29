@@ -22,6 +22,25 @@ type runtime_exhaustion_reason =
   | Structural_attempt_timeout of { stage : string }
   | Unspecified_runtime
 
+type turn_budget_detail =
+  { dimension :
+      [ `Turns
+      | `Wall_clock_seconds
+      | `Idle_turns
+      ]
+  ; source :
+      [ `Oas_sdk
+      | `Keeper_runtime
+      | `User_config
+      ]
+  }
+
+type turn_budget_exhausted =
+  { detail : turn_budget_detail
+  ; used : int
+  ; limit : int
+  }
+
 type t =
   | No_progress_loop of
       { consecutive_idle_cycles : int
@@ -34,20 +53,7 @@ type t =
   | Completion_contract_violation of contract_violation_detail
   | Idle_detected of { consecutive_idle_turns : int }
   | Runtime_exhausted of runtime_exhaustion_reason
-  | Turn_budget_exhausted of
-      { dimension :
-          [ `Turns
-          | `Wall_clock_seconds
-          | `Idle_turns
-          ]
-      ; used : int
-      ; limit : int
-      ; source :
-          [ `Oas_sdk
-          | `Keeper_runtime
-          | `User_config
-          ]
-      }
+  | Turn_budget_exhausted of turn_budget_exhausted
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
   | Operator_paused of { operator_actor : string }
@@ -118,9 +124,9 @@ let equal a b =
      , _ ->
        false)
   | ( Turn_budget_exhausted
-        { dimension = d1; used = u1; limit = l1; source = s1 }
+        { detail = { dimension = d1; source = s1 }; used = u1; limit = l1 }
     , Turn_budget_exhausted
-        { dimension = d2; used = u2; limit = l2; source = s2 } ) ->
+        { detail = { dimension = d2; source = s2 }; used = u2; limit = l2 } ) ->
     poly_equal d1 d2 && Int.equal u1 u2 && Int.equal l1 l2 && poly_equal_source s1 s2
   | Stale_storm, Stale_storm -> true
   | ( Provider_timeout_loop { consecutive_timeouts = c1 }
@@ -169,13 +175,13 @@ let hash = function
          | No_providers_available -> 1
          | Structural_attempt_timeout { stage } -> Hashtbl.hash (2, stage)
          | Unspecified_runtime -> 3) )
-  | Turn_budget_exhausted { dimension; used; limit; source } ->
+  | Turn_budget_exhausted { detail; used; limit } ->
     Hashtbl.hash
       ( 4
-      , (match dimension with `Turns -> 0 | `Wall_clock_seconds -> 1 | `Idle_turns -> 2)
+      , (match detail.dimension with `Turns -> 0 | `Wall_clock_seconds -> 1 | `Idle_turns -> 2)
       , used
       , limit
-      , (match source with `Oas_sdk -> 0 | `Keeper_runtime -> 1 | `User_config -> 2) )
+      , (match detail.source with `Oas_sdk -> 0 | `Keeper_runtime -> 1 | `User_config -> 2) )
   | Stale_storm -> 5
   | Provider_timeout_loop { consecutive_timeouts } -> Hashtbl.hash (6, consecutive_timeouts)
   | Operator_paused { operator_actor } -> Hashtbl.hash (7, operator_actor)
@@ -237,14 +243,14 @@ let pp ppf = function
     Format.fprintf ppf "Runtime_exhausted{";
     pp_runtime_exhaustion ppf r;
     Format.fprintf ppf "}"
-  | Turn_budget_exhausted { dimension; used; limit; source } ->
+  | Turn_budget_exhausted { detail; used; limit } ->
     Format.fprintf
       ppf
       "Turn_budget_exhausted{dim=%s,used=%d,limit=%d,source=%s}"
-      (pp_dim dimension)
+      (pp_dim detail.dimension)
       used
       limit
-      (pp_source source)
+      (pp_source detail.source)
   | Stale_storm -> Format.fprintf ppf "Stale_storm"
   | Provider_timeout_loop { consecutive_timeouts } ->
     Format.fprintf ppf "Provider_timeout_loop{count=%d}" consecutive_timeouts
@@ -295,13 +301,13 @@ let to_wire = function
     Printf.sprintf "idle_detected:idle_turns=%d" consecutive_idle_turns
   | Runtime_exhausted r ->
     Format.asprintf "runtime_exhausted:%a" pp_runtime_exhaustion r
-  | Turn_budget_exhausted { dimension; used; limit; source } ->
+  | Turn_budget_exhausted { detail; used; limit } ->
     Printf.sprintf
       "turn_budget_exhausted:dim=%s:used=%d:limit=%d:source=%s"
-      (pp_dim dimension)
+      (pp_dim detail.dimension)
       used
       limit
-      (pp_source source)
+      (pp_source detail.source)
   | Stale_storm -> "stale_storm"
   | Provider_timeout_loop { consecutive_timeouts } ->
     Printf.sprintf "provider_timeout_loop:count=%d" consecutive_timeouts
@@ -420,7 +426,7 @@ let of_wire wire =
     let* used = int_of_string_exn used_str in
     let* limit = int_of_string_exn limit_str in
     let+ source = parse_source source_str in
-    Turn_budget_exhausted { dimension; used; limit; source }
+    Turn_budget_exhausted { detail = { dimension; source }; used; limit }
   | [ "stale_storm" ] -> Ok Stale_storm
   | [ "provider_timeout_loop"; count_field ] ->
     let* count_str = parse_field "count" count_field in
@@ -539,13 +545,13 @@ module Stable = struct
         ; "consecutive_idle_turns", `Int consecutive_idle_turns
         ]
     | Runtime_exhausted r -> `Assoc [ "kind", `String "runtime_exhausted"; "detail", runtime_to_yojson r ]
-    | Turn_budget_exhausted { dimension; used; limit; source } ->
+    | Turn_budget_exhausted { detail; used; limit } ->
       `Assoc
         [ "kind", `String "turn_budget_exhausted"
-        ; "dimension", `String (string_of_dim dimension)
+        ; "dimension", `String (string_of_dim detail.dimension)
         ; "used", `Int used
         ; "limit", `Int limit
-        ; "source", `String (string_of_source source)
+        ; "source", `String (string_of_source detail.source)
         ]
     | Stale_storm -> `Assoc [ "kind", `String "stale_storm" ]
     | Provider_timeout_loop { consecutive_timeouts } ->
@@ -581,7 +587,7 @@ module Stable = struct
              ; "source", `String s ] ->
       let* dim = dim_of_string d in
       let* src = source_of_string s in
-      Ok (Turn_budget_exhausted { dimension = dim; used = u; limit = l; source = src })
+      Ok (Turn_budget_exhausted { detail = { dimension = dim; source = src }; used = u; limit = l })
     | `Assoc [ "kind", `String "stale_storm" ] -> Ok Stale_storm
     | `Assoc [ "kind", `String "provider_timeout_loop"; "consecutive_timeouts", `Int n ] ->
       Ok (Provider_timeout_loop { consecutive_timeouts = n })

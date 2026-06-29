@@ -94,6 +94,7 @@
   test_pool
   test_institution_ids
   test_keeper_turn_disposition
+  test_keeper_execution_receipt_budget_wire
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
@@ -415,6 +416,7 @@
   test_pool
   test_institution_ids
   test_keeper_turn_disposition
+  test_keeper_execution_receipt_budget_wire
   test_keeper_turn_terminal_disposition_field
   test_keeper_memory_os
   test_keeper_memory_os_gc_dry_run_report
@@ -1880,6 +1882,7 @@
 (include stanzas/test_keeper_personality_round_trip.inc)
 
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
+(include stanzas/test_keeper_post_turn_snapshot_goal_log.inc)
 
 (include stanzas/test_keeper_readonly_hints.inc)
 

@@ -41,7 +41,8 @@ let append_decision_record
     | Some r
       when String.trim r.response_text <> ""
            && Keeper_turn_outcome.equal
-                (Keeper_turn_outcome.of_stop_reason r.stop_reason)
+                (Keeper_turn_outcome.of_result_surface
+                   ~response_text:r.response_text r.stop_reason)
                 Keeper_turn_outcome.Visible_reply ->
         Some (short_preview r.response_text)
     | _ -> None
@@ -276,14 +277,16 @@ let append_decision_record
                   match r.stop_reason with
                   | Runtime_agent.Completed -> "completed"
                   | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
+                      (* Detail-less wire form via the single SSOT [to_wire]:
+                         [Runtime_agent.TurnBudgetExhausted] carries only
+                         {turns_used; limit}, so [detail] is None — the
+                         same form the receipt producer emits. The previous
+                         hardcoded {`Turns; `Oas_sdk} fabricated tags the variant
+                         does not carry and drifted from the receipt path. *)
                       Keeper_turn_disposition.(
                         to_wire
                           (Turn_budget_exhausted
-                             { dimension = `Turns
-                             ; used = turns_used
-                             ; limit
-                             ; source = `Oas_sdk
-                             }))
+                             { detail = None; used = turns_used; limit }))
                   | Runtime_agent.MutationBoundaryReached { turns_used; tool_name } ->
                       (match tool_name with
                        | Some tool ->

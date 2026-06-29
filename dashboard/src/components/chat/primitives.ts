@@ -196,6 +196,8 @@ function deliveryLabel(entry: KeeperConversationEntry): string {
       return 'timeout'
     case 'cancelled':
       return 'cancelled'
+    case 'no_reply':
+      return 'no reply'
     case 'error':
       return 'error'
     case 'interrupted':
@@ -1910,6 +1912,15 @@ const ChatMessageBubble = memo(function ChatMessageBubble({
   showSourceBadge?: boolean
   action?: ChatTranscriptAction
 }) {
+  if (
+    entry.delivery === 'no_reply'
+    && !entry.text.trim()
+    && !entry.blocks?.length
+    && !entry.attachments?.length
+  ) {
+    return null
+  }
+
   const [expandedRaw, setExpandedRaw] = useState(false)
   const [rawExpandedRaw, setRawExpandedRaw] = useState(false)
   const [messageCollapsed, setMessageCollapsed] = useState(true)

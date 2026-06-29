@@ -93,6 +93,47 @@ type overflow_retry_recovery = {
   turn_generation : int;
 } [@@warning "-69"]
 
+let invalid_snapshot_goal_log_dedupe_limit = 512
+let invalid_snapshot_goal_log_dedupe : (string, unit) Hashtbl.t = Hashtbl.create 64
+let invalid_snapshot_goal_log_dedupe_mutex = Stdlib.Mutex.create ()
+
+let short_digest text =
+  let hex = Digest.string text |> Digest.to_hex in
+  String.sub hex 0 (min 12 (String.length hex))
+
+let invalid_snapshot_goal_fingerprint goal_id = short_digest goal_id
+
+let invalid_snapshot_goal_dedupe_key ~keeper_name ~goal_id =
+  keeper_name ^ "\x00" ^ invalid_snapshot_goal_fingerprint goal_id
+
+let should_log_invalid_snapshot_goal ~keeper_name ~goal_id =
+  let key = invalid_snapshot_goal_dedupe_key ~keeper_name ~goal_id in
+  Stdlib.Mutex.protect invalid_snapshot_goal_log_dedupe_mutex (fun () ->
+    if Hashtbl.mem invalid_snapshot_goal_log_dedupe key
+    then false
+    else (
+      if Hashtbl.length invalid_snapshot_goal_log_dedupe
+         >= invalid_snapshot_goal_log_dedupe_limit
+      then Hashtbl.clear invalid_snapshot_goal_log_dedupe;
+      Hashtbl.add invalid_snapshot_goal_log_dedupe key ();
+      true))
+
+let invalid_snapshot_goal_warning_message ~keeper_name ~goal_id =
+  Printf.sprintf
+    "keeper:%s snapshot goal invalid_goal_hash=%s not in active_goal_ids, clearing"
+    keeper_name
+    (invalid_snapshot_goal_fingerprint goal_id)
+
+let record_invalid_snapshot_goal ~keeper_name ~goal_id =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string StateSnapshotInvalidGoal)
+    ~labels:[("keeper", keeper_name)]
+    ();
+  if should_log_invalid_snapshot_goal ~keeper_name ~goal_id
+  then
+    Log.Keeper.warn "%s"
+      (invalid_snapshot_goal_warning_message ~keeper_name ~goal_id)
+
 let log_tool_pair_repair
     ~keeper_name
     ~site
@@ -480,9 +521,7 @@ let apply_post_turn_lifecycle_with_resilience_handles
         let snapshot =
           match snapshot.goal with
           | Some goal_id when not (List.mem goal_id meta.active_goal_ids) ->
-              Log.Keeper.warn
-                "keeper:%s snapshot goal %s not in active_goal_ids, clearing"
-                meta.name goal_id;
+              record_invalid_snapshot_goal ~keeper_name:meta.name ~goal_id;
               { snapshot with goal = None }
           | _ -> snapshot
         in
@@ -951,3 +990,13 @@ let recover_latest_checkpoint_for_overflow_retry
               ~label:"overflow retry checkpoint save exception"
               exn;
             None
+
+module For_testing = struct
+  let invalid_snapshot_goal_fingerprint = invalid_snapshot_goal_fingerprint
+  let invalid_snapshot_goal_warning_message = invalid_snapshot_goal_warning_message
+  let should_log_invalid_snapshot_goal = should_log_invalid_snapshot_goal
+
+  let reset_invalid_snapshot_goal_log_dedupe () =
+    Stdlib.Mutex.protect invalid_snapshot_goal_log_dedupe_mutex (fun () ->
+      Hashtbl.clear invalid_snapshot_goal_log_dedupe)
+end

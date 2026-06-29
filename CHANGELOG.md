@@ -2,11 +2,16 @@
 
 ## Unreleased
 
-## [0.19.53] - 2026-06-29
-
 ### Fixed
-- Fix `keeper_msg_async` race conditions causing tests `#4 operator cancel is terminal` and `#6 gc removes stale terminal disk record` to fail.
-- Fix docs drift and update `shell_parse_site_baseline.txt`.
+- Stabilize keeper quick-suite tests under Dune sandboxing by resolving
+  source-file assertions through `DUNE_SOURCEROOT`.
+- Stabilize `keeper_msg_async` async persistence coverage by waiting for
+  disk persistence before recovery/GC assertions.
+
+## [0.19.54] - 2026-06-29
+
+### Changed
+- Bump OAS agent_sdk pin to 0.207.16 and bump masc version to 0.19.54.
 
 ## [0.19.52] - 2026-06-29
 

@@ -3,6 +3,7 @@
 import { asString, isRecord } from '../components/common/normalize'
 import {
   formatKeeperVisibleReply,
+  keeperTurnOutcomeSuppressesReply,
   normalizeKeeperConversationDetails,
 } from '../keeper-message'
 import type { KeeperConversationDetails, KeeperUserInputBlock } from '../types'
@@ -362,7 +363,7 @@ export function queuedKeeperMessageToReply(result: QueuedKeeperMessageResult): K
   const payload = isRecord(result.result) ? result.result : null
   const rawReply = asString(payload?.reply, '').trim()
   const details = normalizeKeeperConversationDetails(payload ?? result.result)
-  if (result.status === 'done' && details?.turnOutcome === 'continuation_checkpoint') {
+  if (result.status === 'done' && keeperTurnOutcomeSuppressesReply(details?.turnOutcome)) {
     return {
       text: '',
       details,

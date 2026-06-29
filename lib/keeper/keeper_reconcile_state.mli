@@ -11,7 +11,7 @@
     - [`First]: first failure for this (keeper, error fingerprint).
       Caller should keep the existing WARN log (behaviour preservation).
     - [`Repeated]: same (keeper, fingerprint) seen again. Caller should
-      demote the WARN to DEBUG. The counter still increments.
+      log the WARN again without silent suppression. The counter still increments.
     - [`Threshold_disable]: consecutive failures reached
       [disable_threshold] (default 10). Caller should ERROR-log once and
       mark the keeper as disabled. Subsequent sweeps skip until
@@ -19,10 +19,7 @@
 
     Note: in-process state, [Hashtbl.t] guarded by a [Mutex]. No
     cross-process synchronisation — each server replica maintains its own
-    counters. Threshold defaults are conservative; the dedup/demote tier
-    is a [WORKAROUND-CARRYOVER §Symptom-억제] band-aid for invalid TOML
-    drift, not a structural fix. Root fix: invalid keeper TOML cleanup +
-    [keeper_assignable=false] policy decision (separate RFC). *)
+    counters. Threshold defaults are conservative. *)
 
 (** Outcome of recording a reconcile failure. *)
 type record_outcome =

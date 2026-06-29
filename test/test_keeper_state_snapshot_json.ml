@@ -397,6 +397,11 @@ let has_tool_use (msg : Agent_sdk.Types.message) =
       | _ -> false)
     msg.Agent_sdk.Types.content
 
+let prune_reason_to_string reason =
+  Option.map
+    Masc.Keeper_agent_run_finalize_response.For_testing.replay_suffix_prune_reason_to_string
+    reason
+
 let test_attention_checkpoint_prunes_current_turn_suffix () =
   let open Agent_sdk.Types in
   let old_user = checkpoint_msg User [ Text "old user" ] in
@@ -438,10 +443,14 @@ let test_attention_checkpoint_prunes_current_turn_suffix () =
       ~completion_contract_result:Receipt.Contract_passive_only
       ~session_id:"new-session"
       ~response_text:"synthetic no-progress"
+      ~state_snapshot_source:KMP.State_block
       ~state_snapshot:None
       cp
   in
-  Alcotest.(check bool) "suffix pruned" true pruned;
+  Alcotest.(check (option string))
+    "suffix pruned"
+    (Some "completion_contract_requires_attention")
+    (prune_reason_to_string pruned);
   Alcotest.(check int) "only prior history remains" 2
     (List.length patched.messages);
   Alcotest.(check bool) "pre-turn working context restored" true
@@ -470,15 +479,77 @@ let test_attention_checkpoint_refuses_mismatched_history_prefix () =
       ~completion_contract_result:Receipt.Contract_passive_only
       ~session_id:"new-session"
       ~response_text:"synthetic no-progress"
+      ~state_snapshot_source:KMP.State_block
       ~state_snapshot:None
       cp
   in
-  Alcotest.(check bool) "mismatched prefix is not pruned" false pruned;
+  Alcotest.(check (option string))
+    "mismatched prefix is not pruned"
+    None
+    (prune_reason_to_string pruned);
   Alcotest.(check int) "checkpoint messages kept" 4 (List.length patched.messages);
   Alcotest.(check bool)
     "working context not replaced without a verified prefix"
     true
     (patched.working_context = cp.working_context)
+
+let test_synthetic_empty_checkpoint_prunes_current_turn_suffix () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let current_tool_use =
+    checkpoint_msg Assistant
+      [ ToolUse
+          { id = "tool-1"
+          ; name = "keeper_tasks_list"
+          ; input = `Assoc []
+          }
+      ]
+  in
+  let current_tool_result =
+    checkpoint_msg Tool
+      [ ToolResult
+          { tool_use_id = "tool-1"
+          ; content = "[]"
+          ; is_error = false
+          ; json = None
+          ; content_blocks = None
+          }
+      ]
+  in
+  let current_final = checkpoint_msg Assistant [ Text "" ] in
+  let cp =
+    replay_test_checkpoint
+      [ old_user; old_assistant; current_user; current_tool_use
+      ; current_tool_result; current_final
+      ]
+  in
+  let pre_turn_working_context = Some (`Assoc [ "pre_turn", `Bool true ]) in
+  let patched, pruned =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_messages:[ old_user; old_assistant ]
+      ~pre_turn_working_context
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~session_id:"new-session"
+      ~response_text:""
+      ~state_snapshot_source:KMP.Synthesized
+      ~state_snapshot:None
+      cp
+  in
+  Alcotest.(check (option string))
+    "synthetic empty suffix pruned"
+    (Some "synthetic_empty_state_snapshot")
+    (prune_reason_to_string pruned);
+  Alcotest.(check int) "only prior history remains" 2
+    (List.length patched.messages);
+  Alcotest.(check bool) "pre-turn working context restored" true
+    (patched.working_context = pre_turn_working_context);
+  Alcotest.(check bool)
+    "current tool replay is not persisted"
+    false
+    (List.exists has_tool_use patched.messages)
 
 let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
   let open Agent_sdk.Types in
@@ -520,10 +591,12 @@ let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
       ~completion_contract_result:Receipt.Contract_satisfied_execution
       ~session_id:"new-session"
       ~response_text:"visible answer"
+      ~state_snapshot_source:KMP.State_block
       ~state_snapshot:None
       cp
   in
-  Alcotest.(check bool) "suffix kept" false pruned;
+  Alcotest.(check (option string)) "suffix kept" None
+    (prune_reason_to_string pruned);
   Alcotest.(check int) "turn transcript remains" 6
     (List.length patched.messages);
   Alcotest.(check bool) "tool use remains" true
@@ -739,6 +812,10 @@ let () =
             "attention result refuses mismatched replay prefix"
             `Quick
             test_attention_checkpoint_refuses_mismatched_history_prefix;
+          Alcotest.test_case
+            "synthetic empty result prunes current replay suffix"
+            `Quick
+            test_synthetic_empty_checkpoint_prunes_current_turn_suffix;
           Alcotest.test_case
             "satisfied result keeps tool replay suffix"
             `Quick

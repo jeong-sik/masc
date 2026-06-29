@@ -8,6 +8,9 @@
   follow-up SHA.
 
 ### Fixed
+- Prune synthetic empty keeper replay suffixes from OAS checkpoints and record a
+  typed prune reason, preventing no-visible-output state snapshots from being
+  replayed as durable assistant context.
 - Stabilize keeper quick-suite tests under Dune sandboxing by resolving
   source-file assertions through `DUNE_SOURCEROOT`.
 - Stabilize `keeper_msg_async` async persistence coverage by waiting for

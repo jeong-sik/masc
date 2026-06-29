@@ -25,6 +25,39 @@ let completion_contract_drops_current_turn_replay
     completion_contract_result
 ;;
 
+type replay_suffix_prune_reason =
+  | Completion_contract_requires_attention
+  | Synthetic_empty_state_snapshot
+
+let replay_suffix_prune_reason_to_string = function
+  | Completion_contract_requires_attention ->
+    "completion_contract_requires_attention"
+  | Synthetic_empty_state_snapshot -> "synthetic_empty_state_snapshot"
+;;
+
+let synthetic_empty_state_drops_current_turn_replay
+      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
+      ~response_text
+  =
+  Keeper_memory_policy.state_snapshot_source_is_synthetic state_snapshot_source
+  && String.trim response_text = ""
+;;
+
+let replay_suffix_prune_reason
+      ~completion_contract_result
+      ~state_snapshot_source
+      ~response_text
+  =
+  if completion_contract_drops_current_turn_replay completion_contract_result
+  then Some Completion_contract_requires_attention
+  else if
+    synthetic_empty_state_drops_current_turn_replay
+      ~state_snapshot_source
+      ~response_text
+  then Some Synthetic_empty_state_snapshot
+  else None
+;;
+
 let rec messages_prefix_equal expected actual =
   match expected, actual with
   | [], _ -> true
@@ -60,31 +93,40 @@ let checkpoint_for_replay_persistence
          Keeper_execution_receipt.completion_contract_result)
       ~(session_id : string)
       ~(response_text : string)
+      ~(state_snapshot_source : Keeper_memory_policy.state_snapshot_source)
       ~(state_snapshot : Keeper_memory_policy.keeper_state_snapshot option)
       (checkpoint : Agent_sdk.Checkpoint.t)
   =
-  if completion_contract_drops_current_turn_replay completion_contract_result
-  then
+  match
+    replay_suffix_prune_reason
+      ~completion_contract_result
+      ~state_snapshot_source
+      ~response_text
+  with
+  | Some reason ->
     match
       prune_current_turn_replay
         ~history_messages
         ~pre_turn_working_context
         checkpoint
     with
-    | Some checkpoint -> checkpoint, true
-    | None -> checkpoint, false
-  else
+    | Some checkpoint -> checkpoint, Some reason
+    | None -> checkpoint, None
+  | None ->
     ( Keeper_context_core.patch_checkpoint_last_assistant
         checkpoint
         ~session_id
         ~response_text
         ?snapshot:state_snapshot
-    , false )
+    , None )
 ;;
 
 module For_testing = struct
   let completion_contract_drops_current_turn_replay =
     completion_contract_drops_current_turn_replay
+
+  let replay_suffix_prune_reason_to_string =
+    replay_suffix_prune_reason_to_string
 
   let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
 end
@@ -218,6 +260,7 @@ let finalize
           ~session_id:
             (Keeper_id.Trace_id.to_string meta.runtime.trace_id)
           ~response_text
+          ~state_snapshot_source
           ~state_snapshot:(Some state_snapshot)
           checkpoint
       in
@@ -237,13 +280,19 @@ let finalize
            ~decision:
              (`Assoc
                [
-                 ("session_id", `String patched.session_id);
-                 ("turns", `Int result.turns);
-                 ("model", `String model);
-                 ("replay_suffix_pruned", `Bool replay_suffix_pruned);
-                 ( "completion_contract_result"
-                 , `String
-                     (Keeper_execution_receipt
+                ("session_id", `String patched.session_id);
+                ("turns", `Int result.turns);
+                ("model", `String model);
+                ( "replay_suffix_pruned"
+                , `Bool (Option.is_some replay_suffix_pruned) );
+                ( "replay_suffix_prune_reason"
+                , (match replay_suffix_pruned with
+                   | Some reason ->
+                     `String (replay_suffix_prune_reason_to_string reason)
+                   | None -> `Null) );
+                ( "completion_contract_result"
+                , `String
+                    (Keeper_execution_receipt
                       .completion_contract_result_to_string
                         completion_contract_result) );
                ])

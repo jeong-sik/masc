@@ -204,7 +204,10 @@ let test_message_of_request () =
      | [ Agent_sdk.Types.Text q; Agent_sdk.Types.Image img ] ->
        assert (String.equal q "what color?");
        assert (String.equal img.media_type "image/png");
-       assert (String.equal img.source_type "base64");
+       assert (
+         String.equal
+           (Agent_sdk.Types.media_source_kind_to_string img.source_type)
+           "base64");
        assert (String.equal img.data (Base64.encode_string bytes));
        assert (not (String.equal img.data bytes))
      | _ -> assert false)
@@ -702,7 +705,7 @@ let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
       ; Agent_sdk.Types.Image
           { media_type = "image/png"
           ; data = Base64.encode_string bytes
-          ; source_type = "base64"
+          ; source_type = Agent_sdk.Types.Base64
           }
       ; Agent_sdk.Types.Text "after"
       ]
@@ -753,7 +756,7 @@ let test_delegate_eviction_rejects_invalid_media_type_before_store () =
         [ Agent_sdk.Types.Image
             { media_type = "text/plain"
             ; data = Base64.encode_string bytes
-            ; source_type = "base64"
+            ; source_type = Agent_sdk.Types.Base64
             }
         ]
     with
@@ -778,7 +781,7 @@ let test_delegate_eviction_rejects_oversize_before_store () =
           [ Agent_sdk.Types.Image
               { media_type = "image/png"
               ; data = Base64.encode_string bytes
-              ; source_type = "base64"
+              ; source_type = Agent_sdk.Types.Base64
               }
           ]
       with
@@ -793,7 +796,10 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
       ~policy:Masc.Keeper_types_profile.Mm_delegate
       ~keeper_name:"vision-ingest-bad-base64"
       [ Agent_sdk.Types.Image
-          { media_type = "image/png"; data = "not base64"; source_type = "base64" }
+          { media_type = "image/png"
+          ; data = "not base64"
+          ; source_type = Agent_sdk.Types.Base64
+          }
       ]
   with
   | [ Agent_sdk.Types.Text placeholder ] ->
@@ -808,7 +814,7 @@ let test_non_delegate_eviction_preserves_inline_image () =
     [ Agent_sdk.Types.Image
         { media_type = "image/png"
         ; data = Base64.encode_string bytes
-        ; source_type = "base64"
+        ; source_type = Agent_sdk.Types.Base64
         }
     ]
   in
@@ -834,7 +840,7 @@ let test_evicted_history_has_no_image_modality () =
         ; Agent_sdk.Types.Image
             { media_type = "image/png"
             ; data = Base64.encode_string bytes
-            ; source_type = "base64"
+            ; source_type = Agent_sdk.Types.Base64
             }
         ]
     in

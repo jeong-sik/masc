@@ -291,22 +291,7 @@ let execute_with_observers
             (2026-05-19): the same (tool, normalized detail)
             tuple recurs as the supervisor walks the 1->2->3
             retry ladder, so a single transient failure
-            emits at ERROR three times. Route the log
-            surface through [Keeper_tool_retry_state] so
-            attempts 2+ within the same retry cycle and
-            identical failures across cycles are demoted to
-            DEBUG, with one durable ERROR plus a Otel_metric_store
-            counter when the silence threshold trips.
-
-            [WORKAROUND-CARRYOVER]: this is a noise-dedupe
-            layer. Tracked by
-            docs/rfc/RFC-0144-workaround-sunset-keeper-dedup-carryover.md.
-            Removal: whole-layer sunset criteria (RFC §4):
-            aggregate retry ERROR rate <10/day for 7 days
-            rolling AND threshold_silence counter == 0.
-            The root fix is upstream (reduce the rate of
-            tool-call failures themselves — args validation,
-            container reuse RFC-0097, etc.). *)
+            emits at ERROR three times. *)
          let error_signature =
            Keeper_tool_retry_state.normalize detail
          in
@@ -325,7 +310,7 @@ let execute_with_observers
               max_consecutive_failures
               detail
           | `Repeated n ->
-            Log.Keeper.debug
+            Log.Keeper.warn
               "tool %s repeated retry log (%d/%d, total=%d, \
                dedup): %s"
               name

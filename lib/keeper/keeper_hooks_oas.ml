@@ -77,6 +77,7 @@ let idle_decision_to_label = function
   | Agent_sdk.Hooks.ApprovalRequired -> "approval_required"
   | Agent_sdk.Hooks.AdjustParams _ -> "adjust_params"
   | Agent_sdk.Hooks.ElicitInput _ -> "elicit_input"
+  | Agent_sdk.Hooks.HookFailed _ -> "hook_failed"
 
 let json_value_shape_for_log = function
   | `Assoc fields -> Printf.sprintf "object:%d" (List.length fields)

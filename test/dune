@@ -1880,6 +1880,7 @@
 (include stanzas/test_keeper_personality_round_trip.inc)
 
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
+(include stanzas/test_keeper_post_turn_snapshot_goal_log.inc)
 
 (include stanzas/test_keeper_readonly_hints.inc)
 

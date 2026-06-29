@@ -51,9 +51,17 @@ function normalizeKeeperTurnOutcome(value: unknown): KeeperTurnOutcome | null {
       return 'visible_reply'
     case 'continuation_checkpoint':
       return 'continuation_checkpoint'
+    case 'no_visible_reply':
+      return 'no_visible_reply'
     default:
       return null
   }
+}
+
+export function keeperTurnOutcomeSuppressesReply(
+  outcome: KeeperTurnOutcome | null | undefined,
+): boolean {
+  return outcome === 'continuation_checkpoint' || outcome === 'no_visible_reply'
 }
 
 export function normalizeKeeperConversationDetails(raw: unknown): KeeperConversationDetails | null {

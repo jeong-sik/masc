@@ -788,7 +788,9 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                ( Keeper_turn_outcome.of_reply_payload payload_json_opt,
                  String_util.trim_to_option visible_reply )
              with
-            | Keeper_turn_outcome.Continuation_checkpoint, _ -> persist_user_message_only ()
+            | Keeper_turn_outcome.Continuation_checkpoint, _
+            | Keeper_turn_outcome.No_visible_reply, _ ->
+                persist_user_message_only ()
             | Keeper_turn_outcome.Visible_reply, None -> persist_user_message_only ()
             | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                 Keeper_chat_store.append_turn
@@ -928,13 +930,18 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
             | _ -> visible_reply
           in
           let visible_reply = redact_text visible_reply in
-          let is_checkpoint =
-            match Keeper_turn_outcome.of_reply_payload payload_json_opt with
-            | Keeper_turn_outcome.Continuation_checkpoint -> true
+          let turn_outcome =
+            Keeper_turn_outcome.of_reply_payload payload_json_opt
+          in
+          let suppress_terminal_reply =
+            match turn_outcome with
+            | Keeper_turn_outcome.Continuation_checkpoint
+            | Keeper_turn_outcome.No_visible_reply ->
+                true
             | Keeper_turn_outcome.Visible_reply -> false
           in
           if
-            (not is_checkpoint)
+            (not suppress_terminal_reply)
             && not (Keeper_stream_text_accum.suppress_terminal_resend text_accum)
           then
             split_keeper_reply_chunks visible_reply
@@ -947,7 +954,10 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                     { name = "KEEPER_REPLY_DETAILS";
                       value = redact_json payload_json })
            | None -> ());
-          if is_checkpoint then
+          if
+            Keeper_turn_outcome.equal turn_outcome
+              Keeper_turn_outcome.Continuation_checkpoint
+          then
             Keeper_chat_events.publish events
               (Custom
                  { name = "KEEPER_CONTINUATION_CHECKPOINT";

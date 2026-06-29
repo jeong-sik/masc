@@ -1903,10 +1903,14 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
     (Some "sse_stream_incomplete")
     (kind (StreamIncomplete { reason = "max_output_tokens" }))
 
-let test_per_provider_timeout_forwards_to_oas_hard_deadline () =
+let test_per_provider_timeout_not_forwarded_to_oas_hard_deadline () =
+  (* RFC-0129 (§62, 2026-05-17 fleet incident): per_provider_timeout_s must NOT
+     forward to OAS max_execution_time_s. That field is a cumulative wall-clock
+     kill switch that truncates healthy slow streams (307.5s cluster). The
+     attempt deadline stays progress-based, so this helper always returns None. *)
   Alcotest.(check (option (float 0.0)))
-    "keeper timeout forwards to OAS max_execution_time_s"
-    (Some 123.0)
+    "per-provider timeout is not forwarded to OAS max_execution_time_s (RFC-0129)"
+    None
     (Masc.Keeper_turn_driver.For_testing.max_execution_time_for_attempt
        ~per_provider_timeout_s:123.0
        ());
@@ -2019,8 +2023,8 @@ let () =
           Alcotest.test_case "sse progress classifies known deltas" `Quick
             test_sse_event_progress_kind_classifies_known_deltas;
           Alcotest.test_case
-            "keeper timeout forwards to OAS hard deadline"
+            "keeper timeout is not forwarded to OAS hard deadline (RFC-0129)"
             `Quick
-            test_per_provider_timeout_forwards_to_oas_hard_deadline;
+            test_per_provider_timeout_not_forwarded_to_oas_hard_deadline;
         ] );
     ]

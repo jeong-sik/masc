@@ -165,10 +165,17 @@ let wrap_runtime_mcp_external_tool_hooks
     Some { hooks with before_turn_params }
 
 let max_execution_time_for_attempt ?per_provider_timeout_s () =
-  (* Forward the keeper turn deadline into OAS [max_execution_time_s] so
-     Agent.run owns a child switch and releases tool/resource fibers on a hard
-     timeout. Stream/body idle budgets still catch progress gaps earlier. *)
-  per_provider_timeout_s
+  (* Never forward per-provider timeouts to OAS [max_execution_time_s].
+     That field is a cumulative wall-clock kill switch for one Agent.run /
+     run_stream call; it cancels healthy active streams even while chunks are
+     arriving. Provider-attempt liveness is progress-based instead:
+     [stream_idle_timeout_s] catches inter-line stalls, the liveness observer
+     catches no-first-token / inter-chunk gaps, and tool/max-turn limits bound
+     finite work. *)
+  (match per_provider_timeout_s with
+   | Some (_ : float) -> ()
+   | None -> ());
+  None
 
 let stream_idle_timeout_for_attempt ~configured =
   Some

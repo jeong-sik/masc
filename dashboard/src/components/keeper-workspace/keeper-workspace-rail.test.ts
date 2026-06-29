@@ -123,19 +123,15 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).toContain('oas·seoul-1')
   })
 
-  it('renders the selected runtime state from the canonical phase label', () => {
+  it('no longer renders the Selected-runtime top card (removed from the rail)', () => {
     const k = mkKeeper({ status: 'offline', lifecycle_phase: 'Paused' })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
-    const state = container.querySelector('.kw-fleet-aside-state') as HTMLElement | null
-    expect(state).not.toBeNull()
-    expect(state?.textContent).toBe('일시정지')
-    expect(state?.getAttribute('title')).toBe('offline')
-  })
-
-  it('keeps the selected runtime card informational without a duplicate chat CTA', () => {
-    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-
-    expect(container.querySelector('.kw-fleet-aside')).not.toBeNull()
+    // The top card duplicated the 런타임/컨텍스트 sections below it. Its inline
+    // lifecycle actions (pause/resume/wakeup/boot) are not lost — they remain in
+    // the roster row menu + keeper action panel.
+    expect(container.querySelector('.kw-fleet-aside')).toBeNull()
+    expect(container.querySelector('.kw-fleet-aside-state')).toBeNull()
+    expect(container.querySelector('.kw-fleet-actions')).toBeNull()
     expect(container.querySelector('.kw-fleet-chat')).toBeNull()
     expect(container.textContent).not.toContain('대화 콘솔 열기')
   })

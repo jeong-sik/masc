@@ -380,7 +380,6 @@ let run_turn
             ("context_digest", `String context_digest);
           ]))
     Keeper_runtime_manifest.Context_injected;
-  let _world_observation_is_advisory = world_observation in
   (* 7. Set up agent — delegated to Keeper_run_tools *)
   let setup =
     Keeper_run_tools.prepare_agent_setup
@@ -626,6 +625,18 @@ let run_turn
                  in
                  let contract_status = completion_contract_status () in
                  acc.receipt_completion_contract_result <- contract_status;
+                 (* Root B (#22710): capture the world-observation actionable
+                    signal alongside the contract status so the receipt carries
+                    the real "is there anything to do" signal. [operator_disposition]
+                    uses it to replace the [goal_ids = []] proxy. [None] when no
+                    observation was threaded (disposition stays broadcast-required;
+                    conservative). *)
+                 acc.receipt_actionable_signal <-
+                   Option.map
+                     (fun obs ->
+                       Keeper_contract_classifier.classify_actionable_signal
+                         (Keeper_contract_classifier.of_keeper_world_observation obs))
+                     world_observation;
                      (match
                         normalize_response_text_for_finalization
                           ~runtime_id:runtime_id_string

@@ -80,6 +80,7 @@ let prepare_agent_setup
     ; requested_tool_names = []
     ; receipt_completion_contract_result =
         Keeper_execution_receipt.Contract_unknown
+    ; receipt_actionable_signal = None
     ; prompt_blocks = []
     ; extra_system_context_digest = None
     ; extra_system_context_size = None

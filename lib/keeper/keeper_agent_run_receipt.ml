@@ -154,6 +154,7 @@ let finalize
     ; response_text_present = !receipt_response_text_present_ref
     ; model_used = !receipt_model_used_ref
     ; completion_contract_result
+    ; actionable_signal = acc.receipt_actionable_signal
     ; tool_surface =
         { turn_lane = acc.tool_surface.turn_lane }
     ; sandbox_kind = Keeper_execution_receipt.sandbox_kind_of_meta meta

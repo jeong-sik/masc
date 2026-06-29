@@ -28,6 +28,8 @@ type hook_accumulator = Keeper_run_tools_hook_accumulator.hook_accumulator =
   ; mutable requested_tool_names : string list
   ; mutable receipt_completion_contract_result :
       Keeper_execution_receipt.completion_contract_result
+  ; mutable receipt_actionable_signal :
+      Keeper_contract_classifier.actionable_signal option
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
@@ -42,6 +44,8 @@ type hook_outputs = Keeper_run_tools_hook_accumulator.hook_outputs =
   ; out_requested_tool_names : string list
   ; out_receipt_completion_contract_result :
       Keeper_execution_receipt.completion_contract_result
+  ; out_receipt_actionable_signal :
+      Keeper_contract_classifier.actionable_signal option
   }
 
 let freeze = Keeper_run_tools_hook_accumulator.freeze

@@ -26,6 +26,12 @@ type hook_accumulator =
        before_turn_params hook, read at the receipt/TurnRecord write site
        in run_turn. Last-write-wins matches the turn-context cell
        semantics the receipt already uses. *)
+  ; mutable receipt_actionable_signal :
+      Keeper_contract_classifier.actionable_signal option
+    (* Root B (#22710): world-observation actionable signal computed from the
+       turn's [world_observation] in run_turn, carried into the receipt so
+       [operator_disposition] can replace the [goal_ids = []] proxy. [None]
+       until the contract-status write site sets it. *)
   ; mutable prompt_blocks : Turn_record.prompt_block list
   ; mutable extra_system_context_digest : string option
   ; mutable extra_system_context_size : int option
@@ -40,6 +46,8 @@ type hook_outputs =
   ; out_requested_tool_names : string list
   ; out_receipt_completion_contract_result :
       Keeper_execution_receipt.completion_contract_result
+  ; out_receipt_actionable_signal :
+      Keeper_contract_classifier.actionable_signal option
   }
 
 let freeze (acc : hook_accumulator) : hook_outputs =
@@ -50,6 +58,7 @@ let freeze (acc : hook_accumulator) : hook_outputs =
   ; out_tool_surface = acc.tool_surface
   ; out_requested_tool_names = acc.requested_tool_names
   ; out_receipt_completion_contract_result = acc.receipt_completion_contract_result
+  ; out_receipt_actionable_signal = acc.receipt_actionable_signal
   }
 ;;
 

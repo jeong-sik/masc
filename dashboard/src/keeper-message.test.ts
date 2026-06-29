@@ -168,12 +168,15 @@ describe('normalizeKeeperConversationDetails', () => {
         input_tokens: 100,
         output_tokens: 50,
         total_tokens: 150,
+        cache_creation_input_tokens: 7,
+        cache_read_input_tokens: 11,
+        cost_usd: 0.04,
       },
     })
     expect(result).not.toBeNull()
     expect(result!.traceId).toBe('trace-123')
     expect(result!.generation).toBe(5)
-    expect(result!.modelUsed).toBeNull()
+    expect(result!.modelUsed).toBe('gpt-4')
     expect(result!.latencyMs).toBe(1500)
     expect(result!.costUsd).toBe(0.05)
     expect(result!.skillPrimary).toBe('router')
@@ -183,6 +186,9 @@ describe('normalizeKeeperConversationDetails', () => {
       inputTokens: 100,
       outputTokens: 50,
       totalTokens: 150,
+      cacheCreationInputTokens: 7,
+      cacheReadInputTokens: 11,
+      costUsd: 0.04,
     })
   })
 

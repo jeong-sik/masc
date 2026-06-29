@@ -60,6 +60,11 @@ let assoc_int key fields =
   | Some (`Int value) -> Some value
   | _ -> None
 
+let assoc_assoc key fields =
+  match List.assoc_opt key fields with
+  | Some (`Assoc value) -> Some value
+  | _ -> None
+
 let test_agent_name_for_channel_actor () =
   let agent_name =
     Gate_keeper_backend.agent_name_for_channel_actor
@@ -539,6 +544,60 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
                 | Keeper_chat_events.Event_error _ -> "error"
                 | _ -> "other")
               events))
+
+let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
+  let open Agent_sdk.Types in
+  let usage_start =
+    { input_tokens = 10;
+      output_tokens = 1;
+      cache_creation_input_tokens = 3;
+      cache_read_input_tokens = 4;
+      cost_usd = None }
+  in
+  let usage_delta =
+    { usage_start with output_tokens = 2; cost_usd = Some 0.125 }
+  in
+  let events =
+    translate_oas_stream_events
+      [
+        MessageStart
+          { id = "msg-oas-1"; model = "gpt-5.5"; usage = Some usage_start };
+        MessageDelta { stop_reason = Some EndTurn; usage = Some usage_delta };
+        MessageStop;
+        Ping;
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Custom
+        { name = "KEEPER_STREAM_MESSAGE_START"; value = `Assoc start };
+      Keeper_chat_events.Custom
+        { name = "KEEPER_STREAM_MESSAGE_DELTA"; value = `Assoc delta };
+      Keeper_chat_events.Custom
+        { name = "KEEPER_STREAM_MESSAGE_STOP"; value = `Null };
+      Keeper_chat_events.Custom { name = "KEEPER_STREAM_PING"; value = `Null } ] ->
+      let start_usage =
+        assoc_assoc "usage" start |> Option.value ~default:[]
+      in
+      let delta_usage =
+        assoc_assoc "usage" delta |> Option.value ~default:[]
+      in
+      check (option string) "provider message id" (Some "msg-oas-1")
+        (assoc_string "provider_message_id" start);
+      check (option string) "model" (Some "gpt-5.5")
+        (assoc_string "model" start);
+      check (option int) "start input tokens" (Some 10)
+        (assoc_int "input_tokens" start_usage);
+      check (option int) "start total tokens" (Some 11)
+        (assoc_int "total_tokens" start_usage);
+      check (option int) "cache creation tokens" (Some 3)
+        (assoc_int "cache_creation_input_tokens" start_usage);
+      check (option string) "stop reason" (Some "end_turn")
+        (assoc_string "stop_reason" delta);
+      check (option int) "delta output tokens" (Some 2)
+        (assoc_int "output_tokens" delta_usage);
+      check (option int) "delta total tokens" (Some 12)
+        (assoc_int "total_tokens" delta_usage)
+  | _ -> fail "expected OAS message lifecycle metadata events"
 
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_sdk.Types in
@@ -1333,6 +1392,8 @@ let () =
             test_keeper_stream_args_preserve_user_blocks;
           test_case "stream bridge preserves interleaved thinking and tool" `Quick
             test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool;
+          test_case "stream bridge surfaces OAS message metadata" `Quick
+            test_keeper_stream_bridge_surfaces_oas_message_metadata;
           test_case "stream bridge rejects tool args without start" `Quick
             test_keeper_stream_bridge_rejects_tool_args_without_start;
           test_case "stream bridge surfaces unknown and incomplete events" `Quick

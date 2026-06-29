@@ -3,9 +3,10 @@
     Decomposes the previously monolithic [pre_tool_use] guard chain
     (streak / deny / cost / destructive / governance) into standalone
     OAS [Hooks.hooks] records that stack via
-    [Agent_sdk.Hooks.compose]. Each guard fills only the
-    [pre_tool_use] slot; composition short-circuits on the first
-    non-[Continue] decision.
+    [Agent_sdk.Hooks.compose]. Most guards fill only the
+    [pre_tool_use] slot; lifecycle-sensitive guards may also observe
+    post-tool slots while still short-circuiting only from
+    [pre_tool_use].
 
     Design principles:
     - Public SDK boundary (C0): OAS is consumed as-is. No OAS-side
@@ -221,6 +222,10 @@ let record_gate_rejection_log_severity ?reason_key
 
 let planner_alternative_for_gate ~stage ~tool_name =
   match stage with
+  | "readonly_observation_duplicate" ->
+    Printf.sprintf
+      "planner_alternative=\"stop retrying %s with identical input; use the prior observation, choose a different tool/input, mutate state, or report no-work/blocker directly\""
+      tool_name
   | "streak_gate" ->
     Printf.sprintf
       "planner_alternative=\"stop retrying %s; choose a different tool, batch remaining work, or report no-work/blocker directly\""
@@ -452,6 +457,64 @@ type streak_state = { mutable entry : string * int }
 
 let make_streak_state () : streak_state = { entry = ("", 0) }
 
+(** Guarded read-only observation state inside one Agent.run turn.
+    [previous_success] is confirmed only from a successful PostToolUse event;
+    [pending] catches same-batch duplicate reads before the first result lands.
+    The input is stored as canonical JSON, not a lossy digest, so equality is
+    exact after object-key normalization. *)
+type readonly_observation_state = {
+  mutable previous_success : (string * string) option;
+  mutable pending : (string * string) list;
+}
+
+let make_readonly_observation_state () : readonly_observation_state =
+  { previous_success = None; pending = [] }
+
+let reset_readonly_observation_state state =
+  state.previous_success <- None;
+  state.pending <- []
+
+let rec canonical_json = function
+  | `Assoc fields ->
+    fields
+    |> List.map (fun (key, value) -> key, canonical_json value)
+    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    |> fun fields -> `Assoc fields
+  | `List values -> `List (List.map canonical_json values)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json -> json
+
+let canonical_input_string input =
+  canonical_json input |> Yojson.Safe.to_string
+
+let read_only_snapshot_observation ~tool_name ~input =
+  match
+    ( Keeper_tool_descriptor_resolution.readonly_for_tool_call ~tool_name ~input
+    , Keeper_tool_descriptor_resolution.effect_domain_for_tool_name tool_name )
+  with
+  | Some true, Some Tool_catalog.Read_only ->
+    not (Keeper_tool_capability_axis.supports Keeper_tool_capability_axis.Polling_read tool_name)
+  | Some false, _
+  | None, _
+  | _, Some (Tool_catalog.Masc_workspace
+            | Tool_catalog.Playground_write
+            | Tool_catalog.Host_repo_write)
+  | _, None -> false
+
+let readonly_observation_key ~tool_name ~input =
+  let canonical_tool_name = Keeper_tool_capability_axis.canonical_tool_name tool_name in
+  canonical_tool_name, canonical_input_string input
+
+let readonly_observation_remove_pending state key =
+  state.pending <- List.filter (fun pending -> pending <> key) state.pending
+
+let readonly_observation_record_success state key =
+  readonly_observation_remove_pending state key;
+  state.previous_success <- Some key
+
+let readonly_observation_record_failure state key =
+  readonly_observation_remove_pending state key;
+  state.previous_success <- None
+
 (* -------------------------------------------------------------- *)
 (* Timing guard — records tool_start_time for post_tool_use use    *)
 (* -------------------------------------------------------------- *)
@@ -565,6 +628,103 @@ let streak_guard
       end
       else Agent_sdk.Hooks.Continue
     | _ -> Agent_sdk.Hooks.Continue)
+
+(** Consecutive duplicate read-only snapshot gate.
+
+    Same tool + same canonical input + descriptor-proven read-only/snapshot
+    semantics cannot produce new in-turn workspace progress unless an
+    intervening mutation or different observation occurred. Polling tools are
+    classified separately by [Keeper_tool_capability_axis.Polling_read] and are
+    intentionally exempt.
+
+    The blocking decision runs in [pre_tool_use], but completed observations are
+    confirmed only by a successful [post_tool_use]. This preserves legitimate
+    retry after a failed read-only call while still blocking same-batch duplicate
+    pending calls. *)
+let readonly_observation_duplicate_guard
+    ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
+    ~on_gate_decision
+    ~(state : readonly_observation_state)
+  : Agent_sdk.Hooks.hooks =
+  let pre_tool_use event =
+    match event with
+    | Agent_sdk.Hooks.PreToolUse
+        { tool_name; input; accumulated_cost_usd; turn; _ } ->
+      let t0 = Time_compat.now () in
+      let keeper_name = (!meta_ref).name in
+      if not (read_only_snapshot_observation ~tool_name ~input) then (
+        reset_readonly_observation_state state;
+        Agent_sdk.Hooks.Continue)
+      else
+        let key = readonly_observation_key ~tool_name ~input in
+        let duplicate_pending = List.mem key state.pending in
+        let duplicate_success =
+          match state.previous_success with
+          | Some previous -> previous = key
+          | None -> false
+        in
+        if duplicate_pending || duplicate_success
+        then (
+          let reason_text =
+            Printf.sprintf
+              "%s repeated the same read-only observation with identical input. Use the prior observation, choose a different tool/input, mutate state, or finish with a direct no-work/blocker response"
+              tool_name
+          in
+          let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+          Otel_metric_store.inc_counter
+            Keeper_metrics.(to_string GuardsFailures)
+            ~labels:
+              [ ("keeper", keeper_name); ("site", "readonly_observation_duplicate") ]
+            ();
+          log_gate_rejection
+            ~keeper_name ~stage:"readonly_observation_duplicate" ~tool_name
+            ~reason_code:"readonly_observation_duplicate"
+            "keeper:%s readonly_observation_duplicate: %s repeated identical read-only input, blocking"
+            keeper_name tool_name;
+          broadcast_tool_skipped
+            ~keeper_name ~tool_name ~reason_code:"readonly_observation_duplicate";
+          let source_path = keeper_guards_source_path in
+          let source_line = __LINE__ in
+          report_gate_decision on_gate_decision
+            ~source_path:(Some source_path) ~source_line:(Some source_line)
+            ~stage:"readonly_observation_duplicate" ~decision:Gate_override
+            ~reason_code:"readonly_observation_duplicate" ~reason_text
+            ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+            ~stage_latency_ms:latency_ms;
+          Agent_sdk.Hooks.Override
+            (render_inline_skip_reason_with_source
+               ~source_path ~source_line
+               ~tool_name ~reason_code:"readonly_observation_duplicate"
+               ~reason_text))
+        else (
+          state.pending <- key :: state.pending;
+          Agent_sdk.Hooks.Continue)
+    | _ -> Agent_sdk.Hooks.Continue
+  in
+  let post_tool_use event =
+    match event with
+    | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; _ } ->
+      (if read_only_snapshot_observation ~tool_name ~input
+       then
+        let key = readonly_observation_key ~tool_name ~input in
+        (match output with
+         | Ok _ -> readonly_observation_record_success state key
+         | Error _ -> readonly_observation_record_failure state key));
+      Agent_sdk.Hooks.Continue
+    | _ -> Agent_sdk.Hooks.Continue
+  in
+  let post_tool_use_failure event =
+    match event with
+    | Agent_sdk.Hooks.PostToolUseFailure _ ->
+      reset_readonly_observation_state state;
+      Agent_sdk.Hooks.Continue
+    | _ -> Agent_sdk.Hooks.Continue
+  in
+  { Agent_sdk.Hooks.empty with
+    pre_tool_use = Some pre_tool_use;
+    post_tool_use = Some post_tool_use;
+    post_tool_use_failure = Some post_tool_use_failure;
+  }
 
 (** Keeper deny list. Block administrative / destructive tools that
     should only be invoked by operators or controlled workflows. *)
@@ -727,12 +887,13 @@ let governance_approval_guard
     Order matters: the first guard to return a non-[Continue]
     decision wins (short-circuit via [Hooks.compose]). Preserves the
     ordering of the previous monolithic implementation:
-      timing -> custom -> streak -> deny -> cost telemetry passthrough -> destructive ->
-      governance_approval *)
+      timing -> custom -> read-only observation duplicate -> streak -> deny
+      -> cost telemetry passthrough -> destructive -> governance_approval *)
 let build_chain
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
     ~(tool_start_time : float ref)
     ~(streak_state : streak_state)
+    ~(readonly_observation_state : readonly_observation_state)
     ~(streak_threshold : int)
     ~(denied : string list)
     ~(max_cost_usd : float option)
@@ -744,6 +905,8 @@ let build_chain
   compose_all [
     timing_guard ~tool_start_time;
     custom_guard ~meta_ref ~on_gate_decision ~guard:pre_tool_use_guard;
+    readonly_observation_duplicate_guard
+      ~meta_ref ~on_gate_decision ~state:readonly_observation_state;
     streak_guard ~meta_ref ~on_gate_decision ~state:streak_state ~threshold:streak_threshold;
     deny_guard ~meta_ref ~on_gate_decision ~denied;
     cost_guard ~meta_ref ~on_gate_decision ~max_cost_usd;

@@ -5,17 +5,36 @@
    and total over [Agent_sdk.Types] (exhaustive matches, no catch-all). *)
 
 let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
-  List.filter_map
+  match msg.role with
+  | Agent_sdk.Types.Assistant ->
+    List.filter_map
+      (function
+        | Agent_sdk.Types.ToolUse { id; _ } -> Some id
+        (* Only assistant [ToolUse] blocks are provider tool-call anchors. *)
+        | Agent_sdk.Types.Text _
+        | Agent_sdk.Types.Thinking _
+        | Agent_sdk.Types.RedactedThinking _
+        | Agent_sdk.Types.ToolResult _
+        | Agent_sdk.Types.Image _
+        | Agent_sdk.Types.Document _
+        | Agent_sdk.Types.Audio _ -> None)
+      msg.content
+  | Agent_sdk.Types.System
+  | Agent_sdk.Types.User
+  | Agent_sdk.Types.Tool -> []
+;;
+
+let has_tool_use_block (msg : Agent_sdk.Types.message) : bool =
+  List.exists
     (function
-      | Agent_sdk.Types.ToolUse { id; _ } -> Some id
-      (* Only [ToolUse] carries a tool-use id; other blocks contribute none. *)
+      | Agent_sdk.Types.ToolUse _ -> true
       | Agent_sdk.Types.Text _
       | Agent_sdk.Types.Thinking _
       | Agent_sdk.Types.RedactedThinking _
       | Agent_sdk.Types.ToolResult _
       | Agent_sdk.Types.Image _
       | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ -> None)
+      | Agent_sdk.Types.Audio _ -> false)
     msg.content
 ;;
 

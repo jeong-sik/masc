@@ -230,6 +230,14 @@ let assistant_tool_use ?(input = `Null) id name : Agent_sdk.Types.message =
   ; metadata = []
   }
 
+let user_tool_use ?(input = `Null) id name : Agent_sdk.Types.message =
+  { role = Agent_sdk.Types.User
+  ; content = [ Agent_sdk.Types.ToolUse { id; name; input } ]
+  ; name = None
+  ; tool_call_id = None
+  ; metadata = []
+  }
+
 let assistant_text_and_tool_use ?(input = `Null) text id name : Agent_sdk.Types.message =
   { role = Agent_sdk.Types.Assistant
   ; content =
@@ -497,6 +505,35 @@ let test_pair_repair_preserves_contiguous_result_span () =
   Alcotest.(check (pair int int))
     "contiguous span ToolUse and ToolResult blocks preserved"
     (2, 2)
+    (count_tool_blocks repaired)
+
+let test_pair_repair_rejects_non_assistant_tool_use_anchor () =
+  let messages =
+    [ user_tool_use "toolu_user" "lookup"
+    ; tool_result_message ~role:Agent_sdk.Types.Tool "toolu_user" "ok"
+    ]
+  in
+  let repaired, stats = KC.repair_broken_tool_call_pairs_with_stats messages in
+  Alcotest.(check int)
+    "non-assistant ToolUse is dropped"
+    1
+    stats.dropped_tool_uses;
+  Alcotest.(check int)
+    "matching result is still orphan"
+    1
+    stats.dropped_tool_results;
+  Alcotest.(check (list (pair string string)))
+    "invalid ToolUse sample preserved"
+    [ "toolu_user", "lookup" ]
+    stats.dropped_tool_use_samples;
+  Alcotest.(check (list string))
+    "orphan result id preserved"
+    [ "toolu_user" ]
+    stats.dropped_tool_result_ids;
+  Alcotest.(check int) "structural messages removed" 0 (List.length repaired);
+  Alcotest.(check (pair int int))
+    "no malformed tool blocks survive"
+    (0, 0)
     (count_tool_blocks repaired)
 
 let test_pair_repair_moves_late_results_before_interstitial_turns () =
@@ -789,6 +826,8 @@ let () =
         test_pair_repair_preserves_same_message_tool_pair;
       Alcotest.test_case "pair repair preserves contiguous result span" `Quick
         test_pair_repair_preserves_contiguous_result_span;
+      Alcotest.test_case "pair repair rejects non-assistant tool-use anchor" `Quick
+        test_pair_repair_rejects_non_assistant_tool_use_anchor;
       Alcotest.test_case "pair repair moves late results before interstitial turns" `Quick
         test_pair_repair_moves_late_results_before_interstitial_turns;
       Alcotest.test_case "pair repair drops only invalid span blocks" `Quick

@@ -1,6 +1,6 @@
-# Contributing to MASC MCP
+# Contributing to MASC
 
-MASC (Multi-Agent Shared Context) is an OCaml 5.x MCP server for alignment multiple coding agents inside one repository.
+MASC is a repo-local MCP server for coordinating Keepers, MCP clients, and workspace state inside one repository. This document is about contributing to this codebase; it is not meant to justify the whole design.
 
 ## Quick Start
 
@@ -16,11 +16,11 @@ scripts/opam-pin-external-deps.sh
 # 3. Install OCaml dependencies
 opam install . --deps-only
 
-# 4. Build
-dune build --root .
+# 4. Focused local build
+scripts/dune-local.sh build @default
 
-# 5. Run tests
-make test
+# 5. Run a focused test while developing
+scripts/dune-local.sh exec test/test_config_runtime_split.exe
 
 # 6. Start server (HTTP mode)
 ./start-masc.sh --http
@@ -30,12 +30,12 @@ make test
 
 ### Code Style
 
-- **OCaml 5.x + Eio** — Structured concurrency with `Eio.Switch`, `Eio.Fiber`, `Eio.Time`
+- **OCaml 5.x + Eio** — the current project stack; follow existing direct-style Eio patterns
 - **No blocking IO** — `Unix.sleepf` / `Lwt.bind` are forbidden; use `Eio.Time.sleep`
-- **Type Safety** — Leverage `ppx_deriving` for JSON serialization, avoid `Obj.magic`
+- **Type safety** — prefer typed variants/records for runtime contracts, and avoid `Obj.magic`
 - **Result types** — Use `Result.t` over exceptions for recoverable errors
 - **Resource cleanup** — `Eio.Switch.on_release` over nested `Fun.protect`
-- **Pure Functions** — Extract testable logic from IO code
+- **Pure functions** — extract testable logic from IO code when it keeps the change simpler
 
 ### Project Structure
 
@@ -74,19 +74,19 @@ test/                         # Alcotest suites + fixtures
 ### Testing
 
 - **Test framework**: Alcotest
-- **Test files**: ~205 (unit + coverage + integration + benchmarks)
+- **Test files**: many focused Alcotest suites plus coverage/integration/benchmark harnesses
 - **Pure functions**: Tested without mocking
-- **IO functions**: Integration tested with real Neo4j (optional)
+- **IO functions**: tested with integration harnesses when the required service is configured
 
 ```bash
-# Run all tests
-make test
+# Run a focused test through the repo wrapper
+scripts/dune-local.sh exec test/test_config_runtime_split.exe
 
 # Run specific test
-dune exec test/test_council.exe
+scripts/dune-local.sh exec test/<test-name>.exe
 
-# Build only (fast check)
-dune build
+# Build only
+scripts/dune-local.sh build @default
 
 # Build + run a Valgrind leak check on the HTTP server startup/MCP smoke path
 make check-memory-leak
@@ -123,10 +123,10 @@ chore: bump version to 0.9.0
 
 1. **Create branch**: `feat/description` or `fix/description`
 2. **Write tests** for new functionality
-3. **Run tests**: `make test` must pass
-4. **Build**: `dune build` must succeed cleanly
+3. **Run relevant local checks** for changed files through `scripts/dune-local.sh`
+4. **Let CI own full-suite truth** when the PR opens
 5. **Open a draft PR** linked to at least one issue
-6. **Include review evidence** from a non-self model
+6. **Include review evidence** when the repo workflow or reviewer asks for it
 7. **Wait for review**
 
 ### Release Versioning
@@ -140,7 +140,7 @@ chore: bump version to 0.9.0
 
 ## GitHub Planning Rules
 
-`masc` uses GitHub as an operating system for product planning.
+`masc` uses GitHub issues, labels, and PRs for product planning.
 
 Every new issue should end with:
 
@@ -163,7 +163,7 @@ Triage defaults:
 - `target:next` for advanced workflow improvements
 - `target:later` for extraction, speculative platform work, or deep architecture cleanup
 
-See [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) for the full operating model.
+See [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md) for the detailed planning model.
 
 ## PR Description Expectations
 
@@ -185,26 +185,29 @@ Cross-model review evidence should use direct `sb glm-text` when available. If a
 
 ## Architecture Decisions
 
-### Why OCaml 5.x + Eio?
+### OCaml 5.x + Eio notes
 
-- `Switch.run` scopes fiber lifetime — resources released when switch exits
-- Compile-time type checking catches many refactoring errors before runtime
-- Native binary, single executable, no interpreter overhead
-- Eio provides direct-style async (no monadic chaining like Lwt)
+OCaml/Eio is the current implementation stack, not a general recommendation.
+The project uses it because it has worked well enough for this experiment and
+because most runtime code already follows that shape.
 
-### Dual-stream Storage (File + Neo4j)
+- `Switch.run` scopes fiber lifetime; release resources when the switch exits.
+- Compile-time checks catch many record/variant drift errors before runtime.
+- The server builds as a native binary.
+- Eio uses direct-style async; avoid introducing Lwt-style control flow.
 
-- File writes are synchronous and always attempted first (`.masc/` directory)
-- Neo4j writes are async, best-effort — failure does not block the request
-- On restart, files can be synced to Neo4j
-- State files are JSON, human-readable
+### State Storage
 
-### MODEL Runtime
+- Runtime state is filesystem-first under `<base-path>/.masc/`.
+- State files are JSON/JSONL where practical so operators can inspect them.
+- Optional graph/vector integrations are workflow-specific. They are not required for a basic local build, boot, or Keeper turn.
+
+### Runtime Assignment
 
 - Runtime order is controlled by `runtime.toml` at the resolved config root.
 - Missing or invalid `runtime.toml` is a config error; the retired `runtime.json` fallback is not used.
-- If a slot returns empty or errors, the next slot is tried
-- Claude API keys are rotated round-robin per heartbeat tick
+- Keeper TOML/profile files do not own concrete model/provider selection.
+- Keeper-specific routing lives in `runtime.toml` under `[runtime.assignments]`, keyed by keeper name. Unassigned keepers use `[runtime].default`.
 - Runtime catalog changes in `runtime.toml` apply on the next runtime resolve.
 
 ### Runtime Lens Boundary (provider/model identity in JSON)
@@ -245,5 +248,5 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Questions? Open an issue or reach out to maintainers.
+Questions? Open an issue with the reproduction details above.
  

@@ -2,18 +2,18 @@
 
 > Current package version: v0.19.54
 > Latest changelog entry: v0.19.54 (2026-06-29)
-> Latest published GitHub release: v0.19.45 (2026-06-17)
+> Latest published GitHub release: v0.19.51 (2026-06-28)
 > Updated: 2026-06-29
 
-This roadmap is the 6-8 week operating view for `masc`.
-For the product promise and GitHub operating model, see [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md).
+This roadmap is the 6-8 week operating view for `masc`. It is a planning document, not a release promise.
+For the product scope and GitHub planning model, see [docs/PRODUCT-OPERATING-PLAN.md](docs/PRODUCT-OPERATING-PLAN.md).
 For historical feature-train rules and release intake background, see [docs/VERSIONED-ROADMAP.md](docs/VERSIONED-ROADMAP.md).
 
-## Product Promise
+## Product Scope
 
-`masc` is a repo-local MCP server for aligning multiple coding agents inside one repository.
+`masc` is a repo-local MCP server for coordinating long-running Keepers, MCP clients, and workspace state inside one repository.
 
-Promise levels:
+Scope levels:
 
 - Front door: repo workspace collaboration
 - Supporting: dashboard and operator visibility
@@ -24,12 +24,12 @@ Promise levels:
 | Track | Goal | Why now | Primary references |
 |------|------|---------|--------------------|
 | Product truth and onboarding | Make the product easy to describe and start correctly | front-door docs and product posture are still fragmented | `README.md`, `docs/PRODUCT-OPERATING-PLAN.md`, `docs/PRODUCT-REVIEW.md` |
-| GitHub as operating system | Make issues, PRs, and releases reflect product reality instead of drifting | `type:*` exists, but `target:*` and release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
-| Promise hardening | Tighten the parts of the product users actually depend on first | CI truth, transport truth, config visibility, and release truth are blocking trust | `CHANGELOG.md`, `docs/spec/C-implementation-status.md`, open issues below |
+| GitHub planning hygiene | Make issues, PRs, and releases reflect product reality instead of drifting | `type:*` exists, but `target:*` and release blockers are not consistently enforced | `.github/ISSUE_TEMPLATE/*`, `.github/workflows/*`, `CONTRIBUTING.md` |
+| Scope hardening | Tighten the parts of the product users actually depend on first | CI truth, transport truth, config visibility, and release truth are blocking trust | `CHANGELOG.md`, `docs/spec/C-implementation-status.md`, open issues below |
 
 ## target:now
 
-Items that directly affect the current product promise:
+Items that directly affect the current product scope:
 
 - CI truth and merge gates
   - `#3418` quick-suite Eio regression
@@ -47,10 +47,10 @@ Items that directly affect the current product promise:
 
 ## target:next
 
-Items that improve advanced workflows after the front-door promise is cleaner:
+Items that improve advanced workflows after the front-door scope is cleaner:
 
 - auth and API contract hardening for non-local operation
--   - ready-to-delegate contract
+- ready-to-delegate contract
   - verifier turn-budget reliability
   - clearer runtime / model visibility in proof
 - richer operator diagnosis bundles and deeper read confidence
@@ -67,7 +67,7 @@ Important work that stays visible but does not drive the next 6-8 weeks:
   - global mutable state reduction
   - actor/message-passing conversions
   - broad interface and error-pipeline refactors
-- speculative distribution and platform work
+- exploratory distribution and platform work
   - binary distribution
   - cluster mode
   - chaos framework
@@ -94,7 +94,7 @@ Legacy `v2.*` reference points:
 | Version | Theme | Key deliverables |
 |--------|-------|------------------|
 | v2.87.0 | Release closeout | CI green, changelog honesty, worktree cleanup |
-| v2.91.0 | Immortal Base | supervision, health, graceful shutdown |
+| v2.91.0 | Immortal Base (legacy tag name) | supervision, health, graceful shutdown |
 | v2.92.0 | Product Portfolio Trim | explicit keep / archive decisions for experimental surfaces |
 | v2.93.0-v2.158.0 | Incremental | see changelog and product operating plan |
 

@@ -3,9 +3,9 @@
 ## Unreleased
 
 ### Changed
-- Bump OAS agent_sdk pin to 0.207.19 plus the integrated OAS #2232/#2243
-  `d1b46c3` assistant tool-content and fail-closed unknown-stream-block
-  follow-up SHA.
+- Bump OAS agent_sdk pin to 0.207.19 plus the focused OAS #2244
+  `f085fc2` assistant tool-content and fail-closed unknown-stream-block
+  branch SHA.
 
 ### Fixed
 - Prune synthetic empty keeper replay suffixes from OAS checkpoints and record a

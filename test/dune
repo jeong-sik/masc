@@ -1987,6 +1987,8 @@
 
 (include stanzas/test_normalized_actor.inc)
 
+(include stanzas/test_dashboard_interaction_judge_contract.inc)
+
 (include stanzas/test_oas_bridge_judge_callers_9629.inc)
 
 (include stanzas/test_oas_bridge_timeout_ssot_10094.inc)

@@ -207,28 +207,31 @@ type thinking_log_summary =
   }
 
 let summarize_thinking_blocks content =
-  let thinking_blocks = ref 0 in
-  let thinking_chars = ref 0 in
-  let redacted_thinking_blocks = ref 0 in
-  List.iter
-    (function
-      | Agent_sdk.Types.Thinking { content; _ } ->
-          incr thinking_blocks;
-          thinking_chars := !thinking_chars + String.length content
-      | Agent_sdk.Types.RedactedThinking _ -> incr redacted_thinking_blocks
-      | _ -> ())
-    content;
+  (* F2 canonical projection consumption: delegate block counting to the OAS
+     [Response_shape.summarize_blocks] (exhaustive per-variant fold) instead of
+     re-iterating with a [_ -> ()] catch-all that silently drops a new
+     thinking-bearing content_block variant. MASC keeps only the policy shaping
+     (thinking_present + thinking_kind classifier). The leading qualified field
+     anchors the pattern to [Response_shape.t] to disambiguate the shared
+     thinking_* field names. *)
+  let { Agent_sdk.Response_shape.thinking_blocks
+      ; thinking_chars
+      ; redacted_thinking_blocks
+      ; _
+      } =
+    Agent_sdk.Response_shape.summarize_blocks content
+  in
   let thinking_kind =
-    match !thinking_blocks > 0, !redacted_thinking_blocks > 0 with
+    match thinking_blocks > 0, redacted_thinking_blocks > 0 with
     | false, false -> "none"
     | true, false -> "thinking"
     | false, true -> "redacted"
     | true, true -> "mixed"
   in
-  { thinking_present = !thinking_blocks > 0 || !redacted_thinking_blocks > 0
-  ; thinking_blocks = !thinking_blocks
-  ; thinking_chars = !thinking_chars
-  ; redacted_thinking_blocks = !redacted_thinking_blocks
+  { thinking_present = thinking_blocks > 0 || redacted_thinking_blocks > 0
+  ; thinking_blocks
+  ; thinking_chars
+  ; redacted_thinking_blocks
   ; thinking_kind
   }
 

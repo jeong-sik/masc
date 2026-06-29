@@ -551,7 +551,48 @@ max-concurrent = 1
 |}
 ;;
 
+(* Resolve the repo root (containing the vendored OAS catalog) by walking up
+   from the test's cwd to the nearest [dune-project] — same resolution
+   test_runtime_config_validity.ml uses for its catalog-backed cases. *)
+let rec repo_root_from dir =
+  let dune_project = Filename.concat dir "dune-project" in
+  if Sys.file_exists dune_project
+  then dir
+  else (
+    let parent = Filename.dirname dir in
+    if String.equal parent dir
+    then Alcotest.failf "unable to locate repo root from cwd=%s" (Sys.getcwd ())
+    else repo_root_from parent)
+;;
+
+let repo_root () = repo_root_from (Sys.getcwd ())
+
+(* The per-model thinking gate derives preserve-thinking defaults from the OAS
+   capability catalog: [Runtime.default_preserve_thinking_for_model] runs a live
+   [capabilities_for_runtime] lookup against [Model_catalog.global ()].
+   Production seeds that global catalog at boot (server bootstrap /
+   [init_default_strict]); the routing-only [init_default] used here is
+   intentionally catalog-independent (runtime.ml: "kept out of load_list so unit
+   tests stay catalog-independent"), so without an explicit seed the lookup
+   returns [None] and the preserve-thinking default collapses to [None].  Seed
+   the vendored [oas-models.toml] — the same SSOT the server loads — so the
+   capability-derived default (qwen36-35b-a3b-mtp ->
+   chat_template_kwargs_preserve_thinking -> Some true) is exercised against the
+   committed catalog instead of a host-dependent
+   ~/.masc/config/capability-manifest.json.  Cleared via [Fun.protect] so the
+   process-global catalog never leaks into the sibling test groups in this same
+   binary. *)
 let with_runtime_thinking f =
+  let catalog_path = Filename.concat (repo_root ()) "oas-models.toml" in
+  if not (Sys.file_exists catalog_path)
+  then Alcotest.failf "repo oas-models.toml missing at %s" catalog_path;
+  let catalog =
+    match Llm_provider.Model_catalog.load_file catalog_path with
+    | Ok catalog -> catalog
+    | Error msg -> Alcotest.failf "repo oas-models.toml should load: %s" msg
+  in
+  Fun.protect ~finally:Llm_provider.Model_catalog.clear_global @@ fun () ->
+  Llm_provider.Model_catalog.set_global catalog;
   with_temp_dir "runtime-thinking-gate" @@ fun dir ->
   let path = Filename.concat dir "runtime.toml" in
   write_file path runtime_config_thinking;

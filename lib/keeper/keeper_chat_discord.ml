@@ -418,6 +418,16 @@ let adapter_loop ~token ~channel_id ~events ?base_url () =
         Log.Keeper.debug
           "keeper_chat_discord: custom event %s" name;
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
+    | Oas_stream_connected
+    | Oas_stream_message_start _
+    | Oas_stream_message_delta _
+    | Oas_stream_message_stop
+    | Oas_stream_ping
+    | Oas_thinking_delta _
+    | Oas_thinking_signature_delta _
+    | Oas_media_delta _
+    | Oas_stream_protocol_error _ ->
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Tool_call_start { tool_call_id; tool_call_name } ->
         let tool_msgs =
           match send_tool_running ~token ~channel_id ~tool_call_name with

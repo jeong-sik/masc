@@ -35,35 +35,18 @@ let read_file path =
 
 let translate_oas_stream_events events =
   let redact_text text = text in
-  let text_accum = Keeper_stream_text_accum.create () in
+  let on_text_delta text = text in
   let rec loop bridge_state acc = function
     | [] -> List.rev acc
     | event :: rest ->
         let translated =
-          Server_routes_http_keeper_stream.For_testing.translate_oas_stream_event
-            ~redact_text ~text_accum bridge_state event
+          Keeper_chat_oas_stream_bridge.translate ~redact_text ~on_text_delta
+            bridge_state event
         in
         loop translated.bridge_state
           (List.rev_append translated.chat_events acc) rest
   in
-  loop
-    Server_routes_http_keeper_stream.For_testing.empty_stream_bridge_state []
-    events
-
-let assoc_string key fields =
-  match List.assoc_opt key fields with
-  | Some (`String value) -> Some value
-  | _ -> None
-
-let assoc_int key fields =
-  match List.assoc_opt key fields with
-  | Some (`Int value) -> Some value
-  | _ -> None
-
-let assoc_assoc key fields =
-  match List.assoc_opt key fields with
-  | Some (`Assoc value) -> Some value
-  | _ -> None
+  loop Keeper_chat_oas_stream_bridge.empty_state [] events
 
 let test_agent_name_for_channel_actor () =
   let agent_name =
@@ -512,16 +495,13 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Custom
-        { name = "KEEPER_THINKING_DELTA"; value = `Assoc first };
+  | [ Keeper_chat_events.Oas_thinking_delta { delta = first };
       Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
       Keeper_chat_events.Tool_call_args { tool_call_id = args_id_a; delta = args_a };
       Keeper_chat_events.Tool_call_args { tool_call_id = args_id_b; delta = args_b };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id };
-      Keeper_chat_events.Custom
-        { name = "KEEPER_THINKING_DELTA"; value = `Assoc last } ] ->
-      check (option string) "first thinking" (Some "think A")
-        (assoc_string "delta" first);
+      Keeper_chat_events.Oas_thinking_delta { delta = last } ] ->
+      check string "first thinking" "think A" first;
       check string "tool id" "tc-1" tool_call_id;
       check string "tool name" "keeper_board_list" tool_call_name;
       check string "args id a" "tc-1" args_id_a;
@@ -529,14 +509,14 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
       check string "args a" "{\"limit\":" args_a;
       check string "args b" "1}" args_b;
       check string "end id" "tc-1" end_id;
-      check (option string) "last thinking" (Some "think B")
-        (assoc_string "delta" last)
+      check string "last thinking" "think B" last
   | _ ->
       failf "unexpected stream bridge events: %s"
         (String.concat ", "
            (List.map
               (function
                 | Keeper_chat_events.Custom { name; _ } -> "custom:" ^ name
+                | Keeper_chat_events.Oas_thinking_delta _ -> "oas_thinking"
                 | Keeper_chat_events.Tool_call_start _ -> "tool_start"
                 | Keeper_chat_events.Tool_call_args _ -> "tool_args"
                 | Keeper_chat_events.Tool_call_end _ -> "tool_end"
@@ -568,35 +548,24 @@ let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Custom
-        { name = "KEEPER_STREAM_MESSAGE_START"; value = `Assoc start };
-      Keeper_chat_events.Custom
-        { name = "KEEPER_STREAM_MESSAGE_DELTA"; value = `Assoc delta };
-      Keeper_chat_events.Custom
-        { name = "KEEPER_STREAM_MESSAGE_STOP"; value = `Null };
-      Keeper_chat_events.Custom { name = "KEEPER_STREAM_PING"; value = `Null } ] ->
-      let start_usage =
-        assoc_assoc "usage" start |> Option.value ~default:[]
-      in
-      let delta_usage =
-        assoc_assoc "usage" delta |> Option.value ~default:[]
-      in
-      check (option string) "provider message id" (Some "msg-oas-1")
-        (assoc_string "provider_message_id" start);
-      check (option string) "model" (Some "gpt-5.5")
-        (assoc_string "model" start);
-      check (option int) "start input tokens" (Some 10)
-        (assoc_int "input_tokens" start_usage);
-      check (option int) "start total tokens" (Some 11)
-        (assoc_int "total_tokens" start_usage);
-      check (option int) "cache creation tokens" (Some 3)
-        (assoc_int "cache_creation_input_tokens" start_usage);
-      check (option string) "stop reason" (Some "end_turn")
-        (assoc_string "stop_reason" delta);
-      check (option int) "delta output tokens" (Some 2)
-        (assoc_int "output_tokens" delta_usage);
-      check (option int) "delta total tokens" (Some 12)
-        (assoc_int "total_tokens" delta_usage)
+  | [ Keeper_chat_events.Oas_stream_message_start
+        { provider_message_id; model; usage = Some start_usage };
+      Keeper_chat_events.Oas_stream_message_delta
+        { stop_reason = Some stop_reason; usage = Some delta_usage };
+      Keeper_chat_events.Oas_stream_message_stop;
+      Keeper_chat_events.Oas_stream_ping ] ->
+      check string "provider message id" "msg-oas-1" provider_message_id;
+      check string "model" "gpt-5.5" model;
+      check int "start input tokens" 10 start_usage.input_tokens;
+      check int "start total tokens" 11
+        (Agent_sdk.Types.total_tokens start_usage);
+      check int "cache creation tokens" 3
+        start_usage.cache_creation_input_tokens;
+      check string "stop reason" "end_turn"
+        (Agent_sdk.Types.stop_reason_to_string stop_reason);
+      check int "delta output tokens" 2 delta_usage.output_tokens;
+      check int "delta total tokens" 12
+        (Agent_sdk.Types.total_tokens delta_usage)
   | _ -> fail "expected OAS message lifecycle metadata events"
 
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
@@ -606,11 +575,12 @@ let test_keeper_stream_bridge_rejects_tool_args_without_start () =
       [ ContentBlockDelta { index = 7; delta = InputJsonDelta "{\"x\":1}" } ]
   in
   match events with
-  | [ Keeper_chat_events.Custom
-        { name = "KEEPER_STREAM_PROTOCOL_ERROR"; value = `Assoc fields } ] ->
-      check (option string) "kind" (Some "tool_args_without_start")
-        (assoc_string "kind" fields);
-      check (option int) "index" (Some 7) (assoc_int "index" fields);
+  | [ Keeper_chat_events.Oas_stream_protocol_error
+        { kind; index = Some index; event_type = _; reason = _; raw_bytes = _ }
+    ] ->
+      check string "kind" "tool_args_without_start"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check int "index" 7 index;
       check bool "no tool event forged" true
         (not
            (List.exists
@@ -630,17 +600,16 @@ let test_keeper_stream_bridge_surfaces_unknown_and_incomplete_events () =
       ]
   in
   match events with
-  | [ Keeper_chat_events.Custom
-        { name = "KEEPER_STREAM_PROTOCOL_ERROR"; value = `Assoc unknown };
-      Keeper_chat_events.Custom
-        { name = "KEEPER_STREAM_PROTOCOL_ERROR"; value = `Assoc incomplete };
+  | [ Keeper_chat_events.Oas_stream_protocol_error
+        { kind = unknown_kind; event_type = Some event_type; _ };
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind = incomplete_kind; _ };
       Keeper_chat_events.Event_error { message } ] ->
-      check (option string) "unknown kind" (Some "sse_unknown_event_type")
-        (assoc_string "kind" unknown);
-      check (option string) "unknown event type" (Some "response.future")
-        (assoc_string "event_type" unknown);
-      check (option string) "incomplete kind" (Some "sse_stream_incomplete")
-        (assoc_string "kind" incomplete);
+      check string "unknown kind" "sse_unknown_event_type"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string unknown_kind);
+      check string "unknown event type" "response.future" event_type;
+      check string "incomplete kind" "sse_stream_incomplete"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string incomplete_kind);
       check string "incomplete is visible error"
         "Provider stream incomplete: max_output_tokens" message
   | _ -> fail "expected visible events for unknown/incomplete provider stream"

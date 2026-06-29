@@ -174,6 +174,7 @@ module For_testing : sig
   val turn_instructions_for_request : keeper_chat_stream_request -> string option
   val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
   val modalities_for_request : keeper_chat_stream_request -> string list
+  val extract_visible_reply : string -> Yojson.Safe.t option * string
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
 end

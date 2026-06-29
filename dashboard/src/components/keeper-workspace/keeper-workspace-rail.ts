@@ -13,19 +13,12 @@ import type { VNode } from 'preact'
 import { shellAuthSummary, tasks } from '../../store'
 import type { Keeper, Task } from '../../types'
 import { navigate } from '../../router'
-import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
-import { keeperActionVisibility } from '../../lib/keeper-predicates'
 import {
-  WorkspaceSigil,
   keeperBucket,
-  keeperFleetTone,
   keeperModelLabel,
-  keeperPhaseLabel,
   phaseTokenFromKeeper,
   keeperRuntimeLabel,
 } from './keeper-workspace-shared'
-import { phasePulse } from '../v2/keeper-fsm'
-import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { CountBadge } from '../v2/primitives-v2'
 import { callMcpTool } from '../../api/mcp'
 import { showToast } from '../common/toast'
@@ -134,116 +127,6 @@ function AttentionSection({ keeper }: { keeper: Keeper }): VNode | null {
 function formatCtxK(n: number | null | undefined): string | null {
   if (typeof n !== 'number' || !Number.isFinite(n) || n <= 0) return null
   return `${Math.round(n / 1000)}k ctx`
-}
-
-const FLEET_ACTION_LABELS: Record<KeeperActionKey, string> = {
-  pause: '일시정지',
-  resume: '재개',
-  wakeup: '깨우기',
-  boot: '기동',
-  shutdown: '종료',
-}
-
-function fleetLifecycleActions(keeper: Keeper): KeeperActionKey[] {
-  const visibility = keeperActionVisibility(keeper)
-  const actions: KeeperActionKey[] = []
-  if (visibility.canBoot) actions.push('boot')
-  if (visibility.canResume) actions.push('resume')
-  if (visibility.canWake && !visibility.canBoot) actions.push('wakeup')
-  if (visibility.canPause) actions.push('pause')
-  if (visibility.canShutdown) actions.push('shutdown')
-  return actions
-}
-
-async function runFleetKeeperAction(name: string, action: KeeperActionKey): Promise<void> {
-  await runKeeperAction(name, action)
-}
-
-function keeperRecentTools(keeper: Keeper): string[] {
-  const names = [
-    ...(keeper.latest_tool_names ?? []),
-    ...(keeper.recent_tool_names ?? []),
-  ].map(name => name.trim()).filter(Boolean)
-  if (names.length > 0) return Array.from(new Set(names)).slice(0, 4)
-  const count = keeper.latest_tool_call_count
-  return typeof count === 'number' && Number.isFinite(count) && count > 0 ? [`${count} tool calls`] : []
-}
-
-function FleetSelectedSection({ keeper }: { keeper: Keeper }): VNode {
-  const pressure = contextPercent(keeper)
-  const tools = keeperRecentTools(keeper)
-  const taskCount = ownedTasks(keeper).length
-  const latestTps = keeper.metrics_series?.at(-1)?.wall_tokens_per_second
-  const activity = keeperActivityDisplay(keeper)
-  const phase = keeperPhaseLabel(keeper)
-  const model = keeperModelLabel(keeper)
-  const runtime = keeperRuntimeLabel(keeper)
-  const tone = keeperFleetTone(keeper)
-  const lifecycle = keeper.phase || keeper.lifecycle_phase || keeper.status
-  // Phase-driven beat (prototype PHASE_PULSE SSOT). Coarse `bucket === 'running'`
-  // used to mark Draining as beating, which is wrong: Draining is warn-tone
-  // but static. phasePulse is the canonical 5-phase pulsing set.
-  const beat = phasePulse(lifecycle)
-  const actions = fleetLifecycleActions(keeper).filter(action => action !== 'shutdown').slice(0, 3)
-  const [pendingAction, setPendingAction] = useState<KeeperActionKey | null>(null)
-
-  return html`
-    <div class="kw-fleet-aside" data-tone=${tone}>
-      <div class="kw-fleet-aside-head">
-        <${WorkspaceSigil} id=${keeper.name} size=${40} beat=${beat} />
-        <div class="kw-fleet-aside-title">
-          <span class="kw-fleet-aside-kicker">Selected runtime</span>
-          <strong title=${keeper.agent_name || keeper.name}>${keeper.koreanName || keeper.agent_name || keeper.name}</strong>
-          <span title=${keeper.name}>${keeper.name}</span>
-        </div>
-        <span class="kw-fleet-aside-state" title=${keeper.status}>${phase}</span>
-      </div>
-      <div class="kw-fleet-phase" title=${activity.source !== 'none' ? activity.label : phase}>
-        <b>${phase}</b>
-        <span>${activity.source !== 'none' ? activity.label : '최근 활동 미수신'}</span>
-      </div>
-      <div class="kw-fleet-pressure">
-        <div>
-          <span>Context pressure</span>
-          <strong>${pressure === null ? '—' : `${pressure}%`}</strong>
-        </div>
-        <div class="kw-fleet-pressure-bar" aria-hidden="true"><i style=${{ width: `${pressure ?? 0}%` }}></i></div>
-      </div>
-      <div class="kw-fleet-vitals">
-        <div><span>model</span><b title=${model ?? ''}>${model ?? '—'}</b></div>
-        <div><span>runtime</span><b title=${runtime ?? ''}>${runtime ?? '—'}</b></div>
-        <div><span>phase</span><b title=${lifecycle}>${lifecycle}</b></div>
-        <div><span>tps</span><b>${typeof latestTps === 'number' ? latestTps.toFixed(1) : '—'}</b></div>
-        <div><span>tools</span><b>${keeper.latest_tool_call_count ?? tools.length}</b></div>
-        <div><span>tasks</span><b>${taskCount}</b></div>
-      </div>
-      ${tools.length > 0
-        ? html`<div class="kw-fleet-tools">${tools.map(tool => html`<span key=${tool} title=${tool}>${tool}</span>`)}</div>`
-        : null}
-      ${actions.length > 0
-        ? html`
-            <div class="kw-fleet-actions">
-              ${actions.map(action => html`
-                <button
-                  key=${action}
-                  type="button"
-                  class=${`kw-fleet-action${pendingAction === action ? ' busy' : ''}`}
-                  title=${`${keeper.name} ${FLEET_ACTION_LABELS[action]}`}
-                  aria-label=${`${keeper.name} ${FLEET_ACTION_LABELS[action]}`}
-                  aria-busy=${pendingAction === action ? 'true' : 'false'}
-                  disabled=${pendingAction !== null}
-                  onClick=${() => {
-                    if (pendingAction !== null) return
-                    setPendingAction(action)
-                    void runFleetKeeperAction(keeper.name, action).finally(() => setPendingAction(null))
-                  }}
-                >${pendingAction === action ? '실행중' : FLEET_ACTION_LABELS[action]}</button>
-              `)}
-            </div>
-          `
-        : null}
-    </div>
-  `
 }
 
 function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
@@ -479,7 +362,6 @@ export function KeeperWorkspaceRail({
   return html`
     <aside class="ctx" aria-label="키퍼 컨텍스트">
       <div class="ctx-scroll">
-        <${FleetSelectedSection} keeper=${keeper} />
         <${AttentionSection} keeper=${keeper} />
         <${RuntimeSection} keeper=${keeper} />
         <${ContextSection}

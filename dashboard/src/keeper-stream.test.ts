@@ -362,6 +362,31 @@ describe('applyKeeperStreamEvent', () => {
       { kind: 'think', text: 'checking tools', ts: expect.any(String) },
     ])
   })
+
+  it('splits thinking trace steps by OAS content block index', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 1, delta: 'checking ' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 1, delta: 'tools' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { index: 2, delta: 'next block' },
+    })
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.traceSteps).toEqual([
+      { kind: 'think', text: 'checking tools', ts: expect.any(String), oasBlockIndex: 1 },
+      { kind: 'think', text: 'next block', ts: expect.any(String), oasBlockIndex: 2 },
+    ])
+  })
 })
 
 describe('applyKeeperStreamEvent tool calls', () => {
@@ -448,6 +473,52 @@ describe('applyKeeperStreamEvent tool calls', () => {
         ts: expect.any(String),
       },
       { kind: 'think', text: 'think B', ts: expect.any(String) },
+    ])
+  })
+
+  it('preserves OAS content block index on tool trace steps', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTENT_BLOCK_START',
+      value: {
+        index: 7,
+        content_type: 'tool_use',
+        tool_call_id: 'tc-oas',
+        tool_call_name: 'keeper_board_list',
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-oas',
+      toolCallName: 'keeper_board_list',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      toolCallId: 'tc-oas',
+      delta: '{"limit":1}',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_END',
+      toolCallId: 'tc-oas',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTENT_BLOCK_STOP',
+      value: { index: 7 },
+    })
+
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      {
+        kind: 'tool',
+        name: 'keeper_board_list',
+        toolCallId: 'tc-oas',
+        status: 'ok',
+        args: '{"limit":1}',
+        ts: expect.any(String),
+        oasBlockIndex: 7,
+      },
     ])
   })
 

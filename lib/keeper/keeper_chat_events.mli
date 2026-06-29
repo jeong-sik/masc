@@ -48,10 +48,18 @@ type keeper_chat_event =
       }
   | Oas_stream_message_stop
   | Oas_stream_ping
-  | Oas_thinking_delta of { delta : string }
-  | Oas_thinking_signature_delta of { signature_bytes : int }
+  | Oas_content_block_start of
+      { index : int
+      ; content_type : string
+      ; tool_call_id : string option
+      ; tool_call_name : string option
+      }
+  | Oas_content_block_stop of { index : int }
+  | Oas_thinking_delta of { index : int; delta : string }
+  | Oas_thinking_signature_delta of { index : int; signature_bytes : int }
   | Oas_media_delta of
-      { media_type : string
+      { index : int
+      ; media_type : string
       ; source_type : Agent_sdk.Types.media_source_kind
       ; bytes : int
       }

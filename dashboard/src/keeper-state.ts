@@ -285,7 +285,14 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
   const kind = asString(raw.kind)
   if (kind === 'think') {
     const text = asString(raw.text)
-    return text !== undefined ? withoutUndefined({ kind, text, ts: asString(raw.ts) }) : null
+    return text !== undefined
+      ? withoutUndefined({
+          kind,
+          text,
+          ts: asString(raw.ts),
+          oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
+        })
+      : null
   }
   if (kind === 'reason') {
     const text = asString(raw.text)
@@ -308,6 +315,7 @@ function normalizeTraceStep(raw: unknown): ChatTraceStep | null {
       args: normalizeTracePayload(raw.args),
       result: normalizeTracePayload(raw.result),
       ts: asString(raw.ts) ?? undefined,
+      oasBlockIndex: asNumber(raw.oasBlockIndex) ?? asNumber(raw.oas_block_index) ?? undefined,
     })
   }
   return null
@@ -855,24 +863,45 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
   }))
 }
 
-export function appendAssistantThinkingDelta(name: string, entryId: string, delta: string): void {
+export function appendAssistantThinkingDelta(
+  name: string,
+  entryId: string,
+  delta: string,
+  meta: { oasBlockIndex?: number } = {},
+): void {
   if (!delta.trim()) return
+  const oasBlockIndex = meta.oasBlockIndex
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
     const last = existing[existing.length - 1]
+    const sameThinkingBlock =
+      last?.kind === 'think'
+      && (oasBlockIndex === undefined
+        ? last.oasBlockIndex === undefined
+        : last.oasBlockIndex === oasBlockIndex)
     // Stamp the occurrence time on a NEW think step so the work-trace card can
     // interleave it with tool entries by occurrence order. When consecutive
     // deltas merge into the same step, the first stamp is preserved: the step
     // began at that time, not when the latest fragment arrived.
     const traceSteps: ChatTraceStep[] =
-      last?.kind === 'think'
+      sameThinkingBlock
         ? [
             ...existing.slice(0, -1),
-            { kind: 'think', text: `${last.text}${delta}`, ts: last.ts },
+            withoutUndefined({
+              kind: 'think',
+              text: `${last.text}${delta}`,
+              ts: last.ts,
+              oasBlockIndex: last.oasBlockIndex,
+            }),
           ]
         : [
             ...existing,
-            { kind: 'think', text: delta.trimStart(), ts: new Date().toISOString() },
+            withoutUndefined({
+              kind: 'think',
+              text: delta.trimStart(),
+              ts: new Date().toISOString(),
+              oasBlockIndex,
+            }),
           ]
     return {
       ...entry,
@@ -895,7 +924,7 @@ function warnMissingToolTrace(
 export function appendAssistantToolTraceStep(
   name: string,
   entryId: string,
-  step: { toolCallId: string; name: string; ts?: string },
+  step: { toolCallId: string; name: string; ts?: string; oasBlockIndex?: number },
 ): void {
   const toolCallId = step.toolCallId.trim()
   const toolName = step.name.trim()
@@ -908,25 +937,27 @@ export function appendAssistantToolTraceStep(
     const index = existing.findIndex(
       trace => trace.kind === 'tool' && trace.toolCallId === toolCallId,
     )
-    const nextStep: ChatTraceStep = {
+    const nextStep = withoutUndefined({
       kind: 'tool',
       toolCallId,
       name: toolName,
       status: 'pending',
       ts: step.ts ?? new Date().toISOString(),
-    }
+      oasBlockIndex: step.oasBlockIndex,
+    })
     const traceSteps =
       index === -1
         ? [...existing, nextStep]
         : existing.map((trace, i) =>
             i === index && trace.kind === 'tool'
-              ? {
+              ? withoutUndefined({
                   ...trace,
                   name: trace.name || toolName,
                   toolCallId,
                   status: trace.status ?? 'pending',
                   ts: trace.ts ?? nextStep.ts,
-                }
+                  oasBlockIndex: trace.oasBlockIndex ?? nextStep.oasBlockIndex,
+                })
               : trace,
           )
     return {

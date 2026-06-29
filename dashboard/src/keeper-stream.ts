@@ -260,17 +260,40 @@ export function applyKeeperStreamEvent(
         setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
         return null
       }
+      if (event.name === 'KEEPER_CONTENT_BLOCK_START') {
+        const value = isRecord(event.value) ? event.value : null
+        const oasBlockIndex = asNumber(value?.index) ?? asNumber(value?.block_index)
+        const toolCallId = asString(value?.tool_call_id)
+        const toolName = asString(value?.tool_call_name)
+        if (toolCallId && toolName) {
+          appendAssistantToolTraceStep(keeperName, assistantEntryId, {
+            toolCallId,
+            name: toolName,
+            oasBlockIndex,
+          })
+        }
+        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        return null
+      }
+      if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
+        setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
+        return null
+      }
       if (event.name === 'KEEPER_THINKING_DELTA') {
-        const delta = isRecord(event.value)
-          ? (typeof event.value.delta === 'string'
-              ? event.value.delta
-              : typeof event.value.text === 'string'
-                ? event.value.text
+        const value = isRecord(event.value) ? event.value : null
+        const delta = value
+          ? (typeof value.delta === 'string'
+              ? value.delta
+              : typeof value.text === 'string'
+                ? value.text
                 : undefined)
           : typeof event.value === 'string'
             ? event.value
             : undefined
-        if (delta) appendAssistantThinkingDelta(keeperName, assistantEntryId, delta)
+        const oasBlockIndex = value
+          ? asNumber(value.index) ?? asNumber(value.block_index)
+          : undefined
+        if (delta) appendAssistantThinkingDelta(keeperName, assistantEntryId, delta, { oasBlockIndex })
         else setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
         return null
       }

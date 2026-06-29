@@ -669,10 +669,20 @@ describe('thread history merge & persistence', () => {
 
   it('preserves accumulated tool trace state when TOOL_CALL_START repeats', () => {
     appendThreadEntry('echo', entry({ id: 'reply-1', role: 'assistant', source: 'direct_assistant' }))
-    appendAssistantToolTraceStep('echo', 'reply-1', { toolCallId: 'tc-1', name: 'lookup', ts: '2026-06-25T00:00:00.000Z' })
+    appendAssistantToolTraceStep('echo', 'reply-1', {
+      toolCallId: 'tc-1',
+      name: 'lookup',
+      ts: '2026-06-25T00:00:00.000Z',
+      oasBlockIndex: 5,
+    })
     appendAssistantToolTraceArgsDelta('echo', 'reply-1', 'tc-1', '{"a":1}')
     markAssistantToolTraceEnded('echo', 'reply-1', 'tc-1')
-    appendAssistantToolTraceStep('echo', 'reply-1', { toolCallId: 'tc-1', name: 'lookup-again', ts: '2026-06-25T00:00:01.000Z' })
+    appendAssistantToolTraceStep('echo', 'reply-1', {
+      toolCallId: 'tc-1',
+      name: 'lookup-again',
+      ts: '2026-06-25T00:00:01.000Z',
+      oasBlockIndex: 6,
+    })
 
     const reply = keeperThreads.value.echo?.find(e => e.id === 'reply-1')
     expect(reply?.traceSteps).toEqual([
@@ -683,6 +693,7 @@ describe('thread history merge & persistence', () => {
         status: 'ok',
         args: '{"a":1}',
         ts: '2026-06-25T00:00:00.000Z',
+        oasBlockIndex: 5,
       },
     ])
   })

@@ -2162,6 +2162,10 @@ let test_stale_run_sweep_sets_watchdog_stop_signal () =
        | Ok () -> ()
        | Error err -> fail err);
       let reg = Reg.register ~base_path:config.base_path name meta in
+      Reg.set_started_at_for_test
+        ~base_path:config.base_path
+        name
+        (Unix.time () -. 3600.0);
       let max_restarts =
         Masc.Runtime_params.get
           Masc.Governance_registry.keeper_supervisor_max_restarts

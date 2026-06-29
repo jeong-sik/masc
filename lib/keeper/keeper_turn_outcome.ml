@@ -5,21 +5,25 @@
 type t =
   | Visible_reply
   | Continuation_checkpoint
+  | No_visible_reply
 
 let equal a b =
   match (a, b) with
   | Visible_reply, Visible_reply
+  | No_visible_reply, No_visible_reply
   | Continuation_checkpoint, Continuation_checkpoint ->
       true
-  | (Visible_reply | Continuation_checkpoint), _ -> false
+  | (Visible_reply | Continuation_checkpoint | No_visible_reply), _ -> false
 
 let to_label = function
   | Visible_reply -> "visible_reply"
   | Continuation_checkpoint -> "continuation_checkpoint"
+  | No_visible_reply -> "no_visible_reply"
 
 let of_label = function
   | "visible_reply" -> Some Visible_reply
   | "continuation_checkpoint" -> Some Continuation_checkpoint
+  | "no_visible_reply" -> Some No_visible_reply
   | _ -> None
 
 let wire_key = "turn_outcome"
@@ -28,6 +32,12 @@ let turn_ref_wire_key = "turn_ref"
 
 let of_stop_reason = function
   | Runtime_agent.Completed -> Visible_reply
+  | Runtime_agent.TurnBudgetExhausted _ -> Continuation_checkpoint
+  | Runtime_agent.MutationBoundaryReached _ -> Continuation_checkpoint
+
+let of_result_surface ~response_text = function
+  | Runtime_agent.Completed ->
+      if String.trim response_text = "" then No_visible_reply else Visible_reply
   | Runtime_agent.TurnBudgetExhausted _ -> Continuation_checkpoint
   | Runtime_agent.MutationBoundaryReached _ -> Continuation_checkpoint
 

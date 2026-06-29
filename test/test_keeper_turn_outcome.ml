@@ -1,10 +1,11 @@
 (* RFC-0232 P2: producer-typed turn outcome.
 
    The reply payload's [turn_outcome] field is the only carrier of the
-   checkpoint/visible distinction; the legacy "Continuation checkpoint
-   saved;" prefix sniff is deleted.  These tests pin:
+   checkpoint/visible/no-visible distinction; the legacy "Continuation
+   checkpoint saved;" prefix sniff is deleted.  These tests pin:
    - the closed label codec (round-trip, unknown -> None),
    - the stop_reason -> outcome mapping (single mapping site),
+   - response_text-aware result-surface classification,
    - payload decode policy: absent/unknown fails toward Visible_reply
      (the bitten failure mode, #20870, was silent non-persistence),
    - prefix deadness: checkpoint-shaped reply TEXT alone never
@@ -20,7 +21,7 @@ let outcome : TO.t testable =
     (fun fmt t -> Format.pp_print_string fmt (TO.to_label t))
     TO.equal
 
-let all = [ TO.Visible_reply; TO.Continuation_checkpoint ]
+let all = [ TO.Visible_reply; TO.Continuation_checkpoint; TO.No_visible_reply ]
 
 let test_label_round_trip () =
   List.iter
@@ -47,6 +48,16 @@ let test_of_stop_reason () =
        (Runtime_agent.MutationBoundaryReached
           { turns_used = 2; tool_name = Some "masc_add_task" }))
 
+let test_of_result_surface () =
+  check outcome "completed with text -> visible" TO.Visible_reply
+    (TO.of_result_surface ~response_text:"done" Runtime_agent.Completed);
+  check outcome "completed with empty text -> no visible reply"
+    TO.No_visible_reply
+    (TO.of_result_surface ~response_text:"   " Runtime_agent.Completed);
+  check outcome "budget exhausted -> checkpoint" TO.Continuation_checkpoint
+    (TO.of_result_surface ~response_text:"done"
+       (Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 }))
+
 let payload fields = Some (`Assoc fields)
 
 let test_payload_decode () =
@@ -60,6 +71,9 @@ let test_payload_decode () =
   check outcome "visible label" TO.Visible_reply
     (TO.of_reply_payload
        (payload [ (TO.wire_key, `String "visible_reply") ]));
+  check outcome "no visible reply label" TO.No_visible_reply
+    (TO.of_reply_payload
+       (payload [ (TO.wire_key, `String "no_visible_reply") ]));
   check outcome "unknown label -> visible (report-and-persist)"
     TO.Visible_reply
     (TO.of_reply_payload (payload [ (TO.wire_key, `String "deferred") ]))
@@ -83,8 +97,15 @@ let test_prefix_is_dead () =
     TO.Continuation_checkpoint
     (TO.of_reply_payload
        (payload
+         [ ("reply", `String "all done");
+           (TO.wire_key, `String "continuation_checkpoint")
+          ]));
+  check outcome "ordinary text, declared no visible reply"
+    TO.No_visible_reply
+    (TO.of_reply_payload
+       (payload
           [ ("reply", `String "all done");
-            (TO.wire_key, `String "continuation_checkpoint")
+            (TO.wire_key, `String "no_visible_reply")
           ]))
 
 let turn_ref_t : Ids.Turn_ref.t testable =
@@ -129,6 +150,12 @@ let test_direct_reply_visible_text () =
           [ ("reply", `String checkpoint_text);
             ("turn_outcome", `String "continuation_checkpoint")
           ]));
+  check (option string) "declared no visible reply -> None" None
+    (Ops.direct_reply_visible_text
+       (body
+          [ ("reply", `String "all done");
+            ("turn_outcome", `String "no_visible_reply")
+          ]));
   check (option string) "checkpoint-shaped text without field -> visible"
     (Some checkpoint_text)
     (Ops.direct_reply_visible_text
@@ -155,7 +182,10 @@ let () =
           test_case "unknown label is None" `Quick test_unknown_label_is_none;
         ] );
       ( "mapping",
-        [ test_case "of_stop_reason" `Quick test_of_stop_reason ] );
+        [
+          test_case "of_stop_reason" `Quick test_of_stop_reason;
+          test_case "of_result_surface" `Quick test_of_result_surface;
+        ] );
       ( "payload_decode",
         [
           test_case "decode policy" `Quick test_payload_decode;

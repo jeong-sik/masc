@@ -215,7 +215,7 @@ let test_exec_policy_validate_path_survives_deleted_cwd () =
     (fun () ->
        Sys.chdir doomed;
        Unix.rmdir doomed;
-       ignore (Exec_policy.validate_path "/not-under-tmp-or-workspace"))
+       ignore (Exec_policy.Paths.validate_path "/not-under-tmp-or-workspace"))
 
 (* ── runner ──────────────────────────────────────────────────────── *)
 

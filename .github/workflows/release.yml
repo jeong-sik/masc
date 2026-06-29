@@ -123,11 +123,37 @@ jobs:
     timeout-minutes: 15
 
     steps:
+      - name: Checkout repo for config seed hashes
+        uses: actions/checkout@v7
+
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
           path: dist
           merge-multiple: true
+
+      - name: Verify advertised release assets
+        run: |
+          for asset in masc-macos-arm64 masc-linux-x64; do
+            if [ ! -f "dist/$asset" ]; then
+              echo "required release asset missing: $asset"
+              exit 1
+            fi
+          done
+
+      - name: Generate release checksums
+        run: |
+          cd dist
+          artifact_count="$(find . -maxdepth 1 -type f ! -name SHA256SUMS | wc -l | tr -d ' ')"
+          if [ "$artifact_count" -eq 0 ]; then
+            echo "no release artifacts found in dist"
+            exit 1
+          fi
+          find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' \
+            | sort -z \
+            | xargs -0 sha256sum > SHA256SUMS
+          (cd ../config && sha256sum tool_policy.toml runtime.toml) >> SHA256SUMS
+          cat SHA256SUMS
 
       - name: Create Release
         uses: softprops/action-gh-release@v3

@@ -81,12 +81,27 @@ let reconcile_keepalive_keepers
           ();
         Log.Keeper.info "%s: reconciled durable keeper" meta.name))
   in
+  let reconcile_paused_meta meta =
+    match
+      Keeper_supervisor_pause_policy.reconcile_persisted_auto_pause_task_release
+        ~config:ctx.config
+        ~meta
+    with
+    | Ok _meta -> ()
+    | Error err ->
+      inc_reconcile_failure ~name:meta.name ~operation:"paused_task_release";
+      Log.Keeper.warn
+        "reconcile: paused keeper %s task release repair failed: %s"
+        meta.name
+        err
+  in
   let reconcile_one name =
     try
       match read_effective_meta ctx.config name with
       | Ok (Some meta) when not meta.paused ->
         reconcile_meta meta
-      | Ok (Some _meta) -> () (* paused, skip *)
+      | Ok (Some meta) ->
+        reconcile_paused_meta meta
       | Ok None ->
         (match load_or_materialize_keeper_meta ctx name with
          | Ok (Some meta) when not meta.paused ->
@@ -94,9 +109,10 @@ let reconcile_keepalive_keepers
            then
              Log.Keeper.info
                "%s: materialized durable keeper during reconcile"
-               meta.name
+             meta.name
            else reconcile_meta meta
-         | Ok (Some _meta) -> ()
+         | Ok (Some meta) ->
+           reconcile_paused_meta meta
          | Ok None ->
            Log.Keeper.debug
              "reconcile: configured keeper %s has no materialized meta"

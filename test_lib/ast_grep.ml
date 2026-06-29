@@ -147,12 +147,12 @@ let count_value_bindings_with_prefix ~module_path ~prefix =
   in
   let iter =
     { Ast_iterator.default_iterator with
-      pat =
-        (fun self p ->
-          (match p.ppat_desc with
+      value_binding =
+        (fun self vb ->
+          (match vb.pvb_pat.ppat_desc with
            | Ppat_var { txt; _ } when starts_with txt -> incr count
            | _ -> ());
-          Ast_iterator.default_iterator.pat self p)
+          Ast_iterator.default_iterator.value_binding self vb)
     }
   in
   iter.structure iter structure;

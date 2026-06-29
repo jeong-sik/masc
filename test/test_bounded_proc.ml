@@ -31,7 +31,11 @@ let process_exists argv_substring =
         Unix.create_process_env "pgrep" argv (Unix.environment ()) Unix.stdin
           dev_null dev_null
       in
-      match snd (Unix.waitpid [] pid) with
+      let rec wait pid =
+        try snd (Unix.waitpid [] pid)
+        with Unix.Unix_error (Unix.EINTR, _, _) -> wait pid
+      in
+      match wait pid with
       | Unix.WEXITED 0 -> true
       | _ -> false)
 

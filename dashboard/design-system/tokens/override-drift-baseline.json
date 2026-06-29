@@ -1,0 +1,119 @@
+{
+  "_doc": "Reviewed baseline of generated↔variables.css token divergences. The app imports src/styles/tokens.generated.css (@theme, @generated) then src/styles/variables.css (:root), which re-defines these tokens to different RENDERED values. tokens:check (Gate 2) ratchets this set: any NEW divergence, or a value change on a listed entry, or a listed entry that no longer diverges, fails the gate. Entries marked UNREVIEWED are pre-existing drift pending a reconcile decision (chunk F). Scope: variables.css only (the last-winning override layer); styleseed-tokens.css is an earlier layer not yet covered.",
+  "scope": {
+    "generated": "src/styles/tokens.generated.css",
+    "override": "src/styles/variables.css"
+  },
+  "overrides": {
+    "--color-accent-glow": {
+      "generated": "var(--brass-glow)",
+      "override": "var(--accent-glow)",
+      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
+    },
+    "--color-info": {
+      "generated": "#6a8eb0",
+      "override": "var(--text-info)",
+      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
+    },
+    "--font-body": {
+      "generated": "'EB Garamond', 'Noto Sans KR', Georgia, serif",
+      "override": "\"EB Garamond\", \"Noto Sans KR\", Georgia, serif",
+      "reason": "Font stack quote-style / fallback-list variant (cosmetic or fallback diff)"
+    },
+    "--font-display": {
+      "generated": "'Cinzel', 'Noto Sans KR', 'EB Garamond', serif",
+      "override": "\"Cinzel\", \"Noto Sans KR\", \"EB Garamond\", serif",
+      "reason": "Font stack quote-style / fallback-list variant (cosmetic or fallback diff)"
+    },
+    "--radius-lg": {
+      "generated": "12px",
+      "override": "6px",
+      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+    },
+    "--radius-md": {
+      "generated": "6px",
+      "override": "4px",
+      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+    },
+    "--radius-pill": {
+      "generated": "999px",
+      "override": "9999px",
+      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+    },
+    "--radius-sm": {
+      "generated": "4px",
+      "override": "3px",
+      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+    },
+    "--radius-xl": {
+      "generated": "24px",
+      "override": "8px",
+      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+    },
+    "--radius-xs": {
+      "generated": "2px",
+      "override": "var(--r-0)",
+      "reason": "UNREVIEWED: radius scale predates generated tokens; reconcile direction TBD (chunk F)"
+    },
+    "--scrim-strong": {
+      "generated": "var(--color-scrim-strong)",
+      "override": "rgba(0, 0, 0, 0.6)",
+      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
+    },
+    "--shadow-card": {
+      "generated": "0 1px 4px rgba(0, 0, 0, 0.5)",
+      "override": "0 1px 3px rgba(0, 0, 0, 0.04)",
+      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
+    },
+    "--spacing-card": {
+      "generated": "16px",
+      "override": "12px",
+      "reason": "Cockpit density override — keep generated ladder intact, render tighter (variables.css L382-386)"
+    },
+    "--spacing-element": {
+      "generated": "8px",
+      "override": "6px",
+      "reason": "Cockpit density override — keep generated ladder intact, render tighter (variables.css L382-386)"
+    },
+    "--spacing-group": {
+      "generated": "12px",
+      "override": "8px",
+      "reason": "Cockpit density override — keep generated ladder intact, render tighter (variables.css L382-386)"
+    },
+    "--type-body": {
+      "generated": "var(--fs-13)/var(--lh-body) var(--font-sans)",
+      "override": "var(--fs-13)/var(--lh-body) ui-sans-serif, -apple-system, system-ui, sans-serif",
+      "reason": "Type composite re-points font stack to system fallback (variables.css)"
+    },
+    "--type-caption": {
+      "generated": "var(--fs-10)/var(--lh-tight) var(--font-mono)",
+      "override": "var(--fs-10)/var(--lh-tight) ui-monospace, \"SF Mono\", Menlo, monospace",
+      "reason": "Type composite re-points font stack to system fallback (variables.css)"
+    },
+    "--type-kpi-l": {
+      "generated": "var(--fs-20)/var(--lh-tight) var(--font-mono)",
+      "override": "var(--fs-20)/var(--lh-tight) ui-monospace, \"SF Mono\", Menlo, monospace",
+      "reason": "Type composite re-points font stack to system fallback (variables.css)"
+    },
+    "--type-kpi-m": {
+      "generated": "var(--fs-16)/var(--lh-tight) var(--font-mono)",
+      "override": "var(--fs-16)/var(--lh-tight) ui-monospace, \"SF Mono\", Menlo, monospace",
+      "reason": "Type composite re-points font stack to system fallback (variables.css)"
+    },
+    "--type-label": {
+      "generated": "var(--fs-11)/var(--lh-tight) var(--font-sans)",
+      "override": "var(--fs-11)/var(--lh-tight) ui-sans-serif, -apple-system, system-ui, sans-serif",
+      "reason": "Type composite re-points font stack to system fallback (variables.css)"
+    },
+    "--type-meta": {
+      "generated": "var(--fs-12)/var(--lh-tight) var(--font-mono)",
+      "override": "var(--fs-12)/var(--lh-tight) ui-monospace, \"SF Mono\", Menlo, monospace",
+      "reason": "Type composite re-points font stack to system fallback (variables.css)"
+    },
+    "--type-title": {
+      "generated": "var(--fs-14)/var(--lh-tight) var(--font-sans)",
+      "override": "var(--fs-14)/var(--lh-tight) ui-sans-serif, -apple-system, system-ui, sans-serif",
+      "reason": "Type composite re-points font stack to system fallback (variables.css)"
+    }
+  }
+}

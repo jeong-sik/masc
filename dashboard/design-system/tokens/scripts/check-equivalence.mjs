@@ -24,11 +24,21 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import postcss from "postcss";
 import { formatHex, parseHex, differenceCiede2000 } from "culori";
+import { computeConflicts } from "./lib/override-drift.mjs";
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 const REPO = resolve(HERE, "..", "..", "..", "..");
 
 const GENERATED_CSS = resolve(REPO, "dashboard/design-system/source_styles/tokens.generated.css");
+
+// Override-drift gate: the app imports src/styles/tokens.generated.css (@theme)
+// then src/styles/variables.css (:root), which re-defines a subset of tokens to
+// different RENDERED values. The drift workflow only guards source.ts ↔
+// generated, so this divergence is otherwise unchecked. We ratchet it against a
+// reviewed baseline — NEW divergence, a value change, or a stale entry all fail.
+const APP_GENERATED_CSS = resolve(REPO, "dashboard/src/styles/tokens.generated.css");
+const APP_VARIABLES_CSS = resolve(REPO, "dashboard/src/styles/variables.css");
+const OVERRIDE_BASELINE = resolve(HERE, "..", "override-drift-baseline.json");
 
 const STATUS_CANON = {
   ok: "#6b9e6b",
@@ -104,6 +114,49 @@ function checkKeeperPalette(genMap) {
   return errors;
 }
 
+function checkOverrideDrift() {
+  const errors = [];
+  let baseline;
+  try {
+    baseline = JSON.parse(readFileSync(OVERRIDE_BASELINE, "utf8"));
+  } catch (e) {
+    return [`override-drift baseline unreadable: ${OVERRIDE_BASELINE} (${e.message})`];
+  }
+  const allowed = new Map(Object.entries(baseline.overrides ?? {}));
+
+  let conflicts;
+  try {
+    conflicts = computeConflicts(APP_GENERATED_CSS, APP_VARIABLES_CSS);
+  } catch (e) {
+    return [`override-drift scan failed: ${e.message}`];
+  }
+  const current = new Map(conflicts.map((c) => [c.token, c]));
+
+  // NEW divergence or a value change on an allow-listed entry.
+  for (const c of conflicts) {
+    const entry = allowed.get(c.token);
+    if (!entry) {
+      errors.push(
+        `NEW override drift: ${c.token} generated=${c.generated} variables.css=${c.override} — ` +
+          `add a reviewed entry to override-drift-baseline.json (with a reason) or reconcile the value`,
+      );
+    } else if (entry.generated !== c.generated || entry.override !== c.override) {
+      errors.push(
+        `override drift value changed: ${c.token} now generated=${c.generated} variables.css=${c.override}, ` +
+          `baseline had generated=${entry.generated} variables.css=${entry.override} — re-review and update the baseline`,
+      );
+    }
+  }
+  // Stale baseline entry — the divergence is gone, so the entry must be removed
+  // to keep the baseline honest (prevents the allow-list from rotting open).
+  for (const token of allowed.keys()) {
+    if (!current.has(token)) {
+      errors.push(`stale baseline entry: ${token} no longer diverges — remove it from override-drift-baseline.json`);
+    }
+  }
+  return errors;
+}
+
 function main() {
   let genText;
   try {
@@ -133,6 +186,15 @@ function main() {
     failed = true;
   } else {
     console.log(`[OK] keeper 12-slot palette ΔE < 2 vs OkLCH(L=68, C=0.09, H=i*30)`);
+  }
+
+  const overrideErrors = checkOverrideDrift();
+  if (overrideErrors.length > 0) {
+    console.error(`[FAIL] generated ↔ variables.css override drift:`);
+    for (const e of overrideErrors) console.error(`  - ${e}`);
+    failed = true;
+  } else {
+    console.log(`[OK] generated ↔ variables.css override drift matches reviewed baseline`);
   }
 
   if (failed) {

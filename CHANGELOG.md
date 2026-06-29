@@ -4,7 +4,7 @@
 
 ### Changed
 - Bump OAS agent_sdk pin to 0.207.19 plus the focused OAS #2244
-  `f085fc2` assistant tool-content and fail-closed unknown-stream-block
+  `b7148b8` assistant tool-content, GLM forced-tool, and fail-closed unknown-stream-block
   branch SHA.
 
 ### Fixed

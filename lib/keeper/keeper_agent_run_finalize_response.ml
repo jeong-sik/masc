@@ -104,14 +104,15 @@ let checkpoint_for_replay_persistence
       ~response_text
   with
   | Some reason ->
-    match
+    let pruned =
       prune_current_turn_replay
         ~history_messages
         ~pre_turn_working_context
         checkpoint
-    with
+    in
+    (match pruned with
     | Some checkpoint -> checkpoint, Some reason
-    | None -> checkpoint, None
+    | None -> checkpoint, None)
   | None ->
     ( Keeper_context_core.patch_checkpoint_last_assistant
         checkpoint

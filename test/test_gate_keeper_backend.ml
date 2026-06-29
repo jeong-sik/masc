@@ -1064,6 +1064,106 @@ let test_extract_turn_stats_missing_returns_none () =
   let result = Gate_keeper_backend.extract_turn_stats body in
   check bool "missing fields returns None" true (result = None)
 
+(* ── ACK envelope parse (regression for #22569 blocker) ───────────────
+   The previous [Safe_ops.protect ~default:None] wrapper collapsed two
+   distinct failure modes into a single [None]: the keeper legitimately
+   returned no ACK fields vs the backend could not parse what the keeper
+   sent. These tests pin the typed [Result.t] so the dispatch site can
+   surface a deliberate degraded path instead of silently substituting
+   the keeper's reply body. *)
+
+let expect_error expected actual =
+  match actual with
+  | Ok _ -> failf "expected Error %s, got Ok _" expected
+  | Error failure ->
+      let got = Gate_keeper_backend.ack_parse_failure_to_string failure in
+      check bool
+        (Printf.sprintf "expected Error %s, got Error %s" expected got)
+        true
+        (String_util.string_contains_substring ~needle:expected got)
+
+let test_extract_message_request_ack_accepts_well_formed_envelope () =
+  let body =
+    {|{"request_id":"req-1","status":"queued","keeper_name":"luna"}|}
+  in
+  match
+    Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+      ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
+  with
+  | Ok request ->
+      check string "request_id" "req-1" request.request_id;
+      check string "destination_id" "luna" request.destination_id;
+      check string "channel" "discord" request.channel;
+      (match request.status with
+       | Gate_protocol.Queued -> ()
+       | _ -> fail "expected Queued status")
+  | Error failure ->
+      fail
+        ("expected Ok request: "
+         ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
+
+let test_extract_message_request_ack_rejects_missing_request_id () =
+  let body = {|{"status":"queued"}|} in
+  expect_error "missing request_id"
+    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
+
+let test_extract_message_request_ack_rejects_empty_request_id () =
+  let body = {|{"request_id":"   ","status":"queued"}|} in
+  expect_error "empty request_id"
+    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
+
+let test_extract_message_request_ack_rejects_missing_status () =
+  let body = {|{"request_id":"req-1"}|} in
+  expect_error "missing status"
+    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
+
+let test_extract_message_request_ack_rejects_unknown_status () =
+  let body = {|{"request_id":"req-1","status":"frobnicated"}|} in
+  expect_error "unknown status"
+    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
+
+let test_extract_message_request_ack_rejects_invalid_json () =
+  let body = "{not valid json" in
+  expect_error "invalid json"
+    (Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+       ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body)
+
+let test_extract_message_request_ack_normalizes_status_case () =
+  (* The wire contract lowercases the status before consulting the closed
+     sum. A mixed-case envelope from a future keeper should still be
+     accepted, not rejected as unknown. *)
+  let body = {|{"request_id":"req-1","status":"Running"}|} in
+  match
+    Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+      ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
+  with
+  | Ok request ->
+      (match request.status with
+       | Gate_protocol.Running -> ()
+       | _ -> fail "expected Running status after case normalization")
+  | Error failure ->
+      fail
+        ("expected Ok after case normalization: "
+         ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
+
+let test_extract_message_request_ack_falls_back_to_keeper_name () =
+  let body = {|{"request_id":"req-1","status":"done"}|} in
+  match
+    Gate_keeper_backend.extract_message_request_ack ~channel:"discord"
+      ~channel_user_id:"user-1" ~keeper_name:"luna" ~metadata:[] body
+  with
+  | Ok request ->
+      check string "destination_id falls back to keeper_name" "luna"
+        request.destination_id
+  | Error failure ->
+      fail
+        ("expected Ok with fallback keeper_name: "
+         ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
+
 let () =
   Alcotest.run "Gate_keeper_backend"
     [
@@ -1186,5 +1286,24 @@ let () =
             test_extract_turn_stats_ignores_model_only_payload;
           test_case "turn stats missing returns None" `Quick
             test_extract_turn_stats_missing_returns_none;
+        ] );
+      ( "ack_envelope_parse",
+        [
+          test_case "accepts well-formed envelope" `Quick
+            test_extract_message_request_ack_accepts_well_formed_envelope;
+          test_case "rejects missing request_id" `Quick
+            test_extract_message_request_ack_rejects_missing_request_id;
+          test_case "rejects empty request_id" `Quick
+            test_extract_message_request_ack_rejects_empty_request_id;
+          test_case "rejects missing status" `Quick
+            test_extract_message_request_ack_rejects_missing_status;
+          test_case "rejects unknown status" `Quick
+            test_extract_message_request_ack_rejects_unknown_status;
+          test_case "rejects invalid json" `Quick
+            test_extract_message_request_ack_rejects_invalid_json;
+          test_case "normalizes status case" `Quick
+            test_extract_message_request_ack_normalizes_status_case;
+          test_case "falls back to keeper_name" `Quick
+            test_extract_message_request_ack_falls_back_to_keeper_name;
         ] );
     ]

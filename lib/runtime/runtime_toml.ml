@@ -738,40 +738,107 @@ let parse_pause_threshold (toml : Otoml.t) : Runtime_schema.pause_threshold =
   }
 ;;
 
+type runtime_section =
+  { default_runtime_id : string option
+  ; librarian_runtime_id : string option
+  ; cross_verifier_runtime_id : string option
+  ; media_failover : string list
+  }
+
+let empty_runtime_section =
+  { default_runtime_id = None
+  ; librarian_runtime_id = None
+  ; cross_verifier_runtime_id = None
+  ; media_failover = []
+  }
+;;
+
+let parse_runtime_string_leaf ~path ~key value =
+  match value with
+  | Otoml.TomlString value -> Ok value
+  | _ -> Error (error path (key ^ " must be a string runtime id"))
+;;
+
+let parse_runtime_media_failover value =
+  (* RFC-0265 — ordered runtime ids for modality-gated reroute. RFC-0145:
+     narrow to the [Otoml.get_array] wrong-type exception; a malformed value
+     degrades to [] (→ derive-from-declared-caps), and any id typo is caught
+     loudly at load by {!Runtime.validate_media_failover}. *)
+  try Otoml.get_array Otoml.get_string value with
+  | Otoml.Type_error _ ->
+    Log.Runtime.warn
+      "runtime_toml: [runtime].media_failover — expected string array, ignoring";
+    []
+;;
+
+let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list) result =
+  match Otoml.find_opt toml Fun.id [ "runtime" ] with
+  | None -> Ok empty_runtime_section
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    let section, errs =
+      List.fold_left
+        (fun (section, errs) (key, value) ->
+           match key with
+           | "default" ->
+             (match parse_runtime_string_leaf ~path:"runtime.default" ~key value with
+              | Ok default_runtime_id ->
+                { section with default_runtime_id = Some default_runtime_id }, errs
+              | Error e -> section, errs @ e)
+           | "librarian" ->
+             (match parse_runtime_string_leaf ~path:"runtime.librarian" ~key value with
+              | Ok librarian_runtime_id ->
+                { section with librarian_runtime_id = Some librarian_runtime_id }, errs
+              | Error e -> section, errs @ e)
+           | "cross_verifier" ->
+             (match
+                parse_runtime_string_leaf ~path:"runtime.cross_verifier" ~key value
+              with
+              | Ok cross_verifier_runtime_id ->
+                { section with cross_verifier_runtime_id = Some cross_verifier_runtime_id },
+                errs
+              | Error e -> section, errs @ e)
+           | "media_failover" ->
+             { section with media_failover = parse_runtime_media_failover value }, errs
+           | "assignments" ->
+             (* Parsed by [parse_keeper_assignments], including table-shape
+                validation. It is still recognized here so a malformed scalar
+                does not get reported as an unknown key first. *)
+             section, errs
+           | _ when is_toml_table value ->
+             (* [runtime.<profile>] tables are reserved for runtime profiles and
+                intentionally ignored by this parser layer. *)
+             section, errs
+           | _ ->
+             ( section
+             , errs
+               @ error
+                   ("runtime." ^ key)
+                   (Printf.sprintf
+                      "unknown [runtime] key %S; expected default, librarian, \
+                       cross_verifier, media_failover, [runtime.assignments], or \
+                       a table-valued [runtime.<profile>]"
+                      key) )
+        )
+        (empty_runtime_section, [])
+        entries
+    in
+    if errs <> [] then Error errs else Ok section
+  | Some _ -> Error (error "runtime" "[runtime] must be a TOML table")
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
+  let runtime_section_result = parse_runtime_section toml in
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs providers_result
     @ errs models_result
+    @ errs runtime_section_result
     @ errs assignments_result
     @ errs bindings_result
-  in
-  let default_runtime_id =
-    Otoml.find_opt toml Otoml.get_string [ "runtime"; "default" ]
-  in
-  let librarian_runtime_id =
-    Otoml.find_opt toml Otoml.get_string [ "runtime"; "librarian" ]
-  in
-  let cross_verifier_runtime_id =
-    Otoml.find_opt toml Otoml.get_string [ "runtime"; "cross_verifier" ]
-  in
-  let media_failover =
-    (* RFC-0265 — ordered runtime ids for modality-gated reroute. RFC-0145:
-       narrow to the [Otoml.get_array] wrong-type exception; a malformed value
-       degrades to [] (→ derive-from-declared-caps), and any id typo is caught
-       loudly at load by {!Runtime.validate_media_failover}. *)
-    match Otoml.find_opt toml Fun.id [ "runtime"; "media_failover" ] with
-    | None -> []
-    | Some v ->
-      (try Otoml.get_array Otoml.get_string v with
-       | Otoml.Type_error _ ->
-         Log.Runtime.warn
-           "runtime_toml: [runtime].media_failover — expected string array, ignoring";
-         [])
   in
   if all_errors <> []
   then Error all_errors
@@ -786,16 +853,19 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let bindings =
       extract_after_all_errors_guard ~label:"bindings" bindings_result
     in
+    let runtime_section =
+      extract_after_all_errors_guard ~label:"runtime" runtime_section_result
+    in
     let pause_threshold = parse_pause_threshold toml in
     Ok
       { Runtime_schema.providers
       ; models
       ; bindings
-      ; default_runtime_id
-      ; librarian_runtime_id
-      ; cross_verifier_runtime_id
+      ; default_runtime_id = runtime_section.default_runtime_id
+      ; librarian_runtime_id = runtime_section.librarian_runtime_id
+      ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
-      ; media_failover
+      ; media_failover = runtime_section.media_failover
       ; pause_threshold
       })
 ;;

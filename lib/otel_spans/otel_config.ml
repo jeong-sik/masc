@@ -7,10 +7,11 @@
     resolution racing with Docker's IPv4-only port binding during startup.
     Override via [OTEL_EXPORTER_OTLP_ENDPOINT] if needed. *)
 
-let enabled =
-  match Sys.getenv_opt "MASC_OTEL_ENABLED" with
-  | Some "false" | Some "0" -> false
-  | _ -> true
+(* Delegates to the shared env parser instead of an ad-hoc match so
+   [MASC_OTEL_ENABLED] follows the same truthy/falsy vocabulary as every other
+   MASC bool flag (case-insensitive true/1/yes/on vs false/0/no/off) and a
+   malformed value warns rather than silently enabling. *)
+let enabled = Env_config_core.get_bool ~default:true "MASC_OTEL_ENABLED"
 
 let endpoint =
   let raw =

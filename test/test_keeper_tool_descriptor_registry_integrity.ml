@@ -397,32 +397,36 @@ let test_read_descriptor_spells_out_path_basis () =
     (string_contains ~sub:"does not inherit Execute cwd" file_path_description)
 ;;
 
-let test_execute_descriptor_spells_out_argv_basis () =
+let test_execute_descriptor_spells_out_argv_and_filesystem_basis () =
   let descriptor = required_public_descriptor "Execute" in
   let argv_description =
     schema_property_description descriptor.input_schema "argv"
     |> Option.value ~default:""
   in
-  Alcotest.(check bool)
+  check_contains
+    "Execute description says filesystem access is policy-scoped"
+    ~sub:"sandbox/policy-scoped filesystem access"
+    descriptor.description;
+  check_contains
     "Execute description says argv follows executable"
-    true
-    (string_contains ~sub:"argv arguments after the executable" descriptor.description);
-  Alcotest.(check bool)
+    ~sub:"argv arguments after the executable"
+    descriptor.description;
+  check_contains
     "Execute description forbids duplicate argv0"
-    true
-    (string_contains ~sub:"Do not repeat executable as argv[0]" descriptor.description);
-  Alcotest.(check bool)
+    ~sub:"Do not repeat executable as argv[0]"
+    descriptor.description;
+  check_contains
     "Execute description includes git example"
-    true
-    (string_contains ~sub:"executable='git' argv=['status', '--short']" descriptor.description);
-  Alcotest.(check bool)
+    ~sub:"executable='git' argv=['status', '--short']"
+    descriptor.description;
+  check_contains
     "Execute argv schema repeats argv0 warning"
-    true
-    (string_contains ~sub:"Do not repeat executable as argv[0]" argv_description);
-  Alcotest.(check bool)
+    ~sub:"Do not repeat executable as argv[0]"
+    argv_description;
+  check_contains
     "Execute argv schema includes grep example"
-    true
-    (string_contains ~sub:"executable='grep', argv=['-rn', 'pattern', 'lib']" argv_description)
+    ~sub:"executable='grep', argv=['-rn', 'pattern', 'lib']"
+    argv_description
 ;;
 
 let test_board_descriptions_disambiguate_post_id_flow () =
@@ -961,9 +965,9 @@ let () =
             `Quick
             test_read_descriptor_spells_out_path_basis
         ; test_case
-            "Execute argv basis is explicit"
+            "Execute argv/filesystem basis is explicit"
             `Quick
-            test_execute_descriptor_spells_out_argv_basis
+            test_execute_descriptor_spells_out_argv_and_filesystem_basis
         ; test_case
             "Board get/list descriptions disambiguate post_id flow"
             `Quick

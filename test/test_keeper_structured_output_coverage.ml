@@ -44,6 +44,14 @@ let expected_unstructured_completion_exemptions =
     ]
 ;;
 
+let expected_structured_agent_run_json_judges =
+  List.sort
+    String.compare
+    [ "lib/dashboard/dashboard_governance_judge.ml"
+    ; "lib/dashboard/dashboard_operator_judge.ml"
+    ]
+;;
+
 let expected_all_direct_completion_files =
   List.sort
     String.compare
@@ -79,6 +87,33 @@ let test_keeper_direct_completions_request_structured_output () =
     expected_structured_completion_files
 ;;
 
+let test_agent_run_json_judges_request_structured_output () =
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " applies structured-output schema")
+         1
+         (Ast_grep.count_calls
+            ~module_path:rel
+            ~callee:"Keeper_structured_output_schema.apply_to_provider_config"))
+    expected_structured_agent_run_json_judges
+;;
+
+let test_agent_run_json_judges_use_provider_config_transform () =
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " wires provider_config_transform")
+         1
+         (Ast_grep.count_calls_with_label
+            ~module_path:rel
+            ~callee:"Keeper_turn_driver_wrappers.run_named_with_masc_tools"
+            ~label:"provider_config_transform"))
+    expected_structured_agent_run_json_judges
+;;
+
 let () =
   run
     "keeper-structured-output-coverage"
@@ -97,6 +132,16 @@ let () =
             "lib/keeper direct completions request structured output"
             `Quick
             test_keeper_direct_completions_request_structured_output
+        ] )
+    ; ( "dashboard json judges"
+      , [ test_case
+            "dashboard Agent.run JSON judges request structured output"
+            `Quick
+            test_agent_run_json_judges_request_structured_output
+        ; test_case
+            "dashboard Agent.run JSON judges use provider config transform"
+            `Quick
+            test_agent_run_json_judges_use_provider_config_transform
         ] )
     ]
 ;;

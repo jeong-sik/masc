@@ -185,6 +185,7 @@ let run_named_with_masc_tools
     ?approval
     ?max_turns
     ?(max_idle_turns = 3)
+    ?provider_config_transform
     ?sw
     ?net
     ()
@@ -204,7 +205,7 @@ let run_named_with_masc_tools
     ?compact_ratio
     ?approval
     ?raw_trace ?on_event ?on_yield ?on_resume 
-    ?transport ~yield_on_tool ?sw ?net ()
+    ?transport ~yield_on_tool ?provider_config_transform ?sw ?net ()
 
 let run_model_with_masc_tools
     ~(model_label : string)

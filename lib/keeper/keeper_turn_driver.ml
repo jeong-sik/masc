@@ -117,6 +117,7 @@ let run_named
     ?on_runtime_observation
     ?runtime_manifest_context
     ?runtime_manifest_append
+    ?provider_config_transform
     ?sw
     ?net
     ?per_provider_timeout_s
@@ -299,10 +300,15 @@ let run_named
       goal_blocks, initial_messages, oas_checkpoint
   in
   let error_runtime_id = runtime_id in
+  let* provider_config =
+    match provider_config_transform with
+    | None -> Ok runtime.Runtime.provider_config
+    | Some transform -> transform runtime.Runtime.provider_config
+  in
   let candidate =
     Runtime_candidate.of_provider_config
       ~max_concurrent:runtime.Runtime.binding.max_concurrent
-      runtime.Runtime.provider_config
+      provider_config
   in
   let name = Printf.sprintf "oas-%s" runtime_id in
   let transport_resolved =

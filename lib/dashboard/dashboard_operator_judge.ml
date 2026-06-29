@@ -187,9 +187,29 @@ let prompt_for_facts facts_json =
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt prompt_dashboard_operator_judge
 
+let apply_operator_judge_output_schema provider_cfg =
+  let schema = Keeper_structured_output_schema.operator_judge_output_schema in
+  let provider_cfg =
+    Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
+  in
+  match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
+  | Ok () -> Ok provider_cfg
+  | Error detail ->
+      Error
+        (Agent_sdk.Error.Config
+           (Agent_sdk.Error.InvalidConfig
+              { field = "dashboard.operator_judge.output_schema"; detail }))
+
+let workspace_judgment_json json =
+  match Json_util.assoc_member_opt "workspace" json with
+  | Some (`Assoc _ as workspace_json) -> Some workspace_json
+  | Some `Null -> None
+  | Some _ -> None
+  | None -> Some json
+
 let parse_workspace_judgment ~config ~generated_at ~generated_at_unix ~model_used:_ json =
-  match json with
-  | `Assoc _ ->
+  match workspace_judgment_json json with
+  | Some (`Assoc _ as json) ->
       let summary =
         normalize_text
           (Json_util.get_string_with_default json ~key:member_summary ~default:"")
@@ -217,7 +237,7 @@ let parse_workspace_judgment ~config ~generated_at ~generated_at_unix ~model_use
              ~fresh_until:(Masc_domain.iso8601_of_unix_seconds fresh_until_unix)
              ~fresh_until_unix ~keeper_name ();
         Some ()
-  | _ -> None
+  | None | Some _ -> None
 
 let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
@@ -238,6 +258,7 @@ let compute_judgments
         ~base_path ~goal:prompt ~masc_tools ~dispatch
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve
+        ~provider_config_transform:apply_operator_judge_output_schema
         ()
     )
   with

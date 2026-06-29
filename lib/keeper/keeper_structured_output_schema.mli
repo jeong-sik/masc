@@ -17,6 +17,12 @@ val memory_bank_summary_output_schema : Yojson.Safe.t
 val vision_analyze_output_schema : Yojson.Safe.t
 (** JSON object the one-shot vision analyzer provider must return. *)
 
+val operator_judge_output_schema : Yojson.Safe.t
+(** JSON object the dashboard operator judge provider must return. *)
+
+val governance_judge_output_schema : Yojson.Safe.t
+(** JSON object the dashboard governance judge provider must return. *)
+
 val apply_to_provider_config
   :  Yojson.Safe.t
   -> Llm_provider.Provider_config.t

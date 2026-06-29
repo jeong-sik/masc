@@ -140,6 +140,9 @@ val run_named :
   ?on_runtime_observation:(Runtime_observation.runtime_observation -> unit) ->
   ?runtime_manifest_context:Keeper_runtime_manifest.turn_context ->
   ?runtime_manifest_append:(Keeper_runtime_manifest.t -> unit) ->
+  ?provider_config_transform:
+    (Llm_provider.Provider_config.t ->
+    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   ?per_provider_timeout_s:float ->

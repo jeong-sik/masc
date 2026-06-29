@@ -1,7 +1,9 @@
 (** Provider-native JSON schemas for keeper LLM sub-call producers. *)
 
 let string_schema = `Assoc [ "type", `String "string" ]
+let number_schema = `Assoc [ "type", `String "number" ]
 let integer_schema = `Assoc [ "type", `String "integer" ]
+let boolean_schema = `Assoc [ "type", `String "boolean" ]
 let nullable_string_schema = `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
 
 let string_array_schema =
@@ -29,6 +31,134 @@ let object_schema ~required properties =
     ; "properties", `Assoc properties
     ; "required", `List (List.map (fun key -> `String key) required)
     ]
+;;
+
+let nullable_object_schema ~required properties =
+  `Assoc
+    [ "type", `List [ `String "object"; `String "null" ]
+    ; "additionalProperties", `Bool false
+    ; "properties", `Assoc properties
+    ; "required", `List (List.map (fun key -> `String key) required)
+    ]
+;;
+
+let empty_object_schema = object_schema ~required:[] []
+
+let operator_action_tokens =
+  [ "broadcast"
+  ; "namespace_pause"
+  ; "namespace_resume"
+  ; "social_sweep"
+  ; "task_inject"
+  ; "keeper_message"
+  ; "keeper_probe"
+  ; "keeper_recover"
+  ]
+;;
+
+let operator_severity_tokens = [ "warn"; "bad" ]
+
+let operator_recommended_action_schema =
+  let fields =
+    [ "action_type", enum_schema operator_action_tokens
+    ; "severity", enum_schema operator_severity_tokens
+    ; "reason", string_schema
+    ; "suggested_payload", empty_object_schema
+    ]
+  in
+  nullable_object_schema ~required:(List.map fst fields) fields
+;;
+
+let operator_workspace_judgment_schema =
+  let fields =
+    [ "summary", string_schema
+    ; "confidence", number_schema
+    ; "evidence_refs", string_array_schema
+    ; "disagreement_with_truth", boolean_schema
+    ; "recommended_action", operator_recommended_action_schema
+    ]
+  in
+  nullable_object_schema ~required:(List.map fst fields) fields
+;;
+
+let operator_session_judgment_schema =
+  let fields =
+    [ "session_id", string_schema
+    ; "summary", string_schema
+    ; "confidence", number_schema
+    ; "evidence_refs", string_array_schema
+    ; "disagreement_with_truth", boolean_schema
+    ; "recommended_action", operator_recommended_action_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let operator_judge_output_schema =
+  let fields =
+    [ "workspace", operator_workspace_judgment_schema
+    ; ( "sessions"
+      , `Assoc
+          [ "type", `String "array"; "items", operator_session_judgment_schema ] )
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let governance_kind_tokens = [ "case"; "agent_health"; "workspace_state" ]
+
+let governance_tool_tokens =
+  [ "masc_operator_action"
+  ; "masc_operator_confirm"
+  ; "masc_operator_snapshot"
+  ; "masc_surface_audit"
+  ]
+;;
+
+let governance_recommended_action_schema =
+  let fields =
+    [ "action_kind", string_schema
+    ; "resolved_tool", nullable_enum_schema governance_tool_tokens
+    ; "target_type", string_schema
+    ; "target_id", nullable_string_schema
+    ; "reason", string_schema
+    ; "payload_preview", empty_object_schema
+    ]
+  in
+  nullable_object_schema ~required:(List.map fst fields) fields
+;;
+
+let governance_guardrail_state_schema =
+  let fields =
+    [ "requires_human_gate", boolean_schema
+    ; "pending_confirm_token", nullable_string_schema
+    ; "ready_to_execute", boolean_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let governance_item_schema =
+  let fields =
+    [ "kind", enum_schema governance_kind_tokens
+    ; "id", string_schema
+    ; "summary", string_schema
+    ; "confidence", number_schema
+    ; "evidence_refs", string_array_schema
+    ; "recommended_action", governance_recommended_action_schema
+    ; "guardrail_state", governance_guardrail_state_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let governance_judge_output_schema =
+  let fields =
+    [ ( "items"
+      , `Assoc [ "type", `String "array"; "items", governance_item_schema ] )
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
 ;;
 
 let category_tokens =

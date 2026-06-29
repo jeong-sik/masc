@@ -60,6 +60,9 @@ val run_named_with_masc_tools :
   ?approval:Agent_sdk.Hooks.approval_callback ->
   ?max_turns:int ->
   ?max_idle_turns:int ->
+  ?provider_config_transform:
+    (Llm_provider.Provider_config.t ->
+    (Llm_provider.Provider_config.t, Agent_sdk.Error.sdk_error) result) ->
   ?sw:Eio.Switch.t ->
   ?net:Eio_context.eio_net ->
   unit ->

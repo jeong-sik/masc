@@ -75,6 +75,8 @@ import {
 type KeeperInterjectActionKind = 'send' | 'approve' | 'pause' | 'drain'
 
 const TOOL_ONLY_EMPTY_REPLY_TEXT = 'Tool-only turn ended without a final reply.'
+const EMPTY_VISIBLE_REPLY_TEXT =
+  'Keeper가 thinking만 반환하고 표시할 답변을 만들지 못했습니다. 다시 보내주세요.'
 const pendingKeeperThreadCancels = new Map<string, Promise<boolean>>()
 const KEEPER_THREAD_CANCEL_TIMEOUT_MS = 5_000
 const KEEPER_THREAD_CANCEL_SETTLE_GRACE_MS = 500
@@ -517,8 +519,13 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       const isNoVisibleReply = reply.details?.turnOutcome === 'no_visible_reply'
       const suppressReply = keeperTurnOutcomeSuppressesReply(reply.details?.turnOutcome)
       const isCancelled = result.status === 'cancelled'
-      const isError = !isCancelled && (result.status !== 'done' || result.ok === false)
-      const errorMessage = isError ? queuedKeeperMessageError(result) : null
+      const isError = !isCancelled && (isNoVisibleReply || result.status !== 'done' || result.ok === false)
+      let errorMessage: string | null = null
+      if (isNoVisibleReply) {
+        errorMessage = EMPTY_VISIBLE_REPLY_TEXT
+      } else if (isError) {
+        errorMessage = queuedKeeperMessageError(result)
+      }
       let userDelivery: KeeperConversationDelivery = 'delivered'
       if (isCancelled) {
         userDelivery = 'cancelled'
@@ -531,7 +538,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
       } else if (isCheckpoint) {
         assistantDelivery = 'queued'
       } else if (isNoVisibleReply) {
-        assistantDelivery = 'no_reply'
+        assistantDelivery = 'error'
       } else if (isError) {
         assistantDelivery = 'error'
       }
@@ -539,9 +546,17 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
         delivery: userDelivery,
         error: errorMessage,
       })
+      let assistantText = reply.text
+      let assistantRawText = reply.details?.replyText ?? reply.text
+      if (isNoVisibleReply) {
+        assistantText = EMPTY_VISIBLE_REPLY_TEXT
+        assistantRawText = EMPTY_VISIBLE_REPLY_TEXT
+      } else if (suppressReply) {
+        assistantText = ''
+      }
       finalizeAssistantEntry(request.keeperName, assistantId, {
-        text: suppressReply ? '' : reply.text,
-        rawText: reply.details?.replyText ?? reply.text,
+        text: assistantText,
+        rawText: assistantRawText,
         delivery: assistantDelivery,
         streamState: null,
         timestamp: new Date().toISOString(),
@@ -898,10 +913,24 @@ export async function sendKeeperThreadMessage(
       !finalText && finalEntry?.delivery === 'queued'
         ? 'queued' as KeeperConversationDelivery
         : 'delivered' as KeeperConversationDelivery
-    let emptyTerminalText = '(empty reply)'
-    if (finalDelivery === 'queued') {
-      emptyTerminalText = ''
-    } else if (toolCallEnded) {
+    if (!finalText && finalDelivery !== 'queued' && !toolCallEnded) {
+      finalizeAssistantEntry(keeperName, assistantId, {
+        text: EMPTY_VISIBLE_REPLY_TEXT,
+        rawText: finalEntry?.rawText || EMPTY_VISIBLE_REPLY_TEXT,
+        delivery: 'error',
+        streamState: null,
+        timestamp: new Date().toISOString(),
+        error: EMPTY_VISIBLE_REPLY_TEXT,
+      })
+      setRecordValue(keeperActionErrors, keeperName, EMPTY_VISIBLE_REPLY_TEXT)
+      if (requestId) {
+        removePendingKeeperChatRequest(requestId)
+        releaseActiveStreamRequestId(requestId)
+      }
+      return
+    }
+    let emptyTerminalText = ''
+    if (toolCallEnded) {
       emptyTerminalText = TOOL_ONLY_EMPTY_REPLY_TEXT
     }
 

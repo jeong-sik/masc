@@ -14,7 +14,18 @@ import { parse } from 'postcss'
 
 const v2Css = readFileSync(resolve(__dirname, 'v2.css'), 'utf-8')
 const craftCss = readFileSync(resolve(__dirname, 'craft.css'), 'utf-8')
+const globalCss = readFileSync(resolve(__dirname, '../global.css'), 'utf-8')
+const variablesCss = readFileSync(resolve(__dirname, '../variables.css'), 'utf-8')
 const appSource = readFileSync(resolve(__dirname, '../../app.ts'), 'utf-8')
+
+// Resolve a `--token: <Npx>;` declaration from variables.css to its pixel number.
+function tokenPx(prop: string): number {
+  let value = ''
+  parse(variablesCss).walkDecls((decl) => {
+    if (decl.prop === prop) value = decl.value.trim()
+  })
+  return Number.parseFloat(value)
+}
 
 const SHELL_MOBILE_CHROME_BREAKPOINT = '900px'
 
@@ -63,17 +74,28 @@ describe('mobile bottom-bar reserve (data-reading, not dead data-mpane)', () => 
 })
 
 describe('mobile shell gutter is tightened (≤900px)', () => {
-  it('overrides the shell horizontal padding on the mobile branch', () => {
-    // The surface scroll container owns the inner card padding (--pad-surface);
-    // the shell `dashboard-main-scroll p-4` adds the outer gutter. On desktop
-    // both read 12px+; on mobile the outer gutter is tightened via
-    // `max-[900px]:px-2` so card surfaces sit closer to the screen edge while
-    // bare surfaces (e.g. board `.bd-body`, which relies on the shell gutter)
-    // keep a minimal inset. Asserted on the shell branch className.
+  // The shell gutter is owned by the ID-specificity rule `#main-content > div
+  // { padding: var(--spacing-card) }` in global.css — NOT by the shell's
+  // `dashboard-main-scroll p-4` utility classes, which lose the cascade to the
+  // ID selector and never reach the element. An earlier attempt tightened the
+  // gutter via `max-[900px]:px-2` on the shell className; that class generates
+  // but is overridden by the ID rule, so it was a no-op at runtime. The real
+  // lever is a mobile override on `#main-content > div`.
+
+  it('does not rely on the dead max-[900px]:px-2 shell class (loses to the ID rule)', () => {
     const shellBranch = appSource.match(/dashboard-main-scroll[^'"`]*/)?.[0] ?? ''
-    expect(shellBranch).toContain('p-4')
-    expect(shellBranch).toContain('max-[900px]:px-2')
-    expect(shellBranch).toContain('max-[900px]:pb-16')
+    expect(shellBranch).not.toContain('px-2')
+  })
+
+  it('tightens #main-content > div inline padding on the mobile branch', () => {
+    const decls = mediaRuleDecls(globalCss, '#main-content > div', SHELL_MOBILE_CHROME_BREAKPOINT)
+    expect(decls['padding-inline']).toBe('var(--spacing-element)')
+  })
+
+  it('the mobile gutter token is smaller than the desktop --spacing-card', () => {
+    // Desktop: `#main-content > div { padding: var(--spacing-card) }`.
+    // Mobile steps down one semantic tier to --spacing-element.
+    expect(tokenPx('--spacing-element')).toBeLessThan(tokenPx('--spacing-card'))
   })
 })
 

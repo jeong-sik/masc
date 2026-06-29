@@ -316,7 +316,7 @@ export function App() {
             class="v2-surface-host"
             style=${{ minWidth: 0, minHeight: 0, overflowY: 'auto' }}
           >
-            <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : 'dashboard-main-scroll h-full p-4 max-[900px]:px-2 max-[900px]:pb-16'}>
+            <div class=${isCodeSurface || widgetSoloMode ? 'h-full overflow-hidden p-0' : keeperDetailMode ? 'h-full p-0' : 'dashboard-main-scroll h-full p-4 max-[900px]:pb-16'}>
               <div class="v2-surface" key=${currentTab}>
                 <${DashboardMain} />
               </div>

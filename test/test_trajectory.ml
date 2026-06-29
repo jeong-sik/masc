@@ -577,6 +577,54 @@ let test_read_entries_since_no_dir () =
     let entries = Trajectory.read_entries_since ~masc_root:dir ~keeper_name:"nonexistent" ~since:0.0 in
     Alcotest.(check int) "no dir" 0 (List.length entries))
 
+let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
+  Trajectory.Thinking
+    {
+      ts;
+      ts_iso = "2026-06-29T00:00:00Z";
+      turn = 1;
+      content;
+      content_length = String.length content;
+      redacted;
+    }
+
+let check_thinking_content label expected = function
+  | Trajectory.Thinking entry ->
+      Alcotest.(check string) label expected entry.Trajectory.content
+  | Trajectory.Tool_call _ -> Alcotest.fail (label ^ ": expected thinking line")
+
+let check_tool_call label expected = function
+  | Trajectory.Tool_call entry ->
+      Alcotest.(check string) label expected entry.Trajectory.tool_name
+  | Trajectory.Thinking _ -> Alcotest.fail (label ^ ": expected tool call line")
+
+let test_dedupe_thinking_lines_uses_structural_key () =
+  let tool_call =
+    Trajectory.Tool_call
+      (mk_entry ~ts:1000.5 "tool_execute" 20 0.0 "2026-06-29T00:00:00Z")
+  in
+  let lines =
+    [
+      thinking_line ~ts:1000.0 "same";
+      tool_call;
+      thinking_line ~ts:1000.0 "same";
+      thinking_line ~ts:1001.0 "same";
+      thinking_line ~ts:1000.0 ~redacted:true "same";
+    ]
+  in
+  let deduped =
+    Server_dashboard_http_keeper_api_trace.dedupe_thinking_lines lines
+  in
+  Alcotest.(check int) "one exact duplicate removed" 4 (List.length deduped);
+  check_thinking_content "first thinking preserved" "same" (List.nth deduped 0);
+  check_tool_call "tool call preserved" "tool_execute" (List.nth deduped 1);
+  check_thinking_content "same content at a new timestamp preserved" "same"
+    (List.nth deduped 2);
+  (match List.nth deduped 3 with
+   | Trajectory.Thinking entry ->
+       Alcotest.(check bool) "redacted variant preserved" true entry.Trajectory.redacted
+   | Trajectory.Tool_call _ -> Alcotest.fail "expected redacted thinking line")
+
 (* ================================================================ *)
 (* Runner                                                            *)
 (* ================================================================ *)
@@ -703,6 +751,10 @@ let () =
       Alcotest.test_case "parses persisted gate summary" `Quick
         test_read_entries_since_result_parses_gate_summary;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
+    ]);
+    ("keeper_trace", [
+      Alcotest.test_case "dedupe_thinking_lines uses structural key" `Quick
+        test_dedupe_thinking_lines_uses_structural_key;
     ]);
     ("thinking_trajectory", [
       Alcotest.test_case "append_thinking persists full untruncated text" `Quick

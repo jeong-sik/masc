@@ -170,16 +170,21 @@ let build_agent
      계약(label 없으면 정체성=model)인 total mapping이라 sound-partial. DET-OK *)
   let card_name = Option.value name ~default:model in
   match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:model () with
-  | Error e -> Error (Fusion_types.Provider_error e)
-  | Ok [] -> Error (Fusion_types.Provider_error (model ^ ": no provider config"))
+  | Error e ->
+    Error ((Fusion_types.Provider_error e : Fusion_types.panel_failure))
+  | Ok [] ->
+    Error
+      ((Fusion_types.Provider_error (model ^ ": no provider config")
+        : Fusion_types.panel_failure))
   | Ok (provider_cfg :: _) ->
-    let provider_cfg =
+    let provider_cfg : (Llm_provider.Provider_config.t, Fusion_types.panel_failure) result =
       match provider_config_transform with
       | None -> Ok provider_cfg
       | Some transform ->
         Result.map_error
           (fun detail ->
-             Fusion_types.Provider_error (provider_error_detail ~runtime_id:model detail))
+             ( Fusion_types.Provider_error (provider_error_detail ~runtime_id:model detail)
+               : Fusion_types.panel_failure ))
           (transform provider_cfg)
     in
     (* v1: runtime이 여러 provider를 주면 첫 번째만(단일 provider 가정). *)
@@ -206,8 +211,9 @@ let build_agent
      | Ok agent -> Ok agent
      | Error e ->
        Error
-         (Fusion_types.Provider_error
-            (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e))))))
+         ((Fusion_types.Provider_error
+             (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e))
+           : Fusion_types.panel_failure))))
 
 module For_testing = struct
   let apply_timeout_budget = apply_timeout_budget

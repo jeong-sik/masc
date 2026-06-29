@@ -15,8 +15,8 @@
   keeper_runtime_config
   keeper_disk_pressure
   keeper_fd_pressure
-  keeper_turn_admission
-  keeper_turn_admission_observer
+  keeper_pressure_admission
+  keeper_pressure_admission_observer
   keeper_livelock_state
   keeper_binding_health_config
   keeper_recording_error_state

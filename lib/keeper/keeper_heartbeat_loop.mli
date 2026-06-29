@@ -125,7 +125,7 @@ val turn_status_event :
 
 (** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
     The fd/disk pressure precondition is pre-checked by the caller via
-    {!Keeper_turn_admission_observer.decide_observed} BEFORE this is invoked, so
+    {!Keeper_pressure_admission_observer.decide_observed} BEFORE this is invoked, so
     this function must NOT re-add inline pressure gates: doing so would reinstate
     the consume-before-gate churn that hoisting the admission check removed. *)
 val run_keepalive_unified_turn :

@@ -363,7 +363,7 @@ let run_keepalive_unified_turn
         else if should_run_turn
         then (
           (* fd/disk pressure is pre-checked by the caller's turn-admission gate
-             (Keeper_turn_admission_observer.decide_observed in run_heartbeat_loop)
+             (Keeper_pressure_admission_observer.decide_observed in run_heartbeat_loop)
              BEFORE stimulus intake, so this branch is reached only when a turn is
              admitted. The four prior inline pressure gates here were removed: they
              ran AFTER intake had already consumed the stimulus, forcing a
@@ -830,23 +830,23 @@ let run_heartbeat_loop
            (Keeper_supervisor.assess_stale_run) does not crash-restart a keeper that
            is correctly suspended by a shared circuit breaker rather than stalled. *)
         let turn_admission =
-          Keeper_turn_admission_observer.decide_observed
+          Keeper_pressure_admission_observer.decide_observed
             ~masc_root:(Workspace.masc_root_dir ctx.config)
             ~active_keepers:(Keeper_registry.count_running ())
             ()
         in
         let admitted_turn =
           match turn_admission with
-          | Keeper_turn_admission.Admitted -> true
-          | Keeper_turn_admission.Blocked _ -> false
+          | Keeper_pressure_admission.Admitted -> true
+          | Keeper_pressure_admission.Blocked _ -> false
         in
         (match turn_admission with
-         | Keeper_turn_admission.Admitted -> ()
-         | Keeper_turn_admission.Blocked block ->
+         | Keeper_pressure_admission.Admitted -> ()
+         | Keeper_pressure_admission.Blocked block ->
            Keeper_registry.record_skip_reasons
              ~base_path:ctx.config.base_path
              meta_current.name
-             ~reasons:[ Keeper_turn_admission.skip_reason block ];
+             ~reasons:[ Keeper_pressure_admission.skip_reason block ];
            Keeper_registry.touch_last_turn_ts
              ~base_path:ctx.config.base_path
              meta_current.name);

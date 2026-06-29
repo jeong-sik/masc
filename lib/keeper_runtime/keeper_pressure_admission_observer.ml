@@ -54,10 +54,10 @@ let observe decision =
   let now = Time_compat.now () in
   let admitted_kind, summary =
     match decision with
-    | Keeper_turn_admission.Admitted -> None, None
-    | Keeper_turn_admission.Blocked block ->
-      ( Some (Keeper_turn_admission.block_kind block)
-      , Some (Keeper_turn_admission.block_summary block) )
+    | Keeper_pressure_admission.Admitted -> None, None
+    | Keeper_pressure_admission.Blocked block ->
+      ( Some (Keeper_pressure_admission.block_kind block)
+      , Some (Keeper_pressure_admission.block_summary block) )
   in
   let rec attempt () =
     let prev = Atomic.get phase_state in
@@ -73,7 +73,7 @@ let observe decision =
 ;;
 
 let decide_observed ~masc_root ~active_keepers () =
-  let decision = Keeper_turn_admission.decide ~masc_root ~active_keepers () in
+  let decision = Keeper_pressure_admission.decide ~masc_root ~active_keepers () in
   observe decision;
   decision
 ;;

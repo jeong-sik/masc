@@ -227,7 +227,7 @@ let test_runtime_assignment_writer_updates_runtime_toml () =
 
 let test_runtime_inventory_surfaces_assignment_governance () =
   with_runtime_initialized (fun () ->
-    let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+    let json = Server_dashboard_http_runtime_inventory.runtime_inventory_json () in
     let governance = J.member "assignment_governance" json in
     Alcotest.(check string)
       "schema"

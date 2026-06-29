@@ -177,7 +177,7 @@ let add_routes ~sw router =
   router
   |> Http.Router.get "/api/v1/providers" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let json = Server_dashboard_http_runtime_info.runtime_inventory_json () in
+         let json = Server_dashboard_http_runtime_inventory.runtime_inventory_json () in
          Http.Response.json_value ~compress:true ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/models/metrics" (fun request reqd ->

@@ -18,7 +18,7 @@
       ({!runtime_resolution_json},
       {!light_runtime_resolution_json},
       {!Server_runtime_probe.dashboard_runtime_probe_http_json},
-      {!runtime_inventory_json},
+
       {!dashboard_perf_http_json},
       {!dashboard_tools_http_json}).
     - {b runtime probe test seams}
@@ -71,7 +71,7 @@ val governance_hitl_json : unit -> Yojson.Safe.t
     {!Governance_pipeline}. Pure read of config + governance policy; surfaces the
     "whether and why" so operators do not have to infer it from the environment. *)
 
-val runtime_inventory_json : unit -> Yojson.Safe.t
+
 (** Returns the materialized runtime.toml inventory loaded by
     {!Runtime.init_default}. This is the dashboard-compatible projection for
     the legacy [/api/v1/providers] route; it does not execute providers or

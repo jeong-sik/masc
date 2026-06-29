@@ -113,11 +113,11 @@ describe('KeeperWorkspaceRail', () => {
     recent_tool_names: ['masc_amplitude_query', 'masc_board_metrics'],
   })
 
-  it('renders the runtime / throughput vitals', () => {
+  it('renders the runtime vitals (throughput section removed)', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
-    // v2 rail splits the old combined "런타임 · 처리량" header into separate
-    // "처리량" and "런타임" sections; assert both still render their vitals.
-    expect(container.textContent).toContain('처리량')
+    // The 처리량 (throughput) section was removed from the keeper rail as
+    // low-signal in the detail view; the 런타임 section keeps its vitals.
+    expect(container.textContent).not.toContain('처리량')
     expect(container.textContent).toContain('런타임')
     expect(container.textContent).toContain('sonnet-4.6')
     expect(container.textContent).toContain('oas·seoul-1')
@@ -156,7 +156,8 @@ describe('KeeperWorkspaceRail', () => {
     const meter = container.querySelector('.meter') as HTMLElement | null
 
     expect(container.textContent).toContain('컨텍스트')
-    expect(container.textContent).toContain('윈도우 사용량')
+    // The "윈도우 사용량" label was removed as redundant under "컨텍스트".
+    expect(container.textContent).not.toContain('윈도우 사용량')
     expect(container.textContent).toContain('62%')
     expect(container.textContent).toContain('124.0k')
     expect(meter).not.toBeNull()
@@ -185,23 +186,14 @@ describe('KeeperWorkspaceRail', () => {
     expect(tag?.querySelector('.ttl')?.textContent).toContain('세그먼트 리텐션 대시보드')
   })
 
-  it('collapses the throughput card by default and expands the sparkline on click', () => {
+  it('does not render the throughput card (removed from the keeper rail)', () => {
     const k = mkKeeper({
       metrics_series: [{ wall_tokens_per_second: 10 }, { wall_tokens_per_second: 64 }] as unknown as Keeper['metrics_series'],
     })
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
-    // The prototype hides the throughput card behind a collapsible header with an
-    // inline summary; the .tps-spark sparkline only renders once expanded.
-    const toggle = Array.from(container.querySelectorAll<HTMLElement>('.ctx-h-toggle')).find((el) =>
-      el.textContent?.includes('처리량'),
-    )
-    expect(toggle).not.toBeUndefined()
+    expect(container.querySelector('.tps-card')).toBeNull()
     expect(container.querySelector('.tps-spark')).toBeNull()
-    fireEvent.click(toggle as HTMLElement)
-    const spark = container.querySelector('.tps-spark')
-    expect(spark).not.toBeNull()
-    expect(spark?.querySelectorAll('span').length).toBeGreaterThanOrEqual(2)
-    expect(container.querySelector('.tps-val')?.textContent).toContain('64')
+    expect(container.textContent).not.toContain('처리량')
   })
 
   it('opens the planning task detail when an owned task is clicked', () => {

@@ -68,8 +68,6 @@ let mcp_protocol_version_default =
 
 let default_base_path = Server_mcp_transport_http.default_base_path
 
-let implicit_base_path_resolution_source () = "implicit_base_path"
-
 let is_valid_protocol_version =
   Server_mcp_transport_http.is_valid_protocol_version
 
@@ -468,7 +466,10 @@ let run_server ~sw ~env ~host ~port ~base_path =
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn ->
-    Log.Server.error "[main] keeper bootstrap failed (continuing without keepers): %s" (Printexc.to_string exn)
+    Log.Server.error
+      "[main] keeper bootstrap failed; refusing to continue without keepers: %s"
+      (Printexc.to_string exn);
+    raise exn
 
 (** CLI options *)
 let port =
@@ -487,6 +488,12 @@ let base_path =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
   in
   Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+
+let run_base_path =
+  let doc =
+    "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
+  in
+  Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc)
 
 let login_json =
   let doc = "Emit machine-readable JSON instead of text output" in
@@ -566,80 +573,23 @@ let acquire_base_path_lock base_path =
            pid base_path pid);
       exit 1
 
-(** Reject base_path that points to the server's own source repo.
-    Detects by checking if the running executable lives under base_path/_build/.
-    Runtime state (.masc/keepers, traces, logs) must not pollute the repo. *)
-let guard_self_repo_base_path base_path =
-  let base_path = Env_config.normalize_masc_base_path_input base_path in
-  let abs_base =
-    try Unix.realpath base_path with Unix.Unix_error _ -> base_path
-  in
-  let abs_exe =
-    try Unix.realpath Sys.executable_name with Unix.Unix_error _ -> ""
-  in
-  let build_prefix = abs_base ^ "/_build/" in
-  let is_self_repo =
-    abs_exe <> ""
-    && String.length abs_exe > String.length build_prefix
-    && String.sub abs_exe 0 (String.length build_prefix) = build_prefix
-  in
-  if is_self_repo then begin
-    Printf.eprintf
-       "[FATAL] --base-path points to the server's own source repo: %s\n\
-       (executable: %s)\n\
-       Runtime state would pollute the repo. Use a workspace root instead:\n\
-       \  --base-path $MASC_BASE_PATH    (recommended)\n\
-       \  --base-path /path/to/workspace (explicit workspace root)\n\
-       Or start via: sb mcp masc start\n"
-      base_path abs_exe;
-    exit 1
-  end
-
-let run_cmd host port base_path =
+let run_cmd host port cli_base_path =
   Printexc.record_backtrace true;
-  let raw_base_path = String.trim base_path in
-  let normalized_base_path =
-    Env_config.normalize_masc_base_path_input base_path
+  let resolved_base_path =
+    Server_base_path_guard.resolve_startup_base_path ~cli_base_path
+      ~default_base_path ()
   in
+  Server_base_path_guard.exit_on_violation
+    (Server_base_path_guard.enforce resolved_base_path);
+  let raw_base_path = resolved_base_path.raw_base_path in
+  let normalized_base_path = resolved_base_path.normalized_base_path in
   let resolution_source =
-    match Sys.getenv_opt "MASC_BASE_PATH_RESOLUTION_SOURCE" with
-    | Some source when String.trim source <> "" -> String.trim source
-    | _ ->
-        let inherited_env_matches =
-          match Sys.getenv_opt "MASC_BASE_PATH" with
-          | Some existing ->
-              String.equal
-                (Env_config.normalize_masc_base_path_input existing)
-                normalized_base_path
-          | None -> false
-        in
-        if inherited_env_matches then
-          "explicit_env"
-        else
-          let default_path =
-            Env_config.normalize_masc_base_path_input (default_base_path ())
-          in
-          if String.equal default_path normalized_base_path then
-            implicit_base_path_resolution_source ()
-          else
-            "explicit_cli"
+    Server_base_path_guard.resolution_source_label
+      resolved_base_path.resolution_source
   in
   let stripped_base_path =
-    Env_config.strip_path_trailing_slashes (String.trim base_path)
+    Env_config.strip_path_trailing_slashes (String.trim raw_base_path)
   in
-  guard_self_repo_base_path normalized_base_path;
-  if String.equal resolution_source "implicit_base_path" then begin
-    Printf.eprintf
-      "[FATAL] Server refused to start with an implicit base path.\n\
-       Resolution source: %s\n\
-       Resolved path: %s\n\n\
-       Start the server with an explicit base path:\n\
-       \  --base-path /path/to/workspace     (CLI flag)\n\
-       \  MASC_BASE_PATH=/path/to/workspace  (environment variable)\n\n\
-       Use a workspace root, not the repository checkout or $HOME directly.\n"
-      resolution_source normalized_base_path;
-    exit 1
-  end;
   let masc_dir = Filename.concat normalized_base_path Common.masc_dirname in
   Fs_compat.mkdir_p masc_dir;
   acquire_pid_lock port;
@@ -655,7 +605,7 @@ let run_cmd host port base_path =
   then
     Log.Server.warn
       "Normalizing --base-path from %s to %s because runtime base paths must point at the workspace root, not the .masc directory."
-      base_path normalized_base_path;
+      raw_base_path normalized_base_path;
   Unix.putenv "MASC_BASE_PATH_INPUT" raw_base_path;
   Unix.putenv "MASC_BASE_PATH" normalized_base_path;
   Workspace_utils_backend_setup.cache_resolved_base_path normalized_base_path;
@@ -812,7 +762,7 @@ let run_cmd host port base_path =
             ()
             in
             Eio.Fiber.first
-            (fun () -> run_server ~sw ~env ~host ~port ~base_path)
+            (fun () -> run_server ~sw ~env ~host ~port ~base_path:normalized_base_path)
             await_shutdown_signal;
             (* Server stopped; close SSE connections after server is down. *)
             (try close_all_sse_connections ()
@@ -1026,7 +976,7 @@ let setup_gc () =
 let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
-  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ base_path)
+  Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ run_base_path)
     info [ init_cmd; login_cmd; memory_os_gc_dry_run_cmd ]
 
 let () =

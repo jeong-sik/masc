@@ -32,9 +32,11 @@ cd "$SCRIPT_DIR"
 DUNE_JOBS="${MASC_DUNE_JOBS:-8}"
 
 # mkdir-based build mutex (atomic on POSIX, works on macOS without flock).
-# Prevents multiple start-masc.sh instances from building concurrently.
+# Prevents multiple start-masc.sh instances in the same checkout/worktree from
+# building concurrently. The default is intentionally repo-local: a global /tmp
+# lock lets one stuck worktree block every Keeper startup on the host.
 # Stores owner PID to detect and recover from stale locks left by crashed processes.
-MASC_BUILD_LOCK="${MASC_BUILD_LOCK_PATH:-/tmp/masc-build.lock}"
+MASC_BUILD_LOCK="${MASC_BUILD_LOCK_PATH:-$SCRIPT_DIR/.masc-build.lock}"
 _MASC_LOCK_HELD=""
 _masc_cleanup_lock() {
     if [ -n "$_MASC_LOCK_HELD" ] && [ -d "$MASC_BUILD_LOCK" ]; then
@@ -522,13 +524,9 @@ do
     preserve_env_override "$env_name"
 done
 
-# Load secrets from the user profile; tracked plist files must not embed them.
-# NOTE: This intentionally sources ~/.zshenv which may set PATH and other vars.
-# For isolated production deploys, use scripts/deploy.sh which loads only
-# repo-local env files (config/*.env, .env) to avoid contamination.
-load_env_file "$HOME/.zshenv"
-
 # Load repo-local env for development overrides and secrets kept out of user shell.
+# User shell profiles (for example ~/.zshenv) are intentionally ignored: they
+# can silently re-home runtime state by setting MASC_BASE_PATH.
 load_env_file "$REPO_ENV_ROOT/.env"
 load_env_file "$REPO_ENV_ROOT/.env.local"
 if [ "$REPO_ENV_ROOT" != "$SCRIPT_DIR" ]; then
@@ -553,9 +551,9 @@ done
 # Did caller provide --base-path explicitly on CLI?
 BASE_PATH_EXPLICIT=0
 
-# Track whether MASC_BASE_PATH is set after shell/env-file restoration.
-# This must include ~/.zshenv and repo-local env files, not only caller-provided
-# exports, because both paths can accidentally inject a stale parent root.
+# Track whether MASC_BASE_PATH is set after repo-local env-file restoration.
+# User shell profiles are intentionally not sourced, so this captures only
+# caller-provided exports plus repo-local .env files.
 MASC_BASE_PATH_WAS_SET=0
 if [ -n "${MASC_BASE_PATH:-}" ]; then
     MASC_BASE_PATH_WAS_SET=1
@@ -700,7 +698,7 @@ while [[ $# -gt 0 ]]; do
     esac
 done
 
-BASE_PATH_RESOLUTION_SOURCE="implicit_repo_root"
+BASE_PATH_RESOLUTION_SOURCE="implicit_base_path"
 if [ "$BASE_PATH_EXPLICIT" = "1" ]; then
     BASE_PATH_RESOLUTION_SOURCE="explicit_cli"
 elif [ "$MASC_BASE_PATH_WAS_SET" = "1" ] && is_absolute_path "$BASE_PATH"; then

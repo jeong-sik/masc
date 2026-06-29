@@ -10,7 +10,7 @@ val authorization_header_from_policy :
   Llm_provider.Llm_transport.runtime_mcp_policy -> (string * string) option
 
 val per_keeper_authorization_header :
-  agent_name:string -> (string * string) option
+  base_path:string -> agent_name:string -> (string * string) option
 
 val runtime_mcp_policy_uses_bound_actor_tools :
   Llm_provider.Llm_transport.runtime_mcp_policy -> bool

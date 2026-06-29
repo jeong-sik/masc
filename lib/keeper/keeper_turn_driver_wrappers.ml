@@ -164,6 +164,7 @@ let run_model_by_label
 let run_named_with_masc_tools
     ~runtime_id
     ~goal
+    ~base_path
     ?priority
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
@@ -194,7 +195,7 @@ let run_named_with_masc_tools
       ~input_schema:td.input_schema
       (fun input -> dispatch ~name:td.name ~args:input)
   ) masc_tools in
-  Keeper_turn_driver.run_named ~runtime_id ~goal ?priority ~system_prompt ~tools:oas_tools
+  Keeper_turn_driver.run_named ~runtime_id ~goal ~base_path ?priority ~system_prompt ~tools:oas_tools
     ?max_turns
     ~max_idle_turns
     ~temperature ~max_tokens
@@ -208,6 +209,7 @@ let run_named_with_masc_tools
 let run_model_with_masc_tools
     ~(model_label : string)
     ~goal
+    ~base_path
     ?(system_prompt = "")
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
@@ -256,8 +258,8 @@ let run_model_with_masc_tools
               ~scope:(Printf.sprintf "explicit_model:%s" model_label)
               ~config ~goal
               (fun () ->
-                Runtime_agent.run_with_masc_tools ~sw ~net ~config ~masc_tools ~dispatch  ?on_event
-                  goal))
+                Runtime_agent.run_with_masc_tools ~sw ~net ~base_path ~config ~masc_tools ~dispatch  ?on_event
+	                  goal))
       with
       | Ok result -> result
       | Error (`Host_resource_saturated reason) ->

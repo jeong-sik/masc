@@ -22,10 +22,4 @@
  ; RFC-0071 §3.4 Phase 5 ratchet: warning 4 (fragile pattern match) on.
  (flags
   (:standard -w +4))
- (libraries
-  eio
-  yojson
-  masc_core
-  masc.config
-  masc.masc_exec
-  masc.dated_jsonl))
+ (libraries eio yojson masc_core masc.config masc.masc_exec masc.dated_jsonl))

@@ -397,6 +397,11 @@ let with_server f =
   (try Sys.remove base_path with _ -> ());
   Unix.mkdir base_path 0o755;
   seed_server_config ~base_path;
+  let oas_model_catalog =
+    match find_repo_file "oas-models.toml" with
+    | Some path -> path
+    | None -> fail "oas-models.toml fixture not found"
+  in
   let log_fd =
     Unix.openfile log_file [Unix.O_CREAT; Unix.O_WRONLY; Unix.O_TRUNC] 0o644
   in
@@ -408,6 +413,7 @@ let with_server f =
         ("MASC_AUTONOMY_ENABLED", "0");
         ("GRAPHQL_API_KEY", "");
         ("GRAPHQL_URL", "http://127.0.0.1:9/graphql");
+        ("OAS_MODEL_CATALOG", oas_model_catalog);
       ]
   in
   let argv =

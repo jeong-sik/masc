@@ -64,6 +64,18 @@ let assert_contains ~label haystack needle =
           swallow regression: see 2026-05-05 cycle9 FATAL incident"
          label needle)
 
+let assert_not_contains ~label haystack needle =
+  let n = String.length needle in
+  let h = String.length haystack in
+  let rec scan i =
+    if i + n > h then false
+    else if String.sub haystack i n = needle then true
+    else scan (i + 1)
+  in
+  if scan 0 then
+    failwith
+      (Printf.sprintf "[%s] source must not contain fail-open marker %S" label needle)
+
 let count_occurrences haystack needle =
   let n = String.length needle in
   let h = String.length haystack in
@@ -154,6 +166,16 @@ let () =
     ~label:"M3: defence-in-depth guard on error fallback"
     main_src
     "safe_reqd_respond reqd response body] guards all direct";
+
+  assert_contains
+    ~label:"M4: keeper bootstrap fail-closed message"
+    main_src
+    "keeper bootstrap failed; refusing to continue without keepers";
+
+  assert_not_contains
+    ~label:"M5: keeper bootstrap must not continue without keepers"
+    main_src
+    "keeper bootstrap failed (continuing without keepers)";
 
   (* ---- lib/server/server_mcp_transport_http_respond.ml ------------------ *)
   let mcp_respond_src =

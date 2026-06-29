@@ -649,6 +649,41 @@ let admission_block_kind = function
   | Host_fd_hotspot_budget_exhausted _ -> "host_fd_hotspot_budget_exhausted"
 ;;
 
+(* Human-readable one-line summary carrying the typed numbers (no re-probe).
+   Used by the fleet admission observer's edge WARN — mirrors
+   [Keeper_disk_pressure.admission_block_summary]. *)
+let admission_block_summary = function
+  | Fd_pressure_cooldown remaining_sec ->
+    Printf.sprintf "fd pressure cooldown (remaining=%.0fs)" remaining_sec
+  | Probe_unknown { probe; projected_fds; active_keepers; _ } ->
+    Printf.sprintf
+      "fd probe '%s' unknown (projected=%d active_keepers=%d)"
+      probe
+      projected_fds
+      active_keepers
+  | Projected_fd_budget_exhausted { soft_limit; projected_fds; active_keepers; _ } ->
+    Printf.sprintf
+      "projected fd budget exhausted (soft_limit=%d projected=%d active_keepers=%d)"
+      soft_limit
+      projected_fds
+      active_keepers
+  | System_fd_budget_exhausted { open_files; max_files; remaining_files; projected_fds; _ } ->
+    Printf.sprintf
+      "system fd budget exhausted (open=%d max=%d remaining=%d projected=%d)"
+      open_files
+      max_files
+      remaining_files
+      projected_fds
+  | Host_fd_hotspot_budget_exhausted
+      { open_files; max_files_per_process; remaining_files; projected_fds; _ } ->
+    Printf.sprintf
+      "host fd hotspot exhausted (open=%d max_per_proc=%d remaining=%d projected=%d)"
+      open_files
+      max_files_per_process
+      remaining_files
+      projected_fds
+;;
+
 let runtime_state_json ?(soft_limit = process_nofile_soft_limit ())
     ?(open_fds = process_open_fd_count ()) ?(system_fds = system_fd_snapshot ())
     ~active_keepers ~starting_keepers ~requested_keepers () =

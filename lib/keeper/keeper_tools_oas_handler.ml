@@ -192,5 +192,22 @@ let make_keeper_tool_handler
                   ~tool_name:name
                   ~start_time
                   payload)
+              ~on_execution_timeout:(fun message ->
+                let payload =
+                  Yojson.Safe.to_string
+                    (`Assoc
+                       [ "ok", `Bool false
+                       ; "error", `String "tool_resource_gate_execution_timeout"
+                       ; "message", `String message
+                       ; "recoverable", `Bool true
+                       ; "error_class", `String "transient"
+                       ; "failure_class", `String "transient_error"
+                       ])
+                in
+                Tool_result.error
+                  ~failure_class:(Some Tool_result.Transient_error)
+                  ~tool_name:name
+                  ~start_time
+                  payload)
               (fun () -> run_with_current_eio_context ~clock ())))
 ;;

@@ -21,4 +21,12 @@
  (wrapped false)
  (flags
   (:standard -w +4))
- (libraries unix eio yojson fs_compat time_compat dated_jsonl masc_core masc_log))
+ (libraries
+  unix
+  eio
+  yojson
+  fs_compat
+  time_compat
+  dated_jsonl
+  masc_core
+  masc_log))

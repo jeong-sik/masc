@@ -101,7 +101,7 @@ let prompt_for_facts facts_json =
          Agent_sdk.Error.Internal
            ("dashboard_interaction_judge prompt render failed: " ^ msg))
 
-let compute_judgments ~build_facts =
+let compute_judgments ~base_path ~build_facts =
   let runtime_id = Runtime.get_default_runtime_id () in
   Masc_oas_bridge.run_with_caller
     ~caller:Env_config_oas_bridge.Operator_judge
@@ -111,17 +111,17 @@ let compute_judgments ~build_facts =
       | Error err -> Error err
       | Ok prompt ->
           Keeper_turn_driver_wrappers.run_named_with_masc_tools ~runtime_id
-            ~goal:prompt ~masc_tools:[]
+            ~base_path ~goal:prompt ~masc_tools:[]
             ~dispatch:(fun ~name ~args:_ ->
               Tool_result.error ~tool_name:name ~start_time:0.0 "no tools")
             ~accept:Keeper_tool_response.response_has_text_or_tool_progress
             ~approval:Approval_callbacks.auto_approve ())
 
-let refresh_once st build_facts =
+let refresh_once ~base_path st build_facts =
   Eio_guard.with_mutex st.mu (fun () ->
     st.snapshot <- { st.snapshot with refreshing = true; last_error = None }
   );
-  match compute_judgments ~build_facts with
+  match compute_judgments ~base_path ~build_facts with
   | Ok result ->
       let text = Agent_sdk_response.text_of_response result.Runtime_agent.response in
       (match Llm_provider.Lenient_json.parse text with
@@ -173,9 +173,9 @@ let start ~sw ~clock ~base_path ~build_facts =
       let rec loop () =
         Eio.Fiber.check ();
         Eio.Time.sleep clock 60.0;
-        refresh_once st build_facts;
+        refresh_once ~base_path st build_facts;
         loop ()
       in
-      refresh_once st build_facts;
+      refresh_once ~base_path st build_facts;
       loop ())
   end

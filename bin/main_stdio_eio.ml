@@ -14,9 +14,22 @@ let base_path =
   let doc =
     "Workspace root for MASC data. Runtime state lives under <base-path>/.masc; do not pass the .masc directory itself."
   in
-  Arg.(value & opt string (default_base_path ()) & info ["base-path"] ~docv:"PATH" ~doc)
+  Arg.(value & opt (some string) None & info ["base-path"] ~docv:"PATH" ~doc)
 
-let run_cmd base_path =
+let run_cmd cli_base_path =
+  Printexc.record_backtrace true;
+  let resolved_base_path =
+    Server_base_path_guard.resolve_startup_base_path ~cli_base_path
+      ~default_base_path ()
+  in
+  Server_base_path_guard.exit_on_violation
+    (Server_base_path_guard.enforce resolved_base_path);
+  let base_path = resolved_base_path.normalized_base_path in
+  Unix.putenv "MASC_BASE_PATH_INPUT" resolved_base_path.raw_base_path;
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  Unix.putenv "MASC_BASE_PATH_RESOLUTION_SOURCE"
+    (Server_base_path_guard.resolution_source_label
+       resolved_base_path.resolution_source);
   Eio_main.run @@ fun env ->
   Mirage_crypto_rng_unix.use_default ();
   Eio_guard.enable ();

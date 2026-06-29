@@ -13,6 +13,7 @@ module Mcp_policy_helpers = Runtime_transport_mcp_policy_helpers
 module Auth_bridging = Runtime_transport_auth_bridging
 
 let runtime_mcp_policy_for_provider
+      ~base_path
       ~(provider_cfg : Llm_provider.Provider_config.t)
       ~(agent_name : string)
       (policy_opt : Llm_provider.Llm_transport.runtime_mcp_policy option)
@@ -34,7 +35,7 @@ let runtime_mcp_policy_for_provider
     (* Per-request HTTP headers are stripped and only MASC identity headers
          plus the per-keeper [Authorization] header survive — so runtime MCP
          tools still authenticate without leaking secrets via argv. *)
-    Some (Auth_bridging.bridged_runtime_mcp_policy_for_agent ~agent_name policy)
+    Some (Auth_bridging.bridged_runtime_mcp_policy_for_agent ~base_path ~agent_name policy)
   | Some _policy, true, None ->
     (* No keeper identity means no safe per-keeper bridge. Returning
        [None] makes the caller either fall back to inline tools (when

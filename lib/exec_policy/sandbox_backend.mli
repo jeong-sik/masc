@@ -4,4 +4,11 @@ type exec_result = {
   exit_code : int;
 }
 
-val run : Typed_capabilities.safe Typed_capabilities.verified_ir -> Eio_unix.Stdenv.base -> exec_result
+type error = Unsupported_backend of string
+
+val error_message : error -> string
+
+val run :
+  Typed_capabilities.safe Typed_capabilities.verified_ir ->
+  Eio_unix.Stdenv.base ->
+  (exec_result, error) result

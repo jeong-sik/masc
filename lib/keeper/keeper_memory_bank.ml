@@ -807,6 +807,7 @@ let append_memory_notes_from_reply
            This guarantees memory write regardless of LLM output format.
            See RFC #3646 Section 3: Det/NonDet boundary principle. *)
         ( {
+            Keeper_memory_policy.priority = None;
             Keeper_memory_policy.goal =
               (if meta.goal <> "" then Some meta.goal else None);
             progress = None;

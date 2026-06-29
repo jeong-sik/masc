@@ -19,6 +19,7 @@ type try_provider_ctx =
   { (* Runtime identity *)
     runtime_id : string
   ; error_runtime_id : string
+  ; base_path : string
   ; keeper_name : string
   ; name : string
   ; (* Agent config — fields passed through the runtime candidate boundary. *)
@@ -386,6 +387,7 @@ let run_try_provider
   let config_result =
     match
       Runtime_candidate.resolve_tool_lane_for_oas_tools
+        ~base_path:ctx.base_path
         ?agent_name:(Runtime_oas_runner.keeper_agent_name_opt ctx.keeper_name)
         ~tools:ctx.tools
         candidate
@@ -396,6 +398,7 @@ let run_try_provider
         match runtime_mcp_policy, String.trim ctx.keeper_name with
         | Some policy, keeper_name when keeper_name <> "" ->
           Runtime_candidate.runtime_mcp_policy_for_agent
+            ~base_path:ctx.base_path
             ~agent_name:(Keeper_identity.keeper_agent_name ctx.keeper_name)
             candidate
             (Some policy)

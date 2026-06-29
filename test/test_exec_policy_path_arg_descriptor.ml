@@ -125,6 +125,31 @@ let test_grep_context_flags_are_not_path_args () =
   Alcotest.(check bool) "grep context count skipped" false
     (List.mem "3" values)
 
+let test_sandbox_backend_fails_loud () =
+  let simple : Masc_exec.Shell_ir.simple =
+    { bin = Masc_exec.Exec_program.of_known Masc_exec.Exec_program.Ls
+    ; args = []
+    ; env = []
+    ; cwd = None
+    ; redirects = []
+    ; sandbox = Masc_exec.Sandbox_target.host ()
+    }
+  in
+  let safe_ir =
+    Typed_capabilities.Safe_IR (Masc_exec.Shell_ir.Simple simple)
+  in
+  Eio_main.run @@ fun env ->
+  match Sandbox_backend.run safe_ir env with
+  | Error error ->
+      Alcotest.(check string)
+        "unsupported backend is explicit"
+        "masc.exec_policy Sandbox_backend.run is disabled; use \
+         Masc.Keeper_sandbox_runner/Keeper_sandbox_docker"
+        (Sandbox_backend.error_message error)
+  | Ok result ->
+      Alcotest.failf "unexpected sandbox success: exit_code=%d stdout=%S"
+        result.exit_code result.stdout
+
 let () =
   Alcotest.run "exec_policy_path_arg_descriptor"
     [ ( "separated flag form"
@@ -151,5 +176,9 @@ let () =
             test_rg_context_flags_are_not_path_args
         ; Alcotest.test_case "grep context flags are not paths" `Quick
             test_grep_context_flags_are_not_path_args
+        ] )
+    ; ( "sandbox backend"
+      , [ Alcotest.test_case "fails loud instead of fake success" `Quick
+            test_sandbox_backend_fails_loud
         ] )
     ]

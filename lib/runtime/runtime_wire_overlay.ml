@@ -44,7 +44,9 @@ let agent_capabilities_of_llm_capabilities
   ; supports_extended_thinking = caps.supports_extended_thinking
   ; supports_reasoning_budget = caps.supports_reasoning_budget
   ; thinking_control_format = caps.thinking_control_format
+  ; preserve_thinking_control_format = caps.preserve_thinking_control_format
   ; reasoning_visibility_override = caps.reasoning_visibility_override
+  ; reasoning_replay_override = caps.reasoning_replay_override
   ; supports_response_format_json = caps.supports_response_format_json
   ; supports_structured_output = caps.supports_structured_output
   ; supports_multimodal_inputs = caps.supports_multimodal_inputs
@@ -65,8 +67,6 @@ let agent_capabilities_of_llm_capabilities
   ; supports_code_execution = caps.supports_code_execution
   ; emits_usage_tokens = caps.emits_usage_tokens
   ; supported_models = caps.supported_models
-  ; preserve_thinking_control_format = caps.preserve_thinking_control_format
-  ; reasoning_replay_override = caps.reasoning_replay_override
   }
 ;;
 

@@ -376,7 +376,7 @@ let emit_keeper_meta_overlay_drift ~keeper_name categories =
   match categories with
   | [] -> ()
   | cats ->
-    Log.Keeper.info
+    Log.Keeper.debug
       "ensure_keeper_meta: overlaying TOML-only [%s] for %s without writing \
        runtime meta JSON"
       (String.concat "," cats)

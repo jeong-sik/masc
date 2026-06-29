@@ -30,19 +30,24 @@ let classify ~prev ~admitted_kind ~now =
    only when the decision is [Blocked]; resume edges carry no block so they log
    the kind alone. *)
 let log_edge ~summary edge =
+  let summary_or fallback =
+    match summary with
+    | Some text -> text
+    | None -> fallback
+  in
   match edge with
   | No_edge -> ()
   | Entered_block { kind } ->
     Log.Keeper.warn
       "turn admission: fleet turns suspended (%s): %s"
       kind
-      (Option.value summary ~default:kind)
+      (summary_or kind)
   | Kind_changed { from_kind; to_kind } ->
     Log.Keeper.warn
       "turn admission: block reason changed %s -> %s: %s"
       from_kind
       to_kind
-      (Option.value summary ~default:to_kind)
+      (summary_or to_kind)
   | Resumed { was_kind; blocked_for_sec } ->
     Log.Keeper.warn
       "turn admission: fleet turns resumed after %.0fs (was %s)"

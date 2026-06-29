@@ -76,7 +76,10 @@ let translate ~redact_text ~on_text_delta bridge_state
       { bridge_state;
         chat_events =
           [ Oas_media_delta
-              { media_type; source_type; bytes = String.length data } ]
+              { media_type;
+                source_type = media_source_kind_to_string source_type;
+                bytes = String.length data
+              } ]
       }
   | ContentBlockStart { index; tool_id = Some tid; tool_name = Some tname; _ }
     when String.trim tid <> "" && String.trim tname <> "" ->

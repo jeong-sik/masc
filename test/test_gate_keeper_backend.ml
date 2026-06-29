@@ -296,7 +296,8 @@ let test_keeper_multimodal_input_converts_user_blocks_to_oas_blocks () =
       ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64" source_type;
+      check string "source type" "base64"
+        (Agent_sdk.Types.media_source_kind_to_string source_type);
       check string "text" "describe this" text
   | Ok _ -> fail "expected image then text OAS blocks"
   | Error err -> fail ("expected OAS block conversion: " ^ err)
@@ -329,7 +330,8 @@ let test_keeper_multimodal_input_accepts_mixed_case_data_url () =
   | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64" source_type
+      check string "source type" "base64"
+        (Agent_sdk.Types.media_source_kind_to_string source_type)
   | Ok _ -> fail "expected image OAS block"
   | Error err -> fail ("expected mixed-case data URL conversion: " ^ err)
 
@@ -361,7 +363,8 @@ let test_keeper_multimodal_input_normalizes_inferred_data_url_mime () =
   | Ok [ Agent_sdk.Types.Image { media_type; data; source_type } ] ->
       check string "media type" "image/png" media_type;
       check string "data" "abc123" data;
-      check string "source type" "base64" source_type
+      check string "source type" "base64"
+        (Agent_sdk.Types.media_source_kind_to_string source_type)
   | Ok _ -> fail "expected image OAS block"
   | Error err -> fail ("expected inferred data URL MIME conversion: " ^ err)
 
@@ -934,7 +937,8 @@ let test_runtime_run_blocks_appends_multimodal_input_to_oas_agent () =
               check string "text preserved" "Inspect this" text;
               check string "image media type" "image/png" media_type;
               check string "image data" "img" data;
-              check string "source type" "base64" source_type
+              check string "source type" "base64"
+                (Agent_sdk.Types.media_source_kind_to_string source_type)
           | _ -> fail "stored user input lost multimodal block shape")
       | _ -> fail "missing appended OAS user message")
 

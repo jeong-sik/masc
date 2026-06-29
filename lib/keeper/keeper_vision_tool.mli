@@ -55,7 +55,7 @@ val message_of_request
   :  Multimodal.Vision_analyze.request
   -> Agent_sdk.Types.message
 (** One-shot user message [text query; image], with bytes base64-encoded and
-    [~source_type:"base64"] (the OpenAI/ollama serializer emits
+    [~source_type:Agent_sdk.Types.Base64] (the OpenAI/ollama serializer emits
     [data:<media_type>;base64,<data>]). *)
 
 val provider_for_vision

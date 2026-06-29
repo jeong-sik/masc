@@ -71,7 +71,7 @@ let message_of_request (req : Va.request) : Agent_sdk.Types.message =
     ~role:Agent_sdk.Types.User
     [ Agent_sdk.Types.text_block req.Va.query
     ; Agent_sdk.Types.image_block
-        ~source_type:"base64"
+        ~source_type:Agent_sdk.Types.Base64
         ~media_type:req.Va.image_media_type
         ~data:(Base64.encode_string req.Va.image_bytes)
         ()

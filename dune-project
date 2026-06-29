@@ -55,12 +55,11 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.22 main after OAS #2259/#2261 restored
-  ;; format/SDK-independence readiness and #2265 fixed the stale fail-closed
-  ;; inline-test expectation, plus #2254 typed
-  ;; GLM tool-choice rejection, #2248 provider-qualified capability lookup,
-  ;; #2244 assistant tool-content, and fail-closed unknown stream block handling.
-  (agent_sdk (>= 0.207.22))
+  ;; Pinned to OAS v0.207.25 plus the #2288 stream accumulator re-export fix,
+  ;; after #2279 canonicalized stream accumulation, #2281 handled
+  ;; OpenAI-compat [DONE] sentinels cleanly, and #2282 centralized OpenAI
+  ;; request controls.
+  (agent_sdk (>= 0.207.25))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

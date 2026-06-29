@@ -1570,7 +1570,10 @@ let test_accept_contract_delegates_to_oas_response_shape () =
     "media"
     [
       Agent_sdk.Types.Image
-        { media_type = "image/png"; data = "redacted"; source_type = "base64" };
+        { media_type = "image/png"
+        ; data = "redacted"
+        ; source_type = Agent_sdk.Types.Base64
+        };
     ]
 
 let test_thinking_only_non_end_turn_response_is_rejected () =
@@ -1860,7 +1863,7 @@ let test_reject_reason_describes_mixed_non_progress_response () =
                {
                  media_type = "image/png";
                  data = "redacted";
-                 source_type = "base64";
+                 source_type = Agent_sdk.Types.Base64;
                };
            ]
          ())

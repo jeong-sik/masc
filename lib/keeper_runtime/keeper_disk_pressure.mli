@@ -48,6 +48,15 @@ val disk_snapshot_to_json : disk_snapshot -> Yojson.Safe.t
 val snapshot_result_to_json : snapshot_result -> Yojson.Safe.t
 val admission_block_to_json : admission_block -> Yojson.Safe.t
 val admission_decision_to_json : admission_decision -> Yojson.Safe.t
+
+(** Stable kind tag per block constructor (mirrors
+    {!Keeper_fd_pressure.admission_block_kind}). Display/skip-reason only;
+    the sum type is the source of truth, the string is never parsed back. *)
+val admission_block_kind : admission_block -> string
+
+(** Human-readable one-line summary with the typed numbers (no df re-probe). *)
+val admission_block_summary : admission_block -> string
+
 val snapshot_json : ?now:float -> masc_root:string -> unit -> Yojson.Safe.t
 
 module For_testing : sig

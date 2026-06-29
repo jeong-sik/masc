@@ -123,6 +123,11 @@ val record_crashed_cycle_failure :
 val turn_status_event :
   turn_fail_count:int -> max_allowed:int -> Keeper_state_machine.event
 
+(** Runs one keepalive turn (event intake, scheduling, optional cycle dispatch).
+    The fd/disk pressure precondition is pre-checked by the caller via
+    {!Keeper_pressure_admission_observer.decide_observed} BEFORE this is invoked, so
+    this function must NOT re-add inline pressure gates: doing so would reinstate
+    the consume-before-gate churn that hoisting the admission check removed. *)
 val run_keepalive_unified_turn :
   ctx:'a context ->
   meta_after_triage:keeper_meta ->

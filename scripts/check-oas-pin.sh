@@ -39,7 +39,6 @@ done
 # pin against upstream main so CI catches drift immediately.
 source "${SCRIPT_DIR}/oas-agent-sdk-pin.sh"
 
-min_version_re="${OAS_AGENT_SDK_MIN_VERSION//./\\.}"
 default_pin_source="${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
 pin_source="${AGENT_SDK_PIN_URL:-${default_pin_source}}"
 expected_opam_pin_source="git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}"
@@ -92,22 +91,8 @@ else
   echo "OAS pin override in use: ${pin_source}"
 fi
 
-# Accept both bare floor [(agent_sdk (>= X.Y.Z))] and capped floor
-# [(agent_sdk (and (>= X.Y.Z) (< W.V.U)))]. Cap is allowed because the
-# OAS pin SHA may transiently exceed the previous minor while masc
-# opts into a forward upper bound. Floor must remain exact.
-if ! grep -Eq "\\(agent_sdk (\\(>= ${min_version_re}\\)|\\(and \\(>= ${min_version_re}\\))" "${REPO_ROOT}/dune-project"; then
-  echo "dune-project agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
-  exit 1
-fi
-
-if ! grep -Eq "\"agent_sdk\" \\{>= \"${min_version_re}\"" "${REPO_ROOT}/masc.opam"; then
-  echo "masc.opam agent_sdk floor is not ${OAS_AGENT_SDK_MIN_VERSION}" >&2
-  exit 1
-fi
-
-if ! bash "${SCRIPT_DIR}/sync-oas-pin-docs.sh" --check; then
-  echo "OAS pin generated doc blocks are not aligned with scripts/oas-agent-sdk-pin.sh" >&2
+if ! bash "${SCRIPT_DIR}/sync-oas-pin-manifests.sh" --check; then
+  echo "OAS pin manifests are not aligned with scripts/oas-agent-sdk-pin.sh" >&2
   exit 1
 fi
 

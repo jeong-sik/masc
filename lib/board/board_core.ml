@@ -192,15 +192,9 @@ let list_posts store ?(visibility_filter = None) ?hearth ?(limit = 50) () : post
       | Some cached -> cached
       | None ->
         let all = Hashtbl.fold (fun _ (post : post) acc -> post :: acc) store.posts [] in
-        let sorted =
-          List.sort
-            (fun (a : post) (b : post) ->
-               let score_a = a.votes_up - a.votes_down in
-               let score_b = b.votes_up - b.votes_down in
-               let cmp = Stdlib.Int.compare score_b score_a in
-               if cmp <> 0 then cmp else Stdlib.Float.compare b.created_at a.created_at)
-            all
-        in
+        (* Hot formula lives in [Board_sort] (SSOT) — shared with
+           [Board_dispatch.sort_posts_in_memory] to prevent drift. *)
+        let sorted = List.sort Board_sort.hot_compare all in
         store.sorted_posts_cache <- Some sorted;
         sorted
     in

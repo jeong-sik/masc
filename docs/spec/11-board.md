@@ -168,13 +168,13 @@ PostgreSQL Board backend는 runtime contract가 아니다. Bootstrap은 filesyst
 
 | 정렬 | 계산 방식 | 설명 |
 |------|--------------------------|------|
-| Hot | (votes_up - votes_down) DESC, created_at DESC | 기본. 점수순 |
-| Trending | score / age^0.5 DESC | 최근 활동 가중. age = hours since creation |
+| Hot | (votes_up - votes_down) DESC, created_at DESC | 기본. net peer vote순 |
+| Trending | (votes_up - votes_down) / age^0.5 DESC | net peer vote / sqrt(age). reply_count는 별도 engagement signal로 랭킹 점수에 합산하지 않는다. age = max(1.0, hours since creation) |
 | Recent | created_at DESC | 생성 시간순 |
 | Updated | updated_at DESC | 마지막 활동순 (vote, comment 포함) |
 | Discussed | reply_count DESC, created_at DESC | 댓글 수순 |
 
-JSONL 모드에서 Trending 정렬은 `(votes_up - votes_down + reply_count * 2) / age^0.5`으로 계산.
+Hot/Trending 공식은 `Board_sort` 모듈(`lib/board/board_sort.ml`)에 단일 SSOT로 정의되며, `Board_core.list_posts`(캐시 기본 정렬)와 `Board_dispatch.sort_posts_in_memory`(HTTP/MCP 정렬) 양쪽이 공유한다. 과거 Trending이 `(net + reply_count * 2) / age^0.5`로 net vote와 reply를 합산했으나, 이는 downvote 과반 비난글(net 음수)이 댓글 수로 호평글을 제치는 부스트를 유발해 net-vote only로 정정했다(board-karma-v2 S2). reply_count는 표시 전용 engagement signal이다.
 
 ---
 

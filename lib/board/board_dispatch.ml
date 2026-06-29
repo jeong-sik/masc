@@ -300,14 +300,11 @@ let backend () =
           b
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
+  (* Ranking formulas live in [Board_sort] (single source of truth) so the
+     Hot/Trending definitions cannot drift between this in-memory sort and
+     [Board_core.list_posts]'s cached default sort. See [Board_sort]. *)
   match sort_by with
-  | Hot ->
-      List.sort (fun (a : Board.post) (b : Board.post) ->
-        let score_a = a.votes_up - a.votes_down in
-        let score_b = b.votes_up - b.votes_down in
-        let cmp = Stdlib.Int.compare score_b score_a in
-        if cmp <> 0 then cmp
-        else Stdlib.Float.compare b.created_at a.created_at) posts
+  | Hot -> List.sort Board_sort.hot_compare posts
   | Recent ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
         Stdlib.Float.compare b.created_at a.created_at) posts
@@ -315,19 +312,7 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
       List.sort (fun (a : Board.post) (b : Board.post) ->
         Stdlib.Float.compare b.updated_at a.updated_at) posts
   | Trending ->
-      let now = Time_compat.now () in
-      List.sort (fun (a : Board.post) (b : Board.post) ->
-        let age_a = Stdlib.Float.max 1.0 ((now -. a.created_at) /. Masc_time_constants.hour) in
-        let age_b = Stdlib.Float.max 1.0 ((now -. b.created_at) /. Masc_time_constants.hour) in
-        let score_a =
-          Stdlib.Float.of_int (a.votes_up - a.votes_down + (a.reply_count * 2))
-          /. (Stdlib.( **) age_a 0.5)
-        in
-        let score_b =
-          Stdlib.Float.of_int (b.votes_up - b.votes_down + (b.reply_count * 2))
-          /. (Stdlib.( **) age_b 0.5)
-        in
-        Stdlib.Float.compare score_b score_a) posts
+      List.sort (Board_sort.trending_compare ~now:(Time_compat.now ())) posts
   | Discussed ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
         let cmp = Stdlib.Int.compare b.reply_count a.reply_count in

@@ -290,13 +290,18 @@
   letter-spacing: 0.14em;
 }
 
-/* keeper-v2/overview.jsx renders 7 KPI cells (overview.jsx:106-114) into a
- * 6-column grid as the prototype specifies (surfaces.css:88 `repeat(6, 1fr)`).
- * The 7th cell ("진행 심의") wraps to a second row, matching prototype intent.
- * All other values mirror surfaces.css:88. */
+/* OverviewKpiStrip renders exactly 7 KPI cells (overview.ts:744-752) into a
+ * 1px-gap hairline grid: the container background shows through the gaps as
+ * dividers. With repeat(6) the 7th cell wrapped to a second row, leaving 5
+ * empty tracks that exposed the container --border-soft as a solid band
+ * (audit #2). 7 is prime, so only 1 or 7 columns tile 7 cells with no empty
+ * trailing area. Desktop uses 7 (one clean row); below 1280px it stacks to a
+ * single column (see the media query). A 2–3-col tablet tier would need a
+ * per-cell border divider instead of gap-bleed — deferred to the responsive
+ * chunk. */
 .ov-kpis {
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  grid-template-columns: repeat(7, 1fr);
   gap: 1px;
   background: var(--border-soft);
   border: 1px solid var(--border-main);
@@ -1025,7 +1030,9 @@
 
 /* responsive */
 @media (max-width: 1280px) {
-  .ov-kpis { grid-template-columns: repeat(3, 1fr); }
+  /* repeat(3) re-introduced the orphan band (7 % 3 = 1). Stack to a single
+   * band-free column below 1280px (see the .ov-kpis note above). */
+  .ov-kpis { grid-template-columns: 1fr; }
   .ov-grid { grid-template-columns: 1fr; }
 }
 

@@ -10,12 +10,11 @@
    2. The NEW [Keeper_execution_receipt.operator_disposition] (which now
       parses [terminal_reason_code] once via [Keeper_terminal_reason.of_wire]
       and exhaustive-matches) returns the SAME (disposition, reason) pair as
-      a FROZEN verbatim copy of the pre-typing substring-classifier logic,
-      over the cartesian product of (producer-string corpus) x (the small
-      finite field matrix the classifier branches on). The frozen copy is
-      the independent oracle — it is intentionally NOT refactored to share
-      code with production, so a priority-order regression in production is
-      caught here. *)
+      the frozen independent oracle over the cartesian product of
+      (producer-string corpus) x (the small finite field matrix the
+      classifier branches on). The oracle is intentionally NOT refactored to
+      share code with production, so a priority-order regression in production
+      is caught here. *)
 
 module R = Masc.Keeper_execution_receipt
 module Tr = Keeper_terminal_reason
@@ -41,7 +40,7 @@ let roundtrip_corpus =
   ; "api_error_auth"
   ; "provider_error_auth:openai"
   ; "provider_error_invalid_config:field_x"
-    (* provider family (api_error_ prefix) *)
+    (* provider family *)
   ; "api_error_rate_limited"
   ; "api_error_overloaded"
   ; "api_error_server:502"
@@ -49,6 +48,10 @@ let roundtrip_corpus =
   ; "api_error_network"
   ; "api_error_context_overflow"
   ; "api_error_oas_agent_execution_timeout"
+  ; "provider_error_parse"
+  ; "provider_error_server:500"
+  ; "provider_error_missing_api_key"
+  ; "provider_error_hard_quota:openai"
     (* completion-contract-violation (legacy + enriched forms) *)
   ; "completion_contract_violation:completion_contract"
   ; "completion_contract_violation:completion_contract:called[a,b]:satisfying[c]"
@@ -60,9 +63,6 @@ let roundtrip_corpus =
   ; "agent_error_idle_timeout:idle_sec=120.0,idle_timeout_sec=120.0,turn_count=7,max_turns=8"
   ; "turn_budget_exhausted:8/8"
     (* genuine Other (preserve-don't-fix) *)
-  ; "provider_error_server:500"
-  ; "provider_error_missing_api_key"
-  ; "provider_error_hard_quota:openai"
   ; "no_capable_provider"
   ; "mcp_error"
   ; "serialization_error"
@@ -133,10 +133,9 @@ let () =
 (*    substring classifier.                                            *)
 (* ------------------------------------------------------------------ *)
 
-(* Frozen verbatim copy of the pre-typing [operator_disposition] body.
-   DO NOT refactor to call production helpers — this is the oracle. It is
-   a byte-for-byte transcription of the git-history version (the
-   String.starts_with / string_contains chain) and must stay that way. *)
+(* Frozen copy of the pre-typing [operator_disposition] body plus explicit
+   policy updates pinned by focused regressions below. DO NOT refactor to call
+   production helpers — this is the oracle. *)
 let string_contains_ci = String_util.contains_substring_ci
 
 let frozen_terminal_prefix_max_turns_exceeded = "agent_error_max_turns_exceeded"
@@ -196,6 +195,7 @@ let frozen_operator_disposition (receipt : R.t)
   let provider_runtime_failure =
     String.starts_with ~prefix:"api_error_" terminal_reason
     || String.equal terminal_reason "provider_error"
+    || String.starts_with ~prefix:"provider_error_" terminal_reason
     ||
     match error_kind with
     | Some ("api" | "mcp" | "io" | "orchestration" | "serialization") -> true
@@ -507,6 +507,34 @@ let () =
   check
     (Printf.sprintf
        "provider timeout marker disposition want=%s got=%s"
+       (disp_pair_to_string want)
+       (disp_pair_to_string got))
+    (got = want)
+;;
+
+let () =
+  let code = "provider_error_parse" in
+  check
+    "provider parse marker is provider runtime failure"
+    (match Tr.of_wire code with
+     | Tr.Provider_runtime_failure wire -> String.equal wire code
+     | _ -> false);
+  check
+    "provider parse marker is not transient"
+    (not (Tr.is_transient_provider_runtime_failure (Tr.of_wire code)));
+  let receipt =
+    { base_receipt with
+      terminal_reason_code = code
+    ; error_kind = Some (R.error_kind_of_string "provider")
+    ; outcome = `Error
+    ; runtime_outcome = R.Runtime_failed
+    }
+  in
+  let got = R.operator_disposition receipt in
+  let want = R.Disp_pause_human, R.Reason_provider_runtime_error in
+  check
+    (Printf.sprintf
+       "provider parse marker disposition want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)

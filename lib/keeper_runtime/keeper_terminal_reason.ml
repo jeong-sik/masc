@@ -81,10 +81,7 @@ let of_wire wire =
   else if
     String.starts_with ~prefix:"api_error_" lowered
     || String.equal lowered "provider_error"
-    || String.equal lowered "provider_error_timeout"
-    || String.starts_with ~prefix:"provider_error_timeout:" lowered
-    || String.equal lowered "provider_error_network:timeout"
-    || String.starts_with ~prefix:"provider_error_network:timeout:" lowered
+    || String.starts_with ~prefix:"provider_error_" lowered
   then Provider_runtime_failure wire
   else if String.starts_with ~prefix:"completion_contract_violation:" lowered
   then Completion_contract_violation wire

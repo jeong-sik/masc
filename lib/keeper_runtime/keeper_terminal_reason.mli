@@ -63,12 +63,10 @@ type t =
           the original string. *)
   | Provider_runtime_failure of string
   (** Wire [String.starts_with ~prefix:"api_error_"], exact
-          ["provider_error"], or the provider timeout markers
-          ["provider_error_timeout:*"] / ["provider_error_network:timeout:*"].
-          Other parametrised [provider_error_*] codes
-          (server/hard_quota/capacity/missing_api_key/…) do NOT match and,
-          absent a config/auth substring, fall to [Other]. Payload is the
-          original string. *)
+          ["provider_error"], or
+          [String.starts_with ~prefix:"provider_error_"]. Config/auth-like
+          provider codes still land in [Config_or_auth] because that bucket
+          is ranked earlier. Payload is the original string. *)
   | Completion_contract_violation of string
   (** Wire [String.starts_with ~prefix:"completion_contract_violation:"],
           including the extended [:called[..]:satisfying[..]] form. Payload

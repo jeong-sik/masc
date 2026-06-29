@@ -19,3 +19,5 @@ val start :
 val runtime_status : string -> runtime_snapshot
 
 val fresh_interactions_json : base_path:string -> Yojson.Safe.t
+
+val notify_activity : base_path:string -> unit

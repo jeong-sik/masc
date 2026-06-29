@@ -45,8 +45,10 @@ type runtime_snapshot = {
 
 type state = {
   mu : Eio.Mutex.t;
+  cond : Eio.Condition.t;
   mutable snapshot : runtime_snapshot;
   mutable last_json : Yojson.Safe.t;
+  mutable pending_refresh : bool;
 }
 
 let states : (string, state) Hashtbl.t = Hashtbl.create 4
@@ -60,6 +62,7 @@ let get_state base_path =
           let s =
             {
               mu = Eio.Mutex.create ();
+              cond = Eio.Condition.create ();
               snapshot = {
                 enabled = true;
                 judge_online = false;
@@ -71,6 +74,7 @@ let get_state base_path =
                 last_error = None;
               };
               last_json = `Assoc [("stigmergy", `Assoc []); ("interactions", `List [])];
+              pending_refresh = false;
             }
           in
           Hashtbl.replace states base_path s;
@@ -148,12 +152,24 @@ let refresh_once st build_facts =
         st.snapshot <- { st.snapshot with refreshing = false; last_error = Some (Agent_sdk.Error.to_string err) }
       )
 
-let start ~sw ~clock ~base_path ~build_facts =
+let notify_activity ~base_path =
+  let st = get_state base_path in
+  Eio_guard.with_mutex st.mu (fun () ->
+    st.pending_refresh <- true;
+    Eio.Condition.broadcast st.cond
+  )
+
+let start ~sw ~clock:_ ~base_path ~build_facts =
   let st = get_state base_path in
   Eio.Fiber.fork ~sw (fun () ->
     let rec loop () =
+      Eio_guard.with_mutex st.mu (fun () ->
+        while not st.pending_refresh do
+          Eio.Condition.await st.cond st.mu
+        done;
+        st.pending_refresh <- false
+      );
       Eio.Fiber.check ();
-      Eio.Time.sleep clock 60.0; (* We will use 60s, earlier the reviewer mentioned 10s polling LLM cost. The reviewer said: "10s polling + LLM cost. setInterval(fetchJudge, 10000) re-runs the judge every 10s". Ah, the frontend polls every 10s, but the backend loop here was 600s! 600s is 10 min. Wait, I will keep backend loop 600s. *)
       refresh_once st build_facts;
       loop ()
     in

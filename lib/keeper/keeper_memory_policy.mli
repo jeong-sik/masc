@@ -54,6 +54,7 @@ val alert_channel_result_to_json : alert_channel_result -> Yojson.Safe.t
 (** {1 Keeper state snapshot} *)
 
 type keeper_state_snapshot = {
+  priority : int option;
   goal : string option;
   progress : string option;
   done_summary : string option;

@@ -88,6 +88,7 @@ let alert_channel_result_to_json (r : alert_channel_result) : Yojson.Safe.t =
   ]
 
 type keeper_state_snapshot = {
+  priority: int option;
   goal: string option;
   progress: string option;
   done_summary: string option;
@@ -99,6 +100,7 @@ type keeper_state_snapshot = {
 }
 
 let empty_keeper_state_snapshot = {
+  priority = None;
   goal = None;
   progress = None;
   done_summary = None;
@@ -307,7 +309,8 @@ let state_snapshot_of_lines (lines : string list) : keeper_state_snapshot option
                             | None -> acc))))))))
       empty_keeper_state_snapshot lines
   in
-  if snapshot.goal = None
+  if snapshot.priority = None
+     && snapshot.goal = None
      && snapshot.progress = None
      && snapshot.next_items = []
      && snapshot.decisions = []
@@ -447,6 +450,7 @@ let cap_snapshot
     ?(max_item_chars = default_max_item_chars)
     (snapshot : keeper_state_snapshot) : keeper_state_snapshot =
   {
+    priority = snapshot.priority;
     goal = cap_string ~max_chars:max_string_chars snapshot.goal;
     progress = cap_string ~max_chars:max_string_chars snapshot.progress;
     done_summary = cap_string ~max_chars:max_string_chars snapshot.done_summary;
@@ -652,6 +656,7 @@ let continuity_fallback_summary_text
 
 let keeper_state_snapshot_to_json (snapshot : keeper_state_snapshot) : Yojson.Safe.t =
   `Assoc [
+    ("priority", match snapshot.priority with Some p -> `Int p | None -> `Null);
     ("goal", Json_util.string_opt_to_json snapshot.goal);
     ("progress", Json_util.string_opt_to_json snapshot.progress);
     ("done_summary", Json_util.string_opt_to_json snapshot.done_summary);
@@ -675,7 +680,8 @@ let keeper_state_snapshot_of_json (json : Yojson.Safe.t) : keeper_state_snapshot
     | _ -> []
   in
   let snapshot =
-    { goal = string_opt "goal"
+    { priority = Json_util.get_int json "priority"
+    ; goal = string_opt "goal"
     ; progress = string_opt "progress"
     ; done_summary = string_opt "done_summary"
     ; next_summary = string_opt "next_summary"
@@ -685,7 +691,8 @@ let keeper_state_snapshot_of_json (json : Yojson.Safe.t) : keeper_state_snapshot
     ; constraints = string_list "constraints"
     }
   in
-  if snapshot.goal = None
+  if snapshot.priority = None
+     && snapshot.goal = None
      && snapshot.progress = None
      && snapshot.done_summary = None
      && snapshot.next_summary = None
@@ -780,6 +787,11 @@ let structured_state_snapshot_schema :
        this JSON object when the runtime requests structured state.";
     params =
       [ structured_param
+          ~name:"priority"
+          ~description:"Self-evaluated priority score (1-100) for how critical the decisions and next steps in this generation are."
+          ~param_type:Agent_sdk.Types.Int
+          ~required:false
+      ; structured_param
           ~name:"goal"
           ~description:"Current keeper goal, if still relevant."
           ~param_type:Agent_sdk.Types.String
@@ -879,42 +891,12 @@ let priority_for_kind ~(kind : string) : int =
   | "progress" -> 66
   | _ -> 60
 
-(* Byte-wise containment via [String_util.contains_substring_ci] —
-   per-call [Re.compile] is gone and the two [String.lowercase_ascii]
-   allocations are avoided since the helper folds case inline. *)
-let contains_any_ci (text : string) (needles : string list) : bool =
-  List.exists (String_util.contains_substring_ci text) needles
-
-let signal_bonus ~(text : string) : int =
-  let high_priority_words = [
-    "risk"; "danger"; "unsafe"; "security"; "privacy"; "consent"; "guardrail";
-    "위험"; "보안"; "개인정보"; "동의"; "안전";
-    "blocker"; "deadline"; "ship"; "release"; "next step"; "todo"; "must";
-    "막힘"; "차단"; "데드라인"; "배포"; "다음 단계"; "필수";
-    "hypothesis"; "evidence"; "experiment"; "measure"; "benchmark"; "assume";
-    "가설"; "근거"; "실험"; "측정"; "벤치";
-    "preference"; "style"; "tone"; "boundary"; "expectation"; "trust";
-    "선호"; "스타일"; "톤"; "경계"; "기대"; "신뢰";
-    "required"; "중요"; "critical"
-  ] in
-  let uncertainty_words = [
-    "unknown"; "unclear"; "maybe"; "tbd"; "later"; "todo"; "unsure";
-    "모름"; "불명"; "아마"; "추정"; "미정"; "나중";
-  ] in
-  let keyword_bonus =
-    if contains_any_ci text high_priority_words then 8 else 0
-  in
-  let uncertainty_penalty =
-    if contains_any_ci text uncertainty_words then -8 else 0
-  in
-  keyword_bonus + uncertainty_penalty
-
 let tuned_priority_for_candidate
     ~(kind : string)
     ~(text : string) : int =
+  ignore text; (* Heuristics removed. Priority is now LLM-evaluated. *)
   let base = priority_for_kind ~kind in
-  let bonus = signal_bonus ~text in
-  max 1 (min 100 (base + bonus))
+  max 1 (min 100 base)
 
 let total_cap () : int = 12
 

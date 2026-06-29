@@ -607,13 +607,93 @@ let test_readonly_observation_duplicate_resets_after_write_tool () =
          ~input:(`Assoc [ ("request_id", `String "req-1") ])
          ())
   in
-  check string "write tool resets observation state"
+  check string "write tool pre-use does not reset observation state"
     "Continue" (decision_kind write);
+  let write_post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"masc_keeper_msg_cancel"
+         ~input:(`Assoc [ ("request_id", `String "req-1") ])
+         ())
+  in
+  check string "successful write tool resets observation state"
+    "Continue" (decision_kind write_post);
   let after_write =
     invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
   in
   check string "same read after write -> Continue"
     "Continue" (decision_kind after_write)
+
+let test_readonly_observation_duplicate_does_not_reset_after_failed_write_output () =
+  let hook = readonly_observation_hook () in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "first read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "successful read-only observation is recorded"
+    "Continue" (decision_kind post);
+  let failed_output =
+    Error
+      ({ TT.message = "write failed"; recoverable = true; error_class = None }
+       : TT.tool_error)
+  in
+  let failed_write_post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"masc_keeper_msg_cancel"
+         ~input:(`Assoc [ ("request_id", `String "req-1") ])
+         ~output:failed_output
+         ())
+  in
+  check string "failed write output does not reset observation state"
+    "Continue" (decision_kind failed_write_post);
+  let repeated =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "failed write did not clear prior read-only success"
+    "Override" (decision_kind repeated)
+
+let test_readonly_observation_duplicate_does_not_reset_on_denied_non_read_tool () =
+  let meta_ref = make_meta_ref "test_keeper" in
+  let state = KG.make_readonly_observation_state () in
+  let hook =
+    KG.compose_all [
+      KG.readonly_observation_duplicate_guard
+        ~meta_ref ~on_gate_decision:no_gate_observer ~state;
+      KG.deny_guard
+        ~meta_ref ~on_gate_decision:no_gate_observer
+        ~denied:["masc_keeper_msg_cancel"];
+    ]
+  in
+  let input = `Assoc [ ("limit", `Int 15) ] in
+  let first =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "first read-only observation -> Continue"
+    "Continue" (decision_kind first);
+  let post =
+    invoke_post_tool_use hook
+      (post_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "successful read-only observation is recorded"
+    "Continue" (decision_kind post);
+  let denied =
+    invoke hook
+      (pre_tool_use_event ~tool_name:"masc_keeper_msg_cancel"
+         ~input:(`Assoc [ ("request_id", `String "req-1") ])
+         ())
+  in
+  check string "denied non-read tool is blocked"
+    "Override" (decision_kind denied);
+  let repeated =
+    invoke hook (pre_tool_use_event ~tool_name:"keeper_tasks_list" ~input ())
+  in
+  check string "denied non-read tool did not clear prior read-only success"
+    "Override" (decision_kind repeated)
 
 let test_readonly_observation_duplicate_exempts_polling_read () =
   let hook = readonly_observation_hook () in
@@ -814,6 +894,10 @@ let () = run "Keeper_guards" [
       test_readonly_observation_duplicate_allows_retry_after_error;
     test_case "resets after write tool" `Quick
       test_readonly_observation_duplicate_resets_after_write_tool;
+    test_case "does not reset after failed write output" `Quick
+      test_readonly_observation_duplicate_does_not_reset_after_failed_write_output;
+    test_case "does not reset on denied non-read tool" `Quick
+      test_readonly_observation_duplicate_does_not_reset_on_denied_non_read_tool;
     test_case "exempts polling reads" `Quick
       test_readonly_observation_duplicate_exempts_polling_read;
   ];

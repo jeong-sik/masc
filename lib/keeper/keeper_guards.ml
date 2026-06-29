@@ -530,6 +530,14 @@ let read_only_snapshot_observation ~tool_name ~input =
             | Tool_catalog.Host_repo_write)
   | _, None -> false
 
+let mutating_effectful_tool ~tool_name =
+  match Keeper_tool_descriptor_resolution.effect_domain_for_tool_name tool_name with
+  | Some (Tool_catalog.Masc_workspace
+         | Tool_catalog.Playground_write
+         | Tool_catalog.Host_repo_write) -> true
+  | Some Tool_catalog.Read_only
+  | None -> false
+
 let readonly_observation_key ~tool_name ~input =
   let canonical_tool_name = Keeper_tool_capability_axis.canonical_tool_name tool_name in
   canonical_tool_name, canonical_input_string input
@@ -713,9 +721,8 @@ let readonly_observation_duplicate_guard
         { tool_name; input; accumulated_cost_usd; turn; schedule; _ } ->
       let t0 = Time_compat.now () in
       let keeper_name = (!meta_ref).name in
-      if not (read_only_snapshot_observation ~tool_name ~input) then (
-        reset_readonly_observation_state state;
-        Agent_sdk.Hooks.Continue)
+      if not (read_only_snapshot_observation ~tool_name ~input) then
+        Agent_sdk.Hooks.Continue
       else
         let key = readonly_observation_key ~tool_name ~input in
         match readonly_observation_record_pre_tool_use state ~turn ~schedule key with
@@ -757,19 +764,26 @@ let readonly_observation_duplicate_guard
   let post_tool_use event =
     match event with
     | Agent_sdk.Hooks.PostToolUse { tool_name; input; output; _ } ->
-      (if read_only_snapshot_observation ~tool_name ~input
-       then
+      (if read_only_snapshot_observation ~tool_name ~input then
         let key = readonly_observation_key ~tool_name ~input in
         (match output with
          | Ok _ -> readonly_observation_record_success state key
-         | Error _ -> readonly_observation_record_failure state key));
+         | Error _ -> readonly_observation_record_failure state key)
+       else
+        match output with
+        | Ok _ when mutating_effectful_tool ~tool_name ->
+          reset_readonly_observation_state state
+        | Ok _
+        | Error _ -> ());
       Agent_sdk.Hooks.Continue
     | _ -> Agent_sdk.Hooks.Continue
   in
   let post_tool_use_failure event =
     match event with
-    | Agent_sdk.Hooks.PostToolUseFailure _ ->
-      reset_readonly_observation_state state;
+    | Agent_sdk.Hooks.PostToolUseFailure { tool_name; input; _ } ->
+      (if read_only_snapshot_observation ~tool_name ~input then
+        let key = readonly_observation_key ~tool_name ~input in
+        readonly_observation_record_failure state key);
       Agent_sdk.Hooks.Continue
     | _ -> Agent_sdk.Hooks.Continue
   in

@@ -74,17 +74,12 @@ let source_repo_markers base_path =
   let markers = [ Git_metadata; Dune_project; Masc_opam ] in
   if List.for_all (path_exists base_path) markers then markers else []
 
-let has_prefix ~prefix value =
-  let prefix_len = String.length prefix in
-  String.length value > prefix_len
-  && String.equal (String.sub value 0 prefix_len) prefix
-
 let executable_under_base_build base_path =
   match realpath_opt Sys.executable_name with
   | None -> None
   | Some executable ->
       let build_prefix = Filename.concat (realpath_or_input base_path) "_build" ^ "/" in
-      if has_prefix ~prefix:build_prefix executable then Some executable else None
+      if String.starts_with ~prefix:build_prefix executable then Some executable else None
 
 let enforce resolved =
   match resolved.resolution_source with
@@ -107,8 +102,8 @@ let format_violation = function
          Resolution source: %s\n\
          Resolved path: %s\n\n\
          Start the server with an explicit base path:\n\
-         \\  --base-path /path/to/workspace     (CLI flag)\n\
-         \\  MASC_BASE_PATH=/path/to/workspace  (environment variable)\n\n\
+         --base-path /path/to/workspace     (CLI flag)\n\
+         MASC_BASE_PATH=/path/to/workspace  (environment variable)\n\n\
          Use a workspace root, not the repository checkout or $HOME directly.\n"
         (resolution_source_label resolved.resolution_source)
         resolved.normalized_base_path
@@ -128,8 +123,8 @@ let format_violation = function
          Source markers: %s\n\
          Executable: %s\n\
          Runtime state would pollute the repo. Use a workspace root instead:\n\
-         \\  --base-path $MASC_BASE_PATH    (recommended)\n\
-         \\  --base-path /path/to/workspace (explicit workspace root)\n\
+         --base-path $MASC_BASE_PATH    (recommended)\n\
+         --base-path /path/to/workspace (explicit workspace root)\n\
          Or start via: sb mcp masc start\n"
         base_path marker_text executable_text
 

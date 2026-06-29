@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-04-17
+last_verified: 2026-06-29
 code_refs:
   - lib/mcp_server.ml
   - lib/keeper/
@@ -9,10 +9,10 @@ code_refs:
 
 # Release Evidence
 
-> Current package version: v0.19.41
-> Updated: 2026-06-12
+> Current package version: v0.19.54
+> Updated: 2026-06-29
 
-`masc`를 production-ready라고 부를 때는 말보다 증거가 먼저여야 한다.  
+`masc`의 release/readiness 상태를 말할 때는 문구보다 증거가 먼저여야 한다.
 기본 증거 형식은 release-evidence bundle이며, 최소한 아래 항목이 함께 있어야 한다.
 
 ## Required Bundle
@@ -25,7 +25,7 @@ code_refs:
 - quantitative readiness: `docs/PRODUCTION-READINESS-GATES.md`의 release artifact, keeper turn evidence, performance SLO, OAS pin/boundary gate 결과를 함께 첨부
 - raw evidence: headers/body/json 정규화본 + `server.log`
 
-이 bundle이 없으면 최신 release/main에 대해 production claim을 하지 않는다.
+이 bundle이 없으면 최신 release/main에 대해 release-ready 또는 production-ready claim을 하지 않는다.
 
 ## Canonical Commands
 

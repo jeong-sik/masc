@@ -1,6 +1,6 @@
 ---
 status: live
-last_verified: 2026-04-17
+last_verified: 2026-06-29
 code_refs:
   - lib/keeper/
   - lib/mcp_server.ml
@@ -11,22 +11,22 @@ code_refs:
 
 > Current package version: v0.19.54
 > Latest changelog entry: v0.19.54 (2026-06-29)
-> Latest published GitHub release: v0.19.45 (2026-06-17)
+> Latest published GitHub release: v0.19.51 (2026-06-28)
 > Updated: 2026-06-29
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 
 Execution companion for capsule-only workspace collaboration hardening:
 [design/masc-capsule-execution-plan.md](design/masc-capsule-execution-plan.md)
 
-## Product Promise
+## Product Scope
 
-`masc` is a repo-local MCP server for alignment multiple coding agents inside one repository.
+`masc` is a repo-local MCP server for coordinating long-running Keepers, MCP clients, and workspace state inside one repository.
 
 Primary user:
 
 - one engineer or a small trusted team running multiple coding agents against the same checkout or worktree
 
-Promise stack:
+Scope stack:
 
 1. Repo workspace collaboration
 2. Keeper runtime and supervised delivery
@@ -139,7 +139,7 @@ Each PR should link at least one issue and state which promise it affects:
 - align roadmap, changelog, and product review
 - replace stale or ambiguous “what is this product?” prose with one consistent promise
 
-### Track B. GitHub as operating system
+### Track B. GitHub planning hygiene
 
 - enforce issue taxonomy with forms and a lightweight workflow
 - enforce PR section discipline with a sticky hygiene comment

@@ -12,6 +12,13 @@ code_refs:
 **Date**: 2026-03-16
 **대상**: Keeper/Agent 시스템을 사용하는 제품 사용자
 
+> 현재성 메모 (2026-06-29): 이 문서는 오래된 사용자 매뉴얼을 보존한
+> runbook이다. 전체 본문이 최신 코드와 1:1로 재검증된 것은 아니다. Keeper
+> 파일/설정의 권위는 [`KEEPER-FILE-MODEL.md`](./KEEPER-FILE-MODEL.md),
+> [`config/runtime.toml`](../config/runtime.toml), 그리고 loader/parser 코드다.
+> 이 문서의 runtime assignment 설명은 현재 코드 기준으로 갱신했지만, 오래된
+> architecture narrative는 historical context로 읽는다.
+
 ---
 
 ## 1. 아키텍처 개요
@@ -403,7 +410,7 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 | `last_heartbeat` | MASC | 마지막 heartbeat 타임스탬프 | keepalive 미실행 |
 | `trace_id` | MASC | `trace-{timestamp}-{random}` 형식 | (항상 존재) |
 | `agent_name` | MASC | `keeper-{name}-agent` 형식 | (항상 존재) |
-| `active_model` | Runtime | `last_model_used` 우선, 없으면 `runtime_id`의 첫 모델 fallback | 아직 실행 기록 없음 |
+| `runtime_id` / model display fields | Runtime | `runtime.toml [runtime.assignments]` 또는 `[runtime].default`에서 해석. 외부 표면에서는 concrete provider/model identity가 redacted 될 수 있음 | runtime assignment 없음 또는 아직 실행 기록 없음 |
 | `total_cost_usd` | MASC | 누적 MODEL 호출 비용 | 아직 호출 없음 |
 | `compaction_count` | MASC | compaction 수행 횟수 | 아직 compaction 없음 |
 
@@ -413,8 +420,8 @@ live observer는 shell gate counter와 semantic marker 계열만 남는다.
 
 | 필드 | 결정 로직 | 코드 위치 |
 |------|----------|----------|
-| **Active Model** | `last_model_used` 우선, 없으면 `runtime_id`의 첫 모델 fallback | `keeper_status_runtime.ml:active_model_of_meta` |
-| **Next Model Hint** | `config/runtime.toml`에서 해석한 runtime 모델 목록에서 현재 active_model과 다른 첫 모델. 없으면 현재 모델 또는 `None` | `keeper_status_runtime.ml:next_model_hint_of_meta` |
+| **Resolved Runtime** | keeper 이름으로 `runtime.toml [runtime.assignments]`를 조회하고, 없으면 `[runtime].default`를 사용 | `keeper_meta_contract.ml:runtime_id_of_meta` |
+| **Model display / hint fields** | 운영자 호환 필드로 남아 있을 수 있으나, concrete provider/model identity는 외부 표면에서 redacted 될 수 있음 | `keeper_status_runtime.ml`, runtime lens boundary |
 | **Skill (Primary/Secondary)** | 마지막 메트릭 항목의 `skill_primary`, `skill_secondary` 필드 | `keeper_status.ml:last_skill_route` |
 
 ---
@@ -447,7 +454,7 @@ Memory compaction 시 어떤 정보를 우선 보존할지는 통합 정책(`kee
 
 ### 4.3 모델 해석
 
-Keeper 모델 선택은 profile.json 인자가 아니라 `runtime_id`로 결정된다. 기본 keeper는 `routes.keeper_turn` 대상 runtime을 사용하고, 실제 모델 목록은 저장소의 고정 경로 `config/runtime.toml`이 아니라 resolved config root 기준의 `<resolved-config-root>/runtime.toml`에서 해석된다.
+Keeper 모델 선택은 `profile.json`이나 keeper TOML의 `runtime_id` 필드로 결정하지 않는다. 현재 권위는 resolved config root의 `<resolved-config-root>/runtime.toml`이며, keeper별 override는 `[runtime.assignments]`에 keeper 이름을 key로 적는다. assignment가 없으면 `[runtime].default`를 사용한다.
 
 ### 4.4 작성 예시
 
@@ -514,48 +521,55 @@ masc_keeper_create_from_persona(persona_name: "sangsu")
 
 ---
 
-## 5. 모델 Runtime 시스템
+## 5. Runtime Assignment 시스템
 
-### 5.1 모델 선택 우선순위
+### 5.1 Runtime 선택 우선순위
 
 ```mermaid
 flowchart TD
-    A[last_model_used 확인] -->|있으면| Z[Active Model 결정]
-    A -->|없으면| B[runtime_id 해석]
-    B --> C[resolved config root/runtime.toml 첫 모델]
-    C --> Z
+    A[keeper 이름] --> B[resolved config root/runtime.toml 확인]
+    B --> C{[runtime.assignments]에 keeper key가 있는가?}
+    C -->|있음| D[assigned runtime 사용]
+    C -->|없음| E[[runtime].default 사용]
+    D --> Z[turn runtime 결정]
+    E --> Z
 
     style Z fill:#e8f5e9
 ```
 
-### 5.2 Next Model Hint 결정 로직
+### 5.2 Runtime/model 표시 필드
 
-Next Model Hint는 handoff 시 successor에게 추천할 모델이다.
+일부 dashboard/status payload에는 `active_model`, `last_model_used`,
+`next_model_hint` 같은 legacy/display 필드가 남아 있을 수 있다. 현재
+운영 기준에서는 이 필드를 keeper 설정 권위로 쓰지 않는다.
 
-1. resolved config root의 `runtime.toml`에서 `runtime_id`의 모델 목록을 읽는다
-2. 현재 `active_model`과 다른 첫 번째 모델을 고른다
-3. 다른 모델이 없으면 현재 모델을 반환한다
-4. runtime 모델 목록이 비어 있으면 `None`
+1. runtime 선택 권위는 `<resolved-config-root>/runtime.toml`이다.
+2. keeper별 override는 `[runtime.assignments] keeper = "provider.model"`에 둔다.
+3. concrete provider/model identity는 외부 operator/product 표면에서 redacted 될 수 있다.
+4. failover/next-model semantics는 user-facing 자동 failover 계약이 아니다.
 
-코드 근거: `keeper_status_runtime.ml:next_model_hint_of_meta`
+코드 근거: `keeper_meta_contract.ml:runtime_id_of_meta`, `config/runtime.toml`
 
-### 5.3 사용 가능한 모델 형식
+### 5.3 Runtime assignment 형식
 
-`provider:model_id` 형식으로 지정한다:
+`runtime.toml`에서 keeper assignment는 provider/runtime catalog key를 값으로 쓴다:
 
-| Provider | 예시 | API |
-|----------|------|-----|
-| `glm-coding` | `glm-coding:glm-4.7` | Z.AI GLM Coding Plan ChatCompletions |
-| `agent-llm-a` | `agent-llm-a:sonnet` | Provider-A Messages API |
-| `provider-f` | `provider-f:pro` | Google AI API |
-| `openrouter` | `openrouter:meta-llama/llama-3` | OpenRouter API |
-| `custom` | `custom:model@http://host:port` | Provider-D 호환 엔드포인트 |
+```toml
+[runtime]
+default = "provider.runtime-id"
 
-### 5.4 모델 변경 시 주의사항
+[runtime.assignments]
+albini = "provider.runtime-id"
+```
+
+실제 provider, model id, capability, credential env key는 같은 파일의 provider/model catalog가 소유한다. README나 manual에 provider key 목록을 복제하지 않는다.
+
+### 5.4 Runtime 변경 시 주의사항
 
 - keeper는 per-call `models` override나 persisted `active_model` pinning을 지원하지 않는다
-- handoff 시 cross-model 정규화가 자동 적용된다: Llama는 Tool 메시지 변환, Agent-LLM-A는 alternating 규칙 적용
-- runtime fallback은 resolved config root의 `runtime.toml`에 있는 해당 runtime 순서대로 시도한다
+- keeper TOML/profile에 `runtime_id`, `model`, `runtime_ref`를 넣으면 load 단계에서 실패한다
+- runtime catalog / assignment 변경은 resolved config root의 `runtime.toml`을 고친 뒤 runtime reload 또는 재시작 경로를 따라야 한다
+- provider 장애 시 user-facing ordered automatic failover는 아직 구현되지 않았다; README의 Provider Failover 한계를 우선한다
 
 ---
 
@@ -709,19 +723,19 @@ flowchart TD
 | successor 시작 실패 | `next_model_hint` 확인 | 해당 모델의 API 접근 가능 여부 확인 |
 | handoff 쿨다운 | `handoff_cooldown_sec` (기본 300초) | 쿨다운 대기 또는 값 조정 |
 
-### 7.5 모델 Fallback
+### 7.5 Runtime Assignment 확인
 
 | 증상 | 확인 사항 |
 |------|----------|
-| 의도한 모델이 사용 안 됨 | `active_model` vs `last_model_used` 비교 |
-| runtime가 fallback으로 넘어감 | MODEL provider 연결 상태 확인 (API key, 서버 상태 등) |
-| `active_model`이 빈 문자열 | resolved config root의 `runtime.toml`에서 `routes.keeper_turn` 대상 확인 |
+| 의도한 runtime이 사용 안 됨 | resolved config root의 `runtime.toml [runtime.assignments]`에 keeper 이름 key가 있는지 확인 |
+| provider/model 호출 실패 | 해당 runtime catalog 항목의 credential env, endpoint, capability 설정 확인 |
+| runtime 표시가 비어 있거나 neutral 값 | 외부 표면에서 provider/model identity가 redacted 될 수 있음. config truth는 `runtime.toml`에서 확인 |
 
 **Runtime 디버깅**:
 ```
 masc_keeper_status(name: "{keeper_name}")
 ```
-응답의 `models_resolved` 섹션에서 각 모델의 provider, model_id, max_context, api_key_env를 확인한다.
+응답 payload는 호환 필드를 포함할 수 있지만, concrete provider/model identity는 redacted 될 수 있다. 설정 권위는 `<resolved-config-root>/runtime.toml`과 runtime catalog다.
 
 ### 7.6 Quiet 상태 진단
 
@@ -797,9 +811,9 @@ Keeper 설정은 아래 소스에서 공급된다. 상세 우선순위는
 [`docs/KEEPER-FILE-MODEL.md` §2 Keeper Declaration](./KEEPER-FILE-MODEL.md#2-keeper-declaration)을 참조한다. 요약:
 
 - **Canonical minimal**: `[keeper]` 테이블에 `persona_name`만. 나머지는 persona 기본값에서 해석.
-- **Overlay fields**: `goal`, `tool_access`, `runtime_id`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용.
-- **Allowed value sets**: `tool_access`는 candidate profile tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`, `social_model ∈ {bdi_speech_v1, magentic_ledger_v1}`, `runtime_id`는 `runtime.toml`에 `<name>_models` 키로 존재해야 함. 실제 실행 가능 여부는 descriptor/registry availability, `tool_denylist`, per-turn OAS allowlist, eval gate까지 통과해야 한다.
-- **Removed / hard-rejected**: `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
+- **Overlay fields**: `goal`, `tool_access`, `sandbox_profile`, `network_mode`, `active_goal_ids` 등 배치별 override 전용. Runtime/model selection은 keeper TOML overlay가 아니라 `runtime.toml [runtime.assignments]`가 소유한다.
+- **Allowed value sets**: `tool_access`는 candidate profile tool name string 배열, `sandbox_profile ∈ {local, docker}`, `network_mode ∈ {none, inherit}`. 실제 실행 가능 여부는 descriptor/registry availability, `tool_denylist`, per-turn OAS allowlist, eval gate까지 통과해야 한다.
+- **Removed / hard-rejected**: `runtime_id`, `model`, `runtime_ref`, `models`, `allowed_models`, `active_model`, `presence_keepalive*`, `trigger_mode`, `initiative_*`, `policy_mode`, `policy_shell_mode`. 로드 시 에러로 실패한다.
 - **Unknown keys**: canonical/removed 둘 다 아닌 key는 **boot 시 warning** 후 무시된다 (`keeper TOML <path> has unknown keys: ...`). 과거에 `legacy_scope`/`scope_kind` 같은 dead config가 축적된 적이 있으므로 warning을 발견하면 정리한다.
 
 Definitive source는 코드의 `canonical_keeper_toml_key_names` (`lib/keeper/keeper_types_profile.ml`)와 `removed_keeper_input_key_names` (`lib/keeper/keeper_config.ml`)다.
@@ -833,11 +847,11 @@ dir-local 실행에서 shared keeper 상태가 보이지 않는 것은 정상이
 
 해결: dir-local 개발은 `scripts/run-local.sh --target-dir <dir>`를 사용하고, shared `.masc/`를 봐야 할 때만 `./start-masc.sh --http` 또는 explicit `--base-path`를 사용한다.
 
-이 값은 workspace/base 경로이며, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 resolved config root의 첫 후보로도 사용한다. bare `~/.masc`는 `/Users/dancer/.masc`로 해석될 수 있으므로 runbook에서는 `<base-path>/.masc` 또는 fully resolved path를 쓴다.
+이 값은 workspace/base 경로이며, explicit `MASC_CONFIG_DIR`가 없을 때는 `<MASC_BASE_PATH>/.masc/config`를 resolved config root의 첫 후보로도 사용한다. bare `~/.masc`는 operator home의 `.masc`로 해석될 수 있으므로 runbook에서는 `<base-path>/.masc` 또는 fully resolved path를 쓴다.
 
 ### 8.4 모델 실행
 
-모델 선택은 resolved config root의 `runtime.toml`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. `runtime_id` (기본 `routes.keeper_turn` 대상)가 runtime을 지정하고 runtime resolver가 실행 모델을 결정한다.
+모델 선택은 resolved config root의 `runtime.toml`이 유일한 권위다. Keeper 설정에 모델 필드를 직접 지정하지 않는다. keeper별 override는 `[runtime.assignments]`에 keeper 이름을 key로 적고, 없으면 `[runtime].default`를 사용한다.
 
 ---
 

@@ -160,6 +160,10 @@ These are still accepted by the loader, but for consistency they should be used 
 | `telemetry_feedback_window_hours` | int | Window size for telemetry summarization |
 | `shards` | string array | Tool shard override |
 
+Runtime/model selection is not a keeper TOML field. Assign keepers in
+`runtime.toml` under `[runtime.assignments]`, keyed by keeper name. Unassigned
+keepers use `[runtime].default`.
+
 ### Allowed value sets
 
 Enumerated fields only accept the values below. The loader rejects invalid input with an explicit error.
@@ -169,8 +173,10 @@ Enumerated fields only accept the values below. The loader rejects invalid input
 | `sandbox_profile` | `local`, `docker` |
 | `network_mode` | `none`, `inherit` |
 | `tool_access` | string array of registered tool names used as the candidate profile list |
-| `social_model` | `bdi_speech_v1`, `magentic_ledger_v1` (non-public: rejected when passed via tool args; TOML-only) |
-| `runtime_id` | keeper-assignable declarative runtime profiles exposed by the active catalog: route targets, tier names, or runtime names that are not marked `keeper-assignable = false` |
+
+`social_model` is not an allowed public keeper TOML value. The old
+`magentic_ledger_v1` axis was retired, and the non-public keeper input list is
+currently empty in code.
 
 ### Sandbox Example
 
@@ -195,7 +201,8 @@ These keys are **rejected at load time** with an `Error`. They are retained only
 | Field | Replacement / rationale |
 | --- | --- |
 | Retired tool-policy aliases | Tool policy uses the canonical `tool_access` string-array candidate profile list plus `tool_denylist`; runtime execution is still constrained by descriptor/registry availability, per-turn OAS allowlists, and eval gates. |
-| `models`, `allowed_models`, `active_model` | Models are resolved at runtime from `runtime_id` → `runtime.toml`. Do not pin per-keeper. |
+| `runtime_id`, `model`, `runtime_ref` | Runtime assignment lives in `runtime.toml` `[runtime.assignments]`, keyed by keeper name. |
+| `models`, `allowed_models`, `active_model` | Models are resolved from the assigned runtime. Do not pin per-keeper. |
 | `allowed_providers` | Provider/model ownership lives in `runtime.toml` and OAS runtime receipts. Do not pin providers per keeper. |
 | `presence_keepalive`, `presence_keepalive_sec` | Use `paused` in runtime JSON; keepalive is managed by the keepalive fiber. |
 | `trigger_mode`, `policy_action_budget` | Removed with the legacy policy engine. |

@@ -22,10 +22,10 @@ consumer → MASC (workspace collaboration/orchestration) → OAS (agent runtime
 ## 문서 역할 (SSOT)
 
 - 이 문서는 **boundary contract SSOT**다.
-- `/home/runner/work/masc/masc/docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
-- `/home/runner/work/masc/masc/docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
-- `/home/runner/work/masc/masc/docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
-- `/home/runner/work/masc/masc/docs/design/oas-masc-state-boundary.md`는 historical audit + migration backlog로 취급한다.
+- `docs/spec/13-oas-integration.md`는 구현 세부와 open issue ledger를 유지한다.
+- `docs/qa/OAS-BOUNDARY-HEALTHCHECK-2026-03-31.md`는 시점별 health snapshot이다.
+- `docs/qa/OAS-OBSERVABILITY-TRUTH-AUDIT-2026-04-15.md`는 OAS observability producer -> bridge -> durable store -> dashboard consumer chain과 fixed gaps를 기록한다.
+- `docs/design/oas-masc-state-boundary.md`는 historical audit + migration backlog로 취급한다.
 
 ## 역할 분리
 

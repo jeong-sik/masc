@@ -2,7 +2,7 @@ open Alcotest
 
 module Axis = Masc.Keeper_tool_capability_axis
 module Resolution = Masc.Keeper_tool_descriptor_resolution
-module Tool_catalog = Masc.Tool_catalog
+module Tool_catalog = Tool_catalog
 
 let check_support capability name expected =
   check bool name expected (Axis.supports capability name)

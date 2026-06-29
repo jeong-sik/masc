@@ -302,22 +302,23 @@ let test_classify_delivery_mapping () =
   (* Pin the EXACT peer-surface set that the no-progress classifier treats as
      evidence-requiring. Intentionally an explicit literal, NOT
      [Cap.board_activity_tool_names] iterated: iterating the axis would be
-     tautological (it could never detect the axis growing a 5th tool). If
+     tautological (it could never detect the axis growing a 6th tool). If
      [Keeper_tool_capability_axis] adds a Board_activity tool, this assertion
      fails and forces a conscious decision about its no-progress impact —
      converting the policy<->taxonomy coupling from silent to guarded.
 
      vs the removed social-model [inferred_tool_surface] set
      {keeper_board_comment, keeper_board_post, keeper_broadcast}: this set adds
-     [masc_keeper_msg] (keeper->keeper message; [masc_broadcast] is the public
-     name of the same [keeper_broadcast] tool). That is an intentional, more
-     complete peer-surface definition (RFC-0276 §2.4 / §3.2 behavior change): a
-     turn that only sends a peer message with no durable evidence now accrues
-     the streak, matching RFC-0239's "only posts to peers without evidence"
-     intent, where the old social model let a bare keeper-msg turn reset it. *)
+     [masc_broadcast] (public broadcast form) and [masc_keeper_msg]
+     (keeper->keeper message). That is an intentional, more complete
+     peer-surface definition (RFC-0276 §2.4 / §3.2 behavior change): a turn
+     that only sends a peer message with no durable evidence now accrues the
+     streak, matching RFC-0239's "only posts to peers without evidence" intent,
+     where the old social model let a bare keeper-msg turn reset it. *)
   let expected_peer_tools =
-    [ "keeper_board_comment"
-    ; "keeper_board_post"
+    [ "keeper_board_post"
+    ; "keeper_board_comment"
+    ; "keeper_broadcast"
     ; "masc_broadcast"
     ; "masc_keeper_msg"
     ]

@@ -109,14 +109,15 @@ type reply_delivery =
    a multi-signal turn cannot flip the anti-thrash verdict to exempt.
 
    Behavior change (RFC-0276 §2.4): the [Board_activity] capability set is
-   {keeper_board_post, keeper_board_comment, masc_broadcast, masc_keeper_msg} —
-   wider than the old social-model peer set {board_post, board_comment,
-   broadcast} by [masc_keeper_msg] (keeper->keeper message). A turn that only
-   sends a peer message with no durable evidence now accrues the no-progress
-   streak (it previously reset it). This is intentional: a bare peer message is
-   exactly the "posts to peers without evidence" case RFC-0239 targets. The set
-   is pinned in test_no_progress_loop_detector so any axis change forces a
-   conscious no-progress review. *)
+   {keeper_board_post, keeper_board_comment, keeper_broadcast, masc_broadcast,
+   masc_keeper_msg} — wider than the old social-model peer set {board_post,
+   board_comment, broadcast} by the public broadcast form and
+   [masc_keeper_msg] (keeper->keeper message). A turn that only sends a peer
+   message with no durable evidence now accrues the no-progress streak (it
+   previously reset it). This is intentional: a bare peer message is exactly the
+   "posts to peers without evidence" case RFC-0239 targets. The set is pinned
+   in test_no_progress_loop_detector so any axis change forces a conscious
+   no-progress review. *)
 let classify_delivery ~is_autonomous ~reply_delivery ~tools ~has_visible_text =
   if Keeper_tool_capability_axis.(supports_any Board_activity tools)
   then Peer_only

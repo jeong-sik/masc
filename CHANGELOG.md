@@ -3,10 +3,12 @@
 ## Unreleased
 
 ### Changed
-- Bump OAS agent_sdk pin to the 0.207.21 main release (`39a7d139`),
+- Bump OAS agent_sdk pin to the 0.207.22 main follow-up (`c741324`),
   carrying #2254 typed GLM forced-tool-choice rejection, #2248
-  provider-qualified capability lookup, #2244 assistant tool-content, and
-  fail-closed unknown-stream-block handling.
+  provider-qualified capability lookup, #2244 assistant tool-content,
+  fail-closed unknown-stream-block handling, and the post-merge OAS format
+  readiness repair after the earlier 0.207.21/0.207.22 CI failures and the
+  stale inline-test fix from OAS #2265.
 
 ### Fixed
 - Resolve runtime capability validation and default preserve-thinking decisions

@@ -172,16 +172,16 @@ val degraded_retry_after_recoverable_error :
     any other candidate; if it duplicates the effective runtime or has
     already been attempted, the next legal candidate is returned.
 
-    For ["rate_limit"], candidates sharing the effective runtime's credential
-    pool, as reported by [credential_pool_of_runtime_id], are excluded before
-    attempt filtering, preserving independent-provider failover while avoiding
-    same-account fan-out. If no pool function is supplied, no credential-pool
-    filtering is applied. Non-contract transient infrastructure errors
-    (provider timeout, server error, capacity backpressure) allow cycling
-    through candidates again when all are exhausted, because the same runtime may
-    succeed on a subsequent attempt. Contract violations, read-only no-progress
-    accept rejections, and quota/rate-limit classes cap rotation after the
-    candidate set is exhausted.
+    For ["hard_quota"] and ["rate_limit"], candidates sharing the effective
+    runtime's credential pool, as reported by [credential_pool_of_runtime_id],
+    are excluded before attempt filtering, preserving independent-provider
+    failover while avoiding same-account fan-out. If no pool function is
+    supplied, no credential-pool filtering is applied. Non-contract transient
+    infrastructure errors (provider timeout, server error, capacity
+    backpressure) allow cycling through candidates again when all are exhausted,
+    because the same runtime may succeed on a subsequent attempt. Contract
+    violations, read-only no-progress accept rejections, and quota/rate-limit
+    classes cap rotation after the candidate set is exhausted.
     @since 0.174.0 *)
 val degraded_rotation_after_recoverable_error :
   ?credential_pool_of_runtime_id:(string -> string option) ->

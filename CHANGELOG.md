@@ -3,7 +3,7 @@
 ## Unreleased
 
 ### Changed
-- Bump OAS agent_sdk pin to 0.207.19 plus the OAS #2243 `ac4e50b`
+- Bump OAS agent_sdk pin to 0.207.19 plus the OAS #2243 `7a90978`
   fail-closed unknown-stream-block follow-up SHA.
 
 ### Fixed

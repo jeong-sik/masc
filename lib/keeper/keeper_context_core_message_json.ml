@@ -1,9 +1,4 @@
-let role_to_string (r : Agent_sdk.Types.role) =
-  match r with
-  | System -> "system"
-  | User -> "user"
-  | Assistant -> "assistant"
-  | Tool -> "tool"
+let role_to_string = Agent_sdk.Types.role_to_string
 
 (* Issue #8623: returns [Some] only for the 4 wire-format names.
    Callers must handle [None] explicitly — the previous Variant
@@ -12,12 +7,7 @@ let role_to_string (r : Agent_sdk.Types.role) =
    "user" causes the LLM to treat tool output as user instructions,
    echo prior assistant replies as user input, or downgrade system
    prompt privileges. Same anti-pattern class as #8605/#8615. *)
-let role_of_string_opt = function
-  | "system" -> Some Agent_sdk.Types.System
-  | "user" -> Some Agent_sdk.Types.User
-  | "assistant" -> Some Agent_sdk.Types.Assistant
-  | "tool" -> Some Agent_sdk.Types.Tool
-  | _ -> None
+let role_of_string_opt = Agent_sdk.Types.role_of_string
 
 let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =

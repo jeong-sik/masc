@@ -9,8 +9,8 @@ code_refs:
 
 # Product Operating Plan
 
-> Current package version: v0.19.55
-> Latest changelog entry: v0.19.55 (2026-06-29)
+> Current package version: v0.19.54
+> Latest changelog entry: v0.19.54 (2026-06-29)
 > Latest published GitHub release: v0.19.45 (2026-06-17)
 > Updated: 2026-06-29
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history

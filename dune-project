@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.19.55)
+(version 0.19.54)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)

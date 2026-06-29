@@ -623,7 +623,7 @@ let degraded_rotation_candidates
   |> List.filter (fun candidate ->
          not (String.equal candidate normalized_effective))
 
-let filter_rate_limit_rotation_candidates
+let filter_quota_pool_rotation_candidates
       ~credential_pool_of_runtime_id
       ~effective_runtime
       candidates
@@ -707,12 +707,12 @@ let degraded_rotation_after_recoverable_error
       in
       let candidates =
         match fallback_reason with
+        | Hard_quota
         | Rate_limit ->
-          filter_rate_limit_rotation_candidates
+          filter_quota_pool_rotation_candidates
             ~credential_pool_of_runtime_id
             ~effective_runtime
             candidates
-        | Hard_quota
         | Read_only_no_progress
         | Empty_no_progress
         | Thinking_only_no_progress

@@ -411,6 +411,17 @@ let soft_rate_limit_err =
        { retry_after = Some 30.0; message = "rate limited, retry later" })
 ;;
 
+let hard_quota_err =
+  SdkE.Api
+    (Retry.RateLimited
+       {
+         retry_after = None;
+         message =
+           "you (yousleepwhen) have reached your session usage limit, add extra \
+            usage: https://ollama.com/settings";
+       })
+;;
+
 let server_error_500 =
   SdkE.Api
     (Retry.ServerError { status = 500; message = "Internal Server Error" })
@@ -519,6 +530,47 @@ let test_soft_rate_limit_preserves_independent_pool_failover () =
   | Some { fallback_reason; next_runtime } ->
     Alcotest.failf
       "expected rate_limit -> other.c, got %s -> %s"
+      (EC.degraded_retry_reason_to_string fallback_reason)
+      next_runtime
+  | None -> Alcotest.fail "expected independent credential pool failover"
+;;
+
+let test_hard_quota_skips_same_credential_pool () =
+  init_rate_limit_pool_runtime ();
+  let retry =
+    EC.degraded_rotation_after_recoverable_error
+      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
+      ~fallback_hint:"same.b"
+      ~base_runtime:"same.a"
+      ~effective_runtime:"same.a"
+      ~attempted_runtimes:[ "same.a" ]
+      hard_quota_err
+  in
+  Alcotest.(check bool)
+    "hard quota does not fan out to the same credential pool"
+    false
+    (Option.is_some retry)
+;;
+
+let test_hard_quota_preserves_independent_pool_failover () =
+  init_rate_limit_pool_runtime ();
+  match
+    EC.degraded_rotation_after_recoverable_error
+      ~credential_pool_of_runtime_id:rate_limit_pool_of_runtime_id
+      ~fallback_hint:"other.c"
+      ~base_runtime:"same.a"
+      ~effective_runtime:"same.a"
+      ~attempted_runtimes:[ "same.a" ]
+      hard_quota_err
+  with
+  | Some { EC.next_runtime; fallback_reason = EC.Hard_quota } ->
+    Alcotest.(check string)
+      "independent credential pool remains eligible"
+      "other.c"
+      next_runtime
+  | Some { fallback_reason; next_runtime } ->
+    Alcotest.failf
+      "expected hard_quota -> other.c, got %s -> %s"
       (EC.degraded_retry_reason_to_string fallback_reason)
       next_runtime
   | None -> Alcotest.fail "expected independent credential pool failover"
@@ -712,6 +764,14 @@ let () =
             "soft rate limits preserve independent credential-pool failover"
             `Quick
             test_soft_rate_limit_preserves_independent_pool_failover
+        ; Alcotest.test_case
+            "hard quota skips same credential-pool candidates"
+            `Quick
+            test_hard_quota_skips_same_credential_pool
+        ; Alcotest.test_case
+            "hard quota preserves independent credential-pool failover"
+            `Quick
+            test_hard_quota_preserves_independent_pool_failover
         ; Alcotest.test_case
             "500 classifies as recoverable server_error"
             `Quick

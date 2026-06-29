@@ -158,7 +158,7 @@ ollama_cloud.<key>            (runtime_id = fusion model id)
 
 - 기존 `[[...judges]]` (RFC-0283) **backward compat**: `judge_pool`이 없으면 list를 그대로 사용.
 - trio(단일 judge)는 영향 없음.
-- `staged_max_depth` 미설정 시 legacy(무제한) 또는 default 3 — 본문 결정.
+- `staged_max_depth` 미설정 시 default 3. legacy 무제한 동작은 보존하지 않는다.
 
 ## 6. 검증
 

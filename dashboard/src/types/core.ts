@@ -730,6 +730,7 @@ export type KeeperTurnOutcome =
 
 export interface KeeperConversationDetails {
   traceId?: string | null
+  turnRef?: string | null
   generation?: number | null
   modelUsed?: string | null
   latencyMs?: number | null

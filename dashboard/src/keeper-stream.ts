@@ -289,6 +289,7 @@ export function applyKeeperStreamEvent(
               return {
                 ...entry,
                 details,
+                turnRef: details.turnRef ?? entry.turnRef,
                 rawText,
                 text: '',
                 delivery: details.turnOutcome === 'no_visible_reply' ? 'no_reply' : 'queued',
@@ -300,6 +301,7 @@ export function applyKeeperStreamEvent(
             return {
               ...entry,
               details,
+              turnRef: details.turnRef ?? entry.turnRef,
               rawText,
               text,
               blocks,

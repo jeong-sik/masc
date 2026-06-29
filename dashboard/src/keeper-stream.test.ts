@@ -215,6 +215,22 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.delivery).toBe('sending')
   })
 
+  it('keeps the producer turnRef from reply details for history rehydrate joins', () => {
+    assistantEntry()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        reply: 'done',
+        turn_ref: 'trace-live#42',
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.turnRef).toBe('trace-live#42')
+    expect(entry?.details?.turnRef).toBe('trace-live#42')
+  })
+
   it('suppresses a declared checkpoint regardless of reply text', () => {
     assistantEntry()
     expect(applyKeeperStreamEvent('sangsu', 'reply-1', {

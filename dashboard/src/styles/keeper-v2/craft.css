@@ -47,6 +47,18 @@
   --gap-row:     6px;
 }
 
+/* Mobile (single-column shell, ≤900px — same breakpoint the bottom tab bar
+   uses): the desktop surface padding (up to 42px each side on spacious)
+   eats ~27% of a 406px viewport once the 12px shell pad is added. Compress
+   the horizontal pad per density tier; keep the vertical rhythm. Only
+   `--pad-surface` is touched, so every surface on `.ov-scroll`/`.surf-scroll`/
+   `.cp-main` (overview, work, approvals, schedule, cockpit) tightens together. */
+@media (max-width: 900px) {
+  .v2-app[data-density="spacious"] { --pad-surface: 24px 16px 48px; }
+  .v2-app[data-density="regular"]  { --pad-surface: 18px 13px 36px; }
+  .v2-app[data-density="compact"]  { --pad-surface: 14px 11px 28px; }
+}
+
 /* ── Chat console — spacious (the headline surface) ── */
 .v2-app[data-density="spacious"] .chat-head   { padding: 18px 28px 16px; gap: 16px; }
 .v2-app[data-density="spacious"] .thread      { padding: 34px 0 14px; }

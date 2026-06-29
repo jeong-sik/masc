@@ -169,7 +169,7 @@ let meta_with_active_goal goal_id =
   | Ok meta -> meta
   | Error err -> fail ("meta_of_json_fixture failed: " ^ err)
 
-let test_keeper_task_claim_wip_cap_reports_claim_admission () =
+let test_keeper_task_claim_reports_other_keepers_wip_cap () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir () in
@@ -277,6 +277,29 @@ let test_active_items_only_include_claimed_or_in_progress () =
        (fun item -> Admission.category_to_string item.Admission.scope.category)
        active)
 
+let test_active_items_include_all_active_assignees () =
+  let tasks =
+    [ task
+        ~status:(Masc_domain.Claimed { assignee = "keeper-a"; claimed_at = "now" })
+        "task-claimed-a"
+    ; task
+        ~status:
+          (Masc_domain.InProgress { assignee = "keeper-a"; started_at = "now" })
+        "task-progress-a"
+    ; task
+        ~status:(Masc_domain.Claimed { assignee = "keeper-b"; claimed_at = "now" })
+        "task-claimed-b"
+    ; task
+        ~status:
+          (Masc_domain.InProgress { assignee = "keeper-b"; started_at = "now" })
+        "task-progress-b"
+    ]
+  in
+  let active = Admission.active_items_of_tasks ~default_repo:"fallback" tasks in
+  check (list string) "all active ids"
+    [ "task-claimed-a"; "task-progress-a"; "task-claimed-b"; "task-progress-b" ]
+    (List.map (fun item -> item.Admission.id) active)
+
 let test_goalless_task_exempt_from_goal_cap () =
   (* RFC-0245: a goalless claim must not be rejected by the per-goal cap even
      when the goalless ([None]) bucket is at/over [max_per_goal]. With
@@ -341,12 +364,14 @@ let () =
             test_decision_json_rejects_with_scope_key
         ; test_case "task scope uses repo goal and title category" `Quick
             test_scope_of_task_uses_repo_goal_and_title_category
-        ; test_case "keeper_task_claim reports WIP claim admission cap" `Quick
-            test_keeper_task_claim_wip_cap_reports_claim_admission
+        ; test_case "keeper_task_claim reports other keepers WIP cap" `Quick
+            test_keeper_task_claim_reports_other_keepers_wip_cap
         ; test_case "keeper_task_claim no-unclaimed emits no-work outcome" `Quick
             test_keeper_task_claim_no_unclaimed_emits_no_work_outcome
         ; test_case "active items include active WIP only" `Quick
             test_active_items_only_include_claimed_or_in_progress
+        ; test_case "active items include all active assignees" `Quick
+            test_active_items_include_all_active_assignees
         ; test_case "goalless task exempt from goal cap" `Quick
             test_goalless_task_exempt_from_goal_cap
         ; test_case "goalless tasks never goal-capped" `Quick

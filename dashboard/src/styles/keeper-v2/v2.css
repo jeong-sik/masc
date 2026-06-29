@@ -1416,8 +1416,13 @@
   .nav-item:hover, .nav-item.on { background: transparent; }
   .nav-item.on::before { left: 26%; right: 26%; top: 0; bottom: auto; width: auto; height: 3px; border-radius: 0 0 3px 3px; box-shadow: none; }
 
-  /* hide the bottom bar while reading a thread (full-screen chat) */
-  .v2-body[data-mpane="chat"] .v2-nav { display: none; }
+  /* The bottom tab bar is hidden in keeper chat reading mode via
+     `.v2-app[data-reading="true"]` (keeper-workspace.css). The shell
+     `data-mpane` attribute that used to gate these rules was dropped in the
+     reskin and is never set, so the old `.v2-body[data-mpane="chat"]`
+     nav-hide and master-detail rules here never fired (dead selectors,
+     removed). The bottom reserve below is re-keyed off the live
+     `data-reading` attribute. */
 
   /* co-view FAB is redundant on a phone — the top-bar Chat button already
      opens the dock, and a floating FAB collides with the bottom tab bar */
@@ -1425,13 +1430,10 @@
 
   /* single column; JS already sets gridTemplateColumns:1fr, this is the guard */
   .v2-body { grid-template-columns: 1fr !important; }
-  /* reserve room so surface content clears the fixed bottom tab bar. Every
-     surface scrolls inside .v2-body; chat hides the bar so it needs no pad. */
-  .v2-body:not([data-mpane="chat"]) { padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
-
-  /* master-detail: show one pane at a time */
-  .v2-body[data-mpane="chat"] .roster { display: none; }
-  .v2-body[data-mpane="roster"] .chat-wrap { display: none; }
+  /* reserve room so surface content clears the fixed bottom tab bar. Reading
+     mode hides the bar, so it must NOT reserve the band — otherwise the
+     composer floats 58px above the viewport bottom (the empty band bug). */
+  .v2-app:not([data-reading="true"]) .v2-body { padding-bottom: calc(58px + env(safe-area-inset-bottom, 0px)); }
 
   .roster { border-right: none; }
   .roster-list { padding-bottom: 16px; }

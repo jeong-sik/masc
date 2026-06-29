@@ -291,7 +291,7 @@ let test_dispatch_create_board_post_convenience_payload () =
      check int "stored ttl" 2
        (payload |> member "body" |> member "ttl_hours" |> to_int));
   let dashboard =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_http_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   let row =
@@ -578,7 +578,7 @@ let test_dashboard_projection_surfaces_schedule_fsm () =
        ()
       : Schedule_domain.schedule_request);
   let json =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_http_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   check string "schema" "masc.dashboard.scheduled_automation.v1"
@@ -745,7 +745,7 @@ let test_dashboard_projection_surfaces_schedule_runner_signals () =
   check int "one durable signal emitted" 1 (List.length tick_result.emitted);
   let emitted = List.hd tick_result.emitted in
   let json =
-    Server_dashboard_http_runtime_info.scheduled_automation_dashboard_json config
+    Server_dashboard_http_schedule_projection.scheduled_automation_dashboard_json config
   in
   let open Yojson.Safe.Util in
   check string "signal source" "schedule_runner_signals"

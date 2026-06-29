@@ -289,68 +289,6 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   `
 }
 
-type TpsRange = '15m' | '1h' | '6h'
-const RANGE_CFG: Record<TpsRange, { label: string; points: number }> = {
-  '15m': { label: '15m', points: 30 },
-  '1h': { label: '1h', points: 60 },
-  '6h': { label: '6h', points: 120 },
-}
-
-function ThroughputSection({ keeper }: { keeper: Keeper }): VNode {
-  const [open, setOpen] = useState(false)
-  const [range, setRange] = useState<TpsRange>('15m')
-  const cfg = RANGE_CFG[range]
-  const allSeries = (keeper.metrics_series ?? [])
-    .map(p => (typeof p.wall_tokens_per_second === 'number' ? Math.max(0, p.wall_tokens_per_second) : 0))
-  const series = allSeries.slice(-cfg.points)
-  const peak = Math.max(1, ...series)
-  const latest = allSeries.at(-1) ?? 0
-  const avg = series.length ? Math.round(series.reduce((a, b) => a + b, 0) / series.length) : 0
-  const live = keeperBucket(keeper) === 'running'
-  return html`
-    <div class="ctx-sec">
-      <h4
-        class="ctx-h-toggle"
-        style=${{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '6px' }}
-        onClick=${() => setOpen(o => !o)}
-      >
-        <span style=${{ fontSize: '9px', color: 'var(--text-dim)' }}>${open ? '▾' : '▸'}</span>
-        처리량
-        ${!open
-          ? html`<span class="mono" style=${{ marginLeft: 'auto', fontSize: '11px', color: 'var(--text-dim)' }}>${live ? `${latest} tok/s` : '유휴'}</span>`
-          : null}
-      </h4>
-      ${open
-        ? html`
-            <div class="tps-card">
-              <div class="tps-now">
-                <span class=${`tps-val${latest > 0 ? '' : ' idle'}`}>${latest > 0 ? latest : '—'}</span>
-                <span class="tps-unit">tok/s</span>
-                ${live && latest > 0 ? html`<span class="tps-flag"><span class="tps-dot"></span>live</span>` : null}
-              </div>
-              <div class="tps-ranges">
-                ${(Object.keys(RANGE_CFG) as TpsRange[]).map(r => html`
-                  <button
-                    key=${r}
-                    type="button"
-                    class=${`tps-range ${range === r ? 'on' : ''}`}
-                    onClick=${() => setRange(r)}
-                  >${RANGE_CFG[r].label}</button>
-                `)}
-                <span class="tps-avg">${live ? `평균 ${avg}` : '유휴'}</span>
-              </div>
-              ${series.length >= 2
-                ? html`<div class="tps-spark" aria-hidden="true">
-                    ${series.map((v, i) => html`<span key=${i} style=${{ height: `${Math.max(6, (v / peak) * 100)}%`, opacity: live ? 0.3 + 0.7 * (i / series.length) : 0.15 }}></span>`)}
-                  </div>`
-                : null}
-            </div>
-          `
-        : null}
-    </div>
-  `
-}
-
 function compactionGatePct(keeper: Keeper): number {
   const raw = keeper.compaction_ratio_gate
   const ratio = typeof raw === 'number' && Number.isFinite(raw) && raw > 0
@@ -431,9 +369,10 @@ function ContextSection({
     })()
   }
 
+  // The "윈도우 사용량" label was redundant under the section's "컨텍스트"
+  // heading — the percentage and the 사용/전체 line below are self-explanatory.
   const usageHeader = html`
     <div class="ctx-meter-head">
-      <span class="ctx-meter-label">윈도우 사용량</span>
       <span class=${`ctx-meter-pct mono${hot ? ' hot' : ''}`}>${pct ?? 0}%</span>
     </div>
   `
@@ -542,7 +481,6 @@ export function KeeperWorkspaceRail({
       <div class="ctx-scroll">
         <${FleetSelectedSection} keeper=${keeper} />
         <${AttentionSection} keeper=${keeper} />
-        <${ThroughputSection} keeper=${keeper} />
         <${RuntimeSection} keeper=${keeper} />
         <${ContextSection}
           keeper=${keeper}

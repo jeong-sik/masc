@@ -1,0 +1,192 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keeper Thinking / Tools Provider Axis Audit - 2026-06-29</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --ink: #18202a;
+      --muted: #596574;
+      --line: #d8dee6;
+      --panel: #f6f8fb;
+      --good: #1c7c54;
+      --warn: #9a5b00;
+      --bad: #b3261e;
+      --info: #255da8;
+    }
+    body {
+      margin: 0;
+      font: 15px/1.55 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      color: var(--ink);
+      background: white;
+    }
+    main {
+      max-width: 1120px;
+      margin: 0 auto;
+      padding: 40px 28px 56px;
+    }
+    h1, h2, h3 { line-height: 1.2; }
+    h1 { margin: 0 0 8px; font-size: 30px; }
+    h2 { margin-top: 34px; padding-top: 20px; border-top: 1px solid var(--line); font-size: 22px; }
+    h3 { margin-top: 22px; font-size: 17px; }
+    p { margin: 9px 0; }
+    code {
+      padding: 1px 5px;
+      border-radius: 4px;
+      background: #edf1f5;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+    }
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      margin: 14px 0 20px;
+      font-size: 14px;
+    }
+    th, td {
+      border: 1px solid var(--line);
+      padding: 9px 10px;
+      vertical-align: top;
+      text-align: left;
+    }
+    th { background: var(--panel); }
+    ul { padding-left: 22px; }
+    .lead { color: var(--muted); font-size: 16px; }
+    .badge {
+      display: inline-block;
+      min-width: 70px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      color: white;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 700;
+    }
+    .p0 { background: var(--bad); }
+    .p1 { background: var(--warn); }
+    .p2 { background: var(--info); }
+    .ok { color: var(--good); font-weight: 700; }
+    .risk { color: var(--bad); font-weight: 700; }
+    .note {
+      border-left: 4px solid var(--info);
+      background: var(--panel);
+      padding: 12px 14px;
+      margin: 14px 0;
+    }
+  </style>
+</head>
+<body>
+<main>
+  <h1>Keeper Thinking / Tools Provider Axis Audit</h1>
+  <p class="lead">작성일: 2026-06-29 KST. 범위: MASC keeper runtime/dashboard와 OAS provider reasoning/tool replay 경계.</p>
+
+  <h2>Executive Summary</h2>
+  <p>
+    현재 문제는 한 가지가 아니다. <code>thinking</code>이 대시보드에 안 보이는 문제,
+    tool-call turn에서 provider가 요구하는 reasoning replay 문제, 그리고
+    <code>No tools used this generation</code>/<code>No visible output</code> 반복 문제는 서로 다른 축이다.
+  </p>
+  <p>
+    이번 MASC 수정은 첫 번째 축을 provider 문자열이 아니라 OAS typed capability로 복구한다.
+    <code>thinking-support=true</code>를 곧바로 <code>preserve-thinking=true</code>로 해석하지 않는다.
+    생략된 <code>preserve-thinking</code>은 OAS가 해당 모델에 request-side preserve control
+    (<code>Thinking_object_keep_all</code>, <code>Chat_template_kwargs_preserve_thinking</code>,
+    <code>Top_level_preserve_thinking</code>)을 선언했을 때만 <code>Some true</code>가 된다.
+  </p>
+
+  <h2>Requirements Applied</h2>
+  <table>
+    <thead>
+      <tr><th>요구사항</th><th>판정 기준</th><th>이번 처리</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td>MASC는 OAS를 알지만 OAS는 MASC를 모른다</td>
+        <td>OAS provider semantics는 OAS typed capability가 SSOT</td>
+        <td class="ok">MASC는 <code>Llm_provider.Capabilities.for_model_id</code>만 읽고 provider/model string match를 추가하지 않음</td>
+      </tr>
+      <tr>
+        <td>No hardcoding / no string match / no heuristic</td>
+        <td>provider 이름, prefix, raw field 재분류 금지</td>
+        <td class="ok"><code>preserve_thinking_control_format</code> closed variant match 사용</td>
+      </tr>
+      <tr>
+        <td>explicit opt-out 보존</td>
+        <td><code>preserve-thinking=false</code>가 absence로 소실되면 안 됨</td>
+        <td class="ok"><code>model_spec.preserve_thinking : bool option</code>으로 변경, <code>Some false</code> 회귀 테스트 추가</td>
+      </tr>
+      <tr>
+        <td>OAS bump / MASC bump / OAS pin</td>
+        <td>pin script, opam, docs, API surface fingerprint 동기화</td>
+        <td class="ok">MASC <code>0.19.55</code>, OAS <code>agent_sdk 0.207.19</code> / <code>d55fafe2...</code>로 갱신</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Findings</h2>
+  <table>
+    <thead>
+      <tr><th>Severity</th><th>Finding</th><th>Evidence</th><th>Status</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td><span class="badge p0">P0</span></td>
+        <td>#22661 원안은 <code>thinking-support</code>를 <code>preserve-thinking</code> default로 사용</td>
+        <td><code>runtime_toml.ml</code>에서 <code>Otoml.find_or ~default:thinking_support</code> 사용</td>
+        <td class="ok">제거. 생략값은 OAS typed capability로만 판단</td>
+      </tr>
+      <tr>
+        <td><span class="badge p1">P1</span></td>
+        <td><code>preserve-thinking=false</code>가 seed에서 <code>None</code>으로 사라짐</td>
+        <td><code>Runtime.preserve_thinking_of_runtime_id</code>가 bool true만 <code>Some true</code>로 변환</td>
+        <td class="ok"><code>bool option</code>으로 explicit false 보존</td>
+      </tr>
+      <tr>
+        <td><span class="badge p1">P1</span></td>
+        <td>OAS pin이 #2227 시점에 머물러 stream/replay 후속 수정(#2237/#2238)을 못 받음</td>
+        <td><code>scripts/oas-agent-sdk-pin.sh</code>: <code>0.207.16</code>, <code>35d9990...</code></td>
+        <td class="ok"><code>0.207.19</code>, <code>d55fafe2...</code>로 갱신</td>
+      </tr>
+      <tr>
+        <td><span class="badge p2">P2</span></td>
+        <td><code>No tools used this generation</code> 반복은 별도 문제</td>
+        <td>runtime snapshot에 no-progress/synthetic turn이 저장됨. thinking preserve만으로 해소 불가</td>
+        <td class="risk">남음. scheduler/no-progress admission 쪽 후속 필요</td>
+      </tr>
+    </tbody>
+  </table>
+
+  <h2>Changed Files</h2>
+  <ul>
+    <li><code>lib/runtime/runtime_schema.ml(i)</code>: <code>preserve_thinking</code>을 <code>bool option</code>으로 변경.</li>
+    <li><code>lib/runtime/runtime_toml.ml</code>: <code>preserve-thinking</code> 생략 상태를 보존.</li>
+    <li><code>lib/runtime/runtime.ml</code>: OAS typed preserve capability로 default seed 계산.</li>
+    <li><code>test/test_runtime_per_keeper_routing.ml</code>: request-side preserve default와 explicit false override 회귀 추가.</li>
+    <li><code>scripts/oas-agent-sdk-pin.sh</code>, <code>masc.opam.locked</code>, <code>dune-project</code>: OAS pin/version 갱신.</li>
+  </ul>
+
+  <h2>Verification</h2>
+  <table>
+    <thead>
+      <tr><th>Check</th><th>Result</th><th>Notes</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>git diff --check</code></td><td class="ok">PASS</td><td>whitespace check</td></tr>
+      <tr><td><code>ocamlformat --check ...</code></td><td class="ok">PASS</td><td>changed OCaml files only</td></tr>
+      <tr><td><code>scripts/sync-oas-pin-docs.sh --check</code></td><td class="ok">PASS</td><td>generated OAS pin docs aligned</td></tr>
+      <tr><td><code>scripts/oas-drift-check.sh</code></td><td class="ok">PASS</td><td>OAS API surface matches <code>d55fafe2...</code></td></tr>
+      <tr><td><code>scripts/check-doc-truth.sh</code></td><td class="ok">PASS</td><td>package/doc version truth aligned</td></tr>
+      <tr><td><code>scripts/check-oas-pin.sh --local-only</code></td><td class="risk">LOCAL FAIL</td><td>local opam switch still has <code>agent_sdk 0.207.16</code>; branch requires <code>0.207.19</code></td></tr>
+    </tbody>
+  </table>
+
+  <div class="note">
+    <strong>Boundary note:</strong> 이 PR은 dashboard thinking trace가 흘러오도록 request-side preserve seed를 복구한다.
+    Keeper가 read-only/no-progress synthetic turns를 반복하는 문제는 별도 후속이다. 그 문제는 runtime outcome/admission/scheduler가
+    <code>No_visible_reply</code>, <code>No tools used</code>, 반복 read-only observation을 어떻게 다음 wake-up으로 변환하는지에서 다뤄야 한다.
+  </div>
+</main>
+</body>
+</html>

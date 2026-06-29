@@ -147,7 +147,7 @@ type model_spec =
   ; tools_support : bool
   ; max_context : int
   ; thinking_support : bool
-  ; preserve_thinking : bool
+  ; preserve_thinking : bool option
   ; max_thinking_budget : int option
   ; streaming : bool
   ; capabilities : model_capabilities option

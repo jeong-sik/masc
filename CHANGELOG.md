@@ -8,6 +8,16 @@
 - Stabilize `keeper_msg_async` async persistence coverage by waiting for
   disk persistence before recovery/GC assertions.
 
+## [0.19.55] - 2026-06-29
+
+### Changed
+- Bump OAS agent_sdk pin to 0.207.19 and bump masc version to 0.19.55.
+
+### Fixed
+- Default keeper preserve-thinking from OAS typed request-side preserve
+  capabilities instead of treating every thinking-capable runtime as
+  preserve-capable.
+
 ## [0.19.54] - 2026-06-29
 
 ### Changed

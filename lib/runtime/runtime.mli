@@ -143,11 +143,11 @@ val thinking_support_of_runtime_id : string -> bool option
     runtime.toml SSOT. *)
 
 val preserve_thinking_of_runtime_id : string -> bool option
-(** [Some true] when the model bound to runtime [id] opts into
-    [preserve-thinking].  [None] means unknown runtime, uninitialized cache, or
-    the default false value.  Consumed by {!Runtime_inference.for_runtime} to
-    preserve Qwen3.6 reasoning traces on OpenAI-compatible runtimes that
-    support it without spraying explicit false fields at every provider. *)
+(** Explicit [preserve-thinking] for runtime [id], or the OAS typed default for
+    models whose capability declares a request-side preserve-thinking control.
+    [None] means unknown runtime, uninitialized cache, no explicit TOML field,
+    and no OAS request-side preserve control.  Consumed by
+    {!Runtime_inference.for_runtime} without provider/model string matching. *)
 
 val pricing_of_runtime_id : string -> float option * float option
 (** [(price_input, price_output)] per-million-token USD rates declared on the

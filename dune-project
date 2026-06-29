@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.19.54)
+(version 0.19.55)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -55,10 +55,10 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.16. The pinned main SHA includes typed
-  ;; reasoning_replay catalog validation and Kimi K2 thinking/tool replay
-  ;; policy support.
-  (agent_sdk (>= 0.207.16))
+  ;; Pinned to OAS v0.207.19. The pinned main SHA includes typed
+  ;; reasoning replay, closed stream block kinds, and GLM preserved-thinking
+  ;; replay gating.
+  (agent_sdk (>= 0.207.19))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

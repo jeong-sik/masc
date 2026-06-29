@@ -23,7 +23,8 @@ val seed_of_thinking_support
 
 val for_runtime : name:string -> seed
 (** Per-model thinking seed for runtime [name], resolved from the runtime.toml
-    [thinking-support] and [preserve-thinking] of the bound model.  See
+    [thinking-support], explicit [preserve-thinking], and OAS typed
+    preserve-thinking capability of the bound model.  See
     {!seed_of_thinking_support} for the gate semantics. *)
 
 val validate_max_tokens_within_ceiling :

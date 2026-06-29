@@ -460,7 +460,7 @@ let test_repo_runtime_toml_loads () =
      | None -> fail "expected Gemma4 Ollama runtime in seed"
      | Some runtime ->
        check bool "Gemma4 thinking enabled" true runtime.model.thinking_support;
-       check bool "Gemma4 thinking not preserved" false
+       check (option bool) "Gemma4 thinking not preserved" (Some false)
          runtime.model.preserve_thinking;
        (match runtime.model.capabilities with
         | Some caps ->
@@ -488,7 +488,7 @@ let test_repo_runtime_toml_loads () =
        check int "GLM Coding Plan context" 200000 runtime.model.max_context;
        check bool "GLM Coding Plan thinking enabled" true
          runtime.model.thinking_support;
-       check bool "GLM Coding Plan preserves thinking" true
+       check (option bool) "GLM Coding Plan preserves thinking" (Some true)
          runtime.model.preserve_thinking;
        (match runtime.model.capabilities with
         | Some caps ->

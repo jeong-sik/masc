@@ -47,7 +47,7 @@ let qwen_model =
   ; tools_support = true
   ; max_context = 160000
   ; thinking_support = true
-  ; preserve_thinking = false
+  ; preserve_thinking = Some false
   ; max_thinking_budget = None
   ; streaming = true
   ; capabilities = None
@@ -503,7 +503,7 @@ let test_runtime_toml_accepts_glm_coding_capability () =
   match cfg.models with
   | [ model ] ->
     check bool "thinking enabled" true model.thinking_support;
-    check bool "preserve thinking" true model.preserve_thinking;
+    check (option bool) "preserve thinking" (Some true) model.preserve_thinking;
     (match model.capabilities with
      | Some caps ->
        check (option int) "max output" (Some 128000) caps.max_output_tokens;

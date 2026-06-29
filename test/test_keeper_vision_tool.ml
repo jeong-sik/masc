@@ -107,6 +107,15 @@ let ok_response text : Agent_sdk.Types.api_response =
   ; telemetry = None
   }
 
+let text_response text : Agent_sdk.Types.api_response =
+  { id = "vision-test"
+  ; model = "vision-test-model"
+  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; usage = None
+  ; telemetry = None
+  }
+
 let with_temp_base f =
   let path = Filename.temp_file "masc-vision-tool-test-" "" in
   Unix.unlink path;
@@ -598,6 +607,34 @@ let test_schema_unsupported_vision_runtime_is_skipped_before_provider_call () =
       assert (String.equal (assoc_string "error" json) "no_capable_runtime");
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
 
+let test_invalid_structured_vision_response_is_runtime_failure () =
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-invalid-structured-response" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+        Ok (text_response "not-json")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert
+        (String.equal
+           (assoc_string "error" json)
+           "invalid_structured_response");
+      assert (String.equal (assoc_string "failure_class" json) "runtime_failure");
+      assert (contains_substring (assoc_string "detail" json) "not valid JSON")))
+
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -975,6 +1012,7 @@ let () =
   test_oversize_image_is_runtime_failure_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
   test_schema_unsupported_vision_runtime_is_skipped_before_provider_call ();
+  test_invalid_structured_vision_response_is_runtime_failure ();
   test_retryable_provider_error_tries_next_runtime ();
   test_deadline_exhaustion_preserves_provider_error ();
   test_non_retryable_provider_error_stops_without_trying_next_runtime ();

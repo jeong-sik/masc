@@ -274,30 +274,40 @@ let vision_text_of_response (response : Agent_sdk.Types.api_response) =
     match Yojson.Safe.from_string raw with
     | `Assoc fields ->
       (match List.assoc_opt "text" fields with
-       | Some (`String text) -> String.trim text
-       | Some _
-       | None -> "")
-    | _ -> ""
-  with Yojson.Json_error _ -> ""
+       | Some (`String text) -> Ok (String.trim text)
+       | Some _ -> Error "vision response field \"text\" must be a string"
+       | None -> Error "vision response missing required field \"text\"")
+    | _ -> Error "vision response must be a JSON object"
+  with
+  | Yojson.Json_error msg -> Error ("vision response is not valid JSON: " ^ msg)
 ;;
 
 let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
-  let text = vision_text_of_response response in
-  let truncated = truncated_of_stop_reason response.stop_reason in
-  match Va.classify ~truncated ~content:text with
-  | Ok t -> ok_json t
-  | Error Va.Empty_extraction ->
-    err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
-  | Error Va.Truncated_extraction ->
-    err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
+  match vision_text_of_response response with
+  | Error detail ->
+    err_json
+      ~failure_class:Tool_result.Runtime_failure
+      ~detail
+      "invalid_structured_response"
+  | Ok text ->
+    let truncated = truncated_of_stop_reason response.stop_reason in
+    (match Va.classify ~truncated ~content:text with
+     | Ok t -> ok_json t
+     | Error Va.Empty_extraction ->
+       err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
+     | Error Va.Truncated_extraction ->
+       err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction")
 
 let outcome_of_response (response : Agent_sdk.Types.api_response) =
-  let text = vision_text_of_response response in
-  let truncated = truncated_of_stop_reason response.stop_reason in
-  match Va.classify ~truncated ~content:text with
-  | Ok t -> Vo_ok t
-  | Error Va.Empty_extraction -> Vo_empty
-  | Error Va.Truncated_extraction -> Vo_truncated
+  match vision_text_of_response response with
+  | Error detail ->
+    Vo_provider { failure_class = Tool_result.Runtime_failure; detail }
+  | Ok text ->
+    let truncated = truncated_of_stop_reason response.stop_reason in
+    (match Va.classify ~truncated ~content:text with
+     | Ok t -> Vo_ok t
+     | Error Va.Empty_extraction -> Vo_empty
+     | Error Va.Truncated_extraction -> Vo_truncated)
 
 let remaining_timeout_sec ~clock ~deadline =
   let remaining = deadline -. Eio.Time.now clock in

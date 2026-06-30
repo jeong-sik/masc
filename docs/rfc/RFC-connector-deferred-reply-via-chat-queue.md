@@ -1,5 +1,5 @@
 ---
-rfc: "0301"
+rfc: "connector-deferred-reply-via-chat-queue"
 title: "Connector deferred reply: busy-path messages must drain through the chat queue, not a poll-only async store"
 status: Draft
 created: 2026-06-30
@@ -11,7 +11,7 @@ related: ["0203", "0217", "0223", "0225", "0226", "0232"]
 implementation_prs: []
 ---
 
-# RFC-0301: Connector deferred reply via the chat queue
+# RFC: Connector deferred reply via the chat queue
 
 ## 1. Problem
 

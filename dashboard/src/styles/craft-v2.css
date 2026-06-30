@@ -410,7 +410,7 @@
 }
 
 .twk-panel-hd b {
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 600;
   letter-spacing: 0.01em;
 }

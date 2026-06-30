@@ -286,7 +286,7 @@
   flex: none;
   width: 88px;
   color: var(--color-accent-fg);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .slashmenu-lbl {
@@ -300,7 +300,7 @@
   flex: 1;
   overflow: hidden;
   color: var(--color-fg-muted);
-  font-size: 11px;
+  font-size: var(--fs-11);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -312,7 +312,7 @@
   border-radius: 9999px;
   color: var(--color-fg-muted);
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.06em;
   text-transform: uppercase;
 }
@@ -577,7 +577,7 @@
 
 .cdraft-glyph.mic {
   color: var(--color-accent-fg);
-  font-size: 14px;
+  font-size: var(--fs-14);
 }
 
 .cdraft-wave {
@@ -634,7 +634,7 @@
   background: transparent;
   color: var(--color-fg-muted);
   cursor: pointer;
-  font-size: 10px;
+  font-size: var(--fs-10);
   border-radius: var(--radius-2xs, 2px);
 }
 

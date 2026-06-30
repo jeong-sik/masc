@@ -31,7 +31,7 @@
   align-items: center;
   gap: 10px;
   flex-wrap: wrap;
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-mid);
   padding: 8px 12px;
   border: 1px solid var(--border-main);
@@ -41,7 +41,7 @@
 
 .mg-entry-g {
   color: var(--volt);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .mg-entry .dim {
@@ -51,7 +51,7 @@
 
 .mg-entry-x {
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.04em;
   color: var(--volt-strong);
   background: var(--volt-wash);
@@ -95,11 +95,11 @@
 }
 
 .mg-type .g {
-  font-size: 10px;
+  font-size: var(--fs-10);
 }
 
 .mg-meta {
-  font-size: 9px;
+  font-size: var(--fs-9);
   color: var(--text-dim);
   white-space: nowrap;
   overflow: hidden;
@@ -110,7 +110,7 @@
 .mg-title {
   font-family: var(--font-display);
   font-weight: 500;
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.32;
   color: var(--text-bright);
   text-wrap: pretty;
@@ -130,7 +130,7 @@
 }
 
 .mg-node-foot .meta2 {
-  font-size: 9px;
+  font-size: var(--fs-9);
   color: var(--text-mid);
   margin-left: auto;
   white-space: nowrap;
@@ -170,7 +170,7 @@
 .mg-edge-lbl {
   position: absolute;
   transform: translate(-50%, -50%);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.04em;
   color: var(--text-mid);
   background: var(--bg-deep);
@@ -192,7 +192,7 @@
 }
 
 .mg-node.is-anchor .mg-title {
-  font-size: 13px;
+  font-size: var(--fs-13);
 }
 
 .mg-node.is-sat {
@@ -247,7 +247,7 @@
 }
 
 .mg-knot .g {
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1;
 }
 
@@ -266,7 +266,7 @@
 }
 
 .mg-rel {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-mid);
   margin: 1px 0 6px;
 }
@@ -290,7 +290,7 @@
 }
 
 .mg-anchor-tag {
-  font-size: 9px;
+  font-size: var(--fs-9);
   color: var(--volt-strong);
   background: var(--volt-wash);
   border: 1px solid color-mix(in oklab, var(--volt) 32%, transparent);
@@ -410,7 +410,7 @@
 
 .gd-ring-in b {
   font-family: var(--font-mono);
-  font-size: 16px;
+  font-size: var(--fs-16);
   color: var(--volt-strong);
   font-weight: 700;
 }
@@ -451,7 +451,7 @@
 }
 
 .gd-snaplbl {
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.1em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -462,7 +462,7 @@
 
 .gd-snaparr {
   color: var(--text-dim);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 
 .gd-snap {
@@ -490,7 +490,7 @@
 }
 
 .gd-snap .dt {
-  font-size: 9px;
+  font-size: var(--fs-9);
   color: var(--text-dim);
 }
 
@@ -516,7 +516,7 @@
 }
 
 .gd-cv {
-  font-size: 14px;
+  font-size: var(--fs-14);
   color: var(--text-bright);
   font-weight: 600;
 }
@@ -545,14 +545,14 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.06em;
   color: var(--nc);
   font-weight: 600;
 }
 
 .gd-group-h .g {
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .gd-group-h .cnt {
@@ -598,12 +598,12 @@
   align-items: center;
   gap: 8px;
   margin-top: 4px;
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-mid);
 }
 
 .gd-state {
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.08em;
   flex: none;
   padding: 2px 8px;

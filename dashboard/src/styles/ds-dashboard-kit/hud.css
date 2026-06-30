@@ -12,11 +12,11 @@
 }
 .hud > div { padding: 9px 14px; border-right: 1px solid var(--border-main); position: relative; }
 .hud > div:last-child { border-right: 0; }
-.hud .k { font-size: 9px; letter-spacing: 0.26em; text-transform: uppercase; color: var(--text-dim); }
-.hud .v { font-family: var(--font-display); font-size: 13px; letter-spacing: 0.06em; font-weight: 600; color: var(--text-bright); margin-top: 3px; text-transform: none; font-variant-numeric: tabular-nums; }
+.hud .k { font-size: var(--fs-9); letter-spacing: 0.26em; text-transform: uppercase; color: var(--text-dim); }
+.hud .v { font-family: var(--font-display); font-size: var(--fs-13); letter-spacing: 0.06em; font-weight: 600; color: var(--text-bright); margin-top: 3px; text-transform: none; font-variant-numeric: tabular-nums; }
 .hud .v.ok   { color: var(--ok); }
 .hud .v.warn { color: var(--warn); }
 .hud .v.bad  { color: var(--bad); }
 .hud .v.brass{ color: var(--accent-brass); }
-.hud .sub { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); margin-top: 1px; font-variant-numeric: tabular-nums; }
+.hud .sub { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); margin-top: 1px; font-variant-numeric: tabular-nums; }
 .hud .sub .spark { display: inline-block; vertical-align: -2px; margin-left: 4px; }

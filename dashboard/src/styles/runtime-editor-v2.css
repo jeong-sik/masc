@@ -38,7 +38,7 @@ html[data-skin="v2"] .rt-nav-h { padding: 4px 8px 14px; } /* runtime.css:10 */
 html[data-skin="v2"] .rt-nav-h .eyebrow {
   /* runtime.css:11 */
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -69,7 +69,7 @@ html[data-skin="v2"] .rt-nav-item {
   border-radius: var(--radius-sm);
   color: var(--text-dim);
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--fs-13);
   cursor: pointer;
   transition: 0.14s;
   text-align: left;
@@ -90,14 +90,14 @@ html[data-skin="v2"] .rt-nav-gl {
   width: 18px;
   flex: none;
   color: var(--text-dim);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 html[data-skin="v2"] .rt-nav-item.on .rt-nav-gl { color: var(--volt); } /* runtime.css:18 */
 html[data-skin="v2"] .rt-nav-foot {
   /* runtime.css:19 */
   margin-top: auto;
   padding: 10px 8px 2px;
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
 }
 
@@ -134,7 +134,7 @@ html[data-skin="v2"] .rt-status {
   /* status pill — mirrors the prototype's .rt-save chrome at pill scale
      so the existing runtime-toml-status testid keeps a v2 look. */
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 4px 9px;
@@ -150,7 +150,7 @@ html[data-skin="v2"] .rt-status.is-saved { color: var(--status-ok); }
 html[data-skin="v2"] .rt-save {
   /* runtime.css:26 */
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--fs-12);
   padding: 7px 15px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--volt-dim);
@@ -193,7 +193,7 @@ html[data-skin="v2"] .rt-input {
   border-radius: var(--radius-sm);
   padding: 7px 10px;
   color: var(--text-bright);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 html[data-skin="v2"] .rt-input:focus { outline: none; border-color: var(--volt-dim); } /* runtime.css:34 */
 
@@ -207,10 +207,10 @@ html[data-skin="v2"] .rt-lane {
 }
 html[data-skin="v2"] .rt-lane:first-of-type { border-top: 0; } /* runtime.css:38 */
 html[data-skin="v2"] .rt-lane-l { flex: 1; min-width: 0; } /* runtime.css:39 */
-html[data-skin="v2"] .rt-lane-lbl { font-size: 13px; color: var(--text-primary); } /* runtime.css:40 */
+html[data-skin="v2"] .rt-lane-lbl { font-size: var(--fs-13); color: var(--text-primary); } /* runtime.css:40 */
 html[data-skin="v2"] .rt-lane-hint {
   /* runtime.css:41 */
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
   margin-top: 3px;
 }
@@ -228,13 +228,13 @@ html[data-skin="v2"] .rt-select {
   border-radius: var(--radius-sm);
   padding: 7px 10px;
   color: var(--text-bright);
-  font-size: 12px;
+  font-size: var(--fs-12);
   cursor: pointer;
   min-width: 248px;
 }
 html[data-skin="v2"] .rt-select:focus { outline: none; border-color: var(--volt-dim); } /* runtime.css:44 */
-html[data-skin="v2"] .rt-warn { font-size: 11px; color: var(--status-bad); white-space: nowrap; } /* runtime.css:45 */
-html[data-skin="v2"] .rt-ok { font-size: 11px; color: var(--status-ok); white-space: nowrap; } /* runtime.css:46 */
+html[data-skin="v2"] .rt-warn { font-size: var(--fs-11); color: var(--status-bad); white-space: nowrap; } /* runtime.css:45 */
+html[data-skin="v2"] .rt-ok { font-size: var(--fs-11); color: var(--status-ok); white-space: nowrap; } /* runtime.css:46 */
 
 /* provider cards — runtime.css:49 */
 html[data-skin="v2"] .rt-cards { display: flex; flex-direction: column; gap: 12px; }
@@ -252,12 +252,12 @@ html[data-skin="v2"] .rt-card-h {
   gap: 10px;
   margin-bottom: 11px;
 }
-html[data-skin="v2"] .rt-card-id { font-size: 13px; color: var(--volt-strong); } /* runtime.css:52 */
+html[data-skin="v2"] .rt-card-id { font-size: var(--fs-13); color: var(--volt-strong); } /* runtime.css:52 */
 html[data-skin="v2"] .rt-card-name { font-size: 12.5px; color: var(--text-bright); } /* runtime.css:53 */
 html[data-skin="v2"] .rt-proto {
   /* runtime.css:54 */
   margin-left: auto;
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   border: 1px solid var(--border-main);
   padding: 1px 7px;
@@ -273,7 +273,7 @@ html[data-skin="v2"] .rt-field {
 html[data-skin="v2"] .rt-field .sub-k {
   min-width: 78px; /* runtime.css:56 */
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
 }
 html[data-skin="v2"] .rt-field .rt-input { flex: 1; } /* runtime.css:57 */
@@ -286,7 +286,7 @@ html[data-skin="v2"] .rt-cred {
 }
 html[data-skin="v2"] .rt-cred-type {
   /* runtime.css:59 */
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--info);
   border: 1px solid color-mix(in oklab, var(--info) 30%, transparent);
   padding: 2px 7px;
@@ -305,7 +305,7 @@ html[data-skin="v2"] .rt-caps {
 html[data-skin="v2"] .rt-cap {
   /* runtime.css:63 */
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   padding: 2px 8px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-main);
@@ -331,7 +331,7 @@ html[data-skin="v2"] .rt-search {
   border-radius: var(--radius-sm);
   padding: 9px 12px;
   color: var(--text-bright);
-  font-size: 12px;
+  font-size: var(--fs-12);
   margin-bottom: 12px;
 }
 html[data-skin="v2"] .rt-search:focus { outline: none; border-color: var(--volt-dim); } /* runtime.css:69 */
@@ -352,7 +352,7 @@ html[data-skin="v2"] .rt-model-h {
   margin-bottom: 9px;
 }
 html[data-skin="v2"] .rt-model-id { font-size: 12.5px; color: var(--text-bright); } /* runtime.css:73 */
-html[data-skin="v2"] .rt-model-api { font-size: 11px; color: var(--text-dim); } /* runtime.css:74 */
+html[data-skin="v2"] .rt-model-api { font-size: var(--fs-11); color: var(--text-dim); } /* runtime.css:74 */
 html[data-skin="v2"] .rt-model-ctx { margin-left: auto; font-size: 10.5px; color: var(--text-mid); } /* runtime.css:75 */
 
 /* bindings — runtime.css:78 */
@@ -391,7 +391,7 @@ html[data-skin="v2"] .rt-bind-key {
 html[data-skin="v2"] .rt-default-tag {
   /* runtime.css:85 */
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   color: var(--volt);
@@ -407,7 +407,7 @@ html[data-skin="v2"] .rt-mini {
   flex-direction: column;
   gap: 3px;
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -466,11 +466,11 @@ html[data-skin="v2"] .rt-toml-bar {
   padding: 8px 12px;
   background: var(--bg-panel-alt);
   border-bottom: 1px solid var(--border-soft);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
 }
 html[data-skin="v2"] .rt-toml-bar .mono { color: var(--text-mid); } /* runtime.css:103 */
-html[data-skin="v2"] .rt-toml-ro { font-size: 10px; } /* runtime.css:104 */
+html[data-skin="v2"] .rt-toml-ro { font-size: var(--fs-10); } /* runtime.css:104 */
 html[data-skin="v2"] .rt-copy {
   /* runtime.css:105 */
   margin-left: auto;
@@ -478,7 +478,7 @@ html[data-skin="v2"] .rt-copy {
   border: 1px solid var(--border-main);
   color: var(--text-mid);
   border-radius: var(--radius-sm);
-  font-size: 11px;
+  font-size: var(--fs-11);
   padding: 4px 11px;
   cursor: pointer;
 }
@@ -498,7 +498,7 @@ html[data-skin="v2"] .rt-toml {
 }
 html[data-skin="v2"] .rt-toml code {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1.65;
   color: var(--text-primary);
   white-space: pre;

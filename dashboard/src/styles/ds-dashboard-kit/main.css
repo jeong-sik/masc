@@ -16,7 +16,7 @@
 .sec-head > button.toggle {
   background: transparent; border: 1px solid var(--border-main); color: var(--text-dim);
   width: 20px; height: 20px; display: grid; place-items: center; cursor: pointer;
-  font-family: var(--font-mono); font-size: 12px; line-height: 1;
+  font-family: var(--font-mono); font-size: var(--fs-12); line-height: 1;
   transition: all 120ms ease;
 }
 .sec-head > button.toggle:hover { color: var(--accent-brass); border-color: var(--accent-brass-dim); }
@@ -24,12 +24,12 @@
 
 .sec-head svg.sh-glyph { width: 14px; height: 14px; color: var(--accent-brass); }
 .sec-head h3 {
-  font-family: var(--font-display); font-size: 12px; letter-spacing: 0.2em; font-weight: 600;
+  font-family: var(--font-display); font-size: var(--fs-12); letter-spacing: 0.2em; font-weight: 600;
   color: var(--accent-brass); text-transform: uppercase; margin: 0;
 }
 .sec-head .sub { font-family: var(--font-mono); color: var(--text-dim); font-size: 10.5px; letter-spacing: 0.04em; }
 .sec-head .hr { flex: 1; height: 1px; background: linear-gradient(90deg, var(--border-highlight) 0%, var(--border-main) 60%, transparent 100%); }
-.sec-head .r { font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.sec-head .r { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .sec-head .r b { color: var(--text-bright); font-weight: 400; }
 
 .sec-body {
@@ -42,7 +42,7 @@
 /* Tabs for scope */
 .sec-tabs { display: inline-flex; gap: 2px; }
 .sec-tabs button {
-  font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.2em;
+  font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.2em;
   text-transform: uppercase; padding: 4px 9px; background: transparent;
   border: 1px solid var(--border-main); color: var(--text-dim); cursor: pointer;
   transition: all 120ms ease;

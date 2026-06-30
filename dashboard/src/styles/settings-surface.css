@@ -71,7 +71,7 @@
 }
 
 .set-nav-item .ko {
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--text-mid);
 }
 
@@ -111,7 +111,7 @@
 
 .set-nav-glabel {
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -120,7 +120,7 @@
 
 .set-nav-note {
   margin: auto 12px 12px;
-  font-size: 10px;
+  font-size: var(--fs-10);
   line-height: 1.5;
   color: var(--text-dim);
   padding-top: 12px;
@@ -207,7 +207,7 @@
   background: var(--bg-card);
   color: var(--text-dim);
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.04em;
   line-height: 1;
   white-space: nowrap;
@@ -327,12 +327,12 @@
 }
 
 .set-label {
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--text-primary);
 }
 
 .set-hint {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
   margin-top: 3px;
 }
@@ -343,7 +343,7 @@
 
 .set-sub-h {
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -367,7 +367,7 @@
   background: var(--bg-well);
   border: 1px solid var(--border-soft);
   border-radius: var(--radius-xs);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
   overflow-x: auto;
   white-space: nowrap;
@@ -375,7 +375,7 @@
 
 .set-verify {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-11);
   padding: 6px 12px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--border-main);
@@ -428,7 +428,7 @@
 
 .set-rolepill {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--volt-strong);
   border: 1px solid var(--volt-dim);
   background: var(--volt-wash);
@@ -452,7 +452,7 @@
 }
 
 .set-rt-name {
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--text-bright);
 }
 
@@ -468,7 +468,7 @@
 }
 
 .set-rt-keepers {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
 }
 
@@ -559,7 +559,7 @@
 
 .log-f {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-11);
   padding: 4px 12px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--border-main);
@@ -616,7 +616,7 @@
 
 .log-line .ll {
   text-transform: uppercase;
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.06em;
 }
 
@@ -707,7 +707,7 @@
 
 .set-seg-b {
   font-family: var(--font-mono);
-  font-size: 11px;
+  font-size: var(--fs-11);
   padding: 6px 12px;
   background: transparent;
   color: var(--text-dim);
@@ -759,7 +759,7 @@
   color: var(--text-mid);
   border-radius: var(--radius-xs);
   cursor: pointer;
-  font-size: 14px;
+  font-size: var(--fs-14);
 }
 
 .set-stepper button:hover {
@@ -790,7 +790,7 @@
 
 .set-input {
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-12);
   padding: 8px 10px;
   background: var(--bg-sunken);
   color: var(--text-primary);
@@ -821,7 +821,7 @@
   flex-wrap: wrap;
   gap: 14px;
   padding: 4px 0 10px;
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
 }
 
@@ -839,7 +839,7 @@
   color: var(--text-mid);
   cursor: pointer;
   font-family: var(--font-ui);
-  font-size: 12px;
+  font-size: var(--fs-12);
   transition: 0.14s;
 }
 
@@ -894,7 +894,7 @@
 
 .set-tg-kind {
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.06em;
   text-transform: uppercase;
   padding: 2px 6px;
@@ -948,7 +948,7 @@
 }
 
 .set-guard-step {
-  font-size: 12px;
+  font-size: var(--fs-12);
   padding: 6px 12px;
   background: var(--bg-card);
   border: 1px solid var(--border-main);
@@ -959,7 +959,7 @@
 
 .set-guard-arrow {
   color: var(--text-dim);
-  font-size: 13px;
+  font-size: var(--fs-13);
 }
 
 /* fusion preset — keeper-v2 styles/surfaces.css:572-577 (.set-fus-*) */
@@ -978,7 +978,7 @@
 
 .set-fus-lane-h {
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -986,7 +986,7 @@
 }
 
 .set-fus-model {
-  font-size: 12px;
+  font-size: var(--fs-12);
   color: var(--text-mid);
   padding: 5px 9px;
   background: var(--bg-card);
@@ -1081,14 +1081,14 @@
 }
 
 .set-trigger-hint {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
 }
 
 /* v2.css utility classes referenced by the surface but not imported globally */
 .act {
   font-family: var(--font-ui);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.05em;
   padding: 8px 12px;
   border-radius: var(--radius-sm);
@@ -1108,7 +1108,7 @@
 
 .sub-k {
   font-family: var(--font-ui);
-  font-size: 9px;
+  font-size: var(--fs-9);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--text-dim);

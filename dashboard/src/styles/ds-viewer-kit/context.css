@@ -100,7 +100,7 @@
   width: 14px; height: 14px;
   border-radius: 50%;
   display: grid; place-items: center;
-  font-size: 9px;
+  font-size: var(--fs-9);
   font-weight: 600;
   color: var(--text-dim);
   background: var(--surf-sink);

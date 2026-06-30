@@ -38,7 +38,7 @@
 .alert-chip svg { width: 11px; height: 11px; color: var(--text-dim); flex-shrink: 0; }
 .alert-chip .k { font-size: 8.5px; letter-spacing: 0.22em; text-transform: uppercase; color: var(--text-dim); font-weight: 600; }
 .alert-chip .t { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-bright); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 200px; }
-.alert-chip .m { font-family: var(--font-mono); font-size: 9px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
+.alert-chip .m { font-family: var(--font-mono); font-size: var(--fs-9); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 180px; }
 .alert-chip .sep { width: 1px; height: 12px; background: var(--border-main); }
 .alert-chip.bad   { border-color: color-mix(in oklab, var(--bad) 45%, transparent); background: linear-gradient(180deg, rgba(60,12,12,0.4), rgba(20,8,6,0.6)); }
 .alert-chip.bad svg  { color: var(--bad); }

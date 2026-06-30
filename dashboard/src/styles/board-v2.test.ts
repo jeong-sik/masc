@@ -55,12 +55,12 @@ describe('board-v2.css pixel parity with Claude-Design prototype', () => {
     { selector: '.v2-board-surface .bd-rail', prop: 'padding', value: '14px 9px', src: 'surfaces.css:278' },
     { selector: '.v2-board-surface .bd-rail h4', prop: 'margin', value: '0 0 8px 7px', src: 'surfaces.css:279' },
     // type ladder T4 (surfaces.css:768) wins over base in the prototype
-    { selector: '.v2-board-surface .bd-rail h4', prop: 'font-size', value: '9px', src: 'v2.css:101 --fs-t4' },
+    { selector: '.v2-board-surface .bd-rail h4', prop: 'font-size', value: 'var(--fs-9)', src: 'v2.css:101 --fs-t4' },
     { selector: '.v2-board-surface .bd-rail h4', prop: 'font-weight', value: '600', src: 'v2.css:101 --fw-t4' },
     { selector: '.v2-board-surface .bd-sub', prop: 'padding', value: '7px 9px', src: 'surfaces.css:280' },
     { selector: '.v2-board-surface .bd-feed-head', prop: 'padding', value: '11px 18px', src: 'surfaces.css:290' },
     // type ladder T2 (surfaces.css:741) wins over base in the prototype
-    { selector: '.v2-board-surface .bd-feed-head h2', prop: 'font-size', value: '16px', src: 'v2.css:99 --fs-t2' },
+    { selector: '.v2-board-surface .bd-feed-head h2', prop: 'font-size', value: 'var(--fs-16)', src: 'v2.css:99 --fs-t2' },
     { selector: '.v2-board-surface .bd-list', prop: 'padding', value: '14px 18px', src: 'surfaces.css:298' },
     { selector: '.v2-board-surface .bd-post-h', prop: 'gap', value: '9px', src: 'surfaces.css:305' },
     { selector: '.v2-board-surface .bd-post-body', prop: 'margin-top', value: '5px', src: 'surfaces.css:319' },

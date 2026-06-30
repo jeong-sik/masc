@@ -20,8 +20,8 @@
 .ti-summary { display: grid; grid-template-columns: repeat(5, 1fr); gap: 1px; background: var(--border-soft); border-bottom: 1px solid var(--border-main); }
 .ti-stat { background: var(--bg-panel); padding: 11px 14px; min-width: 0; }
 .ti-stat .k { font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); }
-.ti-stat .v { font-family: var(--font-mono); font-size: 16px; color: var(--text-bright); margin-top: 5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
-.ti-stat .v small { font-size: 10px; color: var(--text-dim); }
+.ti-stat .v { font-family: var(--font-mono); font-size: var(--fs-16); color: var(--text-bright); margin-top: 5px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.ti-stat .v small { font-size: var(--fs-10); color: var(--text-dim); }
 .ti-stat .v.ok { color: var(--status-ok); }
 .ti-stat .v.volt { color: var(--volt-strong); }
 
@@ -29,7 +29,7 @@
 .ti-tok { padding: 13px 16px; }
 .ti-tok-top { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 8px; }
 .ti-tok-top .lbl { font-size: 9.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--text-dim); }
-.ti-tok-top .ctxpct { font-family: var(--font-mono); font-size: 11px; color: var(--text-mid); }
+.ti-tok-top .ctxpct { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-mid); }
 .ti-tok-bar { display: flex; height: 10px; border-radius: var(--radius-pill); overflow: hidden; background: var(--bg-sunken); border: 1px solid var(--border-soft); }
 .ti-tok-bar > span { display: block; height: 100%; min-width: 2px; }
 .ti-tok-bar .seg-in { background: var(--info-dim); }
@@ -51,7 +51,7 @@
 .ti-wf-ico { width: 8px; height: 8px; border-radius: 2px; flex: none; }
 .ti-wf-track { position: relative; height: 18px; background: var(--bg-sunken); border-radius: var(--radius-xs); overflow: hidden; }
 .ti-wf-bar { position: absolute; top: 3px; height: 12px; border-radius: 3px; min-width: 4px; transition: none; }
-.ti-wf-dur { font-family: var(--font-mono); font-size: 11px; color: var(--text-mid); text-align: right; font-variant-numeric: tabular-nums; }
+.ti-wf-dur { font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-mid); text-align: right; font-variant-numeric: tabular-nums; }
 .ti-k-ctx { background: var(--text-dim); }
 .ti-k-reason { background: var(--info); }
 .ti-k-tool { background: var(--volt); }
@@ -70,7 +70,7 @@
 .ti-code pre { margin: 0; padding: 10px 12px; overflow-x: auto; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.62; color: var(--text-mid); white-space: pre-wrap; word-break: break-word; }
 .ti-code pre .jk { color: var(--volt-strong); }
 .ti-code pre .js { color: var(--status-ok); }
-.ti-copy { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; background: none; border: 1px solid var(--border-main); color: var(--text-dim); border-radius: var(--radius-xs); font-family: var(--font-ui); font-size: 10px; padding: 3px 9px; cursor: pointer; transition: 0.14s; white-space: nowrap; }
+.ti-copy { margin-left: auto; display: inline-flex; align-items: center; gap: 5px; background: none; border: 1px solid var(--border-main); color: var(--text-dim); border-radius: var(--radius-xs); font-family: var(--font-ui); font-size: var(--fs-10); padding: 3px 9px; cursor: pointer; transition: 0.14s; white-space: nowrap; }
 .ti-copy:hover { color: var(--volt); border-color: var(--volt-dim); }
 .ti-copy.done { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 40%, transparent); }
 
@@ -79,10 +79,10 @@
 .ti-tool-h { display: flex; align-items: center; gap: 9px; padding: 9px 12px; background: var(--bg-panel-alt); }
 .ti-tool-h .seq { font-family: var(--font-mono); font-size: 9.5px; color: var(--text-dim); }
 .ti-tool-h .tnm { font-family: var(--font-mono); font-size: 12.5px; color: var(--text-bright); }
-.ti-tool-h .pill { font-family: var(--font-ui); font-size: 9px; letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border-radius: var(--radius-pill); }
+.ti-tool-h .pill { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.08em; text-transform: uppercase; padding: 2px 7px; border-radius: var(--radius-pill); }
 .ti-tool-h .pill.ok { color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 40%, transparent); }
 .ti-tool-h .pill.bad { color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 40%, transparent); }
-.ti-tool-h .lat { margin-left: auto; font-family: var(--font-mono); font-size: 11px; color: var(--text-dim); }
+.ti-tool-h .lat { margin-left: auto; font-family: var(--font-mono); font-size: var(--fs-11); color: var(--text-dim); }
 .ti-tool-b { padding: 10px 12px; }
 
 /* ── Role-tinted transcript message ── */
@@ -101,20 +101,20 @@
 
 /* ── Meta: parameter chips + kv ── */
 .ti-params { display: flex; flex-wrap: wrap; gap: 7px; margin-bottom: 4px; }
-.ti-param { font-family: var(--font-mono); font-size: 11px; padding: 4px 11px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: var(--bg-card); color: var(--text-dim); }
+.ti-param { font-family: var(--font-mono); font-size: var(--fs-11); padding: 4px 11px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: var(--bg-card); color: var(--text-dim); }
 .ti-param b { color: var(--text-bright); font-weight: 600; margin-left: 6px; }
 
 /* ── Context section card ── */
 .ti-ctx-card { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); overflow: hidden; }
 .ti-ctx-h { display: flex; align-items: center; gap: 8px; padding: 8px 12px; background: var(--bg-panel-alt); border-bottom: 1px solid var(--border-soft); }
-.ti-ctx-h .t { font-family: var(--font-ui); font-size: 10px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-mid); }
-.ti-ctx-h .tok { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.ti-ctx-h .t { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-mid); }
+.ti-ctx-h .tok { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); }
 .ti-ctx-card pre { margin: 0; padding: 11px 13px; max-height: 340px; overflow: auto; font-family: var(--font-mono); font-size: 11.5px; line-height: 1.62; color: var(--text-mid); white-space: pre-wrap; word-break: break-word; }
 
 /* section title gets a count chip on the right */
 .ti-sec-h { display: flex; align-items: center; justify-content: space-between; gap: 10px; margin: 0 0 9px; }
 .ti-sec-h h4 { margin: 0; }
-.ti-sec-h .n { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); }
+.ti-sec-h .n { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); }
 
 /* Drawer entrance: transform-only (no opacity fade). A backgrounded tab
    freezes the animation clock on frame 0 — fading opacity there would hold

@@ -16,9 +16,9 @@
   transition: border-color 140ms ease;
 }
 .a2a-msg:hover { border-color: var(--accent-brass-dim); }
-.a2a-msg .t { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
+.a2a-msg .t { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); letter-spacing: 0.02em; font-variant-numeric: tabular-nums; }
 .a2a-msg .av { width: 22px; height: 22px; border: 1px solid var(--border-main); object-fit: cover; filter: sepia(0.15) contrast(1.05) brightness(0.92); }
-.a2a-msg .arrow { color: var(--text-dim); font-family: var(--font-mono); text-align: center; font-size: 14px; }
+.a2a-msg .arrow { color: var(--text-dim); font-family: var(--font-mono); text-align: center; font-size: var(--fs-14); }
 .a2a-msg .body { display: flex; align-items: baseline; gap: 10px; min-width: 0; }
 .a2a-msg .title { font-weight: 600; color: var(--text-bright); white-space: nowrap; }
 .a2a-msg .sub { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

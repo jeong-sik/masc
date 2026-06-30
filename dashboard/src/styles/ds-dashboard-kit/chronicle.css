@@ -10,7 +10,7 @@
   padding: 6px 0; border-bottom: 1px dashed var(--border-main); align-items: baseline;
 }
 .ev:last-child { border-bottom: 0; }
-.ev .t { font-family: var(--font-mono); font-size: 10px; color: var(--text-dim); font-variant-numeric: tabular-nums; }
+.ev .t { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim); font-variant-numeric: tabular-nums; }
 .ev .mk { position: relative; height: 8px; }
 .ev .mk .d { display: block; width: 7px; height: 7px; border-radius: 50%; background: var(--text-dim); margin-top: 3px; }
 .ev.ok .mk .d    { background: var(--ok); box-shadow: 0 0 4px var(--ok); }
@@ -18,8 +18,8 @@
 .ev.bad .mk .d   { background: var(--bad); box-shadow: 0 0 5px var(--accent-blood-glow); }
 .ev.judge .mk .d { background: var(--t-judge); box-shadow: 0 0 4px var(--t-judge); }
 .ev.hilt .mk .d  { background: var(--t-hilt); box-shadow: 0 0 4px var(--t-hilt); }
-.ev .b { font-family: var(--font-body); font-size: 12px; color: var(--text-primary); line-height: 1.4; }
+.ev .b { font-family: var(--font-body); font-size: var(--fs-12); color: var(--text-primary); line-height: 1.4; }
 .ev .b em { color: var(--text-bright); font-style: italic; }
-.ev .b code { font-family: var(--font-mono); font-size: 10px; color: var(--accent-brass); background: rgba(138,106,40,0.08); padding: 0 4px; border: 1px solid var(--border-main); }
+.ev .b code { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--accent-brass); background: rgba(138,106,40,0.08); padding: 0 4px; border: 1px solid var(--border-main); }
 .ev .b .bad { color: var(--bad); }
 .ev.bad .b code { color: var(--bad); background: rgba(160,24,24,0.08); }

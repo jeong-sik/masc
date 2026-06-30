@@ -1350,7 +1350,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   }
 
   .kw-composer-inner .composer textarea {
-    font-size: 16px;
+    font-size: var(--fs-16);
   }
 
   .kw-mobile-rail-overlay {
@@ -1405,7 +1405,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   .kw-composer-inner .composer-textarea {
     min-height: 24px;
     padding: 9px 0;
-    font-size: 16px;
+    font-size: var(--fs-16);
     line-height: 1.45;
   }
 
@@ -1882,7 +1882,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-kp-gloss {
   margin-top: 3px;
   color: rgba(238, 246, 255, 0.72);
-  font-size: 11px;
+  font-size: var(--fs-11);
   line-height: 1.25;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1947,14 +1947,14 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 .kw-fleet-pressure span,
 .kw-fleet-vitals span {
   color: rgba(148, 163, 184, 0.82);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.08em;
   text-transform: uppercase;
 }
 
 .kw-fleet-aside-title strong {
   color: #f8fafc;
-  font-size: 14px;
+  font-size: var(--fs-14);
 }
 
 .kw-fleet-aside-state {
@@ -1963,7 +1963,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   border: 1px solid rgba(148, 163, 184, 0.22);
   border-radius: 999px;
   color: rgba(226, 232, 240, 0.78);
-  font-size: 10px;
+  font-size: var(--fs-10);
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -1977,12 +1977,12 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 
 .kw-fleet-phase b {
   color: rgba(248, 250, 252, 0.92);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .kw-fleet-phase span {
   color: rgba(203, 213, 225, 0.78);
-  font-size: 11px;
+  font-size: var(--fs-11);
 }
 
 .kw-fleet-pressure {
@@ -2026,12 +2026,12 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 
 .ctx-meter-label {
   color: var(--text-mid);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .ctx-meter-pct {
   color: var(--volt-strong);
-  font-size: 14px;
+  font-size: var(--fs-14);
 }
 
 .ctx-meter-pct.hot {
@@ -2056,7 +2056,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
 
 .kw-fleet-vitals b {
   color: rgba(248, 250, 252, 0.9);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .kw-fleet-tools {
@@ -2073,7 +2073,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   border-radius: 999px;
   background: rgba(15, 23, 42, 0.64);
   color: rgba(203, 213, 225, 0.82);
-  font-size: 10px;
+  font-size: var(--fs-10);
 }
 
 .att-text,
@@ -2111,7 +2111,7 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   border-radius: 12px;
   background: rgba(15, 23, 42, 0.68);
   color: rgba(226, 232, 240, 0.86);
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;

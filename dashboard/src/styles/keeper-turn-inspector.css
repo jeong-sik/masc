@@ -61,7 +61,7 @@
      letter-spacing 0.14em, 13px. var(--type-title) is sentence-case 14px, so
      match the prototype heading explicitly. */
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-13);
   text-transform: uppercase;
   letter-spacing: 0.14em;
   /* --color-fg-primary maps to --text-bright under [data-skin=v2]
@@ -75,7 +75,7 @@
   font-family: var(--font-mono);
   /* prototype .turn-hd .tid (keeper-v2/styles/v2.css:696): 11px. --fs-11 is
      bumped to 13px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--color-fg-muted);
   white-space: nowrap;
   overflow: hidden;
@@ -104,7 +104,7 @@
   height: 26px;
   border-radius: var(--radius-sm);
   cursor: pointer;
-  font-size: 12px;
+  font-size: var(--fs-12);
   line-height: 1;
   transition: 0.14s; /* prototype .turn-close (v2.css:699) */
 }
@@ -184,7 +184,7 @@
   font-family: var(--font-mono);
   /* prototype .ti-stat .v (inspector.css:23): 16px, margin-top 5px. --fs-16 is
      bumped to 18px at desktop :root (variables.css:724); pin the literals. */
-  font-size: 16px;
+  font-size: var(--fs-16);
   color: var(--color-fg-primary);
   margin-top: 5px;
   font-variant-numeric: tabular-nums;
@@ -194,7 +194,7 @@
 .kti-stat .v small {
   /* prototype .ti-stat .v small (inspector.css:24): 10px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--color-fg-disabled);
 }
 
@@ -233,7 +233,7 @@
   font-family: var(--font-mono);
   /* prototype .ti-tok-top .ctxpct (inspector.css:32): 11px. --fs-11 is bumped to
      13px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--color-fg-muted);
 }
 
@@ -328,7 +328,7 @@
   font-family: var(--font-ui);
   /* prototype .turn-tab (v2.css:702): 11px. --fs-11 is bumped to 13px at
      desktop :root (variables.css:723); pin the literal. */
-  font-size: 11px;
+  font-size: var(--fs-11);
   text-transform: uppercase;
   letter-spacing: 0.08em;
   cursor: pointer;
@@ -388,7 +388,7 @@
      This surface uses .kti-sec, so replicate the .turn-sec h4 rule in full. */
   margin: 0;
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--fs-10);
   text-transform: uppercase;
   letter-spacing: 0.1em;
   color: var(--color-fg-disabled);
@@ -398,7 +398,7 @@
   font-family: var(--font-mono);
   /* prototype .ti-sec-h .n (inspector.css:117): 10px. --fs-10 is bumped to 12px
      at desktop :root (variables.css:723); pin the literal. */
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--color-fg-disabled);
 }
 
@@ -478,7 +478,7 @@
   font-family: var(--font-mono);
   /* prototype .ti-wf-dur (inspector.css:54): 11px. --fs-11 is bumped to 13px at
      desktop :root (variables.css:723); pin the literal. */
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--color-fg-muted);
   text-align: right;
   font-variant-numeric: tabular-nums;
@@ -555,7 +555,7 @@
   color: var(--color-fg-disabled);
   border-radius: var(--radius-xs);
   font-family: var(--font-ui);
-  font-size: 10px;
+  font-size: var(--fs-10);
   padding: 3px 9px;
   cursor: pointer;
   transition: 0.14s;
@@ -676,7 +676,7 @@
   font-family: var(--font-ui);
   /* prototype .ti-tool-h .pill (inspector.css:82): 9px, padding 2px 7px. --fs-9
      is bumped to 11px at desktop :root (variables.css:723); pin the literals. */
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.08em;
   text-transform: uppercase;
   padding: 2px 7px;
@@ -698,7 +698,7 @@
   font-family: var(--font-mono);
   /* prototype .ti-tool-h .lat (inspector.css:85): 11px. --fs-11 is bumped to
      13px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--color-fg-disabled);
 }
 
@@ -835,7 +835,7 @@
   font-family: var(--font-ui);
   /* prototype .ti-ctx-h .t (inspector.css:110): 10px. --fs-10 is bumped to 12px
      at desktop :root (variables.css:723); pin the literal. */
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.12em;
   text-transform: uppercase;
   color: var(--color-fg-muted);
@@ -845,7 +845,7 @@
   font-family: var(--font-mono);
   /* prototype .ti-ctx-h .tok (inspector.css:111): 10px. --fs-10 is bumped to
      12px at desktop :root (variables.css:723); pin the literal. */
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--color-fg-disabled);
 }
 
@@ -878,7 +878,7 @@
   font-family: var(--font-mono);
   /* prototype .ti-param (inspector.css:104): 11px, padding 4px 11px. --fs-11 is
      bumped to 13px at desktop :root (variables.css:723); pin the literals. */
-  font-size: 11px;
+  font-size: var(--fs-11);
   padding: 4px 11px;
   border-radius: var(--radius-pill);
   border: 1px solid var(--color-border-default);
@@ -902,7 +902,7 @@
   grid-template-columns: 130px 1fr;
   gap: 8px 12px;
   font-family: var(--font-mono);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .kti-kv .k {

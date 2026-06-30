@@ -99,14 +99,14 @@
 
 .cp-world-title .t {
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.22em;
   text-transform: uppercase;
   color: var(--text-mid);
 }
 
 .cp-world-title .s {
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   margin-top: 3px;
 }
@@ -144,7 +144,7 @@
 
 .cp-head .cp-eyebrow {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   letter-spacing: 0.2em;
   text-transform: uppercase;
   color: var(--text-dim);
@@ -162,7 +162,7 @@
 
 .cp-head .cp-sub {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   margin: 0;
 }
@@ -189,14 +189,14 @@
 }
 
 .cp-mode .ml {
-  font-size: 12px;
+  font-size: var(--fs-12);
   font-weight: 600;
   color: var(--text-mid);
 }
 
 .cp-mode .ms {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--fs-9);
   color: var(--text-dim);
 }
 
@@ -232,7 +232,7 @@
 .cp-disc-h h3 {
   font-family: var(--font-display);
   font-weight: 500;
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.18em;
   text-transform: uppercase;
   color: var(--text-mid);
@@ -254,7 +254,7 @@
 
 .cp-disc-row .lvl {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--fs-9);
   letter-spacing: 0.16em;
   text-transform: uppercase;
   color: var(--volt-strong);
@@ -268,7 +268,7 @@
 }
 
 .cp-disc-row .sum {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
   margin-top: 3px;
   line-height: 1.5;
@@ -277,7 +277,7 @@
 .cp-disc-row .mtr {
   display: inline-block;
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-mid);
   background: var(--bg-card);
   border: 1px solid var(--border-main);
@@ -330,13 +330,13 @@
 .cp-plane-h h2 {
   font-family: var(--font-display);
   font-weight: 600;
-  font-size: 14px;
+  font-size: var(--fs-14);
   color: var(--text-bright);
   margin: 0;
 }
 
 .cp-plane-h .sum {
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-dim);
   margin-top: 2px;
 }
@@ -441,7 +441,7 @@
   color: var(--text-dim);
   flex: none;
   transition: 0.15s;
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 .cp-route .cp-cov {

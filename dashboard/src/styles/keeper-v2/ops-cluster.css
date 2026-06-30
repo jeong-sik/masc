@@ -26,7 +26,7 @@
   padding: 5px 10px;
   gap: 6px;
   border-radius: var(--radius-pill);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }
@@ -48,7 +48,7 @@
   padding: 5px 10px;
   gap: 6px;
   border-radius: var(--radius-pill);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.04em;
   white-space: nowrap;
 }

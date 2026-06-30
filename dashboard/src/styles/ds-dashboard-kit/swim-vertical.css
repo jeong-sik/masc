@@ -70,7 +70,7 @@
 }
 .vcol-head .vmeta .sub {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
   margin-top: 1px;
 }

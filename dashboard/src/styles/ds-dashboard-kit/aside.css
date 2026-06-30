@@ -23,7 +23,7 @@
 .aside h4::after { content: ""; flex: 1; height: 1px; background: linear-gradient(90deg, var(--border-highlight), transparent); }
 .aside h4 svg { width: 12px; height: 12px; color: var(--accent-brass); }
 .aside h4 .r {
-  font-family: var(--font-mono); font-size: 10px; color: var(--text-dim);
+  font-family: var(--font-mono); font-size: var(--fs-10); color: var(--text-dim);
   margin-left: auto; font-variant-numeric: tabular-nums; letter-spacing: 0.04em; text-transform: none;
 }
 

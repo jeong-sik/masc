@@ -10,15 +10,15 @@
   border: 1px solid var(--hair-brass);
   padding: 12px 14px; display: none; z-index: 50;
   box-shadow: 0 10px 32px rgba(0,0,0,0.6), inset 0 0 0 1px rgba(138,106,40,0.1);
-  font-family: var(--font-ui); font-size: 11px;
+  font-family: var(--font-ui); font-size: var(--fs-11);
 }
 #tweaks.on { display: block; }
-#tweaks h5 { margin: 0 0 8px; font-family: var(--font-display); font-size: 11px; letter-spacing: 0.22em; color: var(--accent-brass); text-transform: uppercase; }
+#tweaks h5 { margin: 0 0 8px; font-family: var(--font-display); font-size: var(--fs-11); letter-spacing: 0.22em; color: var(--accent-brass); text-transform: uppercase; }
 #tweaks .row { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--border-main); }
 #tweaks .row:last-child { border-bottom: 0; }
-#tweaks .row .l { color: var(--text-dim); font-size: 10px; letter-spacing: 0.18em; text-transform: uppercase; }
+#tweaks .row .l { color: var(--text-dim); font-size: var(--fs-10); letter-spacing: 0.18em; text-transform: uppercase; }
 #tweaks .row .seg { display: inline-flex; gap: 2px; }
-#tweaks .row .seg button { font: inherit; font-size: 9px; padding: 3px 7px; letter-spacing: 0.14em; text-transform: uppercase; background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); cursor: pointer; }
+#tweaks .row .seg button { font: inherit; font-size: var(--fs-9); padding: 3px 7px; letter-spacing: 0.14em; text-transform: uppercase; background: transparent; border: 1px solid var(--border-main); color: var(--text-dim); cursor: pointer; }
 #tweaks .row .seg button.on { color: var(--accent-brass); border-color: var(--hair-brass); background: rgba(138,106,40,0.06); }
 
 /* Smooth-update flash — applied briefly when a value changes */

@@ -100,7 +100,7 @@
 .p-kc-main { min-width: 0; }
 .p-kc-name {
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-bright);
   letter-spacing: 0.02em;
   white-space: nowrap;
@@ -129,18 +129,18 @@
 }
 .p-sc-lbl {
   font-family: var(--font-mono);
-  font-size: 9px;
+  font-size: var(--fs-9);
   text-transform: uppercase;
   letter-spacing: 0.09em;
   color: var(--text-dim);
 }
 .p-sc-val {
   font-family: var(--font-display);
-  font-size: 13px;
+  font-size: var(--fs-13);
   color: var(--text-bright);
   line-height: 1.15;
 }
-.p-sc-val.mono { font-family: var(--font-mono); font-size: 12px; }
+.p-sc-val.mono { font-family: var(--font-mono); font-size: var(--fs-12); }
 .p-sc-val.ok   { color: var(--ok); }
 .p-sc-val.warn { color: var(--warn); }
 .p-sc-val.bad  { color: var(--bad); }
@@ -187,7 +187,7 @@
 }
 .p-empty-m {
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: var(--fs-11);
   color: var(--text-bright);
   letter-spacing: 0.03em;
 }
@@ -233,12 +233,12 @@
 }
 .p-error-title {
   font-family: var(--font-display);
-  font-size: 11px;
+  font-size: var(--fs-11);
   letter-spacing: 0.04em;
   color: var(--bad);
 }
 .p-error-body {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   color: var(--text-dim);
 }

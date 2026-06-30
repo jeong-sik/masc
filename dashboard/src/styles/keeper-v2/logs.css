@@ -18,7 +18,7 @@
 /* ── header ── */
 .lg-head { flex: none; display: flex; align-items: flex-start; gap: 24px; padding: 22px 26px 16px; }
 .lg-head-l h1 { margin: 0; font-family: var(--font-display); font-weight: 600; font-size: 22px; letter-spacing: -0.01em; color: var(--text-bright); }
-.lg-sub { margin: 6px 0 0; font-size: 11px; letter-spacing: 0.04em; color: var(--text-dim); }
+.lg-sub { margin: 6px 0 0; font-size: var(--fs-11); letter-spacing: 0.04em; color: var(--text-dim); }
 .lg-stats { margin-left: auto; display: flex; gap: 10px; }
 .lg-stat {
   display: flex; flex-direction: column; gap: 3px; min-width: 74px;
@@ -32,7 +32,7 @@
 .lg-toolbar { flex: none; display: flex; align-items: center; gap: 10px; padding: 0 26px 14px; }
 .lg-filters { display: flex; gap: 4px; }
 .lg-fchip {
-  font-family: var(--font-ui); font-size: 12px; color: var(--text-mid);
+  font-family: var(--font-ui); font-size: var(--fs-12); color: var(--text-mid);
   padding: 6px 12px; border: 1px solid var(--border-main); background: transparent;
   border-radius: var(--radius-pill); cursor: pointer; transition: color .18s ease, border-color .18s ease, background .18s ease;
 }
@@ -40,13 +40,13 @@
 .lg-fchip.on { color: var(--bg-deep); background: var(--volt); border-color: var(--volt); font-weight: 600; }
 .lg-tb-spacer { flex: 1; }
 .lg-onlyerr {
-  font-family: var(--font-ui); font-size: 12px; color: var(--text-mid);
+  font-family: var(--font-ui); font-size: var(--fs-12); color: var(--text-mid);
   padding: 6px 12px; border: 1px solid var(--border-main); background: transparent;
   border-radius: var(--radius-pill); cursor: pointer; transition: color .18s ease, border-color .18s ease;
 }
 .lg-onlyerr:hover { color: var(--text-bright); border-color: var(--volt-dim); }
 .lg-onlyerr.on { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 50%, transparent); background: color-mix(in oklab, var(--status-warn) 10%, transparent); }
-.lg-live { display: inline-flex; align-items: center; gap: 7px; font-size: 11px; color: var(--text-dim); }
+.lg-live { display: inline-flex; align-items: center; gap: 7px; font-size: var(--fs-11); color: var(--text-dim); }
 .lg-live .dot { width: 7px; height: 7px; border-radius: 50%; background: var(--status-ok); box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-ok) 60%, transparent); animation: lg-pulse 2.4s ease-in-out infinite; }
 @keyframes lg-pulse { 0%, 100% { box-shadow: 0 0 0 0 color-mix(in oklab, var(--status-ok) 55%, transparent); } 50% { box-shadow: 0 0 0 4px transparent; } }
 
@@ -74,10 +74,10 @@
   font-family: var(--font-ui); transition: background .12s ease;
 }
 .lg-line:hover { background: color-mix(in oklab, var(--text-bright) 4%, transparent); }
-.lg-time { font-size: 12px; color: var(--text-mid); font-variant-numeric: tabular-nums; }
+.lg-time { font-size: var(--fs-12); color: var(--text-mid); font-variant-numeric: tabular-nums; }
 .lg-row[data-sev="bad"] .lg-time { color: var(--status-bad); }
 .lg-who { display: flex; align-items: center; gap: 9px; min-width: 0; }
-.lg-kid { font-size: 13px; color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.lg-kid { font-size: var(--fs-13); color: var(--text-primary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .lg-nosig { width: 18px; height: 18px; border-radius: 4px; background: var(--bg-card); border: 1px solid var(--border-main); flex: none; }
 .lg-kind {
   justify-self: start; font-family: var(--font-mono); font-size: 9.5px; letter-spacing: 0.1em; font-weight: 600;
@@ -89,15 +89,15 @@
 .lg-kind[data-kind="lifecycle"] { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 36%, transparent); }
 .lg-kind[data-kind="approval"]  { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); }
 .lg-kind[data-kind="broadcast"] { color: var(--info); border-color: color-mix(in oklab, var(--info) 40%, transparent); }
-.lg-msg { font-size: 13px; color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.lg-caret { justify-self: center; font-size: 11px; color: var(--text-dim); }
+.lg-msg { font-size: var(--fs-13); color: var(--text-primary); min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.lg-caret { justify-self: center; font-size: var(--fs-11); color: var(--text-dim); }
 
 /* ── expanded detail ── */
 .lg-detail { padding: 4px 26px 16px calc(26px + 92px + 14px); display: flex; flex-direction: column; gap: 10px; }
 .lg-kv { display: flex; flex-wrap: wrap; gap: 6px 22px; }
 .lg-kv-row { display: flex; gap: 8px; align-items: baseline; }
-.lg-kv-k { font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
-.lg-kv-v { font-size: 12px; color: var(--text-bright); }
+.lg-kv-k { font-size: var(--fs-10); letter-spacing: 0.06em; text-transform: uppercase; color: var(--text-dim); }
+.lg-kv-v { font-size: var(--fs-12); color: var(--text-bright); }
 .lg-block { display: flex; flex-direction: column; gap: 4px; }
 .lg-block-h { font-size: 9.5px; letter-spacing: 0.12em; text-transform: uppercase; color: var(--text-dim); }
 .lg-code {
@@ -108,11 +108,11 @@
 .lg-note { font-size: 12.5px; line-height: 1.55; color: var(--text-mid); max-width: 720px; }
 .lg-note.dim { color: var(--text-dim); font-size: 11.5px; }
 .lg-recips { display: flex; flex-wrap: wrap; gap: 6px; }
-.lg-recip { font-size: 11px; color: var(--text-mid); padding: 3px 9px; border: 1px solid var(--border-main); border-radius: var(--radius-pill); }
+.lg-recip { font-size: var(--fs-11); color: var(--text-mid); padding: 3px 9px; border: 1px solid var(--border-main); border-radius: var(--radius-pill); }
 .lg-jump {
-  align-self: flex-start; font-family: var(--font-ui); font-size: 12px; color: var(--volt);
+  align-self: flex-start; font-family: var(--font-ui); font-size: var(--fs-12); color: var(--volt);
   padding: 6px 12px; border: 1px solid color-mix(in oklab, var(--volt) 40%, transparent); background: transparent;
   border-radius: var(--radius-sm); cursor: pointer; transition: background .18s ease, border-color .18s ease;
 }
 .lg-jump:hover { background: color-mix(in oklab, var(--volt) 12%, transparent); border-color: var(--volt); }
-.lg-empty { padding: 48px; text-align: center; color: var(--text-dim); font-size: 13px; }
+.lg-empty { padding: 48px; text-align: center; color: var(--text-dim); font-size: var(--fs-13); }

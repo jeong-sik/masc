@@ -21,11 +21,11 @@
   border-bottom-color: var(--brass-1);
 }
 .sb-railtab-glyph {
-  font-size: 14px; line-height: 1;
+  font-size: var(--fs-14); line-height: 1;
   font-family: var(--font-mono);
 }
 .sb-railtab-label {
-  font-size: 9px; letter-spacing: .04em; text-transform: uppercase;
+  font-size: var(--fs-9); letter-spacing: .04em; text-transform: uppercase;
   font-family: var(--font-mono); line-height: 1;
 }
 
@@ -55,11 +55,11 @@
   line-height: 1.35;
 }
 .sb-item-sub {
-  font-size: 10px; color: var(--fg-3);
+  font-size: var(--fs-10); color: var(--fg-3);
   margin-top: 2px; font-variant-numeric: tabular-nums;
 }
 .sb-item-tag {
-  font-family: var(--font-mono); font-size: 9px;
+  font-family: var(--font-mono); font-size: var(--fs-9);
   padding: 2px 5px; border-radius: var(--r-1);
   background: var(--bg-3); color: var(--fg-3);
   border: 1px solid var(--line-1);
@@ -107,13 +107,13 @@
   border: 1px solid var(--line-1);
   border-radius: var(--r-1);
   color: var(--fg-3);
-  font-size: 10px; font-family: var(--font-mono);
+  font-size: var(--fs-10); font-family: var(--font-mono);
   letter-spacing: .04em; padding: 4px 2px; cursor: pointer;
   display: flex; flex-direction: column; align-items: center; gap: 1px; line-height: 1;
 }
 .sb-tab:hover { background: var(--bg-3); color: var(--fg-1); }
 .sb-tab.is-active { background: var(--bg-3); border-color: var(--brass-3); color: var(--brass-1); }
-.sb-tab-count { font-size: 10px; color: var(--fg-4); font-variant-numeric: tabular-nums; }
+.sb-tab-count { font-size: var(--fs-10); color: var(--fg-4); font-variant-numeric: tabular-nums; }
 .sb-tab.is-active .sb-tab-count { color: var(--brass-1); }
 .sb-search { padding: 6px 8px; border-bottom: 1px solid var(--line-1); flex-shrink: 0; }
 .sb-search input {
@@ -135,4 +135,4 @@
 .keeper-row.is-active { background: var(--bg-3); border-left-color: var(--brass-1); }
 .keeper-row .name { color: var(--fg-1); font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .keeper-row.is-active .name { color: var(--brass-1); }
-.keeper-row .meta { font-family: var(--font-mono); font-size: 10px; color: var(--fg-3); font-variant-numeric: tabular-nums; }
+.keeper-row .meta { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--fg-3); font-variant-numeric: tabular-nums; }

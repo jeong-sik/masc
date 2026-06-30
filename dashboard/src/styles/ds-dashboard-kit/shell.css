@@ -46,7 +46,7 @@
 }
 .page-header .ph-tag {
   font-family: var(--font-mono);
-  font-size: 10px;
+  font-size: var(--fs-10);
   font-weight: 400;
   color: var(--text-dim);
   letter-spacing: 0.12em;
@@ -57,7 +57,7 @@
   background: rgba(255,255,255,0.02);
 }
 .page-header .ph-sub {
-  font-size: 12px;
+  font-size: var(--fs-12);
   color: var(--text-dim);
   line-height: 1.5;
   margin: 0;

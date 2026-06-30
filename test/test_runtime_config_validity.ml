@@ -691,41 +691,48 @@ let test_repo_runtime_toml_loads () =
                Runtime_schema.Reasoning_effort)
         | None -> fail "expected Kimi K2.6 capabilities"))
 
-let fusion_preset_panels toml preset =
-  Otoml.find
-    toml
-    (Otoml.get_array Otoml.get_string)
-    [ "fusion"; "presets"; preset; "panel" ]
-
-let assert_runtime_supports_structured_output runtimes ~preset runtime_id =
-  match find_runtime runtimes runtime_id with
-  | None -> failf "fusion preset %s references unknown runtime %s" preset runtime_id
-  | Some runtime ->
-    (match runtime.model.capabilities with
-     | Some caps ->
-       check
-         bool
-         (Printf.sprintf "%s panel %s supports structured output" preset runtime_id)
-         true
-         caps.supports_structured_output
-     | None ->
-       failf
-         "fusion preset %s runtime %s must declare capabilities"
-         preset
-         runtime_id)
+let assert_panel_runtime_accepts_native_schema runtimes ~preset runtime_id =
+  let runtime = runtime_by_id_or_fail runtimes runtime_id in
+  match Fusion_panel.For_testing.apply_output_contract runtime.provider_config with
+  | Ok _ -> ()
+  | Error msg ->
+    failf
+      "fusion preset %s panel runtime %s must accept native schema: %s"
+      preset
+      runtime_id
+      msg
 
 let test_repo_fusion_panel_presets_are_schema_capable () =
   with_repo_oas_model_catalog @@ fun _catalog ->
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
-  let toml = Otoml.Parser.from_file path in
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
-  | Ok (runtimes, _default, _assignments, _librarian, _structured_judge, _cross, _media) ->
-    List.iter
-      (fun preset ->
-         fusion_preset_panels toml preset
-         |> List.iter (assert_runtime_supports_structured_output runtimes ~preset))
-      [ "trio"; "quorum" ]
+  | Ok
+      ( runtimes
+      , _default
+      , _assignments
+      , _librarian
+      , _structured_judge
+      , _cross
+      , _media ) ->
+    let runtime_cfg = fusion_toml_or_fail path in
+    (match Fusion_config.of_toml runtime_cfg with
+     | Error errs ->
+       failf
+         "repo fusion config should load: %s"
+         (String.concat ", " (List.map Fusion_config.show_config_error errs))
+     | Ok policy ->
+       List.iter
+         (fun validated_preset ->
+            let preset = Fusion_policy.Validated_preset.preset validated_preset in
+            List.iter
+              (fun (group : Fusion_policy.panel_group) ->
+                 List.iter
+                   (assert_panel_runtime_accepts_native_schema runtimes
+                      ~preset:preset.Fusion_policy.name)
+                   group.Fusion_policy.models)
+              preset.Fusion_policy.panels)
+         policy.Fusion_policy.presets)
 
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =

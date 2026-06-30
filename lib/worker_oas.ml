@@ -752,17 +752,7 @@ and run_existing_worker_agent
        match result with
        | Ok response ->
          let output =
-           response.content
-           |> List.filter_map (function
-             | Agent_sdk.Types.Text text -> Some text
-             | Agent_sdk.Types.Thinking _
-             | Agent_sdk.Types.RedactedThinking _
-             | Agent_sdk.Types.ToolUse _
-             | Agent_sdk.Types.ToolResult _
-             | Agent_sdk.Types.Image _
-             | Agent_sdk.Types.Document _
-             | Agent_sdk.Types.Audio _ -> None)
-           |> String.concat "\n"
+           Agent_sdk.Types.visible_text_of_response response
          in
          let* () =
            Worker_container.append_worker_completion_log

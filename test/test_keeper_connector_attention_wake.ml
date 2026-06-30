@@ -40,7 +40,7 @@ let init_runtime_default_for_tests () =
   Fun.protect
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc runtime_toml);
-  match Masc.Runtime.init_default ~config_path:path with
+  match Runtime.init_default ~config_path:path with
   | Ok () -> ()
   | Error e -> Alcotest.failf "Runtime.init_default failed: %s" e
 
@@ -106,6 +106,25 @@ let test_no_stimulus_no_connector_reason () =
   check bool "no Connector_attention_pending without the stimulus" false
     (List.mem WO.Connector_attention_pending (reasons_of_verdict d.verdict))
 
+(* The Connector_attention payload persists to / replays from the per-keeper
+   event-queue snapshot, so its JSON codec must round-trip the event_id pointer. *)
+let test_connector_attention_codec_roundtrips () =
+  let module Q = Keeper_event_queue in
+  let s =
+    { Q.post_id = "evt-77"
+    ; urgency = Q.Normal
+    ; arrived_at = 1.0
+    ; payload = Q.Connector_attention { event_id = "evt-77" }
+    }
+  in
+  match Q.stimulus_of_yojson (Q.stimulus_to_yojson s) with
+  | Ok s' -> (
+    match s'.Q.payload with
+    | Q.Connector_attention { event_id } ->
+      check string "event_id survives the JSON round-trip" "evt-77" event_id
+    | _ -> check bool "round-trip payload stays Connector_attention" true false)
+  | Error e -> check bool ("round-trip decode failed: " ^ e) true false
+
 let () =
   init_runtime_default_for_tests ();
   run "connector_attention_wake"
@@ -114,5 +133,9 @@ let () =
             test_connector_attention_stimulus_drives_run
         ; test_case "dormant without the stimulus" `Quick
             test_no_stimulus_no_connector_reason
+        ] )
+    ; ( "codec",
+        [ test_case "Connector_attention payload JSON round-trips" `Quick
+            test_connector_attention_codec_roundtrips
         ] )
     ]

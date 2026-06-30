@@ -543,7 +543,13 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bg_completed c ->
     Some
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
-  | Keeper_event_queue.Bootstrap | Keeper_event_queue.No_progress_recovery -> None
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.No_progress_recovery
+  | Keeper_event_queue.Connector_attention _ ->
+    (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
+       fires via the Connector_attention_stimulus trigger; content threading
+       from external_attention is P3. *)
+    None
 ;;
 
 (** Collect recent board activity using cursor-based tracking.

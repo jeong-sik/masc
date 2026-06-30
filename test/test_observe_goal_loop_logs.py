@@ -122,7 +122,7 @@ class ObserveGoalLoopLogsTest(unittest.TestCase):
                         '{"status":"skipped","error":"runtime provider health is advisory; bootstrap skips live probe"}',
                         "[WARN] [Auth] archived credential sangsu.json (reason: bare-form keeper credential is dead after PR-3b1 starvation)",
                         "pricing_catalog_miss model=glm-4.7",
-                        "[WARN] [Governance] Governance judge returned unparseable response (Lenient_json fallback hit; 3809 chars)",
+                        "[WARN] [Governance] Governance judge returned unparseable structured response (parse failure; 3809 chars)",
                         "[WARN] [Keeper] keeper TOML jobsian_purist.toml has unknown keys: keeper.base",
                         "[INFO] verifier: warmup=255s",
                         "[WARN] tool_policy unknown tools: foo, bar, baz",

@@ -26,7 +26,7 @@ let test_custom_max_bytes_respected () =
   check bool "first 30 chars preserved" true
     (String.length out >= 30 && String.sub out 0 30 = String.make 30 'x')
 
-let test_format_lenient_fallback_includes_label () =
+let test_format_parse_failure_includes_label () =
   let raw = "garbage that is not json" in
   let out = Judge_diagnostics.format_lenient_fallback ~judge_label:"Governance" raw in
   let contains needle =
@@ -38,7 +38,7 @@ let test_format_lenient_fallback_includes_label () =
   check bool "names judge label" true (contains "Governance judge");
   check bool "names byte size" true (contains "24 chars");
   check bool "embeds raw preview" true (contains raw);
-  check bool "names fallback class" true (contains "Lenient_json fallback hit")
+  check bool "names parse failure class" true (contains "parse failure")
 
 let test_format_lenient_fallback_truncates_huge_raw () =
   let raw = String.make 2000 'z' in
@@ -195,7 +195,7 @@ let () =
       ( "format_lenient_fallback",
         [
           test_case "includes judge label, size, preview, class" `Quick
-            test_format_lenient_fallback_includes_label;
+            test_format_parse_failure_includes_label;
           test_case "preview is bounded for huge raw" `Quick
             test_format_lenient_fallback_truncates_huge_raw;
           test_case "structural invalid includes reason" `Quick

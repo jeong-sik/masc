@@ -269,7 +269,6 @@ lib/dashboard/dashboard_workspaces.ml,28,false,unclassified
 lib/dashboard/dashboard_workspaces.ml,53,false,unclassified
 lib/dashboard/dashboard_verification.ml,47,None,unclassified
 lib/dashboard/dashboard_verification.ml,85,None,unclassified
-lib/dashboard/judge_json_recovery.ml,36,(),unclassified
 lib/diagnostic_dispatch.ml,9,None,unclassified
 lib/drift_guard.ml,50,None,unclassified
 lib/drift_guard.ml,108,false,unclassified

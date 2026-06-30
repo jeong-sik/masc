@@ -1,7 +1,7 @@
 (* #9774: shared helpers for governance / operator judge LLM-output
-   diagnostics. Formatting remains pure; [record_lenient_fallback]
-   is the explicit metric-emitting wrapper used by production fallback
-   branches. *)
+   diagnostics. Formatting remains pure. [record_lenient_fallback] keeps the
+   legacy metric counter name for dashboard compatibility, but structured-output
+   judges no longer recover prose-prefixed JSON. *)
 
 (* Truncate a string to at most [max_bytes] bytes, appending an ellipsis
    marker that records how many bytes were dropped. Byte-count is
@@ -11,14 +11,13 @@ let truncate_with_marker ?(max_bytes = 500) s =
   if len <= max_bytes then s
   else String.sub s 0 max_bytes ^ Printf.sprintf "…[+%d chars]" (len - max_bytes)
 
-(* When a judge's [Lenient_json.parse] returns the [`Assoc [("raw", _)]]
-   fallback, format a single message that names the judge, the raw size,
-   and a bounded preview. The same string is used both as the warn log
-   payload and as the [Error] returned upstream so any consumer sees the
-   diagnostic without enabling raw provider logging. *)
+(* Format a single message that names the judge, the raw size, and a bounded
+   preview. The same string is used both as the warn log payload and as the
+   [Error] returned upstream so any consumer sees the diagnostic without
+   enabling raw provider logging. *)
 let format_lenient_fallback ~judge_label raw =
   Printf.sprintf
-    "%s judge returned unparseable response (Lenient_json fallback hit; %d chars; preview: %s)"
+    "%s judge returned unparseable structured response (parse failure; %d chars; preview: %s)"
     judge_label
     (String.length raw)
     (truncate_with_marker raw)

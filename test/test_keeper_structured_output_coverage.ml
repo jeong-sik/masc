@@ -360,6 +360,16 @@ let test_adversarial_review_response_text_fallback_is_strict_json () =
      || contains_substring source "String.sub trimmed")
 ;;
 
+let test_anti_rationalization_response_text_fallback_is_strict_json () =
+  let source = read_source "lib/task/anti_rationalization.ml" in
+  check
+    bool
+    "anti-rationalization native response must not use legacy prose verdict parsing"
+    false
+    (contains_substring source "parse_review_verdict_from_text text with"
+     || contains_substring source "parse_verdict_typed text with")
+;;
+
 let test_model_label_wrappers_can_receive_provider_config_transform () =
   let rel = "lib/keeper/keeper_turn_driver_wrappers.ml" in
   check
@@ -457,6 +467,10 @@ let () =
             "adversarial review response fallback is strict JSON"
             `Quick
             test_adversarial_review_response_text_fallback_is_strict_json
+        ; test_case
+            "anti-rationalization response fallback is strict JSON"
+            `Quick
+            test_anti_rationalization_response_text_fallback_is_strict_json
         ] )
     ; ( "model-label wrappers"
       , [ test_case

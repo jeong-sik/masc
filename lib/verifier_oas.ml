@@ -45,16 +45,39 @@ Action taken: %s
 
 Result: %s
 
-Respond with exactly one of:
-PASS - if the action is correct and moves toward the goal
-WARN: <reason> - if the action is acceptable but has concerns
-FAIL: <reason> - if the action is wrong or harmful
+Call report_verdict exactly once:
+- verdict: PASS if the action is correct and moves toward the goal.
+- verdict: WARN if the action is acceptable but has concerns.
+- verdict: FAIL if the action is wrong or harmful.
+- reason: null for PASS, otherwise a concise explanation.
+- evidence: an empty array unless you have concrete evidence references.
 
-One line only.|}
+If you cannot call the tool, return only the same JSON object with fields
+`verdict`, `reason`, and `evidence`.|}
       req.goal
       context_truncated
       req.action_description
       result_truncated
+;;
+
+let apply_report_verdict_output_schema provider_cfg =
+  let schema = Keeper_structured_output_schema.verification_verdict_output_schema in
+  let provider_cfg =
+    Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
+  in
+  match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
+  | Ok () -> Ok provider_cfg
+  | Error detail ->
+    Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig
+            { field = "verification.report_verdict.output_schema"; detail }))
+;;
+
+let parse_verdict_from_response_text text =
+  match Yojson.Safe.from_string (String.trim text) with
+  | json -> Core.parse_verdict_from_json json
+  | exception Yojson.Json_error _ -> Core.parse_verdict text
 ;;
 
 (* ================================================================ *)
@@ -64,8 +87,8 @@ One line only.|}
 (** Verify an action using structured tool output (ADR D3 compliant).
 
     Primary path: LLM calls [report_verdict] tool with typed verdict.
-    Fallback path: if LLM responds with text, [parse_verdict] extracts
-    the verdict from free text (Samchon Rank 1: lenient fallback).
+    Fallback path: if LLM responds with text, parse provider-native JSON when
+    available, otherwise extract the verdict from free text.
 
     The structured path is deterministic (JSON schema constrains output).
     The fallback path is nondeterministic but returns Error on failure
@@ -92,9 +115,7 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
           ~start_time
           (sprintf "Invalid verdict format: %s" msg)
     in
-    let runtime_id =
-      Runtime.get_default_runtime_id ()
-    in
+    let runtime_id = Runtime.runtime_id_for_structured_judge () in
     let base_path = Env_config_core.base_path () in
     match
       Keeper_turn_driver_wrappers.run_named_with_masc_tools
@@ -107,6 +128,7 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
         ~temperature:Runtime_provider_defaults.deterministic_temperature
         ~max_tokens:200
         ~approval:Approval_callbacks.auto_approve
+        ~provider_config_transform:apply_report_verdict_output_schema
         ()
     with
     | Ok result ->
@@ -118,7 +140,7 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
          (* LLM responded with text instead of tool call — lenient fallback *)
          let text = Agent_sdk_response.text_of_response result.response in
          Log.Verifier.info "verdict via text fallback (model did not call report_verdict)";
-        (match Core.parse_verdict text with
+        (match parse_verdict_from_response_text text with
          | Ok verdict -> Ok verdict
           | Error parse_err ->
             Log.Verifier.warn

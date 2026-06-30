@@ -1570,9 +1570,9 @@ function SurfaceLead() {
           />`
         : null}
       <div class="flex items-center gap-2">
-        <h1 class="text-lg font-semibold tracking-normal text-[var(--color-fg-secondary)] leading-tight">
+        <div role="heading" aria-level="1" class="text-lg font-semibold tracking-normal normal-case text-[var(--color-fg-secondary)] leading-tight" style="text-shadow: none;">
           ${title}
-        </h1>
+        </div>
         ${shareUrl !== ''
           ? html`<${CopyIdButton}
               value=${shareUrl}

@@ -353,7 +353,10 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       check (option string) (model_id ^ " base") (Some "openai_chat")
         entry.base_label
   in
-  let expect_runpod_caps name caps =
+  let expect_runpod_caps
+        name
+        (caps : Llm_provider.Capabilities.capabilities)
+    =
     check (option int) (name ^ " context") (Some 131072)
       caps.max_context_tokens;
     check bool (name ^ " tools") true caps.supports_tools;

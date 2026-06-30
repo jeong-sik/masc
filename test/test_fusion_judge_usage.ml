@@ -72,7 +72,7 @@ let test_output_contract_keeps_native_schema_when_supported () =
        | Some schema -> Yojson.Safe.equal fusion_schema schema
        | None -> false)
 
-let test_output_contract_degrades_to_json_mode_when_schema_is_not_native () =
+let test_output_contract_fails_loud_when_schema_is_not_native () =
   with_repo_oas_model_catalog @@ fun () ->
   let cfg =
     provider_cfg
@@ -81,14 +81,10 @@ let test_output_contract_degrades_to_json_mode_when_schema_is_not_native () =
       ~base_url:"https://api.deepseek.com"
   in
   match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Error msg -> fail ("expected JSON-mode fallback: " ^ msg)
-  | Ok configured ->
-    check bool "response_format uses JsonMode" true
-      (match configured.response_format with
-       | Agent_sdk.Types.JsonMode -> true
-       | Agent_sdk.Types.JsonSchema _ | Agent_sdk.Types.Off -> false);
-    check (option string) "native output_schema is cleared" None
-      (Option.map Yojson.Safe.to_string configured.output_schema)
+  | Ok _ -> fail "expected schema-native fusion judge to fail loud"
+  | Error msg ->
+    check bool "schema validation reason is retained" true
+      (String.length msg > 0)
 
 let test_output_contract_fails_loud_when_no_output_contract_is_known () =
   with_empty_oas_model_catalog @@ fun () ->
@@ -194,9 +190,9 @@ let () =
             `Quick
             test_output_contract_keeps_native_schema_when_supported
         ; test_case
-            "uses JSON mode when native schema is not available"
+            "fails loud when native schema is not available"
             `Quick
-            test_output_contract_degrades_to_json_mode_when_schema_is_not_native
+            test_output_contract_fails_loud_when_schema_is_not_native
         ; test_case
             "fails loud when no JSON output contract is known"
             `Quick

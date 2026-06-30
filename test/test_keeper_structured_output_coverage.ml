@@ -205,6 +205,19 @@ let test_fusion_agent_run_json_judges_use_provider_config_transform () =
     expected_structured_fusion_json_judges
 ;;
 
+let test_fusion_json_judges_do_not_degrade_to_json_mode () =
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " must not downgrade provider-native schema to JsonMode")
+         0
+         (Ast_grep.count_constructors
+            ~module_path:rel
+            ~constructor:"Agent_sdk.Types.JsonMode"))
+    expected_structured_fusion_json_judges
+;;
+
 let test_all_fusion_agent_build_files_are_classified () =
   check
     (list string)
@@ -358,6 +371,10 @@ let () =
             "fusion JSON judges use provider config transform"
             `Quick
             test_fusion_agent_run_json_judges_use_provider_config_transform
+        ; test_case
+            "fusion JSON judges do not degrade to JsonMode"
+            `Quick
+            test_fusion_json_judges_do_not_degrade_to_json_mode
         ] )
     ; ( "structured tool Agent.run"
       , [ test_case

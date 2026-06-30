@@ -142,6 +142,24 @@ let count_calls_with_label ~module_path ~callee ~label =
   !count
 ;;
 
+let count_constructors ~module_path ~constructor =
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self e ->
+          (match e.pexp_desc with
+           | Pexp_construct ({ txt; _ }, _) ->
+             if longident_to_string txt = constructor then incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
 (* Count value-binding patterns ([let name = ...] or [let rec name = ...])
    whose identifier equals [name] exactly.  Catches the *identifier* —
    the axis [count_string_literals] cannot see, because identifiers are

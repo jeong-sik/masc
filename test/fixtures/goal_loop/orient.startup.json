@@ -48,7 +48,7 @@
       "finding_id": "NF-4",
       "patterns": [
         "governance_unparseable",
-        "lenient_json_fallback"
+        "strict_json_parse_reject"
       ],
       "samples": [
         {
@@ -56,13 +56,13 @@
           "line_no": 49
         },
         {
-          "line": "[WARN] [Governance] Lenient_json fallback hit; 3809 chars",
+          "line": "[WARN] [Governance] strict JSON parse rejected; 3809 chars",
           "line_no": 50
         }
       ],
       "severity": "warning",
       "status": "EVIDENCE_PRESENT",
-      "title": "governance_judge_unparseable_fallback"
+      "title": "governance_judge_strict_json_parse_reject"
     },
     {
       "count": 0,

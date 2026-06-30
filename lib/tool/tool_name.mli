@@ -33,6 +33,7 @@ module Board_name : sig
     | Board_hearths
     | Board_list
     | Board_post
+    | Board_post_update
     | Board_profile
     | Board_reaction
     | Board_search

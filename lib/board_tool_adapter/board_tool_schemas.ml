@@ -133,6 +133,64 @@ let tool_post_create : Masc_domain.tool_schema =
   }
 ;;
 
+let tool_post_edit : Masc_domain.tool_schema =
+  { name = "masc_board_post_update"
+  ; description =
+      "Edit an existing board post you authored, by exact post_id. Only the post's \
+       author can edit it; an edit by anyone else is rejected. Pass the full new \
+       `body` (or `content`) — the post body is replaced, not appended. `title` is \
+       optional (omit to keep deriving it from the body). `author` is auto-filled \
+       from the caller's agent identity when omitted. Get the post_id from \
+       masc_board_list, masc_board_post_get, or visible board context."
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"
+        ; ( "properties"
+          , `Assoc
+              [ ( "post_id"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Required exact board post ID (format: p-xxxx) of the post to \
+                           edit." )
+                    ] )
+              ; ( "body"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String "New post body text (preferred alias for `content`)" )
+                    ] )
+              ; ( "content"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; "maxLength", `Int 4000
+                    ; ( "description"
+                      , `String
+                          "New post body text (alternative to `body`, max 4000 chars)" )
+                    ] )
+              ; ( "title"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Optional new title. When omitted, the title is re-derived \
+                           from the new body." )
+                    ] )
+              ; ( "author"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Editor identity; must match the post's author. Auto-filled \
+                           from caller's agent_name when omitted." )
+                    ] )
+              ] )
+        ; "required", `List [ `String "post_id" ]
+        ]
+  }
+;;
+
 let tool_post_list : Masc_domain.tool_schema =
   { name = "masc_board_list"
   ; description =

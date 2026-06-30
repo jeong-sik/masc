@@ -73,6 +73,7 @@ module Board_name = struct
     | Board_hearths
     | Board_list
     | Board_post
+    | Board_post_update
     | Board_profile
     | Board_reaction
     | Board_search
@@ -95,6 +96,7 @@ module Board_name = struct
     | Board_hearths -> "masc_board_hearths"
     | Board_list -> "masc_board_list"
     | Board_post -> "masc_board_post"
+    | Board_post_update -> "masc_board_post_update"
     | Board_profile -> "masc_board_profile"
     | Board_reaction -> "masc_board_reaction"
     | Board_search -> "masc_board_search"
@@ -118,6 +120,7 @@ module Board_name = struct
     | "masc_board_hearths" -> Some Board_hearths
     | "masc_board_list" -> Some Board_list
     | "masc_board_post" -> Some Board_post
+    | "masc_board_post_update" -> Some Board_post_update
     | "masc_board_profile" -> Some Board_profile
     | "masc_board_reaction" -> Some Board_reaction
     | "masc_board_search" -> Some Board_search

@@ -187,6 +187,7 @@ let board_tool_curation_submit : Masc_domain.tool_schema =
     Order preserved from pre-split board_tool.ml. *)
 let tools =
   [ Board_tool_schemas.tool_post_create
+  ; Board_tool_schemas.tool_post_edit
   ; Board_tool_schemas.tool_post_list
   ; Board_tool_schemas.tool_post_get
   ; Board_tool_schemas.tool_comment_add
@@ -217,6 +218,7 @@ let schema_for_board_name board_name =
 
 let identity_fields_for_board_name = function
   | Tool_name.Board_name.Board_post
+  | Tool_name.Board_name.Board_post_update
   | Tool_name.Board_name.Board_comment -> [ "author" ]
   | Tool_name.Board_name.Board_vote
   | Tool_name.Board_name.Board_comment_vote -> [ "voter" ]
@@ -240,6 +242,7 @@ let identity_fields_for_board_name = function
 
 let identity_input_fields =
   [ Tool_name.Board_name.Board_post
+  ; Tool_name.Board_name.Board_post_update
   ; Tool_name.Board_name.Board_comment
   ; Tool_name.Board_name.Board_vote
   ; Tool_name.Board_name.Board_comment_vote

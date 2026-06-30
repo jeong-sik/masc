@@ -192,6 +192,7 @@ let classify_catalog_tool ~tool_name =
   | "masc_board_curation_submit"
   | "masc_board_delete"
   | "masc_board_post"
+  | "masc_board_post_update"
   | "masc_board_reaction"
   | "masc_board_sub_board_create"
   | "masc_board_sub_board_delete"

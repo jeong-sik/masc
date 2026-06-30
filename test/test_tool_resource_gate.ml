@@ -127,6 +127,7 @@ let test_classifies_host_local_bottlenecks () =
        ~is_read_only:true
        ~args:(`Assoc [ "op", `String "bash" ]));
   check string "board write" "board_write" (classify "masc_board_post");
+  check string "board edit write" "board_write" (classify "masc_board_post_update");
   check string "transition" "workspace_write" (classify "masc_transition");
   check string "worker shell_exec" "shell" (classify "shell_exec");
   check

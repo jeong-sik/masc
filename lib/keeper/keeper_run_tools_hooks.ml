@@ -354,11 +354,20 @@ let assemble_hooks
                   else ctx
                 in
                 let ctx =
+                  (* Off-main: [render_if_enabled] performs synchronous file I/O
+                     (stat/readdir/open over the persisted memory store). Running
+                     it directly on the main Eio domain blocks the cooperative
+                     scheduler, head-of-line-blocking every sibling keeper fiber
+                     until the syscalls return. Push the I/O onto the shared
+                     domain pool ([submit_io_or_inline] runs inline when no pool
+                     is configured, e.g. tests). The render is read-side only and
+                     keeps no module-level mutable state, so it is domain-safe. *)
                   match
-                    Keeper_user_model.render_if_enabled
-                      ~keeper_id:meta.name
-                      ~now:(Time_compat.now ())
-                      ()
+                    Domain_pool_ref.submit_io_or_inline (fun () ->
+                      Keeper_user_model.render_if_enabled
+                        ~keeper_id:meta.name
+                        ~now:(Time_compat.now ())
+                        ())
                   with
                   | None -> ctx
                   | Some block ->
@@ -372,14 +381,20 @@ let assemble_hooks
                      MASC_KEEPER_MEMORY_OS_RECALL. RFC-0247 removed the lexical
                      seed: recall now orders by structural recency, so the
                      current-turn text no longer reranks the recalled facts. *)
+                  (* Off-main: same rationale as the user-model render above —
+                     the recall reads persisted facts/episodes via synchronous
+                     file I/O, which would starve the main Eio domain and HOL
+                     sibling keepers. Read-side only, no module-level mutable
+                     state, so it is domain-safe on the shared pool. *)
                   match
-                    Keeper_memory_os_recall.render_if_enabled
-                      ~keeper_id:meta.name
-                      ~now:(Time_compat.now ())
-                      ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                      ~turn
-                      ~masc_root:(Workspace.masc_root_dir config)
-                      ()
+                    Domain_pool_ref.submit_io_or_inline (fun () ->
+                      Keeper_memory_os_recall.render_if_enabled
+                        ~keeper_id:meta.name
+                        ~now:(Time_compat.now ())
+                        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                        ~turn
+                        ~masc_root:(Workspace.masc_root_dir config)
+                        ())
                   with
                   | None -> ctx
                   | Some block ->

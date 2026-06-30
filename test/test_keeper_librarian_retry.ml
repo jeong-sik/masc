@@ -271,6 +271,9 @@ let test_cadence_error_backoff_policy () =
   check bool "provider transport failure defers cadence" true
     (R.should_record_cadence_backoff_after_error
        (R.Provider_transport_failed "http timeout"));
+  check bool "unparseable provider response defers cadence" true
+    (R.should_record_cadence_backoff_after_error
+       (R.Provider_unparseable_response "invalid_json"));
   check bool "prompt render failure stays due" false
     (R.should_record_cadence_backoff_after_error
        (R.Prompt_render_failed "missing template"));
@@ -279,14 +282,6 @@ let test_cadence_error_backoff_policy () =
        (R.Memory_fact_upsert_failed "permission denied"));
   check bool "missing provider clock does not claim a completed attempt" false
     (R.should_record_cadence_backoff_after_error R.Provider_clock_unavailable)
-
-let test_unstructured_fallback_preservation_policy () =
-  check bool "empty response is not preserved" false
-    (R.should_preserve_unstructured_fallback "");
-  check bool "whitespace response is not preserved" false
-    (R.should_preserve_unstructured_fallback " \n\t ");
-  check bool "invalid text response is preserved" true
-    (R.should_preserve_unstructured_fallback "not json, but evidence")
 
 (* [cadence_due] drives the real per-(keeper, trace) counter table (the gate
    [run_best_effort] uses). A fresh pair is due immediately, and successful
@@ -571,8 +566,6 @@ let () =
           test_case "record attempt defers" `Quick test_cadence_record_attempt_defers;
           test_case "success policy excludes fallback" `Quick test_cadence_success_policy;
           test_case "error backoff policy" `Quick test_cadence_error_backoff_policy;
-          test_case "fallback preservation policy" `Quick
-            test_unstructured_fallback_preservation_policy;
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
           test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;
           test_case "cadence_due resets on trace rollover" `Quick

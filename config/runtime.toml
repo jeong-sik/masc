@@ -972,3 +972,67 @@ judge_timeout_s = 300.0
 web_tools = false
 # 패널 모델당 최대 tool 호출 수 (0 = 무제한, OpenRouter Fusion 허용 범위 0..16).
 max_tool_calls_per_panel = 0
+
+# ── JoJ-capable preset (RFC-0283 judge-of-judges) ───────────────────────────
+# masc_fusion topology="judge_of_judges"는 preset에 1차 심판 >= 2명을 요구한다
+# (fusion_orchestrator.run_judge_of_judges). trio는 단일 judge라 JoJ 호출이 항상
+# "requires >= 2 judges"로 fail-closed된다 → 키퍼가 JoJ topology를 쓸 수 없었다.
+# quorum은 서로 다른 렌즈(evidence/coverage)의 1차 심판 2명을 두고, meta judge(judge=)가
+# 두 종합을 재조정한다. 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
+# 모델은 모두 supports-response-format-json=true (fusion judge는 응답 텍스트에서 JSON을
+# 파싱하므로 native structured-output host allowlist와 무관하나, JSON 신뢰성을 위해
+# JSON-선언 모델만 사용한다). staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)
+# 의 정확한 배수 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
+[fusion.presets.quorum]
+panel = [
+  "ollama_cloud.deepseek-v4-flash",
+  "glm-coding.glm-5-turbo",
+  "ollama_cloud.minimax-m3",
+]
+panel_system_prompt = """
+You are an expert panelist. Answer the user's question directly and concisely \
+with your best independent analysis. Do not defer to other models; give your \
+own view.
+"""
+# meta judge: 1차 심판들의 종합을 재조정하는 최종 reducer (RFC-0283).
+judge = "deepseek.deepseek-v4-pro"
+judge_system_prompt = """
+You are the meta-judge. You are given several independent judge syntheses of the \
+same panel of model answers, each produced through a different evaluative lens. \
+Reconcile them: where the judges agree, state the consensus; where they diverge, \
+adjudicate with reasons; surface any blind spot that a single lens missed. Produce \
+one resolved answer. Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+panel_timeout_s = 300.0
+judge_timeout_s = 300.0
+# meta/stage-meta reducer 구조적 타임아웃. 미지정 시 judge_timeout_s와 동일.
+meta_timeout_s = 300.0
+web_tools = false
+max_tool_calls_per_panel = 0
+
+# 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다 (JoJ requires >= 2; RFC-0283).
+# label이 정체성을 주므로 distinct lens는 distinct identity가 된다 (Duplicate_judge 회피).
+# evidence judge는 panel에 없는 모델을 쓴다 — 자기 답변이 포함된 panel을 심판하는
+# self-preference bias를 구조적으로 배제(panel = deepseek-v4-flash/glm-5-turbo/minimax-m3,
+# coverage judge=kimi-k2-6, meta judge=deepseek-v4-pro 모두 panel 외부).
+[[fusion.presets.quorum.judges]]
+model = "glm-coding.glm-4-7-coding"
+label = "evidence"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through an EVIDENCE lens: weigh each claim by how well it is supported, flag \
+unsupported assertions, and prefer conclusions grounded in verifiable reasoning. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+timeout_s = 300.0
+
+[[fusion.presets.quorum.judges]]
+model = "ollama_cloud.kimi-k2-6"
+label = "coverage"
+system_prompt = """
+You are an impartial first-pass judge. Synthesize the panel of model answers \
+through a COVERAGE lens: map what each answer addresses and omits, surface blind \
+spots and unique insights, and prefer the most complete resolution. \
+Respond with ONLY the requested JSON object, no prose and no code fences.
+"""
+timeout_s = 300.0

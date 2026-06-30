@@ -191,6 +191,15 @@ let parse_credential (tbl : Otoml.t) (path : string)
 
 let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabilities =
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
+  let warn_deprecated key =
+    match Otoml.find_opt tbl Fun.id [ key ] with
+    | None -> ()
+    | Some _ ->
+      Log.Runtime.warn
+        "runtime_toml: %s.capabilities.%s is deprecated and ignored; runtime-MCP capability is resolved from OAS provider bindings"
+        path
+        key
+  in
   let string_list_field key =
     match Otoml.find_opt tbl Fun.id [ key ] with
     | None -> []
@@ -218,10 +227,13 @@ let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabil
           n;
       None
   in
+  List.iter
+    warn_deprecated
+    [ "supports-runtime-mcp-tools"
+    ; "supports-runtime-tool-events"
+    ; "supports-runtime-mcp-http-headers"
+    ];
   { Runtime_schema.supports_inline_tools = b "supports-inline-tools"
-  ; supports_runtime_mcp_tools = b "supports-runtime-mcp-tools"
-  ; supports_runtime_tool_events = b "supports-runtime-tool-events"
-  ; supports_runtime_mcp_http_headers = b "supports-runtime-mcp-http-headers"
   ; requires_per_keeper_bridging_for_bound_actor_tools =
       b "requires-per-keeper-bridging-for-bound-actor-tools"
   ; identity_runtime_mcp_header_keys =

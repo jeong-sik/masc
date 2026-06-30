@@ -48,11 +48,6 @@ connect-timeout-s = 600.0
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
-[providers.ollama_cloud.capabilities]
-supports-runtime-mcp-tools = true
-supports-runtime-tool-events = true
-supports-runtime-mcp-http-headers = true
-
 [providers.deepseek]
 display-name = "DeepSeek API"
 protocol = "openai-compatible-http"
@@ -62,11 +57,6 @@ endpoint = "https://api.deepseek.com"
 type = "env"
 key = "DEEPSEEK_API_KEY"
 
-[providers.deepseek.capabilities]
-supports-runtime-mcp-tools = true
-supports-runtime-tool-events = true
-supports-runtime-mcp-http-headers = true
-
 [providers.glm-coding]
 display-name = "GLM Coding Plan"
 protocol = "openai-compatible-http"
@@ -75,11 +65,6 @@ endpoint = "https://api.z.ai/api/coding/paas/v4"
 [providers.glm-coding.credentials]
 type = "env"
 key = "ZAI_API_KEY_SB"
-
-[providers.glm-coding.capabilities]
-supports-runtime-mcp-tools = true
-supports-runtime-tool-events = true
-supports-runtime-mcp-http-headers = true
 
 [providers.ollama]
 display-name = "Local Ollama"

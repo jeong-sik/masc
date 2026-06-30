@@ -1,13 +1,11 @@
 (* Characterization guard for [Provider_tool_support.oas_capabilities_of_config]
    passthrough (issue #22771).
 
-   The operator-level [providers.<id>.capabilities] supports-runtime-mcp-tools /
-   supports-runtime-tool-events flags declared in config/runtime.toml are parsed
-   into [Runtime_schema.provider.capabilities] but read by no runtime consumer,
-   and the [runtime_mcp_lane] upgrade in [oas_capabilities_of_config] is
-   unreachable (binding-derived [tool_policy] never sets either source). So the
-   consumer-facing predicate [provider_supports_runtime_mcp_lane] resolves to
-   [false] for a cloud OpenAI_compat provider regardless of config intent.
+   The deprecated operator-level [providers.<id>.capabilities]
+   supports-runtime-mcp-* flags are ignored: runtime-MCP capability truth comes
+   from OAS provider bindings. So the consumer-facing predicate
+   [provider_supports_runtime_mcp_lane] resolves to [false] for a cloud
+   OpenAI_compat provider regardless of stale config intent.
 
    This test pins that passthrough invariant: wiring the honor path (#22771
    Option A) flips the predicate to [true] and must be a conscious test update,

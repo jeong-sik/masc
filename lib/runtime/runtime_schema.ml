@@ -32,9 +32,6 @@ type credential =
     transport/tool lane must be driven for a provider, independent of model. *)
 type capabilities =
   { supports_inline_tools : bool
-  ; supports_runtime_mcp_tools : bool
-  ; supports_runtime_tool_events : bool
-  ; supports_runtime_mcp_http_headers : bool
   ; requires_per_keeper_bridging_for_bound_actor_tools : bool
   ; identity_runtime_mcp_header_keys : string list
   ; argv_prompt_preflight : bool

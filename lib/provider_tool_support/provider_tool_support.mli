@@ -38,11 +38,9 @@ type runtime_capabilities_override =
 (** {1 Capability resolution} *)
 
 (** [oas_capabilities_of_config cfg] returns OAS-resolved
-    {!Llm_provider.Capabilities.capabilities} plus MASC's local
-    tool-delivery projection.  Provider/model/catalog capability truth
-    comes from OAS [Provider_runtime_binding]; if the declarative
-    runtime.toml tool policy declares a runtime-MCP lane, the two
-    runtime-MCP capability flags are merged to [true]. *)
+    {!Llm_provider.Capabilities.capabilities}. Provider/model/catalog
+    capability truth comes from OAS [Provider_runtime_binding]; deprecated
+    runtime.toml [supports-runtime-mcp-*] provider flags are not honored. *)
 val oas_capabilities_of_config
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Capabilities.capabilities
@@ -54,9 +52,9 @@ val oas_capabilities_of_config
     - [supports_inline_tool_choice =
        caps.supports_tools && caps.supports_tool_choice]
     - [supports_runtime_mcp_tools] / [supports_runtime_tool_events]:
-      passthrough.
+      OAS passthrough.
     - [supports_runtime_mcp_http_headers]: queried via the local
-      runtime.toml provider-tool policy projection. *)
+      binding-derived provider-tool policy projection. *)
 val capabilities_of_config
   :  ?override:runtime_capabilities_override
   -> Llm_provider.Provider_config.t
@@ -145,5 +143,4 @@ val provider_debug_label : Llm_provider.Provider_config.t -> string
 val provider_kind_label : Llm_provider.Provider_config.t -> string
 
 (** {1 Otel_metric_store filter-rejection counter (#10474)} *)
-
 

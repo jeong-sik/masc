@@ -361,9 +361,13 @@ let parse_thinking_control_format ~(path : string) (raw : string)
   | "" | "none" | "no-thinking-control" | "no_thinking_control" ->
     Ok Runtime_schema.No_thinking_control
   | "thinking-object" | "thinking_object" -> Ok Runtime_schema.Thinking_object
+  | "thinking-object-only" | "thinking_object_only" ->
+    Ok Runtime_schema.Thinking_object_only
   | "chat-template-kwargs" | "chat_template_kwargs" -> Ok Runtime_schema.Chat_template_kwargs
   | "chat-template-token" | "chat_template_token" -> Ok Runtime_schema.Chat_template_token
+  | "ollama-think" | "ollama_think" -> Ok Runtime_schema.Ollama_think
   | "reasoning-effort" | "reasoning_effort" -> Ok Runtime_schema.Reasoning_effort
+  | "enable-thinking" | "enable_thinking" -> Ok Runtime_schema.Enable_thinking
   | other ->
     (* Unknown enum members fail the load, mirroring how this parser already
        rejects unknown protocols / credential types. A silent downgrade to
@@ -374,7 +378,7 @@ let parse_thinking_control_format ~(path : string) (raw : string)
          (path ^ ".thinking-control-format")
          (Printf.sprintf
             "unknown thinking-control-format %S — expected one of \
-             none|thinking-object|chat-template-kwargs|chat-template-token|reasoning-effort"
+             none|thinking-object|thinking-object-only|chat-template-kwargs|chat-template-token|ollama-think|reasoning-effort|enable-thinking"
             other))
 ;;
 

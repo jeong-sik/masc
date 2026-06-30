@@ -55,7 +55,7 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.6+ so MASC consumes RFC-OAS-029 provider capability
+  ;; Pinned to OAS v0.208.7+ so MASC consumes RFC-OAS-029 provider capability
   ;; fields, canonical stream/tool surfaces, typed tool-call/reasoning
   ;; projection, MiniMax adaptive thinking + split-reasoning stream (#2347),
   ;; and fail-closed provider parser hardening.

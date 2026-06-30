@@ -193,16 +193,6 @@ let all_flags : flag list = [
     lifecycle = Active; since = "2.208.0" };
 
   (* ── Contract verification ───────────────────────────────── *)
-  { env_name = "MASC_CDAL_ENABLED";
-    description = "Contract verification: proof capture and verdict evaluation";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "2.162.0" };
-
-  { env_name = "MASC_CDAL_GATE_ENABLED";
-    description = "Contract-verdict gate: block task completion when verdict is Violated/Inconclusive";
-    default = true; category = "runtime";
-    lifecycle = Active; since = "0.9.3" };
-
   { env_name = "MASC_VERIFICATION_FSM_ENABLED";
     description = "Task verification FSM: AwaitingVerification state and cross-agent approval";
     default = true; category = "runtime";

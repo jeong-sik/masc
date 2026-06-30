@@ -75,19 +75,10 @@ module Orchestrator : sig
   val enabled : bool
 end
 
-(** {1 Spawn} *)
-
-module Spawn : sig
-  val timeout_seconds : int
-  val grace_period_seconds : int
-end
-
 (** {1 Local runtime / llama.cpp} *)
 
 module Local_runtime : sig
   val server_url : string
-  val default_model : string
-  val max_tokens : int
   val worker_model_opt : unit -> string option
   val mcp_url : unit -> string
 end
@@ -152,14 +143,6 @@ module Transport : sig
   val agent_transport_opt : unit -> agent_transport option
   val http_auth_strict_env_enabled : unit -> bool
   val startup_watchdog_sec : unit -> float
-end
-
-(** {1 Contract-verdict gate} *)
-
-module Cdal : sig
-  val enabled : unit -> bool
-  val gate_enabled : unit -> bool
-  val verdict_lookup_limit : unit -> int
 end
 
 (** {1 Verification FSM} *)
@@ -249,9 +232,6 @@ module Tools : sig
      removed alongside the [MASC_DISPATCH_V2] feature flag. *)
   val full_surface_enabled : unit -> bool
   val list_page_size : unit -> int
-  val timeout_default_sec : unit -> float
-  val board_write_timeout_sec : unit -> float
-  val description_budget_opt : unit -> int option
   val readonly_retry_limit : int
   val public_tools_extra_opt : unit -> string option
   val web_search_provider_opt : unit -> string option
@@ -323,14 +303,11 @@ end
 
 module InternalTimers : sig
   val metrics_flush_sec : float
-  val session_live_turn_window_sec : float
   val label_quiet_threshold_sec : float
   val label_stuck_threshold_sec : float
   val briefing_cache_ttl_sec : float
   val bootstrap_window_sec : float
   val sse_buffer_ttl_sec : float
-  val cancellation_cleanup_sec : float
-  val provider_run_ttl_sec : float
   val stalled_session_threshold_sec : float
   val janitor_interval_sec : float
   val repo_sync_interval_sec : float

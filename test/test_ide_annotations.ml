@@ -720,9 +720,9 @@ let test_document_highlights_related () =
 ;;
 
 (* Round-trip through [compact], which calls the internal
-   [write_all_partition].  Guards the [Fun.protect] fd-safe rewrite: the
-   happy path must still write every annotation back so a later [list]
-   sees them all. *)
+   [write_all_partition].  Guards the [Fs_compat.save_file_atomic] rewrite:
+   the happy path must still write every annotation back so a later [list] sees
+   them all. *)
 let test_compact_preserves_annotations () =
   with_temp_dir (fun base_dir ->
     let mk content =
@@ -774,7 +774,7 @@ let () =
     "ide_annotations"
     [ ( "compact"
       , [ test_case
-            "compact preserves annotations (fd-safe write)"
+            "compact preserves annotations (atomic write)"
             `Quick
             test_compact_preserves_annotations
         ] )

@@ -102,7 +102,7 @@ let test_review_accepts_strict_json_evaluator_response () =
         AR.review ~evaluator_runtime:"test-json-evaluator" (make_request ())
       in
       Alcotest.(check string)
-        "gate" "llm_text_fallback" (AR.gate_to_string result.AR.gate);
+        "gate" "structured_response" (AR.gate_to_string result.AR.gate);
       match result.AR.verdict with
       | AR.Approve -> ()
       | AR.Reject reason ->

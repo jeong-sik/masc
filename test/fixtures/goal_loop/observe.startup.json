@@ -34,11 +34,11 @@
       ],
       "severity": "warning"
     },
-    "lenient_json_fallback": {
+    "strict_json_parse_reject": {
       "count": 1,
       "samples": [
         {
-          "line": "[WARN] [Governance] Lenient_json fallback hit; 3809 chars",
+          "line": "[WARN] [Governance] strict JSON parse rejected; 3809 chars",
           "line_no": 50
         }
       ],

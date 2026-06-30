@@ -351,14 +351,60 @@ let test_verifier_oas_uses_structured_judge_runtime () =
        ~callee:"Runtime.get_default_runtime_id")
 ;;
 
-let test_verifier_oas_response_text_fallback_is_strict_json () =
+let test_verifier_oas_native_response_is_strict_json () =
   check
     int
-    "verifier_oas must not call prose verdict parser for provider-native response text"
-    0
-    (Ast_grep.count_calls
+    "verifier_oas native response must parse strict verdict JSON"
+    1
+    (Ast_grep.count_calls_in_value_binding
        ~module_path:"lib/verifier_oas.ml"
+       ~binding_name:"verify"
+       ~callee:"parse_verdict_from_structured_response_text");
+  check
+    int
+    "verifier_oas native response must not call prose verdict parser"
+    0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/verifier_oas.ml"
+       ~binding_name:"verify"
        ~callee:"Core.parse_verdict")
+;;
+
+let test_adversarial_review_native_response_is_strict_json () =
+  check
+    int
+    "adversarial review native response must parse strict grounded verdict JSON"
+    1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/keeper/keeper_adversarial_review.ml"
+       ~binding_name:"run_grounded_review"
+       ~callee:"parse_grounded_verdict_from_structured_response_text");
+  check
+    int
+    "adversarial review must not keep prose JSON extraction helper"
+    0
+    (Ast_grep.count_value_bindings
+       ~module_path:"lib/keeper/keeper_adversarial_review.ml"
+       ~name:"parse_json_payload")
+;;
+
+let test_anti_rationalization_native_response_is_strict_json () =
+  check
+    int
+    "anti-rationalization native response must parse strict verdict JSON"
+    1
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/task/anti_rationalization.ml"
+       ~binding_name:"review"
+       ~callee:"parse_review_verdict_from_structured_response_text");
+  check
+    int
+    "anti-rationalization native response must not call legacy prose verdict parser"
+    0
+    (Ast_grep.count_calls_in_value_binding
+       ~module_path:"lib/task/anti_rationalization.ml"
+       ~binding_name:"review"
+       ~callee:"parse_verdict_typed")
 ;;
 
 let test_model_label_wrappers_can_receive_provider_config_transform () =
@@ -451,9 +497,17 @@ let () =
             `Quick
             test_verifier_oas_uses_structured_judge_runtime
         ; test_case
-            "verifier_oas response fallback is strict JSON"
+            "verifier_oas native response is strict JSON"
             `Quick
-            test_verifier_oas_response_text_fallback_is_strict_json
+            test_verifier_oas_native_response_is_strict_json
+        ; test_case
+            "adversarial review native response is strict JSON"
+            `Quick
+            test_adversarial_review_native_response_is_strict_json
+        ; test_case
+            "anti-rationalization native response is strict JSON"
+            `Quick
+            test_anti_rationalization_native_response_is_strict_json
         ] )
     ; ( "model-label wrappers"
       , [ test_case

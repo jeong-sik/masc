@@ -94,7 +94,7 @@ type gate =
   | Excuse
   | Contract
   | Structured_tool
-  | Llm_text_fallback
+  | Structured_response
   | Format_reject
   | Fallback
 
@@ -103,7 +103,7 @@ let gate_to_string = function
   | Excuse -> "excuse"
   | Contract -> "contract"
   | Structured_tool -> "structured_tool"
-  | Llm_text_fallback -> "llm_text_fallback"
+  | Structured_response -> "structured_response"
   | Format_reject -> "format_reject"
   | Fallback -> "fallback"
 ;;
@@ -509,7 +509,7 @@ let parse_review_verdict_from_json (args : Yojson.Safe.t) : (verdict, string) re
 ;;
 
 (* ================================================================ *)
-(* Verdict parsing (text fallback — Samchon Rank 1: lenient)        *)
+(* Verdict parsing (legacy prose parser — Samchon Rank 1: lenient)  *)
 (* ================================================================ *)
 
 (** Parse "APPROVE" or "REJECT: reason" from model text output.
@@ -573,7 +573,7 @@ let parse_verdict (raw_text : string) : (verdict, string) result =
   | Error err -> Error (verdict_parse_error_to_string err)
 ;;
 
-let parse_review_verdict_from_response_text text =
+let parse_review_verdict_from_structured_response_text text =
   let trimmed = String.trim text in
   if String.length trimmed = 0
   then Error Empty_review_output
@@ -586,7 +586,7 @@ let parse_review_verdict_from_response_text text =
     | exception Yojson.Json_error msg ->
       Error
         (Unrecognized_review_format
-           (sprintf "response text is not strict verdict JSON: %s" msg))
+           (sprintf "structured response is not strict verdict JSON: %s" msg))
 ;;
 
 (* ================================================================ *)
@@ -823,8 +823,8 @@ let review
                    schema response must be the strict verdict JSON object; do
                    not accept legacy prose verdicts on this path. *)
                 task_info "[anti-rationalization] verdict via native JSON response";
-                (match parse_review_verdict_from_response_text text with
-                 | Ok v -> v, Llm_text_fallback, None
+                (match parse_review_verdict_from_structured_response_text text with
+                 | Ok v -> v, Structured_response, None
                  | Error parse_error ->
                    let parse_err = verdict_parse_error_to_string parse_error in
                    (match parse_error with

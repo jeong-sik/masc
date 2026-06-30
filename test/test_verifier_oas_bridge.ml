@@ -230,11 +230,11 @@ let test_parse_verdict_rejects_warning_prefix () =
       (String.length msg > 0)
   | Ok _ -> Alcotest.fail "WARNING should be rejected as invalid verdict"
 
-let test_parse_response_text_accepts_strict_json () =
+let test_parse_structured_response_accepts_strict_json () =
   let raw =
     {|{"verdict":"WARN","reason":"minor issue","evidence":[]}|}
   in
-  match Verifier_oas.For_testing.parse_verdict_from_response_text raw with
+  match Verifier_oas.For_testing.parse_verdict_from_structured_response_text raw with
   | Ok (Core.Warn reason) ->
     Alcotest.(check string) "reason" "minor issue" reason
   | Ok other ->
@@ -243,8 +243,8 @@ let test_parse_response_text_accepts_strict_json () =
       (Core.verdict_to_string other)
   | Error msg -> Alcotest.fail ("strict JSON response rejected: " ^ msg)
 
-let test_parse_response_text_rejects_plain_verdict () =
-  match Verifier_oas.For_testing.parse_verdict_from_response_text "PASS" with
+let test_parse_structured_response_rejects_plain_verdict () =
+  match Verifier_oas.For_testing.parse_verdict_from_structured_response_text "PASS" with
   | Error _ -> ()
   | Ok verdict ->
     Alcotest.failf
@@ -390,10 +390,10 @@ let () =
         test_parse_verdict_rejects_passing_prefix;
       Alcotest.test_case "WARNING prefix rejected" `Quick
         test_parse_verdict_rejects_warning_prefix;
-      Alcotest.test_case "response text accepts strict JSON" `Quick
-        test_parse_response_text_accepts_strict_json;
-      Alcotest.test_case "response text rejects plain verdict" `Quick
-        test_parse_response_text_rejects_plain_verdict;
+      Alcotest.test_case "structured response accepts strict JSON" `Quick
+        test_parse_structured_response_accepts_strict_json;
+      Alcotest.test_case "structured response rejects plain verdict" `Quick
+        test_parse_structured_response_rejects_plain_verdict;
     ]);
     ("verify_skip", [
       Alcotest.test_case "read-only skips" `Quick test_verify_skips_readonly;

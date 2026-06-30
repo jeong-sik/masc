@@ -101,11 +101,11 @@ let check_ok = function
   | Ok () -> ()
   | Error msg -> Alcotest.fail msg
 
-let test_response_text_accepts_strict_json () =
+let test_structured_response_accepts_strict_json () =
   let raw =
     {|{"verdict":"FAIL","reason":"bad branch","evidence":[{"path":"lib/foo.ml","line":12,"quote":"let bad = true"}]}|}
   in
-  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  match AR.For_testing.parse_grounded_verdict_from_structured_response_text raw with
   | Ok grounded ->
     check string
       "verdict"
@@ -114,19 +114,19 @@ let test_response_text_accepts_strict_json () =
     check int "evidence count" 1 (List.length grounded.VC.evidence)
   | Error msg -> fail ("strict JSON response rejected: " ^ msg)
 
-let test_response_text_rejects_embedded_json () =
+let test_structured_response_rejects_embedded_json () =
   let raw =
     {|Here is the verdict: {"verdict":"PASS","reason":null,"evidence":[]}|}
   in
-  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  match AR.For_testing.parse_grounded_verdict_from_structured_response_text raw with
   | Error _ -> ()
   | Ok grounded ->
     failf
       "embedded JSON should be rejected, got %s"
       (VC.verdict_to_string grounded.VC.verdict)
 
-let check_response_text_rejected label raw =
-  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+let check_structured_response_rejected label raw =
+  match AR.For_testing.parse_grounded_verdict_from_structured_response_text raw with
   | Error _ -> ()
   | Ok grounded ->
     failf
@@ -134,17 +134,17 @@ let check_response_text_rejected label raw =
       label
       (VC.verdict_to_string grounded.VC.verdict)
 
-let test_response_text_rejects_empty_text () =
-  check_response_text_rejected "empty response" "";
-  check_response_text_rejected "whitespace response" "  \n\t  "
+let test_structured_response_rejects_empty_text () =
+  check_structured_response_rejected "empty response" "";
+  check_structured_response_rejected "whitespace response" "  \n\t  "
 
-let test_response_text_rejects_malformed_json () =
-  check_response_text_rejected
+let test_structured_response_rejects_malformed_json () =
+  check_structured_response_rejected
     "malformed JSON response"
     {|{"verdict":"PASS","reason":null,"evidence":[]|}
 
-let test_response_text_rejects_non_object_json () =
-  check_response_text_rejected
+let test_structured_response_rejects_non_object_json () =
+  check_structured_response_rejected
     "array JSON response"
     {|[{"verdict":"PASS","reason":null,"evidence":[]}]|}
 
@@ -344,15 +344,15 @@ let () =
       ( "response-parser",
         [
           test_case "accepts strict JSON response" `Quick
-            test_response_text_accepts_strict_json;
+            test_structured_response_accepts_strict_json;
           test_case "rejects embedded JSON response" `Quick
-            test_response_text_rejects_embedded_json;
-          test_case "rejects empty response text" `Quick
-            test_response_text_rejects_empty_text;
+            test_structured_response_rejects_embedded_json;
+          test_case "rejects empty structured response text" `Quick
+            test_structured_response_rejects_empty_text;
           test_case "rejects malformed JSON response" `Quick
-            test_response_text_rejects_malformed_json;
+            test_structured_response_rejects_malformed_json;
           test_case "rejects non-object JSON response" `Quick
-            test_response_text_rejects_non_object_json;
+            test_structured_response_rejects_non_object_json;
         ] );
       ( "wake-on-fail",
         [

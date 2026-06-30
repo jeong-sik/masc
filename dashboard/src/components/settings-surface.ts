@@ -285,6 +285,12 @@ const DISCORD_TRIGGER: readonly [string, string][] = [
   ['all', '모든 메시지에 응답'],
   ['user_only', '특정 사용자(snowflake)만'],
 ]
+const DEFAULT_GATE_CONNECTOR_PREVIEW: Record<string, boolean> = {
+  Slack: true,
+  Discord: true,
+  Amplitude: true,
+  GitHub: false,
+}
 
 // System-log row: [time, level, identity, message, status]. Derived from live
 // ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
@@ -756,7 +762,7 @@ export function SettingsSurface() {
   const [fusionWeb, setFusionWeb] = useState(FUSION.webTools)
 
   // discord trigger policy (gate section) — keeper-v2 settings.jsx:183
-  const [discordTrigger, setDiscordTrigger] = useState('mention_or_thread')
+  const [discordTrigger, setDiscordTrigger] = useLocalPreviewString('discordTrigger', 'mention_or_thread')
 
   // lifecycle
   const [idleDrain, setIdleDrain] = useState(30)
@@ -766,12 +772,7 @@ export function SettingsSurface() {
 
   // gate / paths
   const [gateBase, setGateBase] = useLocalPreviewString('gateBase', 'https://gate.masc.local')
-  const [gateOn, setGateOn] = useState<Record<string, boolean>>({
-    Slack: true,
-    Discord: true,
-    Amplitude: true,
-    GitHub: false,
-  })
+  const [gateOn, setGateOn] = useLocalPreviewBoolRecord('gateConnectorPreview', DEFAULT_GATE_CONNECTOR_PREVIEW)
   const [wtBase, setWtBase] = useLocalPreviewString('wtBase', '~/wt')
   const [storeUrl, setStoreUrl] = useLocalPreviewString('storeUrl', 'postgres://masc.local:5432/masc')
   const [pathChecks, setPathChecks] = useState<Partial<Record<PathCheckTarget, PathCheckResult>>>({})
@@ -844,6 +845,7 @@ export function SettingsSurface() {
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
   const sectionState = settingsSectionState(sec, fusionSettingsWritable)
   const grantedGroupCount = Object.values(grant).filter(Boolean).length
+  const gatePreviewEnabledCount = Object.values(gateOn).filter(Boolean).length
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -1294,14 +1296,20 @@ export function SettingsSurface() {
 
             ${sec === 'gate' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Default settings for external gate connections. Per-channel→keeper bindings are managed in
+                Browser-session preview for connector defaults. Live connector runtime, availability and per-channel→keeper bindings are managed in
                 <button
                   type="button"
                   class="set-link"
+                  data-testid="settings-connectors-link"
                   onClick=${() => navigate('connectors')}
                 >
                   Connectors →
                 </button>.
+              </div>
+              <div class="set-local-summary" data-testid="gate-local-summary">
+                <span>local connector preview</span>
+                <span class="mono">${gatePreviewEnabledCount}/${Object.keys(DEFAULT_GATE_CONNECTOR_PREVIEW).length} enabled</span>
+                <${PreviewBadge} />
               </div>
               <${SetRow} label="Gate base URL" hint="GET /api/v1/gate/connectors">
                 <div class="set-path">
@@ -1315,8 +1323,11 @@ export function SettingsSurface() {
                 </div>
               <//>
               ${['Slack', 'Discord', 'Amplitude', 'GitHub'].map(g => html`
-                <${SetRow} key=${g} label=${g} hint=${gateOn[g] ? 'Connected' : 'Inactive'}>
-                  <${SetToggle} on=${gateOn[g]} onChange=${(v: boolean) => setGateOn(p => ({ ...p, [g]: v }))} />
+                <${SetRow} key=${g} label=${g} hint=${gateOn[g] ? 'local preview enabled' : 'local preview disabled'}>
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetToggle} on=${gateOn[g] ?? false} onChange=${(v: boolean) => setGateOn(p => ({ ...p, [g]: v }))} />
+                  </div>
                 <//>
               `)}
               ${gateOn.Discord && html`

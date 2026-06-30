@@ -16,6 +16,9 @@
       모델들을 에이전트로 빌드한다 (그룹마다 다를 수 있음 = 이종). 모든 그룹의
       에이전트를 하나의 [Async_agent.all]에 union으로 던진다.
     - [web_tools]가 true인 그룹은 web_search/web_fetch 도구를 주입한다.
+    - 패널 에이전트는 [fusion.panel.output_schema] provider-native structured output
+      contract를 요청한다. 응답은 string [answer] 필드를 가진 JSON object여야 하며,
+      free-text/invalid JSON/missing answer는 [Failed]로 격리된다.
     - [max_tool_calls]: 0이면 무제한, 양수면 에이전트 [max_turns]로 근approximate.
     - [outer_timeout_s]: 전체 fan-out을 감싸는 [Masc_oas_bridge.run_safe] 구조적
       타임아웃(보통 그룹 timeout 중 max). 타임아웃 시 빌드된 모델은 [Failed Timeout].
@@ -30,3 +33,15 @@ val run
   -> prompt:string
   -> unit
   -> Fusion_types.panel_outcome list
+
+module For_testing : sig
+  val outcome_of_result
+    :  panelist:string
+    -> model:string
+    -> (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result
+    -> Fusion_types.panel_outcome
+
+  val apply_output_contract
+    :  Llm_provider.Provider_config.t
+    -> (Llm_provider.Provider_config.t, string) result
+end

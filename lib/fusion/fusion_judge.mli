@@ -1,9 +1,9 @@
 (** Fusion — 심판. 패널 답들을 judge 모델에 넘겨 구조화 종합({!Fusion_types.judge_synthesis})을 받는다.
 
-    Judge 실행은 provider-native structured output schema를 우선 요청한다. OAS가 해당
-    provider/model 조합의 native schema를 거부하되 JSON mode capability를 선언한 경우에는
-    [JsonMode] + {!Fusion_judge_parse}(LLM-facing JSON 파서)로 degrade한다. 둘 다 없으면
-    build 단계에서 fail-loud한다. 패널 실행은 자유 텍스트이며 이 schema hook을 쓰지 않는다.
+    Judge 실행은 provider-native structured output schema를 요청한다. OAS가 해당
+    provider/model 조합의 native schema를 거부하면 [JsonMode]로 degrade하지 않고
+    build 단계에서 fail-loud한다. 패널 실행도 별도의 `{answer:string}` schema를 요청하고,
+    provider-success malformed output은 typed failure로 격리한다.
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
 

@@ -372,6 +372,13 @@ Legacy flat preset-level keys:
 | `judge_max_output_tokens` | int > 0 | runtime default | simple/refine/meta judge output token budget override |
 | `min_answered` | int 1..panel count | `1` | judge 실행에 필요한 answered panel quorum |
 
+Fusion panel/judge/refine/meta calls request provider-native structured output;
+every configured panel runtime (`panel` and `[[...panels]].models`) and judge
+runtime (`judge` and `[[...judges]].model`) must therefore resolve to a model
+that declares `supports-structured-output=true`. Panel responses must be JSON
+objects with a string `answer` field; malformed or non-schema responses are
+isolated as panel failures rather than treated as free text.
+
 Heterogeneous presets move model lists into group tables:
 
 - `[[fusion.presets.<name>.panels]]`: each group owns `models`,

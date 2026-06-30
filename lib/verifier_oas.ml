@@ -77,8 +77,13 @@ let apply_report_verdict_output_schema provider_cfg =
 let parse_verdict_from_response_text text =
   match Yojson.Safe.from_string (String.trim text) with
   | json -> Core.parse_verdict_from_json json
-  | exception Yojson.Json_error _ -> Core.parse_verdict text
+  | exception Yojson.Json_error msg ->
+      Error (sprintf "verifier response must be strict JSON: %s" msg)
 ;;
+
+module For_testing = struct
+  let parse_verdict_from_response_text = parse_verdict_from_response_text
+end
 
 (* ================================================================ *)
 (* Core: verify                                                     *)
@@ -87,12 +92,11 @@ let parse_verdict_from_response_text text =
 (** Verify an action using structured tool output (ADR D3 compliant).
 
     Primary path: LLM calls [report_verdict] tool with typed verdict.
-    Fallback path: if LLM responds with text, parse provider-native JSON when
-    available, otherwise extract the verdict from free text.
+    Fallback path: if LLM responds with text, parse provider-native JSON only.
 
     The structured path is deterministic (JSON schema constrains output).
-    The fallback path is nondeterministic but returns Error on failure
-    instead of silently degrading. *)
+    The fallback path is strict JSON and returns Error on failure instead of
+    extracting a verdict from prose. *)
 let verify (req : Core.verification_request) : (Core.verdict, string) result =
   if Core.should_skip ~action_description:req.action_description
   then Ok Core.Pass
@@ -137,9 +141,11 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
          Log.Verifier.debug "verdict via structured tool call";
          Ok v
        | None ->
-         (* LLM responded with text instead of tool call — lenient fallback *)
+         (* LLM responded with text instead of tool call. The provider-native
+            schema contract still requires a strict JSON verdict object here. *)
          let text = Agent_sdk_response.text_of_response result.response in
-         Log.Verifier.info "verdict via text fallback (model did not call report_verdict)";
+         Log.Verifier.info
+           "verdict via strict JSON response fallback (model did not call report_verdict)";
         (match parse_verdict_from_response_text text with
          | Ok verdict -> Ok verdict
           | Error parse_err ->

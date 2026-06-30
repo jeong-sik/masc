@@ -211,12 +211,18 @@ let log_rejected_output ~reason ~raw =
     (String.length raw)
 ;;
 
-let plan_of_string raw =
+let plan_result_of_string raw =
   match json_of_output_result raw with
-  | Ok json -> Some (plan_of_json json)
+  | Ok json -> Ok (plan_of_json json)
   | Error reason ->
     log_rejected_output ~reason ~raw;
-    None
+    Error reason
+;;
+
+let plan_of_string raw =
+  match plan_result_of_string raw with
+  | Ok plan -> Some plan
+  | Error _ -> None
 ;;
 
 (* ---------- Apply (pure, deterministic) ---------- *)

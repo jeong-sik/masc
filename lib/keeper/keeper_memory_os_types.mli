@@ -229,14 +229,15 @@ type fact =
     [valid_until] are durable and current. *)
 val fact_is_current : now:float -> fact -> bool
 
-(** Claim prefix used by the producer for librarian parse-failure fallback
-    facts. The producer tags these [Diagnostic] at the write boundary, so this
-    prefix is a display label only — recall eligibility is decided by
-    [claim_kind], not by string-matching [claim]. *)
+(** Legacy claim prefix for historical librarian parse-failure fallback facts.
+    Current provider-backed extraction rejects unparseable structured output
+    before persistence. Recall eligibility for any older rows is still decided
+    by [claim_kind], not by string-matching [claim]. *)
 val librarian_unstructured_fallback_claim_prefix : string
 
-(** Terminal marker used on episodes that preserve unstructured librarian output
-    after strict JSON parsing fails. *)
+(** Legacy terminal marker for historical episodes that preserved unstructured
+    librarian output after strict JSON parsing failed. Current extraction no
+    longer writes this marker. *)
 val librarian_unstructured_fallback_terminal_marker : string
 
 (** Structural prompt-recall eligibility. Callers still apply {!fact_is_current}

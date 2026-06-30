@@ -22,8 +22,15 @@ val summary_schema_supported : Llm_provider.Provider_config.t -> bool
 val messages_for_summary :
   trace_id:string -> texts:string list -> Agent_sdk.Types.message list
 
+type summary_parse_error =
+  | Empty_summary_response
+  | Invalid_structured_response of string
+
 module For_testing : sig
   val summary_text_of_response : Agent_sdk.Types.api_response -> string option
+
+  val summary_text_result_of_response :
+    Agent_sdk.Types.api_response -> (string, summary_parse_error) result
 end
 
 val make :

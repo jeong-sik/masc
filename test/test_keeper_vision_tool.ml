@@ -692,6 +692,29 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure");
       assert (contains_substring (assoc_string "detail" json) "not valid JSON")))
 
+let test_run_vision_invalid_structured_response_is_typed () =
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+      Ok (text_response "not-json")
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision
+            ~complete
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~query:"describe"
+            ~media_type:"image/png"
+            ~bytes:"\x89PNG\r\n\x1a\nraw"
+            ()))
+    in
+    match outcome with
+    | Vt.Vo_invalid_structured_response detail ->
+      assert (contains_substring detail "not valid JSON")
+    | _ -> failwith "expected Vo_invalid_structured_response")
+
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -845,6 +868,22 @@ let test_accept_rejected_is_policy_rejection_without_failover () =
       assert (List.rev !models = [ "vision-a" ]);
       assert (String.equal (assoc_string "error" json) "provider_error");
       assert (String.equal (assoc_string "failure_class" json) "policy_rejection")))
+
+let test_eager_eviction_reason_preserves_typed_outcome () =
+  let reason = Vi.eager_read_eviction_reason_of_outcome in
+  assert (reason (Vt.Vo_ok "text") = None);
+  assert (reason Vt.Vo_empty = Some "eager_empty");
+  assert (reason Vt.Vo_truncated = Some "eager_truncated");
+  assert (reason Vt.Vo_timeout = Some "eager_timeout");
+  assert (reason (Vt.Vo_no_runtime "missing") = Some "eager_no_runtime");
+  assert (reason (Vt.Vo_invalid_request "bad") = Some "eager_invalid_request");
+  assert
+    (reason (Vt.Vo_invalid_structured_response "bad json")
+     = Some "eager_invalid_structured_response");
+  assert
+    (reason
+       (Vt.Vo_provider { failure_class = Tool_result.Runtime_failure; detail = "boom" })
+     = Some "eager_provider_error")
 
 let test_delegate_eager_eviction_stores_image_and_removes_inline_block () =
   with_temp_base (fun _ ->
@@ -1075,10 +1114,12 @@ let () =
      [with_vision_model_catalog]). *)
   with_vision_model_catalog (fun () ->
     test_invalid_structured_vision_response_is_runtime_failure ();
+    test_run_vision_invalid_structured_response_is_typed ();
     test_retryable_provider_error_tries_next_runtime ();
     test_deadline_exhaustion_preserves_provider_error ();
     test_non_retryable_provider_error_stops_without_trying_next_runtime ();
-    test_accept_rejected_is_policy_rejection_without_failover ());
+    test_accept_rejected_is_policy_rejection_without_failover ();
+    test_eager_eviction_reason_preserves_typed_outcome ());
   test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();

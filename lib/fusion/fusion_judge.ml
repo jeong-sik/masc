@@ -141,30 +141,18 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
     Provider_error
       (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
 
-let provider_config_supports_json_mode provider_cfg =
-  match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
-  | Some caps -> caps.Llm_provider.Capabilities.supports_response_format_json
-  | None -> false
-
 let apply_fusion_judge_output_contract provider_cfg =
   let schema = Keeper_structured_output_schema.fusion_judge_output_schema in
   let native_schema_provider_cfg =
     Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
   in
   (* The tier is decided by OAS capability facts, never by provider-name
-     special cases: native schema first, JSON mode only when declared, otherwise
-     fail before an HTTP request. *)
+     special cases: native schema or fail before an HTTP request. *)
   match
     Llm_provider.Provider_config.validate_output_schema_request
       native_schema_provider_cfg
   with
   | Ok () -> Ok native_schema_provider_cfg
-  | Error detail when provider_config_supports_json_mode provider_cfg ->
-    Ok
-      { provider_cfg with
-        response_format = Agent_sdk.Types.JsonMode
-      ; output_schema = None
-      }
   | Error detail -> Error (Printf.sprintf "fusion.judge.output_schema: %s" detail)
 
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가

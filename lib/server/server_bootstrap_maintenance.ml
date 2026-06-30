@@ -100,6 +100,15 @@ let run_memory_os_consolidation_tick
           "memory_os_keeper_consolidation: keeper=%s unparseable: %s"
           keeper_id
           msg
+      | Empty_response ->
+        Log.Server.warn
+          "memory_os_keeper_consolidation: keeper=%s empty_response"
+          keeper_id
+      | Invalid_structured_response msg ->
+        Log.Server.warn
+          "memory_os_keeper_consolidation: keeper=%s invalid_structured_response: %s"
+          keeper_id
+          msg
       | Snapshot_changed { before; current } ->
         Log.Server.info
           "memory_os_keeper_consolidation: keeper=%s snapshot_changed before=%d current=%d"

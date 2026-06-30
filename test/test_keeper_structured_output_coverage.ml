@@ -53,10 +53,10 @@ let expected_structured_dashboard_agent_run_json_judges =
     ]
 ;;
 
-let expected_structured_fusion_json_judges = [ "lib/fusion/fusion_judge.ml" ];;
-
-let expected_unstructured_fusion_agent_build_exemptions =
-  [ "lib/fusion/fusion_panel.ml" ]
+let expected_structured_fusion_agent_build_files =
+  List.sort
+    String.compare
+    [ "lib/fusion/fusion_judge.ml"; "lib/fusion/fusion_panel.ml" ]
 ;;
 
 let expected_structured_tool_agent_runs =
@@ -83,10 +83,32 @@ let fusion_agent_build_files () =
 ;;
 
 let expected_all_fusion_agent_build_files =
-  List.sort
-    String.compare
-    (expected_structured_fusion_json_judges
-     @ expected_unstructured_fusion_agent_build_exemptions)
+  expected_structured_fusion_agent_build_files
+;;
+
+let with_repo_oas_model_catalog f =
+  let path = Ast_grep.resolve_path "oas-models.toml" in
+  check bool "repo oas-models.toml present" true (Sys.file_exists path);
+  match Llm_provider.Model_catalog.load_file path with
+  | Error msg -> failf "repo oas-models.toml should load: %s" msg
+  | Ok catalog ->
+    Fun.protect
+      ~finally:Llm_provider.Model_catalog.clear_global
+      (fun () ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f catalog)
+;;
+
+let fusion_toml_or_fail path =
+  match Otoml.Parser.from_file_result path with
+  | Ok toml -> toml
+  | Error msg -> failf "fusion TOML parse failed: %s" msg
+;;
+
+let runtime_by_id_or_fail runtimes id =
+  match List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes with
+  | Some runtime -> runtime
+  | None -> failf "runtime id %s should resolve in repo runtime.toml" id
 ;;
 
 let masc_tool_agent_run_files_under rel =
@@ -152,9 +174,9 @@ let test_dashboard_agent_run_json_judges_request_structured_output () =
     expected_structured_dashboard_agent_run_json_judges
 ;;
 
-let test_fusion_agent_run_json_judges_request_structured_output () =
+let test_fusion_agent_builds_request_structured_output () =
   test_agent_run_json_judges_request_structured_output
-    expected_structured_fusion_json_judges
+    expected_structured_fusion_agent_build_files
 ;;
 
 let test_dashboard_agent_run_json_judges_use_provider_config_transform () =
@@ -191,7 +213,27 @@ let test_dashboard_agent_run_json_judges_use_structured_judge_runtime () =
     expected_structured_dashboard_agent_run_json_judges
 ;;
 
-let test_fusion_agent_run_json_judges_use_provider_config_transform () =
+let test_dashboard_json_judges_do_not_use_lenient_json_recovery () =
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " must not call Llm_provider.Lenient_json.parse")
+         0
+         (Ast_grep.count_calls
+            ~module_path:rel
+            ~callee:"Llm_provider.Lenient_json.parse");
+       check
+         int
+         (rel ^ " must not call Judge_json_recovery.extract_balanced_object")
+         0
+         (Ast_grep.count_calls
+            ~module_path:rel
+            ~callee:"Judge_json_recovery.extract_balanced_object"))
+    expected_structured_dashboard_agent_run_json_judges
+;;
+
+let test_fusion_agent_builds_use_provider_config_transform () =
   List.iter
     (fun rel ->
        check
@@ -202,7 +244,119 @@ let test_fusion_agent_run_json_judges_use_provider_config_transform () =
             ~module_path:rel
             ~callee:"Fusion_oas.build_agent"
             ~label:"provider_config_transform"))
-    expected_structured_fusion_json_judges
+    expected_structured_fusion_agent_build_files
+;;
+
+let test_fusion_agent_builds_do_not_degrade_to_json_mode () =
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " must not fully qualify a JsonMode downgrade")
+         0
+         (Ast_grep.count_constructors
+            ~module_path:rel
+            ~constructor:"Agent_sdk.Types.JsonMode");
+       check
+         int
+         (rel ^ " must not construct JsonMode through open or alias")
+         0
+         (Ast_grep.count_constructor_leaf_names ~module_path:rel ~name:"JsonMode"))
+    expected_structured_fusion_agent_build_files
+;;
+
+let test_repo_fusion_seed_judges_accept_native_schema () =
+  with_repo_oas_model_catalog @@ fun _catalog ->
+  let path = Ast_grep.resolve_path "config/runtime.toml" in
+  check bool "repo runtime.toml present" true (Sys.file_exists path);
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok
+      ( runtimes
+      , _default
+      , _assignments
+      , _librarian
+      , _structured_judge
+      , _cross_verifier
+      , _media_failover ) ->
+    let runtime_cfg = fusion_toml_or_fail path in
+    (match Fusion_config.of_toml runtime_cfg with
+     | Error errs ->
+       failf
+         "repo fusion config should load: %s"
+         (String.concat ", " (List.map Fusion_config.show_config_error errs))
+     | Ok policy ->
+       List.iter
+         (fun validated_preset ->
+            let preset = Fusion_policy.Validated_preset.preset validated_preset in
+            let judge_runtime_ids =
+              preset.Fusion_policy.judge
+              :: List.map
+                   (fun (judge : Fusion_policy.judge_spec) -> judge.jmodel)
+                   preset.Fusion_policy.judges
+            in
+            List.iter
+              (fun runtime_id ->
+                 let runtime = runtime_by_id_or_fail runtimes runtime_id in
+                 match
+                   Fusion_judge.For_testing.apply_output_contract
+                     runtime.provider_config
+                 with
+                 | Ok _ -> ()
+                 | Error msg ->
+                   failf
+                     "fusion preset %s judge runtime %s must accept native schema: %s"
+                     preset.Fusion_policy.name
+                     runtime_id
+                     msg)
+              judge_runtime_ids)
+         policy.Fusion_policy.presets)
+;;
+
+let assert_panel_runtime_accepts_native_schema runtimes ~preset runtime_id =
+  let runtime = runtime_by_id_or_fail runtimes runtime_id in
+  match Fusion_panel.For_testing.apply_output_contract runtime.provider_config with
+  | Ok _ -> ()
+  | Error msg ->
+    failf
+      "fusion preset %s panel runtime %s must accept native schema: %s"
+      preset
+      runtime_id
+      msg
+;;
+
+let test_repo_fusion_panel_presets_are_schema_capable () =
+  with_repo_oas_model_catalog @@ fun _catalog ->
+  let path = Ast_grep.resolve_path "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok
+      ( runtimes
+      , _default
+      , _assignments
+      , _librarian
+      , _structured_judge
+      , _cross
+      , _media ) ->
+    let runtime_cfg = fusion_toml_or_fail path in
+    (match Fusion_config.of_toml runtime_cfg with
+     | Error errs ->
+       failf
+         "repo fusion config should load: %s"
+         (String.concat ", " (List.map Fusion_config.show_config_error errs))
+     | Ok policy ->
+       List.iter
+         (fun validated_preset ->
+            let preset = Fusion_policy.Validated_preset.preset validated_preset in
+            List.iter
+              (fun (group : Fusion_policy.panel_group) ->
+                 List.iter
+                   (assert_panel_runtime_accepts_native_schema
+                      runtimes
+                      ~preset:preset.Fusion_policy.name)
+                   group.Fusion_policy.models)
+              preset.Fusion_policy.panels)
+         policy.Fusion_policy.presets)
 ;;
 
 let test_all_fusion_agent_build_files_are_classified () =
@@ -295,6 +449,16 @@ let test_verifier_oas_uses_structured_judge_runtime () =
        ~callee:"Runtime.get_default_runtime_id")
 ;;
 
+let test_verifier_oas_response_text_fallback_is_strict_json () =
+  check
+    int
+    "verifier_oas must not call prose verdict parser for provider-native response text"
+    0
+    (Ast_grep.count_calls
+       ~module_path:"lib/verifier_oas.ml"
+       ~callee:"Core.parse_verdict")
+;;
+
 let test_model_label_wrappers_can_receive_provider_config_transform () =
   let rel = "lib/keeper/keeper_turn_driver_wrappers.ml" in
   check
@@ -344,20 +508,36 @@ let () =
             "dashboard Agent.run JSON judges use structured runtime lane"
             `Quick
             test_dashboard_agent_run_json_judges_use_structured_judge_runtime
+        ; test_case
+            "dashboard JSON judges do not use lenient JSON recovery"
+            `Quick
+            test_dashboard_json_judges_do_not_use_lenient_json_recovery
         ] )
-    ; ( "fusion json judges"
+    ; ( "fusion Agent builds"
       , [ test_case
-            "Fusion agent build files are classified as structured or exempt"
+            "Fusion agent build files are classified"
             `Quick
             test_all_fusion_agent_build_files_are_classified
         ; test_case
-            "fusion JSON judges request structured output"
+            "fusion Agent builds request structured output"
             `Quick
-            test_fusion_agent_run_json_judges_request_structured_output
+            test_fusion_agent_builds_request_structured_output
         ; test_case
-            "fusion JSON judges use provider config transform"
+            "fusion Agent builds use provider config transform"
             `Quick
-            test_fusion_agent_run_json_judges_use_provider_config_transform
+            test_fusion_agent_builds_use_provider_config_transform
+        ; test_case
+            "fusion Agent builds do not degrade to JsonMode"
+            `Quick
+            test_fusion_agent_builds_do_not_degrade_to_json_mode
+        ; test_case
+            "repo Fusion seed judge runtimes accept native schema"
+            `Quick
+            test_repo_fusion_seed_judges_accept_native_schema
+        ; test_case
+            "repo Fusion panel presets use schema-capable runtimes"
+            `Quick
+            test_repo_fusion_panel_presets_are_schema_capable
         ] )
     ; ( "structured tool Agent.run"
       , [ test_case
@@ -376,6 +556,10 @@ let () =
             "verifier_oas uses structured_judge runtime"
             `Quick
             test_verifier_oas_uses_structured_judge_runtime
+        ; test_case
+            "verifier_oas response fallback is strict JSON"
+            `Quick
+            test_verifier_oas_response_text_fallback_is_strict_json
         ] )
     ; ( "model-label wrappers"
       , [ test_case

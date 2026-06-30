@@ -567,19 +567,26 @@ let parse_verdict_typed (text : string) : (verdict, verdict_parse_error) result 
                |> String_util.to_string)))
 ;;
 
-let parse_verdict (text : string) : (verdict, string) result =
-  match parse_verdict_typed text with
+let parse_verdict (raw_text : string) : (verdict, string) result =
+  match parse_verdict_typed raw_text with
   | Ok v -> Ok v
   | Error err -> Error (verdict_parse_error_to_string err)
 ;;
 
-let parse_review_verdict_from_text text =
-  match Yojson.Safe.from_string (String.trim text) with
-  | json -> (
-    match parse_review_verdict_from_json json with
-    | Ok verdict -> Ok verdict
-    | Error msg -> Error (Unrecognized_review_format msg))
-  | exception Yojson.Json_error _ -> parse_verdict_typed text
+let parse_review_verdict_from_response_text text =
+  let trimmed = String.trim text in
+  if String.length trimmed = 0
+  then Error Empty_review_output
+  else
+    match Yojson.Safe.from_string trimmed with
+    | json -> (
+      match parse_review_verdict_from_json json with
+      | Ok verdict -> Ok verdict
+      | Error msg -> Error (Unrecognized_review_format msg))
+    | exception Yojson.Json_error msg ->
+      Error
+        (Unrecognized_review_format
+           (sprintf "response text is not strict verdict JSON: %s" msg))
 ;;
 
 (* ================================================================ *)
@@ -812,10 +819,11 @@ let review
                 task_info "[anti-rationalization] verdict via structured tool call";
                 v, Structured_tool, None
               | None ->
-                (* LLM responded without a tool call — parse native JSON first,
-                   then the legacy text fallback. *)
-                task_info "[anti-rationalization] verdict via text fallback";
-                (match parse_review_verdict_from_text text with
+                (* LLM responded without a tool call. The provider-native
+                   schema response must be the strict verdict JSON object; do
+                   not accept legacy prose verdicts on this path. *)
+                task_info "[anti-rationalization] verdict via native JSON response";
+                (match parse_review_verdict_from_response_text text with
                  | Ok v -> v, Llm_text_fallback, None
                  | Error parse_error ->
                    let parse_err = verdict_parse_error_to_string parse_error in

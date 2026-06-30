@@ -39,6 +39,8 @@ let string_contains s sub =
 let iso8601_of_unix ts =
   Masc_domain.iso8601_of_unix_seconds ts
 
+let approval_resume_test_timeout_s = 1.0
+
 let write_legacy_judgment ~base_path json =
   let masc = Filename.concat base_path Common.masc_dirname in
   let governance = Filename.concat masc "governance" in
@@ -449,8 +451,6 @@ let test_parse_governance_response_requires_guardrail_state () =
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names guardrail_state" true
         (string_contains reason "missing guardrail_state")
-  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
-      fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "missing guardrail_state must fail closed"
 
 let test_parse_governance_response_preserves_guardrail_state () =
@@ -529,8 +529,6 @@ let test_parse_governance_response_requires_guardrail_fields () =
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names missing field" true
         (string_contains reason "missing guardrail_state.pending_confirm_token")
-  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
-      fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "incomplete guardrail_state must fail closed"
 
 let test_parse_governance_response_requires_items_array () =
@@ -543,23 +541,19 @@ let test_parse_governance_response_requires_items_array () =
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names items array" true
         (string_contains reason "items array")
-  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
-      fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "missing items array must fail closed"
 
-let test_parse_governance_response_rejects_unparseable_recovered_block () =
+let test_parse_governance_response_rejects_embedded_json_block () =
   let raw = "prefix {\"items\": [} suffix" in
   match
     Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
       ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
-  | Error (Dashboard_governance_judge.Lenient_fallback recovered) ->
-      check bool "fallback keeps recovered fragment" true
-        (string_contains recovered "items")
   | Error (Dashboard_governance_judge.Structural_error reason) ->
-      fail ("expected lenient fallback, got structural error: " ^ reason)
-  | Ok _ -> fail "unparseable recovered JSON must stay lenient fallback"
+      check bool "reason names strict JSON" true
+        (string_contains reason "invalid strict JSON")
+  | Ok _ -> fail "embedded malformed JSON must fail closed"
 
 let test_refresh_failure_keeps_fresh_cache_online () =
   let dir = test_dir () in
@@ -962,6 +956,7 @@ let test_dashboard_exposes_keeper_approval_queue () =
       ignore (Lib.Workspace.init config ~agent_name:(Some "dashboard"));
       Eio.Switch.run @@ fun sw ->
       let decision_result = ref None in
+      let resumed, resume_resolver = Eio.Promise.create () in
       Eio.Fiber.fork ~sw (fun () ->
         let decision =
           Lib.Keeper_approval_queue.submit_and_await
@@ -973,7 +968,8 @@ let test_dashboard_exposes_keeper_approval_queue () =
             ~selected_model:"openai:gpt-5.4"
             ()
         in
-        decision_result := Some decision);
+        decision_result := Some decision;
+        Eio.Promise.resolve resume_resolver ());
       Eio.Fiber.yield ();
       let json =
         Dashboard_governance.dashboard_json ~base_path:dir ~limit:20 ~offset:0
@@ -1002,8 +998,23 @@ let test_dashboard_exposes_keeper_approval_queue () =
        | Ok () -> ()
        | Error err ->
          fail ("resolve failed: " ^ Lib.Keeper_approval_queue.resolve_error_to_string err));
-      Eio.Fiber.yield ();
-      match !decision_result with
+      let decision_result =
+        match
+          Eio.Time.with_timeout
+            (Eio.Stdenv.clock env)
+            approval_resume_test_timeout_s
+            (fun () ->
+               Eio.Promise.await resumed;
+               Ok !decision_result)
+        with
+        | Ok decision_result -> decision_result
+        | Error `Timeout ->
+          fail
+            (Printf.sprintf
+               "approval fiber did not resume within %.1fs"
+               approval_resume_test_timeout_s)
+      in
+      match decision_result with
       | Some Agent_sdk.Hooks.Approve -> ()
       | Some (Agent_sdk.Hooks.Reject reason) ->
         fail ("expected approval resume, got reject: " ^ reason)
@@ -1125,8 +1136,8 @@ let () =
             test_parse_governance_response_requires_guardrail_fields;
           test_case "parser requires items array" `Quick
             test_parse_governance_response_requires_items_array;
-          test_case "parser rejects unparseable recovered block" `Quick
-            test_parse_governance_response_rejects_unparseable_recovered_block;
+          test_case "parser rejects embedded JSON block" `Quick
+            test_parse_governance_response_rejects_embedded_json_block;
           test_case "refresh failure keeps fresh cache online" `Quick
             test_refresh_failure_keeps_fresh_cache_online;
           test_case "refresh failure marks expired cache offline" `Quick

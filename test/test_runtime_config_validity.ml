@@ -523,7 +523,7 @@ let test_repo_runtime_toml_loads () =
     check
       (option string)
       "structured judge runtime"
-      (Some "ollama_cloud.minimax-m3")
+      (Some "ollama_cloud.ollama-cloud-devstral-2-123b")
       structured_judge;
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
@@ -612,7 +612,11 @@ let test_repo_runtime_toml_loads () =
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
        check int "MiniMax M3 context" 524288 runtime.model.max_context;
        (match runtime.model.capabilities with
-        | Some caps ->
+       | Some caps ->
+          check bool "MiniMax M3 response_format json disabled" false
+            caps.supports_response_format_json;
+          check bool "MiniMax M3 structured output disabled" false
+            caps.supports_structured_output;
           check bool "MiniMax M3 image input" true caps.supports_image_input;
           check bool "MiniMax M3 multimodal input" true
             caps.supports_multimodal_inputs;

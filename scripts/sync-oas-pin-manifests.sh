@@ -111,6 +111,58 @@ sync_opam_manifest() {
   write_or_check "${file}" "${tmp_file}"
 }
 
+trim_line() {
+  sed -E 's/^[[:space:]]+//; s/[[:space:]]+$//'
+}
+
+locked_line() {
+  local file="$1" pattern="$2" label="$3"
+  ensure_single_match "${file}" "${pattern}" "${label}"
+  grep -E "${pattern}" "${file}" | trim_line
+}
+
+check_locked_opam_manifest() {
+  local file="${REPO_ROOT}/masc.opam.locked"
+  local dep_line pin_name_line pin_source_line
+  local expected_dep_line expected_pin_name_line expected_pin_source_line
+
+  if [[ ! -f "${file}" ]]; then
+    echo "masc.opam.locked is missing; regenerate or remove it intentionally" >&2
+    return 1
+  fi
+
+  dep_line="$(
+    locked_line "${file}" '^[[:space:]]*"agent_sdk" \{= "' \
+      "masc.opam.locked agent_sdk dependency"
+  )"
+  pin_name_line="$(
+    locked_line "${file}" '^[[:space:]]*"agent_sdk\.[0-9][0-9.]*"' \
+      "masc.opam.locked agent_sdk pin-depends package"
+  )"
+  pin_source_line="$(
+    locked_line "${file}" '^[[:space:]]*"git\+https://github[.]com/jeong-sik/oas[.]git#' \
+      "masc.opam.locked agent_sdk pin-depends source"
+  )"
+
+  expected_dep_line="\"agent_sdk\" {= \"${OAS_AGENT_SDK_MIN_VERSION}\"}"
+  expected_pin_name_line="\"agent_sdk.${OAS_AGENT_SDK_MIN_VERSION}\""
+  expected_pin_source_line="\"git+${OAS_AGENT_SDK_URL}#${OAS_AGENT_SDK_SHA}\""
+
+  if [[ "${dep_line}" != "${expected_dep_line}" \
+     || "${pin_name_line}" != "${expected_pin_name_line}" \
+     || "${pin_source_line}" != "${expected_pin_source_line}" ]]; then
+    echo "masc.opam.locked is not aligned with scripts/oas-agent-sdk-pin.sh" >&2
+    echo "expected dependency: ${expected_dep_line}" >&2
+    echo "actual dependency:   ${dep_line}" >&2
+    echo "expected pin name:   ${expected_pin_name_line}" >&2
+    echo "actual pin name:     ${pin_name_line}" >&2
+    echo "expected pin source: ${expected_pin_source_line}" >&2
+    echo "actual pin source:   ${pin_source_line}" >&2
+    echo "repair: regenerate masc.opam.locked with opam lock after reviewing the full dependency graph" >&2
+    return 1
+  fi
+}
+
 sync_docs() {
   if [[ "${CHECK_ONLY}" -eq 1 ]]; then
     bash "${SCRIPT_DIR}/sync-oas-pin-docs.sh" --check
@@ -133,6 +185,7 @@ sync_surface() {
 
 sync_dune_project
 sync_opam_manifest
+check_locked_opam_manifest
 sync_docs
 sync_surface
 

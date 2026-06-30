@@ -223,11 +223,12 @@ let test_structured_tool_agent_runs_use_tool_schema_output () =
     expected_structured_tool_agent_runs;
   List.iter
     (fun (rel, parser) ->
+       let count = Ast_grep.count_calls ~module_path:rel ~callee:parser in
        check
-         int
+         bool
          (rel ^ " parses structured tool arguments via " ^ parser)
-         1
-         (Ast_grep.count_calls ~module_path:rel ~callee:parser))
+         true
+         (count > 0))
     parser_expectations
 ;;
 

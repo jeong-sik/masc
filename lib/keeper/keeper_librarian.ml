@@ -43,17 +43,28 @@ let text_of_content block =
          result.Canonical_tool.call_id
          result.Canonical_tool.is_error)
   | None -> (
-    match block with
-  | Agent_sdk.Types.Text s -> trim_nonempty s
-  | Agent_sdk.Types.ToolUse { id; name; _ } ->
-    Some (Printf.sprintf "[tool use omitted: id=%s name=%s]" id name)
-  | Agent_sdk.Types.ToolResult _ ->
-    invalid_arg
-      "keeper_librarian: OAS canonical tool-result projection unavailable"
-  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> None
-  | Agent_sdk.Types.Image _ -> Some "[image omitted]"
-  | Agent_sdk.Types.Document _ -> Some "[document omitted]"
-  | Agent_sdk.Types.Audio _ -> Some "[audio omitted]")
+    match Canonical_tool.tool_call_of_block block with
+    | Some call ->
+      Some
+        (Printf.sprintf
+           "[tool use omitted: id=%s name=%s]"
+           call.Canonical_tool.call_id
+           call.Canonical_tool.name)
+    | None -> (
+      match block with
+      | Agent_sdk.Types.Text s -> trim_nonempty s
+      | Agent_sdk.Types.ToolResult _ ->
+        invalid_arg
+          "keeper_librarian: OAS canonical tool-result projection unavailable"
+      | Agent_sdk.Types.ToolUse _ ->
+        invalid_arg
+          "keeper_librarian: OAS canonical tool-call projection unavailable"
+      | Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.ReasoningDetails _
+      | Agent_sdk.Types.RedactedThinking _ -> None
+      | Agent_sdk.Types.Image _ -> Some "[image omitted]"
+      | Agent_sdk.Types.Document _ -> Some "[document omitted]"
+      | Agent_sdk.Types.Audio _ -> Some "[audio omitted]"))
 ;;
 
 let message_to_text ~turn (m : Agent_sdk.Types.message) : string =

@@ -90,9 +90,9 @@ let enrich_idle_detail (detail : string) (messages : Agent_sdk.Types.message lis
               later
             else if m.role = Agent_sdk.Types.Assistant then
               List.find_map
-                (function
-                  | Agent_sdk.Types.ToolUse { name; _ } -> Some name
-                  | _ -> None)
+                (fun block ->
+                  Agent_sdk.Canonical_tool.tool_call_of_block block
+                  |> Option.map (fun call -> call.Agent_sdk.Canonical_tool.name))
                 m.content
             else
               None

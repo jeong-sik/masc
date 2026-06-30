@@ -163,9 +163,12 @@ let score_message ~index ~total (m : Agent_sdk.Types.message) : float =
     | Agent_sdk.Types.Assistant -> role_assistant
   in
   let msg_text = Agent_sdk.Types.text_of_message m in
-  let has_tool_content = List.exists (function
-    | Agent_sdk.Types.ToolUse _ | Agent_sdk.Types.ToolResult _ -> true
-    | _ -> false) m.content
+  let has_tool_content =
+    List.exists
+      (fun block ->
+        Option.is_some (Agent_sdk.Canonical_tool.tool_call_of_block block)
+        || Option.is_some (Agent_sdk.Canonical_tool.tool_result_of_block block))
+      m.content
   in
   let tool_w = if has_tool_content then tool_present else tool_absent in
   let score = w_recency *. recency +. w_role *. role_w +. w_tool *. tool_w in

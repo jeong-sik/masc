@@ -295,9 +295,10 @@ let assemble_hooks
                         | (msg : Agent_sdk.Types.message) :: rest ->
                           let names =
                             List.filter_map
-                              (function
-                                | Agent_sdk.Types.ToolUse { name; _ } -> Some name
-                                | _ -> None)
+                              (fun block ->
+                                Agent_sdk.Canonical_tool.tool_call_of_block block
+                                |> Option.map (fun call ->
+                                  call.Agent_sdk.Canonical_tool.name))
                               msg.content
                           in
                           if names <> [] then names else scan rest

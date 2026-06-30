@@ -94,11 +94,17 @@ let content_block_has_visible_or_tool_progress block =
       | Agent_sdk.Types.ToolResult _ ->
           invalid_arg
             "keeper_hooks_oas_response_metrics: OAS canonical tool-result projection unavailable"
-      | Agent_sdk.Types.ToolUse _
+      | _ when Option.is_some (Canonical_tool.tool_call_of_block block) -> true
       | Agent_sdk.Types.Image _
       | Agent_sdk.Types.Document _
       | Agent_sdk.Types.Audio _ -> true
-      | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> false)
+      | Agent_sdk.Types.Thinking _
+      | Agent_sdk.Types.ReasoningDetails _
+      | Agent_sdk.Types.RedactedThinking _ -> false
+      | Agent_sdk.Types.ToolUse _ ->
+          invalid_arg
+            "keeper_hooks_oas_response_metrics: OAS canonical tool-call projection unavailable"
+      )
 
 let shape_empty = "empty"
 let shape_thinking_only = "thinking_only"
@@ -109,7 +115,9 @@ let response_content_empty_shape content =
   else if
     List.exists
       (function
-        | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> true
+        | Agent_sdk.Types.Thinking _
+        | Agent_sdk.Types.ReasoningDetails _
+        | Agent_sdk.Types.RedactedThinking _ -> true
         | _ -> false)
       content
   then shape_thinking_only

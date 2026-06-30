@@ -159,17 +159,24 @@ let metric_of_block
            | Some value -> String.length (Yojson.Safe.to_string value)
            | None -> 0)
     | None -> (
-      match block with
-    | Agent_sdk.Types.Text text ->
-        String.length (Inference_utils.sanitize_text_utf8 text)
-    | Agent_sdk.Types.ToolUse { id; name; input } ->
-        String.length (Inference_utils.sanitize_text_utf8 id)
-        + String.length (Inference_utils.sanitize_text_utf8 name)
-        + String.length (Yojson.Safe.to_string input)
-    | Agent_sdk.Types.ToolResult _ ->
-        invalid_arg
-          "keeper_agent_prompt_metrics: OAS canonical tool-result projection unavailable"
-    | _ -> 0)
+        match Canonical_tool.tool_call_of_block block with
+        | Some call ->
+            String.length
+              (Inference_utils.sanitize_text_utf8 call.Canonical_tool.call_id)
+            + String.length
+                (Inference_utils.sanitize_text_utf8 call.Canonical_tool.name)
+            + String.length (Yojson.Safe.to_string call.Canonical_tool.input)
+        | None -> (
+          match block with
+          | Agent_sdk.Types.Text text ->
+              String.length (Inference_utils.sanitize_text_utf8 text)
+          | Agent_sdk.Types.ToolResult _ ->
+              invalid_arg
+                "keeper_agent_prompt_metrics: OAS canonical tool-result projection unavailable"
+          | Agent_sdk.Types.ToolUse _ ->
+              invalid_arg
+                "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"
+          | _ -> 0))
   in
   let msg : Agent_sdk.Types.message =
     {
@@ -189,16 +196,22 @@ let metric_of_block
 let history_bucket_of_block
     ~(role : Agent_sdk.Types.role)
     (block : Agent_sdk.Types.content_block) : string =
-  match block with
-  | Agent_sdk.Types.ToolUse _ -> "history_tool_use"
+  if Option.is_some (Canonical_tool.tool_call_of_block block) then
+    "history_tool_use"
+  else
+    match block with
   | Agent_sdk.Types.ToolResult _ -> "history_tool_result"
+  | Agent_sdk.Types.ToolUse _ ->
+      invalid_arg
+        "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"
   | Agent_sdk.Types.Text _ -> (
       match role with
       | Agent_sdk.Types.User -> "history_user"
       | Agent_sdk.Types.Assistant | Agent_sdk.Types.System ->
           "history_assistant_text"
       | Agent_sdk.Types.Tool -> "history_tool_result")
-  | Agent_sdk.Types.Thinking _ -> "history_thinking"
+  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.ReasoningDetails _ ->
+      "history_thinking"
   | Agent_sdk.Types.RedactedThinking _ -> "history_redacted_thinking"
   | Agent_sdk.Types.Image _ -> "history_image"
   | Agent_sdk.Types.Document _ -> "history_document"

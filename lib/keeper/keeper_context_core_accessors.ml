@@ -287,6 +287,11 @@ let canonical_tool_result_of_block block =
             "keeper_context_core_accessors: OAS canonical tool-result projection unavailable"
       | _ -> None)
 
+let canonical_tool_call_of_block block =
+  match Canonical_tool.tool_call_of_block block with
+  | Some call -> Some call
+  | None -> None
+
 let pair_repair_metadata_kind stats =
   match stats.dropped_tool_uses > 0, stats.dropped_tool_results > 0 with
   | true, true -> "dropped_tool_pair_blocks"
@@ -334,14 +339,18 @@ let filter_group_message_content
   let stats = ref empty_tool_pair_repair_stats in
   let content =
     List.filter_map
-      (function
-        | Agent_sdk.Types.ToolUse { id; name; _ }
+      (fun block ->
+        match canonical_tool_call_of_block block with
+        | Some call
           when mode.drop_dangling_uses
                && (msg.role <> Agent_sdk.Types.Assistant
-                   || not (List.mem id matched_tool_result_ids)) ->
-            record_dropped_tool_use stats id name;
+                   || not (List.mem call.Canonical_tool.call_id matched_tool_result_ids)) ->
+            record_dropped_tool_use stats call.Canonical_tool.call_id
+              call.Canonical_tool.name;
             None
-        | Agent_sdk.Types.ToolResult _ as block when mode.drop_orphan_results -> (
+        | _ -> (
+          match block with
+          | Agent_sdk.Types.ToolResult _ when mode.drop_orphan_results -> (
             match canonical_tool_result_of_block block with
             | Some result ->
                 let tool_use_id = result.Canonical_tool.call_id in
@@ -355,7 +364,7 @@ let filter_group_message_content
                   record_dropped_tool_result stats tool_use_id;
                   None)
             | None -> Some block)
-        | other -> Some other)
+          | other -> Some other))
       msg.content
   in
   content, !stats
@@ -373,17 +382,21 @@ let filter_orphan_result_message_content
     let stats = ref empty_tool_pair_repair_stats in
     let content =
       List.filter_map
-        (function
-          | Agent_sdk.Types.ToolResult _ as block when mode.drop_orphan_results -> (
+        (fun block ->
+          match block with
+          | Agent_sdk.Types.ToolResult _ when mode.drop_orphan_results -> (
               match canonical_tool_result_of_block block with
               | Some result ->
                   record_dropped_tool_result stats result.Canonical_tool.call_id;
                   None
               | None -> Some block)
-          | Agent_sdk.Types.ToolUse { id; name; _ } when drop_non_assistant_tool_use ->
-              record_dropped_tool_use stats id name;
+          | _ -> (
+            match canonical_tool_call_of_block block with
+            | Some call when drop_non_assistant_tool_use ->
+              record_dropped_tool_use stats call.Canonical_tool.call_id
+                call.Canonical_tool.name;
               None
-          | other -> Some other)
+            | _ -> Some block))
         msg.content
     in
     content, !stats

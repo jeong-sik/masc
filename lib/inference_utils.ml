@@ -74,6 +74,42 @@ let rec sanitize_content_blocks_utf8
         | Agent_sdk.Types.Text s ->
             let sanitized = sanitize_text_utf8 s in
             if sanitized == s then block else Agent_sdk.Types.Text sanitized
+        | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+            let sanitized_reasoning_content, reasoning_content_changed =
+              match reasoning_content with
+              | None -> (None, false)
+              | Some content ->
+                  let sanitized = sanitize_text_utf8 content in
+                  (Some sanitized, sanitized != content)
+            in
+            let sanitize_detail (detail : Agent_sdk.Types.reasoning_detail) =
+              let sanitized_raw = sanitize_json_utf8 detail.raw in
+              let sanitized_text, text_changed =
+                match detail.text with
+                | None -> (None, false)
+                | Some text ->
+                    let sanitized = sanitize_text_utf8 text in
+                    (Some sanitized, sanitized != text)
+              in
+              ( { Agent_sdk.Types.raw = sanitized_raw; text = sanitized_text }
+              , sanitized_raw != detail.raw || text_changed )
+            in
+            let sanitized_details, details_changed =
+              List.fold_right
+                (fun detail (details, changed) ->
+                  let sanitized, detail_changed = sanitize_detail detail in
+                  sanitized :: details, changed || detail_changed)
+                details
+                ([], false)
+            in
+            if (not reasoning_content_changed) && not details_changed
+            then block
+            else
+              Agent_sdk.Types.ReasoningDetails
+                {
+                  reasoning_content = sanitized_reasoning_content;
+                  details = sanitized_details;
+                }
         | Agent_sdk.Types.ToolUse { id; name; input } ->
             let sanitized_id = sanitize_text_utf8 id in
             let sanitized_name = sanitize_text_utf8 name in

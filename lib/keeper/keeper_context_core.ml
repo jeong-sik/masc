@@ -335,6 +335,17 @@ let sanitize_checkpoint_message
         { empty_checkpoint_sanitize_stats with dropped_messages = 1 } )
   else (Some { msg with content = kept }, stats)
 
+let reasoning_details_chars
+    ~(reasoning_content : string option)
+    ~(details : Agent_sdk.Types.reasoning_detail list) : int =
+  match reasoning_content with
+  | Some content -> String.length content
+  | None ->
+      details
+      |> List.filter_map (fun detail -> detail.Agent_sdk.Types.text)
+      |> String.concat ""
+      |> String.length
+
 let checkpoint_content_chars_of_block block =
   match Canonical_tool.tool_result_of_block block with
   | Some result -> String.length result.Canonical_tool.content
@@ -342,6 +353,8 @@ let checkpoint_content_chars_of_block block =
       match block with
       | Agent_sdk.Types.Text text -> String.length text
       | Agent_sdk.Types.Thinking { content; _ } -> String.length content
+      | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+          reasoning_details_chars ~reasoning_content ~details
       | Agent_sdk.Types.RedactedThinking text -> String.length text
       | Agent_sdk.Types.ToolResult _ ->
           invalid_arg
@@ -436,6 +449,26 @@ let cap_checkpoint_message_to_remaining_content
                  remaining_ref := !remaining_ref - len;
                  used_ref := !used_ref + len;
                  (Agent_sdk.Types.Thinking t :: kept_rev, stats))
+               else
+                 ( kept_rev,
+                   add_checkpoint_sanitize_stats stats
+                     {
+                       empty_checkpoint_sanitize_stats with
+                       dropped_blocks = 1;
+                       dropped_chars = len;
+                     } )
+           | Agent_sdk.Types.ReasoningDetails r ->
+               let len =
+                 reasoning_details_chars
+                   ~reasoning_content:r.Agent_sdk.Types.reasoning_content
+                   ~details:r.Agent_sdk.Types.details
+               in
+               if len = 0 then
+                 (Agent_sdk.Types.ReasoningDetails r :: kept_rev, stats)
+               else if len <= !remaining_ref then (
+                 remaining_ref := !remaining_ref - len;
+                 used_ref := !used_ref + len;
+                 (Agent_sdk.Types.ReasoningDetails r :: kept_rev, stats))
                else
                  ( kept_rev,
                    add_checkpoint_sanitize_stats stats

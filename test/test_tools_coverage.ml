@@ -42,6 +42,27 @@ let get_json_assoc key obj =
        | _ -> None)
   | _ -> None
 
+let get_json_bool key obj =
+  match obj with
+  | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`Bool value) -> Some value
+       | _ -> None)
+  | _ -> None
+
+let schema_property schema property =
+  match get_json_assoc "properties" schema.input_schema with
+  | Some properties -> List.assoc_opt property properties
+  | None -> None
+
+let property_description schema property =
+  match schema_property schema property with
+  | Some (`Assoc fields) ->
+      (match List.assoc_opt "description" fields with
+       | Some (`String value) -> Some value
+       | _ -> None)
+  | Some _ | None -> None
+
 let contains_substring ~needle value =
   let needle_len = String.length needle in
   let value_len = String.length value in
@@ -220,6 +241,58 @@ let test_masc_transition_schema () =
           Alcotest.(check bool) "task_id required" true (List.mem (`String "task_id") reqs);
           Alcotest.(check bool) "action required" true (List.mem (`String "action") reqs)
       | None -> Alcotest.fail "masc_transition missing required field"
+
+let run_tool_names =
+  [ "masc_run_init"; "masc_run_plan"; "masc_run_get"; "masc_run_list" ]
+
+let test_masc_run_schemas_share_ssot () =
+  Alcotest.(check int)
+    "run schema count"
+    (List.length Tool_schemas_run.schemas)
+    (List.length Masc.Tool_run.schemas);
+  List.iter2
+    (fun (expected : Masc_domain.tool_schema) (actual : Masc_domain.tool_schema) ->
+       Alcotest.(check string) "schema name" expected.name actual.name;
+       Alcotest.(check string)
+         (expected.name ^ " description")
+         expected.description
+         actual.description;
+       Alcotest.(check string)
+         (expected.name ^ " input_schema")
+         (Yojson.Safe.to_string expected.input_schema)
+         (Yojson.Safe.to_string actual.input_schema))
+    Tool_schemas_run.schemas
+    Masc.Tool_run.schemas
+
+let test_masc_run_schemas_are_strict_and_documented () =
+  List.iter
+    (fun name ->
+       match find_registered_tool name with
+       | None -> Alcotest.failf "%s not registered" name
+       | Some schema ->
+           Alcotest.(check (option bool))
+             (name ^ " additionalProperties=false")
+             (Some false)
+             (get_json_bool "additionalProperties" schema.input_schema))
+    run_tool_names;
+  List.iter
+    (fun (name, properties) ->
+       let schema =
+         match find_registered_tool name with
+         | Some schema -> schema
+         | None -> Alcotest.failf "%s not registered" name
+       in
+       List.iter
+         (fun property ->
+            Alcotest.(check bool)
+              (Printf.sprintf "%s.%s has description" name property)
+              true
+              (Option.is_some (property_description schema property)))
+         properties)
+    [ "masc_run_init", [ "task_id"; "agent_name" ]
+    ; "masc_run_plan", [ "task_id"; "plan" ]
+    ; "masc_run_get", [ "task_id" ]
+    ]
 
 let test_masc_add_task_schema () =
   match find_registered_tool "masc_add_task" with
@@ -755,6 +828,10 @@ let () =
       Alcotest.test_case "masc_status" `Quick test_masc_status_schema;
       Alcotest.test_case "masc_broadcast" `Quick test_masc_broadcast_schema;
       Alcotest.test_case "masc_transition" `Quick test_masc_transition_schema;
+      Alcotest.test_case "masc_run schemas share SSOT" `Quick
+        test_masc_run_schemas_share_ssot;
+      Alcotest.test_case "masc_run schemas strict documented" `Quick
+        test_masc_run_schemas_are_strict_and_documented;
       Alcotest.test_case "masc_add_task" `Quick test_masc_add_task_schema;
       Alcotest.test_case "masc_batch_add_tasks" `Quick
         test_masc_batch_add_tasks_schema;

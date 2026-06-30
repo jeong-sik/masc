@@ -150,19 +150,6 @@ let board_tool_curation_submit : Masc_domain.tool_schema =
                           "Objects with question_post_id, answer_post_id, score, \
                            rationale" )
                     ] )
-              ; ( "health_score"
-                , `Assoc
-                    [ "type", `String "number"
-                    ; "minimum", `Float 0.0
-                    ; "maximum", `Float 1.0
-                    ; ( "description"
-                      , `String "Optional normalized health score in [0.0, 1.0]" )
-                    ] )
-              ; ( "health_components"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; "description", `String "Objects with name, score, weight, rationale"
-                    ] )
               ; ( "rationale"
                 , `Assoc
                     [ "type", `String "string"

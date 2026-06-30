@@ -671,19 +671,9 @@ let backend_name () =
 
 (* AI curation delegate — thin wrappers around Board_curation *)
 
-let validate_curation_health_score = function
-  | None -> None
-  | Some score
-    when Float.is_finite score && score >= 0.0 && score <= 1.0 ->
-    Some score
-  | Some score ->
-    invalid_arg
-      (Printf.sprintf "health_score must be in [0.0, 1.0], got %g" score)
-
 let submit_curation_snapshot ~submitted_by ?summary ~ordering ~highlights
-    ?(tag_suggestions = []) ?(answer_matches = []) ?health_score
-    ?(health_components = []) ~rationale ?(provenance = `Assoc []) () =
-  let health_score = validate_curation_health_score health_score in
+    ?(tag_suggestions = []) ?(answer_matches = []) ~rationale
+    ?(provenance = `Assoc []) () =
   let snap : Board_curation.curation_snapshot = {
     id = Board_curation.generate_id ();
     generated_at = Time_compat.now ();
@@ -693,8 +683,6 @@ let submit_curation_snapshot ~submitted_by ?summary ~ordering ~highlights
     highlights;
     tag_suggestions;
     answer_matches;
-    health_score;
-    health_components;
     rationale;
     provenance;
   } in

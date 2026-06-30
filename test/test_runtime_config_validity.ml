@@ -1264,6 +1264,48 @@ let test_save_config_text_refreshes_cross_verifier_runtime () =
         (Some "local.libr")
         (Runtime.cross_verifier_runtime_id ()))
 
+let test_deprecated_capability_notice_warns_once_per_process () =
+  (* runtime.toml is re-parsed on every keeper boot; a per-parse deprecation
+     warning flooded the WARN log (~315/day, 25% of live WARN volume). The
+     notice must fire once per process per capability key, not once per parse.
+     [dedupcheck] is a unique provider id so the process-level dedup table is
+     not pre-populated by another test. The deprecated key sits under
+     [providers.<id>.capabilities] because that is where parse_capabilities (the
+     emitter) runs. *)
+  let content =
+    "[providers.dedupcheck]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [providers.dedupcheck.capabilities]\n\
+     supports-runtime-mcp-tools = true\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [dedupcheck.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"dedupcheck.sample\"\n"
+  in
+  let warns = ref [] in
+  Console_sink.For_testing.reset ();
+  Console_sink.For_testing.set_writer (Some (fun l -> warns := l :: !warns));
+  Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+    (* Parse twice; the deprecated key is present both times. *)
+    ignore (Runtime_toml.parse_string content);
+    ignore (Runtime_toml.parse_string content));
+  let dep_warns =
+    List.filter
+      (fun l ->
+        String_util.contains_substring l "dedupcheck"
+        && String_util.contains_substring l "is deprecated")
+      !warns
+  in
+  check int "deprecation notice fires once per process across two parses" 1
+    (List.length dep_warns)
+
 let () =
   run "runtime_config_validity"
     [ ( "runtime TOML gate",
@@ -1314,5 +1356,8 @@ let () =
           test_case "non-positive max-concurrent is rejected" `Quick
             test_runtime_toml_rejects_non_positive_max_concurrent;
           test_case "max-concurrent flows from binding to runtime candidate" `Quick
-            test_runtime_toml_max_concurrent_flows_to_candidate ] )
+            test_runtime_toml_max_concurrent_flows_to_candidate;
+          test_case
+            "deprecated capability notice warns once per process, not per parse"
+            `Quick test_deprecated_capability_notice_warns_once_per_process ] )
     ]

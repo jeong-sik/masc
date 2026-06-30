@@ -333,6 +333,16 @@ let test_verifier_oas_uses_structured_judge_runtime () =
        ~callee:"Runtime.get_default_runtime_id")
 ;;
 
+let test_verifier_oas_response_text_fallback_is_strict_json () =
+  check
+    int
+    "verifier_oas must not call prose verdict parser for provider-native response text"
+    0
+    (Ast_grep.count_calls
+       ~module_path:"lib/verifier_oas.ml"
+       ~callee:"Core.parse_verdict")
+;;
+
 let test_model_label_wrappers_can_receive_provider_config_transform () =
   let rel = "lib/keeper/keeper_turn_driver_wrappers.ml" in
   check
@@ -422,6 +432,10 @@ let () =
             "verifier_oas uses structured_judge runtime"
             `Quick
             test_verifier_oas_uses_structured_judge_runtime
+        ; test_case
+            "verifier_oas response fallback is strict JSON"
+            `Quick
+            test_verifier_oas_response_text_fallback_is_strict_json
         ] )
     ; ( "model-label wrappers"
       , [ test_case

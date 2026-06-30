@@ -1012,8 +1012,11 @@ max_tool_calls_per_panel = 0
 
 # 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다 (JoJ requires >= 2; RFC-0283).
 # label이 정체성을 주므로 distinct lens는 distinct identity가 된다 (Duplicate_judge 회피).
+# evidence judge는 panel에 없는 모델을 쓴다 — 자기 답변이 포함된 panel을 심판하는
+# self-preference bias를 구조적으로 배제(panel = deepseek-v4-flash/glm-5-turbo/minimax-m3,
+# coverage judge=kimi-k2-6, meta judge=deepseek-v4-pro 모두 panel 외부).
 [[fusion.presets.quorum.judges]]
-model = "ollama_cloud.minimax-m3"
+model = "glm-coding.glm-4-7-coding"
 label = "evidence"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \

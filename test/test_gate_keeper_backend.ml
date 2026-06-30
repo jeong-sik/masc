@@ -1131,6 +1131,23 @@ let test_visible_reply_uses_streamed_text_fallback () =
   check string "typed terminal reply wins over streamed fallback" "terminal final"
     explicit
 
+let test_visible_reply_stream_fallback_redacts_before_persist () =
+  let redact = function
+    | "api_key=secret" -> "api_key=[redacted]"
+    | "terminal secret" -> "terminal [redacted]"
+    | text -> text
+  in
+  let fallback =
+    Server_routes_http_keeper_stream.For_testing.redacted_visible_reply_with_stream_fallback
+      ~redact ~streamed_text:" api_key=secret " ""
+  in
+  check string "stream fallback redacted" "api_key=[redacted]" fallback;
+  let explicit =
+    Server_routes_http_keeper_stream.For_testing.redacted_visible_reply_with_stream_fallback
+      ~redact ~streamed_text:"api_key=secret" " terminal secret "
+  in
+  check string "terminal reply redacted" "terminal [redacted]" explicit
+
 let test_streamed_visible_reply_rewrites_no_visible_payload () =
   let payload_json =
     `Assoc
@@ -1829,6 +1846,8 @@ let () =
             test_direct_reply_terminal_error_allows_checkpoint;
           test_case "visible reply uses streamed text fallback" `Quick
             test_visible_reply_uses_streamed_text_fallback;
+          test_case "visible reply stream fallback redacts before persist" `Quick
+            test_visible_reply_stream_fallback_redacts_before_persist;
           test_case "streamed visible reply rewrites no-visible payload" `Quick
             test_streamed_visible_reply_rewrites_no_visible_payload;
           test_case "streamed visible reply preserves checkpoint payload" `Quick

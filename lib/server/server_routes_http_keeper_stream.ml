@@ -635,6 +635,9 @@ let visible_reply_with_stream_fallback ~streamed_text visible_reply =
   | "" -> String.trim streamed_text
   | visible_reply -> visible_reply
 
+let redacted_visible_reply_with_stream_fallback ~redact ~streamed_text visible_reply =
+  visible_reply_with_stream_fallback ~streamed_text visible_reply |> redact
+
 let assoc_replace key value fields =
   (key, value)
   :: List.filter (fun (field_key, _) -> not (String.equal field_key key)) fields
@@ -767,12 +770,14 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
      still an authenticated dashboard operator, so it keeps Owner authority
      while recording the Gate surface label. *)
   let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
-  let worker_text_accum = Buffer.create 256 in
+  let worker_text_accum = Keeper_stream_text_accum.create () in
   let on_event evt =
     (match evt with
      | Agent_sdk.Types.ContentBlockDelta
          { delta = Agent_sdk.Types.TextDelta text; _ } ->
-         Buffer.add_string worker_text_accum text
+         ignore
+           (Keeper_stream_text_accum.on_delta worker_text_accum ~redact:redact_text text
+            : string)
      | _ -> ());
     push_worker_event (Stream_event evt)
   in
@@ -842,8 +847,9 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         | Ok (true, body) ->
             let payload_json_opt, visible_reply = extract_visible_reply body in
             let visible_reply =
-              visible_reply_with_stream_fallback
-                ~streamed_text:(Buffer.contents worker_text_accum)
+              redacted_visible_reply_with_stream_fallback
+                ~redact:redact_text
+                ~streamed_text:(Keeper_stream_text_accum.streamed_text worker_text_accum)
                 visible_reply
             in
             let payload_json_opt =
@@ -1360,6 +1366,8 @@ module For_testing = struct
   let extract_visible_reply = extract_visible_reply
   let direct_reply_terminal_error = direct_reply_terminal_error
   let visible_reply_with_stream_fallback = visible_reply_with_stream_fallback
+  let redacted_visible_reply_with_stream_fallback =
+    redacted_visible_reply_with_stream_fallback
   let reply_payload_with_streamed_visible_reply =
     reply_payload_with_streamed_visible_reply
   let format_surface_context = format_surface_context

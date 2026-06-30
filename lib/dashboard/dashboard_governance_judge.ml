@@ -531,25 +531,14 @@ let parse_recommended_action json =
   | _ -> None
 
 type governance_response_parse_failure =
-  | Lenient_fallback of string
   | Structural_error of string
 
-let parse_lenient_governance_json raw_text =
-  let parsed = Llm_provider.Lenient_json.parse raw_text in
-  match parsed with
-  | `Assoc [("raw", `String raw)] -> (
-      match Judge_json_recovery.extract_balanced_object raw with
-      | Some block -> (
-          try
-            match Llm_provider.Lenient_json.parse block with
-            | `Assoc [ ("raw", `String recovered_raw) ] ->
-                Error (Lenient_fallback recovered_raw)
-            | parsed -> Ok parsed
-          with
-          | Yojson.Json_error _ -> Error (Lenient_fallback raw)
-          | Failure _ -> Error (Lenient_fallback raw))
-      | None -> Error (Lenient_fallback raw))
-  | _ -> Ok parsed
+let parse_strict_governance_json raw_text =
+  match Yojson.Safe.from_string (String.trim raw_text) with
+  | json -> Ok json
+  | exception Yojson.Json_error msg ->
+      Error
+        (Structural_error (Printf.sprintf "invalid strict JSON: %s" msg))
 
 let parse_required_guardrail_state json =
   match Json_util.assoc_member_opt "guardrail_state" json with
@@ -632,7 +621,7 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
                  ]))
 
 let parse_governance_response ~raw_text ~generated_at ~expires_at ~model_used =
-  match parse_lenient_governance_json raw_text with
+  match parse_strict_governance_json raw_text with
   | Error _ as error -> error
   | Ok parsed -> (
       match parsed with
@@ -747,13 +736,6 @@ let compute_judgments
             ~model_used:resolved_model
         with
         | Ok judgments -> Ok (resolved_model, generated_at, expires_at, judgments)
-        | Error (Lenient_fallback raw) ->
-            let msg =
-              Judge_diagnostics.record_lenient_fallback
-                ~judge_label:"Governance" raw
-            in
-            Log.Governance.warn "%s" msg;
-            Error msg
         | Error (Structural_error reason) ->
             let msg =
               Judge_diagnostics.record_unparseable_response

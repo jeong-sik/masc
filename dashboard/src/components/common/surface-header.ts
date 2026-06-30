@@ -94,7 +94,7 @@ export function SurfaceHeader(): VNode | null {
           />`
         : null}
       <div class="flex items-center gap-2">
-        <h1 class="text-lg font-semibold leading-tight tracking-normal text-[var(--color-fg-secondary)]">
+        <h1 class="text-lg font-semibold leading-tight tracking-normal normal-case text-[var(--color-fg-secondary)]" style="text-shadow: none;">
           ${title}
         </h1>
         <${SurfaceHeaderActions} label=${title} />

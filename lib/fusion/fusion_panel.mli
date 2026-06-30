@@ -30,3 +30,15 @@ val run
   -> prompt:string
   -> unit
   -> Fusion_types.panel_outcome list
+
+module For_testing : sig
+  val outcome_of_result
+    :  panelist:string
+    -> model:string
+    -> (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result
+    -> Fusion_types.panel_outcome
+
+  val apply_output_contract
+    :  Llm_provider.Provider_config.t
+    -> (Llm_provider.Provider_config.t, string) result
+end

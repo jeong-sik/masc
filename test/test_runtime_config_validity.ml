@@ -687,6 +687,42 @@ let test_repo_runtime_toml_loads () =
                Runtime_schema.Reasoning_effort)
         | None -> fail "expected Kimi K2.6 capabilities"))
 
+let fusion_preset_panels toml preset =
+  Otoml.find
+    toml
+    (Otoml.get_array Otoml.get_string)
+    [ "fusion"; "presets"; preset; "panel" ]
+
+let assert_runtime_supports_structured_output runtimes ~preset runtime_id =
+  match find_runtime runtimes runtime_id with
+  | None -> failf "fusion preset %s references unknown runtime %s" preset runtime_id
+  | Some runtime ->
+    (match runtime.model.capabilities with
+     | Some caps ->
+       check
+         bool
+         (Printf.sprintf "%s panel %s supports structured output" preset runtime_id)
+         true
+         caps.supports_structured_output
+     | None ->
+       failf
+         "fusion preset %s runtime %s must declare capabilities"
+         preset
+         runtime_id)
+
+let test_repo_fusion_panel_presets_are_schema_capable () =
+  with_repo_oas_model_catalog @@ fun _catalog ->
+  let path = Filename.concat (repo_root ()) "config/runtime.toml" in
+  let toml = Otoml.Parser.from_file path in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok (runtimes, _default, _assignments, _librarian, _structured_judge, _cross, _media) ->
+    List.iter
+      (fun preset ->
+         fusion_preset_panels toml preset
+         |> List.iter (assert_runtime_supports_structured_output runtimes ~preset))
+      [ "trio"; "quorum" ]
+
 let test_toml_catalog_resolves_lifecycle_keys () =
   let doc =
     parse_or_fail
@@ -1332,6 +1368,9 @@ let () =
             `Quick test_repo_oas_model_catalog_modality_priorities_resolve;
           test_case "repo runtime.toml loads through runtime parser" `Quick
             test_repo_runtime_toml_loads;
+          test_case
+            "repo Fusion panel presets use schema-capable runtimes"
+            `Quick test_repo_fusion_panel_presets_are_schema_capable;
           test_case
             "[runtime].librarian and .cross_verifier resolve, default None, \
              reject unknown"

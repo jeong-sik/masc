@@ -934,14 +934,18 @@ max_concurrent_panels = 2
 max_concurrent_judges = 3
 staged_judge_group_size = 3
 
-# 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.
+# 패널 프리셋. Panel execution requests provider-native structured output, so
+# checked-in defaults must use runtimes that declare supports-structured-output.
+# Add new model families here only after their runtime seed declares that
+# capability; otherwise the panel deterministically fails before the provider
+# request.
 # 프롬프트는 행동을 정의하므로 코드 default가 아니라 여기서 받는다 (누락 시 로드
 # 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
 [fusion.presets.trio]
 panel = [
-  "ollama_cloud.deepseek-v4-flash",
-  "glm-coding.glm-5-turbo",
   "ollama_cloud.minimax-m3",
+  "ollama_cloud.kimi-k2-6",
+  "ollama_cloud.ollama-cloud-minimax-m3",
 ]
 # Fusion judges request provider-native structured output. Keep this on a
 # runtime whose model declares supports-structured-output=true.
@@ -971,18 +975,17 @@ max_tool_calls_per_panel = 0
 # "requires >= 2 judges"로 fail-closed된다 → 키퍼가 JoJ topology를 쓸 수 없었다.
 # quorum은 서로 다른 렌즈(evidence/coverage)의 1차 심판 2명을 두고, meta judge(judge=)가
 # 두 종합을 재조정한다. 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
-# Fusion judge/refine/meta paths request provider-native structured output, so
-# every judge runtime below must declare supports-structured-output=true. Panels
-# remain free text and do not need the native-schema capability. The current seed
-# has two structured judge-capable cloud runtimes; distinct labels preserve lens
-# identity while the schema contract prevents config drift back to JSON-mode-only
-# judges. staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)의 정확한 배수
+# Panel models and Fusion judge/refine/meta paths request provider-native
+# structured output, so every panel and judge runtime below must declare
+# supports-structured-output=true. Distinct labels preserve lens identity while
+# the schema contract prevents config drift back to JSON-mode-only runtimes.
+# staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)의 정확한 배수
 # 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
 [fusion.presets.quorum]
 panel = [
-  "ollama_cloud.deepseek-v4-flash",
-  "glm-coding.glm-5-turbo",
-  "deepseek.deepseek-v4-pro",
+  "ollama_cloud.minimax-m3",
+  "ollama_cloud.kimi-k2-6",
+  "ollama_cloud.ollama-cloud-minimax-m3",
 ]
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
@@ -1007,8 +1010,10 @@ max_tool_calls_per_panel = 0
 
 # 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다 (JoJ requires >= 2; RFC-0283).
 # label이 정체성을 주므로 distinct lens는 distinct identity가 된다 (Duplicate_judge 회피).
-# first-pass judges use schema-capable runtimes outside the panel so a judge does
-# not score its own panel answer.
+# Strict structured-output support is mandatory for panel and judge runtimes in
+# this seed. Some model families overlap across panel and judge lanes because the
+# checked-in schema-capable runtime set is intentionally narrow; distinct labels
+# still preserve lens identity for judge-of-judges routing.
 [[fusion.presets.quorum.judges]]
 model = "ollama_cloud.kimi-k2-6"
 label = "evidence"

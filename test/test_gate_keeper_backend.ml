@@ -623,6 +623,105 @@ let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
                 | _ -> "other")
               events))
 
+let provider_kind_label (call : Agent_sdk.Canonical_tool.provider_tool_call) =
+  Option.map Llm_provider.Provider_config.string_of_provider_kind
+    call.provider_kind
+
+let check_visible_reasoning label expected_order expected_content expected_signature
+    (block : Agent_sdk.Canonical_tool.provider_reasoning_block) =
+  check int (label ^ " order") expected_order block.order_index;
+  check string (label ^ " content") expected_content block.content;
+  check (option string) (label ^ " signature") expected_signature
+    block.signature;
+  match block.kind with
+  | Agent_sdk.Canonical_tool.Visible_thinking -> ()
+  | Agent_sdk.Canonical_tool.Redacted_thinking ->
+      fail (label ^ " expected visible thinking")
+
+let check_redacted_reasoning label expected_order expected_content
+    (block : Agent_sdk.Canonical_tool.provider_reasoning_block) =
+  check int (label ^ " order") expected_order block.order_index;
+  check string (label ^ " content") expected_content block.content;
+  check (option string) (label ^ " signature") None block.signature;
+  match block.kind with
+  | Agent_sdk.Canonical_tool.Redacted_thinking -> ()
+  | Agent_sdk.Canonical_tool.Visible_thinking ->
+      fail (label ^ " expected redacted thinking")
+
+let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
+  let open Agent_sdk.Types in
+  let response : api_response =
+    {
+      id = "resp-interleaving";
+      model = "runtime_lane";
+      stop_reason = StopToolUse;
+      content =
+        [
+          Thinking { content = "think 1.1"; signature = None };
+          RedactedThinking "sealed 1.2";
+          ToolUse
+            {
+              id = "tc-1";
+              name = "keeper_board_list";
+              input = `Assoc [ ("query", `String "alpha") ];
+            };
+          Text "visible answer breaks adjacency";
+          Thinking { content = "orphan thinking"; signature = None };
+          Text "intervening text";
+          ToolUse
+            {
+              id = "tc-2";
+              name = "keeper_board_read";
+              input = `Assoc [ ("id", `String "post-2") ];
+            };
+          Thinking { content = "think 2.1"; signature = Some "sig-2.1" };
+          ToolUse
+            {
+              id = "tc-3";
+              name = "keeper_task_update";
+              input = `Assoc [ ("id", `String "task-3") ];
+            };
+        ];
+      usage = None;
+      telemetry =
+        Some
+          {
+            default_inference_telemetry with
+            provider_kind = Some Llm_provider.Provider_config.OpenAI_compat;
+          };
+    }
+  in
+  let calls = Agent_sdk.Canonical_tool.tool_calls_of_response response in
+  match calls with
+  | [ first; second; third ] ->
+      check string "first call id" "tc-1" first.call_id;
+      check string "first name" "keeper_board_list" first.name;
+      check string "first input" {|{"query":"alpha"}|}
+        (Yojson.Safe.to_string first.input);
+      check int "first order" 2 first.order_index;
+      check (option string) "first provider" (Some "openai_compat")
+        (provider_kind_label first);
+      (match first.adjacent_reasoning with
+      | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r0; r1 ] ->
+          check_visible_reasoning "first reasoning 0" 0 "think 1.1" None r0;
+          check_redacted_reasoning "first reasoning 1" 1 "sealed 1.2" r1
+      | _ -> fail "first tool call should carry contiguous adjacent reasoning");
+      check string "second call id" "tc-2" second.call_id;
+      check int "second order" 6 second.order_index;
+      (match second.adjacent_reasoning with
+      | Agent_sdk.Canonical_tool.No_adjacent_reasoning -> ()
+      | Agent_sdk.Canonical_tool.Adjacent_reasoning _ ->
+          fail "intervening text must break reasoning adjacency");
+      check string "third call id" "tc-3" third.call_id;
+      check int "third order" 8 third.order_index;
+      (match third.adjacent_reasoning with
+      | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r0 ] ->
+          check_visible_reasoning "third reasoning" 7 "think 2.1"
+            (Some "sig-2.1") r0
+      | _ -> fail "third tool call should carry only its adjacent thinking")
+  | _ ->
+      failf "expected three projected tool calls, got %d" (List.length calls)
+
 let test_keeper_stream_bridge_ignores_replayed_tool_start () =
   let open Agent_sdk.Types in
   let events =
@@ -1812,6 +1911,8 @@ let () =
             test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool;
           test_case "stream bridge preserves tool args snapshots" `Quick
             test_keeper_stream_bridge_preserves_tool_args_snapshot;
+          test_case "OAS tool-call projection preserves adjacent reasoning" `Quick
+            test_oas_tool_call_projection_preserves_adjacent_reasoning_groups;
           test_case "stream bridge ignores replayed tool starts" `Quick
             test_keeper_stream_bridge_ignores_replayed_tool_start;
           test_case "stream bridge rejects replayed tool name drift" `Quick

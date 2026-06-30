@@ -134,6 +134,30 @@ module Board_name = struct
     | _ -> None
   ;;
 
+  let is_resource_write = function
+    | Board_cleanup
+    | Board_comment
+    | Board_comment_vote
+    | Board_curation_submit
+    | Board_delete
+    | Board_post
+    | Board_post_update
+    | Board_reaction
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_update
+    | Board_vote -> true
+    | Board_curation_read
+    | Board_post_get
+    | Board_hearths
+    | Board_list
+    | Board_profile
+    | Board_search
+    | Board_stats
+    | Board_sub_board_get
+    | Board_sub_board_list -> false
+  ;;
+
   let pp fmt t = Format.pp_print_string fmt (to_string t)
 end
 

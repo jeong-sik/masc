@@ -47,6 +47,7 @@ module Board_name : sig
 
   val to_string : t -> string
   val of_string : string -> t option
+  val is_resource_write : t -> bool
   val pp : Stdlib.Format.formatter -> t -> unit
 end
 

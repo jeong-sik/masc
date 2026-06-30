@@ -4,10 +4,9 @@
    [min provider_cfg.max_tokens librarian_max_tokens] at the complete call
    (see [extract] below). The previous fixed cap of 1024 truncated episode
    JSON mid-object whenever the summary plus facts exceeded ~1024 output
-   tokens, surfacing as "invalid_json: Unexpected end of input" and an
-   unstructured fallback every turn. 4096 covers realistic episode payloads
-   while staying well under the JSON-capable model context budget; tunable
-   via Env_config.KeeperMemoryOs. *)
+   tokens, surfacing as "invalid_json: Unexpected end of input" every turn.
+   4096 covers realistic episode payloads while staying well under the
+   JSON-capable model context budget; tunable via Env_config.KeeperMemoryOs. *)
 let librarian_max_tokens = Env_config.KeeperMemoryOs.librarian_max_tokens_default
 
 (* Memory extraction runs against a JSON-capable model with a long context
@@ -383,6 +382,7 @@ type extraction_error =
   | Provider_timeout
   | Provider_transport_failed of string
   | Provider_empty_response
+  | Provider_unparseable_response of string
   | Memory_fact_upsert_failed of string
 
 let librarian_provider_clock_unavailable_error =
@@ -396,6 +396,8 @@ let extraction_error_to_string = function
   | Provider_timeout -> "librarian provider timed out"
   | Provider_transport_failed msg -> msg
   | Provider_empty_response -> "librarian provider returned empty response"
+  | Provider_unparseable_response msg ->
+    "librarian provider returned unparseable structured response: " ^ msg
   | Memory_fact_upsert_failed msg -> "memory os fact upsert failed: " ^ msg
 ;;
 
@@ -436,7 +438,11 @@ let should_record_cadence_backoff = function
 ;;
 
 let should_record_cadence_backoff_after_error = function
-  | Provider_timeout | Provider_transport_failed _ | Provider_empty_response -> true
+  | Provider_timeout
+  | Provider_transport_failed _
+  | Provider_empty_response
+  | Provider_unparseable_response _ ->
+    true
   | Provider_clock_unavailable
   | Provider_config_rejected _
   | Prompt_render_failed _
@@ -444,13 +450,11 @@ let should_record_cadence_backoff_after_error = function
     false
 ;;
 
-let should_preserve_unstructured_fallback raw =
-  not (String.equal (String.trim raw) "")
-;;
+let should_preserve_unstructured_fallback _raw = false
 
 let prefer_unparseable_response prior current =
   match current.raw_evidence with
-  | Some raw when should_preserve_unstructured_fallback raw -> current
+  | Some raw when not (String.equal (String.trim raw) "") -> current
   | Some _ | None ->
     (match prior with
      | Some best -> best
@@ -514,83 +518,6 @@ let with_timeout ~clock ~timeout_sec f =
   | Eio.Time.Timeout -> None
 ;;
 
-let unstructured_note_max_chars = 900
-
-let collapse_for_unstructured_note raw =
-  let buf = Buffer.create (String.length raw) in
-  let previous_space = ref true in
-  String.iter
-    (fun c ->
-       match c with
-       | '\n' | '\r' | '\t' | ' ' ->
-         if not !previous_space then Buffer.add_char buf ' ';
-         previous_space := true
-       | c ->
-         Buffer.add_char buf c;
-         previous_space := false)
-    raw;
-  Buffer.contents buf |> String.trim
-
-let unstructured_episode ~now ~generation (inp : Keeper_librarian.input) ~reason ~raw =
-  let raw_excerpt, _ =
-    Keeper_text_processing.truncate_utf8_prefix
-      ~max_bytes:unstructured_note_max_chars
-      (collapse_for_unstructured_note raw)
-  in
-  let note =
-    let prefix = Keeper_memory_os_types.librarian_unstructured_fallback_claim_prefix in
-    if String.equal raw_excerpt ""
-    then Printf.sprintf "%s (%s): <empty response>" prefix reason
-    else Printf.sprintf "%s (%s): %s" prefix reason raw_excerpt
-  in
-  let source_turn_range =
-    match List.length inp.messages with
-    | 0 -> None
-    | n -> Some (0, n - 1)
-  in
-  let fact : Keeper_memory_os_types.fact =
-    { claim = note
-    ; category = Keeper_memory_os_types.Ephemeral
-    ; external_ref = None
-    ; (* A parse-retry fallback note is system-authored diagnostic evidence, not a
-         librarian-classified memory claim. Tag it at the producer boundary so recall
-         can exclude it without string-matching the raw claim text. *)
-      claim_kind = Some Keeper_memory_os_types.Diagnostic
-    ; source = { trace_id = inp.trace_id; turn = 0; tool_call_id = None }
-    ; observed_by = []
-    ; first_seen = now
-    ; valid_until =
-        Keeper_memory_os_types.fact_valid_until
-          ~now
-          ~external_ref:None
-          ~claim_kind:(Some Keeper_memory_os_types.Diagnostic)
-          Keeper_memory_os_types.Ephemeral
-    ; last_verified_at = Some now
-    ; schema_version = Keeper_memory_os_types.schema_version
-    ; (* MASC authors this diagnostic fallback, not the LLM librarian. Do not
-         overload the librarian [claim_id] producer-identity field; diagnostic
-         fallback rows degrade to exact-text identity via [claim_id = None]. *)
-      claim_id = None
-    }
-  in
-  { Keeper_memory_os_types.trace_id = inp.trace_id
-  ; generation
-  ; episode_summary = "Unstructured librarian note preserved after parse failure"
-  ; claims = [ fact ]
-  ; open_items = []
-  ; constraints = []
-  ; preserved_tool_refs = []
-  ; source_turn_range
-  ; created_at = now
-  ; valid_until =
-      Keeper_memory_os_types.category_valid_until
-        ~now
-        Keeper_memory_os_types.Ephemeral
-  ; terminal_marker =
-      Some Keeper_memory_os_types.librarian_unstructured_fallback_terminal_marker
-  ; schema_version = Keeper_memory_os_types.schema_version
-  }
-
 let extract_with_provider_classified
     ?(complete = default_complete)
     ?clock
@@ -645,24 +572,7 @@ let extract_with_provider_classified
      | Ok episode -> Ok { episode; kind = Structured_episode }
      | Error (Retry_transport_failed err) -> Error err
      | Error (Retry_exhausted_unparseable diagnostic) ->
-       let raw =
-         match diagnostic.raw_evidence with
-         | Some raw -> raw
-         | None -> ""
-       in
-       if not (should_preserve_unstructured_fallback raw)
-       then Error Provider_empty_response
-       else (
-         let now = Eio.Time.now clock in
-         Log.Keeper.warn
-           "memory os librarian preserving unstructured fallback trace_id=%s generation=%d reason=%s"
-           inp.trace_id
-           generation
-           diagnostic.reason;
-         Ok
-          { episode = unstructured_episode ~now ~generation inp ~reason:diagnostic.reason ~raw
-          ; kind = Unstructured_fallback
-          })))
+       Error (Provider_unparseable_response diagnostic.reason))
     )
 ;;
 
@@ -878,7 +788,7 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  if should_record_cadence_backoff kind
                  then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
                  Log.Keeper.warn ~keeper_name:keeper_id
-                   "memory os librarian wrote unstructured fallback trace_id=%s generation=%d claims=%d; cadence deferred"
+                   "memory os librarian produced non-structured extraction trace_id=%s generation=%d claims=%d; cadence deferred"
                    episode.Keeper_memory_os_types.trace_id
                    episode.generation
                    (List.length episode.claims))

@@ -154,6 +154,16 @@ let test_keeper_direct_completions_request_structured_output () =
     expected_structured_completion_files
 ;;
 
+let test_librarian_runtime_does_not_preserve_unstructured_fallback () =
+  let source = read_source "lib/keeper/keeper_librarian_runtime.ml" in
+  check
+    bool
+    "librarian runtime must not build unstructured fallback episodes"
+    false
+    (contains_substring source "let unstructured_episode"
+     || contains_substring source "preserving unstructured fallback")
+;;
+
 let test_agent_run_json_judges_request_structured_output rels =
   List.iter
     (fun rel ->
@@ -405,6 +415,10 @@ let () =
             "lib/keeper direct completions request structured output"
             `Quick
             test_keeper_direct_completions_request_structured_output
+        ; test_case
+            "librarian runtime does not preserve unstructured fallback"
+            `Quick
+            test_librarian_runtime_does_not_preserve_unstructured_fallback
         ] )
     ; ( "dashboard json judges"
       , [ test_case

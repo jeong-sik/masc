@@ -135,6 +135,7 @@ type extraction_error =
   | Provider_timeout
   | Provider_transport_failed of string
   | Provider_empty_response
+  | Provider_unparseable_response of string
   | Memory_fact_upsert_failed of string
 
 val extraction_error_to_string : extraction_error -> string
@@ -146,8 +147,8 @@ type unparseable_response =
 
 val unparseable_response : ?raw_evidence:string -> string -> unparseable_response
 (** Typed retry diagnostic. [raw_evidence] is present only when the provider
-    returned non-empty output that can be preserved as an unstructured fallback;
-    [reason] describes that same response. *)
+    returned non-empty output; [reason] describes that same response so the
+    final typed provider error is not replaced by a later empty retry. *)
 
 type attempt_outcome =
   | Parsed of Keeper_memory_os_types.episode
@@ -160,6 +161,9 @@ type parse_retry_error =
 
 type extraction_kind =
   | Structured_episode
+  (* Compatibility constructor for older callers/tests that classify historical
+     diagnostic episodes. Current provider extraction no longer constructs this
+     variant from unparseable model output. *)
   | Unstructured_fallback
 
 type extraction_result =
@@ -169,8 +173,7 @@ type extraction_result =
 
 val should_record_cadence_success : extraction_kind -> bool
 (** Whether this extraction kind is allowed to reset the librarian cadence.
-    Unstructured fallback episodes are durable diagnostics, but they mean the
-    provider still failed to produce structured memory. *)
+    Structured episodes are semantic success. *)
 
 val should_record_cadence_backoff : extraction_kind -> bool
 (** Whether this non-success extraction kind should defer the next attempt until
@@ -183,9 +186,9 @@ val should_record_cadence_backoff_after_error : extraction_error -> bool
     failures should defer cadence; local deterministic failures stay due. *)
 
 val should_preserve_unstructured_fallback : string -> bool
-(** Whether raw unparseable provider output is worth preserving as a diagnostic
-    fallback fact. Empty output carries no evidence and should remain a provider
-    failure instead of polluting memory. *)
+(** Structured-only policy for raw unparseable provider output. This now always
+    returns [false]: provider-native schema failures remain typed provider
+    failures instead of becoming diagnostic fallback facts. *)
 
 val run_with_parse_retries
   :  max_retries:int

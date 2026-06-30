@@ -9,12 +9,15 @@ type record_outcome =
   | Loop_detected of { streak : int; threshold : int }
   | Loop_reset of { previous_streak : int; was_latched : bool }
 
+type progress_identity = Keeper_tool_progress_identity.t
+
 (* Per-keeper state: current streak + latched flag so the
    detected-counter only bumps once per loop episode, not on every
    turn while the keeper is stuck. *)
 type keeper_state = {
   mutable streak : int;
   mutable detected_latched : bool;
+  mutable last_progress_identity : progress_identity option;
 }
 
 let state : (string, keeper_state) Hashtbl.t = Hashtbl.create 16
@@ -31,7 +34,9 @@ let get_or_create keeper_name =
   match Hashtbl.find_opt state keeper_name with
   | Some s -> s
   | None ->
-      let s = { streak = 0; detected_latched = false } in
+      let s =
+        { streak = 0; detected_latched = false; last_progress_identity = None }
+      in
       Hashtbl.replace state keeper_name s;
       s
 
@@ -56,9 +61,26 @@ let update_streak_gauge keeper_name value =
 let turn_made_progress ~strong_evidence ~surface_requires_evidence =
   strong_evidence || not surface_requires_evidence
 
-let record_turn ?threshold_override ~keeper_name ~made_progress () =
+let repeated_progress_identity s progress_identity =
+  match progress_identity with
+  | None ->
+    s.last_progress_identity <- None;
+    false
+  | Some current ->
+    let repeated =
+      match s.last_progress_identity with
+      | Some previous -> Keeper_tool_progress_identity.equal previous current
+      | None -> false
+    in
+    s.last_progress_identity <- Some current;
+    repeated
+;;
+
+let record_turn ?threshold_override ?progress_identity ~keeper_name ~made_progress () =
   with_lock (fun () ->
     let s = get_or_create keeper_name in
+    let repeated_identity = repeated_progress_identity s progress_identity in
+    let made_progress = made_progress && not repeated_identity in
     if not made_progress then begin
       s.streak <- s.streak + 1;
       update_streak_gauge keeper_name s.streak;
@@ -75,9 +97,10 @@ let record_turn ?threshold_override ~keeper_name ~made_progress () =
         Log.Keeper.error
           "#9926/RFC-0239 no-progress loop detected keeper=%s streak=%d \
            threshold=%d — keeper repeated no-progress turns (silent speech act \
-           or board posts with no tool evidence). Check effective tool surface \
-           mismatch or scheduler/backlog drift. Counter will not re-fire until \
-           the streak resets via a turn that makes progress."
+           or board posts with no tool evidence, or identical tool-call \
+           progress identity). Check effective tool surface mismatch or \
+           scheduler/backlog drift. Counter will not re-fire until the streak \
+           resets via a turn that makes progress."
           keeper_name s.streak t;
         Loop_detected { streak = s.streak; threshold = t }
       end else Normal

@@ -314,7 +314,14 @@ let method_to_piaf : http_method -> Piaf.Method.t = function
 
 let close_unreleased_client released release_once =
   Eio.Cancel.protect (fun () ->
-    if not !released then (try release_once ~close_only:true with _ -> ()))
+    if not !released
+    then
+      try release_once ~close_only:true with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Misc.debug
+          "masc_http_client pool ignored close-only release failure: %s"
+          (Printexc.to_string exn))
 
 let path_and_query uri =
   let p = Uri.path uri in

@@ -182,7 +182,7 @@ let metric_of_block
   in
   {
     bytes;
-    estimated_tokens = Keeper_context_runtime.msg_tokens msg;
+    estimated_tokens = Keeper_context_core.msg_tokens msg;
     fingerprint = None;
   }
 

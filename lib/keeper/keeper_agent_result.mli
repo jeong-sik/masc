@@ -8,6 +8,8 @@ type tool_call_detail =
   ; latency_ms : float
   ; task_id : string option
   ; route_evidence : Yojson.Safe.t option
+  ; input_fingerprint : string option
+  ; output_fingerprint : string option
   }
 
 (** Result of a single Agent.run() keeper turn. *)

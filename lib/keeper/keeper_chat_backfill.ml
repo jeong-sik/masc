@@ -39,7 +39,9 @@ let backfill_line (line : string) : string option =
 let read_lines path =
   let ic = open_in_bin path in
   Fun.protect
-    ~finally:(fun () -> try close_in ic with _ -> ())
+    ~finally:(fun () ->
+      try close_in ic with
+      | Sys_error _ -> ())
     (fun () ->
       let rec loop acc =
         match input_line ic with
@@ -65,7 +67,9 @@ let backfill_file ~dry_run path =
     let tmp = path ^ ".backfill-tmp" in
     let oc = open_out_bin tmp in
     Fun.protect
-      ~finally:(fun () -> try close_out oc with _ -> ())
+      ~finally:(fun () ->
+        try close_out oc with
+        | Sys_error _ -> ())
       (fun () ->
         List.iter
           (fun line ->

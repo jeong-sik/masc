@@ -11,6 +11,8 @@ type tool_call_detail =
   ; latency_ms : float
   ; task_id : string option
   ; route_evidence : Yojson.Safe.t option
+  ; input_fingerprint : string option
+  ; output_fingerprint : string option
   }
 
 let tool_call_detail_to_json (detail : tool_call_detail) =
@@ -29,6 +31,16 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
     | Some outcome -> [ ("typed_outcome", Keeper_tool_outcome.to_json outcome) ]
     | None -> []
   in
+  let input_fingerprint_field =
+    match detail.input_fingerprint with
+    | Some fingerprint -> [ ("input_fingerprint", `String fingerprint) ]
+    | None -> []
+  in
+  let output_fingerprint_field =
+    match detail.output_fingerprint with
+    | Some fingerprint -> [ ("output_fingerprint", `String fingerprint) ]
+    | None -> []
+  in
   `Assoc
     ([
        ("tool_name", `String detail.tool_name);
@@ -38,6 +50,8 @@ let tool_call_detail_to_json (detail : tool_call_detail) =
      ]
      @ typed_outcome_field
      @ task_id_field
+     @ input_fingerprint_field
+     @ output_fingerprint_field
      @ route_evidence_field)
 
 let tool_names_of_calls (tool_calls : tool_call_detail list) : string list =

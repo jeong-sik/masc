@@ -252,6 +252,20 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
       ~strong_evidence
       ~surface_requires_evidence
   in
+  let progress_identity =
+    if strong_evidence && surface_requires_evidence
+    then
+      result.Keeper_agent_run.tool_calls
+      |> List.map (fun (detail : Keeper_agent_result.tool_call_detail) ->
+        { Keeper_tool_progress_identity.tool_name = detail.tool_name
+        ; typed_outcome = detail.typed_outcome
+        ; task_id = detail.task_id
+        ; input_fingerprint = detail.input_fingerprint
+        ; output_fingerprint = detail.output_fingerprint
+        })
+      |> Keeper_tool_progress_identity.of_calls
+    else None
+  in
   let threshold_override =
     budget_exhausted_no_progress_threshold_override
       ~stop_reason:result.Keeper_agent_run.stop_reason
@@ -262,6 +276,7 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
   match
     Keeper_no_progress_loop_detector.record_turn
       ?threshold_override
+      ?progress_identity
       ~keeper_name:updated_meta.Keeper_meta_contract.name
       ~made_progress
       ()

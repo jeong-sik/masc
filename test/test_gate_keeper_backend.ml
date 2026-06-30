@@ -510,7 +510,8 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
           tool_call_name = Some block_tool_name };
       Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
       Keeper_chat_events.Tool_call_args { tool_call_id = args_id_a; delta = args_a };
-      Keeper_chat_events.Tool_call_args { tool_call_id = args_id_b; delta = args_b };
+      Keeper_chat_events.Tool_call_args_snapshot
+        { tool_call_id = snapshot_id; snapshot };
       Keeper_chat_events.Oas_content_block_stop { index = stop_index };
       Keeper_chat_events.Tool_call_end { tool_call_id = end_id };
       Keeper_chat_events.Oas_thinking_delta { index = last_index; delta = last } ] ->
@@ -523,9 +524,9 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
       check string "tool id" "tc-1" tool_call_id;
       check string "tool name" "keeper_board_list" tool_call_name;
       check string "args id a" "tc-1" args_id_a;
-      check string "args id b" "tc-1" args_id_b;
+      check string "snapshot id" "tc-1" snapshot_id;
       check string "args a" "{\"limit\":" args_a;
-      check string "args b" "{\"limit\":1}" args_b;
+      check string "snapshot" "{\"limit\":1}" snapshot;
       check int "tool stop index" 1 stop_index;
       check string "end id" "tc-1" end_id;
       check int "last thinking index" 2 last_index;

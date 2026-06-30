@@ -7,6 +7,32 @@ entry parses as a complete rule. Malformed entries are ignored, reported as
 persistence read drops, and cannot match a future request or auto-approve a tool
 call.
 
+## Critical Approval Timeout Policy
+
+Production policy for `critical` HITL approvals is fail-closed and
+operator-must-decide:
+
+- Critical-risk pending approvals do not expire automatically.
+- The keeper turn remains suspended until an operator approves or rejects the
+  pending entry. This is intentional because automatic expiry can either deny a
+  required recovery action or requeue dangerous work without a human decision.
+- Operator coverage is required for unattended autonomous sessions that can
+  trigger Critical approvals. At least one operator must monitor the dashboard
+  approval queue and audit logs while those sessions are active. If coverage is
+  unavailable, pause or stop the keeper instead of relying on a timeout.
+- Escalation is manual today: inspect the dashboard approval queue, choose
+  approve or reject, or pause/stop the keeper and record the operator action.
+  Do not duplicate the decision outside the approval queue.
+- Surfacing is split by purpose: the dashboard approval queue is the live SSOT
+  for pending decisions, audit approval JSONL records pending/resolved/expired
+  events, and keeper logs emit the `HITL_APPROVAL_PENDING`,
+  `HITL_APPROVAL_RESOLVED`, and `HITL_APPROVAL_EXPIRED` markers.
+
+Bounded Critical timeout behavior requires runtime work before it can be used
+in production: typed timeout/escalation state, cancel/requeue semantics,
+dashboard state badges, audit events, and tests for each transition. Until that
+work exists, Critical approvals must not auto-cancel, auto-expire, or requeue.
+
 ## Fail-Closed Parse Policy
 
 The persisted file must be a JSON list. Each entry must be an object with these

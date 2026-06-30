@@ -151,6 +151,13 @@ val max_context_of_runtime_id : string -> int option
     not configured.  Budgeting callers use this to size a per-keeper routed turn
     against the same runtime that dispatch will use. *)
 
+val max_output_tokens_of_runtime_id : string -> int option
+(** Declared max output tokens (OAS capability catalog) for the model bound to
+    runtime [id], or [None] when the id is not configured or the catalog leaves
+    it unset.  Consumed by {!Runtime_inference.resolve_max_tokens} to size a
+    reasoning turn from the model's own output ceiling rather than the flat
+    fallback. *)
+
 val thinking_support_of_runtime_id : string -> bool option
 (** [thinking-support] capability of the model bound to runtime [id], or [None]
     when the id is not configured (e.g. before {!init_default}).  Consumed by

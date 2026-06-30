@@ -459,6 +459,22 @@ let max_context_of_runtime_id (id : string) : int option =
   | None -> None
 ;;
 
+(* The model's declared max output tokens (OAS capability catalog SSOT), or
+   [None] when the runtime is unknown or the catalog row leaves it unset.
+   Mirrors [max_context_of_runtime_id] but projects the OAS-typed capability
+   rather than the runtime.toml [model] record, because max output is owned by
+   the provider/model catalog, not the per-binding runtime config. Consumed by
+   [Runtime_inference.resolve_max_tokens] to size reasoning turns from the
+   model's own ceiling. *)
+let max_output_tokens_of_runtime_id (id : string) : int option =
+  match get_runtime_by_id id with
+  | Some rt ->
+    (match capabilities_for_runtime rt with
+     | Some caps -> caps.Llm_provider.Capabilities.max_output_tokens
+     | None -> None)
+  | None -> None
+;;
+
 let thinking_support_of_runtime_id (id : string) : bool option =
   match get_runtime_by_id id with
   | Some rt -> Some rt.model.thinking_support

@@ -78,46 +78,6 @@ function capChip(on: boolean, label: string) {
   return html`<span class="rt-cap ${on ? 'on' : ''}">${on ? '✓' : '·'} ${label}</span>`
 }
 
-// Read a bare [runtime] string value (librarian / cross_verifier) straight from
-// the draft. The parser only surfaces `default`, so the extra routing lanes are
-// read here from the same source text the parser consumes. Matches the
-// parser's [section] header + key = "value" grammar.
-function readRuntimeLaneValue(sourceText: string, key: string): string {
-  const lines = sourceText.split('\n')
-  let inRuntime = false
-  for (const rawLine of lines) {
-    const headerMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/)
-    if (headerMatch) {
-      inRuntime = headerMatch[1]?.trim() === 'runtime'
-      continue
-    }
-    if (!inRuntime) continue
-    const keyMatch = rawLine.match(/^\s*([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"\s*(?:#.*)?$/)
-    if (keyMatch && keyMatch[1] === key) return keyMatch[2] ?? ''
-  }
-  return ''
-}
-
-// Read [runtime.assignments] keeper -> runtime id from the draft. Same grammar
-// as the parser; surfaces explicit assignments so each keeper row reflects what
-// runtime.toml actually pins (and falls back to default when absent).
-function readRuntimeAssignments(sourceText: string): Record<string, string> {
-  const lines = sourceText.split('\n')
-  let inSection = false
-  const assignments: Record<string, string> = {}
-  for (const rawLine of lines) {
-    const headerMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/)
-    if (headerMatch) {
-      inSection = headerMatch[1]?.trim() === 'runtime.assignments'
-      continue
-    }
-    if (!inSection) continue
-    const keyMatch = rawLine.match(/^\s*([A-Za-z0-9_.-]+)\s*=\s*"([^"]*)"\s*(?:#.*)?$/)
-    if (keyMatch?.[1]) assignments[keyMatch[1]] = keyMatch[2] ?? ''
-  }
-  return assignments
-}
-
 // keeper.status -> StatusDot tone (bg). Mirrors copilot-dock's run/idle/bad
 // split; tone classes are the existing --color-status-* tokens.
 function keeperDotTone(status: string): string {
@@ -146,9 +106,9 @@ export function RuntimeEnvironmentEditor({
   const runtimeIds = runtimeOptions(environment)
   const isDisabled = disabled === true || saving === true
 
-  const librarianLane = readRuntimeLaneValue(sourceText, 'librarian')
-  const crossVerifierLane = readRuntimeLaneValue(sourceText, 'cross_verifier')
-  const assignments = readRuntimeAssignments(sourceText)
+  const librarianLane = environment.librarianRuntimeId
+  const crossVerifierLane = environment.crossVerifierRuntimeId
+  const assignments = environment.assignments
   const keeperList = keepers.value
 
   const filteredModels = environment.models.filter(model => {
@@ -162,6 +122,10 @@ export function RuntimeEnvironmentEditor({
   }
 
   function updateRoutingLane(lane: 'librarian' | 'cross_verifier', runtimeId: string) {
+    if (runtimeId === '') {
+      onDraftChange(deleteRuntimeTomlKey(sourceText, 'runtime', lane))
+      return
+    }
     onDraftChange(setRuntimeTomlKey(sourceText, 'runtime', lane, runtimeId))
   }
 
@@ -207,6 +171,7 @@ export function RuntimeEnvironmentEditor({
     onChange: (runtimeId: string) => void,
     needsJson: boolean,
   ) {
+    const canUnset = lane !== 'default'
     const binding = environment.bindings.find(b => b.id === value)
     const model = binding ? environment.models.find(m => m.id === binding.modelId) : null
     const hasJsonCap = model ? (typeof model.jsonSupport === 'boolean' ? model.jsonSupport : null) : false
@@ -230,8 +195,10 @@ export function RuntimeEnvironmentEditor({
             value=${value}
             disabled=${isDisabled}
             aria-label=${lane === 'default' ? 'default runtime' : `${lane} runtime`}
+            onInput=${(event: Event) => onChange((event.currentTarget as HTMLSelectElement).value)}
             onChange=${(event: Event) => onChange((event.currentTarget as HTMLSelectElement).value)}
           >
+            ${canUnset ? html`<option value="">미설정</option>` : null}
             ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
           </select>
           ${capWarning}

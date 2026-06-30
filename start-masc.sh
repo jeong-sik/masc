@@ -24,16 +24,6 @@ if command -v opam >/dev/null 2>&1; then
     eval "$(opam env 2>/dev/null)" >/dev/null 2>/dev/null || true
 fi
 
-# Load provider credentials from .masc/config/.env.local if present, so the
-# one-shot `masc init` setup flows into start without manual exports. $PWD here
-# is the caller's workspace before we cd into SCRIPT_DIR below; --base-path is
-# honored by the binary's own bootstrap for non-default base paths.
-if [ -f "$PWD/.masc/config/.env.local" ]; then
-    set -a
-    . "$PWD/.masc/config/.env.local"
-    set +a
-fi
-
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
@@ -474,6 +464,44 @@ restore_env_override() {
     fi
 }
 
+load_base_path_env_local() {
+    local base_path="$1"
+    local env_file="$base_path/.masc/config/.env.local"
+    if [ ! -f "$env_file" ]; then
+        return 0
+    fi
+
+    for env_name in \
+        MASC_KEEPER_BOOTSTRAP_ENABLED \
+        MASC_PORT \
+        MASC_HOST \
+        MASC_BASE_PATH \
+        MASC_SIDECAR_ROOT \
+        MASC_CONFIG_DIR \
+        MASC_PERSONAS_DIR \
+        MASC_WS_ENABLED \
+        MASC_WEBRTC_ENABLED
+    do
+        preserve_env_override "$env_name"
+    done
+
+    load_env_file "$env_file"
+
+    for env_name in \
+        MASC_KEEPER_BOOTSTRAP_ENABLED \
+        MASC_PORT \
+        MASC_HOST \
+        MASC_BASE_PATH \
+        MASC_SIDECAR_ROOT \
+        MASC_CONFIG_DIR \
+        MASC_PERSONAS_DIR \
+        MASC_WS_ENABLED \
+        MASC_WEBRTC_ENABLED
+    do
+        restore_env_override "$env_name"
+    done
+}
+
 REPO_ENV_ROOT="$(resolve_repo_env_root)"
 
 repo_local_config_dir_match() {
@@ -900,6 +928,11 @@ if [ -z "${MASC_CONFIG_DIR:-}" ]; then
 fi
 # Leave MASC_PERSONAS_DIR unset unless the caller explicitly overrides it.
 # The server-side config resolver will then use "$MASC_CONFIG_DIR/personas".
+
+# Load provider credentials from the active workspace after base-path resolution
+# and config bootstrap. This keeps --base-path/--path starts from importing
+# another workspace's .masc/config/.env.local via the caller's current directory.
+load_base_path_env_local "$RESOLVED_BASE_PATH"
 
 # Wait for port to become available.
 # Default behavior is fail-fast on conflict to prevent duplicate server startup.

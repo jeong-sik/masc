@@ -178,10 +178,23 @@ val category_valid_until : now:float -> category -> float option
     quiets the echo faster. Tune in cycles. *)
 val self_observation_ttl_seconds : float
 
+(** RFC-0259 P7: finite horizon for [External_state] claims, keyed on the
+    producer-emitted [claim_kind] tag (not on claim prose). Bounds how long a
+    volatile external claim (task status, blocker, PR state) can outlive its
+    truth. Longer than [self_observation_ttl_seconds]; tune in cycles. *)
+val external_state_ttl_seconds : float
+
+(** Effective [valid_until] for legacy [External_state] rows that were written
+    before P7 and therefore carry [valid_until = None]. Uses the original
+    [first_seen] anchor; it does not extend stale rows from read time. *)
+val external_state_valid_until_from_first_seen : first_seen:float -> float
+
 (** RFC-0285 §3.4: the write-side [valid_until] producer. [Self_observation]
     claim_kind gets the shortest finite horizon ([self_observation_ttl_seconds])
-    regardless of category/external_ref. Otherwise the category decides;
-    [external_ref] is accepted for compatibility but does not alter retention. *)
+    regardless of category/external_ref; [External_state] gets a longer finite
+    horizon ([external_state_ttl_seconds], RFC-0259 P7). Otherwise the category
+    decides; [external_ref] is accepted for compatibility but does not alter
+    retention. *)
 val fact_valid_until
   :  now:float
   -> external_ref:external_ref option
@@ -225,8 +238,14 @@ type fact =
         rows fall back to [normalize_claim] in [claim_identity]. *)
   }
 
+(** Stored or compatibility-derived hard-expiry horizon. Legacy
+    [External_state] rows with [valid_until = None] get a derived
+    [first_seen + external_state_ttl_seconds] horizon; other [None] rows remain
+    durable. *)
+val fact_effective_valid_until : fact -> float option
+
 (** Whether a fact's hard-expiry horizon still admits it at [now]. Facts with no
-    [valid_until] are durable and current. *)
+    effective [valid_until] are durable and current. *)
 val fact_is_current : now:float -> fact -> bool
 
 (** Legacy claim prefix for historical librarian parse-failure fallback facts.

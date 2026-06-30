@@ -49,16 +49,21 @@ let retention_rank ~now (f : fact) =
 let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
   match existing.claim_kind with
   | Some Self_observation ->
-    (* RFC-0285 §3.3: inherit the prior row entirely for self-observation. The
-       librarian re-extracting it — possibly reworded — is NOT re-verification; it
-       is the same self-narrative re-emitted from memory. Inheriting avoids
-       advancing [last_verified_at], which would raise [retention_rank] and make
-       the cap keep a self-observation as "recently verified" — the opposite of the
-       goal. *)
+    (* RFC-0285 §3.3: inherit the prior row; do NOT advance
+       [last_verified_at]. The librarian re-extracting a recalled
+       self-observation is not re-verification; it is the same self-narrative
+       re-emitted from memory. *)
     existing
-  | Some External_state | Some Durable_knowledge | Some Diagnostic | None ->
-    (* Non-self-observation re-observe: the librarian re-asserting a claim from
-       fresh context is enough to advance the staleness marker. *)
+  | Some External_state ->
+    (* RFC-0259 P7: do not advance [last_verified_at] on mere re-assertion, but
+       do materialize the compatibility-derived horizon for legacy rows whose
+       on-disk [valid_until] was absent before P7. The anchor remains
+       [first_seen], not [now], so re-observation cannot extend stale external
+       state. *)
+    { existing with valid_until = fact_effective_valid_until existing }
+  | Some Durable_knowledge | Some Diagnostic | None ->
+    (* Durable/diagnostic re-observe: re-asserting a timeless claim from fresh
+       context is enough to advance the staleness marker. *)
     { existing with last_verified_at = Some now }
 ;;
 

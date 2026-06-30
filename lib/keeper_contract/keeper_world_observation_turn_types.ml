@@ -29,6 +29,11 @@ type keeper_cycle_channel =
 type event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Connector_attention_stimulus
+      (** RFC-connector-ambient-attention-wake P1: an ambient connector message
+          recorded as Keeper_external_attention. Edge-triggered (dequeued once),
+          carries an event_id pointer (not content). Dormant until a producer
+          enqueues it (P3). *)
 
 type turn_reason =
   | Mention_pending
@@ -36,6 +41,7 @@ type turn_reason =
   | Scope_message_pending
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
+  | Connector_attention_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of
@@ -70,6 +76,7 @@ let turn_reason_to_string = function
   | Scope_message_pending -> "scope_message_pending"
   | Bootstrap_stimulus_pending -> "bootstrap_stimulus_pending"
   | No_progress_recovery_stimulus_pending -> "no_progress_recovery_stimulus_pending"
+  | Connector_attention_pending -> "connector_attention_pending"
   | Scheduled_autonomous_turn -> "scheduled_autonomous_turn"
   | Scheduled_automation_due -> "scheduled_automation_due"
   | Idle_cooldown_elapsed _ -> "idle_cooldown_elapsed"
@@ -83,6 +90,7 @@ let turn_reason_to_string = function
 let turn_reason_of_event_queue_trigger = function
   | Bootstrap_stimulus -> Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus -> No_progress_recovery_stimulus_pending
+  | Connector_attention_stimulus -> Connector_attention_pending
 ;;
 
 let skip_reason_to_string = function

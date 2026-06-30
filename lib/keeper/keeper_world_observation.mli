@@ -156,6 +156,7 @@ type keeper_cycle_channel =
 type event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Connector_attention_stimulus
 
 (** Typed reason for running a keeper cycle. Each variant corresponds to
     exactly one code path in {!keeper_cycle_decision}. *)
@@ -165,6 +166,7 @@ type turn_reason =
   | Scope_message_pending
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
+  | Connector_attention_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of { idle_sec : int; cooldown : int }

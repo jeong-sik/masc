@@ -117,6 +117,42 @@ let test_converter_rejects_flat_content () =
     (Option.is_none (Types.internal_history_json_to_trajectory_line json))
 ;;
 
+let test_skip_warns_once_per_file () =
+  (* Per-file summary: a trace file whose rows do not decode to thinking lines
+     must emit ONE summary WARN, not one per row. The dashboard re-reads each
+     trace on every poll, so the previous per-row WARN flooded the log (~16k/day
+     from a single busy trace, 84% of all warnings in one observed day). *)
+  with_temp_dir (fun dir ->
+    let config = Workspace.default_config dir in
+    let trace_file =
+      Keeper_types_support.keeper_internal_history_path config "summary_trace"
+    in
+    let trace_dir = Filename.dirname trace_file in
+    Unix.system (Printf.sprintf "mkdir -p '%s'" trace_dir) |> ignore;
+    let oc = open_out trace_file in
+    (* Four rows that do not decode to a thinking line (no ts field -> ts<=0). *)
+    Printf.fprintf
+      oc
+      "{\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"A\"}]}\n\
+       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"B\"}]}\n\
+       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"C\"}]}\n\
+       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"D\"}]}\n";
+    close_out oc;
+    let warnings = ref [] in
+    Console_sink.For_testing.reset ();
+    Console_sink.For_testing.set_writer (Some (fun l -> warnings := l :: !warnings));
+    Fun.protect ~finally:Console_sink.For_testing.reset (fun () ->
+      let result = Trace.read_internal_history_lines ~config ~trace_id:"summary_trace" in
+      check int "all four undecodable rows skipped" 0 (List.length result));
+    let trace_warns =
+      List.filter
+        (fun l -> Astring.String.is_infix ~affix:"internal history trace" l)
+        !warnings
+    in
+    check int "one summary warn for the file, not one per skipped row" 1
+      (List.length trace_warns))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
@@ -128,7 +164,9 @@ let () =
         ; test_case "preserves sub-microsecond precision" `Quick test_dedupe_precision
         ] )
     ; ( "read_internal_history_lines"
-      , [ test_case "skips invalid jsonl rows" `Quick test_read_invalid_json_skips ] )
+      , [ test_case "skips invalid jsonl rows" `Quick test_read_invalid_json_skips
+        ; test_case "summarises skips once per file" `Quick test_skip_warns_once_per_file
+        ] )
     ; ( "internal_history_json_to_trajectory_line"
       , [ test_case
             "decodes content_blocks rows"

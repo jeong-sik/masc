@@ -862,6 +862,42 @@ describe('SettingsSurface', () => {
     expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).getAttribute('data-active')).toBe('false')
   })
 
+  it('MCP transport previews render config shape without a fabricated runtime pid (any transport)', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+    await waitFor(() => {
+      expect(container.querySelector('.set-mcp-detail')).toBeTruthy()
+    })
+
+    const segByLabel = (label: string) =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+        .find(button => button.textContent === label)
+
+    // A pid is per-process runtime state, knowable only by observing a live spawned process.
+    // This surface is a browser-session config-shape preview with no backend/process-status
+    // source, so no transport branch may render a concrete pid. The pattern requires a
+    // word-bounded `pid` followed by digits across the file's own delimiters (space, ':', '=',
+    // '·'), so it catches `pid 8421`, `pid: 8421`, `pid·8421` and `pid=8421` alike. It permits
+    // the reviewer-allowed explicit non-fact `pid: n/a` (no trailing digits) and does not
+    // false-match words ending in "pid" (e.g. "rapid8").
+    const fabricatedPid = /\bpid\b[:=\s·]*\d+/i
+
+    for (const transport of ['http', 'stdio', 'sse']) {
+      const seg = segByLabel(transport)
+      expect(seg).toBeTruthy()
+      await fireEvent.click(seg as HTMLButtonElement)
+      const detail = container.querySelector('.set-mcp-detail')?.textContent ?? ''
+      expect(detail).not.toMatch(fabricatedPid)
+    }
+
+    // The stdio branch still renders its legitimate config-shape: spawn command + protocol framing.
+    await fireEvent.click(segByLabel('stdio') as HTMLButtonElement)
+    const stdioDetail = container.querySelector('.set-mcp-detail')?.textContent ?? ''
+    expect(stdioDetail).toContain('masc-mcp serve --stdio')
+    expect(stdioDetail).toContain('framing: ndjson')
+  })
+
   it('renders the fusion preset section (panel families + judge) read-only', async () => {
     render(html`<${SettingsSurface} />`, container)
 

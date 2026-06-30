@@ -1007,7 +1007,7 @@ export function SettingsSurface() {
               <//>
               <div class="set-mcp-detail mono">
                 ${transport === 'http' && html`<span>POST ${mcpUrl} · Content-Type: application/json · Authorization: Bearer ••••</span>`}
-                ${transport === 'stdio' && html`<span>spawn: masc-mcp serve --stdio · framing: ndjson · pid 8421</span>`}
+                ${transport === 'stdio' && html`<span>spawn: masc-mcp serve --stdio · framing: ndjson</span>`}
                 ${transport === 'sse' && html`<span>GET ${mcpUrl}/sse · keep-alive 15s · event: message</span>`}
               </div>
               <div class="set-sub-h">Local tool exposure preview (${mcpPreviewEnabledCount}/${mcpTools.length})</div>

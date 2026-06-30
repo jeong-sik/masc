@@ -75,6 +75,7 @@ const SET_GROUPS: [string, SectionId[]][] = [
 // (Tool_catalog.is_public_mcp). Unknown/empty inventory yields an empty list
 // (no fabricated tool names).
 const MCP_PUBLIC_SURFACE = 'public_mcp'
+const MCP_TRANSPORT_OPTIONS = ['http', 'stdio', 'sse']
 const SETTINGS_LOG_LIMIT = 50
 const SETTINGS_LOG_POLL_MS = 3000
 
@@ -686,7 +687,7 @@ export function SettingsSurface() {
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
   const [mcpUrl, setMcpUrl] = useLocalPreviewString('mcpUrl', 'https://masc.local/mcp')
-  const [transport, setTransport] = useState('http')
+  const [transport, setTransport] = useLocalPreviewString('mcpTransport', 'http')
   const [mcpTools, setMcpTools] = useState<string[]>([])
   const [tools, setTools] = useState<Record<string, boolean>>({})
 
@@ -700,8 +701,8 @@ export function SettingsSurface() {
         setMcpTools(names)
         // Listed tools are, by definition, currently exposed over public MCP.
         // The per-tool toggle is a local view control; expose/unexpose
-        // persistence is deferred (no backend write endpoint yet).
-        setTools(Object.fromEntries(names.map(n => [n, true])))
+        // backend persistence is deferred (no backend write endpoint yet).
+        setTools(readLocalPreviewBoolRecord('mcpToolPreview', Object.fromEntries(names.map(n => [n, true]))))
       } catch {
         if (!active) return
         // No fabricated tool names on failure.
@@ -711,6 +712,14 @@ export function SettingsSurface() {
     })()
     return () => { active = false }
   }, [])
+
+  function updateMcpToolPreview(tool: string, enabled: boolean) {
+    setTools(prev => {
+      const next = { ...prev, [tool]: enabled }
+      writeLocalPreviewBoolRecord('mcpToolPreview', next)
+      return next
+    })
+  }
 
   // runtime defaults / model routing — resolved from runtime.toml (SSOT)
   const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
@@ -844,6 +853,7 @@ export function SettingsSurface() {
 
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
   const sectionState = settingsSectionState(sec, fusionSettingsWritable)
+  const mcpPreviewEnabledCount = Object.values(tools).filter(Boolean).length
   const grantedGroupCount = Object.values(grant).filter(Boolean).length
   const gatePreviewEnabledCount = Object.values(gateOn).filter(Boolean).length
 
@@ -939,7 +949,12 @@ export function SettingsSurface() {
 
             ${sec === 'mcp' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Expose this namespace to external agents/clients via an MCP server.
+                Live <span class="mono">public_mcp</span> inventory is read from the backend. Endpoint, transport and per-tool switches below are browser-session exposure previews only; they do not rewrite MCP server policy.
+              </div>
+              <div class="set-local-summary" data-testid="mcp-local-summary">
+                <span>local exposure preview</span>
+                <span class="mono">${mcpPreviewEnabledCount}/${mcpTools.length} enabled</span>
+                <${PreviewBadge} />
               </div>
               <${SetRow} label="MCP endpoint" hint="GET/POST /mcp">
                 <div class="set-path">
@@ -952,23 +967,29 @@ export function SettingsSurface() {
                   <${PreviewBadge} />
                 </div>
               <//>
-              <${SetRow} label="Transport" hint="transport">
-                <${SetSeg} value=${transport} options=${['http', 'stdio', 'sse']} onChange=${setTransport} />
+              <${SetRow} label="Transport" hint="browser-session preview">
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSeg} value=${transport} options=${MCP_TRANSPORT_OPTIONS} onChange=${setTransport} />
+                </div>
               <//>
               <div class="set-mcp-detail mono">
                 ${transport === 'http' && html`<span>POST ${mcpUrl} · Content-Type: application/json · Authorization: Bearer ••••</span>`}
                 ${transport === 'stdio' && html`<span>spawn: masc-mcp serve --stdio · framing: ndjson · pid 8421</span>`}
                 ${transport === 'sse' && html`<span>GET ${mcpUrl}/sse · keep-alive 15s · event: message</span>`}
               </div>
-              <div class="set-sub-h">Exposed tools (${Object.values(tools).filter(Boolean).length}/${mcpTools.length})</div>
+              <div class="set-sub-h">Local tool exposure preview (${mcpPreviewEnabledCount}/${mcpTools.length})</div>
               ${mcpTools.length === 0
                 ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
                 : mcpTools.map(t => html`
                 <${SetRow} key=${t} label=${html`<span class="mono" style=${{ fontSize: '12.5px' }}>${t}</span>`}>
-                  <${SetToggle}
-                    on=${tools[t] ?? false}
-                    onChange=${(v: boolean) => setTools(p => ({ ...p, [t]: v }))}
-                  />
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetToggle}
+                      on=${tools[t] ?? false}
+                      onChange=${(v: boolean) => updateMcpToolPreview(t, v)}
+                    />
+                  </div>
                 <//>
               `)}
             `}

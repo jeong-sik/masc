@@ -700,9 +700,11 @@ describe('SettingsSurface', () => {
     })
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live inventory + local controls')
     expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
+    expect(container.textContent).toContain('Live public_mcp inventory is read from the backend')
+    expect(container.textContent).not.toContain('Expose this namespace to external agents')
   })
 
-  it('MCP exposed-tool toggles are clickable local controls', async () => {
+  it('MCP exposed-tool toggles are browser-session exposure previews', async () => {
     apiMock.fetchDashboardTools.mockResolvedValue({
       tool_inventory: {
         count: 2,
@@ -717,8 +719,19 @@ describe('SettingsSurface', () => {
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
     await waitFor(() => {
-      expect(container.textContent).toContain('Exposed tools (2/2)')
+      expect(container.textContent).toContain('Local tool exposure preview (2/2)')
     })
+
+    const summary = () => container.querySelector('[data-testid="mcp-local-summary"]') as HTMLElement
+    expect(summary().textContent).toContain('local exposure preview')
+    expect(summary().textContent).toContain('2/2 enabled')
+
+    const stdio = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === 'stdio')
+    expect(stdio).toBeTruthy()
+    await fireEvent.click(stdio as HTMLButtonElement)
+    expect(container.querySelector('.set-mcp-detail')?.textContent).toContain('masc-mcp serve --stdio')
+    expect(sessionStorage.getItem('masc.settings.local.mcpTransport')).toBe('stdio')
 
     const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
     expect(toggles.length).toBe(2)
@@ -728,7 +741,19 @@ describe('SettingsSurface', () => {
     await fireEvent.click(toggles[0]!)
 
     expect(toggles[0]!.getAttribute('aria-checked')).toBe('false')
-    expect(container.textContent).toContain('Exposed tools (1/2)')
+    expect(container.textContent).toContain('Local tool exposure preview (1/2)')
+    expect(summary().textContent).toContain('1/2 enabled')
+    expect(sessionStorage.getItem('masc.settings.local.mcpToolPreview')).toContain('"masc_handoff":false')
+
+    render(null, container)
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('Local tool exposure preview (1/2)')
+    })
+    expect(container.querySelector('.set-mcp-detail')?.textContent).toContain('masc-mcp serve --stdio')
+    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).getAttribute('data-active')).toBe('false')
   })
 
   it('renders the fusion preset section (panel families + judge) read-only', async () => {

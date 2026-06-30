@@ -50,20 +50,14 @@ let valid_sections =
     )
   ; "code", [ "ide-shell" ]
   ; ( "settings"
-    , [ "mcp"
-      ; "runtime"
+    , [ "runtime"
       ; "runtimes"
-      ; "routing"
+      ; "paths"
+      ; "mcp"
+      ; "notify"
       ; "prompts"
       ; "fusion"
-      ; "policy"
-      ; "lifecycle"
-      ; "sandbox"
-      ; "ide"
-      ; "gate"
-      ; "paths"
       ; "logs"
-      ; "notify"
       ; "display"
       ] )
   ]

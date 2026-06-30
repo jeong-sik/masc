@@ -53,6 +53,15 @@ let test_reject_settings_account_section () =
     (Astring.String.is_infix ~affix:"unknown section" msg)
 ;;
 
+let test_reject_retired_settings_routing_section () =
+  let msg = parse_err {|{"surface":"settings","section":"routing"}|} in
+  check
+    bool
+    "mentions section"
+    true
+    (Astring.String.is_infix ~affix:"unknown section" msg)
+;;
+
 let test_parse_full_event () =
   let event =
     parse_ok {|{"surface":"monitoring","section":"agents","redirected_from":"none"}|}
@@ -206,6 +215,10 @@ let () =
             "rejects settings account section"
             `Quick
             test_reject_settings_account_section
+        ; test_case
+            "rejects retired settings routing section"
+            `Quick
+            test_reject_retired_settings_routing_section
         ; test_case "full event" `Quick test_parse_full_event
         ; test_case "redirected_from accepted" `Quick test_parse_redirected
         ; test_case "rejects unknown surface" `Quick test_reject_unknown_surface

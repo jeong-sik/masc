@@ -36,6 +36,11 @@ type stimulus_payload =
          — wakes the calling keeper so the outcome arrives as actionable turn
          input. Phase 1 adds the variant only; no producer emits it yet
          (executor lands in RFC-0290 Phase 3). *)
+  | Connector_attention of connector_attention
+      (* RFC-connector-ambient-attention-wake: an ambient connector message
+         recorded as external attention. Carries the [event_id] pointer (not
+         content). Dormant — no producer emits it yet (handle_ambient enqueuer
+         lands in P3), same staging as [Bg_completed] above. *)
 
 and fusion_completion = {
   run_id : string;
@@ -61,6 +66,11 @@ and bg_job_kind = Subprocess
 and bg_job_outcome =
   | Bg_ok of string  (* result payload *)
   | Bg_failed of string  (* failure label *)
+
+and connector_attention = { event_id : string }
+      (* RFC-connector-ambient-attention-wake: pointer into
+         [Keeper_external_attention] for the ambient message; content/surface
+         read from that store on the turn path. *)
 
 let fusion_completion_post_id (fc : fusion_completion) =
   if String.equal fc.board_post_id "" then "fusion-run:" ^ fc.run_id
@@ -181,10 +191,12 @@ let payload_kind_label = function
   | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed _ -> "fusion_completed"
   | Bg_completed _ -> "bg_completed"
+  | Connector_attention _ -> "connector_attention"
 
 let is_board_signal = function
   | Board_signal _ -> true
-  | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _ ->
+  | Bootstrap | No_progress_recovery | Fusion_completed _ | Bg_completed _
+  | Connector_attention _ ->
     false
 
 let drain_board_window ?(window_sec = 2.0) (queue : t) : stimulus list * t =
@@ -312,6 +324,11 @@ let payload_to_yojson = function
       ; "payload", `String payload
       ; "board_post_id", `String c.bg_board_post_id
       ]
+  | Connector_attention ca ->
+    `Assoc
+      [ "kind", `String "connector_attention"
+      ; "event_id", `String ca.event_id
+      ]
 
 let payload_of_yojson json =
   let context = "stimulus.payload" in
@@ -346,6 +363,9 @@ let payload_of_yojson json =
     Ok
       (Bg_completed
          { bg_run_id = run_id; bg_kind; bg_outcome; bg_board_post_id = board_post_id })
+  | "connector_attention" ->
+    let* event_id = string_field ~context "event_id" fields in
+    Ok (Connector_attention { event_id })
   | value -> Error (Printf.sprintf "unknown stimulus payload kind: %s" value)
 
 let stimulus_to_yojson (stimulus : stimulus) =

@@ -105,6 +105,7 @@ type event_queue_trigger =
   Keeper_world_observation_turn_types.event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Connector_attention_stimulus
 
 type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Mention_pending
@@ -112,6 +113,7 @@ type turn_reason = Keeper_world_observation_turn_types.turn_reason =
   | Scope_message_pending
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
+  | Connector_attention_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of
@@ -541,7 +543,13 @@ let pending_board_event_of_stimulus
   | Keeper_event_queue.Bg_completed c ->
     Some
       (pending_board_event_of_bg_job_completion ~meta ~arrived_at:stimulus.arrived_at c)
-  | Keeper_event_queue.Bootstrap | Keeper_event_queue.No_progress_recovery -> None
+  | Keeper_event_queue.Bootstrap
+  | Keeper_event_queue.No_progress_recovery
+  | Keeper_event_queue.Connector_attention _ ->
+    (* RFC-connector-ambient-attention-wake P1: not a board event. The wake
+       fires via the Connector_attention_stimulus trigger; content threading
+       from external_attention is P3. *)
+    None
 ;;
 
 (** Collect recent board activity using cursor-based tracking.

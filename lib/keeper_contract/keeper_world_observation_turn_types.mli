@@ -7,6 +7,10 @@ type keeper_cycle_channel =
 type event_queue_trigger =
   | Bootstrap_stimulus
   | No_progress_recovery_stimulus
+  | Connector_attention_stimulus
+      (** RFC-connector-ambient-attention-wake P1: ambient connector message
+          recorded as external attention; edge-triggered, carries an event_id
+          pointer. Dormant until a producer enqueues it (P3). *)
 
 type turn_reason =
   | Mention_pending
@@ -14,6 +18,7 @@ type turn_reason =
   | Scope_message_pending
   | Bootstrap_stimulus_pending
   | No_progress_recovery_stimulus_pending
+  | Connector_attention_pending
   | Scheduled_autonomous_turn
   | Scheduled_automation_due
   | Idle_cooldown_elapsed of

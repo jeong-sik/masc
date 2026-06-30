@@ -57,6 +57,13 @@ type stimulus_payload =
   | No_progress_recovery
   | Fusion_completed of fusion_completion
   | Bg_completed of bg_job_completion
+  | Connector_attention of connector_attention
+      (** RFC-connector-ambient-attention-wake: an ambient connector message
+          recorded as [Keeper_external_attention]. Carries the [event_id]
+          pointer into that durable store (not the content), so the wake reads
+          content on the turn path and there is no payload duplication.
+          Edge-triggered: dequeued once, re-armed only by a new ambient
+          message. Dormant until [handle_ambient] enqueues it (P3). *)
 (** Closed set of stimulus kinds. Replaces the prior [payload : string] +
     [classify] JSON-prefix round-trip: producers hold the typed value and
     consumers match it exhaustively, so an unrecognised stimulus is
@@ -95,6 +102,11 @@ and bg_job_kind = Subprocess
 and bg_job_outcome =
   | Bg_ok of string  (** result payload *)
   | Bg_failed of string  (** failure label *)
+
+and connector_attention = { event_id : string }
+(** RFC-connector-ambient-attention-wake payload for [Connector_attention]:
+    [event_id] is the pointer into [Keeper_external_attention] for the ambient
+    message; content/surface are read from that store on the turn path. *)
 
 val fusion_completion_post_id : fusion_completion -> post_id
 (** Dedup/correlation id for [Fusion_completed]. Uses [board_post_id] when the

@@ -63,6 +63,8 @@ let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
   | Keeper_event_queue.No_progress_recovery ->
     Some Keeper_world_observation.No_progress_recovery_stimulus
+  | Keeper_event_queue.Connector_attention _ ->
+    Some Keeper_world_observation.Connector_attention_stimulus
   | Keeper_event_queue.Board_signal _
   | Keeper_event_queue.Fusion_completed _
   | Keeper_event_queue.Bg_completed _ ->
@@ -127,6 +129,37 @@ let consume_single_heartbeat_stimulus
       ~ctx
       ~keeper_name:meta_after_triage.name
       stim;
+    []
+  | Keeper_event_queue.Connector_attention ca ->
+    (* RFC-connector-ambient-attention-wake: the stimulus woke this keeper.
+       P2 — resolution lifecycle (turn-start half): claim the external-attention
+       item so the operator digest shows it as being handled rather than still
+       pending (and a stale claim re-surfaces only after claim_stale_after, not
+       every cycle). The wake itself is already resolution-safe — the stimulus is
+       edge-consumed here exactly once (P1) — so this claim is for the durable
+       backlog projection, not for gating the wake. mark_resolved / mark_ignored
+       at turn end is coupled to reading the content and deciding whether to
+       reply, which lands with content threading + outbound (P3).
+       Content injection is P3; for now the turn runs with no injected board
+       event, like Bootstrap / No_progress_recovery. *)
+    (match
+       Keeper_external_attention.claim_for_turn
+         ~base_path:ctx.config.base_path
+         ~keeper_name:meta_after_triage.name
+         ~event_ids:[ ca.event_id ]
+         ~claim_id:(Printf.sprintf "heartbeat-wake:%s" stim.post_id)
+         ~turn_id:None
+         ()
+     with
+     | Ok () -> ()
+     | Error err ->
+       Log.Keeper.warn
+         "connector attention claim_for_turn failed event_id=%s (keeper=%s): %s"
+         ca.event_id meta_after_triage.name err);
+    Log.Keeper.info
+      "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
+      ca.event_id
+      meta_after_triage.name;
     []
 ;;
 

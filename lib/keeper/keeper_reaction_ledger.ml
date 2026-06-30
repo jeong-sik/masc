@@ -9,6 +9,8 @@ type stimulus_kind =
   | No_progress_recovery
   | Fusion_completed  (* RFC-0266: async masc_fusion completion wake *)
   | Bg_completed  (* RFC-0290: generic background job completion wake *)
+  | Connector_attention
+      (* RFC-connector-ambient-attention-wake: ambient connector message wake *)
 
 type reaction_kind =
   | Turn_started
@@ -27,6 +29,7 @@ let stimulus_kind_to_string = function
   | No_progress_recovery -> "no_progress_recovery"
   | Fusion_completed -> "fusion_completed"
   | Bg_completed -> "bg_completed"
+  | Connector_attention -> "connector_attention"
 ;;
 
 (* stimulus_kind_to_string의 역. 닫힌 합에 없는 문자열(스키마 드리프트/손상 row)은
@@ -39,6 +42,7 @@ let stimulus_kind_of_string = function
   | "no_progress_recovery" -> Some No_progress_recovery
   | "fusion_completed" -> Some Fusion_completed
   | "bg_completed" -> Some Bg_completed
+  | "connector_attention" -> Some Connector_attention
   | _ -> None
 ;;
 
@@ -83,6 +87,7 @@ let stimulus_kind_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
   | Keeper_event_queue.No_progress_recovery -> No_progress_recovery
   | Keeper_event_queue.Fusion_completed _ -> Fusion_completed
   | Keeper_event_queue.Bg_completed _ -> Bg_completed
+  | Keeper_event_queue.Connector_attention _ -> Connector_attention
 ;;
 
 let stimulus_id_of_event_queue (stimulus : Keeper_event_queue.stimulus) =
@@ -157,6 +162,8 @@ let stimulus_payload_preview (payload : Keeper_event_queue.stimulus_payload) =
       "bg_completed run_id=%s kind=%s"
       c.bg_run_id
       (Keeper_event_queue.bg_job_kind_to_string c.bg_kind)
+  | Keeper_event_queue.Connector_attention ca ->
+    Printf.sprintf "connector_attention event_id=%s" ca.event_id
 ;;
 
 let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
@@ -169,7 +176,8 @@ let stimulus_json ~keeper_name (stimulus : Keeper_event_queue.stimulus) =
     | Keeper_event_queue.Bootstrap
     | Keeper_event_queue.No_progress_recovery
     | Keeper_event_queue.Fusion_completed _
-    | Keeper_event_queue.Bg_completed _ -> None
+    | Keeper_event_queue.Bg_completed _
+    | Keeper_event_queue.Connector_attention _ -> None
   in
   `Assoc
     (base_fields
@@ -651,7 +659,8 @@ let summarize_rows ~keeper_name ~limit rows =
           추가 시 이 or-pattern이 non-exhaustive가 되어 컴파일 에러 → 분류 갱신을
           강제한다 (catch-all 금지). *)
        | Some
-           (Board_signal | Bootstrap | No_progress_recovery | Fusion_completed | Bg_completed)
+           ( Board_signal | Bootstrap | No_progress_recovery | Fusion_completed
+           | Bg_completed | Connector_attention )
          -> ())
   in
   let note_payload_parse_error row =
@@ -743,7 +752,9 @@ let summarize_rows ~keeper_name ~limit rows =
       (fun id ->
         match Option.bind (Hashtbl.find_opt stimulus_kind_by_id id) stimulus_kind_of_string with
         | Some No_progress_recovery -> true
-        | Some (Board_signal | Bootstrap | Fusion_completed | Bg_completed)
+        | Some
+            ( Board_signal | Bootstrap | Fusion_completed | Bg_completed
+            | Connector_attention )
         | None ->
           false)
       pending_stimulus_ids

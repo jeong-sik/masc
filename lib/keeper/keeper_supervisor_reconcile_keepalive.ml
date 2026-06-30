@@ -15,10 +15,14 @@ let reconcile_keepalive_keepers
       ~publish_lifecycle
       ~supervise_keepalive
       ~load_or_materialize_keeper_meta
-      (ctx : _ context)
+  (ctx : _ context)
   =
   let base_path = ctx.config.base_path in
-  let names = Keeper_meta_store.keepalive_keeper_names ctx.config in
+  let names =
+    Keeper_meta_store.keepalive_keeper_names ctx.config
+    @ Keeper_meta_store.paused_reconcile_keeper_names ctx.config
+    |> List.sort_uniq String.compare
+  in
   Log.Keeper.debug
     "reconcile_keepalive_keepers: started (candidates=%d)"
     (List.length names);

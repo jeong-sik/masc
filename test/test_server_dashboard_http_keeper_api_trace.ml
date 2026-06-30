@@ -1,6 +1,7 @@
 open Alcotest
 open Masc
 module Trace = Server_dashboard_http_keeper_api_trace
+module Types = Server_dashboard_http_keeper_api_types
 module T = Trajectory
 
 let mk_thinking ~ts ~redacted ~content =
@@ -61,12 +62,14 @@ let test_read_invalid_json_skips () =
     let trace_dir = Filename.dirname trace_file in
     Unix.system (Printf.sprintf "mkdir -p '%s'" trace_dir) |> ignore;
     let oc = open_out trace_file in
-    (* 1 valid line, 1 invalid line (missing ts/timestamp), 1 valid line *)
+    (* Rows persist message text as typed [content_blocks] (the only supported
+       message-content shape), not a flat [content] string. 1 valid line, 1
+       invalid line (missing ts/timestamp), 1 valid line. *)
     Printf.fprintf
       oc
-      "{\"source\":\"internal_assistant\",\"content\":\"A\",\"ts_unix\":1.0}\n\
-       {\"source\":\"internal_assistant\",\"content\":\"B\"}\n\
-       {\"source\":\"internal_assistant\",\"content\":\"C\",\"ts_unix\":3.0}\n";
+      "{\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"A\"}],\"ts_unix\":1.0}\n\
+       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"B\"}]}\n\
+       {\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"C\"}],\"ts_unix\":3.0}\n";
     close_out oc;
     let result = Trace.read_internal_history_lines ~config ~trace_id:"test_trace" in
     (* Should skip the invalid line ("B") without failing *)
@@ -78,6 +81,40 @@ let test_read_invalid_json_skips () =
       check string "second" "C" c.content;
       check (float 0.0) "second_ts" 3.0 c.ts
     | _ -> fail "expected two valid thinking lines")
+;;
+
+let test_converter_decodes_content_blocks () =
+  (* Regression: persisted internal_assistant rows store text under typed
+     [content_blocks]. Before the fix, the converter read a flat [content]
+     field, decoded "" for every row, and returned None — the whole keeper
+     reasoning history was skipped (3339+ "Skipped invalid internal history
+     trace row" WARNs/day) and invisible in the dashboard trace. *)
+  let json =
+    Yojson.Safe.from_string
+      "{\"source\":\"internal_assistant\",\"content_blocks\":[{\"type\":\"text\",\"text\":\"hello world\"}],\"ts_unix\":2.0}"
+  in
+  match Types.internal_history_json_to_trajectory_line json with
+  | Some (T.Thinking entry) ->
+    check string "content" "hello world" entry.content;
+    check int "content_length" (String.length "hello world") entry.content_length;
+    check (float 0.0) "ts" 2.0 entry.ts
+  | Some (T.Tool_call _) -> fail "expected Thinking, got Tool_call"
+  | None -> fail "content_blocks row must decode to a Thinking line"
+;;
+
+let test_converter_rejects_flat_content () =
+  (* Contract: [content_blocks] is the only supported message-content shape
+     (Keeper_context_core_message_json). A legacy flat [content] string is not
+     the supported shape and must not silently masquerade as message text. *)
+  let json =
+    Yojson.Safe.from_string
+      "{\"source\":\"internal_assistant\",\"content\":\"legacy flat\",\"ts_unix\":2.0}"
+  in
+  check
+    bool
+    "flat content (no content_blocks) does not decode"
+    true
+    (Option.is_none (Types.internal_history_json_to_trajectory_line json))
 ;;
 
 let () =
@@ -92,5 +129,15 @@ let () =
         ] )
     ; ( "read_internal_history_lines"
       , [ test_case "skips invalid jsonl rows" `Quick test_read_invalid_json_skips ] )
+    ; ( "internal_history_json_to_trajectory_line"
+      , [ test_case
+            "decodes content_blocks rows"
+            `Quick
+            test_converter_decodes_content_blocks
+        ; test_case
+            "rejects flat content rows"
+            `Quick
+            test_converter_rejects_flat_content
+        ] )
     ]
 ;;

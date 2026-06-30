@@ -304,7 +304,13 @@ let keeper_history_summary_json
         let j = Yojson.Safe.from_string line in
         let role = Safe_ops.json_string ~default:"" "role" j |> String.trim in
         let role_lc = String.lowercase_ascii role in
-        let content = Safe_ops.json_string ~default:"" "content" j |> String.trim in
+        (* Message text lives in typed [content_blocks], not a flat [content]
+           string. Reading flat [content] decoded "" for every row, so the
+           keeper conversation / k2k summary was empty. Same SSOT extractor as
+           the trace view. *)
+        let content =
+          Keeper_context_core.text_of_history_jsonl_json j |> String.trim
+        in
         let source = Safe_ops.json_string ~default:"" "source" j |> String.trim in
         let ts_unix =
           let ts0 = Safe_ops.json_float ~default:0.0 "ts_unix" j in

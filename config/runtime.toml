@@ -197,8 +197,10 @@ supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
 supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = true
+# SSOT = OAS models.toml per official MiniMax Chat docs: Chat tool_choice /
+# response_format / structured output are not documented (jeong-sik/oas#2339).
+supports-response-format-json = false
+supports-structured-output = false
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -659,8 +661,9 @@ supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
 supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = true
+# SSOT = OAS models.toml per official MiniMax Chat docs (jeong-sik/oas#2339).
+supports-response-format-json = false
+supports-structured-output = false
 supports-image-input = true
 supports-multimodal-inputs = true
 

@@ -702,6 +702,11 @@
  (modules test_keeper_structured_output_coverage)
  (libraries alcotest ast_grep masc_test_deps masc.fusion_core))
 
+(test
+ (name test_keeper_structured_output_schema)
+ (modules test_keeper_structured_output_schema)
+ (libraries alcotest masc_test_deps masc.fusion_core))
+
 ; Destructive-ops policy TOML loader + typed default catalogue.
 
 (test

@@ -390,6 +390,16 @@ end
 let get_default_runtime () = (runtime_state ()).default_runtime
 let get_runtimes () = (runtime_state ()).runtimes
 let get_runtime_ids () = runtime_ids (runtime_state ()).runtimes
+
+let default_runtime_id_or_fail () =
+  match (runtime_state ()).default_runtime with
+  | Some rt -> rt.id
+  | None ->
+    failwith
+      "Runtime.get_default_runtime_id: default runtime not initialized; \
+       Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
+;;
+
 let runtimes_and_media_failover () =
   let state = runtime_state () in
   state.runtimes, state.media_failover
@@ -421,13 +431,7 @@ let runtime_id_for_structured_judge () =
   match state.structured_judge_runtime_id, state.librarian_runtime_id with
   | Some id, _ -> id
   | None, Some id -> id
-  | None, None ->
-    (match state.default_runtime with
-     | Some rt -> rt.id
-     | None ->
-       failwith
-         "Runtime.runtime_id_for_structured_judge: default runtime not \
-          initialized; call Runtime.init_default first")
+  | None, None -> default_runtime_id_or_fail ()
 ;;
 
 (* [runtime].cross_verifier routing for the anti-rationalization evaluator.
@@ -507,12 +511,7 @@ let pricing_of_runtime_id (id : string) : float option * float option =
    NB(R2): 함수 호출 시점에만 raise 하므로 호출자는 이 값을 모듈 top-level
    [let] 로 eager 바인딩하면 안 된다(config-less 테스트 바이너리 load crash). *)
 let get_default_runtime_id () =
-  match (runtime_state ()).default_runtime with
-  | Some rt -> rt.id
-  | None ->
-    failwith
-      "Runtime.get_default_runtime_id: default runtime not initialized; \
-       Runtime.init_default must run at startup (no silent fallback — RFC-0206 §2.1)"
+  default_runtime_id_or_fail ()
 ;;
 
 let config_path () : string option =

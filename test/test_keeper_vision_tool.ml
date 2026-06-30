@@ -495,6 +495,41 @@ let with_temp_runtime_toml content f =
       init_runtime_or_fail path;
       f ())
 
+let schema_capable_vision_manifest_json =
+  let entry id =
+    `Assoc
+      [ "id_prefix", `String id
+      ; "base", `String "ollama"
+      ; "supports_structured_output", `Bool true
+      ]
+  in
+  `Assoc
+    [ "schema_version", `Int 1
+    ; "models", `List [ entry "vision-a"; entry "vision-b"; entry "vision-c" ]
+    ]
+;;
+
+let with_schema_capable_vision_manifest f =
+  let previous = Llm_provider.Capability_manifest.global () in
+  let manifest =
+    match Llm_provider.Capability_manifest.of_json schema_capable_vision_manifest_json with
+    | Ok manifest -> manifest
+    | Error msg -> failwith ("invalid vision capability manifest fixture: " ^ msg)
+  in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some manifest -> Llm_provider.Capability_manifest.set_global manifest
+      | None -> Llm_provider.Capability_manifest.clear_global ())
+    (fun () ->
+      Llm_provider.Capability_manifest.set_global manifest;
+      f ())
+;;
+
+let with_schema_capable_runtime_toml content f =
+  with_schema_capable_vision_manifest (fun () -> with_temp_runtime_toml content f)
+;;
+
 let vision_failover_runtime_toml =
   {|
 [runtime]
@@ -516,6 +551,7 @@ max-context = 4096
 [models.vision-a.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
+supports-structured-output = true
 
 [models.vision-b]
 api-name = "vision-b"
@@ -524,6 +560,7 @@ max-context = 4096
 [models.vision-b.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
+supports-structured-output = true
 
 [p1.vision-a]
 
@@ -547,6 +584,7 @@ max-context = 4096
 [models.vision-c.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
+supports-structured-output = true
 
 [p3.vision-c]
 |}
@@ -573,7 +611,7 @@ supports-multimodal-inputs = true
 |}
 
 let test_temp_runtime_toml_restores_runtime_cache () =
-  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+  with_schema_capable_runtime_toml vision_failover_runtime_toml (fun () ->
     let before = Runtime.get_runtime_ids () in
     with_temp_runtime_toml single_vision_runtime_toml (fun () ->
       assert (Runtime.get_runtime_ids () = [ "p3.vision-c" ]));
@@ -608,7 +646,7 @@ let test_schema_unsupported_vision_runtime_is_skipped_before_provider_call () =
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
 
 let test_invalid_structured_vision_response_is_runtime_failure () =
-  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+  with_schema_capable_runtime_toml single_vision_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-invalid-structured-response" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
@@ -636,7 +674,7 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
       assert (contains_substring (assoc_string "detail" json) "not valid JSON")))
 
 let test_retryable_provider_error_tries_next_runtime () =
-  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+  with_schema_capable_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-failover" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
@@ -695,7 +733,7 @@ let test_retryable_provider_error_tries_next_runtime () =
         (metric_value Keeper_metrics.VisionCandidateAttempts ~labels:ok_labels)))
 
 let test_deadline_exhaustion_preserves_provider_error () =
-  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+  with_schema_capable_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-deadline-provider-error" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
@@ -726,7 +764,7 @@ let test_deadline_exhaustion_preserves_provider_error () =
       assert (String.equal (assoc_string "failure_class" json) "transient_error")))
 
 let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
-  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+  with_schema_capable_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-nonretryable-stop" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
@@ -758,7 +796,7 @@ let test_non_retryable_provider_error_stops_without_trying_next_runtime () =
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
 
 let test_accept_rejected_is_policy_rejection_without_failover () =
-  with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
+  with_schema_capable_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
       let meta = make_meta "vision-accept-rejected" in
       let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in

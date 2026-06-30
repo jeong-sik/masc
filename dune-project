@@ -59,7 +59,7 @@
   ;; fields, canonical stream/tool surfaces, typed tool-call/reasoning
   ;; projection, MiniMax adaptive thinking + split-reasoning stream (#2347),
   ;; and fail-closed provider parser hardening.
-  (agent_sdk (>= 0.208.5))
+  (agent_sdk (>= 0.208.7))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

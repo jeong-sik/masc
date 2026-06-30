@@ -148,6 +148,26 @@ let keepalive_keeper_names config =
       None)
 ;;
 
+let paused_reconcile_keeper_names config =
+  configured_keeper_names config
+  |> List.filter_map (fun name ->
+    match read_meta_file_path (keeper_meta_path config name) with
+    | Ok (Some meta) when meta.paused && effective_autoboot_enabled config name meta ->
+      Some meta.name
+    | Ok (Some _)
+    | Ok None -> None
+    | Error msg ->
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string MetaReadFailures)
+        ~labels:[("keeper", name); ("site", "paused_reconcile_read")]
+        ();
+      Log.Keeper.warn
+        "paused_reconcile_keeper_names: meta read failed for %s, dropping from paused reconcile set: %s"
+        name
+        msg;
+      None)
+;;
+
 (** Names of keepers that should be running across sessions.
     A keeper is "persistent" when its on-disk meta has autoboot enabled
     and is not currently paused - i.e. the operator expects the runtime

@@ -53,6 +53,12 @@ val declarative_autoboot_enabled_by_default : Workspace.config -> string -> bool
     (issue #8377). *)
 val keepalive_keeper_names : Workspace.config -> string list
 
+(** Names of paused keepers whose durable meta should still be inspected
+    during supervisor reconciliation. These keepers are not keepalive
+    execution candidates, but a previous runtime may have left them paused
+    while still owning an active backlog task. *)
+val paused_reconcile_keeper_names : Workspace.config -> string list
+
 (** Names of keepers expected to persist across sessions. Mirrors
     [keepalive_keeper_names] for readers caring about durability
     rather than the keepalive fiber. *)

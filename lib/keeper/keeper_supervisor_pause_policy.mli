@@ -93,6 +93,16 @@ val handle_auto_pause_from_meta
   -> unit
   -> (Keeper_meta_contract.keeper_meta, string) result
 
+(** [reconcile_persisted_auto_pause_task_release ~config ~meta] repairs
+    durable paused meta left behind by an earlier runtime before the pause
+    policy could clear task ownership. It only acts on typed blocker classes
+    whose pause path already owns task release semantics; operator/manual
+    pauses without such a blocker are left untouched. *)
+val reconcile_persisted_auto_pause_task_release
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> (Keeper_meta_contract.keeper_meta, string) result
+
 (** [failure_reason_policy_decision reason] maps a persisted
     [Keeper_registry.failure_reason] back to a
     [Keeper_failure_policy.decision]. Returns [None] for non-policy

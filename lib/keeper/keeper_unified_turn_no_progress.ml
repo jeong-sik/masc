@@ -38,11 +38,20 @@ let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
     meta
   in
   match
-    Keeper_turn_runtime_budget.sync_keeper_paused_state_with_resume_policy
+    Keeper_supervisor_pause_policy.handle_auto_pause_from_meta
       ~config
       ~meta:blocked_meta
-      ~paused:true
+      ~reason_tag:failure_reason_code
+      ~lifecycle_detail:detail
+      ~log_message:
+        (Printf.sprintf
+           "no_progress loop escalated to blocker and operator-resume pause \
+            (streak=%d threshold=%d)"
+           streak
+           threshold)
+      ~blocker_class:(Some Keeper_meta_contract.No_progress_loop)
       ~resume_policy:Keeper_supervisor_pause_policy.Manual_resume_required
+      ()
   with
   | Ok paused_meta ->
     Log.Keeper.warn

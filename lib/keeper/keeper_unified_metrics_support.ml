@@ -438,29 +438,43 @@ let turn_mode_of_result (result : Keeper_agent_run.run_result) : turn_mode =
 let turn_mode_of_json = Turn_mode_codec.turn_mode_of_json
 let work_kind_of_json = Turn_mode_codec.work_kind_of_json
 
+let claim_backlog_actionable
+    (observation : Keeper_world_observation.world_observation) : bool =
+  observation.claimable_task_count > 0
+  && observation.provider_capacity_blocked_task_count = 0
+
+let singleton_when condition label =
+  if condition then [ label ] else []
+
 let observed_triggers_of_observation
     ?meta
     (observation : Keeper_world_observation.world_observation) : string list =
-  let triggers = ref [] in
-  let add trigger = triggers := trigger :: !triggers in
-  if observation.pending_mentions <> [] then add "direct_mention";
-  if observation.pending_board_events <> [] then add "board_activity";
-  if observation.pending_scope_messages <> [] then add "scope_message";
-  if observation.unclaimed_task_count > 0 then add "new_unclaimed_task";
-  if observation.claimable_task_count > 0 then add "claimable_task";
-  if observation.provider_capacity_blocked_task_count > 0 then
-    add "provider_capacity_blocked_backlog";
-  if observation.failed_task_count > 0 then add "failed_task";
   let _ = meta in
-  if observation.pending_verification_count > 0 then
-    add "pending_verification";
-  if observation.scheduled_automation.due_ready_count > 0 then
-    add "scheduled_automation_due_ready";
-  if observation.scheduled_automation.blocked_approval_count > 0 then
-    add "scheduled_automation_blocked_approval";
-  if observation.active_goals <> [] && observation.idle_seconds > 0 then
-    add "idle_timeout_candidate";
-  List.rev !triggers
+  let actionable_backlog = claim_backlog_actionable observation in
+  List.concat
+    [
+      singleton_when (observation.pending_mentions <> []) "direct_mention";
+      singleton_when (observation.pending_board_events <> []) "board_activity";
+      singleton_when (observation.pending_scope_messages <> []) "scope_message";
+      singleton_when actionable_backlog "new_unclaimed_task";
+      singleton_when actionable_backlog "claimable_task";
+      singleton_when
+        (observation.provider_capacity_blocked_task_count > 0)
+        "provider_capacity_blocked_backlog";
+      singleton_when (observation.failed_task_count > 0) "failed_task";
+      singleton_when
+        (observation.pending_verification_count > 0)
+        "pending_verification";
+      singleton_when
+        (observation.scheduled_automation.due_ready_count > 0)
+        "scheduled_automation_due_ready";
+      singleton_when
+        (observation.scheduled_automation.blocked_approval_count > 0)
+        "scheduled_automation_blocked_approval";
+      singleton_when
+        (observation.active_goals <> [] && observation.idle_seconds > 0)
+        "idle_timeout_candidate";
+    ]
 
 let observed_affordances_of_observation
     ?meta
@@ -473,11 +487,7 @@ let observed_affordances_of_observation
   if observation.pending_scope_messages <> [] then add "message_sweep";
   if observation.provider_capacity_blocked_task_count > 0 then
     add "provider_capacity_blocked";
-  if
-    observation.claimable_task_count > 0
-    && observation.provider_capacity_blocked_task_count = 0
-  then
-    add "task_claim";
+  if claim_backlog_actionable observation then add "task_claim";
   if observation.failed_task_count > 0 then add "task_audit";
   if observation.pending_verification_count > 0 then
     add "task_verify";

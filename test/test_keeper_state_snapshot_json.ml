@@ -11,6 +11,7 @@
 module KMP = Masc.Keeper_memory_policy
 module KCC = Masc.Keeper_context_core
 module KRT = Masc.Keeper_agent_run_response_text
+module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
 module Receipt = Masc.Keeper_execution_receipt
 
 let contains_substring text needle =
@@ -811,6 +812,30 @@ let test_budget_finalizer_drops_synthetic_response_text () =
     []
     finalized.state_snapshot.decisions
 
+let test_attention_contract_does_not_resume_working_state_digest () =
+  let attention_resume =
+    Finalize.should_resume_merge
+      ~pre_dispatch_compacted:false
+      ~state_snapshot_source:KMP.Synthesized
+      ~stop_reason:Runtime_agent.Completed
+      ~completion_contract_result:Receipt.Contract_passive_only
+  in
+  Alcotest.(check bool)
+    "attention contract does not restore prior prompt-digest loops"
+    false
+    attention_resume;
+  let budget_resume =
+    Finalize.should_resume_merge
+      ~pre_dispatch_compacted:false
+      ~state_snapshot_source:KMP.Synthesized
+      ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 3; limit = 3 })
+      ~completion_contract_result:Receipt.Contract_satisfied_completion
+  in
+  Alcotest.(check bool)
+    "budget checkpoint still resumes prior prompt-digest loops"
+    true
+    budget_resume
+
 let test_synthetic_finalizer_drops_generated_response_text () =
   let raw_response_text =
     String.concat
@@ -968,6 +993,10 @@ let () =
             "budget finalizer drops synthetic response text"
             `Quick
             test_budget_finalizer_drops_synthetic_response_text;
+          Alcotest.test_case
+            "attention result does not resume working-state digest"
+            `Quick
+            test_attention_contract_does_not_resume_working_state_digest;
           Alcotest.test_case
             "synthetic finalizer drops generated response text"
             `Quick

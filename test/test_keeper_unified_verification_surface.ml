@@ -250,9 +250,19 @@ let test_backlog_trigger_split () =
     { base_observation with unclaimed_task_count = 3; claimable_task_count = 1 }
   in
   let triggers = UM.observed_triggers_of_observation obs in
-  check bool "absolute backlog trigger remains visible" true
+  check bool "claimable backlog trigger remains visible" true
     (List.mem "new_unclaimed_task" triggers);
   check bool "matched backlog trigger is explicit" true
+    (List.mem "claimable_task" triggers)
+
+let test_unclaimable_backlog_is_not_a_claim_trigger () =
+  let obs =
+    { base_observation with unclaimed_task_count = 3; claimable_task_count = 0 }
+  in
+  let triggers = UM.observed_triggers_of_observation obs in
+  check bool "unclaimable backlog is not a new task trigger" false
+    (List.mem "new_unclaimed_task" triggers);
+  check bool "unclaimable backlog is not a claimable task trigger" false
     (List.mem "claimable_task" triggers)
 
 let test_provider_capacity_blocked_trigger () =
@@ -265,6 +275,10 @@ let test_provider_capacity_blocked_trigger () =
     }
   in
   let triggers = UM.observed_triggers_of_observation obs in
+  check bool "provider-blocked backlog is not a new task trigger" false
+    (List.mem "new_unclaimed_task" triggers);
+  check bool "provider-blocked backlog is not a claimable task trigger" false
+    (List.mem "claimable_task" triggers);
   check bool "provider capacity trigger is explicit" true
     (List.mem "provider_capacity_blocked_backlog" triggers)
 
@@ -347,6 +361,8 @@ let () =
             `Quick test_task_claim_suppressed_for_provider_blocked_backlog;
           test_case "trigger: absolute and matched backlog split" `Quick
             test_backlog_trigger_split;
+          test_case "trigger: unclaimable backlog is not claimable work" `Quick
+            test_unclaimable_backlog_is_not_a_claim_trigger;
           test_case "trigger: provider capacity blocked backlog" `Quick
             test_provider_capacity_blocked_trigger;
           test_case "trigger: keeper sees pending_verification" `Quick

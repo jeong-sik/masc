@@ -469,6 +469,44 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> fail ("make_meta: " ^ err)
 
+let create_started_task_for_meta config (meta : Keeper_meta_contract.keeper_meta) ~title =
+  let created =
+    match
+      Masc.Workspace.add_task_with_result
+        config
+        ~title
+        ~priority:1
+        ~description:"test task"
+    with
+    | Ok created -> created
+    | Error err -> fail (Masc.Workspace.add_task_error_to_string err)
+  in
+  (match
+     Masc.Workspace.claim_task_r
+       config
+       ~agent_name:meta.agent_name
+       ~task_id:created.task_id
+       ()
+   with
+   | Ok _ -> ()
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
+  (match
+     Masc.Workspace.transition_task_r
+       config
+       ~agent_name:meta.agent_name
+       ~task_id:created.task_id
+       ~action:Masc_domain.Start
+       ()
+   with
+   | Ok _ -> ()
+   | Error err -> fail (Masc_domain.masc_error_to_string err));
+  created
+
+let task_status_for_id config task_id =
+  Masc.Workspace.get_tasks_raw config
+  |> List.find (fun (task : Masc_domain.task) -> String.equal task.id task_id)
+  |> fun (task : Masc_domain.task) -> task.task_status
+
 let noop_load_or_materialize_keeper_meta _ctx _name = Ok None
 
 let sweep_and_recover_no_materialize ctx =
@@ -786,6 +824,131 @@ let test_reconcile_does_not_double_start_materialized_keeper () =
     (List.rev !supervised);
   check bool "materialized keeper registered" true
     (Reg.is_registered ~base_path:config.base_path name)
+
+let test_reconcile_repairs_persisted_no_progress_paused_task_owner () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "paused-no-progress-owner" in
+  write_keeper_toml config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  let ctx = keeper_runtime_context env sw config in
+  let base_meta = make_meta name in
+  let created =
+    create_started_task_for_meta
+      config
+      base_meta
+      ~title:"persisted no-progress owner release"
+  in
+  let task_id =
+    match Keeper_id.Task_id.of_string created.task_id with
+    | Ok task_id -> task_id
+    | Error err -> fail err
+  in
+  let meta =
+    {
+      base_meta with
+      paused = true;
+      current_task_id = Some task_id;
+      runtime =
+        {
+          base_meta.runtime with
+          last_blocker =
+            Some
+              (Keeper_meta_contract.blocker_info_of_class
+                 ~detail:"no_progress loop detected"
+                 Keeper_meta_contract.No_progress_loop);
+        };
+    }
+  in
+  (match Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> fail err);
+  let supervised = ref [] in
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let supervise_keepalive ~proactive_warmup_sec:_ _ctx
+      (meta : Keeper_meta_contract.keeper_meta) =
+    supervised := meta.name :: !supervised
+  in
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ~load_or_materialize_keeper_meta:noop_load_or_materialize_keeper_meta
+    ctx;
+  check (list string) "paused keeper is not supervised" [] (List.rev !supervised);
+  (match task_status_for_id config created.task_id with
+   | Masc_domain.Todo -> ()
+   | status ->
+     fail
+       (Printf.sprintf
+          "expected paused owner task to be released, got %s"
+          (Masc_domain.task_status_to_string status)));
+  match Keeper_meta_store.read_meta config name with
+  | Ok (Some persisted) ->
+    check bool "keeper remains paused" true persisted.paused;
+    check (option string) "stale current_task_id cleared" None
+      (Option.map Keeper_id.Task_id.to_string persisted.current_task_id)
+  | Ok None -> fail "expected persisted keeper meta"
+  | Error err -> fail err
+
+let test_reconcile_keeps_manual_paused_task_owner () =
+  with_config_dir @@ fun config_dir ->
+  Eio_main.run @@ fun env ->
+  ensure_test_runtime ();
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = Filename.dirname config_dir in
+  let name = "manual-paused-owner" in
+  write_keeper_toml config_dir ~name;
+  Eio.Switch.on_release sw (fun () ->
+      Reg.clear ();
+      KR.reset_test_state base_dir);
+  let config = Masc.Workspace.default_config base_dir in
+  let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+  let ctx = keeper_runtime_context env sw config in
+  let base_meta = make_meta name in
+  let created =
+    create_started_task_for_meta config base_meta ~title:"manual paused owner"
+  in
+  let task_id =
+    match Keeper_id.Task_id.of_string created.task_id with
+    | Ok task_id -> task_id
+    | Error err -> fail err
+  in
+  let meta = { base_meta with paused = true; current_task_id = Some task_id } in
+  (match Keeper_meta_store.write_meta config meta with
+   | Ok () -> ()
+   | Error err -> fail err);
+  let publish_lifecycle ~event:_ _name _detail () = () in
+  let supervise_keepalive ~proactive_warmup_sec:_ _ctx _meta = () in
+  KSR.reconcile_keepalive_keepers
+    ~publish_lifecycle
+    ~supervise_keepalive
+    ~load_or_materialize_keeper_meta:noop_load_or_materialize_keeper_meta
+    ctx;
+  (match task_status_for_id config created.task_id with
+   | Masc_domain.InProgress { assignee; _ } ->
+     check string "manual pause keeps active owner" base_meta.agent_name assignee
+   | status ->
+     fail
+       (Printf.sprintf
+          "expected manual paused owner task to stay in_progress, got %s"
+          (Masc_domain.task_status_to_string status)));
+  match Keeper_meta_store.read_meta config name with
+  | Ok (Some persisted) ->
+    check bool "keeper remains paused" true persisted.paused;
+    check (option string) "current_task_id preserved"
+      (Some created.task_id)
+      (Option.map Keeper_id.Task_id.to_string persisted.current_task_id)
+  | Ok None -> fail "expected persisted keeper meta"
+  | Error err -> fail err
 
 let test_reconcile_materialize_failure_continues_with_metric () =
   with_config_dir @@ fun config_dir ->
@@ -3139,6 +3302,10 @@ let () =
         test_reconcile_materializes_configured_keeper_without_meta;
       test_case "reconcile does not double-start materialized keeper" `Quick
         test_reconcile_does_not_double_start_materialized_keeper;
+      test_case "reconcile repairs persisted no-progress paused task owner" `Quick
+        test_reconcile_repairs_persisted_no_progress_paused_task_owner;
+      test_case "reconcile keeps manual paused task owner" `Quick
+        test_reconcile_keeps_manual_paused_task_owner;
       test_case "reconcile materialize failure is isolated and metriced" `Quick
         test_reconcile_materialize_failure_continues_with_metric;
       test_case "reconcile supervise exception is isolated" `Quick

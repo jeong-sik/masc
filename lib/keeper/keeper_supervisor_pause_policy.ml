@@ -138,6 +138,62 @@ let clear_current_task_id_after_successful_pause_release ~config ~meta ~reason_t
        false)
 ;;
 
+let blocker_class_releases_owned_tasks_on_pause = function
+  | Turn_timeout | Turn_livelock_blocked | No_progress_loop -> true
+  | Runtime_exhausted _
+  | Capacity_backpressure
+  | Ambiguous_post_commit_timeout
+  | Ambiguous_post_commit_failure
+  | Admission_queue_wait_timeout
+  | Turn_timeout_after_queue_wait
+  | Completion_contract_violation
+  | Fiber_unresolved
+  | Stale_turn_timeout
+  | Stale_fleet_batch
+  | Oas_agent_execution_timeout
+  | Sdk_max_turns_exceeded
+  | Sdk_token_budget_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met
+  | Sdk_input_required -> false
+;;
+
+let reconcile_persisted_auto_pause_task_release ~config ~meta =
+  let release_required =
+    meta.paused
+    &&
+    match meta.runtime.last_blocker with
+    | Some { klass; _ } -> blocker_class_releases_owned_tasks_on_pause klass
+    | None -> false
+  in
+  if not release_required
+  then Ok meta
+  else (
+    let reason_tag = "persisted_auto_pause_reconcile" in
+    let release_ok = release_owned_active_tasks_after_pause ~config ~meta ~reason_tag in
+    if not release_ok
+    then
+      Error
+        (Printf.sprintf
+           "%s: persisted auto-pause task release failed"
+           meta.name)
+    else if
+      clear_current_task_id_after_successful_pause_release
+        ~config
+        ~meta
+        ~reason_tag
+    then Ok { meta with current_task_id = None; updated_at = now_iso () }
+    else
+      Error
+        (Printf.sprintf
+           "%s: persisted auto-pause current_task_id clear failed"
+           meta.name))
+;;
+
 let handle_crash_auto_pause
       ~publish_phase_lifecycle
       (ctx : _ context)

@@ -337,6 +337,11 @@ let terminal_outcome_to_activity_kind = function
   | Terminal_failed_completion_contract _ -> "keeper.turn_failed"
   | Terminal_done | Terminal_checkpoint -> "keeper.turn_completed"
 
+let terminal_outcome_to_label = function
+  | Terminal_done -> "done"
+  | Terminal_checkpoint -> "checkpoint"
+  | Terminal_failed_completion_contract _ -> "failed"
+
 let terminal_outcome_to_log_label = function
   | Terminal_done -> "OK"
   | Terminal_checkpoint -> "checkpoint"
@@ -471,7 +476,7 @@ let emit_activity_graph
         ~payload:
           (`Assoc
               ([ "keeper_name", `String updated_meta.name
-               ; "terminal_outcome", `String (terminal_outcome_to_log_label terminal_outcome)
+               ; "terminal_outcome", `String (terminal_outcome_to_label terminal_outcome)
                ; ( "input_tokens"
                  , if usage_trusted then `Int result.Keeper_agent_run.usage.input_tokens else `Null )
                ; ( "output_tokens"

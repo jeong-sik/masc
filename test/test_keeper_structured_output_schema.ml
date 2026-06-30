@@ -168,6 +168,50 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
   check bool "fusion schema exposes parser wire fields" true true
 ;;
 
+let test_verification_verdict_schema_uses_core_ssot () =
+  let schema = Keeper_structured_output_schema.verification_verdict_output_schema in
+  check
+    (list string)
+    "verification verdict required fields"
+    [ "evidence"; "reason"; "verdict" ]
+    (required_strings schema);
+  check
+    (list string)
+    "verification verdict enum"
+    (List.sort String.compare Verifier_core.valid_verdict_strings)
+    (schema |> schema_property "verdict" |> enum_strings);
+  check bool "verification verdict is closed" false
+    (allows_additional_properties schema);
+  let evidence_schema =
+    schema |> schema_property "evidence" |> schema_items
+  in
+  check
+    (list string)
+    "verification evidence required fields"
+    [ "line"; "path"; "quote" ]
+    (required_strings evidence_schema);
+  check bool "verification evidence is closed" false
+    (allows_additional_properties evidence_schema)
+;;
+
+let test_anti_rationalization_verdict_schema_uses_task_ssot () =
+  let schema =
+    Keeper_structured_output_schema.anti_rationalization_verdict_output_schema
+  in
+  check
+    (list string)
+    "anti-rationalization verdict required fields"
+    [ "reason"; "verdict" ]
+    (required_strings schema);
+  check
+    (list string)
+    "anti-rationalization verdict enum"
+    (List.sort String.compare Task.Anti_rationalization.valid_verdict_strings)
+    (schema |> schema_property "verdict" |> enum_strings);
+  check bool "anti-rationalization verdict is closed" false
+    (allows_additional_properties schema)
+;;
+
 let () =
   run
     "keeper-structured-output-schema"
@@ -198,6 +242,16 @@ let () =
             "fusion judge schema uses parser wire contract"
             `Quick
             test_fusion_judge_schema_uses_parser_wire_contract
+        ] )
+    ; ( "verdict schemas"
+      , [ test_case
+            "verification verdict schema uses core SSOT"
+            `Quick
+            test_verification_verdict_schema_uses_core_ssot
+        ; test_case
+            "anti-rationalization verdict schema uses task SSOT"
+            `Quick
+            test_anti_rationalization_verdict_schema_uses_task_ssot
         ] )
     ]
 ;;

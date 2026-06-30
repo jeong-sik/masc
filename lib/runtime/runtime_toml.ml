@@ -189,16 +189,37 @@ let parse_credential (tbl : Otoml.t) (path : string)
      | t -> Error (error (path ^ ".type") (Printf.sprintf "unknown credential type %S" t)))
 ;;
 
+(* Deprecation notices fire once per process per [path.capabilities.key], not
+   once per parse. runtime.toml is re-parsed on every keeper boot, so a per-parse
+   warning flooded the WARN log — one observed day carried ~315 of these (25% of
+   the live WARN volume) from a handful of deprecated capability keys across
+   providers, drowning genuine warnings. The notice still surfaces once so an
+   operator can remove the ignored field; only the per-parse repetition is
+   dropped, so no signal is lost. *)
+let deprecation_notice_seen : (string, unit) Hashtbl.t = Hashtbl.create 16
+let deprecation_notice_seen_mu = Stdlib.Mutex.create ()
+
 let parse_capabilities ~(path : string) (tbl : Otoml.t) : Runtime_schema.capabilities =
   let b key = Otoml.find_or ~default:false tbl Otoml.get_boolean [ key ] in
   let warn_deprecated key =
     match Otoml.find_opt tbl Fun.id [ key ] with
     | None -> ()
     | Some _ ->
-      Log.Runtime.warn
-        "runtime_toml: %s.capabilities.%s is deprecated and ignored; runtime-MCP capability is resolved from OAS provider bindings"
-        path
-        key
+      let notice_key = path ^ ".capabilities." ^ key in
+      let should_warn =
+        Stdlib.Mutex.protect deprecation_notice_seen_mu (fun () ->
+          if Hashtbl.mem deprecation_notice_seen notice_key
+          then false
+          else (
+            Hashtbl.replace deprecation_notice_seen notice_key ();
+            true))
+      in
+      if should_warn
+      then
+        Log.Runtime.warn
+          "runtime_toml: %s.capabilities.%s is deprecated and ignored; runtime-MCP capability is resolved from OAS provider bindings"
+          path
+          key
   in
   let string_list_field key =
     match Otoml.find_opt tbl Fun.id [ key ] with

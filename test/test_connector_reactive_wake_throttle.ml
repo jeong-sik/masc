@@ -11,6 +11,13 @@
 open Alcotest
 open Masc
 
+(* [connector_reactive_wakeup_allowed] reaches [Keeper_no_progress_loop_detector.
+   is_latched], which guards its state with [Eio.Mutex]. In production the call
+   runs inside the Discord gateway's forked fiber ([Eio.Fiber.fork ~sw] around
+   [Gw.run] in [server_discord_in_process_gateway.start]), so the effect handler
+   is always present. The test reproduces that context with [Eio_main.run]. *)
+let with_eio f () = Eio_main.run @@ fun _env -> f ()
+
 let rm_rf path =
   ignore (Sys.command (Printf.sprintf "rm -rf %s" (Filename.quote path)))
 
@@ -56,5 +63,7 @@ let test_per_channel_debounce () =
 let () =
   run "connector_reactive_wake_throttle"
     [ ( "throttle",
-        [ test_case "per-channel debounce" `Quick test_per_channel_debounce ] )
+        [ test_case "per-channel debounce" `Quick
+            (with_eio test_per_channel_debounce)
+        ] )
     ]

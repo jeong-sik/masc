@@ -29,54 +29,22 @@ let apply_report_verdict_output_schema provider_cfg =
          (Agent_sdk.Error.InvalidConfig
             { field = "verification.adversarial_review.output_schema"; detail }))
 
-let parse_json_payload text =
-  let trimmed = String.trim text in
-  let attempt s =
-    try Some (Yojson.Safe.from_string s) with
-    | Yojson.Json_error _ -> None
-  in
-  match attempt trimmed with
-  | Some json -> Some json
-  | None ->
-    let len = String.length trimmed in
-    if len = 0 then None
-    else
-      let start_opt =
-        let brace = try Some (String.index trimmed '{') with Not_found -> None in
-        let bracket = try Some (String.index trimmed '[') with Not_found -> None in
-        match brace, bracket with
-        | Some i, Some j -> Some (min i j)
-        | Some i, None -> Some i
-        | None, Some j -> Some j
-        | None, None -> None
-      in
-      match start_opt with
-      | None -> None
-      | Some start ->
-        let closing = if trimmed.[start] = '{' then '}' else ']' in
-        let rec find_last idx =
-          if idx < 0 then None
-          else if trimmed.[idx] = closing then Some idx
-          else find_last (idx - 1)
-        in
-        match find_last (len - 1) with
-        | None -> None
-        | Some fin -> attempt (String.sub trimmed start (fin - start + 1))
+let parse_grounded_verdict_from_response_text text =
+  match Yojson.Safe.from_string (String.trim text) with
+  | json -> Verifier_core.parse_grounded_verdict_from_json json
+  | exception Yojson.Json_error msg ->
+    Error
+      (Printf.sprintf
+         "adversarial review response must be strict JSON: %s"
+         msg)
 
-let parse_verdict_from_text text =
-  match parse_json_payload text with
-  | None ->
-    Error "model did not return a structured verdict (no JSON payload found)"
-  | Some json -> Verifier_core.parse_verdict_from_json json
-
-let parse_grounded_verdict_from_text text =
-  match parse_json_payload text with
-  | None ->
-    Error "model did not return a structured verdict (no JSON payload found)"
-  | Some json -> Verifier_core.parse_grounded_verdict_from_json json
+module For_testing = struct
+  let parse_grounded_verdict_from_response_text =
+    parse_grounded_verdict_from_response_text
+end
 
 (* Mirrors [Verifier_oas.verify]: structured verdict via the [report_verdict]
-   tool, with a structured JSON fallback if the model answers in free text.
+   tool, with a strict JSON fallback if the model answers without the tool.
    The judgment itself is the model's; this only routes its structured output
    back as a typed [Verifier_core.verdict]. *)
 let run_grounded_review ~base_path ~runtime_id (input : review_input) :
@@ -125,9 +93,10 @@ let run_grounded_review ~base_path ~runtime_id (input : review_input) :
       match !verdict_ref with
       | Some v -> Ok v
       | None ->
-        (* Model answered in text instead of calling report_verdict. *)
+        (* Model answered without calling report_verdict. Provider-native
+           schema still requires a strict JSON grounded verdict object. *)
         let text = Agent_sdk_response.text_of_response result.response in
-        parse_grounded_verdict_from_text text)
+        parse_grounded_verdict_from_response_text text)
     | Error err -> Error (Agent_sdk.Error.to_string err)
 
 let run_review ~base_path ~runtime_id (input : review_input) :

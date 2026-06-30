@@ -349,6 +349,17 @@ let test_verifier_oas_response_text_fallback_is_strict_json () =
     (contains_substring source "Core.parse_verdict text")
 ;;
 
+let test_adversarial_review_response_text_fallback_is_strict_json () =
+  let source = read_source "lib/keeper/keeper_adversarial_review.ml" in
+  check
+    bool
+    "adversarial review must not extract JSON payloads from prose responses"
+    false
+    (contains_substring source "parse_json_payload"
+     || contains_substring source "String.index trimmed"
+     || contains_substring source "String.sub trimmed")
+;;
+
 let test_model_label_wrappers_can_receive_provider_config_transform () =
   let rel = "lib/keeper/keeper_turn_driver_wrappers.ml" in
   check
@@ -442,6 +453,10 @@ let () =
             "verifier_oas response fallback is strict JSON"
             `Quick
             test_verifier_oas_response_text_fallback_is_strict_json
+        ; test_case
+            "adversarial review response fallback is strict JSON"
+            `Quick
+            test_adversarial_review_response_text_fallback_is_strict_json
         ] )
     ; ( "model-label wrappers"
       , [ test_case

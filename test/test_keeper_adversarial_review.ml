@@ -11,6 +11,17 @@ module EA = Masc.Keeper_external_attention
 module VC = Masc.Verifier_core
 module PR = Prompt_registry
 
+let contains_substring text needle =
+  let text_len = String.length text in
+  let needle_len = String.length needle in
+  let rec loop idx =
+    if needle_len = 0 then true
+    else if idx + needle_len > text_len then false
+    else if String.sub text idx needle_len = needle then true
+    else loop (idx + 1)
+  in
+  loop 0
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then (
@@ -100,6 +111,32 @@ let pending base ~keeper =
 let check_ok = function
   | Ok () -> ()
   | Error msg -> Alcotest.fail msg
+
+let test_response_text_accepts_strict_json () =
+  let raw =
+    {|{"verdict":"FAIL","reason":"bad branch","evidence":[{"path":"lib/foo.ml","line":12,"quote":"let bad = true"}]}|}
+  in
+  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  | Ok grounded ->
+    check string
+      "verdict"
+      "FAIL"
+      (VC.verdict_constructor_name grounded.VC.verdict);
+    check int "evidence count" 1 (List.length grounded.VC.evidence)
+  | Error msg -> fail ("strict JSON response rejected: " ^ msg)
+
+let test_response_text_rejects_embedded_json () =
+  let raw =
+    {|Here is the verdict: {"verdict":"PASS","reason":null,"evidence":[]}|}
+  in
+  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  | Error msg ->
+    check bool "embedded JSON rejected as non-strict" true
+      (contains_substring msg "strict JSON")
+  | Ok grounded ->
+    failf
+      "embedded JSON should be rejected, got %s"
+      (VC.verdict_to_string grounded.VC.verdict)
 
 let test_fail_wakes_author () =
   with_temp_base (fun base ->
@@ -294,6 +331,13 @@ let test_build_prompt_preserves_literal_braces_in_values () =
 let () =
   Alcotest.run "keeper-adversarial-review"
     [
+      ( "response-parser",
+        [
+          test_case "accepts strict JSON response" `Quick
+            test_response_text_accepts_strict_json;
+          test_case "rejects embedded JSON response" `Quick
+            test_response_text_rejects_embedded_json;
+        ] );
       ( "wake-on-fail",
         [
           test_case "fail wakes author" `Quick test_fail_wakes_author;

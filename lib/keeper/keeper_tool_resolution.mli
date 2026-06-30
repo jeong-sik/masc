@@ -14,6 +14,8 @@ type tried_source =
   | Registry_core_tools         (** effective_core_tools *)
   | Tool_schema                 (** Tool_shard.all_keeper_tool_schemas + inline schemas *)
   | Descriptor_registry         (** Keeper_tool_descriptor.all_descriptors public_name (flat SSOT) *)
+  | System_internal             (** Tool_catalog_surfaces.is_system_internal_hidden — system-internal
+                                    tools hidden from keeper surfaces but still real/dispatchable *)
 
 (** Resolution outcome for a tool name. *)
 type resolution =

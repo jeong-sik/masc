@@ -661,6 +661,66 @@ let test_progress_identity_normalizes_volatile_json_keys () =
   in
   Alcotest.(check string) "volatile keys removed, object fields sorted" left right
 
+let test_progress_identity_normalizes_duplicate_keys_stably () =
+  let normalized =
+    `Assoc
+      [ "dup", `String "first"
+      ; "z", `Int 0
+      ; "dup", `String "second"
+      ]
+    |> Identity.For_testing.normalize_json
+    |> Yojson.Safe.to_string
+  in
+  Alcotest.(check string)
+    "duplicate-key relative order is stable after key sort"
+    "{\"dup\":\"first\",\"dup\":\"second\",\"z\":0}"
+    normalized
+
+let output_fingerprint_of output_text =
+  match
+    Identity.digest_tool_io ~tool_name:"tool_execute"
+      ~input:(`Assoc [ "task", `String "same" ])
+      ~output_text
+  with
+  | Some fingerprints -> fingerprints.Identity.output_fingerprint
+  | None -> Alcotest.fail "expected tool IO fingerprint"
+
+let stored_output ~sha_char ~bytes ~preview =
+  Tool_output.encode_for_oas
+    (Tool_output.Stored
+       { sha256 = String.make 64 sha_char
+       ; bytes
+       ; preview
+       ; mime = "text/plain"
+       })
+
+let test_stored_output_fingerprint_uses_blob_identity () =
+  let same_preview_a =
+    stored_output ~sha_char:'a' ~bytes:128_934 ~preview:"same preview"
+  in
+  let same_preview_b =
+    stored_output ~sha_char:'b' ~bytes:128_934 ~preview:"same preview"
+  in
+  let same_preview_different_bytes =
+    stored_output ~sha_char:'a' ~bytes:128_935 ~preview:"same preview"
+  in
+  let same_blob_different_preview =
+    stored_output ~sha_char:'a' ~bytes:128_934 ~preview:"different preview"
+  in
+  let fp_a = output_fingerprint_of same_preview_a in
+  Alcotest.(check bool)
+    "same preview with different sha256 does not collide"
+    false
+    (String.equal fp_a (output_fingerprint_of same_preview_b));
+  Alcotest.(check bool)
+    "same preview with different bytes does not collide"
+    false
+    (String.equal fp_a (output_fingerprint_of same_preview_different_bytes));
+  Alcotest.(check bool)
+    "stored output fingerprint ignores preview-only drift"
+    true
+    (String.equal fp_a (output_fingerprint_of same_blob_different_preview))
+
 (* audit D3: a [Task_claim] turn is exempt only when a claim bound work. A claim
    that typed [No_eligible_tasks] did not bind work (the sangsu claim-idle loop,
    PR #21065), so it must require evidence and accrue the streak. *)
@@ -832,6 +892,12 @@ let () =
           Alcotest.test_case
             "progress identity normalizes volatile JSON keys"
             `Quick test_progress_identity_normalizes_volatile_json_keys;
+          Alcotest.test_case
+            "progress identity normalizes duplicate JSON keys stably"
+            `Quick test_progress_identity_normalizes_duplicate_keys_stably;
+          Alcotest.test_case
+            "stored output fingerprint uses blob identity"
+            `Quick test_stored_output_fingerprint_uses_blob_identity;
         ] );
       ( "per-keeper isolation",
         [

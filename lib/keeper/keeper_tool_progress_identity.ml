@@ -39,12 +39,16 @@ let is_volatile_json_key key =
   List.exists (String.equal key) volatile_json_keys
 ;;
 
+let sort_json_fields fields =
+  List.stable_sort (fun (left, _) (right, _) -> String.compare left right) fields
+;;
+
 let rec normalize_json = function
   | `Assoc fields ->
     fields
     |> List.filter (fun (key, _) -> not (is_volatile_json_key key))
     |> List.map (fun (key, value) -> key, normalize_json value)
-    |> List.sort (fun (left, _) (right, _) -> String.compare left right)
+    |> sort_json_fields
     |> fun fields -> `Assoc fields
   | `List items -> `List (List.map normalize_json items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _ | `String _) as json -> json
@@ -68,24 +72,37 @@ let digest_tool_input ~tool_name input =
   else Some (digest_json (redacted_input input))
 ;;
 
-let output_identity_text output_text =
+let stored_output_identity_json ~sha256 ~bytes ~mime =
+  `Assoc
+    [ "kind", `String "stored"
+    ; "sha256", `String sha256
+    ; "bytes", `Int bytes
+    ; "mime", `String mime
+    ]
+;;
+
+let inline_output_fingerprint value =
+  let text =
+    value
+    |> Safe_ops.sanitize_text_utf8
+    |> Observability_redact.redact_preview ~max_len:4000
+  in
+  try Some (digest_json (Yojson.Safe.from_string text |> Observability_redact.redact_json_strings))
+  with
+  | Yojson.Json_error _ -> Some (sha256_hex text)
+;;
+
+let output_fingerprint output_text =
   match Tool_output.decode_from_oas output_text with
-  | Tool_output.Stored { preview; _ } -> preview
-  | Tool_output.Inline value -> value
+  | Tool_output.Stored { sha256; bytes; mime; _ } ->
+    Some (digest_json (stored_output_identity_json ~sha256 ~bytes ~mime))
+  | Tool_output.Inline value -> inline_output_fingerprint value
 ;;
 
 let digest_tool_output ~tool_name output_text =
   if Observability_redact.is_denied_tool ~tool_name
   then None
-  else
-    let text =
-      output_identity_text output_text
-      |> Safe_ops.sanitize_text_utf8
-      |> Observability_redact.redact_preview ~max_len:4000
-    in
-    (try Some (digest_json (Yojson.Safe.from_string text |> Observability_redact.redact_json_strings))
-     with
-     | Yojson.Json_error _ -> Some (sha256_hex text))
+  else output_fingerprint output_text
 ;;
 
 let digest_tool_io ~tool_name ~input ~output_text =

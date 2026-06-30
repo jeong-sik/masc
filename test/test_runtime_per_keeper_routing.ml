@@ -566,6 +566,20 @@ thinking-support = true
 preserve-thinking = false
 streaming = true
 
+[models.smallout]
+api-name = "reasoning-small-out"
+max-context = 128000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.bigout]
+api-name = "reasoning-big-out"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+streaming = true
+
 [ollama_cloud.think]
 is-default = true
 max-concurrent = 1
@@ -577,6 +591,12 @@ max-concurrent = 1
 max-concurrent = 1
 
 [ollama_cloud.thinkexplicitoff]
+max-concurrent = 1
+
+[ollama_cloud.smallout]
+max-concurrent = 1
+
+[ollama_cloud.bigout]
 max-concurrent = 1
 |}
 ;;
@@ -594,6 +614,26 @@ supports_extended_thinking = true
 supports_reasoning_budget = true
 thinking_control_format = "chat_template_kwargs"
 preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "reasoning-small-out"
+base = "openai_chat"
+max_context_tokens = 131072
+max_output_tokens = 4096
+supports_tools = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "reasoning-big-out"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 200000
+supports_tools = true
+supports_reasoning = true
+supports_extended_thinking = true
 supports_native_streaming = true
 |}
 ;;
@@ -675,6 +715,91 @@ let test_seed_of_thinking_support_gate_contract () =
     "None -> leave caller policy unchanged"
     None
     (Runtime_inference.seed_of_thinking_support None).Runtime_inference.thinking_enabled
+;;
+
+(* ---- reasoning max_tokens resolution: [Runtime_inference.resolve_max_tokens]
+   sizes a reasoning turn from the model's declared output ceiling (OAS catalog),
+   bounded by the operational [reasoning_turn_max_tokens] (32768); non-reasoning
+   runtimes keep the caller fallback. Regression guard for the thinking_only +
+   stop_reason=max_tokens truncation (live fleet 2026-06-30). ----
+
+   The fallback sentinel (8192) mirrors the keeper path's flat default and is
+   distinct from every reasoning result asserted below, so a test failure
+   pinpoints which branch regressed. *)
+let fallback_sentinel () = 8192
+
+let test_resolve_max_tokens_reasoning_defers_to_caps_not_fallback () =
+  with_runtime_thinking (fun () ->
+    (* qwen36-35b-a3b-mtp declares no explicit [max_output_tokens], so its
+       capability inherits the provider base ceiling (16384). The reasoning path
+       defers to that OAS-owned ceiling — NOT the flat keeper fallback (8192).
+       Raising this runtime to the 32768 operational bound is a catalog change
+       (declare a higher max_output_tokens), per the OAS-owns-the-value split. *)
+    Alcotest.(check int)
+      "reasoning runtime defers to its OAS capability ceiling (16384 base), \
+       above the 8192 keeper fallback"
+      16384
+      (Runtime_inference.resolve_max_tokens
+         ~runtime_id:"ollama_cloud.thinkdefault"
+         ~fallback:fallback_sentinel))
+;;
+
+let test_resolve_max_tokens_non_reasoning_uses_fallback () =
+  with_runtime_thinking (fun () ->
+    Alcotest.(check int)
+      "non-reasoning runtime keeps the caller fallback unchanged"
+      8192
+      (Runtime_inference.resolve_max_tokens
+         ~runtime_id:"ollama_cloud.nothink"
+         ~fallback:fallback_sentinel))
+;;
+
+let test_resolve_max_tokens_reasoning_small_ceiling_respected () =
+  with_runtime_thinking (fun () ->
+    Alcotest.(check int)
+      "reasoning runtime whose declared ceiling is below the operational bound \
+       keeps its smaller ceiling (never request more than the provider accepts)"
+      4096
+      (Runtime_inference.resolve_max_tokens
+         ~runtime_id:"ollama_cloud.smallout"
+         ~fallback:fallback_sentinel))
+;;
+
+let test_resolve_max_tokens_reasoning_big_ceiling_clamped () =
+  with_runtime_thinking (fun () ->
+    Alcotest.(check int)
+      "reasoning runtime whose declared ceiling exceeds the operational bound is \
+       clamped to the bound (runaway guard)"
+      32768
+      (Runtime_inference.resolve_max_tokens
+         ~runtime_id:"ollama_cloud.bigout"
+         ~fallback:fallback_sentinel))
+;;
+
+let test_resolve_max_tokens_unknown_runtime_uses_fallback () =
+  with_runtime_thinking (fun () ->
+    Alcotest.(check int)
+      "unknown runtime id falls through to the caller fallback (fail-safe)"
+      8192
+      (Runtime_inference.resolve_max_tokens
+         ~runtime_id:"bogus.binding"
+         ~fallback:fallback_sentinel))
+;;
+
+let test_max_output_tokens_accessor_projects_catalog () =
+  with_runtime_thinking (fun () ->
+    Alcotest.(check (option int))
+      "explicitly declared catalog ceiling is projected verbatim"
+      (Some 200000)
+      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.bigout");
+    Alcotest.(check (option int))
+      "catalog row without max_output_tokens inherits the provider base ceiling"
+      (Some 16384)
+      (Runtime.max_output_tokens_of_runtime_id "ollama_cloud.thinkdefault");
+    Alcotest.(check (option int))
+      "unknown runtime id projects None (no capability record)"
+      None
+      (Runtime.max_output_tokens_of_runtime_id "bogus.binding"))
 ;;
 
 let () =
@@ -769,6 +894,32 @@ let () =
             "seed_of_thinking_support gate contract (pure)"
             `Quick
             test_seed_of_thinking_support_gate_contract
+        ] )
+    ; ( "reasoning max_tokens resolution"
+      , [ Alcotest.test_case
+            "reasoning runtime defers to OAS capability ceiling, not fallback"
+            `Quick
+            test_resolve_max_tokens_reasoning_defers_to_caps_not_fallback
+        ; Alcotest.test_case
+            "non-reasoning runtime -> caller fallback"
+            `Quick
+            test_resolve_max_tokens_non_reasoning_uses_fallback
+        ; Alcotest.test_case
+            "reasoning runtime, ceiling below bound -> ceiling respected"
+            `Quick
+            test_resolve_max_tokens_reasoning_small_ceiling_respected
+        ; Alcotest.test_case
+            "reasoning runtime, ceiling above bound -> clamped to bound"
+            `Quick
+            test_resolve_max_tokens_reasoning_big_ceiling_clamped
+        ; Alcotest.test_case
+            "unknown runtime id -> caller fallback"
+            `Quick
+            test_resolve_max_tokens_unknown_runtime_uses_fallback
+        ; Alcotest.test_case
+            "max_output_tokens_of_runtime_id projects catalog ceiling"
+            `Quick
+            test_max_output_tokens_accessor_projects_catalog
         ] )
     ]
 ;;

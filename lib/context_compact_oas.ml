@@ -82,12 +82,7 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
   let lines =
     msgs
     |> List.mapi (fun i (m : Agent_sdk.Types.message) ->
-      let role_str = match m.role with
-        | Agent_sdk.Types.User -> "user"
-        | Agent_sdk.Types.Assistant -> "assistant"
-        | Agent_sdk.Types.System -> "system"
-        | Agent_sdk.Types.Tool -> "tool"
-      in
+      let role_str = Agent_sdk.Types.role_to_string m.role in
       let text = String.trim (Agent_sdk.Types.text_of_message m) in
       if text = "" then None
       else Some (Printf.sprintf "[%d] %s: %s" (i + 1) role_str (first_sentence text))

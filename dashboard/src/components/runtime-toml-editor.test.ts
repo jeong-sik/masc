@@ -190,9 +190,8 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('런타임 환경')
       // The prototype models section renders each model read-only: id + context
-      // (protoContext → "128k ctx") + capability chips. It replaced the legacy
-      // editable catalog grid; context length is now edited per-runtime via the
-      // binding num-ctx control (asserted below), not by mutating the model fact.
+      // (protoContext → "128k ctx") + capability chips. Model facts stay
+      // read-only; runtime execution knobs are edited per binding instead.
       const modelsSection = container.querySelector('[data-testid="runtime-section-models"]')
       expect(modelsSection?.textContent).toContain('qwen')
       expect(modelsSection?.textContent).toContain('128k ctx')
@@ -201,9 +200,82 @@ describe('RuntimeTomlEditor', () => {
     })
 
     expect((container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement).readOnly).toBe(true)
-    expect((container.querySelector('[aria-label="runpod_mtp.qwen num-ctx"]') as HTMLInputElement).readOnly).toBe(true)
     expect(container.querySelector('[data-testid="runtime-environment-save"]')).toBeNull()
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('edits binding runtime knobs as a draft and applies them through the existing save path', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+
+    const maxConcurrent = container.querySelector('[aria-label="runpod_mtp.qwen max-concurrent"]') as HTMLInputElement
+    const keepAlive = container.querySelector('[aria-label="runpod_mtp.qwen keep-alive"]') as HTMLInputElement
+    const numCtx = container.querySelector('[aria-label="runpod_mtp.qwen num-ctx"]') as HTMLInputElement
+
+    expect(maxConcurrent.readOnly).toBe(false)
+    expect(maxConcurrent.disabled).toBe(false)
+    expect(maxConcurrent.value).toBe('4')
+    expect(keepAlive.value).toBe('10m')
+
+    fireEvent.input(maxConcurrent, { target: { value: '6' } })
+    fireEvent.input(keepAlive, { target: { value: '20m' } })
+    fireEvent.input(numCtx, { target: { value: '262144' } })
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('max-concurrent = 6')
+      expect(source).toContain('keep-alive = "20m"')
+      expect(source).toContain('num-ctx = 262144')
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+      expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+      expect(savedSource).toContain('max-concurrent = 6')
+      expect(savedSource).toContain('keep-alive = "20m"')
+      expect(savedSource).toContain('num-ctx = 262144')
+      expect(container.textContent).toContain('적용됨')
+    })
+    expect(apiMocks.patchRuntimeRouting).not.toHaveBeenCalled()
+    expect(apiMocks.patchRuntimeAssignment).not.toHaveBeenCalled()
+  })
+
+  it('ignores invalid binding number edits without dirtying the draft', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+
+    const textarea = container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement
+    const maxConcurrent = container.querySelector('[aria-label="runpod_mtp.qwen max-concurrent"]') as HTMLInputElement
+    const numCtx = container.querySelector('[aria-label="runpod_mtp.qwen num-ctx"]') as HTMLInputElement
+
+    expect(textarea.value).toBe(richSourceText)
+    fireEvent.input(maxConcurrent, { target: { value: '0' } })
+    fireEvent.input(numCtx, { target: { value: '-1' } })
+
+    await waitFor(() => {
+      expect((container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value)
+        .toBe(richSourceText)
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
+      expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(true)
+    })
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    expect(apiMocks.patchRuntimeRouting).not.toHaveBeenCalled()
+    expect(apiMocks.patchRuntimeAssignment).not.toHaveBeenCalled()
   })
 
   it('switches the default runtime through the typed backend routing patch', async () => {

@@ -1948,9 +1948,40 @@ let test_extract_message_request_ack_falls_back_to_keeper_name () =
         ("expected Ok with fallback keeper_name: "
          ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
 
+(* ── RFC-connector-deferred-reply-via-chat-queue connector deferred-reply routing ───────────────── *)
+
+let test_route_busy_discord_enqueues () =
+  match
+    Gate_keeper_backend.route_busy_connector Gate_keeper_backend.Discord
+      ~channel_id:"123456789" ~user_id:"u-42"
+  with
+  | `Enqueue_chat_queue (Keeper_chat_queue.Discord { channel_id; user_id }) ->
+      check string "discord channel_id threaded" "123456789" channel_id;
+      check string "discord user_id threaded" "u-42" user_id
+  | `Enqueue_chat_queue _ ->
+      fail "Discord must map to a Discord message_source, not another variant"
+  | `Async_poll -> fail "Discord has an outbound adapter; must enqueue, not poll"
+
+
+let test_route_busy_generic_falls_back () =
+  match
+    Gate_keeper_backend.route_busy_connector Gate_keeper_backend.Generic
+      ~channel_id:"x" ~user_id:"y"
+  with
+  | `Async_poll -> check bool "generic falls back to async poll" true true
+  | `Enqueue_chat_queue _ ->
+      fail "Generic has no in-process outbound adapter; must not enqueue (RFC-connector-deferred-reply-via-chat-queue §3.3a)"
+
 let () =
   Alcotest.run "Gate_keeper_backend"
     [
+      ( "route_busy_connector",
+        [
+          test_case "Discord enqueues with channel_id/user_id" `Quick
+            test_route_busy_discord_enqueues;
+          test_case "Generic falls back to async poll" `Quick
+            test_route_busy_generic_falls_back;
+        ] );
       ( "helpers",
         [
           test_case "agent name is stable" `Quick

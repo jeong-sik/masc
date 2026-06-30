@@ -10,6 +10,7 @@
 open Keeper_tools_oas
 
 let task_state_hint ~(config : Workspace.config) ~(meta : Keeper_meta_contract.keeper_meta) : string =
+  let meta = Keeper_current_task_reconcile.sync_current_task_id_from_backlog ~config meta in
   match meta.current_task_id with
   | None -> "No task currently assigned. Use keeper_task_claim or masc_tasks to find one."
   | Some tid ->

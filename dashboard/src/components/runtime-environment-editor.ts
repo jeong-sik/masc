@@ -18,13 +18,21 @@ export type RuntimeStructuredSection =
   | 'bindings'
   | 'assignments'
 
+export type RuntimeBindingEditableField = 'max-concurrent' | 'keep-alive' | 'num-ctx'
+
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
   section: RuntimeStructuredSection
   disabled?: boolean
+  draftDirty?: boolean
   saving?: boolean
   onRoutingChange: (lane: 'default' | 'librarian' | 'cross_verifier', runtimeId: string | null) => void
   onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
+  onBindingFieldChange: (
+    runtimeId: string,
+    field: RuntimeBindingEditableField,
+    value: string | number | null,
+  ) => void
 }
 
 function firstId<T extends { id: string }>(items: T[]): string {
@@ -53,6 +61,14 @@ function protoContext(value: number | null | undefined): string {
   return `${(value / 1000).toFixed(0)}k ctx`
 }
 
+function parseOptionalPositiveInteger(raw: string): number | null | undefined {
+  const trimmed = raw.trim()
+  if (trimmed === '') return null
+  if (!/^\d+$/.test(trimmed)) return undefined
+  const parsed = Number.parseInt(trimmed, 10)
+  return parsed > 0 ? parsed : undefined
+}
+
 // rt-cap chip — runtime-editor.jsx:17 rtCapChip. `on` toggles the ✓/· glyph
 // and the .on tone (runtime.css:64). Read-only capability readout.
 function capChip(on: boolean, label: string) {
@@ -76,9 +92,11 @@ export function RuntimeEnvironmentEditor({
   sourceText,
   section,
   disabled,
+  draftDirty,
   saving,
   onRoutingChange,
   onAssignmentChange,
+  onBindingFieldChange,
 }: RuntimeEnvironmentEditorProps) {
   const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
   const [modelQuery, setModelQuery] = useState('')
@@ -90,6 +108,7 @@ export function RuntimeEnvironmentEditor({
   const crossVerifierLane = environment.crossVerifierRuntimeId
   const assignments = environment.assignments
   const keeperList = keepers.value
+  const typedPatchDisabled = isDisabled || draftDirty === true
 
   const filteredModels = environment.models.filter(model => {
     if (modelQuery.trim() === '') return true
@@ -111,6 +130,21 @@ export function RuntimeEnvironmentEditor({
       return
     }
     onAssignmentChange(keeperName, runtimeId)
+  }
+
+  function updateBindingNumber(
+    runtimeId: string,
+    field: 'max-concurrent' | 'num-ctx',
+    raw: string,
+  ) {
+    const next = parseOptionalPositiveInteger(raw)
+    if (next === undefined) return
+    onBindingFieldChange(runtimeId, field, next)
+  }
+
+  function updateBindingKeepAlive(runtimeId: string, raw: string) {
+    const next = raw.trim()
+    onBindingFieldChange(runtimeId, 'keep-alive', next === '' ? null : next)
   }
 
   // rt-select — runtime.css:43. Inline width cap so the 248px min-width never
@@ -148,7 +182,7 @@ export function RuntimeEnvironmentEditor({
           <select
             class="rt-select mono"
             value=${value}
-            disabled=${isDisabled}
+            disabled=${typedPatchDisabled}
             aria-label=${lane === 'default' ? 'default runtime' : `${lane} runtime`}
             onChange=${(event: Event) => onChange((event.currentTarget as HTMLSelectElement).value)}
           >
@@ -165,7 +199,7 @@ export function RuntimeEnvironmentEditor({
     <div data-testid="runtime-environment-editor">
       <div class="rt-head-actions" style=${{ justifyContent: 'flex-end', marginBottom: '14px' }}>
         <span class="rt-nav-sub mono" style=${{ marginRight: 'auto' }}>런타임 환경</span>
-        <span class="rt-nav-sub mono">${saving ? '저장 중' : 'backend typed writer'}</span>
+        <span class="rt-nav-sub mono">${saving ? '저장 중' : 'routing live · bindings draft'}</span>
       </div>
 
       ${environment.warnings.length > 0 ? html`
@@ -310,12 +344,13 @@ export function RuntimeEnvironmentEditor({
       </div>
 
       <!-- bindings — runtime-editor.jsx:193-214. radio sets the default runtime;
-           max-conc / num-ctx editable. price / effort sub-line has no live
-           source. -->
+           max-conc / keep-alive / num-ctx edit the draft runtime.toml and are
+           applied through the existing validated Save path. price / effort
+           sub-line has no live source. -->
       <div class=${section === 'bindings' ? '' : 'hidden'} data-testid="runtime-section-bindings">
         <div class="rt-binds">
           <div class="rt-note">
-            바인딩 = 런타임 id <span class="mono">provider.model</span>. 라디오로 기본 런타임 지정.
+            바인딩 = 런타임 id <span class="mono">provider.model</span>. 라디오는 기본 런타임을 즉시 적용하고, 숫자/keep-alive 변경은 draft를 만든 뒤 라이브 적용 버튼으로 저장합니다.
           </div>
           ${environment.bindings.map(binding => {
             const isDefault = binding.id === environment.defaultRuntimeId || binding.isDefault
@@ -325,7 +360,7 @@ export function RuntimeEnvironmentEditor({
                 <button
                   type="button"
                   class="rt-radio ${isDefault ? 'on' : ''}"
-                  disabled=${isDisabled}
+                  disabled=${typedPatchDisabled}
                   title="기본 런타임으로"
                   aria-label=${`${binding.id} 기본 런타임으로`}
                   aria-pressed=${isDefault}
@@ -344,20 +379,42 @@ export function RuntimeEnvironmentEditor({
                     <span>max-conc</span>
                     <input
                       class="rt-input-sm mono"
+                      type="number"
+                      min="1"
+                      step="1"
                       value=${binding.maxConcurrent == null ? '' : String(binding.maxConcurrent)}
                       placeholder="∞"
-                      readOnly
+                      disabled=${isDisabled}
                       aria-label=${`${binding.id} max-concurrent`}
+                      onInput=${(event: Event) => updateBindingNumber(binding.id, 'max-concurrent', (event.currentTarget as HTMLInputElement).value)}
+                      data-testid=${`runtime-binding-${binding.id}-max-concurrent`}
+                    />
+                  </label>
+                  <label class="rt-mini">
+                    <span>keep-alive</span>
+                    <input
+                      class="rt-input-sm mono"
+                      value=${binding.keepAlive}
+                      placeholder="—"
+                      disabled=${isDisabled}
+                      aria-label=${`${binding.id} keep-alive`}
+                      onInput=${(event: Event) => updateBindingKeepAlive(binding.id, (event.currentTarget as HTMLInputElement).value)}
+                      data-testid=${`runtime-binding-${binding.id}-keep-alive`}
                     />
                   </label>
                   <label class="rt-mini">
                     <span>num-ctx</span>
                     <input
                       class="rt-input-sm mono"
+                      type="number"
+                      min="1"
+                      step="1"
                       value=${binding.numCtx == null ? '' : String(binding.numCtx)}
                       placeholder="—"
-                      readOnly
+                      disabled=${isDisabled}
                       aria-label=${`${binding.id} num-ctx`}
+                      onInput=${(event: Event) => updateBindingNumber(binding.id, 'num-ctx', (event.currentTarget as HTMLInputElement).value)}
+                      data-testid=${`runtime-binding-${binding.id}-num-ctx`}
                     />
                   </label>
                 </div>
@@ -388,7 +445,7 @@ export function RuntimeEnvironmentEditor({
                 <select
                   class="rt-select mono"
                   value=${current}
-                  disabled=${isDisabled}
+                  disabled=${typedPatchDisabled}
                   aria-label=${`${keeper.name} 런타임 배정`}
                   onChange=${(event: Event) => updateAssignment(keeper.name, (event.currentTarget as HTMLSelectElement).value)}
                 >

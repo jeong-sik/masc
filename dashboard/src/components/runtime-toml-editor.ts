@@ -13,6 +13,7 @@ import { errorToString } from '../lib/format-string'
 import {
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
+  setRuntimeTomlBindingField,
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
 import { ActionButton } from './common/button'
@@ -20,7 +21,11 @@ import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
 import { ErrorState, LoadingState } from './common/feedback-state'
 import { ringFocusClasses } from './common/ring'
-import { RuntimeEnvironmentEditor, type RuntimeStructuredSection } from './runtime-environment-editor'
+import {
+  RuntimeEnvironmentEditor,
+  type RuntimeBindingEditableField,
+  type RuntimeStructuredSection,
+} from './runtime-environment-editor'
 
 type LoadState = 'idle' | 'loading' | 'loaded'
 
@@ -255,6 +260,17 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
     } finally {
       setSaving(false)
     }
+  }
+
+  function handleBindingFieldChange(
+    runtimeId: string,
+    field: RuntimeBindingEditableField,
+    value: string | number | null,
+  ) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
+    setNotice(null)
+    setError(null)
   }
 
   async function handleRefresh() {
@@ -493,6 +509,7 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
           </header>
 
           <div class="rt-body">
+            ${toolbar}
             ${error ? html`<${ErrorState} message=${error} />` : null}
             ${notice ? html`
               <div
@@ -508,7 +525,8 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
               <${RuntimeEnvironmentEditor}
                 sourceText=${draft}
                 section=${structuredSection}
-                disabled=${loadState !== 'loaded' || dirty}
+                disabled=${loadState !== 'loaded'}
+                draftDirty=${dirty}
                 saving=${saving}
                 onRoutingChange=${(lane: RuntimeRoutingLane, runtimeId: string | null) => {
                   void handleRoutingPatch(lane, runtimeId)
@@ -516,11 +534,11 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
                 onAssignmentChange=${(keeperName: string, runtimeId: string | null) => {
                   void handleAssignmentPatch(keeperName, runtimeId)
                 }}
+                onBindingFieldChange=${handleBindingFieldChange}
               />
             </div>
 
             <div class=${tomlActive ? 'flex flex-col gap-3' : 'hidden'} data-testid="runtime-toml-section">
-              ${toolbar}
               <div class="rt-toml-wrap">
                 <div class="rt-toml-bar">
                   <span class="mono">${path}</span>

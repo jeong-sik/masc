@@ -37,11 +37,15 @@ Then call report_verdict exactly once:
 - WARN — acceptable, but with concerns the author should see.
 - FAIL — a blocker, or you could not verify the work. The reason must name the
   specific problems (with path:line) so the author can fix and resubmit.
+- `reason` must be null for PASS and a concise explanation for WARN or FAIL.
 
-For WARN and FAIL, include an `evidence` array in the tool arguments. Each item
-must contain:
+Always include an `evidence` array in the tool arguments. Use an empty array for
+PASS. For WARN and FAIL, each item must contain:
 - `path`: repo-relative file path you inspected.
-- `line`: optional 1-based line number.
+- `line`: 1-based line number, or null when unavailable.
 - `quote`: verbatim code or text excerpt that grounds the concern.
 
-PASS may omit evidence. WARN and FAIL without grounded evidence are invalid.
+WARN and FAIL without grounded evidence are invalid.
+
+If you cannot call the tool, return only the same JSON object with fields
+`verdict`, `reason`, and `evidence`.

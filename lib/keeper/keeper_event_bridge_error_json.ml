@@ -9,7 +9,7 @@ let agent_completed_usage_fields (response : Agent_sdk.Types.api_response) =
     ; "output_tokens", `Int usage.output_tokens
     ; "cache_creation_input_tokens", `Int usage.cache_creation_input_tokens
     ; "cache_read_input_tokens", `Int usage.cache_read_input_tokens
-    ; "total_tokens", `Int (usage.input_tokens + usage.output_tokens)
+    ; "total_tokens", `Int (Agent_sdk.Types.total_tokens usage)
     ; ( "cost_usd"
       , match usage.cost_usd with
         | Some cost -> `Float cost

@@ -340,14 +340,31 @@ let sdk_error_json error =
      @ sdk_error_detail_fields error)
 ;;
 
+type agent_failed_error_projection =
+  { error : string
+  ; error_domain : string
+  ; error_code : string
+  ; error_retryable : bool
+  ; error_detail : Yojson.Safe.t
+  }
+
+let agent_failed_error_projection error =
+  { error = Agent_sdk.Error.to_string error
+  ; error_domain = Keeper_agent_error.sdk_error_kind error
+  ; error_code =
+      (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed error
+       |> Keeper_turn_terminal_code.to_wire)
+  ; error_retryable = Agent_sdk.Error.is_retryable error
+  ; error_detail = sdk_error_json error
+  }
+;;
+
 let agent_failed_error_fields error =
-  [ "error", `String (Agent_sdk.Error.to_string error)
-  ; "error_domain", `String (Keeper_agent_error.sdk_error_kind error)
-  ; ( "error_code"
-    , `String
-        (Keeper_agent_error.terminal_reason_code_of_sdk_error_typed error
-         |> Keeper_turn_terminal_code.to_wire) )
-  ; "error_retryable", `Bool (Agent_sdk.Error.is_retryable error)
-  ; "error_detail", sdk_error_json error
+  let projection = agent_failed_error_projection error in
+  [ "error", `String projection.error
+  ; "error_domain", `String projection.error_domain
+  ; "error_code", `String projection.error_code
+  ; "error_retryable", `Bool projection.error_retryable
+  ; "error_detail", projection.error_detail
   ]
 ;;

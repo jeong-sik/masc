@@ -25,6 +25,7 @@ let baseline_wrap_event
       ~run_id
       ~event_type
       ~payload
+      ?caused_by
       ?agent_name
       ?task_id
       ?turn
@@ -37,6 +38,7 @@ let baseline_wrap_event
     ; "ts_unix", `Float ts
     ; "correlation_id", `String correlation_id
     ; "run_id", `String run_id
+    ; "caused_by", baseline_json_string_opt caused_by
     ; "agent_name", baseline_json_string_opt agent_name
     ; "task_id", baseline_json_string_opt task_id
     ; ( "turn"

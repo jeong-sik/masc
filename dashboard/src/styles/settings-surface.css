@@ -413,7 +413,7 @@
 }
 
 .set-path-check-result {
-  font-size: 11px;
+  font-size: var(--fs-11);
   font-family: var(--font-mono);
   line-height: 1;
 }
@@ -523,7 +523,7 @@
 
 .set-rt-open {
   font-family: var(--font-ui);
-  font-size: 13px;
+  font-size: var(--fs-13);
   padding: 9px 18px;
   border-radius: var(--radius-sm);
   border: 1px solid var(--volt-dim);
@@ -855,7 +855,7 @@
   gap: 8px;
   margin-bottom: 12px;
   color: var(--text-mid);
-  font-size: 12px;
+  font-size: var(--fs-12);
 }
 
 /* tool-group policy — keeper-v2 styles/surfaces.css:555-565 (.set-tg-*) */

@@ -139,6 +139,28 @@ let test_empty_response_detail_uses_canonical_unknown_stop_reason () =
     (String_util.string_contains_substring ~needle:"line\nquote" detail)
 ;;
 
+let test_empty_response_detail_counts_via_canonical_projection () =
+  (* 비-thinking 카운트가 OAS canonical projection
+     [Agent_sdk.Response_shape.summarize_blocks]에서 산출됨을 증명한다(로컬 fold 제거 후).
+     text_chars는 OAS 규약대로 trim 후 길이다: "  hi  "(2) + "yo"(2) = 4. *)
+  let response : Agent_sdk.Types.api_response =
+    { id = "r"
+    ; model = "m"
+    ; stop_reason = Agent_sdk.Types.MaxTokens
+    ; content = [ Agent_sdk.Types.Text "  hi  "; Agent_sdk.Types.Text "yo" ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  let detail = Fusion_oas.For_testing.empty_response_detail response in
+  Alcotest.(check bool) "content blocks total counted" true
+    (String_util.string_contains_substring ~needle:"content_blocks=2" detail);
+  Alcotest.(check bool) "text blocks from canonical projection" true
+    (String_util.string_contains_substring ~needle:"text_blocks=2" detail);
+  Alcotest.(check bool) "text chars use canonical trimmed length" true
+    (String_util.string_contains_substring ~needle:"text_chars=4" detail)
+;;
+
 let test_panel_failure_yojson_accepts_legacy_empty_response () =
   let decode json =
     match Fusion_types.panel_failure_of_yojson json with
@@ -237,6 +259,10 @@ let () =
             "empty response detail summarizes shape"
             `Quick
             test_empty_response_detail_summarizes_shape
+        ; Alcotest.test_case
+            "empty response detail counts via canonical projection"
+            `Quick
+            test_empty_response_detail_counts_via_canonical_projection
         ; Alcotest.test_case
             "empty response detail uses canonical unknown stop reason"
             `Quick

@@ -55,10 +55,10 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.1 so MASC consumes RFC-OAS-029 provider capability
-  ;; fields, canonical stream/tool surfaces from the v0.207.25 line, and the
-  ;; fail-closed media source carrier expansion (Base64/Url/File_id).
-  (agent_sdk (>= 0.208.1))
+  ;; Pinned to OAS v0.208.2 so MASC consumes RFC-OAS-029 provider capability
+  ;; fields, thinking capability fallback hardening, and the streaming
+  ;; reasoning/tool-arg diagnostics fixes from the v0.208 line.
+  (agent_sdk (>= 0.208.2))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

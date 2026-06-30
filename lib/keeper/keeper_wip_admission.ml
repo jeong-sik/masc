@@ -50,20 +50,28 @@ let title_category title =
   if stop <= 0 then Other "other" else String.sub normalized 0 stop |> category_of_string
 
 type scope = {
-  repo : string;
+  repo : string option;
   goal_id : string option;
   category : category;
 }
 
-let task_repo ~default_repo (task : Masc_domain.task) =
-  ignore task;
-  default_repo
+(* The task model carries no repo attribution (see [Masc_domain.task]); its only
+   repo-ish field is [files], a heuristic path list we deliberately do not parse.
+   A repoless task resolves to [None] and — exactly like a goalless task under the
+   per-goal cap (RFC-0245, see [decide]) — is exempt from the per-repo cap,
+   bounded only by the global/category caps. The per-repo cap stays live for any
+   task that DOES resolve to a repo ([Some]), so the mechanism is preserved for
+   when the task model carries one. Returning a single fallback repo here instead
+   collapsed every fleet task into one [repo:<basename>] bucket, turning
+   [max_per_repo] into a fleet-wide cap tighter than [max_global] — every keeper
+   blocked once 6 tasks were active anywhere in the fleet. *)
+let task_repo (_task : Masc_domain.task) : string option = None
 
-let scope_of_task ?(task_goal_index = Hashtbl.create 0) ~default_repo (task : Masc_domain.task) =
+let scope_of_task ?(task_goal_index = Hashtbl.create 0) (task : Masc_domain.task) =
   let goal_id =
     try Some (List.hd (Hashtbl.find task_goal_index task.id)) with Not_found -> None
   in
-  { repo = task_repo ~default_repo task
+  { repo = task_repo task
   ; goal_id
   ; category = title_category task.title
   }
@@ -96,13 +104,13 @@ let task_is_active_wip (task : Masc_domain.task) =
   | Masc_domain.Done _
   | Masc_domain.Cancelled _ -> false
 
-let active_item_of_task ?task_goal_index ~default_repo (task : Masc_domain.task) =
-  { id = task.id; scope = scope_of_task ?task_goal_index ~default_repo task }
+let active_item_of_task ?task_goal_index (task : Masc_domain.task) =
+  { id = task.id; scope = scope_of_task ?task_goal_index task }
 
-let active_items_of_tasks ?task_goal_index ~default_repo tasks =
+let active_items_of_tasks ?task_goal_index tasks =
   tasks
   |> List.filter task_is_active_wip
-  |> List.map (active_item_of_task ?task_goal_index ~default_repo)
+  |> List.map (active_item_of_task ?task_goal_index)
 
 type reject_reason =
   | Global_cap
@@ -142,6 +150,12 @@ let same_goal a b =
   | None, None -> true
   | _ -> false
 
+let same_repo a b =
+  match a, b with
+  | Some a, Some b -> same_string a b
+  | None, None -> true
+  | _ -> false
+
 let same_category a b =
   String.equal (category_to_string a) (category_to_string b)
 
@@ -150,8 +164,9 @@ let count_matching predicate active =
 
 let global_key = "global"
 
-let repo_key repo =
-  Printf.sprintf "repo:%s" (normalize repo)
+let repo_key = function
+  | Some repo -> Printf.sprintf "repo:%s" (normalize repo)
+  | None -> "repo:<none>"
 
 let goal_key = function
   | Some goal_id -> Printf.sprintf "goal:%s" (normalize goal_id)
@@ -163,7 +178,7 @@ let category_key category =
 let active_counts ~scope active =
   [ global_key, List.length active
   ; ( repo_key scope.repo,
-      count_matching (fun item -> same_string item.scope.repo scope.repo) active )
+      count_matching (fun item -> same_repo item.scope.repo scope.repo) active )
   ; ( goal_key scope.goal_id,
       count_matching
         (fun item -> same_goal item.scope.goal_id scope.goal_id)
@@ -185,7 +200,7 @@ let first_rejection checks =
 let decide ?(caps = default_caps) active ~scope =
   let global_count = List.length active in
   let repo_count =
-    count_matching (fun item -> same_string item.scope.repo scope.repo) active
+    count_matching (fun item -> same_repo item.scope.repo scope.repo) active
   in
   let goal_count =
     count_matching
@@ -211,10 +226,21 @@ let decide ?(caps = default_caps) active ~scope =
         caps.max_per_goal
     | None -> None
   in
+  (* Mirror the per-goal exemption above: a task with no resolved repo
+     ([repo:<none>]) shares no repo scope with any other, so it cannot collide.
+     Applying [max_per_repo] to the [None] bucket lumps every repoless task into
+     one fleet-wide cap — the collapse this module previously suffered. Exempt
+     [None]; the global/category caps still bound repoless WIP. *)
+  let repo_cap_check =
+    match scope.repo with
+    | Some _ ->
+      reject_if_at_cap Repo_cap (repo_key scope.repo) repo_count caps.max_per_repo
+    | None -> None
+  in
   match
     first_rejection
       [ reject_if_at_cap Global_cap global_key global_count caps.max_global
-      ; reject_if_at_cap Repo_cap (repo_key scope.repo) repo_count caps.max_per_repo
+      ; repo_cap_check
       ; goal_cap_check
       ; reject_if_at_cap Category_cap
           (category_key scope.category)

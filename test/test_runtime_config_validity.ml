@@ -351,14 +351,14 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
     | None -> failf "expected repo OAS catalog row for %s" model_id
     | Some entry ->
       check (option string) (model_id ^ " base") (Some "openai_chat")
-        entry.base_label
+        entry.base_label;
+      check (option int) (model_id ^ " context") (Some 131072)
+        entry.max_context_tokens
   in
   let expect_runpod_caps
         name
-        (caps : Llm_provider.Capabilities.capabilities)
+      (caps : Llm_provider.Capabilities.capabilities)
     =
-    check (option int) (name ^ " context") (Some 131072)
-      caps.max_context_tokens;
     check bool (name ^ " tools") true caps.supports_tools;
     check bool (name ^ " tool choice") true caps.supports_tool_choice;
     check bool (name ^ " extended thinking") true

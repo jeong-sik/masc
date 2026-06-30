@@ -120,6 +120,15 @@ let translate ~redact_text ~on_text_delta bridge_state
         chat_events =
           [ Oas_thinking_delta { index; delta = redact_text text } ]
       }
+  | ContentBlockDelta
+      { index; delta = ReasoningDetailsDelta { reasoning_content; _ } } ->
+      (* MiniMax split-reasoning stream (#2347): project the reasoning payload
+         through the thinking-delta lane so keepers surface it like other
+         provider reasoning. Empty when [reasoning_content] is absent. *)
+      let text = Option.value ~default:"" reasoning_content in
+      { bridge_state;
+        chat_events = [ Oas_thinking_delta { index; delta = redact_text text } ]
+      }
   | ContentBlockDelta { index; delta = ThinkingSignatureDelta signature } ->
       { bridge_state;
         chat_events =

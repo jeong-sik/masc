@@ -460,8 +460,8 @@ let cap_checkpoint_message_to_remaining_content
            | Agent_sdk.Types.ReasoningDetails r ->
                let len =
                  reasoning_details_chars
-                   ~reasoning_content:r.Agent_sdk.Types.reasoning_content
-                   ~details:r.Agent_sdk.Types.details
+                   ~reasoning_content:r.reasoning_content
+                   ~details:r.details
                in
                if len = 0 then
                  (Agent_sdk.Types.ReasoningDetails r :: kept_rev, stats)

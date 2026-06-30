@@ -12,7 +12,9 @@ let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
     List.filter_map
       (fun block ->
         Canonical_tool.tool_call_of_block block
-        |> Option.map (fun call -> call.Canonical_tool.call_id))
+        |> Option.map
+             (fun (call : Canonical_tool.provider_tool_call) ->
+               call.Canonical_tool.call_id))
       msg.content
   | Agent_sdk.Types.System
   | Agent_sdk.Types.User

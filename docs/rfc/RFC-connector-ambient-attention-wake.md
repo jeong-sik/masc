@@ -8,7 +8,7 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0020", "0203", "0223", "0226", "connector-deferred-reply-via-chat-queue"]
-implementation_prs: []
+implementation_prs: [22818, 22825]
 ---
 
 # RFC: Connector ambient attention wake
@@ -22,8 +22,8 @@ the **ambient** half, the §2 non-goal that RFC deferred to "a separate RFC, the
 RFC-0020 frame".
 
 An **ambient** connector message — one the trigger policy filters out (default
-`Mention_or_thread`, `server_discord_in_process_gateway.ml:30`) — takes the
-`handle_ambient` path (`server_discord_in_process_gateway.ml:572`): it appends a
+`Mention_or_thread`, `lib/server/server_discord_in_process_gateway.ml:30`) — takes the
+`handle_ambient` path (`lib/server/server_discord_in_process_gateway.ml:572`): it appends a
 chat line and records `Keeper_external_attention` (urgency `Ambient` /
 `Direct_message`), then stops. It never enqueues a stimulus and never flips a
 wakeup. So an **idle keeper never notices it.**
@@ -31,13 +31,13 @@ wakeup. So an **idle keeper never notices it.**
 The backlog is a dead-end to the wake decision:
 
 - `Keeper_external_attention.pending_for_keeper` is consumed by exactly one
-  caller, `operator_digest.ml:287` (the operator digest). It never reaches
-  `keeper_world_observation.observe` or `keeper_cycle_decision`.
-- `keeper_world_observation` already drives reactive wakes from
+  caller, `lib/operator/operator_digest.ml:287` (the operator digest). It never reaches
+  `lib/keeper/keeper_world_observation.ml` or `keeper_cycle_decision`.
+- `lib/keeper/keeper_world_observation.ml` already drives reactive wakes from
   `pending_mentions → Mention_pending`, `pending_board_events → Board_event_pending`,
   `pending_scope_messages → Scope_message_pending`, and Event-Layer stimuli
-  (`keeper_world_observation.ml:1014-1022`) — but **none of these read
-  external_attention.** `keeper_supervisor.ml` has zero references to it.
+  (`lib/keeper/keeper_world_observation.ml:1014-1022`) — but **none of these read
+  external_attention.** `lib/keeper/keeper_supervisor.ml` has zero references to it.
 
 This is exactly the RFC-0020 §1 failure: an external stimulus has a durable store
 but **no data channel into the policy layer**, so the only recovery is the next
@@ -59,7 +59,7 @@ at all.
 ## 3. Design
 
 The wake must satisfy the **actionability invariant**
-(`keeper_world_observation.ml:1097`, `RFC-keeper-proactive-wake-actionability-invariant`):
+(`lib/keeper/keeper_world_observation.ml:1097`, `RFC-keeper-proactive-wake-actionability-invariant`):
 a signal may drive a proactive turn only if the keeper holds a tool affordance
 that can *clear* it. A pending connector message qualifies — the keeper can reply
 on the connector surface, and the reply resolves it — **provided** an outbound
@@ -80,15 +80,15 @@ after `record_external_attention`:
    single durable store (`external_attention`), so there is no payload
    duplication / split-brain (the objection to a content-bearing queue variant).
 2. Flip the wakeup hint (`Keeper_registry.wakeup` / `wakeup_keeper`,
-   `keeper_keepalive.mli:29`) so propagation is sub-second, not next-tick
+   `lib/keeper/keeper_keepalive.mli:29`) so propagation is sub-second, not next-tick
    (RFC-0020 §1 latency).
 
 The heartbeat stimulus intake maps the new payload to a new event_queue trigger,
 and `turn_reason_of_event_queue_trigger`
-(`keeper_world_observation_turn_types.ml:83`) maps that to a **new closed-sum
+(`lib/keeper_contract/keeper_world_observation_turn_types.ml:83`) maps that to a **new closed-sum
 turn_reason** `Connector_attention_pending`. Because
 `event_queue_reactive_triggers` already fold into `reactive_triggers`
-(`keeper_world_observation.ml:1011-1022`), `keeper_cycle_decision` needs **zero
+(`lib/keeper/keeper_world_observation.ml:1011-1022`), `keeper_cycle_decision` needs **zero
 structural change** — the stimulus yields `Run { channel = Reactive }` via the
 existing `match reactive_triggers | first :: rest -> Run` arm (1044-1053), the
 same path Bootstrap / No_progress_recovery stimuli already take.
@@ -104,7 +104,7 @@ the digest/backlog read, not for gating the wake.)
 
 Gate the trigger through `Keeper_agent_tool_surface.affordance_can_mutate`
 exactly like `claimable ↔ Task_claim` / `failed ↔ Task_audit`
-(`keeper_world_observation.ml:876-889`). Introduce a "can reply on a connector
+(`lib/keeper/keeper_world_observation.ml:876-889`). Introduce a "can reply on a connector
 surface" affordance so `Connector_attention_pending` is admitted **only** when the
 keeper actually holds the outbound tool. A keeper bound to no connector, or with
 the reply tool removed, must not wake on it (it cannot clear it). This makes the
@@ -119,21 +119,35 @@ render each item's `content_preview` + `surface` (which channel) into a prompt
 layer, analogous to how board events surface `board_post_get`. The keeper learns
 *what* to respond to and *where*.
 
-### 3.4 Resolution lifecycle (the missing piece — the largest new work)
+### 3.4 Resolution lifecycle (landed pieces and contract)
 
-Today `claim_for_turn` / `mark_resolved` / `mark_ignored` are wired only into the
-Discord gateway's synchronous reply (`mark_attention_resolved`,
-`server_discord_in_process_gateway.ml`). The heartbeat turn lifecycle has **none**
-(`keeper_supervisor` has zero external_attention references). This RFC adds it:
+At RFC creation, `mark_resolved` was wired only into the Discord gateway's
+synchronous reply path (`lib/server/server_discord_in_process_gateway.ml:310`).
+The first implementation slices have since landed:
+
+- #22818 added the dormant `Connector_attention` stimulus, `Connector_attention_pending`
+  turn reason, intake mapping, and turn-start `claim_for_turn`
+  (`lib/keeper/keeper_heartbeat_stimulus_intake.ml:79`,
+  `lib/keeper/keeper_heartbeat_stimulus_intake.ml:146-183`).
+- #22825 added the gated `handle_ambient` producer, wakeup hint, prompt content
+  delivery, heartbeat-loop `mark_ignored` terminalization for completed ambient
+  turns, and debounce gating
+  (`lib/server/server_discord_in_process_gateway.ml:617-643`,
+  `lib/keeper/keeper_heartbeat_loop.ml:140-170`).
+
+The lifecycle contract for every implementation slice remains:
 
 - **Turn start**: `claim_for_turn` the surfaced event_ids, so concurrent cycles
-  and the digest stop re-projecting them as pending for `claim_stale_after` (900s).
+  and the digest stop re-projecting them as pending for `claim_stale_after`
+  (`default_claim_stale_after_s`, currently 900s).
 - **Turn end**: `mark_resolved` (the keeper replied) or `mark_ignored` (the keeper
-  woke, read, and decided no reply — `mark_ignored` is the existing-but-unused
-  primitive for exactly this, `keeper_external_attention.mli:162`).
-- A **claimed-but-never-resolved** item re-surfaces after 900s and re-wakes
-  forever, so the turn MUST reach a terminal `Resolved`/`Ignored` — never leave it
-  merely claimed.
+  woke, read, and decided no reply — `mark_ignored` is the existing primitive for
+  exactly this, `lib/keeper/keeper_external_attention.mli:162`).
+- A **claimed-but-never-resolved** item re-surfaces after the stale-claim window
+  and can re-wake forever, so turn execution MUST terminalize via a finally-style
+  guard (`Fun.protect`, `Eio.Switch.on_release`, or the supervisor turn-end hook).
+  Prose intent is not sufficient; cancellation/exception paths must reach
+  `Resolved`/`Ignored` or explicitly requeue/release.
 
 This is shared with the dispatched path's resolution model and must not race the
 gateway fiber writing to the same per-keeper JSONL (`project_pending` is already
@@ -153,7 +167,7 @@ Ambient messages are precisely the ones the trigger policy filtered out. Waking 
 full LLM turn on every line in a chatty bound channel is the opposite of intent
 and burns tokens. Gate by urgency + debounce, reusing the board precedent
 (`board_reactive_debounce_sec = 60`, `board_reactive_wakeup_max`,
-`keeper_keepalive_signal.ml:299`):
+`lib/keeper/keeper_keepalive_signal.ml:299`):
 
 - `Mention` / `Direct_message` urgency: wake promptly (these are addressed to the
   keeper).
@@ -191,10 +205,10 @@ and operator digest honest and to support the content read.
 - **Double-processing with the dispatched fix** — a message that is both queued
   (dispatched) and recorded (ambient) must not drive two turns. Resolution keys on
   `dedupe_key` / `event_id`; the chat-queue path already sets
-  `connector_user_line_recorded_upstream = true` (`server_bootstrap_loops.ml:1088`)
+  `connector_user_line_recorded_upstream = true` (`lib/server/server_bootstrap_loops.ml:1088`)
   to avoid re-recording.
 - **Approval_pending shadowing** — the `Approval_pending` hard gate returns
-  `blocked` before `reactive_triggers` are matched (`keeper_world_observation.ml:1041`),
+  `blocked` before `reactive_triggers` are matched (`lib/keeper/keeper_world_observation.ml:1041`),
   so connector attention is held while a HITL approval is pending. Acceptable
   because the stimulus persists (re-delivered next cycle), but must be intentional.
 - **RFC-0020 path drift** — RFC-0020 §4 cites `lib/keeper/keeper_event_queue.*`
@@ -204,14 +218,17 @@ and operator digest honest and to support the content read.
 
 The actionability invariant couples wake+content+outbound+resolution into one
 minimum shippable unit. Phasing is therefore by *internal* slice, each behind the
-prior, landing together before the feature is enabled:
+prior, landing together before the feature is enabled. Current main has already
+landed P1/P2 turn-start plumbing in #22818 and P3/P4 gated producer/throttle work
+in #22825; future work should not recreate those modules and should focus on
+remaining policy/readiness gaps.
 
 | Phase | Scope | Independently mergeable? |
 |---|---|---|
-| P1 | `Connector_attention` stimulus + `Connector_attention_pending` turn_reason + intake mapping + the affordance gate (§3.1–3.2). Wake fires but the feature flag is OFF. | yes (dormant: no enqueuer yet) |
-| P2 | Resolution lifecycle: `claim_for_turn` at turn-start, `mark_resolved`/`mark_ignored` at turn-end, shared with the gateway writer (§3.4). | yes (no-op until P3 enqueues) |
-| P3 | `handle_ambient` enqueues the stimulus + flips wakeup; prompt content layer; outbound via `Keeper_chat_queue` (§3.1, §3.3, §3.5). Flag still gated on §3.6. | couples to P1+P2 |
-| P4 | Spurious-wake gating (urgency throttle + debounce, §3.6), then enable. | yes — enables the feature |
+| P1 | `Connector_attention` stimulus + `Connector_attention_pending` turn_reason + intake mapping + affordance gate (§3.1–3.2). | landed in #22818; no producer on its own |
+| P2 | Resolution lifecycle: `claim_for_turn` at turn-start and terminal `mark_resolved`/`mark_ignored` at turn-end (§3.4). | turn-start landed in #22818; turn-end ignore path landed in #22825 |
+| P3 | `handle_ambient` enqueues the stimulus + flips wakeup; prompt content layer; outbound via `Keeper_chat_queue` (§3.1, §3.3, §3.5). | landed behind feature flag in #22825 |
+| P4 | Spurious-wake gating (urgency throttle + debounce, §3.6), then enable. | gating landed in #22825; enabling remains an operator rollout decision |
 
 A reproduction/integration test per phase (deterministic, the busy-slot +
 `Keeper_chat_queue.length` harness from `test_keeper_busy_connector_deferred` and

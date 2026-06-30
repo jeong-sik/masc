@@ -43,7 +43,6 @@ type agent_reputation = {
   accountability_keeper_name: string; [@default ""]
   accountability_source: string; [@default "none"]
   accountability_source_label: string; [@default "No accountability history"]
-  overall_score: float; [@default 0.0]
   (* v2 multi-dimensional scores — additive fields; absent in v1 records
      are interpreted as the neutral default (1.0 for rates, "standard" for level). *)
   execution_reliability: float; [@default 1.0]
@@ -79,7 +78,6 @@ let default_reputation ~(agent_name : string) : agent_reputation =
     accountability_keeper_name = agent_name;
     accountability_source = "none";
     accountability_source_label = "No accountability history";
-    overall_score = 0.0;
     execution_reliability = 1.0;
     goal_adherence = 1.0;
     safety_compliance = 1.0;
@@ -253,23 +251,6 @@ let count_mention_activity (config : Workspace.config) ~(agent_name : string)
 
 let clamp01 value = Float.max 0.0 (Float.min 1.0 value)
 
-(** {1 Reputation Score Weights}
-
-    Weighted linear combination for overall reputation.
-    Rationale: task completion is the primary signal (0.35) because
-    it directly measures value delivered. Response rate (0.25) and
-    board activity (0.25) are secondary engagement signals.
-    Thompson confidence (0.15) captures empirical quality from
-    Beta distribution feedback (votes, quality signals).
-
-    Board activity is capped at [board_activity_cap] to prevent
-    high-volume low-quality posting from inflating scores. *)
-let weight_completion = 0.35
-let weight_response   = 0.25
-let weight_board      = 0.25
-let weight_thompson   = 0.15
-let board_activity_cap = 20.0
-
 let compute_accountability_score ~evidence_coverage
     ~unsupported_completion_rate ~open_overdue_commitments : float =
   let overdue_penalty =
@@ -277,15 +258,6 @@ let compute_accountability_score ~evidence_coverage
   in
   clamp01
     (evidence_coverage -. unsupported_completion_rate -. overdue_penalty)
-
-let compute_overall_score ~completion_rate ~response_rate
-    ~board_posts ~board_comments ~thompson_confidence : float =
-  let board_total = Float.of_int (board_posts + board_comments) in
-  let board_norm = Float.min 1.0 (board_total /. board_activity_cap) in
-  (weight_completion *. completion_rate)
-  +. (weight_response *. response_rate)
-  +. (weight_board *. board_norm)
-  +. (weight_thompson *. thompson_confidence)
 
 (** {1 Accountability Penalty} *)
 
@@ -367,11 +339,6 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
     accountability_metrics config ~agent_name
   in
   let thompson_confidence = thompson_confidence_for_agent agent_name in
-  let overall_score =
-    compute_overall_score ~completion_rate
-      ~response_rate ~board_posts ~board_comments ~thompson_confidence
-    *. clamp01 accountability_score
-  in
   (* v2: pull multi-dimensional metrics from the reputation ledger. *)
   let v2_metrics =
     (try
@@ -401,7 +368,6 @@ let compute_reputation (config : Workspace.config) ~(agent_name : string)
     accountability_keeper_name;
     accountability_source;
     accountability_source_label;
-    overall_score;
     execution_reliability = v2_metrics.Reputation_ledger_v2.execution_reliability;
     goal_adherence = v2_metrics.Reputation_ledger_v2.goal_adherence;
     safety_compliance = v2_metrics.Reputation_ledger_v2.safety_compliance;

@@ -82,14 +82,11 @@ val earn :
   agent_name:string ->
   kind:transaction_kind ->
   reason:string ->
-  ?reputation_score:float ->
   ?metadata:Yojson.Safe.t ->
   unit ->
   (float, string) Result.t
 (** Record an earning. Returns new balance or error.
-    Amount is determined by kind + env config + reputation multiplier.
-    Pass [~reputation_score] (0.0-1.0) to enable reputation-based
-    reward multiplier. If omitted, multiplier defaults to 1.0. *)
+    Amount is determined by kind + env config. *)
 
 val spend :
   base_path:string ->
@@ -117,13 +114,6 @@ val economic_pressure : base_path:string -> agent_name:string -> pressure_mode
 val transaction_to_json : transaction -> Yojson.Safe.t
 val transaction_of_json : Yojson.Safe.t -> transaction option
 val pressure_mode_to_string : pressure_mode -> string
-
-(** {1 Reputation Integration} *)
-
-val reward_multiplier : overall_score:float -> float
-(** Compute reward multiplier from reputation score (0.0-1.0).
-    Maps to 0.5x-1.5x range. Only applied when
-    MASC_ECONOMY_REPUTATION_MULTIPLIER=true. *)
 
 (** {1 Testing Support} *)
 

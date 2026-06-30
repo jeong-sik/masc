@@ -173,15 +173,12 @@ type reconcile_result = Reconcile_started | Reconcile_noop of string
 
 type attempt_record = {
   connector_id : string;
-  generation : int;
-  attempt_id : string;
-  attempt_number : int;
-  last_attempt_result : string;
-  next_retry_at : string option;
+  attempt : Attempt_state.t;
   operator_next_action : string;
-  updated_at : string;
 }
-(** Persisted reconciliation attempt record (one per generation). *)
+(** Persisted reconciliation attempt record (one per generation).
+    [attempt] is the shared {!Attempt_state.t} SSOT; ISO timestamps and
+    string result tokens are only used at the JSON wire boundary. *)
 
 val desired_state_to_string : desired_state -> string
 val desired_state_of_string : string -> desired_state option
@@ -220,7 +217,8 @@ val retry_backoff_seconds : unit -> float
 
 val retry_backoff_active : now:string -> attempt_record -> bool
 (** [true] when [now] is still inside the backoff window for the
-    last attempt. *)
+    last attempt. [now] is parsed at the boundary; the deadline comparison
+    uses {!Attempt_state.is_backoff_active}. *)
 
 val next_attempt_record :
   now:string ->

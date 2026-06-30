@@ -65,16 +65,22 @@ type reconcile_result = Server_routes_http_routes_sidecar_state.reconcile_result
   | Reconcile_started
   | Reconcile_noop of string
 
+module Attempt = Attempt_state
+
 type attempt_record =
   { connector_id : string
-  ; generation : int
-  ; attempt_id : string
-  ; attempt_number : int
-  ; last_attempt_result : string
-  ; next_retry_at : string option
+  ; attempt : Attempt.t
   ; operator_next_action : string
-  ; updated_at : string
   }
+
+let sidecar_operator_next_action =
+  "wait for observed status, or open logs if the sidecar remains offline after \
+   backoff"
+;;
+
+let iso_of_unix_opt = Option.map Masc_domain.iso8601_of_unix_seconds
+let next_retry_at record = iso_of_unix_opt record.attempt.next_retry_unix
+let updated_at record = Masc_domain.iso8601_of_unix_seconds record.attempt.updated_unix
 
 let desired_state_to_string =
   Server_routes_http_routes_sidecar_state.desired_state_to_string
@@ -86,20 +92,22 @@ let reconcile_result_to_string =
   Server_routes_http_routes_sidecar_state.reconcile_result_to_string
 
 let attempt_record_json (record : attempt_record) =
+  let attempt = record.attempt in
   `Assoc
     [ "connector_id", `String record.connector_id
-    ; "generation", `Int record.generation
-    ; "attempt_id", `String record.attempt_id
-    ; "attempt_number", `Int record.attempt_number
-    ; "last_attempt_result", `String record.last_attempt_result
-    ; ( "next_retry_at", Json_util.string_opt_to_json record.next_retry_at )
+    ; "generation", `Int attempt.generation
+    ; "attempt_id", `String attempt.attempt_id
+    ; "attempt_number", `Int attempt.attempt_number
+    ; "last_attempt_result", `String (Attempt.result_to_string attempt.last_result)
+    ; ( "next_retry_at", Json_util.string_opt_to_json (next_retry_at record) )
     ; "operator_next_action", `String record.operator_next_action
-    ; "updated_at", `String record.updated_at
+    ; "updated_at", `String (updated_at record)
     ]
 ;;
 
 let attempt_record_of_json = function
   | `Assoc fields ->
+    let ( let* ) = Option.bind in
     (match
        ( List.assoc_opt "connector_id" fields
        , List.assoc_opt "generation" fields
@@ -118,21 +126,26 @@ let attempt_record_of_json = function
        , next_retry_at
        , Some (`String operator_next_action)
        , Some (`String updated_at) ) ->
-       let next_retry_at =
+       let* last_result = Attempt.result_of_string_opt last_attempt_result in
+       let* next_retry_unix =
          match next_retry_at with
-         | Some (`String value) -> Some value
-         | Some `Null | None -> None
+         | Some (`String value) ->
+           Types_core.parse_iso8601_opt value |> Option.map (fun value -> Some value)
+         | Some `Null | None -> Some None
          | _ -> None
        in
+       let* updated_unix = Types_core.parse_iso8601_opt updated_at in
        Some
          { connector_id
-         ; generation
-         ; attempt_id
-         ; attempt_number
-         ; last_attempt_result
-         ; next_retry_at
+         ; attempt =
+             { generation
+             ; attempt_id
+             ; attempt_number
+             ; last_result
+             ; next_retry_unix
+             ; updated_unix
+             }
          ; operator_next_action
-         ; updated_at
          }
      | _ -> None)
   | _ -> None
@@ -303,40 +316,35 @@ let observed_state_of_status_json = function
 let retry_backoff_seconds () = Env_config_runtime.Sidecar.reconcile_backoff_sec
 
 (** Compare backoff deadline against [now] in unix-epoch seconds. Parses both
-    sides via [Types_core.parse_iso8601_opt] so that an ISO string that
-    serialises before-but-sorts-after (e.g. drift between timezones or a
-    clock skew) still resolves to the correct ordering. Fail-closed: if
-    either side fails to parse (malformed sidecar or boundary layer drift),
-    treat the backoff as inactive so reconcile retries instead of stalling.
-    See #8930 phase 3. *)
+    [now] via [Types_core.parse_iso8601_opt], then delegates the deadline
+    comparison to [Attempt_state.is_backoff_active].  Persisted
+    [next_retry_at] strings are parsed once at the JSON boundary into
+    [Attempt_state.t], so runtime backoff no longer compares wire strings. *)
 let retry_backoff_active ~now attempt =
-  match attempt.next_retry_at with
+  match Types_core.parse_iso8601_opt now with
+  | Some now_unix -> Attempt.is_backoff_active ~now:now_unix attempt.attempt
   | None -> false
-  | Some next_retry_at ->
-    (match
-       Types_core.parse_iso8601_opt next_retry_at, Types_core.parse_iso8601_opt now
-     with
-     | Some next_unix, Some now_unix -> next_unix > now_unix
-     | _ -> false)
+;;
+
+let unix_of_iso_exn ~field value =
+  match Types_core.parse_iso8601_opt value with
+  | Some unix -> unix
+  | None -> invalid_arg (Printf.sprintf "invalid %s: %s" field value)
 ;;
 
 let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
-  let attempt_number =
-    match previous with
-    | Some attempt when attempt.generation = record.generation ->
-      attempt.attempt_number + 1
-    | _ -> 1
-  in
+  let now_unix = unix_of_iso_exn ~field:"now" now in
+  let next_retry_unix = unix_of_iso_exn ~field:"next_retry_at" next_retry_at in
+  let previous = Option.map (fun record -> record.attempt) previous in
   { connector_id = record.connector_id
-  ; generation = record.generation
-  ; attempt_id = Printf.sprintf "%d:%d" record.generation attempt_number
-  ; attempt_number
-  ; last_attempt_result = "start_dispatched"
-  ; next_retry_at = Some next_retry_at
-  ; operator_next_action =
-      "wait for observed status, or open logs if the sidecar remains offline after \
-       backoff"
-  ; updated_at = now
+  ; attempt =
+      Attempt.make_next
+        ~now:now_unix
+        ~backoff_seconds:(next_retry_unix -. now_unix)
+        ~generation:record.generation
+        ~last_result:Attempt.Start_dispatched
+        ~previous
+  ; operator_next_action = sidecar_operator_next_action
   }
 ;;
 
@@ -357,8 +365,9 @@ let reconcile_desired_once
     | Desired_running, Observed_unavailable ->
       (match previous_attempt with
        | Some attempt
-         when attempt.generation = record.generation && retry_backoff_active ~now attempt
-         -> Reconcile_noop "backoff_active"
+         when attempt.attempt.generation = record.generation
+              && retry_backoff_active ~now attempt ->
+         Reconcile_noop "backoff_active"
        | _ ->
          let attempt = next_attempt_record ~now ~next_retry_at previous_attempt record in
          (match write_attempt attempt with
@@ -376,7 +385,8 @@ let reconcile_preview ?now ?previous_attempt (record : desired_record) observed_
     let now = Option.value now ~default:(Masc_domain.now_iso ()) in
     (match previous_attempt with
      | Some attempt
-       when attempt.generation = record.generation && retry_backoff_active ~now attempt ->
+       when attempt.attempt.generation = record.generation
+            && retry_backoff_active ~now attempt ->
        "noop:backoff_active"
      | _ -> "would_start")
   | Desired_running, Observed_available -> "noop:already_available"
@@ -390,10 +400,11 @@ let attempt_fields = function
     ; "operator_next_action", `Null
     ]
   | Some attempt ->
-    [ "last_attempt_result", `String attempt.last_attempt_result
-    ; ( "next_retry_at", Json_util.string_opt_to_json attempt.next_retry_at )
+    [ ( "last_attempt_result"
+      , `String (Attempt.result_to_string attempt.attempt.last_result) )
+    ; ( "next_retry_at", Json_util.string_opt_to_json (next_retry_at attempt) )
     ; "operator_next_action", `String attempt.operator_next_action
-    ; "attempt_id", `String attempt.attempt_id
+    ; "attempt_id", `String attempt.attempt.attempt_id
     ]
 ;;
 

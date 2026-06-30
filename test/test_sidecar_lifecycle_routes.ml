@@ -10,6 +10,7 @@
 
 open Alcotest
 module Routes = Server_routes_http_routes_sidecar
+module Attempt_state = Masc.Attempt_state
 
 let result_of = function
   | Ok s -> "Ok " ^ s
@@ -18,6 +19,48 @@ let result_of = function
 
 let result_t = testable (Fmt.of_to_string result_of) ( = )
 let validate name = Routes.validate_name name
+
+let unix_of_iso_exn value =
+  match Types_core.parse_iso8601_opt value with
+  | Some unix -> unix
+  | None -> invalid_arg ("invalid test timestamp: " ^ value)
+;;
+
+let make_attempt_record
+      ?(connector_id = "discord")
+      ?(generation = 1)
+      ?(attempt_number = 1)
+      ?attempt_id
+      ?(last_result = Attempt_state.Start_dispatched)
+      ?next_retry_at
+      ?(operator_next_action = "none")
+      ?(updated_at = "2026-01-01T00:00:00Z")
+      ()
+  =
+  let attempt_id =
+    Option.value attempt_id ~default:(Printf.sprintf "%d:%d" generation attempt_number)
+  in
+  let next_retry_unix = Option.map unix_of_iso_exn next_retry_at in
+  let updated_unix = unix_of_iso_exn updated_at in
+  let attempt : Attempt_state.t =
+    { generation
+    ; attempt_number
+    ; attempt_id
+    ; last_result
+    ; next_retry_unix
+    ; updated_unix
+    }
+  in
+  { Routes.connector_id; attempt; operator_next_action }
+;;
+
+let attempt_result_token (record : Routes.attempt_record) =
+  Attempt_state.result_to_string record.Routes.attempt.last_result
+;;
+
+let attempt_next_retry_at (record : Routes.attempt_record) =
+  Option.map Masc_domain.iso8601_of_unix_seconds record.Routes.attempt.next_retry_unix
+;;
 
 let contains_substring haystack needle =
   let hlen = String.length haystack in
@@ -481,12 +524,12 @@ let test_reconcile_running_unavailable_starts_once () =
       string
       "attempt result is operator-visible"
       "start_dispatched"
-      attempt.Routes.last_attempt_result;
+      (attempt_result_token attempt);
     check
       string
       "next retry recorded"
       "2099-04-20T00:00:30Z"
-      (Option.value attempt.next_retry_at ~default:"");
+      (Option.value (attempt_next_retry_at attempt) ~default:"");
     check
       string
       "next action recorded"
@@ -535,17 +578,14 @@ let test_reconcile_running_unavailable_backoff_noops () =
     }
   in
   let previous_attempt : Routes.attempt_record =
-    { connector_id = "discord"
-    ; generation = 3
-    ; attempt_id = "3:1"
-    ; attempt_number = 1
-    ; last_attempt_result = "start_dispatched"
-    ; next_retry_at = Some "2099-04-20T00:00:30Z"
-    ; operator_next_action =
+    make_attempt_record
+      ~generation:3
+      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~operator_next_action:
         "wait for observed status, or open logs if the sidecar remains offline after \
          backoff"
-    ; updated_at = "2026-04-20T00:00:00Z"
-    }
+      ~updated_at:"2026-04-20T00:00:00Z"
+      ()
   in
   let result =
     Routes.reconcile_desired_once
@@ -602,17 +642,13 @@ let test_status_json_includes_lifecycle_shape () =
      | Ok _ -> ()
      | Error msg -> failf "desired write failed: %s" msg);
     let attempt : Routes.attempt_record =
-      { connector_id = "discord"
-      ; generation = 1
-      ; attempt_id = "1:1"
-      ; attempt_number = 1
-      ; last_attempt_result = "start_dispatched"
-      ; next_retry_at = Some "2099-04-20T00:00:30Z"
-      ; operator_next_action =
+      make_attempt_record
+        ~next_retry_at:"2099-04-20T00:00:30Z"
+        ~operator_next_action:
           "wait for observed status, or open logs if the sidecar remains offline after \
            backoff"
-      ; updated_at = "2026-04-20T00:00:00Z"
-      }
+        ~updated_at:"2026-04-20T00:00:00Z"
+        ()
     in
     check
       (result unit string)
@@ -853,13 +889,10 @@ let test_atomic_write_file_replaces_content () =
 ;;
 
 (* ── ISO format invariants ────────────────────────────────────────────
-   [retry_backoff_active] compares [next_retry_at : string] against
-   [now : string] with [String.compare]. That is safe only while both
-   sides emit the exact 20-character "YYYY-MM-DDTHH:MM:SSZ" shape, which
-   makes lexical order coincide with chronological order. These tests
-   pin the shape so a future refactor (offset, millisecond, timezone)
-   cannot silently land without also revisiting the backoff comparison.
-   See #8930 for the attempt_state SSOT consolidation. *)
+   Sidecar lifecycle JSON keeps the existing [next_retry_at]/[updated_at]
+   wire strings, while the in-memory retry state uses [Attempt_state.t]
+   floats. These tests pin the boundary format so dashboard consumers see
+   the same contract. *)
 
 let test_isoish_now_fixed_shape () =
   let s = Masc_domain.now_iso () in
@@ -883,8 +916,6 @@ let test_isoish_at_epoch_round_trip () =
 ;;
 
 let test_isoish_lexical_matches_chronological () =
-  (* If these two lose correspondence, [retry_backoff_active]'s
-     [String.compare next_retry_at now > 0] would silently drift.  *)
   let earlier = Masc_domain.iso8601_of_unix_seconds 1_000_000.0 in
   let later = Masc_domain.iso8601_of_unix_seconds 2_000_000.0 in
   check bool "earlier < later lexically" true (String.compare earlier later < 0);
@@ -896,23 +927,14 @@ let test_isoish_lexical_matches_chronological () =
     (String.compare earlier (Masc_domain.iso8601_of_unix_seconds 1_000_000.0))
 ;;
 
-(* ── retry_backoff_active (#8930 phase 3) ──────────────────────────────
-   After phase 3, [retry_backoff_active] parses both [next_retry_at] and
-   [now] via [Types_core.parse_iso8601_opt] and compares float unix-epoch
-   values. If either side is malformed the function returns false
-   (fail-closed) so a broken sidecar record retries instead of stalling. *)
+(* ── retry_backoff_active (#8930 / #22246) ─────────────────────────────
+   [retry_backoff_active] parses [now] at the boundary and delegates the
+   deadline check to [Attempt_state.is_backoff_active]. Malformed persisted
+   [next_retry_at] values are rejected by [attempt_record_of_json] instead
+   of entering the in-memory state. *)
 
 let make_attempt ~next_retry_at =
-  Routes.
-    { connector_id = "discord"
-    ; generation = 1
-    ; attempt_id = "1:1"
-    ; attempt_number = 1
-    ; last_attempt_result = "start_dispatched"
-    ; next_retry_at
-    ; operator_next_action = "none"
-    ; updated_at = "2026-01-01T00:00:00Z"
-    }
+  make_attempt_record ?next_retry_at ()
 ;;
 
 let test_retry_backoff_active_before_deadline () =
@@ -942,13 +964,24 @@ let test_retry_backoff_inactive_when_no_deadline () =
     (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
 ;;
 
-let test_retry_backoff_fail_closed_on_malformed_next () =
-  let attempt = make_attempt ~next_retry_at:(Some "not-an-iso-stamp") in
+let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
+  let json =
+    `Assoc
+      [ "connector_id", `String "discord"
+      ; "generation", `Int 1
+      ; "attempt_id", `String "1:1"
+      ; "attempt_number", `Int 1
+      ; "last_attempt_result", `String "start_dispatched"
+      ; "next_retry_at", `String "not-an-iso-stamp"
+      ; "operator_next_action", `String "none"
+      ; "updated_at", `String "2026-01-01T00:00:00Z"
+      ]
+  in
   check
     bool
-    "malformed next_retry_at → fail-closed"
-    false
-    (Routes.retry_backoff_active ~now:"2026-01-01T00:00:00Z" attempt)
+    "malformed next_retry_at → rejected at boundary"
+    true
+    (Routes.attempt_record_of_json json = None)
 ;;
 
 let test_retry_backoff_fail_closed_on_malformed_now () =
@@ -1179,9 +1212,9 @@ let () =
             `Quick
             test_retry_backoff_inactive_when_no_deadline
         ; test_case
-            "malformed next_retry_at → fail-closed"
+            "malformed next_retry_at → rejected at boundary"
             `Quick
-            test_retry_backoff_fail_closed_on_malformed_next
+            test_attempt_record_of_json_rejects_malformed_next_retry_at
         ; test_case
             "malformed now → fail-closed"
             `Quick

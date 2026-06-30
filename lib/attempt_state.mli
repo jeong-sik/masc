@@ -1,9 +1,8 @@
 (** Shared retry/attempt state for reconcile-style surfaces.
 
-    Purpose: a single record + backoff predicate reused by surfaces that
-    today reimplement their own [attempt_record] / [last_attempt_*] fields
-    (sidecar lifecycle routes, voice bridge, dashboard cache). See #8930
-    for the consolidation trail.
+    Purpose: a single record + backoff predicate reused by sidecar lifecycle
+    routes and other surfaces that need [attempt_record] /
+    [last_attempt_*] state. See #8930 for the consolidation trail.
 
     Boundary rules:
     - Internal state is [float] (seconds-since-epoch). ISO serialization is

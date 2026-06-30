@@ -249,12 +249,12 @@ val create_post_with_outcome
 
 (** Owner-gated in-place edit of an existing post's title/body.  Validates
     [editor] via {!Agent_id.of_string}, folds the canonical [title / body] via
-    {!normalize_post_payload}, then replaces the stored post under {!with_lock}
-    and persists a full JSONL snapshot.  Returns [Unauthorized] when [editor]
-    does not own the post, [Post_not_found] for a missing id, and
-    [Validation_error] for empty/oversized content.  Only the textual content
-    and [updated_at] change; [post_kind]/[meta]/[visibility]/[hearth] are
-    preserved. *)
+    {!normalize_post_payload} (seeded with the existing [meta_json] so a [STATE]
+    block in the edited body lifts into meta instead of being dropped), then
+    replaces the stored post under {!with_lock} and persists a full JSONL
+    snapshot.  Returns [Unauthorized] when [editor] does not own the post,
+    [Post_not_found] for a missing id, and [Validation_error] for
+    empty/oversized content.  [post_kind]/[visibility]/[hearth] are preserved. *)
 val update_post_with_outcome
   :  store
   -> post_id:string

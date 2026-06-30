@@ -9,6 +9,7 @@ module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Runtime_resolution = Masc.Keeper_memory_runtime_resolution
 module Memory_summary = Masc.Keeper_memory_llm_summary
 module Structured_schema = Masc.Keeper_structured_output_schema
+module Domain_pool_ref = Masc.Domain_pool_ref
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
@@ -2422,6 +2423,51 @@ let test_render_if_enabled_renders_persisted_memory () =
             true
             (contains "Gated recall should surface saved facts" block))))
   ;;
+
+(* The keeper turn wraps [render_if_enabled] in
+   [Domain_pool_ref.submit_io_or_inline] so its synchronous memory file I/O runs
+   off the main Eio domain (avoids head-of-line-blocking sibling keepers). Pin
+   that the wrap is transparent: the same block is produced whether the render
+   runs directly or through the pool. Tests configure no pool, so
+   [submit_io_or_inline] takes the inline path here. *)
+let test_render_if_enabled_offmain_wrap_is_transparent () =
+  with_recall_env "true" (fun () ->
+    with_prompt_registry (fun () ->
+      with_temp_keepers_dir (fun keepers_dir ->
+        let keeper_id = "offmain-wrap-keeper" in
+        let now = 1_000_000.0 in
+        let episode =
+          { Types.trace_id = "trace-offmain-wrap"
+          ; Types.generation = 1
+          ; Types.episode_summary = "off-main wrap episode"
+          ; Types.claims = [ fact_fixture ~now () ]
+          ; Types.open_items = []
+          ; Types.constraints = []
+          ; Types.preserved_tool_refs = []
+          ; Types.source_turn_range = Some (1, 2)
+          ; Types.created_at = now
+          ; Types.valid_until = None
+          ; Types.terminal_marker = None
+          ; Types.schema_version = Types.schema_version
+          }
+        in
+        Memory_io.append_episode_bundle ~keeper_id episode;
+        let direct =
+          render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir ()
+        in
+        let wrapped =
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir ())
+        in
+        Alcotest.(check bool)
+          "seeded render produces a block"
+          true
+          (Option.is_some direct);
+        Alcotest.(check (option string))
+          "off-main wrap preserves the render result"
+          direct
+          wrapped)))
+;;
 
 let test_render_if_enabled_omits_diagnostic_memory () =
   with_recall_env "true" (fun () ->
@@ -5495,6 +5541,10 @@ let () =
             "render_if_enabled omits diagnostic memory"
             `Quick
             test_render_if_enabled_omits_diagnostic_memory
+        ; Alcotest.test_case
+            "render_if_enabled off-main wrap is transparent (HOL fix)"
+            `Quick
+            test_render_if_enabled_offmain_wrap_is_transparent
         ; Alcotest.test_case
             "render_if_enabled omits empty episode memory"
             `Quick

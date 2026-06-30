@@ -146,6 +146,59 @@ let test_config_valid () =
     Alcotest.failf "expected Ok, got errors: %s"
       (String.concat ", " (List.map Fusion_config.show_config_error es))
 
+(* JoJ-capable preset: [[fusion.presets.X.judges]] array-of-tables 파싱 경로 (RFC-0283).
+   config/runtime.toml [fusion.presets.quorum] 의 구조를 미러한다(모델 id는 placeholder).
+   topology=judge_of_judges는 orchestrator 런타임에서 judges >= 2 를 요구하므로
+   (fusion_orchestrator.run_judge_of_judges), JoJ를 키퍼가 실제로 쓰려면 judges>=2 preset이
+   shipped config에 있어야 한다. 이 테스트는 그 preset이 의존하는 TOML array-of-tables 파싱
+   (Fusion_config.parse_judge_spec)을 end-to-end로 고정한다 — 기존 Validated_preset 테스트는
+   OCaml-구성 judges만 다뤄 이 파싱 경로를 덮지 않는다. *)
+let joj_preset_toml =
+  {|
+[fusion]
+enabled = true
+default_preset = "quorum"
+[fusion.presets.quorum]
+panel = ["pa", "pb", "pc"]
+judge = "meta-reducer"
+panel_system_prompt = "answer independently"
+judge_system_prompt = "reconcile the first-judge syntheses"
+meta_timeout_s = 120.0
+
+[[fusion.presets.quorum.judges]]
+model = "judge-evidence"
+label = "evidence"
+system_prompt = "judge through an evidence lens"
+
+[[fusion.presets.quorum.judges]]
+model = "judge-coverage"
+label = "coverage"
+system_prompt = "judge through a coverage lens"
+|}
+
+let test_config_joj_preset_parses () =
+  match Fusion_config.of_toml (parse joj_preset_toml) with
+  | Ok p ->
+    (match p.Fusion_policy.presets with
+     | [ vp ] ->
+       let preset = raw vp in
+       let judges = preset.Fusion_policy.judges in
+       Alcotest.(check int) "two first judges (JoJ requires >= 2)" 2
+         (List.length judges);
+       Alcotest.(check bool) "meta judge set" true
+         (String.trim preset.Fusion_policy.judge <> "");
+       Alcotest.(check (list string))
+         "judge models parsed from [[...judges]] array-of-tables"
+         [ "judge-evidence"; "judge-coverage" ]
+         (List.map (fun (j : Fusion_policy.judge_spec) -> j.Fusion_policy.jmodel) judges);
+       Alcotest.(check (list string)) "distinct judge lenses parsed"
+         [ "evidence"; "coverage" ]
+         (List.map (fun (j : Fusion_policy.judge_spec) -> j.Fusion_policy.jlabel) judges)
+     | _ -> Alcotest.fail "expected exactly one preset")
+  | Error es ->
+    Alcotest.failf "JoJ preset must parse+validate, got errors: %s"
+      (String.concat ", " (List.map Fusion_config.show_config_error es))
+
 (* --- byte-identity: legacy flat preset == single explicit panel group --- *)
 
 let golden_flat_toml =
@@ -1549,6 +1602,7 @@ let () =
     ; ( "config"
       , [ Alcotest.test_case "absent" `Quick test_config_absent
         ; Alcotest.test_case "valid" `Quick test_config_valid
+        ; Alcotest.test_case "joj_preset_parses" `Quick test_config_joj_preset_parses
         ; Alcotest.test_case "panels_golden" `Quick test_config_panels_golden
         ; Alcotest.test_case "heterogeneous" `Quick test_config_heterogeneous
         ; Alcotest.test_case "empty_panels" `Quick test_config_empty_panels

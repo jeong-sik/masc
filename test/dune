@@ -697,7 +697,7 @@
 (test
  (name test_runtime_config_validity)
  (modules test_runtime_config_validity)
- (libraries masc_test_deps))
+ (libraries masc_test_deps masc.fusion_core))
 
 (test
  (name test_keeper_structured_output_coverage)

@@ -80,7 +80,8 @@
 
 ```bash
 # 1. 바이너리 설치 (macOS arm64 / Linux x86_64)
-curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
+brew install jeong-sik/masc/masc            # Homebrew (이 repo의 Formula/masc.rb)
+#   또는:  curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
 #   소스 빌드: git clone https://github.com/jeong-sik/masc.git && cd masc &&
 #     scripts/opam-pin-external-deps.sh --install && opam install . --deps-only &&
 #     scripts/dune-local.sh build @default

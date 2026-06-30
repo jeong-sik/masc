@@ -87,7 +87,8 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 
 ```bash
 # 1. Install the binary (macOS arm64 / Linux x86_64)
-curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
+brew install jeong-sik/masc/masc            # Homebrew (Formula/masc.rb in this repo)
+#   or:  curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
 #   from source: git clone https://github.com/jeong-sik/masc.git && cd masc &&
 #     scripts/opam-pin-external-deps.sh --install && opam install . --deps-only &&
 #     scripts/dune-local.sh build @default

@@ -1110,6 +1110,73 @@ let test_direct_reply_terminal_error_allows_checkpoint () =
   in
   check bool "checkpoint can stay user-only" true (Option.is_none err)
 
+let json_string_field key = function
+  | Some (`Assoc fields) -> (
+      match List.assoc_opt key fields with
+      | Some (`String value) -> value
+      | _ -> "")
+  | Some _ | None -> ""
+
+let test_visible_reply_uses_streamed_text_fallback () =
+  let fallback =
+    Server_routes_http_keeper_stream.For_testing.visible_reply_with_stream_fallback
+      ~streamed_text:" streamed final " ""
+  in
+  check string "empty terminal reply uses streamed text" "streamed final"
+    fallback;
+  let explicit =
+    Server_routes_http_keeper_stream.For_testing.visible_reply_with_stream_fallback
+      ~streamed_text:"streamed final" " terminal final "
+  in
+  check string "typed terminal reply wins over streamed fallback" "terminal final"
+    explicit
+
+let test_streamed_visible_reply_rewrites_no_visible_payload () =
+  let payload_json =
+    `Assoc
+      [
+        ("runtime_class", `String "keeper");
+        ("turn_outcome", `String "no_visible_reply");
+        ("reply", `String "");
+      ]
+  in
+  let visible_reply =
+    Server_routes_http_keeper_stream.For_testing.visible_reply_with_stream_fallback
+      ~streamed_text:"streamed final" ""
+  in
+  let rewritten =
+    Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
+      (Some payload_json) ~visible_reply
+  in
+  check string "streamed text becomes typed reply" "streamed final"
+    (json_string_field "reply" rewritten);
+  check string "streamed text promotes visible outcome" "visible_reply"
+    (json_string_field Keeper_turn_outcome.wire_key rewritten);
+  let err =
+    Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
+      rewritten visible_reply
+  in
+  check bool "streamed visible text is not terminal no-reply" false
+    (Option.is_some err)
+
+let test_streamed_visible_reply_preserves_checkpoint_payload () =
+  let payload_json =
+    `Assoc
+      [
+        ("runtime_class", `String "keeper");
+        ("turn_outcome", `String "continuation_checkpoint");
+        ("reply", `String "");
+      ]
+  in
+  let rewritten =
+    Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
+      (Some payload_json) ~visible_reply:"streamed final"
+  in
+  check string "checkpoint outcome is semantic" "continuation_checkpoint"
+    (json_string_field Keeper_turn_outcome.wire_key rewritten);
+  check string "checkpoint reply remains hidden" ""
+    (json_string_field "reply" rewritten)
+
 let vision_provider_cfg () =
   Llm_provider.Provider_config.make
     ~kind:Llm_provider.Provider_config.OpenAI_compat
@@ -1760,6 +1827,12 @@ let () =
             test_direct_reply_terminal_error_rejects_no_visible_reply;
           test_case "direct reply allows continuation checkpoint" `Quick
             test_direct_reply_terminal_error_allows_checkpoint;
+          test_case "visible reply uses streamed text fallback" `Quick
+            test_visible_reply_uses_streamed_text_fallback;
+          test_case "streamed visible reply rewrites no-visible payload" `Quick
+            test_streamed_visible_reply_rewrites_no_visible_payload;
+          test_case "streamed visible reply preserves checkpoint payload" `Quick
+            test_streamed_visible_reply_preserves_checkpoint_payload;
           test_case "runtime run_blocks appends multimodal input to OAS agent" `Quick
             test_runtime_run_blocks_appends_multimodal_input_to_oas_agent;
           test_case "runtime multimodal gate lists required modalities" `Quick

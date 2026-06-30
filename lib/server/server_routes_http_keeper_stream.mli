@@ -169,7 +169,7 @@ val process_single_turn :
     When [true] the turn records the assistant reply only and never re-writes
     the user line — set by the queue consumer for connector ([Discord]/[Slack])
     sources whose busy message was enqueued after the gate already recorded it
-    (RFC-0301 §3.4). [false] keeps the dashboard-route behaviour of recording
+    (RFC-connector-deferred-reply-via-chat-queue §3.4). [false] keeps the dashboard-route behaviour of recording
     both sides. *)
 
 (** {1 Testing helpers} *)

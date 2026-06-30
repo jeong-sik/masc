@@ -640,7 +640,7 @@ let start ~sw ~env ~clock ~state =
     let policy = resolved_trigger_policy () in
     State.set_trigger_policy policy;
     let dispatch =
-      (* RFC-0301: tag this dispatch as the Discord connector so a message that
+      (* RFC-connector-deferred-reply-via-chat-queue: tag this dispatch as the Discord connector so a message that
          arrives while the keeper is in flight is enqueued onto
          [Keeper_chat_queue] (drained by the serial consumer, delivered back to
          the channel via [Keeper_chat_discord.adapter_loop]) rather than the

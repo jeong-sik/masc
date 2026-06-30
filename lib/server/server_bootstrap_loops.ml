@@ -1080,7 +1080,7 @@ let start_keeper_loops
                           MASC_SLACK_BOT_TOKEN not set, \
                           skipping Slack delivery for keeper=%s"
                          keeper_name));
-             (* RFC-0301 §3.4: connector sources (Discord/Slack) had their user
+             (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
                 line recorded at the gate inbound boundary before the message was
                 enqueued, so the turn records the assistant reply only and does
                 not re-write the user line. Dashboard-source queue messages have

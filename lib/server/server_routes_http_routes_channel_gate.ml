@@ -139,7 +139,7 @@ let handle_gate_message ~sw ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let request_started = Unix.gettimeofday () in
     let dispatch =
-      (* RFC-0301: the HTTP gate route is the convergence point for sidecar
+      (* RFC-connector-deferred-reply-via-chat-queue: the HTTP gate route is the convergence point for sidecar
          connectors (imessage-bot, cli-connector) that POST and await the reply
          synchronously. They have no in-process outbound adapter, so [Generic]
          keeps their existing async [masc_keeper_msg] poll behaviour when the

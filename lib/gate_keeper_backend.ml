@@ -1,7 +1,7 @@
 (** Gate_keeper_backend -- adapter between the Channel Gate and the keeper subsystem.
     See [gate_keeper_backend.mli] for the full contract. *)
 
-(* ── Connector deferred-reply routing (RFC-0301) ─────────────── *)
+(* ── Connector deferred-reply routing (RFC-connector-deferred-reply-via-chat-queue) ─────────────── *)
 
 (* [connector_kind] is the typed identity of the connector a [dispatch] serves.
    It is a property of the connector, not of each message, so it is baked in at
@@ -16,24 +16,28 @@
    letting the busy branch route without string-matching the [channel] lane. *)
 type connector_kind =
   | Discord
-  | Slack
   | Generic
-      (** Connectors without an in-process outbound adapter (HTTP gate-route
-          sidecars: imessage-bot, cli-connector). They keep the async
-          [masc_keeper_msg] poll path; see RFC-0301 §3.3 option (a). *)
+      (** Every connector that is not a wired in-process inbound gateway with its
+          own outbound adapter. Today this is the HTTP gate-route lane
+          (imessage-bot, cli-connector) which POSTs and awaits synchronously, so
+          a busy message keeps the async [masc_keeper_msg] poll path; see
+          RFC-connector-deferred-reply-via-chat-queue §3.3 option (a). Slack is
+          intentionally absent: there is no in-process Slack inbound gateway that
+          calls [dispatch ~connector_kind:Slack], so adding a [Slack] arm here
+          would be a dead supported-looking branch. Add it together with that
+          gateway, not before. *)
 
 (* [route_busy_connector] decides where a connector message goes when the keeper
    is already in flight. Pure and exhaustive over [connector_kind] so a new
-   connector forces a routing decision at compile time (no catch-all). Discord and
-   Slack project onto the chat queue, whose serial consumer drains them after the
-   slot frees and delivers the reply through the connector's outbound adapter
+   connector forces a routing decision at compile time (no catch-all). [Discord]
+   projects onto the chat queue, whose serial consumer drains it after the slot
+   frees and delivers the reply through the connector's outbound adapter
    ([Keeper_chat_discord.adapter_loop]); [Generic] has no such adapter and falls
    back to the async poll store. *)
 let route_busy_connector (kind : connector_kind) ~channel_id ~user_id :
     [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ] =
   match kind with
   | Discord -> `Enqueue_chat_queue (Keeper_chat_queue.Discord { channel_id; user_id })
-  | Slack -> `Enqueue_chat_queue (Keeper_chat_queue.Slack { channel = channel_id; user_id })
   | Generic -> `Async_poll
 
 (* ── Keeper response parsing ─────────────────────────────────── *)
@@ -182,7 +186,7 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
     request.request_id
     in_flight_text
 
-(* ACK text for the RFC-0301 chat-queue deferral path. Unlike
+(* ACK text for the RFC-connector-deferred-reply-via-chat-queue chat-queue deferral path. Unlike
    [busy_ack_reply_text], there is no [Keeper_msg_async] request envelope: the
    message was enqueued onto [Keeper_chat_queue], so the durable handle is the
    queue position, not a poll request_id. The reply is delivered later by the
@@ -425,14 +429,14 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
              ~channel_id:channel_workspace_id ~user_id:channel_user_id
          with
          | `Enqueue_chat_queue source ->
-             (* RFC-0301: the keeper already holds an in-flight turn. Route the
+             (* RFC-connector-deferred-reply-via-chat-queue: the keeper already holds an in-flight turn. Route the
                 connector message onto [Keeper_chat_queue] so the serial
                 [Keeper_chat_consumer] drains it once the slot frees and delivers
                 the deferred reply through the connector's outbound adapter
                 ([Keeper_chat_discord.adapter_loop]). The async [masc_keeper_msg]
                 store ([Keeper_msg_async]) has no outbound path, so a busy
                 connector message routed there is answered into the dashboard
-                transcript only and never reaches the channel — the RFC-0301
+                transcript only and never reaches the channel — the RFC-connector-deferred-reply-via-chat-queue
                 root cause. *)
              Keeper_chat_queue.enqueue ~keeper_name
                { Keeper_chat_queue.content = String.trim content
@@ -508,7 +512,7 @@ let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
       in
       Gate_protocol.Reply { content = reply; structured; stats; message_request }
   | `Queued_to_chat_lane in_flight ->
-      (* RFC-0301: the message was enqueued onto [Keeper_chat_queue]; the
+      (* RFC-connector-deferred-reply-via-chat-queue: the message was enqueued onto [Keeper_chat_queue]; the
          connector gets a busy ACK now and the deferred reply later via the
          serial consumer's outbound adapter. There is no [Keeper_msg_async]
          request envelope, so [message_request] is [None] — the queue position is

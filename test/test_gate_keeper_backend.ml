@@ -1948,7 +1948,7 @@ let test_extract_message_request_ack_falls_back_to_keeper_name () =
         ("expected Ok with fallback keeper_name: "
          ^ Gate_keeper_backend.ack_parse_failure_to_string failure)
 
-(* ── RFC-0301 connector deferred-reply routing ───────────────── *)
+(* ── RFC-connector-deferred-reply-via-chat-queue connector deferred-reply routing ───────────────── *)
 
 let test_route_busy_discord_enqueues () =
   match
@@ -1962,17 +1962,6 @@ let test_route_busy_discord_enqueues () =
       fail "Discord must map to a Discord message_source, not another variant"
   | `Async_poll -> fail "Discord has an outbound adapter; must enqueue, not poll"
 
-let test_route_busy_slack_enqueues () =
-  match
-    Gate_keeper_backend.route_busy_connector Gate_keeper_backend.Slack
-      ~channel_id:"C0ABCDEF" ~user_id:"u-7"
-  with
-  | `Enqueue_chat_queue (Keeper_chat_queue.Slack { channel; user_id }) ->
-      check string "slack channel threaded" "C0ABCDEF" channel;
-      check string "slack user_id threaded" "u-7" user_id
-  | `Enqueue_chat_queue _ ->
-      fail "Slack must map to a Slack message_source, not another variant"
-  | `Async_poll -> fail "Slack has an outbound adapter; must enqueue, not poll"
 
 let test_route_busy_generic_falls_back () =
   match
@@ -1981,7 +1970,7 @@ let test_route_busy_generic_falls_back () =
   with
   | `Async_poll -> check bool "generic falls back to async poll" true true
   | `Enqueue_chat_queue _ ->
-      fail "Generic has no in-process outbound adapter; must not enqueue (RFC-0301 §3.3a)"
+      fail "Generic has no in-process outbound adapter; must not enqueue (RFC-connector-deferred-reply-via-chat-queue §3.3a)"
 
 let () =
   Alcotest.run "Gate_keeper_backend"
@@ -1990,8 +1979,6 @@ let () =
         [
           test_case "Discord enqueues with channel_id/user_id" `Quick
             test_route_busy_discord_enqueues;
-          test_case "Slack enqueues with channel/user_id" `Quick
-            test_route_busy_slack_enqueues;
           test_case "Generic falls back to async poll" `Quick
             test_route_busy_generic_falls_back;
         ] );

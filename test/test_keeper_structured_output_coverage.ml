@@ -86,6 +86,31 @@ let expected_all_fusion_agent_build_files =
   expected_structured_fusion_agent_build_files
 ;;
 
+let with_repo_oas_model_catalog f =
+  let path = Ast_grep.resolve_path "oas-models.toml" in
+  check bool "repo oas-models.toml present" true (Sys.file_exists path);
+  match Llm_provider.Model_catalog.load_file path with
+  | Error msg -> failf "repo oas-models.toml should load: %s" msg
+  | Ok catalog ->
+    Fun.protect
+      ~finally:Llm_provider.Model_catalog.clear_global
+      (fun () ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f catalog)
+;;
+
+let fusion_toml_or_fail path =
+  match Otoml.Parser.from_file_result path with
+  | Ok toml -> toml
+  | Error msg -> failf "fusion TOML parse failed: %s" msg
+;;
+
+let runtime_by_id_or_fail runtimes id =
+  match List.find_opt (fun (runtime : Runtime.t) -> String.equal runtime.id id) runtimes with
+  | Some runtime -> runtime
+  | None -> failf "runtime id %s should resolve in repo runtime.toml" id
+;;
+
 let masc_tool_agent_run_files_under rel =
   ml_files_under rel
   |> List.filter (fun rel ->
@@ -238,6 +263,100 @@ let test_fusion_agent_builds_do_not_degrade_to_json_mode () =
          0
          (Ast_grep.count_constructor_leaf_names ~module_path:rel ~name:"JsonMode"))
     expected_structured_fusion_agent_build_files
+;;
+
+let test_repo_fusion_seed_judges_accept_native_schema () =
+  with_repo_oas_model_catalog @@ fun _catalog ->
+  let path = Ast_grep.resolve_path "config/runtime.toml" in
+  check bool "repo runtime.toml present" true (Sys.file_exists path);
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok
+      ( runtimes
+      , _default
+      , _assignments
+      , _librarian
+      , _structured_judge
+      , _cross_verifier
+      , _media_failover ) ->
+    let runtime_cfg = fusion_toml_or_fail path in
+    (match Fusion_config.of_toml runtime_cfg with
+     | Error errs ->
+       failf
+         "repo fusion config should load: %s"
+         (String.concat ", " (List.map Fusion_config.show_config_error errs))
+     | Ok policy ->
+       List.iter
+         (fun validated_preset ->
+            let preset = Fusion_policy.Validated_preset.preset validated_preset in
+            let judge_runtime_ids =
+              preset.Fusion_policy.judge
+              :: List.map
+                   (fun (judge : Fusion_policy.judge_spec) -> judge.jmodel)
+                   preset.Fusion_policy.judges
+            in
+            List.iter
+              (fun runtime_id ->
+                 let runtime = runtime_by_id_or_fail runtimes runtime_id in
+                 match
+                   Fusion_judge.For_testing.apply_output_contract
+                     runtime.provider_config
+                 with
+                 | Ok _ -> ()
+                 | Error msg ->
+                   failf
+                     "fusion preset %s judge runtime %s must accept native schema: %s"
+                     preset.Fusion_policy.name
+                     runtime_id
+                     msg)
+              judge_runtime_ids)
+         policy.Fusion_policy.presets)
+;;
+
+let assert_panel_runtime_accepts_native_schema runtimes ~preset runtime_id =
+  let runtime = runtime_by_id_or_fail runtimes runtime_id in
+  match Fusion_panel.For_testing.apply_output_contract runtime.provider_config with
+  | Ok _ -> ()
+  | Error msg ->
+    failf
+      "fusion preset %s panel runtime %s must accept native schema: %s"
+      preset
+      runtime_id
+      msg
+;;
+
+let test_repo_fusion_panel_presets_are_schema_capable () =
+  with_repo_oas_model_catalog @@ fun _catalog ->
+  let path = Ast_grep.resolve_path "config/runtime.toml" in
+  match Runtime.load_list ~config_path:path with
+  | Error msg -> failf "repo runtime.toml should load: %s" msg
+  | Ok
+      ( runtimes
+      , _default
+      , _assignments
+      , _librarian
+      , _structured_judge
+      , _cross
+      , _media ) ->
+    let runtime_cfg = fusion_toml_or_fail path in
+    (match Fusion_config.of_toml runtime_cfg with
+     | Error errs ->
+       failf
+         "repo fusion config should load: %s"
+         (String.concat ", " (List.map Fusion_config.show_config_error errs))
+     | Ok policy ->
+       List.iter
+         (fun validated_preset ->
+            let preset = Fusion_policy.Validated_preset.preset validated_preset in
+            List.iter
+              (fun (group : Fusion_policy.panel_group) ->
+                 List.iter
+                   (assert_panel_runtime_accepts_native_schema
+                      runtimes
+                      ~preset:preset.Fusion_policy.name)
+                   group.Fusion_policy.models)
+              preset.Fusion_policy.panels)
+         policy.Fusion_policy.presets)
 ;;
 
 let test_all_fusion_agent_build_files_are_classified () =
@@ -411,6 +530,14 @@ let () =
             "fusion Agent builds do not degrade to JsonMode"
             `Quick
             test_fusion_agent_builds_do_not_degrade_to_json_mode
+        ; test_case
+            "repo Fusion seed judge runtimes accept native schema"
+            `Quick
+            test_repo_fusion_seed_judges_accept_native_schema
+        ; test_case
+            "repo Fusion panel presets use schema-capable runtimes"
+            `Quick
+            test_repo_fusion_panel_presets_are_schema_capable
         ] )
     ; ( "structured tool Agent.run"
       , [ test_case

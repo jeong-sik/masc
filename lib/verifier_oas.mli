@@ -50,6 +50,6 @@ val eval_gate_to_oas_guardrails :
   Eval_gate.gate_config -> Agent_sdk.Guardrails.t
 
 module For_testing : sig
-  val parse_verdict_from_response_text :
+  val parse_verdict_from_structured_response_text :
     string -> (Verifier_core.verdict, string) result
 end

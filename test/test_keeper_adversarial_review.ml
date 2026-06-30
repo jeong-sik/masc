@@ -112,11 +112,11 @@ let check_ok = function
   | Ok () -> ()
   | Error msg -> Alcotest.fail msg
 
-let test_response_text_accepts_strict_json () =
+let test_structured_response_accepts_strict_json () =
   let raw =
     {|{"verdict":"FAIL","reason":"bad branch","evidence":[{"path":"lib/foo.ml","line":12,"quote":"let bad = true"}]}|}
   in
-  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  match AR.For_testing.parse_grounded_verdict_from_structured_response_text raw with
   | Ok grounded ->
     check string
       "verdict"
@@ -125,11 +125,11 @@ let test_response_text_accepts_strict_json () =
     check int "evidence count" 1 (List.length grounded.VC.evidence)
   | Error msg -> fail ("strict JSON response rejected: " ^ msg)
 
-let test_response_text_rejects_embedded_json () =
+let test_structured_response_rejects_embedded_json () =
   let raw =
     {|Here is the verdict: {"verdict":"PASS","reason":null,"evidence":[]}|}
   in
-  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  match AR.For_testing.parse_grounded_verdict_from_structured_response_text raw with
   | Error msg ->
     check bool "embedded JSON rejected as non-strict" true
       (contains_substring msg "strict JSON")
@@ -334,9 +334,9 @@ let () =
       ( "response-parser",
         [
           test_case "accepts strict JSON response" `Quick
-            test_response_text_accepts_strict_json;
+            test_structured_response_accepts_strict_json;
           test_case "rejects embedded JSON response" `Quick
-            test_response_text_rejects_embedded_json;
+            test_structured_response_rejects_embedded_json;
         ] );
       ( "wake-on-fail",
         [

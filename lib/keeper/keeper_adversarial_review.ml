@@ -29,7 +29,7 @@ let apply_report_verdict_output_schema provider_cfg =
          (Agent_sdk.Error.InvalidConfig
             { field = "verification.adversarial_review.output_schema"; detail }))
 
-let parse_grounded_verdict_from_response_text text =
+let parse_grounded_verdict_from_structured_response_text text =
   match Yojson.Safe.from_string (String.trim text) with
   | json -> Verifier_core.parse_grounded_verdict_from_json json
   | exception Yojson.Json_error msg ->
@@ -39,14 +39,14 @@ let parse_grounded_verdict_from_response_text text =
          msg)
 
 module For_testing = struct
-  let parse_grounded_verdict_from_response_text =
-    parse_grounded_verdict_from_response_text
+  let parse_grounded_verdict_from_structured_response_text =
+    parse_grounded_verdict_from_structured_response_text
 end
 
 (* Mirrors [Verifier_oas.verify]: structured verdict via the [report_verdict]
-   tool, with a strict JSON fallback if the model answers without the tool.
-   The judgment itself is the model's; this only routes its structured output
-   back as a typed [Verifier_core.verdict]. *)
+   tool, with a strict provider-native JSON response path if the model answers
+   without the tool. The judgment itself is the model's; this only routes its
+   structured output back as a typed [Verifier_core.verdict]. *)
 let run_grounded_review ~base_path ~runtime_id (input : review_input) :
     (Verifier_core.grounded_verdict, string) result =
   match build_prompt input with
@@ -96,7 +96,7 @@ let run_grounded_review ~base_path ~runtime_id (input : review_input) :
         (* Model answered without calling report_verdict. Provider-native
            schema still requires a strict JSON grounded verdict object. *)
         let text = Agent_sdk_response.text_of_response result.response in
-        parse_grounded_verdict_from_response_text text)
+        parse_grounded_verdict_from_structured_response_text text)
     | Error err -> Error (Agent_sdk.Error.to_string err)
 
 let run_review ~base_path ~runtime_id (input : review_input) :

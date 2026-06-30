@@ -32,8 +32,8 @@ let judge_json_of_runtime (runtime : Dashboard_governance_judge.runtime_snapshot
         Json_util.string_option_to_yojson runtime.last_compute_outcome );
       ( "last_compute_reason",
         Json_util.string_option_to_yojson runtime.last_compute_reason );
-      ( "lenient_json_fallback",
-        Judge_diagnostics.lenient_fallback_metrics_json ~judge_label:"Governance" );
+      ( "strict_json_parse",
+        Judge_diagnostics.strict_json_parse_metrics_json ~judge_label:"Governance" );
     ]
 
 let summary_json_of_runtime ?base_path

@@ -192,10 +192,104 @@ let parse_runtime_config_raw_body body_str =
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
 
+type runtime_route_lane =
+  | Runtime_default
+  | Runtime_librarian
+  | Runtime_cross_verifier
+
+let parse_runtime_route_lane = function
+  | "default" -> Ok Runtime_default
+  | "librarian" -> Ok Runtime_librarian
+  | "cross_verifier" -> Ok Runtime_cross_verifier
+  | lane -> Error (Printf.sprintf "unknown runtime routing lane: %s" lane)
+
+let required_string_field json name =
+  match Json_util.assoc_member_opt name json with
+  | Some (`String value) when not (String.equal (String.trim value) "") ->
+    Ok (String.trim value)
+  | Some (`String _) -> Error (name ^ " must not be empty")
+  | Some _ -> Error (name ^ " must be a string")
+  | None -> Error (name ^ " required")
+
+let optional_string_field json name =
+  match Json_util.assoc_member_opt name json with
+  | None | Some `Null -> Ok None
+  | Some (`String value) ->
+    let trimmed = String.trim value in
+    if String.equal trimmed "" then Ok None else Ok (Some trimmed)
+  | Some _ -> Error (name ^ " must be a string or null")
+
+let parse_runtime_route_body body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc _ as json ->
+      (match required_string_field json "lane" with
+       | Error _ as err -> err
+       | Ok lane ->
+         (match parse_runtime_route_lane lane with
+          | Error _ as err -> err
+          | Ok parsed_lane ->
+            (match optional_string_field json "runtime_id" with
+             | Error _ as err -> err
+             | Ok runtime_id -> Ok (parsed_lane, runtime_id))))
+    | _ -> Error "JSON object body required"
+  with
+  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+
+let parse_runtime_assignment_body body_str =
+  try
+    match Yojson.Safe.from_string body_str with
+    | `Assoc _ as json ->
+      (match required_string_field json "keeper_name" with
+       | Error _ as err -> err
+       | Ok keeper_name ->
+         (match optional_string_field json "runtime_id" with
+          | Error _ as err -> err
+          | Ok runtime_id -> Ok (keeper_name, runtime_id)))
+    | _ -> Error "JSON object body required"
+  with
+  | Yojson.Json_error err -> Error ("invalid json: " ^ err)
+
 let runtime_config_path_error_status message =
   if String.equal message "runtime config path not found"
   then `Not_found
   else `Internal_server_error
+
+let audit_runtime_config_write state agent_name ?path ~text ~outcome () =
+  try
+    Audit_log.log_action
+      (Mcp_server.workspace_config state)
+      ~agent_id:agent_name
+      ~action:Audit_log.RuntimeConfigWrite
+      ~details:
+        (`Assoc
+           ((match path with
+             | Some p -> [ ("path", `String p) ]
+             | None -> [])
+            @ [ ("bytes", `Int (String.length text))
+              ; ("lines", `Int (runtime_config_line_count text))
+              ]))
+      ~outcome
+      ()
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    Log.Dashboard.warn
+      "runtime.toml audit log failed: %s"
+      (Printexc.to_string exn)
+
+let respond_runtime_config_reload state agent_name request reqd =
+  match Runtime_config_file.load_config_text () with
+  | Ok (path, saved_text) ->
+    audit_runtime_config_write state agent_name ~path ~text:saved_text
+      ~outcome:Audit_log.Success ();
+    Http.Response.json_value ~compress:true ~request
+      (runtime_config_raw_json ~path ~source_text:saved_text ~reloaded:true)
+      reqd
+  | Error msg ->
+    respond_dashboard_error
+      ~status:(runtime_config_path_error_status msg)
+      ~request reqd msg
 
 let add_routes ~sw ~clock router =
   router
@@ -374,56 +468,75 @@ let add_routes ~sw ~clock router =
                (* RFC-0273 §3.3 — record the runtime.toml write to the governance
                   audit trail (actor + path + size) on top of the CanAdmin gate.
                   The config body is deliberately excluded: runtime.toml can carry
-                  provider secrets (RFC-0132 redaction). Accountability is a side
-                  effect that must never fail the primary write's response, so
-                  audit I/O errors (ENOSPC/EACCES) are demoted to a warning — by
-                  this point the routing change is already live (or already
-                  rejected), and a propagated 5xx would make the operator resubmit
-                  a committed change. Both outcomes are logged: a rejected
-                  CanAdmin routing change is itself a governance signal. *)
-               let audit_runtime_write ?path ~text ~outcome () =
-                 try
-                   Audit_log.log_action
-                     (Mcp_server.workspace_config state)
-                     ~agent_id:agent_name
-                     ~action:Audit_log.RuntimeConfigWrite
-                     ~details:
-                       (`Assoc
-                          ((match path with
-                            | Some p -> [ ("path", `String p) ]
-                            | None -> [])
-                          @ [ ("bytes", `Int (String.length text))
-                            ; ("lines", `Int (runtime_config_line_count text))
-                            ]))
-                     ~outcome
-                     ()
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                   Log.Dashboard.warn
-                     "runtime.toml audit log failed: %s"
-                     (Printexc.to_string exn)
-               in
+                  provider secrets (RFC-0132 redaction). *)
                (match Runtime_config_file.save_config_text source_text with
                 | Error msg ->
-                  audit_runtime_write ~text:source_text
+                  audit_runtime_config_write state agent_name ~text:source_text
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () ->
-                  (match Runtime_config_file.load_config_text () with
-                   | Ok (path, saved_text) ->
-                     audit_runtime_write ~path ~text:saved_text
-                       ~outcome:Audit_log.Success ();
-                     Http.Response.json_value ~compress:true ~request:req
-                       (runtime_config_raw_json
-                          ~path
-                          ~source_text:saved_text
-                          ~reloaded:true)
-                       reqd
-                   | Error msg ->
-                     respond_dashboard_error
-                       ~status:(runtime_config_path_error_status msg)
-                       ~request:req reqd msg)))
+                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+           )
+         ) request reqd)
+  |> Http.Router.post "/api/v1/runtime/config/routing" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_runtime_route_body body_str with
+             | Error msg ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+             | Ok (Runtime_default, Some runtime_id) ->
+               (match Runtime_config_file.set_runtime_default ~runtime_id () with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+             | Ok (Runtime_default, None) ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd
+                 "default runtime_id required"
+             | Ok (Runtime_librarian, runtime_id) ->
+               (match Runtime_config_file.set_runtime_librarian ~runtime_id () with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+             | Ok (Runtime_cross_verifier, runtime_id) ->
+               (match Runtime_config_file.set_runtime_cross_verifier ~runtime_id () with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+           )
+         ) request reqd)
+  |> Http.Router.post "/api/v1/runtime/config/assignment" (fun request reqd ->
+       with_token_permission_auth ~permission:Masc_domain.CanAdmin
+         (fun state agent_name req reqd ->
+           Http.Request.read_body_async reqd (fun body_str ->
+             match parse_runtime_assignment_body body_str with
+             | Error msg ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+             | Ok (keeper_name, Some runtime_id) ->
+               (match
+                  Runtime_config_file.set_runtime_id_for_keeper
+                    ~keeper_name
+                    ~runtime_id
+                    ()
+                with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+             | Ok (keeper_name, None) ->
+               (match Runtime_config_file.clear_runtime_id_for_keeper ~keeper_name () with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+           )
          ) request reqd)
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders
      hit_ratio, in-flight compute count, per-entry ttl_remaining, and

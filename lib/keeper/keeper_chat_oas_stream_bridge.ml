@@ -3,28 +3,36 @@ type tool_ref = {
   tool_call_name : string;
 }
 
-type state = { tools_by_index : (int * tool_ref) list }
+type block_state =
+  | Active_tool of tool_ref
+  | Invalid_tool_block of { failed_tool_call_id : string option }
+
+type state = { blocks_by_index : (int * block_state) list }
 
 type translated_event = {
   bridge_state : state;
   chat_events : Keeper_chat_events.keeper_chat_event list;
 }
 
-let empty_state = { tools_by_index = [] }
+let empty_state = { blocks_by_index = [] }
 
-let stream_tool_for_index bridge_state index =
-  List.assoc_opt index bridge_state.tools_by_index
+let stream_block_for_index bridge_state index =
+  List.assoc_opt index bridge_state.blocks_by_index
 
-let replace_tool bridge_state index tool =
-  { tools_by_index =
-      (index, tool) :: List.remove_assoc index bridge_state.tools_by_index
+let replace_block bridge_state index block =
+  { blocks_by_index =
+      (index, block) :: List.remove_assoc index bridge_state.blocks_by_index
   }
 
-let remove_tool bridge_state index =
-  { tools_by_index = List.remove_assoc index bridge_state.tools_by_index }
+let invalidate_block bridge_state index ~failed_tool_call_id =
+  replace_block bridge_state index (Invalid_tool_block { failed_tool_call_id })
+
+let remove_block bridge_state index =
+  { blocks_by_index = List.remove_assoc index bridge_state.blocks_by_index }
 
 let tool_start_is_replay existing tool =
   String.equal existing.tool_call_id tool.tool_call_id
+  && String.equal existing.tool_call_name tool.tool_call_name
 
 let sdk_stream_event_is_deliverable =
   Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
@@ -39,9 +47,9 @@ let has_any_tool_identity ~tool_id ~tool_name =
   | None, None -> false
   | _ -> true
 
-let protocol_error ?index ?event_type ?reason ?raw_bytes kind =
+let protocol_error ?index ?tool_call_id ?event_type ?reason ?raw_bytes kind =
   Keeper_chat_events.Oas_stream_protocol_error
-    { kind; index; event_type; reason; raw_bytes }
+    { kind; index; tool_call_id; event_type; reason; raw_bytes }
 
 let content_block_start_event ~index ~content_type ~tool_id ~tool_name =
   Keeper_chat_events.Oas_content_block_start
@@ -56,8 +64,8 @@ let content_block_stop_event ~index =
 
 let tool_args_event ~redact_text ~snapshot bridge_state index args =
   let open Keeper_chat_events in
-  match stream_tool_for_index bridge_state index with
-  | Some tool ->
+  match stream_block_for_index bridge_state index with
+  | Some (Active_tool tool) ->
       let args = redact_text args in
       let chat_event =
         if snapshot then
@@ -65,6 +73,13 @@ let tool_args_event ~redact_text ~snapshot bridge_state index args =
         else Tool_call_args { tool_call_id = tool.tool_call_id; delta = args }
       in
       { bridge_state; chat_events = [ chat_event ] }
+  | Some (Invalid_tool_block { failed_tool_call_id }) ->
+      { bridge_state;
+        chat_events =
+          [ protocol_error ?tool_call_id:failed_tool_call_id ~index
+              ~reason:"tool argument event arrived after invalid tool block start"
+              Tool_args_without_start ]
+      }
   | None ->
       { bridge_state;
         chat_events =
@@ -127,27 +142,47 @@ let translate ~redact_text ~on_text_delta bridge_state
       | Some tid, Some tname
         when String.trim tid <> "" && String.trim tname <> "" ->
       let tool = { tool_call_id = tid; tool_call_name = tname } in
-      let existing_tool = stream_tool_for_index bridge_state index in
+      let existing_block = stream_block_for_index bridge_state index in
       let block_start =
         content_block_start_event ~index ~content_type ~tool_id:(Some tid)
           ~tool_name:(Some tname)
       in
-      { bridge_state = replace_tool bridge_state index tool;
-        chat_events =
-          block_start
-          :: (match existing_tool with
-           | Some existing when tool_start_is_replay existing tool -> []
-           | Some existing ->
-               [ Tool_call_end { tool_call_id = existing.tool_call_id };
+      (match existing_block with
+       | Some (Active_tool existing) when tool_start_is_replay existing tool ->
+           { bridge_state; chat_events = [ block_start ] }
+       | Some (Active_tool existing) ->
+           { bridge_state =
+               invalidate_block bridge_state index
+                 ~failed_tool_call_id:(Some existing.tool_call_id);
+             chat_events =
+               [ block_start;
+                 protocol_error ~index ~tool_call_id:existing.tool_call_id
+                   ~reason:
+                     (Printf.sprintf
+                        "tool-use block index already active: existing tool %s/%s, incoming tool %s/%s"
+                        existing.tool_call_id existing.tool_call_name tid tname)
+                   Tool_start_duplicate_index ]
+           }
+       | Some (Invalid_tool_block { failed_tool_call_id }) ->
+           { bridge_state;
+             chat_events =
+               [ block_start;
+                 protocol_error ?tool_call_id:failed_tool_call_id ~index
+                   ~reason:"tool-use block index already invalid"
+                   Tool_start_duplicate_index ]
+           }
+       | None ->
+           { bridge_state = replace_block bridge_state index (Active_tool tool);
+             chat_events =
+               [ block_start;
                  Tool_call_start { tool_call_id = tid; tool_call_name = tname } ]
-           | None ->
-               [ Tool_call_start { tool_call_id = tid; tool_call_name = tname } ])
-      }
+           })
       | _ ->
           let block_start =
             content_block_start_event ~index ~content_type ~tool_id ~tool_name
           in
-          { bridge_state;
+          { bridge_state =
+              invalidate_block bridge_state index ~failed_tool_call_id:None;
             chat_events =
               [ block_start;
                 protocol_error ~index
@@ -159,7 +194,10 @@ let translate ~redact_text ~on_text_delta bridge_state
         content_block_start_event ~index ~content_type ~tool_id ~tool_name
       in
       if has_any_tool_identity ~tool_id ~tool_name then
-        { bridge_state;
+        { bridge_state =
+            invalidate_block bridge_state index
+              ~failed_tool_call_id:(Option.bind tool_id (fun id ->
+                   if String.trim id = "" then None else Some id));
           chat_events =
             [ block_start;
               protocol_error ~index
@@ -173,11 +211,19 @@ let translate ~redact_text ~on_text_delta bridge_state
       tool_args_event ~redact_text ~snapshot:true bridge_state index args
   | ContentBlockStop { index } -> (
       let block_stop = content_block_stop_event ~index in
-      match stream_tool_for_index bridge_state index with
-      | Some tool ->
-          { bridge_state = remove_tool bridge_state index;
+      match stream_block_for_index bridge_state index with
+      | Some (Active_tool tool) ->
+          { bridge_state = remove_block bridge_state index;
             chat_events =
               [ block_stop; Tool_call_end { tool_call_id = tool.tool_call_id } ]
+          }
+      | Some (Invalid_tool_block { failed_tool_call_id }) ->
+          { bridge_state = remove_block bridge_state index;
+            chat_events =
+              [ block_stop;
+                protocol_error ?tool_call_id:failed_tool_call_id ~index
+                  ~reason:"content block stop arrived for invalid tool block"
+                  Tool_stop_without_start ]
           }
       | None ->
           { bridge_state; chat_events = [ block_stop ] })

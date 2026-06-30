@@ -1,23 +1,11 @@
 import { html } from 'htm/preact'
-import { Save } from 'lucide-preact'
 import { useMemo, useState } from 'preact/hooks'
 import {
-  deleteRuntimeTomlKey,
   parseRuntimeTomlEnvironment,
-  setRuntimeTomlBindingField,
-  setRuntimeTomlDefault,
-  setRuntimeTomlKey,
-  setRuntimeTomlModelField,
-  setRuntimeTomlProviderCredential,
-  setRuntimeTomlProviderField,
-  cascadeDeleteProvider,
-  type RuntimeTomlBinding,
-  type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
   type RuntimeTomlProvider,
 } from '../lib/runtime-toml-config'
 import { keepers } from '../store'
-import { ActionButton } from './common/button'
 import { StatusDot } from './common/status-dot'
 
 // rt-* section ids. Mirrors RUNTIME_SECTIONS in runtime-toml-editor.ts so the
@@ -33,21 +21,14 @@ export type RuntimeStructuredSection =
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
   section: RuntimeStructuredSection
-  dirty: boolean
   disabled?: boolean
   saving?: boolean
-  onDraftChange: (sourceText: string) => void
-  onSave: (sourceText?: string) => void
+  onRoutingChange: (lane: 'default' | 'librarian' | 'cross_verifier', runtimeId: string | null) => void
+  onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
 }
 
 function firstId<T extends { id: string }>(items: T[]): string {
   return items[0]?.id ?? ''
-}
-
-function parsePositiveInt(value: string): number | null {
-  const trimmed = value.trim()
-  const parsed = Number.parseInt(trimmed, 10)
-  return Number.isFinite(parsed) && parsed > 0 && String(parsed) === trimmed ? parsed : null
 }
 
 function runtimeOptions(environment: RuntimeTomlEnvironment): string[] {
@@ -78,46 +59,6 @@ function capChip(on: boolean, label: string) {
   return html`<span class="rt-cap ${on ? 'on' : ''}">${on ? '✓' : '·'} ${label}</span>`
 }
 
-// Read a bare [runtime] string value (librarian / cross_verifier) straight from
-// the draft. The parser only surfaces `default`, so the extra routing lanes are
-// read here from the same source text the parser consumes. Matches the
-// parser's [section] header + key = "value" grammar.
-function readRuntimeLaneValue(sourceText: string, key: string): string {
-  const lines = sourceText.split('\n')
-  let inRuntime = false
-  for (const rawLine of lines) {
-    const headerMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/)
-    if (headerMatch) {
-      inRuntime = headerMatch[1]?.trim() === 'runtime'
-      continue
-    }
-    if (!inRuntime) continue
-    const keyMatch = rawLine.match(/^\s*([A-Za-z0-9_-]+)\s*=\s*"([^"]*)"\s*(?:#.*)?$/)
-    if (keyMatch && keyMatch[1] === key) return keyMatch[2] ?? ''
-  }
-  return ''
-}
-
-// Read [runtime.assignments] keeper -> runtime id from the draft. Same grammar
-// as the parser; surfaces explicit assignments so each keeper row reflects what
-// runtime.toml actually pins (and falls back to default when absent).
-function readRuntimeAssignments(sourceText: string): Record<string, string> {
-  const lines = sourceText.split('\n')
-  let inSection = false
-  const assignments: Record<string, string> = {}
-  for (const rawLine of lines) {
-    const headerMatch = rawLine.match(/^\s*\[([^\]]+)\]\s*(?:#.*)?$/)
-    if (headerMatch) {
-      inSection = headerMatch[1]?.trim() === 'runtime.assignments'
-      continue
-    }
-    if (!inSection) continue
-    const keyMatch = rawLine.match(/^\s*([A-Za-z0-9_.-]+)\s*=\s*"([^"]*)"\s*(?:#.*)?$/)
-    if (keyMatch?.[1]) assignments[keyMatch[1]] = keyMatch[2] ?? ''
-  }
-  return assignments
-}
-
 // keeper.status -> StatusDot tone (bg). Mirrors copilot-dock's run/idle/bad
 // split; tone classes are the existing --color-status-* tokens.
 function keeperDotTone(status: string): string {
@@ -134,11 +75,10 @@ function keeperDotTone(status: string): string {
 export function RuntimeEnvironmentEditor({
   sourceText,
   section,
-  dirty,
   disabled,
   saving,
-  onDraftChange,
-  onSave,
+  onRoutingChange,
+  onAssignmentChange,
 }: RuntimeEnvironmentEditorProps) {
   const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
   const [modelQuery, setModelQuery] = useState('')
@@ -146,9 +86,9 @@ export function RuntimeEnvironmentEditor({
   const runtimeIds = runtimeOptions(environment)
   const isDisabled = disabled === true || saving === true
 
-  const librarianLane = readRuntimeLaneValue(sourceText, 'librarian')
-  const crossVerifierLane = readRuntimeLaneValue(sourceText, 'cross_verifier')
-  const assignments = readRuntimeAssignments(sourceText)
+  const librarianLane = environment.librarianRuntimeId
+  const crossVerifierLane = environment.crossVerifierRuntimeId
+  const assignments = environment.assignments
   const keeperList = keepers.value
 
   const filteredModels = environment.models.filter(model => {
@@ -158,40 +98,19 @@ export function RuntimeEnvironmentEditor({
   })
 
   function updateDefault(runtimeId: string) {
-    onDraftChange(setRuntimeTomlDefault(sourceText, runtimeId))
+    if (runtimeId !== '') onRoutingChange('default', runtimeId)
   }
 
   function updateRoutingLane(lane: 'librarian' | 'cross_verifier', runtimeId: string) {
-    onDraftChange(setRuntimeTomlKey(sourceText, 'runtime', lane, runtimeId))
-  }
-
-  function updateProvider(providerId: string, field: 'endpoint', value: string) {
-    onDraftChange(setRuntimeTomlProviderField(sourceText, providerId, field, value))
-  }
-
-  function updateCredential(providerId: string, type: RuntimeTomlCredentialType, value: string) {
-    onDraftChange(setRuntimeTomlProviderCredential(sourceText, providerId, type, value))
-  }
-
-  function setDefaultBinding(binding: RuntimeTomlBinding) {
-    onDraftChange(setRuntimeTomlDefault(sourceText, binding.id))
-  }
-
-  function updateBinding(
-    runtimeId: string,
-    field: 'max-concurrent' | 'num-ctx',
-    value: number | null,
-  ) {
-    onDraftChange(setRuntimeTomlBindingField(sourceText, runtimeId, field, value))
+    onRoutingChange(lane, runtimeId === '' ? null : runtimeId)
   }
 
   function updateAssignment(keeperName: string, runtimeId: string) {
     if (runtimeId === environment.defaultRuntimeId) {
-      // default == fallback; drop the explicit pin so toml stays minimal.
-      onDraftChange(deleteRuntimeTomlKey(sourceText, 'runtime.assignments', keeperName))
+      onAssignmentChange(keeperName, null)
       return
     }
-    onDraftChange(setRuntimeTomlKey(sourceText, 'runtime.assignments', keeperName, runtimeId))
+    onAssignmentChange(keeperName, runtimeId)
   }
 
   // rt-select — runtime.css:43. Inline width cap so the 248px min-width never
@@ -207,6 +126,7 @@ export function RuntimeEnvironmentEditor({
     onChange: (runtimeId: string) => void,
     needsJson: boolean,
   ) {
+    const canUnset = lane !== 'default'
     const binding = environment.bindings.find(b => b.id === value)
     const model = binding ? environment.models.find(m => m.id === binding.modelId) : null
     const hasJsonCap = model ? (typeof model.jsonSupport === 'boolean' ? model.jsonSupport : null) : false
@@ -232,6 +152,7 @@ export function RuntimeEnvironmentEditor({
             aria-label=${lane === 'default' ? 'default runtime' : `${lane} runtime`}
             onChange=${(event: Event) => onChange((event.currentTarget as HTMLSelectElement).value)}
           >
+            ${canUnset ? html`<option value="">미설정</option>` : null}
             ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
           </select>
           ${capWarning}
@@ -244,20 +165,7 @@ export function RuntimeEnvironmentEditor({
     <div data-testid="runtime-environment-editor">
       <div class="rt-head-actions" style=${{ justifyContent: 'flex-end', marginBottom: '14px' }}>
         <span class="rt-nav-sub mono" style=${{ marginRight: 'auto' }}>런타임 환경</span>
-        <${ActionButton}
-          variant="primary"
-          size="sm"
-          onClick=${() => onSave(sourceText)}
-          disabled=${!dirty || isDisabled}
-          ariaBusy=${saving === true}
-          ariaLabel="런타임 환경 저장"
-          title="런타임 환경 저장"
-          testId="runtime-environment-save"
-          class="inline-flex shrink-0 items-center gap-1"
-        >
-          <${Save} size=${13} strokeWidth=${2.25} aria-hidden="true" />
-          <span>${saving ? '저장 중' : '환경 저장'}</span>
-        <//>
+        <span class="rt-nav-sub mono">${saving ? '저장 중' : 'backend typed writer'}</span>
       </div>
 
       ${environment.warnings.length > 0 ? html`
@@ -304,9 +212,9 @@ export function RuntimeEnvironmentEditor({
         )}
       </div>
 
-      <!-- providers — runtime-editor.jsx:144-165. endpoint + credential editable;
-           protocol shown read-only. provider capability chips
-           (mcp-tools/tool-events/mcp-http-headers) have no live source. -->
+      <!-- providers — runtime-editor.jsx:144-165. Read-only projection. Live
+           writes stay behind backend typed routes or the raw editor's validated
+           save; this component does not rewrite TOML text. -->
       <div class=${section === 'providers' ? '' : 'hidden'} data-testid="runtime-section-providers">
         <div class="rt-cards">
           ${environment.providers.map(provider => html`
@@ -321,9 +229,8 @@ export function RuntimeEnvironmentEditor({
                 <input
                   class="rt-input mono"
                   value=${transportValue(provider)}
-                  disabled=${isDisabled}
+                  readOnly
                   aria-label="provider transport value"
-                  onInput=${(event: Event) => updateProvider(provider.id, 'endpoint', (event.currentTarget as HTMLInputElement).value)}
                 />
               </div>
               <div class="rt-field">
@@ -334,34 +241,19 @@ export function RuntimeEnvironmentEditor({
                     <span class="rt-cred">
                       <span class="rt-cred-type mono">${provider.credentialType}</span>
                       <input
-                        class="rt-input mono"
-                        type=${provider.credentialType === 'inline' ? 'password' : 'text'}
-                        value=${credentialValue(provider)}
-                        disabled=${isDisabled}
-                        aria-label="provider credential value"
-                        onInput=${(event: Event) => updateCredential(provider.id, provider.credentialType, (event.currentTarget as HTMLInputElement).value)}
-                      />
-                    </span>
+                      class="rt-input mono"
+                      type=${provider.credentialType === 'inline' ? 'password' : 'text'}
+                      value=${credentialValue(provider)}
+                      readOnly
+                      aria-label="provider credential value"
+                    />
+                  </span>
                   `}
               </div>
               ${/* Provider capability chips (mcp-tools/tool-events/mcp-http-headers)
                    had no live source and rendered as if confirmed. Removed until a
                    provider-capability source exists, rather than implying support
                    with no backing (PR #22081 review P1: no stub). */ ''}
-              <div class="rt-field" style=${{ marginTop: '11px', paddingTop: '11px', borderTop: '1px solid var(--border-soft)' }}>
-                <button
-                  type="button"
-                  class="rt-warn"
-                  style=${{ background: 'none', border: 'none', cursor: 'pointer', fontSize: '11px' }}
-                  disabled=${isDisabled}
-                  onClick=${() => {
-                    const msg = `프로바이더 '${provider.id}'를 삭제할까요? 관련 모델 바인딩 및 런타임 할당이 모두 삭제됩니다.`
-                    if (typeof window !== 'undefined' && !window.confirm(msg)) return
-                    onDraftChange(cascadeDeleteProvider(sourceText, provider.id))
-                  }}
-                  data-testid=${`runtime-provider-delete-${provider.id}`}
-                >프로바이더 삭제</button>
-              </div>
             </div>
           `)}
         </div>
@@ -405,15 +297,8 @@ export function RuntimeEnvironmentEditor({
                   class="rt-input-sm mono"
                   value=${model.maxContext == null ? '' : String(model.maxContext)}
                   placeholder="—"
-                  disabled=${isDisabled}
+                  readOnly
                   aria-label=${`${model.id} max-context`}
-                  onInput=${(event: Event) => {
-                    const raw = (event.currentTarget as HTMLInputElement).value
-                    const parsed = raw.trim() === '' ? null : parsePositiveInt(raw)
-                    if (parsed !== undefined) {
-                      onDraftChange(setRuntimeTomlModelField(sourceText, model.id, 'max-context', parsed))
-                    }
-                  }}
                 />
               </div>
             </div>
@@ -444,7 +329,7 @@ export function RuntimeEnvironmentEditor({
                   title="기본 런타임으로"
                   aria-label=${`${binding.id} 기본 런타임으로`}
                   aria-pressed=${isDefault}
-                  onClick=${() => setDefaultBinding(binding)}
+                  onClick=${() => updateDefault(binding.id)}
                 >${isDefault ? '◉' : '○'}</button>
                 <div class="rt-bind-main">
                   <div class="rt-bind-key mono">
@@ -461,12 +346,8 @@ export function RuntimeEnvironmentEditor({
                       class="rt-input-sm mono"
                       value=${binding.maxConcurrent == null ? '' : String(binding.maxConcurrent)}
                       placeholder="∞"
-                      disabled=${isDisabled}
+                      readOnly
                       aria-label=${`${binding.id} max-concurrent`}
-                      onInput=${(event: Event) => {
-                        const raw = (event.currentTarget as HTMLInputElement).value
-                        updateBinding(binding.id, 'max-concurrent', raw.trim() === '' ? null : parsePositiveInt(raw))
-                      }}
                     />
                   </label>
                   <label class="rt-mini">
@@ -475,12 +356,8 @@ export function RuntimeEnvironmentEditor({
                       class="rt-input-sm mono"
                       value=${binding.numCtx == null ? '' : String(binding.numCtx)}
                       placeholder="—"
-                      disabled=${isDisabled}
+                      readOnly
                       aria-label=${`${binding.id} num-ctx`}
-                      onInput=${(event: Event) => {
-                        const raw = (event.currentTarget as HTMLInputElement).value
-                        updateBinding(binding.id, 'num-ctx', raw.trim() === '' ? null : parsePositiveInt(raw))
-                      }}
                     />
                   </label>
                 </div>

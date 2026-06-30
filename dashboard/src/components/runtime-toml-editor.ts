@@ -3,8 +3,11 @@ import { Copy, RefreshCcw, RotateCcw, Save } from 'lucide-preact'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'preact/hooks'
 import {
   fetchRuntimeTomlConfig,
+  patchRuntimeAssignment,
+  patchRuntimeRouting,
   saveRuntimeTomlConfig,
   type RuntimeTomlConfig,
+  type RuntimeRoutingLane,
 } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
 import {
@@ -210,6 +213,40 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
     setNotice(null)
     try {
       const saved = await saveRuntimeTomlConfig(nextSourceText)
+      setConfig(saved)
+      setDraft(saved.source_text)
+      setNotice('적용됨')
+    } catch (err: unknown) {
+      setError(errorToString(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null) {
+    if (saving || loadState === 'loading' || dirty) return
+    setSaving(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const saved = await patchRuntimeRouting(lane, runtimeId)
+      setConfig(saved)
+      setDraft(saved.source_text)
+      setNotice('적용됨')
+    } catch (err: unknown) {
+      setError(errorToString(err))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  async function handleAssignmentPatch(keeperName: string, runtimeId: string | null) {
+    if (saving || loadState === 'loading' || dirty) return
+    setSaving(true)
+    setError(null)
+    setNotice(null)
+    try {
+      const saved = await patchRuntimeAssignment(keeperName, runtimeId)
       setConfig(saved)
       setDraft(saved.source_text)
       setNotice('적용됨')
@@ -471,15 +508,13 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
               <${RuntimeEnvironmentEditor}
                 sourceText=${draft}
                 section=${structuredSection}
-                dirty=${dirty}
-                disabled=${loadState !== 'loaded'}
+                disabled=${loadState !== 'loaded' || dirty}
                 saving=${saving}
-                onDraftChange=${(nextSourceText: string) => {
-                  setDraft(nextSourceText)
-                  setNotice(null)
+                onRoutingChange=${(lane: RuntimeRoutingLane, runtimeId: string | null) => {
+                  void handleRoutingPatch(lane, runtimeId)
                 }}
-                onSave=${(nextSourceText?: string) => {
-                  void handleSave(nextSourceText)
+                onAssignmentChange=${(keeperName: string, runtimeId: string | null) => {
+                  void handleAssignmentPatch(keeperName, runtimeId)
                 }}
               />
             </div>

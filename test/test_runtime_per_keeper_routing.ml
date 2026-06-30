@@ -317,6 +317,78 @@ let test_runtime_assignment_writer_rejects_unknown_runtime_without_write () =
       (Runtime.runtime_id_for_keeper "routingtest"))
 ;;
 
+let test_runtime_assignment_writer_clears_assignment () =
+  with_runtime_file (fun path ->
+    (match Runtime.clear_runtime_id_for_keeper ~runtime_config_path:path ~keeper_name:"routingtest" () with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "clear_runtime_id_for_keeper failed: %s" msg);
+    Alcotest.(check bool)
+      "runtime.toml assignment removed"
+      false
+      (string_contains (Fs_compat.load_file path) "routingtest");
+    Alcotest.(check (option string))
+      "in-process assignment cache cleared"
+      None
+      (Runtime.runtime_id_for_keeper "routingtest"))
+;;
+
+let test_runtime_route_writer_updates_default () =
+  with_runtime_file (fun path ->
+    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"openai.gpt" () with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "set_runtime_default failed: %s" msg);
+    Alcotest.(check bool)
+      "runtime.toml default rewritten"
+      true
+      (string_contains (Fs_compat.load_file path) "default = \"openai.gpt\"");
+    Alcotest.(check string)
+      "runtime cache default refreshed"
+      "openai.gpt"
+      (Runtime.get_default_runtime_id ()))
+;;
+
+let test_runtime_route_writer_rejects_unknown_default_without_write () =
+  with_runtime_file (fun path ->
+    let before = Fs_compat.load_file path in
+    (match Runtime.set_runtime_default ~runtime_config_path:path ~runtime_id:"missing.runtime" () with
+     | Ok () -> Alcotest.fail "expected unknown default runtime to fail"
+     | Error msg ->
+       Alcotest.(check bool)
+         "error mentions unresolved default"
+         true
+         (string_contains msg "missing.runtime"));
+    Alcotest.(check string)
+      "runtime.toml unchanged after validation failure"
+      before
+      (Fs_compat.load_file path);
+    Alcotest.(check string)
+      "runtime cache unchanged"
+      "runpod_mtp.qwen"
+      (Runtime.get_default_runtime_id ()))
+;;
+
+let test_runtime_route_writer_clears_optional_librarian () =
+  with_runtime_file (fun path ->
+    (match Runtime.set_runtime_librarian ~runtime_config_path:path ~runtime_id:(Some "openai.gpt") () with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "set_runtime_librarian failed: %s" msg);
+    Alcotest.(check (option string))
+      "librarian set"
+      (Some "openai.gpt")
+      (Runtime.librarian_runtime_id ());
+    (match Runtime.set_runtime_librarian ~runtime_config_path:path ~runtime_id:None () with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "clear runtime librarian failed: %s" msg);
+    Alcotest.(check bool)
+      "runtime.toml librarian removed"
+      false
+      (string_contains (Fs_compat.load_file path) "librarian");
+    Alcotest.(check (option string))
+      "librarian cache cleared"
+      None
+      (Runtime.librarian_runtime_id ()))
+;;
+
 let test_runtime_config_text_loads_runtime_toml () =
   with_runtime_file (fun path ->
     match Runtime.load_config_text ~runtime_config_path:path () with
@@ -701,6 +773,22 @@ let () =
             "unknown assignment is rejected before runtime.toml write"
             `Quick
             test_runtime_assignment_writer_rejects_unknown_runtime_without_write
+        ; Alcotest.test_case
+            "dashboard runtime assignment clear validates and refreshes cache"
+            `Quick
+            test_runtime_assignment_writer_clears_assignment
+        ; Alcotest.test_case
+            "dashboard runtime route writer updates default"
+            `Quick
+            test_runtime_route_writer_updates_default
+        ; Alcotest.test_case
+            "unknown default route is rejected before runtime.toml write"
+            `Quick
+            test_runtime_route_writer_rejects_unknown_default_without_write
+        ; Alcotest.test_case
+            "dashboard runtime route writer clears optional librarian"
+            `Quick
+            test_runtime_route_writer_clears_optional_librarian
         ; Alcotest.test_case
             "dashboard raw runtime.toml load returns full source"
             `Quick

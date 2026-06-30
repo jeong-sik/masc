@@ -131,6 +131,7 @@ export type {
   LatencyBucket,
   DashboardRuntimeModelMetricsResponse,
   RuntimeTomlConfig,
+  RuntimeRoutingLane,
 } from './dashboard-runtime'
 export {
   fetchRuntimeProviders,
@@ -138,6 +139,8 @@ export {
   fetchRuntimeTomlConfig,
   fetchRuntimeDefaults,
   saveRuntimeTomlConfig,
+  patchRuntimeAssignment,
+  patchRuntimeRouting,
 } from './dashboard-runtime'
 
 export type {

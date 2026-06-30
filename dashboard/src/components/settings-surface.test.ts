@@ -20,12 +20,15 @@ import type {
   LogEntry,
   RuntimeDefaultsResponse,
 } from '../api/dashboard'
+import type { GateConnectorsData, GateConnectorInfo } from '../api/gate'
+import type { Keeper, KeeperConfig } from '../types'
 import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 import { dashboardLoading } from '../store'
+import { keepers } from '../store'
 import { namespaceTruthInitializing } from '../namespace-truth-store'
 import { resetDevTokenBootstrap } from '../api/dev-token'
 
@@ -34,6 +37,16 @@ const apiMock = vi.hoisted(() => ({
   fetchDashboardTools: vi.fn(),
   fetchRuntimeDefaults: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
+  fetchKeeperConfig: vi.fn(),
+  patchKeeperConfig: vi.fn(),
+}))
+
+const gateApiMock = vi.hoisted(() => ({
+  fetchGateConnectors: vi.fn(),
+}))
+
+const keeperApiMock = vi.hoisted(() => ({
+  fetchKeepersComposite: vi.fn(),
 }))
 
 const promptApiMock = vi.hoisted(() => ({
@@ -70,6 +83,24 @@ vi.mock('../api/dashboard.js', async () => {
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
     fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
+    fetchKeeperConfig: apiMock.fetchKeeperConfig,
+    patchKeeperConfig: apiMock.patchKeeperConfig,
+  }
+})
+
+vi.mock('../api/gate', async () => {
+  const actual = await vi.importActual<typeof import('../api/gate')>('../api/gate')
+  return {
+    ...actual,
+    fetchGateConnectors: gateApiMock.fetchGateConnectors,
+  }
+})
+
+vi.mock('../api/keeper', async () => {
+  const actual = await vi.importActual<typeof import('../api/keeper')>('../api/keeper')
+  return {
+    ...actual,
+    fetchKeepersComposite: keeperApiMock.fetchKeepersComposite,
   }
 })
 
@@ -206,8 +237,294 @@ function makeRuntimeProviders(
   }
 }
 
+function makeKeeper(overrides: Partial<Keeper> = {}): Keeper {
+  return {
+    name: 'sangsu',
+    status: 'idle',
+    sandbox_profile: 'local',
+    ...overrides,
+  }
+}
+
+function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
+  return {
+    name: 'sangsu',
+    active_goal_ids: [],
+    autoboot_enabled: true,
+    max_context_override: null,
+    limits: {
+      min_context_override_tokens: null,
+      max_context_override_tokens: null,
+    },
+    sandbox_profile: 'local',
+    network_mode: 'inherit',
+    sandbox_last_error: null,
+    allowed_paths: ['workspace/masc'],
+    effective_allowed_paths: ['/fixture/workspace/masc'],
+    prompt: {
+      goal: '',
+      instructions: '',
+      system_prompt_blocks: {
+        constitution: { key: 'keeper.constitution', source: 'file', text: '' },
+        world: { key: 'keeper.world', source: 'file', text: '' },
+        capabilities: { key: 'keeper.capabilities', source: 'file', text: '' },
+      },
+      effective_system_prompt: '',
+      unified_system_prompt: '',
+      unified_user_message_preview: '',
+    },
+    execution: {
+      models: [],
+      active_model: '',
+      active_model_label: null,
+      last_model_used_label: null,
+      per_provider_timeout_sec: null,
+      per_provider_timeout_mode: 'turn_budget_default',
+      verify: false,
+      selected_runtime_id: 'rt-a',
+      selected_runtime_canonical: 'rt-a',
+      runtime_options: ['rt-a', 'rt-b'],
+    },
+    compaction: {
+      profile: 'off',
+      ratio_gate: 0.85,
+      message_gate: 0,
+      token_gate: 0,
+      cooldown_sec: 0,
+    },
+    proactive: {
+      enabled: false,
+      idle_sec: 0,
+      cooldown_sec: 0,
+    },
+    drift: {
+      status: 'unwired',
+      enabled: null,
+      min_turn_gap: null,
+      count_total: null,
+      last_reason: null,
+    },
+    handoff: {
+      auto: false,
+      threshold: 0.85,
+      cooldown_sec: 0,
+    },
+    runtime: {
+      paused: false,
+      registered: true,
+      keepalive_running: true,
+      registry_state: 'registered',
+      fiber_health: 'idle',
+      runtime_blocker_class: null,
+      active_model_label: null,
+      last_model_used_label: null,
+      runtime_blocker_summary: null,
+      runtime_blocker_continue_gate: null,
+    },
+    runtime_trust: null,
+    workspace: {
+      mention_targets: [],
+      bound_workspace_ids: [],
+      active_goal_ids: [],
+      active_goals: [],
+      active_goal_count: 0,
+      missing_active_goal_ids: [],
+    },
+    tools: {
+      tool_access: [],
+      resolved_allowlist: [],
+      tool_denylist: [],
+      active_masc_tool_count: 0,
+      active_keeper_tool_count: 0,
+      total_active: 0,
+    },
+    sources: {
+      live_meta_path: '/fixture/.masc/config/keepers/sangsu.toml',
+      default_manifest_path: null,
+      default_source_kind: 'toml',
+      precedence: [],
+      has_live_override: true,
+      override_fields: [],
+    },
+    metrics: {
+      generation: 1,
+      total_turns: 0,
+      total_input_tokens: 0,
+      total_output_tokens: 0,
+      total_tokens: 0,
+      total_cost_usd: 0,
+      last_model_used: '',
+      last_input_tokens: 0,
+      last_output_tokens: 0,
+      last_total_tokens: 0,
+      last_latency_ms: null,
+      last_total_tokens_per_sec: null,
+      last_output_tokens_per_sec: null,
+      compaction_count: 0,
+    },
+    ...overrides,
+  }
+}
+
+function makeGateConnector(overrides: Partial<GateConnectorInfo> = {}): GateConnectorInfo {
+  return {
+    connector_id: 'discord',
+    display_name: 'Discord',
+    channel: 'discord',
+    capabilities: ['bindings'],
+    status: 'connected',
+    available: true,
+    connected: true,
+    stale: false,
+    stale_after_sec: 60,
+    gateway_state: 'connected',
+    status_source: 'in_process_gateway',
+    error: '',
+    status_path: '/state/discord.json',
+    binding_store_path: '/bindings/discord.json',
+    audit_path: '/audit/discord.jsonl',
+    updated_at: '2026-06-30T00:00:00Z',
+    reply_mode: 'mention_or_thread',
+    self_chat_guid: '',
+    last_ready_at: '2026-06-30T00:00:00Z',
+    bot_user_name: 'masc-bot',
+    bot_user_id: 'bot-1',
+    guild_count: 1,
+    gate_base_url: 'https://gate.masc.local',
+    gate_healthy: true,
+    gate_health_checked_at: '2026-06-30T00:00:00Z',
+    binding_source: '/bindings/discord.json',
+    runtime_bindings_count: 1,
+    pid: 123,
+    configured_bindings: [{ channel_id: 'C1', keeper_name: 'sangsu' }],
+    recent_audit: [],
+    storage_paths: {
+      status_path: '/state/discord.json',
+      binding_store_path: '/bindings/discord.json',
+      audit_path: '/audit/discord.jsonl',
+      names_path: '/names/discord.json',
+    },
+    runtime_summary: {
+      available: true,
+      connected: true,
+      stale: false,
+      stale_after_sec: 60,
+      status: 'connected',
+      error: '',
+      updated_at: '2026-06-30T00:00:00Z',
+      reply_mode: 'mention_or_thread',
+      self_chat_guid: '',
+      last_ready_at: '2026-06-30T00:00:00Z',
+      bot_user_name: 'masc-bot',
+      bot_user_id: 'bot-1',
+      guild_count: 1,
+      gate_base_url: 'https://gate.masc.local',
+      gate_healthy: true,
+      gate_health_checked_at: '2026-06-30T00:00:00Z',
+      pid: 123,
+    },
+    binding_summary: {
+      binding_source: '/bindings/discord.json',
+      runtime_bindings_count: 1,
+      configured_bindings_count: 1,
+    },
+    observed_channel: null,
+    names_path: '/names/discord.json',
+    names: {
+      guild_names: {},
+      channel_names: {},
+      channel_to_guild: {},
+      updated_at: '',
+    },
+    ...overrides,
+  }
+}
+
+function makeGateConnectors(overrides: Partial<GateConnectorsData> = {}): GateConnectorsData {
+  return {
+    connectors: [makeGateConnector()],
+    total: 1,
+    active_count: 1,
+    discord_trigger_policy: 'mention_or_thread',
+    generated_at: '2026-06-30T00:00:00Z',
+    ...overrides,
+  }
+}
+
 function stubRuntimeDefaults(value: RuntimeDefaultsResponse = makeRuntimeDefaults()) {
   apiMock.fetchRuntimeDefaults.mockResolvedValue(value)
+}
+
+function stubRuntimeRawFetch(sourceText = '[runtime]\ndefault = "rt-a"\n') {
+  vi.stubGlobal('fetch', vi.fn(async (input: unknown) => {
+    const requestUrl =
+      typeof input === 'string'
+        ? input
+        : input instanceof URL
+          ? input.href
+          : typeof (input as { url?: unknown }).url === 'string'
+            ? (input as { url: string }).url
+            : ''
+    const path = requestUrl.startsWith('http')
+      ? new URL(requestUrl).pathname
+      : requestUrl.split('?')[0] ?? requestUrl
+    if (path === '/api/v1/dashboard/dev-token') {
+      return new Response(JSON.stringify({ token: 'dev-token', actor: 'dashboard' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    if (path === '/api/v1/runtime/config/raw') {
+      return new Response(JSON.stringify({
+        ok: true,
+        path: MOCK_RUNTIME_PATH,
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: false,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      })
+    }
+    return new Response(JSON.stringify({ message: `unexpected ${path}` }), {
+      status: 500,
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }))
+}
+
+function sourceTextForRouting(): string {
+  return `[runtime]
+default = "p.m1"
+librarian = "p.m2"
+cross_verifier = "p.m2"
+
+[providers.p]
+display-name = "Provider"
+protocol = "openai-http"
+endpoint = "https://runtime.example/v1"
+
+[models.m1]
+api-name = "m1"
+max-context = 128000
+tools-support = true
+thinking-support = false
+json-support = true
+streaming = true
+
+[models.m2]
+api-name = "m2"
+max-context = 128000
+tools-support = true
+thinking-support = true
+json-support = true
+streaming = true
+
+[p.m1]
+is-default = true
+
+[p.m2]
+`
 }
 
 function stubEmptyApi() {
@@ -215,6 +532,16 @@ function stubEmptyApi() {
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
   stubRuntimeDefaults()
   apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders())
+  apiMock.fetchKeeperConfig.mockResolvedValue(makeKeeperConfig())
+  apiMock.patchKeeperConfig.mockImplementation(async (_name: string, payload: Partial<KeeperConfig>) =>
+    makeKeeperConfig(payload),
+  )
+  gateApiMock.fetchGateConnectors.mockResolvedValue(makeGateConnectors())
+  keeperApiMock.fetchKeepersComposite.mockResolvedValue({
+    generated_at: '2026-06-30T00:00:00Z',
+    count: 1,
+    snapshots: [{ keeper: 'sangsu' }],
+  })
 }
 
 const navigate = vi.fn()
@@ -239,10 +566,15 @@ describe('SettingsSurface', () => {
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
     apiMock.fetchRuntimeProviders.mockReset()
+    apiMock.fetchKeeperConfig.mockReset()
+    apiMock.patchKeeperConfig.mockReset()
+    gateApiMock.fetchGateConnectors.mockReset()
+    keeperApiMock.fetchKeepersComposite.mockReset()
     promptApiMock.clearPromptOverride.mockClear()
     promptApiMock.fetchDashboardPrompts.mockClear()
     promptApiMock.savePromptOverride.mockClear()
     stubEmptyApi()
+    keepers.value = [makeKeeper()]
     window.location.hash = '#settings'
     route.value = { tab: 'settings', params: {}, postId: null }
   })
@@ -253,6 +585,7 @@ describe('SettingsSurface', () => {
     navigate.mockClear()
     resetDevTokenBootstrap()
     sessionStorage.clear()
+    keepers.value = []
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
   })
@@ -349,11 +682,10 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="token-toggle"]')).toBeNull()
     expect(container.querySelector<HTMLInputElement>('.set-path .set-input')?.readOnly).toBe(true)
 
-    const gateNav = container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement
-    await fireEvent.click(gateNav)
+    const policyNav = container.querySelector('[data-testid="settings-nav-policy"]') as HTMLElement
+    await fireEvent.click(policyNav)
 
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
-    expect(container.textContent).not.toContain('＋ Add gate')
     expect(container.querySelector('[data-testid="settings-preview-badge"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="set-verify"]')).toBeNull()
   })
@@ -393,178 +725,110 @@ describe('SettingsSurface', () => {
     expect(container.querySelector<HTMLInputElement>('[data-testid="settings-mcp-endpoint-input"]')?.value).toBe('http://127.0.0.1:7777/mcp')
   })
 
-  it('sandbox allowlist and gate base local inputs are editable', async () => {
+  it('does not render a fabricated stdio process pid in the MCP preview', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-sandbox"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
 
-    const allowlistInput = container.querySelector<HTMLInputElement>('[data-testid="settings-allowed-domains-input"]')
-    expect(allowlistInput).toBeTruthy()
-    expect(allowlistInput?.readOnly).toBe(false)
+    const stdio = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === 'stdio')
+    expect(stdio).toBeTruthy()
+    await fireEvent.click(stdio as HTMLButtonElement)
 
-    await fireEvent.input(allowlistInput as HTMLInputElement, {
-      target: { value: 'github.com, example.test' },
-    })
-    expect(allowlistInput?.value).toBe('github.com, example.test')
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
-
-    const gateInput = container.querySelector<HTMLInputElement>('[data-testid="settings-gate-base-input"]')
-    expect(gateInput).toBeTruthy()
-    expect(gateInput?.readOnly).toBe(false)
-
-    await fireEvent.input(gateInput as HTMLInputElement, {
-      target: { value: 'https://gate.example.test' },
-    })
-    expect(gateInput?.value).toBe('https://gate.example.test')
+    const detail = container.querySelector('.set-mcp-detail')?.textContent ?? ''
+    expect(detail).toContain('masc-mcp serve --stdio')
+    expect(detail).not.toContain('pid 8421')
   })
 
-  it('sandbox controls are browser-session previews with persisted execution boundaries', async () => {
+  it('edits sandbox from live keeper config instead of fake global controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-sandbox"]') as HTMLElement)
 
-    const summary = () => container.querySelector('[data-testid="sandbox-local-summary"]') as HTMLElement
-    expect(summary().textContent).toContain('local sandbox preview')
-    expect(summary().textContent).toContain('container')
-    expect(summary().textContent).toContain('worktree fs')
-    expect(summary().textContent).toContain('허용목록 network')
-    expect(summary().textContent).toContain('shell on')
-    expect(summary().textContent).toContain('2GB · 2 CPU · 120s')
-    expect(container.textContent).toContain('Settings does not write live sandbox policy yet')
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('keeper config live-backed')
+      expect(container.querySelector('[data-testid="settings-sandbox-profile"]')).not.toBeNull()
+    })
 
-    const buttonByText = (text: string) => Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
-      .find(button => button.textContent === text)
-
-    await fireEvent.click(buttonByText('microVM') as HTMLButtonElement)
-    await fireEvent.click(buttonByText('namespace') as HTMLButtonElement)
-    await fireEvent.click(buttonByText('차단') as HTMLButtonElement)
-
-    expect(summary().textContent).toContain('microVM')
-    expect(summary().textContent).toContain('namespace fs')
-    expect(summary().textContent).toContain('차단 network')
     expect(container.querySelector('[data-testid="settings-allowed-domains-input"]')).toBeNull()
-    expect(sessionStorage.getItem('masc.settings.local.sandboxIsolation')).toBe('microVM')
-    expect(sessionStorage.getItem('masc.settings.local.sandboxFsScope')).toBe('namespace')
-    expect(sessionStorage.getItem('masc.settings.local.sandboxEgress')).toBe('차단')
+    expect(container.textContent).not.toContain('Allowed domains')
+    expect(container.textContent).not.toContain('Resource limits')
 
-    const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
-    await fireEvent.click(toggles[0] as HTMLButtonElement)
-    expect(summary().textContent).toContain('shell off')
-    expect(container.textContent).not.toContain('Block risky commands')
-    expect(sessionStorage.getItem('masc.settings.local.sandboxShellCommands')).toBe('false')
+    const profile = container.querySelector<HTMLSelectElement>('[data-testid="settings-sandbox-profile"]')
+    const network = container.querySelector<HTMLSelectElement>('[data-testid="settings-sandbox-network"]')
+    const allowedPaths = container.querySelector<HTMLTextAreaElement>('[data-testid="settings-sandbox-allowed-paths"]')
+    expect(profile).toBeTruthy()
+    expect(network).toBeTruthy()
+    expect(allowedPaths).toBeTruthy()
 
-    await fireEvent.click(buttonByText('8GB') as HTMLButtonElement)
-    const cpuButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-stepper"] button'))
-    await fireEvent.click(cpuButtons[1] as HTMLButtonElement)
-    const timeoutSlider = container.querySelector('[data-testid="set-slider"] input') as HTMLInputElement
-    await fireEvent.input(timeoutSlider, { target: { value: '300' } })
+    ;(profile as HTMLSelectElement).value = 'docker'
+    await fireEvent.input(profile as HTMLSelectElement)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="settings-sandbox-network"]')?.textContent).toContain('none')
+    })
+    const updatedNetwork = container.querySelector<HTMLSelectElement>('[data-testid="settings-sandbox-network"]')
+    ;(updatedNetwork as HTMLSelectElement).value = 'none'
+    await fireEvent.input(updatedNetwork as HTMLSelectElement)
+    await fireEvent.input(allowedPaths as HTMLTextAreaElement, {
+      target: { value: 'workspace/oas\nworkspace/oas\n  ' },
+    })
 
-    expect(summary().textContent).toContain('8GB · 3 CPU · 300s')
-    expect(sessionStorage.getItem('masc.settings.local.sandboxMemoryLimit')).toBe('8GB')
-    expect(sessionStorage.getItem('masc.settings.local.sandboxCpuLimit')).toBe('3')
-    expect(sessionStorage.getItem('masc.settings.local.sandboxExecTimeout')).toBe('300')
+    const save = container.querySelector<HTMLButtonElement>('[data-testid="settings-sandbox-save"]')
+    expect(save).toBeTruthy()
+    expect(save?.disabled).toBe(false)
+    await fireEvent.click(save as HTMLButtonElement)
 
-    render(null, container)
-    render(html`<${SettingsSurface} />`, container)
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-sandbox"]') as HTMLElement)
-
-    expect(summary().textContent).toContain('microVM')
-    expect(summary().textContent).toContain('namespace fs')
-    expect(summary().textContent).toContain('차단 network')
-    expect(summary().textContent).toContain('shell off')
-    expect(summary().textContent).toContain('8GB · 3 CPU · 300s')
-    expect(container.querySelector('[data-testid="settings-allowed-domains-input"]')).toBeNull()
-    expect(container.textContent).not.toContain('Block risky commands')
+    await waitFor(() => {
+      expect(apiMock.patchKeeperConfig).toHaveBeenCalledWith('sangsu', {
+        sandbox_profile: 'docker',
+        network_mode: 'none',
+        allowed_paths: ['workspace/oas'],
+      })
+    })
+    expect(container.querySelector('[data-testid="settings-sandbox-source"]')?.textContent).toContain('/fixture/.masc/config/keepers/sangsu.toml')
   })
 
-  it('gate connector toggles are browser-session previews, not live connection state', async () => {
+  it('falls back to fleet composite keeper names when sandbox opens before the keeper store is hydrated', async () => {
+    keepers.value = []
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-sandbox"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(keeperApiMock.fetchKeepersComposite).toHaveBeenCalledTimes(1)
+      expect(apiMock.fetchKeeperConfig).toHaveBeenCalledWith('sangsu')
+      expect(container.querySelector('[data-testid="settings-sandbox-profile"]')).not.toBeNull()
+    })
+    expect(container.querySelector<HTMLSelectElement>('[data-testid="settings-sandbox-keeper-select"]')?.value).toBe('sangsu')
+    expect(container.querySelector('[data-testid="settings-sandbox-empty"]')).toBeNull()
+  })
+
+  it('renders gate connectors from the live connector payload without local toggles', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
 
-    const summary = () => container.querySelector('[data-testid="gate-local-summary"]') as HTMLElement
-    expect(summary().textContent).toContain('local connector preview')
-    expect(summary().textContent).toContain('3/4 enabled')
-    expect(container.textContent).toContain('Live connector runtime, availability')
-    expect(container.textContent).not.toContain('Connected')
-    expect(container.textContent).not.toContain('Inactive')
-
-    const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
-    expect(toggles.length).toBe(4)
-    expect(toggles[0]!.getAttribute('data-active')).toBe('true')
-
-    await fireEvent.click(toggles[0]!)
-
-    expect(toggles[0]!.getAttribute('data-active')).toBe('false')
-    expect(summary().textContent).toContain('2/4 enabled')
-    expect(JSON.parse(sessionStorage.getItem('masc.settings.local.gateConnectorPreview') ?? '{}')).toMatchObject({
-      Slack: false,
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('gate connector live-backed')
+      expect(container.querySelector('[data-testid="settings-gate-connectors"]')).not.toBeNull()
     })
 
-    const triggers = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-trigger"]'))
-    expect(triggers().length).toBe(4)
-    await fireEvent.click(triggers()[2] as HTMLButtonElement)
-    expect(triggers()[2]?.getAttribute('data-active')).toBe('true')
-    expect(sessionStorage.getItem('masc.settings.local.discordTrigger')).toBe('all')
+    expect(container.querySelector('[data-testid="gate-live-summary"]')?.textContent).toContain('1/1 active')
+    expect(container.querySelector('[data-testid="settings-gate-discord-trigger"]')?.textContent).toBe('mention_or_thread')
+    expect(container.querySelector('[data-testid="settings-gate-base-live"]')?.textContent).toContain('https://gate.masc.local')
+
+    const connectorCards = Array.from(container.querySelectorAll('[data-testid="settings-gate-connector"]'))
+    expect(connectorCards.length).toBe(1)
+    expect(connectorCards[0]?.textContent).toContain('discord')
+    expect(connectorCards[0]?.textContent).toContain('Discord')
+    expect(connectorCards[0]?.textContent).toContain('bindings 1')
+    expect(container.textContent).not.toContain('Amplitude')
+    expect(container.querySelector('[data-testid="settings-preview-badge"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-trigger"]')).toBeNull()
 
     await fireEvent.click(container.querySelector('[data-testid="settings-connectors-link"]') as HTMLButtonElement)
     expect(navigate).toHaveBeenLastCalledWith('connectors')
-
-    render(null, container)
-    render(html`<${SettingsSurface} />`, container)
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
-
-    expect(summary().textContent).toContain('2/4 enabled')
-    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).getAttribute('data-active')).toBe('false')
-    expect(triggers()[2]?.getAttribute('data-active')).toBe('true')
-  })
-
-  it('notify controls are browser-session previews with persisted thresholds and events', async () => {
-    render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
-
-    const summary = () => container.querySelector('[data-testid="notify-local-summary"]') as HTMLElement
-    expect(summary().textContent).toContain('local notification preview')
-    expect(summary().textContent).toContain('4/5 events')
-    expect(summary().textContent).toContain('Slack')
-    expect(container.textContent).toContain('Settings does not write live delivery policy yet')
-
-    const contextSlider = container.querySelector('[data-testid="set-slider"] input') as HTMLInputElement
-    await fireEvent.input(contextSlider, { target: { value: '90' } })
-    expect(contextSlider.value).toBe('90')
-    expect(sessionStorage.getItem('masc.settings.local.notifyContextThreshold')).toBe('90')
-
-    const failureStepperButtons = Array.from(
-      container.querySelectorAll<HTMLButtonElement>('[data-testid="set-stepper"] button'),
-    )
-    await fireEvent.click(failureStepperButtons[1] as HTMLButtonElement)
-    expect(container.querySelector('[data-testid="set-stepper"] .mono')?.textContent).toBe('4')
-    expect(sessionStorage.getItem('masc.settings.local.notifyFailureThreshold')).toBe('4')
-
-    const discord = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
-      .find(button => button.textContent === 'Discord')
-    expect(discord).toBeTruthy()
-    await fireEvent.click(discord as HTMLButtonElement)
-    expect(summary().textContent).toContain('Discord')
-    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBe('Discord')
-
-    const eventToggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
-    expect(eventToggles.length).toBe(5)
-    await fireEvent.click(eventToggles[0]!)
-    expect(summary().textContent).toContain('3/5 events')
-    expect(sessionStorage.getItem('masc.settings.local.notifyEventPreview')).toContain('"컨텍스트 임계치 초과":false')
-
-    render(null, container)
-    render(html`<${SettingsSurface} />`, container)
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
-
-    expect(summary().textContent).toContain('3/5 events')
-    expect(summary().textContent).toContain('Discord')
-    expect((container.querySelector('[data-testid="set-slider"] input') as HTMLInputElement).value).toBe('90')
-    expect(container.querySelector('[data-testid="set-stepper"] .mono')?.textContent).toBe('4')
-    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).getAttribute('data-active')).toBe('false')
   })
 
   it('paths local preview values can be format-checked without claiming live verification', async () => {
@@ -681,42 +945,47 @@ describe('SettingsSurface', () => {
       ])
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')
     })
+    expect(container.querySelector('[data-testid="runtime-default-context"]')).toBeNull()
     expect(container.textContent).not.toContain('oas·seoul-1')
   })
 
-  it('routing section shows resolved keeper assignments read-only', async () => {
+  it('routing section opens the live runtime.toml routing editor', async () => {
+    keepers.value = [makeKeeper(), makeKeeper({ name: 'mad-improver', status: 'running' })]
+    stubRuntimeRawFetch(`${sourceTextForRouting()}
+
+[runtime.assignments]
+sangsu = "p.m2"
+mad-improver = "p.m1"
+`)
     render(html`<${SettingsSurface} />`, container)
 
     const routingNav = container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement
     await fireEvent.click(routingNav)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="routing-default-model"]')?.textContent).toBe('m1')
-      const assignments = Array.from(
-        container.querySelectorAll('[data-testid="routing-assignment"]'),
-      ).map(n => n.textContent)
-      expect(assignments).toEqual(['rt-b'])
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
+      expect(container.querySelector('[data-testid="runtime-toml-editor"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-section-routing"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-environment-save"]')).toBeNull()
+      expect(container.textContent).toContain('backend typed writer')
     })
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('모델 라우팅')
+    expect(container.querySelector('[data-testid="runtime-toml-section-title"]')?.textContent).toBe('라우팅')
+    expect(container.textContent).toContain('memory-os 라이브러리안')
+    expect(container.textContent).toContain('cross-verifier')
+    expect(container.textContent).not.toContain('Read-only')
+    expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
   })
 
-  it('routing section reports no assignments without fabricating rows', async () => {
-    stubRuntimeDefaults(
-      makeRuntimeDefaults({
-        model_routing: {
-          keeper_assignments: [],
-          librarian_runtime_id: null,
-          cross_verifier_runtime_id: null,
-          media_failover: [],
-        },
-      }),
-    )
+  it('routing section reports empty runtime.toml bindings without fabricating rows', async () => {
+    stubRuntimeRawFetch('[runtime]\ndefault = "rt-a"\n')
     render(html`<${SettingsSurface} />`, container)
 
     const routingNav = container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement
     await fireEvent.click(routingNav)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="routing-assignments-empty"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-environment-empty"]')).not.toBeNull()
     })
     expect(container.querySelectorAll('[data-testid="routing-assignment"]').length).toBe(0)
   })
@@ -806,8 +1075,6 @@ describe('SettingsSurface', () => {
     })
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live inventory + local controls')
     expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
-    expect(container.textContent).toContain('Live public_mcp inventory is read from the backend')
-    expect(container.textContent).not.toContain('Expose this namespace to external agents')
   })
 
   it('MCP exposed-tool toggles are browser-session exposure previews', async () => {
@@ -827,17 +1094,8 @@ describe('SettingsSurface', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('Local tool exposure preview (2/2)')
     })
-
-    const summary = () => container.querySelector('[data-testid="mcp-local-summary"]') as HTMLElement
-    expect(summary().textContent).toContain('local exposure preview')
-    expect(summary().textContent).toContain('2/2 enabled')
-
-    const stdio = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
-      .find(button => button.textContent === 'stdio')
-    expect(stdio).toBeTruthy()
-    await fireEvent.click(stdio as HTMLButtonElement)
-    expect(container.querySelector('.set-mcp-detail')?.textContent).toContain('masc-mcp serve --stdio')
-    expect(sessionStorage.getItem('masc.settings.local.mcpTransport')).toBe('stdio')
+    expect(container.querySelector('[data-testid="mcp-local-summary"]')?.textContent).toContain('2/2 listed tools selected')
+    expect(container.textContent).toContain('browser-session exposure previews only')
 
     const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
     expect(toggles.length).toBe(2)
@@ -848,54 +1106,63 @@ describe('SettingsSurface', () => {
 
     expect(toggles[0]!.getAttribute('aria-checked')).toBe('false')
     expect(container.textContent).toContain('Local tool exposure preview (1/2)')
-    expect(summary().textContent).toContain('1/2 enabled')
     expect(sessionStorage.getItem('masc.settings.local.mcpToolPreview')).toContain('"masc_handoff":false')
 
     render(null, container)
+    route.value = { tab: 'settings', params: {}, postId: null }
     render(html`<${SettingsSurface} />`, container)
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.textContent).toContain('Local tool exposure preview (1/2)')
+      expect(container.querySelector('[data-testid="mcp-local-summary"]')?.textContent).toContain('1/2 listed tools selected')
     })
-    expect(container.querySelector('.set-mcp-detail')?.textContent).toContain('masc-mcp serve --stdio')
-    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).getAttribute('data-active')).toBe('false')
+    const restoredToggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
+    expect(restoredToggles[0]!.getAttribute('aria-checked')).toBe('false')
   })
 
-  it('MCP transport previews render config shape without a fabricated runtime pid (any transport)', async () => {
+  it('notify controls are browser-session previews with persisted thresholds and events', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
-    await waitFor(() => {
-      expect(container.querySelector('.set-mcp-detail')).toBeTruthy()
-    })
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
 
-    const segByLabel = (label: string) =>
-      Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
-        .find(button => button.textContent === label)
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('Slack channel')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('4/5 events enabled')
 
-    // A pid is per-process runtime state, knowable only by observing a live spawned process.
-    // This surface is a browser-session config-shape preview with no backend/process-status
-    // source, so no transport branch may render a concrete pid. The pattern requires a
-    // word-bounded `pid` followed by digits across the file's own delimiters (space, ':', '=',
-    // '·'), so it catches `pid 8421`, `pid: 8421`, `pid·8421` and `pid=8421` alike. It permits
-    // the reviewer-allowed explicit non-fact `pid: n/a` (no trailing digits) and does not
-    // false-match words ending in "pid" (e.g. "rapid8").
-    const fabricatedPid = /\bpid\b[:=\s·]*\d+/i
+    const range = container.querySelector<HTMLInputElement>('input[type="range"]')
+    expect(range).toBeTruthy()
+    await fireEvent.input(range as HTMLInputElement, { target: { value: '92' } })
 
-    for (const transport of ['http', 'stdio', 'sse']) {
-      const seg = segByLabel(transport)
-      expect(seg).toBeTruthy()
-      await fireEvent.click(seg as HTMLButtonElement)
-      const detail = container.querySelector('.set-mcp-detail')?.textContent ?? ''
-      expect(detail).not.toMatch(fabricatedPid)
-    }
+    const plus = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent === '+')
+    expect(plus).toBeTruthy()
+    await fireEvent.click(plus as HTMLButtonElement)
 
-    // The stdio branch still renders its legitimate config-shape: spawn command + protocol framing.
-    await fireEvent.click(segByLabel('stdio') as HTMLButtonElement)
-    const stdioDetail = container.querySelector('.set-mcp-detail')?.textContent ?? ''
-    expect(stdioDetail).toContain('masc-mcp serve --stdio')
-    expect(stdioDetail).toContain('framing: ndjson')
+    const discord = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === 'Discord')
+    expect(discord).toBeTruthy()
+    await fireEvent.click(discord as HTMLButtonElement)
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="set-toggle"]')
+    expect(toggle).toBeTruthy()
+    await fireEvent.click(toggle as HTMLButtonElement)
+
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('Discord channel')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('context 92%')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('failures 4')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('3/5 events enabled')
+    expect(sessionStorage.getItem('masc.settings.local.notifyContextThreshold')).toBe('92')
+    expect(sessionStorage.getItem('masc.settings.local.notifyFailureThreshold')).toBe('4')
+    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBe('Discord')
+    expect(sessionStorage.getItem('masc.settings.local.notifyEventPreview')).toContain('"컨텍스트 임계치 초과":false')
+
+    render(null, container)
+    route.value = { tab: 'settings', params: {}, postId: null }
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('Discord channel')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('context 92%')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('failures 4')
   })
 
   it('renders the fusion preset section (panel families + judge) read-only', async () => {
@@ -995,24 +1262,22 @@ describe('SettingsSurface', () => {
     expect(container.querySelectorAll('.set-tg-chip.safe').length).toBeGreaterThan(0)
   })
 
-  it('shows Discord trigger radios only while the Discord gate is on', async () => {
+  it('shows the Discord trigger policy as live connector data without preview radios', async () => {
+    gateApiMock.fetchGateConnectors.mockResolvedValue(makeGateConnectors({
+      connectors: [],
+      total: 0,
+      active_count: 0,
+      discord_trigger_policy: 'mention_only',
+    }))
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
 
-    // Discord gate defaults on → trigger radios visible with prototype values.
-    const triggers = () => Array.from(container.querySelectorAll('[data-testid="set-trigger"]'))
-    expect(triggers().length).toBe(4)
-    const vals = triggers().map(t => t.querySelector('.mono')?.textContent)
-    expect(vals).toEqual(['mention_or_thread', 'mention_only', 'all', 'user_only'])
-    // default selection is mention_or_thread; local preview radios can be changed.
-    expect(triggers()[0]!.classList.contains('on')).toBe(true)
-    expect((triggers()[0] as HTMLButtonElement).disabled).toBe(false)
-
-    await fireEvent.click(triggers()[2] as HTMLButtonElement)
-
-    expect(triggers()[0]!.getAttribute('data-active')).toBe('false')
-    expect(triggers()[2]!.getAttribute('data-active')).toBe('true')
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="settings-gate-discord-trigger"]')?.textContent).toBe('mention_only')
+      expect(container.querySelector('[data-testid="settings-gate-empty"]')).not.toBeNull()
+    })
+    expect(container.querySelector('[data-testid="set-trigger"]')).toBeNull()
   })
 
   it('opens the live runtime.toml editor from runtime management', async () => {
@@ -1084,7 +1349,12 @@ describe('SettingsSurface shell route', () => {
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
     apiMock.fetchRuntimeProviders.mockReset()
+    apiMock.fetchKeeperConfig.mockReset()
+    apiMock.patchKeeperConfig.mockReset()
+    gateApiMock.fetchGateConnectors.mockReset()
+    keeperApiMock.fetchKeepersComposite.mockReset()
     stubEmptyApi()
+    keepers.value = [makeKeeper()]
     dashboardLoading.value = false
     connected.value = true
     namespaceTruthInitializing.value = false
@@ -1094,6 +1364,7 @@ describe('SettingsSurface shell route', () => {
   afterEach(() => {
     render(null, container)
     container.remove()
+    keepers.value = []
   })
 
   it('renders from the dashboard shell route', async () => {

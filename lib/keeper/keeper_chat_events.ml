@@ -13,6 +13,7 @@ type stream_protocol_error_kind =
 type stream_protocol_error = {
   kind : stream_protocol_error_kind;
   index : int option;
+  tool_call_id : string option;
   event_type : string option;
   reason : string option;
   raw_bytes : int option;
@@ -116,6 +117,7 @@ let stream_protocol_error_summary error =
     [
       Some (stream_protocol_error_kind_to_string error.kind);
       Option.map (Printf.sprintf "index=%d") error.index;
+      Option.map (Printf.sprintf "tool_call_id=%s") error.tool_call_id;
       Option.map (Printf.sprintf "event_type=%s") error.event_type;
       error.reason;
       Option.map (Printf.sprintf "raw_bytes=%d") error.raw_bytes;
@@ -131,6 +133,8 @@ let stream_protocol_error_to_json error =
         `String (stream_protocol_error_kind_to_string error.kind) );
     ]
     @ json_opt "index" (Option.map (fun value -> `Int value) error.index)
+    @ json_opt "tool_call_id"
+        (Option.map (fun value -> `String value) error.tool_call_id)
     @ json_opt "event_type"
         (Option.map (fun value -> `String value) error.event_type)
     @ json_opt "reason" (Option.map (fun value -> `String value) error.reason)

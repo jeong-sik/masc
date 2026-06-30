@@ -36,6 +36,9 @@ export interface RuntimeTomlBinding {
 
 export interface RuntimeTomlEnvironment {
   defaultRuntimeId: string
+  librarianRuntimeId: string
+  crossVerifierRuntimeId: string
+  assignments: Record<string, string>
   providers: RuntimeTomlProvider[]
   models: RuntimeTomlModel[]
   bindings: RuntimeTomlBinding[]
@@ -242,6 +245,11 @@ function bindingFromDocument(
 export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvironment {
   const document = parseDocument(sourceText)
   const runtimeValues = sectionValues(document, 'runtime')
+  const assignmentValues = sectionValues(document, 'runtime.assignments')
+  const assignments = Object.fromEntries(
+    Object.entries(assignmentValues)
+      .filter((entry): entry is [string, string] => typeof entry[1] === 'string'),
+  )
   const providers = providerIds(document).map(id => providerFromDocument(document, id))
   const models = modelIds(document).map(id => modelFromDocument(document, id))
   const bindings = bindingSections(document).map(entry => bindingFromDocument(document, entry))
@@ -251,6 +259,9 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   if (bindings.length === 0) warnings.push('provider.model binding section not found')
   return {
     defaultRuntimeId: asString(runtimeValues.default),
+    librarianRuntimeId: asString(runtimeValues.librarian),
+    crossVerifierRuntimeId: asString(runtimeValues.cross_verifier),
+    assignments,
     providers,
     models,
     bindings,

@@ -23,6 +23,7 @@ type stream_protocol_error_kind =
 type stream_protocol_error = {
   kind : stream_protocol_error_kind;
   index : int option;
+  tool_call_id : string option;
   event_type : string option;
   reason : string option;
   raw_bytes : int option;

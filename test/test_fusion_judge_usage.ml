@@ -23,6 +23,86 @@ let sample_synthesis : Fusion_types.judge_synthesis =
   ; decision = Fusion_types.Answer "ok"
   }
 
+let fusion_schema = Keeper_structured_output_schema.fusion_judge_output_schema
+
+let restore_model_catalog previous =
+  match previous with
+  | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+  | None -> Llm_provider.Model_catalog.clear_global ()
+
+let with_repo_oas_model_catalog f =
+  let previous = Llm_provider.Model_catalog.global () in
+  let path = Masc_test_deps.source_path "oas-models.toml" in
+  match Llm_provider.Model_catalog.load_file path with
+  | Error msg -> fail ("repo oas-models.toml should load: " ^ msg)
+  | Ok catalog ->
+    Fun.protect
+      ~finally:(fun () -> restore_model_catalog previous)
+      (fun () ->
+         Llm_provider.Model_catalog.set_global catalog;
+         f ())
+
+let with_empty_oas_model_catalog f =
+  let previous = Llm_provider.Model_catalog.global () in
+  Fun.protect
+    ~finally:(fun () -> restore_model_catalog previous)
+    (fun () ->
+       Llm_provider.Model_catalog.set_global [];
+       f ())
+
+let provider_cfg ~kind ~model_id ~base_url =
+  Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
+
+let test_output_contract_keeps_native_schema_when_supported () =
+  let cfg =
+    provider_cfg
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~model_id:"claude-test"
+      ~base_url:"https://api.anthropic.test"
+  in
+  match Fusion_judge.For_testing.apply_output_contract cfg with
+  | Error msg -> fail ("expected native schema config: " ^ msg)
+  | Ok configured ->
+    check bool "response_format uses JsonSchema" true
+      (match configured.response_format with
+       | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal fusion_schema schema
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
+    check bool "output_schema mirrors schema" true
+      (match configured.output_schema with
+       | Some schema -> Yojson.Safe.equal fusion_schema schema
+       | None -> false)
+
+let test_output_contract_degrades_to_json_mode_when_schema_is_not_native () =
+  with_repo_oas_model_catalog @@ fun () ->
+  let cfg =
+    provider_cfg
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"deepseek-v4-pro"
+      ~base_url:"https://api.deepseek.com"
+  in
+  match Fusion_judge.For_testing.apply_output_contract cfg with
+  | Error msg -> fail ("expected JSON-mode fallback: " ^ msg)
+  | Ok configured ->
+    check bool "response_format uses JsonMode" true
+      (match configured.response_format with
+       | Agent_sdk.Types.JsonMode -> true
+       | Agent_sdk.Types.JsonSchema _ | Agent_sdk.Types.Off -> false);
+    check (option string) "native output_schema is cleared" None
+      (Option.map Yojson.Safe.to_string configured.output_schema)
+
+let test_output_contract_fails_loud_when_no_output_contract_is_known () =
+  with_empty_oas_model_catalog @@ fun () ->
+  let cfg =
+    provider_cfg
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"unknown-json-contract"
+      ~base_url:"https://api.example.invalid/v1"
+  in
+  match Fusion_judge.For_testing.apply_output_contract cfg with
+  | Ok _ -> fail "expected unknown provider/model to fail loud"
+  | Error msg ->
+    check bool "schema validation reason is retained" true (String.length msg > 0)
+
 let test_attach_usage_on_success () =
   match Fusion_judge.attach_usage (Ok sample_synthesis) sample_usage with
   | Ok (_synthesis, usage) ->
@@ -108,7 +188,21 @@ let test_sum_all_usage_empty_is_zero () =
 
 let () =
   run "fusion_judge_usage"
-    [ ( "attach_usage"
+    [ ( "output_contract"
+      , [ test_case
+            "keeps native schema when supported"
+            `Quick
+            test_output_contract_keeps_native_schema_when_supported
+        ; test_case
+            "uses JSON mode when native schema is not available"
+            `Quick
+            test_output_contract_degrades_to_json_mode_when_schema_is_not_native
+        ; test_case
+            "fails loud when no JSON output contract is known"
+            `Quick
+            test_output_contract_fails_loud_when_no_output_contract_is_known
+        ] )
+    ; ( "attach_usage"
       , [ test_case "success carries usage" `Quick test_attach_usage_on_success
         ; test_case "parse failure carries usage" `Quick
             test_attach_usage_on_parse_failure

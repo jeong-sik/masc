@@ -95,7 +95,7 @@ supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
 supports-native-streaming = true
 supports-response-format-json = true
-supports-structured-output = true
+supports-structured-output = false
 
 [models.deepseek-v4-flash]
 api-name = "deepseek-v4-flash"

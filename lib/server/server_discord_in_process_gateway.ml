@@ -640,7 +640,13 @@ let start ~sw ~env ~clock ~state =
     let policy = resolved_trigger_policy () in
     State.set_trigger_policy policy;
     let dispatch =
+      (* RFC-0301: tag this dispatch as the Discord connector so a message that
+         arrives while the keeper is in flight is enqueued onto
+         [Keeper_chat_queue] (drained by the serial consumer, delivered back to
+         the channel via [Keeper_chat_discord.adapter_loop]) rather than the
+         outbound-less async poll store ([Keeper_msg_async]). *)
       Gate_keeper_backend.dispatch_with_text_snapshot
+        ~connector_kind:Gate_keeper_backend.Discord
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net

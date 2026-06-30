@@ -139,7 +139,13 @@ let handle_gate_message ~sw ~clock state request reqd =
   Http.Request.read_body_async reqd (fun body_str ->
     let request_started = Unix.gettimeofday () in
     let dispatch =
+      (* RFC-0301: the HTTP gate route is the convergence point for sidecar
+         connectors (imessage-bot, cli-connector) that POST and await the reply
+         synchronously. They have no in-process outbound adapter, so [Generic]
+         keeps their existing async [masc_keeper_msg] poll behaviour when the
+         keeper is busy. *)
       Gate_keeper_backend.dispatch
+        ~connector_kind:Gate_keeper_backend.Generic
         ~sw ~clock
         ~proc_mgr:state.Mcp_server.proc_mgr
         ~net:state.Mcp_server.net

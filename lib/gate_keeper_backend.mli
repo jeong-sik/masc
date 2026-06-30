@@ -34,6 +34,7 @@ val route_busy_connector :
     isolation. *)
 
 val dispatch :
+  connector_kind:connector_kind ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->
   proc_mgr:Eio_unix.Process.mgr_ty Eio.Resource.t option ->
@@ -48,14 +49,19 @@ val dispatch :
   content:string ->
   Gate_protocol.dispatch_result
 (** Build a keeper context, call the keeper surface, and parse the response.
-    When the target keeper already has an admitted turn in flight, returns an
-    accepted async request envelope instead of blocking the connector HTTP
-    request behind that turn.  The [channel] and [channel_user_id] are used to
-    construct the agent name ([gate:<channel>:<workspace_id>:<user_id>]).  The other
-    connector fields are injected into the keeper-visible message body so
-    external user identity survives memory and handoff boundaries. *)
+    When the target keeper already has an admitted turn in flight, the busy
+    message is routed per {!route_busy_connector}: a [Discord]/[Slack]
+    [connector_kind] enqueues onto [Keeper_chat_queue] for deferred delivery via
+    the serial consumer's outbound adapter (RFC-0301); [Generic] (the default)
+    returns an accepted async request envelope ([Keeper_msg_async]) instead of
+    blocking the connector request behind that turn.  The [channel] and
+    [channel_user_id] are used to construct the agent name
+    ([gate:<channel>:<workspace_id>:<user_id>]).  The other connector fields are
+    injected into the keeper-visible message body so external user identity
+    survives memory and handoff boundaries. *)
 
 val dispatch_with_text_snapshot :
+  connector_kind:connector_kind ->
   on_text_snapshot:(string -> unit) ->
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->

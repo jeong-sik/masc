@@ -182,6 +182,26 @@ let busy_ack_reply_text ?in_flight (request : Gate_protocol.message_request) =
     request.request_id
     in_flight_text
 
+(* ACK text for the RFC-0301 chat-queue deferral path. Unlike
+   [busy_ack_reply_text], there is no [Keeper_msg_async] request envelope: the
+   message was enqueued onto [Keeper_chat_queue], so the durable handle is the
+   queue position, not a poll request_id. The reply is delivered later by the
+   serial consumer through the connector's outbound adapter. *)
+let busy_ack_reply_text_queued ~in_flight ~keeper_name =
+  let in_flight_text =
+    match in_flight with
+    | None -> ""
+    | Some { Keeper_turn_admission.lane; started_at = _ } ->
+        Printf.sprintf
+          " Current turn: %s."
+          (Keeper_turn_admission.lane_to_string lane)
+  in
+  Printf.sprintf
+    "%s is busy; your message is queued and will be answered once the current \
+     turn finishes.%s"
+    keeper_name
+    in_flight_text
+
 (* ── Dispatch ────────────────────────────────────────────────── *)
 
 let normalized_context_value value =
@@ -285,7 +305,8 @@ let persist_connector_assistant_reply ~base_dir ~keeper_name ~source
    below either pass it ([dispatch_with_text_snapshot]) or omit it so it defaults
    to [None] ([dispatch]). Without the unit the optional leaks into [dispatch]'s
    inferred type and breaks the .mli signature. Do not drop the [()]. *)
-let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
+let dispatch_core ?on_text_snapshot ?(connector_kind = Generic) ~sw ~clock
+    ~proc_mgr ~net ~config
     ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
     ~keeper_name ~metadata ~content () =
   let keeper_name = String.trim keeper_name in
@@ -399,10 +420,32 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
   let dispatch_result =
     match busy_in_flight with
     | Some info ->
-        `Async_ack
-          ( info
-          , Keeper_tool_surface.dispatch keeper_ctx
-              ~name:"masc_keeper_msg" ~args )
+        (match
+           route_busy_connector connector_kind
+             ~channel_id:channel_workspace_id ~user_id:channel_user_id
+         with
+         | `Enqueue_chat_queue source ->
+             (* RFC-0301: the keeper already holds an in-flight turn. Route the
+                connector message onto [Keeper_chat_queue] so the serial
+                [Keeper_chat_consumer] drains it once the slot frees and delivers
+                the deferred reply through the connector's outbound adapter
+                ([Keeper_chat_discord.adapter_loop]). The async [masc_keeper_msg]
+                store ([Keeper_msg_async]) has no outbound path, so a busy
+                connector message routed there is answered into the dashboard
+                transcript only and never reaches the channel — the RFC-0301
+                root cause. *)
+             Keeper_chat_queue.enqueue ~keeper_name
+               { Keeper_chat_queue.content = String.trim content
+               ; user_blocks = []
+               ; attachments = []
+               ; timestamp = Eio.Time.now clock
+               ; source };
+             `Queued_to_chat_lane info
+         | `Async_poll ->
+             `Async_ack
+               ( info
+               , Keeper_tool_surface.dispatch keeper_ctx
+                   ~name:"masc_keeper_msg" ~args ))
     | None ->
         (* Channel gate needs the final keeper reply when the keeper can run it
            now, not the async request ACK that plain dispatch returns. *)
@@ -464,6 +507,25 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
           }
       in
       Gate_protocol.Reply { content = reply; structured; stats; message_request }
+  | `Queued_to_chat_lane in_flight ->
+      (* RFC-0301: the message was enqueued onto [Keeper_chat_queue]; the
+         connector gets a busy ACK now and the deferred reply later via the
+         serial consumer's outbound adapter. There is no [Keeper_msg_async]
+         request envelope, so [message_request] is [None] — the queue position is
+         the durable handle, not a poll request_id. *)
+      let duration_ms =
+        Mtime.Span.to_uint64_ns (Mtime.span (Mtime_clock.now ()) start_mtime)
+        |> Int64.div 1_000_000L
+        |> Int64.to_int
+      in
+      let reply =
+        redact_text (busy_ack_reply_text_queued ~in_flight:(Some in_flight) ~keeper_name)
+      in
+      let stats =
+        Some { Gate_protocol.model_used = "runtime"; duration_ms; tokens_used = 0 }
+      in
+      Gate_protocol.Reply
+        { content = reply; structured = None; stats; message_request = None }
   | `Streaming (Some result) when Tool_result.is_success result ->
       let body = Tool_result.message result in
       let duration_ms =
@@ -494,14 +556,23 @@ let dispatch_core ?on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config
   | `Async_ack (_, None) | `Streaming None ->
       Gate_protocol.Unavailable_result
 
-let dispatch ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
-    ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content =
-  dispatch_core ~sw ~clock ~proc_mgr ~net ~config ~channel ~channel_user_id
-    ~channel_user_name ~channel_workspace_id ~keeper_name ~metadata ~content ()
-
-let dispatch_with_text_snapshot ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
-    ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
-    ~keeper_name ~metadata ~content =
-  dispatch_core ~on_text_snapshot ~sw ~clock ~proc_mgr ~net ~config ~channel
+(* [connector_kind] is a required labelled argument (not optional): these
+   wrappers are partially applied to produce a [Channel_gate.dispatch_fn] /
+   [streaming_dispatch_fn], so a leading erasable optional would either fail to
+   erase (warning 16) or linger into the resulting function type and not match
+   the connector-neutral [dispatch_fn] shape. Requiring the connector to name
+   its kind also makes a missing wiring a compile error rather than a silent
+   [Generic] default. *)
+let dispatch ~connector_kind ~sw ~clock ~proc_mgr ~net ~config ~channel
+    ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
+    ~metadata ~content =
+  dispatch_core ~connector_kind ~sw ~clock ~proc_mgr ~net ~config ~channel
     ~channel_user_id ~channel_user_name ~channel_workspace_id ~keeper_name
     ~metadata ~content ()
+
+let dispatch_with_text_snapshot ~connector_kind ~on_text_snapshot ~sw ~clock
+    ~proc_mgr ~net ~config ~channel ~channel_user_id ~channel_user_name
+    ~channel_workspace_id ~keeper_name ~metadata ~content =
+  dispatch_core ~connector_kind ~on_text_snapshot ~sw ~clock ~proc_mgr ~net
+    ~config ~channel ~channel_user_id ~channel_user_name ~channel_workspace_id
+    ~keeper_name ~metadata ~content ()

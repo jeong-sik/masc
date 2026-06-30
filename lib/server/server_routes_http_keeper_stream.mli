@@ -139,6 +139,7 @@ val handle_keeper_chat_stream :
 (** {1 Turn execution (shared between HTTP handler and queue consumer)} *)
 
 val process_single_turn :
+  connector_user_line_recorded_upstream:bool ->
   state:Mcp_server.server_state ->
   clock:[> float Eio.Time.clock_ty ] Eio.Resource.t ->
   sw:Eio.Switch.t ->
@@ -160,7 +161,16 @@ val process_single_turn :
     closed). [client_disconnects] carries the HTTP stream switch and
     disconnect signal; it stops only the stream projection and does not
     cancel the accepted request. [auth_token] is [None] for queue-consumer
-    turns where no HTTP request is available. *)
+    turns where no HTTP request is available.
+
+    [connector_user_line_recorded_upstream] (default [false]) tells the turn
+    that the inbound user line was already persisted by the gate inbound
+    boundary ([Gate_keeper_backend.dispatch_core], RFC-0226 sole-recorder).
+    When [true] the turn records the assistant reply only and never re-writes
+    the user line — set by the queue consumer for connector ([Discord]/[Slack])
+    sources whose busy message was enqueued after the gate already recorded it
+    (RFC-0301 §3.4). [false] keeps the dashboard-route behaviour of recording
+    both sides. *)
 
 (** {1 Testing helpers} *)
 

@@ -538,6 +538,27 @@ let test_of_json_rejects_exec_and_pipeline_together () =
     (String_util.contains_substring_ci msg "mutually exclusive")
 ;;
 
+(* Pipeline은 redirect_target triple을 갖지 않는다(Exec variant 전용). stdin/stdout/stderr가
+   pipeline과 함께 오면 이전에는 of_json이 조용히 버렸다(silent failure). 명시적 거부를 고정. *)
+let test_of_json_rejects_pipeline_with_redirect () =
+  let msg =
+    parse_json_error
+      (`Assoc
+          [ ( "pipeline"
+            , `List
+                [ `Assoc
+                    [ "executable", `String "printf"; "argv", `List [ `String "x" ] ]
+                ; `Assoc [ "executable", `String "wc" ]
+                ] )
+          ; "stdout", `Assoc [ "file", `String "/tmp/out.log" ]
+          ])
+  in
+  Alcotest.(check bool)
+    "error states redirects unsupported with pipeline"
+    true
+    (String_util.contains_substring_ci msg "not supported with $.pipeline")
+;;
+
 let test_of_json_rejects_stages_alias () =
   let msg =
     parse_json_error
@@ -1223,6 +1244,10 @@ let suite =
           "of_json_rejects_exec_and_pipeline_together"
           `Quick
           test_of_json_rejects_exec_and_pipeline_together
+      ; Alcotest.test_case
+          "of_json_rejects_pipeline_with_redirect"
+          `Quick
+          test_of_json_rejects_pipeline_with_redirect
       ; Alcotest.test_case
           "of_json_rejects_stages_alias"
           `Quick

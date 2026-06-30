@@ -338,13 +338,8 @@ let sanitize_checkpoint_message
 let reasoning_details_chars
     ~(reasoning_content : string option)
     ~(details : Agent_sdk.Types.reasoning_detail list) : int =
-  match reasoning_content with
-  | Some content -> String.length content
-  | None ->
-      details
-      |> List.filter_map (fun detail -> detail.Agent_sdk.Types.text)
-      |> String.concat ""
-      |> String.length
+  Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+  |> String.length
 
 let checkpoint_content_chars_of_block block =
   match Canonical_tool.tool_result_of_block block with

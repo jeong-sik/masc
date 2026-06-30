@@ -141,11 +141,13 @@ let translate ~redact_text ~on_text_delta bridge_state
           [ Oas_thinking_delta { index; delta = redact_text text } ]
       }
   | ContentBlockDelta
-      { index; delta = ReasoningDetailsDelta { reasoning_content; _ } } ->
+      { index; delta = ReasoningDetailsDelta { reasoning_content; details } } ->
       (* MiniMax split-reasoning stream (#2347): project the reasoning payload
          through the thinking-delta lane so keepers surface it like other
-         provider reasoning. Empty when [reasoning_content] is absent. *)
-      let text = Option.value ~default:"" reasoning_content in
+         provider reasoning. OAS owns the typed text projection. *)
+      let text =
+        Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+      in
       { bridge_state;
         chat_events = [ Oas_thinking_delta { index; delta = redact_text text } ]
       }

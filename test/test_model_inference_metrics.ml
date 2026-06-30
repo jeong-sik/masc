@@ -338,6 +338,18 @@ let test_provider_kind_is_not_reconstructed_from_legacy_fields () =
     let rollup = M.provider_rollup agg in
     check int "provider rollup stays empty" 0 (List.length rollup))
 
+let test_canonical_provider_label_delegates_to_oas_provider_config () =
+  let expected =
+    Llm_provider.Provider_config.string_of_provider_kind
+      Llm_provider.Provider_config.Anthropic
+  in
+  check (option string) "known provider kind" (Some expected)
+    (Runtime_provider_labels.canonical_provider_label "  AnThRoPiC  ");
+  check (option string) "blank provider kind" None
+    (Runtime_provider_labels.canonical_provider_label "   ");
+  check (option string) "historical custom provider" (Some "custom-provider")
+    (Runtime_provider_labels.canonical_provider_label "Custom-Provider")
+
 let test_untrusted_usage_excluded_from_aggregates () =
   let base = test_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) (fun () ->
@@ -1318,6 +1330,8 @@ let () =
       test_case "single model success" `Quick test_single_model_success;
       test_case "provider_kind is not reconstructed" `Quick
         test_provider_kind_is_not_reconstructed_from_legacy_fields;
+      test_case "provider labels delegate to OAS Provider_config" `Quick
+        test_canonical_provider_label_delegates_to_oas_provider_config;
       test_case "untrusted usage excluded from aggregates" `Quick
         test_untrusted_usage_excluded_from_aggregates;
       test_case "error turns counted" `Quick test_error_turns_counted;

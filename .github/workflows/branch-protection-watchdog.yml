@@ -26,13 +26,13 @@ jobs:
           BRANCH_PROTECTION_AUDIT_TOKEN: ${{ secrets.BRANCH_PROTECTION_AUDIT_TOKEN }}
         run: |
           if [[ -z "${BRANCH_PROTECTION_AUDIT_TOKEN:-}" ]]; then
-            # The audit reads branch protection settings. Missing credentials are
-            # a repo-configuration gap, not a source-build failure, so PR and
-            # main push runs skip with a warning. Schedule/manual runs still fail
-            # hard to keep the missing secret visible until repository settings
-            # are fixed.
-            if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "push" ]]; then
-              echo "::warning title=Branch protection audit skipped::No BRANCH_PROTECTION_AUDIT_TOKEN secret configured. Skipping the branch-protection drift audit for this ${{ github.event_name }} run; schedule and manual runs still fail until the secret is configured."
+            # The audit reads branch protection settings, which a pull request
+            # cannot change. Skip PR runs with a warning so every open PR is not
+            # marked red by a repo-config gap unrelated to its diff. Push,
+            # schedule, and manual runs stay fail-closed because those events
+            # are the branch-protection watchdog's source of truth.
+            if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+              echo "::warning title=Branch protection audit skipped on PR::No BRANCH_PROTECTION_AUDIT_TOKEN secret configured. Skipping the branch-protection drift audit for this pull request; push, schedule, and manual runs still fail until the secret is configured."
               echo "skip_audit=true" >> "$GITHUB_OUTPUT"
               exit 0
             fi

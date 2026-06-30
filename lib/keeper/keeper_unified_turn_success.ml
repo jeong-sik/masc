@@ -296,6 +296,57 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
       ~was_latched
 ;;
 
+type terminal_outcome =
+  | Terminal_done
+  | Terminal_checkpoint
+  | Terminal_failed_completion_contract of { reason_code : string }
+
+let completion_contract_terminal_failure_reason_code result =
+  match result.Keeper_agent_run.operator_disposition with
+  | Some
+      { disposition = Keeper_execution_receipt.Disp_pause_human
+      ; reason = Keeper_execution_receipt.Reason_completion_contract_unsatisfied
+      } ->
+    Some
+      (Keeper_execution_receipt.completion_contract_result_to_string
+         result.Keeper_agent_run.completion_contract_result)
+  | Some _ -> None
+  | None ->
+    Some
+      (Keeper_execution_receipt.operator_disposition_reason_to_string
+         Keeper_execution_receipt.Reason_unmapped_runtime_state)
+;;
+
+let terminal_outcome_of_result result =
+  match completion_contract_terminal_failure_reason_code result with
+  | Some reason_code -> Terminal_failed_completion_contract { reason_code }
+  | None ->
+    (match result.Keeper_agent_run.stop_reason with
+     | Runtime_agent.Completed -> Terminal_done
+     | Runtime_agent.TurnBudgetExhausted _
+     | Runtime_agent.MutationBoundaryReached _ ->
+       Terminal_checkpoint)
+;;
+
+let terminal_outcome_is_completed_turn = function
+  | Terminal_done | Terminal_checkpoint -> true
+  | Terminal_failed_completion_contract _ -> false
+;;
+
+let terminal_outcome_to_activity_kind = function
+  | Terminal_failed_completion_contract _ -> "keeper.turn_failed"
+  | Terminal_done | Terminal_checkpoint -> "keeper.turn_completed"
+
+let terminal_outcome_to_label = function
+  | Terminal_done -> "done"
+  | Terminal_checkpoint -> "checkpoint"
+  | Terminal_failed_completion_contract _ -> "failed"
+
+let terminal_outcome_to_log_label = function
+  | Terminal_done -> "OK"
+  | Terminal_checkpoint -> "checkpoint"
+  | Terminal_failed_completion_contract _ -> "failed"
+
 module For_testing = struct
   let budget_exhausted_no_progress_threshold_override =
     budget_exhausted_no_progress_threshold_override
@@ -315,6 +366,17 @@ module For_testing = struct
   let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
   let claim_bound_work = claim_bound_work
 
+  let completion_contract_terminal_failure_reason_code =
+    completion_contract_terminal_failure_reason_code
+
+  type nonrec terminal_outcome = terminal_outcome =
+    | Terminal_done
+    | Terminal_checkpoint
+    | Terminal_failed_completion_contract of { reason_code : string }
+
+  let terminal_outcome_of_result = terminal_outcome_of_result
+  let terminal_outcome_is_completed_turn = terminal_outcome_is_completed_turn
+
   let apply_loop_detectors = apply_loop_detectors
 end
 
@@ -328,6 +390,7 @@ let append_metrics_snapshot
       ~turn_cost
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~last_provider_timeout_budget
+      ~terminal_outcome
   =
   let any_pending =
     observation.Keeper_world_observation.pending_mentions <> []
@@ -365,6 +428,7 @@ let append_metrics_snapshot
       ~handoff_json:lifecycle.handoff_json
       ?provider_timeout_plan_json:
         (Option.map KCB.provider_timeout_budget_to_yojson last_provider_timeout_budget)
+      ~count_completed_turn:(terminal_outcome_is_completed_turn terminal_outcome)
       ()
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -400,16 +464,19 @@ let emit_activity_graph
       ~turn_mode_label
       ~(lifecycle : KEC.post_turn_lifecycle)
       ~wall_tokens_per_second
+      ~terminal_outcome
   =
   try
+    let activity_kind = terminal_outcome_to_activity_kind terminal_outcome in
     let event =
       Activity_graph.emit
         config
         ~actor:{ kind = "agent"; id = updated_meta.Keeper_meta_contract.agent_name }
-        ~kind:"keeper.turn_completed"
+        ~kind:activity_kind
         ~payload:
           (`Assoc
               ([ "keeper_name", `String updated_meta.name
+               ; "terminal_outcome", `String (terminal_outcome_to_label terminal_outcome)
                ; ( "input_tokens"
                  , if usage_trusted then `Int result.Keeper_agent_run.usage.input_tokens else `Null )
                ; ( "output_tokens"
@@ -458,8 +525,9 @@ let emit_activity_graph
         ()
     in
     Log.Keeper.debug
-      "%s: activity graph turn_completed emitted seq=%d"
+      "%s: activity graph %s emitted seq=%d"
       updated_meta.name
+      activity_kind
       event.seq
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -467,7 +535,7 @@ let emit_activity_graph
     Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
       ~config
       ~keeper_name:updated_meta.name
-      ~side_effect:"activity graph turn_completed emit"
+      ~side_effect:"activity graph turn terminal emit"
       (Printexc.to_string exn)
 ;;
 
@@ -479,6 +547,7 @@ let emit_usage_metrics_and_log
       ~usage_trusted
       ~turn_mode_label
       ~(lifecycle : KEC.post_turn_lifecycle)
+      ~terminal_outcome
   =
   let outcome_str =
     match result.Keeper_agent_run.stop_reason with
@@ -491,10 +560,14 @@ let emit_usage_metrics_and_log
        | None -> Printf.sprintf "mutation_boundary(%d)" turns_used)
   in
   let outcome_label =
-    match result.stop_reason with
-    | Runtime_agent.Completed -> "success"
-    | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
-    | Runtime_agent.MutationBoundaryReached _ -> "mutation_boundary"
+    match terminal_outcome with
+    | Terminal_failed_completion_contract _ -> "failure"
+    | Terminal_done -> "success"
+    | Terminal_checkpoint ->
+      (match result.stop_reason with
+       | Runtime_agent.TurnBudgetExhausted _ -> "budget_exhausted"
+       | Runtime_agent.MutationBoundaryReached _ -> "mutation_boundary"
+       | Runtime_agent.Completed -> "success")
   in
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string Turns)
@@ -563,29 +636,60 @@ let emit_usage_metrics_and_log
   let logged_total_tokens =
     if usage_trusted then result.usage.input_tokens + result.usage.output_tokens else 0
   in
-  Log.Keeper.info
-    "%s: keeper cycle OK runtime_lane=%s tokens=%d latency=%dms mode=%s stop=%s"
-    updated_meta.name
-    runtime_lane_label
-    logged_total_tokens
-    latency_ms
-    turn_mode_label
-    outcome_str
+  match terminal_outcome with
+  | Terminal_failed_completion_contract { reason_code } ->
+    Log.Keeper.warn
+      "%s: keeper cycle failed runtime_lane=%s tokens=%d latency=%dms mode=%s \
+       stop=%s terminal=completion_contract_violation reason=%s"
+      updated_meta.name
+      runtime_lane_label
+      logged_total_tokens
+      latency_ms
+      turn_mode_label
+      outcome_str
+      reason_code
+  | Terminal_done | Terminal_checkpoint ->
+    Log.Keeper.info
+      "%s: keeper cycle %s runtime_lane=%s tokens=%d latency=%dms mode=%s stop=%s"
+      updated_meta.name
+      (terminal_outcome_to_log_label terminal_outcome)
+      runtime_lane_label
+      logged_total_tokens
+      latency_ms
+      turn_mode_label
+      outcome_str
 ;;
 
 type decision_outcome =
   | Decision_success
   | Decision_checkpoint
+  | Decision_failure
 
-let decision_outcome_of_stop_reason = function
-  | Runtime_agent.Completed -> Decision_success
-  | Runtime_agent.TurnBudgetExhausted _
-  | Runtime_agent.MutationBoundaryReached _ ->
-    Decision_checkpoint
+let decision_outcome_of_terminal_outcome = function
+  | Terminal_done -> Decision_success
+  | Terminal_checkpoint -> Decision_checkpoint
+  | Terminal_failed_completion_contract _ -> Decision_failure
 
 let decision_outcome_to_label = function
   | Decision_success -> "success"
   | Decision_checkpoint -> "checkpoint"
+  | Decision_failure -> "failure"
+
+let terminal_reason_of_outcome result = function
+  | Terminal_done -> Keeper_turn_terminal.success ()
+  | Terminal_checkpoint ->
+    (match result.Keeper_agent_run.stop_reason with
+     | Runtime_agent.TurnBudgetExhausted { turns_used; limit } ->
+       Keeper_turn_terminal.of_disposition
+         ~source:"runtime_stop_reason"
+         (Keeper_turn_disposition.Turn_budget_exhausted
+            { detail = None; used = turns_used; limit })
+     | Runtime_agent.MutationBoundaryReached _ | Runtime_agent.Completed ->
+       Keeper_turn_terminal.success ())
+  | Terminal_failed_completion_contract _ ->
+    Keeper_turn_terminal.of_disposition
+      ~source:"completion_contract"
+      Keeper_turn_disposition.Completion_contract_unsatisfied
 
 let persist_success_meta ~config ~original_meta ~updated_meta =
   let updated_meta =
@@ -648,6 +752,116 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
   | Runtime_agent.Completed -> reset_failure_state ()
 ;;
 
+let completion_contract_attention_detail ~reason_code =
+  Printf.sprintf
+    "completion contract requires attention after runtime success: result=%s"
+    reason_code
+;;
+
+let record_completion_contract_attention_failure
+      ~(config : Workspace.config)
+      ~(updated_meta : Keeper_meta_contract.keeper_meta)
+      ~reason_code
+  =
+  let base_path = config.Workspace.base_path in
+  let detail = completion_contract_attention_detail ~reason_code in
+  Keeper_registry.increment_turn_failures ~base_path updated_meta.name;
+  Keeper_registry.set_failure_reason
+    ~base_path
+    updated_meta.name
+    (Some (Keeper_registry.Completion_contract_violation { detail }));
+  Health.record_failure
+    ~agent_name:updated_meta.name
+    ~reason:(Keeper_types_profile.short_preview detail);
+  let count = Keeper_registry.get_turn_failures ~base_path updated_meta.name in
+  let pause_threshold = Runtime.pause_threshold () in
+  let turn_fail_streak_threshold =
+    pause_threshold.Runtime_schema.turn_fail_streak_threshold
+  in
+  if count >= turn_fail_streak_threshold && not updated_meta.paused
+  then (
+    let blocker =
+      Keeper_meta_contract.blocker_info_of_class
+        ~detail:(Keeper_types_profile.short_preview detail)
+        Keeper_meta_contract.Completion_contract_violation
+    in
+    let pause_meta =
+      { updated_meta with
+        runtime = { updated_meta.runtime with last_blocker = Some blocker }
+      }
+    in
+    match
+      KCB.sync_keeper_paused_state_with_resume_policy
+        ~config
+        ~meta:pause_meta
+        ~paused:true
+        ~resume_policy:Keeper_supervisor_pause_policy.Manual_resume_required
+    with
+    | Ok paused_meta ->
+      Log.Keeper.warn
+        "%s: auto-paused after %d completion contract attention failures \
+         (pause_threshold=%d, reason=%s); operator must inspect provider/model \
+         reasoning/tool interleave before resuming"
+        updated_meta.name
+        count
+        turn_fail_streak_threshold
+        reason_code;
+      paused_meta
+    | Error sync_err ->
+      Log.Keeper.error
+        "%s: completion contract attention auto-pause sync failed: %s \
+         (persistent failure remains counted)"
+        updated_meta.name
+        sync_err;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string RuntimeSyncFailures)
+        ~labels:
+          [ "keeper", updated_meta.name
+          ; "site", "completion_contract_attention_auto_pause"
+          ]
+        ();
+      pause_meta)
+  else updated_meta
+;;
+
+let emit_terminal_fsm
+      ~config
+      ~meta
+      ~keeper_turn_id
+      ~updated_meta
+      ~terminal_outcome
+      result
+  =
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name:meta.Keeper_meta_contract.name
+    ~turn_id:keeper_turn_id
+    ~prev:Keeper_turn_fsm.Streaming
+    Keeper_turn_fsm.Completing;
+  match terminal_outcome with
+  | Terminal_failed_completion_contract { reason_code } ->
+    let updated_meta =
+      record_completion_contract_attention_failure
+        ~config
+        ~updated_meta
+        ~reason_code
+    in
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:meta.name
+      ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Completing
+      (Keeper_turn_fsm.Failed
+         (Keeper_turn_fsm.Failure_completion_contract_violation { reason_code }));
+    updated_meta
+  | Terminal_done | Terminal_checkpoint ->
+    reset_turn_failures_for_stop_reason ~config ~updated_meta result;
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:meta.name
+      ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Completing
+      Keeper_turn_fsm.Done;
+    updated_meta
+;;
+
 let handle
       ~config
       ~base_dir
@@ -686,6 +900,7 @@ let handle
   let updated_meta =
     apply_loop_detectors ~config ~observation ~meta updated_meta result
   in
+  let terminal_outcome = terminal_outcome_of_result result in
   append_metrics_snapshot
     ~config
     ~meta
@@ -695,7 +910,8 @@ let handle
     ~latency_ms
     ~turn_cost
     ~lifecycle
-    ~last_provider_timeout_budget;
+    ~last_provider_timeout_budget
+    ~terminal_outcome;
   let turn_mode = KUM.turn_mode_of_result result in
   let turn_mode_label = KUM.turn_mode_to_string turn_mode in
   let usage_trust =
@@ -720,7 +936,8 @@ let handle
     ~usage_trusted
     ~turn_mode_label
     ~lifecycle
-    ~wall_tokens_per_second;
+    ~wall_tokens_per_second
+    ~terminal_outcome;
   KUM.broadcast_lifecycle_events
     ~name:updated_meta.name
     ~turn_generation:lifecycle.turn_generation
@@ -734,11 +951,12 @@ let handle
     ~latency_ms
     ~outcome:
       (decision_outcome_to_label
-         (decision_outcome_of_stop_reason result.Keeper_agent_run.stop_reason))
+         (decision_outcome_of_terminal_outcome terminal_outcome))
     ~degraded_retry_applied
     ?degraded_retry_runtime
     ?fallback_reason:(Option.map Keeper_error_classify.degraded_retry_reason_to_string fallback_reason)
     ~turn_mode
+    ~terminal_reason:(terminal_reason_of_outcome result terminal_outcome)
     ~result:(Some result)
     ();
   emit_usage_metrics_and_log
@@ -748,8 +966,14 @@ let handle
     ~usage_trust
     ~usage_trusted
     ~turn_mode_label
-    ~lifecycle;
-  let updated_meta = persist_success_meta ~config ~original_meta:meta ~updated_meta in
+    ~lifecycle
+    ~terminal_outcome;
+  let updated_meta =
+    match terminal_outcome with
+    | Terminal_failed_completion_contract _ -> updated_meta
+    | Terminal_done | Terminal_checkpoint ->
+      persist_success_meta ~config ~original_meta:meta ~updated_meta
+  in
   let tool_call_summaries =
     let max_tool_calls = 10 in
     result.Keeper_agent_run.tool_calls
@@ -766,18 +990,15 @@ let handle
     }
   in
   (* Single source of truth for success-path terminal FSM transitions.
-     [Keeper_unified_turn.handle] is the only caller; do not add another
-     Streaming -> Completing -> Done emitter on the success path. *)
-  Keeper_turn_fsm.emit_transition
-    ~keeper_name:meta.name
-    ~turn_id:keeper_turn_id
-    ~prev:Keeper_turn_fsm.Streaming
-    Keeper_turn_fsm.Completing;
-  reset_turn_failures_for_stop_reason ~config ~updated_meta result;
-  Keeper_turn_fsm.emit_transition
-    ~keeper_name:meta.name
-    ~turn_id:keeper_turn_id
-    ~prev:Keeper_turn_fsm.Completing
-    Keeper_turn_fsm.Done;
-  updated_meta
+     [Keeper_unified_turn.handle] is the only caller. The terminal outcome is
+     computed before side effects, so metrics, decision records, activity graph,
+     meta writes, health/failure accounting, and FSM emission cannot disagree
+     on whether this turn completed or failed its completion contract. *)
+  emit_terminal_fsm
+    ~config
+    ~meta
+    ~keeper_turn_id
+    ~updated_meta
+    ~terminal_outcome
+    result
 ;;

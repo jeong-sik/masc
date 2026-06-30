@@ -557,7 +557,18 @@ let tool_call
   ; output_fingerprint
   }
 
-let run_result tool_calls : Masc.Keeper_agent_run.run_result =
+let run_result
+      ?(completion_contract_result =
+        Masc.Keeper_execution_receipt.Contract_satisfied_execution)
+      ?(operator_disposition =
+        Some
+          ({ disposition = Masc.Keeper_execution_receipt.Disp_pass
+           ; reason = Masc.Keeper_execution_receipt.Reason_healthy
+           }
+             : Masc.Keeper_agent_result.operator_disposition))
+      tool_calls
+    : Masc.Keeper_agent_run.run_result
+  =
   { response_text = ""
   ; model_used = "test-model"
   ; prompt_metrics
@@ -567,6 +578,8 @@ let run_result tool_calls : Masc.Keeper_agent_run.run_result =
   ; usage = Masc.Inference_utils.zero_usage
   ; usage_reported = true
   ; tool_calls
+  ; completion_contract_result
+  ; operator_disposition
   ; checkpoint = None
   ; trace_ref = None
   ; run_validation = None
@@ -675,6 +688,71 @@ let test_progress_identity_normalizes_duplicate_keys_stably () =
     "duplicate-key relative order is stable after key sort"
     "{\"dup\":\"first\",\"dup\":\"second\",\"z\":0}"
     normalized
+
+let test_completion_contract_terminal_failure_reason_code () =
+  let satisfied = run_result [] in
+  Alcotest.(check bool)
+    "satisfied execution is not a completion-contract terminal failure"
+    true
+    (Option.is_none
+       (Success.completion_contract_terminal_failure_reason_code satisfied));
+  let healthy_passive_only =
+    run_result
+      ~completion_contract_result:
+        Masc.Keeper_execution_receipt.Contract_passive_only
+      []
+  in
+  Alcotest.(check bool)
+    "healthy passive-only idle is not a terminal failure"
+    true
+    (Option.is_none
+       (Success.completion_contract_terminal_failure_reason_code
+          healthy_passive_only));
+  let failed_passive_only =
+    run_result
+      ~completion_contract_result:
+        Masc.Keeper_execution_receipt.Contract_passive_only
+      ~operator_disposition:
+        (Some
+           ({ disposition = Masc.Keeper_execution_receipt.Disp_pause_human
+            ; reason =
+                Masc.Keeper_execution_receipt.Reason_completion_contract_unsatisfied
+            }
+              : Masc.Keeper_agent_result.operator_disposition))
+      []
+  in
+  Alcotest.(check string)
+    "failed passive-only reason is the typed contract label"
+    "passive_only"
+    (Option.value
+       ~default:""
+       (Success.completion_contract_terminal_failure_reason_code
+          failed_passive_only))
+  ;
+  Alcotest.(check bool)
+    "failed passive-only is not counted as completed turn"
+    false
+    (Success.terminal_outcome_is_completed_turn
+       (Success.terminal_outcome_of_result failed_passive_only));
+  let no_capable_provider =
+    run_result
+      ~completion_contract_result:
+        Masc.Keeper_execution_receipt.Contract_no_capable_provider
+      ~operator_disposition:
+        (Some
+           ({ disposition = Masc.Keeper_execution_receipt.Disp_pause_human
+            ; reason =
+                Masc.Keeper_execution_receipt.Reason_tool_route_recoverable_failure
+            }
+              : Masc.Keeper_agent_result.operator_disposition))
+      []
+  in
+  Alcotest.(check bool)
+    "no-capable-provider tool-route pause is not completion-contract auto-pause"
+    true
+    (Option.is_none
+       (Success.completion_contract_terminal_failure_reason_code
+          no_capable_provider))
 
 let output_fingerprint_of output_text =
   match
@@ -895,6 +973,9 @@ let () =
           Alcotest.test_case
             "progress identity normalizes duplicate JSON keys stably"
             `Quick test_progress_identity_normalizes_duplicate_keys_stably;
+          Alcotest.test_case
+            "completion contract attention keeps typed reason"
+            `Quick test_completion_contract_terminal_failure_reason_code;
           Alcotest.test_case
             "stored output fingerprint uses blob identity"
             `Quick test_stored_output_fingerprint_uses_blob_identity;

@@ -54,8 +54,10 @@ let count_substring haystack needle =
 
     - [keeper_unified_turn.ml] owns entry, routing, pre-dispatch, streaming
       failure/cancellation, and pre-provider transitions.
-    - [keeper_unified_turn_success.ml] owns the successful
-      [Streaming -> Completing -> Done] pair.
+    - [keeper_unified_turn_success.ml] owns runtime-success terminal
+      transitions: [Streaming -> Completing -> Done] for satisfied completion
+      contracts, and [Streaming -> Completing -> Failed] for typed
+      completion-contract attention results.
 
     Other extracted handlers may emit their own terminal transitions; this test
     intentionally does not count those modules. *)
@@ -96,11 +98,14 @@ let test_success_completion_transitions_owned_once () =
     "success completion transitions not emitted by caller" 0
     (count_substring unified "Keeper_turn_fsm.Completing");
   Alcotest.(check int)
-    "success handler owns two completion-state references" 2
+    "success handler owns three completion-state references" 3
     (count_substring success "Keeper_turn_fsm.Completing");
   Alcotest.(check int)
     "success handler owns one done transition" 1
-    (count_substring success "Keeper_turn_fsm.Done")
+    (count_substring success "Keeper_turn_fsm.Done");
+  Alcotest.(check int)
+    "success handler owns one typed failed transition" 1
+    (count_substring success "Keeper_turn_fsm.Failed")
 
 let () =
   Alcotest.run "keeper_turn_fsm_wired_sites"

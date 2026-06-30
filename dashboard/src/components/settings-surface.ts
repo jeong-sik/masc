@@ -195,6 +195,20 @@ function useLocalPreviewString(key: string, initialValue: string): [string, (nex
   return [value, setStoredValue]
 }
 
+function readLocalPreviewNumber(key: string, fallback: number): number {
+  const parsed = Number(readLocalPreviewString(key, String(fallback)))
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
+function useLocalPreviewNumber(key: string, initialValue: number): [number, (next: number) => void] {
+  const [value, setValue] = useState(() => readLocalPreviewNumber(key, initialValue))
+  const setStoredValue = (next: number) => {
+    setValue(next)
+    writeLocalPreviewString(key, String(next))
+  }
+  return [value, setStoredValue]
+}
+
 function useLocalPreviewBoolRecord(
   key: string,
   initialValue: Record<string, boolean>,
@@ -291,6 +305,13 @@ const DEFAULT_GATE_CONNECTOR_PREVIEW: Record<string, boolean> = {
   Discord: true,
   Amplitude: true,
   GitHub: false,
+}
+const DEFAULT_NOTIFY_EVENT_PREVIEW: Record<string, boolean> = {
+  '컨텍스트 임계치 초과': true,
+  '연속 실패': true,
+  'keeper crash/dead': true,
+  '핸드오프 완료': false,
+  '승인 요청': true,
 }
 
 // System-log row: [time, level, identity, message, status]. Derived from live
@@ -836,16 +857,10 @@ export function SettingsSurface() {
   const [sampling, setSampling] = useState(100)
 
   // notify / display
-  const [notifyCtx, setNotifyCtx] = useState(85)
-  const [notifyFails, setNotifyFails] = useState(3)
-  const [notifyCh, setNotifyCh] = useState('Slack')
-  const [notifyOn, setNotifyOn] = useState<Record<string, boolean>>({
-    '컨텍스트 임계치 초과': true,
-    '연속 실패': true,
-    'keeper crash/dead': true,
-    '핸드오프 완료': false,
-    '승인 요청': true,
-  })
+  const [notifyCtx, setNotifyCtx] = useLocalPreviewNumber('notifyContextThreshold', 85)
+  const [notifyFails, setNotifyFails] = useLocalPreviewNumber('notifyFailureThreshold', 3)
+  const [notifyCh, setNotifyCh] = useLocalPreviewString('notifyChannel', 'Slack')
+  const [notifyOn, setNotifyOn] = useLocalPreviewBoolRecord('notifyEventPreview', DEFAULT_NOTIFY_EVENT_PREVIEW)
   const [density, setDensity] = useState('regular')
   const [tz, setTz] = useState('Asia/Seoul')
   const [locale, setLocale] = useState('KO')
@@ -856,6 +871,7 @@ export function SettingsSurface() {
   const mcpPreviewEnabledCount = Object.values(tools).filter(Boolean).length
   const grantedGroupCount = Object.values(grant).filter(Boolean).length
   const gatePreviewEnabledCount = Object.values(gateOn).filter(Boolean).length
+  const notifyPreviewEnabledCount = Object.values(notifyOn).filter(Boolean).length
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -1457,21 +1473,44 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'notify' && html`
-              <${SetRow} label="Context threshold alert" hint="Notify when context exceeds this %">
-                <${SetSlider} value=${notifyCtx} min=${70} max=${98} suffix="%" onChange=${setNotifyCtx} />
-              <//>
-              <${SetRow} label="Consecutive failure alert" hint="Notify after this many consecutive failures">
-                <${SetStepper} v=${notifyFails} set=${setNotifyFails} min=${1} max=${10} />
-              <//>
-              <${SetRow} label="Notify channel" hint="Where to send">
-                <${SetSeg} value=${notifyCh} options=${['Slack', 'Discord', '없음']} onChange=${setNotifyCh} />
-              <//>
-              <div class="set-sub-h">Notify events</div>
-              ${Object.keys(notifyOn).map(k => html`
-                <${SetRow} key=${k} label=${k}>
-                  <${SetToggle} on=${notifyOn[k]} onChange=${(v: boolean) => setNotifyOn(p => ({ ...p, [k]: v }))} />
+              <div class="set-notify-section" data-testid="notify-preview-section">
+                <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                  Browser-session preview for notification thresholds, channel choice and event defaults. Settings does not write live delivery policy yet.
+                </div>
+                <div class="set-local-summary" data-testid="notify-local-summary">
+                  <span>local notification preview</span>
+                  <span class="mono">${notifyPreviewEnabledCount}/${Object.keys(DEFAULT_NOTIFY_EVENT_PREVIEW).length} events</span>
+                  <span class="mono">${notifyCh}</span>
+                  <${PreviewBadge} />
+                </div>
+                <${SetRow} label="Context threshold alert" hint="Notify when context exceeds this %">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetSlider} value=${notifyCtx} min=${70} max=${98} suffix="%" onChange=${setNotifyCtx} />
+                  </div>
                 <//>
-              `)}
+                <${SetRow} label="Consecutive failure alert" hint="Notify after this many consecutive failures">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetStepper} v=${notifyFails} set=${setNotifyFails} min=${1} max=${10} />
+                  </div>
+                <//>
+                <${SetRow} label="Notify channel" hint="Where to send">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetSeg} value=${notifyCh} options=${['Slack', 'Discord', '없음']} onChange=${setNotifyCh} />
+                  </div>
+                <//>
+                <div class="set-sub-h">Notify events</div>
+                ${Object.keys(notifyOn).map(k => html`
+                  <${SetRow} key=${k} label=${k}>
+                    <div class="set-tg-control">
+                      <${PreviewBadge} />
+                      <${SetToggle} on=${notifyOn[k]} onChange=${(v: boolean) => setNotifyOn(p => ({ ...p, [k]: v }))} />
+                    </div>
+                  <//>
+                `)}
+              </div>
             `}
 
             ${sec === 'display' && html`

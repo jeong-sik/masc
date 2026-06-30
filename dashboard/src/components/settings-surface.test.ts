@@ -461,6 +461,53 @@ describe('SettingsSurface', () => {
     expect(triggers()[2]?.getAttribute('data-active')).toBe('true')
   })
 
+  it('notify controls are browser-session previews with persisted thresholds and events', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    const summary = () => container.querySelector('[data-testid="notify-local-summary"]') as HTMLElement
+    expect(summary().textContent).toContain('local notification preview')
+    expect(summary().textContent).toContain('4/5 events')
+    expect(summary().textContent).toContain('Slack')
+    expect(container.textContent).toContain('Settings does not write live delivery policy yet')
+
+    const contextSlider = container.querySelector('[data-testid="set-slider"] input') as HTMLInputElement
+    await fireEvent.input(contextSlider, { target: { value: '90' } })
+    expect(contextSlider.value).toBe('90')
+    expect(sessionStorage.getItem('masc.settings.local.notifyContextThreshold')).toBe('90')
+
+    const failureStepperButtons = Array.from(
+      container.querySelectorAll<HTMLButtonElement>('[data-testid="set-stepper"] button'),
+    )
+    await fireEvent.click(failureStepperButtons[1] as HTMLButtonElement)
+    expect(container.querySelector('[data-testid="set-stepper"] .mono')?.textContent).toBe('4')
+    expect(sessionStorage.getItem('masc.settings.local.notifyFailureThreshold')).toBe('4')
+
+    const discord = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === 'Discord')
+    expect(discord).toBeTruthy()
+    await fireEvent.click(discord as HTMLButtonElement)
+    expect(summary().textContent).toContain('Discord')
+    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBe('Discord')
+
+    const eventToggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
+    expect(eventToggles.length).toBe(5)
+    await fireEvent.click(eventToggles[0]!)
+    expect(summary().textContent).toContain('3/5 events')
+    expect(sessionStorage.getItem('masc.settings.local.notifyEventPreview')).toContain('"컨텍스트 임계치 초과":false')
+
+    render(null, container)
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    expect(summary().textContent).toContain('3/5 events')
+    expect(summary().textContent).toContain('Discord')
+    expect((container.querySelector('[data-testid="set-slider"] input') as HTMLInputElement).value).toBe('90')
+    expect(container.querySelector('[data-testid="set-stepper"] .mono')?.textContent).toBe('4')
+    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).getAttribute('data-active')).toBe('false')
+  })
+
   it('paths local preview values can be format-checked without claiming live verification', async () => {
     render(html`<${SettingsSurface} />`, container)
 

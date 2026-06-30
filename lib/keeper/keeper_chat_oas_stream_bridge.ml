@@ -105,7 +105,27 @@ let translate ~redact_text ~on_text_delta bridge_state
         chat_events = [ Oas_stream_message_delta { stop_reason; usage } ]
       }
   | MessageStop ->
-      { bridge_state; chat_events = [ Oas_stream_message_stop ] }
+      (* Block indices are scoped to one provider message. A keeper dispatch is a
+         multi-turn tool loop: each OAS call is a separate stream whose block
+         indices restart at 0. Clear the per-message block table at message end
+         so the next call's reused index cannot collide with a stale [Active_tool]
+         (the cross-message [tool_args_without_start] seen with deepseek-v4-flash
+         via ollama_cloud, an OpenAI-compat stream carrying no wire
+         content_block_stop). Close any tool block still open here with a
+         [Tool_call_end] rather than dropping it silently — with OAS now emitting
+         balanced ContentBlockStop the open set is normally already empty. *)
+      let tool_ends =
+        List.filter_map
+          (fun (_index, block) ->
+            match block with
+            | Active_tool tool ->
+                Some (Tool_call_end { tool_call_id = tool.tool_call_id })
+            | Invalid_tool_block _ -> None)
+          bridge_state.blocks_by_index
+      in
+      { bridge_state = empty_state;
+        chat_events = tool_ends @ [ Oas_stream_message_stop ]
+      }
   | Ping ->
       { bridge_state; chat_events = [ Oas_stream_ping ] }
   | Timeout reason ->

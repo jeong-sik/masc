@@ -897,6 +897,66 @@ let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
       fail
         "expected conflicting reused-index tool start to fail closed without forged tool events"
 
+let test_keeper_stream_bridge_isolates_tool_blocks_across_messages () =
+  let open Agent_sdk.Types in
+  (* A keeper dispatch is a multi-turn tool loop: each OAS call is a SEPARATE
+     provider message whose block indices restart at 0, and the OpenAI-compat
+     path carries no wire content_block_stop. The MessageStop ending message 1
+     must clear the per-message block table so message 2's tool start at the SAME
+     reused index opens a fresh Active_tool instead of colliding with message 1's
+     still-open block — otherwise the args delta surfaces a spurious
+     tool_args_without_start. Live regression: deepseek-v4-flash via ollama_cloud.
+     Contrast with the within-message reuse test above, which MUST still fail
+     closed (no MessageStop separates the two starts there). *)
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "call_first";
+            tool_name = Some "keeper_tasks_audit" };
+        ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"a\":1}" };
+        MessageStop;
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "call_second";
+            tool_name = Some "keeper_tasks_audit" };
+        ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"b\":2}" };
+      ]
+  in
+  check bool "no protocol error across message boundary" false
+    (has_stream_protocol_error events);
+  let tool_starts =
+    List.filter_map
+      (function
+        | Keeper_chat_events.Tool_call_start { tool_call_id; _ } -> Some tool_call_id
+        | _ -> None)
+      events
+  in
+  check (list string) "both messages start their tool cleanly"
+    [ "call_first"; "call_second" ] tool_starts;
+  let tool_ends =
+    List.filter_map
+      (function
+        | Keeper_chat_events.Tool_call_end { tool_call_id } -> Some tool_call_id
+        | _ -> None)
+      events
+  in
+  check bool "message-1 tool closed at MessageStop" true
+    (List.mem "call_first" tool_ends);
+  let second_args =
+    List.filter_map
+      (function
+        | Keeper_chat_events.Tool_call_args { tool_call_id = "call_second"; delta } ->
+            Some delta
+        | _ -> None)
+      events
+  in
+  check (list string) "message-2 args routed to its own fresh block"
+    [ "{\"b\":2}" ] second_args
+
 let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
   let open Agent_sdk.Types in
   let usage_start =
@@ -2034,6 +2094,8 @@ let () =
             test_keeper_stream_bridge_rejects_replayed_tool_name_drift;
           test_case "stream bridge rejects conflicting tool index reuse" `Quick
             test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse;
+          test_case "stream bridge isolates tool blocks across messages" `Quick
+            test_keeper_stream_bridge_isolates_tool_blocks_across_messages;
           test_case "stream bridge surfaces OAS message metadata" `Quick
             test_keeper_stream_bridge_surfaces_oas_message_metadata;
           test_case "stream bridge preserves typed media source" `Quick

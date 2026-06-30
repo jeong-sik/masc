@@ -83,6 +83,42 @@ Legend — ✅ working now · 🟡 partially working · ❌ not working. Status 
 
 ---
 
+## Quick Start (5 minutes)
+
+```bash
+# 1. Install the binary (macOS arm64 / Linux x86_64)
+brew install jeong-sik/masc/masc            # Homebrew (Formula/masc.rb in this repo)
+#   or:  curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
+#   from source: git clone https://github.com/jeong-sik/masc.git && cd masc &&
+#     scripts/opam-pin-external-deps.sh --install && opam install . --deps-only &&
+#     scripts/dune-local.sh build @default
+
+# 2. Seed config, then set your provider key
+masc init
+#   edit .masc/config/.env.local:
+#     export OLLAMA_CLOUD_API_KEY=...     # one provider, see table below
+
+# 3. Load your key + start
+source .masc/config/.env.local && masc start
+curl http://127.0.0.1:8935/health        # → 200 OK
+
+# 4. (optional) Dashboard
+cd dashboard && pnpm install && pnpm dev
+```
+
+Provider keys (put the one you use in `.masc/config/.env.local`):
+
+| Provider in `runtime.toml` | Environment variable |
+|---|---|
+| `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` |
+| `deepseek` | `DEEPSEEK_API_KEY` |
+| `glm-coding` | `ZAI_API_KEY_SB` |
+| `ollama` (local) | — (no key) |
+
+> `masc init` seeds `.masc/config/runtime.toml`, which already sets `[runtime].default`. If the server logs `refusing to boot`, run `masc init` in your workspace first. `masc start` is the same as running `masc` with no subcommand (kept as an explicit name for tutorials).
+
+---
+
 ## Install
 
 ### Prebuilt binary

@@ -635,6 +635,29 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure");
       assert (contains_substring (assoc_string "detail" json) "not valid JSON")))
 
+let test_run_vision_invalid_structured_response_is_typed () =
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+      Ok (text_response "not-json")
+    in
+    let outcome =
+      Eio_main.run (fun env ->
+        Eio.Switch.run (fun sw ->
+          Vt.run_vision
+            ~complete
+            ~sw
+            ~clock:(Eio.Stdenv.clock env)
+            ~net:(Eio.Stdenv.net env)
+            ~query:"describe"
+            ~media_type:"image/png"
+            ~bytes:"\x89PNG\r\n\x1a\nraw"
+            ()))
+    in
+    match outcome with
+    | Vt.Vo_invalid_structured_response detail ->
+      assert (contains_substring detail "not valid JSON")
+    | _ -> failwith "expected Vo_invalid_structured_response")
+
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     with_temp_base (fun _ ->
@@ -1013,6 +1036,7 @@ let () =
   test_temp_runtime_toml_restores_runtime_cache ();
   test_schema_unsupported_vision_runtime_is_skipped_before_provider_call ();
   test_invalid_structured_vision_response_is_runtime_failure ();
+  test_run_vision_invalid_structured_response_is_typed ();
   test_retryable_provider_error_tries_next_runtime ();
   test_deadline_exhaustion_preserves_provider_error ();
   test_non_retryable_provider_error_stops_without_trying_next_runtime ();

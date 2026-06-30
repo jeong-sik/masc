@@ -101,6 +101,8 @@ let eager_read ~media_type ~bytes : (string, string) result option =
      | Keeper_vision_tool.Vo_no_runtime msg -> Some (Error ("no vision runtime: " ^ msg))
      | Keeper_vision_tool.Vo_invalid_request msg ->
        Some (Error ("invalid vision request: " ^ msg))
+     | Keeper_vision_tool.Vo_invalid_structured_response detail ->
+       Some (Error ("vision invalid structured response: " ^ detail))
      | Keeper_vision_tool.Vo_provider { detail; _ } ->
        Some (Error ("vision provider error: " ^ detail)))
   | _ -> None

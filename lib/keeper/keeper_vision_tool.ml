@@ -261,6 +261,7 @@ type vision_outcome =
   | Vo_invalid_request of string
   | Vo_no_runtime of string
   | Vo_timeout
+  | Vo_invalid_structured_response of string
   | Vo_provider of
       { failure_class : Tool_result.tool_failure_class
       ; detail : string
@@ -300,8 +301,7 @@ let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
 
 let outcome_of_response (response : Agent_sdk.Types.api_response) =
   match vision_text_of_response response with
-  | Error detail ->
-    Vo_provider { failure_class = Tool_result.Runtime_failure; detail }
+  | Error detail -> Vo_invalid_structured_response detail
   | Ok text ->
     let truncated = truncated_of_stop_reason response.stop_reason in
     (match Va.classify ~truncated ~content:text with

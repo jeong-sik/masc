@@ -525,7 +525,7 @@ def system_health_signals(observe: dict[str, Any] | None) -> dict[str, Any]:
         },
         "governance_patterns": {
             "governance_unparseable": pattern_count(observe, "governance_unparseable"),
-            "lenient_json_fallback": pattern_count(observe, "lenient_json_fallback"),
+            "strict_json_parse_reject": pattern_count(observe, "strict_json_parse_reject"),
         },
     }
     return signals

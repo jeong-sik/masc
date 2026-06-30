@@ -56,7 +56,7 @@ DEFAULT_MUST_CONTAIN = (
 DEFAULT_MUST_NOT_CONTAIN = (
     "pricing_catalog_miss",
     "persistence UTF-8 repaired",
-    "Lenient_json fallback hit",
+    "strict JSON parse rejected",
     "archived credential.*starvation",
 )
 

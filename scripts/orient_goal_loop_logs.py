@@ -134,9 +134,9 @@ FINDINGS: tuple[FindingSpec, ...] = (
     ),
     FindingSpec(
         "NF-4",
-        "governance_judge_unparseable_fallback",
+        "governance_judge_strict_json_parse_reject",
         "warning",
-        ("governance_unparseable", "lenient_json_fallback"),
+        ("governance_unparseable", "strict_json_parse_reject"),
     ),
     FindingSpec(
         "NF-5",

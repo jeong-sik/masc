@@ -524,6 +524,54 @@ let pending_board_event_of_bg_job_completion
   }
 ;;
 
+let external_attention_actor_label (item : Keeper_external_attention.item) =
+  match item.actor.display_name with
+  | Some name when String.trim name <> "" -> name
+  | Some _ | None ->
+    (match item.actor.actor_id with
+     | Some id when String.trim id <> "" -> id
+     | Some _ | None -> item.source_label)
+;;
+
+let pending_board_event_of_external_attention
+      ~(meta : keeper_meta)
+      (item : Keeper_external_attention.item)
+  : pending_board_event
+  =
+  let surface_label = Surface_ref.lane_label item.conversation.surface in
+  let urgency_label = Keeper_external_attention.urgency_to_string item.urgency in
+  let actor = external_attention_actor_label item in
+  let explicit_mention, matched_targets =
+    match item.urgency with
+    | Keeper_external_attention.Mention
+    | Keeper_external_attention.Direct_message ->
+      true, [ meta.name ]
+    | Keeper_external_attention.Ambient
+    | Keeper_external_attention.System ->
+      false, []
+  in
+  { post_id = "connector-attention:" ^ item.event_id
+  ; author = actor
+  ; title =
+      Printf.sprintf
+        "External %s attention (%s, conversation %s)"
+        surface_label
+        urgency_label
+        item.conversation.conversation_id
+  ; preview = short_preview ~max_len:fusion_result_preview_max_len item.content_preview
+  ; hearth = None
+  ; post_kind = Board.Human_post
+  ; updated_at = item.received_at
+  ; explicit_mention
+  ; matched_targets
+  ; self_commented = false
+  ; new_external_since = 1
+  ; latest_external_author = Some actor
+  ; latest_external_preview = Some (short_preview ~max_len:80 item.content_preview)
+  ; provenance = Unknown
+  }
+;;
+
 let pending_board_event_of_stimulus
       ~continuity_summary
       ~(meta : keeper_meta)

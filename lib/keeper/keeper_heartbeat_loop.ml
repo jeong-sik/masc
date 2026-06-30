@@ -136,6 +136,41 @@ type keepalive_turn_outcome = {
   cycle_crashed : bool;
 }
 
+let connector_attention_event_ids_of_stimuli stimuli =
+  List.filter_map
+    (fun (stimulus : Keeper_event_queue.stimulus) ->
+      match stimulus.payload with
+      | Keeper_event_queue.Connector_attention { event_id } -> Some event_id
+      | Keeper_event_queue.Board_signal _
+      | Keeper_event_queue.Fusion_completed _
+      | Keeper_event_queue.Bg_completed _
+      | Keeper_event_queue.Bootstrap
+      | Keeper_event_queue.No_progress_recovery ->
+        None)
+    stimuli
+;;
+
+let mark_connector_attention_ignored_after_turn ~base_path ~keeper_name event_ids =
+  match event_ids with
+  | [] -> ()
+  | _ :: _ ->
+    (match
+       Keeper_external_attention.mark_ignored
+         ~base_path
+         ~keeper_name
+         ~event_ids
+         ~reason:"connector_attention_turn_completed_without_direct_reply"
+         ()
+     with
+     | Ok () -> ()
+     | Error err ->
+       Log.Keeper.warn
+         "connector attention mark_ignored after turn failed keeper=%s events=[%s]: %s"
+         keeper_name
+         (String.concat "," event_ids)
+         err)
+;;
+
 (* T6 audit: record a swallowed cycle exception as a turn failure.
 
    Catch-and-survive is intentional (the fiber must outlive the
@@ -390,11 +425,15 @@ let run_keepalive_unified_turn
       if !consumed_stimuli <> []
       then
         if !consumed_stimuli_turn_completed
-        then
+        then (
           Keeper_registry_event_queue.ack_consumed
             ~base_path:ctx.config.base_path
             meta_after_triage.name
-            !consumed_stimuli
+            !consumed_stimuli;
+          mark_connector_attention_ignored_after_turn
+            ~base_path:ctx.config.base_path
+            ~keeper_name:meta_after_triage.name
+            (connector_attention_event_ids_of_stimuli !consumed_stimuli))
         else
           Keeper_registry_event_queue.requeue_front
             ~base_path:ctx.config.base_path

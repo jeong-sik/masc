@@ -227,6 +227,34 @@ let test_agent_sdk_response_visible_text_excludes_non_answer_blocks () =
     "visible\ntail"
     (Agent_sdk_response.text_of_response response)
 
+let test_agent_sdk_response_structured_json_uses_oas_visible_projection () =
+  let response : Agent_sdk.Types.api_response =
+    { id = "resp"
+    ; model = "model"
+    ; stop_reason = Agent_sdk.Types.EndTurn
+    ; content =
+        [ Agent_sdk.Types.ToolResult
+            { tool_use_id = "tool-1"
+            ; content = {|{"text":"tool payload must not be parsed"}|}
+            ; is_error = false
+            ; json = None
+            ; content_blocks = None
+            }
+        ; Agent_sdk.Types.Thinking { signature = None; content = "private reasoning" }
+        ; Agent_sdk.Types.Text "```json\n{\"text\":\"visible answer\"}\n```"
+        ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  match Agent_sdk_response.structured_json_of_response response with
+  | Error msg -> Alcotest.fail ("structured JSON rejected: " ^ msg)
+  | Ok json ->
+    Alcotest.(check string)
+      "parsed visible JSON"
+      "visible answer"
+      Yojson.Safe.Util.(json |> member "text" |> to_string)
+
 (* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
@@ -260,5 +288,7 @@ let () =
     "response_projection", [
       Alcotest.test_case "visible text excludes non-answer blocks" `Quick
         test_agent_sdk_response_visible_text_excludes_non_answer_blocks;
+      Alcotest.test_case "structured JSON uses OAS visible projection" `Quick
+        test_agent_sdk_response_structured_json_uses_oas_visible_projection;
     ];
   ]

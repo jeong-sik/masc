@@ -620,33 +620,34 @@ let parse_item_judgment ~generated_at ~expires_at ~model_used:_ json =
                    ("guardrail_state", guardrail_state);
                  ]))
 
+let parse_governance_response_json ~json ~generated_at ~expires_at ~model_used =
+  match json with
+  | `Assoc _ ->
+    (match Json_util.assoc_member_opt "items" json with
+     | Some (`List rows) ->
+       let rec loop acc = function
+         | [] -> Ok (List.rev acc)
+         | row :: rest ->
+           (match parse_item_judgment ~generated_at ~expires_at ~model_used row with
+            | Error reason -> Error (Structural_error reason)
+            | Ok None -> loop acc rest
+            | Ok (Some judgment) -> loop (judgment :: acc) rest)
+       in
+       loop [] rows
+     | _ ->
+       Error
+         (Structural_error
+            "expected top-level items array in judge response"))
+  | _ ->
+    Error
+      (Structural_error
+         "expected top-level JSON object in judge response")
+;;
+
 let parse_governance_response ~raw_text ~generated_at ~expires_at ~model_used =
   match parse_strict_governance_json raw_text with
   | Error _ as error -> error
-  | Ok parsed -> (
-      match parsed with
-      | `Assoc _ -> (
-          match Json_util.assoc_member_opt "items" parsed with
-          | Some (`List rows) ->
-              let rec loop acc = function
-                | [] -> Ok (List.rev acc)
-                | row :: rest -> (
-                    match
-                      parse_item_judgment ~generated_at ~expires_at ~model_used row
-                    with
-                    | Error reason -> Error (Structural_error reason)
-                    | Ok None -> loop acc rest
-                    | Ok (Some judgment) -> loop (judgment :: acc) rest)
-              in
-              loop [] rows
-          | _ ->
-              Error
-                (Structural_error
-                   "expected top-level items array in judge response"))
-      | _ ->
-          Error
-            (Structural_error
-               "expected top-level JSON object in judge response"))
+  | Ok json -> parse_governance_response_json ~json ~generated_at ~expires_at ~model_used
 
 let parse_governance_response_for_testing =
   parse_governance_response
@@ -731,10 +732,24 @@ let compute_judgments
                 "compute_judgments: response.model empty -> fallback=%s (#9880)"
                 source;
         end;
-        match
-          parse_governance_response ~raw_text ~generated_at ~expires_at
-            ~model_used:resolved_model
-        with
+        let parsed_response =
+          match
+            Agent_sdk_response.structured_json_of_response
+              ~schema_name:"dashboard_governance_judge"
+              response
+          with
+          | Ok json ->
+            parse_governance_response_json
+              ~json
+              ~generated_at
+              ~expires_at
+              ~model_used:resolved_model
+          | Error detail ->
+            Error
+              (Structural_error
+                 (Printf.sprintf "invalid structured JSON: %s" detail))
+        in
+        match parsed_response with
         | Ok judgments -> Ok (resolved_model, generated_at, expires_at, judgments)
         | Error (Structural_error reason) ->
             let msg =
@@ -744,8 +759,6 @@ let compute_judgments
             Log.Governance.warn "%s" msg;
             Error msg
       with
-      | Yojson.Json_error msg ->
-          Error (Printf.sprintf "Governance judge returned invalid JSON: %s" msg)
       | exn ->
           Error (Printf.sprintf "Governance judge parse error: %s" (Printexc.to_string exn)))
 

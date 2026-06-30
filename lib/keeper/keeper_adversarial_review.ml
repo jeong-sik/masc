@@ -38,6 +38,19 @@ let parse_grounded_verdict_from_response_text text =
          "adversarial review response must be strict JSON: %s"
          msg)
 
+let parse_grounded_verdict_from_response response =
+  match
+    Agent_sdk_response.structured_json_of_response
+      ~schema_name:"verification_adversarial_review"
+      response
+  with
+  | Ok json -> Verifier_core.parse_grounded_verdict_from_json json
+  | Error msg ->
+    Error
+      (Printf.sprintf
+         "adversarial review response must be structured JSON: %s"
+         msg)
+
 module For_testing = struct
   let parse_grounded_verdict_from_response_text =
     parse_grounded_verdict_from_response_text
@@ -95,8 +108,7 @@ let run_grounded_review ~base_path ~runtime_id (input : review_input) :
       | None ->
         (* Model answered without calling report_verdict. Provider-native
            schema still requires a strict JSON grounded verdict object. *)
-        let text = Agent_sdk_response.text_of_response result.response in
-        parse_grounded_verdict_from_response_text text)
+        parse_grounded_verdict_from_response result.response)
     | Error err -> Error (Agent_sdk.Error.to_string err)
 
 let run_review ~base_path ~runtime_id (input : review_input) :

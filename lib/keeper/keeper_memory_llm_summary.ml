@@ -104,7 +104,7 @@ let messages_for_summary ~trace_id ~texts =
 
 let raw_response_text (response : Agent_sdk.Types.api_response) : string option =
   let text =
-    Agent_sdk.Types.visible_text_of_response response
+    Agent_sdk_response.text_of_response response
     |> String.split_on_char '\n'
     |> List.map String.trim
     |> List.filter (fun s -> s <> "")
@@ -117,6 +117,17 @@ type summary_parse_error =
   | Empty_summary_response
   | Invalid_structured_response of string
 
+let summary_text_result_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "summary" fields with
+     | Some (`String summary) ->
+       let summary = String.trim summary in
+       if summary = "" then Error Empty_summary_response else Ok summary
+     | Some _ -> Error (Invalid_structured_response "summary field must be a string")
+     | None -> Error (Invalid_structured_response "missing summary field"))
+  | _ -> Error (Invalid_structured_response "summary response must be an object")
+;;
+
 let summary_text_result_of_raw_text raw =
   let raw = String.trim raw in
   if raw = "" then Error Empty_summary_response
@@ -124,22 +135,20 @@ let summary_text_result_of_raw_text raw =
     match Yojson.Safe.from_string raw with
     | exception Yojson.Json_error msg ->
         Error (Invalid_structured_response ("invalid JSON: " ^ msg))
-    | `Assoc fields ->
-        (match List.assoc_opt "summary" fields with
-         | Some (`String summary) ->
-             let summary = String.trim summary in
-             if summary = "" then Error Empty_summary_response else Ok summary
-         | Some _ ->
-             Error (Invalid_structured_response "summary field must be a string")
-         | None ->
-             Error (Invalid_structured_response "missing summary field"))
-    | _ -> Error (Invalid_structured_response "summary response must be an object")
+    | json -> summary_text_result_of_json json
 ;;
 
 let summary_text_result_of_response response =
   match raw_response_text response with
   | None -> Error Empty_summary_response
-  | Some raw -> summary_text_result_of_raw_text raw
+  | Some _ ->
+    (match
+       Agent_sdk_response.structured_json_of_response
+         ~schema_name:"keeper_memory_bank_summary"
+         response
+     with
+     | Ok json -> summary_text_result_of_json json
+     | Error detail -> Error (Invalid_structured_response detail))
 
 let summary_text_of_response response =
   match summary_text_result_of_response response with

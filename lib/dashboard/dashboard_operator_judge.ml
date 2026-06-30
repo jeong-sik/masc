@@ -267,15 +267,21 @@ let compute_judgments
   | Ok result -> (
       let response = result.Runtime_agent.response in
       try
-        let raw_text = Agent_sdk_response.text_of_response response in
-        match Yojson.Safe.from_string (String.trim raw_text) with
-        | `Assoc _ as parsed ->
+        match
+          Agent_sdk_response.structured_json_of_response
+            ~schema_name:"dashboard_operator_judge"
+            response
+        with
+        | Ok (`Assoc _ as parsed) ->
             let _ = response.model in
             Ok (model_used_runtime, parsed)
-        | _ -> Error "Operator judge returned non-object strict JSON"
+        | Ok _ -> Error "Operator judge returned non-object structured JSON"
+        | Error msg ->
+          Error
+            (Printf.sprintf
+               "Operator judge returned invalid structured JSON: %s"
+               msg)
       with
-      | Yojson.Json_error msg ->
-          Error (Printf.sprintf "Operator judge returned invalid strict JSON: %s" msg)
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 

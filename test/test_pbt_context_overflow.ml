@@ -347,6 +347,7 @@ let text_blocks (messages : Agent_sdk.Types.message list) =
          (function
            | Agent_sdk.Types.Text text -> Some text
            | Agent_sdk.Types.Thinking _
+           | Agent_sdk.Types.ReasoningDetails _
            | Agent_sdk.Types.RedactedThinking _
            | Agent_sdk.Types.ToolUse _
            | Agent_sdk.Types.ToolResult _
@@ -368,6 +369,7 @@ let count_tool_blocks messages =
            | Agent_sdk.Types.ToolResult _ -> tool_uses, tool_results + 1
            | Agent_sdk.Types.Text _
            | Agent_sdk.Types.Thinking _
+           | Agent_sdk.Types.ReasoningDetails _
            | Agent_sdk.Types.RedactedThinking _
            | Agent_sdk.Types.Image _
            | Agent_sdk.Types.Document _

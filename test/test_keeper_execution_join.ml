@@ -5,6 +5,7 @@
 open Alcotest
 module Join = Masc.Keeper_execution_join
 module Bridge = Masc.Keeper_event_bridge
+module Error_json = Masc.Keeper_event_bridge_error_json
 
 let member key json =
   match json with
@@ -125,6 +126,41 @@ let test_empty_tool_use_id_omitted_from_payload () =
   check bool "empty provider id is omitted" true
     (payload_member "tool_use_id" json = None)
 
+let test_agent_failed_matches_typed_sse_event () =
+  let agent_name = "oas-r1" in
+  let task_id = "task-failed-1" in
+  let elapsed_s = 4.25 in
+  let caused_by = "run-agent-started-1" in
+  let error = Agent_sdk.Error.Internal "bridge failure" in
+  let projection = Error_json.agent_failed_error_projection error in
+  let actual =
+    Bridge.native_event_to_json
+      (mk_event
+         ~caused_by
+         (Agent_sdk.Event_bus.AgentFailed
+            { agent_name; task_id; error; elapsed = elapsed_s }))
+    |> Option.get
+    |> Yojson.Safe.to_string
+  in
+  let expected =
+    Sse_event.agent_failed
+      ~caused_by
+      ~ts_unix:1781200000.0
+      ~correlation_id:"corr-1"
+      ~run_id:"run-1"
+      ~agent_name
+      ~task_id
+      ~elapsed_s
+      ~error:projection.error
+      ~error_domain:projection.error_domain
+      ~error_code:projection.error_code
+      ~error_retryable:projection.error_retryable
+      ~error_detail:projection.error_detail
+      ()
+    |> Yojson.Safe.to_string
+  in
+  check string "agent_failed bridge matches typed constructor" expected actual
+
 let () =
   run "keeper_execution_join"
     [ ( "join_table"
@@ -142,5 +178,7 @@ let () =
             test_tool_completed_without_entry_omits_execution_id
         ; test_case "empty tool_use_id omitted" `Quick
             test_empty_tool_use_id_omitted_from_payload
+        ; test_case "agent_failed matches typed constructor" `Quick
+            test_agent_failed_matches_typed_sse_event
         ] )
     ]

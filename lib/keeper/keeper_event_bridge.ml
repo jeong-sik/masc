@@ -224,15 +224,22 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
     in
     Some (wrap ~event_type:"agent_completed" ~payload ~agent_name ~task_id ())
   | Agent_sdk.Event_bus.AgentFailed { agent_name; task_id; error; elapsed } ->
-    let payload =
-      `Assoc
-        ([ "agent_name", `String agent_name
-         ; "task_id", `String task_id
-         ; "elapsed_s", `Float elapsed
-         ]
-         @ agent_failed_error_fields error)
-    in
-    Some (wrap ~event_type:"agent_failed" ~payload ~agent_name ~task_id ())
+    let projection = agent_failed_error_projection error in
+    Some
+      (Sse_event.agent_failed
+         ?caused_by
+         ~ts_unix:ts
+         ~correlation_id
+         ~run_id
+         ~agent_name
+         ~task_id
+         ~elapsed_s:elapsed
+         ~error:projection.error
+         ~error_domain:projection.error_domain
+         ~error_code:projection.error_code
+         ~error_retryable:projection.error_retryable
+         ~error_detail:projection.error_detail
+         ())
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; tool_use_id; _ } ->
     (* tool_called publishes before execution, so the keeper hook has not
        minted an execution_id yet — this row carries the provider call id

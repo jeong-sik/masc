@@ -5,6 +5,7 @@ type envelope_meta =
   ; ts_unix : float
   ; correlation_id : string
   ; run_id : string
+  ; caused_by : string option
   ; agent_name : string option
   ; task_id : string option
   ; turn : int option
@@ -164,7 +165,8 @@ val agent_completed
   -> Yojson.Safe.t
 
 val agent_failed
-  :  ts_unix:float
+  :  ?caused_by:string
+  -> ts_unix:float
   -> correlation_id:string
   -> run_id:string
   -> agent_name:string
@@ -175,4 +177,5 @@ val agent_failed
   -> error_code:string
   -> error_retryable:bool
   -> error_detail:Yojson.Safe.t
+  -> unit
   -> Yojson.Safe.t

@@ -21,6 +21,7 @@ type envelope_meta =
   ; ts_unix : float
   ; correlation_id : string
   ; run_id : string
+  ; caused_by : string option
   ; agent_name : string option
   ; task_id : string option
   ; turn : int option
@@ -47,6 +48,7 @@ let wrap_envelope (meta : envelope_meta) (payload : Yojson.Safe.t) : Yojson.Safe
     ; "ts_unix", `Float meta.ts_unix
     ; "correlation_id", `String meta.correlation_id
     ; "run_id", `String meta.run_id
+    ; "caused_by", json_string_opt meta.caused_by
     ; "agent_name", json_string_opt meta.agent_name
     ; "task_id", json_string_opt meta.task_id
     ; ( "turn"
@@ -80,6 +82,7 @@ let agent_started
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = Some task_id
     ; turn = None
@@ -109,6 +112,7 @@ let tool_called
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = None
     ; turn = None
@@ -135,6 +139,7 @@ let tool_completed
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = None
     ; turn = None
@@ -161,6 +166,7 @@ let turn_started
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = None
     ; turn = Some turn
@@ -187,6 +193,7 @@ let turn_completed
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = None
     ; turn = Some turn
@@ -227,6 +234,7 @@ let turn_ready
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = None
     ; turn = Some turn
@@ -257,6 +265,7 @@ let handoff_requested
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some from_agent
     ; task_id = None
     ; turn = None
@@ -286,6 +295,7 @@ let handoff_completed
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some from_agent
     ; task_id = None
     ; turn = None
@@ -318,6 +328,7 @@ let context_compacted
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = None
     ; turn = None
@@ -350,6 +361,7 @@ let context_overflow_imminent
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = None
     ; turn = None
@@ -379,6 +391,7 @@ let context_compact_started
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = None
     ; turn = None
@@ -411,6 +424,7 @@ let content_replacement_replaced
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = None
     ; task_id = None
     ; turn = None
@@ -440,6 +454,7 @@ let content_replacement_kept
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = None
     ; task_id = None
     ; turn = None
@@ -474,6 +489,7 @@ let slot_scheduler_observed
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = None
     ; task_id = None
     ; turn = None
@@ -532,6 +548,7 @@ let agent_completed
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by = None
     ; agent_name = Some agent_name
     ; task_id = Some task_id
     ; turn = None
@@ -544,6 +561,7 @@ let agent_completed
     encoded in the atd schema; the caller passes the simple
     projections directly. *)
 let agent_failed
+      ?caused_by
       ~(ts_unix : float)
       ~(correlation_id : string)
       ~(run_id : string)
@@ -555,6 +573,7 @@ let agent_failed
       ~(error_code : string)
       ~(error_retryable : bool)
       ~(error_detail : Yojson.Safe.t)
+      ()
   : Yojson.Safe.t
   =
   let payload_json =
@@ -576,6 +595,7 @@ let agent_failed
     ; ts_unix
     ; correlation_id
     ; run_id
+    ; caused_by
     ; agent_name = Some agent_name
     ; task_id = Some task_id
     ; turn = None

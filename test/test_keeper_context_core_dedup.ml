@@ -177,8 +177,8 @@ let test_roundtrip_preserves_thinking_signature () =
       T.role = T.Assistant;
       content =
         [
-          T.Thinking { content = "chain"; signature = None };
-          T.Thinking { content = "signed"; signature = Some "anthropic-signature" };
+          T.Thinking { signature = None; content = "chain" };
+          T.Thinking { signature = Some "anthropic-signature"; content = "signed" };
           T.RedactedThinking "encrypted";
           T.Text "done";
         ];
@@ -196,11 +196,11 @@ let test_roundtrip_preserves_thinking_signature () =
    T.RedactedThinking blob;
    T.Text text;
   ] ->
-      Alcotest.(check (option string)) "first thinking signature" None first_signature;
+      Alcotest.(check (option string)) "first thinking signature" None
+        first_signature;
       Alcotest.(check string) "first thinking content" "chain" first_content;
       Alcotest.(check (option string))
-        "second thinking signature"
-        (Some "anthropic-signature")
+        "second thinking signature" (Some "anthropic-signature")
         second_signature;
       Alcotest.(check string) "second thinking content" "signed" second_content;
       Alcotest.(check string) "redacted thinking" "encrypted" blob;
@@ -212,7 +212,7 @@ let test_thinking_block_json_uses_oas_signature () =
     {
       T.role = T.Assistant;
       content =
-        [ T.Thinking { content = "signed"; signature = Some "anthropic-signature" } ];
+        [ T.Thinking { signature = Some "anthropic-signature"; content = "signed" } ];
       name = None;
       tool_call_id = None;
       metadata = [];
@@ -236,7 +236,7 @@ let test_thinking_block_json_uses_oas_signature () =
       | _ -> Alcotest.fail "expected one content block")
   | _ -> Alcotest.fail "expected message object"
 
-let test_legacy_thinking_type_still_reads () =
+let test_legacy_thinking_type_is_not_promoted_to_signature () =
   let json : Yojson.Safe.t =
     `Assoc
       [
@@ -256,9 +256,7 @@ let test_legacy_thinking_type_still_reads () =
   let parsed = C.message_of_json json in
   match parsed.content with
   | [ T.Thinking { signature; content } ] ->
-      Alcotest.(check (option string))
-        "legacy thinking_type reads as signature"
-        (Some "legacy-signature")
+      Alcotest.(check (option string)) "legacy thinking type ignored" None
         signature;
       Alcotest.(check string) "content" "signed" content
   | _ -> Alcotest.fail "expected legacy thinking block"
@@ -285,8 +283,8 @@ let () =
             test_roundtrip_preserves_thinking_signature;
           Alcotest.test_case "thinking block JSON uses OAS signature" `Quick
             test_thinking_block_json_uses_oas_signature;
-          Alcotest.test_case "legacy thinking_type still reads" `Quick
-            test_legacy_thinking_type_still_reads;
+          Alcotest.test_case "legacy thinking_type is not promoted" `Quick
+            test_legacy_thinking_type_is_not_promoted_to_signature;
         ] );
       ( "text_of_history_jsonl_json",
         [

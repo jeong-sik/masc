@@ -55,8 +55,11 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.27, including InputJsonSnapshot tool-argument
-  ;; snapshots emitted by provider stream adapters.
+  ;; Pinned to OAS v0.207.27 plus the latest main follow-up fixes after
+  ;; #2291 locked the GLM clear_thinking=false/non-preserve behavior. MASC also
+  ;; consumes the canonical stream/tool surfaces introduced in the v0.207.25
+  ;; line and the fail-closed media source carrier expansion
+  ;; (Base64/Url/File_id).
   (agent_sdk (>= 0.207.27))
   (uri (>= 4.4))
   (tls (>= 2.0))

@@ -15,6 +15,8 @@
     [~goal], so downstream p95 analysis matches the wire-level view
     the LLM actually receives. *)
 
+module Canonical_tool = Agent_sdk.Canonical_tool
+
 type sizes = {
   system_prompt_bytes : int;
   tool_defs_bytes : int;
@@ -25,24 +27,27 @@ type sizes = {
   tool_count : int;
 }
 
-let role_key : Agent_sdk.Types.role -> string = function
-  | Agent_sdk.Types.System -> "system"
-  | Agent_sdk.Types.User -> "user"
-  | Agent_sdk.Types.Assistant -> "assistant"
-  | Agent_sdk.Types.Tool -> "tool"
+let role_key : Agent_sdk.Types.role -> string = Agent_sdk.Types.role_to_string
 
-let bytes_of_content_block : Agent_sdk.Types.content_block -> int = function
+let bytes_of_content_block (block : Agent_sdk.Types.content_block) : int =
+  match Canonical_tool.tool_result_of_block block with
+  | Some result ->
+    String.length result.Canonical_tool.call_id
+    + String.length result.Canonical_tool.content
+  | None -> (
+    match block with
   | Agent_sdk.Types.Text s -> String.length s
   | Agent_sdk.Types.Thinking { content; _ } -> String.length content
   | Agent_sdk.Types.RedactedThinking s -> String.length s
   | Agent_sdk.Types.ToolUse { id; name; input } ->
     String.length id + String.length name
     + String.length (Yojson.Safe.to_string input)
-  | Agent_sdk.Types.ToolResult { tool_use_id; content; _ } ->
-    String.length tool_use_id + String.length content
+  | Agent_sdk.Types.ToolResult _ ->
+    invalid_arg
+      "keeper_wake_telemetry: OAS canonical tool-result projection unavailable"
   | Agent_sdk.Types.Image { data; _ }
   | Agent_sdk.Types.Document { data; _ }
-  | Agent_sdk.Types.Audio { data; _ } -> String.length data
+  | Agent_sdk.Types.Audio { data; _ } -> String.length data)
 
 let bytes_of_message (m : Agent_sdk.Types.message) : int =
   List.fold_left

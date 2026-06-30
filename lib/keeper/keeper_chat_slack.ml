@@ -295,7 +295,7 @@ let adapter_loop ~token ~channel ~events ?base_url () =
                 ^ Keeper_chat_events.stream_protocol_error_summary error)
             : (unit, error) result);
         loop ~acc_text ~acc_blocks ~run_id_opt
-    | Tool_call_start _ | Tool_call_args _ | Tool_call_end _ ->
+    | Tool_call_start _ | Tool_call_args _ | Tool_call_args_snapshot _ | Tool_call_end _ ->
         loop ~acc_text ~acc_blocks ~run_id_opt
     | Link_block { url; title; description; image = _ } ->
         let block = link_block_json ~url ~title ~description in

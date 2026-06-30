@@ -453,6 +453,9 @@ let adapter_loop ~token ~channel_id ~events ?base_url () =
     | Tool_call_args { tool_call_id = _; delta = _ } ->
         (* Args stream is not visualized — only start/end matters. *)
         loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
+    | Tool_call_args_snapshot { tool_call_id = _; snapshot = _ } ->
+        (* Args stream is not visualized — only start/end matters. *)
+        loop ~acc_text ~msg_id ~last_edit_time ~last_edited_text ~base_url ~tool_msgs
     | Tool_call_end { tool_call_id } ->
         (match find_tool_msg tool_msgs tool_call_id with
          | Some entry ->

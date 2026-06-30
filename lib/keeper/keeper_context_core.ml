@@ -10,6 +10,8 @@ open Keeper_types_profile
 
 include Keeper_context_core_accessors
 
+module Canonical_tool = Agent_sdk.Canonical_tool
+
 let add_checkpoint_sanitize_stats
     (a : checkpoint_sanitize_stats)
     (b : checkpoint_sanitize_stats) : checkpoint_sanitize_stats =
@@ -232,7 +234,17 @@ let sanitize_checkpoint_message
                    dropped_blocks = 1;
                    dropped_chars = String.length text;
                  } )
-         | Agent_sdk.Types.ToolResult { tool_use_id; content; is_error; _ } ->
+         | Agent_sdk.Types.ToolResult _ ->
+             let result =
+               match Canonical_tool.tool_result_of_block block with
+               | Some result -> result
+               | None ->
+                   invalid_arg
+                     "keeper_context_core: OAS canonical tool-result projection unavailable"
+             in
+             let tool_use_id = result.Canonical_tool.call_id in
+             let content = result.Canonical_tool.content in
+             let is_error = result.Canonical_tool.is_error in
              let tool_chars = String.length content in
              if kept_tool_results
                 >= default_max_checkpoint_tool_results_per_message
@@ -345,12 +357,18 @@ let sanitize_checkpoint_message
         { empty_checkpoint_sanitize_stats with dropped_messages = 1 } )
   else (Some { msg with content = kept }, stats)
 
-let checkpoint_content_chars_of_block = function
-  | Agent_sdk.Types.Text text -> String.length text
-  | Agent_sdk.Types.Thinking { content; _ } -> String.length content
-  | Agent_sdk.Types.RedactedThinking text -> String.length text
-  | Agent_sdk.Types.ToolResult { content; _ } -> String.length content
-  | _ -> 0
+let checkpoint_content_chars_of_block block =
+  match Canonical_tool.tool_result_of_block block with
+  | Some result -> String.length result.Canonical_tool.content
+  | None -> (
+      match block with
+      | Agent_sdk.Types.Text text -> String.length text
+      | Agent_sdk.Types.Thinking { content; _ } -> String.length content
+      | Agent_sdk.Types.RedactedThinking text -> String.length text
+      | Agent_sdk.Types.ToolResult _ ->
+          invalid_arg
+            "keeper_context_core: OAS canonical tool-result projection unavailable"
+      | _ -> 0)
 
 let checkpoint_content_chars_of_message (msg : Agent_sdk.Types.message) : int =
   List.fold_left
@@ -414,13 +432,24 @@ let cap_checkpoint_message_to_remaining_content
            match block with
            | Agent_sdk.Types.Text text ->
                cap_content (fun text -> Agent_sdk.Types.Text text) text
-           | Agent_sdk.Types.ToolResult
-               { tool_use_id; content; is_error; content_blocks; _ } ->
+           | Agent_sdk.Types.ToolResult _ ->
+               let result =
+                 match Canonical_tool.tool_result_of_block block with
+                 | Some result -> result
+                 | None ->
+                     invalid_arg
+                       "keeper_context_core: OAS canonical tool-result projection unavailable"
+               in
                cap_content
                  (fun content ->
                    Agent_sdk.Types.ToolResult
-                     { tool_use_id; content; is_error; json = None; content_blocks })
-                 content
+                     { tool_use_id = result.Canonical_tool.call_id
+                     ; content
+                     ; is_error = result.Canonical_tool.is_error
+                     ; json = None
+                     ; content_blocks = result.Canonical_tool.content_blocks
+                     })
+                 result.Canonical_tool.content
            | Agent_sdk.Types.Thinking t ->
                cap_content
                  (fun text -> Agent_sdk.Types.Thinking { t with content = text })

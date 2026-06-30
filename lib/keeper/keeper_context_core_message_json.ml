@@ -1,9 +1,6 @@
-let role_to_string (r : Agent_sdk.Types.role) =
-  match r with
-  | System -> "system"
-  | User -> "user"
-  | Assistant -> "assistant"
-  | Tool -> "tool"
+module Canonical_tool = Agent_sdk.Canonical_tool
+
+let role_to_string = Agent_sdk.Types.role_to_string
 
 (* Issue #8623: returns [Some] only for the 4 wire-format names.
    Callers must handle [None] explicitly — the previous Variant
@@ -12,46 +9,17 @@ let role_to_string (r : Agent_sdk.Types.role) =
    "user" causes the LLM to treat tool output as user instructions,
    echo prior assistant replies as user input, or downgrade system
    prompt privileges. Same anti-pattern class as #8605/#8615. *)
-let role_of_string_opt = function
-  | "system" -> Some Agent_sdk.Types.System
-  | "user" -> Some Agent_sdk.Types.User
-  | "assistant" -> Some Agent_sdk.Types.Assistant
-  | "tool" -> Some Agent_sdk.Types.Tool
-  | _ -> None
+let role_of_string_opt = Agent_sdk.Types.role_of_string
 
 let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
   `List (List.map Agent_sdk.Api.content_block_to_json blocks)
 
-let thinking_signature_of_json (json : Yojson.Safe.t) =
-  match Json_util.get_string json "signature" with
-  | Some _ as signature -> signature
-  | None ->
-    (* DET-OK: older context/checkpoint JSON predates the OAS canonical
-       [signature] carrier and stored the same value under [thinking_type]. *)
-    Json_util.get_string json "thinking_type"
-
 let content_blocks_of_json
     (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
   match Json_util.assoc_member_opt "content_blocks" json with
   | Some (`List blocks) ->
-      let parse_block = function
-        | `Assoc _ as j ->
-          (match Json_util.get_string j "type" with
-           | Some "thinking" ->
-             (match Json_util.get_string j "thinking" with
-              | Some content ->
-                let signature = thinking_signature_of_json j in
-                Some (Agent_sdk.Types.Thinking { content; signature })
-              | None -> None)
-           | Some "redacted_thinking" ->
-             (match Json_util.get_string j "data" with
-              | Some text -> Some (Agent_sdk.Types.RedactedThinking text)
-              | None -> None)
-           | _ -> Agent_sdk.Api.content_block_of_json j)
-        | _ -> None
-      in
-      let parsed = List.filter_map parse_block blocks in
+      let parsed = List.filter_map Agent_sdk.Api.content_block_of_json blocks in
       if List.length parsed = List.length blocks then Some parsed else None
   | _ -> None
 
@@ -74,17 +42,9 @@ let message_to_json (m : Agent_sdk.Types.message) : Yojson.Safe.t =
         match m.role with
         | Agent_sdk.Types.Tool ->
             List.find_map
-              (function
-                | Agent_sdk.Types.ToolResult { tool_use_id; _ } ->
-                    Some tool_use_id
-                (* Other content_block variants do not carry a tool_use_id. *)
-                | Agent_sdk.Types.Text _
-                | Agent_sdk.Types.Thinking _
-                | Agent_sdk.Types.RedactedThinking _
-                | Agent_sdk.Types.ToolUse _
-                | Agent_sdk.Types.Image _
-                | Agent_sdk.Types.Document _
-                | Agent_sdk.Types.Audio _ -> None)
+              (fun block ->
+                Canonical_tool.tool_result_of_block block
+                |> Option.map (fun result -> result.Canonical_tool.call_id))
               m.content
         (* Non-Tool roles never own a tool_call_id. *)
         | Agent_sdk.Types.System

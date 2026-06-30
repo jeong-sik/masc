@@ -20,6 +20,8 @@ val completion_contract_result_for_progress_evidence
 
 module For_testing : sig
   val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option
+  val sse_event_watchdog_progress_kind :
+    Agent_sdk.Types.sse_event -> string option
   val registry_progress_on_event
     :  record_turn_progress:(string -> unit)
     -> (Agent_sdk.Types.sse_event -> unit) option

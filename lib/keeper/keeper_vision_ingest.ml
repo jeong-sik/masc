@@ -115,11 +115,11 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_sdk.Types.conten
   | Agent_sdk.Types.Image { media_type; data; source_type } ->
     (match source_type with
      | Agent_sdk.Types.Url | Agent_sdk.Types.File_id ->
-      record_eviction ~mode ~result:"error" ~reason:"invalid_source_type";
-      Agent_sdk.Types.Text
-        (image_store_failed_placeholder ~reason:"unsupported image source")
+       record_eviction ~mode ~result:"error" ~reason:"invalid_source_type";
+       Agent_sdk.Types.Text
+         (image_store_failed_placeholder ~reason:"unsupported image source")
      | Agent_sdk.Types.Base64 ->
-      match raw_bytes_of_image_data data with
+       match raw_bytes_of_image_data data with
       | Error _ ->
         record_eviction ~mode ~result:"error" ~reason:"bad_base64";
         Agent_sdk.Types.Text

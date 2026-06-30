@@ -13,6 +13,7 @@ open Keeper_meta_contract
 open Keeper_types_profile
 
 module Message_json = Keeper_context_core_message_json
+module Canonical_tool = Agent_sdk.Canonical_tool
 
 (* ================================================================ *)
 (* Constants                                                         *)
@@ -276,6 +277,16 @@ let record_dropped_tool_result stats tool_use_id =
       ; dropped_tool_result_ids = [ tool_use_id ]
       }
 
+let canonical_tool_result_of_block block =
+  match Canonical_tool.tool_result_of_block block with
+  | Some result -> Some result
+  | None -> (
+      match block with
+      | Agent_sdk.Types.ToolResult _ ->
+          invalid_arg
+            "keeper_context_core_accessors: OAS canonical tool-result projection unavailable"
+      | _ -> None)
+
 let pair_repair_metadata_kind stats =
   match stats.dropped_tool_uses > 0, stats.dropped_tool_results > 0 with
   | true, true -> "dropped_tool_pair_blocks"
@@ -330,17 +341,20 @@ let filter_group_message_content
                    || not (List.mem id matched_tool_result_ids)) ->
             record_dropped_tool_use stats id name;
             None
-        | Agent_sdk.Types.ToolResult { tool_use_id; _ } as block
-          when mode.drop_orphan_results ->
-            let allowed = List.mem tool_use_id allowed_tool_use_ids in
-            let duplicate = List.mem tool_use_id !seen_tool_result_ids in
-            if allowed && not duplicate
-            then (
-              seen_tool_result_ids := tool_use_id :: !seen_tool_result_ids;
-              Some block)
-            else (
-              record_dropped_tool_result stats tool_use_id;
-              None)
+        | Agent_sdk.Types.ToolResult _ as block when mode.drop_orphan_results -> (
+            match canonical_tool_result_of_block block with
+            | Some result ->
+                let tool_use_id = result.Canonical_tool.call_id in
+                let allowed = List.mem tool_use_id allowed_tool_use_ids in
+                let duplicate = List.mem tool_use_id !seen_tool_result_ids in
+                if allowed && not duplicate
+                then (
+                  seen_tool_result_ids := tool_use_id :: !seen_tool_result_ids;
+                  Some block)
+                else (
+                  record_dropped_tool_result stats tool_use_id;
+                  None)
+            | None -> Some block)
         | other -> Some other)
       msg.content
   in
@@ -360,10 +374,12 @@ let filter_orphan_result_message_content
     let content =
       List.filter_map
         (function
-          | Agent_sdk.Types.ToolResult { tool_use_id; _ }
-            when mode.drop_orphan_results ->
-              record_dropped_tool_result stats tool_use_id;
-              None
+          | Agent_sdk.Types.ToolResult _ as block when mode.drop_orphan_results -> (
+              match canonical_tool_result_of_block block with
+              | Some result ->
+                  record_dropped_tool_result stats result.Canonical_tool.call_id;
+                  None
+              | None -> Some block)
           | Agent_sdk.Types.ToolUse { id; name; _ } when drop_non_assistant_tool_use ->
               record_dropped_tool_use stats id name;
               None

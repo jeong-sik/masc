@@ -543,6 +543,79 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
                 | Keeper_chat_events.Oas_thinking_delta _ -> "oas_thinking"
                 | Keeper_chat_events.Tool_call_start _ -> "tool_start"
                 | Keeper_chat_events.Tool_call_args _ -> "tool_args"
+                | Keeper_chat_events.Tool_call_args_snapshot _ ->
+                    "tool_args_snapshot"
+                | Keeper_chat_events.Tool_call_end _ -> "tool_end"
+                | Keeper_chat_events.Text_delta _ -> "text"
+                | Keeper_chat_events.Event_error _ -> "error"
+                | _ -> "other")
+              events))
+
+let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockDelta { index = 0; delta = ThinkingDelta "think A" };
+        ContentBlockStart
+          { index = 1;
+            content_type = "tool_use";
+            tool_id = Some "tc-snapshot";
+            tool_name = Some "keeper_board_list" };
+        ContentBlockDelta
+          { index = 1; delta = InputJsonSnapshot "{\"limit\":1}" };
+        ContentBlockDelta
+          { index = 1; delta = InputJsonSnapshot "{\"limit\":2}" };
+        ContentBlockStop { index = 1 };
+        ContentBlockDelta { index = 2; delta = ThinkingDelta "think B" };
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_thinking_delta { index = first_index; delta = first };
+      Keeper_chat_events.Oas_content_block_start
+        { index = tool_index;
+          content_type;
+          tool_call_id = Some block_tool_id;
+          tool_call_name = Some block_tool_name };
+      Keeper_chat_events.Tool_call_start { tool_call_id; tool_call_name };
+      Keeper_chat_events.Tool_call_args_snapshot
+        { tool_call_id = snapshot_id_a; snapshot = snapshot_a };
+      Keeper_chat_events.Tool_call_args_snapshot
+        { tool_call_id = snapshot_id_b; snapshot = snapshot_b };
+      Keeper_chat_events.Oas_content_block_stop { index = stop_index };
+      Keeper_chat_events.Tool_call_end { tool_call_id = end_id };
+      Keeper_chat_events.Oas_thinking_delta { index = last_index; delta = last } ] ->
+      check int "first thinking index" 0 first_index;
+      check string "first thinking" "think A" first;
+      check int "tool block index" 1 tool_index;
+      check string "content type" "tool_use" content_type;
+      check string "block tool id" "tc-snapshot" block_tool_id;
+      check string "block tool name" "keeper_board_list" block_tool_name;
+      check string "tool id" "tc-snapshot" tool_call_id;
+      check string "tool name" "keeper_board_list" tool_call_name;
+      check string "snapshot id a" "tc-snapshot" snapshot_id_a;
+      check string "snapshot id b" "tc-snapshot" snapshot_id_b;
+      check string "snapshot a" "{\"limit\":1}" snapshot_a;
+      check string "snapshot b" "{\"limit\":2}" snapshot_b;
+      check int "tool stop index" 1 stop_index;
+      check string "end id" "tc-snapshot" end_id;
+      check int "last thinking index" 2 last_index;
+      check string "last thinking" "think B" last
+  | _ ->
+      failf "unexpected stream bridge snapshot events: %s"
+        (String.concat ", "
+           (List.map
+              (function
+                | Keeper_chat_events.Custom { name; _ } -> "custom:" ^ name
+                | Keeper_chat_events.Oas_content_block_start _ ->
+                    "oas_block_start"
+                | Keeper_chat_events.Oas_content_block_stop _ ->
+                    "oas_block_stop"
+                | Keeper_chat_events.Oas_thinking_delta _ -> "oas_thinking"
+                | Keeper_chat_events.Tool_call_start _ -> "tool_start"
+                | Keeper_chat_events.Tool_call_args _ -> "tool_args"
+                | Keeper_chat_events.Tool_call_args_snapshot _ ->
+                    "tool_args_snapshot"
                 | Keeper_chat_events.Tool_call_end _ -> "tool_end"
                 | Keeper_chat_events.Text_delta _ -> "text"
                 | Keeper_chat_events.Event_error _ -> "error"
@@ -740,6 +813,74 @@ let test_keeper_stream_bridge_preserves_non_tool_block_lifecycle () =
       check int "stop index" 4 stop_index
   | _ -> fail "expected non-tool OAS block start and stop events"
 
+let test_keeper_stream_bridge_rejects_tool_start_missing_identity () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockStart
+          { index = 5;
+            content_type = "tool_use";
+            tool_id = None;
+            tool_name = None };
+      ]
+  in
+  match events with
+  | [
+      Keeper_chat_events.Oas_content_block_start
+        { index = block_index; content_type; tool_call_id; tool_call_name };
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind; index = Some error_index; reason = Some reason; _ };
+    ] ->
+      check int "block index" 5 block_index;
+      check string "content type" "tool_use" content_type;
+      check (option string) "tool id" None tool_call_id;
+      check (option string) "tool name" None tool_call_name;
+      check string "kind" "tool_start_missing_identity"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check int "error index" 5 error_index;
+      check string "reason" "tool-use block start missed tool id or name" reason
+  | _ -> fail "expected tool-use start without identity to fail closed"
+
+let test_keeper_stream_bridge_rejects_non_tool_start_with_tool_identity () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockStart
+          { index = 6;
+            content_type = "text";
+            tool_id = Some "tc-not-tool";
+            tool_name = Some "keeper_memory_search" };
+      ]
+  in
+  let has_tool_start =
+    List.exists
+      (function
+        | Keeper_chat_events.Tool_call_start _ -> true
+        | _ -> false)
+      events
+  in
+  check bool "non-tool block is not promoted to tool call" false has_tool_start;
+  match events with
+  | [
+      Keeper_chat_events.Oas_content_block_start
+        { index = block_index; content_type; tool_call_id; tool_call_name };
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind; index = Some error_index; reason = Some reason; _ };
+    ] ->
+      check int "block index" 6 block_index;
+      check string "content type" "text" content_type;
+      check (option string) "tool id" (Some "tc-not-tool") tool_call_id;
+      check (option string) "tool name" (Some "keeper_memory_search")
+        tool_call_name;
+      check string "kind" "tool_start_missing_identity"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check int "error index" 6 error_index;
+      check string "reason" "non-tool content block carried tool id or name"
+        reason
+  | _ -> fail "expected non-tool start with tool identity to fail closed"
+
 let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_sdk.Types in
   let events =
@@ -758,6 +899,7 @@ let test_keeper_stream_bridge_rejects_tool_args_without_start () =
            (List.exists
               (function
                 | Keeper_chat_events.Tool_call_args _ -> true
+                | Keeper_chat_events.Tool_call_args_snapshot _ -> true
                 | _ -> false)
               events))
   | _ -> fail "expected a stream protocol error for missing tool start"
@@ -1583,6 +1725,8 @@ let () =
             test_keeper_stream_args_preserve_user_blocks;
           test_case "stream bridge preserves interleaved thinking and tool" `Quick
             test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool;
+          test_case "stream bridge preserves tool args snapshots" `Quick
+            test_keeper_stream_bridge_preserves_tool_args_snapshot;
           test_case "stream bridge ignores replayed tool starts" `Quick
             test_keeper_stream_bridge_ignores_replayed_tool_start;
           test_case "stream bridge closes tool when index is reused" `Quick
@@ -1593,6 +1737,10 @@ let () =
             test_keeper_stream_bridge_preserves_typed_media_source;
           test_case "stream bridge preserves non-tool block lifecycle" `Quick
             test_keeper_stream_bridge_preserves_non_tool_block_lifecycle;
+          test_case "stream bridge rejects tool start missing identity" `Quick
+            test_keeper_stream_bridge_rejects_tool_start_missing_identity;
+          test_case "stream bridge rejects non-tool start with tool identity" `Quick
+            test_keeper_stream_bridge_rejects_non_tool_start_with_tool_identity;
           test_case "stream bridge rejects tool args without start" `Quick
             test_keeper_stream_bridge_rejects_tool_args_without_start;
           test_case "stream protocol error summary includes diagnostics" `Quick

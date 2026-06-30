@@ -808,25 +808,37 @@ let test_delegate_eviction_bad_base64_surfaces_redacted_text_error () =
     assert (not (contains_substring placeholder "bad base64"))
   | _ -> failwith "bad base64 must surface as a redacted text placeholder"
 
-let test_delegate_eviction_rejects_non_base64_source_types () =
-  let check_source source_type =
-    match
-      Vi.evict_blocks
-        ~mode:Vi.Store_only
-        ~policy:Masc.Keeper_types_profile.Mm_delegate
-        ~keeper_name:"vision-ingest-source-kind"
-        [ Agent_sdk.Types.Image
-            { media_type = "image/png"; data = "not-inline-base64"; source_type }
-        ]
-    with
-    | [ Agent_sdk.Types.Text placeholder ] ->
-      assert (contains_substring placeholder "could not store");
-      assert (contains_substring placeholder "unsupported image source")
-    | _ -> failwith "non-base64 image source must surface as a text placeholder"
-  in
-  check_source Agent_sdk.Types.Url;
-  check_source Agent_sdk.Types.File_id
-;;
+let test_delegate_eviction_rejects_non_base64_source_before_store () =
+  List.iter
+    (fun source_type ->
+      let source_name = Agent_sdk.Types.media_source_kind_to_string source_type in
+      let metric_labels =
+        [ "mode", "store_only"; "result", "error"; "reason", "invalid_source_type" ]
+      in
+      let before =
+        metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels
+      in
+      match
+        Vi.evict_blocks
+          ~mode:Vi.Store_only
+          ~policy:Masc.Keeper_types_profile.Mm_delegate
+          ~keeper_name:("vision-ingest-source-" ^ source_name)
+          [ Agent_sdk.Types.Image
+              { media_type = "image/png"
+              ; data = "https://example.invalid/image.png"
+              ; source_type
+              }
+          ]
+      with
+      | [ Agent_sdk.Types.Text placeholder ] ->
+        assert (contains_substring placeholder "could not store");
+        assert (contains_substring placeholder "unsupported image source");
+        assert_metric_increment
+          ("vision_ingest invalid_source_type " ^ source_name)
+          before
+          (metric_value Keeper_metrics.VisionIngestEvictions ~labels:metric_labels)
+      | _ -> failwith "non-base64 image source must surface as a text placeholder")
+    [ Agent_sdk.Types.Url; Agent_sdk.Types.File_id ]
 
 let test_non_delegate_eviction_preserves_inline_image () =
   let bytes = "raw-image" in
@@ -908,7 +920,7 @@ let () =
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();
   test_delegate_eviction_bad_base64_surfaces_redacted_text_error ();
-  test_delegate_eviction_rejects_non_base64_source_types ();
+  test_delegate_eviction_rejects_non_base64_source_before_store ();
   test_non_delegate_eviction_preserves_inline_image ();
   test_evicted_history_has_no_image_modality ();
   print_endline "test_keeper_vision_tool: all assertions passed"

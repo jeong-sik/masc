@@ -2,6 +2,8 @@
 
 open Keeper_hooks_oas_types
 
+module Canonical_tool = Agent_sdk.Canonical_tool
+
 (* #9919: counter for post_tool_use_failure events.
 
    Replaces an earlier low-signal metric emit that produced
@@ -78,15 +80,25 @@ let resolve_after_turn_model ~keeper_name
    stop_reason_label_* SSOT constants by inlining their literals.  [open
    Keeper_hooks_oas_types] above brings stop_reason_to_label into scope. *)
 
-let content_block_has_visible_or_tool_progress = function
-  | Agent_sdk.Types.Text text -> String.trim text <> ""
-  | Agent_sdk.Types.ToolResult { content; json; _ } ->
-      String.trim content <> "" || Option.is_some json
-  | Agent_sdk.Types.ToolUse _
-  | Agent_sdk.Types.Image _
-  | Agent_sdk.Types.Document _
-  | Agent_sdk.Types.Audio _ -> true
-  | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> false
+let content_block_has_visible_or_tool_progress block =
+  match Canonical_tool.tool_result_of_block block with
+  | Some result ->
+      String.trim result.Canonical_tool.content <> ""
+      || Option.is_some result.Canonical_tool.structured_content
+      || (match result.Canonical_tool.content_blocks with
+          | Some (_ :: _) -> true
+          | Some [] | None -> false)
+  | None -> (
+      match block with
+      | Agent_sdk.Types.Text text -> String.trim text <> ""
+      | Agent_sdk.Types.ToolResult _ ->
+          invalid_arg
+            "keeper_hooks_oas_response_metrics: OAS canonical tool-result projection unavailable"
+      | Agent_sdk.Types.ToolUse _
+      | Agent_sdk.Types.Image _
+      | Agent_sdk.Types.Document _
+      | Agent_sdk.Types.Audio _ -> true
+      | Agent_sdk.Types.Thinking _ | Agent_sdk.Types.RedactedThinking _ -> false)
 
 let shape_empty = "empty"
 let shape_thinking_only = "thinking_only"

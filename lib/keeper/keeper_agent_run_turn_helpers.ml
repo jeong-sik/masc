@@ -75,25 +75,36 @@ let per_provider_timeout_for_turn
 
 [@@@warning "-11"]
 
+let sdk_stream_event_is_first_token =
+  Agent_sdk.Llm_provider.Streaming.sse_event_is_first_token_signal
+
+let sdk_stream_event_is_deliverable =
+  Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
+
 let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
   match event with
   | Agent_sdk.Types.MessageStart _ -> Some "sse_message_start"
-  | Agent_sdk.Types.ContentBlockStart { tool_name = Some _; _ } ->
+  | Agent_sdk.Types.ContentBlockStart _ when sdk_stream_event_is_deliverable event ->
       Some "sse_tool_block_start"
   | Agent_sdk.Types.ContentBlockStart _ -> Some "sse_content_block_start"
-  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.TextDelta _; _ } ->
+  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.TextDelta _; _ }
+    when sdk_stream_event_is_deliverable event ->
       Some "sse_text_delta"
-  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.ThinkingDelta _; _ } ->
+  | Agent_sdk.Types.ContentBlockDelta
+      { delta = Agent_sdk.Types.ThinkingDelta _; _ }
+    when sdk_stream_event_is_first_token event ->
       Some "sse_thinking_delta"
   | Agent_sdk.Types.ContentBlockDelta
-      { delta = (Agent_sdk.Types.InputJsonDelta _ | Agent_sdk.Types.InputJsonSnapshot _)
-      ; _
-      } ->
+      { delta = Agent_sdk.Types.InputJsonDelta _ | Agent_sdk.Types.InputJsonSnapshot _; _ }
+    when sdk_stream_event_is_deliverable event ->
       Some "sse_tool_arg_delta"
+  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.MediaDelta _; _ }
+    when sdk_stream_event_is_deliverable event ->
+      Some "sse_media_delta"
   | Agent_sdk.Types.ContentBlockDelta _ ->
       (* Future OAS carrier deltas, such as provider-private reasoning signatures,
-         are progress evidence only. They must not be promoted to text/tool
-         progress or keeper-visible output. *)
+         are diagnostic stream evidence only. They must not be promoted to
+         text/tool progress, keeper-visible output, or watchdog progress. *)
       Some "sse_content_delta"
   | Agent_sdk.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
   | Agent_sdk.Types.MessageDelta _ -> Some "sse_message_delta"
@@ -108,8 +119,13 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
 
 [@@@warning "+11"]
 
+let sse_event_watchdog_progress_kind event =
+  match sse_event_progress_kind event with
+  | Some kind when sdk_stream_event_is_deliverable event -> Some kind
+  | _ -> None
+
 let registry_progress_on_event ~record_turn_progress downstream event =
-  Option.iter record_turn_progress (sse_event_progress_kind event);
+  Option.iter record_turn_progress (sse_event_watchdog_progress_kind event);
   Option.iter (fun cb -> cb event) downstream
 
 

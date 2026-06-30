@@ -56,7 +56,7 @@ let test_thinking_and_redacted () =
       role = Types.Assistant;
       content =
         [
-          Types.Thinking { content = "ponder"; signature = None };
+          Types.Thinking { signature = None; content = "ponder" };
           Types.RedactedThinking "redacted-blob";
         ];
       name = None;

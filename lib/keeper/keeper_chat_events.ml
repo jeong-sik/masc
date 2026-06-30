@@ -56,6 +56,7 @@ type keeper_chat_event =
   | Oas_stream_protocol_error of stream_protocol_error
   | Tool_call_start of { tool_call_id : string; tool_call_name : string }
   | Tool_call_args of { tool_call_id : string; delta : string }
+  | Tool_call_args_snapshot of { tool_call_id : string; snapshot : string }
   | Tool_call_end of { tool_call_id : string }
   | Link_block of
       { url : string

@@ -53,10 +53,10 @@ let expected_structured_dashboard_agent_run_json_judges =
     ]
 ;;
 
-let expected_structured_fusion_json_judges = [ "lib/fusion/fusion_judge.ml" ];;
-
-let expected_unstructured_fusion_agent_build_exemptions =
-  [ "lib/fusion/fusion_panel.ml" ]
+let expected_structured_fusion_agent_build_files =
+  List.sort
+    String.compare
+    [ "lib/fusion/fusion_judge.ml"; "lib/fusion/fusion_panel.ml" ]
 ;;
 
 let expected_structured_tool_agent_runs =
@@ -83,10 +83,7 @@ let fusion_agent_build_files () =
 ;;
 
 let expected_all_fusion_agent_build_files =
-  List.sort
-    String.compare
-    (expected_structured_fusion_json_judges
-     @ expected_unstructured_fusion_agent_build_exemptions)
+  expected_structured_fusion_agent_build_files
 ;;
 
 let masc_tool_agent_run_files_under rel =
@@ -152,9 +149,9 @@ let test_dashboard_agent_run_json_judges_request_structured_output () =
     expected_structured_dashboard_agent_run_json_judges
 ;;
 
-let test_fusion_agent_run_json_judges_request_structured_output () =
+let test_fusion_agent_builds_request_structured_output () =
   test_agent_run_json_judges_request_structured_output
-    expected_structured_fusion_json_judges
+    expected_structured_fusion_agent_build_files
 ;;
 
 let test_dashboard_agent_run_json_judges_use_provider_config_transform () =
@@ -211,7 +208,7 @@ let test_dashboard_json_judges_do_not_use_lenient_json_recovery () =
     expected_structured_dashboard_agent_run_json_judges
 ;;
 
-let test_fusion_agent_run_json_judges_use_provider_config_transform () =
+let test_fusion_agent_builds_use_provider_config_transform () =
   List.iter
     (fun rel ->
        check
@@ -222,10 +219,10 @@ let test_fusion_agent_run_json_judges_use_provider_config_transform () =
             ~module_path:rel
             ~callee:"Fusion_oas.build_agent"
             ~label:"provider_config_transform"))
-    expected_structured_fusion_json_judges
+    expected_structured_fusion_agent_build_files
 ;;
 
-let test_fusion_json_judges_do_not_degrade_to_json_mode () =
+let test_fusion_agent_builds_do_not_degrade_to_json_mode () =
   List.iter
     (fun rel ->
        check
@@ -240,7 +237,7 @@ let test_fusion_json_judges_do_not_degrade_to_json_mode () =
          (rel ^ " must not construct JsonMode through open or alias")
          0
          (Ast_grep.count_constructor_leaf_names ~module_path:rel ~name:"JsonMode"))
-    expected_structured_fusion_json_judges
+    expected_structured_fusion_agent_build_files
 ;;
 
 let test_all_fusion_agent_build_files_are_classified () =
@@ -397,23 +394,23 @@ let () =
             `Quick
             test_dashboard_json_judges_do_not_use_lenient_json_recovery
         ] )
-    ; ( "fusion json judges"
+    ; ( "fusion Agent builds"
       , [ test_case
-            "Fusion agent build files are classified as structured or exempt"
+            "Fusion agent build files are classified"
             `Quick
             test_all_fusion_agent_build_files_are_classified
         ; test_case
-            "fusion JSON judges request structured output"
+            "fusion Agent builds request structured output"
             `Quick
-            test_fusion_agent_run_json_judges_request_structured_output
+            test_fusion_agent_builds_request_structured_output
         ; test_case
-            "fusion JSON judges use provider config transform"
+            "fusion Agent builds use provider config transform"
             `Quick
-            test_fusion_agent_run_json_judges_use_provider_config_transform
+            test_fusion_agent_builds_use_provider_config_transform
         ; test_case
-            "fusion JSON judges do not degrade to JsonMode"
+            "fusion Agent builds do not degrade to JsonMode"
             `Quick
-            test_fusion_json_judges_do_not_degrade_to_json_mode
+            test_fusion_agent_builds_do_not_degrade_to_json_mode
         ] )
     ; ( "structured tool Agent.run"
       , [ test_case

@@ -28,10 +28,10 @@ describe('SurfaceHeader', () => {
     ['monitoring', 'Keeper Fleet'],
     ['command', 'Actions'],
     ['lab', 'Tools'],
-  ] as const)('renders the %s surface title as the primary heading', (tab, label) => {
+  ] as const)('renders the %s surface title as the primary h1', (tab, label) => {
     route.value = { tab, params: {}, postId: null }
     render(h(SurfaceHeader, {}), container)
-    const h1 = container.querySelector('header.v2-surface-header div[role="heading"]')
+    const h1 = container.querySelector('header.v2-surface-header h1')
     expect(h1?.textContent?.trim()).toBe(label)
   })
 

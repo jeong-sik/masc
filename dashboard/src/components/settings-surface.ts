@@ -90,8 +90,16 @@ const SET_GROUPS: [string, SectionId[]][] = [
 // (Tool_catalog.is_public_mcp). Unknown/empty inventory yields an empty list
 // (no fabricated tool names).
 const MCP_PUBLIC_SURFACE = 'public_mcp'
+const MCP_TRANSPORT_OPTIONS = ['http', 'stdio', 'sse']
 const SETTINGS_LOG_LIMIT = 50
 const SETTINGS_LOG_POLL_MS = 3000
+const DEFAULT_NOTIFY_EVENT_PREVIEW: Record<string, boolean> = {
+  '컨텍스트 임계치 초과': true,
+  '연속 실패': true,
+  'keeper crash/dead': true,
+  '핸드오프 완료': false,
+  '승인 요청': true,
+}
 
 export function normalizeSettingsSection(value: string | null | undefined): SectionId {
   return SETTINGS_ROUTE_SECTION_SET.has(value ?? '') ? (value as SectionId) : 'account'
@@ -173,6 +181,11 @@ function writeLocalPreviewString(key: string, value: string) {
   }
 }
 
+function readLocalPreviewNumber(key: string, fallback: number): number {
+  const parsed = Number(readLocalPreviewString(key, String(fallback)))
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 function readLocalPreviewBoolRecord(key: string, fallback: Record<string, boolean>): Record<string, boolean> {
   const next = { ...fallback }
   try {
@@ -205,6 +218,15 @@ function useLocalPreviewString(key: string, initialValue: string): [string, (nex
   const setStoredValue = (next: string) => {
     setValue(next)
     writeLocalPreviewString(key, next)
+  }
+  return [value, setStoredValue]
+}
+
+function useLocalPreviewNumber(key: string, initialValue: number): [number, (next: number) => void] {
+  const [value, setValue] = useState(() => readLocalPreviewNumber(key, initialValue))
+  const setStoredValue = (next: number) => {
+    setValue(next)
+    writeLocalPreviewString(key, String(next))
   }
   return [value, setStoredValue]
 }
@@ -774,7 +796,7 @@ export function SettingsSurface() {
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
   const [mcpUrl, setMcpUrl] = useLocalPreviewString('mcpUrl', 'https://masc.local/mcp')
-  const [transport, setTransport] = useState('http')
+  const [transport, setTransport] = useLocalPreviewString('mcpTransport', 'http')
   const [mcpTools, setMcpTools] = useState<string[]>([])
   const [tools, setTools] = useState<Record<string, boolean>>({})
 
@@ -786,10 +808,7 @@ export function SettingsSurface() {
         if (!active) return
         const names = mcpExposedToolNames(resp.tool_inventory?.tools ?? [])
         setMcpTools(names)
-        // Listed tools are, by definition, currently exposed over public MCP.
-        // The per-tool toggle is a local view control; expose/unexpose
-        // persistence is deferred (no backend write endpoint yet).
-        setTools(Object.fromEntries(names.map(n => [n, true])))
+        setTools(readLocalPreviewBoolRecord('mcpToolPreview', Object.fromEntries(names.map(n => [n, true]))))
       } catch {
         if (!active) return
         // No fabricated tool names on failure.
@@ -799,6 +818,14 @@ export function SettingsSurface() {
     })()
     return () => { active = false }
   }, [])
+
+  function updateMcpToolPreview(tool: string, enabled: boolean) {
+    setTools(prev => {
+      const next = { ...prev, [tool]: enabled }
+      writeLocalPreviewBoolRecord('mcpToolPreview', next)
+      return next
+    })
+  }
 
   // runtime defaults / model routing — resolved from runtime.toml (SSOT)
   const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
@@ -1026,16 +1053,10 @@ export function SettingsSurface() {
   const [sampling, setSampling] = useState(100)
 
   // notify / display
-  const [notifyCtx, setNotifyCtx] = useState(85)
-  const [notifyFails, setNotifyFails] = useState(3)
-  const [notifyCh, setNotifyCh] = useState('Slack')
-  const [notifyOn, setNotifyOn] = useState<Record<string, boolean>>({
-    '컨텍스트 임계치 초과': true,
-    '연속 실패': true,
-    'keeper crash/dead': true,
-    '핸드오프 완료': false,
-    '승인 요청': true,
-  })
+  const [notifyCtx, setNotifyCtx] = useLocalPreviewNumber('notifyContextThreshold', 85)
+  const [notifyFails, setNotifyFails] = useLocalPreviewNumber('notifyFailureThreshold', 3)
+  const [notifyCh, setNotifyCh] = useLocalPreviewString('notifyChannel', 'Slack')
+  const [notifyOn, setNotifyOn] = useLocalPreviewBoolRecord('notifyEventPreview', DEFAULT_NOTIFY_EVENT_PREVIEW)
   const [density, setDensity] = useState('regular')
   const [tz, setTz] = useState('Asia/Seoul')
   const [locale, setLocale] = useState('KO')
@@ -1062,6 +1083,8 @@ export function SettingsSurface() {
   const keeperAssignmentCount = keeperAssignments.length > 0
     ? keeperAssignments.length
     : runtimeProviders?.assignment_governance?.assignment_count ?? 0
+  const mcpPreviewEnabledCount = Object.values(tools).filter(Boolean).length
+  const notifyPreviewEnabledCount = Object.values(notifyOn).filter(Boolean).length
 
   return html`
     <main class="v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary" data-screen-label="설정" data-testid="settings-surface">
@@ -1139,7 +1162,10 @@ export function SettingsSurface() {
 
             ${sec === 'mcp' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Expose this namespace to external agents/clients via an MCP server.
+                Live <span class="mono">public_mcp</span> inventory is read from the backend. Endpoint, transport and per-tool switches below are browser-session exposure previews only; they do not rewrite MCP server policy.
+              </div>
+              <div class="set-local-summary" data-testid="mcp-local-summary">
+                Previewing ${transport} against ${mcpUrl}; ${mcpPreviewEnabledCount}/${mcpTools.length} listed tools selected in this browser session.
               </div>
               <${SetRow} label="MCP endpoint" hint="GET/POST /mcp">
                 <div class="set-path">
@@ -1152,23 +1178,29 @@ export function SettingsSurface() {
                   <${PreviewBadge} />
                 </div>
               <//>
-              <${SetRow} label="Transport" hint="transport">
-                <${SetSeg} value=${transport} options=${['http', 'stdio', 'sse']} onChange=${setTransport} />
+              <${SetRow} label="Transport" hint="browser-session preview">
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSeg} value=${transport} options=${MCP_TRANSPORT_OPTIONS} onChange=${setTransport} />
+                </div>
               <//>
               <div class="set-mcp-detail mono">
                 ${transport === 'http' && html`<span>POST ${mcpUrl} · Content-Type: application/json · Authorization: Bearer ••••</span>`}
-                ${transport === 'stdio' && html`<span>spawn: masc-mcp serve --stdio · framing: ndjson · pid 8421</span>`}
+                ${transport === 'stdio' && html`<span>spawn: masc-mcp serve --stdio · framing: ndjson</span>`}
                 ${transport === 'sse' && html`<span>GET ${mcpUrl}/sse · keep-alive 15s · event: message</span>`}
               </div>
-              <div class="set-sub-h">Exposed tools (${Object.values(tools).filter(Boolean).length}/${mcpTools.length})</div>
+              <div class="set-sub-h">Local tool exposure preview (${mcpPreviewEnabledCount}/${mcpTools.length})</div>
               ${mcpTools.length === 0
                 ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
                 : mcpTools.map(t => html`
                 <${SetRow} key=${t} label=${html`<span class="mono" style=${{ fontSize: '12.5px' }}>${t}</span>`}>
-                  <${SetToggle}
-                    on=${tools[t] ?? false}
-                    onChange=${(v: boolean) => setTools(p => ({ ...p, [t]: v }))}
-                  />
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetToggle}
+                      on=${tools[t] ?? false}
+                      onChange=${(v: boolean) => updateMcpToolPreview(t, v)}
+                    />
+                  </div>
                 <//>
               `)}
             `}
@@ -1654,21 +1686,38 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'notify' && html`
+              <div class="set-local-summary" data-testid="notify-local-summary">
+                Browser-session preview: ${notifyCh} channel, context ${notifyCtx}%, failures ${notifyFails}, ${notifyPreviewEnabledCount}/${Object.keys(notifyOn).length} events enabled.
+              </div>
+              <div class="set-notify-section">
               <${SetRow} label="Context threshold alert" hint="Notify when context exceeds this %">
-                <${SetSlider} value=${notifyCtx} min=${70} max=${98} suffix="%" onChange=${setNotifyCtx} />
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSlider} value=${notifyCtx} min=${70} max=${98} suffix="%" onChange=${setNotifyCtx} />
+                </div>
               <//>
               <${SetRow} label="Consecutive failure alert" hint="Notify after this many consecutive failures">
-                <${SetStepper} v=${notifyFails} set=${setNotifyFails} min=${1} max=${10} />
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetStepper} v=${notifyFails} set=${setNotifyFails} min=${1} max=${10} />
+                </div>
               <//>
               <${SetRow} label="Notify channel" hint="Where to send">
-                <${SetSeg} value=${notifyCh} options=${['Slack', 'Discord', '없음']} onChange=${setNotifyCh} />
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSeg} value=${notifyCh} options=${['Slack', 'Discord', '없음']} onChange=${setNotifyCh} />
+                </div>
               <//>
               <div class="set-sub-h">Notify events</div>
               ${Object.keys(notifyOn).map(k => html`
                 <${SetRow} key=${k} label=${k}>
-                  <${SetToggle} on=${notifyOn[k]} onChange=${(v: boolean) => setNotifyOn(p => ({ ...p, [k]: v }))} />
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetToggle} on=${notifyOn[k]} onChange=${(v: boolean) => setNotifyOn(p => ({ ...p, [k]: v }))} />
+                  </div>
                 <//>
               `)}
+              </div>
             `}
 
             ${sec === 'display' && html`

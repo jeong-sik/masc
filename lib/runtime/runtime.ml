@@ -598,6 +598,10 @@ let assignment_line ~keeper_name ~runtime_id =
     (toml_escape_string runtime_id)
 ;;
 
+let runtime_scalar_line ~key ~runtime_id =
+  Printf.sprintf "%s = \"%s\"" key (toml_escape_string runtime_id)
+;;
+
 let split_lines content =
   if String.equal content "" then [], false
   else (
@@ -637,6 +641,10 @@ let is_toml_table_header line =
 
 let is_runtime_assignments_header line =
   String.equal (line |> strip_toml_comment |> String.trim) "[runtime.assignments]"
+;;
+
+let is_runtime_header line =
+  String.equal (line |> strip_toml_comment |> String.trim) "[runtime]"
 ;;
 
 let rec split_at n xs =
@@ -723,7 +731,46 @@ let replace_or_append_assignment section_lines ~keeper_name ~runtime_id =
          List.rev_append acc (line :: rest)
        | _ -> loop (existing :: acc) rest)
   in
+    loop [] section_lines
+;;
+
+let remove_assignment section_lines ~keeper_name =
+  List.filter
+    (fun existing ->
+      match assignment_key_of_line existing with
+      | Some key when String.equal key keeper_name -> false
+      | _ -> true)
+    section_lines
+;;
+
+let replace_or_append_runtime_scalar section_lines ~key ~runtime_id =
+  let line = runtime_scalar_line ~key ~runtime_id in
+  let rec loop acc = function
+    | [] -> List.rev_append acc [ line ]
+    | existing :: rest ->
+      (match assignment_key_of_line existing with
+       | Some existing_key when String.equal existing_key key ->
+         List.rev_append acc (line :: rest)
+       | _ -> loop (existing :: acc) rest)
+  in
   loop [] section_lines
+;;
+
+let remove_runtime_scalar section_lines ~key =
+  List.filter
+    (fun existing ->
+      match assignment_key_of_line existing with
+      | Some existing_key when String.equal existing_key key -> false
+      | _ -> true)
+    section_lines
+;;
+
+let append_runtime_section lines ~key ~runtime_id =
+  let section = [ "[runtime]"; runtime_scalar_line ~key ~runtime_id ] in
+  match List.rev lines with
+  | [] -> section
+  | last :: _ when String.equal (String.trim last) "" -> lines @ section
+  | _ -> lines @ ("" :: section)
 ;;
 
 let append_runtime_assignments_section lines ~keeper_name ~runtime_id =
@@ -758,6 +805,55 @@ let update_runtime_assignment_text content ~keeper_name ~runtime_id =
                  ~keeper_name
                  ~runtime_id)
          @ after_section)
+  in
+  join_lines updated_lines ~trailing_newline:true
+;;
+
+let update_runtime_scalar_text content ~key ~runtime_id =
+  let lines, _trailing_newline = split_lines content in
+  let updated_lines =
+    match find_index is_runtime_header lines, runtime_id with
+    | None, None -> lines
+    | None, Some runtime_id -> append_runtime_section lines ~key ~runtime_id
+    | Some header_index, _ ->
+      let before, from_header = split_at header_index lines in
+      (match from_header with
+       | [] ->
+         (match runtime_id with
+          | None -> lines
+          | Some runtime_id -> append_runtime_section lines ~key ~runtime_id)
+       | header :: after_header ->
+         let section_lines, after_section =
+           match find_index is_toml_table_header after_header with
+           | None -> after_header, []
+           | Some next_header_index -> split_at next_header_index after_header
+         in
+         let next_section_lines =
+           match runtime_id with
+           | None -> remove_runtime_scalar section_lines ~key
+           | Some runtime_id -> replace_or_append_runtime_scalar section_lines ~key ~runtime_id
+         in
+         before @ (header :: next_section_lines) @ after_section)
+  in
+  join_lines updated_lines ~trailing_newline:true
+;;
+
+let remove_runtime_assignment_text content ~keeper_name =
+  let lines, _trailing_newline = split_lines content in
+  let updated_lines =
+    match find_index is_runtime_assignments_header lines with
+    | None -> lines
+    | Some header_index ->
+      let before, from_header = split_at header_index lines in
+      (match from_header with
+       | [] -> lines
+       | header :: after_header ->
+         let section_lines, after_section =
+           match find_index is_toml_table_header after_header with
+           | None -> after_header, []
+           | Some next_header_index -> split_at next_header_index after_header
+         in
+         before @ (header :: remove_assignment section_lines ~keeper_name) @ after_section)
   in
   join_lines updated_lines ~trailing_newline:true
 ;;
@@ -818,6 +914,57 @@ let set_runtime_id_for_keeper ?runtime_config_path ~keeper_name ~runtime_id () =
     let* () = Fs_compat.save_file_atomic path next in
     let* () = init_default ~config_path:path in
     Ok ()
+;;
+
+let clear_runtime_id_for_keeper ?runtime_config_path ~keeper_name () =
+  let keeper_name = String.trim keeper_name in
+  if String.equal keeper_name ""
+  then Error "keeper_name must not be empty"
+  else if contains_newline keeper_name
+  then Error "keeper_name must not contain newlines"
+  else
+    let* path = runtime_config_path_result ?runtime_config_path () in
+    let* content = load_file_result path in
+    let next = remove_runtime_assignment_text content ~keeper_name in
+    let* () = validate_runtime_config_text ~config_path:path next in
+    let* () = Fs_compat.save_file_atomic path next in
+    let* () = init_default ~config_path:path in
+    Ok ()
+;;
+
+let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
+  let key = String.trim key in
+  let runtime_id = Option.map String.trim runtime_id in
+  if String.equal key ""
+  then Error "runtime key must not be empty"
+  else if contains_newline key
+  then Error "runtime key must not contain newlines"
+  else
+    match runtime_id with
+    | Some runtime_id when String.equal runtime_id "" ->
+      Error "runtime_id must not be empty"
+    | Some runtime_id when contains_newline runtime_id ->
+      Error "runtime_id must not contain newlines"
+    | _ ->
+      let* path = runtime_config_path_result ?runtime_config_path () in
+      let* content = load_file_result path in
+      let next = update_runtime_scalar_text content ~key ~runtime_id in
+      let* () = validate_runtime_config_text ~config_path:path next in
+      let* () = Fs_compat.save_file_atomic path next in
+      let* () = init_default ~config_path:path in
+      Ok ()
+;;
+
+let set_runtime_default ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
+;;
+
+let set_runtime_librarian ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar ?runtime_config_path ~key:"librarian" ~runtime_id ()
+;;
+
+let set_runtime_cross_verifier ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar ?runtime_config_path ~key:"cross_verifier" ~runtime_id ()
 ;;
 
 (* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]

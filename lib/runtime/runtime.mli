@@ -202,6 +202,30 @@ val set_runtime_id_for_keeper :
     runtime config, atomically write it, and refresh the in-process runtime
     assignment cache. *)
 
+val clear_runtime_id_for_keeper :
+  ?runtime_config_path:string -> keeper_name:string -> unit -> (unit, string) result
+(** Remove [keeper_name] from [\[runtime.assignments\]], validate the resulting
+    runtime config, atomically write it, and refresh the in-process runtime
+    assignment cache. *)
+
+val set_runtime_default :
+  ?runtime_config_path:string -> runtime_id:string -> unit -> (unit, string) result
+(** Persist [\[runtime\]].default through the runtime.toml SSOT writer,
+    validate the resulting config, atomically write it, and refresh the
+    in-process runtime cache. *)
+
+val set_runtime_librarian :
+  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
+(** Persist or clear [\[runtime\]].librarian through the runtime.toml SSOT
+    writer, validate the resulting config, atomically write it, and refresh the
+    in-process runtime cache. *)
+
+val set_runtime_cross_verifier :
+  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
+(** Persist or clear [\[runtime\]].cross_verifier through the runtime.toml SSOT
+    writer, validate the resulting config, atomically write it, and refresh the
+    in-process runtime cache. *)
+
 val default_max_context : unit -> int
 (** Context-window budget of the default runtime's model (RFC-0206
     single-binding). Replaces the deleted [Runtime_runtime.resolve_*_max_context]

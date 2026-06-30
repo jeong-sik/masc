@@ -260,7 +260,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
     network_mode: 'inherit',
     sandbox_last_error: null,
     allowed_paths: ['workspace/masc'],
-    effective_allowed_paths: ['/Users/dancer/me/workspace/yousleepwhen/masc'],
+    effective_allowed_paths: ['/fixture/workspace/masc'],
     prompt: {
       goal: '',
       instructions: '',
@@ -339,7 +339,7 @@ function makeKeeperConfig(overrides: Partial<KeeperConfig> = {}): KeeperConfig {
       total_active: 0,
     },
     sources: {
-      live_meta_path: '/Users/dancer/me/.masc/config/keepers/sangsu.toml',
+      live_meta_path: '/fixture/.masc/config/keepers/sangsu.toml',
       default_manifest_path: null,
       default_source_kind: 'toml',
       precedence: [],
@@ -725,6 +725,21 @@ describe('SettingsSurface', () => {
     expect(container.querySelector<HTMLInputElement>('[data-testid="settings-mcp-endpoint-input"]')?.value).toBe('http://127.0.0.1:7777/mcp')
   })
 
+  it('does not render a fabricated stdio process pid in the MCP preview', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    const stdio = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === 'stdio')
+    expect(stdio).toBeTruthy()
+    await fireEvent.click(stdio as HTMLButtonElement)
+
+    const detail = container.querySelector('.set-mcp-detail')?.textContent ?? ''
+    expect(detail).toContain('masc-mcp serve --stdio')
+    expect(detail).not.toContain('pid 8421')
+  })
+
   it('edits sandbox from live keeper config instead of fake global controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 
@@ -770,7 +785,7 @@ describe('SettingsSurface', () => {
         allowed_paths: ['workspace/oas'],
       })
     })
-    expect(container.querySelector('[data-testid="settings-sandbox-source"]')?.textContent).toContain('/Users/dancer/me/.masc/config/keepers/sangsu.toml')
+    expect(container.querySelector('[data-testid="settings-sandbox-source"]')?.textContent).toContain('/fixture/.masc/config/keepers/sangsu.toml')
   })
 
   it('falls back to fleet composite keeper names when sandbox opens before the keeper store is hydrated', async () => {
@@ -951,7 +966,8 @@ mad-improver = "p.m1"
       expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
       expect(container.querySelector('[data-testid="runtime-toml-editor"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-section-routing"]')).not.toBeNull()
-      expect(container.querySelector('[data-testid="runtime-environment-save"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-environment-save"]')).toBeNull()
+      expect(container.textContent).toContain('backend typed writer')
     })
     expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('모델 라우팅')
     expect(container.querySelector('[data-testid="runtime-toml-section-title"]')?.textContent).toBe('라우팅')
@@ -1061,7 +1077,7 @@ mad-improver = "p.m1"
     expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
   })
 
-  it('MCP exposed-tool toggles are clickable local controls', async () => {
+  it('MCP exposed-tool toggles are browser-session exposure previews', async () => {
     apiMock.fetchDashboardTools.mockResolvedValue({
       tool_inventory: {
         count: 2,
@@ -1076,8 +1092,10 @@ mad-improver = "p.m1"
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
     await waitFor(() => {
-      expect(container.textContent).toContain('Exposed tools (2/2)')
+      expect(container.textContent).toContain('Local tool exposure preview (2/2)')
     })
+    expect(container.querySelector('[data-testid="mcp-local-summary"]')?.textContent).toContain('2/2 listed tools selected')
+    expect(container.textContent).toContain('browser-session exposure previews only')
 
     const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
     expect(toggles.length).toBe(2)
@@ -1087,7 +1105,64 @@ mad-improver = "p.m1"
     await fireEvent.click(toggles[0]!)
 
     expect(toggles[0]!.getAttribute('aria-checked')).toBe('false')
-    expect(container.textContent).toContain('Exposed tools (1/2)')
+    expect(container.textContent).toContain('Local tool exposure preview (1/2)')
+    expect(sessionStorage.getItem('masc.settings.local.mcpToolPreview')).toContain('"masc_handoff":false')
+
+    render(null, container)
+    route.value = { tab: 'settings', params: {}, postId: null }
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mcp-local-summary"]')?.textContent).toContain('1/2 listed tools selected')
+    })
+    const restoredToggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
+    expect(restoredToggles[0]!.getAttribute('aria-checked')).toBe('false')
+  })
+
+  it('notify controls are browser-session previews with persisted thresholds and events', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('Slack channel')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('4/5 events enabled')
+
+    const range = container.querySelector<HTMLInputElement>('input[type="range"]')
+    expect(range).toBeTruthy()
+    await fireEvent.input(range as HTMLInputElement, { target: { value: '92' } })
+
+    const plus = Array.from(container.querySelectorAll<HTMLButtonElement>('button'))
+      .find(button => button.textContent === '+')
+    expect(plus).toBeTruthy()
+    await fireEvent.click(plus as HTMLButtonElement)
+
+    const discord = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === 'Discord')
+    expect(discord).toBeTruthy()
+    await fireEvent.click(discord as HTMLButtonElement)
+
+    const toggle = container.querySelector<HTMLButtonElement>('[data-testid="set-toggle"]')
+    expect(toggle).toBeTruthy()
+    await fireEvent.click(toggle as HTMLButtonElement)
+
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('Discord channel')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('context 92%')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('failures 4')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('3/5 events enabled')
+    expect(sessionStorage.getItem('masc.settings.local.notifyContextThreshold')).toBe('92')
+    expect(sessionStorage.getItem('masc.settings.local.notifyFailureThreshold')).toBe('4')
+    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBe('Discord')
+    expect(sessionStorage.getItem('masc.settings.local.notifyEventPreview')).toContain('"컨텍스트 임계치 초과":false')
+
+    render(null, container)
+    route.value = { tab: 'settings', params: {}, postId: null }
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('Discord channel')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('context 92%')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('failures 4')
   })
 
   it('renders the fusion preset section (panel families + judge) read-only', async () => {

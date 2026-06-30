@@ -995,6 +995,26 @@
   flex-shrink: 0;
 }
 
+.settings-surf .set-notify-section .set-row {
+  align-items: flex-start;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.settings-surf .set-notify-section .set-row-l,
+.settings-surf .set-notify-section .set-row-c {
+  width: 100%;
+}
+
+.settings-surf .set-notify-section .set-row-c {
+  display: flex;
+  justify-content: flex-start;
+}
+
+.settings-surf .set-notify-section .set-row-c > .set-tg-control {
+  flex-wrap: wrap;
+}
+
 .set-tg-l {
   flex: 1;
   min-width: 0;

@@ -705,6 +705,11 @@
  (libraries alcotest ast_grep masc_test_deps masc.fusion_core))
 
 (test
+ (name test_oas_canonical_delegation)
+ (modules test_oas_canonical_delegation)
+ (libraries alcotest ast_grep masc_test_deps))
+
+(test
  (name test_keeper_structured_output_schema)
  (modules test_keeper_structured_output_schema)
  (libraries alcotest masc_test_deps masc.fusion_core))
@@ -1460,6 +1465,7 @@
   test_mention_coverage
   test_resilience_coverage
   test_types_coverage
+  test_oas_canonical_delegation_contract
   test_dashboard_coverage
   test_rate_limit_coverage
   test_session_coverage
@@ -1505,6 +1511,7 @@
   test_mention_coverage
   test_resilience_coverage
   test_types_coverage
+  test_oas_canonical_delegation_contract
   test_dashboard_coverage
   test_rate_limit_coverage
   test_session_coverage

@@ -165,38 +165,8 @@ let prepare_agent_setup
     let tbl = Hashtbl.create (List.length keeper_tools) in
     List.iter
       (fun (t : Agent_sdk.Tool.t) ->
-         let param_type_str (pt : Agent_sdk.Types.param_type) =
-           match pt with
-           | String -> "string"
-           | Integer -> "integer"
-           | Number -> "number"
-           | Boolean -> "boolean"
-           | Array -> "array"
-           | Object -> "object"
-         in
-         let props =
-           List.map
-             (fun (p : Agent_sdk.Types.tool_param) ->
-                ( p.name
-                , `Assoc
-                    [ "type", `String (param_type_str p.param_type)
-                    ; "description", `String p.description
-                    ] ))
-             t.schema.parameters
-         in
-         let required =
-           t.schema.parameters
-           |> List.filter (fun (p : Agent_sdk.Types.tool_param) -> p.required)
-           |> List.map (fun (p : Agent_sdk.Types.tool_param) -> `String p.name)
-         in
-         let schema =
-           `Assoc
-             [ "type", `String "object"
-             ; "properties", `Assoc props
-             ; "required", `List required
-             ]
-         in
-         Hashtbl.replace tbl t.schema.name schema)
+         Hashtbl.replace tbl t.schema.name
+           (Agent_sdk.Types.params_to_input_schema t.schema.parameters))
       keeper_tools;
     tbl
   in

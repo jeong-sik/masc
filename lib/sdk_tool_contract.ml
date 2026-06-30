@@ -248,17 +248,14 @@ let validate_input_json schema json =
   validate_json_value ~label:"input" schema json
 
 (* Strict classifier: returns [None] for unknown JSON Schema types so
-   callers can distinguish "rule fired" from "fall-through default".
-   See #8832. *)
+   callers can distinguish "rule fired" from "fall-through default"
+   (see #8832). Delegates to the OAS SSOT
+   [Agent_sdk.Types.param_type_of_string] ([Error _ -> None]) so a
+   param_type added upstream stays in sync without editing this table.
+   NB: not [Tool_bridge.param_type_of_string] / [Mcp.json_schema_type_to_param_type],
+   whose permissive [_ -> String] default would erase the strict [None]. *)
 let param_type_of_schema_opt schema : Agent_sdk.Types.param_type option =
-  match schema_type schema with
-  | "string" -> Some Agent_sdk.Types.String
-  | "integer" -> Some Agent_sdk.Types.Integer
-  | "number" -> Some Agent_sdk.Types.Number
-  | "boolean" -> Some Agent_sdk.Types.Boolean
-  | "array" -> Some Agent_sdk.Types.Array
-  | "object" -> Some Agent_sdk.Types.Object
-  | _ -> None
+  Agent_sdk.Types.param_type_of_string (schema_type schema) |> Result.to_option
 
 let tool_params_of_input_schema schema =
   let required = required_names schema in

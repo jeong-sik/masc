@@ -432,10 +432,21 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       =
       let reason = forbidden_without_approval_reject_reason ~risk ~hard_forbidden in
       let decision = Agent_sdk.Hooks.Reject reason in
+      let event_type, event_id_prefix, disposition_reason =
+        if hard_forbidden
+        then
+          ( Keeper_approval_queue.approval_audit_hard_forbidden_event
+          , "hard_forbidden"
+          , "hard_forbidden" )
+        else
+          ( Keeper_approval_queue.approval_audit_soft_forbidden_event
+          , "soft_forbidden"
+          , "soft_forbidden" )
+      in
       Keeper_approval_queue.audit_approval_event
         ~base_path
-        ~event_type:Keeper_approval_queue.approval_audit_hard_forbidden_event
-        ~id:(Printf.sprintf "hard_forbidden_%s_%s" keeper_name tool_name)
+        ~event_type
+        ~id:(Printf.sprintf "%s_%s_%s" event_id_prefix keeper_name tool_name)
         ~keeper_name
         ~tool_name
         ~risk_level
@@ -447,7 +458,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         ?runtime_contract
         ?selected_model
         ~disposition:"Blocked"
-        ~disposition_reason:"hard_forbidden"
+        ~disposition_reason
         ~auto_approved:false
         ~decision:(Keeper_approval_queue.Approval_resolved decision)
         ();

@@ -1497,6 +1497,69 @@ let test_hard_forbidden_blocks_when_hitl_disabled () =
           true
           (approval_decision_is_reject decision)))
 
+let test_soft_forbidden_writes_soft_audit_and_read_model () =
+  with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect
+      ~finally:AQ.For_testing.reset_audit_store
+      (fun () ->
+        with_test_config @@ fun config ->
+        let keeper_name = "soft-forbidden-audit-keeper" in
+        let meta =
+          meta_from_json
+            (`Assoc [
+               ("name", `String keeper_name);
+               ("trace_id", `String "trace-soft-forbidden-audit");
+               ("sandbox_profile", `String "docker");
+               ("network_mode", `String "inherit");
+               ("always_approve", `Bool true);
+             ])
+        in
+        let cb =
+          GP.to_oas_approval_callback
+            ~config
+            ~governance_level:"production"
+            ~keeper_name
+            ~meta
+            ()
+        in
+        let decision =
+          cb
+            ~tool_name:"masc_status"
+            ~input:(`Assoc [ ("op", `String "git") ])
+        in
+        Alcotest.(check bool)
+          "soft-forbidden rejected with HITL disabled"
+          true
+          (approval_decision_is_reject decision);
+        (match AQ.read_recent_audit ~base_path:config.base_path ~keeper_name ~n:1 () with
+         | latest :: _ ->
+           let open Yojson.Safe.Util in
+           Alcotest.(check string)
+             "event"
+             AQ.approval_audit_soft_forbidden_event
+             (latest |> member "event" |> to_string);
+           Alcotest.(check string)
+             "disposition reason"
+             "soft_forbidden"
+             (latest |> member "disposition_reason" |> to_string);
+           Alcotest.(check string)
+             "decision kind"
+             "reject"
+             (latest |> member "decision_kind" |> to_string)
+         | [] -> Alcotest.fail "expected soft-forbidden audit row");
+        let snapshot = Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta in
+        let open Yojson.Safe.Util in
+        let approval = snapshot |> member "approval" in
+        Alcotest.(check string)
+          "approval state"
+          "soft_forbidden"
+          (approval |> member "state" |> to_string);
+        Alcotest.(check string)
+          "latest event kind"
+          AQ.approval_audit_soft_forbidden_event
+          (approval |> member "latest_event_kind" |> to_string)))
+
 let test_callback_always_approve_respects_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1821,5 +1884,7 @@ let () =
         test_hard_forbidden_hoisted_outside_needs_approval;
       Alcotest.test_case "hard_forbidden blocks when HITL disabled" `Quick
         test_hard_forbidden_blocks_when_hitl_disabled;
+      Alcotest.test_case "soft_forbidden writes soft audit and read model" `Quick
+        test_soft_forbidden_writes_soft_audit_and_read_model;
     ]);
   ]

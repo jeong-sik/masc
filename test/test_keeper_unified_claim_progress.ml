@@ -158,6 +158,8 @@ let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   ; latency_ms = 1.0
   ; task_id = None
   ; route_evidence = None
+  ; input_fingerprint = Some "input"
+  ; output_fingerprint = Some "output"
   }
 ;;
 

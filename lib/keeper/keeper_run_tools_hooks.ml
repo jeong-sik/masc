@@ -129,6 +129,12 @@ let assemble_hooks
               ~input
               ~output_text
           in
+          let progress_io_fingerprints =
+            Keeper_tool_progress_identity.digest_tool_io
+              ~tool_name
+              ~input
+              ~output_text
+          in
           let outcome =
             if not success
             then "error"
@@ -153,6 +159,16 @@ let assemble_hooks
              ; latency_ms = duration_ms
              ; task_id
              ; route_evidence
+             ; input_fingerprint =
+                 Option.map
+                   (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+                      d.input_fingerprint)
+                   progress_io_fingerprints
+             ; output_fingerprint =
+                 Option.map
+                   (fun (d : Keeper_tool_progress_identity.io_fingerprints) ->
+                      d.output_fingerprint)
+                   progress_io_fingerprints
              }
              :: acc.tool_calls;
           (* Emit neutral agent observation events; UI adapters subscribe separately. *)

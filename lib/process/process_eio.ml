@@ -62,6 +62,16 @@ let set_spawn_guard guard = Atomic.set spawn_guard guard
 let reset_spawn_guard_for_testing () = Atomic.set spawn_guard default_spawn_guard
 let with_spawn_guard f = (Atomic.get spawn_guard).run f
 
+let close_flow_best_effort label flow =
+  try Eio.Flow.close flow with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn ->
+    Log.Misc.debug
+      "[Process_eio] ignored %s close error: %s"
+      label
+      (Printexc.to_string exn)
+;;
+
 let init ~cwd_default ~proc_mgr ~clock =
   Atomic.set runtime_state (Some { proc_mgr; clock; cwd_default })
 
@@ -497,7 +507,7 @@ let spawn_and_drain_stdout ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv
   Fun.protect
     ~finally:(fun () ->
       if Option.is_none !status then (
-        (try Eio.Flow.close stdout_r with _ -> ());
+        close_flow_best_effort "stdout" stdout_r;
         reap_proc_with_clock clock proc
       ) else
         Eio.Flow.close stdout_r)
@@ -534,8 +544,8 @@ let spawn_and_drain_both ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~clock argv s
   Fun.protect
     ~finally:(fun () ->
       if Option.is_none !status then (
-        (try Eio.Flow.close stdout_r with _ -> ());
-        (try Eio.Flow.close stderr_r with _ -> ());
+        close_flow_best_effort "stdout" stdout_r;
+        close_flow_best_effort "stderr" stderr_r;
         reap_proc_with_clock clock proc
       ) else (
         Eio.Flow.close stdout_r;
@@ -596,8 +606,8 @@ let spawn_and_drain_both_streaming ?phase_ref ~sw pm ~cwd ?env ?stdin_source ~cl
   Fun.protect
     ~finally:(fun () ->
       if Option.is_none !status then (
-        (try Eio.Flow.close stdout_r with _ -> ());
-        (try Eio.Flow.close stderr_r with _ -> ());
+        close_flow_best_effort "stdout" stdout_r;
+        close_flow_best_effort "stderr" stderr_r;
         reap_proc_with_clock clock proc
       ) else (
         Eio.Flow.close stdout_r;

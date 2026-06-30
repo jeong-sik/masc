@@ -14,6 +14,7 @@ module Success = Masc.Keeper_unified_turn_success.For_testing
 module Support = Masc.Keeper_unified_metrics_support
 module WO = Masc.Keeper_world_observation
 module Cap = Masc.Keeper_tool_capability_axis
+module Identity = Masc.Keeper_tool_progress_identity
 
 (* Detector now uses Eio.Mutex (was Stdlib.Mutex; the latter raised EDEADLK
    under any fiber contention). Every public entry needs an Eio fiber
@@ -538,7 +539,13 @@ let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =
   ; runtime_config_path = None
   }
 
-let tool_call ?typed_outcome tool_name : Masc.Keeper_agent_result.tool_call_detail =
+let tool_call
+      ?typed_outcome
+      ?(input_fingerprint = Some "input")
+      ?(output_fingerprint = Some "output")
+      tool_name
+  : Masc.Keeper_agent_result.tool_call_detail
+  =
   { tool_name
   ; provider = "test"
   ; outcome = "ok"
@@ -546,6 +553,8 @@ let tool_call ?typed_outcome tool_name : Masc.Keeper_agent_result.tool_call_deta
   ; latency_ms = 0.0
   ; task_id = None
   ; route_evidence = None
+  ; input_fingerprint
+  ; output_fingerprint
   }
 
 let run_result tool_calls : Masc.Keeper_agent_run.run_result =
@@ -569,6 +578,148 @@ let run_result tool_calls : Masc.Keeper_agent_run.run_result =
   ; pre_dispatch_compaction_before_tokens = None
   ; pre_dispatch_compaction_after_tokens = None
   }
+
+let identity_call_of_tool_call (detail : Masc.Keeper_agent_result.tool_call_detail)
+    : Identity.call =
+  { Identity.tool_name = detail.tool_name
+  ; typed_outcome = detail.typed_outcome
+  ; task_id = detail.task_id
+  ; input_fingerprint = detail.input_fingerprint
+  ; output_fingerprint = detail.output_fingerprint
+  }
+
+let progress_identity_of calls =
+  match Identity.of_calls (List.map identity_call_of_tool_call calls) with
+  | Some identity -> identity
+  | None -> Alcotest.fail "expected progress identity"
+;;
+
+let test_repeated_progress_identity_accrues_streak () =
+  D.reset_all_for_test ();
+  let k = "progress-identity-repeat" in
+  let progress_identity =
+    progress_identity_of [ tool_call "tool_execute" ]
+  in
+  D.record_turn ~keeper_name:k ~made_progress:true ~progress_identity ()
+  |> ignore_outcome;
+  Alcotest.(check int) "first evidence identity is progress" 0
+    (D.current_streak ~keeper_name:k);
+  D.record_turn ~keeper_name:k ~made_progress:true ~progress_identity ()
+  |> ignore_outcome;
+  Alcotest.(check int) "same evidence identity repeats => no-progress" 1
+    (D.current_streak ~keeper_name:k);
+  D.record_turn ~keeper_name:k ~made_progress:true ~progress_identity ()
+  |> ignore_outcome;
+  Alcotest.(check int) "same evidence identity keeps accruing" 2
+    (D.current_streak ~keeper_name:k)
+
+let test_different_progress_identity_resets_streak () =
+  D.reset_all_for_test ();
+  let k = "progress-identity-advances" in
+  let first =
+    progress_identity_of
+      [ tool_call ~input_fingerprint:(Some "task-a") "tool_execute" ]
+  in
+  let second =
+    progress_identity_of
+      [ tool_call ~input_fingerprint:(Some "task-b") "tool_execute" ]
+  in
+  D.record_turn ~keeper_name:k ~made_progress:true ~progress_identity:first ()
+  |> ignore_outcome;
+  D.record_turn ~keeper_name:k ~made_progress:true ~progress_identity:first ()
+  |> ignore_outcome;
+  Alcotest.(check int) "repeat built a streak" 1 (D.current_streak ~keeper_name:k);
+  (match D.record_turn ~keeper_name:k ~made_progress:true ~progress_identity:second () with
+   | D.Loop_reset { previous_streak; was_latched } ->
+     Alcotest.(check int) "different identity reset previous streak" 1
+       previous_streak;
+     Alcotest.(check bool) "not latched" false was_latched
+   | D.Normal | D.Loop_detected _ -> Alcotest.fail "expected identity reset");
+  Alcotest.(check int) "different identity is progress" 0
+    (D.current_streak ~keeper_name:k)
+
+let test_progress_identity_requires_complete_digests () =
+  Alcotest.(check bool)
+    "missing output digest disables identity instead of using weak tool/outcome"
+    true
+    (Option.is_none
+       (Identity.of_calls
+          [ identity_call_of_tool_call
+              (tool_call ~output_fingerprint:None "tool_execute")
+          ]))
+
+let test_progress_identity_normalizes_volatile_json_keys () =
+  let left =
+    `Assoc [ "b", `Int 2; "ts", `String "one"; "a", `String "x" ]
+    |> Identity.For_testing.normalize_json
+    |> Yojson.Safe.to_string
+  in
+  let right =
+    `Assoc [ "ts", `String "two"; "a", `String "x"; "b", `Int 2 ]
+    |> Identity.For_testing.normalize_json
+    |> Yojson.Safe.to_string
+  in
+  Alcotest.(check string) "volatile keys removed, object fields sorted" left right
+
+let test_progress_identity_normalizes_duplicate_keys_stably () =
+  let normalized =
+    `Assoc
+      [ "dup", `String "first"
+      ; "z", `Int 0
+      ; "dup", `String "second"
+      ]
+    |> Identity.For_testing.normalize_json
+    |> Yojson.Safe.to_string
+  in
+  Alcotest.(check string)
+    "duplicate-key relative order is stable after key sort"
+    "{\"dup\":\"first\",\"dup\":\"second\",\"z\":0}"
+    normalized
+
+let output_fingerprint_of output_text =
+  match
+    Identity.digest_tool_io ~tool_name:"tool_execute"
+      ~input:(`Assoc [ "task", `String "same" ])
+      ~output_text
+  with
+  | Some fingerprints -> fingerprints.Identity.output_fingerprint
+  | None -> Alcotest.fail "expected tool IO fingerprint"
+
+let stored_output ~sha_char ~bytes ~preview =
+  Tool_output.encode_for_oas
+    (Tool_output.Stored
+       { sha256 = String.make 64 sha_char
+       ; bytes
+       ; preview
+       ; mime = "text/plain"
+       })
+
+let test_stored_output_fingerprint_uses_blob_identity () =
+  let same_preview_a =
+    stored_output ~sha_char:'a' ~bytes:128_934 ~preview:"same preview"
+  in
+  let same_preview_b =
+    stored_output ~sha_char:'b' ~bytes:128_934 ~preview:"same preview"
+  in
+  let same_preview_different_bytes =
+    stored_output ~sha_char:'a' ~bytes:128_935 ~preview:"same preview"
+  in
+  let same_blob_different_preview =
+    stored_output ~sha_char:'a' ~bytes:128_934 ~preview:"different preview"
+  in
+  let fp_a = output_fingerprint_of same_preview_a in
+  Alcotest.(check bool)
+    "same preview with different sha256 does not collide"
+    false
+    (String.equal fp_a (output_fingerprint_of same_preview_b));
+  Alcotest.(check bool)
+    "same preview with different bytes does not collide"
+    false
+    (String.equal fp_a (output_fingerprint_of same_preview_different_bytes));
+  Alcotest.(check bool)
+    "stored output fingerprint ignores preview-only drift"
+    true
+    (String.equal fp_a (output_fingerprint_of same_blob_different_preview))
 
 (* audit D3: a [Task_claim] turn is exempt only when a claim bound work. A claim
    that typed [No_eligible_tasks] did not bind work (the sangsu claim-idle loop,
@@ -684,6 +835,12 @@ let () =
             `Quick (with_eio test_made_progress_predicate);
           Alcotest.test_case "no-progress board post accrues streak (RFC-0239 R3)"
             `Quick (with_eio test_no_progress_board_post_accrues_streak);
+          Alcotest.test_case
+            "repeated progress identity accrues streak"
+            `Quick (with_eio test_repeated_progress_identity_accrues_streak);
+          Alcotest.test_case
+            "different progress identity resets streak"
+            `Quick (with_eio test_different_progress_identity_resets_streak);
         ] );
       ( "threshold crossing",
         [
@@ -729,6 +886,18 @@ let () =
             `Quick (with_eio test_apply_loop_detectors_claim_no_eligible_accrues);
           Alcotest.test_case "is_nonprogress 4-arm mapping (RFC-0289 SSOT)"
             `Quick test_is_nonprogress_branches;
+          Alcotest.test_case
+            "progress identity requires complete digests"
+            `Quick test_progress_identity_requires_complete_digests;
+          Alcotest.test_case
+            "progress identity normalizes volatile JSON keys"
+            `Quick test_progress_identity_normalizes_volatile_json_keys;
+          Alcotest.test_case
+            "progress identity normalizes duplicate JSON keys stably"
+            `Quick test_progress_identity_normalizes_duplicate_keys_stably;
+          Alcotest.test_case
+            "stored output fingerprint uses blob identity"
+            `Quick test_stored_output_fingerprint_uses_blob_identity;
         ] );
       ( "per-keeper isolation",
         [

@@ -33,6 +33,8 @@ type record_outcome =
   | Loop_detected of { streak : int; threshold : int }
   | Loop_reset of { previous_streak : int; was_latched : bool }
 
+type progress_identity = Keeper_tool_progress_identity.t
+
 (** [turn_made_progress ~strong_evidence ~surface_requires_evidence] is the
     no-progress predicate (RFC-0239 §3 R3). A turn makes progress when it
     produced durable evidence ([strong_evidence]), or when its delivery surface
@@ -49,11 +51,23 @@ val turn_made_progress :
     "nothing to do" conclusion (a no-progress board post) also accrues the
     streak.
 
+    [progress_identity], when present, is the stable fingerprint of the
+    strong-evidence tool I/O for this turn. Repeating the same identity does
+    not count as progress even when [made_progress] is true, because it is the
+    budget-exhausted continuation loop class from #22695. The fingerprint must
+    include input/output digests; a weak [(tool_name, outcome)] identity is not
+    accepted by the builder.
+
     [threshold_override] is for high-confidence runtime containment signals
     where waiting for the product default would burn another autonomous budgeted
     turn. Non-positive overrides are ignored. *)
 val record_turn :
-  ?threshold_override:int -> keeper_name:string -> made_progress:bool -> unit -> record_outcome
+  ?threshold_override:int ->
+  ?progress_identity:progress_identity ->
+  keeper_name:string ->
+  made_progress:bool ->
+  unit ->
+  record_outcome
 
 (** Current consecutive no-progress count for [keeper_name]. *)
 val current_streak : keeper_name:string -> int

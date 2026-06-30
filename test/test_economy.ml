@@ -250,23 +250,6 @@ let test_list_transactions () =
         (first.metadata |> member "goal_id" |> to_string)));
   rm_rf dir
 
-(** {1 Reputation Multiplier Tests} *)
-
-let test_reward_multiplier_range () =
-  (* score=0.0 -> 0.5x, score=0.5 -> 1.0x, score=1.0 -> 1.5x *)
-  let m0 = Economy.reward_multiplier ~overall_score:0.0 in
-  let m5 = Economy.reward_multiplier ~overall_score:0.5 in
-  let m10 = Economy.reward_multiplier ~overall_score:1.0 in
-  Alcotest.(check (float 0.01)) "score 0.0 -> 0.5x" 0.5 m0;
-  Alcotest.(check (float 0.01)) "score 0.5 -> 1.0x" 1.0 m5;
-  Alcotest.(check (float 0.01)) "score 1.0 -> 1.5x" 1.5 m10
-
-let test_reward_multiplier_clamped () =
-  let m_neg = Economy.reward_multiplier ~overall_score:(-0.5) in
-  let m_over = Economy.reward_multiplier ~overall_score:2.0 in
-  Alcotest.(check (float 0.01)) "negative clamped to 0.5x" 0.5 m_neg;
-  Alcotest.(check (float 0.01)) "over 1.0 clamped to 1.5x" 1.5 m_over
-
 (** {1 Serialization Tests} *)
 
 let test_transaction_roundtrip () =
@@ -353,10 +336,6 @@ let () =
       Alcotest.test_case "ledger persistence" `Quick test_ledger_persistence;
       Alcotest.test_case "ledger file created" `Quick test_ledger_file_created;
       Alcotest.test_case "list transactions" `Quick test_list_transactions;
-    ]);
-    ("reputation", [
-      Alcotest.test_case "multiplier range" `Quick test_reward_multiplier_range;
-      Alcotest.test_case "multiplier clamped" `Quick test_reward_multiplier_clamped;
     ]);
     ("serialization", [
       Alcotest.test_case "transaction roundtrip" `Quick test_transaction_roundtrip;

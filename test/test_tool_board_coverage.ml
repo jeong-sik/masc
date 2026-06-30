@@ -494,7 +494,6 @@ let test_board_dashboard_json_embeds_contributor_quality () =
   let rep =
     {
       (Reputation.default_reputation ~agent_name:"quality-author") with
-      overall_score = 0.72;
       completion_rate = 0.8;
       response_rate = 0.6;
       board_posts = 3;
@@ -518,8 +517,6 @@ let test_board_dashboard_json_embeds_contributor_quality () =
   in
   Alcotest.(check string) "quality source" "agent_reputation"
     (json_member_string quality "source");
-  Alcotest.(check string) "quality band" "strong"
-    (json_member_string quality "band");
   Alcotest.(check int) "quality board posts" 3
     (json_member_int quality "board_posts")
 

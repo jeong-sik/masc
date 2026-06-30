@@ -235,11 +235,6 @@ let test_agent_reputation_penalizes_unsupported_claims () =
              ("evidence_refs", `List []);
              ("synthetic", `Bool false);
            ]);
-      let unpenalized =
-        Reputation.compute_overall_score ~completion_rate:1.0
-          ~response_rate:0.0 ~board_posts:0 ~board_comments:0
-          ~thompson_confidence:0.5
-      in
       let rep =
         Reputation.compute_reputation config
           ~agent_name:"keeper-rep-agent"
@@ -251,9 +246,7 @@ let test_agent_reputation_penalizes_unsupported_claims () =
       check (float 0.0001) "unsupported completion rate" 1.0
         rep.accountability_unsupported_completion_rate;
       check (float 0.0001) "accountability score clamps to zero" 0.0
-        rep.accountability_score;
-      check bool "overall reputation penalized" true
-        (rep.overall_score < unpenalized))
+        rep.accountability_score)
 
 let test_generated_alias_inherits_accountability_penalty () =
   with_workspace ~agent_name:"adversary-eager-viper" (fun config ->

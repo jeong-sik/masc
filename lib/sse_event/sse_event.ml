@@ -573,6 +573,7 @@ let agent_failed
       ~(error_code : string)
       ~(error_retryable : bool)
       ~(error_detail : Yojson.Safe.t)
+      ()
   : Yojson.Safe.t
   =
   let payload_json =

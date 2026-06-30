@@ -789,7 +789,8 @@ let test_agent_failed_byte_equal () =
          ~error_domain:agent_failed_error_domain
          ~error_code:agent_failed_error_code
          ~error_retryable:agent_failed_error_retryable
-         ~error_detail:agent_failed_error_detail)
+         ~error_detail:agent_failed_error_detail
+         ())
   in
   Alcotest.(check string) "agent_failed typed == baseline" baseline typed
 ;;

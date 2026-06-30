@@ -6,7 +6,6 @@ open Alcotest
 module Join = Masc.Keeper_execution_join
 module Bridge = Masc.Keeper_event_bridge
 module Error_json = Masc.Keeper_event_bridge_error_json
-module Sse_event = Masc.Sse_event
 
 let member key json =
   match json with
@@ -157,6 +156,7 @@ let test_agent_failed_matches_typed_sse_event () =
       ~error_code:projection.error_code
       ~error_retryable:projection.error_retryable
       ~error_detail:projection.error_detail
+      ()
     |> Yojson.Safe.to_string
   in
   check string "agent_failed bridge matches typed constructor" expected actual

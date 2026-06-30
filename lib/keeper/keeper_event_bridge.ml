@@ -238,7 +238,8 @@ let native_event_to_json (evt : Agent_sdk.Event_bus.event) : Yojson.Safe.t optio
          ~error_domain:projection.error_domain
          ~error_code:projection.error_code
          ~error_retryable:projection.error_retryable
-         ~error_detail:projection.error_detail)
+         ~error_detail:projection.error_detail
+         ())
   | Agent_sdk.Event_bus.ToolCalled { agent_name; tool_name; tool_use_id; _ } ->
     (* tool_called publishes before execution, so the keeper hook has not
        minted an execution_id yet — this row carries the provider call id

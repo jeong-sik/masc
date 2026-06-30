@@ -177,4 +177,5 @@ val agent_failed
   -> error_code:string
   -> error_retryable:bool
   -> error_detail:Yojson.Safe.t
+  -> unit
   -> Yojson.Safe.t

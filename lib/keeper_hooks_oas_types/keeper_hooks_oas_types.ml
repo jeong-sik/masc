@@ -262,22 +262,15 @@ let is_keeper_board_write_tool_name tool_name =
 let current_keeper_model _meta =
   runtime_lane_label
 
-let stop_reason_label_end_turn = "end_turn"
-let stop_reason_label_tool_use = "tool_use"
-let stop_reason_label_max_tokens = "max_tokens"
-let stop_reason_label_stop_sequence = "stop_sequence"
-let stop_reason_label_unknown = "unknown"
+let stop_reason_to_label = Agent_sdk.Types.stop_reason_to_metric_label
+let stop_reason_label_end_turn = stop_reason_to_label Agent_sdk.Types.EndTurn
+let stop_reason_label_tool_use = stop_reason_to_label Agent_sdk.Types.StopToolUse
+let stop_reason_label_max_tokens = stop_reason_to_label Agent_sdk.Types.MaxTokens
+let stop_reason_label_stop_sequence =
+  stop_reason_to_label Agent_sdk.Types.StopSequence
 
-let stop_reason_to_label : Agent_sdk.Types.stop_reason -> string = function
-  | Agent_sdk.Types.EndTurn -> stop_reason_label_end_turn
-  | Agent_sdk.Types.StopToolUse -> stop_reason_label_tool_use
-  | Agent_sdk.Types.MaxTokens -> stop_reason_label_max_tokens
-  | Agent_sdk.Types.StopSequence -> stop_reason_label_stop_sequence
-  | Agent_sdk.Types.Refusal -> "refusal"
-  | Agent_sdk.Types.PauseTurn -> "pause_turn"
-  | Agent_sdk.Types.Compaction -> "compaction"
-  | Agent_sdk.Types.ContextWindowExceeded -> "model_context_window_exceeded"
-  | Agent_sdk.Types.Unknown _ -> stop_reason_label_unknown
+let stop_reason_label_unknown =
+  stop_reason_to_label (Agent_sdk.Types.Unknown "")
 
 (* F4 canonical projection consumption: delegate to OAS instead of re-spelling
    the api_usage record literal (SSOT — OAS owns the zero marker). *)

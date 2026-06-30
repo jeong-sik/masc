@@ -20,13 +20,7 @@ let default_complete ~sw ~net ?clock ~config ~messages () =
   Llm_provider.Complete.complete ~sw ~net ?clock ~config ~messages ()
 ;;
 
-let user_message text : Agent_sdk.Types.message =
-  { role = Agent_sdk.Types.User
-  ; content = [ Agent_sdk.Types.Text text ]
-  ; name = None
-  ; tool_call_id = None
-  ; metadata = []
-  }
+let user_message text : Agent_sdk.Types.message = Agent_sdk.Types.user_msg text
 ;;
 
 let with_timeout ?clock ~timeout_sec f =

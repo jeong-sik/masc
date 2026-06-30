@@ -199,17 +199,7 @@ let oas_completion_at ?runtime_pool ~model_id ~prompt ~max_tokens ~timeout_sec (
           let runtime_id =
             Local_runtime_pool.runtime_id_of_base_url provider_config.base_url
           in
-          let messages : Oas_types.message list =
-            [
-              {
-                Oas_types.role = Oas_types.User;
-                content = [ Oas_types.Text prompt ];
-                name = None;
-                tool_call_id = None;
-                metadata = [];
-              };
-            ]
-          in
+          let messages : Oas_types.message list = [ Oas_types.user_msg prompt ] in
           let run_completion () =
             Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
               ~config:provider_config ~messages ()

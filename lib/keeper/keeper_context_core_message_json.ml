@@ -102,16 +102,7 @@ let text_of_history_jsonl_json (json : Yojson.Safe.t) : string =
     if blocks = []
     then ""
     else
-      let msg : Agent_sdk.Types.message =
-        {
-          Agent_sdk.Types.role = Agent_sdk.Types.User;
-          content = blocks;
-          name = None;
-          tool_call_id = None;
-          metadata = [];
-        }
-      in
-      Inference_utils.sanitize_text_utf8 (Agent_sdk.Types.text_of_message msg)
+      Inference_utils.sanitize_text_utf8 (Agent_sdk.Types.text_of_content blocks)
   in
   match content_blocks_of_json json with
   | Some blocks -> text_of_blocks blocks

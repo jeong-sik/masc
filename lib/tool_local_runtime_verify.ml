@@ -110,17 +110,7 @@ let probe_chat_completion_compatible
           ~request_path:Masc_network_defaults.openai_chat_completions_path
           ~max_tokens:1 ~temperature:Runtime_provider_defaults.deterministic_temperature ()
       in
-      let messages : Oas_types.message list =
-        [
-          {
-            Oas_types.role = Oas_types.User;
-            content = [ Oas_types.Text "hi" ];
-            name = None;
-            tool_call_id = None;
-            metadata = [];
-          };
-        ]
-      in
+      let messages : Oas_types.message list = [ Oas_types.user_msg "hi" ] in
       let run_completion () =
         Llm_provider.Complete.complete ~sw:env.sw ~net:env.net
           ~config:provider_config ~messages ()

@@ -2,10 +2,12 @@ import { html } from 'htm/preact'
 import { useEffect, useState } from 'preact/hooks'
 import {
   AlertTriangle,
+  BookOpenText,
+  Brain,
+  FileText,
   GitCompareArrows,
+  Map as MapIcon,
   RefreshCw,
-  Route,
-  Send,
 } from 'lucide-preact'
 import { fetchDashboardPrompts, type DashboardPromptItem, type PromptSource } from '../api'
 import { ActionButton } from './common/button'
@@ -50,6 +52,7 @@ export interface KeeperPromptAssemblyRow {
   source: PromptSource | 'computed'
   hasOverride: boolean
   filePath: string | null
+  text: string
   bytes: number
   estimatedTokens: number
   fingerprint: string
@@ -95,6 +98,13 @@ export interface KeeperPromptAssemblyReport {
     promptBytes: number
     estimatedTokens: number
   }
+}
+
+export interface KeeperPromptAssemblyPreset {
+  id: string
+  label: string
+  description: string
+  count: number
 }
 
 const STAGES: AssemblyStageSpec[] = [
@@ -259,6 +269,158 @@ function promptText(prompt: DashboardPromptItem | undefined): string {
   return prompt.effective ?? prompt.file_value ?? prompt.default ?? ''
 }
 
+function promptDisplayText(row: KeeperPromptAssemblyRow): string {
+  if (row.text) return row.text
+  if (row.source === 'computed') return 'Computed at turn time from workspace, scheduler, memory, and runtime state.'
+  if (row.missing) return 'Required prompt file is missing from the active prompt root.'
+  return 'No effective text is currently resolved for this prompt.'
+}
+
+function sourceLabel(source: KeeperPromptAssemblyRow['source']): string {
+  if (source === 'computed') return 'computed'
+  if (source === 'override') return 'saved override'
+  if (source === 'file') return 'prompt file'
+  if (source === 'default') return 'default'
+  return 'missing'
+}
+
+function messageSlotLabel(stage: KeeperPromptAssemblyStage): string {
+  if (stage.messageSlot === 'not sent') return 'not sent'
+  return `${stage.messageSlot} message`
+}
+
+function stageRoleLabel(stage: KeeperPromptAssemblyStage): string {
+  if (stage.role === 'source_prep') return 'source preparation'
+  if (stage.role === 'evidence') return 'audit evidence'
+  return 'model input'
+}
+
+function stagePurpose(stage: KeeperPromptAssemblyStage): string {
+  if (stage.role === 'model_input') return 'Keeper sees this'
+  if (stage.role === 'source_prep') return 'chooses source text'
+  return 'kept for recap'
+}
+
+function stageAccentClass(stage: KeeperPromptAssemblyStage): string {
+  switch (stage.lane) {
+    case 'registry':
+      return 'border-l-[var(--info)] bg-[rgba(106,142,176,0.10)] text-[#48647a]'
+    case 'system_prompt':
+      return 'border-l-[#8e63a9] bg-[rgba(142,99,169,0.12)] text-[#6f4b88]'
+    case 'user_message':
+      return 'border-l-[var(--ok)] bg-[rgba(107,158,107,0.12)] text-[#486f48]'
+    case 'extra_system_context':
+      return 'border-l-[var(--warn)] bg-[rgba(201,162,74,0.14)] text-[#806331]'
+    case 'oas_hook':
+      return 'border-l-[#ba5b65] bg-[rgba(196,106,90,0.13)] text-[#87444b]'
+    case 'manifest':
+      return 'border-l-[var(--color-border-strong)] bg-[rgba(44,40,34,0.08)] text-[#6a5c4a]'
+    default:
+      return 'border-l-[var(--color-border-default)] bg-[rgba(44,40,34,0.08)] text-[#6a5c4a]'
+  }
+}
+
+function stageDotClass(stage: KeeperPromptAssemblyStage): string {
+  switch (stage.lane) {
+    case 'registry':
+      return 'bg-[var(--info)]'
+    case 'system_prompt':
+      return 'bg-[#8e63a9]'
+    case 'user_message':
+      return 'bg-[var(--ok)]'
+    case 'extra_system_context':
+      return 'bg-[var(--warn)]'
+    case 'oas_hook':
+      return 'bg-[#ba5b65]'
+    case 'manifest':
+      return 'bg-[var(--color-border-strong)]'
+    default:
+      return 'bg-[var(--color-border-default)]'
+  }
+}
+
+function stagePresetId(stage: KeeperPromptAssemblyStage): string {
+  return `stage:${stage.id}`
+}
+
+function isStagePreset(id: string): boolean {
+  return id.startsWith('stage:')
+}
+
+function stageIdFromPreset(id: string): string | null {
+  return isStagePreset(id) ? id.slice('stage:'.length) : null
+}
+
+function assemblyPresetOptions(report: KeeperPromptAssemblyReport): KeeperPromptAssemblyPreset[] {
+  const stagePresets = report.stages
+    .filter(stage => stage.rows.some(row => row.source !== 'computed'))
+    .map(stage => ({
+      id: stagePresetId(stage),
+      label: stage.messageSlot === 'not sent' ? stage.title : `${stage.messageSlot}: ${stage.title}`,
+      description: stage.summary,
+      count: stage.rows.filter(row => row.source !== 'computed').length,
+    }))
+
+  return [
+    {
+      id: 'all',
+      label: '전체',
+      description: 'Full prompt world and assembly trail.',
+      count: report.stats.totalRows,
+    },
+    ...stagePresets,
+    {
+      id: 'attention',
+      label: '수정/누락',
+      description: 'Saved overrides and missing required prompt files.',
+      count: report.stats.overrideRows + report.stats.missingRows,
+    },
+  ]
+}
+
+function rowsForPreset(stage: KeeperPromptAssemblyStage, activePreset: string): KeeperPromptAssemblyRow[] {
+  if (activePreset === 'attention') {
+    return stage.rows.filter(row => row.hasOverride || row.missing)
+  }
+  return stage.rows
+}
+
+function stagesForPreset(report: KeeperPromptAssemblyReport, activePreset: string): KeeperPromptAssemblyStage[] {
+  const stageId = stageIdFromPreset(activePreset)
+  if (stageId) return report.stages.filter(stage => stage.id === stageId)
+  if (activePreset === 'attention') {
+    const attentionStages = report.stages.filter(stage => rowsForPreset(stage, activePreset).length > 0)
+    return attentionStages.length > 0 ? attentionStages : report.stages
+  }
+  return report.stages
+}
+
+function stageBytesForPreset(stage: KeeperPromptAssemblyStage, activePreset: string): number {
+  return rowsForPreset(stage, activePreset).reduce((sum, row) => sum + row.bytes, 0)
+}
+
+function stageTokensForPreset(stage: KeeperPromptAssemblyStage, activePreset: string): number {
+  return rowsForPreset(stage, activePreset).reduce((sum, row) => sum + row.estimatedTokens, 0)
+}
+
+function presetStats(stages: KeeperPromptAssemblyStage[], activePreset: string) {
+  const rows = stages.flatMap(stage => rowsForPreset(stage, activePreset))
+  return {
+    rows,
+    bytes: rows.reduce((sum, row) => sum + row.bytes, 0),
+    estimatedTokens: rows.reduce((sum, row) => sum + row.estimatedTokens, 0),
+    overrides: rows.filter(row => row.hasOverride).length,
+    missing: rows.filter(row => row.missing).length,
+  }
+}
+
+function minimapHeight(stage: KeeperPromptAssemblyStage, activePreset: string, largest: number): string {
+  const tokens = stageTokensForPreset(stage, activePreset)
+  const ratio = largest > 0 ? tokens / largest : 0.2
+  const px = Math.max(28, Math.round(28 + ratio * 76))
+  return `${px}px`
+}
+
 function promptRoot(filePath: string | null): string | null {
   if (!filePath) return null
   const marker = '/prompts/'
@@ -321,6 +483,7 @@ export function buildKeeperPromptAssemblyReport(
         source: 'computed',
         hasOverride: false,
         filePath: null,
+        text: '',
         bytes: 0,
         estimatedTokens: 0,
         fingerprint: '-',
@@ -347,6 +510,7 @@ export function buildKeeperPromptAssemblyReport(
         source: prompt?.source ?? 'missing',
         hasOverride: prompt?.has_override ?? false,
         filePath: prompt?.file_path ?? null,
+        text,
         bytes: textByteLength(text),
         estimatedTokens: estimateTokens(text),
         fingerprint: text ? shortFingerprint(text) : '-',
@@ -457,26 +621,6 @@ function reportMicrocopy(report: KeeperPromptAssemblyReport): string {
   return modelInputMicrocopy(modelStages)
 }
 
-function ModelInputStage({ stage, index }: { stage: KeeperPromptAssemblyStage; index: number }) {
-  const messageTone: StatusChipTone = index === 0 ? 'info' : index === 1 ? 'ok' : 'warn'
-  const attention = stageAttention(stage)
-
-  return html`
-    <li class="min-w-0 border-t border-[var(--color-border-default)] py-3 first:border-t-0 first:pt-0 last:pb-0 v2-monitoring-row">
-      <div class="mb-1 flex flex-wrap items-center gap-2">
-        <span class="text-3xs font-semibold text-[var(--color-fg-disabled)]">${index + 1}</span>
-        <${StatusChip} tone=${messageTone} uppercase=${false}>${stage.messageSlot}<//>
-        <div class="text-xs font-semibold leading-tight text-[var(--color-fg-primary)]">${stage.title}</div>
-        ${attention ? html`<${StatusChip} tone=${attention.tone}>${attention.label}<//>` : null}
-      </div>
-      <div class="text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-        ${stage.summary}
-        ${attention ? html`<span class="text-[var(--color-fg-disabled)]"> ${attention.note}</span>` : null}
-      </div>
-    </li>
-  `
-}
-
 interface BuildPathStep {
   id: string
   label: string
@@ -545,25 +689,289 @@ function BuildPathStepRow({ step }: { step: BuildPathStep }) {
   `
 }
 
-function PromptFlowMap({ stages }: { stages: KeeperPromptAssemblyStage[] }) {
-  const modelStages = stages.filter(stage => stage.role === 'model_input')
+function PromptPresetControls({
+  presets,
+  activePreset,
+  onSelect,
+}: {
+  presets: KeeperPromptAssemblyPreset[]
+  activePreset: string
+  onSelect: (id: string) => void
+}) {
+  return html`
+    <div data-prompt-preset-switcher class="flex min-w-0 flex-wrap gap-1.5">
+      ${presets.map(preset => {
+        const active = preset.id === activePreset
+        return html`
+          <button
+            type="button"
+            class=${`min-h-8 rounded-[var(--r-1)] border px-2.5 py-1.5 text-left transition-colors ${active
+              ? 'border-[var(--accent-30)] bg-[var(--accent-15)] text-[var(--color-accent-fg)]'
+              : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] text-[var(--color-fg-secondary)] hover:border-[var(--accent-22)] hover:bg-[var(--color-bg-elevated)]'}`}
+            data-active=${active ? 'true' : 'false'}
+            title=${preset.description}
+            onClick=${() => onSelect(preset.id)}
+          >
+            <span class="flex items-center gap-2">
+              <span class="text-2xs font-semibold leading-none">${preset.label}</span>
+              <span class="rounded-[var(--r-0)] bg-[rgba(255,255,255,0.06)] px-1.5 py-0.5 font-mono text-3xs leading-none">${preset.count}</span>
+            </span>
+          </button>
+        `
+      })}
+    </div>
+  `
+}
+
+function CodexMetric({
+  label,
+  value,
+  detail,
+  tone = 'neutral',
+}: {
+  label: string
+  value: string
+  detail: string
+  tone?: StatusChipTone
+}) {
+  return html`
+    <div class="min-w-0 rounded-[var(--r-1)] border border-[rgba(114,97,67,0.34)] bg-[rgba(43,32,21,0.08)] px-3 py-2">
+      <div class="mb-1 flex items-center justify-between gap-2">
+        <span class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[#7d6a4b]">${label}</span>
+        <${StatusChip} tone=${tone} uppercase=${false}>${detail}<//>
+      </div>
+      <div class="break-words font-mono text-sm font-semibold leading-tight text-[#2b2015]">${value}</div>
+    </div>
+  `
+}
+
+function PromptSourceLine({ row, stage }: { row: KeeperPromptAssemblyRow; stage: KeeperPromptAssemblyStage }) {
+  return html`
+    <div class="grid gap-1 text-3xs leading-relaxed text-[#6a5a40] sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+      <div class="min-w-0">
+        <span class="font-semibold uppercase tracking-[var(--track-caps)]">${messageSlotLabel(stage)}</span>
+        <span class="mx-1 text-[#9a7a3a]">/</span>
+        <span>${stageRoleLabel(stage)}</span>
+        <span class="mx-1 text-[#9a7a3a]">/</span>
+        <span>${sourceLabel(row.source)}</span>
+        ${row.filePath ? html`
+          <span class="mx-1 text-[#9a7a3a]">/</span>
+          <code class="break-all font-mono text-[#4e3b23]">${row.filePath}</code>
+        ` : null}
+      </div>
+      <div class="flex flex-wrap gap-1 sm:justify-end">
+        <span class="rounded-[var(--r-0)] border border-[rgba(114,97,67,0.28)] bg-[rgba(255,255,255,0.24)] px-1.5 py-0.5 font-mono text-[#4e3b23]">bytes ${formatBytes(row.bytes)}</span>
+        <span class="rounded-[var(--r-0)] border border-[rgba(114,97,67,0.28)] bg-[rgba(255,255,255,0.24)] px-1.5 py-0.5 font-mono text-[#4e3b23]">tokens ${row.estimatedTokens ? row.estimatedTokens.toLocaleString() : '-'}</span>
+        <span class="rounded-[var(--r-0)] border border-[rgba(114,97,67,0.28)] bg-[rgba(255,255,255,0.24)] px-1.5 py-0.5 font-mono text-[#4e3b23]">fingerprint ${row.fingerprint}</span>
+      </div>
+    </div>
+  `
+}
+
+function PromptDocumentRow({ row, stage }: { row: KeeperPromptAssemblyRow; stage: KeeperPromptAssemblyStage }) {
+  const text = promptDisplayText(row)
+  return html`
+    <article
+      data-prompt-document-row
+      class=${`group relative border-l-4 ${stageAccentClass(stage)} rounded-r-[var(--r-1)] border-y border-r border-[rgba(114,97,67,0.24)] bg-clip-padding px-4 py-3 shadow-[0_1px_0_rgba(255,255,255,0.45)_inset]`}
+    >
+      <div class="mb-2 flex min-w-0 flex-wrap items-center gap-2">
+        <span class="flex size-6 shrink-0 items-center justify-center rounded-[var(--r-0)] bg-[rgba(43,32,21,0.10)] font-mono text-3xs font-semibold text-current">
+          ${row.order}
+        </span>
+        <div class="min-w-0">
+          <div class="truncate font-mono text-xs font-semibold text-[#2b2015]">${row.promptKey}</div>
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[#7d6a4b]">${stage.title}</div>
+        </div>
+        <div class="ml-auto flex flex-wrap gap-1">
+          <${StatusChip} tone=${sourceTone(row)} uppercase=${false}>${sourceLabel(row.source)}<//>
+          ${row.hasOverride && row.source !== 'override' ? html`<${StatusChip} tone="warn" uppercase=${false}>edited<//>` : null}
+          ${row.missing && row.source !== 'missing' ? html`<${StatusChip} tone="bad" uppercase=${false}>missing<//>` : null}
+        </div>
+      </div>
+      <${PromptSourceLine} row=${row} stage=${stage} />
+      <pre
+        class="mt-3 max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-[var(--r-1)] border border-[rgba(114,97,67,0.22)] bg-[rgba(255,251,238,0.62)] p-3 font-serif text-sm leading-7 text-[#2b2015] shadow-[0_10px_22px_rgba(43,32,21,0.05)_inset]"
+      >${text}</pre>
+    </article>
+  `
+}
+
+function PromptStageDocument({
+  stage,
+  activePreset,
+}: {
+  stage: KeeperPromptAssemblyStage
+  activePreset: string
+}) {
+  const rows = rowsForPreset(stage, activePreset)
+  const attention = stageAttention(stage)
 
   return html`
-    <section data-prompt-route-default class="min-w-0 border-l border-[var(--accent-22)] py-1 pl-3 v2-monitoring-panel">
-      <div class="mb-2 flex min-w-0 items-center gap-2 v2-monitoring-toolbar">
-        <div class="flex min-w-0 items-center gap-2">
-          <${Send} size=${15} class="shrink-0 text-[var(--color-accent-fg)]" />
+    <section data-prompt-codex-stage=${stage.id} class="scroll-mt-6">
+      <div class="mb-3 flex min-w-0 items-start gap-3">
+        <span class=${`mt-1 size-3 shrink-0 rounded-full ${stageDotClass(stage)} shadow-[0_0_0_4px_rgba(43,32,21,0.08)]`}></span>
+        <div class="min-w-0 flex-1">
+          <div class="flex flex-wrap items-center gap-2">
+            <h4 class="m-0 text-lg font-semibold leading-tight" style=${{ color: '#2b2015', textTransform: 'none' }}>${stage.title}</h4>
+            <${StatusChip} tone=${stage.role === 'model_input' ? 'info' : 'neutral'} uppercase=${false}>${stagePurpose(stage)}<//>
+            ${attention ? html`<${StatusChip} tone=${attention.tone} uppercase=${false}>${attention.label}<//>` : null}
+          </div>
+          <p class="m-0 mt-1 text-sm leading-relaxed" style=${{ color: '#6a5a40' }}>${stage.summary}</p>
+        </div>
+        <div class="hidden shrink-0 text-right font-mono text-2xs text-[#6a5a40] sm:block">
+          <div>${formatBytes(stageBytesForPreset(stage, activePreset))}</div>
+          <div>${stageTokensForPreset(stage, activePreset).toLocaleString()} tok est</div>
+        </div>
+      </div>
+      <div class="grid gap-3">
+        ${rows.map(row => html`
+          <${PromptDocumentRow} key=${row.id} row=${row} stage=${stage} />
+        `)}
+      </div>
+    </section>
+  `
+}
+
+function PromptCodexMinimap({
+  stages,
+  activePreset,
+  selectedPreset,
+  onSelectPreset,
+}: {
+  stages: KeeperPromptAssemblyStage[]
+  activePreset: string
+  selectedPreset: string
+  onSelectPreset: (id: string) => void
+}) {
+  const largest = Math.max(...stages.map(stage => stageTokensForPreset(stage, activePreset)), 0)
+
+  return html`
+    <aside data-prompt-minimap class="min-w-0 rounded-[var(--r-1)] border border-[rgba(201,162,74,0.24)] bg-[rgba(11,10,8,0.42)] p-3">
+      <div class="mb-3 flex items-center gap-2">
+        <${MapIcon} size=${14} class="text-[var(--color-accent-fg)]" />
+        <div>
+          <div class="text-xs font-semibold text-[var(--color-fg-primary)]">Recap minimap</div>
+          <div class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">source map</div>
+        </div>
+      </div>
+      <div class="grid gap-2">
+        ${stages.map(stage => {
+          const stagePreset = stagePresetId(stage)
+          const selected = selectedPreset === stagePreset
+          return html`
+            <button
+              type="button"
+              class=${`grid min-w-0 grid-cols-[10px_minmax(0,1fr)] gap-2 rounded-[var(--r-1)] border p-2 text-left transition-colors ${selected
+                ? 'border-[var(--accent-30)] bg-[var(--accent-12)]'
+                : 'border-[var(--color-border-default)] bg-[rgba(255,255,255,0.03)] hover:border-[var(--accent-22)] hover:bg-[var(--color-bg-elevated)]'}`}
+              onClick=${() => onSelectPreset(stagePreset)}
+            >
+              <span class=${`block w-2 rounded-full ${stageDotClass(stage)}`} style=${{ height: minimapHeight(stage, activePreset, largest) }}></span>
+              <span class="min-w-0">
+                <span class="block truncate text-xs font-semibold text-[var(--color-fg-primary)]">${stage.title}</span>
+                <span class="mt-0.5 block truncate font-mono text-3xs text-[var(--color-fg-muted)]">
+                  ${messageSlotLabel(stage)} · ${stageTokensForPreset(stage, activePreset).toLocaleString()} tok
+                </span>
+                <span class="mt-1 flex flex-wrap gap-1">
+                  ${stage.overrideCount > 0 ? html`<${StatusChip} tone="warn" uppercase=${false}>${stage.overrideCount} edited<//>` : null}
+                  ${stage.missingCount > 0 ? html`<${StatusChip} tone="bad" uppercase=${false}>${stage.missingCount} missing<//>` : null}
+                </span>
+              </span>
+            </button>
+          `
+        })}
+      </div>
+    </aside>
+  `
+}
+
+function PromptCodexDocument({
+  report,
+  activePreset,
+  presets,
+  onSelectPreset,
+}: {
+  report: KeeperPromptAssemblyReport
+  activePreset: string
+  presets: KeeperPromptAssemblyPreset[]
+  onSelectPreset: (id: string) => void
+}) {
+  const visibleStages = stagesForPreset(report, activePreset)
+  const visible = presetStats(visibleStages, activePreset)
+  const modelStages = report.stages.filter(stage => stage.role === 'model_input')
+  const activePresetLabel = presets.find(preset => preset.id === activePreset)?.label ?? '전체'
+
+  return html`
+    <section
+      data-prompt-route-default
+      data-prompt-codex
+      class="min-w-0 overflow-hidden rounded-[var(--r-1)] border border-[rgba(201,162,74,0.24)] bg-[linear-gradient(180deg,rgba(34,27,18,0.88),rgba(13,12,10,0.92))] shadow-[0_18px_50px_rgba(0,0,0,0.32)]"
+    >
+      <div class="border-b border-[rgba(201,162,74,0.18)] px-4 py-4">
+        <div class="grid gap-3">
           <div class="min-w-0">
-            <div class="text-3xs font-semibold uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">model sees</div>
-            <div class="text-sm font-semibold leading-tight text-[var(--color-fg-primary)]">Model request</div>
+            <div class="mb-2 flex flex-wrap items-center gap-2">
+              <${BookOpenText} size=${18} class="text-[var(--color-accent-fg)]" />
+              <h3 class="m-0 text-lg font-semibold leading-tight text-[var(--color-fg-primary)]">Prompt Codex</h3>
+              <${StatusChip} tone="info" uppercase=${false}>${activePresetLabel}<//>
+              <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
+            </div>
+            <p data-prompt-recipe-intro class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
+              Keeper instructions as assembled document sections, with source boundaries and size recap.
+            </p>
+          </div>
+          <${PromptPresetControls} presets=${presets} activePreset=${activePreset} onSelect=${onSelectPreset} />
+        </div>
+      </div>
+
+      <div class="grid gap-4 p-4 xl:grid-cols-[minmax(0,1fr)_270px]">
+        <article class="min-w-0 rounded-[var(--r-1)] border border-[#b58e48]/55 bg-[#ead9b5] p-4 text-[#2b2015] shadow-[0_1px_0_rgba(255,255,255,0.55)_inset,0_18px_46px_rgba(0,0,0,0.28)]">
+          <div class="mb-4 grid gap-2 md:grid-cols-4">
+            <${CodexMetric} label="Total size" value=${`${formatBytes(report.stats.promptBytes)} · ${report.stats.estimatedTokens.toLocaleString()} tok`} detail="all" tone="neutral" />
+            <${CodexMetric} label="Preset size" value=${`${formatBytes(visible.bytes)} · ${visible.estimatedTokens.toLocaleString()} tok`} detail=${activePresetLabel} tone="info" />
+            <${CodexMetric} label="Sources" value=${`${visible.rows.length.toLocaleString()} rows`} detail=${`${modelStages.length} model parts`} tone="ok" />
+            <${CodexMetric} label="Attention" value=${`${visible.overrides} edited · ${visible.missing} missing`} detail="audit" tone=${visible.missing > 0 ? 'bad' : visible.overrides > 0 ? 'warn' : 'neutral'} />
+          </div>
+
+          <div class="mb-5 flex min-w-0 items-start gap-3 border-y border-[rgba(114,97,67,0.24)] py-4">
+            <div class="flex size-10 shrink-0 items-center justify-center rounded-full border border-[rgba(114,97,67,0.28)] bg-[rgba(255,251,238,0.48)]">
+              <${Brain} size=${20} class="text-[#806331]" />
+            </div>
+            <div class="min-w-0">
+              <div class="text-2xs font-semibold uppercase tracking-[var(--track-caps)] text-[#7d6a4b]">Keeper sees</div>
+              <div class="mt-1 text-xl font-semibold leading-tight text-[#2b2015]">A staged instruction manuscript</div>
+              <div class="mt-1 text-sm leading-relaxed text-[#6a5a40]">Every block shows where it enters the request, which file or override supplied it, and how much context weight it adds.</div>
+            </div>
+          </div>
+
+          <div class="grid gap-8">
+            ${visibleStages.map(stage => html`
+              <${PromptStageDocument} key=${stage.id} stage=${stage} activePreset=${activePreset} />
+            `)}
+          </div>
+        </article>
+
+        <div class="grid content-start gap-3">
+          <${PromptCodexMinimap}
+            stages=${report.stages}
+            activePreset=${activePreset}
+            selectedPreset=${activePreset}
+            onSelectPreset=${onSelectPreset}
+          />
+          <div data-prompt-source-roots class="min-w-0 rounded-[var(--r-1)] border border-[rgba(201,162,74,0.24)] bg-[rgba(11,10,8,0.42)] p-3">
+            <div class="mb-2 flex items-center gap-2 text-xs font-semibold text-[var(--color-fg-primary)]">
+              <${FileText} size=${14} class="text-[var(--color-accent-fg)]" />
+              Prompt roots
+            </div>
+            ${report.activePromptRoots.length > 0 ? report.activePromptRoots.map(root => html`
+              <code class="block break-all rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[rgba(255,255,255,0.03)] px-2 py-1.5 font-mono text-3xs leading-relaxed text-[var(--color-fg-secondary)]">${root}</code>
+            `) : html`
+              <div class="text-2xs text-[var(--color-fg-muted)]">No prompt root resolved.</div>
+            `}
           </div>
         </div>
       </div>
-      <ol class="mt-2">
-        ${modelStages.map((stage, index) => html`
-          <${ModelInputStage} key=${stage.id} stage=${stage} index=${index} />
-        `)}
-      </ol>
     </section>
   `
 }
@@ -696,25 +1104,27 @@ function SourceEvidenceDetails({ report, compact }: { report: KeeperPromptAssemb
   `
 }
 
-function PromptAssemblyContent({ report, compact = false }: { report: KeeperPromptAssemblyReport; compact?: boolean }) {
+function PromptAssemblyContent({
+  report,
+  compact = false,
+  activePreset,
+  presets,
+  onSelectPreset,
+}: {
+  report: KeeperPromptAssemblyReport
+  compact?: boolean
+  activePreset: string
+  presets: KeeperPromptAssemblyPreset[]
+  onSelectPreset: (id: string) => void
+}) {
   return html`
-    <div
-      class="rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-elevated)] p-4 v2-monitoring-panel"
-    >
-      <div class="mb-4 border-b border-[var(--color-border-default)] pb-3 v2-monitoring-toolbar">
-        <div class="max-w-4xl">
-          <div class="mb-1 flex flex-wrap items-center gap-2">
-            <${Route} size=${16} class="text-[var(--color-accent-fg)]" />
-            <h3 class="text-sm font-semibold text-[var(--color-fg-primary)]">Turn prompt recipe</h3>
-            <span class="text-3xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-disabled)]">${reportMicrocopy(report)}</span>
-          </div>
-          <p data-prompt-recipe-intro class="m-0 max-w-3xl text-2xs leading-relaxed text-[var(--color-fg-muted)]">
-            Shows only the ordered model request. Build details explains assembly.
-          </p>
-        </div>
-      </div>
-
-      <${PromptFlowMap} stages=${report.stages} />
+    <div class="v2-monitoring-panel">
+      <${PromptCodexDocument}
+        report=${report}
+        activePreset=${activePreset}
+        presets=${presets}
+        onSelectPreset=${onSelectPreset}
+      />
       <${SourceEvidenceDetails} report=${report} compact=${compact} />
     </div>
   `
@@ -723,11 +1133,18 @@ function PromptAssemblyContent({ report, compact = false }: { report: KeeperProm
 export function KeeperPromptAssemblyPanel({
   compact = false,
   prompts: providedPrompts,
+  activePreset,
+  presets: providedPresets,
+  onPresetChange,
 }: {
   compact?: boolean
   prompts?: DashboardPromptItem[]
+  activePreset?: string
+  presets?: KeeperPromptAssemblyPreset[]
+  onPresetChange?: (id: string) => void
 }) {
   const [loadedPrompts, setLoadedPrompts] = useState<DashboardPromptItem[]>([])
+  const [localPreset, setLocalPreset] = useState('all')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const ownsFetch = providedPrompts == null
@@ -751,6 +1168,17 @@ export function KeeperPromptAssemblyPanel({
   }, [ownsFetch])
 
   const report = buildKeeperPromptAssemblyReport(providedPrompts ?? loadedPrompts)
+  const presets = providedPresets?.length ? providedPresets : assemblyPresetOptions(report)
+  const requestedPreset = activePreset ?? localPreset
+  const selectedPreset = presets.some(preset => preset.id === requestedPreset) ? requestedPreset : 'all'
+  function selectPreset(id: string) {
+    if (!presets.some(preset => preset.id === id)) return
+    if (onPresetChange) {
+      onPresetChange(id)
+      return
+    }
+    setLocalPreset(id)
+  }
   const showToolbar = ownsFetch || loading
 
   return html`
@@ -768,7 +1196,13 @@ export function KeeperPromptAssemblyPanel({
         ` : null}
       </div>` : null}
       ${error ? html`<${ErrorState} message=${error} class="mb-3" />` : null}
-      <${PromptAssemblyContent} report=${report} compact=${compact} />
+      <${PromptAssemblyContent}
+        report=${report}
+        compact=${compact}
+        activePreset=${selectedPreset}
+        presets=${presets}
+        onSelectPreset=${selectPreset}
+      />
     </div>
   `
 }

@@ -359,35 +359,15 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
         </div>
       </div>
 
-      <div class="mb-4" data-prompt-preset-switcher>
-        <div class="mb-2 flex items-center justify-between gap-2">
-          <div class="text-2xs uppercase tracking-[var(--track-caps)] text-[var(--color-fg-muted)]">프리셋</div>
-          <div class="text-2xs text-[var(--color-fg-muted)]">Turn prompt recipe 기준으로 묶어 봅니다.</div>
-        </div>
-        <div class="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-          ${presets.map(item => html`
-            <button
-              type="button"
-              class=${`prompt-preset-card rounded-[var(--r-1)] border px-3 py-2 text-left transition-colors ${activePreset === item.id
-                ? 'border-[var(--accent-30)] bg-[var(--accent-10)]'
-                : 'border-[var(--color-border-default)] bg-[var(--color-bg-surface)] hover:border-[var(--accent-22)] hover:bg-[var(--color-bg-elevated)]'}`}
-              data-active=${activePreset === item.id ? 'true' : 'false'}
-              onClick=${() => {
-                setPreset(item.id)
-                setStatus(null)
-              }}
-            >
-              <div class="mb-1 flex items-center justify-between gap-2">
-                <span class="text-xs font-semibold text-[var(--color-fg-primary)]">${item.label}</span>
-                <${StatusChip} tone=${activePreset === item.id ? 'info' : 'neutral'} uppercase=${false}>${item.count}<//>
-              </div>
-              <div class="prompt-preset-description text-2xs leading-relaxed text-[var(--color-fg-muted)]">${item.description}</div>
-            </button>
-          `)}
-        </div>
-      </div>
-
-      <${KeeperPromptAssemblyPanel} prompts=${prompts} />
+      <${KeeperPromptAssemblyPanel}
+        prompts=${prompts}
+        activePreset=${activePreset}
+        presets=${presets}
+        onPresetChange=${(id: string) => {
+          setPreset(id as PromptPresetId)
+          setStatus(null)
+        }}
+      />
 
       ${error ? html`<${ErrorState} message=${error} class="mb-4" />` : null}
       ${status ? html`<div class="v2-lab-panel mb-4 rounded-[var(--r-1)] border border-[var(--sky-28)] bg-[var(--sky-8)] px-3 py-2 text-xs text-[var(--sky-light)]">${status}</div>` : null}

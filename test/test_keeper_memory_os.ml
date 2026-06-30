@@ -1284,7 +1284,7 @@ let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
     (parse {|{"text":"Remember exact command."}|});
   check_invalid_structured
     "wrong field result"
-    (parse_result {|{"text":"Remember exact command."}|)
+    (parse_result {|{"text":"Remember exact command."}|})
 ;;
 
 let json_episode_file_count ~keeper_id =

@@ -349,7 +349,6 @@ let text_blocks (messages : Agent_sdk.Types.message list) =
            | Agent_sdk.Types.Thinking _
            | Agent_sdk.Types.ReasoningDetails _
            | Agent_sdk.Types.RedactedThinking _
-           | Agent_sdk.Types.ReasoningDetails _
            | Agent_sdk.Types.ToolUse _
            | Agent_sdk.Types.ToolResult _
            | Agent_sdk.Types.Image _
@@ -372,7 +371,6 @@ let count_tool_blocks messages =
            | Agent_sdk.Types.Thinking _
            | Agent_sdk.Types.ReasoningDetails _
            | Agent_sdk.Types.RedactedThinking _
-           | Agent_sdk.Types.ReasoningDetails _
            | Agent_sdk.Types.Image _
            | Agent_sdk.Types.Document _
            | Agent_sdk.Types.Audio _ -> tool_uses, tool_results)

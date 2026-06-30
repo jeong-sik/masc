@@ -1,6 +1,6 @@
 opam-version: "2.0"
 name: "masc"
-version: "0.19.54"
+version: "0.19.55"
 synopsis: "Multi-Agent Shared Context MCP Server in OCaml"
 description:
   "MASC Protocol: File-based workspace collaboration for Claude, Gemini, and Codex agents"

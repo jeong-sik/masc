@@ -1,6 +1,6 @@
 ---
 status: live
-last_verified: 2026-06-29
+last_verified: 2026-06-30
 code_refs:
   - lib/keeper/
   - lib/mcp_server.ml
@@ -9,10 +9,10 @@ code_refs:
 
 # Product Operating Plan
 
-> Current package version: v0.19.54
-> Latest changelog entry: v0.19.54 (2026-06-29)
+> Current package version: v0.19.55
+> Latest changelog entry: v0.19.55 (2026-06-30)
 > Latest published GitHub release: v0.19.51 (2026-06-28)
-> Updated: 2026-06-29
+> Updated: 2026-06-30
 > Release line: pre-1.0 (`0.y.z`); legacy `v2.*` tags are frozen history
 
 Execution companion for capsule-only workspace collaboration hardening:

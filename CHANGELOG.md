@@ -2,6 +2,14 @@
 
 ## Unreleased
 
+## [0.19.55] - 2026-06-30
+
+### Changed
+- Bump OAS `agent_sdk` pin to `v0.208.1`
+  (`9e7794f9b37e268269f5ff24a8f6570438b5f7b7`) and raise the
+  dependency floor to `agent_sdk >= 0.208.1`, carrying the OAS
+  RFC-OAS-029 tools/thinking/reasoning standard and enforcement coverage.
+
 ### Changed
 - Bump OAS agent_sdk pin to the 0.207.22 main follow-up (`c741324`),
   carrying #2254 typed GLM forced-tool-choice rejection, #2248

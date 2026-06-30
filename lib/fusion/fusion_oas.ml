@@ -11,45 +11,13 @@ let answer_text (resp : Agent_sdk.Types.api_response) : string =
 
 let stop_reason_label = Keeper_hooks_oas_types.stop_reason_to_label
 
-type empty_response_content_counts =
-  { text_blocks : int
-  ; text_chars : int
-  ; tool_use_count : int
-  ; tool_result_count : int
-  ; image_count : int
-  ; document_count : int
-  ; audio_count : int
-  }
-
-let zero_empty_response_content_counts =
-  { text_blocks = 0
-  ; text_chars = 0
-  ; tool_use_count = 0
-  ; tool_result_count = 0
-  ; image_count = 0
-  ; document_count = 0
-  ; audio_count = 0
-  }
-
-let empty_response_content_counts content =
-  List.fold_left
-    (fun acc -> function
-      | Agent_sdk.Types.Text s ->
-        { acc with
-          text_blocks = acc.text_blocks + 1
-        ; text_chars = acc.text_chars + String.length s
-        }
-      | Thinking _ | RedactedThinking _ -> acc
-      | ToolUse _ -> { acc with tool_use_count = acc.tool_use_count + 1 }
-      | ToolResult _ ->
-        { acc with tool_result_count = acc.tool_result_count + 1 }
-      | Image _ -> { acc with image_count = acc.image_count + 1 }
-      | Document _ -> { acc with document_count = acc.document_count + 1 }
-      | Audio _ -> { acc with audio_count = acc.audio_count + 1 })
-    zero_empty_response_content_counts content
-
+(* 콘텐츠 블록 카운팅은 OAS canonical projection
+   [Agent_sdk.Response_shape.summarize_blocks]에 위임한다. 로컬 fold를 재구현하지 않는다
+   (keeper_hooks_oas_types.ml의 F2 canonical projection 원칙과 동일 — 미이행 사이트였다).
+   thinking_kind 분류만 MASC가 소유한다: OAS는 model-family thinking 의미를 의도적으로
+   노출하지 않으므로 [summarize_thinking_blocks]로 별도 산출한다. *)
 let empty_response_detail (resp : Agent_sdk.Types.api_response) : string =
-  let counts = empty_response_content_counts resp.content in
+  let shape = Agent_sdk.Response_shape.summarize_blocks resp.content in
   let thinking = Keeper_hooks_oas_types.summarize_thinking_blocks resp.content in
   let input_tokens, output_tokens =
     match resp.usage with
@@ -64,17 +32,17 @@ let empty_response_detail (resp : Agent_sdk.Types.api_response) : string =
      output_tokens=%s)"
     (stop_reason_label resp.stop_reason)
     (List.length resp.content)
-    counts.text_blocks
-    counts.text_chars
+    shape.Agent_sdk.Response_shape.text_blocks
+    shape.Agent_sdk.Response_shape.text_chars
     thinking.Keeper_hooks_oas_types.thinking_kind
     thinking.Keeper_hooks_oas_types.thinking_blocks
     thinking.Keeper_hooks_oas_types.thinking_chars
     thinking.Keeper_hooks_oas_types.redacted_thinking_blocks
-    counts.tool_use_count
-    counts.tool_result_count
-    counts.image_count
-    counts.document_count
-    counts.audio_count
+    shape.Agent_sdk.Response_shape.tool_use_count
+    shape.Agent_sdk.Response_shape.tool_result_count
+    shape.Agent_sdk.Response_shape.image_count
+    shape.Agent_sdk.Response_shape.document_count
+    shape.Agent_sdk.Response_shape.audio_count
     input_tokens
     output_tokens
 

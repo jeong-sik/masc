@@ -42,8 +42,8 @@ lib/playground_repo_readiness.ml:400  # argv_subsystem
 lib/repo_manager/repo_git.ml:41  # argv_workspace
 lib/server/server_dashboard_http_runtime_info.ml:270  # argv_dispatch
 lib/server/server_dashboard_http_runtime_info.ml:368  # argv_dispatch
-lib/server/server_routes_http_routes_sidecar.ml:564  # argv_dispatch
-lib/server/server_routes_http_routes_sidecar.ml:628  # argv_dispatch
+lib/server/server_routes_http_routes_sidecar.ml:575  # argv_dispatch
+lib/server/server_routes_http_routes_sidecar.ml:639  # argv_dispatch
 lib/server/server_routes_http_routes_workspace.ml:372  # argv_dispatch
 lib/server/server_routes_sidecar_config_schema.ml:40  # argv_dispatch
 lib/server/server_startup_takeover.ml:81  # argv_dispatch

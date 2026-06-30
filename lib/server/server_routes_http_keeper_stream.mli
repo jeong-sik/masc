@@ -189,6 +189,8 @@ module For_testing : sig
   val direct_reply_terminal_error : Yojson.Safe.t option -> string -> string option
   val visible_reply_with_stream_fallback :
     streamed_text:string -> string -> string
+  val redacted_visible_reply_with_stream_fallback :
+    redact:(string -> string) -> streamed_text:string -> string -> string
   val reply_payload_with_streamed_visible_reply :
     Yojson.Safe.t option -> visible_reply:string -> Yojson.Safe.t option
   val format_surface_context : Yojson.Safe.t -> string

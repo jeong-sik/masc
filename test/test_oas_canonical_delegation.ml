@@ -41,6 +41,14 @@ let test_masc_delegates_oas_stream_progress_predicates () =
     ~expected:1
 ;;
 
+let test_masc_delegates_oas_response_shape_metrics () =
+  let file = "lib/keeper/keeper_hooks_oas_response_metrics.ml" in
+  check_calls ~file ~callee:"Response_shape.summarize" ~expected:1;
+  check_calls ~file ~callee:"Response_shape.has_deliverable_content" ~expected:1;
+  check_calls ~file ~callee:"Response_shape.content_shape" ~expected:1;
+  check_calls ~file ~callee:"Response_shape.content_shape_to_string" ~expected:1
+;;
+
 let test_masc_delegates_oas_tool_call_projection () =
   check_calls
     ~file:"lib/keeper/keeper_context_tool_message_pairs.ml"
@@ -84,6 +92,10 @@ let () =
             "MASC delegates stream progress classification to OAS"
             `Quick
             test_masc_delegates_oas_stream_progress_predicates
+        ; test_case
+            "MASC delegates response shape metrics to OAS"
+            `Quick
+            test_masc_delegates_oas_response_shape_metrics
         ; test_case
             "MASC delegates tool-call block projection to OAS"
             `Quick

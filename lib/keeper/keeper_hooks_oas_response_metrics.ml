@@ -2,7 +2,7 @@
 
 open Keeper_hooks_oas_types
 
-module Canonical_tool = Agent_sdk.Canonical_tool
+module Response_shape = Agent_sdk.Response_shape
 
 (* #9919: counter for post_tool_use_failure events.
 
@@ -80,59 +80,18 @@ let resolve_after_turn_model ~keeper_name
    stop_reason_label_* SSOT constants by inlining their literals.  [open
    Keeper_hooks_oas_types] above brings stop_reason_to_label into scope. *)
 
-let content_block_has_visible_or_tool_progress block =
-  match Canonical_tool.tool_result_of_block block with
-  | Some result ->
-      String.trim result.Canonical_tool.content <> ""
-      || Option.is_some result.Canonical_tool.structured_content
-      || (match result.Canonical_tool.content_blocks with
-          | Some (_ :: _) -> true
-          | Some [] | None -> false)
-  | None -> (
-      match block with
-      | Agent_sdk.Types.Text text -> String.trim text <> ""
-      | Agent_sdk.Types.ToolResult _ ->
-          invalid_arg
-            "keeper_hooks_oas_response_metrics: OAS canonical tool-result projection unavailable"
-      | _ when Option.is_some (Canonical_tool.tool_call_of_block block) -> true
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ -> true
-      | Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.ReasoningDetails _
-      | Agent_sdk.Types.RedactedThinking _ -> false
-      | Agent_sdk.Types.ToolUse _ ->
-          invalid_arg
-            "keeper_hooks_oas_response_metrics: OAS canonical tool-call projection unavailable"
-      )
-
-let shape_empty = "empty"
-let shape_thinking_only = "thinking_only"
-let shape_blank_text = "blank_text"
-
-let response_content_empty_shape content =
-  if content = [] then shape_empty
-  else if
-    List.exists
-      (function
-        | Agent_sdk.Types.Thinking _
-        | Agent_sdk.Types.ReasoningDetails _
-        | Agent_sdk.Types.RedactedThinking _ -> true
-        | _ -> false)
-      content
-  then shape_thinking_only
-  else shape_blank_text
-
 let record_response_content_quality_metric ~keeper_name
     (response : Agent_sdk.Types.api_response) =
-  if not (List.exists content_block_has_visible_or_tool_progress response.content)
-  then
+  let shape = Response_shape.summarize response in
+  if not (Response_shape.has_deliverable_content shape) then
     Otel_metric_store.inc_counter empty_response_content_metric
       ~labels:
         [
           (label_keeper, keeper_name);
           (label_stop_reason, stop_reason_to_label response.stop_reason);
-          (label_shape, response_content_empty_shape response.content);
+          ( label_shape,
+            Response_shape.(
+              content_shape response shape |> content_shape_to_string) );
         ]
       ()
 

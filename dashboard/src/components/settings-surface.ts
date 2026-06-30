@@ -1001,47 +1001,54 @@ export function SettingsSurface() {
                   <//>
                 </div>
 
-                <div class="set-sub-h">Model routing</div>
-                <div class="set-route-summary" data-testid="runtime-routing-summary">
-                  ${librarianRuntime
-                    ? html`<span><span class="sub-k">librarian</span><span class="mono">${librarianRuntime}</span></span>`
-                    : html`<span><span class="sub-k">librarian</span><span class="mono">default runtime</span></span>`}
-                  ${crossVerifierRuntime
-                    ? html`<span><span class="sub-k">cross verifier</span><span class="mono">${crossVerifierRuntime}</span></span>`
-                    : html`<span><span class="sub-k">cross verifier</span><span class="mono">default runtime</span></span>`}
-                  <span><span class="sub-k">media failover</span><span class="mono">${mediaFailover.length > 0 ? mediaFailover.join(', ') : 'none'}</span></span>
+                <div class="settings-runtime-section" data-runtime-section="catalog" data-testid="runtime-catalog-section">
+                  <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
+                  ${runtimeCatalogStatus === 'loading'
+                    ? html`<div class="set-hint" data-testid="runtime-catalog-loading">runtime catalog 불러오는 중...</div>`
+                    : runtimeCatalogStatus === 'error'
+                      ? html`<div class="set-hint" data-testid="runtime-catalog-error">runtime catalog를 불러오지 못했습니다.</div>`
+                      : runtimeCatalogEntries.length === 0
+                        ? html`<div class="set-hint" data-testid="runtime-catalog-empty">표시할 runtime catalog entry가 없습니다.</div>`
+                        : html`
+                          <div class="settings-runtime-catalog" data-testid="runtime-catalog-summary">
+                            ${runtimeCatalogEntries.map(item => html`
+                              <${RuntimeCatalogCard}
+                                key=${runtimeCatalogKey(item)}
+                                item=${item}
+                                defaultRuntimeId=${defaultRuntimeId}
+                              />
+                            `)}
+                          </div>
+                        `}
                 </div>
-                <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
-                ${keeperAssignments.length === 0
-                  ? html`<div class="set-hint" data-testid="routing-assignments-empty">명시적 keeper 할당이 없습니다 — 모두 기본 런타임을 사용합니다.</div>`
-                  : html`<div class="settings-runtime-routing" data-testid="routing-assignments-list">
-                    ${keeperAssignments.map(a => html`
-                      <div class="set-routing-row" key=${a.keeper}>
-                        <span class="mono">${a.keeper}</span>
-                        <span class="set-routing-arrow">→</span>
-                        <span class="mono" data-testid="routing-assignment">${a.runtime_id}</span>
-                      </div>
-                    `)}
-                  </div>`}
 
-                <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
-                ${runtimeCatalogStatus === 'loading'
-                  ? html`<div class="set-hint" data-testid="runtime-catalog-loading">runtime catalog 불러오는 중...</div>`
-                  : runtimeCatalogStatus === 'error'
-                    ? html`<div class="set-hint" data-testid="runtime-catalog-error">runtime catalog를 불러오지 못했습니다.</div>`
-                    : runtimeCatalogEntries.length === 0
-                      ? html`<div class="set-hint" data-testid="runtime-catalog-empty">표시할 runtime catalog entry가 없습니다.</div>`
-                      : html`
-                        <div class="settings-runtime-catalog" data-testid="runtime-catalog-summary">
-                          ${runtimeCatalogEntries.map(item => html`
-                            <${RuntimeCatalogCard}
-                              key=${runtimeCatalogKey(item)}
-                              item=${item}
-                              defaultRuntimeId=${defaultRuntimeId}
-                            />
-                          `)}
+                <div class="settings-runtime-section" data-runtime-section="routing" data-testid="runtime-routing-section">
+                  <div class="set-sub-h">Model routing</div>
+                  <div class="set-route-summary" data-testid="runtime-routing-summary">
+                    ${librarianRuntime
+                      ? html`<span><span class="sub-k">librarian</span><span class="mono">${librarianRuntime}</span></span>`
+                      : html`<span><span class="sub-k">librarian</span><span class="mono">default runtime</span></span>`}
+                    ${crossVerifierRuntime
+                      ? html`<span><span class="sub-k">cross verifier</span><span class="mono">${crossVerifierRuntime}</span></span>`
+                      : html`<span><span class="sub-k">cross verifier</span><span class="mono">default runtime</span></span>`}
+                    <span><span class="sub-k">media failover</span><span class="mono">${mediaFailover.length > 0 ? mediaFailover.join(', ') : 'none'}</span></span>
+                  </div>
+                </div>
+
+                <div class="settings-runtime-section" data-runtime-section="assignments" data-testid="runtime-assignments-section">
+                  <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
+                  ${keeperAssignments.length === 0
+                    ? html`<div class="set-hint" data-testid="routing-assignments-empty">명시적 keeper 할당이 없습니다 — 모두 기본 런타임을 사용합니다.</div>`
+                    : html`<div class="settings-runtime-routing" data-testid="routing-assignments-list">
+                      ${keeperAssignments.map(a => html`
+                        <div class="set-routing-row" key=${a.keeper}>
+                          <span class="mono">${a.keeper}</span>
+                          <span class="set-routing-arrow">→</span>
+                          <span class="mono" data-testid="routing-assignment">${a.runtime_id}</span>
                         </div>
-                      `}
+                      `)}
+                    </div>`}
+                </div>
               </div>
             `}
 

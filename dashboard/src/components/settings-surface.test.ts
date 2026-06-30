@@ -419,6 +419,48 @@ describe('SettingsSurface', () => {
     expect(gateInput?.value).toBe('https://gate.example.test')
   })
 
+  it('gate connector toggles are browser-session previews, not live connection state', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
+
+    const summary = () => container.querySelector('[data-testid="gate-local-summary"]') as HTMLElement
+    expect(summary().textContent).toContain('local connector preview')
+    expect(summary().textContent).toContain('3/4 enabled')
+    expect(container.textContent).toContain('Live connector runtime, availability')
+    expect(container.textContent).not.toContain('Connected')
+    expect(container.textContent).not.toContain('Inactive')
+
+    const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
+    expect(toggles.length).toBe(4)
+    expect(toggles[0]!.getAttribute('data-active')).toBe('true')
+
+    await fireEvent.click(toggles[0]!)
+
+    expect(toggles[0]!.getAttribute('data-active')).toBe('false')
+    expect(summary().textContent).toContain('2/4 enabled')
+    expect(JSON.parse(sessionStorage.getItem('masc.settings.local.gateConnectorPreview') ?? '{}')).toMatchObject({
+      Slack: false,
+    })
+
+    const triggers = () => Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-trigger"]'))
+    expect(triggers().length).toBe(4)
+    await fireEvent.click(triggers()[2] as HTMLButtonElement)
+    expect(triggers()[2]?.getAttribute('data-active')).toBe('true')
+    expect(sessionStorage.getItem('masc.settings.local.discordTrigger')).toBe('all')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-connectors-link"]') as HTMLButtonElement)
+    expect(navigate).toHaveBeenLastCalledWith('connectors')
+
+    render(null, container)
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
+
+    expect(summary().textContent).toContain('2/4 enabled')
+    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).getAttribute('data-active')).toBe('false')
+    expect(triggers()[2]?.getAttribute('data-active')).toBe('true')
+  })
+
   it('paths local preview values can be format-checked without claiming live verification', async () => {
     render(html`<${SettingsSurface} />`, container)
 

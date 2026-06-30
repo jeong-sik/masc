@@ -64,12 +64,18 @@ type provider =
 
 (** {1 Layer 2: Model} *)
 
+(** Re-exported from OAS so thinking-control capability drift is
+    compiler-checked. *)
 type thinking_control_format =
+  Llm_provider.Capabilities.thinking_control_format =
   | No_thinking_control
   | Thinking_object
+  | Thinking_object_only
   | Chat_template_kwargs
   | Chat_template_token
+  | Ollama_think
   | Reasoning_effort
+  | Enable_thinking
 [@@deriving show, eq]
 
 type model_capabilities =

@@ -75,13 +75,20 @@ type provider =
 
 (** How an OpenAI-compat backend's request body encodes "enable thinking".
     Pinned on the model because the same physical model can be served by
-    backends with different thinking-control wire shapes. *)
+    backends with different thinking-control wire shapes.
+
+    This re-exports the OAS capability enum so OAS variant changes break MASC
+    compile instead of leaving a stale local mirror. *)
 type thinking_control_format =
+  Llm_provider.Capabilities.thinking_control_format =
   | No_thinking_control
   | Thinking_object
+  | Thinking_object_only
   | Chat_template_kwargs
   | Chat_template_token
+  | Ollama_think
   | Reasoning_effort
+  | Enable_thinking
 [@@deriving show, eq]
 
 (** Per-model capabilities, mirroring OAS [Llm_provider.Capabilities] for the

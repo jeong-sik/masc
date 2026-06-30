@@ -202,20 +202,7 @@ let persist_message ?source session msg =
     | Some raw -> String.trim raw
     | None -> ""
   in
-  let content_text =
-    msg.content
-    |> List.filter_map (function
-      | Agent_sdk.Types.Text text -> Some text
-      (* Non-Text blocks contribute no inline text to the legacy field. *)
-      | Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.RedactedThinking _
-      | Agent_sdk.Types.ToolUse _
-      | Agent_sdk.Types.ToolResult _
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ -> None)
-    |> String.concat "\n"
-  in
+  let content_text = Agent_sdk.Types.visible_text_of_message msg in
   if classify_history_entry ~source:source_text ~content:content_text = Drop_line
   then ()
   else

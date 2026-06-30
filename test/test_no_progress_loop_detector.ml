@@ -494,52 +494,6 @@ let test_scope_message_internal_textonly_accrues_streak () =
     "internal scope-message prose without evidence accrues streak" 4
     (D.current_streak ~keeper_name:k)
 
-(* task-5 keeper-stability: a passive-only turn that observed no actionable
-   work and did not own an active task is legitimately idle. It must not accrue
-   the no-progress streak even when the surface otherwise requires evidence.
-   The exemption applies to any tool classified as [Passive_status] by
-   [Keeper_tool_progress.classify_tool_progress], including peer-surface tools
-   when no work/owned task exists. *)
-let test_passive_only_no_work_does_not_accrue () =
-  D.reset_all_for_test ();
-  let k = "passive-no-work" in
-  (* The classifier uses [claimable_task_count] to decide whether there is an
-     actionable signal, so [unclaimed_task_count] is omitted here. *)
-  let observation =
-    { scheduled_observation with
-      claimable_task_count = 0
-    }
-  in
-  let is_legitimate tool_calls had_owned_active_task =
-    Success.legitimate_no_work_passive_only
-      ~observation
-      ~tool_calls
-      ~had_owned_active_task
-  in
-  Alcotest.(check bool) "passive-only no-work is legitimate" true
-    (is_legitimate [ ("keeper_surface_read", None) ] false);
-  Alcotest.(check bool) "owned active task breaks legitimacy" false
-    (is_legitimate [ ("keeper_surface_read", None) ] true);
-  Alcotest.(check bool) "actionable signal breaks legitimacy" false
-    (Success.legitimate_no_work_passive_only
-       ~observation:{ observation with claimable_task_count = 1 }
-       ~tool_calls:[ ("keeper_surface_read", None) ]
-       ~had_owned_active_task:false);
-  (* [classify_tool_progress] currently treats [tool_execute] as [Passive_status],
-     so the negative case for a non-passive tool uses a claim tool instead. *)
-  Alcotest.(check bool) "non-passive tool breaks legitimacy" false
-    (is_legitimate [ (List.hd Cap.claim_task_tool_names, None) ] false);
-  for _ = 1 to D.threshold () do
-    let surface_requires_evidence = true in
-    record_turn ~keeper_name:k
-      ~made_progress:
-        (D.turn_made_progress ~strong_evidence:false ~surface_requires_evidence
-         || is_legitimate [ ("keeper_surface_read", None) ] false)
-    |> ignore_outcome
-  done;
-  Alcotest.(check int) "streak stays 0" 0 (D.current_streak ~keeper_name:k)
-;;
-
 (* RFC-0239 / audit D1·D3: the no-progress detector reads the typed outcome
    recorded on each tool call, not just the tool name. *)
 module Outcome = Keeper_tool_outcome
@@ -666,18 +620,24 @@ let test_sangsu_claim_idle_loop_accrues () =
     (D.turn_made_progress ~strong_evidence:false
        ~surface_requires_evidence:(not (Success.claim_bound_work bound)))
 
-let test_apply_loop_detectors_passive_only_no_work_does_not_accrue () =
+(* #22747: a passive-only no-work turn now ACCRUES the no-progress streak. The
+   retired [legitimate_no_work_passive_only] carve-out marked such turns as
+   progress and reset the streak every cycle, so the detector never latched and
+   the RFC-0246/0294 R2b wake-tombstone (which suppresses self-cadence re-wakes
+   only while latched) could not engage — the keeper re-woke on its min-interval
+   cadence forever, the idle spin. This mirrors the claim-no-eligible accrual
+   below: both are "repeatedly found nothing to do". Re-adding the carve-out
+   flips this assertion back to 0 (revert-red). *)
+let test_apply_loop_detectors_passive_only_no_work_now_accrues () =
   D.reset_all_for_test ();
   with_temp_config @@ fun config ->
   let keeper = "apply-passive-no-work" in
   let meta = make_meta keeper in
   let result = run_result [ tool_call "keeper_surface_read" ] in
-  for _ = 1 to D.threshold () do
-    ignore
-      (Success.apply_loop_detectors ~config ~observation:scheduled_observation
-         ~meta meta result)
-  done;
-  Alcotest.(check int) "production detector path keeps passive no-work at zero" 0
+  ignore
+    (Success.apply_loop_detectors ~config ~observation:scheduled_observation
+       ~meta meta result);
+  Alcotest.(check int) "production detector path accrues passive no-work (#22747)" 1
     (D.current_streak ~keeper_name:keeper)
 
 let test_apply_loop_detectors_claim_no_eligible_accrues () =
@@ -755,9 +715,6 @@ let () =
           Alcotest.test_case
             "R3 scope-message internal prose accrues streak"
             `Quick (with_eio test_scope_message_internal_textonly_accrues_streak);
-          Alcotest.test_case
-            "passive-only no-work does not accrue streak (task-5)"
-            `Quick (with_eio test_passive_only_no_work_does_not_accrue);
           Alcotest.test_case "claim exemption is outcome-aware (D3)"
             `Quick test_claim_outcome_aware_exemption;
           Alcotest.test_case "strong evidence drops typed-failure completions (D1)"
@@ -765,8 +722,8 @@ let () =
           Alcotest.test_case "sangsu claim-idle loop accrues streak"
             `Quick test_sangsu_claim_idle_loop_accrues;
           Alcotest.test_case
-            "apply_loop_detectors passive-only no-work stays reset"
-            `Quick (with_eio test_apply_loop_detectors_passive_only_no_work_does_not_accrue);
+            "apply_loop_detectors passive-only no-work now accrues (#22747)"
+            `Quick (with_eio test_apply_loop_detectors_passive_only_no_work_now_accrues);
           Alcotest.test_case
             "apply_loop_detectors typed no-eligible claim accrues"
             `Quick (with_eio test_apply_loop_detectors_claim_no_eligible_accrues);

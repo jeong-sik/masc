@@ -199,6 +199,34 @@ let test_restore_messages_all_roles () =
   Alcotest.(check string) "second is assistant" "assistant"
     (match second.role with Agent_sdk.Types.Assistant -> "assistant" | _ -> "other")
 
+let test_agent_sdk_response_visible_text_excludes_non_answer_blocks () =
+  let response : Agent_sdk.Types.api_response =
+    { id = "resp"
+    ; model = "model"
+    ; stop_reason = Agent_sdk.Types.EndTurn
+    ; content =
+        [ Agent_sdk.Types.Text "visible"
+        ; Agent_sdk.Types.Thinking { signature = None; content = "private reasoning" }
+        ; Agent_sdk.Types.ToolResult
+            { tool_use_id = "tool-1"
+            ; content = "tool payload"
+            ; is_error = false
+            ; json = None
+            ; content_blocks = Some [ Agent_sdk.Types.Text "structured tool payload" ]
+            }
+        ; Agent_sdk.Types.Image
+            { media_type = "image/png"; data = "bytes"; source_type = Agent_sdk.Types.Base64 }
+        ; Agent_sdk.Types.Text "tail"
+        ]
+    ; usage = None
+    ; telemetry = None
+    }
+  in
+  Alcotest.(check string)
+    "visible answer text"
+    "visible\ntail"
+    (Agent_sdk_response.text_of_response response)
+
 (* ================================================================ *)
 (* Runner                                                           *)
 (* ================================================================ *)
@@ -228,5 +256,9 @@ let () =
     "message_restore", [
       Alcotest.test_case "restore messages all roles" `Quick
         test_restore_messages_all_roles;
+    ];
+    "response_projection", [
+      Alcotest.test_case "visible text excludes non-answer blocks" `Quick
+        test_agent_sdk_response_visible_text_excludes_non_answer_blocks;
     ];
   ]

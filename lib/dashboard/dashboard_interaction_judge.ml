@@ -2,6 +2,10 @@ let keeper_name = "interaction-judge"
 let production_enabled = false
 let disabled_reason = "interaction judge requires Fusion job lifecycle before production"
 let disabled_next_action = "migrate_to_fusion_job_lifecycle"
+let lifecycle_contract_id = "dashboard_interaction_judge_fusion_lifecycle"
+let lifecycle_contract_doc_path =
+  "docs/design/dashboard-interaction-judge-fusion-lifecycle.md"
+let lifecycle_contract_issue_url = "https://github.com/jeong-sik/masc/issues/22656"
 
 type interaction = {
   source : string;
@@ -21,6 +25,18 @@ type lifecycle_status =
 type lifecycle_next_action =
   | Migrate_to_fusion_job_lifecycle
 
+type lifecycle_contract = {
+  id : string;
+  next_action : string;
+  issue_url : string;
+  doc_path : string;
+  owner_lane_id : string;
+  prompt_template_id : string;
+  fusion_runs_route : string;
+  fusion_run_status_event : string;
+  status_labels : string list;
+}
+
 type lifecycle_event = {
   task_id : string option;
   keeper_id : string;
@@ -39,9 +55,38 @@ let lifecycle_status_to_string = function
 let lifecycle_next_action_to_string = function
   | Migrate_to_fusion_job_lifecycle -> disabled_next_action
 
+let lifecycle_contract =
+  {
+    id = lifecycle_contract_id;
+    next_action = disabled_next_action;
+    issue_url = lifecycle_contract_issue_url;
+    doc_path = lifecycle_contract_doc_path;
+    owner_lane_id = keeper_name;
+    prompt_template_id = "dashboard_interaction_judge";
+    fusion_runs_route = "/api/v1/dashboard/fusion-runs";
+    fusion_run_status_event = "fusion_run_status";
+    status_labels = [ "disabled"; "running"; "completed"; "failed" ];
+  }
+
 let option_to_yojson f = function
   | Some value -> f value
   | None -> `Null
+
+let string_list_to_yojson values =
+  `List (List.map (fun value -> `String value) values)
+
+let lifecycle_contract_to_yojson contract =
+  `Assoc [
+    ("id", `String contract.id);
+    ("next_action", `String contract.next_action);
+    ("issue_url", `String contract.issue_url);
+    ("doc_path", `String contract.doc_path);
+    ("owner_lane_id", `String contract.owner_lane_id);
+    ("prompt_template_id", `String contract.prompt_template_id);
+    ("fusion_runs_route", `String contract.fusion_runs_route);
+    ("fusion_run_status_event", `String contract.fusion_run_status_event);
+    ("status_labels", string_list_to_yojson contract.status_labels);
+  ]
 
 let lifecycle_event_to_yojson event =
   `Assoc [
@@ -53,6 +98,9 @@ let lifecycle_event_to_yojson event =
     ("deadline_s", option_to_yojson (fun f -> `Float f) event.deadline_s);
     ("last_checkpoint", option_to_yojson (fun s -> `String s) event.last_checkpoint);
     ("next_action", `String (lifecycle_next_action_to_string event.next_action));
+    ("contract_id", `String lifecycle_contract.id);
+    ("contract_doc_path", `String lifecycle_contract.doc_path);
+    ("contract_issue_url", `String lifecycle_contract.issue_url);
     ("reason", option_to_yojson (fun s -> `String s) event.reason);
   ]
 
@@ -197,6 +245,7 @@ let fresh_interactions_json ~base_path =
        | Some action -> `String (lifecycle_next_action_to_string action)
        | None -> `Null);
       ("last_error", match st.snapshot.last_error with Some e -> `String e | None -> `Null);
+      ("lifecycle_contract", lifecycle_contract_to_yojson lifecycle_contract);
       ("lifecycle_event",
        match st.snapshot.last_event with
        | Some event -> lifecycle_event_to_yojson event

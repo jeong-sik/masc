@@ -1,14 +1,4 @@
-let stop_reason_to_wire = function
-  | Agent_sdk.Types.EndTurn -> "end_turn"
-  | Agent_sdk.Types.StopToolUse -> "tool_use"
-  | Agent_sdk.Types.MaxTokens -> "max_tokens"
-  | Agent_sdk.Types.StopSequence -> "stop_sequence"
-  | Agent_sdk.Types.Refusal -> "refusal"
-  | Agent_sdk.Types.PauseTurn -> "pause_turn"
-  | Agent_sdk.Types.Compaction -> "compaction"
-  | Agent_sdk.Types.ContextWindowExceeded -> "model_context_window_exceeded"
-  | Agent_sdk.Types.Unknown value -> value
-;;
+let stop_reason_to_wire = Agent_sdk.Types.stop_reason_to_string
 
 let agent_completed_usage_fields (response : Agent_sdk.Types.api_response) =
   match response.usage with

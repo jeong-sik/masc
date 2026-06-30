@@ -190,37 +190,6 @@ let claim_bound_work (calls : (string * Keeper_tool_outcome.t option) list) =
     calls
 ;;
 
-let legitimate_no_work_passive_only
-      ~observation
-      ~(tool_calls : (string * Keeper_tool_outcome.t option) list)
-      ~had_owned_active_task
-  =
-  let actionable_signal =
-    Keeper_contract_classifier.classify_actionable_signal
-      (Keeper_contract_classifier.of_keeper_world_observation observation)
-  in
-  let passive_status_tool name =
-    match Keeper_tool_progress.classify_tool_progress name with
-    | Keeper_tool_progress.Passive_status -> true
-    | Keeper_tool_progress.Claim_context
-    | Keeper_tool_progress.Execution
-    | Keeper_tool_progress.Completion -> false
-  in
-  let non_material_outcome_effect name outcome =
-    match Keeper_tool_progress.classify_tool_progress_with_outcome name outcome with
-    | Keeper_tool_progress.Streak_increment
-    | Keeper_tool_progress.Streak_reset_and_empty_queue_sleep _ -> true
-    | Keeper_tool_progress.Streak_reset -> false
-  in
-  (not had_owned_active_task)
-  && tool_calls <> []
-  && List.for_all
-       (fun (name, outcome) ->
-          passive_status_tool name && non_material_outcome_effect name outcome)
-       tool_calls
-  && actionable_signal = Keeper_contract_classifier.No_actionable_signal
-;;
-
 let apply_loop_detectors ~config ~observation ~meta updated_meta result =
   (* RFC-0239 §3 R3 / RFC-0276 §3.2: feed the loop detector a semantic
      no-progress verdict derived from observed turn facts, not the LLM
@@ -260,18 +229,28 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
     | (Peer_only | User_facing | Internal_prose) as delivery ->
       delivery_requires_evidence delivery
   in
-  let had_owned_active_task_at_turn_start =
-    Option.is_some meta.Keeper_meta_contract.current_task_id
-  in
-  let legitimate_no_work_passive_only =
-    legitimate_no_work_passive_only ~observation ~tool_calls:calls_with_outcomes
-      ~had_owned_active_task:had_owned_active_task_at_turn_start
-  in
+  (* #22747 / RFC-keeper-proactive-wake-actionability-invariant: a passive-only
+     no-work turn (only [Passive_status] tools, no owned task, no actionable
+     signal) is NOT treated as progress. The retired [legitimate_no_work_passive_only]
+     carve-out marked such turns as progress, which RESET the no-progress streak
+     every cycle, so the detector never latched — and the RFC-0246/0294 R2b
+     wake-tombstone (which suppresses self-cadence re-wakes only while latched)
+     could never engage. A keeper with nothing to do therefore re-woke on its
+     min-interval cadence forever, ran keeper_context_status, found no work, and
+     produced no visible reply: the idle spin.
+
+     Letting these turns accrue the streak makes passive-no-work consistent with
+     the already-shipped claim-no-eligible loop (PR #21065, test
+     test_sangsu_claim_idle_loop_accrues): both are "repeatedly found nothing to
+     do" and both now latch at the threshold. The threshold (default 10) already
+     tolerates a single legitimate idle check, so a healthy keeper that gets work
+     before the threshold resets cleanly; only a persistent idle loop latches and
+     is paused for operator resume (Keeper_unified_turn_no_progress.mark_loop_detected),
+     which also arms the self-cadence wake-tombstone. *)
   let made_progress =
     Keeper_no_progress_loop_detector.turn_made_progress
       ~strong_evidence
       ~surface_requires_evidence
-    || legitimate_no_work_passive_only
   in
   let threshold_override =
     budget_exhausted_no_progress_threshold_override
@@ -320,8 +299,6 @@ module For_testing = struct
   let delivery_requires_evidence = delivery_requires_evidence
   let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
   let claim_bound_work = claim_bound_work
-
-  let legitimate_no_work_passive_only = legitimate_no_work_passive_only
 
   let apply_loop_detectors = apply_loop_detectors
 end

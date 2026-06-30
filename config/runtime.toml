@@ -12,18 +12,17 @@
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
 # memory-os librarian (post-turn episode extraction) requests provider-native
-# structured output, so it is routed independently of keeper chat to a
-# schema-capable runtime. minimax-m3 declares supports-structured-output;
-# deepseek-v4-flash does not in this runtime seed and measured ~74%
-# empty/invalid-JSON on the librarian (2026-06-18). Override per process with
-# MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each keeper's
-# runtime (legacy).
-librarian = "ollama_cloud.minimax-m3"
+# structured output, so it is routed independently of keeper chat to a runtime
+# whose OAS catalog row advertises native structured output. Keep MiniMax out of
+# this lane until OAS capability truth proves native schema support. Override per
+# process with MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each
+# keeper's runtime (legacy).
+librarian = "ollama_cloud.ollama-cloud-devstral-2-123b"
 # Provider-native structured-output judges must not inherit the fleet chat
 # default when that default lacks schema support. Keep this lane explicit so
 # dashboard operator/governance judges fail at config load on typo/unsupported
 # routing instead of discovering the mismatch in the daemon loop.
-structured_judge = "ollama_cloud.minimax-m3"
+structured_judge = "ollama_cloud.ollama-cloud-devstral-2-123b"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
@@ -173,15 +172,10 @@ supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
 
-# MiniMax M3 (Ollama Cloud) — schema-capable runtime for Memory OS
-# librarian/summary/consolidation and dashboard structured judges. These lanes
-# request provider-native JsonSchema/output_schema; a runtime whose model omits
-# structured-output support can fail closed or produce unconstrained output. The
-# fleet default (deepseek-v4-flash, no structured-output capability declared in
-# this seed) measured ~74% empty / invalid-JSON on the librarian. Activate for
-# the librarian only via
-# MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID=ollama_cloud.minimax-m3 (keeper chat
-# stays on [runtime].default). api-name originally verified 2026-06-18 against
+# MiniMax M3 (Ollama Cloud) — chat/runtime binding retained for explicit
+# operator use. Do not route provider-native structured-output lanes here unless
+# the OAS catalog proves a native schema guarantee for this runtime.
+# api-name originally verified 2026-06-18 against
 # https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
 api-name = "minimax-m3"
@@ -223,8 +217,10 @@ supports-extended-thinking = true
 supports-reasoning-budget = true
 thinking-control-format = "reasoning-effort"
 supports-native-streaming = true
-supports-response-format-json = true
-supports-structured-output = true
+# SSOT = OAS models.toml; Ollama Cloud Kimi rows do not currently advertise a
+# native schema/response_format guarantee.
+supports-response-format-json = false
+supports-structured-output = false
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -319,6 +315,8 @@ supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
 supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
 supports-image-input = false
 supports-multimodal-inputs = false
 
@@ -337,6 +335,8 @@ supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
 supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -718,6 +718,8 @@ supports-extended-thinking = false
 supports-reasoning-budget = false
 thinking-control-format = "none"
 supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
 supports-image-input = true
 supports-multimodal-inputs = true
 
@@ -946,13 +948,13 @@ staged_judge_group_size = 3
 # 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
 [fusion.presets.trio]
 panel = [
-  "ollama_cloud.minimax-m3",
-  "ollama_cloud.kimi-k2-6",
-  "ollama_cloud.ollama-cloud-minimax-m3",
+  "ollama_cloud.ollama-cloud-devstral-2-123b",
+  "ollama_cloud.ollama-cloud-devstral-small-2-24b",
+  "ollama_cloud.ollama-cloud-ministral-3-14b",
 ]
 # Fusion judges request provider-native structured output. Keep this on a
-# runtime whose model declares supports-structured-output=true.
-judge = "ollama_cloud.kimi-k2-6"
+# runtime whose model resolves through the OAS catalog with native schema support.
+judge = "ollama_cloud.ollama-cloud-devstral-2-123b"
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
 with your best independent analysis. Do not defer to other models; give your \
@@ -986,9 +988,9 @@ max_tool_calls_per_panel = 0
 # 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
 [fusion.presets.quorum]
 panel = [
-  "ollama_cloud.minimax-m3",
-  "ollama_cloud.kimi-k2-6",
-  "ollama_cloud.ollama-cloud-minimax-m3",
+  "ollama_cloud.ollama-cloud-devstral-2-123b",
+  "ollama_cloud.ollama-cloud-devstral-small-2-24b",
+  "ollama_cloud.ollama-cloud-ministral-3-14b",
 ]
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
@@ -996,7 +998,7 @@ with your best independent analysis. Do not defer to other models; give your \
 own view.
 """
 # meta judge: 1차 심판들의 종합을 재조정하는 최종 reducer (RFC-0283).
-judge = "ollama_cloud.minimax-m3"
+judge = "ollama_cloud.ollama-cloud-ministral-3-14b"
 judge_system_prompt = """
 You are the meta-judge. You are given several independent judge syntheses of the \
 same panel of model answers, each produced through a different evaluative lens. \
@@ -1018,7 +1020,7 @@ max_tool_calls_per_panel = 0
 # checked-in schema-capable runtime set is intentionally narrow; distinct labels
 # still preserve lens identity for judge-of-judges routing.
 [[fusion.presets.quorum.judges]]
-model = "ollama_cloud.kimi-k2-6"
+model = "ollama_cloud.ollama-cloud-devstral-2-123b"
 label = "evidence"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \
@@ -1029,7 +1031,7 @@ Respond with ONLY the requested JSON object, no prose and no code fences.
 timeout_s = 300.0
 
 [[fusion.presets.quorum.judges]]
-model = "ollama_cloud.minimax-m3"
+model = "ollama_cloud.ollama-cloud-devstral-small-2-24b"
 label = "coverage"
 system_prompt = """
 You are an impartial first-pass judge. Synthesize the panel of model answers \

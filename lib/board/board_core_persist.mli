@@ -117,6 +117,21 @@ val create_post_with_outcome :
   unit ->
   (create_post_outcome, board_error) result
 
+(** Owner-gated in-place edit of an existing post's title/body.  Returns
+    [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
+    missing id, and [Validation_error] for empty/oversized content.  Only the
+    textual content and [updated_at] change; kind/meta/visibility are
+    preserved. *)
+val update_post_with_outcome :
+  store ->
+  post_id:string ->
+  editor:string ->
+  content:string ->
+  ?title:string ->
+  ?body:string ->
+  unit ->
+  (post, board_error) result
+
 val create_post :
   store ->
   author:string ->

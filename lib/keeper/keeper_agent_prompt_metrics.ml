@@ -178,15 +178,7 @@ let metric_of_block
                 "keeper_agent_prompt_metrics: OAS canonical tool-call projection unavailable"
           | _ -> 0))
   in
-  let msg : Agent_sdk.Types.message =
-    {
-      Agent_sdk.Types.role;
-      content = [block];
-      name = None;
-      tool_call_id = None;
-      metadata = [];
-    }
-  in
+  let msg : Agent_sdk.Types.message = Agent_sdk.Types.make_message ~role [ block ] in
   {
     bytes;
     estimated_tokens = Keeper_context_core.msg_tokens msg;

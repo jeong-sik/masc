@@ -92,17 +92,10 @@ let summarize_chunk (msgs : Agent_sdk.Types.message list) : Agent_sdk.Types.mess
   match lines with
   | [] -> None
   | _ ->
-    Some {
-      Agent_sdk.Types.role = Agent_sdk.Types.Assistant;
-      content = [
-        Agent_sdk.Types.Text
-          (Printf.sprintf "[MEMORY_SUMMARY] Compacted %d older messages\n%s"
-             (List.length msgs) (String.concat "\n" lines))
-      ];
-      name = None;
-      tool_call_id = None;
-      metadata = [];
-    }
+    Some
+      (Agent_sdk.Types.assistant_msg
+         (Printf.sprintf "[MEMORY_SUMMARY] Compacted %d older messages\n%s"
+            (List.length msgs) (String.concat "\n" lines)))
 
 (** Score a list of messages by importance for context compaction.
     Returns [(index, score)] pairs where score is in [0.0, 1.0].

@@ -72,11 +72,7 @@ let summary_schema_supported provider_cfg =
     Keeper_structured_output_schema.memory_bank_summary_output_schema
     provider_cfg
 
-let text_block text : Agent_sdk.Types.content_block =
-  Agent_sdk.Types.Text text
-
-let message role text : Agent_sdk.Types.message =
-  { role; content = [ text_block text ]; name = None; tool_call_id = None; metadata = [] }
+let message role text : Agent_sdk.Types.message = Agent_sdk.Types.text_message role text
 
 let bounded_notes_text texts =
   texts

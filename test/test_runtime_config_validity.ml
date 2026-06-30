@@ -349,11 +349,16 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       check (option string) (model_id ^ " base") (Some "openai_chat")
         entry.base_label
   in
-  expect_lookup "runpod_mtp/qwen36-35b-a3b-mtp";
+  (* RunPod proxy URLs (host suffix .proxy.runpod.net) get no OAS base_url
+     recognition, so OAS resolves them as provider_label "openai_compat",
+     not "runpod_mtp". The catalog id_prefix must match that label or the
+     capability gate (Runtime.init_default_strict) rejects the model at boot.
+     Root fix: teach OAS to recognize RunPod proxy URLs (follow-up OAS PR). *)
+  expect_lookup "openai_compat/qwen36-35b-a3b-mtp";
   expect_lookup "qwen36-35b-a3b-mtp";
   match
     Llm_provider.Capabilities.for_model_id_catalog
-      "runpod_mtp/qwen36-35b-a3b-mtp"
+      "openai_compat/qwen36-35b-a3b-mtp"
   with
   | None -> fail "expected RunPod qwen3.6 capability lookup"
   | Some caps ->
@@ -365,7 +370,26 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
       caps.supports_extended_thinking;
     check bool "RunPod qwen3.6 chat-template thinking" true
       (Llm_provider.Capabilities.(
-         caps.thinking_control_format = Chat_template_kwargs))
+         caps.thinking_control_format = Chat_template_kwargs));
+    (* Verify the actual gate resolution path — for_provider_model_id with
+       the label OAS emits for RunPod. This is the path
+       capabilities_for_config_model uses at boot; the prior catalog used a
+       label OAS never emits, so this returned None and boot failed while the
+       raw [for_model_id_catalog] lookup above still passed (the gap that hid
+       the regression). *)
+    (match
+       Llm_provider.Capabilities.for_provider_model_id
+         ~allow_bare_fallback:false
+         ~provider_label:"openai_compat"
+         ~model_id:"qwen36-35b-a3b-mtp"
+     with
+     | None ->
+       fail
+         "RunPod qwen3.6 must resolve via gate path (provider_label openai_compat)"
+     | Some gate_caps ->
+       check bool "RunPod qwen3.6 gate thinking control" true
+         (Llm_provider.Capabilities.(
+            gate_caps.thinking_control_format = Chat_template_kwargs)))
 
 let test_repo_oas_model_catalog_preserve_axes_resolve () =
   with_repo_oas_model_catalog @@ fun catalog ->

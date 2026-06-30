@@ -137,9 +137,20 @@ input_per_million = 0.0
 output_per_million = 0.0
 
 # RunPod Models
+# WORKAROUND: OAS emits provider_label "openai_compat" for RunPod — it has no
+# *.proxy.runpod.net base_url recognition (unlike ollama_cloud's ollama.com
+# special-case in provider_config.capability_provider_label). The prior
+# "runpod_mtp/" id_prefix never matched the provider-qualified catalog lookup
+# (Capabilities.for_provider_model_id_catalog joins label^"/"^model_id and
+# requires entry.id_prefix to start with label^"/"), so the capability gate
+# (Runtime.init_default_strict) rejected qwen36-35b-a3b-mtp at boot as silently
+# dropping thinking/sampling control. Aligning the id_prefix with the label OAS
+# actually emits restores the match. Root fix: teach OAS to recognize RunPod
+# proxy URLs so a dedicated "runpod_mtp" label exists (follow-up OAS PR,
+# mirrors the ollama_cloud pattern).
 
 [[models]]
-id_prefix = "runpod_mtp/qwen36-35b-a3b-mtp"
+id_prefix = "openai_compat/qwen36-35b-a3b-mtp"
 base = "openai_chat"
 max_context_tokens = 131072
 supports_tools = true

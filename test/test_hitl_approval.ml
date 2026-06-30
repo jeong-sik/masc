@@ -83,6 +83,16 @@ let pending_id_for_keeper ~keeper_name =
       entries
   | _ -> None
 
+let with_env key value f =
+  let old = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match old with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    f
+
 let audit_event_names ~base_path ~keeper_name =
   AQ.read_recent_audit ~base_path ~keeper_name ~n:10 ()
   |> List.map (fun json ->
@@ -1336,6 +1346,57 @@ let test_callback_always_approve_respects_forbidden () =
       | Some _ -> Alcotest.fail "expected Approve after operator resolution"
       | None -> Alcotest.fail "destructive tool callback did not suspend for approval")
 
+let test_callback_hitl_disabled_forbidden_requires_approval () =
+  with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "hitl-disabled-forbidden-keeper" in
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cb =
+          GP.to_oas_approval_callback
+            ~config ~governance_level:"production" ~keeper_name ()
+        in
+        let decision =
+          cb
+            ~tool_name:"tool_edit_file"
+            ~input:(`Assoc [ ("path", `String "/dangerous") ])
+        in
+        result := Some decision);
+      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
+      Alcotest.(check int)
+        "forbidden tool still requires approval when HITL threshold is disabled"
+        (initial_pending + 1)
+        (AQ.pending_count ());
+      let id =
+        match pending_id_for_keeper ~keeper_name with
+        | Some id -> id
+        | None -> Alcotest.fail "expected pending approval for HITL-disabled forbidden tool"
+      in
+      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+       | Ok () -> ()
+       | Error err ->
+         Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+      yield_until (fun () -> Option.is_some !result);
+      match !result with
+      | Some Agent_sdk.Hooks.Approve -> ()
+      | Some Agent_sdk.Hooks.Reject reason ->
+        Alcotest.fail ("expected Approve after operator resolution, got reject: " ^ reason)
+      | Some Agent_sdk.Hooks.Edit _ ->
+        Alcotest.fail "expected Approve after operator resolution, got edit"
+      | None ->
+        Alcotest.fail "HITL-disabled forbidden callback did not suspend for approval")
+
 let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun base_path ->
   let keeper_name = "audit-target-keeper" in
@@ -1539,5 +1600,7 @@ let () =
         test_runtime_trust_classifies_always_approve_flag;
       Alcotest.test_case "always_approve respects forbidden" `Quick
         test_callback_always_approve_respects_forbidden;
+      Alcotest.test_case "HITL disabled still gates forbidden tools" `Quick
+        test_callback_hitl_disabled_forbidden_requires_approval;
     ]);
   ]

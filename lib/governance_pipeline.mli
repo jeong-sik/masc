@@ -121,6 +121,9 @@ val to_oas_approval_callback :
     resolves the approval via the dashboard approval HTTP handler
     ([server_dashboard_http.ml]), resuming the fiber.
 
-    Tools below the threshold are auto-approved.
+    Tools below the threshold are auto-approved unless auto-approval is
+    explicitly forbidden by critical risk, destructive payload semantics, or
+    runtime safety blockers. Those calls still enter the operator approval
+    queue even when HITL thresholds are otherwise disabled.
 
     @since 2.262.0 (#5902, #5907) *)

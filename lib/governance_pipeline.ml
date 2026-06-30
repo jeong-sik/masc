@@ -334,15 +334,21 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
       | None -> false
     in
+    let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
+    let soft_forbidden = auto_approval_soft_forbidden ~tool_name ~input in
+    let auto_approval_forbidden = hard_forbidden || soft_forbidden in
+    let requires_operator_approval = needs_approval || auto_approval_forbidden in
     if trifecta_active
     then
       Log.Governance.debug
-        "[%s] trifecta_active tool=%s base=%s effective=%s needs_approval=%b"
+        "[%s] trifecta_active tool=%s base=%s effective=%s needs_approval=%b \
+         requires_operator_approval=%b"
         keeper_name
         tool_name
         (risk_level_to_string base_risk)
         (risk_level_to_string risk)
-        needs_approval;
+        needs_approval
+        requires_operator_approval;
     if trifecta_active && risk_level_to_int risk > risk_level_to_int base_risk
     then
       Log.Governance.warn
@@ -351,7 +357,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         tool_name
         (risk_level_to_string base_risk)
         (risk_level_to_string risk);
-    if needs_approval
+    if requires_operator_approval
     then (
       let turn_id =
         Option.map
@@ -389,20 +395,12 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
       let base_path = (config : Workspace.config).base_path in
-      let hard_forbidden =
-        runtime_auto_approval_blocked meta
-        || risk = Critical
-      in
-      let soft_forbidden =
-        auto_approval_soft_forbidden ~tool_name ~input
-      in
-      let forbidden = hard_forbidden || soft_forbidden in
       let always_approve =
         Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false
       in
       let rule_match =
-        if forbidden
+        if auto_approval_forbidden
         then None
         else
           Keeper_approval_queue.find_matching_rule
@@ -416,7 +414,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
             ?runtime_contract
             ()
       in
-      if (not forbidden) && always_approve
+      if (not auto_approval_forbidden) && always_approve
       then (
         Keeper_approval_queue.audit_approval_event
           ~base_path

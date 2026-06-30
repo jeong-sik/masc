@@ -81,6 +81,84 @@ let test_create_and_get_post () =
           Alcotest.(check string) "content matches"
             "dispatch test post" fetched.content
 
+let test_update_post_by_owner () =
+  match
+    Board_dispatch.create_post ~author:"editor-agent"
+      ~content:"original body before edit" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"editor-agent"
+          ~content:"edited body after change" ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok updated -> (
+          Alcotest.(check string) "content updated" "edited body after change"
+            updated.content;
+          Alcotest.(check string) "body updated" "edited body after change"
+            updated.body;
+          Alcotest.(check bool) "updated_at not regressed" true
+            (updated.updated_at >= post.updated_at);
+          (* edit persists: a fresh get returns the edited content *)
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "edit persisted via get"
+                "edited body after change" fetched.content))
+
+let test_update_post_rejects_non_owner () =
+  match
+    Board_dispatch.create_post ~author:"owner-agent"
+      ~content:"body owned by owner-agent" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"intruder-agent"
+          ~content:"hijacked content" ()
+      with
+      | Ok _ -> Alcotest.fail "non-owner edit must be rejected"
+      | Error (Board.Unauthorized _) -> (
+          (* the original content must survive a rejected edit *)
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "original preserved on rejected edit"
+                "body owned by owner-agent" fetched.content)
+      | Error e ->
+          Alcotest.fail ("expected Unauthorized, got " ^ Board.show_board_error e))
+
+let test_update_post_missing_id () =
+  match
+    Board_dispatch.update_post ~post_id:"missing-post-id-zzz" ~editor:"any-agent"
+      ~content:"replacement" ()
+  with
+  | Ok _ -> Alcotest.fail "edit of missing post must fail"
+  | Error (Board.Post_not_found _) -> ()
+  | Error e ->
+      Alcotest.fail ("expected Post_not_found, got " ^ Board.show_board_error e)
+
+let test_update_post_rejects_empty_content () =
+  match
+    Board_dispatch.create_post ~author:"empty-edit-agent"
+      ~content:"non-empty original" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"empty-edit-agent"
+          ~content:"   " ()
+      with
+      | Ok _ -> Alcotest.fail "empty content edit must fail"
+      | Error (Board.Validation_error _) -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected Validation_error, got " ^ Board.show_board_error e))
+
 let test_keeper_signal_hook_failure_does_not_abort_create_post () =
   Board_dispatch.set_board_signal_hook (fun _ ->
       failwith "keeper signal hook failed");
@@ -1305,6 +1383,14 @@ let () =
     ];
     "posts", [
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
+      Alcotest.test_case "update by owner persists" `Quick
+        (with_eio test_update_post_by_owner);
+      Alcotest.test_case "update rejects non-owner" `Quick
+        (with_eio test_update_post_rejects_non_owner);
+      Alcotest.test_case "update missing id" `Quick
+        (with_eio test_update_post_missing_id);
+      Alcotest.test_case "update rejects empty content" `Quick
+        (with_eio test_update_post_rejects_empty_content);
       Alcotest.test_case "keeper hook failure does not abort create" `Quick
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick

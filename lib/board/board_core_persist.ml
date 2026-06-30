@@ -695,6 +695,91 @@ let create_post_with_outcome
       | Ok (`Dedup_hit existing) -> Ok (Dedup_hit existing)
       | Error _ as e -> e)
 ;;
+
+(* Owner-gated in-place edit of an existing post's title/body. Mirrors the
+   status-rollup update path (find -> [{ existing with ... }] -> [Hashtbl.replace]
+   -> [mark_dirty_post] -> snapshot save) but is initiated by an explicit edit
+   request rather than a same-key automation re-post. [post_kind]/[meta_json]/
+   [visibility]/[hearth]/[thread_id]/[origin] are intentionally immutable here;
+   edit only touches the textual content + [updated_at]. Author mismatch returns
+   [Unauthorized] (no silent ignore). *)
+let update_post_with_outcome
+      store
+      ~post_id
+      ~editor
+      ~content
+      ?title
+      ?body
+      ()
+  : (post, board_error) Result.t
+  =
+  match Post_id.of_string post_id with
+  | Error e -> Error e
+  | Ok pid ->
+  match Agent_id.of_string editor with
+  | Error e -> Error e
+  | Ok editor_id ->
+  (* [post_kind] is required by [normalize_post_payload] but the result kind is
+     discarded — the existing post's kind is preserved via [{ existing with }]. *)
+  match
+    normalize_post_payload ~content ?title ?body ~post_kind:Human_post ()
+  with
+  | Error (Board_core_payload.Meta_not_assoc payload) ->
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "Malformed meta_json: expected JSON object, got %s"
+              (Yojson.Safe.to_string payload)))
+  | Ok (normalized_title, normalized_body, _kind, _meta) ->
+    if String.length normalized_body > Limits.max_content_length
+    then
+      Error
+        (Validation_error
+           (Printf.sprintf
+              "Content too long: %d > %d"
+              (String.length normalized_body)
+              Limits.max_content_length))
+    else if String.length normalized_body = 0
+    then Error (Validation_error "Content cannot be empty")
+    else (
+      let snapshot_result =
+        with_lock store (fun () ->
+          let key = Post_id.to_string pid in
+          match Hashtbl.find_opt store.posts key with
+          | None -> Error (Post_not_found post_id)
+          | Some existing ->
+            let owner = Agent_id.to_string existing.author in
+            let editor_str = Agent_id.to_string editor_id in
+            if not (String.equal owner editor_str)
+            then
+              Error
+                (Unauthorized
+                   (Printf.sprintf
+                      "agent %s cannot edit post %s owned by %s"
+                      editor_str
+                      key
+                      owner))
+            else (
+              let now = Time_compat.now () in
+              let updated =
+                { existing with
+                  title = normalized_title
+                ; body = normalized_body
+                ; content = normalized_body
+                ; updated_at = now
+                }
+              in
+              Hashtbl.replace store.posts key updated;
+              mark_dirty_post store key;
+              invalidate_post_caches store;
+              Ok (updated, posts_jsonl_unlocked store)))
+      in
+      match snapshot_result with
+      | Error _ as e -> e
+      | Ok (updated, posts_jsonl) ->
+        with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
+        Ok updated)
+;;
 let create_post
       store
       ~author

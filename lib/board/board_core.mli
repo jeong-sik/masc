@@ -247,6 +247,24 @@ val create_post_with_outcome
   -> unit
   -> (create_post_outcome, board_error) Result.t
 
+(** Owner-gated in-place edit of an existing post's title/body.  Validates
+    [editor] via {!Agent_id.of_string}, folds the canonical [title / body] via
+    {!normalize_post_payload}, then replaces the stored post under {!with_lock}
+    and persists a full JSONL snapshot.  Returns [Unauthorized] when [editor]
+    does not own the post, [Post_not_found] for a missing id, and
+    [Validation_error] for empty/oversized content.  Only the textual content
+    and [updated_at] change; [post_kind]/[meta]/[visibility]/[hearth] are
+    preserved. *)
+val update_post_with_outcome
+  :  store
+  -> post_id:string
+  -> editor:string
+  -> content:string
+  -> ?title:string
+  -> ?body:string
+  -> unit
+  -> (post, board_error) Result.t
+
 (** Creates a new post.  Validates [author] via
     {!Agent_id.of_string}, normalises [hearth] (lowercased +
     trimmed), folds the canonical [title / body / kind /

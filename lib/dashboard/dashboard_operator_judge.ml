@@ -63,12 +63,10 @@ let key_preview = "preview"
 let key_provenance = "provenance"
 let key_authoritative = "authoritative"
 let key_confirm_required = "confirm_required"
-let key_raw = "raw"
 let keeper_name_operator_judge = "operator-judge"
 let backoff_status_slots_saturated = "Backoff: local slots saturated"
 let severity_warn = "warn"
 let provenance_judgment = "judgment"
-let judge_label_operator = "Operator"
 let model_used_runtime = "runtime"
 let prompt_dashboard_operator_judge = "dashboard.operator_judge"
 let field_facts_json = "facts_json"
@@ -269,25 +267,15 @@ let compute_judgments
   | Ok result -> (
       let response = result.Runtime_agent.response in
       try
-        (* See dashboard_governance_judge.ml for rationale: LLMs frequently
-           wrap JSON in ```json … ``` markdown fences. Lenient_json strips
-           fences and applies other deterministic recovery transforms. *)
         let raw_text = Agent_sdk_response.text_of_response response in
-        match Llm_provider.Lenient_json.parse raw_text with
-        | `Assoc [(key_raw, `String raw)] ->
-            (* #9774: include a preview so the failure diagnostic doesn't
-               require enabling raw provider logging. *)
-            let msg =
-              Judge_diagnostics.record_lenient_fallback ~judge_label:judge_label_operator raw
-            in
-            Log.Governance.warn "%s" msg;
-            Error msg
-        | parsed ->
+        match Yojson.Safe.from_string (String.trim raw_text) with
+        | `Assoc _ as parsed ->
             let _ = response.model in
             Ok (model_used_runtime, parsed)
+        | _ -> Error "Operator judge returned non-object strict JSON"
       with
       | Yojson.Json_error msg ->
-          Error (Printf.sprintf "Operator judge returned invalid JSON: %s" msg)
+          Error (Printf.sprintf "Operator judge returned invalid strict JSON: %s" msg)
       | exn ->
           Error (Printf.sprintf "Operator judge parse error: %s" (Printexc.to_string exn)))
 

@@ -751,11 +751,31 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('도구 정책')
     // 11 named groups in the prototype snapshot.
     expect(container.querySelectorAll('[data-testid="set-tg-row"]').length).toBe(11)
-    expect(container.textContent).toContain('현재는 live tool-policy 연동이 없어 prototype 표기 스냅샷으로 표시합니다.')
+    expect(container.textContent).toContain('browser-session grant preview')
+    expect(container.textContent).toContain('현재는 live tool-policy writer가 없어 prototype group catalog 스냅샷으로 표시합니다.')
+    expect(container.textContent).not.toContain('기본 부여 그룹과 안전장치를 관리합니다')
+    expect(container.querySelector('[data-testid="policy-local-summary"]')?.textContent).toContain('10/11 enabled')
+    expect(container.querySelectorAll('[data-testid="settings-preview-badge"]').length).toBeGreaterThanOrEqual(12)
     // execute group carries the 3-layer guard badge; voice is opt-in.
     const kinds = Array.from(container.querySelectorAll('.set-tg-kind')).map(n => n.textContent?.trim())
     expect(kinds).toContain('3-layer guard')
     expect(kinds).toContain('opt-in')
+    const firstToggle = container.querySelector('[data-testid="set-tg-row"] [data-testid="set-toggle"]') as HTMLButtonElement
+    expect(firstToggle.getAttribute('data-active')).toBe('true')
+    await fireEvent.click(firstToggle)
+    expect(firstToggle.getAttribute('data-active')).toBe('false')
+    expect(container.querySelector('[data-testid="policy-local-summary"]')?.textContent).toContain('9/11 enabled')
+    expect(sessionStorage.getItem('masc.settings.local.policyGrant')).toContain('"base":false')
+
+    render(null, container)
+    route.value = { tab: 'settings', params: {}, postId: null }
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-policy"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="policy-local-summary"]')?.textContent).toContain('9/11 enabled')
+    expect(
+      container.querySelector('[data-testid="set-tg-row"] [data-testid="set-toggle"]')?.getAttribute('data-active'),
+    ).toBe('false')
     // exec-guard pipeline: validate_command → destructive_guard → write_gate.
     const guardSteps = Array.from(
       container.querySelectorAll('[data-testid="set-guard"] .set-guard-step'),

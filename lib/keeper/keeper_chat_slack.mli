@@ -49,7 +49,8 @@ val adapter_loop :
     Rich events ([Link_block], [Image_block], [Audio_block],
     [Tool_context_block]) are rendered as Slack Block Kit sections and
     included alongside the final message. [Tool_call_start],
-    [Tool_call_args], and [Tool_call_end] are ignored for live streaming.
+    [Tool_call_args], [Tool_call_args_snapshot], and [Tool_call_end] are
+    ignored for live streaming.
 
     [base_url] is used to build public voice-audio URLs; when omitted the
     configured {!Env_config_core.masc_http_base_url} is used.

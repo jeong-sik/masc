@@ -10,6 +10,7 @@ import {
   appendAssistantDelta,
   appendAssistantThinkingDelta,
   appendAssistantToolTraceArgsDelta,
+  setAssistantToolTraceArgsSnapshot,
   appendAssistantToolTraceStep,
   setAssistantStreamState,
   updateThreadEntry,
@@ -195,7 +196,15 @@ export function applyKeeperStreamEvent(
         )
         return null
       }
-      if (toolCallId && typeof event.delta === 'string' && event.delta) {
+      const snapshot = event.snapshot
+      if (toolCallId && typeof snapshot === 'string') {
+        setAssistantToolTraceArgsSnapshot(keeperName, assistantEntryId, toolCallId, snapshot)
+        updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
+          ...entry,
+          text: snapshot,
+          rawText: snapshot,
+        }))
+      } else if (toolCallId && typeof event.delta === 'string' && event.delta) {
         appendAssistantToolTraceArgsDelta(keeperName, assistantEntryId, toolCallId, event.delta)
         updateThreadEntry(keeperName, toolEntryIdFromCallId(toolCallId), entry => ({
           ...entry,

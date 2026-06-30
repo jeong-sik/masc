@@ -1216,6 +1216,18 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                     ~delta:(Some delta)
                     Tool_call_args)
             then loop ()
+        | Tool_call_args_snapshot { tool_call_id; snapshot } ->
+            (* [snapshot] is already redacted at publish. OAS
+               [InputJsonSnapshot] is a whole replacement value, not an
+               append fragment, so preserve that distinction on the wire. *)
+            if
+              keeper_stream_send_event ~on_closed writer mutex closed
+                Ag_ui.(
+                  make_event ~thread_id:!current_thread_id ~run_id:!current_run_id
+                    ~tool_call_id:(Some tool_call_id)
+                    ~snapshot:(Some (`String snapshot))
+                    Tool_call_args)
+            then loop ()
         | Tool_call_end { tool_call_id } ->
             if
               keeper_stream_send_event ~on_closed writer mutex closed

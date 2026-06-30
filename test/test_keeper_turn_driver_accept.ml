@@ -242,7 +242,8 @@ let test_reject_reason_describes_thinking_only_response () =
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "abcde"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "abcde" };
            ]
          ())
   in
@@ -344,7 +345,8 @@ let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
            ]
          ())
   in
@@ -469,7 +471,8 @@ let test_accept_reason_includes_last_tool_context () =
          ~checkpoint
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
            ]
          ())
   in
@@ -534,7 +537,8 @@ let test_thinking_only_after_mutation_then_read_does_not_try_next_candidate () =
          ~checkpoint
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
            ]
          ())
   in
@@ -603,7 +607,8 @@ let test_historical_mutation_does_not_block_current_read_only_retry () =
          ~checkpoint
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
            ]
          ())
   in
@@ -667,7 +672,8 @@ let test_thinking_only_after_read_only_webfetch_can_try_next_candidate () =
          ~checkpoint
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
            ]
          ())
   in
@@ -739,7 +745,8 @@ let test_thinking_only_after_workspace_mutation_stays_terminal () =
               ~checkpoint
               ~content:
                 [
-                  Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+                  Agent_sdk.Types.Thinking
+                    { signature = None; content = "internal chain" };
                 ]
               ())
        in
@@ -1484,7 +1491,8 @@ let test_thinking_with_text_is_accepted () =
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
              Agent_sdk.Types.Text "final answer";
            ]
          ())
@@ -1504,7 +1512,8 @@ let test_thinking_with_tool_use_is_accepted () =
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
              Agent_sdk.Types.ToolUse
                { id = "tool-1"; name = "keeper_board_search"; input = `Assoc [] };
            ]
@@ -1534,7 +1543,8 @@ let test_accept_contract_delegates_to_oas_response_shape () =
   check_accept_matches_oas_shape
     "thinking only"
     [
-      Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+      Agent_sdk.Types.Thinking
+        { signature = None; content = "internal chain" };
     ];
   check_accept_matches_oas_shape "blank text" [ Agent_sdk.Types.Text " \n\t " ];
   check_accept_matches_oas_shape "text" [ Agent_sdk.Types.Text "visible answer" ];
@@ -1574,7 +1584,8 @@ let test_thinking_only_non_end_turn_response_is_rejected () =
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
            ]
          ~stop_reason:Agent_sdk.Types.StopSequence
          ())
@@ -1601,7 +1612,8 @@ let test_thinking_only_no_tool_can_try_next_candidate () =
       (run_result
          ~content:
            [
-             Agent_sdk.Types.Thinking { content = "internal chain"; signature = None };
+             Agent_sdk.Types.Thinking
+               { signature = None; content = "internal chain" };
            ]
          ())
   in

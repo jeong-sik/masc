@@ -434,6 +434,40 @@ describe('applyKeeperStreamEvent tool calls', () => {
     expect(finished?.streamState).toBeNull()
   })
 
+  it('replaces tool-call args when OAS emits argument snapshots', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-snapshot',
+      toolCallName: 'keeper_board_list',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      toolCallId: 'tc-snapshot',
+      snapshot: '{"limit":1}',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_ARGS',
+      toolCallId: 'tc-snapshot',
+      snapshot: '{"limit":2}',
+    })
+
+    const tool = keeperThreads.value.sangsu?.find(entry => entry.id === 'tool-tc-snapshot')
+    expect(tool?.text).toBe('{"limit":2}')
+    expect(tool?.rawText).toBe('{"limit":2}')
+    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      {
+        kind: 'tool',
+        name: 'keeper_board_list',
+        toolCallId: 'tc-snapshot',
+        status: 'pending',
+        args: '{"limit":2}',
+        ts: expect.any(String),
+      },
+    ])
+  })
+
   it('records tool calls in the assistant trace between thinking deltas', () => {
     assistantEntry()
     applyKeeperStreamEvent('sangsu', 'reply-1', {

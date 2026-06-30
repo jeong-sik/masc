@@ -15,35 +15,11 @@ let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
   `List (List.map Agent_sdk.Api.content_block_to_json blocks)
 
-let thinking_signature_of_json (json : Yojson.Safe.t) =
-  match Json_util.get_string json "signature" with
-  | Some _ as signature -> signature
-  | None ->
-    (* DET-OK: older context/checkpoint JSON predates the OAS canonical
-       [signature] carrier and stored the same value under [thinking_type]. *)
-    Json_util.get_string json "thinking_type"
-
 let content_blocks_of_json
     (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
   match Json_util.assoc_member_opt "content_blocks" json with
   | Some (`List blocks) ->
-      let parse_block = function
-        | `Assoc _ as j ->
-          (match Json_util.get_string j "type" with
-           | Some "thinking" ->
-             (match Json_util.get_string j "thinking" with
-              | Some content ->
-                let signature = thinking_signature_of_json j in
-                Some (Agent_sdk.Types.Thinking { content; signature })
-              | None -> None)
-           | Some "redacted_thinking" ->
-             (match Json_util.get_string j "data" with
-              | Some text -> Some (Agent_sdk.Types.RedactedThinking text)
-              | None -> None)
-           | _ -> Agent_sdk.Api.content_block_of_json j)
-        | _ -> None
-      in
-      let parsed = List.filter_map parse_block blocks in
+      let parsed = List.filter_map Agent_sdk.Api.content_block_of_json blocks in
       if List.length parsed = List.length blocks then Some parsed else None
   | _ -> None
 

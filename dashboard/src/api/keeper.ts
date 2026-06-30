@@ -239,6 +239,7 @@ export interface KeeperChatStreamEvent {
   messageId?: string
   role?: string
   delta?: string
+  snapshot?: string
   name?: string
   value?: unknown
   timestamp?: number

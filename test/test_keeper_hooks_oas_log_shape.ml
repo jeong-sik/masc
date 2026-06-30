@@ -27,8 +27,8 @@ let test_tool_arg_shapes_keep_field_names () =
    These pin that policy output across all classifier cases so the delegation
    stays behavior-preserving. *)
 
-let thinking content =
-  Agent_sdk.Types.Thinking { content; signature = None }
+let thinking ?signature content =
+  Agent_sdk.Types.Thinking { signature; content }
 
 let check_thinking_summary ~msg ~present ~blocks ~chars ~redacted ~kind content =
   let { Keeper_hooks_oas_types.thinking_present

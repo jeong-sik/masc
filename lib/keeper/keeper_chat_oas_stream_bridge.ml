@@ -54,6 +54,25 @@ let content_block_start_event ~index ~content_type ~tool_id ~tool_name =
 let content_block_stop_event ~index =
   Keeper_chat_events.Oas_content_block_stop { index }
 
+let tool_args_event ~redact_text ~snapshot bridge_state index args =
+  let open Keeper_chat_events in
+  match stream_tool_for_index bridge_state index with
+  | Some tool ->
+      let args = redact_text args in
+      let chat_event =
+        if snapshot then
+          Tool_call_args_snapshot { tool_call_id = tool.tool_call_id; snapshot = args }
+        else Tool_call_args { tool_call_id = tool.tool_call_id; delta = args }
+      in
+      { bridge_state; chat_events = [ chat_event ] }
+  | None ->
+      { bridge_state;
+        chat_events =
+          [ protocol_error ~index
+              ~reason:"tool argument event arrived before tool start"
+              Tool_args_without_start ]
+      }
+
 let translate ~redact_text ~on_text_delta bridge_state
     (evt : Agent_sdk.Types.sse_event) =
   let open Agent_sdk.Types in
@@ -148,21 +167,10 @@ let translate ~redact_text ~on_text_delta bridge_state
                 Tool_start_missing_identity ]
         }
       else { bridge_state; chat_events = [ block_start ] }
-  | ContentBlockDelta { index; delta = (InputJsonDelta args | InputJsonSnapshot args) } -> (
-      match stream_tool_for_index bridge_state index with
-      | Some tool ->
-          { bridge_state;
-            chat_events =
-              [ Tool_call_args
-                  { tool_call_id = tool.tool_call_id; delta = redact_text args } ]
-          }
-      | None ->
-          { bridge_state;
-            chat_events =
-              [ protocol_error ~index
-                  ~reason:"tool argument delta arrived before tool start"
-                  Tool_args_without_start ]
-          })
+  | ContentBlockDelta { index; delta = InputJsonDelta args } ->
+      tool_args_event ~redact_text ~snapshot:false bridge_state index args
+  | ContentBlockDelta { index; delta = InputJsonSnapshot args } ->
+      tool_args_event ~redact_text ~snapshot:true bridge_state index args
   | ContentBlockStop { index } -> (
       let block_stop = content_block_stop_event ~index in
       match stream_tool_for_index bridge_state index with

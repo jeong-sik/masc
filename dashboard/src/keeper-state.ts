@@ -996,6 +996,33 @@ export function appendAssistantToolTraceArgsDelta(
   if (!found) warnMissingToolTrace('args patch', name, entryId, id)
 }
 
+export function setAssistantToolTraceArgsSnapshot(
+  name: string,
+  entryId: string,
+  toolCallId: string,
+  snapshot: string,
+): void {
+  const id = toolCallId.trim()
+  if (!id) return
+  let found = false
+  updateThreadEntry(name, entryId, entry => {
+    const existing = entry.traceSteps ?? []
+    const traceSteps = existing.map((trace) => {
+      if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
+      found = true
+      return {
+        ...trace,
+        args: snapshot,
+      }
+    })
+    return {
+      ...entry,
+      traceSteps,
+    }
+  })
+  if (!found) warnMissingToolTrace('args snapshot', name, entryId, id)
+}
+
 export function markAssistantToolTraceEnded(
   name: string,
   entryId: string,

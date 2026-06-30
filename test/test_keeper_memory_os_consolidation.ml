@@ -283,6 +283,49 @@ let test_apply_self_observation_group_inherits_min_horizon () =
   | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
 ;;
 
+let test_apply_external_state_group_inherits_effective_horizon () =
+  let first_seen = now -. 1000.0 in
+  let stored_horizon = now +. 2_000.0 in
+  let facts =
+    [ fact
+        ~first_seen
+        ~category:Types.Blocker
+        ~claim_kind:(Some Types.External_state)
+        "task-1578 is blocked by missing mapping"
+    ; fact
+        ~first_seen:(now -. 500.0)
+        ~valid_until:stored_horizon
+        ~category:Types.Blocker
+        ~claim_kind:(Some Types.External_state)
+        "task-1578 still has missing mapping"
+    ]
+  in
+  let expected =
+    Some (first_seen +. Types.external_state_ttl_seconds)
+  in
+  let plan =
+    { Consolidation.groups =
+        [ { Consolidation.member_indices = [ 0; 1 ]
+          ; consolidated_claim = "task-1578 is blocked by missing mapping"
+          ; category = Types.Blocker
+          }
+        ]
+    ; drop_indices = []
+    }
+  in
+  match Consolidation.apply_plan ~now ~facts plan with
+  | [ merged ] ->
+    Alcotest.(check bool)
+      "consolidated fact stays External_state"
+      true
+      (merged.Types.claim_kind = Some Types.External_state);
+    Alcotest.(check (option (float 1e-9)))
+      "External_state consolidated horizon uses member-min effective horizon"
+      expected
+      merged.Types.valid_until
+  | other -> Alcotest.failf "expected 1 merged fact, got %d" (List.length other)
+;;
+
 let test_apply_preserves_ephemeral_expiry_and_verification_age () =
   let facts =
     [ fact
@@ -481,6 +524,10 @@ let () =
             "self-observation group inherits min horizon"
             `Quick
             test_apply_self_observation_group_inherits_min_horizon
+        ; Alcotest.test_case
+            "external-state group inherits effective horizon"
+            `Quick
+            test_apply_external_state_group_inherits_effective_horizon
         ; Alcotest.test_case
             "preserves ephemeral expiry and verification age"
             `Quick

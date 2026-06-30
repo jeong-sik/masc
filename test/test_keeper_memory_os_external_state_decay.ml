@@ -77,9 +77,30 @@ let test_external_state_expires_past_horizon () =
     (Types.fact_is_current ~now:(now +. Types.external_state_ttl_seconds +. 1.0) f)
 ;;
 
-(* 4. Re-observing an External_state claim must NOT advance last_verified_at
+(* 4. Legacy External_state rows written before P7 have [valid_until = None].
+   They must still decay from their original [first_seen] anchor, otherwise the
+   exact stale garnet rows that motivated P7 remain immortal. *)
+let test_legacy_external_state_without_valid_until_expires_from_first_seen () =
+  let first_seen = now -. Types.external_state_ttl_seconds -. 1.0 in
+  let legacy =
+    { (fact ~claim_kind:(Some Types.External_state) ~category:Types.Blocker ())
+      with
+      Types.first_seen
+    ; valid_until = None
+    }
+  in
+  check (option (float 0.001)) "legacy effective horizon"
+    (Some (first_seen +. Types.external_state_ttl_seconds))
+    (Types.fact_effective_valid_until legacy);
+  check bool "legacy row is expired by effective horizon" false
+    (Types.fact_is_current ~now legacy)
+;;
+
+(* 5. Re-observing an External_state claim must NOT advance last_verified_at
    (mirrors Self_observation): repetition cannot keep a stale claim "fresh" or
-   extend its lifetime. Durable_knowledge still advances (contrast). *)
+   extend its lifetime. It should materialize the compatibility-derived horizon
+   for legacy rows so the next write no longer stores an immortal row.
+   Durable_knowledge still advances (contrast). *)
 let test_reobserve_external_state_does_not_bump () =
   let stale_lv = Some (now -. 1000.0) in
   let existing =
@@ -91,6 +112,10 @@ let test_reobserve_external_state_does_not_bump () =
   check (option (float 0.001))
     "External_state last_verified_at unchanged by re-observation" stale_lv
     merged.Types.last_verified_at;
+  check (option (float 0.001))
+    "External_state legacy horizon materialized on re-observation"
+    (Types.fact_effective_valid_until existing)
+    merged.Types.valid_until;
   let dk =
     fact ~claim_kind:(Some Types.Durable_knowledge) ~category:Types.Lesson
       ~last_verified_at:stale_lv ()
@@ -110,6 +135,8 @@ let () =
             test_other_claim_kinds_unchanged
         ; test_case "External_state expires past its horizon" `Quick
             test_external_state_expires_past_horizon
+        ; test_case "legacy External_state valid_until=None expires from first_seen" `Quick
+            test_legacy_external_state_without_valid_until_expires_from_first_seen
         ; test_case "re-observing External_state does not bump last_verified_at" `Quick
             test_reobserve_external_state_does_not_bump
         ] )

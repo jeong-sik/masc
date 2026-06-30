@@ -301,6 +301,10 @@ let self_observation_ttl_seconds = 3_600.0
    state. A TIME, not a score; named, not magic; tune in cycles (RFC §7). *)
 let external_state_ttl_seconds = 6.0 *. 3_600.0
 
+let external_state_valid_until_from_first_seen ~first_seen =
+  first_seen +. external_state_ttl_seconds
+;;
+
 (* RFC-0285 §3.4: the write-side [valid_until] producer. A [Self_observation]
    claim_kind gets the shortest finite horizon regardless of category; an
    [External_state] claim gets a longer finite horizon (RFC-0259 P7). Otherwise
@@ -310,7 +314,7 @@ let external_state_ttl_seconds = 6.0 *. 3_600.0
 let fact_valid_until ~now ~external_ref:_ ~claim_kind category =
   match claim_kind with
   | Some Self_observation -> Some (now +. self_observation_ttl_seconds)
-  | Some External_state -> Some (now +. external_state_ttl_seconds)
+  | Some External_state -> Some (external_state_valid_until_from_first_seen ~first_seen:now)
   | Some Durable_knowledge | Some Diagnostic | None ->
     category_valid_until ~now category
 ;;
@@ -353,8 +357,16 @@ type fact =
        Keyed by the librarian's judgment, not a classifier we author. *)
   }
 
+let fact_effective_valid_until (fact : fact) =
+  match fact.valid_until, fact.claim_kind with
+  | Some _ as valid_until, _ -> valid_until
+  | None, Some External_state ->
+    Some (external_state_valid_until_from_first_seen ~first_seen:fact.first_seen)
+  | None, _ -> None
+;;
+
 let fact_is_current ~now (fact : fact) =
-  match fact.valid_until with
+  match fact_effective_valid_until fact with
   | None -> true
   | Some ts -> ts >= now
 ;;

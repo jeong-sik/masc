@@ -260,7 +260,15 @@ let valid_until_for_group ~now ~external_ref:_ ~claim_kind ~members category =
     (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with
      | Some _ as valid_until -> valid_until
      | None -> Some (now +. self_observation_ttl_seconds))
-  | Some External_state | Some Durable_knowledge | Some Diagnostic | None ->
+  | Some External_state ->
+    (* RFC-0259 P7: consolidation must not collapse legacy External_state rows
+       back into [valid_until = None]. Inherit the earliest stored or
+       compatibility-derived member horizon so a reworded merge cannot extend a
+       volatile external-state claim. *)
+    (match min_optional_float (List.map fact_effective_valid_until members) with
+     | Some _ as valid_until -> valid_until
+     | None -> Some (external_state_valid_until_from_first_seen ~first_seen:now))
+  | Some Durable_knowledge | Some Diagnostic | None ->
     (match category with
      | Ephemeral ->
        (match min_optional_float (List.map (fun (m : fact) -> m.valid_until) members) with

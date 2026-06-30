@@ -48,18 +48,19 @@ let retention_rank ~now (f : fact) =
    strength to move — re-observation is a binary "seen again now". *)
 let reobserve_fact ~now ~existing ~incoming:(_ : fact) =
   match existing.claim_kind with
-  | Some Self_observation | Some External_state ->
-    (* RFC-0285 §3.3 / RFC-0259 P7: inherit the prior row; do NOT advance
-       [last_verified_at]. The librarian re-extracting a recalled claim — a
-       self-observation OR a volatile external-state claim — is NOT
-       re-verification; it is the same claim re-emitted from memory. Advancing the
-       staleness marker would raise [retention_rank] and make the cap keep an
-       echoed (possibly now-false) claim as "recently verified" — the opposite of
-       the goal. For [External_state] the birth-set finite [valid_until]
-       (fact_valid_until, RFC-0259 P7) is what bounds its lifetime; re-assertion
-       must not extend it, otherwise a claim about a cancelled task would be kept
-       alive forever by repetition. *)
+  | Some Self_observation ->
+    (* RFC-0285 §3.3: inherit the prior row; do NOT advance
+       [last_verified_at]. The librarian re-extracting a recalled
+       self-observation is not re-verification; it is the same self-narrative
+       re-emitted from memory. *)
     existing
+  | Some External_state ->
+    (* RFC-0259 P7: do not advance [last_verified_at] on mere re-assertion, but
+       do materialize the compatibility-derived horizon for legacy rows whose
+       on-disk [valid_until] was absent before P7. The anchor remains
+       [first_seen], not [now], so re-observation cannot extend stale external
+       state. *)
+    { existing with valid_until = fact_effective_valid_until existing }
   | Some Durable_knowledge | Some Diagnostic | None ->
     (* Durable/diagnostic re-observe: re-asserting a timeless claim from fresh
        context is enough to advance the staleness marker. *)

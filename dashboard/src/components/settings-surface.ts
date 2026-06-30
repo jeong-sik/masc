@@ -10,20 +10,35 @@ import {
   type SettingsRouteSectionId,
 } from '../config/navigation'
 import { navigate, route } from '../router'
-import { fetchDashboardTools, fetchLogs, fetchRuntimeDefaults, fetchRuntimeProviders } from '../api/dashboard.js'
+import {
+  fetchDashboardTools,
+  fetchKeeperConfig,
+  fetchLogs,
+  fetchRuntimeDefaults,
+  fetchRuntimeProviders,
+  patchKeeperConfig,
+} from '../api/dashboard.js'
 import type {
   DashboardRuntimeProviderSnapshot,
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
+  KeeperConfigUpdatePayload,
   LogEntry,
   RuntimeDefaultsResponse,
+  SandboxNetworkMode,
+  SandboxProfile,
 } from '../api/dashboard.js'
+import { fetchGateConnectors, type GateConnectorInfo, type GateConnectorsData } from '../api/gate'
+import { fetchKeepersComposite } from '../api/keeper'
 import { envBool } from '../config/env'
+import { keepers } from '../store'
+import type { KeeperConfig } from '../types'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
 import type { ComponentChildren } from 'preact'
+import { errorToString } from '../lib/format-string'
 
 type SectionId = SettingsRouteSectionId
 
@@ -75,8 +90,16 @@ const SET_GROUPS: [string, SectionId[]][] = [
 // (Tool_catalog.is_public_mcp). Unknown/empty inventory yields an empty list
 // (no fabricated tool names).
 const MCP_PUBLIC_SURFACE = 'public_mcp'
+const MCP_TRANSPORT_OPTIONS = ['http', 'stdio', 'sse']
 const SETTINGS_LOG_LIMIT = 50
 const SETTINGS_LOG_POLL_MS = 3000
+const DEFAULT_NOTIFY_EVENT_PREVIEW: Record<string, boolean> = {
+  '컨텍스트 임계치 초과': true,
+  '연속 실패': true,
+  'keeper crash/dead': true,
+  '핸드오프 완료': false,
+  '승인 요청': true,
+}
 
 export function normalizeSettingsSection(value: string | null | undefined): SectionId {
   return SETTINGS_ROUTE_SECTION_SET.has(value ?? '') ? (value as SectionId) : 'account'
@@ -158,6 +181,11 @@ function writeLocalPreviewString(key: string, value: string) {
   }
 }
 
+function readLocalPreviewNumber(key: string, fallback: number): number {
+  const parsed = Number(readLocalPreviewString(key, String(fallback)))
+  return Number.isFinite(parsed) ? parsed : fallback
+}
+
 function readLocalPreviewBoolRecord(key: string, fallback: Record<string, boolean>): Record<string, boolean> {
   const next = { ...fallback }
   try {
@@ -190,6 +218,15 @@ function useLocalPreviewString(key: string, initialValue: string): [string, (nex
   const setStoredValue = (next: string) => {
     setValue(next)
     writeLocalPreviewString(key, next)
+  }
+  return [value, setStoredValue]
+}
+
+function useLocalPreviewNumber(key: string, initialValue: number): [number, (next: number) => void] {
+  const [value, setValue] = useState(() => readLocalPreviewNumber(key, initialValue))
+  const setStoredValue = (next: number) => {
+    setValue(next)
+    writeLocalPreviewString(key, String(next))
   }
   return [value, setStoredValue]
 }
@@ -277,21 +314,6 @@ const LAST_TURN_SAFE: readonly string[] = ['keeper_board_post', 'keeper_board_co
 // tool_execute 3-layer deterministic guard — keeper-v2 settings.jsx:101
 // ([groups.execute]).
 const EXEC_GUARD: readonly string[] = ['validate_command', 'destructive_guard', 'write_gate']
-// [discord].trigger_policy — keeper-v2 settings.jsx:103-108. env
-// MASC_DISCORD_TRIGGER_POLICY overrides.
-const DISCORD_TRIGGER: readonly [string, string][] = [
-  ['mention_or_thread', '스레드 자동 응답, 일반 채널은 멘션 필요 (기본)'],
-  ['mention_only', '@멘션된 메시지만 응답'],
-  ['all', '모든 메시지에 응답'],
-  ['user_only', '특정 사용자(snowflake)만'],
-]
-const DEFAULT_GATE_CONNECTOR_PREVIEW: Record<string, boolean> = {
-  Slack: true,
-  Discord: true,
-  Amplitude: true,
-  GitHub: false,
-}
-
 // System-log row: [time, level, identity, message, status]. Derived from live
 // ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
 // polls. Status is derived from the entry level only (error→fail, warn→warn,
@@ -541,6 +563,92 @@ function RuntimeCatalogCard({
   `
 }
 
+type SandboxDraft = {
+  sandbox_profile: SandboxProfile
+  network_mode: SandboxNetworkMode
+  allowed_paths_text: string
+}
+
+function coerceSandboxProfile(raw: string | null | undefined): SandboxProfile {
+  return raw === 'docker' ? 'docker' : 'local'
+}
+
+function coerceNetworkMode(raw: string | null | undefined): SandboxNetworkMode {
+  return raw === 'none' ? 'none' : 'inherit'
+}
+
+function dedupeListText(text: string): string[] {
+  const seen = new Set<string>()
+  const values: string[] = []
+  for (const raw of text.split('\n')) {
+    const item = raw.trim()
+    if (!item || seen.has(item)) continue
+    seen.add(item)
+    values.push(item)
+  }
+  return values
+}
+
+function sameStringArray(left: readonly string[], right: readonly string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
+
+function sandboxDraftFromConfig(config: KeeperConfig): SandboxDraft {
+  return {
+    sandbox_profile: coerceSandboxProfile(config.sandbox_profile),
+    network_mode: coerceNetworkMode(config.network_mode),
+    allowed_paths_text: (config.allowed_paths ?? []).join('\n'),
+  }
+}
+
+function buildSandboxPayload(draft: SandboxDraft, config: KeeperConfig): KeeperConfigUpdatePayload {
+  const payload: KeeperConfigUpdatePayload = {}
+  const allowedPaths = dedupeListText(draft.allowed_paths_text)
+  if (draft.sandbox_profile !== coerceSandboxProfile(config.sandbox_profile)) {
+    payload.sandbox_profile = draft.sandbox_profile
+  }
+  if (draft.network_mode !== coerceNetworkMode(config.network_mode)) {
+    payload.network_mode = draft.network_mode
+  }
+  if (!sameStringArray(allowedPaths, config.allowed_paths ?? [])) {
+    payload.allowed_paths = allowedPaths
+  }
+  return payload
+}
+
+function connectorState(connector: GateConnectorInfo): 'connected' | 'stale' | 'offline' {
+  if (!connector.available) return 'offline'
+  if (connector.stale) return 'stale'
+  return connector.connected ? 'connected' : 'offline'
+}
+
+function connectorStateText(connector: GateConnectorInfo): string {
+  const state = connectorState(connector)
+  if (state === 'connected') return 'connected'
+  if (state === 'stale') return 'stale'
+  return connector.status || 'offline'
+}
+
+function uniqueConnectorGateBaseUrls(connectors: readonly GateConnectorInfo[]): string[] {
+  return Array.from(new Set(
+    connectors
+      .map(connector => connector.gate_base_url.trim())
+      .filter(Boolean),
+  )).sort((a, b) => a.localeCompare(b))
+}
+
+function uniqueNonEmptyStrings(values: readonly (string | null | undefined)[]): string[] {
+  const seen = new Set<string>()
+  const names: string[] = []
+  for (const value of values) {
+    const name = value?.trim()
+    if (!name || seen.has(name)) continue
+    seen.add(name)
+    names.push(name)
+  }
+  return names
+}
+
 type SettingsSectionMode = 'live' | 'local'
 
 function settingsSectionState(
@@ -551,6 +659,8 @@ function settingsSectionState(
   if (section === 'runtimes') return { mode: 'live', label: 'runtime.toml live-backed' }
   if (section === 'routing') return { mode: 'live', label: 'runtime.toml live-backed' }
   if (section === 'prompts') return { mode: 'live', label: 'prompt registry live-backed' }
+  if (section === 'sandbox') return { mode: 'live', label: 'keeper config live-backed' }
+  if (section === 'gate') return { mode: 'live', label: 'gate connector live-backed' }
   if (section === 'fusion' && fusionSettingsWritable) {
     return { mode: 'live', label: 'runtime.toml live-backed' }
   }
@@ -686,7 +796,7 @@ export function SettingsSurface() {
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
   const [mcpUrl, setMcpUrl] = useLocalPreviewString('mcpUrl', 'https://masc.local/mcp')
-  const [transport, setTransport] = useState('http')
+  const [transport, setTransport] = useLocalPreviewString('mcpTransport', 'http')
   const [mcpTools, setMcpTools] = useState<string[]>([])
   const [tools, setTools] = useState<Record<string, boolean>>({})
 
@@ -698,10 +808,7 @@ export function SettingsSurface() {
         if (!active) return
         const names = mcpExposedToolNames(resp.tool_inventory?.tools ?? [])
         setMcpTools(names)
-        // Listed tools are, by definition, currently exposed over public MCP.
-        // The per-tool toggle is a local view control; expose/unexpose
-        // persistence is deferred (no backend write endpoint yet).
-        setTools(Object.fromEntries(names.map(n => [n, true])))
+        setTools(readLocalPreviewBoolRecord('mcpToolPreview', Object.fromEntries(names.map(n => [n, true]))))
       } catch {
         if (!active) return
         // No fabricated tool names on failure.
@@ -711,6 +818,14 @@ export function SettingsSurface() {
     })()
     return () => { active = false }
   }, [])
+
+  function updateMcpToolPreview(tool: string, enabled: boolean) {
+    setTools(prev => {
+      const next = { ...prev, [tool]: enabled }
+      writeLocalPreviewBoolRecord('mcpToolPreview', next)
+      return next
+    })
+  }
 
   // runtime defaults / model routing — resolved from runtime.toml (SSOT)
   const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
@@ -761,9 +876,6 @@ export function SettingsSurface() {
   const [fusionPanels, setFusionPanels] = useState(FUSION.maxConcurrentPanels)
   const [fusionWeb, setFusionWeb] = useState(FUSION.webTools)
 
-  // discord trigger policy (gate section) — keeper-v2 settings.jsx:183
-  const [discordTrigger, setDiscordTrigger] = useLocalPreviewString('discordTrigger', 'mention_or_thread')
-
   // lifecycle
   const [idleDrain, setIdleDrain] = useState(30)
   const [autoRestart, setAutoRestart] = useState(true)
@@ -771,8 +883,9 @@ export function SettingsSurface() {
   const [onOverflow, setOnOverflow] = useState('자동 compact')
 
   // gate / paths
-  const [gateBase, setGateBase] = useLocalPreviewString('gateBase', 'https://gate.masc.local')
-  const [gateOn, setGateOn] = useLocalPreviewBoolRecord('gateConnectorPreview', DEFAULT_GATE_CONNECTOR_PREVIEW)
+  const [gateConnectorsData, setGateConnectorsData] = useState<GateConnectorsData | null>(null)
+  const [gateConnectorsStatus, setGateConnectorsStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [gateConnectorsError, setGateConnectorsError] = useState<string | null>(null)
   const [wtBase, setWtBase] = useLocalPreviewString('wtBase', '~/wt')
   const [storeUrl, setStoreUrl] = useLocalPreviewString('storeUrl', 'postgres://masc.local:5432/masc')
   const [pathChecks, setPathChecks] = useState<Partial<Record<PathCheckTarget, PathCheckResult>>>({})
@@ -793,16 +906,129 @@ export function SettingsSurface() {
     setPathChecks(current => ({ ...current, [target]: result }))
   }
 
-  // sandbox
-  const [isolation, setIsolation] = useState('container')
-  const [egress, setEgress] = useState('허용목록')
-  const [allowlist, setAllowlist] = useLocalPreviewString('allowlist', 'github.com, opam.ocaml.org, *.masc.local')
-  const [fsScope, setFsScope] = useState('worktree')
-  const [shellOn, setShellOn] = useState(true)
-  const [blockRisky, setBlockRisky] = useState(true)
-  const [memLimit, setMemLimit] = useState('2GB')
-  const [cpuLimit, setCpuLimit] = useState(2)
-  const [execTimeout, setExecTimeout] = useState(120)
+  // sandbox — per-keeper live config, not a global sandbox policy.
+  const [sandboxFallbackKeeperNames, setSandboxFallbackKeeperNames] = useState<string[]>([])
+  const [sandboxKeeperListStatus, setSandboxKeeperListStatus] = useState<'idle' | 'loading' | 'ready' | 'error'>('idle')
+  const [sandboxKeeperListError, setSandboxKeeperListError] = useState<string | null>(null)
+  const liveKeeperCount = keepers.value.length
+  const keeperList = liveKeeperCount > 0
+    ? keepers.value
+    : sandboxFallbackKeeperNames.map(name => ({ name, status: 'unknown' }))
+  const keeperNamesKey = keeperList.map(keeper => keeper.name).join('\u0000')
+  const [sandboxKeeperName, setSandboxKeeperName] = useState('')
+  const [sandboxConfig, setSandboxConfig] = useState<KeeperConfig | null>(null)
+  const [sandboxDraft, setSandboxDraft] = useState<SandboxDraft | null>(null)
+  const [sandboxStatus, setSandboxStatus] = useState<'idle' | 'loading' | 'ready' | 'saving' | 'error'>('idle')
+  const [sandboxError, setSandboxError] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (sec !== 'sandbox') return
+    setSandboxKeeperName(current => {
+      if (current && keeperList.some(keeper => keeper.name === current)) return current
+      return keeperList[0]?.name ?? ''
+    })
+  }, [keeperNamesKey, sec])
+
+  useEffect(() => {
+    if (sec !== 'sandbox' || liveKeeperCount > 0) return undefined
+    const controller = new AbortController()
+    setSandboxKeeperListStatus('loading')
+    setSandboxKeeperListError(null)
+    void (async () => {
+      try {
+        const fleet = await fetchKeepersComposite({ signal: controller.signal })
+        if (controller.signal.aborted) return
+        const names = uniqueNonEmptyStrings(fleet.snapshots.map(snapshot => snapshot.keeper))
+        setSandboxFallbackKeeperNames(names)
+        setSandboxKeeperListStatus('ready')
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return
+        setSandboxFallbackKeeperNames([])
+        setSandboxKeeperListStatus('error')
+        setSandboxKeeperListError(errorToString(err))
+      }
+    })()
+    return () => controller.abort()
+  }, [liveKeeperCount, sec])
+
+  useEffect(() => {
+    if (sec !== 'gate') return undefined
+    const controller = new AbortController()
+    setGateConnectorsStatus('loading')
+    setGateConnectorsError(null)
+    void (async () => {
+      try {
+        const resp = await fetchGateConnectors(controller.signal)
+        setGateConnectorsData(resp)
+        setGateConnectorsStatus('ready')
+      } catch (err: unknown) {
+        if (controller.signal.aborted) return
+        setGateConnectorsData(null)
+        setGateConnectorsStatus('error')
+        setGateConnectorsError(errorToString(err))
+      }
+    })()
+    return () => controller.abort()
+  }, [sec])
+
+  useEffect(() => {
+    if (sec !== 'sandbox' || !sandboxKeeperName) return undefined
+    let active = true
+    setSandboxStatus('loading')
+    setSandboxError(null)
+    setSandboxConfig(null)
+    setSandboxDraft(null)
+    void (async () => {
+      try {
+        const config = await fetchKeeperConfig(sandboxKeeperName)
+        if (!active) return
+        setSandboxConfig(config)
+        setSandboxDraft(sandboxDraftFromConfig(config))
+        setSandboxStatus('ready')
+      } catch (err: unknown) {
+        if (!active) return
+        setSandboxStatus('error')
+        setSandboxError(errorToString(err))
+      }
+    })()
+    return () => { active = false }
+  }, [sandboxKeeperName, sec])
+
+  function updateSandboxDraft(field: keyof SandboxDraft, value: string) {
+    setSandboxDraft(current => {
+      if (!current) return current
+      const next = { ...current, [field]: value } as SandboxDraft
+      if (field === 'sandbox_profile' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
+        next.network_mode = 'inherit'
+      }
+      if (field === 'network_mode' && next.sandbox_profile !== 'docker' && next.network_mode === 'none') {
+        next.network_mode = 'inherit'
+      }
+      return next
+    })
+  }
+
+  async function saveSandboxConfig() {
+    if (!sandboxConfig || !sandboxDraft || sandboxStatus === 'saving') return
+    const payload = buildSandboxPayload(sandboxDraft, sandboxConfig)
+    if (Object.keys(payload).length === 0) return
+    setSandboxStatus('saving')
+    setSandboxError(null)
+    try {
+      const updated = await patchKeeperConfig(sandboxConfig.name, payload)
+      setSandboxConfig(updated)
+      setSandboxDraft(sandboxDraftFromConfig(updated))
+      setSandboxStatus('ready')
+      keepers.value = keepers.value.map(keeper =>
+        keeper.name === updated.name
+          ? { ...keeper, sandbox_profile: coerceSandboxProfile(updated.sandbox_profile) }
+          : keeper,
+      )
+    } catch (err: unknown) {
+      setSandboxStatus('error')
+      setSandboxError(errorToString(err))
+    }
+  }
 
   // ide
   const [ideView, setIdeView] = useState('split-diff')
@@ -827,16 +1053,10 @@ export function SettingsSurface() {
   const [sampling, setSampling] = useState(100)
 
   // notify / display
-  const [notifyCtx, setNotifyCtx] = useState(85)
-  const [notifyFails, setNotifyFails] = useState(3)
-  const [notifyCh, setNotifyCh] = useState('Slack')
-  const [notifyOn, setNotifyOn] = useState<Record<string, boolean>>({
-    '컨텍스트 임계치 초과': true,
-    '연속 실패': true,
-    'keeper crash/dead': true,
-    '핸드오프 완료': false,
-    '승인 요청': true,
-  })
+  const [notifyCtx, setNotifyCtx] = useLocalPreviewNumber('notifyContextThreshold', 85)
+  const [notifyFails, setNotifyFails] = useLocalPreviewNumber('notifyFailureThreshold', 3)
+  const [notifyCh, setNotifyCh] = useLocalPreviewString('notifyChannel', 'Slack')
+  const [notifyOn, setNotifyOn] = useLocalPreviewBoolRecord('notifyEventPreview', DEFAULT_NOTIFY_EVENT_PREVIEW)
   const [density, setDensity] = useState('regular')
   const [tz, setTz] = useState('Asia/Seoul')
   const [locale, setLocale] = useState('KO')
@@ -845,7 +1065,10 @@ export function SettingsSurface() {
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
   const sectionState = settingsSectionState(sec, fusionSettingsWritable)
   const grantedGroupCount = Object.values(grant).filter(Boolean).length
-  const gatePreviewEnabledCount = Object.values(gateOn).filter(Boolean).length
+  const liveGateConnectors = gateConnectorsData?.connectors ?? []
+  const liveGateBaseUrls = uniqueConnectorGateBaseUrls(liveGateConnectors)
+  const sandboxDirty = sandboxConfig !== null && sandboxDraft !== null
+    && Object.keys(buildSandboxPayload(sandboxDraft, sandboxConfig)).length > 0
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -860,8 +1083,8 @@ export function SettingsSurface() {
   const keeperAssignmentCount = keeperAssignments.length > 0
     ? keeperAssignments.length
     : runtimeProviders?.assignment_governance?.assignment_count ?? 0
-  const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
-  const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
+  const mcpPreviewEnabledCount = Object.values(tools).filter(Boolean).length
+  const notifyPreviewEnabledCount = Object.values(notifyOn).filter(Boolean).length
 
   return html`
     <main class="v2-shell-surface settings-surf ss-surface bg-surface-page text-text-primary" data-screen-label="설정" data-testid="settings-surface">
@@ -911,7 +1134,7 @@ export function SettingsSurface() {
           </header>
 
           <div
-            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'runtimes' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
+            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'runtimes' || sec === 'routing' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
             data-preview-locked="false"
             data-settings-mode=${sectionState.mode}
           >
@@ -939,7 +1162,10 @@ export function SettingsSurface() {
 
             ${sec === 'mcp' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Expose this namespace to external agents/clients via an MCP server.
+                Live <span class="mono">public_mcp</span> inventory is read from the backend. Endpoint, transport and per-tool switches below are browser-session exposure previews only; they do not rewrite MCP server policy.
+              </div>
+              <div class="set-local-summary" data-testid="mcp-local-summary">
+                Previewing ${transport} against ${mcpUrl}; ${mcpPreviewEnabledCount}/${mcpTools.length} listed tools selected in this browser session.
               </div>
               <${SetRow} label="MCP endpoint" hint="GET/POST /mcp">
                 <div class="set-path">
@@ -952,23 +1178,29 @@ export function SettingsSurface() {
                   <${PreviewBadge} />
                 </div>
               <//>
-              <${SetRow} label="Transport" hint="transport">
-                <${SetSeg} value=${transport} options=${['http', 'stdio', 'sse']} onChange=${setTransport} />
+              <${SetRow} label="Transport" hint="browser-session preview">
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSeg} value=${transport} options=${MCP_TRANSPORT_OPTIONS} onChange=${setTransport} />
+                </div>
               <//>
               <div class="set-mcp-detail mono">
                 ${transport === 'http' && html`<span>POST ${mcpUrl} · Content-Type: application/json · Authorization: Bearer ••••</span>`}
-                ${transport === 'stdio' && html`<span>spawn: masc-mcp serve --stdio · framing: ndjson · pid 8421</span>`}
+                ${transport === 'stdio' && html`<span>spawn: masc-mcp serve --stdio · framing: ndjson</span>`}
                 ${transport === 'sse' && html`<span>GET ${mcpUrl}/sse · keep-alive 15s · event: message</span>`}
               </div>
-              <div class="set-sub-h">Exposed tools (${Object.values(tools).filter(Boolean).length}/${mcpTools.length})</div>
+              <div class="set-sub-h">Local tool exposure preview (${mcpPreviewEnabledCount}/${mcpTools.length})</div>
               ${mcpTools.length === 0
                 ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
                 : mcpTools.map(t => html`
                 <${SetRow} key=${t} label=${html`<span class="mono" style=${{ fontSize: '12.5px' }}>${t}</span>`}>
-                  <${SetToggle}
-                    on=${tools[t] ?? false}
-                    onChange=${(v: boolean) => setTools(p => ({ ...p, [t]: v }))}
-                  />
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetToggle}
+                      on=${tools[t] ?? false}
+                      onChange=${(v: boolean) => updateMcpToolPreview(t, v)}
+                    />
+                  </div>
                 <//>
               `)}
             `}
@@ -1016,11 +1248,6 @@ export function SettingsSurface() {
                   <${SetRow} label="Default model" hint="Resolved model API name">
                     <span class="mono" data-testid="runtime-default-model">${runtimeDefaults?.default_model ?? defaultCatalogEntry?.model_api_name ?? '—'}</span>
                   <//>
-                  <${SetRow} label="Default context" hint="Resolved context window">
-                    <span class="mono" data-testid="runtime-default-context">
-                      ${formatRuntimeContext(runtimeDefaults?.default_max_context ?? defaultCatalogEntry?.max_context ?? null)}
-                    </span>
-                  <//>
                 </div>
 
                 <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
@@ -1050,25 +1277,9 @@ export function SettingsSurface() {
 
             ${sec === 'routing' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Resolved model routing from runtime.toml (SSOT). Read-only — edit runtime.toml to change.
+                runtime.toml 의 라우팅 레인과 keeper 배정을 직접 수정합니다. 기본 런타임, memory-os 라이브러리안, cross-verifier, keeper별 배정은 모두 같은 SSOT에 저장됩니다.
               </div>
-              <${SetRow} label="Default model" hint="Used when no keeper assignment matches">
-                <span class="mono" data-testid="routing-default-model">${runtimeDefaults?.default_model ?? '—'}</span>
-              <//>
-              ${librarianRuntime
-                ? html`<${SetRow} label="Librarian runtime" hint="[runtime].librarian"><span class="mono">${librarianRuntime}</span><//>`
-                : null}
-              ${crossVerifierRuntime
-                ? html`<${SetRow} label="Cross-verifier runtime" hint="[runtime].cross_verifier"><span class="mono">${crossVerifierRuntime}</span><//>`
-                : null}
-              <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
-              ${keeperAssignments.length === 0
-                ? html`<div class="set-hint" data-testid="routing-assignments-empty">명시적 keeper 할당이 없습니다 — 모두 기본 런타임을 사용합니다.</div>`
-                : keeperAssignments.map(a => html`
-                    <${SetRow} key=${a.keeper} label=${a.keeper} hint="keeper → runtime">
-                      <span class="mono" data-testid="routing-assignment">${a.runtime_id}</span>
-                    <//>
-                  `)}
+              <${RuntimeTomlEditor} />
             `}
 
             ${sec === 'prompts' && html`
@@ -1184,46 +1395,88 @@ export function SettingsSurface() {
 
             ${sec === 'sandbox' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Isolated execution environment for keeper code. Tool permissions (approval policy) sit above this OS·network boundary.
+                Keeper별 <span class="mono">sandbox_profile</span>, <span class="mono">network_mode</span>, <span class="mono">allowed_paths</span>를 live keeper config에 저장합니다. 선택한 keeper의 source path와 effective_paths를 함께 표시합니다.
               </div>
-              <${SetRow} label="Isolation level" hint="Keeper execution isolation">
-                <${SetSeg} value=${isolation} options=${['worktree', 'container', 'microVM']} onChange=${setIsolation} />
-              <//>
-              <${SetRow} label="Filesystem scope" hint="Paths the keeper can access">
-                <${SetSeg} value=${fsScope} options=${['worktree', 'namespace', '전체']} onChange=${setFsScope} />
-              <//>
-              <${SetRow} label="Network egress" hint="External network access">
-                <${SetSeg} value=${egress} options=${['차단', '허용목록', '전체']} onChange=${setEgress} />
-              <//>
-              ${egress === '허용목록' && html`
-                <${SetRow} label="Allowed domains" hint="Comma-separated">
-                  <input
-                    class="set-input mono"
-                    data-testid="settings-allowed-domains-input"
-                    style=${{ width: '260px' }}
-                    value=${allowlist}
-                    onInput=${(e: Event) => setAllowlist((e.target as HTMLInputElement).value)}
-                  />
-                <//>
-              `}
-              <${SetRow} label="Shell commands" hint="Keeper may run shell commands">
-                <${SetToggle} on=${shellOn} onChange=${setShellOn} />
-              <//>
-              ${shellOn && html`
-                <${SetRow} label="Block risky commands" hint="rm -rf, curl | sh, etc.">
-                  <${SetToggle} on=${blockRisky} onChange=${setBlockRisky} />
-                <//>
-              `}
-              <div class="set-sub-h">Resource limits</div>
-              <${SetRow} label="Memory" hint="Max per keeper">
-                <${SetSeg} value=${memLimit} options=${['1GB', '2GB', '4GB', '8GB']} onChange=${setMemLimit} />
-              <//>
-              <${SetRow} label="CPU" hint="vCPU cores">
-                <${SetStepper} v=${cpuLimit} set=${setCpuLimit} min=${1} max=${16} />
-              <//>
-              <${SetRow} label="Execution timeout" hint="Max single command runtime (seconds)">
-                <${SetSlider} value=${execTimeout} min=${10} max=${600} step=${10} suffix="s" onChange=${setExecTimeout} />
-              <//>
+              ${keeperList.length === 0
+                ? sandboxKeeperListStatus === 'loading'
+                  ? html`<div class="set-hint" data-testid="settings-sandbox-keepers-loading">keeper 목록을 불러오는 중...</div>`
+                  : sandboxKeeperListStatus === 'error'
+                    ? html`<div class="set-hint" data-testid="settings-sandbox-keepers-error">${sandboxKeeperListError ?? 'keeper 목록을 불러오지 못했습니다.'}</div>`
+                    : html`<div class="set-hint" data-testid="settings-sandbox-empty">표시할 keeper가 없습니다.</div>`
+                : html`
+                  <${SetRow} label="Keeper" hint="config/keepers/<name>.toml + live override">
+                    <select
+                      class="set-select mono"
+                      data-testid="settings-sandbox-keeper-select"
+                      value=${sandboxKeeperName}
+                      onInput=${(event: Event) => setSandboxKeeperName((event.currentTarget as HTMLSelectElement).value)}
+                      onChange=${(event: Event) => setSandboxKeeperName((event.currentTarget as HTMLSelectElement).value)}
+                    >
+                      ${keeperList.map(keeper => html`<option key=${keeper.name} value=${keeper.name}>${keeper.name}</option>`)}
+                    </select>
+                  <//>
+                  ${sandboxStatus === 'loading'
+                    ? html`<div class="set-hint" data-testid="settings-sandbox-loading">keeper sandbox 설정을 불러오는 중...</div>`
+                    : sandboxStatus === 'error'
+                      ? html`<div class="set-hint" data-testid="settings-sandbox-error">${sandboxError ?? 'keeper sandbox 설정을 불러오지 못했습니다.'}</div>`
+                      : sandboxConfig && sandboxDraft
+                        ? html`
+                          <${SetRow} label="sandbox_profile" hint="local 또는 docker">
+                            <select
+                              class="set-select mono"
+                              data-testid="settings-sandbox-profile"
+                              value=${sandboxDraft.sandbox_profile}
+                              disabled=${sandboxStatus === 'saving'}
+                              onInput=${(event: Event) => updateSandboxDraft('sandbox_profile', (event.currentTarget as HTMLSelectElement).value)}
+                              onChange=${(event: Event) => updateSandboxDraft('sandbox_profile', (event.currentTarget as HTMLSelectElement).value)}
+                            >
+                              <option value="local">local</option>
+                              <option value="docker">docker</option>
+                            </select>
+                          <//>
+                          <${SetRow} label="network_mode" hint="docker일 때 none 선택 가능">
+                            <select
+                              class="set-select mono"
+                              data-testid="settings-sandbox-network"
+                              value=${sandboxDraft.network_mode}
+                              disabled=${sandboxStatus === 'saving'}
+                              onInput=${(event: Event) => updateSandboxDraft('network_mode', (event.currentTarget as HTMLSelectElement).value)}
+                              onChange=${(event: Event) => updateSandboxDraft('network_mode', (event.currentTarget as HTMLSelectElement).value)}
+                            >
+                              <option value="inherit">inherit</option>
+                              ${sandboxDraft.sandbox_profile === 'docker' ? html`<option value="none">none</option>` : null}
+                            </select>
+                          <//>
+                          <${SetRow} label="allowed_paths" hint="한 줄에 하나, 비우면 computed default">
+                            <textarea
+                              class="set-input mono"
+                              data-testid="settings-sandbox-allowed-paths"
+                              rows=${4}
+                              disabled=${sandboxStatus === 'saving'}
+                              value=${sandboxDraft.allowed_paths_text}
+                              onInput=${(event: Event) => updateSandboxDraft('allowed_paths_text', (event.currentTarget as HTMLTextAreaElement).value)}
+                            ></textarea>
+                          <//>
+                          <div class="set-mcp-detail mono" data-testid="settings-sandbox-effective-paths">
+                            effective_paths ${(sandboxConfig.effective_allowed_paths ?? []).join(', ') || '(computed default)'}
+                          </div>
+                          <div class="set-actions">
+                            <button
+                              type="button"
+                              class="set-verify"
+                              data-testid="settings-sandbox-save"
+                              disabled=${!sandboxDirty || sandboxStatus === 'saving'}
+                              onClick=${() => { void saveSandboxConfig() }}
+                            >
+                              ${sandboxStatus === 'saving' ? 'Saving' : 'Save'}
+                            </button>
+                            <span class="set-hint" data-testid="settings-sandbox-source">
+                              ${sandboxConfig.sources.live_meta_path || sandboxConfig.sources.default_manifest_path || sandboxConfig.name}
+                            </span>
+                          </div>
+                        `
+                        : null}
+                `}
             `}
 
             ${sec === 'ide' && html`
@@ -1296,7 +1549,7 @@ export function SettingsSurface() {
 
             ${sec === 'gate' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Browser-session preview for connector defaults. Live connector runtime, availability and per-channel→keeper bindings are managed in
+                Live connector runtime, availability, trigger policy and channel→keeper bindings are read from <span class="mono">GET /api/v1/gate/connectors</span>. Add, remove, bind and sidecar lifecycle actions live in
                 <button
                   type="button"
                   class="set-link"
@@ -1306,53 +1559,50 @@ export function SettingsSurface() {
                   Connectors →
                 </button>.
               </div>
-              <div class="set-local-summary" data-testid="gate-local-summary">
-                <span>local connector preview</span>
-                <span class="mono">${gatePreviewEnabledCount}/${Object.keys(DEFAULT_GATE_CONNECTOR_PREVIEW).length} enabled</span>
-                <${PreviewBadge} />
+              <div class="set-local-summary" data-testid="gate-live-summary">
+                <span>live connector status</span>
+                <span class="mono">
+                  ${gateConnectorsStatus === 'ready'
+                    ? `${gateConnectorsData?.active_count ?? 0}/${gateConnectorsData?.total ?? liveGateConnectors.length} active`
+                    : gateConnectorsStatus}
+                </span>
               </div>
-              <${SetRow} label="Gate base URL" hint="GET /api/v1/gate/connectors">
-                <div class="set-path">
-                  <input
-                    class="set-input mono"
-                    data-testid="settings-gate-base-input"
-                    value=${gateBase}
-                    onInput=${(e: Event) => setGateBase((e.target as HTMLInputElement).value)}
-                  />
-                  <${PreviewBadge} />
-                </div>
-              <//>
-              ${['Slack', 'Discord', 'Amplitude', 'GitHub'].map(g => html`
-                <${SetRow} key=${g} label=${g} hint=${gateOn[g] ? 'local preview enabled' : 'local preview disabled'}>
-                  <div class="set-tg-control">
-                    <${PreviewBadge} />
-                    <${SetToggle} on=${gateOn[g] ?? false} onChange=${(v: boolean) => setGateOn(p => ({ ...p, [g]: v }))} />
-                  </div>
-                <//>
-              `)}
-              ${gateOn.Discord && html`
-                <div class="set-sub-h">Discord 트리거 정책</div>
-                <div class="set-hint" style=${{ marginBottom: '8px' }}>
-                  어떤 인바운드 이벤트에 봇이 응답할지 — <span class="mono">[discord].trigger_policy</span> · env <span class="mono">MASC_DISCORD_TRIGGER_POLICY</span> 우선.
-                </div>
-                ${DISCORD_TRIGGER.map(([val, hint]) => html`
-                  <button
-                    type="button"
-                    key=${val}
-                    class=${`set-trigger ${discordTrigger === val ? 'on' : ''}`}
-                    data-testid="set-trigger"
-                    data-active=${discordTrigger === val ? 'true' : 'false'}
-                    aria-pressed=${discordTrigger === val}
-                    onClick=${() => setDiscordTrigger(val)}
-                  >
-                    <span class="set-trigger-radio"></span>
-                    <span class="set-trigger-l">
-                      <span class="mono">${val}</span>
-                      <span class="set-trigger-hint">${hint}</span>
-                    </span>
-                  </button>
-                `)}
-              `}
+              ${gateConnectorsStatus === 'loading'
+                ? html`<div class="set-hint" data-testid="settings-gate-loading">connector 상태를 불러오는 중...</div>`
+                : gateConnectorsStatus === 'error'
+                  ? html`<div class="set-hint" data-testid="settings-gate-error">${gateConnectorsError ?? 'connector 상태를 불러오지 못했습니다.'}</div>`
+                  : html`
+                    <${SetRow} label="Discord trigger policy" hint="live connector payload">
+                      <span class="mono" data-testid="settings-gate-discord-trigger">${gateConnectorsData?.discord_trigger_policy ?? 'unknown'}</span>
+                    <//>
+                    <${SetRow} label="Gate base URL" hint="connector-advertised URLs">
+                      <span class="mono" data-testid="settings-gate-base-live">
+                        ${liveGateBaseUrls.length > 0 ? liveGateBaseUrls.join(', ') : '미수집'}
+                      </span>
+                    <//>
+                    <div class="set-sub-h">Configured connectors (${liveGateConnectors.length})</div>
+                    ${liveGateConnectors.length === 0
+                      ? html`<div class="set-hint" data-testid="settings-gate-empty">설정된 connector가 없습니다.</div>`
+                      : html`
+                        <div class="settings-gate-connectors" data-testid="settings-gate-connectors">
+                          ${liveGateConnectors.map(connector => html`
+                            <div key=${connector.connector_id} class="settings-gate-connector" data-testid="settings-gate-connector">
+                              <div class="settings-gate-connector-head">
+                                <span class="mono">${connector.connector_id}</span>
+                                <span class=${`settings-gate-state ${connectorState(connector)}`}>${connectorStateText(connector)}</span>
+                              </div>
+                              <div class="settings-gate-connector-name">${connector.display_name || connector.channel}</div>
+                              <div class="settings-gate-connector-meta mono">
+                                bindings ${connector.configured_bindings.length} · reply ${connector.reply_mode || 'manual'} · pid ${connector.pid || '-'}
+                              </div>
+                              ${connector.error
+                                ? html`<div class="settings-gate-connector-error">${connector.error}</div>`
+                                : null}
+                            </div>
+                          `)}
+                        </div>
+                      `}
+                  `}
             `}
 
             ${sec === 'paths' && html`
@@ -1436,21 +1686,38 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'notify' && html`
+              <div class="set-local-summary" data-testid="notify-local-summary">
+                Browser-session preview: ${notifyCh} channel, context ${notifyCtx}%, failures ${notifyFails}, ${notifyPreviewEnabledCount}/${Object.keys(notifyOn).length} events enabled.
+              </div>
+              <div class="set-notify-section">
               <${SetRow} label="Context threshold alert" hint="Notify when context exceeds this %">
-                <${SetSlider} value=${notifyCtx} min=${70} max=${98} suffix="%" onChange=${setNotifyCtx} />
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSlider} value=${notifyCtx} min=${70} max=${98} suffix="%" onChange=${setNotifyCtx} />
+                </div>
               <//>
               <${SetRow} label="Consecutive failure alert" hint="Notify after this many consecutive failures">
-                <${SetStepper} v=${notifyFails} set=${setNotifyFails} min=${1} max=${10} />
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetStepper} v=${notifyFails} set=${setNotifyFails} min=${1} max=${10} />
+                </div>
               <//>
               <${SetRow} label="Notify channel" hint="Where to send">
-                <${SetSeg} value=${notifyCh} options=${['Slack', 'Discord', '없음']} onChange=${setNotifyCh} />
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSeg} value=${notifyCh} options=${['Slack', 'Discord', '없음']} onChange=${setNotifyCh} />
+                </div>
               <//>
               <div class="set-sub-h">Notify events</div>
               ${Object.keys(notifyOn).map(k => html`
                 <${SetRow} key=${k} label=${k}>
-                  <${SetToggle} on=${notifyOn[k]} onChange=${(v: boolean) => setNotifyOn(p => ({ ...p, [k]: v }))} />
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetToggle} on=${notifyOn[k]} onChange=${(v: boolean) => setNotifyOn(p => ({ ...p, [k]: v }))} />
+                  </div>
                 <//>
               `)}
+              </div>
             `}
 
             ${sec === 'display' && html`

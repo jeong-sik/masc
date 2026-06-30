@@ -38,6 +38,8 @@ import {
   fetchRuntimeTomlConfig,
   fetchRuntimeDefaults,
   fetchRuntimeModelMetrics,
+  patchRuntimeAssignment,
+  patchRuntimeRouting,
   patchKeeperConfig,
   saveRuntimeTomlConfig,
   fetchDashboardCacheStats,
@@ -2302,6 +2304,64 @@ describe('runtime.toml raw config API', () => {
     expect(init.method).toBe('POST')
     expect(JSON.parse(init.body as string)).toEqual({ source_text: sourceText })
     expect(result.reloaded).toBe(true)
+    expect(result.source_text).toBe(sourceText)
+  })
+
+  it('posts runtime routing patches without client-side TOML text', async () => {
+    const sourceText = '[runtime]\ndefault = "openai.gpt"\nlibrarian = "openai.gpt"\n'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: true,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchRuntimeRouting('librarian', 'openai.gpt')
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/config/routing')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      lane: 'librarian',
+      runtime_id: 'openai.gpt',
+    })
+    expect(result.source_text).toBe(sourceText)
+  })
+
+  it('posts runtime assignment patches without client-side TOML text', async () => {
+    const sourceText = '[runtime.assignments]\nsangsu = "openai.gpt"\n'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: true,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchRuntimeAssignment('sangsu', null)
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/config/assignment')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      keeper_name: 'sangsu',
+      runtime_id: null,
+    })
     expect(result.source_text).toBe(sourceText)
   })
 })

@@ -476,3 +476,27 @@ export async function saveRuntimeTomlConfig(sourceText: string): Promise<Runtime
     source_text: sourceText,
   }).then(normalizeRuntimeTomlConfig)
 }
+
+export type RuntimeRoutingLane = 'default' | 'librarian' | 'cross_verifier'
+
+export async function patchRuntimeRouting(
+  lane: RuntimeRoutingLane,
+  runtimeId: string | null,
+): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
+  return post<unknown>('/api/v1/runtime/config/routing', {
+    lane,
+    runtime_id: runtimeId,
+  }).then(normalizeRuntimeTomlConfig)
+}
+
+export async function patchRuntimeAssignment(
+  keeperName: string,
+  runtimeId: string | null,
+): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
+  return post<unknown>('/api/v1/runtime/config/assignment', {
+    keeper_name: keeperName,
+    runtime_id: runtimeId,
+  }).then(normalizeRuntimeTomlConfig)
+}

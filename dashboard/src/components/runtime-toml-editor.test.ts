@@ -5,11 +5,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const apiMocks = vi.hoisted(() => ({
   fetchRuntimeTomlConfig: vi.fn(),
+  patchRuntimeAssignment: vi.fn(),
+  patchRuntimeRouting: vi.fn(),
   saveRuntimeTomlConfig: vi.fn(),
 }))
 
 vi.mock('../api/dashboard', () => ({
   fetchRuntimeTomlConfig: apiMocks.fetchRuntimeTomlConfig,
+  patchRuntimeAssignment: apiMocks.patchRuntimeAssignment,
+  patchRuntimeRouting: apiMocks.patchRuntimeRouting,
   saveRuntimeTomlConfig: apiMocks.saveRuntimeTomlConfig,
 }))
 
@@ -95,8 +99,23 @@ describe('RuntimeTomlEditor', () => {
     container = document.createElement('div')
     document.body.appendChild(container)
     apiMocks.fetchRuntimeTomlConfig.mockReset()
+    apiMocks.patchRuntimeAssignment.mockReset()
+    apiMocks.patchRuntimeRouting.mockReset()
     apiMocks.saveRuntimeTomlConfig.mockReset()
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValue(baseConfig)
+    apiMocks.patchRuntimeAssignment.mockImplementation(async (_keeperName: string, runtimeId: string | null) => ({
+      ...richConfig,
+      source_text: `${richConfig.source_text}\n[runtime.assignments]\nsangsu = ${JSON.stringify(runtimeId ?? 'runpod_mtp.qwen')}\n`,
+      reloaded: true,
+    }))
+    apiMocks.patchRuntimeRouting.mockImplementation(async (lane: string, runtimeId: string | null) => ({
+      ...richConfig,
+      source_text: richConfig.source_text.replace(
+        'default = "runpod_mtp.qwen"',
+        lane === 'default' && runtimeId ? `default = "${runtimeId}"` : 'default = "runpod_mtp.qwen"',
+      ),
+      reloaded: true,
+    }))
     apiMocks.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => ({
       ...baseConfig,
       source_text: sourceText,
@@ -164,7 +183,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('[data-testid="runtime-toml-impact-preview"]')).toBeNull()
   })
 
-  it('edits runtime environment fields through the structured controls', async () => {
+  it('renders runtime environment fields as structured projections without raw TOML mutation', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -181,27 +200,13 @@ describe('RuntimeTomlEditor', () => {
         .toBe('https://runpod.example/v1')
     })
 
-    fireEvent.input(container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement, {
-      target: { value: 'https://runpod.example/v2' },
-    })
-    await waitFor(() => {
-      expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('endpoint = "https://runpod.example/v2"')
-    })
-    fireEvent.input(container.querySelector('[aria-label="runpod_mtp.qwen num-ctx"]') as HTMLInputElement, {
-      target: { value: '262144' },
-    })
-    fireEvent.click(container.querySelector('[data-testid="runtime-environment-save"]') as HTMLButtonElement)
-
-    await waitFor(() => {
-      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalledTimes(1)
-    })
-    const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
-    expect(savedSource).toContain('endpoint = "https://runpod.example/v2"')
-    expect(savedSource).toContain('num-ctx = 262144')
-    expect(savedSource).toContain('[providers.openai]')
+    expect((container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement).readOnly).toBe(true)
+    expect((container.querySelector('[aria-label="runpod_mtp.qwen num-ctx"]') as HTMLInputElement).readOnly).toBe(true)
+    expect(container.querySelector('[data-testid="runtime-environment-save"]')).toBeNull()
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 
-  it('switches the default runtime from the structured runtime selector', async () => {
+  it('switches the default runtime through the typed backend routing patch', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -215,9 +220,11 @@ describe('RuntimeTomlEditor', () => {
     })
 
     await waitFor(() => {
+      expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledWith('default', 'openai.gpt')
       expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('default = "openai.gpt"')
     })
-    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
   })
 
   it('saves from the editor keyboard shortcut', async () => {

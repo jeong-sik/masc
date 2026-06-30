@@ -41,6 +41,9 @@ describe('runtime TOML dashboard editing helpers', () => {
     const environment = parseRuntimeTomlEnvironment(sourceText)
 
     expect(environment.defaultRuntimeId).toBe('runpod_mtp.qwen')
+    expect(environment.librarianRuntimeId).toBe('')
+    expect(environment.crossVerifierRuntimeId).toBe('')
+    expect(environment.assignments).toEqual({})
     expect(environment.providers[0]).toMatchObject({
       id: 'runpod_mtp',
       displayName: 'RunPod',
@@ -63,6 +66,27 @@ describe('runtime TOML dashboard editing helpers', () => {
       id: 'runpod_mtp.qwen',
       maxConcurrent: 4,
       keepAlive: '10m',
+    })
+  })
+
+  it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
+    const withRouting = `${sourceText.replace(
+      'default = "runpod_mtp.qwen"',
+      'default = "runpod_mtp.qwen"\nlibrarian = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
+    )}
+
+[runtime.assignments]
+sangsu = "runpod_mtp.qwen"
+mad-improver = "runpod_mtp.qwen"
+`
+
+    const environment = parseRuntimeTomlEnvironment(withRouting)
+
+    expect(environment.librarianRuntimeId).toBe('runpod_mtp.qwen')
+    expect(environment.crossVerifierRuntimeId).toBe('runpod_mtp.qwen')
+    expect(environment.assignments).toEqual({
+      sangsu: 'runpod_mtp.qwen',
+      'mad-improver': 'runpod_mtp.qwen',
     })
   })
 

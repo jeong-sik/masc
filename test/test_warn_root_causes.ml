@@ -35,6 +35,15 @@ let file_contains_pattern file_rel pattern =
 let file_not_contains_pattern file_rel pattern =
   not (file_contains_pattern file_rel pattern)
 
+let string_contains text pattern =
+  if String.length pattern = 0 then true
+  else
+    let re = Str.regexp_string pattern in
+    try
+      ignore (Str.search_forward re text 0);
+      true
+    with Not_found -> false
+
 let require_write_ok label = function
   | Ok () -> ()
   | Error msg -> failf "%s: %s" label msg
@@ -206,6 +215,54 @@ let test_fusion_default_descriptor_is_bundle_visible () =
           check bool "masc_fusion is in the executable OAS tool bundle" true
             (List.mem "masc_fusion" names)))
 
+let test_missing_current_task_reconciled_before_transition_hint () =
+  ignore (init_registry ());
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc_test_stale_task_hint_%d" (Random.int 1_000_000))
+  in
+  (try Unix.mkdir dir 0o755 with Unix.Unix_error (Unix.EEXIST, _, _) -> ());
+  Fun.protect
+    ~finally:(fun () -> try Unix.rmdir dir with _ -> ())
+    (fun () ->
+      let config = Workspace.default_config dir in
+      ignore (Workspace.init config ~agent_name:(Some "test-stale-task-hint"));
+      let task_id =
+        match Keeper_id.Task_id.of_string "task-1468" with
+        | Ok task_id -> task_id
+        | Error msg -> failf "task id parse failed: %s" msg
+      in
+      let meta =
+        { (make_meta ~name:"test-stale-task-hint" ()) with
+          current_task_id = Some task_id
+        }
+      in
+      let ctx_snapshot =
+        Keeper_context_runtime.create ~eio:false ~system_prompt:"test"
+          ~max_tokens:4000
+      in
+      let bundle =
+        Keeper_tools_oas_bundle.make_tool_bundle ~config ~meta ~ctx_snapshot ()
+      in
+      Fun.protect
+        ~finally:bundle.cleanup
+        (fun () ->
+          let description =
+            bundle.tools
+            |> List.find_map (fun (tool : Agent_sdk.Tool.t) ->
+                 if String.equal tool.schema.name "masc_transition"
+                 then Some tool.schema.description
+                 else None)
+          in
+          match description with
+          | None -> fail "masc_transition not found in bundle"
+          | Some description ->
+            check bool "missing task hint removed" false
+              (string_contains description "not found in backlog");
+            check bool "reconciled hint asks for claim/list" true
+              (string_contains description "No task currently assigned")))
+
 (* ── Test 2: Atomic agent JSON writes ─────────────────────────── *)
 
 let test_atomic_write_not_empty () =
@@ -328,6 +385,8 @@ let () =
             test_web_alias_bundle_visible_without_injected_masc_schema;
           test_case "fusion default descriptor reaches OAS bundle" `Quick
             test_fusion_default_descriptor_is_bundle_visible;
+          test_case "missing current task reconciles before transition hint" `Quick
+            test_missing_current_task_reconciled_before_transition_hint;
         ] );
       ( "atomic_agent_json",
         [

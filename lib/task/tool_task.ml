@@ -21,6 +21,36 @@ let task_log_error ~task_id fmt =
     (fun message -> Log.Task.error "task_id=%s %s" task_id message)
     fmt
 
+let missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id ~action_s =
+  sync_owner_current_task_binding ctx;
+  sync_planning_current_task_with_owned_task ctx;
+  task_log_warn ~task_id
+    "transition rejected stale task_id for action=%s agent=%s; reconciled current task bindings"
+    action_s ctx.agent_name;
+  Tool_result.error
+    ~failure_class:(Some Tool_result.Workflow_rejection)
+    ~tool_name
+    ~start_time
+    (workflow_rejection_payload_json
+       ~rule_id:"stale_task_id_not_found"
+       ~tool_suggestion:"keeper_tasks_list"
+       ~hint:
+         "The requested task_id is absent from the live backlog. Do not retry \
+          this task_id from memory; refresh keeper_tasks_list or masc_tasks and \
+          choose a live task."
+       ~scope_policy:"observe"
+       ~alternatives:[ "keeper_tasks_list"; "masc_tasks"; "keeper_task_claim" ]
+       ~extra_fields:
+         [ "task_id", `String task_id
+         ; "action", `String action_s
+         ; "requested_agent", `String ctx.agent_name
+         ; "stale_context", `Bool true
+         ]
+       (Printf.sprintf
+          "Task %s is absent from the live backlog; cleared stale current-task \
+           bindings and suppressed transition action=%s."
+          task_id action_s))
+
 let rec handle_done ~tool_name ~start_time ctx args =
   let notes = get_string args "notes" "" in
   handle_transition ~tool_name ~start_time ctx
@@ -173,6 +203,10 @@ and handle_transition ~tool_name ~start_time ctx args =
   in
   let tasks = Workspace.get_tasks_raw ctx.config in
   let task_opt = List.find_opt (fun (t : Masc_domain.task) -> String.equal t.id task_id) tasks in
+  match task_opt with
+  | None ->
+    missing_live_task_transition_rejection ~tool_name ~start_time ctx ~task_id ~action_s
+  | Some _ ->
   let release_owner_mismatch_rejection =
     match action, task_opt with
     | Masc_domain.Release, Some task ->

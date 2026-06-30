@@ -195,6 +195,7 @@ let message_text (message : Agent_sdk.Types.message) =
     | Agent_sdk.Types.Text text -> Some text
     | Agent_sdk.Types.Thinking _
     | Agent_sdk.Types.RedactedThinking _
+    | Agent_sdk.Types.ReasoningDetails _
     | Agent_sdk.Types.ToolUse _
     | Agent_sdk.Types.ToolResult _
     | Agent_sdk.Types.Image _

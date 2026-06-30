@@ -457,18 +457,18 @@ let cap_checkpoint_message_to_remaining_content
                        dropped_blocks = 1;
                        dropped_chars = len;
                      } )
-           | Agent_sdk.Types.ReasoningDetails r ->
-               let len =
-                 reasoning_details_chars
-                   ~reasoning_content:r.Agent_sdk.Types.reasoning_content
-                   ~details:r.Agent_sdk.Types.details
-               in
+           | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } as block
+             ->
+               (* 0.208.5: ReasoningDetails carries an inline record, so its
+                  fields are bound by destructuring rather than projected; the
+                  block is reused verbatim via [as block]. *)
+               let len = reasoning_details_chars ~reasoning_content ~details in
                if len = 0 then
-                 (Agent_sdk.Types.ReasoningDetails r :: kept_rev, stats)
+                 (block :: kept_rev, stats)
                else if len <= !remaining_ref then (
                  remaining_ref := !remaining_ref - len;
                  used_ref := !used_ref + len;
-                 (Agent_sdk.Types.ReasoningDetails r :: kept_rev, stats))
+                 (block :: kept_rev, stats))
                else
                  ( kept_rev,
                    add_checkpoint_sanitize_stats stats

@@ -127,6 +127,18 @@ let translate ~redact_text ~on_text_delta bridge_state
               { index; signature_bytes = String.length signature } ]
       }
   | ContentBlockDelta
+      { index; delta = ReasoningDetailsDelta { reasoning_content; details = _ } } ->
+      (* 0.208.5 split-reasoning streaming: reasoning_content is the incremental
+         reasoning text. OAS itself classifies this delta as `Thinking, so the
+         bridge surfaces it as a thinking delta; the structured [details] are
+         carried by the accumulated ReasoningDetails block, not the delta. *)
+      { bridge_state;
+        chat_events =
+          (match reasoning_content with
+           | Some text -> [ Oas_thinking_delta { index; delta = redact_text text } ]
+           | None -> [])
+      }
+  | ContentBlockDelta
       { index; delta = MediaDelta { media_type; source_type; data } } ->
       { bridge_state;
         chat_events =

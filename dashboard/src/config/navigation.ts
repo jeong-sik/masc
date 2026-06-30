@@ -2,21 +2,14 @@ import type { RouteState, TabId } from '../types'
 
 type SurfaceId = TabId
 export const SETTINGS_ROUTE_SECTION_IDS = [
-  'account',
-  'mcp',
   'runtime',
   'runtimes',
-  'routing',
+  'paths',
+  'mcp',
+  'notify',
   'prompts',
   'fusion',
-  'policy',
-  'lifecycle',
-  'sandbox',
-  'ide',
-  'gate',
-  'paths',
   'logs',
-  'notify',
   'display',
 ] as const
 export type SettingsRouteSectionId = typeof SETTINGS_ROUTE_SECTION_IDS[number]
@@ -564,7 +557,7 @@ export function normalizeRouteParams(tabId: TabId, params: Record<string, string
   const legacyObservatoryRanges = new Set(['1h', '6h', '24h', '7d'])
 
   if (tabId === 'settings') {
-    if (!isSettingsRouteSection(next.section) || next.section === 'account') {
+    if (!isSettingsRouteSection(next.section)) {
       delete next.section
     }
     delete next.surface

@@ -23,6 +23,19 @@ let direct_completion_files_under rel =
   |> List.sort String.compare
 ;;
 
+let direct_agent_run_files_under rel =
+  ml_files_under rel
+  |> List.filter (fun rel ->
+    Ast_grep.count_calls ~module_path:rel ~callee:"Agent_sdk.Agent.run" > 0)
+  |> List.sort String.compare
+;;
+
+let direct_agent_run_files () =
+  List.concat
+    [ direct_agent_run_files_under "lib"; direct_agent_run_files_under "bin" ]
+  |> List.sort String.compare
+;;
+
 let keeper_direct_completion_files () = direct_completion_files_under "lib/keeper"
 
 let expected_structured_completion_files =
@@ -68,11 +81,35 @@ let expected_structured_tool_agent_runs =
     ]
 ;;
 
+let expected_freeform_masc_tool_agent_run_files =
+  List.sort
+    String.compare
+    [ (* Eval harness: measures live tool-call attempts and arbitrary terminal text.
+         Tool arguments remain structured through [completion_tools]. *)
+      "bin/masc_completion_trust_eval.ml"
+    ]
+;;
+
 let expected_masc_tool_agent_run_files =
   List.sort
     String.compare
     (expected_structured_dashboard_agent_run_json_judges
-     @ expected_structured_tool_agent_runs)
+     @ expected_structured_tool_agent_runs
+     @ expected_freeform_masc_tool_agent_run_files)
+;;
+
+let expected_freeform_direct_agent_run_files =
+  List.sort
+    String.compare
+    [ (* Worker bridge: executes arbitrary OAS worker agents/tasks. The worker
+         result text is the payload, so forcing a provider-native JSON envelope
+         here would change the public worker contract. *)
+      "lib/worker_oas.ml"
+    ]
+;;
+
+let expected_all_direct_agent_run_files =
+  expected_freeform_direct_agent_run_files
 ;;
 
 let fusion_agent_build_files () =
@@ -114,10 +151,17 @@ let runtime_by_id_or_fail runtimes id =
 let masc_tool_agent_run_files_under rel =
   ml_files_under rel
   |> List.filter (fun rel ->
-    Ast_grep.count_calls
-      ~module_path:rel
-      ~callee:"Keeper_turn_driver_wrappers.run_named_with_masc_tools"
+    (Ast_grep.count_calls
+       ~module_path:rel
+       ~callee:"Keeper_turn_driver_wrappers.run_named_with_masc_tools"
+     + Ast_grep.count_calls ~module_path:rel ~callee:"KTDW.run_named_with_masc_tools")
     > 0)
+  |> List.sort String.compare
+;;
+
+let masc_tool_agent_run_files () =
+  List.concat
+    [ masc_tool_agent_run_files_under "lib"; masc_tool_agent_run_files_under "bin" ]
   |> List.sort String.compare
 ;;
 
@@ -133,6 +177,14 @@ let test_all_direct_completions_are_classified () =
     "all direct completion files"
     expected_all_direct_completion_files
     (direct_completion_files_under "lib")
+;;
+
+let test_all_direct_agent_runs_are_classified () =
+  check
+    (list string)
+    "all direct Agent.run files"
+    expected_all_direct_agent_run_files
+    (direct_agent_run_files ())
 ;;
 
 let test_keeper_direct_completions_are_enumerated () =
@@ -372,7 +424,7 @@ let test_all_masc_tool_agent_runs_are_classified () =
     (list string)
     "all run_named_with_masc_tools files"
     expected_masc_tool_agent_run_files
-    (masc_tool_agent_run_files_under "lib")
+    (masc_tool_agent_run_files ())
 ;;
 
 let test_structured_tool_agent_runs_use_tool_schema_output () =
@@ -484,6 +536,12 @@ let () =
             "direct completion files are classified as structured or exempt"
             `Quick
             test_all_direct_completions_are_classified
+        ] )
+    ; ( "all direct Agent.run"
+      , [ test_case
+            "direct Agent.run files are classified as structured or exempt"
+            `Quick
+            test_all_direct_agent_runs_are_classified
         ] )
     ; ( "keeper direct completion"
       , [ test_case

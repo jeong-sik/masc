@@ -74,7 +74,7 @@ let apply_report_verdict_output_schema provider_cfg =
             { field = "verification.report_verdict.output_schema"; detail }))
 ;;
 
-let parse_verdict_from_response_text text =
+let parse_verdict_from_structured_response_text text =
   match Yojson.Safe.from_string (String.trim text) with
   | json -> Core.parse_verdict_from_json json
   | exception Yojson.Json_error msg ->
@@ -82,7 +82,8 @@ let parse_verdict_from_response_text text =
 ;;
 
 module For_testing = struct
-  let parse_verdict_from_response_text = parse_verdict_from_response_text
+  let parse_verdict_from_structured_response_text =
+    parse_verdict_from_structured_response_text
 end
 
 (* ================================================================ *)
@@ -92,10 +93,11 @@ end
 (** Verify an action using structured tool output (ADR D3 compliant).
 
     Primary path: LLM calls [report_verdict] tool with typed verdict.
-    Fallback path: if LLM responds with text, parse provider-native JSON only.
+    Structured response path: if LLM responds without the tool, parse
+    provider-native JSON only.
 
     The structured path is deterministic (JSON schema constrains output).
-    The fallback path is strict JSON and returns Error on failure instead of
+    The response path is strict JSON and returns Error on failure instead of
     extracting a verdict from prose. *)
 let verify (req : Core.verification_request) : (Core.verdict, string) result =
   if Core.should_skip ~action_description:req.action_description
@@ -145,8 +147,8 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
             schema contract still requires a strict JSON verdict object here. *)
          let text = Agent_sdk_response.text_of_response result.response in
          Log.Verifier.info
-           "verdict via strict JSON response fallback (model did not call report_verdict)";
-        (match parse_verdict_from_response_text text with
+           "verdict via native structured response (model did not call report_verdict)";
+        (match parse_verdict_from_structured_response_text text with
          | Ok verdict -> Ok verdict
           | Error parse_err ->
             Log.Verifier.warn

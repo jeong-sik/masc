@@ -10,8 +10,8 @@
 
     The verdict is the LLM's judgment. On the structured [report_verdict] path
     there is no rule, heuristic, or string match deciding pass/fail. The
-    response fallback accepts only a strict JSON grounded verdict object; it
-    does not extract JSON from prose or fences. The grounded entry point
+    provider-native response path accepts only a strict JSON grounded verdict
+    object; it does not extract JSON from prose or fences. The grounded entry point
     requires evidence for WARN/FAIL before wake-on-fail routing. The only
     deterministic parts are identity (which keeper authored the work, hence who
     to wake) and event-id dedup (a given task-level FAIL wakes the author at
@@ -50,7 +50,7 @@ val run_grounded_review :
   (Verifier_core.grounded_verdict, string) result
 (** Run the adversarial reviewer agent and read its structured grounded verdict
     via the [report_verdict] tool. If the model answers without calling the
-    tool, the fallback accepts only a strict JSON response object decoded with
+    tool, the provider-native response path accepts only a strict JSON object decoded with
     [Verifier_core.parse_grounded_verdict_from_json]. *)
 
 val act_on_verdict :
@@ -80,6 +80,6 @@ val review_and_wake_on_fail :
     verdict, returning the compatibility [Verifier_core.verdict]. *)
 
 module For_testing : sig
-  val parse_grounded_verdict_from_response_text :
+  val parse_grounded_verdict_from_structured_response_text :
     string -> (Verifier_core.grounded_verdict, string) result
 end

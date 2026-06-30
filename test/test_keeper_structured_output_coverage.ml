@@ -350,16 +350,16 @@ let test_verifier_oas_uses_structured_judge_runtime () =
        ~callee:"Runtime.get_default_runtime_id")
 ;;
 
-let test_verifier_oas_response_text_fallback_is_strict_json () =
+let test_verifier_oas_native_response_is_strict_json () =
   let source = read_source "lib/verifier_oas.ml" in
   check
     bool
-    "verifier_oas must not parse provider-native response text as prose verdicts"
+    "verifier_oas must not parse provider-native structured responses as prose verdicts"
     false
     (contains_substring source "Core.parse_verdict text")
 ;;
 
-let test_adversarial_review_response_text_fallback_is_strict_json () =
+let test_adversarial_review_native_response_is_strict_json () =
   let source = read_source "lib/keeper/keeper_adversarial_review.ml" in
   check
     bool
@@ -474,13 +474,13 @@ let () =
             `Quick
             test_verifier_oas_uses_structured_judge_runtime
         ; test_case
-            "verifier_oas response fallback is strict JSON"
+            "verifier_oas native response is strict JSON"
             `Quick
-            test_verifier_oas_response_text_fallback_is_strict_json
+            test_verifier_oas_native_response_is_strict_json
         ; test_case
-            "adversarial review response fallback is strict JSON"
+            "adversarial review native response is strict JSON"
             `Quick
-            test_adversarial_review_response_text_fallback_is_strict_json
+            test_adversarial_review_native_response_is_strict_json
         ; test_case
             "anti-rationalization native response is strict JSON"
             `Quick

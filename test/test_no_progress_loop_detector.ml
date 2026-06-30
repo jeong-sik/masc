@@ -733,7 +733,26 @@ let test_completion_contract_terminal_failure_reason_code () =
     "failed passive-only is not counted as completed turn"
     false
     (Success.terminal_outcome_is_completed_turn
-       (Success.terminal_outcome_of_result failed_passive_only))
+       (Success.terminal_outcome_of_result failed_passive_only));
+  let no_capable_provider =
+    run_result
+      ~completion_contract_result:
+        Masc.Keeper_execution_receipt.Contract_no_capable_provider
+      ~operator_disposition:
+        (Some
+           ({ disposition = Masc.Keeper_execution_receipt.Disp_pause_human
+            ; reason =
+                Masc.Keeper_execution_receipt.Reason_tool_route_recoverable_failure
+            }
+              : Masc.Keeper_agent_result.operator_disposition))
+      []
+  in
+  Alcotest.(check bool)
+    "no-capable-provider tool-route pause is not completion-contract auto-pause"
+    true
+    (Option.is_none
+       (Success.completion_contract_terminal_failure_reason_code
+          no_capable_provider))
 
 let output_fingerprint_of output_text =
   match

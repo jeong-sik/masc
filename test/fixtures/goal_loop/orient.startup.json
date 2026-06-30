@@ -56,7 +56,7 @@
           "line_no": 49
         },
         {
-          "line": "[WARN] [Governance] Lenient_json fallback hit; 3809 chars",
+          "line": "[WARN] [Governance] Governance judge returned unparseable structured response (parse failure; 3809 chars)",
           "line_no": 50
         }
       ],

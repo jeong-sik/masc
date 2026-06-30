@@ -81,12 +81,6 @@ PATTERNS: tuple[PatternSpec, ...] = (
         "Governance judge response was unparseable.",
     ),
     PatternSpec(
-        "lenient_json_fallback",
-        r"Lenient_json fallback hit",
-        "warning",
-        "Lenient JSON fallback parsed an otherwise invalid response.",
-    ),
-    PatternSpec(
         "utf8_repair",
         r"persistence UTF-8 repaired",
         "critical",

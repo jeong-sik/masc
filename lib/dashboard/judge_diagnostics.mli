@@ -5,10 +5,9 @@ val truncate_with_marker : ?max_bytes:int -> string -> string
     marker recording how many bytes were dropped. *)
 
 val format_lenient_fallback : judge_label:string -> string -> string
-(** Format the unparseable-response error string for a judge that hit
-    the [Lenient_json.parse] [\`Assoc [("raw", _)]] fallback. The
-    output is consumed both as the warn log payload and as the [Error]
-    returned upstream. *)
+(** Format the unparseable-response error string for a judge response that
+    failed structured parsing. The output is consumed both as the warn log
+    payload and as the [Error] returned upstream. *)
 
 val format_unparseable_response :
   judge_label:string -> reason:string -> string -> string
@@ -16,8 +15,9 @@ val format_unparseable_response :
     for JSON that parsed but violated the judge output contract. *)
 
 val record_lenient_fallback : judge_label:string -> string -> string
-(** Increment the judge fallback metrics and return
-    {!format_lenient_fallback}. *)
+(** Increment the legacy judge parse-failure metrics and return
+    {!format_lenient_fallback}. The metric name is retained for dashboard
+    compatibility. *)
 
 val record_unparseable_response :
   judge_label:string -> reason:string -> string -> string

@@ -85,7 +85,7 @@ let test_effective_interval_at_threshold_boundary () =
      (the implementation uses strict >, see heartbeat_smart.ml) *)
   let last_activity = now -. 300.0 (* exactly at threshold *) in
   check_float "exactly-at-threshold uses base interval" 30.0
-    (HS.effective_interval ~config ~last_activity)
+    (HS.effective_interval_at ~config ~now ~last_activity)
 
 (* ── should_emit: decision matrix ────────────────────────────────────── *)
 

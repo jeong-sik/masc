@@ -528,50 +528,52 @@ let extract_with_provider_classified
   =
   match clock with
   | None -> Error Provider_clock_unavailable
-  | Some clock -> (
-  match messages_for_librarian inp with
-  | Error msg -> Error (Prompt_render_failed msg)
-  | Ok messages ->
-    let provider_cfg = provider_for_librarian provider_cfg in
-    (match
-       Llm_provider.Provider_config.validate_output_schema_request provider_cfg
-     with
-     | Error msg -> Error (Provider_config_rejected msg)
-     | Ok () ->
-    let attempt messages =
-      match
-        with_timeout ~clock ~timeout_sec (fun () ->
-          complete ~sw ~net ~clock ~config:provider_cfg ~messages ())
-      with
-      | None -> Transport_failed Provider_timeout
-      | Some (Error err) ->
-        Transport_failed (Provider_transport_failed (Provider_http_error.to_message err))
-      | Some (Ok response) ->
-        let raw = Agent_sdk_response.text_of_response response |> String.trim in
-        if String.equal raw ""
-        then Unparseable (unparseable_response "librarian provider returned empty response")
-        else (
-          match Keeper_librarian.episode_of_output_result ~generation inp raw with
-          | Ok episode -> Parsed episode
-          | Error error ->
-            Unparseable
-              (unparseable_response
-                 ~raw_evidence:raw
-                 (Printf.sprintf
-                    "librarian provider returned invalid episode JSON (%s)"
-                    (Keeper_librarian.parse_error_to_string error))))
-    in
-    (match
-       run_with_parse_retries
-         ~max_retries:librarian_max_parse_retries
-         ~attempt
-         messages
-     with
-     | Ok episode -> Ok { episode; kind = Structured_episode }
-     | Error (Retry_transport_failed err) -> Error err
-     | Error (Retry_exhausted_unparseable diagnostic) ->
-       Error (Provider_unparseable_response diagnostic.reason))
-    )
+  | Some clock ->
+    (match messages_for_librarian inp with
+     | Error msg -> Error (Prompt_render_failed msg)
+     | Ok messages ->
+       let provider_cfg = provider_for_librarian provider_cfg in
+       (match
+          Llm_provider.Provider_config.validate_output_schema_request provider_cfg
+        with
+        | Error msg -> Error (Provider_config_rejected msg)
+        | Ok () ->
+          let attempt messages =
+            match
+              with_timeout ~clock ~timeout_sec (fun () ->
+                complete ~sw ~net ~clock ~config:provider_cfg ~messages ())
+            with
+            | None -> Transport_failed Provider_timeout
+            | Some (Error err) ->
+              Transport_failed
+                (Provider_transport_failed (Provider_http_error.to_message err))
+            | Some (Ok response) ->
+              let raw = Agent_sdk_response.text_of_response response |> String.trim in
+              if String.equal raw ""
+              then
+                Unparseable
+                  (unparseable_response "librarian provider returned empty response")
+              else (
+                match Keeper_librarian.episode_of_output_result ~generation inp raw with
+                | Ok episode -> Parsed episode
+                | Error error ->
+                  Unparseable
+                    (unparseable_response
+                       ~raw_evidence:raw
+                       (Printf.sprintf
+                          "librarian provider returned invalid episode JSON (%s)"
+                          (Keeper_librarian.parse_error_to_string error))))
+          in
+          (match
+             run_with_parse_retries
+               ~max_retries:librarian_max_parse_retries
+               ~attempt
+               messages
+           with
+           | Ok episode -> Ok { episode; kind = Structured_episode }
+           | Error (Retry_transport_failed err) -> Error err
+           | Error (Retry_exhausted_unparseable diagnostic) ->
+             Error (Provider_unparseable_response diagnostic.reason))))
 ;;
 
 let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp =

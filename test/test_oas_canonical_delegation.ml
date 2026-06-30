@@ -33,6 +33,14 @@ let test_masc_delegates_canonical_oas_projections () =
     ~expected:1
 ;;
 
+let test_masc_delegates_oas_stream_progress_predicates () =
+  check_calls
+    ~file:"lib/keeper/keeper_chat_oas_stream_bridge.ml"
+    ~callee:
+      "Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal"
+    ~expected:1
+;;
+
 let test_hand_rolled_tool_schema_projection_is_not_reintroduced () =
   check_no_binding ~file:"lib/keeper/keeper_run_tools_setup.ml" ~name:"param_type_str";
   check_calls
@@ -49,6 +57,10 @@ let () =
             "MASC delegates canonical projections to OAS"
             `Quick
             test_masc_delegates_canonical_oas_projections
+        ; test_case
+            "MASC delegates stream progress classification to OAS"
+            `Quick
+            test_masc_delegates_oas_stream_progress_predicates
         ; test_case
             "tool schema projection helper is not hand-rolled locally"
             `Quick

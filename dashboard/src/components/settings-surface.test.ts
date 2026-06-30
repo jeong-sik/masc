@@ -740,6 +740,25 @@ describe('SettingsSurface', () => {
     expect(detail).not.toContain('pid 8421')
   })
 
+  it('does not render pid-shaped runtime state in any MCP transport preview', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    const segByLabel = (label: string) =>
+      Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+        .find(button => button.textContent === label)
+    const fabricatedPid = /\bpid\b[:=\s·]*\d+/i
+
+    for (const transport of ['http', 'stdio', 'sse']) {
+      const seg = segByLabel(transport)
+      expect(seg).toBeTruthy()
+      await fireEvent.click(seg as HTMLButtonElement)
+      const detail = container.querySelector('.set-mcp-detail')?.textContent ?? ''
+      expect(detail).not.toMatch(fabricatedPid)
+    }
+  })
+
   it('edits sandbox from live keeper config instead of fake global controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 

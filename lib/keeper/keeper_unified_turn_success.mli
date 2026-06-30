@@ -48,16 +48,6 @@ module For_testing : sig
   val claim_bound_work
     : (string * Keeper_tool_outcome.t option) list -> bool
 
-  (** task-5: a passive-only no-work exemption. A turn that only called tools
-      classified as [Passive_status] and whose typed outcomes do not prove
-      material progress, while observing no actionable work at turn start, is
-      legitimately idle and must not accrue the no-progress streak. *)
-  val legitimate_no_work_passive_only
-    :  observation:Keeper_world_observation.world_observation
-    -> tool_calls:(string * Keeper_tool_outcome.t option) list
-    -> had_owned_active_task:bool
-    -> bool
-
   val apply_loop_detectors
     :  config:Workspace.config
     -> observation:Keeper_world_observation.world_observation

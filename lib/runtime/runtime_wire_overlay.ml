@@ -70,6 +70,8 @@ let agent_capabilities_of_llm_capabilities
   ; supports_code_execution = caps.supports_code_execution
   ; emits_usage_tokens = caps.emits_usage_tokens
   ; supported_models = caps.supported_models
+  ; reasoning_output_format = caps.reasoning_output_format
+  ; reasoning_streaming_format = caps.reasoning_streaming_format
   }
 ;;
 

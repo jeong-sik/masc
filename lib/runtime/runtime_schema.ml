@@ -80,6 +80,7 @@ type thinking_control_format =
   Llm_provider.Capabilities.thinking_control_format =
   | No_thinking_control
   | Thinking_object
+  | Thinking_object_adaptive
   | Thinking_object_only
   | Chat_template_kwargs
   | Chat_template_token

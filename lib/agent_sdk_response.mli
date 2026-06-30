@@ -6,7 +6,8 @@
 type api_response = Agent_sdk.Types.api_response
 
 val text_of_response : api_response -> string
-(** Extract text content from an API response. *)
+(** Extract end-user-visible answer text from an API response. Thinking,
+    ToolUse, ToolResult, and media blocks are intentionally excluded. *)
 
 val usage : api_response -> Agent_sdk.Types.api_usage option
 (** Return provider-reported usage stats, if present. [None] means the

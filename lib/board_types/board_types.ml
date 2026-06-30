@@ -27,6 +27,10 @@ type board_error =
   | Validation_error of string
   | Already_voted of string
   | Already_exists of string
+  | Unauthorized of string
+    (** Actor attempted an owner-gated mutation (e.g. editing a post they
+        do not own). Distinct from [Validation_error] so callers can map it
+        to a 403-class rejection rather than a generic input error. *)
   [@@deriving show]
 
 (** {1 Safe ID Module - Parse Don't Validate} *)

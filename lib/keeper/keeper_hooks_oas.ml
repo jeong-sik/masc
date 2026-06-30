@@ -336,7 +336,7 @@ let make_hooks
         let provider_label =
           match response.telemetry with
           | Some { provider_kind = Some pk; _ } ->
-            Llm_provider.Provider_kind.to_string pk
+            Llm_provider.Provider_config.string_of_provider_kind pk
           | _ -> runtime_lane_label
         in
         let cache_creation_input_tokens, cache_read_input_tokens =

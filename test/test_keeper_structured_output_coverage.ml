@@ -204,9 +204,11 @@ let test_all_masc_tool_agent_runs_are_classified () =
 let test_structured_tool_agent_runs_use_tool_schema_output () =
   let parser_expectations =
     [ ( "lib/keeper/keeper_adversarial_review.ml"
+      , "dispatch"
       , "Verifier_core.parse_grounded_verdict_from_json" )
-    ; "lib/verifier_oas.ml", "Core.parse_verdict_from_json"
+    ; "lib/verifier_oas.ml", "dispatch", "Core.parse_verdict_from_json"
     ; ( "lib/workspace_metric_hooks.ml"
+      , "dispatch"
       , "Task.Anti_rationalization.parse_review_verdict_from_json" )
     ]
   in
@@ -222,13 +224,15 @@ let test_structured_tool_agent_runs_use_tool_schema_output () =
             ~label:"masc_tools"))
     expected_structured_tool_agent_runs;
   List.iter
-    (fun (rel, parser) ->
-       let count = Ast_grep.count_calls ~module_path:rel ~callee:parser in
+    (fun (rel, binding_name, parser) ->
        check
-         bool
-         (rel ^ " parses structured tool arguments via " ^ parser)
-         true
-         (count > 0))
+         int
+         (rel ^ " parses structured tool arguments in " ^ binding_name ^ " via " ^ parser)
+         1
+         (Ast_grep.count_calls_in_value_binding
+            ~module_path:rel
+            ~binding_name
+            ~callee:parser))
     parser_expectations
 ;;
 

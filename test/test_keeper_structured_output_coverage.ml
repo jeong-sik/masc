@@ -16,6 +16,26 @@ let rec ml_files_under rel =
     else [])
 ;;
 
+let read_source rel =
+  let path = Ast_grep.resolve_path rel in
+  let ic = open_in_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () -> really_input_string ic (in_channel_length ic))
+;;
+
+let contains_substring haystack needle =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop i =
+    if needle_len = 0 then true
+    else if i + needle_len > haystack_len then false
+    else if String.sub haystack i needle_len = needle then true
+    else loop (i + 1)
+  in
+  loop 0
+;;
+
 let direct_completion_files_under rel =
   ml_files_under rel
   |> List.filter (fun rel ->
@@ -205,6 +225,18 @@ let test_fusion_agent_run_json_judges_use_provider_config_transform () =
     expected_structured_fusion_json_judges
 ;;
 
+let test_fusion_json_judges_do_not_degrade_to_json_mode () =
+  List.iter
+    (fun rel ->
+       let source = read_source rel in
+       check
+         bool
+         (rel ^ " must not downgrade provider-native schema to JsonMode")
+         false
+         (contains_substring source "Agent_sdk.Types.JsonMode"))
+    expected_structured_fusion_json_judges
+;;
+
 let test_all_fusion_agent_build_files_are_classified () =
   check
     (list string)
@@ -358,6 +390,10 @@ let () =
             "fusion JSON judges use provider config transform"
             `Quick
             test_fusion_agent_run_json_judges_use_provider_config_transform
+        ; test_case
+            "fusion JSON judges do not degrade to JsonMode"
+            `Quick
+            test_fusion_json_judges_do_not_degrade_to_json_mode
         ] )
     ; ( "structured tool Agent.run"
       , [ test_case

@@ -81,6 +81,153 @@ let test_create_and_get_post () =
           Alcotest.(check string) "content matches"
             "dispatch test post" fetched.content
 
+let test_update_post_by_owner () =
+  match
+    Board_dispatch.create_post ~author:"editor-agent"
+      ~content:"original body before edit" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"editor-agent"
+          ~content:"edited body after change" ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok updated -> (
+          Alcotest.(check string) "content updated" "edited body after change"
+            updated.content;
+          Alcotest.(check string) "body updated" "edited body after change"
+            updated.body;
+          Alcotest.(check bool) "updated_at not regressed" true
+            (updated.updated_at >= post.updated_at);
+          (* edit persists: a fresh get returns the edited content *)
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "edit persisted via get"
+                "edited body after change" fetched.content))
+
+let test_update_post_rejects_non_owner () =
+  match
+    Board_dispatch.create_post ~author:"owner-agent"
+      ~content:"body owned by owner-agent" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"intruder-agent"
+          ~content:"hijacked content" ()
+      with
+      | Ok _ -> Alcotest.fail "non-owner edit must be rejected"
+      | Error (Board.Unauthorized _) -> (
+          (* the original content must survive a rejected edit *)
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "original preserved on rejected edit"
+                "body owned by owner-agent" fetched.content)
+      | Error e ->
+          Alcotest.fail ("expected Unauthorized, got " ^ Board.show_board_error e))
+
+let test_update_post_missing_id () =
+  match
+    Board_dispatch.update_post ~post_id:"missing-post-id-zzz" ~editor:"any-agent"
+      ~content:"replacement" ()
+  with
+  | Ok _ -> Alcotest.fail "edit of missing post must fail"
+  | Error (Board.Post_not_found _) -> ()
+  | Error e ->
+      Alcotest.fail ("expected Post_not_found, got " ^ Board.show_board_error e)
+
+let test_update_post_rejects_empty_content () =
+  match
+    Board_dispatch.create_post ~author:"empty-edit-agent"
+      ~content:"non-empty original" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"empty-edit-agent"
+          ~content:"   " ()
+      with
+      | Ok _ -> Alcotest.fail "empty content edit must fail"
+      | Error (Board.Validation_error _) -> ()
+      | Error e ->
+          Alcotest.fail
+            ("expected Validation_error, got " ^ Board.show_board_error e))
+
+(* Exercises the explicit [?title]/[?body] params (the default-only path is
+   covered by [test_update_post_by_owner]) and asserts the fields documented as
+   immutable on edit — [post_kind] and [visibility] — are preserved. *)
+let test_update_post_with_explicit_title_and_body () =
+  match
+    Board_dispatch.create_post ~author:"titler-agent"
+      ~content:"original" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"titler-agent"
+          ~content:"content fallback" ~title:"Explicit Title"
+          ~body:"Explicit body text" ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok updated ->
+          Alcotest.(check string) "title from ?title" "Explicit Title"
+            updated.title;
+          Alcotest.(check string) "body from ?body" "Explicit body text"
+            updated.body;
+          Alcotest.(check string) "content tracks body" "Explicit body text"
+            updated.content;
+          Alcotest.(check bool) "post_kind preserved" true
+            (updated.post_kind = post.post_kind);
+          Alcotest.(check bool) "visibility preserved" true
+            (updated.visibility = post.visibility))
+
+(* Regression for the meta-drop bug: a [STATE] block in the edited body must be
+   lifted into [meta_json] (same as create), not stripped from the body and
+   silently discarded. *)
+let meta_has_state_block (meta : Yojson.Safe.t option) : bool =
+  match meta with
+  | Some (`Assoc fields) -> List.mem_assoc "state_block" fields
+  | _ -> false
+
+(* stdlib-only substring containment; avoids a [re] dep for this test exe. *)
+let contains_substring ~(needle : string) (haystack : string) : bool =
+  let nlen = String.length needle and hlen = String.length haystack in
+  let rec scan i =
+    if i + nlen > hlen then false
+    else if String.equal (String.sub haystack i nlen) needle then true
+    else scan (i + 1)
+  in
+  nlen = 0 || scan 0
+
+let test_update_post_lifts_state_block_into_meta () =
+  match
+    Board_dispatch.create_post ~author:"stateful-agent"
+      ~content:"plain original body" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      Alcotest.(check bool) "original has no state_block" false
+        (meta_has_state_block post.meta_json);
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"stateful-agent"
+          ~content:"visible text [STATE]progress=halfway[/STATE] trailing" ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok updated ->
+          Alcotest.(check bool) "state_block lifted into meta" true
+            (meta_has_state_block updated.meta_json);
+          (* the marker is stripped from the stored body, not left inline *)
+          Alcotest.(check bool) "STATE marker stripped from body" false
+            (contains_substring ~needle:"[STATE]" updated.body))
+
 let test_keeper_signal_hook_failure_does_not_abort_create_post () =
   Board_dispatch.set_board_signal_hook (fun _ ->
       failwith "keeper signal hook failed");
@@ -1305,6 +1452,18 @@ let () =
     ];
     "posts", [
       Alcotest.test_case "create and get" `Quick (with_eio test_create_and_get_post);
+      Alcotest.test_case "update by owner persists" `Quick
+        (with_eio test_update_post_by_owner);
+      Alcotest.test_case "update rejects non-owner" `Quick
+        (with_eio test_update_post_rejects_non_owner);
+      Alcotest.test_case "update missing id" `Quick
+        (with_eio test_update_post_missing_id);
+      Alcotest.test_case "update rejects empty content" `Quick
+        (with_eio test_update_post_rejects_empty_content);
+      Alcotest.test_case "update with explicit title and body" `Quick
+        (with_eio test_update_post_with_explicit_title_and_body);
+      Alcotest.test_case "update lifts STATE block into meta" `Quick
+        (with_eio test_update_post_lifts_state_block_into_meta);
       Alcotest.test_case "keeper hook failure does not abort create" `Quick
         (with_eio test_keeper_signal_hook_failure_does_not_abort_create_post);
       Alcotest.test_case "keeper hook cancellation propagates" `Quick

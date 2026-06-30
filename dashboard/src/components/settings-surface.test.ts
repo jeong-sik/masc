@@ -653,6 +653,10 @@ describe('SettingsSurface', () => {
         expect.stringContaining('Provider B'),
       ])
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')
+      expect(
+        Array.from(container.querySelectorAll('[data-runtime-section]'))
+          .map(section => section.getAttribute('data-runtime-section')),
+      ).toEqual(['catalog', 'routing', 'assignments'])
     })
     expect(container.textContent).not.toContain('oas·seoul-1')
   })

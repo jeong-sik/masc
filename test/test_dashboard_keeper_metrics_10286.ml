@@ -233,6 +233,50 @@ let test_metrics_window_redacts_model_and_handoff_labels () =
         (handoff |> member "to_model" = `Null)
   | None -> fail "expected last handoff summary")
 
+let with_temp_history content f =
+  let path = Filename.temp_file "khist" ".jsonl" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect ~finally:(fun () -> try Sys.remove path with _ -> ()) (fun () -> f path)
+
+(* Regression: keeper history rows persist message text as typed
+   [content_blocks], not a flat [content] string. Reading flat [content]
+   decoded "" for every row, so the dashboard keeper conversation feed and the
+   k2k mention graph were entirely empty. *)
+let test_history_summary_decodes_content_blocks () =
+  let rows =
+    String.concat
+      "\n"
+      [ {|{"role":"assistant","content_blocks":[{"type":"text","text":"hello from albini"}],"ts_unix":1.0}|}
+      ; {|{"role":"user","content_blocks":[{"type":"text","text":"ping @taskmaster please"}],"ts_unix":2.0}|}
+      ]
+    ^ "\n"
+  in
+  with_temp_history rows (fun path ->
+      let conversation, _k2k_recent, _k2k_mentions, raw_count, _frag, _filtered =
+        Metrics.keeper_history_summary_json
+          ~all_keeper_names:[ "albini"; "taskmaster" ]
+          ~keeper_name:"albini"
+          ~history_path:path
+          ~filter_fragments:false
+      in
+      check int "raw_count counts content_blocks rows" 2 raw_count;
+      match conversation with
+      | `List (first :: _ as items) ->
+          check int "conversation length" 2 (List.length items);
+          let content =
+            first
+            |> Yojson.Safe.Util.member "content"
+            |> Yojson.Safe.Util.to_string
+          in
+          check
+            string
+            "first row content extracted from blocks"
+            "hello from albini"
+            content
+      | _ -> fail "expected non-empty conversation list")
+
 let () =
   run "dashboard_keeper_metrics_10286"
     [
@@ -260,5 +304,10 @@ let () =
             test_metrics_series_ignores_sparse_tool_events;
           test_case "redacts model and handoff labels" `Quick
             test_metrics_window_redacts_model_and_handoff_labels;
+        ] );
+      ( "history_summary",
+        [
+          test_case "decodes content_blocks rows" `Quick
+            test_history_summary_decodes_content_blocks;
         ] );
     ]

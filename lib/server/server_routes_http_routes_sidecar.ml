@@ -73,6 +73,30 @@ type attempt_record =
   ; operator_next_action : string
   }
 
+type attempt_record_decode_error =
+  | Attempt_record_not_object of string
+  | Attempt_record_invalid_field of
+      { field : string
+      ; expected : string
+      ; actual : string
+      }
+  | Attempt_record_unknown_result of string
+  | Attempt_record_invalid_timestamp of
+      { field : string
+      ; value : string
+      }
+
+let attempt_record_decode_error_to_string = function
+  | Attempt_record_not_object actual ->
+    Printf.sprintf "attempt record must be an object, got %s" actual
+  | Attempt_record_invalid_field { field; expected; actual } ->
+    Printf.sprintf "field %S must be %s, got %s" field expected actual
+  | Attempt_record_unknown_result value ->
+    Printf.sprintf "field %S has unknown result %S" "last_attempt_result" value
+  | Attempt_record_invalid_timestamp { field; value } ->
+    Printf.sprintf "field %S has invalid ISO-8601 timestamp %S" field value
+;;
+
 let sidecar_operator_next_action =
   "wait for observed status, or open logs if the sidecar remains offline after \
    backoff"
@@ -105,50 +129,83 @@ let attempt_record_json (record : attempt_record) =
     ]
 ;;
 
-let attempt_record_of_json = function
+let invalid_attempt_field ~field ~expected actual =
+  Error
+    (Attempt_record_invalid_field
+       { field; expected; actual = Json_util.kind_name actual })
+;;
+
+let required_string_field fields field =
+  match List.assoc_opt field fields with
+  | Some (`String value) -> Ok value
+  | Some actual -> invalid_attempt_field ~field ~expected:"string" actual
+  | None ->
+    Error
+      (Attempt_record_invalid_field { field; expected = "string"; actual = "missing" })
+;;
+
+let required_int_field fields field =
+  match List.assoc_opt field fields with
+  | Some (`Int value) -> Ok value
+  | Some actual -> invalid_attempt_field ~field ~expected:"integer" actual
+  | None ->
+    Error
+      (Attempt_record_invalid_field
+         { field; expected = "integer"; actual = "missing" })
+;;
+
+let parse_timestamp_field ~field value =
+  match Types_core.parse_iso8601_opt value with
+  | Some unix -> Ok unix
+  | None -> Error (Attempt_record_invalid_timestamp { field; value })
+;;
+
+let optional_next_retry_unix fields =
+  match List.assoc_opt "next_retry_at" fields with
+  | None | Some `Null -> Ok None
+  | Some (`String value) ->
+    (match parse_timestamp_field ~field:"next_retry_at" value with
+     | Ok unix -> Ok (Some unix)
+     | Error _ as error -> error)
+  | Some actual -> invalid_attempt_field ~field:"next_retry_at" ~expected:"string or null" actual
+;;
+
+let attempt_record_of_json_result = function
   | `Assoc fields ->
-    let ( let* ) = Option.bind in
-    (match
-       ( List.assoc_opt "connector_id" fields
-       , List.assoc_opt "generation" fields
-       , List.assoc_opt "attempt_id" fields
-       , List.assoc_opt "attempt_number" fields
-       , List.assoc_opt "last_attempt_result" fields
-       , List.assoc_opt "next_retry_at" fields
-       , List.assoc_opt "operator_next_action" fields
-       , List.assoc_opt "updated_at" fields )
-     with
-     | ( Some (`String connector_id)
-       , Some (`Int generation)
-       , Some (`String attempt_id)
-       , Some (`Int attempt_number)
-       , Some (`String last_attempt_result)
-       , next_retry_at
-       , Some (`String operator_next_action)
-       , Some (`String updated_at) ) ->
-       let* last_result = Attempt.result_of_string_opt last_attempt_result in
-       let* next_retry_unix =
-         match next_retry_at with
-         | Some (`String value) ->
-           Types_core.parse_iso8601_opt value |> Option.map (fun value -> Some value)
-         | Some `Null | None -> Some None
-         | _ -> None
-       in
-       let* updated_unix = Types_core.parse_iso8601_opt updated_at in
-       Some
-         { connector_id
-         ; attempt =
-             { generation
-             ; attempt_id
-             ; attempt_number
-             ; last_result
-             ; next_retry_unix
-             ; updated_unix
-             }
-         ; operator_next_action
-         }
-     | _ -> None)
-  | _ -> None
+    let ( let* ) = Result.bind in
+    let* connector_id = required_string_field fields "connector_id" in
+    let* generation = required_int_field fields "generation" in
+    let* attempt_id = required_string_field fields "attempt_id" in
+    let* attempt_number = required_int_field fields "attempt_number" in
+    let* last_attempt_result = required_string_field fields "last_attempt_result" in
+    let* last_result =
+      match Attempt.result_of_string_opt last_attempt_result with
+      | Some result -> Ok result
+      | None -> Error (Attempt_record_unknown_result last_attempt_result)
+    in
+    let* next_retry_unix = optional_next_retry_unix fields in
+    let* operator_next_action = required_string_field fields "operator_next_action" in
+    let* updated_at = required_string_field fields "updated_at" in
+    let* updated_unix = parse_timestamp_field ~field:"updated_at" updated_at in
+    Ok
+      { connector_id
+      ; attempt =
+          { generation
+          ; attempt_id
+          ; attempt_number
+          ; last_result
+          ; next_retry_unix
+          ; updated_unix
+          }
+      ; operator_next_action
+      }
+  | other -> Error (Attempt_record_not_object (Json_util.kind_name other))
+;;
+
+let attempt_record_of_json json =
+  match attempt_record_of_json_result json with
+  | Ok record -> Some record
+  | Error _ -> None
 ;;
 
 let desired_record_json (record : desired_record) =
@@ -194,14 +251,15 @@ let sidecar_attempt_path ~base_path id =
     (Printf.sprintf ".gate/runtime/%s/sidecar_lifecycle_attempt.json" id)
 ;;
 
-(* Silent [Sys_error _ | Yojson.Json_error _ -> None] previously
-   collapsed two distinct failure modes into "no record":
+(* Silent [Sys_error _ | Yojson.Json_error _ -> None] previously collapsed
+   distinct failure modes into "no record":
    (1) file existed at [Sys.file_exists] check but read failed (TOCTOU
        race, permission change, partial write mid-rename),
-   (2) file read OK but JSON was malformed.
-   Operators tracing why [/api/v1/sidecar/status] reports stale state
-   need to tell these apart from a genuinely absent record. Log-only —
-   [None] return preserved so caller contracts are unchanged. *)
+   (2) file read OK but JSON was malformed,
+   (3) JSON was syntactically valid but semantically invalid.
+   Desired-state reads remain log-only for compatibility. Attempt-state reads
+   use [read_attempt_record_result] so reconcile/status callers can fail closed
+   or surface corruption instead of treating it as absence. *)
 let read_desired_record ~base_path id =
   let path = sidecar_desired_path ~base_path id in
   if not (Sys.file_exists path)
@@ -219,21 +277,35 @@ let read_desired_record ~base_path id =
       None)
 ;;
 
-let read_attempt_record ~base_path id =
+let read_attempt_record_result ~base_path id =
   let path = sidecar_attempt_path ~base_path id in
   if not (Sys.file_exists path)
-  then None
+  then Ok None
   else (
-    try read_file path |> Yojson.Safe.from_string |> attempt_record_of_json with
+    try
+      let json = read_file path |> Yojson.Safe.from_string in
+      match attempt_record_of_json_result json with
+      | Ok record -> Ok (Some record)
+      | Error error ->
+        let detail = attempt_record_decode_error_to_string error in
+        Log.Server.warn "[sidecar/attempt] invalid persisted state at %s: %s" path detail;
+        Error (Printf.sprintf "invalid persisted attempt state at %s: %s" path detail)
+    with
     | Sys_error msg ->
       Log.Server.warn
         "[sidecar/attempt] file_exists OK but read failed at %s: %s"
         path
         msg;
-      None
+      Error (Printf.sprintf "attempt state read failed at %s: %s" path msg)
     | Yojson.Json_error msg ->
       Log.Server.warn "[sidecar/attempt] malformed JSON at %s: %s" path msg;
-      None)
+      Error (Printf.sprintf "malformed attempt state JSON at %s: %s" path msg))
+;;
+
+let read_attempt_record ~base_path id =
+  match read_attempt_record_result ~base_path id with
+  | Ok record -> record
+  | Error _ -> None
 ;;
 
 (** Make sure [.gate/runtime/<id>/] exists before atomic_write_file
@@ -319,33 +391,44 @@ let retry_backoff_seconds () = Env_config_runtime.Sidecar.reconcile_backoff_sec
     [now] via [Types_core.parse_iso8601_opt], then delegates the deadline
     comparison to [Attempt_state.is_backoff_active].  Persisted
     [next_retry_at] strings are parsed once at the JSON boundary into
-    [Attempt_state.t], so runtime backoff no longer compares wire strings. *)
+    [Attempt_state.t], so runtime backoff no longer compares wire strings.
+    Malformed [now] keeps backoff inactive so reconcile retries instead of
+    stalling (#8930 phase 3); malformed persisted deadlines fail at the
+    attempt-record read boundary. *)
 let retry_backoff_active ~now attempt =
   match Types_core.parse_iso8601_opt now with
   | Some now_unix -> Attempt.is_backoff_active ~now:now_unix attempt.attempt
   | None -> false
 ;;
 
-let unix_of_iso_exn ~field value =
+let unix_of_iso_result ~field value =
   match Types_core.parse_iso8601_opt value with
-  | Some unix -> unix
-  | None -> invalid_arg (Printf.sprintf "invalid %s: %s" field value)
+  | Some unix -> Ok unix
+  | None -> Error (Printf.sprintf "invalid %s: %s" field value)
 ;;
 
-let next_attempt_record ~now ~next_retry_at previous (record : desired_record) =
-  let now_unix = unix_of_iso_exn ~field:"now" now in
-  let next_retry_unix = unix_of_iso_exn ~field:"next_retry_at" next_retry_at in
+let next_attempt_record_result ~now ~next_retry_at previous (record : desired_record) =
+  let ( let* ) = Result.bind in
+  let* now_unix = unix_of_iso_result ~field:"now" now in
+  let* next_retry_unix = unix_of_iso_result ~field:"next_retry_at" next_retry_at in
   let previous = Option.map (fun record -> record.attempt) previous in
-  { connector_id = record.connector_id
-  ; attempt =
-      Attempt.make_next
-        ~now:now_unix
-        ~backoff_seconds:(next_retry_unix -. now_unix)
-        ~generation:record.generation
-        ~last_result:Attempt.Start_dispatched
-        ~previous
-  ; operator_next_action = sidecar_operator_next_action
-  }
+  Ok
+    { connector_id = record.connector_id
+    ; attempt =
+        Attempt.make_next
+          ~now:now_unix
+          ~backoff_seconds:(next_retry_unix -. now_unix)
+          ~generation:record.generation
+          ~last_result:Attempt.Start_dispatched
+          ~previous
+    ; operator_next_action = sidecar_operator_next_action
+    }
+;;
+
+let next_attempt_record ~now ~next_retry_at previous record =
+  match next_attempt_record_result ~now ~next_retry_at previous record with
+  | Ok record -> record
+  | Error msg -> invalid_arg msg
 ;;
 
 let reconcile_desired_once
@@ -369,12 +452,20 @@ let reconcile_desired_once
               && retry_backoff_active ~now attempt ->
          Reconcile_noop "backoff_active"
        | _ ->
-         let attempt = next_attempt_record ~now ~next_retry_at previous_attempt record in
-         (match write_attempt attempt with
-          | Ok () ->
-            start_process ();
-            Reconcile_started
-          | Error _ -> Reconcile_noop "attempt_write_failed"))
+         (match next_attempt_record_result ~now ~next_retry_at previous_attempt record with
+          | Error msg ->
+            Log.Server.warn
+              "[sidecar/reconcile] invalid attempt timestamp for %s generation %d: %s"
+              record.connector_id
+              record.generation
+              msg;
+            Reconcile_noop "attempt_time_invalid"
+          | Ok attempt ->
+            (match write_attempt attempt with
+             | Ok () ->
+               start_process ();
+               Reconcile_started
+             | Error _ -> Reconcile_noop "attempt_write_failed")))
     | Desired_running, Observed_available -> Reconcile_noop "already_available"
     | Desired_stopped, _ -> Reconcile_noop "desired_stopped")
 ;;
@@ -410,7 +501,11 @@ let attempt_fields = function
 
 let lifecycle_json ~base_path id status_json =
   let observed_state = observed_state_of_status_json status_json in
-  let previous_attempt = read_attempt_record ~base_path id in
+  let previous_attempt, attempt_error_fields =
+    match read_attempt_record_result ~base_path id with
+    | Ok previous_attempt -> previous_attempt, []
+    | Error msg -> None, [ "attempt_read_error", `String msg ]
+  in
   match read_desired_record ~base_path id with
   | None ->
     `Assoc
@@ -419,7 +514,8 @@ let lifecycle_json ~base_path id status_json =
        ; "observed_state", `String (observed_state_to_string observed_state)
        ; "reconcile_result", `String "none"
        ]
-       @ attempt_fields previous_attempt)
+       @ attempt_fields previous_attempt
+       @ attempt_error_fields)
   | Some record ->
     `Assoc
       ([ "desired_state", `String (desired_state_to_string record.desired_state)
@@ -430,7 +526,8 @@ let lifecycle_json ~base_path id status_json =
        ; ( "reconcile_result"
          , `String (reconcile_preview ?previous_attempt record observed_state) )
        ]
-       @ attempt_fields previous_attempt)
+       @ attempt_fields previous_attempt
+       @ attempt_error_fields)
 ;;
 
 let append_assoc key value = function
@@ -839,52 +936,65 @@ let handle_start state request reqd =
          ~status:`Service_unavailable
          (`Assoc [ "ok", `Bool false; "error", `String msg ])
      | Ok script ->
-       (match
-          write_desired_record ~base_path ~id ~updated_by:"http:start" Desired_running
-        with
+       (match read_attempt_record_result ~base_path id with
         | Error msg ->
           respond_json
             request
             reqd
             ~status:`Internal_server_error
-            (`Assoc [ "ok", `Bool false; "error", `String msg ])
-        | Ok desired ->
+            (`Assoc
+                [ "ok", `Bool false
+                ; "id", `String id
+                ; "error", `String "sidecar attempt state invalid"
+                ; "detail", `String msg
+                ])
+        | Ok previous_attempt ->
+          (match
+             write_desired_record ~base_path ~id ~updated_by:"http:start" Desired_running
+           with
+           | Error msg ->
+             respond_json
+               request
+               reqd
+               ~status:`Internal_server_error
+               (`Assoc [ "ok", `Bool false; "error", `String msg ])
+           | Ok desired ->
           (* Detach without a shell: [Process_eio] gives the child its own
              session and redirects stdio to [/dev/null], so the sidecar
              survives backend restart without retaining server FDs. *)
-          let status_json = read_status_json ~base_path id in
-          let observed_state = observed_state_of_status_json status_json in
-          let previous_attempt = read_attempt_record ~base_path id in
-          let reconcile_result =
-            reconcile_desired_once
-              ~current_generation:desired.generation
-              ?previous_attempt
-              ~observed_state
-              ~write_attempt:(write_attempt_record ~base_path ~id)
-              ~start_process:(fun () ->
-                match start_sidecar_process ~base_path ~script with
-                | Ok () -> ()
-                | Error msg ->
-                  Log.Misc.warn "[Sidecar] detached start failed: %s" msg)
-              desired
-          in
-          respond_json
-            request
-            reqd
-            ~status:`Accepted
-            (`Assoc
-                [ "ok", `Bool true
-                ; "id", `String id
-                ; "desired_state", `String (desired_state_to_string desired.desired_state)
-                ; "desired_generation", `Int desired.generation
-                ; "observed_state", `String (observed_state_to_string observed_state)
-                ; ( "reconcile_result"
-                  , `String (reconcile_result_to_string reconcile_result) )
-                ; ( "note"
-                  , `String
-                      "sidecar desired state updated; poll \
-                       /api/v1/sidecar/status?name=..." )
-                ])))
+             let status_json = read_status_json ~base_path id in
+             let observed_state = observed_state_of_status_json status_json in
+             let reconcile_result =
+               reconcile_desired_once
+                 ~current_generation:desired.generation
+                 ?previous_attempt
+                 ~observed_state
+                 ~write_attempt:(write_attempt_record ~base_path ~id)
+                 ~start_process:(fun () ->
+                   match start_sidecar_process ~base_path ~script with
+                   | Ok () -> ()
+                   | Error msg ->
+                     Log.Misc.warn "[Sidecar] detached start failed: %s" msg)
+                 desired
+             in
+             respond_json
+               request
+               reqd
+               ~status:`Accepted
+               (`Assoc
+                   [ "ok", `Bool true
+                   ; "id", `String id
+                   ; ( "desired_state"
+                     , `String (desired_state_to_string desired.desired_state) )
+                   ; "desired_generation", `Int desired.generation
+                   ; "observed_state", `String (observed_state_to_string observed_state)
+                   ; ( "reconcile_result"
+                     , `String (reconcile_result_to_string reconcile_result) )
+                   ; ( "note"
+                     , `String
+                         "sidecar desired state updated; poll \
+                          /api/v1/sidecar/status?name=..." )
+                   ]))))
 ;;
 
 (** Register sidecar lifecycle routes on the router. *)

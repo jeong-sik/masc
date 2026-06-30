@@ -977,11 +977,48 @@ let test_attempt_record_of_json_rejects_malformed_next_retry_at () =
       ; "updated_at", `String "2026-01-01T00:00:00Z"
       ]
   in
-  check
-    bool
-    "malformed next_retry_at → rejected at boundary"
-    true
-    (Routes.attempt_record_of_json json = None)
+  (match Routes.attempt_record_of_json_result json with
+   | Error (Routes.Attempt_record_invalid_timestamp { field; value }) ->
+     check string "field" "next_retry_at" field;
+     check string "value" "not-an-iso-stamp" value
+   | Error error ->
+     failf
+       "unexpected decode error: %s"
+       (Routes.attempt_record_decode_error_to_string error)
+   | Ok _ -> failf "malformed next_retry_at should be rejected at boundary");
+  check bool "compat option wrapper still rejects" true (Routes.attempt_record_of_json json = None)
+;;
+
+let test_read_attempt_record_result_reports_semantic_corruption () =
+  with_temp_dir "sidecar-attempt-corrupt-read" (fun base_path ->
+    let path = Routes.sidecar_attempt_path ~base_path "discord" in
+    write_file
+      path
+      {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
+    match Routes.read_attempt_record_result ~base_path "discord" with
+    | Error msg ->
+      check bool "mentions field" true (contains_substring msg "next_retry_at");
+      check bool "mentions bad value" true (contains_substring msg "not-an-iso-stamp")
+    | Ok None -> failf "corrupt persisted attempt state must not look absent"
+    | Ok (Some _) -> failf "corrupt persisted attempt state should not decode")
+;;
+
+let test_status_json_surfaces_invalid_attempt_state () =
+  with_temp_dir "sidecar-attempt-corrupt-status" (fun base_path ->
+    let path = Routes.sidecar_attempt_path ~base_path "discord" in
+    write_file
+      path
+      {|{"connector_id":"discord","generation":1,"attempt_id":"1:1","attempt_number":1,"last_attempt_result":"start_dispatched","next_retry_at":"not-an-iso-stamp","operator_next_action":"none","updated_at":"2026-01-01T00:00:00Z"}|};
+    let json = Routes.read_status_json ~base_path "discord" in
+    let open Yojson.Safe.Util in
+    let lifecycle = json |> member "sidecar_lifecycle" in
+    let error =
+      match lifecycle |> member "attempt_read_error" with
+      | `String msg -> msg
+      | other -> failf "expected attempt_read_error string, got %s" (Yojson.Safe.to_string other)
+    in
+    check bool "mentions field" true (contains_substring error "next_retry_at");
+    check bool "mentions bad value" true (contains_substring error "not-an-iso-stamp"))
 ;;
 
 let test_retry_backoff_fail_closed_on_malformed_now () =
@@ -991,6 +1028,33 @@ let test_retry_backoff_fail_closed_on_malformed_now () =
     "malformed now → fail-closed"
     false
     (Routes.retry_backoff_active ~now:"not-an-iso-stamp" attempt)
+;;
+
+let test_reconcile_invalid_attempt_time_noops_without_exception () =
+  let process_calls = ref 0 in
+  let desired : Routes.desired_record =
+    { Routes.connector_id = "discord"
+    ; desired_state = Routes.Desired_running
+    ; generation = 3
+    ; updated_by = "test"
+    ; updated_at = "2026-04-20T00:00:00Z"
+    }
+  in
+  let result =
+    Routes.reconcile_desired_once
+      ~now:"not-an-iso-stamp"
+      ~next_retry_at:"2099-04-20T00:00:30Z"
+      ~current_generation:3
+      ~observed_state:Routes.Observed_unavailable
+      ~start_process:(fun () -> incr process_calls)
+      desired
+  in
+  check int "invalid attempt time suppresses process start" 0 !process_calls;
+  check
+    string
+    "invalid time result"
+    "noop:attempt_time_invalid"
+    (Routes.reconcile_result_to_string result)
 ;;
 
 (* ---- Fault-recovery gaps (untested subprocess failure paths) ----
@@ -1216,9 +1280,21 @@ let () =
             `Quick
             test_attempt_record_of_json_rejects_malformed_next_retry_at
         ; test_case
+            "malformed persisted attempt → read error"
+            `Quick
+            test_read_attempt_record_result_reports_semantic_corruption
+        ; test_case
+            "malformed persisted attempt → status error"
+            `Quick
+            test_status_json_surfaces_invalid_attempt_state
+        ; test_case
             "malformed now → fail-closed"
             `Quick
             test_retry_backoff_fail_closed_on_malformed_now
+        ; test_case
+            "malformed reconcile time → noop"
+            `Quick
+            test_reconcile_invalid_attempt_time_noops_without_exception
         ] )
     ; ( "fault_recovery_gaps"
       , [ test_case

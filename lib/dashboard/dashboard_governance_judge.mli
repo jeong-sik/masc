@@ -240,12 +240,10 @@ val resolve_governance_model_used :
     not expose concrete provider/model identity. *)
 
 type governance_response_parse_failure =
-  | Lenient_fallback of string
   | Structural_error of string
 (** Failure class for governance judge response parsing.
-    [Lenient_fallback raw] means all deterministic JSON recovery
-    failed. [Structural_error reason] means JSON parsed but
-    violated the judge output contract. *)
+    [Structural_error reason] means the response was not strict JSON
+    or violated the judge output contract. *)
 
 val parse_governance_response_for_testing :
   raw_text:string ->

@@ -211,6 +211,19 @@ let test_dashboard_agent_run_json_judges_use_structured_judge_runtime () =
     expected_structured_dashboard_agent_run_json_judges
 ;;
 
+let test_dashboard_json_judges_do_not_use_lenient_json_recovery () =
+  List.iter
+    (fun rel ->
+       let source = read_source rel in
+       check
+         bool
+         (rel ^ " must parse provider-native schema output strictly")
+         false
+         (contains_substring source "Llm_provider.Lenient_json.parse"
+          || contains_substring source "Judge_json_recovery.extract_balanced_object"))
+    expected_structured_dashboard_agent_run_json_judges
+;;
+
 let test_fusion_agent_run_json_judges_use_provider_config_transform () =
   List.iter
     (fun rel ->
@@ -376,6 +389,10 @@ let () =
             "dashboard Agent.run JSON judges use structured runtime lane"
             `Quick
             test_dashboard_agent_run_json_judges_use_structured_judge_runtime
+        ; test_case
+            "dashboard JSON judges do not use lenient JSON recovery"
+            `Quick
+            test_dashboard_json_judges_do_not_use_lenient_json_recovery
         ] )
     ; ( "fusion json judges"
       , [ test_case

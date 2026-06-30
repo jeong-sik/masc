@@ -449,8 +449,6 @@ let test_parse_governance_response_requires_guardrail_state () =
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names guardrail_state" true
         (string_contains reason "missing guardrail_state")
-  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
-      fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "missing guardrail_state must fail closed"
 
 let test_parse_governance_response_preserves_guardrail_state () =
@@ -529,8 +527,6 @@ let test_parse_governance_response_requires_guardrail_fields () =
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names missing field" true
         (string_contains reason "missing guardrail_state.pending_confirm_token")
-  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
-      fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "incomplete guardrail_state must fail closed"
 
 let test_parse_governance_response_requires_items_array () =
@@ -543,23 +539,19 @@ let test_parse_governance_response_requires_items_array () =
   | Error (Dashboard_governance_judge.Structural_error reason) ->
       check bool "reason names items array" true
         (string_contains reason "items array")
-  | Error (Dashboard_governance_judge.Lenient_fallback _) ->
-      fail "expected structural error, got lenient fallback"
   | Ok _ -> fail "missing items array must fail closed"
 
-let test_parse_governance_response_rejects_unparseable_recovered_block () =
+let test_parse_governance_response_rejects_embedded_json_block () =
   let raw = "prefix {\"items\": [} suffix" in
   match
     Dashboard_governance_judge.parse_governance_response_for_testing
       ~raw_text:raw ~generated_at:"2026-05-06T00:00:00Z"
       ~expires_at:"2026-05-06T00:10:00Z" ~model_used:"glm:test"
   with
-  | Error (Dashboard_governance_judge.Lenient_fallback recovered) ->
-      check bool "fallback keeps recovered fragment" true
-        (string_contains recovered "items")
   | Error (Dashboard_governance_judge.Structural_error reason) ->
-      fail ("expected lenient fallback, got structural error: " ^ reason)
-  | Ok _ -> fail "unparseable recovered JSON must stay lenient fallback"
+      check bool "reason names strict JSON" true
+        (string_contains reason "invalid strict JSON")
+  | Ok _ -> fail "embedded malformed JSON must fail closed"
 
 let test_refresh_failure_keeps_fresh_cache_online () =
   let dir = test_dir () in
@@ -1125,8 +1117,8 @@ let () =
             test_parse_governance_response_requires_guardrail_fields;
           test_case "parser requires items array" `Quick
             test_parse_governance_response_requires_items_array;
-          test_case "parser rejects unparseable recovered block" `Quick
-            test_parse_governance_response_rejects_unparseable_recovered_block;
+          test_case "parser rejects embedded JSON block" `Quick
+            test_parse_governance_response_rejects_embedded_json_block;
           test_case "refresh failure keeps fresh cache online" `Quick
             test_refresh_failure_keeps_fresh_cache_online;
           test_case "refresh failure marks expired cache offline" `Quick

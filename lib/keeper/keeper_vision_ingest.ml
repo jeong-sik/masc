@@ -49,6 +49,18 @@ let record_eviction ~mode ~result ~reason =
     ()
 ;;
 
+let eager_read_eviction_reason_of_outcome = function
+  | Keeper_vision_tool.Vo_ok _ -> None
+  | Keeper_vision_tool.Vo_empty -> Some "eager_empty"
+  | Keeper_vision_tool.Vo_truncated -> Some "eager_truncated"
+  | Keeper_vision_tool.Vo_timeout -> Some "eager_timeout"
+  | Keeper_vision_tool.Vo_no_runtime _ -> Some "eager_no_runtime"
+  | Keeper_vision_tool.Vo_invalid_request _ -> Some "eager_invalid_request"
+  | Keeper_vision_tool.Vo_invalid_structured_response _ ->
+    Some "eager_invalid_structured_response"
+  | Keeper_vision_tool.Vo_provider _ -> Some "eager_provider_error"
+;;
+
 let truncate_read_text text =
   let length = String.length text in
   if length <= max_read_text_chars
@@ -95,14 +107,10 @@ let eager_read ~media_type ~bytes : (string, string) result option =
          ()
      with
      | Keeper_vision_tool.Vo_ok text -> Some (Ok (truncate_read_text text))
-     | Keeper_vision_tool.Vo_empty -> Some (Error "vision returned no text")
-     | Keeper_vision_tool.Vo_truncated -> Some (Error "vision reply truncated")
-     | Keeper_vision_tool.Vo_timeout -> Some (Error "vision sub-call timed out")
-     | Keeper_vision_tool.Vo_no_runtime msg -> Some (Error ("no vision runtime: " ^ msg))
-     | Keeper_vision_tool.Vo_invalid_request msg ->
-       Some (Error ("invalid vision request: " ^ msg))
-     | Keeper_vision_tool.Vo_provider { detail; _ } ->
-       Some (Error ("vision provider error: " ^ detail)))
+     | outcome ->
+       (match eager_read_eviction_reason_of_outcome outcome with
+        | Some reason -> Some (Error reason)
+        | None -> Some (Error "eager_read_failed")))
   | _ -> None
 ;;
 
@@ -157,8 +165,8 @@ let evict_block ~mode ~keeper_name ~eager_budget (block : Agent_sdk.Types.conten
                        record_eviction ~mode ~result:"ok" ~reason:"eager_read";
                        Agent_sdk.Types.Text
                          (image_read_placeholder ~handle ~media_type ~read_text)
-                     | Some (Error _reason) ->
-                       record_eviction ~mode ~result:"error" ~reason:"eager_read_failed";
+                     | Some (Error reason) ->
+                       record_eviction ~mode ~result:"error" ~reason;
                        Agent_sdk.Types.Text
                          (image_unread_placeholder
                             ~handle

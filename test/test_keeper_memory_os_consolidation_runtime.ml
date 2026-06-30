@@ -275,6 +275,60 @@ let test_consolidate_rejects_malformed_fact_store () =
         | _ -> Alcotest.fail "expected Unparseable for malformed fact store"))))
 ;;
 
+let test_consolidate_classifies_empty_provider_response () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete:(fake_complete "   ")
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        match outcome with
+        | Runtime.Empty_response -> ()
+        | _ -> Alcotest.fail "expected Empty_response for blank provider output"))))
+;;
+
+let test_consolidate_classifies_invalid_structured_response () =
+  Eio_main.run (fun env ->
+    Eio.Switch.run (fun sw ->
+      with_prompts (fun () ->
+      with_temp_keepers (fun () ->
+        let keeper_id = "keeper-1" in
+        List.iter
+          (Io.append_fact ~keeper_id)
+          [ fact "a"; fact "b"; fact "c"; fact "d" ];
+        let outcome =
+          Runtime.consolidate_keeper
+            ~complete:(fake_complete "not json {{{")
+            ~sw
+            ~net:(Eio.Stdenv.net env)
+            ~provider_cfg:(provider_cfg ())
+            ~now
+            ~keeper_id
+            ()
+        in
+        match outcome with
+        | Runtime.Invalid_structured_response detail ->
+          Alcotest.(check string)
+            "detail keeps rejection reason"
+            "consolidation provider returned invalid structured response: non_json"
+            detail
+        | _ ->
+          Alcotest.fail
+            "expected Invalid_structured_response for malformed provider output"))))
+;;
+
 let test_consolidate_respects_provider_config_and_prompt_template () =
   Eio_main.run (fun env ->
     Eio.Switch.run (fun sw ->
@@ -357,8 +411,16 @@ let () =
       , [ Alcotest.test_case "applies the model's plan" `Quick test_consolidate_applies_plan
         ; Alcotest.test_case "skips when too few facts" `Quick test_consolidate_skips_too_few
 	        ; Alcotest.test_case "dry-run preserves the store" `Quick test_consolidate_dry_run_preserves_store
-	        ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
-	        ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store
+        ; Alcotest.test_case "rejects stale snapshots" `Quick test_consolidate_rejects_stale_snapshot
+        ; Alcotest.test_case "rejects malformed fact store" `Quick test_consolidate_rejects_malformed_fact_store
+        ; Alcotest.test_case
+            "classifies empty provider response"
+            `Quick
+            test_consolidate_classifies_empty_provider_response
+        ; Alcotest.test_case
+            "classifies invalid structured provider response"
+            `Quick
+            test_consolidate_classifies_invalid_structured_response
         ; Alcotest.test_case
             "respects provider config and prompt template"
             `Quick

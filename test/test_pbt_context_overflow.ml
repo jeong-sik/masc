@@ -346,14 +346,7 @@ let text_blocks (messages : Agent_sdk.Types.message list) =
        List.filter_map
          (function
            | Agent_sdk.Types.Text text -> Some text
-           | Agent_sdk.Types.Thinking _
-           | Agent_sdk.Types.ReasoningDetails _
-           | Agent_sdk.Types.RedactedThinking _
-           | Agent_sdk.Types.ToolUse _
-           | Agent_sdk.Types.ToolResult _
-           | Agent_sdk.Types.Image _
-           | Agent_sdk.Types.Document _
-           | Agent_sdk.Types.Audio _ -> None)
+           | _ -> None)
          msg.content)
     messages
 
@@ -367,13 +360,7 @@ let count_tool_blocks messages =
          (fun (tool_uses, tool_results) -> function
            | Agent_sdk.Types.ToolUse _ -> tool_uses + 1, tool_results
            | Agent_sdk.Types.ToolResult _ -> tool_uses, tool_results + 1
-           | Agent_sdk.Types.Text _
-           | Agent_sdk.Types.Thinking _
-           | Agent_sdk.Types.ReasoningDetails _
-           | Agent_sdk.Types.RedactedThinking _
-           | Agent_sdk.Types.Image _
-           | Agent_sdk.Types.Document _
-           | Agent_sdk.Types.Audio _ -> tool_uses, tool_results)
+           | _ -> tool_uses, tool_results)
          counts
          msg.content)
     (0, 0)

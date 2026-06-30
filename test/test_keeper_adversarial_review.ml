@@ -101,6 +101,30 @@ let check_ok = function
   | Ok () -> ()
   | Error msg -> Alcotest.fail msg
 
+let test_response_text_accepts_strict_json () =
+  let raw =
+    {|{"verdict":"FAIL","reason":"bad branch","evidence":[{"path":"lib/foo.ml","line":12,"quote":"let bad = true"}]}|}
+  in
+  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  | Ok grounded ->
+    check string
+      "verdict"
+      "FAIL"
+      (VC.verdict_constructor_name grounded.VC.verdict);
+    check int "evidence count" 1 (List.length grounded.VC.evidence)
+  | Error msg -> fail ("strict JSON response rejected: " ^ msg)
+
+let test_response_text_rejects_embedded_json () =
+  let raw =
+    {|Here is the verdict: {"verdict":"PASS","reason":null,"evidence":[]}|}
+  in
+  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  | Error _ -> ()
+  | Ok grounded ->
+    failf
+      "embedded JSON should be rejected, got %s"
+      (VC.verdict_to_string grounded.VC.verdict)
+
 let test_fail_wakes_author () =
   with_temp_base (fun base ->
       let author = "builder-keeper" in
@@ -294,6 +318,13 @@ let test_build_prompt_preserves_literal_braces_in_values () =
 let () =
   Alcotest.run "keeper-adversarial-review"
     [
+      ( "response-parser",
+        [
+          test_case "accepts strict JSON response" `Quick
+            test_response_text_accepts_strict_json;
+          test_case "rejects embedded JSON response" `Quick
+            test_response_text_rejects_embedded_json;
+        ] );
       ( "wake-on-fail",
         [
           test_case "fail wakes author" `Quick test_fail_wakes_author;

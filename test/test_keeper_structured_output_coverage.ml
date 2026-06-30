@@ -338,6 +338,25 @@ let test_verifier_oas_response_text_fallback_is_strict_json () =
        ~callee:"Core.parse_verdict")
 ;;
 
+let test_adversarial_review_response_text_fallback_is_strict_json () =
+  let rel = "lib/keeper/keeper_adversarial_review.ml" in
+  check
+    int
+    "adversarial review must not keep prose JSON payload extractor"
+    0
+    (Ast_grep.count_value_bindings ~module_path:rel ~name:"parse_json_payload");
+  check
+    int
+    "adversarial review must not scan response text for an embedded JSON start"
+    0
+    (Ast_grep.count_calls ~module_path:rel ~callee:"String.index");
+  check
+    int
+    "adversarial review must not slice response text into recovered JSON"
+    0
+    (Ast_grep.count_calls ~module_path:rel ~callee:"String.sub")
+;;
+
 let test_model_label_wrappers_can_receive_provider_config_transform () =
   let rel = "lib/keeper/keeper_turn_driver_wrappers.ml" in
   check
@@ -431,6 +450,10 @@ let () =
             "verifier_oas response fallback is strict JSON"
             `Quick
             test_verifier_oas_response_text_fallback_is_strict_json
+        ; test_case
+            "adversarial review response fallback is strict JSON"
+            `Quick
+            test_adversarial_review_response_text_fallback_is_strict_json
         ] )
     ; ( "model-label wrappers"
       , [ test_case

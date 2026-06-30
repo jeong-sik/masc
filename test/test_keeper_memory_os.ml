@@ -1524,6 +1524,10 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
           ; messages = [ text_message "Please remember the fallback path." ]
           }
         in
+        Alcotest.(check bool)
+          "production cadence gate is due before provider attempt"
+          true
+          (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id);
         let fallback_result =
           Librarian_runtime.extract_and_append_with_provider_classified
             ~complete
@@ -1537,17 +1541,30 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
         in
         (match fallback_result with
          | Ok _ -> Alcotest.fail "unstructured provider output must not persist"
-         | Error err ->
+         | Error (Librarian_runtime.Provider_unparseable_response reason as err) ->
            Alcotest.(check int)
              "initial attempt + parse retries"
              (1 + Librarian_runtime.librarian_max_parse_retries)
              !calls;
            Alcotest.(check bool)
-             "error kind"
+             "typed provider error preserves parser reason"
              true
              (contains
-                "librarian provider returned unparseable structured response"
-                (Librarian_runtime.extraction_error_to_string err)));
+                "librarian provider returned invalid episode JSON"
+                reason);
+           Alcotest.(check bool)
+             "unparseable provider error enters cadence backoff path"
+             true
+             (Librarian_runtime.should_record_cadence_backoff_after_error err);
+           Librarian_runtime.cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
+           Alcotest.(check bool)
+             "cadence attempt defers the next provider retry"
+             false
+             (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id)
+         | Error err ->
+           Alcotest.failf
+             "expected Provider_unparseable_response, got %s"
+             (Librarian_runtime.extraction_error_to_string err));
         Alcotest.(check int)
           "episode file not persisted"
           0

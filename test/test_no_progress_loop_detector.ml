@@ -557,7 +557,12 @@ let tool_call
   ; output_fingerprint
   }
 
-let run_result tool_calls : Masc.Keeper_agent_run.run_result =
+let run_result
+      ?(completion_contract_result =
+        Masc.Keeper_execution_receipt.Contract_satisfied_execution)
+      tool_calls
+    : Masc.Keeper_agent_run.run_result
+  =
   { response_text = ""
   ; model_used = "test-model"
   ; prompt_metrics
@@ -567,6 +572,7 @@ let run_result tool_calls : Masc.Keeper_agent_run.run_result =
   ; usage = Masc.Inference_utils.zero_usage
   ; usage_reported = true
   ; tool_calls
+  ; completion_contract_result
   ; checkpoint = None
   ; trace_ref = None
   ; run_validation = None
@@ -675,6 +681,25 @@ let test_progress_identity_normalizes_duplicate_keys_stably () =
     "duplicate-key relative order is stable after key sort"
     "{\"dup\":\"first\",\"dup\":\"second\",\"z\":0}"
     normalized
+
+let test_completion_contract_attention_reason_code () =
+  let satisfied = run_result [] in
+  Alcotest.(check bool)
+    "satisfied execution does not require attention"
+    true
+    (Option.is_none (Success.completion_contract_attention_reason_code satisfied));
+  let passive_only =
+    run_result
+      ~completion_contract_result:
+        Masc.Keeper_execution_receipt.Contract_passive_only
+      []
+  in
+  Alcotest.(check string)
+    "passive-only attention reason is the typed contract label"
+    "passive_only"
+    (Option.value
+       ~default:""
+       (Success.completion_contract_attention_reason_code passive_only))
 
 let output_fingerprint_of output_text =
   match
@@ -895,6 +920,9 @@ let () =
           Alcotest.test_case
             "progress identity normalizes duplicate JSON keys stably"
             `Quick test_progress_identity_normalizes_duplicate_keys_stably;
+          Alcotest.test_case
+            "completion contract attention keeps typed reason"
+            `Quick test_completion_contract_attention_reason_code;
           Alcotest.test_case
             "stored output fingerprint uses blob identity"
             `Quick test_stored_output_fingerprint_uses_blob_identity;

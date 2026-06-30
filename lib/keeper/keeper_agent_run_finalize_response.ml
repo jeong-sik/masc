@@ -471,6 +471,7 @@ let finalize
       ; usage
       ; usage_reported = Option.is_some result.response.usage
       ; tool_calls = List.rev acc.tool_calls
+      ; completion_contract_result
       ; checkpoint = saved_checkpoint
       ; trace_ref = result.trace_ref
       ; run_validation = result.run_validation

@@ -296,6 +296,20 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
       ~was_latched
 ;;
 
+let completion_contract_attention_reason_code result =
+  let completion_contract_result =
+    result.Keeper_agent_run.completion_contract_result
+  in
+  if
+    Keeper_execution_receipt.completion_contract_result_requires_attention
+      completion_contract_result
+  then
+    Some
+      (Keeper_execution_receipt.completion_contract_result_to_string
+         completion_contract_result)
+  else None
+;;
+
 module For_testing = struct
   let budget_exhausted_no_progress_threshold_override =
     budget_exhausted_no_progress_threshold_override
@@ -314,6 +328,9 @@ module For_testing = struct
   let delivery_requires_evidence = delivery_requires_evidence
   let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
   let claim_bound_work = claim_bound_work
+
+  let completion_contract_attention_reason_code =
+    completion_contract_attention_reason_code
 
   let apply_loop_detectors = apply_loop_detectors
 end
@@ -648,6 +665,109 @@ let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
   | Runtime_agent.Completed -> reset_failure_state ()
 ;;
 
+let completion_contract_attention_detail ~reason_code =
+  Printf.sprintf
+    "completion contract requires attention after runtime success: result=%s"
+    reason_code
+;;
+
+let record_completion_contract_attention_failure
+      ~(config : Workspace.config)
+      ~(updated_meta : Keeper_meta_contract.keeper_meta)
+      ~reason_code
+  =
+  let base_path = config.Workspace.base_path in
+  let detail = completion_contract_attention_detail ~reason_code in
+  Keeper_registry.increment_turn_failures ~base_path updated_meta.name;
+  Keeper_registry.set_failure_reason
+    ~base_path
+    updated_meta.name
+    (Some (Keeper_registry.Completion_contract_violation { detail }));
+  Health.record_failure
+    ~agent_name:updated_meta.name
+    ~reason:(Keeper_types_profile.short_preview detail);
+  let count = Keeper_registry.get_turn_failures ~base_path updated_meta.name in
+  let pause_threshold = Runtime.pause_threshold () in
+  let turn_fail_streak_threshold =
+    pause_threshold.Runtime_schema.turn_fail_streak_threshold
+  in
+  if count >= turn_fail_streak_threshold && not updated_meta.paused
+  then (
+    let blocker =
+      Keeper_meta_contract.blocker_info_of_class
+        ~detail:(Keeper_types_profile.short_preview detail)
+        Keeper_meta_contract.Completion_contract_violation
+    in
+    let pause_meta =
+      { updated_meta with
+        runtime = { updated_meta.runtime with last_blocker = Some blocker }
+      }
+    in
+    match
+      KCB.sync_keeper_paused_state_with_resume_policy
+        ~config
+        ~meta:pause_meta
+        ~paused:true
+        ~resume_policy:Keeper_supervisor_pause_policy.Manual_resume_required
+    with
+    | Ok paused_meta ->
+      Log.Keeper.warn
+        "%s: auto-paused after %d completion contract attention failures \
+         (pause_threshold=%d, reason=%s); operator must inspect provider/model \
+         reasoning/tool interleave before resuming"
+        updated_meta.name
+        count
+        turn_fail_streak_threshold
+        reason_code;
+      paused_meta
+    | Error sync_err ->
+      Log.Keeper.error
+        "%s: completion contract attention auto-pause sync failed: %s \
+         (persistent failure remains counted)"
+        updated_meta.name
+        sync_err;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string RuntimeSyncFailures)
+        ~labels:
+          [ "keeper", updated_meta.name
+          ; "site", "completion_contract_attention_auto_pause"
+          ]
+        ();
+      pause_meta)
+  else updated_meta
+;;
+
+let emit_terminal_fsm_for_result ~config ~meta ~keeper_turn_id ~updated_meta result =
+  Keeper_turn_fsm.emit_transition
+    ~keeper_name:meta.Keeper_meta_contract.name
+    ~turn_id:keeper_turn_id
+    ~prev:Keeper_turn_fsm.Streaming
+    Keeper_turn_fsm.Completing;
+  match completion_contract_attention_reason_code result with
+  | Some reason_code ->
+    let updated_meta =
+      record_completion_contract_attention_failure
+        ~config
+        ~updated_meta
+        ~reason_code
+    in
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:meta.name
+      ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Completing
+      (Keeper_turn_fsm.Failed
+         (Keeper_turn_fsm.Failure_completion_contract_violation { reason_code }));
+    updated_meta
+  | None ->
+    reset_turn_failures_for_stop_reason ~config ~updated_meta result;
+    Keeper_turn_fsm.emit_transition
+      ~keeper_name:meta.name
+      ~turn_id:keeper_turn_id
+      ~prev:Keeper_turn_fsm.Completing
+      Keeper_turn_fsm.Done;
+    updated_meta
+;;
+
 let handle
       ~config
       ~base_dir
@@ -766,18 +886,8 @@ let handle
     }
   in
   (* Single source of truth for success-path terminal FSM transitions.
-     [Keeper_unified_turn.handle] is the only caller; do not add another
-     Streaming -> Completing -> Done emitter on the success path. *)
-  Keeper_turn_fsm.emit_transition
-    ~keeper_name:meta.name
-    ~turn_id:keeper_turn_id
-    ~prev:Keeper_turn_fsm.Streaming
-    Keeper_turn_fsm.Completing;
-  reset_turn_failures_for_stop_reason ~config ~updated_meta result;
-  Keeper_turn_fsm.emit_transition
-    ~keeper_name:meta.name
-    ~turn_id:keeper_turn_id
-    ~prev:Keeper_turn_fsm.Completing
-    Keeper_turn_fsm.Done;
-  updated_meta
+     [Keeper_unified_turn.handle] is the only caller. Runtime-level success
+     still ends as [Done], but a typed completion-contract attention result is
+     terminal [Failed] so the failure streak is not reset as a healthy turn. *)
+  emit_terminal_fsm_for_result ~config ~meta ~keeper_turn_id ~updated_meta result
 ;;

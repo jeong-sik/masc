@@ -70,6 +70,7 @@ type run_result =
   ; usage : Agent_sdk.Types.api_usage
   ; usage_reported : bool
   ; tool_calls : tool_call_detail list
+  ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option

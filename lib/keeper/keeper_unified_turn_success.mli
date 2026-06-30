@@ -1,7 +1,11 @@
 (** Success-path post-processing for [Keeper_unified_turn].
 
-    Emits the terminal FSM transitions [Streaming -> Completing -> Done];
-    this function is the single source of truth for those transitions on the
+    Emits terminal FSM transitions for runtime-success turns. Runtime-success
+    turns with a satisfied completion contract emit
+    [Streaming -> Completing -> Done]. Runtime-success turns whose typed
+    completion-contract result requires attention emit
+    [Streaming -> Completing -> Failed completion_contract_violation] instead.
+    This function is the single source of truth for those transitions on the
     success path and must be called at most once per turn.
     [Keeper_unified_turn.run_keeper_cycle] is the expected caller. *)
 
@@ -47,6 +51,9 @@ module For_testing : sig
       turn is no longer exempt from the no-progress streak. *)
   val claim_bound_work
     : (string * Keeper_tool_outcome.t option) list -> bool
+
+  val completion_contract_attention_reason_code
+    : Keeper_agent_run.run_result -> string option
 
   val apply_loop_detectors
     :  config:Workspace.config

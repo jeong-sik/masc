@@ -150,6 +150,26 @@ let test_execution_tools_satisfy_contract_progress () =
   ()
 ;;
 
+let test_empty_no_tool_response_violates_contract () =
+  let result ~response_text_present =
+    KAR.Contract_helpers.observed_completion_contract_status
+      ~had_owned_active_task_at_turn_start:false
+      ~actual_keeper_tool_names:[]
+      ~response_text_present
+    |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
+  in
+  check
+    string
+    "empty no-tool response is not satisfied completion"
+    "violated"
+    (result ~response_text_present:false);
+  check
+    string
+    "visible no-tool response remains completion"
+    "satisfied_completion"
+    (result ~response_text_present:true)
+;;
+
 let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
   { tool_name
   ; provider = "test"
@@ -243,6 +263,10 @@ let () =
             "execution tools satisfy contract progress"
             `Quick
             test_execution_tools_satisfy_contract_progress
+        ; test_case
+            "empty no-tool response violates completion contract"
+            `Quick
+            test_empty_no_tool_response_violates_contract
         ; test_case
             "contract progress filters no-progress tool results"
             `Quick

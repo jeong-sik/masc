@@ -143,13 +143,13 @@ Source-of-truth cross-reference (after Step 4 caller adoption):
 | `Streaming → Completing` | `keeper_unified_turn_success.ml` | #11308 |
 | `Streaming → Cancelled supervisor_stop` (HonorStopSignal, Eio.Cancel) | `keeper_unified_turn.ml:884` | Cycle 1b-iv |
 | `Completing → Done` (success exit) | `keeper_unified_turn_success.ml` | #11288 |
+| `Completing → Failed completion_contract_violation` (typed completion-contract attention) | `keeper_unified_turn_success.ml` | current |
 
 Pending edges (require `keeper_agent_run.ml run_turn` adoption — volume risk):
 - `Streaming ⇄ Awaiting_tool_result` per tool call
 
 Pending RISKY edges (require feature-flag / dual-emit infrastructure):
 - `Completing → Failed receipt_lost` (Step 3 — receipt authoritative)
-- `Streaming → Failed completion_contract_violation` (Step 6b-2 — typed classifier replacing string match)
 
 ## See also
 

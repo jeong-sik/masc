@@ -41,6 +41,37 @@ let test_masc_delegates_oas_stream_progress_predicates () =
     ~expected:1
 ;;
 
+let test_masc_delegates_oas_response_shape_metrics () =
+  let file = "lib/keeper/keeper_hooks_oas_response_metrics.ml" in
+  check_calls ~file ~callee:"Response_shape.summarize" ~expected:1;
+  check_calls ~file ~callee:"Response_shape.has_deliverable_content" ~expected:1;
+  check_calls ~file ~callee:"Response_shape.content_shape" ~expected:1;
+  check_calls ~file ~callee:"Response_shape.content_shape_to_string" ~expected:1
+;;
+
+let test_masc_delegates_oas_tool_call_projection () =
+  check_calls
+    ~file:"lib/keeper/keeper_context_tool_message_pairs.ml"
+    ~callee:"Canonical_tool.tool_call_of_block"
+    ~expected:2;
+  check_calls
+    ~file:"lib/keeper/keeper_context_core_accessors.ml"
+    ~callee:"Canonical_tool.tool_call_of_block"
+    ~expected:1;
+  check_calls
+    ~file:"lib/keeper/keeper_agent_prompt_metrics.ml"
+    ~callee:"Canonical_tool.tool_call_of_block"
+    ~expected:2;
+  check_calls
+    ~file:"lib/keeper/keeper_librarian.ml"
+    ~callee:"Canonical_tool.tool_call_of_block"
+    ~expected:1;
+  check_calls
+    ~file:"lib/keeper/keeper_wake_telemetry.ml"
+    ~callee:"Canonical_tool.tool_call_of_block"
+    ~expected:1
+;;
+
 let test_hand_rolled_tool_schema_projection_is_not_reintroduced () =
   check_no_binding ~file:"lib/keeper/keeper_run_tools_setup.ml" ~name:"param_type_str";
   check_calls
@@ -61,6 +92,14 @@ let () =
             "MASC delegates stream progress classification to OAS"
             `Quick
             test_masc_delegates_oas_stream_progress_predicates
+        ; test_case
+            "MASC delegates response shape metrics to OAS"
+            `Quick
+            test_masc_delegates_oas_response_shape_metrics
+        ; test_case
+            "MASC delegates tool-call block projection to OAS"
+            `Quick
+            test_masc_delegates_oas_tool_call_projection
         ; test_case
             "tool schema projection helper is not hand-rolled locally"
             `Quick

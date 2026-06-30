@@ -763,6 +763,7 @@ let replay_snapshot_empty_text_only
            (function
              | Agent_sdk.Types.Text text -> String.trim text = ""
              | Agent_sdk.Types.Thinking _
+             | Agent_sdk.Types.ReasoningDetails _
              | Agent_sdk.Types.RedactedThinking _
              | Agent_sdk.Types.ToolUse _
              | Agent_sdk.Types.ToolResult _

@@ -83,10 +83,9 @@ val enrich_idle_detail :
     with ["Idle detected"]. For all other detail strings the
     input is returned unchanged.
 
-    The "most recently called tool" is the last
-    [Agent_sdk.Types.ToolUse { name }] block in the most recent
-    [Assistant] message; when no such block exists the bare
-    detail is returned.
+    The "most recently called tool" is projected through
+    [Agent_sdk.Canonical_tool.tool_call_of_block] from the most recent
+    [Assistant] message; when no such block exists the bare detail is returned.
 
     Exposed at module level so the test suite can exercise it
     independently of the network-bound [run] function. *)

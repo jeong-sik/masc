@@ -218,9 +218,12 @@ let tool_uses_of_messages (messages : Agent_sdk.Types.message list) =
     then acc
     else
       List.fold_left
-        (fun acc -> function
-          | Agent_sdk.Types.ToolUse { name; input; _ } -> (name, input) :: acc
-          | _ -> acc)
+        (fun acc block ->
+          match Agent_sdk.Canonical_tool.tool_call_of_block block with
+          | Some call ->
+              (call.Agent_sdk.Canonical_tool.name, call.Agent_sdk.Canonical_tool.input)
+              :: acc
+          | None -> acc)
         acc
         msg.content
   in

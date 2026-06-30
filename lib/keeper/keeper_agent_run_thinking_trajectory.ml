@@ -40,6 +40,26 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
             }
           in
           append_entry ~keeper_name ~failure_label:"thinking" acc entry
+        | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+          let content =
+            match reasoning_content with
+            | Some content -> content
+            | None ->
+              details
+              |> List.filter_map (fun detail -> detail.Agent_sdk.Types.text)
+              |> String.concat ""
+          in
+          if not (String.equal (String.trim content) "") then
+            let entry : Trajectory.thinking_entry =
+              { ts = now
+              ; ts_iso = now_iso
+              ; turn
+              ; content
+              ; content_length = String.length content
+              ; redacted = false
+              }
+            in
+            append_entry ~keeper_name ~failure_label:"reasoning details" acc entry
         | Agent_sdk.Types.RedactedThinking _ ->
           let entry : Trajectory.thinking_entry =
             { ts = now

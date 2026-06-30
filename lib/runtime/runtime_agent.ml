@@ -377,6 +377,7 @@ let rec required_modalities_of_content_blocks
        match block with
        | Agent_sdk.Types.Text _
        | Agent_sdk.Types.Thinking _
+       | Agent_sdk.Types.ReasoningDetails _
        | Agent_sdk.Types.RedactedThinking _
        | Agent_sdk.Types.ToolUse _ ->
            acc
@@ -504,7 +505,12 @@ let block_required_modality (block : Agent_sdk.Types.content_block) =
   | Agent_sdk.Types.Image _ -> Some "image"
   | Agent_sdk.Types.Document _ -> Some "document"
   | Agent_sdk.Types.Audio _ -> Some "audio"
-  | _ -> None
+  | Agent_sdk.Types.Text _
+  | Agent_sdk.Types.Thinking _
+  | Agent_sdk.Types.ReasoningDetails _
+  | Agent_sdk.Types.RedactedThinking _
+  | Agent_sdk.Types.ToolUse _
+  | Agent_sdk.Types.ToolResult _ -> None
 
 let bump_modality_count modality counts =
   let prev = match List.assoc_opt modality counts with Some n -> n | None -> 0 in
@@ -972,18 +978,31 @@ let content_block_detail (block : Agent_sdk.Types.content_block) =
   match block with
   | Agent_sdk.Types.Text text -> text
   | Agent_sdk.Types.Thinking _ -> "[thinking block omitted]"
+  | Agent_sdk.Types.ReasoningDetails _ -> "[reasoning details block omitted]"
   | Agent_sdk.Types.RedactedThinking _ -> "[redacted thinking block omitted]"
-  | Agent_sdk.Types.ToolUse { name; _ } ->
-      Printf.sprintf "[tool use block: %s]" name
-  | Agent_sdk.Types.ToolResult { is_error; _ } ->
-      if is_error then "[tool result block: error]"
-      else "[tool result block]"
-  | Agent_sdk.Types.Image { media_type; data; _ } ->
-      Printf.sprintf "[image:%s data_chars=%d]" media_type (String.length data)
-  | Agent_sdk.Types.Document { media_type; data; _ } ->
-      Printf.sprintf "[document:%s data_chars=%d]" media_type (String.length data)
-  | Agent_sdk.Types.Audio { media_type; data; _ } ->
-      Printf.sprintf "[audio:%s data_chars=%d]" media_type (String.length data)
+  | _ -> (
+      match Agent_sdk.Canonical_tool.tool_call_of_block block with
+      | Some call ->
+          Printf.sprintf "[tool use block: %s]" call.Agent_sdk.Canonical_tool.name
+      | None -> (
+          match block with
+          | Agent_sdk.Types.ToolResult { is_error; _ } ->
+              if is_error then "[tool result block: error]"
+              else "[tool result block]"
+          | Agent_sdk.Types.Image { media_type; data; _ } ->
+              Printf.sprintf "[image:%s data_chars=%d]" media_type (String.length data)
+          | Agent_sdk.Types.Document { media_type; data; _ } ->
+              Printf.sprintf "[document:%s data_chars=%d]" media_type
+                (String.length data)
+          | Agent_sdk.Types.Audio { media_type; data; _ } ->
+              Printf.sprintf "[audio:%s data_chars=%d]" media_type (String.length data)
+          | Agent_sdk.Types.Text _
+          | Agent_sdk.Types.Thinking _
+          | Agent_sdk.Types.ReasoningDetails _
+          | Agent_sdk.Types.RedactedThinking _
+          | Agent_sdk.Types.ToolUse _ ->
+              invalid_arg
+                "runtime_agent: OAS canonical tool-call projection unavailable"))
 
 let content_blocks_detail (blocks : Agent_sdk.Types.content_block list) =
   blocks

@@ -6,6 +6,8 @@
     - [context_compact_oas]: [role_to_string]
     - [sdk_tool_contract]: [param_type_of_string] (strict [None] on unknown)
     - [keeper_run_tools_setup]: [params_to_input_schema]
+    - [keeper_context_tool_message_pairs] and peer consumers:
+      [Canonical_tool.tool_call_of_block]
 
     These tests pin the exact OAS outputs MASC now emits on the wire (provider
     request tool schema, dashboard role labels, usage JSON). They are a boundary
@@ -70,11 +72,22 @@ let test_params_to_input_schema_shape () =
   check bool "params_to_input_schema matches hand-rolled shape" true
     (Agent_sdk.Types.params_to_input_schema params = expected)
 
+let test_tool_call_of_block_shape () =
+  let input = `Assoc [ "path", `String "lib/" ] in
+  let block = Agent_sdk.Types.ToolUse { id = "call_read"; name = "read"; input } in
+  match Agent_sdk.Canonical_tool.tool_call_of_block block with
+  | Some call ->
+      check string "call_id" "call_read" call.Agent_sdk.Canonical_tool.call_id;
+      check string "name" "read" call.Agent_sdk.Canonical_tool.name;
+      check bool "input preserved" true (call.Agent_sdk.Canonical_tool.input = input)
+  | None -> fail "ToolUse block must project to a canonical tool call"
+
 let suite =
   [ test_case "total_tokens billable" `Quick test_total_tokens
   ; test_case "role_to_string variants" `Quick test_role_to_string
   ; test_case "param_type_of_string strict option" `Quick test_param_type_of_string_strict_option
   ; test_case "params_to_input_schema shape" `Quick test_params_to_input_schema_shape
+  ; test_case "tool_call_of_block shape" `Quick test_tool_call_of_block_shape
   ]
 
 let () = run "oas_canonical_delegation_contract" [ "contract", suite ]

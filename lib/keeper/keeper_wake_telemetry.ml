@@ -35,19 +35,33 @@ let bytes_of_content_block (block : Agent_sdk.Types.content_block) : int =
     String.length result.Canonical_tool.call_id
     + String.length result.Canonical_tool.content
   | None -> (
-    match block with
-  | Agent_sdk.Types.Text s -> String.length s
-  | Agent_sdk.Types.Thinking { content; _ } -> String.length content
-  | Agent_sdk.Types.RedactedThinking s -> String.length s
-  | Agent_sdk.Types.ToolUse { id; name; input } ->
-    String.length id + String.length name
-    + String.length (Yojson.Safe.to_string input)
-  | Agent_sdk.Types.ToolResult _ ->
-    invalid_arg
-      "keeper_wake_telemetry: OAS canonical tool-result projection unavailable"
-  | Agent_sdk.Types.Image { data; _ }
-  | Agent_sdk.Types.Document { data; _ }
-  | Agent_sdk.Types.Audio { data; _ } -> String.length data)
+    match Canonical_tool.tool_call_of_block block with
+    | Some call ->
+      String.length call.Canonical_tool.call_id
+      + String.length call.Canonical_tool.name
+      + String.length (Yojson.Safe.to_string call.Canonical_tool.input)
+    | None -> (
+      match block with
+      | Agent_sdk.Types.Text s -> String.length s
+      | Agent_sdk.Types.Thinking { content; _ } -> String.length content
+      | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
+        (match reasoning_content with
+         | Some content -> String.length content
+         | None ->
+           details
+           |> List.filter_map (fun detail -> detail.Agent_sdk.Types.text)
+           |> String.concat ""
+           |> String.length)
+      | Agent_sdk.Types.RedactedThinking s -> String.length s
+      | Agent_sdk.Types.ToolResult _ ->
+        invalid_arg
+          "keeper_wake_telemetry: OAS canonical tool-result projection unavailable"
+      | Agent_sdk.Types.ToolUse _ ->
+        invalid_arg
+          "keeper_wake_telemetry: OAS canonical tool-call projection unavailable"
+      | Agent_sdk.Types.Image { data; _ }
+      | Agent_sdk.Types.Document { data; _ }
+      | Agent_sdk.Types.Audio { data; _ } -> String.length data))
 
 let bytes_of_message (m : Agent_sdk.Types.message) : int =
   List.fold_left

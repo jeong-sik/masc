@@ -1,8 +1,8 @@
 (* Tool-use / tool-result block pair invariants for keeper messages.
 
    Extracted from [Keeper_context_core] (godfile decomp). ToolResult
-   projections delegate to [Agent_sdk.Canonical_tool]; ToolUse projections stay
-   local until OAS exposes the matching call projection. *)
+   and ToolUse projections delegate to [Agent_sdk.Canonical_tool] so pair
+   repair consumes OAS-owned provider-boundary block projections. *)
 
 module Canonical_tool = Agent_sdk.Canonical_tool
 
@@ -10,16 +10,9 @@ let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
   match msg.role with
   | Agent_sdk.Types.Assistant ->
     List.filter_map
-      (function
-        | Agent_sdk.Types.ToolUse { id; _ } -> Some id
-        (* Only assistant [ToolUse] blocks are provider tool-call anchors. *)
-        | Agent_sdk.Types.Text _
-        | Agent_sdk.Types.Thinking _
-        | Agent_sdk.Types.RedactedThinking _
-        | Agent_sdk.Types.ToolResult _
-        | Agent_sdk.Types.Image _
-        | Agent_sdk.Types.Document _
-        | Agent_sdk.Types.Audio _ -> None)
+      (fun block ->
+        Canonical_tool.tool_call_of_block block
+        |> Option.map (fun call -> call.Canonical_tool.call_id))
       msg.content
   | Agent_sdk.Types.System
   | Agent_sdk.Types.User
@@ -28,15 +21,7 @@ let tool_use_ids_of_message (msg : Agent_sdk.Types.message) : string list =
 
 let has_tool_use_block (msg : Agent_sdk.Types.message) : bool =
   List.exists
-    (function
-      | Agent_sdk.Types.ToolUse _ -> true
-      | Agent_sdk.Types.Text _
-      | Agent_sdk.Types.Thinking _
-      | Agent_sdk.Types.RedactedThinking _
-      | Agent_sdk.Types.ToolResult _
-      | Agent_sdk.Types.Image _
-      | Agent_sdk.Types.Document _
-      | Agent_sdk.Types.Audio _ -> false)
+    (fun block -> Canonical_tool.tool_call_of_block block |> Option.is_some)
     msg.content
 ;;
 

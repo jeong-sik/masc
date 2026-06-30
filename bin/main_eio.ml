@@ -854,6 +854,14 @@ let login_cmd =
       $ login_role $ login_client_env $ login_no_expiry $ login_json
       $ login_shell)
 
+let start_cmd =
+  let doc =
+    "Start the MASC MCP server (HTTP/SSE). Same as running `masc` with no \
+     subcommand; exposed as an explicit name for quick-start guides."
+  in
+  let info = Cmd.info "start" ~doc in
+  Cmd.v info Term.(const run_cmd_exit $ host $ port $ run_base_path)
+
 let init_force =
   let doc = "Overwrite existing config files instead of skipping them" in
   Arg.(value & flag & info ["force"] ~doc)
@@ -977,7 +985,7 @@ let cmd =
   let doc = "MASC MCP Server and operator diagnostics" in
   let info = Cmd.info "masc" ~version:Masc.Version.version ~doc in
   Cmd.group ~default:Term.(const run_cmd_exit $ host $ port $ run_base_path)
-    info [ init_cmd; login_cmd; memory_os_gc_dry_run_cmd ]
+    info [ init_cmd; start_cmd; login_cmd; memory_os_gc_dry_run_cmd ]
 
 let () =
   setup_gc ();

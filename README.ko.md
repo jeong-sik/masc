@@ -76,6 +76,41 @@
 
 ---
 
+## 빠른 시작 (5분) / Quick Start
+
+```bash
+# 1. 바이너리 설치 (macOS arm64 / Linux x86_64)
+curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
+#   소스 빌드: git clone https://github.com/jeong-sik/masc.git && cd masc &&
+#     scripts/opam-pin-external-deps.sh --install && opam install . --deps-only &&
+#     scripts/dune-local.sh build @default
+
+# 2. 설정 시드 + provider 키 입력
+masc init
+#   .masc/config/.env.local 편집:
+#     export OLLAMA_CLOUD_API_KEY=...     # 아래 표에서 하나 선택
+
+# 3. 키 적용 + 시작
+source .masc/config/.env.local && masc start
+curl http://127.0.0.1:8935/health        # → 200 OK
+
+# 4. (선택) 대시보드
+cd dashboard && pnpm install && pnpm dev
+```
+
+Provider 키 (사용할 것을 `.masc/config/.env.local`에):
+
+| `runtime.toml` provider | 환경 변수 |
+|---|---|
+| `ollama_cloud` | `OLLAMA_CLOUD_API_KEY` |
+| `deepseek` | `DEEPSEEK_API_KEY` |
+| `glm-coding` | `ZAI_API_KEY_SB` |
+| `ollama` (로컬) | — (키 불필요) |
+
+> `masc init`이 `.masc/config/runtime.toml`을 시드합니다(`[runtime].default` 포함). 서버가 `refusing to boot`를 로그하면 워크스페이스에서 먼저 `masc init`을 실행하세요. `masc start`는 subcommand 없이 `masc`를 실행한 것과 동일(가이드용 명시적 이름).
+
+---
+
 ## 설치 / Install
 
 ### 바이너리 (prebuilt)

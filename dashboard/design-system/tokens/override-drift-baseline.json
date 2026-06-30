@@ -60,11 +60,6 @@
       "override": "rgba(0, 0, 0, 0.6)",
       "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
     },
-    "--shadow-card": {
-      "generated": "0 1px 4px rgba(0, 0, 0, 0.5)",
-      "override": "0 1px 3px rgba(0, 0, 0, 0.04)",
-      "reason": "UNREVIEWED: color/shadow override; some a11y-driven (variables.css L598); reconcile direction TBD (chunk F)"
-    },
     "--spacing-card": {
       "generated": "16px",
       "override": "12px",

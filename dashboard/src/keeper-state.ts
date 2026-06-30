@@ -1049,6 +1049,32 @@ export function markAssistantToolTraceEnded(
   if (!found) warnMissingToolTrace('end patch', name, entryId, id)
 }
 
+export function markAssistantToolTraceErrored(
+  name: string,
+  entryId: string,
+  toolCallId: string,
+): void {
+  const id = toolCallId.trim()
+  if (!id) return
+  let found = false
+  updateThreadEntry(name, entryId, entry => {
+    const existing = entry.traceSteps ?? []
+    const traceSteps = existing.map((trace) => {
+      if (trace.kind !== 'tool' || trace.toolCallId !== id) return trace
+      found = true
+      return {
+        ...trace,
+        status: 'err' as const,
+      }
+    })
+    return {
+      ...entry,
+      traceSteps,
+    }
+  })
+  if (!found) warnMissingToolTrace('error patch', name, entryId, id)
+}
+
 export function finalizeAssistantEntry(
   name: string,
   entryId: string,

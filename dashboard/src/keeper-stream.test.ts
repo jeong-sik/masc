@@ -522,6 +522,9 @@ describe('applyKeeperStreamEvent tool calls', () => {
         tool_call_name: 'keeper_board_list',
       },
     })
+    let reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps).toBeUndefined()
+
     applyKeeperStreamEvent('sangsu', 'reply-1', {
       type: 'TOOL_CALL_START',
       toolCallId: 'tc-oas',
@@ -542,7 +545,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
       value: { index: 7 },
     })
 
-    const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
+    reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(reply?.traceSteps).toEqual([
       {
         kind: 'tool',
@@ -554,6 +557,66 @@ describe('applyKeeperStreamEvent tool calls', () => {
         oasBlockIndex: 7,
       },
     ])
+  })
+
+  it('marks the active tool errored when a server protocol error carries tool_call_id', () => {
+    assistantEntry()
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTENT_BLOCK_START',
+      value: {
+        index: 2,
+        content_type: 'tool_use',
+        tool_call_id: 'tc-first',
+        tool_call_name: 'keeper_memory_search',
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TOOL_CALL_START',
+      toolCallId: 'tc-first',
+      toolCallName: 'keeper_memory_search',
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTENT_BLOCK_START',
+      value: {
+        index: 2,
+        content_type: 'tool_use',
+        tool_call_id: 'tc-second',
+        tool_call_name: 'keeper_board_list',
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_STREAM_PROTOCOL_ERROR',
+      value: {
+        kind: 'tool_start_duplicate_index',
+        index: 2,
+        tool_call_id: 'tc-first',
+        reason: 'tool-use block index already active',
+      },
+    })
+
+    const thread = keeperThreads.value.sangsu ?? []
+    expect(thread.find(entry => entry.id === 'tool-tc-second')).toBeUndefined()
+    const tool = thread.find(entry => entry.id === 'tool-tc-first')
+    expect(tool?.delivery).toBe('error')
+    expect(tool?.streamState).toBeNull()
+    expect(tool?.error).toBe(
+      'tool_start_duplicate_index | index=2 | tool_call_id=tc-first | tool-use block index already active',
+    )
+    const reply = thread.find(entry => entry.id === 'reply-1')
+    expect(reply?.traceSteps).toEqual([
+      {
+        kind: 'tool',
+        name: 'keeper_memory_search',
+        toolCallId: 'tc-first',
+        status: 'err',
+        ts: expect.any(String),
+        oasBlockIndex: 2,
+      },
+    ])
+    expect(reply?.rawText).toContain('[stream protocol] tool_start_duplicate_index')
   })
 
   it('records a protocol error instead of guessing the tool when toolCallId is missing', () => {

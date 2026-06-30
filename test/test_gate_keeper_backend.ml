@@ -667,7 +667,59 @@ let test_keeper_stream_bridge_ignores_replayed_tool_start () =
       fail
         "expected replayed block start, one tool start, one args delta, and one end"
 
-let test_keeper_stream_bridge_closes_tool_when_index_is_reused () =
+let test_keeper_stream_bridge_rejects_replayed_tool_name_drift () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "tc-repeat";
+            tool_name = Some "keeper_memory_search" };
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "tc-repeat";
+            tool_name = Some "keeper_board_list" };
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_content_block_start
+        { tool_call_id = Some first_block_id;
+          tool_call_name = Some first_block_name;
+          _ };
+      Keeper_chat_events.Tool_call_start
+        { tool_call_id = first_start_id; tool_call_name = first_start_name };
+      Keeper_chat_events.Oas_content_block_start
+        { tool_call_id = Some replay_block_id;
+          tool_call_name = Some replay_block_name;
+          _ };
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind;
+          index = Some index;
+          tool_call_id = Some error_tool_id;
+          reason = Some reason;
+          _ } ] ->
+      check string "first block id" "tc-repeat" first_block_id;
+      check string "first block name" "keeper_memory_search" first_block_name;
+      check string "first start id" "tc-repeat" first_start_id;
+      check string "first start name" "keeper_memory_search" first_start_name;
+      check string "replay block id" "tc-repeat" replay_block_id;
+      check string "replay block name" "keeper_board_list" replay_block_name;
+      check string "kind" "tool_start_duplicate_index"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check int "index" 2 index;
+      check string "error tool id" "tc-repeat" error_tool_id;
+      check bool "reason names original tool" true
+        (string_contains reason "existing tool tc-repeat/keeper_memory_search");
+      check bool "reason names incoming tool" true
+        (string_contains reason "incoming tool tc-repeat/keeper_board_list")
+  | _ ->
+      fail
+        "expected same-id different-name tool start replay to fail closed"
+
+let test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse () =
   let open Agent_sdk.Types in
   let events =
     translate_oas_stream_events
@@ -687,7 +739,7 @@ let test_keeper_stream_bridge_closes_tool_when_index_is_reused () =
         ContentBlockStop { index = 2 };
       ]
   in
-  check bool "no protocol error for recoverable reused index" false
+  check bool "protocol error for conflicting reused index" true
     (has_stream_protocol_error events);
   match events with
   | [ Keeper_chat_events.Oas_content_block_start
@@ -696,11 +748,25 @@ let test_keeper_stream_bridge_closes_tool_when_index_is_reused () =
       Keeper_chat_events.Tool_call_args { tool_call_id = first_args; delta = args_a };
       Keeper_chat_events.Oas_content_block_start
         { index = second_block_index; tool_call_id = Some second_block_id; _ };
-      Keeper_chat_events.Tool_call_end { tool_call_id = first_end };
-      Keeper_chat_events.Tool_call_start { tool_call_id = second_start; _ };
-      Keeper_chat_events.Tool_call_args { tool_call_id = second_args; delta = args_b };
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind = duplicate_kind;
+          index = Some duplicate_index;
+          tool_call_id = Some duplicate_tool_id;
+          reason = Some duplicate_reason;
+          _ };
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind = args_kind;
+          index = Some args_index;
+          tool_call_id = Some args_tool_id;
+          reason = Some args_reason;
+          _ };
       Keeper_chat_events.Oas_content_block_stop { index = stop_index };
-      Keeper_chat_events.Tool_call_end { tool_call_id = second_end } ] ->
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind = stop_kind;
+          index = Some stop_error_index;
+          tool_call_id = Some stop_tool_id;
+          reason = Some stop_reason;
+          _ } ] ->
       check int "first block index" 2 first_block_index;
       check string "first block id" "tc-first" first_block_id;
       check string "first start" "tc-first" first_start;
@@ -708,13 +774,29 @@ let test_keeper_stream_bridge_closes_tool_when_index_is_reused () =
       check string "first args" "{\"q\":\"first\"}" args_a;
       check int "second block index" 2 second_block_index;
       check string "second block id" "tc-second" second_block_id;
-      check string "first implicit end" "tc-first" first_end;
-      check string "second start" "tc-second" second_start;
-      check string "second args id" "tc-second" second_args;
-      check string "second args" "{\"q\":\"second\"}" args_b;
+      check string "duplicate kind" "tool_start_duplicate_index"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string
+           duplicate_kind);
+      check int "duplicate index" 2 duplicate_index;
+      check string "duplicate tool id" "tc-first" duplicate_tool_id;
+      check bool "duplicate reason names incoming tool" true
+        (string_contains duplicate_reason "incoming tool tc-second");
+      check string "args kind" "tool_args_without_start"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string args_kind);
+      check int "args index" 2 args_index;
+      check string "args error tool id" "tc-first" args_tool_id;
+      check string "args reason"
+        "tool argument event arrived after invalid tool block start" args_reason;
       check int "stop index" 2 stop_index;
-      check string "second end" "tc-second" second_end
-  | _ -> fail "expected previous tool to close before reused-index tool starts"
+      check string "stop kind" "tool_stop_without_start"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string stop_kind);
+      check int "stop error index" 2 stop_error_index;
+      check string "stop error tool id" "tc-first" stop_tool_id;
+      check string "stop reason"
+        "content block stop arrived for invalid tool block" stop_reason
+  | _ ->
+      fail
+        "expected conflicting reused-index tool start to fail closed without forged tool events"
 
 let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
   let open Agent_sdk.Types in
@@ -911,6 +993,7 @@ let test_stream_protocol_error_summary_includes_diagnostics () =
       {
         kind = Keeper_chat_events.Tool_args_without_start;
         index = Some 2;
+        tool_call_id = Some "tc-1";
         event_type = Some "response.future";
         reason = Some "tool argument delta arrived before tool start";
         raw_bytes = Some 7;
@@ -918,6 +1001,7 @@ let test_stream_protocol_error_summary_includes_diagnostics () =
   in
   check bool "kind" true (string_contains summary "tool_args_without_start");
   check bool "index" true (string_contains summary "index=2");
+  check bool "tool id" true (string_contains summary "tool_call_id=tc-1");
   check bool "event type" true
     (string_contains summary "event_type=response.future");
   check bool "reason" true
@@ -1730,8 +1814,10 @@ let () =
             test_keeper_stream_bridge_preserves_tool_args_snapshot;
           test_case "stream bridge ignores replayed tool starts" `Quick
             test_keeper_stream_bridge_ignores_replayed_tool_start;
-          test_case "stream bridge closes tool when index is reused" `Quick
-            test_keeper_stream_bridge_closes_tool_when_index_is_reused;
+          test_case "stream bridge rejects replayed tool name drift" `Quick
+            test_keeper_stream_bridge_rejects_replayed_tool_name_drift;
+          test_case "stream bridge rejects conflicting tool index reuse" `Quick
+            test_keeper_stream_bridge_rejects_conflicting_tool_index_reuse;
           test_case "stream bridge surfaces OAS message metadata" `Quick
             test_keeper_stream_bridge_surfaces_oas_message_metadata;
           test_case "stream bridge preserves typed media source" `Quick

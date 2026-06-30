@@ -370,7 +370,7 @@ let test_adversarial_review_response_text_fallback_is_strict_json () =
      || contains_substring source "String.sub trimmed")
 ;;
 
-let test_anti_rationalization_response_text_fallback_is_strict_json () =
+let test_anti_rationalization_native_response_is_strict_json () =
   let source = read_source "lib/task/anti_rationalization.ml" in
   check
     bool
@@ -482,9 +482,9 @@ let () =
             `Quick
             test_adversarial_review_response_text_fallback_is_strict_json
         ; test_case
-            "anti-rationalization response fallback is strict JSON"
+            "anti-rationalization native response is strict JSON"
             `Quick
-            test_anti_rationalization_response_text_fallback_is_strict_json
+            test_anti_rationalization_native_response_is_strict_json
         ] )
     ; ( "model-label wrappers"
       , [ test_case

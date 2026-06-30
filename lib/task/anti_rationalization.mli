@@ -60,7 +60,7 @@ type gate =
   | Excuse
   | Contract
   | Structured_tool
-  | Llm_text_fallback
+  | Structured_response
   | Format_reject
   | Fallback
 
@@ -135,7 +135,7 @@ val build_prompt :
   ?completion_contract:string list ->
   review_request -> string
 
-(** Parse LLM text output into a verdict (lenient fallback path).
+(** Parse legacy LLM prose output into a verdict (lenient parser).
     "APPROVE" -> [Ok Approve], "REJECT: reason" -> [Ok (Reject reason)].
     Unrecognized format returns [Error] instead of silently approving (ADR D3).
     Exposed for testing.

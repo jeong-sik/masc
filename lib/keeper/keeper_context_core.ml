@@ -212,28 +212,6 @@ let sanitize_checkpoint_message
                         add_checkpoint_sanitize_stats
                           (add_checkpoint_sanitize_stats stats text_stats)
                           block_stats ))
-         | Agent_sdk.Types.Thinking { content; _ } ->
-             ( kept_rev,
-               kept_text_blocks,
-               kept_text_chars,
-               kept_tool_results, kept_tool_result_chars,
-               add_checkpoint_sanitize_stats stats
-                 {
-                   empty_checkpoint_sanitize_stats with
-                   dropped_blocks = 1;
-                   dropped_chars = String.length content;
-                 } )
-         | Agent_sdk.Types.RedactedThinking text ->
-             ( kept_rev,
-               kept_text_blocks,
-               kept_text_chars,
-               kept_tool_results, kept_tool_result_chars,
-               add_checkpoint_sanitize_stats stats
-                 {
-                   empty_checkpoint_sanitize_stats with
-                   dropped_blocks = 1;
-                   dropped_chars = String.length text;
-                 } )
          | Agent_sdk.Types.ToolResult _ ->
              let result =
                match Canonical_tool.tool_result_of_block block with
@@ -451,11 +429,37 @@ let cap_checkpoint_message_to_remaining_content
                      })
                  result.Canonical_tool.content
            | Agent_sdk.Types.Thinking t ->
-               cap_content
-                 (fun text -> Agent_sdk.Types.Thinking { t with content = text })
-                 t.content
+               let len = String.length t.content in
+               if len = 0 then
+                 (Agent_sdk.Types.Thinking t :: kept_rev, stats)
+               else if len <= !remaining_ref then (
+                 remaining_ref := !remaining_ref - len;
+                 used_ref := !used_ref + len;
+                 (Agent_sdk.Types.Thinking t :: kept_rev, stats))
+               else
+                 ( kept_rev,
+                   add_checkpoint_sanitize_stats stats
+                     {
+                       empty_checkpoint_sanitize_stats with
+                       dropped_blocks = 1;
+                       dropped_chars = len;
+                     } )
            | Agent_sdk.Types.RedactedThinking text ->
-               cap_content (fun text -> Agent_sdk.Types.RedactedThinking text) text
+               let len = String.length text in
+               if len = 0 then
+                 (Agent_sdk.Types.RedactedThinking text :: kept_rev, stats)
+               else if len <= !remaining_ref then (
+                 remaining_ref := !remaining_ref - len;
+                 used_ref := !used_ref + len;
+                 (Agent_sdk.Types.RedactedThinking text :: kept_rev, stats))
+               else
+                 ( kept_rev,
+                   add_checkpoint_sanitize_stats stats
+                     {
+                       empty_checkpoint_sanitize_stats with
+                       dropped_blocks = 1;
+                       dropped_chars = len;
+                     } )
            | _ -> (block :: kept_rev, stats))
         ([], empty_checkpoint_sanitize_stats)
         msg.content
@@ -781,10 +785,11 @@ let load_context_from_checkpoint ~max_checkpoint_messages ~trace_id ~primary_mod
          were already logged above at error level. *)
       (session, None)
 
-(** Patch an OAS checkpoint: unify session_id and replace the last
-    assistant message's text content with [response_text] and attach the
-    structured replay snapshot in message metadata. New writes keep the
-    checkpoint [working_context] empty. *)
+(** Patch an OAS checkpoint: unify session_id, normalize the last assistant
+    message's visible text, and attach the structured replay snapshot in message
+    metadata. OAS-owned internal replay blocks (reasoning/tool blocks) stay
+    typed content blocks; MASC only edits the visible text projection. New
+    writes keep the checkpoint [working_context] empty. *)
 let patch_checkpoint_last_assistant
     ?snapshot
     (cp : Agent_sdk.Checkpoint.t) ~session_id ~response_text
@@ -799,34 +804,43 @@ let patch_checkpoint_last_assistant
     | Some _ -> Keeper_text_processing.strip_state_blocks_text response_text
     | None -> response_text
   in
-  (* Find index of last assistant message. *)
-  let last_asst_idx = ref (-1) in
-  List.iteri
-    (fun i (msg : Agent_sdk.Types.message) ->
-      if msg.role = Agent_sdk.Types.Assistant then last_asst_idx := i)
-    cp.messages;
+  let patch_assistant_message (msg : Agent_sdk.Types.message) =
+    let metadata =
+      match snapshot with
+      | Some snapshot ->
+          [
+            ( Keeper_memory_policy.replay_metadata_key,
+              Keeper_memory_policy.replay_metadata_of_snapshot snapshot );
+          ]
+      | None -> []
+    in
+    let visible_is_blank = String.trim visible_response_text = "" in
+    let rec patch_content replaced acc = function
+      | [] ->
+          if replaced || visible_is_blank then List.rev acc
+          else List.rev (Agent_sdk.Types.Text visible_response_text :: acc)
+      | Agent_sdk.Types.Text _ :: rest when not replaced ->
+          let acc =
+            if visible_is_blank then acc
+            else Agent_sdk.Types.Text visible_response_text :: acc
+          in
+          patch_content true acc rest
+      | Agent_sdk.Types.Text _ :: rest -> patch_content replaced acc rest
+      | block :: rest -> patch_content replaced (block :: acc) rest
+    in
+    Agent_sdk.Types.make_message
+      ~role:Agent_sdk.Types.Assistant
+      ~metadata
+      (patch_content false [] msg.Agent_sdk.Types.content)
+  in
+  let rec patch_last_assistant suffix_rev = function
+    | [] -> cp.messages
+    | msg :: older_rev when msg.Agent_sdk.Types.role = Agent_sdk.Types.Assistant ->
+        List.rev_append older_rev (patch_assistant_message msg :: suffix_rev)
+    | msg :: older_rev -> patch_last_assistant (msg :: suffix_rev) older_rev
+  in
   let messages =
-    if !last_asst_idx < 0 then cp.messages
-    else
-      List.mapi
-        (fun i msg ->
-          if i = !last_asst_idx then
-            let metadata =
-              match snapshot with
-              | Some snapshot ->
-                  [
-                    ( Keeper_memory_policy.replay_metadata_key,
-                      Keeper_memory_policy.replay_metadata_of_snapshot
-                        snapshot );
-                  ]
-              | None -> []
-            in
-            Agent_sdk.Types.make_message
-              ~role:Agent_sdk.Types.Assistant
-              ~metadata
-              [ Agent_sdk.Types.Text visible_response_text ]
-          else msg)
-        cp.messages
+    patch_last_assistant [] (List.rev cp.messages)
   in
   let sanitized_messages, _ = sanitize_checkpoint_messages messages in
   { cp with Agent_sdk.Checkpoint.session_id;

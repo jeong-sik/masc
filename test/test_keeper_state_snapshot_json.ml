@@ -454,6 +454,76 @@ let has_tool_use (msg : Agent_sdk.Types.message) =
       | _ -> false)
     msg.Agent_sdk.Types.content
 
+let has_tool_result (msg : Agent_sdk.Types.message) =
+  List.exists
+    (function
+      | Agent_sdk.Types.ToolResult _ -> true
+      | _ -> false)
+    msg.Agent_sdk.Types.content
+
+let has_thinking (msg : Agent_sdk.Types.message) =
+  List.exists
+    (function
+      | Agent_sdk.Types.Thinking _ -> true
+      | _ -> false)
+    msg.Agent_sdk.Types.content
+
+let has_redacted_thinking (msg : Agent_sdk.Types.message) =
+  List.exists
+    (function
+      | Agent_sdk.Types.RedactedThinking _ -> true
+      | _ -> false)
+    msg.Agent_sdk.Types.content
+
+let assistant_message_count messages =
+  List.fold_left
+    (fun count (msg : Agent_sdk.Types.message) ->
+       if msg.role = Agent_sdk.Types.Assistant then count + 1 else count)
+    0
+    messages
+
+let visible_text_occurrences needle messages =
+  List.fold_left
+    (fun count (msg : Agent_sdk.Types.message) ->
+       count
+       +
+       List.fold_left
+         (fun n -> function
+            | Agent_sdk.Types.Text text when text = needle -> n + 1
+            | _ -> n)
+         0
+         msg.content)
+    0
+    messages
+
+let test_sanitize_preserves_oas_reasoning_blocks () =
+  let open Agent_sdk.Types in
+  let assistant =
+    checkpoint_msg Assistant
+      [ Thinking { signature = Some "sig-1"; content = "think 1.1" }
+      ; RedactedThinking "{\"type\":\"reasoning\",\"id\":\"rs_1\"}"
+      ; Text "visible answer"
+      ]
+  in
+  let cp = replay_test_checkpoint [ assistant ] in
+  let sanitized, stats = KCC.sanitize_oas_checkpoint ~repair_orphans:false cp in
+  Alcotest.(check bool)
+    "reasoning blocks do not count as sanitize loss"
+    false
+    (KCC.checkpoint_sanitize_changed stats);
+  match sanitized.messages with
+  | [ msg ] ->
+      Alcotest.(check bool) "thinking preserved" true (has_thinking msg);
+      Alcotest.(check bool)
+        "redacted thinking preserved"
+        true
+        (has_redacted_thinking msg);
+      Alcotest.(check string)
+        "visible text preserved"
+        "visible answer"
+        (Agent_sdk.Types.text_of_message msg)
+  | _ -> Alcotest.fail "expected one sanitized assistant message"
+
 let replay_snapshot_msg role content =
   let snapshot =
     { KMP.empty_keeper_state_snapshot with goal = Some "resume goal" }
@@ -659,14 +729,15 @@ let test_synthetic_empty_checkpoint_prunes_current_turn_suffix () =
     false
     (List.exists has_tool_use patched.messages)
 
-let test_satisfied_checkpoint_drops_tool_suffix_and_persists_final () =
+let test_satisfied_checkpoint_preserves_structured_replay_suffix () =
   let open Agent_sdk.Types in
   let old_user = checkpoint_msg User [ Text "old user" ] in
   let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
   let current_user = checkpoint_msg User [ Text "current user" ] in
   let current_tool_use =
     checkpoint_msg Assistant
-      [ ToolUse
+      [ Thinking { signature = None; content = "think before tool" }
+      ; ToolUse
           { id = "tool-1"
           ; name = "keeper_context_status"
           ; input = `Assoc []
@@ -681,10 +752,15 @@ let test_satisfied_checkpoint_drops_tool_suffix_and_persists_final () =
           ; is_error = false
           ; json = None
           ; content_blocks = None
-          }
+        }
       ]
   in
-  let current_final = checkpoint_msg Assistant [ Text "draft answer" ] in
+  let current_final =
+    checkpoint_msg Assistant
+      [ Thinking { signature = Some "sig-final"; content = "final thinking" }
+      ; Text "draft answer"
+      ]
+  in
   let cp =
     replay_test_checkpoint
       [ old_user; old_assistant; current_user; current_tool_use
@@ -708,15 +784,58 @@ let test_satisfied_checkpoint_drops_tool_suffix_and_persists_final () =
     "suffix canonicalized"
     (Some "canonical_success_replay")
     (prune_reason_to_string pruned);
-  Alcotest.(check int) "prior history plus final assistant remains" 3
+  Alcotest.(check int) "full OAS replay suffix remains" 6
     (List.length patched.messages);
-  Alcotest.(check bool) "tool use dropped from replay checkpoint" false
+  Alcotest.(check bool) "tool use remains typed" true
     (List.exists has_tool_use patched.messages);
+  Alcotest.(check bool) "tool result remains typed" true
+    (List.exists has_tool_result patched.messages);
+  Alcotest.(check bool) "thinking remains typed" true
+    (List.exists has_thinking patched.messages);
+  Alcotest.(check int) "no duplicate assistant appended" 3
+    (assistant_message_count patched.messages);
+  Alcotest.(check int) "visible answer stored once" 1
+    (visible_text_occurrences "visible answer" patched.messages);
+  Alcotest.(check int) "draft answer replaced" 0
+    (visible_text_occurrences "draft answer" patched.messages);
   Alcotest.(check bool) "working context cleared" true
     (patched.working_context = None);
   match List.rev patched.messages with
   | last :: _ ->
       Alcotest.(check string) "final assistant patched" "visible answer"
+        (Agent_sdk.Types.text_of_message last)
+  | [] -> Alcotest.fail "expected messages"
+
+let test_success_checkpoint_appends_final_when_suffix_has_no_assistant () =
+  let open Agent_sdk.Types in
+  let old_user = checkpoint_msg User [ Text "old user" ] in
+  let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
+  let current_user = checkpoint_msg User [ Text "current user" ] in
+  let cp =
+    replay_test_checkpoint [ old_user; old_assistant; current_user ]
+  in
+  let patched, _pruned =
+    Masc.Keeper_agent_run_finalize_response.For_testing
+    .checkpoint_for_replay_persistence
+      ~history_messages:[ old_user; old_assistant ]
+      ~pre_turn_working_context:None
+      ~completion_contract_result:Receipt.Contract_satisfied_execution
+      ~session_id:"new-session"
+      ~response_text:"visible answer"
+      ~state_snapshot_source:KMP.State_block
+      ~state_snapshot:None
+      cp
+    |> expect_checkpoint_for_replay
+  in
+  Alcotest.(check int) "current user plus appended assistant" 4
+    (List.length patched.messages);
+  Alcotest.(check int) "only one new assistant appended" 2
+    (assistant_message_count patched.messages);
+  Alcotest.(check int) "old assistant remains unchanged" 1
+    (visible_text_occurrences "old answer" patched.messages);
+  match List.rev patched.messages with
+  | last :: _ ->
+      Alcotest.(check string) "appended final answer" "visible answer"
         (Agent_sdk.Types.text_of_message last)
   | [] -> Alcotest.fail "expected messages"
 
@@ -958,6 +1077,10 @@ let () =
           Alcotest.test_case "drops legacy state sidecar from wc" `Quick test_patch_drops_legacy_state_working_context_sidecar;
           Alcotest.test_case "no [STATE] keeps text and no metadata" `Quick test_patch_without_state_block_keeps_text_and_no_metadata;
           Alcotest.test_case
+            "sanitize preserves OAS reasoning blocks"
+            `Quick
+            test_sanitize_preserves_oas_reasoning_blocks;
+          Alcotest.test_case
             "attention result prunes current replay suffix"
             `Quick
             test_attention_checkpoint_prunes_current_turn_suffix;
@@ -970,9 +1093,13 @@ let () =
             `Quick
             test_synthetic_empty_checkpoint_prunes_current_turn_suffix;
           Alcotest.test_case
-            "satisfied result drops tool replay suffix"
+            "satisfied result preserves structured replay suffix"
             `Quick
-            test_satisfied_checkpoint_drops_tool_suffix_and_persists_final;
+            test_satisfied_checkpoint_preserves_structured_replay_suffix;
+          Alcotest.test_case
+            "success appends final only when suffix lacks assistant"
+            `Quick
+            test_success_checkpoint_appends_final_when_suffix_has_no_assistant;
           Alcotest.test_case
             "drops persisted empty replay snapshot suffix"
             `Quick

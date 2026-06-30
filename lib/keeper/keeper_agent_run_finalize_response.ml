@@ -87,6 +87,13 @@ let rec messages_prefix_equal expected actual =
   | _ :: _, [] -> false
 ;;
 
+let rec drop_prefix prefix messages =
+  match prefix, messages with
+  | [], rest -> rest
+  | _ :: prefix_rest, _ :: message_rest -> drop_prefix prefix_rest message_rest
+  | _ :: _, [] -> []
+;;
+
 let prune_current_turn_replay
       ~(history_messages : Agent_sdk.Types.message list)
       ~(pre_turn_working_context : Yojson.Safe.t option)
@@ -120,27 +127,37 @@ let canonical_success_replay_checkpoint
       List.length checkpoint.Agent_sdk.Checkpoint.messages
       > List.length history_messages
     in
-    let history_messages =
-      Keeper_context_core.repair_broken_tool_call_pairs history_messages
-    in
     let checkpoint =
       if String.trim response_text = ""
       then
         { checkpoint with
           Agent_sdk.Checkpoint.session_id
-        ; messages = history_messages
+        ; messages = Keeper_context_core.repair_broken_tool_call_pairs history_messages
         ; working_context = None
         }
       else
-        let replay_assistant =
-          Agent_sdk.Types.make_message
-            ~role:Agent_sdk.Types.Assistant
-            [ Agent_sdk.Types.Text response_text ]
+        let messages =
+          let current_suffix =
+            drop_prefix history_messages checkpoint.Agent_sdk.Checkpoint.messages
+          in
+          if
+            List.exists
+              (fun (msg : Agent_sdk.Types.message) ->
+                 msg.role = Agent_sdk.Types.Assistant)
+              current_suffix
+          then checkpoint.Agent_sdk.Checkpoint.messages
+          else
+            checkpoint.Agent_sdk.Checkpoint.messages
+            @
+            [ Agent_sdk.Types.make_message
+                ~role:Agent_sdk.Types.Assistant
+                [ Agent_sdk.Types.Text response_text ]
+            ]
         in
         Keeper_context_core.patch_checkpoint_last_assistant
           { checkpoint with
             Agent_sdk.Checkpoint.messages =
-              history_messages @ [ replay_assistant ]
+              Keeper_context_core.repair_broken_tool_call_pairs messages
           }
           ~session_id
           ~response_text

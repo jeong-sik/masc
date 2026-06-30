@@ -120,6 +120,37 @@ let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
                runtime.model.id)))
 ;;
 
+(* [runtime].structured_judge is the explicit lane for provider-native schema
+   requests. Unlike the librarian lane, this lane must declare structured output,
+   not just JSON mode. [None] remains a migration fallback for existing configs;
+   unsupported resolved runtimes are rejected by each caller's OAS schema
+   validation instead of silently dropping the schema. *)
+let validate_structured_judge_runtime ~(config_path : string) (runtimes : t list)
+    (structured_judge_id : string option) : (unit, string) result =
+  match structured_judge_id with
+  | None -> Ok ()
+  | Some id ->
+    (match List.find_opt (fun (r : t) -> String.equal r.id id) runtimes with
+     | None ->
+       Error
+         (Printf.sprintf
+            "%s: [runtime].structured_judge = %S not found among %d runtimes"
+            config_path
+            id
+            (List.length runtimes))
+     | Some runtime ->
+       (match runtime.model.capabilities with
+        | Some caps when caps.supports_structured_output -> Ok ()
+        | _ ->
+          Error
+            (Printf.sprintf
+               "%s: [runtime].structured_judge = %S uses model %S, which does \
+                not declare supports-structured-output"
+               config_path
+               id
+               runtime.model.id)))
+;;
+
 (* [runtime].media_failover (RFC-0265) mirrors [runtime].librarian validation for
    each id in the ordered list: an unknown id is an operator typo rejected at
    load, not a silent drop (Unknown→Permissive anti-pattern). [[]] is the designed
@@ -200,6 +231,7 @@ let materialize_config ~(config_path : string) (cfg : config)
       * (string * string) list
       * string option
       * string option
+      * string option
       * string list
     , string )
     result
@@ -230,6 +262,10 @@ let materialize_config ~(config_path : string) (cfg : config)
     validate_librarian_runtime ~config_path runtimes cfg.librarian_runtime_id
   in
   let* () =
+    validate_structured_judge_runtime ~config_path runtimes
+      cfg.structured_judge_runtime_id
+  in
+  let* () =
     validate_cross_verifier_runtime ~config_path runtimes
       cfg.cross_verifier_runtime_id
   in
@@ -244,17 +280,19 @@ let materialize_config ~(config_path : string) (cfg : config)
     , rt
     , assignments
     , cfg.librarian_runtime_id
+    , cfg.structured_judge_runtime_id
     , cfg.cross_verifier_runtime_id
     , cfg.media_failover )
 ;;
 
 let load_list ~(config_path : string)
   : ( t list
-      * t
-      * (string * string) list
-      * string option
-      * string option
-      * string list
+       * t
+       * (string * string) list
+       * string option
+       * string option
+       * string option
+       * string list
     , string )
     result
   =
@@ -279,6 +317,7 @@ type loaded_state =
   ; runtimes : t list
   ; keeper_assignments : (string * string) list
   ; librarian_runtime_id : string option
+  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option
@@ -289,6 +328,7 @@ let empty_loaded_state =
   ; runtimes = []
   ; keeper_assignments = []
   ; librarian_runtime_id = None
+  ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   ; config_path = None
@@ -300,12 +340,19 @@ let runtime_ids runtimes = List.map (fun (rt : t) -> rt.id) runtimes
 
 let set_loaded
     ~config_path
-    (runtimes, rt, assignments, librarian_id, cross_verifier_id, media_failover) =
+    ( runtimes
+    , rt
+    , assignments
+    , librarian_id
+    , structured_judge_id
+    , cross_verifier_id
+    , media_failover ) =
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
     ; keeper_assignments = assignments
     ; librarian_runtime_id = librarian_id
+    ; structured_judge_runtime_id = structured_judge_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
     ; config_path = Some config_path
@@ -324,7 +371,7 @@ let init_default ~config_path =
 let init_default_strict ~config_path =
   match load_list ~config_path with
   | Error _ as e -> e
-  | Ok ((runtimes, _, _, _, _, _) as loaded) ->
+  | Ok ((runtimes, _, _, _, _, _, _) as loaded) ->
     (match validate_runtime_model_capabilities ~config_path runtimes with
      | Error _ as e -> e
      | Ok () ->
@@ -364,6 +411,24 @@ let keeper_assignments () = (runtime_state ()).keeper_assignments
    librarian inherits each keeper's runtime (legacy). Reads the Atomic ref set by
    [init_default]; the env override lives in keeper_librarian_runtime. *)
 let librarian_runtime_id () = (runtime_state ()).librarian_runtime_id
+
+(* [runtime].structured_judge is the explicit runtime.toml SSOT for
+   provider-native schema requests. *)
+let structured_judge_runtime_id () = (runtime_state ()).structured_judge_runtime_id
+
+let runtime_id_for_structured_judge () =
+  let state = runtime_state () in
+  match state.structured_judge_runtime_id, state.librarian_runtime_id with
+  | Some id, _ -> id
+  | None, Some id -> id
+  | None, None ->
+    (match state.default_runtime with
+     | Some rt -> rt.id
+     | None ->
+       failwith
+         "Runtime.runtime_id_for_structured_judge: default runtime not \
+          initialized; call Runtime.init_default first")
+;;
 
 (* [runtime].cross_verifier routing for the anti-rationalization evaluator.
    [None] = the evaluator inherits [runtime].default. Reads the Atomic ref set by
@@ -718,6 +783,7 @@ let validate_runtime_config_text ~config_path content =
          : t list
            * t
            * (string * string) list
+           * string option
            * string option
            * string option
            * string list) =

@@ -249,7 +249,7 @@ let compute_judgments
     ~facts_json =
   let prompt = prompt_for_facts facts_json in
   let runtime_id =
-    Runtime.get_default_runtime_id ()
+    Runtime.runtime_id_for_structured_judge ()
   in
   match
     (* #9629: caller uses run_with_caller so this judge inherits

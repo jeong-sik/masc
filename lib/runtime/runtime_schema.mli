@@ -151,11 +151,18 @@ type config =
   ; default_runtime_id : string option
   ; librarian_runtime_id : string option
     (** [\[runtime\].librarian] — runtime id for the memory-os librarian
-        (post-turn episode extraction). The librarian requests JSON mode, so it
-        must run on a model declaring [supports-response-format-json]. [None] =
+        (post-turn episode extraction). The librarian now requests
+        provider-native structured output at its call sites; this field is the
+        routing SSOT and load-time validation only rejects unknown ids. [None] =
         inherit each keeper's runtime. Unknown id rejected at load like
         [\[runtime\].default]; [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID]
         overrides. *)
+  ; structured_judge_runtime_id : string option
+    (** [\[runtime\].structured_judge] — runtime id for provider-native
+        structured-output judge calls. When set, the model must declare
+        [supports-structured-output]. [None] lets callers use their documented
+        migration fallback; schema requests still fail loudly if the resolved
+        runtime cannot satisfy them. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
         evaluator (cross-model task verification). The evaluator requests JSON

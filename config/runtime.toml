@@ -11,13 +11,19 @@
 
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
-# memory-os librarian (post-turn episode extraction) runs JSON mode, so it is
-# routed independently of keeper chat to a JSON-capable runtime. minimax-m3
-# declares supports-response-format-json (deepseek-v4-flash does not — it
-# measured ~74% empty/invalid-JSON on the librarian, 2026-06-18). Override per
-# process with MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each
-# keeper's runtime (legacy).
+# memory-os librarian (post-turn episode extraction) requests provider-native
+# structured output, so it is routed independently of keeper chat to a
+# schema-capable runtime. minimax-m3 declares supports-structured-output;
+# deepseek-v4-flash does not in this runtime seed and measured ~74%
+# empty/invalid-JSON on the librarian (2026-06-18). Override per process with
+# MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each keeper's
+# runtime (legacy).
 librarian = "ollama_cloud.minimax-m3"
+# Provider-native structured-output judges must not inherit the fleet chat
+# default when that default lacks schema support. Keep this lane explicit so
+# dashboard operator/governance judges fail at config load on typo/unsupported
+# routing instead of discovering the mismatch in the daemon loop.
+structured_judge = "ollama_cloud.minimax-m3"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
@@ -182,17 +188,16 @@ supports-structured-output = false
 
 [glm-coding.glm-5-turbo]
 
-# MiniMax M3 (Ollama Cloud) — runtime for the memory-os librarian (post-turn
-# episode extraction). The librarian requests JsonMode
-# (keeper_librarian_runtime.ml:228); a runtime whose model omits
-# supports-response-format-json produces unconstrained output, which on the
-# fleet default (deepseek-v4-flash, no JSON capability declared) measured ~74%
-# empty / invalid-JSON. minimax-m3 declares json + structured output and is the
-# memory_os judge runtime. Activate for the librarian only via
-# MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID=ollama_cloud.minimax-m3 (keeper
-# chat stays on [runtime].default). api-name verified 2026-06-18 against
-# https://ollama.com/v1/chat/completions: HTTP 200 with response_format
-# json_object honored (clean JSON body), model "minimax-m3".
+# MiniMax M3 (Ollama Cloud) — schema-capable runtime for Memory OS
+# librarian/summary/consolidation and dashboard structured judges. These lanes
+# request provider-native JsonSchema/output_schema; a runtime whose model omits
+# structured-output support can fail closed or produce unconstrained output. The
+# fleet default (deepseek-v4-flash, no structured-output capability declared in
+# this seed) measured ~74% empty / invalid-JSON on the librarian. Activate for
+# the librarian only via
+# MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID=ollama_cloud.minimax-m3 (keeper chat
+# stays on [runtime].default). api-name originally verified 2026-06-18 against
+# https://ollama.com/v1/chat/completions.
 [models.minimax-m3]
 api-name = "minimax-m3"
 max-context = 524288

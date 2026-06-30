@@ -171,6 +171,26 @@ let test_dashboard_agent_run_json_judges_use_provider_config_transform () =
     expected_structured_dashboard_agent_run_json_judges
 ;;
 
+let test_dashboard_agent_run_json_judges_use_structured_judge_runtime () =
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " uses structured_judge runtime lane")
+         1
+         (Ast_grep.count_calls
+            ~module_path:rel
+            ~callee:"Runtime.runtime_id_for_structured_judge");
+       check
+         int
+         (rel ^ " does not inherit fleet default runtime")
+         0
+         (Ast_grep.count_calls
+            ~module_path:rel
+            ~callee:"Runtime.get_default_runtime_id"))
+    expected_structured_dashboard_agent_run_json_judges
+;;
+
 let test_fusion_agent_run_json_judges_use_provider_config_transform () =
   List.iter
     (fun rel ->
@@ -448,6 +468,10 @@ let () =
             "dashboard Agent.run JSON judges use provider config transform"
             `Quick
             test_dashboard_agent_run_json_judges_use_provider_config_transform
+        ; test_case
+            "dashboard Agent.run JSON judges use structured runtime lane"
+            `Quick
+            test_dashboard_agent_run_json_judges_use_structured_judge_runtime
         ; test_case
             "operator judge schema uses action approval SSOT"
             `Quick

@@ -689,7 +689,7 @@ let compute_judgments
     ~base_path
     ~build_facts =
   let runtime_id =
-    Runtime.get_default_runtime_id ()
+    Runtime.runtime_id_for_structured_judge ()
   in
   match
     (* build_facts() is moved inside the bridge so a deadlock in

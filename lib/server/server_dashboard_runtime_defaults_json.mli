@@ -19,6 +19,7 @@ type resolved =
   ; runtimes : runtime_entry list
   ; keeper_assignments : (string * string) list
   ; librarian_runtime_id : string option
+  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   ; config_path : string option

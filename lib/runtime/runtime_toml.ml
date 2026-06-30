@@ -741,6 +741,7 @@ let parse_pause_threshold (toml : Otoml.t) : Runtime_schema.pause_threshold =
 type runtime_section =
   { default_runtime_id : string option
   ; librarian_runtime_id : string option
+  ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
   }
@@ -748,6 +749,7 @@ type runtime_section =
 let empty_runtime_section =
   { default_runtime_id = None
   ; librarian_runtime_id = None
+  ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
   }
@@ -788,6 +790,16 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
              (match parse_runtime_string_leaf ~path:"runtime.librarian" ~key value with
               | Ok librarian_runtime_id ->
                 { section with librarian_runtime_id = Some librarian_runtime_id }, errs
+              | Error e -> section, errs @ e)
+           | "structured_judge" ->
+             (match
+                parse_runtime_string_leaf ~path:"runtime.structured_judge" ~key value
+              with
+              | Ok structured_judge_runtime_id ->
+                ( { section with
+                    structured_judge_runtime_id = Some structured_judge_runtime_id
+                  }
+                , errs )
               | Error e -> section, errs @ e)
            | "cross_verifier" ->
              (match
@@ -863,6 +875,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; bindings
       ; default_runtime_id = runtime_section.default_runtime_id
       ; librarian_runtime_id = runtime_section.librarian_runtime_id
+      ; structured_judge_runtime_id = runtime_section.structured_judge_runtime_id
       ; cross_verifier_runtime_id = runtime_section.cross_verifier_runtime_id
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover

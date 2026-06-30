@@ -468,8 +468,7 @@ let test_librarian_prompt_omits_private_blocks () =
     { role = Agent_sdk.Types.Assistant
     ; content =
         [ Agent_sdk.Types.Text "[STATE]\nsecret runtime marker\n[/STATE]\nvisible fact"
-        ; Agent_sdk.Types.Thinking
-            { thinking_type = "reasoning"; content = "hidden chain of thought" }
+        ; Agent_sdk.Types.Thinking { content = "hidden chain of thought"; signature = None }
         ; Agent_sdk.Types.RedactedThinking "redacted reasoning blob"
         ; Agent_sdk.Types.ToolResult
             { tool_use_id = "call_1"
@@ -1170,8 +1169,7 @@ let test_librarian_runtime_appends_episode_bundle () =
           ; content =
               [ Agent_sdk.Types.Text
                   "[STATE]\nruntime secret sentinel\n[/STATE]\nvisible durable fact"
-              ; Agent_sdk.Types.Thinking
-                  { thinking_type = "reasoning"; content = "hidden chain of thought" }
+              ; Agent_sdk.Types.Thinking { content = "hidden chain of thought"; signature = None }
               ; Agent_sdk.Types.ToolResult
                   { tool_use_id = "call_runtime"
                   ; content = "secret tool payload"

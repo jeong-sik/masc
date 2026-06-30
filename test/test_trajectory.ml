@@ -676,8 +676,8 @@ let test_persist_response_content_per_turn_full () =
     (* acc.turn stays 0; the hook passes ~turn:11 — assert ~turn wins. *)
     let big = String.make 5000 'a' in
     let content = [
-      Agent_sdk.Types.Thinking { thinking_type = "reasoning"; content = big };
-      Agent_sdk.Types.Thinking { thinking_type = "reasoning"; content = "second block" };
+      Agent_sdk.Types.Thinking { content = big; signature = None };
+      Agent_sdk.Types.Thinking { content = "second block"; signature = None };
     ] in
     Keeper_agent_run_thinking_trajectory.persist_response_content
       ~keeper_name:"k" ~trajectory_acc:(Some acc) ~turn:11 content;

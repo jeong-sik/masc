@@ -23,17 +23,13 @@ let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =
   `List (List.map Agent_sdk.Api.content_block_to_json blocks)
 
-let thinking_type_of_json (json : Yojson.Safe.t) =
+let thinking_signature_of_json (json : Yojson.Safe.t) =
   match Json_util.get_string json "signature" with
-  | Some signature -> signature
-  | None -> (
-      match Json_util.get_string json "thinking_type" with
-      | Some thinking_type -> thinking_type
-      | None ->
-          (* DET-OK: older context/checkpoint JSON predates the OAS
-             canonical [signature] carrier; "thinking" is the historical wire
-             value for those persisted rows. *)
-          "thinking")
+  | Some _ as signature -> signature
+  | None ->
+    (* DET-OK: older context/checkpoint JSON predates the OAS canonical
+       [signature] carrier and stored the same value under [thinking_type]. *)
+    Json_util.get_string json "thinking_type"
 
 let content_blocks_of_json
     (json : Yojson.Safe.t) : Agent_sdk.Types.content_block list option =
@@ -45,8 +41,8 @@ let content_blocks_of_json
            | Some "thinking" ->
              (match Json_util.get_string j "thinking" with
               | Some content ->
-                let thinking_type = thinking_type_of_json j in
-                Some (Agent_sdk.Types.Thinking { thinking_type; content })
+                let signature = thinking_signature_of_json j in
+                Some (Agent_sdk.Types.Thinking { content; signature })
               | None -> None)
            | Some "redacted_thinking" ->
              (match Json_util.get_string j "data" with

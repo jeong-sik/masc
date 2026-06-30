@@ -95,7 +95,7 @@ let test_empty_response_detail_summarizes_shape () =
     ; model = "m"
     ; stop_reason = Agent_sdk.Types.MaxTokens
     ; content =
-        [ Agent_sdk.Types.Thinking { thinking_type = "reasoning"; content = "secret chain" } ]
+        [ Agent_sdk.Types.Thinking { content = "secret chain"; signature = None } ]
     ; usage =
         Some
           { input_tokens = 21

@@ -55,9 +55,9 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.207.26 plus the latest main follow-up fixes after
-  ;; #2291 locked the GLM clear_thinking=false/non-preserve behavior.
-  (agent_sdk (>= 0.207.26))
+  ;; Pinned to OAS v0.207.27, including InputJsonSnapshot tool-argument
+  ;; snapshots emitted by provider stream adapters.
+  (agent_sdk (>= 0.207.27))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

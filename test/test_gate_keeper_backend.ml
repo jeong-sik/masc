@@ -496,7 +496,7 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
             tool_id = Some "tc-1";
             tool_name = Some "keeper_board_list" };
         ContentBlockDelta { index = 1; delta = InputJsonDelta "{\"limit\":" };
-        ContentBlockDelta { index = 1; delta = InputJsonDelta "1}" };
+        ContentBlockDelta { index = 1; delta = InputJsonSnapshot "{\"limit\":1}" };
         ContentBlockStop { index = 1 };
         ContentBlockDelta { index = 2; delta = ThinkingDelta "think B" };
       ]
@@ -525,7 +525,7 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
       check string "args id a" "tc-1" args_id_a;
       check string "args id b" "tc-1" args_id_b;
       check string "args a" "{\"limit\":" args_a;
-      check string "args b" "1}" args_b;
+      check string "args b" "{\"limit\":1}" args_b;
       check int "tool stop index" 1 stop_index;
       check string "end id" "tc-1" end_id;
       check int "last thinking index" 2 last_index;
@@ -744,7 +744,7 @@ let test_keeper_stream_bridge_rejects_tool_args_without_start () =
   let open Agent_sdk.Types in
   let events =
     translate_oas_stream_events
-      [ ContentBlockDelta { index = 7; delta = InputJsonDelta "{\"x\":1}" } ]
+      [ ContentBlockDelta { index = 7; delta = InputJsonSnapshot "{\"x\":1}" } ]
   in
   match events with
   | [ Keeper_chat_events.Oas_stream_protocol_error

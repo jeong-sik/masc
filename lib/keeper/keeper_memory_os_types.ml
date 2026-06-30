@@ -354,11 +354,11 @@ let librarian_unstructured_fallback_terminal_marker =
 
 let fact_prompt_recallable (fact : fact) =
   (* [claim_kind] is the sole recall-eligibility signal: the producer
-     ([Keeper_librarian_runtime.unstructured_episode]) tags fallback notes as
-     [Diagnostic] at the write boundary, so recall excludes them by type without
-     string-matching [claim]. Rows lacking [claim_kind] are ordinary recallable
-     facts; their [valid_until] horizon ([fact_is_current]) bounds any stale
-     pre-[Diagnostic] rows still on disk. *)
+     historically tagged fallback notes as [Diagnostic] at the write boundary,
+     so recall excludes them by type without string-matching [claim]. Rows
+     lacking [claim_kind] are ordinary recallable facts; their [valid_until]
+     horizon ([fact_is_current]) bounds any stale pre-[Diagnostic] rows still on
+     disk. *)
   match fact.claim_kind with
   | Some Diagnostic -> false
   | Some Self_observation | Some External_state | Some Durable_knowledge -> true

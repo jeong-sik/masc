@@ -16,6 +16,19 @@ let build_prompt (input : review_input) : (string, string) result =
       ("evidence_refs", input.evidence_refs);
     ]
 
+let apply_report_verdict_output_schema provider_cfg =
+  let schema = Keeper_structured_output_schema.verification_verdict_output_schema in
+  let provider_cfg =
+    Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
+  in
+  match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
+  | Ok () -> Ok provider_cfg
+  | Error detail ->
+    Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig
+            { field = "verification.adversarial_review.output_schema"; detail }))
+
 let parse_json_payload text =
   let trimmed = String.trim text in
   let attempt s =
@@ -104,7 +117,9 @@ let run_grounded_review ~base_path ~runtime_id (input : review_input) :
         ~masc_tools:[ Verifier_core.report_verdict_schema ]
         ~dispatch
         ~temperature:Runtime_provider_defaults.deterministic_temperature
-        ~approval:Approval_callbacks.auto_approve ()
+        ~approval:Approval_callbacks.auto_approve
+        ~provider_config_transform:apply_report_verdict_output_schema
+        ()
     with
     | Ok result -> (
       match !verdict_ref with

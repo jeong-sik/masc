@@ -26,6 +26,12 @@ val governance_judge_output_schema : Yojson.Safe.t
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 
+val verification_verdict_output_schema : Yojson.Safe.t
+(** JSON object the verification verdict providers must return. *)
+
+val anti_rationalization_verdict_output_schema : Yojson.Safe.t
+(** JSON object the task anti-rationalization reviewer provider must return. *)
+
 val governance_resolved_tool_tokens : string list
 (** Resolved tool names accepted by the dashboard governance judge. The
     provider schema and runtime parser both consume this list. *)

@@ -5,6 +5,7 @@ let number_schema = `Assoc [ "type", `String "number" ]
 let integer_schema = `Assoc [ "type", `String "integer" ]
 let boolean_schema = `Assoc [ "type", `String "boolean" ]
 let nullable_string_schema = `Assoc [ "type", `List [ `String "string"; `String "null" ] ]
+let nullable_integer_schema = `Assoc [ "type", `List [ `String "integer"; `String "null" ] ]
 
 let string_array_schema =
   `Assoc [ "type", `String "array"; "items", string_schema ]
@@ -214,6 +215,35 @@ let memory_bank_summary_output_schema =
 
 let vision_analyze_output_schema =
   let fields = [ "text", string_schema ] in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let verification_evidence_ref_schema =
+  let fields =
+    [ "path", string_schema
+    ; "line", nullable_integer_schema
+    ; "quote", string_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let verification_verdict_output_schema =
+  let fields =
+    [ "verdict", enum_schema Verifier_core.valid_verdict_strings
+    ; "reason", nullable_string_schema
+    ; "evidence", array_schema verification_evidence_ref_schema
+    ]
+  in
+  object_schema ~required:(List.map fst fields) fields
+;;
+
+let anti_rationalization_verdict_output_schema =
+  let fields =
+    [ "verdict", enum_schema Task.Anti_rationalization.valid_verdict_strings
+    ; "reason", nullable_string_schema
+    ]
+  in
   object_schema ~required:(List.map fst fields) fields
 ;;
 

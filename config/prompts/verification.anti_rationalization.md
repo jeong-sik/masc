@@ -20,6 +20,10 @@ Check:
 3. Are there avoidance patterns (e.g. "out of scope", "will do later", "pre-existing issue")?
 4. Are the notes substantive or just vague hand-waving?
 
-Respond with exactly one line:
-APPROVE - if the notes describe real work addressing the task
-REJECT: <reason> - if the notes are vague, avoidant, or do not address the task
+Call report_review_verdict exactly once:
+- verdict: APPROVE if the notes describe real work addressing the task.
+- verdict: REJECT if the notes are vague, avoidant, or do not address the task.
+- reason: null for APPROVE, otherwise a concise explanation.
+
+If you cannot call the tool, return only the same JSON object with fields
+`verdict` and `reason`.

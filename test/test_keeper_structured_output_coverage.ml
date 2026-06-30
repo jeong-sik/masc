@@ -256,6 +256,45 @@ let test_structured_tool_agent_runs_use_tool_schema_output () =
     parser_expectations
 ;;
 
+let test_structured_tool_agent_runs_request_provider_native_output () =
+  List.iter
+    (fun rel ->
+       check
+         int
+         (rel ^ " applies provider-native structured-output schema")
+         1
+         (Ast_grep.count_calls
+            ~module_path:rel
+            ~callee:"Keeper_structured_output_schema.apply_to_provider_config");
+       check
+         int
+         (rel ^ " wires provider_config_transform")
+         1
+         (Ast_grep.count_calls_with_label
+            ~module_path:rel
+            ~callee:"Keeper_turn_driver_wrappers.run_named_with_masc_tools"
+            ~label:"provider_config_transform"))
+    expected_structured_tool_agent_runs
+;;
+
+let test_verifier_oas_uses_structured_judge_runtime () =
+  let rel = "lib/verifier_oas.ml" in
+  check
+    int
+    "verifier_oas uses structured_judge runtime lane"
+    1
+    (Ast_grep.count_calls
+       ~module_path:rel
+       ~callee:"Runtime.runtime_id_for_structured_judge");
+  check
+    int
+    "verifier_oas does not inherit fleet default runtime for native schema"
+    0
+    (Ast_grep.count_calls
+       ~module_path:rel
+       ~callee:"Runtime.get_default_runtime_id")
+;;
+
 let test_model_label_wrappers_can_receive_provider_config_transform () =
   let rel = "lib/keeper/keeper_turn_driver_wrappers.ml" in
   check
@@ -329,6 +368,14 @@ let () =
             "tool-output Agent.run paths parse structured tool arguments"
             `Quick
             test_structured_tool_agent_runs_use_tool_schema_output
+        ; test_case
+            "tool-output Agent.run paths request provider-native schema"
+            `Quick
+            test_structured_tool_agent_runs_request_provider_native_output
+        ; test_case
+            "verifier_oas uses structured_judge runtime"
+            `Quick
+            test_verifier_oas_uses_structured_judge_runtime
         ] )
     ; ( "model-label wrappers"
       , [ test_case

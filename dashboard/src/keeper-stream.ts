@@ -17,6 +17,7 @@ import {
   insertThreadEntryBefore,
   finalizeAssistantEntry,
   markAssistantToolTraceEnded,
+  markAssistantToolTraceErrored,
   clearActiveStream,
   clearActiveStreamRequestId,
   releaseActiveStreamRequestId,
@@ -33,6 +34,8 @@ import { toolEntryIdFromCallId } from './tool-call-output-store'
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 
+const pendingOasToolBlockIndexes = new Map<string, number>()
+
 export interface KeeperThreadAbortResult {
   readonly keeperName: string
   readonly entryId: string | null
@@ -45,8 +48,15 @@ function streamProtocolMessage(value: unknown, fallback: string): string {
   const kind = asString(value.kind, '').trim()
   const reason = asString(value.reason, '').trim()
   const eventType = asString(value.event_type, '').trim()
+  const toolCallId = asString(value.tool_call_id, '').trim()
   const index = typeof value.index === 'number' ? `index=${value.index}` : ''
-  return [kind || fallback, eventType ? `event=${eventType}` : '', index, reason]
+  return [
+    kind || fallback,
+    eventType ? `event=${eventType}` : '',
+    index,
+    toolCallId ? `tool_call_id=${toolCallId}` : '',
+    reason,
+  ]
     .filter(part => part.trim() !== '')
     .join(' | ')
 }
@@ -55,6 +65,7 @@ function recordStreamProtocolError(
   keeperName: string,
   assistantEntryId: string,
   message: string,
+  toolCallId?: string,
 ): void {
   updateThreadEntry(keeperName, assistantEntryId, entry => {
     const line = `[stream protocol] ${message}`
@@ -64,6 +75,61 @@ function recordStreamProtocolError(
       error: message,
     }
   })
+  const id = toolCallId?.trim()
+  if (id) {
+    markAssistantToolTraceErrored(keeperName, assistantEntryId, id)
+    updateThreadEntry(keeperName, toolEntryIdFromCallId(id), entry => ({
+      ...entry,
+      delivery: 'error',
+      streamState: null,
+      error: message,
+    }))
+  }
+}
+
+function oasToolBlockKey(keeperName: string, assistantEntryId: string, toolCallId: string): string {
+  return `${keeperName}\u0000${assistantEntryId}\u0000${toolCallId}`
+}
+
+function rememberOasToolBlockIndex(
+  keeperName: string,
+  assistantEntryId: string,
+  toolCallId: string,
+  index: number | undefined,
+): void {
+  const id = toolCallId.trim()
+  if (!id || index === undefined) return
+  pendingOasToolBlockIndexes.set(oasToolBlockKey(keeperName, assistantEntryId, id), index)
+}
+
+function takeOasToolBlockIndex(
+  keeperName: string,
+  assistantEntryId: string,
+  toolCallId: string,
+): number | undefined {
+  const key = oasToolBlockKey(keeperName, assistantEntryId, toolCallId)
+  const index = pendingOasToolBlockIndexes.get(key)
+  pendingOasToolBlockIndexes.delete(key)
+  return index
+}
+
+function forgetOasToolBlockIndexByIndex(
+  keeperName: string,
+  assistantEntryId: string,
+  index: number | undefined,
+): void {
+  if (index === undefined) return
+  const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
+  for (const [key, value] of pendingOasToolBlockIndexes.entries()) {
+    if (key.startsWith(prefix) && value === index) pendingOasToolBlockIndexes.delete(key)
+  }
+}
+
+function clearPendingOasToolBlockIndexesForEntry(keeperName: string, assistantEntryId: string): void {
+  const prefix = `${keeperName}\u0000${assistantEntryId}\u0000`
+  for (const key of pendingOasToolBlockIndexes.keys()) {
+    if (key.startsWith(prefix)) pendingOasToolBlockIndexes.delete(key)
+  }
 }
 
 function normalizeStreamUsage(raw: unknown): NonNullable<KeeperConversationDetails['usage']> | null {
@@ -119,6 +185,7 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
       error: null,
       timestamp: new Date().toISOString(),
     })
+    clearPendingOasToolBlockIndexesForEntry(keeperName, entryId)
   }
   clearActiveStream(keeperName)
   setRecordValue(keeperSending, keeperName, false)
@@ -153,6 +220,7 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TEXT_MESSAGE_END':
+      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
       setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
       return null
     case 'TOOL_CALL_START': {
@@ -169,6 +237,7 @@ export function applyKeeperStreamEvent(
       appendAssistantToolTraceStep(keeperName, assistantEntryId, {
         toolCallId,
         name: toolName,
+        oasBlockIndex: takeOasToolBlockIndex(keeperName, assistantEntryId, toolCallId),
       })
       // Insert above the live assistant bubble so the final reply text
       // stays the last entry in the transcript.
@@ -262,6 +331,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
+        clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
         setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
         return null
       }
@@ -275,16 +345,18 @@ export function applyKeeperStreamEvent(
         const toolCallId = asString(value?.tool_call_id)
         const toolName = asString(value?.tool_call_name)
         if (toolCallId && toolName) {
-          appendAssistantToolTraceStep(keeperName, assistantEntryId, {
-            toolCallId,
-            name: toolName,
-            oasBlockIndex,
-          })
+          rememberOasToolBlockIndex(keeperName, assistantEntryId, toolCallId, oasBlockIndex)
         }
         setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
         return null
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
+        const value = isRecord(event.value) ? event.value : null
+        forgetOasToolBlockIndexByIndex(
+          keeperName,
+          assistantEntryId,
+          asNumber(value?.index) ?? asNumber(value?.block_index),
+        )
         setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
         return null
       }
@@ -307,10 +379,17 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {
+        const value = isRecord(event.value) ? event.value : null
+        forgetOasToolBlockIndexByIndex(
+          keeperName,
+          assistantEntryId,
+          asNumber(value?.index) ?? asNumber(value?.block_index),
+        )
         recordStreamProtocolError(
           keeperName,
           assistantEntryId,
           streamProtocolMessage(event.value, 'stream protocol error'),
+          asString(value?.tool_call_id),
         )
         return null
       }
@@ -350,6 +429,7 @@ export function applyKeeperStreamEvent(
         if (!TERMINAL_REQUEST_STATUSES.has(status)) {
           return null
         }
+        clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
         if (terminalRequestId) releaseActiveStreamRequestId(terminalRequestId)
         else clearActiveStreamRequestId(keeperName)
         const ok = terminal?.ok === true

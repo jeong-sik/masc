@@ -9,7 +9,9 @@ module Librarian_runtime = Masc.Keeper_librarian_runtime
 module Runtime_resolution = Masc.Keeper_memory_runtime_resolution
 module Memory_summary = Masc.Keeper_memory_llm_summary
 module Structured_schema = Masc.Keeper_structured_output_schema
-module Domain_pool_ref = Masc.Domain_pool_ref
+(* Domain_pool_ref lives in the unwrapped masc_core sublibrary (re_export'd by
+   masc_test_deps), so it is referenced bare — there is no Masc.Domain_pool_ref. *)
+module Domain_pool_ref = Domain_pool_ref
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
@@ -196,6 +198,7 @@ let message_text (message : Agent_sdk.Types.message) =
     | Agent_sdk.Types.Text text -> Some text
     | Agent_sdk.Types.Thinking _
     | Agent_sdk.Types.RedactedThinking _
+    | Agent_sdk.Types.ReasoningDetails _
     | Agent_sdk.Types.ToolUse _
     | Agent_sdk.Types.ToolResult _
     | Agent_sdk.Types.Image _

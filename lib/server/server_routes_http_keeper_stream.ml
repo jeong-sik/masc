@@ -630,6 +630,46 @@ let direct_reply_terminal_error payload_json_opt visible_reply =
   | Keeper_turn_outcome.Visible_reply, None -> Some empty_direct_reply_error
   | Keeper_turn_outcome.Visible_reply, Some _ -> None
 
+let visible_reply_with_stream_fallback ~streamed_text visible_reply =
+  match String.trim visible_reply with
+  | "" -> String.trim streamed_text
+  | visible_reply -> visible_reply
+
+let redacted_visible_reply_with_stream_fallback ~redact ~streamed_text visible_reply =
+  visible_reply_with_stream_fallback ~streamed_text visible_reply |> redact
+
+let assoc_replace key value fields =
+  (key, value)
+  :: List.filter (fun (field_key, _) -> not (String.equal field_key key)) fields
+
+let reply_payload_with_streamed_visible_reply payload_json_opt ~visible_reply =
+  match String_util.trim_to_option visible_reply with
+  | None -> payload_json_opt
+  | Some visible_reply -> (
+      match Keeper_turn_outcome.of_reply_payload payload_json_opt with
+      | Keeper_turn_outcome.Continuation_checkpoint -> payload_json_opt
+      | Keeper_turn_outcome.No_visible_reply
+      | Keeper_turn_outcome.Visible_reply -> (
+          match payload_json_opt with
+          | Some (`Assoc fields) ->
+              let fields =
+                assoc_replace "reply" (`String visible_reply) fields
+              in
+              let fields =
+                assoc_replace Keeper_turn_outcome.wire_key
+                  (`String
+                    (Keeper_turn_outcome.to_label
+                       Keeper_turn_outcome.Visible_reply))
+                  fields
+              in
+              Some (`Assoc fields)
+          | Some _ | None -> payload_json_opt))
+
+let body_with_rewritten_payload ~fallback payload_json_opt =
+  match payload_json_opt with
+  | Some (`Assoc _ as payload_json) -> Yojson.Safe.to_string payload_json
+  | Some _ | None -> fallback
+
 let keeper_request_terminal_payload ~request_id ~keeper_name ~status ~ok
     ?(message = "") () =
   let fields =
@@ -730,7 +770,15 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
      still an authenticated dashboard operator, so it keeps Owner authority
      while recording the Gate surface label. *)
   let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
+  let worker_text_accum = Keeper_stream_text_accum.create () in
   let on_event evt =
+    (match evt with
+     | Agent_sdk.Types.ContentBlockDelta
+         { delta = Agent_sdk.Types.TextDelta text; _ } ->
+         ignore
+           (Keeper_stream_text_accum.on_delta worker_text_accum ~redact:redact_text text
+            : string)
+     | _ -> ());
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
@@ -798,6 +846,19 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
         match dispatch_result with
         | Ok (true, body) ->
             let payload_json_opt, visible_reply = extract_visible_reply body in
+            let visible_reply =
+              redacted_visible_reply_with_stream_fallback
+                ~redact:redact_text
+                ~streamed_text:(Keeper_stream_text_accum.streamed_text worker_text_accum)
+                visible_reply
+            in
+            let payload_json_opt =
+              reply_payload_with_streamed_visible_reply payload_json_opt
+                ~visible_reply
+            in
+            let body =
+              body_with_rewritten_payload ~fallback:body payload_json_opt
+            in
             (* RFC-0233 §7: the keeper minted this turn's join key into the
                reply payload (keeper_turn.ml). Decode it via the shared
                reply-payload parser — never repair: a malformed or absent
@@ -1304,6 +1365,11 @@ module For_testing = struct
   let modalities_for_request = modalities_for_request
   let extract_visible_reply = extract_visible_reply
   let direct_reply_terminal_error = direct_reply_terminal_error
+  let visible_reply_with_stream_fallback = visible_reply_with_stream_fallback
+  let redacted_visible_reply_with_stream_fallback =
+    redacted_visible_reply_with_stream_fallback
+  let reply_payload_with_streamed_visible_reply =
+    reply_payload_with_streamed_visible_reply
   let format_surface_context = format_surface_context
   let surface_context_to_instructions = surface_context_to_instructions
   let empty_stream_bridge_state = empty_keeper_stream_bridge_state

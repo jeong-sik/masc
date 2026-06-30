@@ -187,6 +187,10 @@ module For_testing : sig
   val modalities_for_request : keeper_chat_stream_request -> string list
   val extract_visible_reply : string -> Yojson.Safe.t option * string
   val direct_reply_terminal_error : Yojson.Safe.t option -> string -> string option
+  val visible_reply_with_stream_fallback :
+    streamed_text:string -> string -> string
+  val reply_payload_with_streamed_visible_reply :
+    Yojson.Safe.t option -> visible_reply:string -> Yojson.Safe.t option
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val empty_stream_bridge_state : keeper_stream_bridge_state

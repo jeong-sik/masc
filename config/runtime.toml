@@ -949,14 +949,18 @@ max_concurrent_panels = 2
 max_concurrent_judges = 3
 staged_judge_group_size = 3
 
-# 패널 프리셋. 서로 다른 모델 패밀리로 구성해 관점 다양성을 확보한다.
+# 패널 프리셋. Panel execution requests provider-native structured output, so
+# checked-in defaults must use runtimes that declare supports-structured-output.
+# Add new model families here only after their runtime seed declares that
+# capability; otherwise the panel deterministically fails before the provider
+# request.
 # 프롬프트는 행동을 정의하므로 코드 default가 아니라 여기서 받는다 (누락 시 로드
 # 단계에서 fail-fast). 튜닝은 재컴파일 없이 이 값만 바꾸면 된다.
 [fusion.presets.trio]
 panel = [
-  "ollama_cloud.deepseek-v4-flash",
-  "glm-coding.glm-5-turbo",
   "ollama_cloud.minimax-m3",
+  "ollama_cloud.kimi-k2-6",
+  "ollama_cloud.ollama-cloud-minimax-m3",
 ]
 judge = "deepseek.deepseek-v4-pro"
 panel_system_prompt = """
@@ -984,15 +988,16 @@ max_tool_calls_per_panel = 0
 # "requires >= 2 judges"로 fail-closed된다 → 키퍼가 JoJ topology를 쓸 수 없었다.
 # quorum은 서로 다른 렌즈(evidence/coverage)의 1차 심판 2명을 두고, meta judge(judge=)가
 # 두 종합을 재조정한다. 키퍼 사용: masc_fusion preset="quorum" topology="judge_of_judges".
-# 모델은 모두 supports-response-format-json=true (fusion judge는 응답 텍스트에서 JSON을
-# 파싱하므로 native structured-output host allowlist와 무관하나, JSON 신뢰성을 위해
-# JSON-선언 모델만 사용한다). staged_judge_of_judges는 [fusion].staged_judge_group_size(=3)
-# 의 정확한 배수 그룹을 요구하므로 quorum(2 judges)은 비대상 — 별도 preset 필요.
+# Panel models must declare supports-structured-output because panel execution
+# now uses provider-native JsonSchema/output_schema. Judges still parse response
+# text JSON, so they only require JSON reliability. staged_judge_of_judges는
+# [fusion].staged_judge_group_size(=3)의 정확한 배수 그룹을 요구하므로 quorum(2 judges)은
+# 비대상 — 별도 preset 필요.
 [fusion.presets.quorum]
 panel = [
-  "ollama_cloud.deepseek-v4-flash",
-  "glm-coding.glm-5-turbo",
   "ollama_cloud.minimax-m3",
+  "ollama_cloud.kimi-k2-6",
+  "ollama_cloud.ollama-cloud-minimax-m3",
 ]
 panel_system_prompt = """
 You are an expert panelist. Answer the user's question directly and concisely \
@@ -1017,9 +1022,10 @@ max_tool_calls_per_panel = 0
 
 # 1차 심판 — 서로 다른 렌즈로 패널을 독립 종합한다 (JoJ requires >= 2; RFC-0283).
 # label이 정체성을 주므로 distinct lens는 distinct identity가 된다 (Duplicate_judge 회피).
-# evidence judge는 panel에 없는 모델을 쓴다 — 자기 답변이 포함된 panel을 심판하는
-# self-preference bias를 구조적으로 배제(panel = deepseek-v4-flash/glm-5-turbo/minimax-m3,
-# coverage judge=kimi-k2-6, meta judge=deepseek-v4-pro 모두 panel 외부).
+# evidence judge는 panel에 없는 모델을 써서 자기 답변을 심판하는 self-preference
+# bias를 구조적으로 배제한다. coverage judge=kimi-k2-6 overlaps with the panel
+# because the strict panel contract now requires schema-capable panel runtimes;
+# the evidence and meta-judge lenses remain outside that panel.
 [[fusion.presets.quorum.judges]]
 model = "glm-coding.glm-4-7-coding"
 label = "evidence"

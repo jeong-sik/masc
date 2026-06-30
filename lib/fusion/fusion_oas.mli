@@ -19,9 +19,9 @@
     [name]은 에이전트 카드명 — [Async_agent.all]이 결과 키로 반환하는 패널 정체성이다
     (RFC-0278: 같은 model을 다른 라벨로 구분). 미지정이면 카드명=[model]. provider
     라우팅은 카드명과 무관하게 [model]로 한다.
-    [provider_config_transform]은 judge처럼 provider-native structured-output 설정이
-    필요한 호출자가 resolved provider config를 agent build 전에 보강하는 hook이다.
-    패널 호출자는 생략한다.
+    [provider_config_transform]은 panel/judge처럼 provider-native structured-output
+    설정이 필요한 호출자가 resolved provider config를 agent build 전에 보강하는
+    hook이다.
     미존재 runtime·빌드 실패는 [panel_failure]로. *)
 val build_agent
   :  sw:Eio.Switch.t

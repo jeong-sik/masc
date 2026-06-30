@@ -2,7 +2,8 @@
 
     Judge 실행은 provider-native structured output schema를 요청한다. OAS가 해당
     provider/model 조합의 native schema를 거부하면 [JsonMode]로 degrade하지 않고
-    build 단계에서 fail-loud한다. 패널 실행은 자유 텍스트이며 이 schema hook을 쓰지 않는다.
+    build 단계에서 fail-loud한다. 패널 실행도 별도의 `{answer:string}` schema를 요청하고,
+    provider-success malformed output은 typed failure로 격리한다.
 
     설계 SSOT: docs/rfc/RFC-0252-fusion-panel-judge-deliberation.md §7.2 *)
 

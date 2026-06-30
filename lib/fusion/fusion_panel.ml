@@ -17,15 +17,55 @@ let outcome_of_result ~(panelist : string) ~(model : string)
   =
   match res with
   | Ok resp ->
-    let answer = Fusion_oas.answer_text resp in
-    if String.length (String.trim answer) = 0 then
+    let raw = String.trim (Fusion_oas.answer_text resp) in
+    if String.length raw = 0 then
       Fusion_types.Failed
         { failed_model = panelist
         ; reason = Fusion_types.Empty_response (Fusion_oas.empty_response_detail resp)
         }
-    else
-      Fusion_types.Answered
-        { model = panelist; answer; usage = Fusion_oas.usage_of resp }
+    else (
+      match Yojson.Safe.from_string raw with
+      | exception Yojson.Json_error msg ->
+        Fusion_types.Failed
+          { failed_model = panelist
+          ; reason =
+              Fusion_types.Invalid_structured_response
+                ("panel response is not valid JSON: " ^ msg)
+          }
+      | `Assoc fields ->
+        (match List.assoc_opt "answer" fields with
+         | Some (`String answer) ->
+           let answer = String.trim answer in
+           if String.length answer = 0 then
+             Fusion_types.Failed
+               { failed_model = panelist
+               ; reason =
+                   Fusion_types.Empty_response (Fusion_oas.empty_response_detail resp)
+               }
+           else
+             Fusion_types.Answered
+               { model = panelist; answer; usage = Fusion_oas.usage_of resp }
+         | Some _ ->
+           Fusion_types.Failed
+             { failed_model = panelist
+             ; reason =
+                 Fusion_types.Invalid_structured_response
+                   "panel response field \"answer\" must be a string"
+             }
+         | None ->
+           Fusion_types.Failed
+             { failed_model = panelist
+             ; reason =
+                 Fusion_types.Invalid_structured_response
+                   "panel response missing required field \"answer\""
+             })
+      | _ ->
+        Fusion_types.Failed
+          { failed_model = panelist
+          ; reason =
+              Fusion_types.Invalid_structured_response
+                "panel response must be a JSON object"
+          })
   | Error e ->
     Fusion_types.Failed
       { failed_model = panelist
@@ -39,6 +79,18 @@ let bridge_failure_of_error (error : Agent_sdk.Error.sdk_error) : Fusion_types.p
   match error with
   | Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout _) -> Fusion_types.Timeout
   | _ -> Fusion_types.Bridge_error (Agent_sdk.Error.to_string error)
+
+let apply_fusion_panel_output_contract provider_cfg =
+  let schema = Keeper_structured_output_schema.fusion_panel_answer_output_schema in
+  let native_schema_provider_cfg =
+    Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
+  in
+  match
+    Llm_provider.Provider_config.validate_output_schema_request
+      native_schema_provider_cfg
+  with
+  | Ok () -> Ok native_schema_provider_cfg
+  | Error detail -> Error (Printf.sprintf "fusion.panel.output_schema: %s" detail)
 
 let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
   : Fusion_types.panel_outcome list
@@ -58,6 +110,7 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
             match
               Fusion_oas.build_agent ~sw ~net ~system_prompt:g.system_prompt ~tools
                 ~max_tool_calls:g.max_tool_calls ~timeout_s:g.timeout_s
+                ~provider_config_transform:apply_fusion_panel_output_contract
                 ?max_tokens:g.max_output_tokens
                 ~name:panelist model
             with
@@ -99,3 +152,8 @@ let run ~sw ~net ~max_fibers ~outer_timeout_s ~groups ~prompt ()
         built
   in
   build_failures @ answered
+
+module For_testing = struct
+  let outcome_of_result = outcome_of_result
+  let apply_output_contract = apply_fusion_panel_output_contract
+end

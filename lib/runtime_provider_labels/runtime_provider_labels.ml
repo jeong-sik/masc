@@ -5,7 +5,7 @@ let canonical_provider_label raw =
   if String.equal trimmed ""
   then None
   else (
-    match Llm_provider.Provider_kind.of_string trimmed with
-    | Some kind -> Some (Llm_provider.Provider_kind.to_string kind)
+    match Llm_provider.Provider_config.provider_kind_of_string trimmed with
+    | Some kind -> Some (Llm_provider.Provider_config.string_of_provider_kind kind)
     | None -> Some (String.lowercase_ascii trimmed))
 ;;

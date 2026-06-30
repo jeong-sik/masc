@@ -59,17 +59,17 @@ val cadence_record_success : keeper_id:string -> trace_id:string -> unit
 (** Record a successful structured extraction for [keeper_id] on [trace_id] so
     the cadence counter resets and the next cycle can begin. Must only be called
     after a due turn actually produced a structured episode; skipped, failed, or
-    unstructured-fallback attempts must not call this.
+    unparseable provider attempts must not call this.
 
     Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
     focused pre-Eio tests keep a direct single-threaded path. *)
 
 val cadence_record_attempt : keeper_id:string -> trace_id:string -> unit
 (** Record a completed non-success extraction attempt for [keeper_id] on
-    [trace_id] so transient provider failures and diagnostic fallbacks do not
-    immediately retry every keeper turn. This intentionally does not mark the
-    extraction as semantically successful. Skipped work such as a busy provider
-    slot must not call this, because no provider attempt happened.
+    [trace_id] so transient provider failures and unparseable structured-output
+    failures do not immediately retry every keeper turn. This intentionally does
+    not mark the extraction as semantically successful. Skipped work such as a
+    busy provider slot must not call this, because no provider attempt happened.
 
     Uses [Eio_guard.with_mutex] so runtime fibers take a cooperative mutex while
     focused pre-Eio tests keep a direct single-threaded path. *)
@@ -159,36 +159,10 @@ type parse_retry_error =
   | Retry_exhausted_unparseable of unparseable_response
   | Retry_transport_failed of extraction_error
 
-type extraction_kind =
-  | Structured_episode
-  (* Compatibility constructor for older callers/tests that classify historical
-     diagnostic episodes. Current provider extraction no longer constructs this
-     variant from unparseable model output. *)
-  | Unstructured_fallback
-
-type extraction_result =
-  { episode : Keeper_memory_os_types.episode
-  ; kind : extraction_kind
-  }
-
-val should_record_cadence_success : extraction_kind -> bool
-(** Whether this extraction kind is allowed to reset the librarian cadence.
-    Structured episodes are semantic success. *)
-
-val should_record_cadence_backoff : extraction_kind -> bool
-(** Whether this non-success extraction kind should defer the next attempt until
-    the next cadence window. Structured episodes use [cadence_record_success]
-    instead. *)
-
 val should_record_cadence_backoff_after_error : extraction_error -> bool
 (** Whether an extraction error represents enough completed work to defer the
     next attempt until the next cadence window. Only completed provider-attempt
     failures should defer cadence; local deterministic failures stay due. *)
-
-val should_preserve_unstructured_fallback : string -> bool
-(** Structured-only policy for raw unparseable provider output. This now always
-    returns [false]: provider-native schema failures remain typed provider
-    failures instead of becoming diagnostic fallback facts. *)
 
 val run_with_parse_retries
   :  max_retries:int
@@ -247,7 +221,7 @@ val extract_with_provider_classified
   -> provider_cfg:Llm_provider.Provider_config.t
   -> generation:int
   -> Keeper_librarian.input
-  -> (extraction_result, extraction_error) result
+  -> (Keeper_memory_os_types.episode, extraction_error) result
 (** Provider-backed librarian extraction. [clock] stays optional at the API
     boundary because [run_best_effort] may be called from contexts that cannot
     supply an Eio clock; [None] returns
@@ -274,7 +248,7 @@ val extract_and_append_with_provider_classified
   -> keeper_id:string
   -> provider_cfg:Llm_provider.Provider_config.t
   -> Keeper_librarian.input
-  -> (extraction_result, extraction_error) result
+  -> (Keeper_memory_os_types.episode, extraction_error) result
 
 val run_best_effort
   :  ?complete:complete_fn

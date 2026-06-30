@@ -418,25 +418,6 @@ type parse_retry_error =
   | Retry_exhausted_unparseable of unparseable_response
   | Retry_transport_failed of extraction_error
 
-type extraction_kind =
-  | Structured_episode
-  | Unstructured_fallback
-
-type extraction_result =
-  { episode : Keeper_memory_os_types.episode
-  ; kind : extraction_kind
-  }
-
-let should_record_cadence_success = function
-  | Structured_episode -> true
-  | Unstructured_fallback -> false
-;;
-
-let should_record_cadence_backoff = function
-  | Structured_episode -> false
-  | Unstructured_fallback -> true
-;;
-
 let should_record_cadence_backoff_after_error = function
   | Provider_timeout
   | Provider_transport_failed _
@@ -449,8 +430,6 @@ let should_record_cadence_backoff_after_error = function
   | Memory_fact_upsert_failed _ ->
     false
 ;;
-
-let should_preserve_unstructured_fallback _raw = false
 
 let prefer_unparseable_response prior current =
   match current.raw_evidence with
@@ -569,7 +548,7 @@ let extract_with_provider_classified
          ~attempt
          messages
      with
-     | Ok episode -> Ok { episode; kind = Structured_episode }
+     | Ok episode -> Ok episode
      | Error (Retry_transport_failed err) -> Error err
      | Error (Retry_exhausted_unparseable diagnostic) ->
        Error (Provider_unparseable_response diagnostic.reason))
@@ -589,7 +568,7 @@ let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~
       inp
   with
   | Error err -> Error (extraction_error_to_string err)
-  | Ok { episode; kind = _ } -> Ok episode
+  | Ok episode -> Ok episode
 ;;
 
 let extract_and_append_with_provider_classified
@@ -623,7 +602,7 @@ let extract_and_append_with_provider_classified
          inp
      with
   | Error _ as e -> e
-  | Ok ({ episode; kind = _ } as extraction) ->
+  | Ok episode ->
     let now = episode.Keeper_memory_os_types.created_at in
     (* RFC-0243: UPSERT claims into the fact store instead of blind-appending. A claim
        re-extracted across turns is folded into the existing row
@@ -678,7 +657,7 @@ let extract_and_append_with_provider_classified
         (* RFC-0251: the co-occurrence edge / spreading-activation organ was removed
            (dark-by-default, no recall consumer), so the fact upsert above is the only
            post-merge work. *)
-        Ok extraction
+        Ok episode
       | Error message -> Error (Memory_fact_upsert_failed message)))
 ;;
 
@@ -704,7 +683,7 @@ let extract_and_append_with_provider
       inp
   with
   | Error err -> Error (extraction_error_to_string err)
-  | Ok { episode; kind = _ } -> Ok episode
+  | Ok episode -> Ok episode
 ;;
 
 let provider_for_runtime ~runtime_id =
@@ -774,24 +753,13 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
                  "memory os librarian skipped runtime=%s: per-keeper provider slot busy (capacity=%d)"
                  runtime_id
                  (per_keeper_slot_capacity ())
-             | Some (Ok { episode; kind }) ->
-               if should_record_cadence_success kind
-               then (
-                 (* Only structured extraction records semantic success. *)
-                 cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
-                 Log.Keeper.info ~keeper_name:keeper_id
-                   "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
-                   episode.Keeper_memory_os_types.trace_id
-                   episode.generation
-                   (List.length episode.claims))
-               else (
-                 if should_record_cadence_backoff kind
-                 then cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
-                 Log.Keeper.warn ~keeper_name:keeper_id
-                   "memory os librarian produced non-structured extraction trace_id=%s generation=%d claims=%d; cadence deferred"
-                   episode.Keeper_memory_os_types.trace_id
-                   episode.generation
-                   (List.length episode.claims))
+             | Some (Ok episode) ->
+               cadence_record_success ~keeper_id ~trace_id:inp.trace_id;
+               Log.Keeper.info ~keeper_name:keeper_id
+                 "memory os librarian wrote episode trace_id=%s generation=%d claims=%d"
+                 episode.Keeper_memory_os_types.trace_id
+                 episode.generation
+                 (List.length episode.claims)
              | Some (Error err) ->
                Otel_metric_store.inc_counter
                  Keeper_metrics.(to_string EpisodeCreateFailures)

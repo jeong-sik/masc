@@ -158,7 +158,10 @@ let test_librarian_runtime_does_not_preserve_unstructured_fallback () =
     "librarian runtime must not build unstructured fallback episodes"
     false
     (contains_substring source "let unstructured_episode"
-     || contains_substring source "preserving unstructured fallback")
+     || contains_substring source "preserving unstructured fallback"
+     || contains_substring source "Unstructured_fallback"
+     || contains_substring source "should_preserve_unstructured_fallback"
+     || contains_substring source "type extraction_kind")
 ;;
 
 let test_agent_run_json_judges_request_structured_output rels =

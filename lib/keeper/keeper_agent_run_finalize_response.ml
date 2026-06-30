@@ -28,11 +28,13 @@ let completion_contract_drops_current_turn_replay
 type replay_suffix_prune_reason =
   | Completion_contract_requires_attention
   | Synthetic_empty_state_snapshot
+  | Canonical_success_replay
 
 let replay_suffix_prune_reason_to_string = function
   | Completion_contract_requires_attention ->
     "completion_contract_requires_attention"
   | Synthetic_empty_state_snapshot -> "synthetic_empty_state_snapshot"
+  | Canonical_success_replay -> "canonical_success_replay"
 ;;
 
 let synthetic_empty_state_drops_current_turn_replay
@@ -86,6 +88,56 @@ let prune_current_turn_replay
   else None
 ;;
 
+let canonical_success_replay_checkpoint
+      ~(history_messages : Agent_sdk.Types.message list)
+      ~(session_id : string)
+      ~(response_text : string)
+      ~(state_snapshot : Keeper_memory_policy.keeper_state_snapshot option)
+      (checkpoint : Agent_sdk.Checkpoint.t)
+  =
+  if messages_prefix_equal history_messages checkpoint.Agent_sdk.Checkpoint.messages
+  then
+    let dropped_current_turn_replay =
+      List.length checkpoint.Agent_sdk.Checkpoint.messages
+      > List.length history_messages
+    in
+    let history_messages =
+      Keeper_context_core.repair_broken_tool_call_pairs history_messages
+    in
+    let checkpoint =
+      if String.trim response_text = ""
+      then
+        { checkpoint with
+          Agent_sdk.Checkpoint.session_id
+        ; messages = history_messages
+        ; working_context = None
+        }
+      else
+        let replay_assistant =
+          Agent_sdk.Types.make_message
+            ~role:Agent_sdk.Types.Assistant
+            [ Agent_sdk.Types.Text response_text ]
+        in
+        Keeper_context_core.patch_checkpoint_last_assistant
+          { checkpoint with
+            Agent_sdk.Checkpoint.messages =
+              history_messages @ [ replay_assistant ]
+          }
+          ~session_id
+          ~response_text
+          ?snapshot:state_snapshot
+    in
+    Ok
+      ( checkpoint
+      , if dropped_current_turn_replay
+        then Some Canonical_success_replay
+        else None )
+  else
+    Error
+      "refusing to save checkpoint: canonical replay persistence requires \
+       checkpoint messages to match pre-turn history prefix"
+;;
+
 let checkpoint_for_replay_persistence
       ~(history_messages : Agent_sdk.Types.message list)
       ~(pre_turn_working_context : Yojson.Safe.t option)
@@ -119,13 +171,12 @@ let checkpoint_for_replay_persistence
             checkpoint messages do not match pre-turn history prefix"
            (replay_suffix_prune_reason_to_string reason)))
   | None ->
-    Ok
-      ( Keeper_context_core.patch_checkpoint_last_assistant
-          checkpoint
-          ~session_id
-          ~response_text
-          ?snapshot:state_snapshot
-      , None )
+    canonical_success_replay_checkpoint
+      ~history_messages
+      ~session_id
+      ~response_text
+      ~state_snapshot
+      checkpoint
 ;;
 
 module For_testing = struct

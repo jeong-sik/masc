@@ -658,7 +658,7 @@ let test_synthetic_empty_checkpoint_prunes_current_turn_suffix () =
     false
     (List.exists has_tool_use patched.messages)
 
-let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
+let test_satisfied_checkpoint_drops_tool_suffix_and_persists_final () =
   let open Agent_sdk.Types in
   let old_user = checkpoint_msg User [ Text "old user" ] in
   let old_assistant = checkpoint_msg Assistant [ Text "old answer" ] in
@@ -703,12 +703,16 @@ let test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final () =
       cp
     |> expect_checkpoint_for_replay
   in
-  Alcotest.(check (option string)) "suffix kept" None
+  Alcotest.(check (option string))
+    "suffix canonicalized"
+    (Some "canonical_success_replay")
     (prune_reason_to_string pruned);
-  Alcotest.(check int) "turn transcript remains" 6
+  Alcotest.(check int) "prior history plus final assistant remains" 3
     (List.length patched.messages);
-  Alcotest.(check bool) "tool use remains" true
+  Alcotest.(check bool) "tool use dropped from replay checkpoint" false
     (List.exists has_tool_use patched.messages);
+  Alcotest.(check bool) "working context cleared" true
+    (patched.working_context = None);
   match List.rev patched.messages with
   | last :: _ ->
       Alcotest.(check string) "final assistant patched" "visible answer"
@@ -775,7 +779,11 @@ let test_no_tool_synthesis_does_not_invent_progress_text () =
   Alcotest.(check (option string))
     "no synthetic no-tool done summary"
     None
-    snapshot.done_summary
+    snapshot.done_summary;
+  Alcotest.(check (list string))
+    "no synthetic no-tool decisions"
+    []
+    snapshot.decisions
 
 let test_budget_finalizer_drops_synthetic_response_text () =
   let finalized =
@@ -837,7 +845,11 @@ let test_synthetic_finalizer_drops_generated_response_text () =
   Alcotest.(check bool)
     "raw repeated text not persisted as response"
     false
-    (contains_substring finalized.response_text "What should I do next?")
+    (contains_substring finalized.response_text "What should I do next?");
+  Alcotest.(check (list string))
+    "raw repeated text not persisted as synthetic decisions"
+    []
+    finalized.state_snapshot.decisions
 
 let test_contract_attention_finalizer_drops_raw_response_text () =
   let raw_response_text =
@@ -933,9 +945,9 @@ let () =
             `Quick
             test_synthetic_empty_checkpoint_prunes_current_turn_suffix;
           Alcotest.test_case
-            "satisfied result keeps tool replay suffix"
+            "satisfied result drops tool replay suffix"
             `Quick
-            test_satisfied_checkpoint_keeps_tool_suffix_and_patches_final;
+            test_satisfied_checkpoint_drops_tool_suffix_and_persists_final;
           Alcotest.test_case
             "drops persisted empty replay snapshot suffix"
             `Quick

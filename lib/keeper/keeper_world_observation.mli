@@ -288,6 +288,15 @@ val pending_board_event_of_bg_job_completion :
   Keeper_event_queue.bg_job_completion ->
   pending_board_event
 
+(** Build the actionable observation for a connector-recorded external
+    attention item. Ambient connector chatter remains observational by default:
+    it is not trusted operator instruction unless another typed path makes it
+    an explicit mention. *)
+val pending_board_event_of_external_attention :
+  meta:Keeper_meta_contract.keeper_meta ->
+  Keeper_external_attention.item ->
+  pending_board_event
+
 (** Convert a queued Event Layer stimulus back into structured board activity
     for the next keeper prompt. [Board_signal], [Fusion_completed] (RFC-0266),
     and [Bg_completed] (RFC-0290) produce [Some];

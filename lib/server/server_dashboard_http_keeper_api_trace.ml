@@ -44,21 +44,34 @@ let read_internal_history_lines ~(config : Workspace.config) ~(trace_id : string
   =
   let path = Keeper_types_support.keeper_internal_history_path config trace_id in
   (* Streaming filter: avoid materialising the full JSONL list when only a
-     subset of lines decode to [trajectory_line]. *)
-  Fs_compat.fold_jsonl_lines
-    ~init:[]
-    ~f:(fun acc ~line_no json ->
-       match
-         Server_dashboard_http_keeper_api_types
-         .internal_history_json_to_trajectory_line
-           json
-       with
-       | Some line -> line :: acc
-       | None ->
-         Log.Dashboard.warn "Skipped invalid internal history trace row (trace=%s, line=%d)" trace_id line_no;
-         acc)
-    path
-  |> List.rev
+     subset of lines decode to [trajectory_line].
+
+     Rows that do not decode to a thinking line (older content-block format,
+     non-assistant sources, or empty-text rows) are expected here. They are
+     summarised once per read rather than warned per row: the dashboard re-reads
+     each trace file on every poll, so a single undecodable file emitted one
+     WARN per skipped row per read — a busy trace produced ~16k warnings/day,
+     dominating the WARN log and drowning genuine warnings. The per-file summary
+     keeps the signal (skipped/total counts) without the per-row volume. *)
+  let lines_rev, skipped, total =
+    Fs_compat.fold_jsonl_lines
+      ~init:([], 0, 0)
+      ~f:(fun (acc, skipped, total) ~line_no:_ json ->
+         match
+           Server_dashboard_http_keeper_api_types
+           .internal_history_json_to_trajectory_line
+             json
+         with
+         | Some line -> (line :: acc, skipped, total + 1)
+         | None -> (acc, skipped + 1, total + 1))
+      path
+  in
+  if skipped > 0 then
+    Log.Dashboard.warn
+      "internal history trace %s: %d of %d rows did not decode to a thinking \
+       line (older content-block format or non-assistant rows)"
+      trace_id skipped total;
+  List.rev lines_rev
 ;;
 
 let merge_keeper_trace_lines ~(config : Workspace.config) ~(trace_id : string)

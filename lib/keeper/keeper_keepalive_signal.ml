@@ -353,6 +353,28 @@ let board_reactive_wakeup_allowed
     ~debounce_sec:board_reactive_debounce_sec
 ;;
 
+(* ── Connector-reactive policy (RFC-connector-ambient-attention-wake P4) ── *)
+
+let connector_reactive_debounce_sec = 60.0
+
+(* Throttle ambient connector wakes with the SAME proven primitive as
+   board-reactive: the RFC-0246 tombstone gate (a latched no-progress keeper is
+   not re-woken) plus a per-key debounce. Keyed per channel, so a chatty channel
+   wakes the keeper at most once per window; the keeper then sees every
+   accumulated message in its chat history (RFC-0226) and decides whether to
+   reply. The dedup_key is namespaced ("connector-ambient:") so it never collides
+   with board dedup keys in the shared per-keeper wakeup map. A dedicated
+   [Connector_reactive] tombstone origin is a follow-up — [Board_reactive]'s
+   suppression is already correct here: a latched keeper must not wake on
+   connector chatter either. *)
+let connector_reactive_wakeup_allowed ~base_path ~keeper_name ~channel_id =
+  Keeper_registry.board_wakeup_allowed
+    ~base_path
+    keeper_name
+    ~dedup_key:("connector-ambient:" ^ channel_id)
+    ~debounce_sec:connector_reactive_debounce_sec
+;;
+
 let take = List.take
 
 (* RFC-0020: select which keepers wake for a board signal from typed

@@ -58,7 +58,7 @@
   ;; Pinned to OAS v0.208.3+ so MASC consumes RFC-OAS-029 provider capability
   ;; fields, canonical stream/tool surfaces, typed tool-call/reasoning
   ;; projection, and fail-closed provider parser hardening.
-  (agent_sdk (>= 0.208.3))
+  (agent_sdk (>= 0.208.5))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

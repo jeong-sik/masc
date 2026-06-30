@@ -28,6 +28,7 @@
 (tests
  (names
   test_keeper_memory_os_io_fd
+  test_keeper_memory_os_external_state_decay
   test_connector_reactive_wake_throttle
   test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane
@@ -355,6 +356,7 @@
   test_keeper_behavior_trace)
  (modules
   test_keeper_memory_os_io_fd
+  test_keeper_memory_os_external_state_decay
   test_connector_reactive_wake_throttle
   test_keeper_bank_longterm_inject_flag
   test_keeper_memory_lane

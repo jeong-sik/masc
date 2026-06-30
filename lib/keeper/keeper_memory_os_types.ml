@@ -288,15 +288,30 @@ let category_valid_until ~now = function
    named, not magic; tune in cycles (RFC §7). *)
 let self_observation_ttl_seconds = 3_600.0
 
+(* RFC-0259 P7 (2026-06-30): [External_state] claims describe volatile external
+   reality (a task's status, a blocker, a PR state) that becomes false when the
+   world moves on. Without a finite horizon they never expire (the category arm
+   below returns [None] for Fact/Constraint/...) and [reobserve_fact] keeps
+   refreshing [last_verified_at] on mere LLM re-assertion, so a claim about a
+   cancelled task is re-injected into recall indefinitely. A horizon keyed on the
+   producer-emitted [claim_kind] tag — NOT on claim prose; prose-inferred
+   external_ref grounding stays superseded per the 2026-06-25 note — bounds how
+   long such a claim can outlive its truth. Longer than a self-observation:
+   external facts change on a slower cadence than a keeper's moment-to-moment
+   state. A TIME, not a score; named, not magic; tune in cycles (RFC §7). *)
+let external_state_ttl_seconds = 6.0 *. 3_600.0
+
 (* RFC-0285 §3.4: the write-side [valid_until] producer. A [Self_observation]
-   claim_kind gets the shortest finite horizon regardless of category. Otherwise
+   claim_kind gets the shortest finite horizon regardless of category; an
+   [External_state] claim gets a longer finite horizon (RFC-0259 P7). Otherwise
    the category decides (only [Ephemeral] is finite). [external_ref] is accepted for
    call-site compatibility but does not affect retention; Memory OS provides refs
    as context, not as a code-enforced status classifier. *)
 let fact_valid_until ~now ~external_ref:_ ~claim_kind category =
   match claim_kind with
   | Some Self_observation -> Some (now +. self_observation_ttl_seconds)
-  | Some External_state | Some Durable_knowledge | Some Diagnostic | None ->
+  | Some External_state -> Some (now +. external_state_ttl_seconds)
+  | Some Durable_knowledge | Some Diagnostic | None ->
     category_valid_until ~now category
 ;;
 

@@ -447,6 +447,23 @@ let test_parse_non_json_is_none () =
   Alcotest.(check bool) "JSON array yields None" true (Consolidation.plan_of_string "[]" = None)
 ;;
 
+let test_parse_result_reports_rejection_reason () =
+  Alcotest.(check bool)
+    "non-JSON result"
+    true
+    (match Consolidation.plan_result_of_string "not json {{{" with
+     | Error Consolidation.Non_json -> true
+     | Ok _
+     | Error Consolidation.Non_object_json -> false);
+  Alcotest.(check bool)
+    "non-object result"
+    true
+    (match Consolidation.plan_result_of_string {|"not an object"|} with
+     | Error Consolidation.Non_object_json -> true
+     | Ok _
+     | Error Consolidation.Non_json -> false)
+;;
+
 let () =
   Alcotest.run
     "keeper_memory_os_consolidation"
@@ -480,10 +497,14 @@ let () =
 	    ; ( "parse"
 	      , [ Alcotest.test_case "parses a plan" `Quick test_parse_plan_json
 	        ; Alcotest.test_case "rejects fractional indices" `Quick test_parse_rejects_fractional_indices
-	        ; Alcotest.test_case "rejects wrapped JSON" `Quick test_parse_rejects_wrapped_json
-	        ; Alcotest.test_case "degrades a garbled group" `Quick test_parse_degrades_garbled_group
-	        ; Alcotest.test_case "non-JSON is None" `Quick test_parse_non_json_is_none
-	        ] )
+        ; Alcotest.test_case "rejects wrapped JSON" `Quick test_parse_rejects_wrapped_json
+        ; Alcotest.test_case "degrades a garbled group" `Quick test_parse_degrades_garbled_group
+        ; Alcotest.test_case "non-JSON is None" `Quick test_parse_non_json_is_none
+        ; Alcotest.test_case
+            "result reports rejection reason"
+            `Quick
+            test_parse_result_reports_rejection_reason
+        ] )
     ; ( "render"
       , [ Alcotest.test_case
             "keeps one fact per prompt line"

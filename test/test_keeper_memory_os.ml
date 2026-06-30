@@ -1246,22 +1246,49 @@ let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
   let parse raw =
     Memory_summary.For_testing.summary_text_of_response (fake_response raw)
   in
+  let parse_result raw =
+    Memory_summary.For_testing.summary_text_result_of_response (fake_response raw)
+  in
+  let check_invalid_structured label = function
+    | Error (Memory_summary.Invalid_structured_response _) -> ()
+    | Ok summary -> Alcotest.failf "%s: expected invalid structured response, got %S" label summary
+    | Error Memory_summary.Empty_summary_response ->
+        Alcotest.failf "%s: expected invalid structured response, got empty response" label
+  in
   Alcotest.(check (option string))
     "valid summary json"
     (Some "Remember exact command.")
     (parse {|{"summary":" Remember exact command.  "}|});
+  (match parse_result {|{"summary":" Remember exact command.  "}|} with
+   | Ok summary ->
+       Alcotest.(check string)
+         "valid summary json result"
+         "Remember exact command."
+         summary
+   | Error _ -> Alcotest.fail "valid summary json result rejected");
   Alcotest.(check (option string))
     "plain text rejected"
     None
     (parse "Remember exact command.");
+  check_invalid_structured "plain text result" (parse_result "Remember exact command.");
   Alcotest.(check (option string))
     "empty summary rejected"
     None
     (parse {|{"summary":"   "}|});
+  Alcotest.(check bool)
+    "empty summary result"
+    true
+    (match parse_result {|{"summary":"   "}|} with
+     | Error Memory_summary.Empty_summary_response -> true
+     | Ok _
+     | Error (Memory_summary.Invalid_structured_response _) -> false);
   Alcotest.(check (option string))
     "wrong field rejected"
     None
-    (parse {|{"text":"Remember exact command."}|})
+    (parse {|{"text":"Remember exact command."}|});
+  check_invalid_structured
+    "wrong field result"
+    (parse_result {|{"text":"Remember exact command."}|})
 ;;
 
 let json_episode_file_count ~keeper_id =
@@ -1485,7 +1512,7 @@ let test_librarian_runtime_requires_clock_for_provider_call () =
           (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
 ;;
 
-let test_librarian_runtime_preserves_unstructured_fallback () =
+let test_librarian_runtime_rejects_unstructured_fallback () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       with_eio (fun ~sw ~net ~clock ->
@@ -1501,7 +1528,10 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
           ; messages = [ text_message "Please remember the fallback path." ]
           }
         in
-        let fallback_started_at = Eio.Time.now clock in
+        Alcotest.(check bool)
+          "production cadence gate is due before provider attempt"
+          true
+          (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id);
         let fallback_result =
           Librarian_runtime.extract_and_append_with_provider_classified
             ~complete
@@ -1513,113 +1543,47 @@ let test_librarian_runtime_preserves_unstructured_fallback () =
             ~provider_cfg:(test_provider_cfg ())
             inp
         in
-        let fallback_finished_at = Eio.Time.now clock in
-        let fallback_created_at = ref None in
-        let check_in_clock_window label value =
-          Alcotest.(check bool)
-            label
-            true
-            (value >= fallback_started_at && value <= fallback_finished_at +. 0.001)
-        in
         (match fallback_result with
-         | Error err ->
-           Alcotest.fail (Librarian_runtime.extraction_error_to_string err)
-         | Ok extraction ->
-           let episode = extraction.Librarian_runtime.episode in
-           let kind = extraction.Librarian_runtime.kind in
-           (match kind with
-            | Librarian_runtime.Unstructured_fallback -> ()
-            | Librarian_runtime.Structured_episode ->
-              Alcotest.fail "expected unstructured fallback extraction");
-           Alcotest.(check bool)
-             "fallback does not count as cadence success"
-             false
-             (Librarian_runtime.should_record_cadence_success kind);
-           Alcotest.(check bool)
-             "fallback defers the next cadence attempt"
-             true
-             (Librarian_runtime.should_record_cadence_backoff kind);
-           fallback_created_at := Some episode.Types.created_at;
-           check_in_clock_window
-             "fallback created_at derives from injected clock"
-             episode.Types.created_at;
+         | Ok _ -> Alcotest.fail "unstructured provider output must not persist"
+         | Error (Librarian_runtime.Provider_unparseable_response reason as err) ->
            Alcotest.(check int)
              "initial attempt + parse retries"
              (1 + Librarian_runtime.librarian_max_parse_retries)
              !calls;
-           Alcotest.(check string)
-             "fallback summary"
-             "Unstructured librarian note preserved after parse failure"
-             episode.Types.episode_summary;
-           Alcotest.(check (option string))
-             "fallback marker"
-             (Some Types.librarian_unstructured_fallback_terminal_marker)
-             episode.Types.terminal_marker;
-           (match episode.Types.claims with
-            | [ fact ] ->
-              Alcotest.(check bool)
-                "fallback claim keeps raw provider text"
-                true
-                (contains "not json, but keep this observation" fact.Types.claim);
-              Alcotest.(check bool)
-                "fallback is ephemeral"
-                true
-                (fact.Types.category = Types.Ephemeral);
-              Alcotest.(check (option string))
-                "fallback is diagnostic"
-                (Some "diagnostic")
-                (Option.map Types.claim_kind_to_string fact.Types.claim_kind);
-              Alcotest.(check (option string))
-                "fallback diagnostic does not author claim_id"
-                None
-                fact.Types.claim_id;
-              Alcotest.(check (float 0.001))
-                "fallback fact first_seen uses episode timestamp"
-                episode.Types.created_at
-                fact.Types.first_seen;
-              Alcotest.(check (option (float 0.001)))
-                "fallback fact last_verified_at uses episode timestamp"
-                (Some episode.Types.created_at)
-                fact.Types.last_verified_at
-            | facts -> Alcotest.failf "expected one fallback fact, got %d" (List.length facts)));
-        let fallback_created_at =
-          match !fallback_created_at with
-          | Some ts -> ts
-          | None -> Alcotest.fail "fallback result timestamp was not captured"
-        in
+           Alcotest.(check bool)
+             "typed provider error preserves parser reason"
+             true
+             (contains
+                "librarian provider returned invalid episode JSON"
+                reason);
+           Alcotest.(check bool)
+             "unparseable provider error enters cadence backoff path"
+             true
+             (Librarian_runtime.should_record_cadence_backoff_after_error err);
+           Librarian_runtime.cadence_record_attempt ~keeper_id ~trace_id:inp.trace_id;
+           Alcotest.(check bool)
+             "cadence attempt defers the next provider retry"
+             false
+             (Librarian_runtime.cadence_due ~keeper_id ~trace_id:inp.trace_id)
+         | Error err ->
+           Alcotest.failf
+             "expected Provider_unparseable_response, got %s"
+             (Librarian_runtime.extraction_error_to_string err));
         Alcotest.(check int)
-          "episode file persisted"
-          1
+          "episode file not persisted"
+          0
           (json_episode_file_count ~keeper_id);
-        (match Memory_io.read_events_tail ~keeper_id ~n:1 with
-         | [ episode ] ->
-           Alcotest.(check (option string))
-             "event persisted with fallback marker"
-             (Some Types.librarian_unstructured_fallback_terminal_marker)
-             episode.Types.terminal_marker;
-           Alcotest.(check (float 0.001))
-             "event persisted with injected-clock timestamp"
-             fallback_created_at
-             episode.Types.created_at
-         | events -> Alcotest.failf "expected one event, got %d" (List.length events));
-        match Memory_io.read_facts_tail ~keeper_id ~n:1 with
-        | [ fact ] ->
-          Alcotest.(check bool)
-            "fact persisted as unstructured note"
-            true
-            (contains "unstructured_note" fact.Types.claim);
-          Alcotest.(check (option string))
-            "persisted fact is diagnostic"
-            (Some "diagnostic")
-            (Option.map Types.claim_kind_to_string fact.Types.claim_kind);
-          Alcotest.(check (float 0.001))
-            "persisted fact first_seen uses injected clock"
-            fallback_created_at
-            fact.Types.first_seen
-        | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
+        Alcotest.(check int)
+          "event not persisted"
+          0
+          (List.length (Memory_io.read_events_tail ~keeper_id ~n:1));
+        Alcotest.(check int)
+          "fact not persisted"
+          0
+          (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
 ;;
 
-let test_librarian_runtime_keeps_nonempty_fallback_across_empty_retries () =
+let test_librarian_runtime_rejects_unparseable_output_across_empty_retries () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       with_eio (fun ~sw ~net ~clock ->
@@ -1649,42 +1613,35 @@ let test_librarian_runtime_keeps_nonempty_fallback_across_empty_retries () =
             ~provider_cfg:(test_provider_cfg ())
             inp
         with
+        | Ok _ -> Alcotest.fail "unparseable provider output must not persist"
         | Error err ->
-          Alcotest.fail
-            (Printf.sprintf
-               "expected non-empty first response to be preserved, got %s"
-               (Librarian_runtime.extraction_error_to_string err))
-        | Ok extraction ->
           Alcotest.(check int)
             "initial invalid response + empty retries"
             (1 + Librarian_runtime.librarian_max_parse_retries)
             !calls;
-          (match extraction.Librarian_runtime.kind with
-           | Librarian_runtime.Unstructured_fallback -> ()
-           | Librarian_runtime.Structured_episode ->
-             Alcotest.fail "expected unstructured fallback extraction");
-          (match extraction.Librarian_runtime.episode.Types.claims with
-           | [ fact ] ->
-             Alcotest.(check bool)
-               "fallback claim keeps first non-empty provider text"
-               true
-               (contains "first invalid librarian payload" fact.Types.claim);
-             Alcotest.(check bool)
-               "fallback claim keeps invalid-json reason"
-               true
-               (contains
-                  "librarian provider returned invalid episode JSON"
-                  fact.Types.claim);
-             Alcotest.(check bool)
-               "fallback claim does not use later empty retry reason"
-               false
-               (contains
-                  "librarian provider returned empty response"
-                  fact.Types.claim)
-           | facts -> Alcotest.failf "expected one fallback fact, got %d" (List.length facts)))))
+          Alcotest.(check bool)
+            "error keeps first non-empty invalid-json reason"
+            true
+            (contains
+               "librarian provider returned invalid episode JSON"
+               (Librarian_runtime.extraction_error_to_string err));
+          Alcotest.(check bool)
+            "error does not use later empty retry reason"
+            false
+            (contains
+               "librarian provider returned empty response"
+               (Librarian_runtime.extraction_error_to_string err));
+          Alcotest.(check int)
+            "event not persisted"
+            0
+            (List.length (Memory_io.read_events_tail ~keeper_id ~n:1));
+          Alcotest.(check int)
+            "fact not persisted"
+            0
+            (List.length (Memory_io.read_facts_tail ~keeper_id ~n:1)))))
 ;;
 
-let test_librarian_unstructured_fallback_uses_exact_text_identity () =
+let test_librarian_unstructured_fallback_does_not_write_facts () =
   with_prompt_registry (fun () ->
     with_temp_keepers_dir (fun _keepers_dir ->
       with_eio (fun ~sw ~net ~clock ->
@@ -1713,57 +1670,25 @@ let test_librarian_unstructured_fallback_uses_exact_text_identity () =
               ~provider_cfg:(test_provider_cfg ())
               inp
           with
-          | Error msg -> Alcotest.fail msg
-          | Ok episode -> episode
+          | Ok _ -> Alcotest.fail "unparseable provider output must not persist"
+          | Error msg -> msg
         in
         let first = run_once first_complete in
         let second = run_once second_complete in
         Alcotest.(check int)
-          "both fallback episodes are still evented"
-          2
+          "fallback events are not written"
+          0
           (List.length (Memory_io.read_events_tail ~keeper_id ~n:10));
         let facts = Memory_io.read_facts_all ~keeper_id in
-        Alcotest.(check int) "distinct diagnostics remain distinct facts" 2 (List.length facts);
+        Alcotest.(check int) "diagnostic facts are not written" 0 (List.length facts);
         Alcotest.(check bool)
-          "fallback diagnostics do not author claim_id"
+          "first error keeps invalid-json reason"
           true
-          (List.for_all (fun fact -> Option.is_none fact.Types.claim_id) facts);
+          (contains "invalid episode JSON" first);
         Alcotest.(check bool)
-          "fallback diagnostics are typed diagnostic"
+          "second error keeps invalid-json reason"
           true
-          (List.for_all (fun fact -> fact.Types.claim_kind = Some Types.Diagnostic) facts);
-        Alcotest.(check bool)
-          "first raw note is preserved"
-          true
-          (List.exists
-             (fun fact -> contains "first invalid librarian payload" fact.Types.claim)
-             facts);
-        Alcotest.(check bool)
-          "second raw note is preserved"
-          true
-          (List.exists
-             (fun fact -> contains "second invalid librarian payload" fact.Types.claim)
-             facts);
-        (match first.Types.claims, second.Types.claims with
-         | [ first_fact ], [ second_fact ] ->
-           Alcotest.(check bool)
-             "first result has no claim_id"
-             true
-             (Option.is_none first_fact.Types.claim_id);
-           Alcotest.(check bool)
-             "second result has no claim_id"
-             true
-             (Option.is_none second_fact.Types.claim_id);
-           Alcotest.(check bool)
-             "result fallback facts are diagnostic"
-             true
-             (first_fact.Types.claim_kind = Some Types.Diagnostic
-              && second_fact.Types.claim_kind = Some Types.Diagnostic)
-         | first_claims, second_claims ->
-           Alcotest.failf
-             "expected one fallback fact in each result, got %d/%d"
-             (List.length first_claims)
-             (List.length second_claims)))))
+          (contains "invalid episode JSON" second))))
 ;;
 
 let test_librarian_runtime_reports_fact_upsert_failure () =
@@ -5711,17 +5636,17 @@ let () =
         ] )
     ; ( "librarian runtime"
       , [ Alcotest.test_case
-            "unparseable output is preserved as unstructured fallback"
+            "unparseable output is rejected instead of persisted"
             `Quick
-            test_librarian_runtime_preserves_unstructured_fallback
+            test_librarian_runtime_rejects_unstructured_fallback
         ; Alcotest.test_case
-            "non-empty fallback evidence survives empty retries"
+            "non-empty fallback evidence remains an error across empty retries"
             `Quick
-            test_librarian_runtime_keeps_nonempty_fallback_across_empty_retries
+            test_librarian_runtime_rejects_unparseable_output_across_empty_retries
         ; Alcotest.test_case
-            "unstructured fallback uses exact-text identity"
+            "unstructured fallback does not write facts"
             `Quick
-            test_librarian_unstructured_fallback_uses_exact_text_identity
+            test_librarian_unstructured_fallback_does_not_write_facts
         ; Alcotest.test_case
             "provider slot gate caps concurrency at capacity (#21376/#21230)"
             `Quick

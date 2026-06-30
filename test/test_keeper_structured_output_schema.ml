@@ -168,6 +168,24 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
   check bool "fusion schema exposes parser wire fields" true true
 ;;
 
+let test_fusion_panel_schema_uses_answer_contract () =
+  let schema = Keeper_structured_output_schema.fusion_panel_answer_output_schema in
+  check
+    (list string)
+    "fusion panel required fields"
+    [ "answer" ]
+    (required_strings schema);
+  check
+    (option string)
+    "fusion panel answer is string"
+    (Some "string")
+    (match schema |> schema_property "answer" |> schema_member "type" with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  check bool "fusion panel schema is closed" false
+    (allows_additional_properties schema)
+;;
+
 let test_verification_verdict_schema_uses_core_ssot () =
   let schema = Keeper_structured_output_schema.verification_verdict_output_schema in
   check
@@ -242,6 +260,10 @@ let () =
             "fusion judge schema uses parser wire contract"
             `Quick
             test_fusion_judge_schema_uses_parser_wire_contract
+        ; test_case
+            "fusion panel schema uses answer contract"
+            `Quick
+            test_fusion_panel_schema_uses_answer_contract
         ] )
     ; ( "verdict schemas"
       , [ test_case

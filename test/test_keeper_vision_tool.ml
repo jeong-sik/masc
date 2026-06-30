@@ -495,6 +495,60 @@ let with_temp_runtime_toml content f =
       init_runtime_or_fail path;
       f ())
 
+(* The structured-output capability gate (SDK [validate_output_schema_request])
+   resolves a model's [supports_structured_output] from the global
+   [Model_catalog], not from the runtime.toml [capabilities] block. Production
+   wires this by walking cwd parents for oas-models.toml and exporting
+   OAS_MODEL_CATALOG (server_runtime_bootstrap), which the SDK lazily loads.
+   These pure tests never run that bootstrap, so without an installed catalog
+   the synthetic ollama vision runtimes resolve to [default_capabilities]
+   (supports_structured_output = false); [vision_runtime_candidates] then
+   filters them out and the tool short-circuits to no_capable_runtime before
+   ever reaching the provider sub-call. Install a minimal catalog so the
+   provider-reaching tests below exercise their intended paths.
+   Ref #22767 (consume provider capability contract). *)
+let vision_model_catalog_toml =
+  {|
+[[models]]
+id_prefix = "ollama/vision-a"
+base = "ollama"
+supports_image_input = true
+supports_multimodal_inputs = true
+supports_structured_output = true
+
+[[models]]
+id_prefix = "ollama/vision-b"
+base = "ollama"
+supports_image_input = true
+supports_multimodal_inputs = true
+supports_structured_output = true
+
+[[models]]
+id_prefix = "ollama/vision-c"
+base = "ollama"
+supports_image_input = true
+supports_multimodal_inputs = true
+supports_structured_output = true
+|}
+
+let with_vision_model_catalog f =
+  let path = Filename.temp_file "masc-vision-catalog-" ".toml" in
+  write_file path vision_model_catalog_toml;
+  let previous = Llm_provider.Model_catalog.global () in
+  Fun.protect
+    ~finally:(fun () ->
+      (match previous with
+       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+       | None -> Llm_provider.Model_catalog.clear_global ());
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+      match Llm_provider.Model_catalog.load_file path with
+      | Error msg -> failwith ("vision test model catalog should load: " ^ msg)
+      | Ok catalog ->
+        Llm_provider.Model_catalog.set_global catalog;
+        f ())
+
 let vision_failover_runtime_toml =
   {|
 [runtime]
@@ -1012,11 +1066,16 @@ let () =
   test_oversize_image_is_runtime_failure_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
   test_schema_unsupported_vision_runtime_is_skipped_before_provider_call ();
-  test_invalid_structured_vision_response_is_runtime_failure ();
-  test_retryable_provider_error_tries_next_runtime ();
-  test_deadline_exhaustion_preserves_provider_error ();
-  test_non_retryable_provider_error_stops_without_trying_next_runtime ();
-  test_accept_rejected_is_policy_rejection_without_failover ();
+  (* These tests drive the synthetic ollama vision runtimes past the
+     schema-capability gate to the provider sub-call, so they need an installed
+     model catalog that advertises supports_structured_output (see
+     [with_vision_model_catalog]). *)
+  with_vision_model_catalog (fun () ->
+    test_invalid_structured_vision_response_is_runtime_failure ();
+    test_retryable_provider_error_tries_next_runtime ();
+    test_deadline_exhaustion_preserves_provider_error ();
+    test_non_retryable_provider_error_stops_without_trying_next_runtime ();
+    test_accept_rejected_is_policy_rejection_without_failover ());
   test_delegate_eager_eviction_stores_image_and_removes_inline_block ();
   test_delegate_eviction_rejects_invalid_media_type_before_store ();
   test_delegate_eviction_rejects_oversize_before_store ();

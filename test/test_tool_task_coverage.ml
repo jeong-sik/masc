@@ -1711,6 +1711,30 @@ let () = test "transition_claim_sets_planning_current_task" (fun () ->
   assert (Planning_eio.get_current_task ctx.config = Some "task-001")
 )
 
+let () = test "transition_missing_task_clears_stale_current_task" (fun () ->
+  let ctx = make_test_ctx () in
+  (match Planning_eio.set_current_task ctx.config ~task_id:"task-1468" with
+   | Ok () -> ()
+   | Error msg -> failwith msg);
+  let result =
+    Task.Tool.handle_transition ~tool_name:"test_tool" ~start_time:0.0 ctx
+      (`Assoc [("task_id", `String "task-1468"); ("action", `String "start")])
+  in
+  assert (not (Tool_result.is_success result));
+  assert (Tool_result.failure_class result = Some Tool_result.Workflow_rejection);
+  assert (Planning_eio.get_current_task ctx.config = None);
+  let data = Tool_result.data result in
+  assert (Json_util.get_bool data "stale_context" = Some true);
+  assert (
+    match Json_util.assoc_member_opt "diagnosis" data with
+    | Some diagnosis ->
+      Json_util.get_string diagnosis "rule_id" = Some "stale_task_id_not_found"
+      && Json_util.get_string diagnosis "tool_suggestion"
+         = Some "keeper_tasks_list"
+    | None -> false);
+  assert (str_contains (Tool_result.message result) "absent from the live backlog")
+)
+
 (* RFC-0109 Phase E (#18822, 2026-05-27) retired the transition-layer
    substring evidence gate. The two tests that previously locked in
    the substring-reject behaviour

@@ -34,11 +34,8 @@ let tool_start_is_replay existing tool =
   String.equal existing.tool_call_id tool.tool_call_id
   && String.equal existing.tool_call_name tool.tool_call_name
 
-let sdk_stream_event_is_deliverable =
-  Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
-
 let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
-  sdk_stream_event_is_deliverable
+  Agent_sdk.Llm_provider.Streaming.sse_event_is_deliverable_progress_signal
     (Agent_sdk.Types.ContentBlockStart
        { index; content_type; tool_id; tool_name })
 

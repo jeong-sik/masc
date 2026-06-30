@@ -33,6 +33,7 @@ module Board_name : sig
     | Board_hearths
     | Board_list
     | Board_post
+    | Board_post_update
     | Board_profile
     | Board_reaction
     | Board_search
@@ -46,6 +47,7 @@ module Board_name : sig
 
   val to_string : t -> string
   val of_string : string -> t option
+  val is_resource_write : t -> bool
   val pp : Stdlib.Format.formatter -> t -> unit
 end
 

@@ -183,69 +183,60 @@ let classify_catalog_metadata_tool ~tool_name =
   | _ -> None
 ;;
 
+let classify_board_tool_name ~tool_name =
+  match Tool_name.Board_name.of_string tool_name with
+  | Some board_name ->
+    Some
+      (if Tool_name.Board_name.is_resource_write board_name then Board_write else Ungated)
+  | None -> None
+;;
+
 let classify_catalog_tool ~tool_name =
-  match tool_name with
-  | "masc_web_fetch" | "masc_web_search" -> Some Web
-  | "masc_board_cleanup"
-  | "masc_board_comment"
-  | "masc_board_comment_vote"
-  | "masc_board_curation_submit"
-  | "masc_board_delete"
-  | "masc_board_post"
-  | "masc_board_reaction"
-  | "masc_board_sub_board_create"
-  | "masc_board_sub_board_delete"
-  | "masc_board_sub_board_update"
-  | "masc_board_vote" -> Some Board_write
-  | "masc_add_task"
-  | "masc_batch_add_tasks"
-  | "masc_deliver"
-  | "masc_goal_transition"
-  | "masc_goal_upsert"
-  | "masc_goal_verify"
-  | "masc_heartbeat"
-  | "masc_note_add"
-  | "masc_plan_clear_task"
-  | "masc_plan_init"
-  | "masc_plan_set_task"
-  | "masc_plan_update"
-  | "masc_reset"
-  | "masc_tool_grant"
-  | "masc_tool_revoke"
-  | "masc_transition"
-  | "masc_update_priority" -> Some Workspace_write
-  | "masc_broadcast"
-  | "masc_cleanup_zombies"
-  | "masc_gc" -> Some Generic_write
-  | "masc_board_curation_read"
-  | "masc_board_post_get"
-  | "masc_board_hearths"
-  | "masc_board_list"
-  | "masc_board_profile"
-  | "masc_board_search"
-  | "masc_board_stats"
-  | "masc_board_sub_board_get"
-  | "masc_board_sub_board_list"
-  | "masc_check"
-  | "masc_config"
-  | "masc_dashboard"
-  | "masc_get_metrics"
-  | "masc_goal_list"
-  | "masc_messages"
-  | "masc_operator_digest"
-  | "masc_operator_snapshot"
-  | "masc_pause"
-  | "masc_plan_get"
-  | "masc_plan_get_task"
-  | "masc_resume"
-  | "masc_session"
-  | "masc_start"
-  | "masc_status"
-  | "masc_task_history"
-  | "masc_tasks"
-  | "masc_tool_list"
-  | "masc_tool_stats" -> Some Ungated
-  | _ -> None
+  match classify_board_tool_name ~tool_name with
+  | Some resource_class -> Some resource_class
+  | None ->
+    (match tool_name with
+     | "masc_web_fetch" | "masc_web_search" -> Some Web
+     | "masc_add_task"
+     | "masc_batch_add_tasks"
+     | "masc_deliver"
+     | "masc_goal_transition"
+     | "masc_goal_upsert"
+     | "masc_goal_verify"
+     | "masc_heartbeat"
+     | "masc_note_add"
+     | "masc_plan_clear_task"
+     | "masc_plan_init"
+     | "masc_plan_set_task"
+     | "masc_plan_update"
+     | "masc_reset"
+     | "masc_tool_grant"
+     | "masc_tool_revoke"
+     | "masc_transition"
+     | "masc_update_priority" -> Some Workspace_write
+     | "masc_broadcast"
+     | "masc_cleanup_zombies"
+     | "masc_gc" -> Some Generic_write
+     | "masc_check"
+     | "masc_config"
+     | "masc_dashboard"
+     | "masc_get_metrics"
+     | "masc_goal_list"
+     | "masc_messages"
+     | "masc_operator_digest"
+     | "masc_operator_snapshot"
+     | "masc_pause"
+     | "masc_plan_get"
+     | "masc_plan_get_task"
+     | "masc_resume"
+     | "masc_session"
+     | "masc_start"
+     | "masc_status"
+     | "masc_task_history"
+     | "masc_tasks"
+     | "masc_tool_list"
+     | "masc_tool_stats" -> Some Ungated
+     | _ -> None)
 ;;
 
 let classify_descriptor_tool ~tool_name ~arguments =

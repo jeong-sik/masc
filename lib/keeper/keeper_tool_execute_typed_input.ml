@@ -270,8 +270,31 @@ let of_json (json : Yojson.Safe.t) =
     let* stderr = optional_redirect_target ~path:"$" fields "stderr" in
     Ok (Exec { executable; argv; cwd; env; stdin; stdout; stderr })
   | false, Some (path, value) ->
-    let* stages = parse_pipeline ~path value in
-    Ok (Pipeline { stages; cwd; env })
+    (* RFC-0198 Phase B 한계: typed redirect triple(stdin/stdout/stderr)은 [Exec]
+       variant에만 존재하고 [Pipeline]에는 없다. 그런데 이 세 키는
+       reject_unknown_fields 허용 목록(위 reject_unknown_fields ~allowed)에 들어
+       있어 pipeline과 함께 와도 파싱은 통과하고, [Pipeline { stages; cwd; env }]가
+       redirect를 버려 조용히 폐기된다 — silent failure. 명시적으로 거부해 사일런트
+       드롭을 차단한다. 근본 해결(Pipeline endpoint redirect 실제 지원)은 [Pipeline]
+       variant에 redirect_target triple을 추가하는 타입 확장이며 후속 작업이다. *)
+    let redirect_present key =
+      match member fields key with
+      | None | Some `Null -> false
+      | Some _ -> true
+    in
+    if
+      redirect_present "stdin"
+      || redirect_present "stdout"
+      || redirect_present "stderr"
+    then
+      Error
+        "$.stdin / $.stdout / $.stderr are not supported with $.pipeline; typed \
+         redirects apply only to the single-process {executable, argv} form. \
+         Put the redirecting command in its own pipeline stage, or use the \
+         {executable, argv} form with the typed redirect fields."
+    else
+      let* stages = parse_pipeline ~path value in
+      Ok (Pipeline { stages; cwd; env })
   | false, None -> Error "$.executable or $.pipeline is required"
 ;;
 

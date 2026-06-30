@@ -12,17 +12,18 @@
 [runtime]
 default = "ollama_cloud.deepseek-v4-flash"
 # memory-os librarian (post-turn episode extraction) requests provider-native
-# structured output, so it is routed independently of keeper chat to a runtime
-# whose OAS catalog row advertises native structured output. Keep MiniMax out of
-# this lane until OAS capability truth proves native schema support. Override per
+# structured output, so it is routed independently of keeper chat to the native
+# Ollama /api/chat binding whose `format` schema path was live-verified. The
+# OpenAI-compatible /v1 path accepts response_format but can still return fenced
+# prose, so do not point this lane at [providers.ollama_cloud]. Override per
 # process with MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID. Unset = inherit each
 # keeper's runtime (legacy).
-librarian = "ollama_cloud.ollama-cloud-devstral-2-123b"
+librarian = "ollama_cloud_native.minimax-m3-native-structured"
 # Provider-native structured-output judges must not inherit the fleet chat
 # default when that default lacks schema support. Keep this lane explicit so
 # dashboard operator/governance judges fail at config load on typo/unsupported
 # routing instead of discovering the mismatch in the daemon loop.
-structured_judge = "ollama_cloud.ollama-cloud-devstral-2-123b"
+structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
 # Anti-rationalization/cross-verifier work asks for JSON and higher judgment.
 # Keep normal keeper turns on the fleet default flash runtime; reserve Pro for
 # this explicit smart lane.
@@ -44,6 +45,18 @@ endpoint = "https://ollama.com/v1"
 connect-timeout-s = 600.0
 
 [providers.ollama_cloud.credentials]
+type = "env"
+key = "OLLAMA_CLOUD_API_KEY"
+
+[providers.ollama_cloud_native]
+display-name = "Ollama Cloud Native"
+protocol = "ollama-http"
+endpoint = "https://ollama.com"
+# Mirrors [providers.ollama_cloud]. This lane uses native /api/chat for schema
+# output, not OpenAI-compatible /v1/chat/completions.
+connect-timeout-s = 600.0
+
+[providers.ollama_cloud_native.credentials]
 type = "env"
 key = "OLLAMA_CLOUD_API_KEY"
 
@@ -199,6 +212,31 @@ supports-image-input = true
 supports-multimodal-inputs = true
 
 [ollama_cloud.minimax-m3]
+
+# MiniMax M3 native Ollama Cloud structured-output lane. This uses the same
+# provider-owned model id as [models.minimax-m3], but a distinct runtime model key
+# because the OpenAI-compatible /v1 transport does not strictly enforce
+# response_format/json_schema while native /api/chat `format` does.
+[models.minimax-m3-native-structured]
+api-name = "minimax-m3"
+max-context = 524288
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.minimax-m3-native-structured.capabilities]
+max-output-tokens = 131072
+supports-tool-choice = false
+supports-extended-thinking = true
+supports-reasoning-budget = true
+thinking-control-format = "ollama_think"
+supports-native-streaming = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[ollama_cloud_native.minimax-m3-native-structured]
 
 # Kimi K2.6 (Ollama Cloud) — vision-capable Cloud runtime. The model name is
 # kept separate from Kimi's direct API route; OAS owns provider/model wire

@@ -523,7 +523,7 @@ let test_repo_runtime_toml_loads () =
     check
       (option string)
       "structured judge runtime"
-      (Some "ollama_cloud.ollama-cloud-devstral-2-123b")
+      (Some "ollama_cloud_native.minimax-m3-native-structured")
       structured_judge;
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
@@ -623,6 +623,31 @@ let test_repo_runtime_toml_loads () =
           check bool "MiniMax M3 forced tool_choice disabled" false
             caps.supports_tool_choice
         | None -> fail "expected MiniMax M3 capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id
+              "ollama_cloud_native.minimax-m3-native-structured")
+         runtimes
+     with
+     | None -> fail "expected native MiniMax M3 structured-output runtime in seed"
+     | Some runtime ->
+       check string "native MiniMax M3 api name" "minimax-m3"
+         runtime.model.api_name;
+       check (option (float 0.0)) "native MiniMax M3 connect timeout"
+         (Some 600.0)
+         runtime.provider_config.connect_timeout_s;
+       (match runtime.model.capabilities with
+       | Some caps ->
+         check bool "native MiniMax M3 response_format json" true
+           caps.supports_response_format_json;
+         check bool "native MiniMax M3 structured output" true
+           caps.supports_structured_output;
+         check bool "native MiniMax M3 Ollama think control" true
+           (Runtime_schema.equal_thinking_control_format
+              caps.thinking_control_format
+              Runtime_schema.Ollama_think)
+       | None -> fail "expected native MiniMax M3 capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->

@@ -27,6 +27,7 @@ import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
+import { tweaksDensity, type Density } from './tweaks-panel'
 import type { ComponentChildren } from 'preact'
 
 type SectionId = SettingsRouteSectionId
@@ -68,6 +69,7 @@ const SET_GROUPS: [string, SectionId[]][] = [
 const MCP_PUBLIC_SURFACE = 'public_mcp'
 const SETTINGS_LOG_LIMIT = 50
 const SETTINGS_LOG_POLL_MS = 3000
+const DISPLAY_DENSITY_OPTIONS: Density[] = ['compact', 'regular', 'spacious']
 
 export function normalizeSettingsSection(value: string | null | undefined): SectionId {
   return SETTINGS_ROUTE_SECTION_SET.has(value ?? '') ? (value as SectionId) : DEFAULT_SETTINGS_SECTION
@@ -116,6 +118,13 @@ function writeLocalPreviewString(key: string, value: string) {
   }
 }
 
+function readLocalPreviewBool(key: string, fallback: boolean): boolean {
+  const raw = readLocalPreviewString(key, fallback ? 'true' : 'false')
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return fallback
+}
+
 function readLocalPreviewBoolRecord(key: string, fallback: Record<string, boolean>): Record<string, boolean> {
   const next = { ...fallback }
   try {
@@ -148,6 +157,15 @@ function useLocalPreviewString(key: string, initialValue: string): [string, (nex
   const setStoredValue = (next: string) => {
     setValue(next)
     writeLocalPreviewString(key, next)
+  }
+  return [value, setStoredValue]
+}
+
+function useLocalPreviewBool(key: string, initialValue: boolean): [boolean, (next: boolean) => void] {
+  const [value, setValue] = useState(() => readLocalPreviewBool(key, initialValue))
+  const setStoredValue = (next: boolean) => {
+    setValue(next)
+    writeLocalPreviewString(key, next ? 'true' : 'false')
   }
   return [value, setStoredValue]
 }
@@ -557,7 +575,7 @@ function settingsSectionState(
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
   if (section === 'notify') return { mode: 'mixed', label: 'live thresholds + local preview' }
-  if (section === 'display') return { mode: 'local', label: 'browser preference' }
+  if (section === 'display') return { mode: 'mixed', label: 'theme/density live + local preview' }
   return { mode: 'local', label: 'local preview only' }
 }
 
@@ -799,10 +817,16 @@ export function SettingsSurface() {
     '핸드오프 완료': false,
     '승인 요청': true,
   })
-  const [density, setDensity] = useState('regular')
-  const [tz, setTz] = useState('Asia/Seoul')
-  const [locale, setLocale] = useState('KO')
-  const [clock24, setClock24] = useState(true)
+  const density = tweaksDensity.value
+  const setDensity = (next: string) => {
+    if ((DISPLAY_DENSITY_OPTIONS as string[]).includes(next)) {
+      tweaksDensity.value = next as Density
+    }
+  }
+  const [tz, setTz] = useLocalPreviewString('displayTimezone', 'Asia/Seoul')
+  const [locale, setLocale] = useLocalPreviewString('displayLocale', 'KO')
+  const [clock24, setClock24] = useLocalPreviewBool('displayClock24', true)
+  const clockLabel = clock24 ? '24-hour clock' : '12-hour clock'
 
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
   const sectionState = settingsSectionState(sec, fusionSettingsWritable)
@@ -977,47 +1001,54 @@ export function SettingsSurface() {
                   <//>
                 </div>
 
-                <div class="set-sub-h">Model routing</div>
-                <div class="set-route-summary" data-testid="runtime-routing-summary">
-                  ${librarianRuntime
-                    ? html`<span><span class="sub-k">librarian</span><span class="mono">${librarianRuntime}</span></span>`
-                    : html`<span><span class="sub-k">librarian</span><span class="mono">default runtime</span></span>`}
-                  ${crossVerifierRuntime
-                    ? html`<span><span class="sub-k">cross verifier</span><span class="mono">${crossVerifierRuntime}</span></span>`
-                    : html`<span><span class="sub-k">cross verifier</span><span class="mono">default runtime</span></span>`}
-                  <span><span class="sub-k">media failover</span><span class="mono">${mediaFailover.length > 0 ? mediaFailover.join(', ') : 'none'}</span></span>
+                <div class="settings-runtime-section" data-runtime-section="catalog" data-testid="runtime-catalog-section">
+                  <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
+                  ${runtimeCatalogStatus === 'loading'
+                    ? html`<div class="set-hint" data-testid="runtime-catalog-loading">runtime catalog 불러오는 중...</div>`
+                    : runtimeCatalogStatus === 'error'
+                      ? html`<div class="set-hint" data-testid="runtime-catalog-error">runtime catalog를 불러오지 못했습니다.</div>`
+                      : runtimeCatalogEntries.length === 0
+                        ? html`<div class="set-hint" data-testid="runtime-catalog-empty">표시할 runtime catalog entry가 없습니다.</div>`
+                        : html`
+                          <div class="settings-runtime-catalog" data-testid="runtime-catalog-summary">
+                            ${runtimeCatalogEntries.map(item => html`
+                              <${RuntimeCatalogCard}
+                                key=${runtimeCatalogKey(item)}
+                                item=${item}
+                                defaultRuntimeId=${defaultRuntimeId}
+                              />
+                            `)}
+                          </div>
+                        `}
                 </div>
-                <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
-                ${keeperAssignments.length === 0
-                  ? html`<div class="set-hint" data-testid="routing-assignments-empty">명시적 keeper 할당이 없습니다 — 모두 기본 런타임을 사용합니다.</div>`
-                  : html`<div class="settings-runtime-routing" data-testid="routing-assignments-list">
-                    ${keeperAssignments.map(a => html`
-                      <div class="set-routing-row" key=${a.keeper}>
-                        <span class="mono">${a.keeper}</span>
-                        <span class="set-routing-arrow">→</span>
-                        <span class="mono" data-testid="routing-assignment">${a.runtime_id}</span>
-                      </div>
-                    `)}
-                  </div>`}
 
-                <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
-                ${runtimeCatalogStatus === 'loading'
-                  ? html`<div class="set-hint" data-testid="runtime-catalog-loading">runtime catalog 불러오는 중...</div>`
-                  : runtimeCatalogStatus === 'error'
-                    ? html`<div class="set-hint" data-testid="runtime-catalog-error">runtime catalog를 불러오지 못했습니다.</div>`
-                    : runtimeCatalogEntries.length === 0
-                      ? html`<div class="set-hint" data-testid="runtime-catalog-empty">표시할 runtime catalog entry가 없습니다.</div>`
-                      : html`
-                        <div class="settings-runtime-catalog" data-testid="runtime-catalog-summary">
-                          ${runtimeCatalogEntries.map(item => html`
-                            <${RuntimeCatalogCard}
-                              key=${runtimeCatalogKey(item)}
-                              item=${item}
-                              defaultRuntimeId=${defaultRuntimeId}
-                            />
-                          `)}
+                <div class="settings-runtime-section" data-runtime-section="routing" data-testid="runtime-routing-section">
+                  <div class="set-sub-h">Model routing</div>
+                  <div class="set-route-summary" data-testid="runtime-routing-summary">
+                    ${librarianRuntime
+                      ? html`<span><span class="sub-k">librarian</span><span class="mono">${librarianRuntime}</span></span>`
+                      : html`<span><span class="sub-k">librarian</span><span class="mono">default runtime</span></span>`}
+                    ${crossVerifierRuntime
+                      ? html`<span><span class="sub-k">cross verifier</span><span class="mono">${crossVerifierRuntime}</span></span>`
+                      : html`<span><span class="sub-k">cross verifier</span><span class="mono">default runtime</span></span>`}
+                    <span><span class="sub-k">media failover</span><span class="mono">${mediaFailover.length > 0 ? mediaFailover.join(', ') : 'none'}</span></span>
+                  </div>
+                </div>
+
+                <div class="settings-runtime-section" data-runtime-section="assignments" data-testid="runtime-assignments-section">
+                  <div class="set-sub-h">Keeper assignments (${keeperAssignments.length})</div>
+                  ${keeperAssignments.length === 0
+                    ? html`<div class="set-hint" data-testid="routing-assignments-empty">명시적 keeper 할당이 없습니다 — 모두 기본 런타임을 사용합니다.</div>`
+                    : html`<div class="settings-runtime-routing" data-testid="routing-assignments-list">
+                      ${keeperAssignments.map(a => html`
+                        <div class="set-routing-row" key=${a.keeper}>
+                          <span class="mono">${a.keeper}</span>
+                          <span class="set-routing-arrow">→</span>
+                          <span class="mono" data-testid="routing-assignment">${a.runtime_id}</span>
                         </div>
-                      `}
+                      `)}
+                    </div>`}
+                </div>
               </div>
             `}
 
@@ -1147,20 +1178,39 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'display' && html`
-              <${SetRow} label="Theme" hint="Color palette — Dark / StyleSeed / Paper">
+              <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                Theme and density apply to this browser immediately. Language, timezone and clock format are browser-session previews only until the dashboard has a renderer-wide locale/time setting.
+              </div>
+              <div class="set-local-summary" data-testid="display-local-summary">
+                <span>display session</span>
+                <span class="mono">${density} · ${locale} · ${tz} · ${clockLabel}</span>
+              </div>
+              <${SetRow} label="Theme" hint="Live color palette — Dark / StyleSeed / Paper">
                 <${ThemeSwitch} />
               <//>
-              <${SetRow} label="Density" hint="List/card spacing">
-                <${SetSeg} value=${density} options=${['compact', 'regular']} onChange=${setDensity} />
+              <${SetRow} label="Density" hint="Live list/card spacing on the dashboard shell">
+                <div class="set-tg-control">
+                  <${PreviewBadge} label="live shell" />
+                  <${SetSeg} value=${density} options=${DISPLAY_DENSITY_OPTIONS} onChange=${setDensity} />
+                </div>
               <//>
-              <${SetRow} label="Language" hint="UI labels">
-                <${SetSeg} value=${locale} options=${['KO', 'EN']} onChange=${setLocale} />
+              <${SetRow} label="Language" hint="Session preview for UI labels">
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSeg} value=${locale} options=${['KO', 'EN']} onChange=${setLocale} />
+                </div>
               <//>
-              <${SetRow} label="Timezone" hint="Timestamp basis">
-                <${SetSeg} value=${tz} options=${['Asia/Seoul', 'Asia/Tokyo', 'UTC']} onChange=${setTz} />
+              <${SetRow} label="Timezone" hint="Session preview for timestamp basis">
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetSeg} value=${tz} options=${['Asia/Seoul', 'Asia/Tokyo', 'UTC']} onChange=${setTz} />
+                </div>
               <//>
-              <${SetRow} label="24-hour clock" hint="Time format">
-                <${SetToggle} on=${clock24} onChange=${setClock24} />
+              <${SetRow} label="24-hour clock" hint="Session preview for time format">
+                <div class="set-tg-control">
+                  <${PreviewBadge} />
+                  <${SetToggle} on=${clock24} onChange=${setClock24} />
+                </div>
               <//>
             `}
           </div>

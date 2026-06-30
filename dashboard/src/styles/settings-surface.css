@@ -290,6 +290,17 @@
   padding: 6px 8px;
 }
 
+.settings-runtime-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+}
+
+.settings-runtime-section .set-sub-h {
+  margin: 0;
+}
+
 .settings-runtime-catalog {
   display: grid;
   gap: 12px;

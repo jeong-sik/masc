@@ -23,6 +23,13 @@ let handle_tool name args : Tool_result.result =
     in
     Board_tool_cache.invalidate_board_list_cache ();
     result
+  | "masc_board_post_update" ->
+    let result =
+      Board_tool_format.with_yojson_boundary ~tool_name:name ~start_time (fun () ->
+        Board_tool_post.handle_post_edit ~tool_name:name ~start_time args)
+    in
+    Board_tool_cache.invalidate_board_list_cache ();
+    result
   | "masc_board_list" ->
     Board_tool_post.handle_post_list ~tool_name:name ~start_time args
   | "masc_board_post_get" ->

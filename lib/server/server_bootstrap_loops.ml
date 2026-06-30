@@ -1080,7 +1080,18 @@ let start_keeper_loops
                           MASC_SLACK_BOT_TOKEN not set, \
                           skipping Slack delivery for keeper=%s"
                          keeper_name));
-             process_single_turn ~state ~clock ~sw ~auth_token:None
+             (* RFC-connector-deferred-reply-via-chat-queue §3.4: connector sources (Discord/Slack) had their user
+                line recorded at the gate inbound boundary before the message was
+                enqueued, so the turn records the assistant reply only and does
+                not re-write the user line. Dashboard-source queue messages have
+                no upstream recorder, so the turn records both sides. *)
+             let connector_user_line_recorded_upstream =
+               match queued_message.source with
+               | Keeper_chat_queue.Discord _ | Keeper_chat_queue.Slack _ -> true
+               | Keeper_chat_queue.Dashboard -> false
+             in
+             process_single_turn ~connector_user_line_recorded_upstream
+               ~state ~clock ~sw ~auth_token:None
                ~thread_id ~closed ~client_disconnects:None ~payload ~run_id ~message_id
                ~agent_name ~events)
        with

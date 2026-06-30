@@ -6,6 +6,7 @@
 open Masc_board_handlers
 
 val tool_post_create : Masc_domain.tool_schema
+val tool_post_edit : Masc_domain.tool_schema
 val tool_post_list : Masc_domain.tool_schema
 val tool_post_get : Masc_domain.tool_schema
 val tool_comment_add : Masc_domain.tool_schema

@@ -334,6 +334,7 @@ let is_board_write_name = function
   | Tool_name.Board_name.Board_comment
   | Tool_name.Board_name.Board_curation_submit
   | Tool_name.Board_name.Board_post
+  | Tool_name.Board_name.Board_post_update
   | Tool_name.Board_name.Board_vote -> true
   | Tool_name.Board_name.Board_cleanup
   | Tool_name.Board_name.Board_comment_vote

@@ -23,6 +23,7 @@ import type {
 import { DashboardMain } from './dashboard-shell'
 import { route } from '../router'
 import { connected } from '../sse'
+import { tweaksDensity } from './tweaks-panel'
 
 const MOCK_RUNTIME_PATH = 'fixture/config/runtime.toml'
 import { dashboardLoading, shellConfigResolution, shellRuntimeResolution } from '../store'
@@ -344,6 +345,8 @@ describe('SettingsSurface', () => {
       keepers: { path: '/workspace/.masc/keepers', exists: true, source: 'derived' },
       personas: { path: '/workspace/.masc/personas', exists: true, source: 'derived' },
     }
+    localStorage.clear()
+    tweaksDensity.value = 'spacious'
     window.location.hash = '#settings'
     route.value = { tab: 'settings', params: {}, postId: null }
   })
@@ -356,6 +359,8 @@ describe('SettingsSurface', () => {
     shellRuntimeResolution.value = null
     resetDevTokenBootstrap()
     sessionStorage.clear()
+    localStorage.clear()
+    tweaksDensity.value = 'spacious'
     vi.unstubAllGlobals()
     vi.unstubAllEnvs()
   })
@@ -422,6 +427,43 @@ describe('SettingsSurface', () => {
     const themeButton = [...container.querySelectorAll('button')]
       .find(b => /DARK|STYLESEED|PAPER/.test(b.textContent ?? ''))
     expect(themeButton).toBeTruthy()
+  })
+
+  it('wires display density to the dashboard density signal and keeps local-only display previews honest', async () => {
+    route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
+
+    render(html`<${SettingsSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
+      .toContain('theme/density live + local preview')
+    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
+      .toContain('spacious')
+
+    const clickSeg = async (label: string) => {
+      const button = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+        .find(candidate => candidate.textContent === label)
+      expect(button).toBeTruthy()
+      await fireEvent.click(button as HTMLButtonElement)
+    }
+
+    await clickSeg('compact')
+    await clickSeg('EN')
+    await clickSeg('UTC')
+    await fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="set-toggle"]') as HTMLButtonElement)
+
+    expect(tweaksDensity.value).toBe('compact')
+    expect(sessionStorage.getItem('masc.settings.local.displayLocale')).toBe('EN')
+    expect(sessionStorage.getItem('masc.settings.local.displayTimezone')).toBe('UTC')
+    expect(sessionStorage.getItem('masc.settings.local.displayClock24')).toBe('false')
+    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
+      .toContain('compact · EN · UTC · 12-hour clock')
+
+    render(null, container)
+    render(html`<${SettingsSurface} />`, container)
+
+    expect(tweaksDensity.value).toBe('compact')
+    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
+      .toContain('compact · EN · UTC · 12-hour clock')
   })
 
   it('falls invalid settings sections back to runtime without a fake subsection', () => {
@@ -611,6 +653,10 @@ describe('SettingsSurface', () => {
         expect.stringContaining('Provider B'),
       ])
       expect(container.querySelector('[data-testid="runtime-catalog-default"]')?.textContent).toBe('default')
+      expect(
+        Array.from(container.querySelectorAll('[data-runtime-section]'))
+          .map(section => section.getAttribute('data-runtime-section')),
+      ).toEqual(['catalog', 'routing', 'assignments'])
     })
     expect(container.textContent).not.toContain('oas·seoul-1')
   })

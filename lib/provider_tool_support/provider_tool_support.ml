@@ -70,29 +70,40 @@ let fallback_tool_policy_for_kind kind =
 let tool_policy_for_kind kind = fallback_tool_policy_for_kind kind
 ;;
 
-(** Resolve OAS-level capabilities for a provider config, then merge
-    declarative runtime.toml capabilities when the tool policy declares a
-    runtime MCP lane — this ensures [classify_rejection] respects the
-    operator's [supports-runtime-mcp-tools] even when the OAS model-level
-    lookup returns a narrower capability set. *)
+(** Resolve OAS-level capabilities for a provider config.
+
+    Returns OAS's resolved capabilities unchanged in practice. The
+    [runtime_mcp_lane] upgrade below is currently unreachable, and the
+    operator-level [providers.<id>.capabilities] [supports-runtime-mcp-tools] /
+    [supports-runtime-tool-events] declared in config/runtime.toml is parsed
+    into [Runtime_schema.provider.capabilities] but read by no runtime
+    consumer, so provider-level runtime-MCP intent is dropped today
+    (masc#22771).
+
+    The upgrade branch is left in place deliberately — it is the (broken)
+    honor path, and deleting it would silently cement the config drop. Whether
+    to honor the operator flag (revives the RFC-0206 override) or formally
+    deprecate it is the open decision tracked in masc#22771. *)
 let oas_capabilities_of_config (provider_cfg : Llm_provider.Provider_config.t) =
   let caps =
     Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config provider_cfg
   in
-  match tool_policy_for_config provider_cfg with
-  | exception _ -> caps
-  | tool_policy ->
-    let runtime_mcp_lane =
-      tool_policy.supports_runtime_mcp_http_headers
-      || tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
-    in
-    if runtime_mcp_lane
-    then
-      { caps with
-        supports_runtime_mcp_tools = true
-      ; supports_runtime_tool_events = true
-      }
-    else caps
+  (* [tool_policy_for_config] is total (binding lookup returns [option]; the
+     policy is a pure record build with no I/O), so no exception handler is
+     warranted here: a raised [Eio.Cancel.Cancelled] / [Out_of_memory] must
+     propagate, not be absorbed into a degraded capability set. *)
+  let tool_policy = tool_policy_for_config provider_cfg in
+  let runtime_mcp_lane =
+    tool_policy.supports_runtime_mcp_http_headers
+    || tool_policy.requires_per_keeper_bridging_for_bound_actor_tools
+  in
+  if runtime_mcp_lane
+  then
+    { caps with
+      supports_runtime_mcp_tools = true
+    ; supports_runtime_tool_events = true
+    }
+  else caps
 ;;
 
 let supports_runtime_mcp_http_headers (provider_cfg : Llm_provider.Provider_config.t) =

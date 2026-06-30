@@ -1,6 +1,6 @@
 ---
 status: runbook
-last_verified: 2026-06-30
+last_verified: 2026-06-29
 code_refs:
   - lib/mcp_server.ml
   - lib/keeper/
@@ -9,8 +9,8 @@ code_refs:
 
 # Release Evidence
 
-> Current package version: v0.19.55
-> Updated: 2026-06-30
+> Current package version: v0.19.54
+> Updated: 2026-06-29
 
 `masc`의 release/readiness 상태를 말할 때는 문구보다 증거가 먼저여야 한다.
 기본 증거 형식은 release-evidence bundle이며, 최소한 아래 항목이 함께 있어야 한다.

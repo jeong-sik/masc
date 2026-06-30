@@ -10,8 +10,8 @@ code_refs:
 
 > Supersedes: `docs/SPEC.md`, `docs/MERGED-ARCHITECTURE-SSOT.md`
 > Status: Living draft
-> Last Updated: 2026-06-30
-> Snapshot baseline: `dune-project` version `0.19.55`
+> Last Updated: 2026-06-29
+> Snapshot baseline: `dune-project` version `0.19.54`
 
 MASC (Multi-Agent Shared Context)는 OCaml 5.x / Eio 기반 MCP 서버로, 여러 Keeper/MCP client가 동일 workspace에서 작업할 때 필요한 조율과 관찰성을 제공한다. Workspace 기반 세션 관리, Task 할당, Heartbeat 모니터링, Keeper turn, dashboard/operator read visibility를 제공하며, MCP JSON-RPC 프로토콜을 통해 주요 AI IDE/CLI와 통합된다. Retired orchestration surfaces and internal references remain only as migration context.
 
@@ -23,7 +23,7 @@ used as evidence.
 
 | 항목 | 값 |
 |------|-----|
-| Release baseline | 0.19.55 |
+| Release baseline | 0.19.54 |
 | Language | OCaml 5.x (Eio-native, effect-based concurrency) |
 | LOC (lib, `.ml` + `.mli`) | ~248K |
 | LOC (test, `.ml` + `.mli`) | ~155K |

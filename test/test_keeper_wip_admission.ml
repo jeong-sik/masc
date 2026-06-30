@@ -4,8 +4,11 @@ module Admission = Masc.Keeper_wip_admission
 module Task_runtime = Masc.Keeper_tool_task_runtime
 module U = Yojson.Safe.Util
 
+(* Cap-mechanism tests pass a concrete repo string; wrap it as [Some] so the
+   per-repo cap is exercised. [task_repo] resolves real tasks to [None] (no repo
+   attribution in the task model), covered separately below. *)
 let scope ?goal_id ?(category = Admission.Fix) repo =
-  { Admission.repo; goal_id; category }
+  { Admission.repo = Some repo; goal_id; category }
 
 let item ?goal_id ?(category = Admission.Fix) repo id =
   { Admission.id; scope = scope ?goal_id ~category repo }
@@ -111,20 +114,42 @@ let test_decision_json_rejects_with_scope_key () =
   check string "scope key" "global"
     Yojson.Safe.Util.(json |> member "scope_key" |> to_string)
 
-let test_scope_of_task_uses_repo_goal_and_title_category () =
+let test_scope_of_task_has_no_repo_uses_goal_and_title_category () =
   let task_goal_index = Hashtbl.create 1 in
   Hashtbl.replace task_goal_index "task-001" ["goal-a"];
   let scope =
     Admission.scope_of_task
       ~task_goal_index
-      ~default_repo:"fallback"
       (task
          ~title:"refactor(keeper): split claim gate"
          "task-001")
   in
-  check string "repo" "fallback" scope.repo;
+  (* The task model carries no repo, so the scope resolves to [None] — exempt
+     from the per-repo cap rather than collapsed into a fleet-wide bucket. *)
+  check (option string) "repo" None scope.repo;
   check (option string) "goal" (Some "goal-a") scope.goal_id;
   check string "category" "refactor" (Admission.category_to_string scope.category)
+
+let test_repoless_tasks_exempt_from_repo_cap () =
+  (* Regression guard for the WIP-cap collapse: many repoless ([None]) tasks must
+     NOT share a single fleet-wide repo bucket. With [max_per_repo = Some 2] and
+     three already-active repoless items, a fourth repoless task still admits
+     (only the global cap bounds it). Before the fix, [task_repo] returned a
+     shared fallback string, so this rejected with repo_cap once 2 were active. *)
+  let active =
+    [ { Admission.id = "one"; scope = { Admission.repo = None; goal_id = None; category = Admission.Fix } }
+    ; { Admission.id = "two"; scope = { Admission.repo = None; goal_id = None; category = Admission.Docs } }
+    ; { Admission.id = "three"; scope = { Admission.repo = None; goal_id = None; category = Admission.Chore } }
+    ]
+  in
+  let repoless_scope = { Admission.repo = None; goal_id = None; category = Admission.Ci } in
+  match Admission.decide ~caps active ~scope:repoless_scope with
+  | Admission.Admit { active_count_after_admit } ->
+    check int "active after admit" 4 active_count_after_admit
+  | Reject rejection ->
+    fail
+      (Printf.sprintf "repoless task should be exempt from repo cap, got %s"
+         (Admission.reject_reason_to_string rejection.reason))
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_wip_admission_" "" in
@@ -269,7 +294,7 @@ let test_active_items_only_include_claimed_or_in_progress () =
     ; task ~title:"fix: still todo" "task-003"
     ]
   in
-  let active = Admission.active_items_of_tasks ~default_repo:"fallback" tasks in
+  let active = Admission.active_items_of_tasks tasks in
   check (list string) "active ids" [ "task-001"; "task-002" ]
     (List.map (fun item -> item.Admission.id) active);
   check (list string) "categories" [ "fix"; "docs" ]
@@ -295,7 +320,7 @@ let test_active_items_include_all_active_assignees () =
         "task-progress-b"
     ]
   in
-  let active = Admission.active_items_of_tasks ~default_repo:"fallback" tasks in
+  let active = Admission.active_items_of_tasks tasks in
   check (list string) "all active ids"
     [ "task-claimed-a"; "task-progress-a"; "task-claimed-b"; "task-progress-b" ]
     (List.map (fun item -> item.Admission.id) active)
@@ -362,8 +387,10 @@ let () =
             test_active_counts_surface_all_axes
         ; test_case "decision JSON rejects with scope key" `Quick
             test_decision_json_rejects_with_scope_key
-        ; test_case "task scope uses repo goal and title category" `Quick
-            test_scope_of_task_uses_repo_goal_and_title_category
+        ; test_case "task scope has no repo, uses goal and title category" `Quick
+            test_scope_of_task_has_no_repo_uses_goal_and_title_category
+        ; test_case "repoless tasks exempt from repo cap" `Quick
+            test_repoless_tasks_exempt_from_repo_cap
         ; test_case "keeper_task_claim reports other keepers WIP cap" `Quick
             test_keeper_task_claim_reports_other_keepers_wip_cap
         ; test_case "keeper_task_claim no-unclaimed emits no-work outcome" `Quick

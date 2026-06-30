@@ -243,9 +243,6 @@ let no_eligible_blocker_summary
     blocked_count
 ;;
 
-let wip_admission_default_repo config =
-  Keeper_alerting_path.project_root_of_config config |> Filename.basename
-;;
 
 let wip_admission_kind = "claim_wip_admission"
 
@@ -503,7 +500,6 @@ let handle_keeper_task_tool
     let claim_goal_scope =
       Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
     in
-    let wip_default_repo = wip_admission_default_repo config in
     let wip_rejections = ref [] in
     let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let remember_wip_rejection task_id rejection =
@@ -512,13 +508,10 @@ let handle_keeper_task_tool
     in
     let wip_admission_filter ~active_tasks task =
       let active_items =
-        Keeper_wip_admission.active_items_of_tasks
-          ~task_goal_index
-          ~default_repo:wip_default_repo
-          active_tasks
+        Keeper_wip_admission.active_items_of_tasks ~task_goal_index active_tasks
       in
       let scope =
-        Keeper_wip_admission.scope_of_task ~task_goal_index ~default_repo:wip_default_repo task
+        Keeper_wip_admission.scope_of_task ~task_goal_index task
       in
       match Keeper_wip_admission.decide active_items ~scope with
       | Keeper_wip_admission.Admit _ -> true

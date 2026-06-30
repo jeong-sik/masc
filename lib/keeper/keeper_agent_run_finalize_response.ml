@@ -60,6 +60,25 @@ let replay_suffix_prune_reason
   else None
 ;;
 
+let stop_reason_requests_resume_merge = function
+  | Runtime_agent.TurnBudgetExhausted _ -> true
+  | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
+;;
+
+let should_resume_merge
+      ~pre_dispatch_compacted
+      ~state_snapshot_source
+      ~stop_reason
+      ~completion_contract_result
+  =
+  if completion_contract_drops_current_turn_replay completion_contract_result
+  then false
+  else
+    pre_dispatch_compacted
+    || Keeper_memory_policy.state_snapshot_source_is_synthetic state_snapshot_source
+    || stop_reason_requests_resume_merge stop_reason
+;;
+
 let rec messages_prefix_equal expected actual =
   match expected, actual with
   | [], _ -> true
@@ -187,6 +206,7 @@ module For_testing = struct
     replay_suffix_prune_reason_to_string
 
   let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
+  let should_resume_merge = should_resume_merge
 end
 
 let finalize
@@ -260,14 +280,12 @@ let finalize
      reminder, or the model emitted no structured state at all (synthesized). On
      a normal model-authored state turn the snapshot is authoritative, so a
      dropped loop still clears. *)
-  let is_budget_exhausted = function
-    | Runtime_agent.TurnBudgetExhausted _ -> true
-    | _ -> false
-  in
   let resume_merge =
-    pre_dispatch_compacted
-    || Keeper_memory_policy.state_snapshot_source_is_synthetic state_snapshot_source
-    || is_budget_exhausted result.stop_reason
+    should_resume_merge
+      ~pre_dispatch_compacted
+      ~state_snapshot_source
+      ~stop_reason:result.stop_reason
+      ~completion_contract_result
   in
   let { Keeper_agent_run_sidecar.working_state = _
       ; state_snapshot_saved = _

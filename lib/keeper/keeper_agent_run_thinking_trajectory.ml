@@ -42,12 +42,7 @@ let persist_response_content ~keeper_name ~trajectory_acc ~turn content =
           append_entry ~keeper_name ~failure_label:"thinking" acc entry
         | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
           let content =
-            match reasoning_content with
-            | Some content -> content
-            | None ->
-              details
-              |> List.filter_map (fun detail -> detail.Agent_sdk.Types.text)
-              |> String.concat ""
+            Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
           in
           if not (String.equal (String.trim content) "") then
             let entry : Trajectory.thinking_entry =

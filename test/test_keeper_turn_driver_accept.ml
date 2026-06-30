@@ -1907,6 +1907,22 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
     (Some "sse_thinking_delta")
     (kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }));
   Alcotest.(check (option string))
+    "reasoning details delta"
+    (Some "sse_thinking_delta")
+    (kind
+       (ContentBlockDelta
+          { index = 0
+          ; delta =
+              ReasoningDetailsDelta
+                { reasoning_content = None
+                ; details =
+                    [ { raw = `Assoc [ "text", `String "hidden" ]
+                      ; text = Some "hidden"
+                      }
+                    ]
+                }
+          }));
+  Alcotest.(check (option string))
     "tool arg delta"
     (Some "sse_tool_arg_delta")
     (kind (ContentBlockDelta { index = 0; delta = InputJsonDelta "{}" }));
@@ -1937,6 +1953,16 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
     "thinking delta is diagnostic but not watchdog progress"
     None
     (watchdog_kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }));
+  Alcotest.(check (option string))
+    "reasoning details delta is diagnostic but not watchdog progress"
+    None
+    (watchdog_kind
+       (ContentBlockDelta
+          { index = 0
+          ; delta =
+              ReasoningDetailsDelta
+                { reasoning_content = Some "hidden"; details = [] }
+          }));
   Alcotest.(check (option string))
     "visible text delta is watchdog progress"
     (Some "sse_text_delta")

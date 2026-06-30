@@ -552,6 +552,38 @@ let test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool () =
                 | _ -> "other")
               events))
 
+let test_keeper_stream_bridge_projects_reasoning_details_delta () =
+  let open Agent_sdk.Types in
+  let detail : reasoning_detail =
+    { raw = `Assoc [ "text", `String "detail thinking" ]
+    ; text = Some "detail thinking"
+    }
+  in
+  let events =
+    translate_oas_stream_events
+      [ ContentBlockDelta
+          { index = 0
+          ; delta =
+              ReasoningDetailsDelta
+                { reasoning_content = None; details = [ detail ] }
+          }
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_thinking_delta { index; delta } ] ->
+      check int "reasoning details index" 0 index;
+      check string "reasoning details thinking" "detail thinking" delta
+  | _ ->
+      failf "unexpected reasoning details events: %s"
+        (String.concat ", "
+           (List.map
+              (function
+                | Keeper_chat_events.Oas_thinking_delta _ -> "oas_thinking"
+                | Keeper_chat_events.Text_delta _ -> "text"
+                | Keeper_chat_events.Event_error _ -> "error"
+                | _ -> "other")
+              events))
+
 let test_keeper_stream_bridge_preserves_tool_args_snapshot () =
   let open Agent_sdk.Types in
   let events =
@@ -2084,6 +2116,8 @@ let () =
             test_keeper_stream_args_preserve_user_blocks;
           test_case "stream bridge preserves interleaved thinking and tool" `Quick
             test_keeper_stream_bridge_preserves_interleaved_thinking_and_tool;
+          test_case "stream bridge projects reasoning details delta" `Quick
+            test_keeper_stream_bridge_projects_reasoning_details_delta;
           test_case "stream bridge preserves tool args snapshots" `Quick
             test_keeper_stream_bridge_preserves_tool_args_snapshot;
           test_case "OAS tool-call projection preserves adjacent reasoning" `Quick

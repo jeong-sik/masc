@@ -45,13 +45,8 @@ let bytes_of_content_block (block : Agent_sdk.Types.content_block) : int =
       | Agent_sdk.Types.Text s -> String.length s
       | Agent_sdk.Types.Thinking { content; _ } -> String.length content
       | Agent_sdk.Types.ReasoningDetails { reasoning_content; details } ->
-        (match reasoning_content with
-         | Some content -> String.length content
-         | None ->
-           details
-           |> List.filter_map (fun detail -> detail.Agent_sdk.Types.text)
-           |> String.concat ""
-           |> String.length)
+        Agent_sdk.Types.reasoning_details_text ~reasoning_content ~details
+        |> String.length
       | Agent_sdk.Types.RedactedThinking s -> String.length s
       | Agent_sdk.Types.ToolResult _ ->
         invalid_arg

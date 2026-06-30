@@ -91,7 +91,12 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
     when sdk_stream_event_is_deliverable event ->
       Some "sse_text_delta"
   | Agent_sdk.Types.ContentBlockDelta
-      { delta = Agent_sdk.Types.ThinkingDelta _; _ }
+      {
+        delta =
+          ( Agent_sdk.Types.ThinkingDelta _
+          | Agent_sdk.Types.ReasoningDetailsDelta _ );
+        _;
+      }
     when sdk_stream_event_is_first_token event ->
       Some "sse_thinking_delta"
   | Agent_sdk.Types.ContentBlockDelta

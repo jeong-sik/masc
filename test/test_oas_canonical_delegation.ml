@@ -80,6 +80,25 @@ let test_masc_delegates_oas_tool_call_projection () =
     ~expected:1
 ;;
 
+let test_masc_delegates_oas_reasoning_details_projection () =
+  check_calls
+    ~file:"lib/keeper/keeper_chat_oas_stream_bridge.ml"
+    ~callee:"Agent_sdk.Types.reasoning_details_text"
+    ~expected:1;
+  check_calls
+    ~file:"lib/keeper/keeper_context_core.ml"
+    ~callee:"Agent_sdk.Types.reasoning_details_text"
+    ~expected:1;
+  check_calls
+    ~file:"lib/keeper/keeper_wake_telemetry.ml"
+    ~callee:"Agent_sdk.Types.reasoning_details_text"
+    ~expected:1;
+  check_calls
+    ~file:"lib/keeper/keeper_agent_run_thinking_trajectory.ml"
+    ~callee:"Agent_sdk.Types.reasoning_details_text"
+    ~expected:1
+;;
+
 let test_hand_rolled_tool_schema_projection_is_not_reintroduced () =
   check_no_binding ~file:"lib/keeper/keeper_run_tools_setup.ml" ~name:"param_type_str";
   check_calls
@@ -108,6 +127,10 @@ let () =
             "MASC delegates tool-call block projection to OAS"
             `Quick
             test_masc_delegates_oas_tool_call_projection
+        ; test_case
+            "MASC delegates reasoning-details projection to OAS"
+            `Quick
+            test_masc_delegates_oas_reasoning_details_projection
         ; test_case
             "tool schema projection helper is not hand-rolled locally"
             `Quick

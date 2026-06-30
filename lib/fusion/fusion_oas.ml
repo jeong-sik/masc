@@ -5,7 +5,7 @@
    fusion 개념은 OAS에 노출하지 않는다. *)
 
 let answer_text (resp : Agent_sdk.Types.api_response) : string =
-  Agent_sdk.Types.visible_text_of_response resp
+  Agent_sdk_response.text_of_response resp
 
 let stop_reason_label = Keeper_hooks_oas_types.stop_reason_to_label
 

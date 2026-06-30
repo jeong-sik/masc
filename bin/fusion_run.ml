@@ -51,6 +51,8 @@ let string_of_failure (f : Fusion_types.panel_failure) : string =
   | Fusion_types.Bridge_error msg -> "bridge_error: " ^ msg
   | Fusion_types.Provider_error msg -> "provider_error: " ^ msg
   | Fusion_types.Empty_response detail -> "empty_response: " ^ detail
+  | Fusion_types.Invalid_structured_response detail ->
+    "invalid_structured_response: " ^ detail
   | Fusion_types.Invalid_max_output_tokens n ->
     Printf.sprintf "invalid_max_output_tokens: %d" n
 

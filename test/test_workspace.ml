@@ -810,6 +810,44 @@ let agent_current_task config ~agent_name =
    (e.g. nick0cave), so this models the actual desync surface. *)
 let stale_nick = "claude-stale-fox"
 let other_nick = "claude-other-bear"
+let old_release_timestamp = "2020-01-01T00:00:00Z"
+
+let mark_agent_stale_for_release config ~agent_name =
+  Workspace.update_local_agent_state config ~agent_name (fun agent ->
+    { agent with status = Masc_domain.Active; last_seen = old_release_timestamp })
+;;
+
+let rewrite_task_status config ~task_id ~f =
+  let backlog = Workspace.read_backlog config in
+  let updated_tasks =
+    List.map
+      (fun (task : Masc_domain.task) ->
+         if String.equal task.id task_id
+         then { task with task_status = f task.task_status }
+         else task)
+      backlog.tasks
+  in
+  Workspace.write_backlog config { backlog with tasks = updated_tasks }
+;;
+
+let age_claimed_task_for_release config ~task_id =
+  rewrite_task_status config ~task_id ~f:(function
+    | Masc_domain.Claimed { assignee; _ } ->
+      Masc_domain.Claimed { assignee; claimed_at = old_release_timestamp }
+    | other -> other)
+;;
+
+let assert_task_todo config ~task_id =
+  let backlog = Workspace.read_backlog config in
+  match List.find_opt (fun t -> (t : Masc_domain.task).id = task_id) backlog.tasks with
+  | Some { task_status = Masc_domain.Todo; _ } -> ()
+  | Some task ->
+    Alcotest.failf
+      "expected %s to be Todo, got %s"
+      task_id
+      (Masc_domain.task_status_to_string task.task_status)
+  | None -> Alcotest.failf "%s not found in backlog" task_id
+;;
 
 let test_release_stale_claims_clears_agent_current_task () =
   with_test_env (fun config ->
@@ -820,11 +858,16 @@ let test_release_stale_claims_clears_agent_current_task () =
       (fun agent -> { agent with current_task = Some "task-001" });
     Alcotest.(check (option string)) "precondition: agent.current_task set"
       (Some "task-001") (agent_current_task config ~agent_name:stale_nick);
+    mark_agent_stale_for_release config ~agent_name:stale_nick;
+    age_claimed_task_for_release config ~task_id:"task-001";
     let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
     Alcotest.(check (list (pair string string)))
-      "task-001 not released (no timeout)" [] released;
-    Alcotest.(check (option string)) "agent.current_task preserved" (Some "task-001")
-      (agent_current_task config ~agent_name:stale_nick)
+      "task-001 released from stale claim"
+      [ "task-001", stale_nick ]
+      released;
+    Alcotest.(check (option string)) "agent.current_task cleared" None
+      (agent_current_task config ~agent_name:stale_nick);
+    assert_task_todo config ~task_id:"task-001"
   )
 
 (* Spec: agent A claimed task X, then its on-disk pointer moved to a
@@ -838,52 +881,40 @@ let test_release_stale_claims_preserves_other_agent_task () =
     let _ = Workspace.claim_task config ~agent_name:other_nick ~task_id:"task-001" in
     Workspace.update_local_agent_state config ~agent_name:other_nick
       (fun agent -> { agent with current_task = Some "task-999" });
+    mark_agent_stale_for_release config ~agent_name:other_nick;
+    age_claimed_task_for_release config ~task_id:"task-001";
     let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
     Alcotest.(check (list (pair string string)))
-      "task-001 not released from backlog" [] released;
+      "task-001 released from backlog"
+      [ "task-001", other_nick ]
+      released;
     Alcotest.(check (option string)) "agent kept its newer current_task"
-      (Some "task-999") (agent_current_task config ~agent_name:other_nick)
+      (Some "task-999") (agent_current_task config ~agent_name:other_nick);
+    assert_task_todo config ~task_id:"task-001"
   )
 
 
-(* AwaitingVerification tasks with stale assignees must be released
-   back to Todo, just like Claimed/InProgress. This closes the
-   verification deadlock where a zombie assignee blocks the task
-   indefinitely — the deadline mechanism only handles verifier absence,
-   not assignee zombification. *)
-let test_release_stale_claims_releases_stale_verification () =
+(* AwaitingVerification is not a Claim/InProgress ownership state in the
+   Release FSM. Verification deadlocks need a separate recovery path instead
+   of being forced through release_stale_claims. *)
+let test_release_stale_claims_skips_stale_verification () =
   with_test_env (fun config ->
     let _ = Workspace.bind_session config ~agent_name:stale_nick ~capabilities:[] () in
     let _ = Workspace.add_task config ~title:"Stale verification" ~priority:1 ~description:"" in
     let _ = Workspace.claim_task config ~agent_name:stale_nick ~task_id:"task-001" in
     (* Force task into AwaitingVerification with an old submitted_at
        by reading the backlog, mutating the task status, and writing back. *)
-    let old_time = "2020-01-01T00:00:00Z" in
-    let backlog = Workspace.read_backlog config in
-    let updated_tasks =
-      List.map
-        (fun (task : Masc_domain.task) ->
-           if task.id = "task-001"
-           then
-             { task with
-               task_status =
-                 Masc_domain.AwaitingVerification
-                   { assignee = stale_nick
-                   ; submitted_at = old_time
-                   ; verification_id = "vrf-test"
-                   ; phase = Masc_domain.Awaiting_verifier
-                   }
-             }
-           else task)
-        backlog.tasks
-    in
-    Workspace.write_backlog config { backlog with tasks = updated_tasks };
+    rewrite_task_status config ~task_id:"task-001" ~f:(fun _ ->
+      Masc_domain.AwaitingVerification
+        { assignee = stale_nick
+        ; submitted_at = old_release_timestamp
+        ; verification_id = "vrf-test"
+        ; phase = Masc_domain.Awaiting_verifier
+        });
     (* ttl_seconds:0.0 forces any timestamp to be stale *)
     let released = Workspace.release_stale_claims config ~ttl_seconds:0.0 in
     Alcotest.(check (list (pair string string)))
-      "task-001 not released from stale verification"
-      [] released;
-    (* Verify task is back to Todo *)
+      "stale verification is handled outside release_stale_claims" [] released;
     let backlog = Workspace.read_backlog config in
     match List.find_opt (fun t -> (t : Masc_domain.task).id = "task-001") backlog.tasks with
     | Some task ->
@@ -1940,8 +1971,8 @@ let () =
         test_release_stale_claims_clears_agent_current_task;
       Alcotest.test_case "release stale claims preserves other agent task" `Quick
         test_release_stale_claims_preserves_other_agent_task;
-      Alcotest.test_case "release stale claims releases stale verification" `Quick
-        test_release_stale_claims_releases_stale_verification;
+      Alcotest.test_case "release stale claims skips stale verification" `Quick
+        test_release_stale_claims_skips_stale_verification;
       Alcotest.test_case "cleanup zombies empty" `Quick test_cleanup_zombies_empty;
       Alcotest.test_case "cleanup detects regular zombie" `Quick test_cleanup_zombies_detects_regular;
       Alcotest.test_case "cleanup detects keeper zombie" `Quick test_cleanup_zombies_detects_keeper;

@@ -38,6 +38,7 @@ let agent_capabilities_of_llm_capabilities
   ; supports_tools = caps.supports_tools
   ; supports_tool_choice = caps.supports_tool_choice
   ; supports_named_tool_choice = caps.supports_named_tool_choice
+  ; supports_required_tool_choice = caps.supports_required_tool_choice
   ; supports_parallel_tool_calls = caps.supports_parallel_tool_calls
   ; supports_runtime_mcp_tools = caps.supports_runtime_mcp_tools
   ; supports_runtime_tool_events = caps.supports_runtime_tool_events
@@ -45,6 +46,7 @@ let agent_capabilities_of_llm_capabilities
   ; supports_reasoning = caps.supports_reasoning
   ; supports_extended_thinking = caps.supports_extended_thinking
   ; supports_reasoning_budget = caps.supports_reasoning_budget
+  ; accepted_reasoning_efforts = caps.accepted_reasoning_efforts
   ; thinking_control_format = caps.thinking_control_format
   ; preserve_thinking_control_format = caps.preserve_thinking_control_format
   ; reasoning_replay_override = caps.reasoning_replay_override

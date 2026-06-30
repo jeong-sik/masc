@@ -95,10 +95,14 @@ let board_error_to_string = function
   | Board.Validation_error s -> Printf.sprintf "Validation error: %s" s
   | Board.Already_voted s -> Printf.sprintf "Already voted: %s" s
   | Board.Already_exists s -> Printf.sprintf "Already exists: %s" s
+  | Board.Unauthorized s -> Printf.sprintf "Unauthorized: %s" s
 ;;
 
 let board_error_failure_class = function
-  | Board.Post_not_found _ | Board.Comment_not_found _ ->
+  | Board.Post_not_found _ | Board.Comment_not_found _
+  (* Owner-gated rejection: retrying with the same actor cannot succeed,
+     so it is a workflow rejection rather than a transient runtime failure. *)
+  | Board.Unauthorized _ ->
     Tool_result.Workflow_rejection
   | _ -> Tool_result.Runtime_failure
 ;;

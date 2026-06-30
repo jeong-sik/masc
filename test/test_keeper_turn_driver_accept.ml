@@ -1889,6 +1889,9 @@ let test_reject_reason_describes_mixed_non_progress_response () =
 let test_sse_event_progress_kind_classifies_known_deltas () =
   let open Agent_sdk.Types in
   let kind event = Masc.Keeper_agent_run_turn_helpers.sse_event_progress_kind event in
+  let watchdog_kind event =
+    Masc.Keeper_agent_run_turn_helpers.sse_event_watchdog_progress_kind event
+  in
   Alcotest.(check (option string))
     "tool block start follows SDK stream classifier"
     (Some "sse_tool_block_start")
@@ -1927,9 +1930,113 @@ let test_sse_event_progress_kind_classifies_known_deltas () =
     (Some "sse_content_delta")
     (kind (ContentBlockDelta { index = 0; delta = TextDelta "" }));
   Alcotest.(check (option string))
+    "empty text delta is not watchdog progress"
+    None
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = TextDelta "" }));
+  Alcotest.(check (option string))
+    "thinking delta is diagnostic but not watchdog progress"
+    None
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }));
+  Alcotest.(check (option string))
+    "visible text delta is watchdog progress"
+    (Some "sse_text_delta")
+    (watchdog_kind (ContentBlockDelta { index = 0; delta = TextDelta "visible" }));
+  Alcotest.(check (option string))
     "stream incomplete"
     (Some "sse_stream_incomplete")
     (kind (StreamIncomplete { reason = "max_output_tokens" }))
+
+let registry_recorded_progress events =
+  let recorded = ref [] in
+  let downstream_count = ref 0 in
+  let on_event =
+    Masc.Keeper_agent_run_turn_helpers.registry_progress_on_event
+      ~record_turn_progress:(fun kind -> recorded := kind :: !recorded)
+      (Some (fun _ -> incr downstream_count))
+  in
+  List.iter on_event events;
+  (List.rev !recorded, !downstream_count)
+
+let test_registry_progress_on_event_records_only_watchdog_progress () =
+  let open Agent_sdk.Types in
+  let recorded, downstream_count =
+    registry_recorded_progress
+      [ ContentBlockDelta { index = 0; delta = TextDelta "" }
+      ; ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }
+      ; ContentBlockStop { index = 0 }
+      ; MessageDelta { stop_reason = None; usage = None }
+      ; ContentBlockDelta { index = 0; delta = TextDelta "visible" }
+      ; ContentBlockStart
+          { index = 1; content_type = "tool_use"; tool_id = None; tool_name = None }
+      ]
+  in
+  Alcotest.(check (list string))
+    "carrier/control events do not reset watchdog progress"
+    [ "sse_text_delta"; "sse_tool_block_start" ]
+    recorded;
+  Alcotest.(check int) "downstream still sees every event" 6 downstream_count
+
+let test_carrier_only_stream_does_not_suppress_mid_turn_no_progress () =
+  let open Agent_sdk.Types in
+  let recorded, downstream_count =
+    registry_recorded_progress
+      [ ContentBlockDelta { index = 0; delta = TextDelta "" }
+      ; ContentBlockDelta { index = 0; delta = ThinkingDelta "hidden" }
+      ; ContentBlockStop { index = 0 }
+      ; MessageDelta { stop_reason = None; usage = None }
+      ; MessageStop
+      ]
+  in
+  Alcotest.(check (list string))
+    "carrier-only stream does not record watchdog progress"
+    []
+    recorded;
+  Alcotest.(check int) "diagnostic downstream receives carrier stream" 5 downstream_count;
+  let turn_observation =
+    let open Masc.Keeper_registry_types in
+    ({ turn_id = 1
+     ; started_at = 0.0
+     ; last_progress_at = 0.0
+     ; last_progress_kind = Some "turn_started"
+     ; active_tool_count = 0
+     ; turn_phase = Packed Turn_prompting
+     ; decision_stage = Packed Decision_undecided
+     ; measurement = None
+     ; measurement_bind_count = 0
+     ; selected_model = None
+     }
+      : Masc.Keeper_registry_types.turn_observation)
+  in
+  match
+    Masc.Keeper_supervisor.assess_in_turn_progress
+      ~phase:Masc.Keeper_state_machine.Running
+      ~in_turn:(Some turn_observation)
+      ~now:45.0
+      ~progress_timeout:30.0
+  with
+  | Some
+      (Masc.Keeper_registry.Stale_turn_timeout
+         (Masc.Keeper_registry.Mid_turn_no_progress
+            { since_progress_seconds
+            ; progress_timeout_threshold
+            ; last_progress_kind
+            ; _
+            })) ->
+    Alcotest.(check int)
+      "carrier-only stream stays stale"
+      45
+      (int_of_float since_progress_seconds);
+    Alcotest.(check int)
+      "progress timeout threshold preserved"
+      30
+      (int_of_float progress_timeout_threshold);
+    Alcotest.(check (option string))
+      "last watchdog progress remains turn start"
+      (Some "turn_started")
+      last_progress_kind
+  | _ ->
+    Alcotest.fail
+      "carrier-only stream must not suppress Mid_turn_no_progress"
 
 let test_per_provider_timeout_not_forwarded_to_oas_hard_deadline () =
   (* RFC-0129 (§62, 2026-05-17 fleet incident): per_provider_timeout_s must NOT
@@ -2050,6 +2157,14 @@ let () =
             test_reject_reason_describes_mixed_non_progress_response;
           Alcotest.test_case "sse progress classifies known deltas" `Quick
             test_sse_event_progress_kind_classifies_known_deltas;
+          Alcotest.test_case
+            "sse watchdog progress records deliverable events only"
+            `Quick
+            test_registry_progress_on_event_records_only_watchdog_progress;
+          Alcotest.test_case
+            "carrier-only stream still trips mid-turn no-progress"
+            `Quick
+            test_carrier_only_stream_does_not_suppress_mid_turn_no_progress;
           Alcotest.test_case
             "keeper timeout is not forwarded to OAS hard deadline (RFC-0129)"
             `Quick

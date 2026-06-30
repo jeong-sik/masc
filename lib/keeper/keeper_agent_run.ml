@@ -65,6 +65,8 @@ let normalize_response_text_for_finalization
 
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
+  let sse_event_watchdog_progress_kind =
+    Turn_helpers.sse_event_watchdog_progress_kind
   let registry_progress_on_event = Turn_helpers.registry_progress_on_event
   let progress_keeper_tool_names_for_contract =
     Contract_helpers.progress_keeper_tool_names_for_contract

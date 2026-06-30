@@ -103,8 +103,8 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
       Some "sse_media_delta"
   | Agent_sdk.Types.ContentBlockDelta _ ->
       (* Future OAS carrier deltas, such as provider-private reasoning signatures,
-         are progress evidence only. They must not be promoted to text/tool
-         progress or keeper-visible output. *)
+         are diagnostic stream evidence only. They must not be promoted to
+         text/tool progress, keeper-visible output, or watchdog progress. *)
       Some "sse_content_delta"
   | Agent_sdk.Types.ContentBlockStop _ -> Some "sse_content_block_stop"
   | Agent_sdk.Types.MessageDelta _ -> Some "sse_message_delta"
@@ -119,8 +119,13 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
 
 [@@@warning "+11"]
 
+let sse_event_watchdog_progress_kind event =
+  match sse_event_progress_kind event with
+  | Some kind when sdk_stream_event_is_deliverable event -> Some kind
+  | _ -> None
+
 let registry_progress_on_event ~record_turn_progress downstream event =
-  Option.iter record_turn_progress (sse_event_progress_kind event);
+  Option.iter record_turn_progress (sse_event_watchdog_progress_kind event);
   Option.iter (fun cb -> cb event) downstream
 
 

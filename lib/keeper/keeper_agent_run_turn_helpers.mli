@@ -13,6 +13,8 @@ val per_provider_timeout_for_turn :
   float option
 
 val sse_event_progress_kind : Agent_sdk.Types.sse_event -> string option
+val sse_event_watchdog_progress_kind :
+  Agent_sdk.Types.sse_event -> string option
 
 val registry_progress_on_event :
   record_turn_progress:(string -> unit) ->

@@ -5,6 +5,9 @@ import { html } from 'htm/preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import {
   SettingsSurface,
+  checkSettingsMcpEndpoint,
+  checkSettingsStoreUrl,
+  checkSettingsWorktreeBase,
   mcpExposedToolNames,
   logEntryToSysRow,
   logRowStatus,
@@ -334,11 +337,12 @@ describe('SettingsSurface', () => {
     })
   })
 
-  it('marks unbacked settings sections as previews instead of fake saved actions', async () => {
+  it('marks unbacked settings sections as local preview controls instead of fake saved actions', async () => {
     render(html`<${SettingsSurface} />`, container)
 
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('preview only')
-    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.textContent).not.toContain('Save changes')
     expect(container.textContent).not.toContain('Reissue')
     expect(container.textContent).not.toContain('Log out')
@@ -348,10 +352,100 @@ describe('SettingsSurface', () => {
     const gateNav = container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement
     await fireEvent.click(gateNav)
 
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('preview only')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
     expect(container.textContent).not.toContain('＋ Add gate')
     expect(container.querySelector('[data-testid="settings-preview-badge"]')).not.toBeNull()
     expect(container.querySelector('[data-testid="set-verify"]')).toBeNull()
+  })
+
+  it('local preview segmented controls update visible state when clicked', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const never = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === '안 함')
+    expect(never).toBeTruthy()
+    expect(never?.disabled).toBe(false)
+
+    await fireEvent.click(never as HTMLButtonElement)
+
+    expect(never?.getAttribute('data-active')).toBe('true')
+  })
+
+  it('local preview text inputs are editable and reflected in dependent text', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    const input = container.querySelector<HTMLInputElement>('[data-testid="settings-mcp-endpoint-input"]')
+    expect(input).toBeTruthy()
+    expect(input?.readOnly).toBe(false)
+
+    await fireEvent.input(input as HTMLInputElement, {
+      target: { value: 'http://127.0.0.1:7777/mcp' },
+    })
+
+    expect(input?.value).toBe('http://127.0.0.1:7777/mcp')
+    expect(container.querySelector('.set-mcp-detail')?.textContent).toContain('POST http://127.0.0.1:7777/mcp')
+    expect(container.querySelector('[data-testid="settings-preview-badge"]')?.textContent).toBe('local only')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement)
+
+    expect(container.querySelector<HTMLInputElement>('[data-testid="settings-mcp-endpoint-input"]')?.value).toBe('http://127.0.0.1:7777/mcp')
+  })
+
+  it('sandbox allowlist and gate base local inputs are editable', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-sandbox"]') as HTMLElement)
+
+    const allowlistInput = container.querySelector<HTMLInputElement>('[data-testid="settings-allowed-domains-input"]')
+    expect(allowlistInput).toBeTruthy()
+    expect(allowlistInput?.readOnly).toBe(false)
+
+    await fireEvent.input(allowlistInput as HTMLInputElement, {
+      target: { value: 'github.com, example.test' },
+    })
+    expect(allowlistInput?.value).toBe('github.com, example.test')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-gate"]') as HTMLElement)
+
+    const gateInput = container.querySelector<HTMLInputElement>('[data-testid="settings-gate-base-input"]')
+    expect(gateInput).toBeTruthy()
+    expect(gateInput?.readOnly).toBe(false)
+
+    await fireEvent.input(gateInput as HTMLInputElement, {
+      target: { value: 'https://gate.example.test' },
+    })
+    expect(gateInput?.value).toBe('https://gate.example.test')
+  })
+
+  it('paths local preview values can be format-checked without claiming live verification', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement)
+
+    expect(container.textContent).toContain('format-checked only')
+    expect(container.textContent).not.toContain('Each item can be verified')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-path-check-mcp"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-path-check-store"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-path-check-worktree"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="settings-path-check-result-mcp"]')?.textContent).toBe('valid MCP URL')
+    expect(container.querySelector('[data-testid="settings-path-check-result-mcp"]')?.getAttribute('data-ok')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-path-check-result-store"]')?.textContent).toBe('valid store URL')
+    expect(container.querySelector('[data-testid="settings-path-check-result-store"]')?.getAttribute('data-ok')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-path-check-result-worktree"]')?.textContent).toBe('valid local path')
+    expect(container.querySelector('[data-testid="settings-path-check-result-worktree"]')?.getAttribute('data-ok')).toBe('true')
+
+    const storeInput = container.querySelector<HTMLInputElement>('[data-testid="settings-store-url-input"]')
+    await fireEvent.input(storeInput as HTMLInputElement, {
+      target: { value: 'not-a-url' },
+    })
+    await fireEvent.click(container.querySelector('[data-testid="settings-path-check-store"]') as HTMLElement)
+
+    expect(container.querySelector('[data-testid="settings-path-check-result-store"]')?.textContent).toBe('invalid URL')
+    expect(container.querySelector('[data-testid="settings-path-check-result-store"]')?.getAttribute('data-ok')).toBe('false')
   })
 
   it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {
@@ -562,6 +656,37 @@ describe('SettingsSurface', () => {
       // internal-only tools are not exposed over public MCP.
       expect(labels).not.toContain('internal_only')
     })
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live inventory + local controls')
+    expect(container.querySelector('.set-card-b')?.getAttribute('data-settings-mode')).toBe('local')
+  })
+
+  it('MCP exposed-tool toggles are clickable local controls', async () => {
+    apiMock.fetchDashboardTools.mockResolvedValue({
+      tool_inventory: {
+        count: 2,
+        tools: [
+          makeToolItem({ name: 'masc_handoff', surfaces: ['public_mcp'] }),
+          makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),
+        ],
+      },
+    })
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+    await waitFor(() => {
+      expect(container.textContent).toContain('Exposed tools (2/2)')
+    })
+
+    const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
+    expect(toggles.length).toBe(2)
+    expect(toggles[0]!.disabled).toBe(false)
+    expect(toggles[0]!.getAttribute('aria-checked')).toBe('true')
+
+    await fireEvent.click(toggles[0]!)
+
+    expect(toggles[0]!.getAttribute('aria-checked')).toBe('false')
+    expect(container.textContent).toContain('Exposed tools (1/2)')
   })
 
   it('renders the fusion preset section (panel families + judge) read-only', async () => {
@@ -578,7 +703,8 @@ describe('SettingsSurface', () => {
     expect(models).toContain('glm-coding.glm-5-turbo')
     expect(models).toContain('ollama_cloud.minimax-m3')
     expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('deepseek.deepseek-v4-pro')
-    expect(container.querySelector('[data-testid="set-toggle"]')?.getAttribute('aria-disabled')).toBe('true')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
+    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).disabled).toBe(false)
     expect(container.querySelector('[data-testid="fusion-settings-editor"]')).toBeNull()
     expect(container.textContent).not.toContain('per_hour_budget')
   })
@@ -650,9 +776,14 @@ describe('SettingsSurface', () => {
     expect(triggers().length).toBe(4)
     const vals = triggers().map(t => t.querySelector('.mono')?.textContent)
     expect(vals).toEqual(['mention_or_thread', 'mention_only', 'all', 'user_only'])
-    // default selection is mention_or_thread; controls are read-only previews.
+    // default selection is mention_or_thread; local preview radios can be changed.
     expect(triggers()[0]!.classList.contains('on')).toBe(true)
-    expect((triggers()[0] as HTMLButtonElement).disabled).toBe(true)
+    expect((triggers()[0] as HTMLButtonElement).disabled).toBe(false)
+
+    await fireEvent.click(triggers()[2] as HTMLButtonElement)
+
+    expect(triggers()[0]!.getAttribute('data-active')).toBe('false')
+    expect(triggers()[2]!.getAttribute('data-active')).toBe('true')
   })
 
   it('opens the live runtime.toml editor from runtime management', async () => {
@@ -751,6 +882,39 @@ describe('SettingsSurface shell route', () => {
 })
 
 describe('settings read-surface helpers', () => {
+  it('checks Settings path preview values by format only', () => {
+    expect(checkSettingsMcpEndpoint('https://masc.local/mcp')).toEqual({
+      ok: true,
+      message: 'valid MCP URL',
+    })
+    expect(checkSettingsMcpEndpoint('ftp://masc.local/mcp')).toEqual({
+      ok: false,
+      message: 'expected http(s) URL',
+    })
+    expect(checkSettingsMcpEndpoint('https://masc.local/api')).toEqual({
+      ok: false,
+      message: 'path should include /mcp',
+    })
+
+    expect(checkSettingsStoreUrl('postgres://masc.local:5432/masc')).toEqual({
+      ok: true,
+      message: 'valid store URL',
+    })
+    expect(checkSettingsStoreUrl('https://masc.local/db')).toEqual({
+      ok: false,
+      message: 'expected postgres URL',
+    })
+
+    expect(checkSettingsWorktreeBase('~/wt')).toEqual({
+      ok: true,
+      message: 'valid local path',
+    })
+    expect(checkSettingsWorktreeBase('http://masc.local/wt')).toEqual({
+      ok: false,
+      message: 'expected filesystem path',
+    })
+  })
+
   it('mcpExposedToolNames keeps only public_mcp tools, sorted', () => {
     const names = mcpExposedToolNames([
       makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),

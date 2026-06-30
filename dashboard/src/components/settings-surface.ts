@@ -28,7 +28,13 @@ import type { ComponentChildren } from 'preact'
 type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
+type PathCheckTarget = 'mcp' | 'store' | 'worktree'
+type PathCheckResult = {
+  readonly ok: boolean
+  readonly message: string
+}
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
+const SETTINGS_LOCAL_STORAGE_PREFIX = 'masc.settings.local.'
 
 const SET_SECTIONS: [SectionId, string, string][] = [
   ['account', 'Account', '계정'],
@@ -80,6 +86,84 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .filter(item => item.surfaces.includes(MCP_PUBLIC_SURFACE))
     .map(item => item.name)
     .sort((a, b) => a.localeCompare(b))
+}
+
+export function checkSettingsMcpEndpoint(value: string): PathCheckResult {
+  const trimmed = value.trim()
+  if (trimmed === '') return { ok: false, message: 'URL required' }
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      return { ok: false, message: 'expected http(s) URL' }
+    }
+    if (url.hostname.trim() === '') return { ok: false, message: 'host required' }
+    if (!url.pathname.toLowerCase().includes('mcp')) {
+      return { ok: false, message: 'path should include /mcp' }
+    }
+    return { ok: true, message: 'valid MCP URL' }
+  } catch {
+    return { ok: false, message: 'invalid URL' }
+  }
+}
+
+export function checkSettingsStoreUrl(value: string): PathCheckResult {
+  const trimmed = value.trim()
+  if (trimmed === '') return { ok: false, message: 'URL required' }
+  try {
+    const url = new URL(trimmed)
+    if (url.protocol !== 'postgres:' && url.protocol !== 'postgresql:') {
+      return { ok: false, message: 'expected postgres URL' }
+    }
+    if (url.hostname.trim() === '') return { ok: false, message: 'host required' }
+    return { ok: true, message: 'valid store URL' }
+  } catch {
+    return { ok: false, message: 'invalid URL' }
+  }
+}
+
+export function checkSettingsWorktreeBase(value: string): PathCheckResult {
+  const trimmed = value.trim()
+  if (trimmed === '') return { ok: false, message: 'path required' }
+  if (/^[a-z][a-z0-9+.-]*:\/\//i.test(trimmed)) {
+    return { ok: false, message: 'expected filesystem path' }
+  }
+  if (
+    trimmed.startsWith('~/') ||
+    trimmed === '~' ||
+    trimmed.startsWith('/') ||
+    trimmed.startsWith('./') ||
+    trimmed.startsWith('../')
+  ) {
+    return { ok: true, message: 'valid local path' }
+  }
+  return { ok: false, message: 'use absolute, ./, ../, or ~/' }
+}
+
+function readLocalPreviewString(key: string, fallback: string): string {
+  try {
+    if (typeof sessionStorage === 'undefined') return fallback
+    return sessionStorage.getItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`) ?? fallback
+  } catch {
+    return fallback
+  }
+}
+
+function writeLocalPreviewString(key: string, value: string) {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    sessionStorage.setItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`, value)
+  } catch {
+    // Local preview settings are best-effort; blocked storage should not break Settings.
+  }
+}
+
+function useLocalPreviewString(key: string, initialValue: string): [string, (next: string) => void] {
+  const [value, setValue] = useState(() => readLocalPreviewString(key, initialValue))
+  const setStoredValue = (next: string) => {
+    setValue(next)
+    writeLocalPreviewString(key, next)
+  }
+  return [value, setStoredValue]
 }
 
 // [fusion] preset shape from config/runtime.toml [fusion] — keeper-v2
@@ -201,8 +285,6 @@ function SetToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => vo
       class=${`set-toggle ${on ? 'on' : ''}`}
       role="switch"
       aria-checked=${on}
-      aria-disabled="true"
-      disabled
       data-testid="set-toggle"
       onClick=${() => onChange(!on)}
     >
@@ -228,8 +310,7 @@ function SetSeg({
           key=${o}
           class=${`set-seg-b ${value === o ? 'on' : ''}`}
           data-active=${value === o ? 'true' : 'false'}
-          aria-disabled="true"
-          disabled
+          aria-pressed=${value === o}
           onClick=${() => onChange(o)}
         >
           ${o}
@@ -264,9 +345,9 @@ function SetStepper({
 }) {
   return html`
     <div class="set-stepper" data-testid="set-stepper">
-      <button type="button" aria-disabled="true" disabled onClick=${() => set(Math.max(min, v - 1))}>−</button>
+      <button type="button" disabled=${v <= min} onClick=${() => set(Math.max(min, v - 1))}>−</button>
       <span class="mono">${v}</span>
-      <button type="button" aria-disabled="true" disabled onClick=${() => set(Math.min(max, v + 1))}>+</button>
+      <button type="button" disabled=${v >= max} onClick=${() => set(Math.min(max, v + 1))}>+</button>
     </div>
   `
 }
@@ -294,8 +375,6 @@ function SetSlider({
         max=${max}
         step=${step ?? 1}
         value=${value}
-        disabled
-        aria-disabled="true"
         onInput=${(e: Event) => onChange(Number((e.target as HTMLInputElement).value))}
       />
       <span class="mono">${value}${suffix ?? ''}</span>
@@ -303,13 +382,32 @@ function SetSlider({
   `
 }
 
-function PreviewBadge({ label = 'API 미연결' }: { label?: string }) {
+function PreviewBadge({ label = 'local only' }: { label?: string }) {
   return html`
     <span
       class="set-preview-badge"
       data-testid="settings-preview-badge"
     >
       ${label}
+    </span>
+  `
+}
+
+function PathCheckBadge({
+  result,
+  target,
+}: {
+  result: PathCheckResult | undefined
+  target: PathCheckTarget
+}) {
+  if (!result) return null
+  return html`
+    <span
+      class=${`set-path-check-result ${result.ok ? 'ok' : 'fail'}`}
+      data-testid=${`settings-path-check-result-${target}`}
+      data-ok=${result.ok ? 'true' : 'false'}
+    >
+      ${result.message}
     </span>
   `
 }
@@ -390,17 +488,22 @@ function RuntimeCatalogCard({
   `
 }
 
+type SettingsSectionMode = 'live' | 'local'
+
 function settingsSectionState(
   section: SectionId,
   fusionSettingsWritable: boolean,
-): { live: boolean; label: string } {
-  if (section === 'runtime') return { live: true, label: 'runtime.toml live-backed' }
-  if (section === 'runtimes') return { live: true, label: 'runtime.toml live-backed' }
-  if (section === 'prompts') return { live: true, label: 'prompt registry live-backed' }
+): { mode: SettingsSectionMode; label: string } {
+  if (section === 'runtime') return { mode: 'live', label: 'runtime.toml live-backed' }
+  if (section === 'runtimes') return { mode: 'live', label: 'runtime.toml live-backed' }
+  if (section === 'routing') return { mode: 'live', label: 'runtime.toml live-backed' }
+  if (section === 'prompts') return { mode: 'live', label: 'prompt registry live-backed' }
   if (section === 'fusion' && fusionSettingsWritable) {
-    return { live: true, label: 'runtime.toml live-backed' }
+    return { mode: 'live', label: 'runtime.toml live-backed' }
   }
-  return { live: false, label: 'preview only' }
+  if (section === 'mcp') return { mode: 'local', label: 'live inventory + local controls' }
+  if (section === 'logs') return { mode: 'local', label: 'live logs + local controls' }
+  return { mode: 'local', label: 'local preview only' }
 }
 
 function LogFilter({
@@ -529,7 +632,7 @@ export function SettingsSurface() {
   const [sessionExpiry, setSessionExpiry] = useState('8시간')
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
-  const [mcpUrl, setMcpUrl] = useState('https://masc.local/mcp')
+  const [mcpUrl, setMcpUrl] = useLocalPreviewString('mcpUrl', 'https://masc.local/mcp')
   const [transport, setTransport] = useState('http')
   const [mcpTools, setMcpTools] = useState<string[]>([])
   const [tools, setTools] = useState<Record<string, boolean>>({})
@@ -617,20 +720,37 @@ export function SettingsSurface() {
   const [onOverflow, setOnOverflow] = useState('자동 compact')
 
   // gate / paths
-  const [gateBase, setGateBase] = useState('https://gate.masc.local')
+  const [gateBase, setGateBase] = useLocalPreviewString('gateBase', 'https://gate.masc.local')
   const [gateOn, setGateOn] = useState<Record<string, boolean>>({
     Slack: true,
     Discord: true,
     Amplitude: true,
     GitHub: false,
   })
-  const [wtBase, setWtBase] = useState('~/wt')
-  const [storeUrl, setStoreUrl] = useState('postgres://masc.local:5432/masc')
+  const [wtBase, setWtBase] = useLocalPreviewString('wtBase', '~/wt')
+  const [storeUrl, setStoreUrl] = useLocalPreviewString('storeUrl', 'postgres://masc.local:5432/masc')
+  const [pathChecks, setPathChecks] = useState<Partial<Record<PathCheckTarget, PathCheckResult>>>({})
+
+  function runPathCheck(target: PathCheckTarget) {
+    let result: PathCheckResult
+    switch (target) {
+      case 'mcp':
+        result = checkSettingsMcpEndpoint(mcpUrl)
+        break
+      case 'store':
+        result = checkSettingsStoreUrl(storeUrl)
+        break
+      case 'worktree':
+        result = checkSettingsWorktreeBase(wtBase)
+        break
+    }
+    setPathChecks(current => ({ ...current, [target]: result }))
+  }
 
   // sandbox
   const [isolation, setIsolation] = useState('container')
   const [egress, setEgress] = useState('허용목록')
-  const [allowlist, setAllowlist] = useState('github.com, opam.ocaml.org, *.masc.local')
+  const [allowlist, setAllowlist] = useLocalPreviewString('allowlist', 'github.com, opam.ocaml.org, *.masc.local')
   const [fsScope, setFsScope] = useState('worktree')
   const [shellOn, setShellOn] = useState(true)
   const [blockRisky, setBlockRisky] = useState(true)
@@ -653,7 +773,7 @@ export function SettingsSurface() {
   const [annoAutoLink, setAnnoAutoLink] = useState(true)
   const [embedTerminal, setEmbedTerminal] = useState(true)
   const [searchIndex, setSearchIndex] = useState(true)
-  const [ideRepo, setIdeRepo] = useState('masc/masc-mcp')
+  const [ideRepo, setIdeRepo] = useLocalPreviewString('ideRepo', 'masc/masc-mcp')
 
   // logs
   const [traceKeep, setTraceKeep] = useState('30일')
@@ -728,14 +848,14 @@ export function SettingsSurface() {
             </div>
           `)}
           <!-- keeper-v2 settings.jsx:262 — KO nav-note copy. -->
-          <div class="set-nav-note">프로토타입 — 변경은 로컬에만 적용됩니다.</div>
+          <div class="set-nav-note">live-backed 섹션은 API에 저장됩니다. local preview 섹션은 이 브라우저 세션에서만 바뀝니다.</div>
         </nav>
 
         <div class="set-content">
           <header class="set-content-h">
             <h1 data-testid="settings-section-title">${cur[2]}</h1>
             <span
-              class=${`set-section-state ${sectionState.live ? 'live' : 'preview'}`}
+              class=${`set-section-state ${sectionState.mode}`}
               data-testid="settings-section-state"
             >
               ${sectionState.label}
@@ -744,7 +864,8 @@ export function SettingsSurface() {
 
           <div
             class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'runtimes' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
-            data-preview-locked=${sectionState.live ? 'false' : 'true'}
+            data-preview-locked="false"
+            data-settings-mode=${sectionState.mode}
           >
             ${sec === 'account' && html`
               <${SetRow} label="Operator" hint="Currently logged-in operator">
@@ -776,7 +897,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-mcp-endpoint-input"
                     value=${mcpUrl}
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
@@ -1022,7 +1143,7 @@ export function SettingsSurface() {
                 <${SetRow} label="Allowed domains" hint="Comma-separated">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-allowed-domains-input"
                     style=${{ width: '260px' }}
                     value=${allowlist}
                     onInput=${(e: Event) => setAllowlist((e.target as HTMLInputElement).value)}
@@ -1108,7 +1229,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-ide-repo-input"
                     value=${ideRepo}
                     onInput=${(e: Event) => setIdeRepo((e.target as HTMLInputElement).value)}
                   />
@@ -1132,7 +1253,7 @@ export function SettingsSurface() {
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-gate-base-input"
                     value=${gateBase}
                     onInput=${(e: Event) => setGateBase((e.target as HTMLInputElement).value)}
                   />
@@ -1156,8 +1277,7 @@ export function SettingsSurface() {
                     class=${`set-trigger ${discordTrigger === val ? 'on' : ''}`}
                     data-testid="set-trigger"
                     data-active=${discordTrigger === val ? 'true' : 'false'}
-                    aria-disabled="true"
-                    disabled
+                    aria-pressed=${discordTrigger === val}
                     onClick=${() => setDiscordTrigger(val)}
                   >
                     <span class="set-trigger-radio"></span>
@@ -1172,39 +1292,66 @@ export function SettingsSurface() {
 
             ${sec === 'paths' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Server·store basepaths and keeper worktree root. Each item can be verified.
+                Server·store basepaths and keeper worktree root. Local preview values can be format-checked only.
               </div>
               <${SetRow} label="MCP endpoint" hint="/mcp HTTP entrypoint">
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-mcp-endpoint-input"
                     value=${mcpUrl}
                     onInput=${(e: Event) => setMcpUrl((e.target as HTMLInputElement).value)}
                   />
                   <${PreviewBadge} />
+                  <button
+                    type="button"
+                    class="set-verify"
+                    data-testid="settings-path-check-mcp"
+                    onClick=${() => runPathCheck('mcp')}
+                  >
+                    Check
+                  </button>
+                  <${PathCheckBadge} target="mcp" result=${pathChecks.mcp} />
                 </div>
               <//>
               <${SetRow} label="Store (DB)" hint="trace·audit persistence">
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-store-url-input"
                     value=${storeUrl}
                     onInput=${(e: Event) => setStoreUrl((e.target as HTMLInputElement).value)}
                   />
                   <${PreviewBadge} />
+                  <button
+                    type="button"
+                    class="set-verify"
+                    data-testid="settings-path-check-store"
+                    onClick=${() => runPathCheck('store')}
+                  >
+                    Check
+                  </button>
+                  <${PathCheckBadge} target="store" result=${pathChecks.store} />
                 </div>
               <//>
               <${SetRow} label="Default worktree basepath" hint="keeper worktree root — e.g. ~/wt/<keeper>">
                 <div class="set-path">
                   <input
                     class="set-input mono"
-                    readOnly
+                    data-testid="settings-worktree-base-input"
                     value=${wtBase}
                     onInput=${(e: Event) => setWtBase((e.target as HTMLInputElement).value)}
                   />
                   <${PreviewBadge} />
+                  <button
+                    type="button"
+                    class="set-verify"
+                    data-testid="settings-path-check-worktree"
+                    onClick=${() => runPathCheck('worktree')}
+                  >
+                    Check
+                  </button>
+                  <${PathCheckBadge} target="worktree" result=${pathChecks.worktree} />
                 </div>
               <//>
             `}

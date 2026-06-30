@@ -21,6 +21,12 @@ type tried_source =
   | Tool_schema                 (** S7: policy tool-schema inventory name extraction *)
   | Descriptor_registry         (** S7.5: Keeper_tool_descriptor.all_descriptors public_name —
                                     flat SSOT incl. internal_descriptors (masc_keeper_* live here) *)
+  | System_internal             (** S8: Tool_catalog_surfaces.is_system_internal_hidden —
+                                    system-internal tools (masc_gc, masc_reset,
+                                    masc_cleanup_zombies, …) dispatched via tool_misc and
+                                    hidden from keeper surfaces. Real tools, not
+                                    stale/hallucinated tokens, so the prompt-token integrity
+                                    scanner must not flag or strip them. *)
 
 type resolution =
   | Resolved of { canonical : string ; via : tried_source }
@@ -43,6 +49,7 @@ let string_of_tried_source = function
   | Registry_core_tools -> "registry_core_tools"
   | Tool_schema -> "tool_schema"
   | Descriptor_registry -> "descriptor_registry"
+  | System_internal -> "system_internal"
 
 let string_of_tried sources =
   String.concat ", " (List.map string_of_tried_source sources)
@@ -87,6 +94,17 @@ let resolve name =
            without touching dispatch — resolve is a validity gate; [via] is only
            used for the error string. *)
         Resolved { canonical = normalized; via = Descriptor_registry }
+      else if Tool_catalog_surfaces.is_system_internal_hidden normalized then
+        (* System-internal tools (masc_gc, masc_reset, masc_cleanup_zombies, …)
+           are dispatched directly via tool_misc and hidden from keeper surfaces,
+           so they appear in no keeper-facing registry above. They are real
+           tools, not stale/hallucinated names, so the prompt-token integrity
+           scanner must treat them as valid (otherwise it strips them from
+           continuity prose and emits a per-render WARN — observed as ~33/day of
+           false "stripped masc token masc_gc" for keeper taskmaster). resolve is
+           a validity gate whose only callers are that scanner/sanitizer, so this
+           does not widen keeper tool admission. *)
+        Resolved { canonical = normalized; via = System_internal }
       else
         (* The per-actor surface coverage gate (RFC-0084 §1.3) was removed in
            the surface-cut refactor: the [surface] type and its lists are
@@ -103,6 +121,7 @@ let resolve name =
               ; Registry_core_tools
               ; Tool_schema
               ; Descriptor_registry
+              ; System_internal
               ]
           }
 
@@ -132,6 +151,8 @@ let all_admitting_sources name =
         String.equal d.Keeper_tool_descriptor.public_name normalized)
       (Keeper_tool_descriptor.all_descriptors ())
   then sources := Descriptor_registry :: !sources;
+  if Tool_catalog_surfaces.is_system_internal_hidden normalized then
+    sources := System_internal :: !sources;
   (* The per-actor surface admit sources (RFC-0084 §1.3) were removed in the
      surface-cut refactor — the [surface] type is deleted. *)
   List.rev !sources

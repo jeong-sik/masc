@@ -92,6 +92,23 @@ let test_masc_board_post_resolves () =
       fail (Printf.sprintf "masc_board_post should resolve, got Unknown (tried: %s)"
               (TR.string_of_tried tried))
 
+let test_system_internal_hidden_tool_resolves () =
+  (* masc_gc is a system-internal tool (tool_misc dispatch, hidden from keeper
+     surfaces). Before the System_internal source it resolved to Unknown, so the
+     prompt-token integrity scanner stripped it from continuity prose and emitted
+     ~33 false "stripped masc token masc_gc" WARNs/day for keeper taskmaster. It
+     is a real tool and must now resolve via System_internal. *)
+  match TR.resolve "masc_gc" with
+  | TR.Resolved { via = TR.System_internal; canonical } ->
+      check string "canonical preserved" "masc_gc" canonical
+  | TR.Resolved { via; _ } | TR.Alias_to { via; _ } ->
+      fail (Printf.sprintf "masc_gc resolved via %s; expected System_internal"
+              (TR.string_of_tried_source via))
+  | TR.Unknown { tried; _ } ->
+      fail (Printf.sprintf
+              "masc_gc must resolve (system-internal tool), got Unknown (tried: %s)"
+              (TR.string_of_tried tried))
+
 (* ── Policy validation surface ── *)
 
 let resolves name =
@@ -318,6 +335,7 @@ let () =
         test_case "tool_execute resolves" `Quick test_tool_execute_resolves;
         test_case "masc_keeper_* cluster resolves via descriptor registry (boot guard)" `Quick test_descriptor_registry_admits_masc_keeper_cluster;
         test_case "masc_board_post resolves" `Quick test_masc_board_post_resolves;
+        test_case "system-internal hidden tool (masc_gc) resolves via System_internal" `Quick test_system_internal_hidden_tool_resolves;
       ]
     ; "policy_validation", [
         test_case "known tools resolve" `Quick test_policy_validation_known_tools_resolve;

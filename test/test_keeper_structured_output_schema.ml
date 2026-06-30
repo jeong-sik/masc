@@ -49,6 +49,63 @@ let allows_additional_properties schema =
   | _ -> false
 ;;
 
+let all_provider_native_schema_cases =
+  [ "librarian_episode", Keeper_structured_output_schema.librarian_episode_output_schema
+  ; "consolidation_plan", Keeper_structured_output_schema.consolidation_plan_output_schema
+  ; "memory_bank_summary", Keeper_structured_output_schema.memory_bank_summary_output_schema
+  ; "vision_analyze", Keeper_structured_output_schema.vision_analyze_output_schema
+  ; "operator_judge", Keeper_structured_output_schema.operator_judge_output_schema
+  ; "governance_judge", Keeper_structured_output_schema.governance_judge_output_schema
+  ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
+  ; "fusion_panel", Keeper_structured_output_schema.fusion_panel_answer_output_schema
+  ; "verification_verdict", Keeper_structured_output_schema.verification_verdict_output_schema
+  ; ( "anti_rationalization_verdict"
+    , Keeper_structured_output_schema.anti_rationalization_verdict_output_schema )
+  ]
+;;
+
+let schema_capable_oas_provider_config () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"structured-output-ratchet"
+    ~base_url:"https://structured-output.invalid/v1"
+    ~supports_structured_output_override:true
+    ~model_capabilities_override:
+      Llm_provider.Capabilities.openai_compat_chat_extended_capabilities
+    ()
+;;
+
+let test_all_schemas_apply_as_oas_native_json_schema () =
+  let base = schema_capable_oas_provider_config () in
+  List.iter
+    (fun (label, schema) ->
+       let configured =
+         Keeper_structured_output_schema.apply_to_provider_config schema base
+       in
+       check
+         bool
+         (label ^ " response_format mirrors schema")
+         true
+         (match configured.Llm_provider.Provider_config.response_format with
+          | Agent_sdk.Types.JsonSchema actual -> Yojson.Safe.equal schema actual
+          | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
+       check
+         bool
+         (label ^ " output_schema mirrors schema")
+         true
+         (match configured.Llm_provider.Provider_config.output_schema with
+          | Some actual -> Yojson.Safe.equal schema actual
+          | None -> false);
+       match Llm_provider.Provider_config.validate_output_schema_request configured with
+       | Ok () -> ()
+       | Error msg ->
+         failf
+           "%s should satisfy the OAS native structured-output contract: %s"
+           label
+           msg)
+    all_provider_native_schema_cases
+;;
+
 let operator_recommended_action_schema () =
   Keeper_structured_output_schema.operator_judge_output_schema
   |> schema_property "workspace"
@@ -233,7 +290,13 @@ let test_anti_rationalization_verdict_schema_uses_task_ssot () =
 let () =
   run
     "keeper-structured-output-schema"
-    [ ( "dashboard schemas"
+    [ ( "oas provider config"
+      , [ test_case
+            "all schemas apply as OAS native JSON schema requests"
+            `Quick
+            test_all_schemas_apply_as_oas_native_json_schema
+        ] )
+    ; ( "dashboard schemas"
       , [ test_case
             "operator judge schema uses action approval SSOT"
             `Quick

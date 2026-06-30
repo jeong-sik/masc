@@ -4574,8 +4574,9 @@ let test_dashboard_fact_json_marks_diagnostic_not_prompt_recallable () =
     | `Assoc fields -> fields
     | _ -> Alcotest.fail "memory_os_fact_json must be a JSON object"
   in
-  (* The producer tags fallback notes as [Diagnostic] at the write boundary, so
-     recall eligibility is decided by [claim_kind] — not by string-matching
+  (* Current librarian extraction rejects unparseable structured output before
+     persistence; historical fallback diagnostics are typed as [Diagnostic].
+     Recall eligibility is decided by [claim_kind] — not by string-matching
      [claim]. Rows lacking [claim_kind] are ordinary recallable facts; their
      [valid_until] horizon bounds any stale pre-[Diagnostic] rows on disk. *)
   Alcotest.(check bool)

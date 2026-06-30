@@ -131,6 +131,32 @@ let test_keeper_direct_completions_request_structured_output () =
     expected_structured_completion_files
 ;;
 
+let test_librarian_runtime_does_not_preserve_unstructured_fallback () =
+  let rel = "lib/keeper/keeper_librarian_runtime.ml" in
+  check
+    int
+    "librarian runtime must not build unstructured fallback episodes"
+    0
+    (Ast_grep.count_value_bindings ~module_path:rel ~name:"unstructured_episode");
+  check
+    int
+    "librarian runtime must not keep fallback preservation predicate"
+    0
+    (Ast_grep.count_value_bindings
+       ~module_path:rel
+       ~name:"should_preserve_unstructured_fallback");
+  check
+    int
+    "librarian runtime must not construct unstructured fallback kind"
+    0
+    (Ast_grep.count_constructors ~module_path:rel ~constructor:"Unstructured_fallback");
+  check
+    (list string)
+    "librarian runtime must not define extraction kind variants"
+    []
+    (Ast_grep.constructor_names_of_type ~module_path:rel ~type_name:"extraction_kind")
+;;
+
 let test_agent_run_json_judges_request_structured_output rels =
   List.iter
     (fun rel ->

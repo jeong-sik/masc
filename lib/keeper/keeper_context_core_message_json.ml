@@ -1,6 +1,6 @@
 module Canonical_tool = Agent_sdk.Canonical_tool
 
-let role_to_string = Agent_sdk.Types.role_to_string
+let role_to_string role = Agent_sdk.Types.role_to_string role
 
 (* Issue #8623: returns [Some] only for the 4 wire-format names.
    Callers must handle [None] explicitly — the previous Variant
@@ -9,7 +9,7 @@ let role_to_string = Agent_sdk.Types.role_to_string
    "user" causes the LLM to treat tool output as user instructions,
    echo prior assistant replies as user input, or downgrade system
    prompt privileges. Same anti-pattern class as #8605/#8615. *)
-let role_of_string_opt = Agent_sdk.Types.role_of_string
+let role_of_string_opt role = Agent_sdk.Types.role_of_string role
 
 let content_blocks_to_json
     (blocks : Agent_sdk.Types.content_block list) : Yojson.Safe.t =

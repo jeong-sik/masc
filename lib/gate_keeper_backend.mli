@@ -10,6 +10,29 @@
 
     @since 2.222.0 *)
 
+(** {1 Connector deferred-reply routing (RFC-0301)} *)
+
+type connector_kind =
+  | Discord
+  | Slack
+  | Generic
+(** The typed identity of the connector a {!dispatch} serves, injected at
+    dispatch-construction time. [Discord]/[Slack] have an in-process outbound
+    adapter and project onto the chat queue; [Generic] (HTTP gate-route sidecars)
+    keeps the async [masc_keeper_msg] poll path. See RFC-0301 §3.2–3.3. *)
+
+val route_busy_connector :
+  connector_kind ->
+  channel_id:string ->
+  user_id:string ->
+  [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ]
+(** Pure routing decision for a connector message that arrives while the keeper
+    has an in-flight turn. Exhaustive over {!connector_kind}: [Discord]/[Slack]
+    return [`Enqueue_chat_queue] with the typed source so the serial
+    {!Keeper_chat_consumer} drains and delivers it after the slot frees;
+    [Generic] returns [`Async_poll]. Exposed for unit testing the decision in
+    isolation. *)
+
 val dispatch :
   sw:Eio.Switch.t ->
   clock:_ Eio.Time.clock ->

@@ -1,6 +1,41 @@
 (** Gate_keeper_backend -- adapter between the Channel Gate and the keeper subsystem.
     See [gate_keeper_backend.mli] for the full contract. *)
 
+(* ── Connector deferred-reply routing (RFC-0301) ─────────────── *)
+
+(* [connector_kind] is the typed identity of the connector a [dispatch] serves.
+   It is a property of the connector, not of each message, so it is baked in at
+   dispatch-construction time (the Discord gateway passes [~connector_kind:Discord]
+   when it builds its dispatch). The per-message channel_id / user_id arrive as the
+   ordinary [channel_workspace_id] / [channel_user_id] dispatch fields.
+
+   This lives in [masc] (not the [masc_gate] [dispatch_fn] type) on purpose:
+   [message_source] is a [masc] type, and putting it on a [masc_gate] signature
+   would be a [masc_gate -> masc] dependency cycle. Threading the typed kind as an
+   injected dispatch argument keeps [masc_gate] connector-neutral (RFC-0226) while
+   letting the busy branch route without string-matching the [channel] lane. *)
+type connector_kind =
+  | Discord
+  | Slack
+  | Generic
+      (** Connectors without an in-process outbound adapter (HTTP gate-route
+          sidecars: imessage-bot, cli-connector). They keep the async
+          [masc_keeper_msg] poll path; see RFC-0301 §3.3 option (a). *)
+
+(* [route_busy_connector] decides where a connector message goes when the keeper
+   is already in flight. Pure and exhaustive over [connector_kind] so a new
+   connector forces a routing decision at compile time (no catch-all). Discord and
+   Slack project onto the chat queue, whose serial consumer drains them after the
+   slot frees and delivers the reply through the connector's outbound adapter
+   ([Keeper_chat_discord.adapter_loop]); [Generic] has no such adapter and falls
+   back to the async poll store. *)
+let route_busy_connector (kind : connector_kind) ~channel_id ~user_id :
+    [ `Enqueue_chat_queue of Keeper_chat_queue.message_source | `Async_poll ] =
+  match kind with
+  | Discord -> `Enqueue_chat_queue (Keeper_chat_queue.Discord { channel_id; user_id })
+  | Slack -> `Enqueue_chat_queue (Keeper_chat_queue.Slack { channel = channel_id; user_id })
+  | Generic -> `Async_poll
+
 (* ── Keeper response parsing ─────────────────────────────────── *)
 
 let extract_turn_stats (body : string) : Gate_protocol.turn_stats option =

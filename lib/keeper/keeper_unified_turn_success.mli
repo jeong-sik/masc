@@ -1,9 +1,10 @@
 (** Success-path post-processing for [Keeper_unified_turn].
 
     Emits terminal FSM transitions for runtime-success turns. Runtime-success
-    turns with a satisfied completion contract emit
+    turns whose authoritative receipt/operator disposition is healthy emit
     [Streaming -> Completing -> Done]. Runtime-success turns whose typed
-    completion-contract result requires attention emit
+    receipt/operator disposition requires human pause for an unsatisfied
+    completion contract emit
     [Streaming -> Completing -> Failed completion_contract_violation] instead.
     This function is the single source of truth for those transitions on the
     success path and must be called at most once per turn.
@@ -52,8 +53,16 @@ module For_testing : sig
   val claim_bound_work
     : (string * Keeper_tool_outcome.t option) list -> bool
 
-  val completion_contract_attention_reason_code
+  val completion_contract_terminal_failure_reason_code
     : Keeper_agent_run.run_result -> string option
+
+  type terminal_outcome =
+    | Terminal_done
+    | Terminal_checkpoint
+    | Terminal_failed_completion_contract of { reason_code : string }
+
+  val terminal_outcome_of_result : Keeper_agent_run.run_result -> terminal_outcome
+  val terminal_outcome_is_completed_turn : terminal_outcome -> bool
 
   val apply_loop_detectors
     :  config:Workspace.config

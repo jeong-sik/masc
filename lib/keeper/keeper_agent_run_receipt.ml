@@ -197,6 +197,15 @@ let finalize
     ; pre_dispatch_compaction_after_tokens
     }
   in
+  let disposition, reason = Keeper_execution_receipt.operator_disposition receipt in
+  let operator_disposition =
+    Some ({ disposition; reason } : Keeper_agent_result.operator_disposition)
+  in
+  let turn_result_with_operator_disposition =
+    match turn_result with
+    | Ok result -> Ok { result with operator_disposition }
+    | Error _ -> turn_result
+  in
   let receipt_path =
     Keeper_runtime_manifest.execution_receipt_path_for_today config
       ~keeper_name:meta.name
@@ -269,9 +278,9 @@ let finalize
   in
   Keeper_agent_run_phase5_task_link.run ~config ~meta ~acc ();
   let final_result =
-    match turn_result, receipt_append_outcome with
-    | Error _, _ -> turn_result
-    | Ok _, Ok () -> turn_result
+    match turn_result_with_operator_disposition, receipt_append_outcome with
+    | Error _, _ -> turn_result_with_operator_disposition
+    | Ok _, Ok () -> turn_result_with_operator_disposition
     | Ok _, Error err_msg ->
       Error
         (Agent_sdk.Error.Internal

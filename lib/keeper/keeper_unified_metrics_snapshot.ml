@@ -22,7 +22,8 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~(message_count : int)
     ~(compaction : Keeper_context_runtime.compaction_event)
     ~(handoff_json : Yojson.Safe.t option)
-    ?provider_timeout_plan_json ?deliberation_execution () : unit =
+    ?provider_timeout_plan_json ?(count_completed_turn = true)
+    ?deliberation_execution () : unit =
   let now_ts = Time_compat.now () in
   let _observation = observation in
   let turn_mode = turn_mode_of_result result in
@@ -91,10 +92,12 @@ let append_metrics_snapshot ~(config : Workspace.config) ~(meta : keeper_meta)
     ~channel:(Keeper_world_observation.channel_to_string channel)
     ~runtime_profile
     ~latency_ms;
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string TurnCompleted)
-    ~labels:[("keeper", meta.name)]
-    ();
+  if count_completed_turn
+  then
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string TurnCompleted)
+      ~labels:[("keeper", meta.name)]
+      ();
   let snapshot =
     `Assoc
       [

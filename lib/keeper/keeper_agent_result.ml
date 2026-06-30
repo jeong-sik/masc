@@ -15,6 +15,11 @@ type tool_call_detail =
   ; output_fingerprint : string option
   }
 
+type operator_disposition =
+  { disposition : Keeper_execution_receipt.operator_disposition_kind
+  ; reason : Keeper_execution_receipt.operator_disposition_reason
+  }
+
 let tool_call_detail_to_json (detail : tool_call_detail) =
   let route_evidence_field =
     match detail.route_evidence with
@@ -71,6 +76,7 @@ type run_result =
   ; usage_reported : bool
   ; tool_calls : tool_call_detail list
   ; completion_contract_result : Keeper_execution_receipt.completion_contract_result
+  ; operator_disposition : operator_disposition option
   ; checkpoint : Agent_sdk.Checkpoint.t option
   ; trace_ref : Agent_sdk.Raw_trace.run_ref option
   ; run_validation : Agent_sdk.Raw_trace.run_validation option

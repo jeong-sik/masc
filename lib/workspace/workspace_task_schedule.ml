@@ -645,9 +645,68 @@ let claim_next config ~agent_name =
 
 (** Release stale task claims older than [ttl_seconds].
     A Claimed or InProgress task whose assignee has no recent heartbeat
-    (per the zombie threshold) is considered stale.
+    and whose task-status timestamp exceeds the TTL is considered stale.
     Returns list of (task_id, assignee) pairs that were released. *)
 let release_stale_claims config ~ttl_seconds =
   ensure_initialized config;
-  []
+  match read_backlog_r config with
+  | Error msg ->
+    Log.TaskState.warn "release_stale_claims: skipped unreadable backlog: %s" msg;
+    []
+  | Ok _ ->
+    let now = Time_compat.now () in
+    let status_timestamp = function
+      | Masc_domain.Claimed { claimed_at; _ } -> Some claimed_at
+      | Masc_domain.InProgress { started_at; _ } -> Some started_at
+      | Masc_domain.Todo
+      | Masc_domain.AwaitingVerification _
+      | Masc_domain.Done _
+      | Masc_domain.Cancelled _ -> None
+    in
+    let older_than_ttl task =
+      match status_timestamp task.task_status with
+      | None -> false
+      | Some raw_ts ->
+        (match Masc_domain.parse_iso8601_opt raw_ts with
+         | Some ts -> now -. ts > ttl_seconds
+         | None ->
+           Log.TaskState.warn
+             "release_stale_claims: refusing to release task=%s with unparsable \
+              status timestamp %S"
+             task.id
+             raw_ts;
+           false)
+    in
+    let release_one ((task : Masc_domain.task), assignee) =
+      if not (older_than_ttl task)
+      then None
+      else (
+        match
+          Workspace_task.force_release_task_r
+            config
+            ~agent_name:"keeper-stale-claim-gc"
+            ~task_id:task.id
+            ()
+        with
+        | Ok _ ->
+          Task_cache_invariant.clear_stale_agent_task
+            config
+            ~agent_name:assignee
+            ~task_id:task.id
+            ~status:Masc_domain.Todo
+            ~module_name:"release_stale_claims";
+          Some (task.id, assignee)
+        | Error err ->
+          log_event
+            config
+            (`Assoc
+                [ "type", `String "stale_claim_release_error"
+                ; "task_id", `String task.id
+                ; "agent", `String assignee
+                ; "error", `String (Masc_domain.masc_error_to_string err)
+                ; "ts", `String (now_iso ())
+                ]);
+          None)
+    in
+    Workspace_query.audit_orphan_tasks config |> List.filter_map release_one
 ;;

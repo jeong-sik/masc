@@ -60,7 +60,7 @@
   ;; consumes the canonical stream/tool surfaces introduced in the v0.207.25
   ;; line and the fail-closed media source carrier expansion
   ;; (Base64/Url/File_id).
-  (agent_sdk (>= 0.207.27))
+  (agent_sdk (>= 0.208.0))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

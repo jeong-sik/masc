@@ -107,8 +107,8 @@ let messages_for_summary ~trace_id ~texts =
 
 let raw_response_text (response : Agent_sdk.Types.api_response) : string option =
   let text =
-    response.content
-    |> List.filter_map (function Agent_sdk.Types.Text s -> Some s | _ -> None)
+    Agent_sdk.Types.visible_text_of_response response
+    |> String.split_on_char '\n'
     |> List.map String.trim
     |> List.filter (fun s -> s <> "")
     |> String.concat "\n"

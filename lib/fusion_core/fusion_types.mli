@@ -68,6 +68,9 @@ type panel_failure =
   | Timeout  (** 구조적 타임아웃 (Masc_oas_bridge) *)
   | Bridge_error of string  (** MASC/OAS bridge bootstrap or wrapper error *)
   | Provider_error of string  (** provider/transport 에러, 메시지 보존 *)
+  | Invalid_structured_response of string
+      (** provider returned non-empty output that violated the requested panel
+          answer JSON schema. *)
   | Empty_response of string
       (** 모델이 빈 응답. detail에는 stop_reason/usage/content shape만 보존하고,
           reasoning/thinking 본문은 노출하지 않는다. *)

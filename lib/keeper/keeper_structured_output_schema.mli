@@ -26,6 +26,9 @@ val governance_judge_output_schema : Yojson.Safe.t
 val fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 
+val fusion_panel_answer_output_schema : Yojson.Safe.t
+(** JSON object each Fusion panel provider must return. *)
+
 val verification_verdict_output_schema : Yojson.Safe.t
 (** JSON object the verification verdict providers must return. *)
 

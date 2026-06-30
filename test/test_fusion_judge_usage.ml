@@ -24,6 +24,7 @@ let sample_synthesis : Fusion_types.judge_synthesis =
   }
 
 let fusion_schema = Keeper_structured_output_schema.fusion_judge_output_schema
+let panel_schema = Keeper_structured_output_schema.fusion_panel_answer_output_schema
 
 let restore_model_catalog previous =
   match previous with
@@ -52,6 +53,15 @@ let with_empty_oas_model_catalog f =
 
 let provider_cfg ~kind ~model_id ~base_url =
   Llm_provider.Provider_config.make ~kind ~model_id ~base_url ()
+
+let response_with_text text : Agent_sdk.Types.api_response =
+  { id = "fusion-panel-test"
+  ; model = "fusion-panel-test-model"
+  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; content = [ Agent_sdk.Types.Text text ]
+  ; usage = None
+  ; telemetry = None
+  }
 
 let test_output_contract_keeps_native_schema_when_supported () =
   let cfg =
@@ -98,6 +108,70 @@ let test_output_contract_fails_loud_when_no_output_contract_is_known () =
   | Ok _ -> fail "expected unknown provider/model to fail loud"
   | Error msg ->
     check bool "schema validation reason is retained" true (String.length msg > 0)
+
+let test_panel_output_contract_keeps_native_schema_when_supported () =
+  let cfg =
+    provider_cfg
+      ~kind:Llm_provider.Provider_config.Anthropic
+      ~model_id:"claude-test"
+      ~base_url:"https://api.anthropic.test"
+  in
+  match Fusion_panel.For_testing.apply_output_contract cfg with
+  | Error msg -> fail ("expected native schema config: " ^ msg)
+  | Ok configured ->
+    check bool "response_format uses JsonSchema" true
+      (match configured.response_format with
+       | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal panel_schema schema
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
+    check bool "output_schema mirrors schema" true
+      (match configured.output_schema with
+       | Some schema -> Yojson.Safe.equal panel_schema schema
+       | None -> false)
+
+let test_panel_outcome_parses_structured_answer () =
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model"
+      (Ok (response_with_text {|{"answer":"  hello  "}|}))
+  with
+  | Fusion_types.Answered { model; answer; usage } ->
+    check string "panel identity preserved" "panel-a" model;
+    check string "answer is parsed and trimmed" "hello" answer;
+    check usage_t "missing provider usage defaults to zero" Fusion_types.zero_usage
+      usage
+  | Fusion_types.Failed failure ->
+    fail ("expected structured answer, got failure: " ^ Fusion_types.show_panel_error failure)
+
+let test_panel_outcome_rejects_invalid_structured_answer () =
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model"
+      (Ok (response_with_text "not-json"))
+  with
+  | Fusion_types.Failed
+      { failed_model = "panel-a"
+      ; reason = Fusion_types.Invalid_structured_response detail
+      } ->
+    check bool "invalid JSON detail is retained" true
+      (String_util.string_contains_substring ~needle:"not valid JSON" detail)
+  | other ->
+    fail
+      ("expected invalid structured response failure, got: "
+       ^ Fusion_types.show_panel_outcome other)
+
+let test_panel_outcome_rejects_empty_answer () =
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model"
+      (Ok (response_with_text {|{"answer":"   "}|}))
+  with
+  | Fusion_types.Failed
+      { failed_model = "panel-a"; reason = Fusion_types.Empty_response detail } ->
+    check bool "empty response detail is retained" true (String.length detail > 0)
+  | other ->
+    fail
+      ("expected empty structured answer failure, got: "
+       ^ Fusion_types.show_panel_outcome other)
 
 let test_attach_usage_on_success () =
   match Fusion_judge.attach_usage (Ok sample_synthesis) sample_usage with
@@ -197,6 +271,18 @@ let () =
             "fails loud when no JSON output contract is known"
             `Quick
             test_output_contract_fails_loud_when_no_output_contract_is_known
+        ; test_case
+            "panel keeps native answer schema when supported"
+            `Quick
+            test_panel_output_contract_keeps_native_schema_when_supported
+        ] )
+    ; ( "panel_outcome"
+      , [ test_case "parses structured answer" `Quick
+            test_panel_outcome_parses_structured_answer
+        ; test_case "rejects invalid structured answer" `Quick
+            test_panel_outcome_rejects_invalid_structured_answer
+        ; test_case "rejects empty answer" `Quick
+            test_panel_outcome_rejects_empty_answer
         ] )
     ; ( "attach_usage"
       , [ test_case "success carries usage" `Quick test_attach_usage_on_success

@@ -65,6 +65,7 @@ type panel_failure =
   | Timeout
   | Bridge_error of string
   | Provider_error of string
+  | Invalid_structured_response of string
   | Empty_response of string
   | Invalid_max_output_tokens of int
 [@@deriving to_yojson, show, eq]
@@ -74,6 +75,8 @@ let panel_failure_of_yojson = function
   | `String "Empty_response" -> Ok (Empty_response "empty response")
   | `List [ `String "Timeout" ] -> Ok Timeout
   | `List [ `String "Provider_error"; `String detail ] -> Ok (Provider_error detail)
+  | `List [ `String "Invalid_structured_response"; `String detail ] ->
+    Ok (Invalid_structured_response detail)
   | `List [ `String "Empty_response"; `String detail ] -> Ok (Empty_response detail)
   | `List [ `String "Invalid_max_output_tokens"; `Int value ] ->
     Ok (Invalid_max_output_tokens value)

@@ -706,7 +706,12 @@ type translated_keeper_stream_event =
 let empty_keeper_stream_bridge_state = Keeper_chat_oas_stream_bridge.empty_state
 let translate_oas_stream_event = Keeper_chat_oas_stream_bridge.translate
 
-let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
+(* [connector_user_line_recorded_upstream] is a required labelled argument: the
+   function ends in labelled args with no positional terminator, so a leading
+   optional could not be erased (warning 16). Every caller states explicitly
+   whether the gate inbound boundary already owns the user line. *)
+let process_single_turn ~connector_user_line_recorded_upstream
+    ~state ~clock ~sw ~auth_token ~thread_id ~closed
     ~client_disconnects
     ~payload ~run_id ~message_id ~agent_name
     ~(events : Keeper_chat_events.keeper_chat_event Eio.Stream.t) =
@@ -782,14 +787,19 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
-    Keeper_chat_store.append_user_message
-      ~base_dir:base_path
-      ~keeper_name:payload.name
-      ~content:payload.message
-      ~attachments:payload.attachments
-      ~surface:chat_surface
-      ~speaker:chat_speaker
-      ()
+    (* RFC-connector-deferred-reply-via-chat-queue §3.4: when the gate inbound boundary already recorded this
+       connector user line (Discord/Slack busy message enqueued onto the chat
+       queue), re-recording it here would double-write. The gate inbound line is
+       assistant-less, so the message is already "pending" — nothing to add. *)
+    if not connector_user_line_recorded_upstream then
+      Keeper_chat_store.append_user_message
+        ~base_dir:base_path
+        ~keeper_name:payload.name
+        ~content:payload.message
+        ~attachments:payload.attachments
+        ~surface:chat_surface
+        ~speaker:chat_speaker
+        ()
   in
   let persist_failure_reply err =
     (* The failure marker is typed, not an utterance: it renders for the
@@ -800,16 +810,36 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
       Keeper_metrics.(to_string ChatTransportFailures)
       ~labels:[ ("keeper", payload.name); ("source", chat_source) ]
       ();
-    Keeper_chat_store.append_turn
-      ~base_dir:base_path
-      ~keeper_name:payload.name
-      ~user_content:payload.message
-      ~user_attachments:payload.attachments
-      ~surface:chat_surface
-      ~speaker:chat_speaker
-      ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
-      ~assistant_content:(persisted_error_reply err)
-      ();
+    (* RFC-connector-deferred-reply-via-chat-queue §3.4: the failure must be
+       DURABLE on both paths — a post-ACK deferred turn that fails must not
+       vanish on restart/replay (counter + live broadcast alone is silent
+       failure under this feature's "queued, will answer" contract).
+       - Dashboard route ([recorded_upstream = false]): the turn owns the user
+         line, so record the paired [Transport_failure] row (user message stays
+         pending for the next turn; keeper never reads the error as its words).
+       - Connector route ([recorded_upstream = true]): the gate inbound boundary
+         already persisted the user line (assistant-less). The paired
+         [append_turn] would double-record that user line, so persist an
+         assistant-only durable failure marker instead — the failure survives a
+         restart and stays joined to the already-pending user line. *)
+    (if connector_user_line_recorded_upstream then
+       Keeper_chat_store.append_assistant_message
+         ~base_dir:base_path
+         ~keeper_name:payload.name
+         ~content:(persisted_error_reply err)
+         ~surface:chat_surface
+         ()
+     else
+       Keeper_chat_store.append_turn
+         ~base_dir:base_path
+         ~keeper_name:payload.name
+         ~user_content:payload.message
+         ~user_attachments:payload.attachments
+         ~surface:chat_surface
+         ~speaker:chat_speaker
+         ~assistant_kind:Keeper_chat_store.Row_kind.Transport_failure
+         ~assistant_content:(persisted_error_reply err)
+         ());
     Keeper_chat_broadcast.chat_appended
       ~keeper_name:payload.name ~source:chat_source
       ~content:(persisted_error_reply err)
@@ -885,16 +915,30 @@ let process_single_turn ~state ~clock ~sw ~auth_token ~thread_id ~closed
                  | Keeper_turn_outcome.Visible_reply, None ->
                      persist_user_message_only ()
                  | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
-                     Keeper_chat_store.append_turn
-                       ~base_dir:base_path
-                       ~keeper_name:payload.name
-                       ~user_content:payload.message
-                       ~user_attachments:payload.attachments
-                       ~surface:chat_surface
-                       ~speaker:chat_speaker
-                       ~assistant_content:visible_reply
-                       ?turn_ref
-                       ();
+                     (* RFC-connector-deferred-reply-via-chat-queue §3.4: gate-recorded connector message → the user
+                        line is already persisted at the gate inbound boundary,
+                        so pair the reply by appending the assistant line only
+                        (mirrors [append_direct_chat_pair_if_reply]'s connector
+                        arm). The dashboard route records the full pair. *)
+                     if connector_user_line_recorded_upstream then
+                       Keeper_chat_store.append_assistant_message
+                         ~base_dir:base_path
+                         ~keeper_name:payload.name
+                         ~content:visible_reply
+                         ~surface:chat_surface
+                         ?turn_ref
+                         ()
+                     else
+                       Keeper_chat_store.append_turn
+                         ~base_dir:base_path
+                         ~keeper_name:payload.name
+                         ~user_content:payload.message
+                         ~user_attachments:payload.attachments
+                         ~surface:chat_surface
+                         ~speaker:chat_speaker
+                         ~assistant_content:visible_reply
+                         ?turn_ref
+                         ();
                      Keeper_chat_broadcast.chat_appended
                        ~keeper_name:payload.name ~source:chat_source
                        ~content:visible_reply
@@ -1342,7 +1386,10 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
            Eio.Fiber.fork ~sw:stream_sw (fun () ->
              sse_adapter_loop ~events ~writer ~mutex ~closed
                ~on_closed:notify_disconnect);
-           process_single_turn ~state ~clock ~sw
+           (* Dashboard stream route: no gate inbound boundary recorded this
+              user line, so the turn owns recording both sides (RFC-connector-deferred-reply-via-chat-queue §3.4). *)
+           process_single_turn ~connector_user_line_recorded_upstream:false
+             ~state ~clock ~sw
              ~auth_token:(auth_token_from_request request)
              ~thread_id ~closed
              ~client_disconnects:(Some (stream_sw, client_disconnects))

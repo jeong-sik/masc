@@ -1242,22 +1242,49 @@ let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
   let parse raw =
     Memory_summary.For_testing.summary_text_of_response (fake_response raw)
   in
+  let parse_result raw =
+    Memory_summary.For_testing.summary_text_result_of_response (fake_response raw)
+  in
+  let check_invalid_structured label = function
+    | Error (Memory_summary.Invalid_structured_response _) -> ()
+    | Ok summary -> Alcotest.failf "%s: expected invalid structured response, got %S" label summary
+    | Error Memory_summary.Empty_summary_response ->
+        Alcotest.failf "%s: expected invalid structured response, got empty response" label
+  in
   Alcotest.(check (option string))
     "valid summary json"
     (Some "Remember exact command.")
     (parse {|{"summary":" Remember exact command.  "}|});
+  (match parse_result {|{"summary":" Remember exact command.  "}|} with
+   | Ok summary ->
+       Alcotest.(check string)
+         "valid summary json result"
+         "Remember exact command."
+         summary
+   | Error _ -> Alcotest.fail "valid summary json result rejected");
   Alcotest.(check (option string))
     "plain text rejected"
     None
     (parse "Remember exact command.");
+  check_invalid_structured "plain text result" (parse_result "Remember exact command.");
   Alcotest.(check (option string))
     "empty summary rejected"
     None
     (parse {|{"summary":"   "}|});
+  Alcotest.(check bool)
+    "empty summary result"
+    true
+    (match parse_result {|{"summary":"   "}|} with
+     | Error Memory_summary.Empty_summary_response -> true
+     | Ok _
+     | Error (Memory_summary.Invalid_structured_response _) -> false);
   Alcotest.(check (option string))
     "wrong field rejected"
     None
-    (parse {|{"text":"Remember exact command."}|})
+    (parse {|{"text":"Remember exact command."}|});
+  check_invalid_structured
+    "wrong field result"
+    (parse_result {|{"text":"Remember exact command."}|)
 ;;
 
 let json_episode_file_count ~keeper_id =

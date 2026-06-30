@@ -22,7 +22,8 @@ let () =
     ~name:Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
     ~help:
       "Total [summarize_with_provider] attempts classified by label \
-       [outcome] (ok_summary | timed_out | http_error | empty_response). \
+       [outcome] (ok_summary | timed_out | http_error | empty_response | \
+       invalid_structured_response). \
        Labels: [outcome], [provider] (model_id), [runtime_id]."
     ();
   Otel_metric_store.register_counter
@@ -116,28 +117,43 @@ let raw_response_text (response : Agent_sdk.Types.api_response) : string option 
   in
   if text = "" then None else Some text
 
-let summary_text_of_raw_text raw =
-  try
+type summary_parse_error =
+  | Empty_summary_response
+  | Invalid_structured_response of string
+
+let summary_text_result_of_raw_text raw =
+  let raw = String.trim raw in
+  if raw = "" then Error Empty_summary_response
+  else
     match Yojson.Safe.from_string raw with
+    | exception Yojson.Json_error msg ->
+        Error (Invalid_structured_response ("invalid JSON: " ^ msg))
     | `Assoc fields ->
-      (match List.assoc_opt "summary" fields with
-       | Some (`String summary) ->
-         let summary = String.trim summary in
-         if summary = "" then None else Some summary
-       | Some _
-       | None -> None)
-    | _ -> None
-  with Yojson.Json_error _ -> None
+        (match List.assoc_opt "summary" fields with
+         | Some (`String summary) ->
+             let summary = String.trim summary in
+             if summary = "" then Error Empty_summary_response else Ok summary
+         | Some _ ->
+             Error (Invalid_structured_response "summary field must be a string")
+         | None ->
+             Error (Invalid_structured_response "missing summary field"))
+    | _ -> Error (Invalid_structured_response "summary response must be an object")
 ;;
 
-let summary_text_of_response response =
+let summary_text_result_of_response response =
   match raw_response_text response with
-  | None -> None
-  | Some raw -> summary_text_of_raw_text raw
+  | None -> Error Empty_summary_response
+  | Some raw -> summary_text_result_of_raw_text raw
+
+let summary_text_of_response response =
+  match summary_text_result_of_response response with
+  | Ok summary -> Some summary
+  | Error _ -> None
 ;;
 
 module For_testing = struct
   let summary_text_of_response = summary_text_of_response
+  let summary_text_result_of_response = summary_text_result_of_response
 end
 
 let with_timeout ?clock ~timeout_sec f =
@@ -184,14 +200,20 @@ let summarize_with_provider
           trace_id provider_cfg.model_id timeout_sec;
         None, Keeper_memory_llm_summary_outcome.Timed_out
     | Some (Ok response) ->
-        (match summary_text_of_response response with
-         | Some _ as summary ->
-             summary, Keeper_memory_llm_summary_outcome.Ok_summary
-         | None ->
+        (match summary_text_result_of_response response with
+         | Ok summary ->
+             Some summary, Keeper_memory_llm_summary_outcome.Ok_summary
+         | Error Empty_summary_response ->
              Log.Keeper.warn
                "memory LLM summary empty trace_id=%s provider=%s"
                trace_id provider_cfg.model_id;
-             None, Keeper_memory_llm_summary_outcome.Empty_response)
+             None, Keeper_memory_llm_summary_outcome.Empty_response
+         | Error (Invalid_structured_response detail) ->
+             Log.Keeper.warn
+               "memory LLM summary invalid structured response trace_id=%s \
+                provider=%s detail=%s"
+               trace_id provider_cfg.model_id detail;
+             None, Keeper_memory_llm_summary_outcome.Invalid_structured_response)
     | Some (Error err) ->
         Log.Keeper.warn
           "memory LLM summary failed trace_id=%s provider=%s: %s"

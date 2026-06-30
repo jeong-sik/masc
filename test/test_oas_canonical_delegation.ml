@@ -20,6 +20,14 @@ let test_masc_delegates_canonical_oas_projections () =
     ~callee:"Agent_sdk.Types.role_to_string"
     ~expected:1;
   check_calls
+    ~file:"lib/keeper/keeper_context_core_message_json.ml"
+    ~callee:"Agent_sdk.Types.role_to_string"
+    ~expected:1;
+  check_calls
+    ~file:"lib/keeper/keeper_context_core_message_json.ml"
+    ~callee:"Agent_sdk.Types.role_of_string"
+    ~expected:1;
+  check_calls
     ~file:"lib/keeper/keeper_event_bridge_error_json.ml"
     ~callee:"Agent_sdk.Types.total_tokens"
     ~expected:1;

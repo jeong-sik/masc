@@ -624,6 +624,12 @@ let handle_ambient ~base_dir
       (match attention_event_id with
        | Some event_id
          when Feature_flag_registry.get_bool "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED"
+              (* P4 throttle: the flag short-circuits first (cheap, no side
+                 effect); the debounce records a timestamp only when reached, so
+                 a chatty channel wakes the keeper at most once per window and a
+                 no-progress-latched keeper is not re-woken (RFC-0246). *)
+              && Keeper_keepalive_signal.connector_reactive_wakeup_allowed
+                   ~base_path:base_dir ~keeper_name ~channel_id
          ->
          let stimulus =
            { Keeper_event_queue.post_id = event_id

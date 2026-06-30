@@ -589,7 +589,7 @@ let handle_ambient ~base_dir
       Discord_observability.record_ambient
         Discord_observability.Ambient_dropped_too_long
     else begin
-      let (_ : string option) =
+      let attention_event_id =
         record_external_attention ~base_dir ~keeper_name ~guild_id ~channel_id
           ~message_id ~author_id ~author_name ~content:trimmed
           ~mentions_bot:false ~route:"ambient"
@@ -614,6 +614,34 @@ let handle_ambient ~base_dir
           }
         ();
       Keeper_chat_broadcast.chat_appended ~keeper_name ~source:State.channel ();
+      (* RFC-connector-ambient-attention-wake P3: wake the (possibly idle) keeper
+         on this ambient message via an edge stimulus carrying the external-
+         attention event_id (not content — content stays in the durable store),
+         plus a wakeup hint for sub-second propagation. Gated off by default:
+         until the spurious-wake throttle (P4) lands, running a turn on every
+         ambient line in a chatty channel is the anti-pattern the trigger policy
+         deliberately filtered. *)
+      (match attention_event_id with
+       | Some event_id
+         when Feature_flag_registry.get_bool "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED"
+              (* P4 throttle: the flag short-circuits first (cheap, no side
+                 effect); the debounce records a timestamp only when reached, so
+                 a chatty channel wakes the keeper at most once per window and a
+                 no-progress-latched keeper is not re-woken (RFC-0246). *)
+              && Keeper_keepalive_signal.connector_reactive_wakeup_allowed
+                   ~base_path:base_dir ~keeper_name ~channel_id
+         ->
+         let stimulus =
+           { Keeper_event_queue.post_id = event_id
+           ; urgency = Keeper_event_queue.Low
+           ; arrived_at = Unix.gettimeofday ()
+             (* NDT-OK: stimulus receipt time, used only for ordering/age *)
+           ; payload = Keeper_event_queue.Connector_attention { event_id }
+           }
+         in
+         Keeper_registry_event_queue.enqueue ~base_path:base_dir keeper_name stimulus;
+         Keeper_registry.wakeup ~base_path:base_dir keeper_name
+       | Some _ | None -> ());
       Discord_observability.record_ambient
         Discord_observability.Ambient_recorded
     end

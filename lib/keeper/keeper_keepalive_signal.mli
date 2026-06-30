@@ -139,6 +139,20 @@ val wakeup_all_keepers : ?base_path:string -> unit -> unit
 (** Board-reactive debounce interval (seconds), from runtime config. *)
 val board_reactive_debounce_sec : float
 
+(** Connector-reactive (ambient connector message) debounce interval, seconds.
+    RFC-connector-ambient-attention-wake P4. *)
+val connector_reactive_debounce_sec : float
+
+val connector_reactive_wakeup_allowed :
+  base_path:string -> keeper_name:string -> channel_id:string -> bool
+(** Whether an ambient connector message on [channel_id] may wake [keeper_name]
+    now. Reuses the board-reactive primitive: the RFC-0246 tombstone gate (a
+    latched no-progress keeper is not re-woken) plus a per-channel debounce
+    ({!connector_reactive_debounce_sec}). Returns [false] within the debounce
+    window so a chatty channel wakes the keeper at most once per window; the
+    keeper then sees every accumulated message in its chat history. Records the
+    wakeup timestamp as a side effect when it returns [true]. *)
+
 val board_reactive_wakeup_max : int
 
 (** [board_wakeup_dedup_key] is the content fingerprint a board wakeup is

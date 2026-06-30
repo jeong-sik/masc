@@ -9,6 +9,16 @@
 
 open Alcotest
 module WO = Masc.Keeper_world_observation
+module A = Masc.Keeper_external_attention
+
+let contains ~needle haystack =
+  let nl = String.length needle in
+  let hl = String.length haystack in
+  let rec loop i =
+    i + nl <= hl
+    && (String.equal (String.sub haystack i nl) needle || loop (i + 1))
+  in
+  nl = 0 || loop 0
 
 (* keeper_cycle_decision resolves a runtime id unconditionally (RFC-0206 §2.1),
    so a minimal default runtime must exist — same setup the other cycle-decision
@@ -56,6 +66,48 @@ let make_meta name =
   match Masc_test_deps.meta_of_json_fixture json with
   | Ok meta -> meta
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
+
+let discord_surface =
+  A.Discord
+    {
+      guild_id = Some "guild-1";
+      channel_id = "chan-1";
+      parent_channel_id = None;
+      thread_id = None;
+    }
+
+let external_attention_item ?(urgency = A.Ambient) ?(preview = "ambient TOKEN-123")
+    () : A.item =
+  let dedupe_key = "discord:discord:guild-1:channel:chan-1:msg-1" in
+  {
+    A.event_id = A.event_id_of_dedupe_key dedupe_key;
+    dedupe_key;
+    keeper_name = "conn-keeper";
+    conversation =
+      {
+        conversation_id = "discord:guild-1:channel:chan-1";
+        surface = discord_surface;
+      };
+    external_message =
+      Some
+        {
+          surface = discord_surface;
+          message_id = "msg-1";
+          reply_to_message_id = None;
+        };
+    source_label = "discord";
+    actor =
+      {
+        actor_id = Some "user-1";
+        display_name = Some "Alex";
+        authority = Masc.Keeper_chat_store.External;
+      };
+    urgency;
+    content_preview = preview;
+    content_ref = None;
+    received_at = 123.0;
+    metadata = [ ("route", "ambient") ];
+  }
 
 (* Quiet observation: no mention / board / scope trigger and no task backlog, so
    the ONLY reactive trigger is the injected event-queue one. *)
@@ -125,6 +177,23 @@ let test_connector_attention_codec_roundtrips () =
     | _ -> check bool "round-trip payload stays Connector_attention" true false)
   | Error e -> check bool ("round-trip decode failed: " ^ e) true false
 
+let test_external_attention_projects_to_prompt_event () =
+  let meta = make_meta "conn-keeper" in
+  let item = external_attention_item () in
+  let ev = WO.pending_board_event_of_external_attention ~meta item in
+  check string "post id carries event id"
+    ("connector-attention:" ^ item.A.event_id)
+    ev.WO.post_id;
+  check bool "title carries typed surface" true
+    (contains ~needle:"External discord attention" ev.WO.title);
+  check bool "preview carries connector message" true
+    (contains ~needle:"TOKEN-123" ev.WO.preview);
+  check bool "ambient is not an explicit mention" false ev.WO.explicit_mention;
+  check bool "ambient stays observational" true
+    (match ev.WO.provenance with
+     | WO.Unknown -> true
+     | _ -> false)
+
 let () =
   init_runtime_default_for_tests ();
   run "connector_attention_wake"
@@ -137,5 +206,9 @@ let () =
     ; ( "codec",
         [ test_case "Connector_attention payload JSON round-trips" `Quick
             test_connector_attention_codec_roundtrips
+        ] )
+    ; ( "projection",
+        [ test_case "external attention becomes prompt event" `Quick
+            test_external_attention_projects_to_prompt_event
         ] )
     ]

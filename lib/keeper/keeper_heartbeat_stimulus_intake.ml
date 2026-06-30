@@ -58,6 +58,19 @@ type heartbeat_event_intake = {
   event_queue_triggers : Keeper_world_observation.event_queue_trigger list;
 }
 
+let recorded_attention_item_by_event_id ~base_path ~keeper_name ~event_id =
+  Keeper_external_attention.load_events ~base_path ~keeper_name
+  |> List.find_map (function
+       | Keeper_external_attention.Recorded item
+         when String.equal item.Keeper_external_attention.event_id event_id ->
+         Some item
+       | Keeper_external_attention.Recorded _
+       | Keeper_external_attention.Claimed_for_turn _
+       | Keeper_external_attention.Resolved _
+       | Keeper_external_attention.Ignored _ ->
+         None)
+;;
+
 let event_queue_trigger_of_stimulus (stim : Keeper_event_queue.stimulus) =
   match stim.payload with
   | Keeper_event_queue.Bootstrap -> Some Keeper_world_observation.Bootstrap_stimulus
@@ -132,16 +145,29 @@ let consume_single_heartbeat_stimulus
     []
   | Keeper_event_queue.Connector_attention ca ->
     (* RFC-connector-ambient-attention-wake: the stimulus woke this keeper.
-       P2 — resolution lifecycle (turn-start half): claim the external-attention
-       item so the operator digest shows it as being handled rather than still
-       pending (and a stale claim re-surfaces only after claim_stale_after, not
-       every cycle). The wake itself is already resolution-safe — the stimulus is
-       edge-consumed here exactly once (P1) — so this claim is for the durable
-       backlog projection, not for gating the wake. mark_resolved / mark_ignored
-       at turn end is coupled to reading the content and deciding whether to
-       reply, which lands with content threading + outbound (P3).
-       Content injection is P3; for now the turn runs with no injected board
-       event, like Bootstrap / No_progress_recovery. *)
+       The event_id is a pointer only; the message/surface content stays in
+       Keeper_external_attention. Load it here and promote it to a pending
+       observation so the turn has real connector context instead of a
+       contentless wake reason. *)
+    let pending_events =
+      match
+        recorded_attention_item_by_event_id
+          ~base_path:ctx.config.base_path
+          ~keeper_name:meta_after_triage.name
+          ~event_id:ca.event_id
+      with
+      | Some item ->
+        [ Keeper_world_observation.pending_board_event_of_external_attention
+            ~meta:meta_after_triage
+            item
+        ]
+      | None ->
+        Log.Keeper.warn
+          "connector attention stimulus missing recorded item event_id=%s (keeper=%s)"
+          ca.event_id
+          meta_after_triage.name;
+        []
+    in
     (match
        Keeper_external_attention.claim_for_turn
          ~base_path:ctx.config.base_path
@@ -160,7 +186,7 @@ let consume_single_heartbeat_stimulus
       "turn entry: connector attention stimulus consumed event_id=%s (keeper=%s)"
       ca.event_id
       meta_after_triage.name;
-    []
+    pending_events
 ;;
 
 let consume_board_stimulus_batch ~meta_after_triage batch =

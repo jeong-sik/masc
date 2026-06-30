@@ -419,6 +419,65 @@ describe('SettingsSurface', () => {
     expect(gateInput?.value).toBe('https://gate.example.test')
   })
 
+  it('sandbox controls are browser-session previews with persisted execution boundaries', async () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-sandbox"]') as HTMLElement)
+
+    const summary = () => container.querySelector('[data-testid="sandbox-local-summary"]') as HTMLElement
+    expect(summary().textContent).toContain('local sandbox preview')
+    expect(summary().textContent).toContain('container')
+    expect(summary().textContent).toContain('worktree fs')
+    expect(summary().textContent).toContain('허용목록 network')
+    expect(summary().textContent).toContain('shell on')
+    expect(summary().textContent).toContain('2GB · 2 CPU · 120s')
+    expect(container.textContent).toContain('Settings does not write live sandbox policy yet')
+
+    const buttonByText = (text: string) => Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
+      .find(button => button.textContent === text)
+
+    await fireEvent.click(buttonByText('microVM') as HTMLButtonElement)
+    await fireEvent.click(buttonByText('namespace') as HTMLButtonElement)
+    await fireEvent.click(buttonByText('차단') as HTMLButtonElement)
+
+    expect(summary().textContent).toContain('microVM')
+    expect(summary().textContent).toContain('namespace fs')
+    expect(summary().textContent).toContain('차단 network')
+    expect(container.querySelector('[data-testid="settings-allowed-domains-input"]')).toBeNull()
+    expect(sessionStorage.getItem('masc.settings.local.sandboxIsolation')).toBe('microVM')
+    expect(sessionStorage.getItem('masc.settings.local.sandboxFsScope')).toBe('namespace')
+    expect(sessionStorage.getItem('masc.settings.local.sandboxEgress')).toBe('차단')
+
+    const toggles = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-toggle"]'))
+    await fireEvent.click(toggles[0] as HTMLButtonElement)
+    expect(summary().textContent).toContain('shell off')
+    expect(container.textContent).not.toContain('Block risky commands')
+    expect(sessionStorage.getItem('masc.settings.local.sandboxShellCommands')).toBe('false')
+
+    await fireEvent.click(buttonByText('8GB') as HTMLButtonElement)
+    const cpuButtons = Array.from(container.querySelectorAll<HTMLButtonElement>('[data-testid="set-stepper"] button'))
+    await fireEvent.click(cpuButtons[1] as HTMLButtonElement)
+    const timeoutSlider = container.querySelector('[data-testid="set-slider"] input') as HTMLInputElement
+    await fireEvent.input(timeoutSlider, { target: { value: '300' } })
+
+    expect(summary().textContent).toContain('8GB · 3 CPU · 300s')
+    expect(sessionStorage.getItem('masc.settings.local.sandboxMemoryLimit')).toBe('8GB')
+    expect(sessionStorage.getItem('masc.settings.local.sandboxCpuLimit')).toBe('3')
+    expect(sessionStorage.getItem('masc.settings.local.sandboxExecTimeout')).toBe('300')
+
+    render(null, container)
+    render(html`<${SettingsSurface} />`, container)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-sandbox"]') as HTMLElement)
+
+    expect(summary().textContent).toContain('microVM')
+    expect(summary().textContent).toContain('namespace fs')
+    expect(summary().textContent).toContain('차단 network')
+    expect(summary().textContent).toContain('shell off')
+    expect(summary().textContent).toContain('8GB · 3 CPU · 300s')
+    expect(container.querySelector('[data-testid="settings-allowed-domains-input"]')).toBeNull()
+    expect(container.textContent).not.toContain('Block risky commands')
+  })
+
   it('gate connector toggles are browser-session previews, not live connection state', async () => {
     render(html`<${SettingsSurface} />`, container)
 

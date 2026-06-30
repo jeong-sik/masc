@@ -209,6 +209,22 @@ function useLocalPreviewNumber(key: string, initialValue: number): [number, (nex
   return [value, setStoredValue]
 }
 
+function readLocalPreviewBool(key: string, fallback: boolean): boolean {
+  const raw = readLocalPreviewString(key, fallback ? 'true' : 'false').trim().toLowerCase()
+  if (raw === 'true') return true
+  if (raw === 'false') return false
+  return fallback
+}
+
+function useLocalPreviewBool(key: string, initialValue: boolean): [boolean, (next: boolean) => void] {
+  const [value, setValue] = useState(() => readLocalPreviewBool(key, initialValue))
+  const setStoredValue = (next: boolean) => {
+    setValue(next)
+    writeLocalPreviewString(key, next ? 'true' : 'false')
+  }
+  return [value, setStoredValue]
+}
+
 function useLocalPreviewBoolRecord(
   key: string,
   initialValue: Record<string, boolean>,
@@ -824,15 +840,15 @@ export function SettingsSurface() {
   }
 
   // sandbox
-  const [isolation, setIsolation] = useState('container')
-  const [egress, setEgress] = useState('허용목록')
+  const [isolation, setIsolation] = useLocalPreviewString('sandboxIsolation', 'container')
+  const [egress, setEgress] = useLocalPreviewString('sandboxEgress', '허용목록')
   const [allowlist, setAllowlist] = useLocalPreviewString('allowlist', 'github.com, opam.ocaml.org, *.masc.local')
-  const [fsScope, setFsScope] = useState('worktree')
-  const [shellOn, setShellOn] = useState(true)
-  const [blockRisky, setBlockRisky] = useState(true)
-  const [memLimit, setMemLimit] = useState('2GB')
-  const [cpuLimit, setCpuLimit] = useState(2)
-  const [execTimeout, setExecTimeout] = useState(120)
+  const [fsScope, setFsScope] = useLocalPreviewString('sandboxFsScope', 'worktree')
+  const [shellOn, setShellOn] = useLocalPreviewBool('sandboxShellCommands', true)
+  const [blockRisky, setBlockRisky] = useLocalPreviewBool('sandboxBlockRiskyCommands', true)
+  const [memLimit, setMemLimit] = useLocalPreviewString('sandboxMemoryLimit', '2GB')
+  const [cpuLimit, setCpuLimit] = useLocalPreviewNumber('sandboxCpuLimit', 2)
+  const [execTimeout, setExecTimeout] = useLocalPreviewNumber('sandboxExecTimeout', 120)
 
   // ide
   const [ideView, setIdeView] = useState('split-diff')
@@ -1220,47 +1236,85 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'sandbox' && html`
-              <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Isolated execution environment for keeper code. Tool permissions (approval policy) sit above this OS·network boundary.
+              <div class="set-sandbox-section" data-testid="sandbox-preview-section">
+                <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                  Browser-session preview for keeper execution boundaries. Settings does not write live sandbox policy yet; tool permissions and approvals still sit above this OS·network boundary.
+                </div>
+                <div class="set-local-summary" data-testid="sandbox-local-summary">
+                  <span>local sandbox preview</span>
+                  <span class="mono">${isolation}</span>
+                  <span class="mono">${fsScope} fs</span>
+                  <span class="mono">${egress} network</span>
+                  <span class="mono">${shellOn ? 'shell on' : 'shell off'}</span>
+                  <span class="mono">${memLimit} · ${cpuLimit} CPU · ${execTimeout}s</span>
+                  <${PreviewBadge} />
+                </div>
+                <${SetRow} label="Isolation level" hint="Keeper execution isolation">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetSeg} value=${isolation} options=${['worktree', 'container', 'microVM']} onChange=${setIsolation} />
+                  </div>
+                <//>
+                <${SetRow} label="Filesystem scope" hint="Paths the keeper can access">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetSeg} value=${fsScope} options=${['worktree', 'namespace', '전체']} onChange=${setFsScope} />
+                  </div>
+                <//>
+                <${SetRow} label="Network egress" hint="External network access">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetSeg} value=${egress} options=${['차단', '허용목록', '전체']} onChange=${setEgress} />
+                  </div>
+                <//>
+                ${egress === '허용목록' && html`
+                  <${SetRow} label="Allowed domains" hint="Comma-separated">
+                    <div class="set-path">
+                      <input
+                        class="set-input mono"
+                        data-testid="settings-allowed-domains-input"
+                        style=${{ width: '260px' }}
+                        value=${allowlist}
+                        onInput=${(e: Event) => setAllowlist((e.target as HTMLInputElement).value)}
+                      />
+                      <${PreviewBadge} />
+                    </div>
+                  <//>
+                `}
+                <${SetRow} label="Shell commands" hint="Keeper may run shell commands">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetToggle} on=${shellOn} onChange=${setShellOn} />
+                  </div>
+                <//>
+                ${shellOn && html`
+                  <${SetRow} label="Block risky commands" hint="rm -rf, curl | sh, etc.">
+                    <div class="set-tg-control">
+                      <${PreviewBadge} />
+                      <${SetToggle} on=${blockRisky} onChange=${setBlockRisky} />
+                    </div>
+                  <//>
+                `}
+                <div class="set-sub-h">Resource limits</div>
+                <${SetRow} label="Memory" hint="Max per keeper">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetSeg} value=${memLimit} options=${['1GB', '2GB', '4GB', '8GB']} onChange=${setMemLimit} />
+                  </div>
+                <//>
+                <${SetRow} label="CPU" hint="vCPU cores">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetStepper} v=${cpuLimit} set=${setCpuLimit} min=${1} max=${16} />
+                  </div>
+                <//>
+                <${SetRow} label="Execution timeout" hint="Max single command runtime (seconds)">
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetSlider} value=${execTimeout} min=${10} max=${600} step=${10} suffix="s" onChange=${setExecTimeout} />
+                  </div>
+                <//>
               </div>
-              <${SetRow} label="Isolation level" hint="Keeper execution isolation">
-                <${SetSeg} value=${isolation} options=${['worktree', 'container', 'microVM']} onChange=${setIsolation} />
-              <//>
-              <${SetRow} label="Filesystem scope" hint="Paths the keeper can access">
-                <${SetSeg} value=${fsScope} options=${['worktree', 'namespace', '전체']} onChange=${setFsScope} />
-              <//>
-              <${SetRow} label="Network egress" hint="External network access">
-                <${SetSeg} value=${egress} options=${['차단', '허용목록', '전체']} onChange=${setEgress} />
-              <//>
-              ${egress === '허용목록' && html`
-                <${SetRow} label="Allowed domains" hint="Comma-separated">
-                  <input
-                    class="set-input mono"
-                    data-testid="settings-allowed-domains-input"
-                    style=${{ width: '260px' }}
-                    value=${allowlist}
-                    onInput=${(e: Event) => setAllowlist((e.target as HTMLInputElement).value)}
-                  />
-                <//>
-              `}
-              <${SetRow} label="Shell commands" hint="Keeper may run shell commands">
-                <${SetToggle} on=${shellOn} onChange=${setShellOn} />
-              <//>
-              ${shellOn && html`
-                <${SetRow} label="Block risky commands" hint="rm -rf, curl | sh, etc.">
-                  <${SetToggle} on=${blockRisky} onChange=${setBlockRisky} />
-                <//>
-              `}
-              <div class="set-sub-h">Resource limits</div>
-              <${SetRow} label="Memory" hint="Max per keeper">
-                <${SetSeg} value=${memLimit} options=${['1GB', '2GB', '4GB', '8GB']} onChange=${setMemLimit} />
-              <//>
-              <${SetRow} label="CPU" hint="vCPU cores">
-                <${SetStepper} v=${cpuLimit} set=${setCpuLimit} min=${1} max=${16} />
-              <//>
-              <${SetRow} label="Execution timeout" hint="Max single command runtime (seconds)">
-                <${SetSlider} value=${execTimeout} min=${10} max=${600} step=${10} suffix="s" onChange=${setExecTimeout} />
-              <//>
             `}
 
             ${sec === 'ide' && html`

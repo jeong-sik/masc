@@ -97,7 +97,7 @@ let write_all_partition ~base_dir partition annotations =
   let content = String.concat "" (List.map (fun line -> line ^ "\n") lines) in
   match Fs_compat.save_file_atomic path content with
   | Ok () -> ()
-  | Error msg -> failwith msg
+  | Error msg -> raise (Sys_error msg)
 ;;
 
 let create

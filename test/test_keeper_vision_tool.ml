@@ -14,6 +14,7 @@
 module Vt = Masc.Keeper_vision_tool
 module Vi = Masc.Keeper_vision_ingest
 module Va = Multimodal.Vision_analyze
+module Structured_schema = Masc.Keeper_structured_output_schema
 module Store = Multimodal.Vision_artifact_store
 
 external unsetenv : string -> unit = "masc_test_unsetenv"
@@ -95,6 +96,18 @@ let artifact_handle_of_placeholder text =
     String.sub text start (stop start - start)
 
 let ok_response text : Agent_sdk.Types.api_response =
+  let text_json =
+    Yojson.Safe.to_string (`Assoc [ "text", `String text ])
+  in
+  { id = "vision-test"
+  ; model = "vision-test-model"
+  ; stop_reason = Agent_sdk.Types.EndTurn
+  ; content = [ Agent_sdk.Types.Text text_json ]
+  ; usage = None
+  ; telemetry = None
+  }
+
+let text_response text : Agent_sdk.Types.api_response =
   { id = "vision-test"
   ; model = "vision-test-model"
   ; stop_reason = Agent_sdk.Types.EndTurn
@@ -189,7 +202,8 @@ let test_truncated_of_stop_reason () =
     ]
 
 (* One User message [text query; image]; image data is base64 of the raw bytes
-   (NOT the raw bytes), media_type preserved, source_type "base64". *)
+   (NOT the raw bytes), media_type preserved, source_type "base64". The JSON
+   response contract is carried by [provider_for_vision], not prompt prose. *)
 let test_message_of_request () =
   let bytes = "\x89PNG\r\n\x1a\n\x00raw\xffbytes" in
   match
@@ -202,7 +216,7 @@ let test_message_of_request () =
     assert (msg.Agent_sdk.Types.role = Agent_sdk.Types.User);
     (match msg.Agent_sdk.Types.content with
      | [ Agent_sdk.Types.Text q; Agent_sdk.Types.Image img ] ->
-       assert (String.equal q "what color?");
+       assert (contains_substring q "what color?");
        assert (String.equal img.media_type "image/png");
        assert (
          String.equal
@@ -230,7 +244,16 @@ let test_provider_for_vision_preserves_configured_max_tokens () =
   let configured = Vt.provider_for_vision { base with max_tokens = Some 4096 } in
   assert (configured.max_tokens = Some 4096);
   let fallback = Vt.provider_for_vision { base with max_tokens = None } in
-  assert (fallback.max_tokens = Some Vt.vision_default_max_tokens)
+  assert (fallback.max_tokens = Some Vt.vision_default_max_tokens);
+  let expected_schema = Structured_schema.vision_analyze_output_schema in
+  (match configured.response_format with
+   | Agent_sdk.Types.JsonSchema schema ->
+     assert (Yojson.Safe.equal schema expected_schema)
+   | Agent_sdk.Types.JsonMode
+   | Agent_sdk.Types.Off -> failwith "vision provider must request JsonSchema");
+  (match configured.output_schema with
+   | Some schema -> assert (Yojson.Safe.equal schema expected_schema)
+   | None -> failwith "vision provider must mirror output_schema")
 
 let test_max_image_bytes_reads_env_config () =
   with_env "MASC_KEEPER_VISION_MAX_IMAGE_BYTES" "128" (fun () ->
@@ -479,11 +502,11 @@ default = "p1.vision-a"
 media_failover = ["p1.vision-a", "p2.vision-b"]
 
 [providers.p1]
-protocol = "openai-compatible-http"
+protocol = "ollama-http"
 endpoint = "https://p1.example/v1"
 
 [providers.p2]
-protocol = "openai-compatible-http"
+protocol = "ollama-http"
 endpoint = "https://p2.example/v1"
 
 [models.vision-a]
@@ -514,7 +537,7 @@ default = "p3.vision-c"
 media_failover = ["p3.vision-c"]
 
 [providers.p3]
-protocol = "openai-compatible-http"
+protocol = "ollama-http"
 endpoint = "https://p3.example/v1"
 
 [models.vision-c]
@@ -528,6 +551,27 @@ supports-multimodal-inputs = true
 [p3.vision-c]
 |}
 
+let schema_unsupported_vision_runtime_toml =
+  {|
+[runtime]
+default = "local.vision"
+media_failover = ["local.vision"]
+
+[providers.local]
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[models.vision]
+api-name = "vision"
+max-context = 4096
+
+[models.vision.capabilities]
+supports-image-input = true
+supports-multimodal-inputs = true
+
+[local.vision]
+|}
+
 let test_temp_runtime_toml_restores_runtime_cache () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
     let before = Runtime.get_runtime_ids () in
@@ -535,6 +579,61 @@ let test_temp_runtime_toml_restores_runtime_cache () =
       assert (Runtime.get_runtime_ids () = [ "p3.vision-c" ]));
     assert (Runtime.get_runtime_ids () = before));
   assert (Vt.vision_runtime_ids () = [])
+
+let test_schema_unsupported_vision_runtime_is_skipped_before_provider_call () =
+  with_temp_runtime_toml schema_unsupported_vision_runtime_toml (fun () ->
+    assert (Vt.vision_runtime_ids () = []);
+    (match Vt.first_vision_runtime_id () with
+     | Ok runtime_id ->
+       failwith ("schema-unsupported vision runtime was admitted: " ^ runtime_id)
+     | Error msg ->
+       assert (contains_substring msg "schema-capable image runtime"));
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-schema-admission" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete:complete_should_not_run
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert (String.equal (assoc_string "error" json) "no_capable_runtime");
+      assert (String.equal (assoc_string "failure_class" json) "runtime_failure")))
+
+let test_invalid_structured_vision_response_is_runtime_failure () =
+  with_temp_runtime_toml single_vision_runtime_toml (fun () ->
+    with_temp_base (fun _ ->
+      let meta = make_meta "vision-invalid-structured-response" in
+      let handle = store_image meta "\x89PNG\r\n\x1a\nraw" in
+      let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+        Ok (text_response "not-json")
+      in
+      let raw =
+        Eio_main.run (fun env ->
+          Eio.Switch.run (fun sw ->
+            Vt.handle
+              ~complete
+              ~sw
+              ~clock:(Eio.Stdenv.clock env)
+              ~net:(Eio.Stdenv.net env)
+              ~meta
+              ~args:(artifact_args handle)
+              ()))
+      in
+      let json = json_of_output raw in
+      assert
+        (String.equal
+           (assoc_string "error" json)
+           "invalid_structured_response");
+      assert (String.equal (assoc_string "failure_class" json) "runtime_failure");
+      assert (contains_substring (assoc_string "detail" json) "not valid JSON")))
 
 let test_retryable_provider_error_tries_next_runtime () =
   with_temp_runtime_toml vision_failover_runtime_toml (fun () ->
@@ -912,6 +1011,8 @@ let () =
   test_unknown_magic_bytes_are_policy_rejection ();
   test_oversize_image_is_runtime_failure_before_provider_call ();
   test_temp_runtime_toml_restores_runtime_cache ();
+  test_schema_unsupported_vision_runtime_is_skipped_before_provider_call ();
+  test_invalid_structured_vision_response_is_runtime_failure ();
   test_retryable_provider_error_tries_next_runtime ();
   test_deadline_exhaustion_preserves_provider_error ();
   test_non_retryable_provider_error_stops_without_trying_next_runtime ();

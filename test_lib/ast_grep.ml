@@ -82,6 +82,66 @@ let count_calls_across_files ~module_paths ~callee =
     module_paths
 ;;
 
+let count_calls_in_value_binding ~module_path ~binding_name ~callee =
+  let structure = parse_implementation_or_fail module_path in
+  let count_calls_in_expr expr =
+    let count = ref 0 in
+    let iter =
+      { Ast_iterator.default_iterator with
+        expr =
+          (fun self e ->
+            (match e.pexp_desc with
+             | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, _) ->
+               if longident_to_string txt = callee then incr count
+             | _ -> ());
+            Ast_iterator.default_iterator.expr self e)
+      }
+    in
+    iter.expr iter expr;
+    !count
+  in
+  let total = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      value_binding =
+        (fun self vb ->
+          (match vb.pvb_pat.ppat_desc with
+           | Ppat_var { txt; _ } when txt = binding_name ->
+             total := !total + count_calls_in_expr vb.pvb_expr
+           | _ -> ());
+          Ast_iterator.default_iterator.value_binding self vb)
+    }
+  in
+  iter.structure iter structure;
+  !total
+;;
+
+let count_calls_with_label ~module_path ~callee ~label =
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let has_label args =
+    List.exists
+      (function
+        | (Asttypes.Labelled arg | Asttypes.Optional arg), _ -> String.equal arg label
+        | Asttypes.Nolabel, _ -> false)
+      args
+  in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self e ->
+          (match e.pexp_desc with
+           | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
+             when String.equal (longident_to_string txt) callee
+                  && has_label args -> incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
 (* Count value-binding patterns ([let name = ...] or [let rec name = ...])
    whose identifier equals [name] exactly.  Catches the *identifier* —
    the axis [count_string_literals] cannot see, because identifiers are

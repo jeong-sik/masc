@@ -342,17 +342,28 @@ let remote_schemas : tool_schema list =
     surface_audit_schema ~remote:true;
   ]
 
-let remote_tool_names : string list =
-  List.map (fun (schema : tool_schema) -> schema.name) remote_schemas
+module Operator_remote_name = Tool_name.Operator_remote_name
+module Operator_name = Tool_name.Operator_name
+
+let remote_tool_names : string list = Operator_remote_name.all_strings
+let operator_remote_tool_name name = Operator_remote_name.to_string name
+let operator_tool_name name = operator_remote_tool_name (Operator_remote_name.Operator_tool name)
+let surface_audit_tool_name = operator_remote_tool_name Operator_remote_name.Surface_audit
 
 (* ================================================================ *)
 (* Tool_spec registration                                           *)
 (* ================================================================ *)
 
-let tool_spec_read_only = [ "masc_operator_snapshot"; "masc_operator_digest"; "masc_surface_audit" ]
+let tool_spec_read_only =
+  [
+    operator_tool_name Operator_name.Operator_snapshot;
+    operator_tool_name Operator_name.Operator_digest;
+    surface_audit_tool_name;
+  ]
+
 (* Tools with explicit catalog metadata that must be preserved. *)
-let tool_spec_hidden = [ "masc_operator_judgment_write"; "masc_surface_audit" ]
-let tool_spec_hidden_destructive = [ "masc_operator_action" ]
+let tool_spec_hidden = [ "masc_operator_judgment_write"; surface_audit_tool_name ]
+let tool_spec_hidden_destructive = [ operator_tool_name Operator_name.Operator_action ]
 
 let () =
   List.iter

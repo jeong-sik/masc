@@ -30,6 +30,32 @@
 (** 심판 프롬프트에 임베드할, 기대 JSON 형태 설명 (LLM 지시용). *)
 val expected_json_doc : string
 
+(** Wire field names consumed by {!of_json}. Provider-native output schemas must
+    use these constants instead of duplicating field strings. *)
+val wire_field_consensus : string
+val wire_field_consensus_text : string
+val wire_field_supporting_models : string
+val wire_field_contradictions : string
+val wire_field_topic : string
+val wire_field_positions : string
+val wire_field_model : string
+val wire_field_stance : string
+val wire_field_evidence : string
+val wire_field_partial_coverage : string
+val wire_field_addressed_by : string
+val wire_field_missing : string
+val wire_field_unique_insights : string
+val wire_field_blind_spots : string
+val wire_field_resolved_answer : string
+val wire_field_decision : string
+val wire_field_decision_kind : string
+val wire_field_answer : string
+val wire_decision_answer : string
+val wire_decision_recommend : string
+val wire_decision_insufficient : string
+val wire_field_recommend_action : string
+val wire_field_recommend_rationale : string
+
 (** LLM JSON 값 → judge_synthesis.
 
     - 리스트 필드(consensus/contradictions/partial_coverage/unique_insights/blind_spots)는

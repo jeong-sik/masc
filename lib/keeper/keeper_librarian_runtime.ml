@@ -234,16 +234,7 @@ let default_timeout_sec () =
 ;;
 
 let runtime_id_for_librarian ~runtime_id =
-  match Env_config.KeeperMemoryOs.librarian_runtime_id () with
-  | Some value -> value
-  | None ->
-    (* [runtime].librarian (runtime.toml) routes the librarian independently of
-       keeper chat — the librarian runs JSON mode and needs a JSON-capable model,
-       which the cheap chat runtimes may not be. Env var above takes precedence;
-       [None] here falls back to inheriting the keeper's own runtime. *)
-    (match Runtime.librarian_runtime_id () with
-     | Some id -> id
-     | None -> runtime_id)
+  Keeper_memory_runtime_resolution.runtime_id_for_librarian ~runtime_id
 ;;
 
 let select_recent_messages ~max_messages messages =
@@ -273,13 +264,13 @@ let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
   ; temperature = Some 0.0
   ; tool_choice = None
   ; disable_parallel_tool_use = true
-  ; response_format = Agent_sdk.Types.JsonMode
-  ; output_schema = None
   ; enable_thinking = Some false
   ; preserve_thinking = Some false
   ; thinking_budget = None
   ; clear_thinking = Some true
   }
+    |> Keeper_structured_output_schema.apply_to_provider_config
+         Keeper_structured_output_schema.librarian_episode_output_schema
 ;;
 
 let message role text =
@@ -388,6 +379,7 @@ let parse_retry_nudge =
 type extraction_error =
   | Prompt_render_failed of string
   | Provider_clock_unavailable
+  | Provider_config_rejected of string
   | Provider_timeout
   | Provider_transport_failed of string
   | Provider_empty_response
@@ -400,6 +392,7 @@ let librarian_provider_clock_unavailable_error =
 let extraction_error_to_string = function
   | Prompt_render_failed msg -> msg
   | Provider_clock_unavailable -> librarian_provider_clock_unavailable_error
+  | Provider_config_rejected msg -> "librarian provider config rejected: " ^ msg
   | Provider_timeout -> "librarian provider timed out"
   | Provider_transport_failed msg -> msg
   | Provider_empty_response -> "librarian provider returned empty response"
@@ -444,7 +437,10 @@ let should_record_cadence_backoff = function
 
 let should_record_cadence_backoff_after_error = function
   | Provider_timeout | Provider_transport_failed _ | Provider_empty_response -> true
-  | Provider_clock_unavailable | Prompt_render_failed _ | Memory_fact_upsert_failed _ ->
+  | Provider_clock_unavailable
+  | Provider_config_rejected _
+  | Prompt_render_failed _
+  | Memory_fact_upsert_failed _ ->
     false
 ;;
 
@@ -612,6 +608,11 @@ let extract_with_provider_classified
   | Error msg -> Error (Prompt_render_failed msg)
   | Ok messages ->
     let provider_cfg = provider_for_librarian provider_cfg in
+    (match
+       Llm_provider.Provider_config.validate_output_schema_request provider_cfg
+     with
+     | Error msg -> Error (Provider_config_rejected msg)
+     | Ok () ->
     let attempt messages =
       match
         with_timeout ~clock ~timeout_sec (fun () ->
@@ -662,6 +663,7 @@ let extract_with_provider_classified
           { episode = unstructured_episode ~now ~generation inp ~reason:diagnostic.reason ~raw
           ; kind = Unstructured_fallback
           })))
+    )
 ;;
 
 let extract_with_provider ?complete ?clock ?timeout_sec ~sw ~net ~provider_cfg ~generation inp =
@@ -796,12 +798,7 @@ let extract_and_append_with_provider
 ;;
 
 let provider_for_runtime ~runtime_id =
-  match Runtime.get_runtime_by_id runtime_id with
-  | Some rt -> Ok rt.Runtime.provider_config
-  | None ->
-    (match Runtime.get_default_runtime () with
-     | Some rt -> Ok rt.Runtime.provider_config
-     | None -> Error "no runtime configured for librarian extraction")
+  Keeper_memory_runtime_resolution.provider_for_runtime ~runtime_id
 ;;
 
 let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_librarian.input) =

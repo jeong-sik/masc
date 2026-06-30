@@ -5,6 +5,7 @@ module Types = Masc.Keeper_memory_os_types
 module Io = Masc.Keeper_memory_os_io
 module Consolidation = Masc.Keeper_memory_os_consolidation
 module Runtime = Masc.Keeper_memory_os_consolidation_runtime
+module Structured_schema = Masc.Keeper_structured_output_schema
 module Agent_sdk_response = Masc.Agent_sdk_response
 module Atypes = Agent_sdk.Types
 
@@ -287,6 +288,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
           {|{"groups":[{"member_indices":[0,1],"consolidated_claim":"ab","category":"fact"}],"drop_indices":[]}|}
         in
         let seen_response_format = ref None in
+        let seen_output_schema = ref None in
         let seen_prompt_matches_template = ref false in
         let expected_prompt =
           match
@@ -302,6 +304,7 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
             (fun config messages ->
                seen_max_tokens := config.Llm_provider.Provider_config.max_tokens;
                seen_response_format := Some config.Llm_provider.Provider_config.response_format;
+               seen_output_schema := config.Llm_provider.Provider_config.output_schema;
                let rendered_prompt =
                  messages
                  |> List.map text_of_message
@@ -328,10 +331,19 @@ let test_consolidate_respects_provider_config_and_prompt_template () =
           "configured max_tokens cap is preserved"
           (Some 512)
           !seen_max_tokens;
+        let expected_schema = Structured_schema.consolidation_plan_output_schema in
         Alcotest.(check (option bool))
-          "json mode requested"
+          "json schema response format requested"
           (Some true)
-          (Option.map (fun format -> format = Atypes.JsonMode) !seen_response_format);
+          (Option.map
+             (function
+               | Atypes.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
+               | Atypes.JsonMode | Atypes.Off -> false)
+             !seen_response_format);
+        Alcotest.(check (option bool))
+          "output schema mirrors response format"
+          (Some true)
+          (Option.map (Yojson.Safe.equal expected_schema) !seen_output_schema);
         Alcotest.(check bool)
           "prompt registry output is passed through verbatim"
           true

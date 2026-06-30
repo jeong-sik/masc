@@ -436,7 +436,14 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
   let path = Filename.concat (repo_root ()) "config/runtime.toml" in
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
-  | Ok (runtimes, _default, _assignments, _librarian, _cross_verifier, _media_failover) ->
+  | Ok
+      ( runtimes
+      , _default
+      , _assignments
+      , _librarian
+      , _structured_judge
+      , _cross_verifier
+      , _media_failover ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
     List.iter
       (fun (runtime : Runtime.t) ->
@@ -502,10 +509,22 @@ let test_repo_runtime_toml_loads () =
   check bool "repo runtime.toml present" true (Sys.file_exists path);
   match Runtime.load_list ~config_path:path with
   | Error msg -> failf "repo runtime.toml should load: %s" msg
-  | Ok (runtimes, default, assignments, _librarian, _cross_verifier, _media_failover) ->
+  | Ok
+      ( runtimes
+      , default
+      , assignments
+      , _librarian
+      , structured_judge
+      , _cross_verifier
+      , _media_failover ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
+    check
+      (option string)
+      "structured judge runtime"
+      (Some "ollama_cloud.minimax-m3")
+      structured_judge;
     check (option (float 0.0)) "Ollama Cloud connect timeout override"
       (Some 600.0)
       default.provider_config.connect_timeout_s;
@@ -1023,7 +1042,14 @@ let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_temp_runtime_toml content (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "runtime TOML should materialize: %s" msg
-    | Ok (runtimes, _default, _assignments, _librarian, _cross_verifier, _media_failover) ->
+    | Ok
+        ( runtimes
+        , _default
+        , _assignments
+        , _librarian
+        , _structured_judge
+        , _cross_verifier
+        , _media_failover ) ->
       let expect id expected =
         match
           List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
@@ -1081,12 +1107,19 @@ let test_librarian_runtime_routing () =
   with_temp_runtime_toml (base ^ "librarian = \"local.libr\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "librarian routing should load: %s" msg
-    | Ok (_runtimes, _default, _assignments, librarian, _cross_verifier, _media_failover) ->
+    | Ok
+        ( _runtimes
+        , _default
+        , _assignments
+        , librarian
+        , _structured_judge
+        , _cross_verifier
+        , _media_failover ) ->
       check (option string) "librarian runtime id" (Some "local.libr") librarian);
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent librarian should load: %s" msg
-    | Ok (_, _, _, librarian, _cross_verifier, _media_failover) ->
+    | Ok (_, _, _, librarian, _structured_judge, _cross_verifier, _media_failover) ->
       check (option string) "librarian unset is None" None librarian);
   with_temp_runtime_toml (base ^ "librarian = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1095,13 +1128,20 @@ let test_librarian_runtime_routing () =
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.libr\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "cross_verifier routing should load: %s" msg
-    | Ok (_runtimes, _default, _assignments, _librarian, cross_verifier, _media_failover) ->
+    | Ok
+        ( _runtimes
+        , _default
+        , _assignments
+        , _librarian
+        , _structured_judge
+        , cross_verifier
+        , _media_failover ) ->
       check (option string) "cross_verifier runtime id" (Some "local.libr")
         cross_verifier);
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, cross_verifier, _media_failover) ->
+    | Ok (_, _, _, _, _structured_judge, cross_verifier, _media_failover) ->
       check (option string) "cross_verifier unset is None" None cross_verifier);
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1114,6 +1154,80 @@ let test_librarian_runtime_routing () =
         "[runtime].cross_verifier must reject models without JSON response \
          format support"
     | Error _ -> ())
+
+let test_structured_judge_runtime_routing () =
+  with_fake_runtime_model_catalog @@ fun () ->
+  let base =
+    "[providers.local]\n\
+     display-name = \"Local\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://localhost:11434\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.judge]\n\
+     api-name = \"judge\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.judge.capabilities]\n\
+     supports-response-format-json = true\n\
+     supports-structured-output = true\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [local.judge]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n"
+  in
+  with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "structured_judge routing should load: %s" msg
+    | Ok (_, _, _, _, structured_judge, _, _) ->
+      check
+        (option string)
+        "structured_judge runtime id"
+        (Some "local.judge")
+        structured_judge);
+  with_temp_runtime_toml base (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Error msg -> failf "absent structured_judge should load: %s" msg
+    | Ok (_, _, _, _, structured_judge, _, _) ->
+      check (option string) "structured_judge unset is None" None structured_judge);
+  with_temp_runtime_toml (base ^ "structured_judge = \"local.nope\"\n") (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ -> failf "unknown [runtime].structured_judge id must be rejected"
+    | Error _ -> ());
+  with_temp_runtime_toml (base ^ "structured_judge = \"local.chat\"\n") (fun path ->
+    match Runtime.load_list ~config_path:path with
+    | Ok _ ->
+      failf
+        "[runtime].structured_judge must reject models without structured-output \
+         support"
+    | Error _ -> ());
+  let librarian_fallback = base ^ "librarian = \"local.judge\"\n" in
+  with_temp_runtime_toml librarian_fallback (fun path ->
+    match Runtime.save_config_text ~runtime_config_path:path librarian_fallback with
+    | Error msg -> failf "save_config_text should load librarian fallback: %s" msg
+    | Ok () ->
+      check string "structured judge falls back to librarian" "local.judge"
+        (Runtime.runtime_id_for_structured_judge ()));
+  let explicit_structured_judge = base ^ "structured_judge = \"local.judge\"\n" in
+  with_temp_runtime_toml explicit_structured_judge (fun path ->
+    match
+      Runtime.save_config_text ~runtime_config_path:path explicit_structured_judge
+    with
+    | Error msg -> failf "save_config_text should load structured_judge: %s" msg
+    | Ok () ->
+      check
+        (option string)
+        "saved structured_judge runtime id"
+        (Some "local.judge")
+        (Runtime.structured_judge_runtime_id ());
+      check string "resolved structured judge runtime" "local.judge"
+        (Runtime.runtime_id_for_structured_judge ()))
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -1172,6 +1286,9 @@ let () =
             "[runtime].librarian and .cross_verifier resolve, default None, \
              reject unknown"
             `Quick test_librarian_runtime_routing;
+          test_case
+            "[runtime].structured_judge resolves and rejects unsupported models"
+            `Quick test_structured_judge_runtime_routing;
           test_case
             "save_config_text validates and refreshes cross_verifier runtime"
             `Quick test_save_config_text_refreshes_cross_verifier_runtime;

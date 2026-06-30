@@ -6,6 +6,9 @@ module Memory_io = Masc.Keeper_memory_os_io
 module GC = Masc.Keeper_memory_os_gc
 module Librarian = Masc.Keeper_librarian
 module Librarian_runtime = Masc.Keeper_librarian_runtime
+module Runtime_resolution = Masc.Keeper_memory_runtime_resolution
+module Memory_summary = Masc.Keeper_memory_llm_summary
+module Structured_schema = Masc.Keeper_structured_output_schema
 module Prompt_names = Keeper_prompt_names
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
@@ -212,13 +215,22 @@ let fake_response raw : Agent_sdk.Types.api_response =
 
 let test_provider_cfg () =
   Llm_provider.Provider_config.make
-    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~kind:Llm_provider.Provider_config.Anthropic
     ~model_id:"fake-librarian-model"
-    ~base_url:"http://127.0.0.1:1"
+    ~base_url:"https://api.anthropic.com"
     ~max_tokens:4096
     ~enable_thinking:true
     ~preserve_thinking:true
     ~thinking_budget:512
+    ()
+;;
+
+let invalid_schema_provider_cfg () =
+  Llm_provider.Provider_config.make
+    ~kind:Llm_provider.Provider_config.OpenAI_compat
+    ~model_id:"fake-librarian-model"
+    ~base_url:"http://127.0.0.1:1"
+    ~max_tokens:4096
     ()
 ;;
 
@@ -740,6 +752,52 @@ let test_librarian_runtime_override_env () =
          (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime"))
 ;;
 
+let memory_runtime_resolution_toml =
+  {|
+[runtime]
+default = "p0.default"
+
+[providers.p0]
+protocol = "openai-compatible-http"
+endpoint = "https://p0.example/v1"
+
+[models.default]
+api-name = "default"
+max-context = 4096
+
+[p0.default]
+|}
+;;
+
+let with_runtime_config_toml content f =
+  let snapshot = Runtime.For_testing.snapshot () in
+  let path = Filename.temp_file "keeper-memory-runtime-" ".toml" in
+  write_text_file path content;
+  Fun.protect
+    ~finally:(fun () ->
+      Runtime.For_testing.restore snapshot;
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+       match Runtime.init_default ~config_path:path with
+       | Error msg -> Alcotest.failf "Runtime.init_default failed: %s" msg
+       | Ok () -> f ())
+;;
+
+let test_librarian_provider_for_runtime_errors_on_missing_id () =
+  with_runtime_config_toml memory_runtime_resolution_toml (fun () ->
+    match Runtime_resolution.provider_for_runtime ~runtime_id:"missing.runtime" with
+    | Ok provider ->
+      Alcotest.failf
+        "missing runtime silently resolved to provider base_url=%s"
+        provider.Llm_provider.Provider_config.base_url
+    | Error msg ->
+      Alcotest.(check bool)
+        "error names missing runtime"
+        true
+        (contains "missing.runtime" msg))
+;;
+
 let with_memory_os_env name value f =
   let old = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -1147,6 +1205,61 @@ let test_librarian_rejects_invalid_claims () =
        ])
 ;;
 
+let test_memory_llm_summary_provider_requests_json_schema () =
+  let provider_cfg = Memory_summary.provider_for_summary (test_provider_cfg ()) in
+  let expected_schema = Structured_schema.memory_bank_summary_output_schema in
+  Alcotest.(check (option int))
+    "summary max tokens capped"
+    (Some Memory_summary.summary_max_tokens)
+    provider_cfg.Llm_provider.Provider_config.max_tokens;
+  Alcotest.(check bool)
+    "summary json schema response format"
+    true
+    (match provider_cfg.response_format with
+     | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
+     | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
+  Alcotest.(check (option bool))
+    "summary output schema mirrors response format"
+    (Some true)
+    (Option.map
+       (Yojson.Safe.equal expected_schema)
+       provider_cfg.Llm_provider.Provider_config.output_schema);
+  Alcotest.(check bool)
+    "summary schema config accepted by OAS"
+    true
+    (Result.is_ok
+       (Llm_provider.Provider_config.validate_output_schema_request provider_cfg))
+;;
+
+let test_memory_llm_summary_rejects_invalid_schema_provider () =
+  Alcotest.(check bool)
+    "localhost OpenAI-compatible schema provider rejected"
+    false
+    (Memory_summary.summary_schema_supported (invalid_schema_provider_cfg ()))
+;;
+
+let test_memory_llm_summary_response_parser_accepts_only_summary_json () =
+  let parse raw =
+    Memory_summary.For_testing.summary_text_of_response (fake_response raw)
+  in
+  Alcotest.(check (option string))
+    "valid summary json"
+    (Some "Remember exact command.")
+    (parse {|{"summary":" Remember exact command.  "}|});
+  Alcotest.(check (option string))
+    "plain text rejected"
+    None
+    (parse "Remember exact command.");
+  Alcotest.(check (option string))
+    "empty summary rejected"
+    None
+    (parse {|{"summary":"   "}|});
+  Alcotest.(check (option string))
+    "wrong field rejected"
+    None
+    (parse {|{"text":"Remember exact command."}|})
+;;
+
 let json_episode_file_count ~keeper_id =
   Memory_io.episodes_dir ~keeper_id
   |> Sys.readdir
@@ -1222,10 +1335,19 @@ let test_librarian_runtime_appends_episode_bundle () =
              "thinking preservation disabled"
              (Some false)
              provider_cfg.Llm_provider.Provider_config.preserve_thinking;
+           let expected_schema = Structured_schema.librarian_episode_output_schema in
            Alcotest.(check bool)
-             "json mode"
+             "librarian json schema response format"
              true
-             (provider_cfg.response_format = Agent_sdk.Types.JsonMode);
+             (match provider_cfg.response_format with
+              | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal schema expected_schema
+              | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
+           Alcotest.(check (option bool))
+             "librarian output schema mirrors response format"
+             (Some true)
+             (Option.map
+                (Yojson.Safe.equal expected_schema)
+                provider_cfg.Llm_provider.Provider_config.output_schema);
            Alcotest.(check int) "system+user prompt" 2 (List.length messages);
            let rendered_prompt = messages |> List.map message_text |> String.concat "\n" in
            Alcotest.(check bool)
@@ -1262,6 +1384,49 @@ let test_librarian_runtime_appends_episode_bundle () =
             "Strict librarian claim survives parsing"
             fact.Types.claim
         | facts -> Alcotest.failf "expected one fact, got %d" (List.length facts))))
+;;
+
+let test_librarian_runtime_rejects_invalid_schema_provider_before_call () =
+  with_prompt_registry (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      with_eio (fun ~sw ~net ~clock ->
+        let called = ref false in
+        let complete ~sw:_ ~net:_ ?clock:_ ~config:_ ~messages:_ () =
+          called := true;
+          Ok (fake_response (valid_librarian_output () |> Yojson.Safe.to_string))
+        in
+        let inp : Librarian.input =
+          { Librarian.trace_id = "trace-invalid-schema-provider"
+          ; generation = 1
+          ; messages = [ text_message "Please remember schema validation." ]
+          }
+        in
+        match
+          Librarian_runtime.extract_with_provider_classified
+            ~complete
+            ~clock
+            ~timeout_sec:1.0
+            ~sw
+            ~net
+            ~provider_cfg:(invalid_schema_provider_cfg ())
+            ~generation:1
+            inp
+        with
+        | Ok _ -> Alcotest.fail "expected invalid schema provider to fail closed"
+        | Error (Librarian_runtime.Provider_config_rejected msg) ->
+          Alcotest.(check bool)
+            "fake complete was not called"
+            false
+            !called;
+          Alcotest.(check bool)
+            "rejection cites native structured output"
+            true
+            (contains "native structured output" msg)
+        | Error err ->
+          Alcotest.fail
+            (Printf.sprintf
+               "expected provider config rejection, got %s"
+               (Librarian_runtime.extraction_error_to_string err)))))
 ;;
 
 let test_librarian_runtime_requires_clock_for_provider_call () =
@@ -5129,6 +5294,10 @@ let () =
             `Quick
             test_librarian_runtime_override_env
         ; Alcotest.test_case
+            "librarian provider resolution rejects missing runtime id"
+            `Quick
+            test_librarian_provider_for_runtime_errors_on_missing_id
+        ; Alcotest.test_case
             "memory os bool env accepts enabled disabled"
             `Quick
             test_memory_os_bool_env_accepts_enabled_disabled
@@ -5157,9 +5326,25 @@ let () =
             `Quick
             test_librarian_rejects_invalid_claims
         ; Alcotest.test_case
+            "memory llm summary requests json schema"
+            `Quick
+            test_memory_llm_summary_provider_requests_json_schema
+        ; Alcotest.test_case
+            "memory llm summary rejects invalid schema provider"
+            `Quick
+            test_memory_llm_summary_rejects_invalid_schema_provider
+        ; Alcotest.test_case
+            "memory llm summary accepts only summary json"
+            `Quick
+            test_memory_llm_summary_response_parser_accepts_only_summary_json
+        ; Alcotest.test_case
             "librarian runtime appends episode bundle"
             `Quick
             test_librarian_runtime_appends_episode_bundle
+        ; Alcotest.test_case
+            "librarian runtime rejects invalid schema provider before call"
+            `Quick
+            test_librarian_runtime_rejects_invalid_schema_provider_before_call
         ; Alcotest.test_case
             "librarian runtime requires clock for provider call"
             `Quick

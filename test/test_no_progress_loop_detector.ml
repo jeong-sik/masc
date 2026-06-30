@@ -308,16 +308,17 @@ let test_classify_delivery_mapping () =
      converting the policy<->taxonomy coupling from silent to guarded.
 
      vs the removed social-model [inferred_tool_surface] set
-     {keeper_board_comment, keeper_board_post, keeper_broadcast}: this set adds
-     [masc_broadcast] (public broadcast form) and [masc_keeper_msg]
-     (keeper->keeper message). That is an intentional, more complete
-     peer-surface definition (RFC-0276 §2.4 / §3.2 behavior change): a turn
-     that only sends a peer message with no durable evidence now accrues the
-     streak, matching RFC-0239's "only posts to peers without evidence" intent,
-     where the old social model let a bare keeper-msg turn reset it. *)
+     {keeper_board_comment, keeper_board_post, keeper_broadcast}: this set pins
+     both canonical broadcast names ([keeper_broadcast] internal descriptor form
+     and [masc_broadcast] public non-descriptor form) and adds
+     [masc_keeper_msg] (keeper->keeper message). That is an intentional, more
+     complete peer-surface definition (RFC-0276 §2.4 / §3.2 behavior change): a
+     turn that only sends a peer message with no durable evidence now accrues
+     the streak, matching RFC-0239's "only posts to peers without evidence"
+     intent, where the old social model let a bare keeper-msg turn reset it. *)
   let expected_peer_tools =
-    [ "keeper_board_post"
-    ; "keeper_board_comment"
+    [ "keeper_board_comment"
+    ; "keeper_board_post"
     ; "keeper_broadcast"
     ; "masc_broadcast"
     ; "masc_keeper_msg"

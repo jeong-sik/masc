@@ -26,6 +26,12 @@
 
 open Keeper_memory_os_types
 
+let wire_field_member_indices = "member_indices"
+let wire_field_consolidated_claim = "consolidated_claim"
+let wire_field_category = "category"
+let wire_field_groups = "groups"
+let wire_field_drop_indices = "drop_indices"
+
 (* The LLM's judgement that several existing facts (referenced by 0-based index
    into the numbered input list) state the same thing or supersede one another,
    and should collapse into one [consolidated_claim] under [category]. *)
@@ -139,9 +145,9 @@ let string_field key json =
 
 let merge_group_of_json json =
   match
-    ( assoc_field "member_indices" json
-    , string_field "consolidated_claim" json
-    , string_field "category" json )
+    ( assoc_field wire_field_member_indices json
+    , string_field wire_field_consolidated_claim json
+    , string_field wire_field_category json )
   with
   | Some indices_json, Some claim, Some category_str
     when String.trim claim <> "" ->
@@ -171,7 +177,7 @@ let plan_of_json (json : Yojson.Safe.t) =
   match json with
   | `Assoc _ ->
     let groups =
-      match assoc_field "groups" json with
+      match assoc_field wire_field_groups json with
       | Some (`List items) ->
         let parsed = List.filter_map merge_group_of_json items in
         log_dropped_groups ~dropped:(List.length items - List.length parsed) ~total:(List.length items);
@@ -179,7 +185,7 @@ let plan_of_json (json : Yojson.Safe.t) =
       | _ -> []
     in
     let drop_indices =
-      match assoc_field "drop_indices" json with
+      match assoc_field wire_field_drop_indices json with
       | Some indices_json -> int_list_of_json indices_json
       | None -> []
     in

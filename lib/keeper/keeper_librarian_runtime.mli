@@ -131,6 +131,7 @@ val parse_retry_nudge : string
 type extraction_error =
   | Prompt_render_failed of string
   | Provider_clock_unavailable
+  | Provider_config_rejected of string
   | Provider_timeout
   | Provider_transport_failed of string
   | Provider_empty_response

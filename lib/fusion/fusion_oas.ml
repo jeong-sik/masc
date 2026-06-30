@@ -150,8 +150,17 @@ let web_tool_bundle () : Agent_sdk.Tool.t list =
   |> List.concat
   |> List.filter_map oas_tool_of_descriptor
 
-let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
-    ?timeout_s ?max_tokens ?name (model : string)
+let build_agent
+    ~sw
+    ~net
+    ~system_prompt
+    ?(tools = [])
+    ?(max_tool_calls = 0)
+    ?timeout_s
+    ?max_tokens
+    ?name
+    ?provider_config_transform
+    (model : string)
   : (Agent_sdk.Agent.t, Fusion_types.panel_failure) result
   =
   (* 카드명(Async_agent.all이 결과 키로 반환)은 패널 정체성([name], 예 "skeptic (claude)").
@@ -161,34 +170,63 @@ let build_agent ~sw ~net ~system_prompt ?(tools = []) ?(max_tool_calls = 0)
      계약(label 없으면 정체성=model)인 total mapping이라 sound-partial. DET-OK *)
   let card_name = Option.value name ~default:model in
   match Runtime_oas_runner.resolve_runtime_providers ~runtime_id:model () with
-  | Error e -> Error (Fusion_types.Provider_error e)
-  | Ok [] -> Error (Fusion_types.Provider_error (model ^ ": no provider config"))
+  | Error e ->
+    Error ((Fusion_types.Provider_error e : Fusion_types.panel_failure))
+  | Ok [] ->
+    Error
+      ((Fusion_types.Provider_error (model ^ ": no provider config")
+        : Fusion_types.panel_failure))
   | Ok (provider_cfg :: _) ->
+    let provider_cfg : (Llm_provider.Provider_config.t, Fusion_types.panel_failure) result =
+      match provider_config_transform with
+      | None -> Ok provider_cfg
+      | Some transform ->
+        Result.map_error
+          (fun detail ->
+             ( Fusion_types.Provider_error (provider_error_detail ~runtime_id:model detail)
+               : Fusion_types.panel_failure ))
+          (transform provider_cfg)
+    in
     (* v1: runtime이 여러 provider를 주면 첫 번째만(단일 provider 가정). *)
-    let base_config =
-      Runtime_agent.default_config ~name:card_name ~provider_cfg ~system_prompt ~tools
-    in
-    let base_config = apply_timeout_budget ?timeout_s base_config in
-    let base_config =
-      match max_tokens with
-      | None -> Ok base_config
-      | Some n when Fusion_policy.valid_max_output_tokens (Some n) ->
-        Ok { base_config with max_tokens = n }
-      | Some n -> Error (Fusion_types.Invalid_max_output_tokens n)
-    in
-    Result.bind base_config (fun base_config ->
-    (* max_tool_calls는 OpenRouter Fusion의 per-panel tool budget에 대응.
-       Runtime_agent의 max_turns로 근사: tool 호출 횟수 + 최종 답변 1턴. *)
-    let config =
-      if max_tool_calls > 0 then { base_config with max_turns = max_tool_calls + 1 }
-      else base_config
-    in
-    (match Runtime_agent.build ~sw ~net ~config with
-     | Ok agent -> Ok agent
-     | Error e ->
-       Error
-         (Fusion_types.Provider_error
-            (provider_error_detail ~runtime_id:model (Agent_sdk.Error.to_string e)))))
+    (match provider_cfg with
+     | Error _ as err -> err
+     | Ok provider_cfg ->
+       let base_config =
+         Runtime_agent.default_config
+           ~name:card_name
+           ~provider_cfg
+           ~system_prompt
+           ~tools
+       in
+       let base_config = apply_timeout_budget ?timeout_s base_config in
+       let base_config
+         : (Runtime_agent.config, Fusion_types.panel_failure) result
+         =
+         match max_tokens with
+         | None -> Ok base_config
+         | Some n when Fusion_policy.valid_max_output_tokens (Some n) ->
+           Ok { base_config with max_tokens = n }
+         | Some n -> Error (Fusion_types.Invalid_max_output_tokens n)
+       in
+       (match base_config with
+        | Error _ as err -> err
+        | Ok base_config ->
+          (* max_tool_calls는 OpenRouter Fusion의 per-panel tool budget에 대응.
+             Runtime_agent의 max_turns로 근사: tool 호출 횟수 + 최종 답변 1턴. *)
+          let config =
+            if max_tool_calls > 0
+            then { base_config with max_turns = max_tool_calls + 1 }
+            else base_config
+          in
+    match Runtime_agent.build ~sw ~net ~config with
+           | Ok agent -> Ok agent
+           | Error e ->
+             Error
+               ((Fusion_types.Provider_error
+                   (provider_error_detail
+                      ~runtime_id:model
+                      (Agent_sdk.Error.to_string e))
+                 : Fusion_types.panel_failure))))
 
 module For_testing = struct
   let apply_timeout_budget = apply_timeout_budget

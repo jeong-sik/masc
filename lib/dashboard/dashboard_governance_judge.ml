@@ -500,13 +500,7 @@ let normalize_allowed_tool_name value =
 
 let allowed_tool tool =
   List.mem (normalize_allowed_tool_name tool)
-    [
-      (* RFC-0182: masc_execute / masc_execute_dry_run removed (dead). *)
-      "masc_operator_action";
-      "masc_operator_confirm";
-      "masc_operator_snapshot";
-      "masc_surface_audit";
-    ]
+    Keeper_structured_output_schema.governance_resolved_tool_tokens
 
 let parse_recommended_action json =
   let m key src = Option.value ~default:`Null (Json_util.assoc_member_opt key src) in
@@ -676,13 +670,26 @@ let prompt_for_facts facts_json =
   | Ok value -> value
   | Error _ -> Prompt_registry.get_prompt "dashboard.governance_judge"
 
+let apply_governance_judge_output_schema provider_cfg =
+  let schema = Keeper_structured_output_schema.governance_judge_output_schema in
+  let provider_cfg =
+    Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
+  in
+  match Llm_provider.Provider_config.validate_output_schema_request provider_cfg with
+  | Ok () -> Ok provider_cfg
+  | Error detail ->
+      Error
+        (Agent_sdk.Error.Config
+           (Agent_sdk.Error.InvalidConfig
+              { field = "dashboard.governance_judge.output_schema"; detail }))
+
 let compute_judgments
     ~(masc_tools : Masc_domain.tool_schema list)
     ~(dispatch : name:string -> args:Yojson.Safe.t -> Tool_result.result)
     ~base_path
     ~build_facts =
   let runtime_id =
-    Runtime.get_default_runtime_id ()
+    Runtime.runtime_id_for_structured_judge ()
   in
   match
     (* build_facts() is moved inside the bridge so a deadlock in
@@ -699,6 +706,7 @@ let compute_judgments
         ~base_path ~goal:prompt ~masc_tools ~dispatch
         ~accept:Keeper_tool_response.response_has_text_or_tool_progress
         ~approval:Approval_callbacks.auto_approve
+        ~provider_config_transform:apply_governance_judge_output_schema
         ()
     )
   with

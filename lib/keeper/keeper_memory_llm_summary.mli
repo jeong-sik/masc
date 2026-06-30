@@ -17,8 +17,14 @@ val is_direct_completion_provider :
 val provider_for_summary :
   Llm_provider.Provider_config.t -> Llm_provider.Provider_config.t
 
+val summary_schema_supported : Llm_provider.Provider_config.t -> bool
+
 val messages_for_summary :
   trace_id:string -> texts:string list -> Agent_sdk.Types.message list
+
+module For_testing : sig
+  val summary_text_of_response : Agent_sdk.Types.api_response -> string option
+end
 
 val make :
   ?complete:complete_fn ->

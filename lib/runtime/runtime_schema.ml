@@ -207,16 +207,22 @@ type config =
   ; default_runtime_id : string option
   ; librarian_runtime_id : string option
     (** [\[runtime\].librarian] — runtime id ["provider.model"] for the memory-os
-        librarian (post-turn episode extraction). The librarian requests JSON
-        mode, so it must run on a model that declares
-        [supports-response-format-json]; the keeper chat runtimes need not.
-        [None] = the librarian inherits each keeper's runtime (legacy). An
-        unknown id is rejected at load like [\[runtime\].default]. The
+        librarian (post-turn episode extraction). The librarian now requests
+        provider-native structured output at its call sites; this field is the
+        routing SSOT and load-time validation only rejects unknown ids. [None] =
+        the librarian inherits each keeper's runtime (legacy). An unknown id is
+        rejected at load like [\[runtime\].default]. The
         [MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID] env var overrides this. *)
+  ; structured_judge_runtime_id : string option
+    (** [\[runtime\].structured_judge] — runtime id for provider-native
+        structured-output judge calls such as dashboard operator/governance
+        judges. When set, it must resolve to a model declaring
+        [supports-structured-output]. [None] lets callers use their documented
+        migration fallback, but no caller may silently discard a schema request. *)
   ; cross_verifier_runtime_id : string option
     (** [\[runtime\].cross_verifier] — runtime id for the anti-rationalization
-        evaluator. Like the librarian it requests JSON mode and must run on a
-        model declaring [supports-response-format-json]; [None] = inherit
+        evaluator. It requests JSON mode and must run on a model declaring
+        [supports-response-format-json]; [None] = inherit
         [\[runtime\].default]. Unknown id rejected at load. *)
   ; keeper_assignments : (string * string) list
     (** [\[runtime.assignments\]] — keeper name → runtime id ["provider.model"].

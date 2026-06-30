@@ -58,18 +58,31 @@ let provider_for_vision (provider_cfg : Llm_provider.Provider_config.t) =
   ; temperature = Some 0.0
   ; tool_choice = None
   ; disable_parallel_tool_use = true
-  ; response_format = Agent_sdk.Types.Off
-  ; output_schema = None
   ; enable_thinking = Some false
   ; preserve_thinking = Some false
   ; thinking_budget = None
   ; clear_thinking = Some true
   }
+  |> Keeper_structured_output_schema.apply_to_provider_config
+       Keeper_structured_output_schema.vision_analyze_output_schema
+
+let vision_schema_supported provider_cfg =
+  Keeper_structured_output_schema.provider_config_accepts_schema
+    Keeper_structured_output_schema.vision_analyze_output_schema
+    provider_cfg
 
 let message_of_request (req : Va.request) : Agent_sdk.Types.message =
+  let query =
+    Printf.sprintf
+      "Analyze the attached image for this request:\n\
+       %s\n\n\
+       Return only a JSON object with a non-empty string field named text. Do \
+       not include markdown fences or prose outside the JSON object."
+      req.Va.query
+  in
   Agent_sdk.Types.make_message
     ~role:Agent_sdk.Types.User
-    [ Agent_sdk.Types.text_block req.Va.query
+    [ Agent_sdk.Types.text_block query
     ; Agent_sdk.Types.image_block
         ~source_type:Agent_sdk.Types.Base64
         ~media_type:req.Va.image_media_type
@@ -99,7 +112,15 @@ let vision_runtime_candidates () : (string * Runtime.t) list =
   |> List.filter_map (fun (rt : Runtime.t) ->
        let caps = Runtime_agent.input_capabilities_of_runtime rt in
        if Runtime_agent.caps_admit_required_modalities caps [ "image" ]
-       then Some (rt.Runtime.id, rt)
+       then
+         if vision_schema_supported rt.Runtime.provider_config
+         then Some (rt.Runtime.id, rt)
+         else (
+           Log.Keeper.warn
+             "vision runtime skipped runtime=%s provider=%s: provider does not support native structured output"
+             rt.Runtime.id
+             rt.Runtime.provider_config.Llm_provider.Provider_config.model_id;
+           None)
        else None)
 
 let vision_runtime_ids () : string list =
@@ -108,7 +129,7 @@ let vision_runtime_ids () : string list =
 let first_vision_runtime_id () : (string, string) result =
   match vision_runtime_ids () with
   | id :: _ -> Ok id
-  | [] -> Error "no image-capable runtime configured"
+  | [] -> Error "no schema-capable image runtime configured"
 
 (* Per-keeper content-addressed store dir. Phase 2 ingestion (§2.3) will write
    incoming images here under the same path. *)
@@ -247,23 +268,46 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
+let vision_text_of_response (response : Agent_sdk.Types.api_response) =
+  let raw = String.trim (Agent_sdk_response.text_of_response response) in
+  try
+    match Yojson.Safe.from_string raw with
+    | `Assoc fields ->
+      (match List.assoc_opt "text" fields with
+       | Some (`String text) -> Ok (String.trim text)
+       | Some _ -> Error "vision response field \"text\" must be a string"
+       | None -> Error "vision response missing required field \"text\"")
+    | _ -> Error "vision response must be a JSON object"
+  with
+  | Yojson.Json_error msg -> Error ("vision response is not valid JSON: " ^ msg)
+;;
+
 let ok_or_classified_json (response : Agent_sdk.Types.api_response) =
-  let text = Agent_sdk_response.text_of_response response in
-  let truncated = truncated_of_stop_reason response.stop_reason in
-  match Va.classify ~truncated ~content:text with
-  | Ok t -> ok_json t
-  | Error Va.Empty_extraction ->
-    err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
-  | Error Va.Truncated_extraction ->
-    err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction"
+  match vision_text_of_response response with
+  | Error detail ->
+    err_json
+      ~failure_class:Tool_result.Runtime_failure
+      ~detail
+      "invalid_structured_response"
+  | Ok text ->
+    let truncated = truncated_of_stop_reason response.stop_reason in
+    (match Va.classify ~truncated ~content:text with
+     | Ok t -> ok_json t
+     | Error Va.Empty_extraction ->
+       err_json ~failure_class:Tool_result.Workflow_rejection "empty_extraction"
+     | Error Va.Truncated_extraction ->
+       err_json ~failure_class:Tool_result.Runtime_failure "truncated_extraction")
 
 let outcome_of_response (response : Agent_sdk.Types.api_response) =
-  let text = Agent_sdk_response.text_of_response response in
-  let truncated = truncated_of_stop_reason response.stop_reason in
-  match Va.classify ~truncated ~content:text with
-  | Ok t -> Vo_ok t
-  | Error Va.Empty_extraction -> Vo_empty
-  | Error Va.Truncated_extraction -> Vo_truncated
+  match vision_text_of_response response with
+  | Error detail ->
+    Vo_provider { failure_class = Tool_result.Runtime_failure; detail }
+  | Ok text ->
+    let truncated = truncated_of_stop_reason response.stop_reason in
+    (match Va.classify ~truncated ~content:text with
+     | Ok t -> Vo_ok t
+     | Error Va.Empty_extraction -> Vo_empty
+     | Error Va.Truncated_extraction -> Vo_truncated)
 
 let remaining_timeout_sec ~clock ~deadline =
   let remaining = deadline -. Eio.Time.now clock in
@@ -313,7 +357,7 @@ let run_candidates
        | None ->
          err_json
            ~failure_class:Tool_result.Runtime_failure
-           ~detail:"no image-capable runtime configured"
+           ~detail:"no schema-capable image runtime configured"
            "no_capable_runtime"
        | Some (`Timeout runtime_id) ->
          err_json
@@ -404,7 +448,7 @@ let run_candidates_outcome
   let rec loop ~last_error ~attempt_index = function
     | [] ->
       (match last_error with
-       | None -> Vo_no_runtime "no image-capable runtime configured"
+       | None -> Vo_no_runtime "no schema-capable image runtime configured"
        | Some (`Timeout _runtime_id) -> Vo_timeout
        | Some (`Provider_error err) ->
          Vo_provider

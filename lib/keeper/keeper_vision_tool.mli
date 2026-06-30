@@ -61,15 +61,16 @@ val message_of_request
 val provider_for_vision
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
-(** A one-shot, non-thinking, plain-text vision config: thinking off (avoids the
+(** A one-shot, non-thinking, structured-output vision config: thinking off (avoids the
     2026-06-25 gemma4 thinking-budget exhaustion that produced empty replies),
-    [response_format = Off], [tool_choice = None], [temperature = 0], and a
-    fallback [max_tokens] only when the selected runtime has not configured one. *)
+    [response_format = JsonSchema _], [output_schema = Some _],
+    [tool_choice = None], [temperature = 0], and a fallback [max_tokens] only
+    when the selected runtime has not configured one. *)
 
 val vision_runtime_ids : unit -> string list
-(** Ordered image-capable runtime ids: [\[runtime\].media_failover] order first,
-    then declaration order. The handler tries these candidates in order for
-    timeout/provider failures within one cumulative tool deadline. *)
+(** Ordered schema-capable image runtime ids: [\[runtime\].media_failover] order
+    first, then declaration order. The handler tries these candidates in order
+    for timeout/provider failures within one cumulative tool deadline. *)
 
 val first_vision_runtime_id : unit -> (string, string) result
 (** Compatibility helper returning the first entry of {!vision_runtime_ids}, or

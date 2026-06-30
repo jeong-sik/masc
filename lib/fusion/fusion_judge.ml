@@ -141,6 +141,32 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
     Provider_error
       (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
 
+let provider_config_supports_json_mode provider_cfg =
+  match Llm_provider.Provider_config.capabilities_for_config_model provider_cfg with
+  | Some caps -> caps.Llm_provider.Capabilities.supports_response_format_json
+  | None -> false
+
+let apply_fusion_judge_output_contract provider_cfg =
+  let schema = Keeper_structured_output_schema.fusion_judge_output_schema in
+  let native_schema_provider_cfg =
+    Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
+  in
+  (* The tier is decided by OAS capability facts, never by provider-name
+     special cases: native schema first, JSON mode only when declared, otherwise
+     fail before an HTTP request. *)
+  match
+    Llm_provider.Provider_config.validate_output_schema_request
+      native_schema_provider_cfg
+  with
+  | Ok () -> Ok native_schema_provider_cfg
+  | Error detail when provider_config_supports_json_mode provider_cfg ->
+    Ok
+      { provider_cfg with
+        response_format = Agent_sdk.Types.JsonMode
+      ; output_schema = None
+      }
+  | Error detail -> Error (Printf.sprintf "fusion.judge.output_schema: %s" detail)
+
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
    서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고
    실행/usage/파싱 경로는 동일하다(2 인스턴스에서 추출, N-of-M 회피).
@@ -156,7 +182,9 @@ let run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_mod
   let tools = if web_tools then Fusion_oas.web_tool_bundle () else [] in
   match
     Fusion_oas.build_agent ~sw ~net ~system_prompt:judge_system_prompt ~tools
-      ~max_tool_calls ~timeout_s ?max_tokens judge_model
+      ~max_tool_calls ~timeout_s ?max_tokens
+      ~provider_config_transform:apply_fusion_judge_output_contract
+      judge_model
   with
   | Error reason ->
     Error
@@ -214,3 +242,7 @@ let run_meta ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~
     result =
   run_composed ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~web_tools
     ~max_tool_calls ~prompt:(compose_meta_prompt ~question ~panel ~priors) ()
+
+module For_testing = struct
+  let apply_output_contract = apply_fusion_judge_output_contract
+end

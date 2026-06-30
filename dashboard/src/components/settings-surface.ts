@@ -33,6 +33,7 @@ type PathCheckResult = {
   readonly ok: boolean
   readonly message: string
 }
+type BoolRecordUpdater = Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 const SETTINGS_LOCAL_STORAGE_PREFIX = 'masc.settings.local.'
 
@@ -157,11 +158,53 @@ function writeLocalPreviewString(key: string, value: string) {
   }
 }
 
+function readLocalPreviewBoolRecord(key: string, fallback: Record<string, boolean>): Record<string, boolean> {
+  const next = { ...fallback }
+  try {
+    if (typeof sessionStorage === 'undefined') return next
+    const raw = sessionStorage.getItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`)
+    if (raw === null) return next
+    const parsed: unknown = JSON.parse(raw)
+    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return next
+    const values = parsed as Record<string, unknown>
+    for (const id of Object.keys(next)) {
+      if (typeof values[id] === 'boolean') next[id] = values[id]
+    }
+  } catch {
+    return next
+  }
+  return next
+}
+
+function writeLocalPreviewBoolRecord(key: string, value: Record<string, boolean>) {
+  try {
+    if (typeof sessionStorage === 'undefined') return
+    sessionStorage.setItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`, JSON.stringify(value))
+  } catch {
+    // Local preview settings are best-effort; blocked storage should not break Settings.
+  }
+}
+
 function useLocalPreviewString(key: string, initialValue: string): [string, (next: string) => void] {
   const [value, setValue] = useState(() => readLocalPreviewString(key, initialValue))
   const setStoredValue = (next: string) => {
     setValue(next)
     writeLocalPreviewString(key, next)
+  }
+  return [value, setStoredValue]
+}
+
+function useLocalPreviewBoolRecord(
+  key: string,
+  initialValue: Record<string, boolean>,
+): [Record<string, boolean>, (next: BoolRecordUpdater) => void] {
+  const [value, setValue] = useState(() => readLocalPreviewBoolRecord(key, initialValue))
+  const setStoredValue = (nextOrUpdate: BoolRecordUpdater) => {
+    setValue(prev => {
+      const next = typeof nextOrUpdate === 'function' ? nextOrUpdate(prev) : nextOrUpdate
+      writeLocalPreviewBoolRecord(key, next)
+      return next
+    })
   }
   return [value, setStoredValue]
 }
@@ -224,6 +267,9 @@ const TOOL_GROUPS: readonly ToolGroup[] = [
   { id: 'masc.workspace', kind: 'masc', tools: ['masc_tasks', 'masc_claim_next', 'masc_transition', 'masc_add_task', 'masc_agents', 'masc_broadcast', 'masc_messages', 'masc_heartbeat'] },
   { id: 'masc.goal', kind: 'masc', tools: ['masc_goal_list', 'masc_goal_upsert', 'masc_goal_transition', 'masc_goal_verify'] },
 ]
+const DEFAULT_TOOL_GROUP_GRANTS: Record<string, boolean> = Object.fromEntries(
+  TOOL_GROUPS.map(g => [g.id, !g.optin]),
+)
 // [groups.last_turn_safe] — keeper-v2 settings.jsx:99. On a keeper's final
 // turn, allowed tools are intersected with this set. Snapshot from the
 // prototype settings view; backend parity is deferred.
@@ -286,6 +332,7 @@ function SetToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => vo
       role="switch"
       aria-checked=${on}
       data-testid="set-toggle"
+      data-active=${on ? 'true' : 'false'}
       onClick=${() => onChange(!on)}
     >
       <span class="knob"></span>
@@ -699,9 +746,7 @@ export function SettingsSurface() {
 
   // policy — tool-group grants (namespace default-grant per [groups.*]); opt-in groups
   // start off. keeper-v2 settings.jsx:177.
-  const [grant, setGrant] = useState<Record<string, boolean>>(
-    Object.fromEntries(TOOL_GROUPS.map(g => [g.id, !g.optin])),
-  )
+  const [grant, setGrant] = useLocalPreviewBoolRecord('policyGrant', DEFAULT_TOOL_GROUP_GRANTS)
 
   // fusion (config/runtime.toml [fusion]) — keeper-v2 settings.jsx:178-182
   const fusionSettingsWritable = envBool('VITE_FUSION_SETTINGS_WRITABLE', false)
@@ -798,6 +843,7 @@ export function SettingsSurface() {
 
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
   const sectionState = settingsSectionState(sec, fusionSettingsWritable)
+  const grantedGroupCount = Object.values(grant).filter(Boolean).length
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -1067,10 +1113,15 @@ export function SettingsSurface() {
 
             ${sec === 'policy' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                keeper 의 <span class="mono">tool_access</span> 는 named 그룹(<span class="mono">tool_policy.toml</span>)의 도구를 참조합니다. 여기서 namespace 기본 부여 그룹과 안전장치를 관리합니다.
+                keeper 의 <span class="mono">tool_access</span> 는 named 그룹(<span class="mono">tool_policy.toml</span>)의 도구를 참조합니다. 이 섹션은 runtime 정책을 저장하지 않고 browser-session grant preview만 조정합니다.
               </div>
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                현재는 live tool-policy 연동이 없어 prototype 표기 스냅샷으로 표시합니다. 런타임 도구 정책이 SSOT로 연동되면 값이 교체됩니다.
+                현재는 live tool-policy writer가 없어 prototype group catalog 스냅샷으로 표시합니다. 런타임 도구 정책이 SSOT로 연동되면 값이 교체됩니다.
+              </div>
+              <div class="set-local-summary" data-testid="policy-local-summary">
+                <span>local grant preview</span>
+                <span class="mono">${grantedGroupCount}/${TOOL_GROUPS.length} enabled</span>
+                <${PreviewBadge} />
               </div>
               <div class="set-sub-h">도구 그룹 부여</div>
               ${TOOL_GROUPS.map(g => html`
@@ -1084,10 +1135,13 @@ export function SettingsSurface() {
                     </div>
                     <div class="set-tg-tools">${g.tools.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}</div>
                   </div>
-                  <${SetToggle}
-                    on=${grant[g.id] ?? false}
-                    onChange=${(v: boolean) => setGrant(p => ({ ...p, [g.id]: v }))}
-                  />
+                  <div class="set-tg-control">
+                    <${PreviewBadge} />
+                    <${SetToggle}
+                      on=${grant[g.id] ?? false}
+                      onChange=${(v: boolean) => setGrant(p => ({ ...p, [g.id]: v }))}
+                    />
+                  </div>
                 </div>
               `)}
 

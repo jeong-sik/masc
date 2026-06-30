@@ -848,6 +848,16 @@
   color: var(--volt);
 }
 
+.set-local-summary {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+  color: var(--text-mid);
+  font-size: 12px;
+}
+
 /* tool-group policy — keeper-v2 styles/surfaces.css:555-565 (.set-tg-*) */
 .set-tg-row {
   display: flex;
@@ -855,6 +865,13 @@
   gap: 14px;
   padding: 12px 0;
   border-bottom: 1px solid var(--border-soft);
+}
+
+.set-tg-control {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  flex-shrink: 0;
 }
 
 .set-tg-l {

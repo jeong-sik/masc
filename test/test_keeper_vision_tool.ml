@@ -570,6 +570,7 @@ max-context = 4096
 [models.vision-a.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
+supports-structured-output = true
 
 [models.vision-b]
 api-name = "vision-b"
@@ -578,6 +579,7 @@ max-context = 4096
 [models.vision-b.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
+supports-structured-output = true
 
 [p1.vision-a]
 
@@ -601,6 +603,7 @@ max-context = 4096
 [models.vision-c.capabilities]
 supports-image-input = true
 supports-multimodal-inputs = true
+supports-structured-output = true
 
 [p3.vision-c]
 |}

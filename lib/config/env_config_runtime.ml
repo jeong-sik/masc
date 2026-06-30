@@ -117,20 +117,6 @@ module Orchestrator = struct
     Feature_flag_registry.get_bool Env_config_core.orchestrator_enabled_env_key
 end
 
-(** {1 Spawn Configuration} *)
-
-module Spawn = struct
-  (** Default spawn timeout for agent processes (seconds).
-      Used by spawn.ml, spawn_eio.ml, and tool_relay.ml.
-      Higher value (600s) allows for slow network/API conditions while preventing indefinite hangs. *)
-  let timeout_seconds =
-    int_of_float (get_float ~default:600.0 "MASC_SPAWN_TIMEOUT_SEC")
-
-  (** Grace period before timeout — sends SIGTERM for checkpoint opportunity (seconds). *)
-  let grace_period_seconds =
-    int_of_float (get_float ~default:60.0 "MASC_SPAWN_GRACE_PERIOD_SEC")
-end
-
 (** {1 Local MODEL Server Configuration} *)
 
 (** Local MODEL runtime config (llama-server / any OpenAI-compatible backend).
@@ -139,18 +125,6 @@ module Local_runtime = struct
   (** OpenAI-compatible local MODEL server URL *)
   let server_url =
     get_string ~default:Masc_network_defaults.local_llm_default_url "LLAMA_SERVER_URL"
-
-  (** Default local runtime model id for llama.cpp/OpenAI-compatible servers. *)
-  let default_model =
-    get_string ~default:"explicit-model-required" "LLAMA_DEFAULT_MODEL"
-
-  (** Upper bound for local runtime requests.
-      Callers may request less, but never more than this cap.
-      Falls back to MASC_LLAMA_MAX_TOKENS for backward compatibility. *)
-  let max_tokens =
-    let primary = get_int ~default:0 "MASC_LOCAL_MAX_TOKENS" in
-    if primary > 0 then primary
-    else get_int ~default:32768 "MASC_LLAMA_MAX_TOKENS"
 
   (** Default worker model override for the local runtime. *)
   let worker_model_opt () =
@@ -320,23 +294,6 @@ module Transport = struct
   let startup_watchdog_sec () =
     let v = get_float ~default:240.0 "MASC_STARTUP_WATCHDOG_SEC" in
     Float.max 30.0 (Float.min 600.0 v)
-end
-
-module Cdal = struct
-  (** Enable contract-driven proof capture. Default: true. *)
-  let enabled () =
-    Feature_flag_registry.get_bool "MASC_CDAL_ENABLED"
-
-  (** Block task completion when contract verdict is Violated/Inconclusive. Default: false. *)
-  let gate_enabled () =
-    Feature_flag_registry.get_bool "MASC_CDAL_GATE_ENABLED"
-
-  (** Max verdicts to scan when looking up the latest verdict by task_id.
-      Beyond this limit, older entries are silently skipped — WARN is logged
-      by the gate when the task_id is not found. Default: 500.
-      Issue #7546. *)
-  let verdict_lookup_limit () =
-    get_int ~default:500 "MASC_CDAL_VERDICT_LOOKUP_LIMIT"
 end
 
 module Verification = struct
@@ -513,32 +470,6 @@ module Tools = struct
   let list_page_size () =
     let v = get_int ~default:512 "MASC_LIST_PAGE_SIZE" in
     max 10 (min 1024 v)
-
-  (** Default outer MCP tool-call timeout, clamped to [5, 300] seconds.
-      Board writes have a separate timeout below so operators can tune
-      persistence stalls without raising every tool.
-      @category Timeouts
-      @ops_class operator *)
-  let timeout_default_sec () =
-    let v = get_int ~default:60 "MASC_TOOL_TIMEOUT_DEFAULT_SEC" in
-    float_of_int (max 5 (min 300 v))
-
-  (** Board write outer MCP tool-call timeout, clamped to [5, 300] seconds.
-      Default: 90 seconds (#10569).
-      @category Timeouts
-      @ops_class operator *)
-  let board_write_timeout_sec () =
-    let v = get_int ~default:90 "MASC_TOOL_TIMEOUT_BOARD_SEC" in
-    float_of_int (max 5 (min 300 v))
-
-  (** Tool description budget (max chars). None = unlimited. *)
-  let description_budget_opt () =
-    match Sys.getenv_opt "MASC_TOOL_DESCRIPTION_BUDGET" |> trim_opt with
-    | Some raw -> (
-        match int_of_string_opt raw with
-        | Some v when v > 0 -> Some v
-        | _ -> None)
-    | None -> None
 
   (** Read-only tool retry limit. Default: 2. *)
   let readonly_retry_limit = get_int ~default:2 "MASC_TOOL_READONLY_RETRY_LIMIT"
@@ -803,10 +734,6 @@ module InternalTimers = struct
   let metrics_flush_sec =
     get_float ~default:300.0 "MASC_METRICS_FLUSH_SEC"
 
-  (** Team session live turn window (seconds). Default: 300 (5 min). *)
-  let session_live_turn_window_sec =
-    get_float ~default:300.0 "MASC_SESSION_LIVE_TURN_WINDOW_SEC"
-
   (** Dashboard label "quiet" threshold (seconds). Default: 300 (5 min). *)
   let label_quiet_threshold_sec =
     get_float ~default:300.0 "MASC_LABEL_QUIET_THRESHOLD_SEC"
@@ -826,14 +753,6 @@ module InternalTimers = struct
   (** SSE buffer TTL (seconds). Default: 300 (5 min). *)
   let sse_buffer_ttl_sec =
     get_float ~default:300.0 "MASC_SSE_BUFFER_TTL_SEC"
-
-  (** Cancellation token cleanup interval (seconds). Default: 300 (5 min). *)
-  let cancellation_cleanup_sec =
-    get_float ~default:300.0 "MASC_CANCELLATION_CLEANUP_SEC"
-
-  (** Provider run finished TTL (seconds). Default: 3600 (1 hour). *)
-  let provider_run_ttl_sec =
-    get_float ~default:3600.0 "MASC_PROVIDER_RUN_TTL_SEC"
 
   (** Operator digest stalled session threshold (seconds). Default: 300 (5 min). *)
   let stalled_session_threshold_sec =

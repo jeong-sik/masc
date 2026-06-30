@@ -36,8 +36,6 @@ let auth_entries =
 
 let runtime_entries =
   [
-    entry ~default:"(none)" "MASC_CDAL_ENABLED"
-      "Contract-driven agent loop proof capture (feature flag)";
     (* RFC-0084 host-config-cleanup-J — MASC_DISPATCH_V2 removed. *)
     entry ~default:"(auto)" Env_config_core.log_level_env_key "Log level override";
     entry ~default:"debug" Env_config_core.log_routine_level_env_key
@@ -406,8 +404,6 @@ let internal_timer_entries =
   [
     entry ~default:"300.0" "MASC_BRIEFING_CACHE_TTL_SEC"
       "Mission briefing cache TTL (seconds, 5 min)";
-    entry ~default:"300.0" "MASC_CANCELLATION_CLEANUP_SEC"
-      "Cancellation token cleanup interval (seconds)";
     entry ~default:"300.0" "MASC_KEEPER_BOOTSTRAP_WINDOW_SEC"
       "Keeper world observation bootstrap window (seconds, 5 min)";
     entry ~default:"300.0" "MASC_LABEL_QUIET_THRESHOLD_SEC"
@@ -416,10 +412,6 @@ let internal_timer_entries =
       "Dashboard label stuck threshold (seconds, 15 min)";
     entry ~default:"300.0" "MASC_METRICS_FLUSH_SEC"
       "Tool metrics flush interval (seconds, 5 min)";
-    entry ~default:"3600.0" "MASC_PROVIDER_RUN_TTL_SEC"
-      "Provider run finished TTL (seconds, 1 hour)";
-    entry ~default:"300.0" "MASC_SESSION_LIVE_TURN_WINDOW_SEC"
-      "Team session live turn window (seconds, 5 min)";
     entry ~default:"300.0" "MASC_SSE_BUFFER_TTL_SEC"
       "SSE buffer TTL (seconds, 5 min)";
     entry ~default:"300.0" "MASC_STALLED_SESSION_THRESHOLD_SEC"
@@ -569,10 +561,6 @@ let keeper_tool_entries =
 
 let local_runtime_entries =
   [
-    entry ~default:"32768" "MASC_LLAMA_MAX_TOKENS"
-      "Upper bound for local runtime requests (fallback)";
-    entry ~default:"0" "MASC_LOCAL_MAX_TOKENS"
-      "Upper bound for local runtime requests (primary; falls back to MASC_LLAMA_MAX_TOKENS)";
     entry ~default:"(none)" "MASC_URL"
       "MASC MCP endpoint URL";
   ]
@@ -660,8 +648,6 @@ let model_routing_entries =
       "Default provider name; None when unset";
     entry ~default:"task" "MASC_GOAL_DISPATCH_RUNTIME"
       "Goal dispatch runtime type";
-    entry ~default:"(none)" "MASC_GOAL_MODELS"
-      "Goal models comma-separated; None when unset";
     entry ~default:"(none)" "MASC_ROUTING_RUNTIME"
       "Routing runtime for team session routing";
   ]
@@ -764,14 +750,6 @@ let smart_heartbeat_entries =
       "Idle threshold before multiplier kicks in (seconds, clamped 60-3600)";
   ]
 
-let spawn_entries =
-  [
-    entry ~default:"60.0" "MASC_SPAWN_GRACE_PERIOD_SEC"
-      "Grace period before timeout for SIGTERM checkpoint (seconds)";
-    entry ~default:"600.0" "MASC_SPAWN_TIMEOUT_SEC"
-      "Default spawn timeout for agent processes (seconds)";
-  ]
-
 let sse_entries =
   [
     entry ~default:"(none)" "MASC_SSE_STREAM_CAPACITY"
@@ -834,8 +812,6 @@ let tool_entries =
       "Enable placeholder tool exposure";
     entry ~default:"(none)" "MASC_PUBLIC_TOOLS_EXTRA"
       "Extra public tools (comma-separated names); None when unset";
-    entry ~default:"(none)" "MASC_TOOL_DESCRIPTION_BUDGET"
-      "Tool description budget max chars; None=unlimited";
     entry ~default:"2" "MASC_TOOL_READONLY_RETRY_LIMIT"
       "Read-only tool retry limit";
   ]
@@ -927,7 +903,7 @@ let all_categories () =
       (operator_entries @ orchestrator_entries @ smart_heartbeat_entries);
     category "channel" channel_gate_entries;
     category "process"
-      (shutdown_entries @ spawn_entries
+      (shutdown_entries
        @ cancellation_entries @ zombie_cleanup_entries @ lock_entries
        @ procedural_memory_entries);
     category "worker" (worker_entries @ worker_runtime_entries);

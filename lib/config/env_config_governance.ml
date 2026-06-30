@@ -159,18 +159,6 @@ module Model_defaults = struct
   (** Default runtime label (e.g. "glm:pro,openai:gpt-4.1"). *)
   let default_runtime_opt () =
     Sys.getenv_opt "MASC_DEFAULT_RUNTIME" |> trim_opt
-
-  (** Default provider name. *)
-  let default_provider_opt () =
-    Sys.getenv_opt "MASC_DEFAULT_PROVIDER" |> trim_opt
-
-  (** Default model id. *)
-  let default_model_opt () =
-    Sys.getenv_opt "MASC_DEFAULT_MODEL" |> trim_opt
-
-  (** Goal models (comma-separated). *)
-  let goal_models_opt () =
-    Sys.getenv_opt "MASC_GOAL_MODELS" |> trim_opt
 end
 
 (** {1 Anti-Rationalization Configuration}

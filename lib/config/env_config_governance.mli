@@ -147,9 +147,6 @@ end
 
 module Model_defaults : sig
   val default_runtime_opt : unit -> string option
-  val default_provider_opt : unit -> string option
-  val default_model_opt : unit -> string option
-  val goal_models_opt : unit -> string option
 end
 
 (** {1 Anti-rationalization} *)

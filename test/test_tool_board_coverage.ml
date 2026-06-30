@@ -1039,18 +1039,6 @@ let test_keeper_board_dispatch_uses_typed_tool_names () =
                       ("rationale", `String "Same issue");
                     ];
                 ]);
-             ("health_score", `Float 0.7);
-             ("health_components",
-              `List
-                [
-                  `Assoc
-                    [
-                      ("name", `String "answer_rate");
-                      ("score", `Float 0.7);
-                      ("weight", `Float 0.25);
-                      ("rationale", `String "Some answers present");
-                    ];
-                ]);
              ("rationale", `String "Summarize active board activity");
              ("provenance", `Assoc [ ("source", `String "test") ]);
            ])
@@ -1083,19 +1071,6 @@ let test_board_curation_submit_roundtrips_to_read () =
   Alcotest.(check bool) "raw submit requires submitted_by" false missing_ok;
   Alcotest.(check string) "missing submitted_by error" "submitted_by required"
     missing_body;
-  let invalid_score_ok, invalid_score_body =
-    dispatch "masc_board_curation_submit"
-      (make_args
-         [
-           ("submitted_by", `String "curator");
-           ("rationale", `String "score out of range");
-           ("health_score", `Float 1.5);
-         ])
-  in
-  Alcotest.(check bool) "raw submit rejects out-of-range health score" false
-    invalid_score_ok;
-  Alcotest.(check bool) "invalid score error mentions health_score" true
-    (contains_substring invalid_score_body "health_score");
   let invalid_provenance_ok, invalid_provenance_body =
     dispatch "masc_board_curation_submit"
       (make_args
@@ -1139,18 +1114,6 @@ let test_board_curation_submit_roundtrips_to_read () =
                     ("rationale", `String "Direct answer candidate");
                   ];
               ]);
-           ("health_score", `Float 0.65);
-           ("health_components",
-            `List
-              [
-                `Assoc
-                  [
-                    ("name", `String "routing_latency");
-                    ("score", `String "0.65");
-                    ("weight", `String " 0.5 ");
-                    ("rationale", `String "Some delay visible");
-                  ];
-              ]);
            ("rationale", `String "Useful routing snapshot");
            ("provenance", `Assoc [ ("source", `String "unit-test") ]);
          ])
@@ -1168,20 +1131,15 @@ let test_board_curation_submit_roundtrips_to_read () =
     Yojson.Safe.Util.(submitted |> member "ordering" |> to_list |> List.map to_string);
   Alcotest.(check (list string)) "highlights trim and drop blanks" [ "p-7" ]
     Yojson.Safe.Util.(submitted |> member "highlights" |> to_list |> List.map to_string);
-  Alcotest.(check (float 0.0001)) "health score persisted" 0.65
-    Yojson.Safe.Util.(submitted |> member "health_score" |> to_float);
+  Alcotest.(check bool) "health score omitted from board curation contract" true
+    Yojson.Safe.Util.(submitted |> member "health_score" = `Null);
+  Alcotest.(check bool) "health components omitted from board curation contract" true
+    Yojson.Safe.Util.(submitted |> member "health_components" = `Null);
   let answer_match =
     Yojson.Safe.Util.(submitted |> member "answer_matches" |> to_list |> List.hd)
   in
   Alcotest.(check (float 0.0001)) "string answer score parsed" 0.9
     Yojson.Safe.Util.(answer_match |> member "score" |> to_float);
-  let health_component =
-    Yojson.Safe.Util.(submitted |> member "health_components" |> to_list |> List.hd)
-  in
-  Alcotest.(check (float 0.0001)) "string health component score parsed" 0.65
-    Yojson.Safe.Util.(health_component |> member "score" |> to_float);
-  Alcotest.(check (float 0.0001)) "string health component weight parsed" 0.5
-    Yojson.Safe.Util.(health_component |> member "weight" |> to_float);
   let read_ok, read_body = dispatch "masc_board_curation_read" (make_args []) in
   Alcotest.(check bool) "curation read after submit ok" true read_ok;
   let read_json = Yojson.Safe.from_string read_body in
@@ -1794,14 +1752,11 @@ let test_tools_all_have_descriptions () =
       (String.length t.description > 0)
   ) Board_tool.tools
 
-let health_score_schema (tool : Masc_domain.tool_schema) =
+let curation_schema_properties (tool : Masc_domain.tool_schema) =
   match tool.input_schema with
   | `Assoc fields ->
     (match List.assoc_opt "properties" fields with
-     | Some (`Assoc properties) ->
-       (match List.assoc_opt "health_score" properties with
-        | Some (`Assoc schema) -> schema
-        | _ -> Alcotest.failf "%s missing health_score schema" tool.name)
+     | Some (`Assoc properties) -> properties
      | _ -> Alcotest.failf "%s missing properties schema" tool.name)
   | _ -> Alcotest.failf "%s input_schema is not an object" tool.name
 
@@ -1810,17 +1765,17 @@ let find_tool name tools =
   | Some tool -> tool
   | None -> Alcotest.failf "missing tool schema %s" name
 
-let test_curation_health_score_schema_bounds () =
-  let check_bounds label tool =
-    let schema = health_score_schema tool in
-    Alcotest.(check (float 0.0001)) (label ^ " minimum") 0.0
-      Yojson.Safe.Util.(List.assoc "minimum" schema |> to_float);
-    Alcotest.(check (float 0.0001)) (label ^ " maximum") 1.0
-      Yojson.Safe.Util.(List.assoc "maximum" schema |> to_float)
+let test_curation_schema_omits_health_score () =
+  let check_absent label tool =
+    let properties = curation_schema_properties tool in
+    Alcotest.(check bool) (label ^ " omits health_score") true
+      (Option.is_none (List.assoc_opt "health_score" properties));
+    Alcotest.(check bool) (label ^ " omits health_components") true
+      (Option.is_none (List.assoc_opt "health_components" properties))
   in
-  check_bounds "raw curation submit"
+  check_absent "raw curation submit"
     (find_tool "masc_board_curation_submit" Board_tool.tools);
-  check_bounds "keeper curation submit"
+  check_absent "keeper curation submit"
     (find_tool "keeper_board_curation_submit" Tool_shard.shard_board.tools)
 
 (** {1 Comment Rate Limiting Tests} *)
@@ -2126,8 +2081,8 @@ let () =
           Alcotest.test_case "tools count" `Quick test_tools_count;
           Alcotest.test_case "unique names" `Quick test_tools_names_unique;
           Alcotest.test_case "all have descriptions" `Quick test_tools_all_have_descriptions;
-          Alcotest.test_case "curation health score schema bounds" `Quick
-            test_curation_health_score_schema_bounds;
+          Alcotest.test_case "curation schema omits health score" `Quick
+            test_curation_schema_omits_health_score;
         ] );
       ( "post_kind_registry",
         [

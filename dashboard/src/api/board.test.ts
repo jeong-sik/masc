@@ -457,8 +457,6 @@ describe('fetchBoard', () => {
           report_count: 2,
           moderation_status: 'flagged',
           contributor_quality: {
-            score: 0.72,
-            band: 'strong',
             source: 'agent_reputation',
             completion_rate: 0.8,
             response_rate: 0.6,
@@ -504,8 +502,6 @@ describe('fetchBoard', () => {
       report_count: 2,
       moderation_status: 'flagged',
       contributor_quality: {
-        score: 0.72,
-        band: 'strong',
         source: 'agent_reputation',
         completion_rate: 0.8,
         response_rate: 0.6,

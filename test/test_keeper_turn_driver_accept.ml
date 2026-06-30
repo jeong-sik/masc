@@ -2009,7 +2009,7 @@ let test_carrier_only_stream_does_not_suppress_mid_turn_no_progress () =
   in
   match
     Masc.Keeper_supervisor.assess_in_turn_progress
-      ~phase:Masc.Keeper_state_machine.Running
+      ~phase:Keeper_state_machine.Running
       ~in_turn:(Some turn_observation)
       ~now:45.0
       ~progress_timeout:30.0

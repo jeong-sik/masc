@@ -54,6 +54,12 @@ let rec longident_to_string : Longident.t -> string = function
     ^ ")"
 ;;
 
+let rec longident_leaf : Longident.t -> string = function
+  | Lident s -> s
+  | Ldot (_, name) -> name.Location.txt
+  | Lapply (_, r) -> longident_leaf r.Location.txt
+;;
+
 (* Count function-application sites where the callee identifier matches
    [callee] exactly (string form "Module.fn" or just "fn" for unqualified).
    Skips comments / docstrings (AST has no nodes for them). *)
@@ -134,6 +140,42 @@ let count_calls_with_label ~module_path ~callee ~label =
            | Pexp_apply ({ pexp_desc = Pexp_ident { txt; _ }; _ }, args)
              when String.equal (longident_to_string txt) callee
                   && has_label args -> incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
+let count_constructors ~module_path ~constructor =
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self e ->
+          (match e.pexp_desc with
+           | Pexp_construct ({ txt; _ }, _) ->
+             if longident_to_string txt = constructor then incr count
+           | _ -> ());
+          Ast_iterator.default_iterator.expr self e)
+    }
+  in
+  iter.structure iter structure;
+  !count
+;;
+
+let count_constructor_leaf_names ~module_path ~name =
+  let structure = parse_implementation_or_fail module_path in
+  let count = ref 0 in
+  let iter =
+    { Ast_iterator.default_iterator with
+      expr =
+        (fun self e ->
+          (match e.pexp_desc with
+           | Pexp_construct ({ txt; _ }, _) ->
+             if String.equal (longident_leaf txt) name then incr count
            | _ -> ());
           Ast_iterator.default_iterator.expr self e)
     }

@@ -14,6 +14,8 @@ type outcome =
   | Skipped_too_few of int
   | Transport_failed of string
   | Unparseable of string
+  | Empty_response
+  | Invalid_structured_response of string
   | Snapshot_changed of
       { before : int
       ; current : int

@@ -102,6 +102,7 @@ type vision_outcome =
   | Vo_invalid_request of string
   | Vo_no_runtime of string
   | Vo_timeout
+  | Vo_invalid_structured_response of string
   | Vo_provider of { failure_class : Tool_result.tool_failure_class; detail : string }
   | Vo_empty
   | Vo_truncated
@@ -121,8 +122,9 @@ val run_vision
     call under [with_timeout] + §2.2 classification). Used by {!handle} and by
     eager ingestion. Requires the turn clock, so eager ingestion cannot run an
     unbounded provider call. Non-cancellation exceptions are converted to
-    [Vo_provider] so eager ingestion can keep the turn alive with a typed unread
-    placeholder. *)
+    [Vo_provider]; provider success with malformed structured output is
+    [Vo_invalid_structured_response], so eager ingestion can keep the turn alive
+    with a typed unread placeholder. *)
 
 val handle
   :  ?complete:complete_fn

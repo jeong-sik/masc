@@ -24,6 +24,14 @@ type mode =
 val extraction_query : string
 (** The fixed exhaustive extraction query used by [Eager] (RFC §2.3-eager). *)
 
+val eager_read_eviction_reason_of_outcome
+  :  Keeper_vision_tool.vision_outcome
+  -> string option
+(** Metric reason projection for failed [Eager] vision sub-calls. [Vo_ok] has
+    no error reason; every non-ok outcome maps to a finite eviction reason so
+    provider failures, timeouts, invalid requests, and invalid structured
+    responses do not collapse into one counter bucket. *)
+
 val evict_blocks
   :  mode:mode
   -> policy:Keeper_types_profile.multimodal_policy

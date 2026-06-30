@@ -30,6 +30,12 @@ type consolidation_plan =
 
 val empty_plan : consolidation_plan
 
+type output_rejection_reason =
+  | Non_json
+  | Non_object_json
+
+val output_rejection_reason_to_string : output_rejection_reason -> string
+
 (** The numbered fact list the consolidation prompt sees: one 0-based line per
     fact, ["i: [category] claim"]. The index is the LLM's only handle on an
     existing fact, matching [apply_plan]'s reading. *)
@@ -39,6 +45,11 @@ val render_numbered_facts : fact list -> string
     (dropped with warning counts, not fatal); a wholly invalid object yields
     [empty_plan]. *)
 val plan_of_json : Yojson.Safe.t -> consolidation_plan
+
+(** Parse the provider output as an exact JSON object, preserving the structured
+    rejection reason for runtime outcome classification. *)
+val plan_result_of_string :
+  string -> (consolidation_plan, output_rejection_reason) result
 
 (** [plan_of_string raw] is [None] only when [raw] is not an exact JSON object.
     Rejections emit a warning with a bounded reason label and byte count so

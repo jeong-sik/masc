@@ -60,6 +60,8 @@ type outcome =
   | Skipped_too_few of int
   | Transport_failed of string
   | Unparseable of string
+  | Empty_response
+  | Invalid_structured_response of string
   | Snapshot_changed of
       { before : int
       ; current : int
@@ -131,6 +133,12 @@ let rewrite_if_snapshot_current ?clock ~keeper_id ~facts ~survivors ~before ~aft
         Consolidated { before; after }))
 ;;
 
+let invalid_structured_response reason =
+  Invalid_structured_response
+    ("consolidation provider returned invalid structured response: "
+     ^ Consolidation.output_rejection_reason_to_string reason)
+;;
+
 (* Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it, and
    (unless [dry_run]) rewrite the store atomically. Returns what happened without
    raising for the expected failure modes (too few facts, transport error,
@@ -169,11 +177,11 @@ let consolidate_keeper
          | Some (Error _) -> Transport_failed "consolidation provider transport error"
          | Some (Ok response) ->
            (match response_text response with
-            | None -> Unparseable "consolidation provider returned empty response"
+            | None -> Empty_response
             | Some raw ->
-              (match Consolidation.plan_of_string raw with
-               | None -> Unparseable "consolidation provider returned invalid plan JSON"
-               | Some plan ->
+              (match Consolidation.plan_result_of_string raw with
+               | Error reason -> invalid_structured_response reason
+               | Ok plan ->
                  let survivors = Consolidation.apply_plan ~now ~facts plan in
                  let after = List.length survivors in
                  if dry_run

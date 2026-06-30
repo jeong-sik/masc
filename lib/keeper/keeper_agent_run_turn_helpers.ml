@@ -85,7 +85,10 @@ let sse_event_progress_kind (event : Agent_sdk.Types.sse_event) =
       Some "sse_text_delta"
   | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.ThinkingDelta _; _ } ->
       Some "sse_thinking_delta"
-  | Agent_sdk.Types.ContentBlockDelta { delta = Agent_sdk.Types.InputJsonDelta _; _ } ->
+  | Agent_sdk.Types.ContentBlockDelta
+      { delta = (Agent_sdk.Types.InputJsonDelta _ | Agent_sdk.Types.InputJsonSnapshot _)
+      ; _
+      } ->
       Some "sse_tool_arg_delta"
   | Agent_sdk.Types.ContentBlockDelta _ ->
       (* Future OAS carrier deltas, such as provider-private reasoning signatures,

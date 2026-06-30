@@ -127,7 +127,7 @@ let translate ~redact_text ~on_text_delta bridge_state
                 Tool_start_missing_identity ]
         }
       else { bridge_state; chat_events = [ block_start ] }
-  | ContentBlockDelta { index; delta = InputJsonDelta args } -> (
+  | ContentBlockDelta { index; delta = (InputJsonDelta args | InputJsonSnapshot args) } -> (
       match stream_tool_for_index bridge_state index with
       | Some tool ->
           { bridge_state;

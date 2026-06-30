@@ -269,7 +269,7 @@ let unexpected_claim_field = function
   | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ -> None
 ;;
 
-let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
+let episode_of_json_result ?now ~generation (inp : input) (json : Yojson.Safe.t) :
   (episode, parse_error) result
   =
   let now =
@@ -279,49 +279,54 @@ let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
       (* NDT-OK: extraction timestamps are provenance/retention metadata only. *)
       Unix.gettimeofday ()
   in
+  match json with
+  | `Assoc fields ->
+    (match first_unexpected_field ~allowed:accepted_episode_fields fields with
+     | Some field -> Error (Unexpected_field field)
+     | None ->
+       (match
+          string_field wire_field_episode_summary fields
+          , List.assoc_opt wire_field_claims fields
+          , string_list_field_or_empty wire_field_open_items fields
+          , string_list_field_or_empty wire_field_constraints fields
+          , string_list_field_or_empty wire_field_preserved_tool_refs fields
+        with
+        | ( Some episode_summary
+          , Some (`List claim_items)
+          , Some open_items
+          , Some constraints
+          , Some preserved_tool_refs ) ->
+          (match List.find_map unexpected_claim_field claim_items with
+           | Some field -> Error (Unexpected_field field)
+           | None ->
+             (match traverse (fact_of_json ~trace_id:inp.trace_id ~now) claim_items with
+              | Some claims ->
+                Ok
+                  { trace_id = inp.trace_id
+                  ; generation
+                  ; episode_summary
+                  ; claims
+                  ; open_items
+                  ; constraints
+                  ; preserved_tool_refs
+                  ; source_turn_range = source_turn_range claims
+                  ; created_at = now
+                  ; valid_until = None
+                  ; terminal_marker = None
+                  ; schema_version
+                  }
+              | None -> Error Claim_schema_mismatch))
+        | _ -> Error Missing_required_fields))
+  | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
+    Error Top_level_not_object
+;;
+
+let episode_of_output_result ?now ~generation (inp : input) (raw : string) :
+  (episode, parse_error) result
+  =
   match json_of_output raw with
   | Error _ as error -> error
-  | Ok json ->
-    (match json with
-    | `Assoc fields ->
-      (match first_unexpected_field ~allowed:accepted_episode_fields fields with
-       | Some field -> Error (Unexpected_field field)
-       | None ->
-         (match
-            string_field wire_field_episode_summary fields
-            , List.assoc_opt wire_field_claims fields
-            , string_list_field_or_empty wire_field_open_items fields
-            , string_list_field_or_empty wire_field_constraints fields
-            , string_list_field_or_empty wire_field_preserved_tool_refs fields
-          with
-          | ( Some episode_summary
-            , Some (`List claim_items)
-            , Some open_items
-            , Some constraints
-            , Some preserved_tool_refs ) ->
-            (match List.find_map unexpected_claim_field claim_items with
-             | Some field -> Error (Unexpected_field field)
-             | None ->
-               (match traverse (fact_of_json ~trace_id:inp.trace_id ~now) claim_items with
-                | Some claims ->
-                  Ok
-                    { trace_id = inp.trace_id
-                    ; generation
-                    ; episode_summary
-                    ; claims
-                    ; open_items
-                    ; constraints
-                    ; preserved_tool_refs
-                    ; source_turn_range = source_turn_range claims
-                    ; created_at = now
-                    ; valid_until = None
-                    ; terminal_marker = None
-                    ; schema_version
-                    }
-                | None -> Error Claim_schema_mismatch))
-          | _ -> Error Missing_required_fields))
-    | `Bool _ | `Float _ | `Int _ | `Intlit _ | `List _ | `Null | `String _ ->
-      Error Top_level_not_object)
+  | Ok json -> episode_of_json_result ?now ~generation inp json
 ;;
 
 let episode_of_output ?now ~generation inp raw : episode option =

@@ -65,6 +65,15 @@ val episode_of_output_result
   -> string
   -> (Keeper_memory_os_types.episode, parse_error) result
 
+val episode_of_json_result
+  :  ?now:float
+  -> generation:int
+  -> input
+  -> Yojson.Safe.t
+  -> (Keeper_memory_os_types.episode, parse_error) result
+(** Parse an already extracted provider-native JSON response into an episode.
+    This is the runtime path used after OAS structured response extraction. *)
+
 (** Parse a raw strict-JSON LLM response into an episode.
 
     Compatibility wrapper over {!episode_of_output_result}; [None] means the

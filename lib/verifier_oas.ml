@@ -81,6 +81,17 @@ let parse_verdict_from_response_text text =
       Error (sprintf "verifier response must be strict JSON: %s" msg)
 ;;
 
+let parse_verdict_from_response response =
+  match
+    Agent_sdk_response.structured_json_of_response
+      ~schema_name:"verification_report_verdict"
+      response
+  with
+  | Ok json -> Core.parse_verdict_from_json json
+  | Error msg ->
+    Error (sprintf "verifier response must be structured JSON: %s" msg)
+;;
+
 module For_testing = struct
   let parse_verdict_from_response_text = parse_verdict_from_response_text
 end
@@ -143,16 +154,14 @@ let verify (req : Core.verification_request) : (Core.verdict, string) result =
        | None ->
          (* LLM responded with text instead of tool call. The provider-native
             schema contract still requires a strict JSON verdict object here. *)
-         let text = Agent_sdk_response.text_of_response result.response in
          Log.Verifier.info
            "verdict via strict JSON response fallback (model did not call report_verdict)";
-        (match parse_verdict_from_response_text text with
+        (match parse_verdict_from_response result.response with
          | Ok verdict -> Ok verdict
           | Error parse_err ->
             Log.Verifier.warn
-              "Verdict parse failed (%s); raw=%s"
-              parse_err
-              (String.sub text 0 (min 80 (String.length text)));
+              "Verdict parse failed (%s)"
+              parse_err;
             Error (sprintf "verdict parse: %s" parse_err)))
     | Error err -> Error (Agent_sdk.Error.to_string err))
 ;;

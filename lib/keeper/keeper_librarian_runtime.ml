@@ -529,21 +529,35 @@ let extract_with_provider_classified
               Transport_failed
                 (Provider_transport_failed (Provider_http_error.to_message err))
             | Some (Ok response) ->
-              let raw = Agent_sdk_response.text_of_response response |> String.trim in
-              if String.equal raw ""
-              then
-                Unparseable
-                  (unparseable_response "librarian provider returned empty response")
-              else (
-                match Keeper_librarian.episode_of_output_result ~generation inp raw with
-                | Ok episode -> Parsed episode
-                | Error error ->
-                  Unparseable
-                    (unparseable_response
-                       ~raw_evidence:raw
-                       (Printf.sprintf
-                          "librarian provider returned invalid episode JSON (%s)"
-                          (Keeper_librarian.parse_error_to_string error))))
+              let raw_evidence = Agent_sdk_response.text_of_response response |> String.trim in
+              (match
+                 Agent_sdk_response.structured_json_of_response
+                   ~schema_name:"keeper_librarian_episode"
+                   response
+               with
+               | Error detail ->
+                 let raw_evidence =
+                   if String.equal raw_evidence "" then None else Some raw_evidence
+                 in
+                 Unparseable
+                   (unparseable_response
+                      ?raw_evidence
+                      (Printf.sprintf
+                         "librarian provider returned invalid structured JSON (%s)"
+                         detail))
+               | Ok json ->
+                 (match Keeper_librarian.episode_of_json_result ~generation inp json with
+                  | Ok episode -> Parsed episode
+                  | Error error ->
+                    let raw_evidence =
+                      if String.equal raw_evidence "" then None else Some raw_evidence
+                    in
+                    Unparseable
+                      (unparseable_response
+                         ?raw_evidence
+                         (Printf.sprintf
+                            "librarian provider returned invalid episode JSON (%s)"
+                            (Keeper_librarian.parse_error_to_string error)))))
           in
           (match
              run_with_parse_retries

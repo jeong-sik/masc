@@ -269,18 +269,23 @@ type vision_outcome =
   | Vo_empty
   | Vo_truncated
 
+let vision_text_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "text" fields with
+     | Some (`String text) -> Ok (String.trim text)
+     | Some _ -> Error "vision response field \"text\" must be a string"
+     | None -> Error "vision response missing required field \"text\"")
+  | _ -> Error "vision response must be a JSON object"
+;;
+
 let vision_text_of_response (response : Agent_sdk.Types.api_response) =
-  let raw = String.trim (Agent_sdk_response.text_of_response response) in
-  try
-    match Yojson.Safe.from_string raw with
-    | `Assoc fields ->
-      (match List.assoc_opt "text" fields with
-       | Some (`String text) -> Ok (String.trim text)
-       | Some _ -> Error "vision response field \"text\" must be a string"
-       | None -> Error "vision response missing required field \"text\"")
-    | _ -> Error "vision response must be a JSON object"
+  match
+    Agent_sdk_response.structured_json_of_response
+      ~schema_name:"keeper_vision_analyze"
+      response
   with
-  | Yojson.Json_error msg -> Error ("vision response is not valid JSON: " ^ msg)
+  | Ok json -> vision_text_of_json json
+  | Error msg -> Error ("vision response is not valid structured JSON: " ^ msg)
 ;;
 
 let ok_or_classified_json (response : Agent_sdk.Types.api_response) =

@@ -31,18 +31,6 @@ let with_timeout ?clock ~timeout_sec f =
      | Eio.Time.Timeout -> None)
 ;;
 
-let response_text (response : Agent_sdk.Types.api_response) : string option =
-  let text =
-    Agent_sdk.Types.visible_text_of_response response
-    |> String.split_on_char '\n'
-    |> List.map String.trim
-    |> List.filter (fun s -> s <> "")
-    |> String.concat "\n"
-    |> String.trim
-  in
-  if String.equal text "" then None else Some text
-;;
-
 (* Below this many facts there is nothing to consolidate; skip the LLM call. *)
 let min_facts_to_consolidate = 4
 
@@ -133,6 +121,11 @@ let invalid_structured_response reason =
      ^ Consolidation.output_rejection_reason_to_string reason)
 ;;
 
+let invalid_structured_response_detail detail =
+  Invalid_structured_response
+    ("consolidation provider returned invalid structured response: " ^ detail)
+;;
+
 (* Read [keeper_id]'s facts, ask the model for a consolidation plan, apply it, and
    (unless [dry_run]) rewrite the store atomically. Returns what happened without
    raising for the expected failure modes (too few facts, transport error,
@@ -170,24 +163,31 @@ let consolidate_keeper
          | None -> Transport_failed "consolidation provider timed out"
          | Some (Error _) -> Transport_failed "consolidation provider transport error"
          | Some (Ok response) ->
-           (match response_text response with
-            | None -> Empty_response
-            | Some raw ->
-              (match Consolidation.plan_result_of_string raw with
-               | Error reason -> invalid_structured_response reason
-               | Ok plan ->
-                 let survivors = Consolidation.apply_plan ~now ~facts plan in
-                 let after = List.length survivors in
-                 if dry_run
-                 then Consolidated { before; after }
-                 else
-                   rewrite_if_snapshot_current
-                     ?clock
-                     ~keeper_id
-                     ~facts
-                     ~survivors
-                     ~before
-                     ~after
-                     ())))
+           if String.trim (Agent_sdk_response.text_of_response response) = ""
+           then Empty_response
+           else
+             (match
+                Agent_sdk_response.structured_json_of_response
+                  ~schema_name:"keeper_memory_consolidation_plan"
+                  response
+              with
+              | Error detail -> invalid_structured_response_detail detail
+              | Ok (`Assoc _ as json) ->
+                let plan = Consolidation.plan_of_json json in
+                let survivors = Consolidation.apply_plan ~now ~facts plan in
+                let after = List.length survivors in
+                if dry_run
+                then Consolidated { before; after }
+                else
+                  rewrite_if_snapshot_current
+                    ?clock
+                    ~keeper_id
+                    ~facts
+                    ~survivors
+                    ~before
+                    ~after
+                    ()
+              | Ok _ -> invalid_structured_response Consolidation.Non_object_json)
+        )
         )
 ;;

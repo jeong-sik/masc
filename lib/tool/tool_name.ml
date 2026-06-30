@@ -73,6 +73,7 @@ module Board_name = struct
     | Board_hearths
     | Board_list
     | Board_post
+    | Board_post_update
     | Board_profile
     | Board_reaction
     | Board_search
@@ -95,6 +96,7 @@ module Board_name = struct
     | Board_hearths -> "masc_board_hearths"
     | Board_list -> "masc_board_list"
     | Board_post -> "masc_board_post"
+    | Board_post_update -> "masc_board_post_update"
     | Board_profile -> "masc_board_profile"
     | Board_reaction -> "masc_board_reaction"
     | Board_search -> "masc_board_search"
@@ -118,6 +120,7 @@ module Board_name = struct
     | "masc_board_hearths" -> Some Board_hearths
     | "masc_board_list" -> Some Board_list
     | "masc_board_post" -> Some Board_post
+    | "masc_board_post_update" -> Some Board_post_update
     | "masc_board_profile" -> Some Board_profile
     | "masc_board_reaction" -> Some Board_reaction
     | "masc_board_search" -> Some Board_search
@@ -129,6 +132,30 @@ module Board_name = struct
     | "masc_board_sub_board_list" -> Some Board_sub_board_list
     | "masc_board_sub_board_update" -> Some Board_sub_board_update
     | _ -> None
+  ;;
+
+  let is_resource_write = function
+    | Board_cleanup
+    | Board_comment
+    | Board_comment_vote
+    | Board_curation_submit
+    | Board_delete
+    | Board_post
+    | Board_post_update
+    | Board_reaction
+    | Board_sub_board_create
+    | Board_sub_board_delete
+    | Board_sub_board_update
+    | Board_vote -> true
+    | Board_curation_read
+    | Board_post_get
+    | Board_hearths
+    | Board_list
+    | Board_profile
+    | Board_search
+    | Board_stats
+    | Board_sub_board_get
+    | Board_sub_board_list -> false
   ;;
 
   let pp fmt t = Format.pp_print_string fmt (to_string t)

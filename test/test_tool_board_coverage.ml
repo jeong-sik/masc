@@ -1466,6 +1466,78 @@ let test_dispatch_delete_empty_id () =
   Alcotest.(check bool) "error mentions required" true
     (contains_substring body "required")
 
+let test_dispatch_post_update_success () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let _ok, body =
+    dispatch "masc_board_post"
+      (make_args
+         [ ("content", `String "original tool body")
+         ; ("author", `String "edit-tool-author")
+         ])
+  in
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  let ok_edit, msg_edit =
+    dispatch "masc_board_post_update"
+      (make_args
+         [ ("post_id", `String post_id)
+         ; ("author", `String "edit-tool-author")
+         ; ("content", `String "edited tool body")
+         ])
+  in
+  Alcotest.(check bool) "edit ok" true ok_edit;
+  Alcotest.(check bool) "edit msg contains new body" true
+    (contains_substring msg_edit "edited tool body");
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok post -> Alcotest.(check string) "edit persisted" "edited tool body" post.content)
+
+let test_dispatch_post_update_rejects_non_owner () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let _ok, body =
+    dispatch "masc_board_post"
+      (make_args
+         [ ("content", `String "owned tool body"); ("author", `String "tool-owner") ])
+  in
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  let ok_edit, _msg =
+    dispatch "masc_board_post_update"
+      (make_args
+         [ ("post_id", `String post_id)
+         ; ("author", `String "tool-intruder")
+         ; ("content", `String "hijacked tool body")
+         ])
+  in
+  Alcotest.(check bool) "non-owner edit rejected" false ok_edit;
+  (* the rejected edit must not touch the stored content *)
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok post ->
+     Alcotest.(check string) "original preserved on rejected edit" "owned tool body"
+       post.content)
+
+let test_dispatch_post_update_missing_id () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let ok, body =
+    dispatch "masc_board_post_update"
+      (make_args [ ("author", `String "x"); ("content", `String "y") ])
+  in
+  Alcotest.(check bool) "missing post_id rejected" false ok;
+  Alcotest.(check bool) "error mentions required" true (contains_substring body "required")
+
 let test_post_get_success () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1706,7 +1778,7 @@ let test_tools_count () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   cleanup ();
-  Alcotest.(check int) "19 tool schemas" 19 (List.length Board_tool.tools)
+  Alcotest.(check int) "20 tool schemas" 20 (List.length Board_tool.tools)
 
 let test_tools_names_unique () =
   with_eio @@ fun env ->
@@ -2045,6 +2117,12 @@ let () =
           Alcotest.test_case "delete success" `Quick test_dispatch_delete_success;
           Alcotest.test_case "delete not found" `Quick test_dispatch_delete_not_found;
           Alcotest.test_case "delete empty id" `Quick test_dispatch_delete_empty_id;
+          Alcotest.test_case "post update by owner" `Quick
+            test_dispatch_post_update_success;
+          Alcotest.test_case "post update rejects non-owner" `Quick
+            test_dispatch_post_update_rejects_non_owner;
+          Alcotest.test_case "post update missing id" `Quick
+            test_dispatch_post_update_missing_id;
         ] );
       ( "schemas",
         [

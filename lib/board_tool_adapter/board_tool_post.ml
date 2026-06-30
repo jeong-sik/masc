@@ -169,6 +169,86 @@ let handle_post_create ~tool_name ~start_time args : Tool_result.result =
            Board_tool_format.error_of_board_error ~tool_name ~start_time e))
 ;;
 
+let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
+  let post_id = get_string args "post_id" "" in
+  (* Mirror create's body/content handling: strip [STATE] blocks at the tool
+     boundary (an LLM output artifact) and let [body] win over [content]. The
+     core then re-normalizes against the existing meta; via this tool path the
+     body carries no state block, so meta is preserved. *)
+  let body_arg =
+    get_string_opt args "body" |> Option.map Board_tool_format.strip_state_blocks_text
+  in
+  let raw_content =
+    match body_arg with
+    | Some value -> value
+    | None -> get_string args "content" ""
+  in
+  let content = Board_tool_format.strip_state_blocks_text raw_content in
+  let body = Option.map (fun _ -> content) body_arg in
+  (* A blank/absent title means "re-derive from the new body"; only a non-empty
+     title overrides. *)
+  let title =
+    match get_string_opt args "title" with
+    | Some t when not (String.equal (String.trim t) "") -> Some t
+    | _ -> None
+  in
+  (* Parse [author] into a validated editor string at the boundary instead of
+     carrying a [string option] and defaulting at the call site. Owner-gate
+     enforcement downstream needs a concrete editor identity, so an absent,
+     blank, or "anonymous" author is rejected here; the dispatch then only ever
+     receives a non-empty editor (no unreachable default to guess). *)
+  let valid_editor =
+    match get_string_opt args "author" |> Option.map String.trim with
+    | Some editor
+      when (not (String.equal editor "")) && not (String.equal editor "anonymous") ->
+      Some editor
+    | _ -> None
+  in
+  if String.equal (String.trim post_id) ""
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "post_id is required"
+  else if String.equal (String.trim content) ""
+  then
+    Tool_result.make_err
+      ~tool_name
+      ~class_:Tool_result.Workflow_rejection
+      ~start_time
+      "New body content must not be empty (resend the full post body to edit)"
+  else (
+    match valid_editor with
+    | None ->
+      Tool_result.make_err
+        ~tool_name
+        ~class_:Tool_result.Workflow_rejection
+        ~start_time
+        "author is required"
+    | Some editor ->
+      if String.length content > Board.Limits.max_content_length
+      then
+        Tool_result.make_err
+          ~tool_name
+          ~class_:Tool_result.Workflow_rejection
+          ~start_time
+          (Printf.sprintf
+             "Content exceeds max length (%d > %d chars)"
+             (String.length content)
+             Board.Limits.max_content_length)
+      else (
+        match Board_dispatch.update_post ~post_id ~editor ~content ?title ?body () with
+        | Ok post ->
+          let json = Board.post_to_yojson post in
+          (* Structured result via [Tool_result.ok]; see "Post created" note above. *)
+          Tool_result.ok
+            ~tool_name
+            ~start_time
+            (Printf.sprintf "Post updated:\n%s" (Yojson.Safe.pretty_to_string json))
+        | Error e -> Board_tool_format.error_of_board_error ~tool_name ~start_time e))
+;;
+
 let handle_post_list_uncached ~tool_name ~start_time args : Tool_result.result =
   let limit = get_int args "limit" 20 |> max 1 |> min 100 in
   let compact = get_bool args "compact" true in

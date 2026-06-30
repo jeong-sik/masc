@@ -27,6 +27,20 @@ let with_reviewer reviewer f =
       Atomic.set AR.run_llm_reviewer_fn reviewer;
       f ())
 
+let contains_substring haystack needle =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop idx =
+    if needle_len = 0
+    then true
+    else if idx + needle_len > haystack_len
+    then false
+    else if String.sub haystack idx needle_len = needle
+    then true
+    else loop (idx + 1)
+  in
+  loop 0
+
 let test_empty_verdict_emits_typed_error () =
   match AR.parse_verdict_typed "" with
   | Error AR.Empty_review_output -> ()
@@ -79,6 +93,56 @@ let test_review_rejects_empty_evaluator_output () =
         Alcotest.fail
           "empty evaluator output must not approve by liveness")
 
+let test_review_accepts_strict_json_evaluator_response () =
+  with_reviewer
+    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+      Ok (None, {|{"verdict":"APPROVE"}|}))
+    (fun () ->
+      let result =
+        AR.review ~evaluator_runtime:"test-json-evaluator" (make_request ())
+      in
+      Alcotest.(check string)
+        "gate" "llm_text_fallback" (AR.gate_to_string result.AR.gate);
+      match result.AR.verdict with
+      | AR.Approve -> ()
+      | AR.Reject reason ->
+        Alcotest.failf "strict JSON APPROVE should pass, rejected: %s" reason)
+
+let check_review_rejects_evaluator_text ~label ~text ~reason_substring =
+  with_reviewer
+    (fun ?sw:_ ~evaluator_runtime:_ ~prompt:_ ~report_tool_schema:_ () ->
+      Ok (None, text))
+    (fun () ->
+      let result =
+        AR.review ~evaluator_runtime:("test-" ^ label) (make_request ())
+      in
+      Alcotest.(check string)
+        "gate" "format_reject" (AR.gate_to_string result.AR.gate);
+      (match result.AR.fallback_reason with
+       | Some reason ->
+         Alcotest.(check bool)
+           "fallback reason names strict JSON requirement"
+           true
+           (contains_substring reason reason_substring)
+       | None -> Alcotest.fail "format reject should include a fallback reason");
+      match result.AR.verdict with
+      | AR.Reject _ -> ()
+      | AR.Approve -> Alcotest.failf "%s evaluator output must not approve" label)
+
+let test_review_rejects_prose_evaluator_response () =
+  check_review_rejects_evaluator_text ~label:"prose-evaluator" ~text:"APPROVE"
+    ~reason_substring:"strict verdict JSON"
+
+let test_review_rejects_malformed_json_evaluator_response () =
+  check_review_rejects_evaluator_text ~label:"malformed-json-evaluator"
+    ~text:{|{"verdict":"APPROVE"|}
+    ~reason_substring:"strict verdict JSON"
+
+let test_review_rejects_non_object_json_evaluator_response () =
+  check_review_rejects_evaluator_text ~label:"array-json-evaluator"
+    ~text:{|[{"verdict":"APPROVE"}]|}
+    ~reason_substring:"review verdict"
+
 let () =
   Alcotest.run
     "anti_rationalization_empty_reject"
@@ -104,5 +168,21 @@ let () =
             "empty evaluator output rejects"
             `Quick
             test_review_rejects_empty_evaluator_output;
+          Alcotest.test_case
+            "strict JSON evaluator response passes"
+            `Quick
+            test_review_accepts_strict_json_evaluator_response;
+          Alcotest.test_case
+            "prose evaluator response rejects"
+            `Quick
+            test_review_rejects_prose_evaluator_response;
+          Alcotest.test_case
+            "malformed JSON evaluator response rejects"
+            `Quick
+            test_review_rejects_malformed_json_evaluator_response;
+          Alcotest.test_case
+            "non-object JSON evaluator response rejects"
+            `Quick
+            test_review_rejects_non_object_json_evaluator_response;
         ] );
     ]

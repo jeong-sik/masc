@@ -101,6 +101,53 @@ let check_ok = function
   | Ok () -> ()
   | Error msg -> Alcotest.fail msg
 
+let test_response_text_accepts_strict_json () =
+  let raw =
+    {|{"verdict":"FAIL","reason":"bad branch","evidence":[{"path":"lib/foo.ml","line":12,"quote":"let bad = true"}]}|}
+  in
+  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  | Ok grounded ->
+    check string
+      "verdict"
+      "FAIL"
+      (VC.verdict_constructor_name grounded.VC.verdict);
+    check int "evidence count" 1 (List.length grounded.VC.evidence)
+  | Error msg -> fail ("strict JSON response rejected: " ^ msg)
+
+let test_response_text_rejects_embedded_json () =
+  let raw =
+    {|Here is the verdict: {"verdict":"PASS","reason":null,"evidence":[]}|}
+  in
+  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  | Error _ -> ()
+  | Ok grounded ->
+    failf
+      "embedded JSON should be rejected, got %s"
+      (VC.verdict_to_string grounded.VC.verdict)
+
+let check_response_text_rejected label raw =
+  match AR.For_testing.parse_grounded_verdict_from_response_text raw with
+  | Error _ -> ()
+  | Ok grounded ->
+    failf
+      "%s should be rejected, got %s"
+      label
+      (VC.verdict_to_string grounded.VC.verdict)
+
+let test_response_text_rejects_empty_text () =
+  check_response_text_rejected "empty response" "";
+  check_response_text_rejected "whitespace response" "  \n\t  "
+
+let test_response_text_rejects_malformed_json () =
+  check_response_text_rejected
+    "malformed JSON response"
+    {|{"verdict":"PASS","reason":null,"evidence":[]|}
+
+let test_response_text_rejects_non_object_json () =
+  check_response_text_rejected
+    "array JSON response"
+    {|[{"verdict":"PASS","reason":null,"evidence":[]}]|}
+
 let test_fail_wakes_author () =
   with_temp_base (fun base ->
       let author = "builder-keeper" in
@@ -294,6 +341,19 @@ let test_build_prompt_preserves_literal_braces_in_values () =
 let () =
   Alcotest.run "keeper-adversarial-review"
     [
+      ( "response-parser",
+        [
+          test_case "accepts strict JSON response" `Quick
+            test_response_text_accepts_strict_json;
+          test_case "rejects embedded JSON response" `Quick
+            test_response_text_rejects_embedded_json;
+          test_case "rejects empty response text" `Quick
+            test_response_text_rejects_empty_text;
+          test_case "rejects malformed JSON response" `Quick
+            test_response_text_rejects_malformed_json;
+          test_case "rejects non-object JSON response" `Quick
+            test_response_text_rejects_non_object_json;
+        ] );
       ( "wake-on-fail",
         [
           test_case "fail wakes author" `Quick test_fail_wakes_author;

@@ -6,9 +6,9 @@ title: RFC-0300 — Dashboard design-token scope consolidation (radius / shadow 
 
 | Field | Value |
 |---|---|
-| Status | Draft |
+| Status | Accepted — §9 decided 2026-06-30; P1/P2/P3 landed |
 | Repo | `jeong-sik/masc` (`dashboard/`) |
-| Relates | #22696 (token codegen pipeline restore), #22703 (orphan token CSS removal), #22712 (radius cascade diagnosis in drift baseline), #22723 (chunk B font-size tokenization + ratchet) |
+| Relates | #22696 (token codegen pipeline restore), #22703 (orphan token CSS removal), #22712 (radius cascade diagnosis in drift baseline), #22723 (P1 font-size tokenization + ratchet), #22729 (P2 dead :root --shadow-card removal), #22731 (P3 dead :root radius removal) |
 | Evidence | 2026-06-30 cascade investigation during chunk F of the dashboard token-polish backlog |
 | Author | dashboard token-polish thread |
 
@@ -80,11 +80,18 @@ since skin-v2 omits them): **xs 3 / sm 4 / md 6 / lg 10 / xl 8 / pill 9999**.
 styleseed), `skin-v2.css:92/184`, `styleseed-*.css`, `keeper-v2/v2.css:81/151`,
 `ds-viewer-kit/theme-paper.css:122`.
 
-In the default app, `skin-v2.css:92` (specificity 0,3,1) wins everywhere —
-including inside `.gd-board` (`.gd-board` is only 0,1,0) — so **both
-`variables.css` `--shadow-card` declarations are dead**. The
-override-drift baseline (#22712) captured `0.04` as the "override", which
-never renders.
+**Correction (getComputedStyle, 2026-06-30 — see #22729).** An earlier draft
+claimed *both* `variables.css` `--shadow-card` decls are dead. Measurement
+disproved it. Custom properties are resolved by **inheritance vs self-element
+declaration**, not only specificity: `skin-v2.css:92` sets `--shadow-card` on
+the `html` element (inherited down), but `.gd-board` (`variables.css:662`)
+sets it on the `.gd-board` **element itself** — a different element, so the
+0,3,1-vs-0,1,0 specificity comparison does not apply. The self-declaration
+beats inheritance, so the `.gd-board` `0 2px 8px /.35` **is LIVE** in every
+theme. Only the `:root` `0 1px 3px /.04` is dead — and it is dead with the
+skin *off* too, because `tokens.generated.css` (`0 1px 4px /.5`) wins `:root`,
+not `variables.css`. So the override-drift baseline's `0.04` "override" never
+renders (removed in #22729); the `.gd-board` decl stays.
 
 ### 2.3 Type-scale — `--fs-*` (font-size)
 
@@ -168,38 +175,37 @@ one `fundamental-check.yml` job per family. Wire into the same workflow.
   new canonical value, which is called out per-token.
 - **Non-goal:** theming redesign. Intentional theme/skin divergence stays.
 
-## 9. Open questions (design-owner decision — values intentionally blank)
+## 9. Decisions (design-owner answered 2026-06-30)
 
-These cannot be derived from code; they are design calls. Conversion does not
-start until they are answered.
+Canonical = **preserve current rendered pixels**. Each family keeps the value
+it renders today; only declarations proven dead by getComputedStyle are
+removed. Executed in the PRs below — no conversion pending.
 
-### 9.1 Radius — canonical scale
+### 9.1 Radius — canonical scale — DECIDED: preserve rendered
 
-The default app renders **xs 3 / sm 4 / md 6 / lg 10 / xl 8 / pill 9999**
-(skin-v2 + variables fallback). Generated says 2/4/6/12/24/999.
+Adopt the app-rendered scale as canonical (no visible change). App (skin-v2)
+renders xs3/sm4/md6/lg10/xl8/pill999; `.gd-board` self-declares xs2/pill9999
+(kept as an intentional component override); keeper-v2 flattens to 0 (kept).
+Done in **#22731 (P3)**: dead `:root` lg6/md4/sm3 removed; `:root` xl8 kept
+(live — neither skin-v2 nor generated defines xl); skin-v2 / `.gd-board`
+untouched.
 
-- [ ] Adopt the skin-v2-rendered scale as canonical (no visible change), OR
-- [ ] Choose a different canonical scale (specify), OR
-- [ ] Keep per-skin radius scales intentionally distinct (document why).
+### 9.2 Shadow — canonical `--shadow-card` — DECIDED: preserve rendered
 
-### 9.2 Shadow — canonical `--shadow-card` (and siblings)
+Canonical = the value rendered per context (skin-v2 `0 1px 3px /.5` for the
+app; paper/styleseed keep their own; `.gd-board` keeps `0 2px 8px /.35`).
+Only the `:root` `0 1px 3px /.04` was dead — generated wins `:root` with the
+skin off, skin-v2 wins with it on — and was deleted in **#22729 (P2)**. The
+`.gd-board` decl is **LIVE** (§2.2 correction) and stays. shadow-elevated /
+shadow-modal stay (`:root` is their live source; skin-v2 does not redefine
+them).
 
-Default app renders `skin-v2.css:92` = `0 1px 3px rgba(0,0,0,0.5)`. Generated
-= `0 1px 4px rgba(0,0,0,0.5)` (3px vs 4px blur). `variables.css` 0.04 / 0.35
-are dead.
+### 9.3 Type-scale — the 610 unmapped font-sizes — DECIDED: leave raw + exempt
 
-- [ ] Canonical shadow-card value: ______ (blur, spread, alpha).
-- [ ] Are the dead `variables.css` decls safe to delete? (depends §8 skin
-      permanence) — confirm: ______.
-
-### 9.3 Type-scale — the 610 unmapped font-sizes
-
-~505 are fractional (`10.5/9.5/11.5/12.5px`).
-
-- [ ] Add half-step tokens (`--fs-10h` …)? OR
-- [ ] Round to nearest existing token (accepts a visible change)? OR
-- [ ] Leave raw and exempt (status quo after #22723)?
-- [ ] Whole unmapped (`15/17/18/22px`): add tokens or leave?
+Leave raw and exempt from the ratchet (status quo after **#22723 (P1)**). No
+half-step tokens and no rounding — both would either change rendering or
+expand the scale with no design need. `no-raw-font-size-px.sh` covers only the
+whole-pixel sizes that already have a `--fs-*` token.
 
 ## 10. Definition of done
 

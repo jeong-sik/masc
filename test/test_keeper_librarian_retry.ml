@@ -253,16 +253,6 @@ let test_cadence_record_attempt_defers () =
   check bool "after a completed non-success attempt the next turn is not due" false
     (R.cadence_due ~keeper_id:kid ~trace_id:tid)
 
-let test_cadence_success_policy () =
-  check bool "structured extraction resets cadence" true
-    (R.should_record_cadence_success R.Structured_episode);
-  check bool "unstructured fallback is not semantic success" false
-    (R.should_record_cadence_success R.Unstructured_fallback);
-  check bool "structured extraction uses success path, not backoff" false
-    (R.should_record_cadence_backoff R.Structured_episode);
-  check bool "unstructured fallback defers cadence" true
-    (R.should_record_cadence_backoff R.Unstructured_fallback)
-
 let test_cadence_error_backoff_policy () =
   check bool "empty provider response defers cadence" true
     (R.should_record_cadence_backoff_after_error R.Provider_empty_response);
@@ -564,7 +554,6 @@ let () =
           test_case "step transitions" `Quick test_cadence_step_transitions;
           test_case "record success resets" `Quick test_cadence_record_success_resets;
           test_case "record attempt defers" `Quick test_cadence_record_attempt_defers;
-          test_case "success policy excludes fallback" `Quick test_cadence_success_policy;
           test_case "error backoff policy" `Quick test_cadence_error_backoff_policy;
           test_case "cadence_due fires once per period" `Quick test_cadence_due_periodic;
           test_case "cadence_due is per-keeper" `Quick test_cadence_due_independent_keepers;

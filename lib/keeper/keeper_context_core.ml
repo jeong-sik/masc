@@ -804,7 +804,7 @@ let patch_checkpoint_last_assistant
     | Some _ -> Keeper_text_processing.strip_state_blocks_text response_text
     | None -> response_text
   in
-  let patch_assistant_message msg =
+  let patch_assistant_message (msg : Agent_sdk.Types.message) =
     let metadata =
       match snapshot with
       | Some snapshot ->

@@ -215,16 +215,7 @@ let direct_success_may_clear_no_progress_pause
   : bool
   =
   direct_success_disposition_allows_no_progress_resume result
-  &&
-  match
-    Keeper_turn_outcome.of_result_surface
-      ~response_text:result.response_text
-      result.stop_reason
-  with
-  | Keeper_turn_outcome.Visible_reply -> true
-  | Keeper_turn_outcome.Continuation_checkpoint
-  | Keeper_turn_outcome.No_visible_reply ->
-    direct_success_has_progress_evidence result
+  && direct_success_has_progress_evidence result
 
 let clear_direct_success_no_progress_pause
       ~(config : Workspace.config)

@@ -494,15 +494,27 @@ let test_mutation_refused_and_preserves_corrupt_ledger () =
 let test_insert_surfaces_primary_write_failure () =
   with_workspace
   @@ fun config ->
-  Unix.mkdir (schedules_path config) 0o755;
-  let request =
-    make_request ~schedule_id:"persist-fail" ~risk_class:Read_only ()
-  in
-  match insert_request config request with
-  | Error (Persistence_failed msg) ->
-    check bool "failure detail is surfaced" true (String.length msg > 0)
-  | Error err -> fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
-  | Ok _ -> fail "insert unexpectedly succeeded when schedule path is a directory"
+  (* A directory at schedules_path breaks the *read* load_for_mutation does
+     before ever reaching write_state (Eio.Io reports "Is a directory" on the
+     readv, which load classifies as Corrupt_ledger) - it never exercises the
+     write-failure path this test names. Inject a write-only failure instead:
+     the ledger directory itself is made read-only *after* the (nonexistent-
+     file / Fresh) read succeeds, so save_file_atomic's temp-file creation for
+     the write is what fails. *)
+  let masc_dir = Workspace_utils.masc_dir config in
+  Unix.chmod masc_dir 0o500;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod masc_dir 0o755)
+    (fun () ->
+       let request =
+         make_request ~schedule_id:"persist-fail" ~risk_class:Read_only ()
+       in
+       match insert_request config request with
+       | Error (Persistence_failed msg) ->
+         check bool "failure detail is surfaced" true (String.length msg > 0)
+       | Error err ->
+         fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+       | Ok _ -> fail "insert unexpectedly succeeded when the ledger dir is read-only")
 ;;
 
 let test_cancel_refused_on_corrupt_ledger () =

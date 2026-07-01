@@ -320,7 +320,13 @@ val init_workspace_secret : string -> string
 (** [init_workspace_secret config] generates and persists a workspace secret.
     Returns the raw secret (shown once). *)
 
-val verify_workspace_secret : string -> string -> bool
+val verify_workspace_secret : string -> cached_hash:string option -> string -> bool
+(** [verify_workspace_secret config ~cached_hash secret] checks [secret]
+    against [cached_hash] (the caller's already-loaded [auth_config.
+    workspace_secret_hash]) using a constant-time comparison. Falls back to
+    a guarded read of the on-disk workspace-secret file only when
+    [cached_hash] is [None]; that fallback fails closed on any read error
+    rather than raising. *)
 
 (** {1 Auth Toggle} *)
 

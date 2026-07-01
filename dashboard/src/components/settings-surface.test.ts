@@ -550,7 +550,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-worktree-base-input"]')).toBeNull()
   })
 
-  it('notify page shows live thresholds plus local routing preview controls', async () => {
+  it('notify page shows live thresholds without fake local routing controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
@@ -558,15 +558,16 @@ describe('SettingsSurface', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('MASC_DASHBOARD_CTX_PREPARING')
       expect(container.textContent).toContain('70%')
-      expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('local routing preview')
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live thresholds read-only')
+      expect(container.querySelector('[data-testid="notify-routing-readonly"]')?.textContent).toContain('no writer')
     })
 
-    const discord = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
-      .find(button => button.textContent === 'Discord')
-    expect(discord).toBeTruthy()
-    await fireEvent.click(discord as HTMLButtonElement)
-    expect(discord?.getAttribute('data-active')).toBe('true')
-    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBe('Discord')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-slider"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-stepper"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
+    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBeNull()
   })
 
   it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {

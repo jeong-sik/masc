@@ -37,7 +37,6 @@ type PathCheckResult = {
   readonly ok: boolean
   readonly message: string
 }
-type BoolRecordUpdater = Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 const SETTINGS_LOCAL_STORAGE_PREFIX = 'masc.settings.local.'
 const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
@@ -125,33 +124,6 @@ function readLocalPreviewBool(key: string, fallback: boolean): boolean {
   return fallback
 }
 
-function readLocalPreviewBoolRecord(key: string, fallback: Record<string, boolean>): Record<string, boolean> {
-  const next = { ...fallback }
-  try {
-    if (typeof sessionStorage === 'undefined') return next
-    const raw = sessionStorage.getItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`)
-    if (raw === null) return next
-    const parsed: unknown = JSON.parse(raw)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return next
-    const values = parsed as Record<string, unknown>
-    for (const id of Object.keys(next)) {
-      if (typeof values[id] === 'boolean') next[id] = values[id]
-    }
-  } catch {
-    return next
-  }
-  return next
-}
-
-function writeLocalPreviewBoolRecord(key: string, value: Record<string, boolean>) {
-  try {
-    if (typeof sessionStorage === 'undefined') return
-    sessionStorage.setItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`, JSON.stringify(value))
-  } catch {
-    // Local preview settings are best-effort; blocked storage should not break Settings.
-  }
-}
-
 function useLocalPreviewString(key: string, initialValue: string): [string, (next: string) => void] {
   const [value, setValue] = useState(() => readLocalPreviewString(key, initialValue))
   const setStoredValue = (next: string) => {
@@ -166,21 +138,6 @@ function useLocalPreviewBool(key: string, initialValue: boolean): [boolean, (nex
   const setStoredValue = (next: boolean) => {
     setValue(next)
     writeLocalPreviewString(key, next ? 'true' : 'false')
-  }
-  return [value, setStoredValue]
-}
-
-function useLocalPreviewBoolRecord(
-  key: string,
-  initialValue: Record<string, boolean>,
-): [Record<string, boolean>, (next: BoolRecordUpdater) => void] {
-  const [value, setValue] = useState(() => readLocalPreviewBoolRecord(key, initialValue))
-  const setStoredValue = (nextOrUpdate: BoolRecordUpdater) => {
-    setValue(prev => {
-      const next = typeof nextOrUpdate === 'function' ? nextOrUpdate(prev) : nextOrUpdate
-      writeLocalPreviewBoolRecord(key, next)
-      return next
-    })
   }
   return [value, setStoredValue]
 }
@@ -306,56 +263,6 @@ function SetRow({ label, hint, children }: { label: ComponentChildren; hint?: st
         ${hint ? html`<div class="set-hint">${hint}</div>` : null}
       </div>
       <div class="set-row-c">${children}</div>
-    </div>
-  `
-}
-
-function SetStepper({
-  v,
-  set,
-  min,
-  max,
-}: {
-  v: number
-  set: (n: number) => void
-  min: number
-  max: number
-}) {
-  return html`
-    <div class="set-stepper" data-testid="set-stepper">
-      <button type="button" disabled=${v <= min} onClick=${() => set(Math.max(min, v - 1))}>−</button>
-      <span class="mono">${v}</span>
-      <button type="button" disabled=${v >= max} onClick=${() => set(Math.min(max, v + 1))}>+</button>
-    </div>
-  `
-}
-
-function SetSlider({
-  value,
-  min,
-  max,
-  step,
-  suffix,
-  onChange,
-}: {
-  value: number
-  min: number
-  max: number
-  step?: number
-  suffix?: string
-  onChange: (n: number) => void
-}) {
-  return html`
-    <div class="set-slider" data-testid="set-slider">
-      <input
-        type="range"
-        min=${min}
-        max=${max}
-        step=${step ?? 1}
-        value=${value}
-        onInput=${(e: Event) => onChange(Number((e.target as HTMLInputElement).value))}
-      />
-      <span class="mono">${value}${suffix ?? ''}</span>
     </div>
   `
 }
@@ -575,7 +482,7 @@ function settingsSectionState(
   if (section === 'paths') return { mode: 'live', label: 'resolved by server' }
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
-  if (section === 'notify') return { mode: 'mixed', label: 'live thresholds + local preview' }
+  if (section === 'notify') return { mode: 'live', label: 'live thresholds read-only' }
   if (section === 'display') return { mode: 'mixed', label: 'theme/density live + local preview' }
   return { mode: 'local', label: 'local preview only' }
 }
@@ -803,17 +710,7 @@ export function SettingsSurface() {
   // fusion (config/runtime.toml [fusion]) — keeper-v2 settings.jsx:178-182
   const fusionSettingsWritable = envBool('VITE_FUSION_SETTINGS_WRITABLE', false)
 
-  // notify / display
-  const [notifyCtx, setNotifyCtx] = useState(95)
-  const [notifyFails, setNotifyFails] = useState(3)
-  const [notifyCh, setNotifyCh] = useLocalPreviewString('notifyChannel', 'Slack')
-  const [notifyOn, setNotifyOn] = useLocalPreviewBoolRecord('notifyEvents', {
-    '컨텍스트 임계치 초과': true,
-    '연속 실패': true,
-    'keeper crash/dead': true,
-    '핸드오프 완료': false,
-    '승인 요청': true,
-  })
+  // display
   const density = tweaksDensity.value
   const setDensity = (next: string) => {
     if ((DISPLAY_DENSITY_OPTIONS as string[]).includes(next)) {
@@ -1140,7 +1037,7 @@ export function SettingsSurface() {
 
             ${sec === 'notify' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                알림 임계값은 현재 서버 config projection에서 읽습니다. 아래 라우팅/이벤트 토글은 알림 writer가 생기기 전까지 브라우저 세션 preview입니다.
+                알림 임계값은 현재 서버 config projection에서 읽습니다. 이 화면은 아직 알림 라우팅 writer를 노출하지 않으므로 브라우저-only 토글을 만들지 않습니다.
               </div>
               <div class="set-sub-h">Live alert thresholds</div>
               <${ThresholdTruthRow}
@@ -1160,30 +1057,12 @@ export function SettingsSurface() {
               />
               <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
               <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
-
-              <div class="set-local-summary" data-testid="notify-local-summary">
-                <span>local routing preview</span>
-                <span class="mono">${Object.values(notifyOn).filter(Boolean).length}/${Object.keys(notifyOn).length} events enabled</span>
-                <${PreviewBadge} />
-              </div>
-              <${SetRow} label="Preview context alert" hint="Local what-if threshold; server truth is shown above">
-                <${SetSlider} value=${notifyCtx} min=${70} max=${98} suffix="%" onChange=${setNotifyCtx} />
+              <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
+                <div class="set-truth-value" data-testid="notify-routing-readonly">
+                  <span class="mono">read-only</span>
+                  <span class="set-truth-source">no writer</span>
+                </div>
               <//>
-              <${SetRow} label="Preview failure count" hint="Local what-if count; no backend writer exists yet">
-                <${SetStepper} v=${notifyFails} set=${setNotifyFails} min=${1} max=${10} />
-              <//>
-              <${SetRow} label="Preview channel" hint="Local routing preview">
-                <${SetSeg} value=${notifyCh} options=${['Slack', 'Discord', '없음']} onChange=${setNotifyCh} />
-              <//>
-              <div class="set-sub-h">Notify events</div>
-              ${Object.keys(notifyOn).map(k => html`
-                <${SetRow} key=${k} label=${k}>
-                  <div class="set-tg-control">
-                    <${PreviewBadge} />
-                    <${SetToggle} on=${notifyOn[k] ?? false} onChange=${(v: boolean) => setNotifyOn(p => ({ ...p, [k]: v }))} />
-                  </div>
-                <//>
-              `)}
             `}
 
             ${sec === 'display' && html`

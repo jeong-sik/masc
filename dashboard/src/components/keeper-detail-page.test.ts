@@ -36,6 +36,9 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 function renderInto(ui: ReturnType<typeof html>) {
   const container = document.createElement('div')
+  // Attach to the document so fireEvent (e.g. changing the sort <select>)
+  // dispatches and re-renders reliably; detached nodes drop some events.
+  document.body.appendChild(container)
   render(ui, container)
   return container
 }
@@ -43,6 +46,7 @@ function renderInto(ui: ReturnType<typeof html>) {
 afterEach(() => {
   keepers.value = []
   tasks.value = []
+  document.body.innerHTML = ''
 })
 
 describe('KeeperWorkspaceRoster', () => {
@@ -59,6 +63,10 @@ describe('KeeperWorkspaceRoster', () => {
     // v2 filter chips carry the SHORT label + count ('실행' + '1'), not the old
     // combined '실행중1' chip label (rails.jsx filter chips).
     expect(container.textContent).toContain('실행1')
+    // The roster now defaults to '최근순' (flat, no group headers); status grouping
+    // is opt-in, so select 상태순 before asserting the bucket headers.
+    fireEvent.change(container.querySelector('.roster-sort') as HTMLSelectElement, { target: { value: 'status' } })
+    throw new Error('DIAG kwgroups=' + container.querySelectorAll('.kw-roster-group').length + ' classes=' + JSON.stringify(Array.from(container.querySelectorAll('[class*="group"]')).map(e=>e.className).slice(0,5)) + ' HTML=' + container.innerHTML.replace(/\s+/g,' ').slice(0,700))
     // v2 status group headers render the SHORT label + count in the body and the
     // FULL label in the .roster-group title attribute; query the title to keep the
     // exact full-label checks.

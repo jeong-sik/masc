@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import type { Keeper } from '../types'
-import { keeperRecencyMs, compareByRecency, mostRecentlyActiveKeeper } from './keeper-recency'
+import { keeperRecencyMs, compareByRecency, sortByRecency, mostRecentlyActiveKeeper } from './keeper-recency'
 
 // Fixed reference clock so relative (`*_ago_s`) conversions are deterministic.
 const NOW = Date.parse('2026-07-01T12:00:00.000Z')
@@ -72,6 +72,28 @@ describe('compareByRecency', () => {
     const rel = k('rel', { last_activity_ago_s: 30 }) // 30s ago → more recent
     expect([abs, rel].sort((a, b) => compareByRecency(a, b, NOW)).map(x => x.name))
       .toEqual(['rel', 'abs'])
+  })
+})
+
+describe('sortByRecency', () => {
+  it('returns a most-recent-first copy without mutating the input', () => {
+    const input = [
+      k('albini', { last_activity_ago_s: 3600 }),
+      k('zed', { last_activity_ago_s: 5 }),
+      k('mara', { last_activity_ago_s: 120 }),
+    ]
+    const sorted = sortByRecency(input, NOW)
+    expect(sorted.map(x => x.name)).toEqual(['zed', 'mara', 'albini'])
+    // input order preserved (pure)
+    expect(input.map(x => x.name)).toEqual(['albini', 'zed', 'mara'])
+  })
+
+  it('breaks ties by name and pushes no-recency keepers last', () => {
+    const sorted = sortByRecency(
+      [k('b'), k('a'), k('recent', { last_activity_ago_s: 1 })],
+      NOW,
+    )
+    expect(sorted.map(x => x.name)).toEqual(['recent', 'a', 'b'])
   })
 })
 

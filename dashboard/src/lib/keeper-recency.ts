@@ -8,8 +8,10 @@
 // "albini") stick as the default regardless of activity.
 //
 // Pure by design: `nowMs` is injected rather than read from `Date.now()` so
-// unit tests are deterministic. Production call sites omit it and get the
-// wall-clock default.
+// unit tests are deterministic. The low-level `keeperRecencyMs` /
+// `compareByRecency` / `sortByRecency` take an explicit `nowMs` (callers read
+// the clock once per comparison pass); only the top-level
+// `mostRecentlyActiveKeeper` convenience defaults `nowMs` to `Date.now()`.
 
 import type { Keeper } from '../types'
 
@@ -57,6 +59,18 @@ export function keeperRecencyMs(keeper: Keeper, nowMs: number): number {
  */
 export function compareByRecency(a: Keeper, b: Keeper, nowMs: number): number {
   return keeperRecencyMs(b, nowMs) - keeperRecencyMs(a, nowMs) || a.name.localeCompare(b.name)
+}
+
+/**
+ * Most-recent-first sorted copy. Decorate-sort-undecorate: each keeper's
+ * recency is computed ONCE (not on every comparator call), so a large roster
+ * costs O(n) timestamp parses instead of O(n log n). Ties break by name.
+ */
+export function sortByRecency(keepers: readonly Keeper[], nowMs: number): Keeper[] {
+  return keepers
+    .map(keeper => ({ keeper, recency: keeperRecencyMs(keeper, nowMs) }))
+    .sort((a, b) => b.recency - a.recency || a.keeper.name.localeCompare(b.keeper.name))
+    .map(entry => entry.keeper)
 }
 
 /**

@@ -25,7 +25,7 @@ import { formatRelativeSec } from '../../lib/format-time'
 import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
-import { compareByRecency } from '../../lib/keeper-recency'
+import { sortByRecency } from '../../lib/keeper-recency'
 import type { Keeper } from '../../types'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { VirtualList } from '../common/virtual-list'
@@ -169,12 +169,10 @@ function attentionScore(keeper: Keeper): number {
   return needsAttention(keeper) ? Math.max(1, attentionCount(keeper)) : 0
 }
 
-/** Comparator for the flat sort modes ('recent'/'name'/'att'). 'status' keeps the
- *  bucket grouping instead and never reaches here. Name ties break alphabetically
- *  so the order is stable. `nowMs` anchors the 'recent' comparator's relative
- *  (`*_ago_s`) fallback and is ignored by the other modes. */
-function compareKeepers(a: Keeper, b: Keeper, sort: Exclude<RosterSort, 'status'>, nowMs: number): number {
-  if (sort === 'recent') return compareByRecency(a, b, nowMs)
+/** Comparator for the 'name'/'att' flat sort modes. 'status' keeps the bucket
+ *  grouping and 'recent' uses sortByRecency (decorate-sort-undecorate); neither
+ *  reaches here. Name ties break alphabetically so the order is stable. */
+function compareKeepers(a: Keeper, b: Keeper, sort: 'name' | 'att'): number {
   if (sort === 'name') return a.name.localeCompare(b.name)
   return attentionScore(b) - attentionScore(a) || keeperContextRatio(b) - keeperContextRatio(a) || a.name.localeCompare(b.name)
 }
@@ -520,7 +518,9 @@ export function KeeperWorkspaceRoster({
   // relative (`*_ago_s`) fallbacks stay mutually consistent.
   const nowMs = Date.now()
   const sortRows = (rows: Keeper[]): Keeper[] => {
-    return sort === 'status' ? rows : [...rows].sort((a, b) => compareKeepers(a, b, sort, nowMs))
+    if (sort === 'status') return rows
+    if (sort === 'recent') return sortByRecency(rows, nowMs)
+    return [...rows].sort((a, b) => compareKeepers(a, b, sort))
   }
 
   const select = (name: string) => {

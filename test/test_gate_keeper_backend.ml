@@ -793,7 +793,7 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
       check string "first name" "keeper_board_list" first.name;
       check string "first input" {|{"query":"alpha"}|}
         (Yojson.Safe.to_string first.input);
-      check int "first order" 2 first.order_index;
+      check int "first order" 0 first.order_index;
       check (option string) "first provider" (Some "openai_compat")
         (provider_kind_label first);
       (match first.adjacent_reasoning with
@@ -802,13 +802,13 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
           check_redacted_reasoning "first reasoning 1" 1 r1
       | _ -> fail "first tool call should carry contiguous adjacent reasoning");
       check string "second call id" "tc-2" second.call_id;
-      check int "second order" 6 second.order_index;
+      check int "second order" 1 second.order_index;
       (match second.adjacent_reasoning with
       | Agent_sdk.Canonical_tool.No_adjacent_reasoning -> ()
       | Agent_sdk.Canonical_tool.Adjacent_reasoning _ ->
           fail "intervening text must break reasoning adjacency");
       check string "third call id" "tc-3" third.call_id;
-      check int "third order" 8 third.order_index;
+      check int "third order" 2 third.order_index;
       (match third.adjacent_reasoning with
       | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r0 ] ->
           check_visible_reasoning "third reasoning" 7
@@ -904,14 +904,14 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
   match calls with
   | [ first; second ] ->
       check string "first canonical call" "keeper_board_list" first.name;
-      check int "first canonical order" 1 first.order_index;
+      check int "first canonical order" 0 first.order_index;
       (match first.adjacent_reasoning with
        | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
            check_visible_reasoning "first adjacent thinking" 0
              (Some "sig-read") r
        | _ -> fail "first call should carry preceding thinking");
       check string "second canonical call" "keeper_task_done" second.name;
-      check int "second canonical order" 3 second.order_index;
+      check int "second canonical order" 1 second.order_index;
       (match second.adjacent_reasoning with
        | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
            check_visible_reasoning "second adjacent thinking" 2

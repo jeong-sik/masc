@@ -425,6 +425,37 @@ let test_redacted_thinking_block_roundtrip () =
    | Some [ B.Thinking { content = ""; redacted = true } ] -> ()
    | _ -> Alcotest.fail "redacted thinking block should roundtrip with redacted=true")
 
+let test_redacted_thinking_block_encoder_scrubs_smuggled_content () =
+  (* A caller-side bug could build [Thinking { content = <real text>; redacted
+     = true }]. The encoder must never emit that content on the wire just
+     because the in-memory record carries it - [redacted] is a promise that
+     no reasoning text crosses this boundary. *)
+  let original = [ B.Thinking { content = "leaked reasoning"; redacted = true } ] in
+  Alcotest.(check (list yojson_testable))
+    "redacted thinking with smuggled content is scrubbed to empty on encode"
+    [ `Assoc
+        [ ("t", `String "thinking"); ("content", `String ""); ("redacted", `Bool true) ]
+    ]
+    (blocks_to_json_list original)
+
+let test_redacted_thinking_block_decoder_scrubs_smuggled_content () =
+  (* A legacy writer, hand-crafted payload, or replayed record could carry
+     [redacted=true] alongside non-empty content. The decoded in-memory value
+     must never expose that text just because the JSON did. *)
+  match
+    B.blocks_of_yojson
+      (`List
+         [ `Assoc
+             [ ("t", `String "thinking")
+             ; ("content", `String "leaked reasoning")
+             ; ("redacted", `Bool true)
+             ]
+         ])
+  with
+  | Some [ B.Thinking { content = ""; redacted = true } ] -> ()
+  | _ ->
+    Alcotest.fail "decoder must scrub non-empty content when redacted=true, not preserve it"
+
 let test_thinking_block_requires_content () =
   Alcotest.(check bool) "missing content rejected"
     true
@@ -492,6 +523,10 @@ let () =
             test_thinking_block_roundtrip;
           Alcotest.test_case "redacted thinking block roundtrip" `Quick
             test_redacted_thinking_block_roundtrip;
+          Alcotest.test_case "redacted thinking encoder scrubs smuggled content" `Quick
+            test_redacted_thinking_block_encoder_scrubs_smuggled_content;
+          Alcotest.test_case "redacted thinking decoder scrubs smuggled content" `Quick
+            test_redacted_thinking_block_decoder_scrubs_smuggled_content;
           Alcotest.test_case "thinking block requires content" `Quick
             test_thinking_block_requires_content;
         ] );

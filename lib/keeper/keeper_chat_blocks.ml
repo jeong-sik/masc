@@ -547,8 +547,15 @@ let block_to_yojson = function
   | Thinking { content; redacted } ->
     (* redacted defaults to false (omitted); only emit when true so the
        common non-redacted case stays minimal and legacy decoders that do
-       not know "thinking" still parse the rest of the list. *)
-    let base = [ ("t", `String "thinking"); ("content", `String content) ] in
+       not know "thinking" still parse the rest of the list.
+
+       [redacted = true] is a signature-only marker: force [content] to ""
+       at the wire boundary regardless of what the in-memory record holds,
+       so a caller-side bug that builds [Thinking { content = <real text>;
+       redacted = true }] can never persist or transmit the reasoning text
+       behind a flag that claims it was scrubbed. *)
+    let wire_content = if redacted then "" else content in
+    let base = [ ("t", `String "thinking"); ("content", `String wire_content) ] in
     `Assoc (if redacted then base @ [ ("redacted", `Bool true) ] else base)
 ;;
 
@@ -732,6 +739,13 @@ let block_of_yojson json : chat_block option =
            | Some (`Bool true) -> true
            | _ -> false
          in
+         (* Scrub any smuggled content at the decode boundary too: a legacy
+            writer, a hand-crafted payload, or a replayed record could carry
+            [redacted=true] alongside non-empty content. The in-memory
+            [Thinking] value must never expose reasoning text behind a flag
+            that claims it was redacted, regardless of how the JSON reached
+            this decoder. *)
+         let content = if redacted then "" else content in
          Some (Thinking { content; redacted }))
      | _ -> None)
   | _ -> None

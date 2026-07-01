@@ -134,7 +134,12 @@ type trace_block = { trace : trace_step list }
     [redacted] marks that case so the dashboard renders a placeholder rather
     than an empty card. Not produced by [parse_text_to_blocks] — text-only
     input — and kept out of [content] so the role/content observation
-    projection is not polluted, mirroring [fusion_block]. *)
+    projection is not polluted, mirroring [fusion_block].
+
+    [block_to_yojson]/[block_of_yojson] enforce [redacted = true ==> content
+    = ""] at both the encode and decode boundary, so a caller building or a
+    payload carrying [redacted = true] with non-empty [content] can never
+    round-trip the reasoning text through the wire format. *)
 type thinking_block = {
   content : string;
   redacted : bool;

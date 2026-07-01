@@ -178,6 +178,7 @@ module For_testing : sig
     Agent_sdk.Types.message list -> string option
 
   val sdk_error_of_nonretryable_attempt_error :
+    runtime_id:string ->
     original_error:Agent_sdk.Error.sdk_error ->
     Llm_provider.Http_client.http_error ->
     Agent_sdk.Error.sdk_error
@@ -192,4 +193,13 @@ module For_testing : sig
 
   val accept_rejected_result_should_try_next :
     is_last:bool -> Agent_sdk.Error.sdk_error -> bool
+
+  val runtime_exhaustion_reason_of_http_error :
+    Llm_provider.Http_client.http_error option ->
+    Keeper_internal_error.runtime_exhaustion_reason
+
+  val sdk_error_of_exhausted :
+    runtime_id:string ->
+    Llm_provider.Http_client.http_error option ->
+    Agent_sdk.Error.sdk_error
 end

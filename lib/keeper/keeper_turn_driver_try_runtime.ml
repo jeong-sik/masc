@@ -97,13 +97,84 @@ let http_status_of_http_error = function
   | Some (Llm_provider.Http_client.HttpError { code; _ }) -> Some code
   | _ -> None
 
-let sdk_error_of_exhausted last_err =
-  Agent_sdk.Error.Internal (Runtime_attempt_fsm.to_user_message last_err)
+(* KLV-DNS (RFC-keeper-liveness-ssot §6): classify the last transport error
+   observed before candidate exhaustion into a typed
+   [Keeper_internal_error.runtime_exhaustion_reason]. Before this, exhaustion
+   always produced a plain [Agent_sdk.Error.Internal <free-text message>]
+   (see [Runtime_attempt_fsm.to_user_message]), so
+   [Keeper_error_classify.is_runtime_exhausted_error] — the sole gate for
+   [record_failure_and_maybe_escalate]'s Turn_consecutive_failures
+   accounting and its [Auto_resume_with_backoff] auto-pause branch — never
+   fired for DNS/network exhaustion. Every keeper whose runtime candidates
+   were exhausted by a DNS failure fell back to the generic crash-restart
+   path (eventually [max_restarts] -> permanent Dead) instead of the
+   already-built typed retryable-reason auto-pause. This function is the
+   only producer that needs to change; the consuming policy
+   ([Keeper_supervisor_pause_policy], [Keeper_failure_policy],
+   [Keeper_error_classify.is_auto_recoverable_runtime_exhausted_error]) was
+   already correct and simply unreachable. Capacity-shaped failures
+   ([ProviderFailure { kind = Capacity_exhausted; _ }],
+   [NetworkError { kind = Local_resource_exhaustion; _ }]) are deliberately
+   left to [Keeper_internal_error.Other_detail] here rather than folded into
+   [Capacity_exhausted]/[Capacity_backpressure]: wiring the dedicated
+   backpressure envelope ([Keeper_turn_driver_backpressure], currently
+   dead — no caller constructs [Capacity_backpressure] either) is a
+   separate, larger fix. *)
+let runtime_exhaustion_reason_of_http_error
+  : Llm_provider.Http_client.http_error option
+    -> Keeper_internal_error.runtime_exhaustion_reason
+  = function
+  | None -> Keeper_internal_error.No_providers_available
+  | Some (Llm_provider.Http_client.NetworkError { kind = Llm_provider.Http_client.Dns_failure; _ }) ->
+    Keeper_internal_error.Dns_failure
+  | Some (Llm_provider.Http_client.NetworkError { kind = Llm_provider.Http_client.Connection_refused; _ }) ->
+    Keeper_internal_error.Connection_refused
+  | Some
+      (Llm_provider.Http_client.NetworkError
+         { kind =
+             ( Llm_provider.Http_client.Tls_error
+             | Llm_provider.Http_client.Timeout
+             | Llm_provider.Http_client.Local_resource_exhaustion
+             | Llm_provider.Http_client.End_of_file
+             | Llm_provider.Http_client.Unknown )
+         ; _
+         }) ->
+    (* Transient at the transport layer (matches
+       [Runtime_attempt_fsm.should_try_next]'s [true] for [NetworkError]);
+       no dedicated reason exists, so bucket with the retryable
+       all-candidates-failed reason rather than the non-retryable
+       [Other_detail]. *)
+    Keeper_internal_error.All_providers_failed
+  | Some (Llm_provider.Http_client.TimeoutError _) ->
+    Keeper_internal_error.All_providers_failed
+  | Some (Llm_provider.Http_client.HttpError _ as http_err)
+    when Runtime_attempt_fsm.should_try_next http_err ->
+    Keeper_internal_error.All_providers_failed
+  | Some (Llm_provider.Http_client.HttpError { code; _ }) ->
+    Keeper_internal_error.Other_detail (Printf.sprintf "HTTP %d" code)
+  | Some (Llm_provider.Http_client.AcceptRejected { reason }) ->
+    (* Defensive only: [sdk_error_of_nonretryable_attempt_error] returns
+       [original_error] directly whenever [is_accept_rejected_sdk_error]
+       holds, so a properly-classified accept-rejection never reaches
+       here as [last_err]. *)
+    Keeper_internal_error.Other_detail reason
+  | Some (Llm_provider.Http_client.ProviderTerminal { kind = Llm_provider.Http_client.Max_turns _; _ }) ->
+    Keeper_internal_error.Max_turns_exceeded
+  | Some (Llm_provider.Http_client.ProviderTerminal { kind = Llm_provider.Http_client.Other _; message }) ->
+    Keeper_internal_error.Other_detail message
+  | Some (Llm_provider.Http_client.ProviderFailure { kind; message }) ->
+    Keeper_internal_error.Other_detail
+      (Llm_provider.Http_client.provider_failure_to_string ~kind ~message)
 
-let sdk_error_of_nonretryable_attempt_error ~original_error last_err =
+let sdk_error_of_exhausted ~runtime_id last_err =
+  Keeper_internal_error.sdk_error_of_masc_internal_error
+    (Keeper_internal_error.Runtime_exhausted
+       { runtime_id; reason = runtime_exhaustion_reason_of_http_error last_err })
+
+let sdk_error_of_nonretryable_attempt_error ~runtime_id ~original_error last_err =
   if is_accept_rejected_sdk_error original_error
   then original_error
-  else sdk_error_of_exhausted (Some last_err)
+  else sdk_error_of_exhausted ~runtime_id (Some last_err)
 
 let maybe_mark_provider_attempt_started ctx =
   match ctx.base_path, String.trim ctx.keeper_name with
@@ -195,7 +266,7 @@ let run
     , ctx.turn_deadline )
   in
   let rec loop resume_checkpoint last_err = function
-    | [] -> Error (sdk_error_of_exhausted last_err)
+    | [] -> Error (sdk_error_of_exhausted ~runtime_id:ctx.error_runtime_id last_err)
     | candidate :: rest ->
       let is_last = rest = [] in
       maybe_mark_provider_attempt_started ctx;
@@ -276,7 +347,10 @@ let run
            loop checkpoint_after (Some http_err) rest
          | Some http_err ->
            Error
-             (sdk_error_of_nonretryable_attempt_error ~original_error http_err)
+             (sdk_error_of_nonretryable_attempt_error
+                ~runtime_id:ctx.error_runtime_id
+                ~original_error
+                http_err)
          | None ->
            if is_last then Error err else loop checkpoint_after last_err rest)
   in
@@ -290,4 +364,9 @@ module For_testing = struct
 
   let accept_rejected_result_should_try_next =
     accept_rejected_result_should_try_next
+
+  let runtime_exhaustion_reason_of_http_error =
+    runtime_exhaustion_reason_of_http_error
+
+  let sdk_error_of_exhausted = sdk_error_of_exhausted
 end

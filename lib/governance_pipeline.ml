@@ -382,6 +382,11 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
           (fun (keeper_meta : Keeper_meta_contract.keeper_meta) -> keeper_meta.active_goal_ids)
           meta
       in
+      let audit_goal_ids =
+        match goal_ids with
+        | Some ids -> ids
+        | None -> []
+      in
       let runtime_contract =
         Option.map
           (fun keeper_meta ->
@@ -408,8 +413,12 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
            matching is skipped — so it falls through to [submit_and_await] and
            waits for an explicit operator decision. *)
         let always_approve =
-          Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
-          |> Option.value ~default:false
+          match
+            Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) ->
+              m.always_approve)
+          with
+          | Some value -> value
+          | None -> false
         in
         let rule_match =
           if auto_approval_forbidden
@@ -438,7 +447,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
             ?turn_id
             ?task_id
             ?goal_id
-            ~goal_ids:(Option.value ~default:[] goal_ids)
+            ~goal_ids:audit_goal_ids
             ?sandbox_target
             ?runtime_contract
             ?selected_model
@@ -460,7 +469,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
               ?turn_id
               ?task_id
               ?goal_id
-              ~goal_ids:(Option.value ~default:[] goal_ids)
+              ~goal_ids:audit_goal_ids
               ?sandbox_target
               ?runtime_contract
               ?selected_model

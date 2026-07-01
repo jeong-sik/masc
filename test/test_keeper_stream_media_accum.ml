@@ -6,8 +6,9 @@ module A = Keeper_stream_media_accum
 module Blocks = Masc.Keeper_chat_blocks
 
 let expected_token ~media_type data =
-  Digest.to_hex
-    (Digest.string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data))
+  Digestif.SHA256.(
+    digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
+    |> to_hex)
 
 let test_image_media_persisted_as_block () =
   let open Agent_sdk.Types in

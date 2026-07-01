@@ -36,7 +36,7 @@ val content_type_of_ext : string -> string
     the serve route. *)
 val content_type_of_path : string -> string
 
-(** [true] iff [token] is a well-formed store token (32-char lowercase hex).
+(** [true] iff [token] is a well-formed store token (64-char lowercase hex).
     Guards the serve route path parameter; the token is not a bearer capability. *)
 val valid_token : string -> bool
 

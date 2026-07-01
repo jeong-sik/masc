@@ -206,7 +206,8 @@ module For_testing : sig
   val args_of_request : keeper_chat_stream_request -> Yojson.Safe.t
   val modalities_for_request : keeper_chat_stream_request -> string list
   val extract_visible_reply : string -> Yojson.Safe.t option * string
-  val direct_reply_terminal_error : Yojson.Safe.t option -> string -> string option
+  val direct_reply_terminal_error :
+    ?has_visible_blocks:bool -> Yojson.Safe.t option -> string -> string option
   val visible_reply_with_stream_fallback :
     streamed_text:string -> string -> string
   val redacted_visible_reply_with_stream_fallback :

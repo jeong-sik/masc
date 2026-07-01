@@ -13,8 +13,9 @@ let read_file path =
     (fun () -> really_input_string ic (in_channel_length ic))
 
 let expected_token ~media_type data =
-  Digest.to_hex
-    (Digest.string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data))
+  Digestif.SHA256.(
+    digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
+    |> to_hex)
 
 let test_persist_round_trip () =
   with_temp_base (fun base_dir ->
@@ -25,6 +26,7 @@ let test_persist_round_trip () =
       ("/api/v1/media/" ^ token)
       url;
     Alcotest.(check bool) "token has valid shape" true (M.valid_token token);
+    Alcotest.(check int) "token is SHA-256 hex" 64 (String.length token);
     match M.file_path_of_token ~base_dir ~token with
     | None -> Alcotest.fail "persisted media not found by token"
     | Some path ->
@@ -60,7 +62,7 @@ let test_unknown_token_absent () =
     Alcotest.(check (option string))
       "absent token resolves to None"
       None
-      (M.file_path_of_token ~base_dir ~token:"deadbeefdeadbeefdeadbeefdeadbeef"))
+      (M.file_path_of_token ~base_dir ~token:(String.make 64 '0')))
 
 let test_media_type_mapping () =
   Alcotest.(check string) "png ext" "png" (M.ext_of_media_type "image/png");

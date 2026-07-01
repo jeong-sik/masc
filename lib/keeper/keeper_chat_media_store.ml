@@ -81,16 +81,16 @@ let content_type_of_ext ext =
 let media_dir ~base_dir =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) media_subdir
 
-(* Token = lowercase MD5 hex (32 chars). This is only an authenticated locator,
+(* Token = lowercase SHA-256 hex (64 chars). This is only an authenticated locator,
    not a bearer capability: the media route is read-auth gated. Include the
    normalized media type in the digest material so identical bytes mislabeled as
    different media types cannot create multiple files for one token. *)
 let token_of_payload ~media_type data =
-  Digest.to_hex (Digest.string (normalize media_type ^ "\000" ^ data))
+  Digestif.SHA256.(digest_string (normalize media_type ^ "\000" ^ data) |> to_hex)
 
 let media_url token = Printf.sprintf "/api/v1/media/%s" token
 
-let token_re = Re.compile (Re.Pcre.re "^[a-f0-9]{32}$")
+let token_re = Re.compile (Re.Pcre.re "^[a-f0-9]{64}$")
 
 let valid_token token =
   Re.execp token_re token

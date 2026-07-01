@@ -652,13 +652,15 @@ let persisted_error_reply err =
 let empty_direct_reply_error =
   "Keeper completed without a visible reply; the runtime returned only thinking or internal state."
 
-let direct_reply_terminal_error payload_json_opt visible_reply =
+let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt visible_reply =
   let turn_outcome = Keeper_turn_outcome.of_reply_payload payload_json_opt in
-  match (turn_outcome, String_util.trim_to_option visible_reply) with
-  | Keeper_turn_outcome.Continuation_checkpoint, _ -> None
-  | Keeper_turn_outcome.No_visible_reply, _ -> Some empty_direct_reply_error
-  | Keeper_turn_outcome.Visible_reply, None -> Some empty_direct_reply_error
-  | Keeper_turn_outcome.Visible_reply, Some _ -> None
+  match (turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks) with
+  | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
+  | Keeper_turn_outcome.No_visible_reply, _, true -> None
+  | Keeper_turn_outcome.Visible_reply, None, true -> None
+  | Keeper_turn_outcome.No_visible_reply, _, false -> Some empty_direct_reply_error
+  | Keeper_turn_outcome.Visible_reply, None, false -> Some empty_direct_reply_error
+  | Keeper_turn_outcome.Visible_reply, Some _, _ -> None
 
 let visible_reply_with_stream_fallback ~streamed_text visible_reply =
   match String.trim visible_reply with
@@ -942,61 +944,69 @@ let process_single_turn ~connector_user_line_recorded_upstream
               Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
             in
             let visible_reply = String.trim visible_reply in
-            (match direct_reply_terminal_error payload_json_opt visible_reply with
+            (* RFC-0301 item 6: attach any generated media (accumulated from
+               this turn's stream) as reload-visible chat blocks so a dashboard
+               reload shows media-only replies too, not just text-bearing
+               replies. *)
+            let blocks =
+              match
+                Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
+                  worker_media_accum
+              with
+              | [] -> None
+              | media_blocks -> Some media_blocks
+            in
+            let has_visible_blocks = Option.is_some blocks in
+            (match
+               direct_reply_terminal_error ~has_visible_blocks payload_json_opt
+                 visible_reply
+             with
              | Some err ->
                  persist_failure_reply err;
                  push_worker_event
                    (Stream_terminal { ok = false; status = "error"; body = err });
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
+                 let persist_assistant_reply ~assistant_content =
+                   if connector_user_line_recorded_upstream then
+                     Keeper_chat_store.append_assistant_message
+                       ~base_dir:base_path
+                       ~keeper_name:payload.name
+                       ~content:assistant_content
+                       ~surface:chat_surface
+                       ?blocks
+                       ?turn_ref
+                       ()
+                   else
+                     Keeper_chat_store.append_turn
+                       ~base_dir:base_path
+                       ~keeper_name:payload.name
+                       ~user_content:payload.message
+                       ~user_attachments:payload.attachments
+                       ~surface:chat_surface
+                       ~speaker:chat_speaker
+                       ~assistant_content
+                       ?blocks
+                       ?turn_ref
+                       ()
+                 in
                  (match
                     ( Keeper_turn_outcome.of_reply_payload payload_json_opt,
                       String_util.trim_to_option visible_reply )
                   with
                  | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                      persist_user_message_only ()
-                 | Keeper_turn_outcome.No_visible_reply, _ ->
-                     persist_user_message_only ()
+                 | Keeper_turn_outcome.No_visible_reply, _
                  | Keeper_turn_outcome.Visible_reply, None ->
-                     persist_user_message_only ()
+                     if has_visible_blocks then persist_assistant_reply ~assistant_content:""
+                     else persist_user_message_only ()
                  | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                      (* RFC-connector-deferred-reply-via-chat-queue §3.4: gate-recorded connector message → the user
                         line is already persisted at the gate inbound boundary,
                         so pair the reply by appending the assistant line only
                         (mirrors [append_direct_chat_pair_if_reply]'s connector
                         arm). The dashboard route records the full pair. *)
-                     (* RFC-0301 item 6: attach any generated media (accumulated
-                        from this turn's stream) as reload-visible chat blocks so a
-                        dashboard reload shows the image/audio, not just the text. *)
-                     let blocks =
-                       match
-                         Keeper_stream_media_accum.to_chat_blocks
-                           ~base_dir:base_path worker_media_accum
-                       with
-                       | [] -> None
-                       | media_blocks -> Some media_blocks
-                     in
-                     if connector_user_line_recorded_upstream then
-                       Keeper_chat_store.append_assistant_message
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~content:visible_reply
-                         ~surface:chat_surface
-                         ?blocks
-                         ?turn_ref
-                         ()
-                     else
-                       Keeper_chat_store.append_turn
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~user_content:payload.message
-                         ~user_attachments:payload.attachments
-                         ~surface:chat_surface
-                         ~speaker:chat_speaker
-                         ~assistant_content:visible_reply
-                         ?blocks
-                         ?turn_ref
-                         ();
+                     persist_assistant_reply ~assistant_content:visible_reply;
                      Keeper_chat_broadcast.chat_appended
                        ~keeper_name:payload.name ~source:chat_source
                        ~content:visible_reply

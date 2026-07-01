@@ -1649,7 +1649,7 @@ let test_hard_forbidden_blocks_critical_risk () =
       true
       (approval_decision_is_reject decision))
 
-let test_hard_forbidden_blocks_destructive_tool () =
+let test_soft_forbidden_blocks_destructive_tool () =
   with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
     with_test_config @@ fun config ->
     let meta =
@@ -2100,7 +2100,7 @@ let () =
       Alcotest.test_case "hard_forbidden blocks critical risk" `Quick
         test_hard_forbidden_blocks_critical_risk;
       Alcotest.test_case "soft_forbidden blocks destructive op" `Quick
-        test_hard_forbidden_blocks_destructive_tool;
+        test_soft_forbidden_blocks_destructive_tool;
       Alcotest.test_case "always_approve bypasses only when not hard_forbidden" `Quick
         test_always_approve_bypasses_only_when_not_hard_forbidden;
       Alcotest.test_case "hard_forbidden hoisted outside needs_approval" `Quick

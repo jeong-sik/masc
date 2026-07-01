@@ -56,10 +56,12 @@ let decide_keepalive_scheduling
      reported as tombstone suppressions.
      Reactive turns are gated upstream in the registry, so only the autonomous
      channel is gated here. *)
+  let self_cadence_evaluated =
+    requested_should_run_turn
+    && Keeper_world_observation.is_autonomous turn_decision.channel
+  in
   let self_cadence_wake : Keeper_wake_tombstone.wake_decision =
-    if
-      requested_should_run_turn
-      && Keeper_world_observation.is_autonomous turn_decision.channel
+    if self_cadence_evaluated
     then
       wake_tombstone_decide ~origin:Keeper_wake_tombstone.Self_cadence
         ~keeper_name:meta.name
@@ -93,6 +95,18 @@ let decide_keepalive_scheduling
   in
   let verdict_reasons =
     let base = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
+    (* RFC-0303 Phase 1: tag the wake origin on every autonomous self-cadence
+       turn decision (allowed OR suppressed) so the share of blind self-cadence
+       wakes — the ones that manufacture passive turns — is observable before
+       Phase 2 gates wakes on a real stimulus. *)
+    let base =
+      if self_cadence_evaluated
+      then
+        ("wake_origin:"
+         ^ Keeper_wake_tombstone.origin_label Keeper_wake_tombstone.Self_cadence)
+        :: base
+      else base
+    in
     let base =
       match self_cadence_wake with
       | Keeper_wake_tombstone.Suppressed reason ->

@@ -20,7 +20,7 @@
 
    Errors:
       400 — token malformed (not 32 hex chars)
-      404 — clip not on disk (never synthesized, or reaped by the 1h TTL of
+      404 — clip not on disk (never synthesized, or reaped by the 24h TTL of
             [Voice_bridge.cleanup_old_audio_files])
       503 — base path unresolvable *)
 
@@ -35,7 +35,7 @@ let is_valid_token (s : string) : bool =
   String.length s = token_hex_len
   && String.for_all
        (fun c ->
-         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'f'))
+         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
        s
 
 let generated_media_serve_max_bytes () =
@@ -51,7 +51,7 @@ let clip_path ~token =
 let serve_clip ~token request reqd =
   let path = clip_path ~token in
   if not (Sys.file_exists path) then
-    (* Never synthesized, or reaped by the 1h TTL reaper. Text-only render
+    (* Never synthesized, or reaped by the 24h TTL reaper. Text-only render
        remains the dashboard fallback, so 404 is not a hard failure. *)
     respond_public_read_json_value ~status:`Not_found request reqd
       (`Assoc [ ("error", `String "not found"); ("token", `String token) ])

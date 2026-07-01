@@ -440,8 +440,16 @@ module KeeperGeneratedMedia = struct
     max min_value (min max_value value)
   ;;
 
+  let clamp_float ~min_value ~max_value value =
+    Float.max min_value (Float.min max_value value)
+  ;;
+
   let max_bytes_default = 10 * 1024 * 1024
   let max_bytes_ceiling = 50 * 1024 * 1024
+  let dir_max_bytes_default = 500 * 1024 * 1024
+  let dir_max_bytes_ceiling = 5 * 1024 * 1024 * 1024
+  let retention_seconds_default = Masc_time_constants.day
+  let retention_seconds_ceiling = Masc_time_constants.days_to_seconds 30
 
   (** Maximum raw generated-media bytes accepted by the durable store and serve
       route. Default is 10 MiB. Range: [1, 50 MiB].
@@ -450,6 +458,28 @@ module KeeperGeneratedMedia = struct
   let max_bytes () =
     get_int_nonneg ~default:max_bytes_default "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES"
     |> clamp_int ~min_value:1 ~max_value:max_bytes_ceiling
+  ;;
+
+  (** Maximum total bytes retained in [<masc_dir>/media] after opportunistic
+      cleanup. Default is 500 MiB. Range: [1, 5 GiB].
+
+      @category Policies @ops_class operator *)
+  let dir_max_bytes () =
+    get_int_nonneg
+      ~default:dir_max_bytes_default
+      "MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:dir_max_bytes_ceiling
+  ;;
+
+  (** Maximum generated-media file age retained by opportunistic cleanup. Default
+      is 24 hours. Range: [1 second, 30 days].
+
+      @category Policies @ops_class operator *)
+  let retention_seconds () =
+    get_float_nonneg
+      ~default:retention_seconds_default
+      "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC"
+    |> clamp_float ~min_value:1.0 ~max_value:retention_seconds_ceiling
   ;;
 end
 

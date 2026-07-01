@@ -23,6 +23,12 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
+let write_file path data =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc data)
+
 let expected_token ~media_type data =
   Digestif.SHA256.(
     digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
@@ -154,6 +160,25 @@ let test_generated_media_cap_rejects_oversize_raw_media () =
       | Error err ->
           Alcotest.failf "unexpected error: %s" (M.persist_error_to_string err)))
 
+let test_persist_runs_opportunistic_media_cleanup () =
+  with_env "MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC" "1" (fun () ->
+    with_temp_base (fun base_dir ->
+      let seed_token, _ = M.persist ~base_dir ~media_type:"image/png" ~data:"seed" in
+      let media_dir =
+        match M.file_path_of_token ~base_dir ~token:seed_token with
+        | Some path -> Filename.dirname path
+        | None -> Alcotest.fail "seed media path missing"
+      in
+      let stale_path = Filename.concat media_dir (String.make 64 'a' ^ ".png") in
+      write_file stale_path "old";
+      let old_time = Unix.gettimeofday () -. 10.0 in
+      Unix.utimes stale_path old_time old_time;
+      ignore (M.persist_result ~base_dir ~media_type:"image/png" ~data:"fresh");
+      Alcotest.(check bool)
+        "stale media is removed by next persist"
+        false
+        (Sys.file_exists stale_path)))
+
 let test_unsupported_source_type_rejected () =
   with_temp_base (fun base_dir ->
     match
@@ -189,6 +214,10 @@ let () =
             "generated media cap rejects oversize raw media"
             `Quick
             test_generated_media_cap_rejects_oversize_raw_media
+        ; Alcotest.test_case
+            "persist runs opportunistic media cleanup"
+            `Quick
+            test_persist_runs_opportunistic_media_cleanup
         ; Alcotest.test_case
             "unsupported source rejected"
             `Quick

@@ -5,7 +5,9 @@
     reducing it to a byte count. Generalizes the voice-clip token/serve pattern
     ([/api/v1/voice/audio/<token>]) to an arbitrary [media_type]. Files live under
     [<masc_dir>/media/] as [<token>.<ext>]; identical media type + payload pairs
-    dedup to one file. Served by [GET /api/v1/media/<token>] behind read auth. *)
+    dedup to one file. Served by [GET /api/v1/media/<token>] behind read auth.
+    Retention is enforced opportunistically on persist via generated-media age and
+    directory-size caps. *)
 
 type persist_error =
   | Unsupported_source_type of Agent_sdk.Types.media_source_kind

@@ -9,8 +9,8 @@
     Files live under [<masc_dir>/media/] as [<token>.<ext>], where [token] is a
     deterministic SHA-256 hex locator derived from the media type and raw payload.
     Served by [GET /api/v1/media/<token>] behind normal read auth. Retention is
-    the media directory's operational policy; the voice-clip TTL sweep only owns
-    [<masc_dir>/audio]. *)
+    enforced opportunistically on persist via [KeeperGeneratedMedia] age and
+    directory-size caps; the voice-clip TTL sweep only owns [<masc_dir>/audio]. *)
 
 let media_subdir = "media"
 
@@ -111,6 +111,65 @@ let validate_raw_size data =
   then Error (size_bytes, max_bytes)
   else Ok ()
 
+let cleanup_old_files_in_dir dir =
+  if Sys.file_exists dir && Sys.is_directory dir
+  then
+    try
+      let cutoff =
+        Time_compat.now ()
+        -. Env_config_keeper.KeeperGeneratedMedia.retention_seconds ()
+      in
+      let entries =
+        Sys.readdir dir
+        |> Array.to_list
+        |> List.filter_map (fun entry ->
+          let path = Filename.concat dir entry in
+          try
+            let stat = Unix.stat path in
+            if stat.st_kind = Unix.S_REG
+            then Some (path, stat.st_mtime, stat.st_size)
+            else None
+          with
+          | Unix.Unix_error _ | Sys_error _ -> None)
+      in
+      let by_age =
+        List.sort (fun (_, left_mtime, _) (_, right_mtime, _) ->
+          Float.compare left_mtime right_mtime)
+          entries
+      in
+      let remove path =
+        try Sys.remove path with
+        | Unix.Unix_error _ | Sys_error _ -> ()
+      in
+      let remaining =
+        List.filter
+          (fun (path, mtime, _size) ->
+            if mtime < cutoff
+            then (
+              remove path;
+              false)
+            else true)
+          by_age
+      in
+      let dir_max_bytes = Env_config_keeper.KeeperGeneratedMedia.dir_max_bytes () in
+      let total_size =
+        List.fold_left (fun acc (_, _, size) -> acc + size) 0 remaining
+      in
+      if total_size > dir_max_bytes
+      then
+        ignore
+          (List.fold_left
+             (fun acc (path, _mtime, size) ->
+               if acc <= dir_max_bytes
+               then acc
+               else (
+                 remove path;
+                 acc - size))
+             total_size
+             remaining)
+    with
+    | Sys_error _ | Unix.Unix_error _ -> ()
+
 (* Resolve a token to its on-disk path by locating [<token>.<ext>] — the ext is
    not carried by the token, so the directory is scanned for the single file whose
    basename (sans ext) equals the token. Returns [None] if absent or reaped. *)
@@ -164,6 +223,7 @@ let persist_result ~base_dir ~media_type ~data =
       let url = media_url token in
       try
         Fs_compat.mkdir_p dir;
+        cleanup_old_files_in_dir dir;
         match file_path_of_token ~base_dir ~token with
         | Some _ -> Ok (token, url)
         | None ->

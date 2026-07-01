@@ -342,30 +342,61 @@ let with_repo_oas_model_catalog f =
 
 let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
   with_repo_oas_model_catalog @@ fun catalog ->
+  let runpod_model_id = "qwen36-35b-a3b-mtp" in
+  let provider_model_ids =
+    [ "runpod_mtp/" ^ runpod_model_id; "openai_compat/" ^ runpod_model_id ]
+  in
   let expect_lookup model_id =
     match Llm_provider.Model_catalog.lookup catalog model_id with
     | None -> failf "expected repo OAS catalog row for %s" model_id
     | Some entry ->
       check (option string) (model_id ^ " base") (Some "openai_chat")
-        entry.base_label
+        entry.base_label;
+      check (option int) (model_id ^ " context") (Some 131072)
+        entry.max_context_tokens
   in
-  expect_lookup "runpod_mtp/qwen36-35b-a3b-mtp";
-  expect_lookup "qwen36-35b-a3b-mtp";
-  match
-    Llm_provider.Capabilities.for_model_id_catalog
-      "runpod_mtp/qwen36-35b-a3b-mtp"
-  with
-  | None -> fail "expected RunPod qwen3.6 capability lookup"
-  | Some caps ->
-    check (option int) "RunPod qwen3.6 context" (Some 131072)
-      caps.max_context_tokens;
-    check bool "RunPod qwen3.6 tools" true caps.supports_tools;
-    check bool "RunPod qwen3.6 tool choice" true caps.supports_tool_choice;
-    check bool "RunPod qwen3.6 extended thinking" true
+  let expect_runpod_caps
+        name
+      (caps : Llm_provider.Capabilities.capabilities)
+    =
+    check bool (name ^ " tools") true caps.supports_tools;
+    check bool (name ^ " tool choice") true caps.supports_tool_choice;
+    check bool (name ^ " extended thinking") true
       caps.supports_extended_thinking;
-    check bool "RunPod qwen3.6 chat-template thinking" true
+    check bool (name ^ " chat-template thinking") true
       (Llm_provider.Capabilities.(
          caps.thinking_control_format = Chat_template_kwargs))
+  in
+  List.iter expect_lookup provider_model_ids;
+  expect_lookup runpod_model_id;
+  List.iter
+    (fun provider_model_id ->
+       match
+         Llm_provider.Capabilities.for_model_id_catalog provider_model_id
+       with
+       | None ->
+         failf "expected RunPod qwen3.6 capability lookup for %s"
+           provider_model_id
+       | Some caps -> expect_runpod_caps provider_model_id caps)
+    provider_model_ids;
+  (* Verify the actual boot gate path without bare fallback. current pinned OAS
+     emits openai_compat for RunPod proxy URLs; jeong-sik/oas#2374 emits
+     runpod_mtp after the pin bump. Both labels must resolve during the
+     transition window. *)
+  List.iter
+    (fun provider_label ->
+       let name = "RunPod qwen3.6 gate " ^ provider_label in
+       match
+         Llm_provider.Capabilities.for_provider_model_id
+           ~allow_bare_fallback:false
+           ~provider_label
+           ~model_id:runpod_model_id
+       with
+       | None ->
+         failf "RunPod qwen3.6 must resolve via gate path (%s)"
+           provider_label
+       | Some gate_caps -> expect_runpod_caps name gate_caps)
+    [ "runpod_mtp"; "openai_compat" ]
 
 let test_repo_oas_model_catalog_preserve_axes_resolve () =
   with_repo_oas_model_catalog @@ fun catalog ->

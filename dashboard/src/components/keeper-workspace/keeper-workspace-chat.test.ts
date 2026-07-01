@@ -171,6 +171,48 @@ describe('KeeperWorkspaceChat', () => {
     expect(container.querySelector('[data-testid="kw-chat-command-config"]')).not.toBeNull()
   })
 
+  it('keeps utility commands usable while a lifecycle command is pending', async () => {
+    const { KeeperWorkspaceChat } = await loadChat()
+    const { runKeeperAction } = await import('../keeper-action-panel')
+    let resolveAction: () => void = () => {}
+    vi.mocked(runKeeperAction).mockImplementationOnce(async () => new Promise<void>(resolve => {
+      resolveAction = resolve
+    }))
+
+    await act(async () => {
+      render(html`
+        <${KeeperWorkspaceChat}
+          keeper=${mockKeeper}
+        />
+      `, container)
+    })
+
+    const pause = container.querySelector('[data-testid="kw-chat-command-pause"]') as HTMLButtonElement
+    const turn = container.querySelector('[data-testid="kw-chat-command-turn"]') as HTMLButtonElement
+    expect(pause).not.toBeNull()
+    expect(turn).not.toBeNull()
+
+    await act(async () => {
+      pause.click()
+      await Promise.resolve()
+    })
+
+    expect(runKeeperAction).toHaveBeenCalledWith('sangsu', 'pause')
+    expect(pause.disabled).toBe(true)
+    expect(turn.disabled).toBe(false)
+
+    await act(async () => {
+      turn.click()
+    })
+
+    expect(container.querySelector('[role="dialog"]')?.textContent).toContain('턴 검사')
+
+    await act(async () => {
+      resolveAction()
+      await Promise.resolve()
+    })
+  })
+
   it('keeps runtime scope/path out of the slim chat header', async () => {
     const { KeeperWorkspaceChat } = await loadChat()
     const keeperWithSlug = { ...mockKeeper, sandbox_target: '~/wt/sangsu', skill_primary: 'skill-primary' }

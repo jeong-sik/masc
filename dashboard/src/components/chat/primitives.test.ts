@@ -11,6 +11,7 @@ import {
   CHAT_COMPOSER_DROP_PLACEHOLDER,
   ChatComposer,
   ChatTranscript,
+  THINKING_TRACE_PREVIEW_CHARS,
   type ChatComposerSendPayload,
 } from './primitives'
 import { _resetChatStoreForTests, readKeeperDraft } from '../../keeper-chat-store'
@@ -1958,6 +1959,39 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(renderedThink?.textContent).toContain('둘째 줄')
     // Untrusted model markup is stripped (no executable script element).
     expect(renderedThink?.querySelector('script')).toBeNull()
+  })
+
+  it('keeps long thinking traces collapsed until the operator expands them', () => {
+    const hiddenTail = 'TAIL-MARKER-KEEPER-THINKING'
+    const longThinking = `${'reasoning '.repeat(Math.ceil(THINKING_TRACE_PREVIEW_CHARS / 10) + 20)}${hiddenTail}`
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '답합니다',
+            role: 'assistant',
+            source: 'direct_assistant',
+            traceSteps: [{ kind: 'think', text: longThinking }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const think = container.querySelector('[data-chat-trace-step="think"]') as HTMLElement | null
+    expect(think).not.toBeNull()
+    expect(think?.textContent).toContain('chars hidden')
+    expect(think?.textContent).not.toContain(hiddenTail)
+
+    const expand = think?.querySelector('button') as HTMLButtonElement | null
+    expect(expand).not.toBeNull()
+    fireEvent.click(expand!)
+
+    expect(think?.textContent).toContain(hiddenTail)
   })
 
   it('renders board post ids in assistant prose as board detail links', () => {

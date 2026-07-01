@@ -4,7 +4,10 @@ open Env_config_core
 
     Bounded timeouts prevent dangerous tool approvals from stalling a Keeper
     turn indefinitely while still giving operators a reasonable decision
-    window. *)
+    window.
+
+    @category Timeouts
+    @ops_class operator *)
 
 let critical_timeout_s_value =
   let raw = get_float ~default:3600.0 "MASC_HITL_CRITICAL_TIMEOUT_S" in

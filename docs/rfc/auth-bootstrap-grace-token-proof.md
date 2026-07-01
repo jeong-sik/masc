@@ -1,4 +1,4 @@
-# RFC-0302: Auth bootstrap-grace requires proof of token possession
+# Auth bootstrap-grace requires proof of token possession
 
 - Status: Implemented
 - Author: Claude (Sonnet 5), on behalf of jeong-sik (vincent)

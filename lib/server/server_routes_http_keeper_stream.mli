@@ -202,7 +202,10 @@ module For_testing : sig
   val redacted_visible_reply_with_stream_fallback :
     redact:(string -> string) -> streamed_text:string -> string -> string
   val reply_payload_with_streamed_visible_reply :
-    Yojson.Safe.t option -> visible_reply:string -> Yojson.Safe.t option
+    Yojson.Safe.t option ->
+    visible_reply:string ->
+    streamed_text_present:bool ->
+    Yojson.Safe.t option
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val empty_stream_bridge_state : keeper_stream_bridge_state

@@ -955,7 +955,7 @@ let test_attention_contract_does_not_resume_working_state_digest () =
     true
     budget_resume
 
-let test_synthetic_finalizer_drops_generated_response_text () =
+let test_synthetic_finalizer_preserves_generated_response_text () =
   let raw_response_text =
     String.concat
       "\n"
@@ -983,12 +983,12 @@ let test_synthetic_finalizer_drops_generated_response_text () =
     "synthesized"
     (KMP.state_snapshot_source_to_string finalized.state_snapshot_source);
   Alcotest.(check string)
-    "synthetic source is not a user-visible reply"
-    ""
+    "synthetic state source preserves typed response text"
+    raw_response_text
     finalized.response_text;
   Alcotest.(check bool)
-    "raw repeated text not persisted as response"
-    false
+    "raw repeated text remains visible response"
+    true
     (contains_substring finalized.response_text "What should I do next?");
   Alcotest.(check (list string))
     "raw repeated text not persisted as synthetic decisions"
@@ -1125,9 +1125,9 @@ let () =
             `Quick
             test_attention_contract_does_not_resume_working_state_digest;
           Alcotest.test_case
-            "synthetic finalizer drops generated response text"
+            "synthetic finalizer preserves generated response text"
             `Quick
-            test_synthetic_finalizer_drops_generated_response_text;
+            test_synthetic_finalizer_preserves_generated_response_text;
           Alcotest.test_case
             "contract attention finalizer drops raw response text"
             `Quick

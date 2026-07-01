@@ -616,4 +616,284 @@ describe('RuntimeTomlEditor', () => {
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('[runtime]\ndefault = "missing.runtime"\n')
     expect(saveButton.disabled).toBe(false)
   })
+
+  it('adds a new provider through the form and saves it through the existing validated path', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: 'brandnew' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
+      target: { value: 'https://brandnew.example/v1' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider credential 값"]') as HTMLInputElement, {
+      target: { value: 'BRANDNEW_KEY' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[providers.brandnew]')
+      expect(source).toContain('endpoint = "https://brandnew.example/v1"')
+      expect(source).toContain('[providers.brandnew.credentials]')
+      expect(source).toContain('key = "BRANDNEW_KEY"')
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+    })
+    // Existing providers untouched.
+    expect((container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value)
+      .toContain('[providers.runpod_mtp]')
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => {
+      const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+      expect(savedSource).toContain('[providers.brandnew]')
+    })
+  })
+
+  it('rejects adding a provider whose id already exists without dirtying the draft', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: 'runpod_mtp' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
+      target: { value: 'https://irrelevant.example/v1' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-provider-error"]')?.textContent)
+        .toContain('이미 존재하는')
+    })
+    // Form-validation errors need role="alert" so screen readers announce them
+    // immediately -- they appear without any focus change or navigation.
+    expect(container.querySelector('[data-testid="runtime-add-provider-error"]')?.getAttribute('role')).toBe('alert')
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).not.toContain('modified')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('trims a whitespace-only display name to fall back to the id, and trims credential padding', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: 'brandnew2' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider 표시 이름"]') as HTMLInputElement, {
+      target: { value: '   ' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
+      target: { value: 'https://brandnew2.example/v1' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider credential 값"]') as HTMLInputElement, {
+      target: { value: '  BRANDNEW2_KEY  ' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('display-name = "brandnew2"')
+      expect(source).toContain('key = "BRANDNEW2_KEY"')
+      expect(source).not.toContain('display-name = "   "')
+      expect(source).not.toContain('key = "  BRANDNEW2_KEY  "')
+    })
+  })
+
+  it('does not offer CLI protocols or command transport in the add-provider form', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+
+    const protocolOptions = Array.from(
+      container.querySelectorAll('[aria-label="새 provider protocol"] option'),
+    ).map(option => (option as HTMLOptionElement).value)
+    expect(protocolOptions).toEqual(['openai-compatible-http', 'ollama-http', 'messages-http'])
+    expect(protocolOptions).not.toContain('openai-compatible-cli')
+    expect(protocolOptions).not.toContain('messages-cli')
+    // No transport-kind selector left to switch to 'command'.
+    expect(container.querySelector('[aria-label="새 provider transport 종류"]')).toBeNull()
+  })
+
+  it('adds a new model through the form', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-models"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-model-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-id"]') as HTMLInputElement, {
+      target: { value: 'brandnewmodel' },
+    })
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-max-context"]') as HTMLInputElement, {
+      target: { value: '50000' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-model-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[models.brandnewmodel]')
+      expect(source).toContain('max-context = 50000')
+    })
+  })
+
+  it('rejects adding a model with an invalid or missing max-context', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-models"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-model-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-model-id"]') as HTMLInputElement, {
+      target: { value: 'brandnewmodel' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-model-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-model-error"]')?.textContent)
+        .toContain('max-context')
+    })
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('adds a new binding pinning an existing provider to an existing model', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
+      target: { value: 'runpod_mtp' },
+    })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
+      target: { value: 'gpt' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('[runpod_mtp.gpt]')
+    })
+  })
+
+  it('rejects a binding whose provider id is a reserved top-level namespace', async () => {
+    // Legacy/hand-edited data: a provider table literally named "models" is
+    // parseable (providerIds() has no reserved check on read), so it can show
+    // up in the binding form's provider dropdown even though a *new* provider
+    // could never be created with this id (runtimeTomlIdError blocks it).
+    // bindingSections() excludes RESERVED_TOP_LEVEL first segments on read,
+    // so a binding pinned to it would be silently unreadable -- or collide
+    // with a real [models.<id>] model definition outright.
+    const configWithReservedProvider = {
+      ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.models]
+display-name = "Bad Provider"
+protocol = "openai-http"
+endpoint = "https://example.invalid/v1"
+`,
+    }
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(configWithReservedProvider)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+
+    const sourceBefore = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
+      target: { value: 'models' },
+    })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
+      target: { value: 'gpt' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain(
+        '예약된 이름',
+      )
+    })
+    // A rejected submit must never touch the draft source -- onAddBinding
+    // should not have been called at all, not just "called harmlessly".
+    const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+    expect(sourceAfter).toBe(sourceBefore)
+  })
+
+  it('rejects a binding to an existing command-transport (CLI) provider', async () => {
+    // Legacy/hand-edited data: a `command`-transport provider is parseable and
+    // shows up in the binding dropdown even though the add-provider form can
+    // no longer create one (RUNTIME_TOML_CREATABLE_PROTOCOLS/endpoint-only).
+    // Runtime_adapter.provider_kind_of_cli_provider is hardcoded to None, so
+    // materialize_config would silently drop any binding pinned to it.
+    const configWithCliProvider = {
+      ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.cli_like]
+display-name = "CLI Like"
+protocol = "openai-compatible-cli"
+command = "provider-runtime --serve"
+`,
+    }
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(configWithCliProvider)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+
+    const sourceBefore = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
+      target: { value: 'cli_like' },
+    })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
+      target: { value: 'gpt' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain(
+        'command(CLI)',
+      )
+    })
+    const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+    expect(sourceAfter).toBe(sourceBefore)
+  })
 })

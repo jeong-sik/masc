@@ -34,6 +34,12 @@ type runtime_exhaustion_reason =
   | Other_detail of string
 
 val runtime_exhaustion_reason_retryable : runtime_exhaustion_reason -> bool
+
+val runtime_exhaustion_reason_to_label : runtime_exhaustion_reason -> string
+(** Human-readable label carrying the [detail]/[message] payload inline,
+    for {!summary_of_masc_internal_error} and log lines. Distinct from
+    {!runtime_exhaustion_reason_to_json}'s bare wire tags. *)
+
 val runtime_exhaustion_reason_to_json : runtime_exhaustion_reason -> Yojson.Safe.t
 val runtime_exhaustion_reason_of_json : Yojson.Safe.t -> runtime_exhaustion_reason option
 

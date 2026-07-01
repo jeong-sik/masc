@@ -353,6 +353,7 @@ let test_runtime_error_mapping_preserves_no_progress_accept_rejection () =
   let err, _reason_kind, _reason = expect_accept_rejected result in
   let mapped =
     Masc.Keeper_turn_driver.For_testing.sdk_error_of_nonretryable_attempt_error
+      ~runtime_id:"runtime.thinking-model"
       ~original_error:err
       (Llm_provider.Http_client.AcceptRejected { reason = "flattened" })
   in
@@ -2080,6 +2081,119 @@ let test_per_provider_timeout_not_forwarded_to_oas_hard_deadline () =
     None
     (Masc.Keeper_turn_driver.For_testing.max_execution_time_for_attempt ())
 
+(* KLV-DNS (RFC-keeper-liveness-ssot §6): before this fix, candidate
+   exhaustion always produced a plain [Agent_sdk.Error.Internal <free-text>],
+   so [Keeper_error_classify.is_runtime_exhausted_error] never fired for
+   DNS/network failures and the already-built Turn_consecutive_failures /
+   Auto_resume_with_backoff auto-pause path was unreachable — every DNS
+   outage fell back to the generic crash-restart-then-Dead path instead. *)
+let test_dns_failure_exhaustion_classifies_as_runtime_exhausted () =
+  let dns_err =
+    Llm_provider.Http_client.NetworkError
+      { message = "getaddrinfo failed"; kind = Llm_provider.Http_client.Dns_failure }
+  in
+  let mapped =
+    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
+      ~runtime_id:"runtime.dns-test"
+      (Some dns_err)
+  in
+  Alcotest.(check bool)
+    "DNS exhaustion is a runtime-exhausted error"
+    true
+    (Masc.Keeper_error_classify.is_runtime_exhausted_error mapped);
+  Alcotest.(check bool)
+    "DNS exhaustion is not auto-recoverable (counts toward crash threshold, \
+     per record_failure_and_maybe_escalate's counts_toward_crash)"
+    false
+    (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped);
+  match Keeper_internal_error.classify_masc_internal_error mapped with
+  | Some (Keeper_internal_error.Runtime_exhausted { runtime_id; reason }) ->
+    Alcotest.(check string) "runtime_id preserved" "runtime.dns-test" runtime_id;
+    Alcotest.(check bool)
+      "reason is Dns_failure"
+      true
+      (reason = Keeper_internal_error.Dns_failure);
+    Alcotest.(check bool)
+      "Dns_failure is policy-retryable (Auto_resume_with_backoff eligible)"
+      true
+      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason)
+  | Some other ->
+    Alcotest.failf "expected Runtime_exhausted, got %s"
+      (Keeper_internal_error.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_sdk.Error.to_string mapped)
+
+let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
+  let mapped =
+    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
+      ~runtime_id:"runtime.no-candidates"
+      None
+  in
+  match Keeper_internal_error.classify_masc_internal_error mapped with
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
+    Alcotest.(check bool)
+      "no last_err maps to No_providers_available"
+      true
+      (reason = Keeper_internal_error.No_providers_available)
+  | Some other ->
+    Alcotest.failf "expected Runtime_exhausted, got %s"
+      (Keeper_internal_error.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_sdk.Error.to_string mapped)
+
+let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
+  let capacity_err =
+    Llm_provider.Http_client.ProviderFailure
+      { kind =
+          Llm_provider.Http_client.Capacity_exhausted
+            { scope = Llm_provider.Http_client.Failure_scope_provider
+            ; retry_after = Some "30"
+            ; model = Some "test-model"
+            }
+      ; message = "capacity exhausted"
+      }
+  in
+  let mapped =
+    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
+      ~runtime_id:"runtime.capacity-test"
+      (Some capacity_err)
+  in
+  match Keeper_internal_error.classify_masc_internal_error mapped with
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
+    Alcotest.(check bool)
+      "reason is Capacity_exhausted"
+      true
+      (reason = Keeper_internal_error.Capacity_exhausted);
+    Alcotest.(check bool)
+      "Capacity_exhausted is policy-retryable"
+      true
+      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
+    Alcotest.(check bool)
+      "capacity exhaustion is auto-recoverable"
+      true
+      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped)
+  | Some other ->
+    Alcotest.failf "expected Runtime_exhausted, got %s"
+      (Keeper_internal_error.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_sdk.Error.to_string mapped)
+
+let test_runtime_exhaustion_label_caps_free_text_detail () =
+  let detail = String.make 260 'x' ^ "\nwith newline\tand spacing" in
+  let label =
+    Keeper_internal_error.runtime_exhaustion_reason_to_label
+      (Keeper_internal_error.Other_detail detail)
+  in
+  Alcotest.(check bool)
+    "label detail is byte-capped"
+    true
+    (String.length label <= 212);
+  Alcotest.(check bool) "label has no newline" false (contains ~needle:"\n" label);
+  Alcotest.(check bool) "label is marked truncated" true (contains ~needle:"..." label)
+
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
@@ -2195,5 +2309,21 @@ let () =
             "keeper timeout is not forwarded to OAS hard deadline (RFC-0129)"
             `Quick
             test_per_provider_timeout_not_forwarded_to_oas_hard_deadline;
+          Alcotest.test_case
+            "DNS failure exhaustion classifies as Runtime_exhausted (KLV-DNS)"
+            `Quick
+            test_dns_failure_exhaustion_classifies_as_runtime_exhausted;
+          Alcotest.test_case
+            "no-candidates exhaustion classifies as No_providers_available"
+            `Quick
+            test_no_candidates_exhaustion_classifies_as_no_providers_available;
+          Alcotest.test_case
+            "capacity exhaustion classifies as retryable Runtime_exhausted"
+            `Quick
+            test_capacity_failure_exhaustion_classifies_as_capacity_exhausted;
+          Alcotest.test_case
+            "runtime exhaustion labels cap free-text detail"
+            `Quick
+            test_runtime_exhaustion_label_caps_free_text_detail;
         ] );
     ]

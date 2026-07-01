@@ -2149,7 +2149,7 @@ let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
       { kind =
           Llm_provider.Http_client.Capacity_exhausted
             { scope = Llm_provider.Http_client.Failure_scope_provider
-            ; retry_after = Some "30"
+            ; retry_after = Some 30.0
             ; model = Some "test-model"
             }
       ; message = "capacity exhausted"

@@ -18,7 +18,7 @@ That would preserve the unsafe behavior this contract removes.
 
 Callers registered in `Env_config_oas_bridge.known_callers` must have finite
 checked-in defaults. The bridge rejects `Float.infinity` even when supplied
-directly, and env parsing treats `infinity` as invalid so a checked-in finite
+directly, and env parsing treats `infinity` as invalid so the finite global
 fallback is used instead. Advisory dashboard judges are still separately
 bounded, but they no longer bypass the bridge timeout wrapper.
 

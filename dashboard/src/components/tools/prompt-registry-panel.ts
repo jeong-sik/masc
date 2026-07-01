@@ -243,15 +243,24 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
     setDraftPromptKey(draftKeyForPrompt(prompt))
   }
 
+  // Depend on the first visible prompt's stable key (a string) rather than the
+  // freshly-allocated [visiblePrompts] array, which changes identity every
+  // render (filterPrompts returns a new array) and would otherwise schedule
+  // this effect after every render/keystroke. [prompts] is stable useState
+  // identity, so re-selection only fires when the fallback target actually
+  // changes.
+  const firstVisibleKey = visiblePrompts[0]?.key ?? null
+
   useEffect(() => {
     if (draftDirty || selectedPromptVisible) return
-    const nextPrompt = visiblePrompts[0] ?? null
-    const nextKey = nextPrompt?.key ?? null
-    if (selectedKey === nextKey) return
-    setSelectedKey(nextKey)
+    if (selectedKey === firstVisibleKey) return
+    const nextPrompt = firstVisibleKey
+      ? prompts.find(prompt => prompt.key === firstVisibleKey) ?? null
+      : null
+    setSelectedKey(firstVisibleKey)
     setDraftForPrompt(nextPrompt)
     setStatus(null)
-  }, [draftDirty, selectedKey, selectedPromptVisible, visiblePrompts])
+  }, [draftDirty, selectedKey, selectedPromptVisible, firstVisibleKey, prompts])
 
   async function loadPrompts(preferredKey?: string | null) {
     setLoading(true)

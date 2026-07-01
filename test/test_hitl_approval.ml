@@ -1616,8 +1616,16 @@ let test_callback_always_approve_respects_forbidden () =
       | Some _ -> Alcotest.fail "expected Approve after operator resolution"
       | None -> Alcotest.fail "destructive tool callback did not suspend for approval")
 
-let test_callback_hitl_disabled_forbidden_requires_approval () =
-  with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
+(* Hard-forbidden (Critical risk / runtime-blocked) must reject immediately
+   when HITL is disabled, not suspend into the approval queue for an operator
+   to later approve around - MASC_DISABLE_HITL removes the *operator*, so
+   queuing a hard-forbidden call would make it unconditionally approvable by
+   whoever drains the queue, defeating the "always-approve bypass" the PR
+   closes. This exercises the same invariant test_hard_forbidden_blocks_
+   critical_risk pins, but through the async Fiber-based callback path used
+   in production, to confirm that path doesn't accidentally suspend either. *)
+let test_callback_hitl_disabled_forbidden_rejects_without_queuing () =
+  with_env Env_config_core.disable_hitl_env_key "true" @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1643,29 +1651,15 @@ let test_callback_hitl_disabled_forbidden_requires_approval () =
             ~input:(`Assoc [ ("path", `String "/dangerous") ])
         in
         result := Some decision);
-      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
-      Alcotest.(check int)
-        "forbidden tool still requires approval when HITL threshold is disabled"
-        (initial_pending + 1)
-        (AQ.pending_count ());
-      let id =
-        match pending_id_for_keeper ~keeper_name with
-        | Some id -> id
-        | None -> Alcotest.fail "expected pending approval for HITL-disabled forbidden tool"
-      in
-      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-       | Ok () -> ()
-       | Error err ->
-         Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       yield_until (fun () -> Option.is_some !result);
-      match !result with
-      | Some Agent_sdk.Hooks.Approve -> ()
-      | Some Agent_sdk.Hooks.Reject reason ->
-        Alcotest.fail ("expected Approve after operator resolution, got reject: " ^ reason)
-      | Some Agent_sdk.Hooks.Edit _ ->
-        Alcotest.fail "expected Approve after operator resolution, got edit"
-      | None ->
-        Alcotest.fail "HITL-disabled forbidden callback did not suspend for approval")
+      Alcotest.(check bool)
+        "hard-forbidden tool rejects immediately when HITL is disabled"
+        true
+        (approval_decision_is_reject (Option.get !result));
+      Alcotest.(check int)
+        "hard-forbidden rejection never enters the approval queue"
+        initial_pending
+        (AQ.pending_count ()))
 
 let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun base_path ->
@@ -1870,8 +1864,8 @@ let () =
         test_runtime_trust_classifies_always_approve_flag;
       Alcotest.test_case "always_approve respects forbidden" `Quick
         test_callback_always_approve_respects_forbidden;
-      Alcotest.test_case "HITL disabled still gates forbidden tools" `Quick
-        test_callback_hitl_disabled_forbidden_requires_approval;
+      Alcotest.test_case "HITL disabled rejects forbidden tools without queuing" `Quick
+        test_callback_hitl_disabled_forbidden_rejects_without_queuing;
       Alcotest.test_case "hard_forbidden blocks critical risk" `Quick
         test_hard_forbidden_blocks_critical_risk;
       Alcotest.test_case "hard_forbidden blocks destructive tool" `Quick

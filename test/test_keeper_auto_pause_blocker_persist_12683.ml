@@ -158,11 +158,36 @@ let pass_next_model_operator_disposition
   ; reason = Masc.Keeper_execution_receipt.Reason_runtime_fallback
   }
 
+let run_ref : Agent_sdk.Raw_trace.run_ref =
+  { worker_run_id = "test-run"
+  ; path = "/tmp/test-raw-trace.jsonl"
+  ; start_seq = 1
+  ; end_seq = 2
+  ; agent_name = "test-keeper"
+  ; session_id = None
+  }
+
+let file_write_run_validation : Agent_sdk.Raw_trace.run_validation =
+  { run_ref
+  ; ok = true
+  ; checks = []
+  ; evidence = []
+  ; paired_tool_result_count = 0
+  ; evidence_roles = []
+  ; has_file_write = true
+  ; verification_pass_after_file_write = false
+  ; final_text = Some "validated"
+  ; tool_names = []
+  ; stop_reason = Some "completed"
+  ; failure_reason = None
+  }
+
 let run_result
       ?(response_text = "direct reply")
       ?(stop_reason = Runtime_agent.Completed)
       ?(operator_disposition = Some healthy_operator_disposition)
       ?(tool_calls = [])
+      ?run_validation
       ()
   : Masc.Keeper_agent_run.run_result
   =
@@ -180,7 +205,7 @@ let run_result
   ; operator_disposition
   ; checkpoint = None
   ; trace_ref = None
-  ; run_validation = None
+  ; run_validation
   ; stop_reason
   ; inference_telemetry = None
   ; tool_surface
@@ -942,6 +967,16 @@ let test_direct_success_visible_text_only_keeps_no_progress_pause () =
     (Masc.Keeper_turn.For_testing.direct_success_may_clear_no_progress_pause
        result)
 
+let test_direct_success_run_validation_clears_no_progress_pause () =
+  let result =
+    run_result ~response_text:"" ~run_validation:file_write_run_validation ()
+  in
+  check bool
+    "validated file write can clear no-progress pause"
+    true
+    (Masc.Keeper_turn.For_testing.direct_success_may_clear_no_progress_pause
+       result)
+
 let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
   Eio_main.run
   @@ fun env ->
@@ -1519,6 +1554,9 @@ let () =
             "direct success visible text-only keeps no-progress pause"
             `Quick
             test_direct_success_visible_text_only_keeps_no_progress_pause;
+          test_case "direct success validated run clears no-progress pause"
+            `Quick
+            test_direct_success_run_validation_clears_no_progress_pause;
           test_case
             "direct success clears no-progress pause after blocker overwrite"
             `Quick

@@ -23,9 +23,7 @@ module Io = Keeper_memory_os_io
 
 (* RFC-0244 §3.6 / task-1612: env-gate. Default OFF -> opt-in. *)
 let consolidation_enabled () =
-  Keeper_memory_bank_env.memory_env_bool_logged
-    "MASC_KEEPER_MEMORY_OS_CONSOLIDATE"
-    ~default:false
+  Env_config.KeeperMemoryOs.shared_consolidator_enabled ()
 
 (* Which categories are durable enough to consider, and which are
    outcome-positive enough to cross keepers, are compile-time properties of the
@@ -44,7 +42,12 @@ type report =
   ; claims_considered : int (* distinct normalized claims with >= 1 eligible contribution *)
   ; promoted : int
   ; dry_run : bool
+  ; status : report_status
   }
+
+and report_status =
+  | Consolidation_ran
+  | Consolidation_disabled
 
 (* A contribution is one keeper's eligible observation of a claim. *)
 type contribution =
@@ -217,8 +220,14 @@ let log_run_summary ~dry_run ~min_keepers ~source_ids ~keeper_facts ~considered 
    back in as a "keeper". *)
 let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
   if not (consolidation_enabled ()) then (
-    Log.info (fun f -> f "Consolidation disabled (MASC_KEEPER_MEMORY_OS_CONSOLIDATE=false)");
-    { keepers_scanned = 0; claims_considered = 0; promoted = 0; dry_run }
+    Log.Keeper.info
+      "memory os consolidator skipped: MASC_KEEPER_MEMORY_OS_CONSOLIDATE=false";
+    { keepers_scanned = 0
+    ; claims_considered = 0
+    ; promoted = 0
+    ; dry_run
+    ; status = Consolidation_disabled
+    }
   ) else
   let source_ids =
     List.filter (fun id -> not (String.equal id shared_store_id)) keeper_ids
@@ -259,6 +268,7 @@ let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
       ; claims_considered = considered
       ; promoted = List.length promoted
       ; dry_run
+      ; status = Consolidation_ran
       }
   in
   if dry_run

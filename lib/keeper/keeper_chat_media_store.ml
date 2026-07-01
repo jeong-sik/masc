@@ -239,7 +239,7 @@ let persist_result ~base_dir ~media_type ~data =
 let persist ~base_dir ~media_type ~data =
   match persist_result ~base_dir ~media_type ~data with
   | Ok persisted -> persisted
-  | Error msg -> failwith msg
+  | Error msg -> invalid_arg ("Keeper_chat_media_store.persist: " ^ msg)
 
 let persist_error_to_string = function
   | Unsupported_source_type source_type ->

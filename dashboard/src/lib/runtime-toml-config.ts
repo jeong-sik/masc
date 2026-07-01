@@ -91,8 +91,28 @@ function sectionOf(document: TomlDocument, name: string): TomlSection | null {
   return document.sections.find(section => section.name === name) ?? null
 }
 
+// Bare key (letters/digits/underscore/hyphen) OR a quoted key ("..."/'...').
+// [runtime.assignments] keeper entries are written as quoted keys (e.g.
+// `"nick0cave" = "..."`); the earlier bare-key-only pattern silently failed
+// to match those lines, so sectionValues() returned {} for every quoted
+// entry and every keeper appeared to fall back to [runtime].default.
 function keyLineMatch(line: string): RegExpMatchArray | null {
-  return line.match(/^(\s*)([A-Za-z0-9_-]+)(\s*=\s*)(.*)$/)
+  return line.match(/^(\s*)("[^"]*"|'[^']*'|[A-Za-z0-9_-]+)(\s*=\s*)(.*)$/)
+}
+
+// Strip the surrounding quotes from a matched key token so callers compare
+// against the plain keeper/field name regardless of how the TOML author
+// quoted it.
+function dequoteTomlKey(rawKey: string | undefined): string {
+  const trimmed = (rawKey ?? '').trim()
+  if (trimmed.length >= 2) {
+    const first = trimmed[0]
+    const last = trimmed[trimmed.length - 1]
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1)
+    }
+  }
+  return trimmed
 }
 
 function stripInlineComment(raw: string): string {
@@ -150,7 +170,7 @@ function sectionValues(document: TomlDocument, name: string): Record<string, Tom
     const line = document.lines[index] ?? ''
     const match = keyLineMatch(line)
     if (!match?.[2] || match[0].trimStart().startsWith('#')) continue
-    values[match[2]] = parseTomlScalar(match[4] ?? '')
+    values[dequoteTomlKey(match[2])] = parseTomlScalar(match[4] ?? '')
   }
   return values
 }
@@ -346,7 +366,7 @@ export function setRuntimeTomlKey(
   const serialized = serializeValue(value)
   for (let index = section.start + 1; index < section.end; index += 1) {
     const match = keyLineMatch(lines[index] ?? '')
-    if (match?.[2] === key) {
+    if (match && dequoteTomlKey(match[2]) === key) {
       lines[index] = `${match[1] ?? ''}${key}${match[3] ?? ' = '}${serialized}`
       return joinLines(lines)
     }
@@ -369,7 +389,7 @@ export function getRuntimeTomlKey(
   if (!section) return undefined
   for (let index = section.start + 1; index < section.end; index += 1) {
     const match = keyLineMatch(document.lines[index] ?? '')
-    if (match?.[2] === key) return stripInlineComment(match[4] ?? '').trim()
+    if (match && dequoteTomlKey(match[2]) === key) return stripInlineComment(match[4] ?? '').trim()
   }
   return undefined
 }
@@ -381,7 +401,7 @@ export function deleteRuntimeTomlKey(sourceText: string, sectionName: string, ke
   const lines = [...document.lines]
   for (let index = section.end - 1; index > section.start; index -= 1) {
     const match = keyLineMatch(lines[index] ?? '')
-    if (match?.[2] === key) lines.splice(index, 1)
+    if (match && dequoteTomlKey(match[2]) === key) lines.splice(index, 1)
   }
   return joinLines(lines)
 }

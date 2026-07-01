@@ -31,7 +31,9 @@ val caller_key : caller -> string
 (** Resolve the OAS bridge timeout (seconds) for [caller] using the
     four-step lookup order documented above. Invalid env values, including
     non-positive floats, [nan], and [infinity], fall back to
-    [global_default_sec]. *)
+    the next lookup step; known callers therefore keep their checked-in
+    defaults, while unknown callers fall through to the global/default
+    fallback. *)
 val timeout_sec : caller:caller -> unit -> float
 
 (** [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — env var consulted in

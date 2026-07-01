@@ -155,21 +155,19 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
          [Tool_call_end] rather than dropping it silently — with OAS now emitting
          balanced ContentBlockStop the open set is normally already empty. *)
       let block_ends =
-        List.filter_map
+        List.concat_map
           (fun (index, block) ->
             match block with
             | Active_tool tool ->
-                Some (Tool_call_end { tool_call_id = tool.tool_call_id })
-            | Invalid_tool_block _ -> None
+                [ Tool_call_end { tool_call_id = tool.tool_call_id } ]
+            | Invalid_tool_block _ -> []
             | Active_media { media_type; source_type; chunks } ->
                 (* RFC-0301: media block still open at message end (no balanced
                    ContentBlockStop) — persist and surface it rather than drop it
                    silently on the block-table clear below. *)
-                Some
-                  (finalize_media_block ~redact_text ~base_dir ~index
-                     ~media_type ~source_type ~chunks))
+                finalize_media_block ~redact_text ~base_dir ~index ~media_type
+                  ~source_type ~chunks)
           bridge_state.blocks_by_index
-        |> List.concat
       in
       { bridge_state = empty_state;
         chat_events = block_ends @ [ Oas_stream_message_stop ]

@@ -538,7 +538,21 @@ let read_all_facts ~keeper_id =
 ;;
 
 let read_facts_for_rewrite ~keeper_id =
-  match read_facts_all_strict ~keeper_id with
+  (* RFC-0302 (#22823) phase-2b: resolve keepers_dir on the main domain (it touches
+     the Config_dir_resolver plain-ref memo), then offload the blocking full read +
+     strict parse of the fact store off the main Eio scheduler. This is the
+     per-write read on the librarian hot path (merge_and_cap_facts) and cap_facts.
+     Byte-equivalent to [read_facts_all_strict ~keeper_id] (which is exactly
+     [read_facts_all_strict_for_keepers_dir ~keepers_dir:(keepers_dir ())]) — only
+     the resolution is hoisted to main and the read is offloaded. Callers hold a
+     File_lock_eio flock on main across this (inline-in-tests) submit; the closure
+     reads only [keepers]/[keeper_id] and no shared mutable state, and the
+     Fs_compat rewrite that follows stays on main. *)
+  let keepers = keepers_dir () in
+  match
+    Domain_pool_ref.submit_io_or_inline (fun () ->
+      read_facts_all_strict_for_keepers_dir ~keepers_dir:keepers ~keeper_id)
+  with
   | Ok facts -> facts
   | Error message -> invalid_arg message
 ;;

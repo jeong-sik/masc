@@ -340,6 +340,49 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
   })
 
+  it('keeps another keeper lane available while one keeper stream is in flight', async () => {
+    let resolveEcho: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementation(async (
+      name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      if (name === 'echo') {
+        opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'echo reply' })
+        return new Promise<{ terminal: boolean }>(resolve => {
+          resolveEcho = resolve
+        })
+      }
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: `${name} reply` })
+      return { terminal: true }
+    })
+
+    const echoSend = sendKeeperThreadMessage('echo', 'slow turn')
+    await Promise.resolve()
+
+    expect(keeperSending.value.echo).toBe(true)
+    expect(activeStreamEntryId('echo')).not.toBeNull()
+
+    await sendKeeperThreadMessage('rama', 'status?')
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect(streamKeeperMessage.mock.calls.map(call => call[0])).toEqual(['echo', 'rama'])
+    expect(keeperSending.value.echo).toBe(true)
+    expect(activeStreamEntryId('echo')).not.toBeNull()
+    expect(keeperSending.value.rama).toBe(false)
+    expect(activeStreamEntryId('rama')).toBeNull()
+    expect((keeperThreads.value.rama ?? []).map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', 'status?', 'delivered'],
+      ['assistant', 'rama reply', 'delivered'],
+    ])
+
+    resolveEcho({ terminal: true })
+    await echoSend
+
+    expect(keeperSending.value.echo).toBe(false)
+    expect(activeStreamEntryId('echo')).toBeNull()
+  })
+
   it('keeps queued client action ids guarded while a batched queue send is in flight', async () => {
     let resolveStream: (outcome: { terminal: boolean }) => void = () => {}
     streamKeeperMessage.mockImplementationOnce(async () => new Promise<{ terminal: boolean }>(resolve => {

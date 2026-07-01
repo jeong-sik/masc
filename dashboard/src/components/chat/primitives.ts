@@ -177,6 +177,8 @@ type ChatTranscriptAction = {
   onClick: (entry: KeeperConversationEntry) => void
 }
 
+export const THINKING_TRACE_PREVIEW_CHARS = 2400
+
 function timeLabel(timestamp?: string | null): string | null {
   if (!timestamp) return null
   const value = new Date(timestamp)
@@ -1221,17 +1223,42 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
   const [open, setOpen] = useState(false)
 
   if (step.kind === 'think') {
+    const longThinking = step.text.length > THINKING_TRACE_PREVIEW_CHARS
+    const previewText = longThinking
+      ? `${step.text.slice(0, THINKING_TRACE_PREVIEW_CHARS).trimEnd()}\n\n... ${step.text.length - THINKING_TRACE_PREVIEW_CHARS} chars hidden`
+      : step.text
     return html`
       <div class="chat-block-tstep think" data-chat-trace-step="think">
         <span class="chat-block-tnode"></span>
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row">
             <span class="chat-block-tstep-kind">Thinking</span>
+            ${longThinking
+              ? html`
+                  <button
+                    type="button"
+                    class="chat-block-tstep-chev"
+                    aria-expanded=${open}
+                    onClick=${() => setOpen((o) => !o)}
+                  >
+                    ${open ? '접기' : '전체 보기'}
+                  </button>
+                `
+              : null}
           </div>
-          <${AsyncMarkdownDiv}
-            text=${step.text}
-            className="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
-          />
+          ${longThinking && !open
+            ? html`
+                <div
+                  class="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+                  dangerouslySetInnerHTML=${renderPlainLinkedHtml(previewText)}
+                />
+              `
+            : html`
+                <${AsyncMarkdownDiv}
+                  text=${step.text}
+                  className="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+                />
+              `}
         </div>
       </div>
     `
@@ -1896,10 +1923,9 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
 // regardless of memo (the test 're-renders the settled bubble when action is a
 // new object…' locks this).
 //
-// KNOWN GAP: tool/thinking turns render through the un-memoized TurnWorkBundle,
-// whose `tools` array is rebuilt every render (buildChatRenderUnits), so its
-// trace cards are NOT yet skipped on a stream chunk. Closing that needs the
-// unit arrays stabilized first — a separate follow-up.
+// Tool/thinking turns render through TurnWorkBundle. buildChatRenderUnits
+// rebuilds `tools` arrays each render, so the bundle comparator compares entry
+// references inside those arrays instead of the array object itself.
 const ChatMessageBubble = memo(function ChatMessageBubble({
   entry,
   showMetadata = true,
@@ -2725,7 +2751,14 @@ function ToolTraceCard({
   `
 }
 
-function TurnWorkBundle({
+function sameEntryRefs(
+  left: readonly KeeperConversationEntry[],
+  right: readonly KeeperConversationEntry[],
+): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index])
+}
+
+const TurnWorkBundle = memo(function TurnWorkBundle({
   tools,
   assistant,
   showMetadata,
@@ -2767,7 +2800,16 @@ function TurnWorkBundle({
       />
     </div>
   `
-}
+}, (prev, next) =>
+  prev.assistant === next.assistant
+  && sameEntryRefs(prev.tools, next.tools)
+  && prev.showMetadata === next.showMetadata
+  && prev.variant === next.variant
+  && prev.showSourceBadge === next.showSourceBadge
+  && prev.toolOutputsCoveredSinceMs === next.toolOutputsCoveredSinceMs
+  && prev.toolOutputsCoveredThroughMs === next.toolOutputsCoveredThroughMs
+  && prev.action === next.action
+)
 
 // A reader within this distance of the bottom is considered "pinned":
 // new content keeps auto-scrolling. Scrolling further up unpins so the

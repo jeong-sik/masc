@@ -176,6 +176,10 @@ function workspaceCommandGroup(command: WorkspaceCommand): string {
   return command.id in LIFECYCLE_COPY ? '명령' : '이동'
 }
 
+function isLifecycleWorkspaceCommand(command: WorkspaceCommand): boolean {
+  return command.id in LIFECYCLE_COPY
+}
+
 function WorkspaceCommandButtons({
   keeper,
   mobile,
@@ -215,6 +219,11 @@ function WorkspaceCommandButtons({
   const commands = [...lifecycleCommands(keeper), ...utilities]
 
   async function run(command: WorkspaceCommand) {
+    if (!isLifecycleWorkspaceCommand(command)) {
+      await command.onClick()
+      setMenuOpen(false)
+      return
+    }
     if (busyAction) return
     setBusyAction(command.id)
     try {
@@ -255,7 +264,7 @@ function WorkspaceCommandButtons({
                         type="button"
                         role="menuitem"
                         class=${`kw-chat-command-item${command.danger ? ' danger' : ''}`}
-                        disabled=${busyAction !== null}
+                        disabled=${isLifecycleWorkspaceCommand(command) && busyAction !== null}
                         onClick=${() => { void run(command) }}
                         data-testid=${`kw-chat-command-${command.id}`}
                       >
@@ -284,7 +293,7 @@ function WorkspaceCommandButtons({
             aria-label=${command.label}
             aria-pressed=${command.active ? 'true' : undefined}
             title=${command.title}
-            disabled=${busyAction !== null}
+            disabled=${isLifecycleWorkspaceCommand(command) && busyAction !== null}
             onClick=${() => { void run(command) }}
             data-testid=${`kw-chat-command-${command.id}`}
           >
@@ -490,9 +499,15 @@ export function KeeperWorkspaceChat({
     hint: command.title,
     glyph: COMMAND_GLYPHS[command.id],
     danger: command.danger,
-    disabled: composerBusyAction !== null,
-    disabledReason: composerBusyAction !== null ? '다른 keeper 명령 실행 중' : undefined,
+    disabled: isLifecycleWorkspaceCommand(command) && composerBusyAction !== null,
+    disabledReason: isLifecycleWorkspaceCommand(command) && composerBusyAction !== null
+      ? '다른 keeper lifecycle 명령 실행 중'
+      : undefined,
     run: async () => {
+      if (!isLifecycleWorkspaceCommand(command)) {
+        await command.onClick()
+        return
+      }
       if (composerBusyAction !== null) return
       setComposerBusyAction(command.id)
       try {

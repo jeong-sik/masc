@@ -207,6 +207,17 @@ export function applyKeeperStreamEvent(
     if (typeof payload !== 'string') return
     if (payload) appendAssistantDelta(keeperName, assistantEntryId, payload)
   }
+  const markFinalizingIfLive = (): void => {
+    updateThreadEntry(keeperName, assistantEntryId, entry => {
+      if (entry.streamState === null) return entry
+      if (entry.delivery !== 'sending' && entry.delivery !== 'streaming') return entry
+      return {
+        ...entry,
+        streamState: 'finalizing',
+        delivery: 'streaming',
+      }
+    })
+  }
 
   switch (event.type) {
     case 'RUN_STARTED':
@@ -221,7 +232,7 @@ export function applyKeeperStreamEvent(
     }
     case 'TEXT_MESSAGE_END':
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-      setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+      markFinalizingIfLive()
       return null
     case 'TOOL_CALL_START': {
       const toolCallId = event.toolCallId?.trim()
@@ -327,12 +338,12 @@ export function applyKeeperStreamEvent(
         if (usage) patch.usage = usage
         if (usage?.costUsd !== undefined) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        if (stopReason) setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+        if (stopReason) markFinalizingIfLive()
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
         clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-        setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+        markFinalizingIfLive()
         return null
       }
       if (event.name === 'KEEPER_STREAM_PING') {
@@ -411,6 +422,10 @@ export function applyKeeperStreamEvent(
           : ''
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
+          details: {
+            ...(entry.details ?? {}),
+            turnOutcome: 'continuation_checkpoint',
+          },
           text: '',
           rawText: rawText || entry.rawText,
           delivery: 'queued',
@@ -460,6 +475,22 @@ export function applyKeeperStreamEvent(
             error: message,
           }))
           return message
+        }
+        if (status === 'done' && terminal?.ok !== false) {
+          updateThreadEntry(keeperName, assistantEntryId, entry => {
+            const delivery =
+              entry.delivery === 'no_reply'
+                || (entry.delivery === 'queued'
+                  && keeperTurnOutcomeSuppressesReply(entry.details?.turnOutcome))
+                ? entry.delivery
+                : 'delivered'
+            return {
+              ...entry,
+              delivery,
+              streamState: null,
+              error: null,
+            }
+          })
         }
         return null
       }

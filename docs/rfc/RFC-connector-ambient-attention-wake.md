@@ -3,7 +3,7 @@ rfc: "connector-ambient-attention-wake"
 title: "Connector ambient attention wake: drive an idle keeper turn from external-attention backlog"
 status: Draft
 created: 2026-06-30
-updated: 2026-06-30
+updated: 2026-07-01
 author: vincent
 supersedes: []
 superseded_by: null
@@ -36,7 +36,7 @@ The backlog is a dead-end to the wake decision:
 - `lib/keeper/keeper_world_observation.ml` already drives reactive wakes from
   `pending_mentions → Mention_pending`, `pending_board_events → Board_event_pending`,
   `pending_scope_messages → Scope_message_pending`, and Event-Layer stimuli
-  (`lib/keeper/keeper_world_observation.ml:1014-1022`) — but **none of these read
+  (`lib/keeper/keeper_world_observation.ml:1067-1078`) — but **none of these read
   external_attention.** `lib/keeper/keeper_supervisor.ml` has zero references to it.
 
 This is exactly the RFC-0020 §1 failure: an external stimulus has a durable store
@@ -55,11 +55,21 @@ at all.
 - Not the dispatched path (already shipped).
 - Not a general "respond to all chatter" mode — §3.5 spurious-wake gating is a
   hard requirement, not an afterthought.
+- Not a dedicated outbound lane or fleet-wide rate cap for ambient-wake replies.
+  §3.5 enqueues onto the same `Keeper_chat_queue` the dispatched (mention) path
+  already uses; this RFC does not add lane separation or a mention-starvation
+  backpressure mechanism for the shared queue. §3.6's debounce bounds how often
+  an *individual* keeper wakes on ambient traffic, but does not bound how the
+  resulting replies interleave with mention-driven replies once both are
+  enqueued. If ambient-wake volume turns out to meaningfully delay mention
+  replies in practice, that is a follow-up RFC (lane separation and/or a
+  priority field on `Keeper_chat_queue` entries), not something this RFC's
+  design covers.
 
 ## 3. Design
 
 The wake must satisfy the **actionability invariant**
-(`lib/keeper/keeper_world_observation.ml:1097`, `RFC-keeper-proactive-wake-actionability-invariant`):
+(`lib/keeper/keeper_world_observation.ml:919-930`, `RFC-keeper-proactive-wake-actionability-invariant`):
 a signal may drive a proactive turn only if the keeper holds a tool affordance
 that can *clear* it. A pending connector message qualifies — the keeper can reply
 on the connector surface, and the reply resolves it — **provided** an outbound
@@ -88,9 +98,9 @@ and `turn_reason_of_event_queue_trigger`
 (`lib/keeper_contract/keeper_world_observation_turn_types.ml:83`) maps that to a **new closed-sum
 turn_reason** `Connector_attention_pending`. Because
 `event_queue_reactive_triggers` already fold into `reactive_triggers`
-(`lib/keeper/keeper_world_observation.ml:1011-1022`), `keeper_cycle_decision` needs **zero
+(`lib/keeper/keeper_world_observation.ml:1067-1078`), `keeper_cycle_decision` needs **zero
 structural change** — the stimulus yields `Run { channel = Reactive }` via the
-existing `match reactive_triggers | first :: rest -> Run` arm (1044-1053), the
+existing `match reactive_triggers | first :: rest -> Run` arm (1100-1109), the
 same path Bootstrap / No_progress_recovery stimuli already take.
 
 Why edge, not level (`observe` polling `pending_for_keeper`): a level read is
@@ -104,7 +114,7 @@ the digest/backlog read, not for gating the wake.)
 
 Gate the trigger through `Keeper_agent_tool_surface.affordance_can_mutate`
 exactly like `claimable ↔ Task_claim` / `failed ↔ Task_audit`
-(`lib/keeper/keeper_world_observation.ml:876-889`). Introduce a "can reply on a connector
+(`lib/keeper/keeper_world_observation.ml:932-944`). Introduce a "can reply on a connector
 surface" affordance so `Connector_attention_pending` is admitted **only** when the
 keeper actually holds the outbound tool. A keeper bound to no connector, or with
 the reply tool removed, must not wake on it (it cannot clear it). This makes the
@@ -208,7 +218,7 @@ and operator digest honest and to support the content read.
   `connector_user_line_recorded_upstream = true` (`lib/server/server_bootstrap_loops.ml:1088`)
   to avoid re-recording.
 - **Approval_pending shadowing** — the `Approval_pending` hard gate returns
-  `blocked` before `reactive_triggers` are matched (`lib/keeper/keeper_world_observation.ml:1041`),
+  `blocked` before `reactive_triggers` are matched (`lib/keeper/keeper_world_observation.ml:1096-1099`),
   so connector attention is held while a HITL approval is pending. Acceptable
   because the stimulus persists (re-delivered next cycle), but must be intentional.
 - **RFC-0020 path drift** — RFC-0020 §4 cites `lib/keeper/keeper_event_queue.*`

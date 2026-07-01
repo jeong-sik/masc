@@ -42,6 +42,7 @@ type no_progress_reason =
   | Repeated_identity
   | Surface_mismatch
   | Stale_task
+  | Unclassified
 
 val no_progress_reason_to_string : no_progress_reason -> string
 val no_progress_reason_of_string : string -> no_progress_reason option

@@ -1020,7 +1020,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
           translate_oas_stream_event ~redact_text
             ~on_text_delta:
               (Keeper_stream_text_accum.on_delta text_accum ~redact:redact_text)
-            bridge_state evt
+            ~base_dir:base_path bridge_state evt
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
@@ -1281,7 +1281,10 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                     ("signature_bytes", `Int signature_bytes);
                   ])
             then loop ()
-        | Oas_media_delta { index; media_type; source_type; bytes } ->
+        | Oas_media_delta { index; media_type; source_type; media_ref } ->
+            (* RFC-0301: emit the reader-facing media URL so the dashboard can
+               fetch + render the payload (GET /api/v1/media/<token>), replacing
+               the pre-RFC byte count. *)
             if
               send_custom "KEEPER_MEDIA_DELTA"
                 (`Assoc
@@ -1292,7 +1295,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                       `String
                         (Agent_sdk.Types.media_source_kind_to_string source_type)
                     );
-                    ("bytes", `Int bytes);
+                    ("media_ref", `String media_ref);
                   ])
             then loop ()
         | Oas_stream_protocol_error error ->

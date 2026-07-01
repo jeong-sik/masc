@@ -158,6 +158,7 @@ let api_error_terminal_reason_code (err : Agent_sdk.Error.api_error) : string =
   | Agent_sdk.Retry.ServerError { status; _ } ->
     Printf.sprintf "api_error_server:%d" status
   | Agent_sdk.Retry.AuthError _ -> "api_error_auth"
+  | Agent_sdk.Retry.PaymentRequired _ -> "api_error_payment_required"
   | Agent_sdk.Retry.InvalidRequest _ -> "api_error_invalid_request"
   | Agent_sdk.Retry.NotFound _ -> "api_error_not_found"
   | Agent_sdk.Retry.ContextOverflow _ -> "api_error_context_overflow"

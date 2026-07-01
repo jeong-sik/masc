@@ -64,6 +64,8 @@ let sdk_api_error_fields = function
     ]
   | Agent_sdk.Retry.AuthError { message } ->
     [ "variant", `String "auth_error"; "message", `String message ]
+  | Agent_sdk.Retry.PaymentRequired { message } ->
+    [ "variant", `String "payment_required"; "message", `String message ]
   | Agent_sdk.Retry.InvalidRequest { message; reason } ->
     [ "variant", `String "invalid_request"
     ; "message", `String message

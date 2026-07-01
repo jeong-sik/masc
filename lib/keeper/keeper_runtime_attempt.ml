@@ -130,6 +130,8 @@ let sdk_error_to_runtime_outcome err =
            Llm_provider.Http_client.HttpError { code = 400; body = message }
          | RateLimited { message; _ } ->
            Llm_provider.Http_client.HttpError { code = 429; body = message }
+         | PaymentRequired { message } ->
+           Llm_provider.Http_client.HttpError { code = 402; body = message }
          | NotFound { message } ->
            Llm_provider.Http_client.HttpError { code = 404; body = message }
          | ServerError { status; message } ->

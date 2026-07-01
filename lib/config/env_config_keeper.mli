@@ -92,6 +92,7 @@ module KeeperMemoryOs : sig
   val librarian_runtime_id_default : string option
   val librarian_global_slot_default : int
   val gc_enabled_default : bool
+  val shared_consolidator_enabled_default : bool
   val consolidation_enabled_default : bool
   val consolidation_runtime_id_default : string option
 
@@ -107,6 +108,7 @@ module KeeperMemoryOs : sig
   val librarian_runtime_id : unit -> string option
   val librarian_global_slot : unit -> int
   val gc_enabled : unit -> bool
+  val shared_consolidator_enabled : unit -> bool
   val consolidation_enabled : unit -> bool
   val consolidation_runtime_id : unit -> string option
 end

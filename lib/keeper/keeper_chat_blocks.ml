@@ -723,7 +723,7 @@ let block_of_yojson json : chat_block option =
          Option.bind (trace_steps_of_yojson trace_json) (fun trace ->
            if trace = [] then None else Some (Trace { trace })))
      | Some "thinking" ->
-       (* content is required ([""] for signature-only redacted thinking);
+       (* content is required (empty string for signature-only redacted thinking);
           redacted defaults to false and is only honoured when explicitly
           [true], matching the encoder's omission rule. *)
        Option.bind (get_string "content") (fun content ->

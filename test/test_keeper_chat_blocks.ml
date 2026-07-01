@@ -412,7 +412,7 @@ let test_thinking_block_roundtrip () =
   | None -> Alcotest.fail "blocks_of_yojson rejected valid thinking block"
 
 let test_redacted_thinking_block_roundtrip () =
-  (* Signature-only RedactedThinking: content is [""] and redacted is emitted
+  (* Signature-only RedactedThinking: content is an empty string and redacted is emitted
      so the dashboard renders a placeholder rather than an empty card. *)
   let original = [ B.Thinking { content = ""; redacted = true } ] in
   Alcotest.(check (list yojson_testable))

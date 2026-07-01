@@ -356,7 +356,8 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_keeper_behavior_trace)
+  test_keeper_behavior_trace
+  test_keeper_wire_capture)
  (modules
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
@@ -694,7 +695,8 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_keeper_behavior_trace)
+  test_keeper_behavior_trace
+  test_keeper_wire_capture)
  (libraries masc_test_deps multimodal))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.

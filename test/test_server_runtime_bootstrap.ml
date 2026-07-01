@@ -125,6 +125,10 @@ let make_config_root root =
   write_file (Filename.concat config "personas/example.txt") "persona";
   config
 
+let model_catalog_resolution_source_label resolution =
+  Server_runtime_bootstrap.model_catalog_env_source_to_string
+    resolution.Server_runtime_bootstrap.source
+
 let test_model_catalog_resolution_prefers_explicit_env () =
   let env = function
     | "OAS_MODEL_CATALOG" -> Some "/explicit/oas-models.toml"
@@ -143,7 +147,7 @@ let test_model_catalog_resolution_prefers_explicit_env () =
      Alcotest.(check string)
        "source"
        "OAS_MODEL_CATALOG"
-       resolution.Server_runtime_bootstrap.source;
+       (model_catalog_resolution_source_label resolution);
      Alcotest.(check string)
        "path"
        "/explicit/oas-models.toml"
@@ -164,7 +168,7 @@ let test_model_catalog_resolution_prefers_explicit_env () =
     Alcotest.(check string)
       "source"
       "MASC_MODEL_CATALOG"
-      resolution.Server_runtime_bootstrap.source;
+      (model_catalog_resolution_source_label resolution);
     Alcotest.(check string)
       "path"
       "/explicit/masc-models.toml"
@@ -195,7 +199,7 @@ let test_model_catalog_resolution_uses_executable_parent_when_cwd_is_base_path (
       Alcotest.(check string)
         "source"
         "argv0-parent:oas-models.toml"
-        resolution.Server_runtime_bootstrap.source;
+        (model_catalog_resolution_source_label resolution);
       Alcotest.(check string)
         "path"
         (canonical_path catalog)
@@ -226,11 +230,31 @@ let test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd () =
       Alcotest.(check string)
         "source"
         "argv0-parent:oas-models.toml"
-        resolution.Server_runtime_bootstrap.source;
+        (model_catalog_resolution_source_label resolution);
       Alcotest.(check string)
         "path"
         (canonical_path catalog)
         (canonical_path resolution.Server_runtime_bootstrap.path))
+
+let test_model_catalog_configuration_delegates_to_agent_sdk_ambient () =
+  with_temp_dir "model-catalog-bootstrap-agent-sdk" (fun dir ->
+    let putenv_calls = ref [] in
+    let preload_calls = ref 0 in
+    let env _ = None in
+    let result =
+      Server_runtime_bootstrap.configure_oas_model_catalog_env
+        ~env
+        ~cwd:dir
+        ~argv0:(Filename.concat dir "main_eio.exe")
+        ~putenv:(fun name value -> putenv_calls := (name, value) :: !putenv_calls)
+        ~preload_agent_sdk_catalog:(fun () -> incr preload_calls)
+        ~agent_sdk_catalog:(fun () -> Some [])
+        ()
+    in
+    Alcotest.(check bool) "no explicit path resolution" true (Option.is_none result);
+    Alcotest.(check int) "preload called once" 1 !preload_calls;
+    Alcotest.(check int) "does not write OAS_MODEL_CATALOG" 0
+      (List.length !putenv_calls))
 
 let write_config_root_keeper_toml config_root name =
   write_file
@@ -4160,6 +4184,10 @@ let () =
             "model catalog resolution uses process cwd for relative argv0"
             `Quick
             test_model_catalog_resolution_resolves_relative_argv0_from_process_cwd;
+          Alcotest.test_case
+            "model catalog configuration delegates to agent_sdk ambient catalog"
+            `Quick
+            test_model_catalog_configuration_delegates_to_agent_sdk_ambient;
           Alcotest.test_case
             "bootstrap base-path config copies shared seed only"
             `Quick

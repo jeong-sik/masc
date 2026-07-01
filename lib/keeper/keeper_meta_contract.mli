@@ -210,9 +210,23 @@ val blocker_class_of_serialized_string :
 
 (** {1 Unified blocker_info} *)
 
+type no_progress_blocker_facts = {
+  no_progress_reason : string;
+  no_progress_streak : int;
+  no_progress_threshold : int;
+  no_progress_latched : bool;
+}
+(** Structured facts for a persisted [No_progress_loop] blocker.  These fields
+    are machine-readable state; [blocker_info.detail] remains presentation
+    text only. *)
+
+type blocker_facts =
+  | No_progress_loop_facts of no_progress_blocker_facts
+
 type blocker_info = {
   klass : blocker_class;
   detail : string;
+  facts : blocker_facts option;
 }
 (** Authoritative blocker representation: a typed [blocker_class]
     paired with optional free-form [detail] (UI / Otel_metric_store label).
@@ -222,9 +236,22 @@ type blocker_info = {
     blocker, the runtime state holds [None]; when there is a blocker,
     [klass] is always populated and [detail] may be ["" ]. *)
 
-val blocker_info_of_class : ?detail:string -> blocker_class -> blocker_info
+val blocker_info_of_class :
+  ?detail:string -> ?facts:blocker_facts -> blocker_class -> blocker_info
 (** [blocker_info_of_class ?detail klass] constructs a [blocker_info]
     for [klass].  [detail] defaults to [""]. *)
+
+val blocker_info_of_no_progress_loop :
+  ?detail:string ->
+  reason:string ->
+  streak:int ->
+  threshold:int ->
+  latched:bool ->
+  unit ->
+  blocker_info
+(** [blocker_info_of_no_progress_loop] stamps [No_progress_loop] with
+    structured telemetry facts so downstream status surfaces do not parse
+    the human-readable [detail]. *)
 
 val blocker_info_to_json : blocker_info -> Yojson.Safe.t
 (** Round-trippable JSON encoding.  [Runtime_exhausted reason] uses

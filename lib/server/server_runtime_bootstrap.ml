@@ -12,8 +12,39 @@ let startup_config_resolution = Config_root_bootstrap.startup_config_resolution
 
 type model_catalog_env_resolution =
   { path : string
-  ; source : string
+  ; source : model_catalog_env_source
   }
+
+and model_catalog_env_source =
+  | Env_var of model_catalog_env_var
+  | Parent_file of
+      { origin : model_catalog_parent_origin
+      ; filename : string
+      }
+
+and model_catalog_env_var =
+  | Oas_model_catalog
+  | Masc_model_catalog
+
+and model_catalog_parent_origin =
+  | Cwd_parent
+  | Argv0_parent
+
+let model_catalog_env_var_name = function
+  | Oas_model_catalog -> "OAS_MODEL_CATALOG"
+  | Masc_model_catalog -> "MASC_MODEL_CATALOG"
+
+let model_catalog_parent_origin_label = function
+  | Cwd_parent -> "cwd-parent"
+  | Argv0_parent -> "argv0-parent"
+
+let model_catalog_env_source_to_string = function
+  | Env_var var -> model_catalog_env_var_name var
+  | Parent_file { origin; filename } ->
+    Printf.sprintf "%s:%s" (model_catalog_parent_origin_label origin) filename
+
+let models_toml_filename = "models.toml"
+let oas_models_toml_filename = "oas-models.toml"
 
 let nonempty_env env name =
   match env name with
@@ -36,19 +67,21 @@ let rec find_in_parents filename dir depth =
   if depth <= 0 then
     None
   else
-    let path = Filename.concat dir filename in
-    match existing_file path with
-    | Some _ as found -> found
-    | None ->
-      let parent = Filename.dirname dir in
-      if String.equal parent dir then None else find_in_parents filename parent (depth - 1)
+      let path = Filename.concat dir filename in
+      match existing_file path with
+      | Some _ as found -> found
+      | None ->
+        let parent = Filename.dirname dir in
+        if String.equal parent dir then None else find_in_parents filename parent (depth - 1)
 
-let find_catalog_in_parents ~source dir =
-  match find_in_parents "models.toml" dir 10 with
-  | Some path -> Some { path; source = source ^ ":models.toml" }
+let find_catalog_in_parents ~origin dir =
+  match find_in_parents models_toml_filename dir 10 with
+  | Some path ->
+    Some { path; source = Parent_file { origin; filename = models_toml_filename } }
   | None ->
-    (match find_in_parents "oas-models.toml" dir 10 with
-     | Some path -> Some { path; source = source ^ ":oas-models.toml" }
+    (match find_in_parents oas_models_toml_filename dir 10 with
+     | Some path ->
+       Some { path; source = Parent_file { origin; filename = oas_models_toml_filename } }
      | None -> None)
 
 let absolute_or_cwd ~cwd path =
@@ -66,11 +99,11 @@ let argv0_parent_dir ~cwd argv0 =
   | Some path -> Some (Filename.dirname path)
 
 let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
-  match nonempty_env env "OAS_MODEL_CATALOG" with
-  | Some path -> Some { path; source = "OAS_MODEL_CATALOG" }
+  match nonempty_env env (model_catalog_env_var_name Oas_model_catalog) with
+  | Some path -> Some { path; source = Env_var Oas_model_catalog }
   | None ->
-    (match nonempty_env env "MASC_MODEL_CATALOG" with
-     | Some path -> Some { path; source = "MASC_MODEL_CATALOG" }
+    (match nonempty_env env (model_catalog_env_var_name Masc_model_catalog) with
+     | Some path -> Some { path; source = Env_var Masc_model_catalog }
      | None ->
        let search_cwd =
          match cwd with
@@ -85,29 +118,47 @@ let resolve_oas_model_catalog_path ?(env = Sys.getenv_opt) ?cwd ?argv0 () =
          | Some argv0 -> argv0
          | None ->
            (match Array.to_list Sys.argv with
-            | head :: _ -> head
-            | [] -> "")
+           | head :: _ -> head
+           | [] -> "")
        in
-       (match find_catalog_in_parents ~source:"cwd-parent" search_cwd with
+       (match find_catalog_in_parents ~origin:Cwd_parent search_cwd with
         | Some _ as found -> found
         | None ->
           (match argv0_parent_dir ~cwd:process_cwd argv0 with
-           | Some dir -> find_catalog_in_parents ~source:"argv0-parent" dir
+           | Some dir -> find_catalog_in_parents ~origin:Argv0_parent dir
            | None -> None)))
 
-let configure_oas_model_catalog_env () =
-  match resolve_oas_model_catalog_path () with
-  | Some { source = "OAS_MODEL_CATALOG"; path } as resolution ->
+let configure_oas_model_catalog_env
+      ?(env = Sys.getenv_opt)
+      ?cwd
+      ?argv0
+      ?(putenv = Unix.putenv)
+      ?(preload_agent_sdk_catalog = Llm_provider.Model_catalog.preload_global)
+      ?(agent_sdk_catalog = Llm_provider.Model_catalog.global)
+      ()
+  =
+  match resolve_oas_model_catalog_path ~env ?cwd ?argv0 () with
+  | Some { source = Env_var Oas_model_catalog; path } as resolution ->
     Log.Misc.info "model_catalog: OAS_MODEL_CATALOG=%s already configured" path;
     resolution
   | Some { source; path } as resolution ->
-    Unix.putenv "OAS_MODEL_CATALOG" path;
-    Log.Misc.info "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s" path source;
+    putenv (model_catalog_env_var_name Oas_model_catalog) path;
+    Log.Misc.info
+      "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s"
+      path
+      (model_catalog_env_source_to_string source);
     resolution
   | None ->
-    Log.Misc.warn
-      "model_catalog: no OAS model catalog resolved; capability lookups may fall \
-       back to provider_default";
+    preload_agent_sdk_catalog ();
+    (match agent_sdk_catalog () with
+     | Some _ ->
+       Log.Misc.info
+         "model_catalog: no explicit catalog path resolved; using agent_sdk ambient \
+          model catalog"
+     | None ->
+       Log.Misc.warn
+         "model_catalog: no explicit or agent_sdk ambient model catalog resolved; \
+          capability lookups may fall back to provider_default");
     None
 
 (* GC tuning for long-running server with bursty allocation.

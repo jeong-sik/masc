@@ -1347,6 +1347,40 @@ let test_structured_judge_runtime_routing () =
         (Runtime.structured_judge_runtime_id ());
       check string "resolved structured judge runtime" "local.judge"
         (Runtime.runtime_id_for_structured_judge ()))
+  ;
+  with_temp_runtime_toml base (fun path ->
+    match
+      Runtime.set_runtime_structured_judge
+        ~runtime_config_path:path
+        ~runtime_id:(Some "local.judge")
+        ()
+    with
+    | Error msg -> failf "set_runtime_structured_judge should validate: %s" msg
+    | Ok () ->
+      check
+        (option string)
+        "writer saved structured_judge runtime id"
+        (Some "local.judge")
+        (Runtime.structured_judge_runtime_id ());
+      check bool "runtime.toml structured_judge persisted" true
+        (String_util.contains_substring
+           (Fs_compat.load_file path)
+           "structured_judge = \"local.judge\""));
+  with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
+    match
+      Runtime.set_runtime_structured_judge
+        ~runtime_config_path:path
+        ~runtime_id:None
+        ()
+    with
+    | Error msg -> failf "clear structured_judge should validate: %s" msg
+    | Ok () ->
+      check (option string) "writer cleared structured_judge" None
+        (Runtime.structured_judge_runtime_id ());
+      check bool "runtime.toml structured_judge removed" false
+        (String_util.contains_substring
+           (Fs_compat.load_file path)
+           "structured_judge"))
 
 let test_save_config_text_refreshes_cross_verifier_runtime () =
   with_fake_runtime_model_catalog @@ fun () ->

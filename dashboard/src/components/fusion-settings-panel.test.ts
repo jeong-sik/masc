@@ -33,9 +33,13 @@ const cfg = (over: { ok?: boolean; source_text?: string; reloaded?: boolean }) =
 
 const fetchMock = vi.fn()
 const saveMock = vi.fn()
+const runtimeRefreshMock = vi.fn(async () => undefined)
 vi.mock('../api/dashboard', () => ({
   fetchRuntimeTomlConfig: () => fetchMock(),
   saveRuntimeTomlConfig: (text: string) => saveMock(text),
+}))
+vi.mock('../lib/runtime-config-refresh', () => ({
+  refreshRuntimeConfigConsumers: () => runtimeRefreshMock(),
 }))
 
 let container: HTMLDivElement
@@ -44,6 +48,7 @@ const q = (sel: string) => container.querySelector(sel)
 beforeEach(() => {
   fetchMock.mockReset()
   saveMock.mockReset()
+  runtimeRefreshMock.mockClear()
   container = document.createElement('div')
   document.body.appendChild(container)
 })
@@ -74,6 +79,7 @@ describe('FusionSettingsPanel', () => {
     await vi.waitFor(() => expect(saveMock).toHaveBeenCalledTimes(1))
     const posted = saveMock.mock.calls[0]?.[0] as string
     expect(posted.split('[fusion.presets.trio]')[1]).toContain('min_answered = 2')
+    expect(runtimeRefreshMock).toHaveBeenCalledTimes(1)
   })
 
   it('surfaces a backend validation rejection (ok=false) instead of claiming success', async () => {

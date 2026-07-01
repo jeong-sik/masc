@@ -302,12 +302,86 @@ let runtime_exhaustion_reason_of_json json =
    [blocker_class] the only authoritative class eliminates that recovery path;
    [detail] carries free-form context for UI / Otel_metric_store labels (no
    classification semantics). *)
+type no_progress_blocker_facts =
+  { no_progress_reason : string
+  ; no_progress_streak : int
+  ; no_progress_threshold : int
+  ; no_progress_latched : bool
+  }
+
+type blocker_facts =
+  | No_progress_loop_facts of no_progress_blocker_facts
+
 type blocker_info = {
   klass : blocker_class;
   detail : string;
+  facts : blocker_facts option;
 }
 
-let blocker_info_of_class ?(detail = "") klass = { klass; detail }
+let blocker_info_of_class ?(detail = "") ?facts klass = { klass; detail; facts }
+
+let blocker_info_of_no_progress_loop
+      ?(detail = "")
+      ~reason
+      ~streak
+      ~threshold
+      ~latched
+      ()
+  =
+  blocker_info_of_class
+    ~detail
+    ~facts:
+      (No_progress_loop_facts
+         { no_progress_reason = reason
+         ; no_progress_streak = streak
+         ; no_progress_threshold = threshold
+         ; no_progress_latched = latched
+         })
+    No_progress_loop
+;;
+
+let no_progress_blocker_facts_to_json facts : Yojson.Safe.t =
+  `Assoc
+    [ "kind", `String "no_progress_loop"
+    ; "reason", `String facts.no_progress_reason
+    ; "streak", `Int facts.no_progress_streak
+    ; "threshold", `Int facts.no_progress_threshold
+    ; "latched", `Bool facts.no_progress_latched
+    ]
+;;
+
+let blocker_facts_to_json = function
+  | No_progress_loop_facts facts -> no_progress_blocker_facts_to_json facts
+;;
+
+let no_progress_blocker_facts_of_fields fields =
+  match
+    ( List.assoc_opt "reason" fields
+    , List.assoc_opt "streak" fields
+    , List.assoc_opt "threshold" fields
+    , List.assoc_opt "latched" fields )
+  with
+  | Some (`String reason), Some (`Int streak), Some (`Int threshold), Some (`Bool latched)
+    when String.trim reason <> "" ->
+    Some
+      { no_progress_reason = reason
+      ; no_progress_streak = streak
+      ; no_progress_threshold = threshold
+      ; no_progress_latched = latched
+      }
+  | _ -> None
+;;
+
+let blocker_facts_of_json = function
+  | `Assoc fields ->
+    (match List.assoc_opt "kind" fields with
+     | Some (`String "no_progress_loop") ->
+       Option.map
+         (fun facts -> No_progress_loop_facts facts)
+         (no_progress_blocker_facts_of_fields fields)
+     | _ -> None)
+  | _ -> None
+;;
 
 let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
   let klass_payload = match info.klass with
@@ -317,10 +391,17 @@ let blocker_info_to_json (info : blocker_info) : Yojson.Safe.t =
              ]
     | _ -> `String (blocker_class_to_string info.klass)
   in
-  `Assoc
+  let fields =
     [ "klass", klass_payload
     ; "detail", `String info.detail
     ]
+  in
+  let fields =
+    match info.facts with
+    | Some facts -> fields @ [ "facts", blocker_facts_to_json facts ]
+    | None -> fields
+  in
+  `Assoc fields
 ;;
 
 let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
@@ -353,7 +434,12 @@ let blocker_info_of_json (json : Yojson.Safe.t) : blocker_info option =
          | Some (`String s) -> s
          | _ -> ""
        in
-       Some { klass; detail })
+       let facts =
+         match List.assoc_opt "facts" fields with
+         | Some raw -> blocker_facts_of_json raw
+         | None -> None
+       in
+       Some { klass; detail; facts })
   | _ -> None
 ;;
 

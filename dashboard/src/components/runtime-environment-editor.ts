@@ -73,6 +73,7 @@ interface RuntimeEnvironmentEditorProps {
   onAddProvider: (input: NewRuntimeProviderInput) => void
   onAddModel: (input: NewRuntimeModelInput) => void
   onAddBinding: (providerId: string, modelId: string) => void
+  onDeleteProvider: (providerId: string) => void
   onProviderTransportChange: (
     providerId: string,
     field: RuntimeProviderTransportEditableField,
@@ -203,6 +204,7 @@ export function RuntimeEnvironmentEditor({
   onAddProvider,
   onAddModel,
   onAddBinding,
+  onDeleteProvider,
   onProviderTransportChange,
   onProviderCredentialChange,
 }: RuntimeEnvironmentEditorProps) {
@@ -212,6 +214,7 @@ export function RuntimeEnvironmentEditor({
   const [providerFormOpen, setProviderFormOpen] = useState(false)
   const [newProvider, setNewProvider] = useState<NewProviderDraft>(DEFAULT_NEW_PROVIDER)
   const [providerFormError, setProviderFormError] = useState<string | null>(null)
+  const [providerDeleteError, setProviderDeleteError] = useState<string | null>(null)
 
   const [modelFormOpen, setModelFormOpen] = useState(false)
   const [newModel, setNewModel] = useState<NewModelDraft>(DEFAULT_NEW_MODEL)
@@ -245,11 +248,11 @@ export function RuntimeEnvironmentEditor({
   }
 
   function updateAssignment(keeperName: string, runtimeId: string) {
-    if (runtimeId === environment.defaultRuntimeId) {
-      onAssignmentChange(keeperName, null)
-      return
-    }
     onAssignmentChange(keeperName, runtimeId)
+  }
+
+  function clearAssignment(keeperName: string) {
+    onAssignmentChange(keeperName, null)
   }
 
   function updateBindingNumber(
@@ -306,7 +309,21 @@ export function RuntimeEnvironmentEditor({
     })
     setNewProvider(DEFAULT_NEW_PROVIDER)
     setProviderFormError(null)
+    setProviderDeleteError(null)
     setProviderFormOpen(false)
+  }
+
+  function deleteProvider(providerId: string) {
+    const providerBindings = environment.bindings.filter(b => b.providerId === providerId)
+    const remainingBindings = environment.bindings.filter(b => b.providerId !== providerId)
+    if (providerBindings.length > 0 && remainingBindings.length === 0) {
+      setProviderDeleteError(
+        '마지막 runtime binding을 가진 provider alias는 삭제할 수 없습니다. 새 provider/model/binding을 먼저 추가하세요.',
+      )
+      return
+    }
+    setProviderDeleteError(null)
+    onDeleteProvider(providerId)
   }
 
   function submitAddModel() {
@@ -440,13 +457,21 @@ export function RuntimeEnvironmentEditor({
   // at a glance which keepers actually have a pinned runtime vs. which are
   // just inheriting whatever [runtime].default happens to be.
   const assignmentRows = keeperList.map(keeper => {
-    const current = assignments[keeper.name] ?? environment.defaultRuntimeId
-    return { keeper, current, isDefault: current === environment.defaultRuntimeId }
+    const explicitRuntime = assignments[keeper.name]
+    const isPinned = explicitRuntime !== undefined
+    const current = explicitRuntime ?? environment.defaultRuntimeId
+    return {
+      keeper,
+      current,
+      isPinned,
+      matchesDefault: isPinned && explicitRuntime === environment.defaultRuntimeId,
+    }
   })
-  const pinnedAssignments = assignmentRows.filter(row => !row.isDefault)
-  const fallbackAssignments = assignmentRows.filter(row => row.isDefault)
+  const pinnedAssignments = assignmentRows.filter(row => row.isPinned)
+  const fallbackAssignments = assignmentRows.filter(row => !row.isPinned)
 
   function assignRow(row: (typeof assignmentRows)[number]) {
+    const canPinCurrent = row.current !== ''
     return html`
       <div key=${row.keeper.name} class="rt-assign">
         <span class="rt-assign-k">
@@ -462,9 +487,30 @@ export function RuntimeEnvironmentEditor({
         >
           ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
         </select>
-        ${row.isDefault
-          ? html`<span class="rt-assign-tag mono">↳ default 폴백</span>`
-          : html`<span class="rt-assign-tag pin mono">고정</span>`}
+        ${row.isPinned
+          ? html`<span class="rt-assign-tag pin mono">
+              고정${row.matchesDefault ? ' · default와 같음' : ''}
+            </span>`
+          : html`<span class="rt-assign-tag mono">↳ default 폴백</span>`}
+        ${row.isPinned
+          ? html`
+              <button
+                type="button"
+                class="rt-add-cancel"
+                disabled=${typedPatchDisabled}
+                data-testid=${`runtime-assignment-${row.keeper.name}-clear`}
+                onClick=${() => clearAssignment(row.keeper.name)}
+              >폴백</button>
+            `
+          : html`
+              <button
+                type="button"
+                class="rt-save"
+                disabled=${typedPatchDisabled || !canPinCurrent}
+                data-testid=${`runtime-assignment-${row.keeper.name}-pin-current`}
+                onClick=${() => updateAssignment(row.keeper.name, row.current)}
+              >고정</button>
+            `}
       </div>
     `
   }
@@ -530,6 +576,9 @@ export function RuntimeEnvironmentEditor({
            save. -->
       <div class=${section === 'providers' ? '' : 'hidden'} data-testid="runtime-section-providers">
         <div class="rt-cards">
+          ${providerDeleteError ? html`
+            <div class="rt-warn" role="alert" data-testid="runtime-delete-provider-error">${providerDeleteError}</div>
+          ` : null}
           ${environment.providers.map(provider => {
             const providerTransportField = transportField(provider)
             return html`
@@ -538,6 +587,13 @@ export function RuntimeEnvironmentEditor({
                 <span class="rt-card-id mono">${provider.id}</span>
                 <span class="rt-card-name">${provider.displayName}</span>
                 <span class="rt-proto mono">${provider.protocol || '—'}</span>
+                <button
+                  type="button"
+                  class="rt-delete-provider"
+                  disabled=${isDisabled}
+                  data-testid=${`runtime-provider-${provider.id}-delete`}
+                  onClick=${() => deleteProvider(provider.id)}
+                >삭제</button>
               </div>
               <div class="rt-field">
                 <span class="sub-k">${providerTransportField}</span>
@@ -979,7 +1035,7 @@ export function RuntimeEnvironmentEditor({
       <div class=${section === 'assignments' ? '' : 'hidden'} data-testid="runtime-section-assignments">
         <div class="rt-assigns">
           <div class="rt-note">
-            [runtime.assignments] — keeper → 런타임 id. <span class="mono">default</span>와 같으면 toml에서 생략(폴백).
+            [runtime.assignments] — keeper → 런타임 id.
           </div>
           ${keeperList.length === 0 ? html`
             <div class="rt-note" data-testid="runtime-assignments-empty">표시할 keeper가 없습니다.</div>

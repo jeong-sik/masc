@@ -12,8 +12,25 @@ val startup_config_resolution : base_path:string -> Config_dir_resolver.resoluti
 
 type model_catalog_env_resolution =
   { path : string
-  ; source : string
+  ; source : model_catalog_env_source
   }
+
+and model_catalog_env_source =
+  | Env_var of model_catalog_env_var
+  | Parent_file of
+      { origin : model_catalog_parent_origin
+      ; filename : string
+      }
+
+and model_catalog_env_var =
+  | Oas_model_catalog
+  | Masc_model_catalog
+
+and model_catalog_parent_origin =
+  | Cwd_parent
+  | Argv0_parent
+
+val model_catalog_env_source_to_string : model_catalog_env_source -> string
 
 val resolve_oas_model_catalog_path :
   ?env:(string -> string option) ->
@@ -22,7 +39,15 @@ val resolve_oas_model_catalog_path :
   unit ->
   model_catalog_env_resolution option
 
-val configure_oas_model_catalog_env : unit -> model_catalog_env_resolution option
+val configure_oas_model_catalog_env :
+  ?env:(string -> string option) ->
+  ?cwd:string ->
+  ?argv0:string ->
+  ?putenv:(string -> string -> unit) ->
+  ?preload_agent_sdk_catalog:(unit -> unit) ->
+  ?agent_sdk_catalog:(unit -> Llm_provider.Model_catalog.t option) ->
+  unit ->
+  model_catalog_env_resolution option
 
 (** {1 Runtime Context}
 

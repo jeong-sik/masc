@@ -59,6 +59,7 @@ import {
   keeperRecovering,
   keeperSending,
   keeperStatusDetails,
+  keeperStreamLastEventAt,
   keeperStreamStartedAt,
   keeperThreads,
   activeStreamRequestId,
@@ -249,6 +250,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
   beforeEach(() => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
+    keeperStreamLastEventAt.value = {}
     _clearPendingKeeperChatRequestsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()
@@ -764,6 +766,43 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+
+  it('throttles stream heartbeat signal updates during dense event bursts', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const observed: Array<number | null> = []
+      streamKeeperMessage.mockImplementation(async (
+        _name: string,
+        _message: string,
+        opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+      ) => {
+        vi.setSystemTime(1_000)
+        opts.onEvent({ type: 'RUN_STARTED' })
+        observed.push(keeperStreamLastEventAt.value.echo ?? null)
+
+        vi.setSystemTime(1_200)
+        opts.onEvent({ type: 'TEXT_MESSAGE_START' })
+        observed.push(keeperStreamLastEventAt.value.echo ?? null)
+
+        vi.setSystemTime(1_500)
+        opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'ok' })
+        observed.push(keeperStreamLastEventAt.value.echo ?? null)
+
+        vi.setSystemTime(2_100)
+        opts.onEvent({ type: 'RUN_FINISHED' })
+        observed.push(keeperStreamLastEventAt.value.echo ?? null)
+        return { terminal: true }
+      })
+
+      await sendKeeperThreadMessage('echo', '진행 상황?')
+
+      expect(observed).toEqual([1_000, 1_000, 1_000, 2_100])
+      expect(keeperStreamLastEventAt.value.echo).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('hydrates tool outputs when a live stream finishes a tool call', async () => {

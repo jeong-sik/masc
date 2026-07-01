@@ -39,6 +39,7 @@ import {
   fetchRuntimeDefaults,
   fetchRuntimeModelMetrics,
   patchRuntimeAssignment,
+  patchRuntimeMediaFailover,
   patchRuntimeRouting,
   patchKeeperConfig,
   saveRuntimeTomlConfig,
@@ -2336,6 +2337,35 @@ describe('runtime.toml raw config API', () => {
     expect(result.source_text).toBe(sourceText)
   })
 
+  it('posts ordered media failover routing patches', async () => {
+    const sourceText = '[runtime]\nmedia_failover = ["rt-a", "rt-b"]\n'
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        ok: true,
+        path: '/tmp/.masc/config/runtime.toml',
+        file_name: 'runtime.toml',
+        source_text: sourceText,
+        reloaded: true,
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await patchRuntimeMediaFailover(['rt-a', 'rt-b'])
+
+    expect(devTokenMock.ensureDevToken).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/v1/runtime/config/routing')
+    expect(init.method).toBe('POST')
+    expect(JSON.parse(init.body as string)).toEqual({
+      lane: 'media_failover',
+      runtime_ids: ['rt-a', 'rt-b'],
+    })
+    expect(result.source_text).toBe(sourceText)
+  })
+
   it('posts runtime assignment patches without client-side TOML text', async () => {
     const sourceText = '[runtime.assignments]\nsangsu = "openai.gpt"\n'
     const fetchMock = vi.fn().mockResolvedValue(
@@ -2767,6 +2797,7 @@ describe('fetchRuntimeDefaults', () => {
       model_routing: {
         keeper_assignments: [{ keeper: 'analyst', runtime_id: 'openai.gpt-4o' }],
         librarian_runtime_id: null,
+        structured_judge_runtime_id: null,
         cross_verifier_runtime_id: null,
         media_failover: [],
       },

@@ -258,6 +258,13 @@ type operator_disposition_reason =
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
   | Reason_completion_contract_unsatisfied
+  | Reason_passive_no_action
+  (** RFC-0303 Phase 0: a passive-only turn ([Contract_passive_only]) paired with
+      [Disp_pass]. The turn produced activity (thinking / defer / choosing to
+      wait) but took no execution/completion action; it is not an operator page.
+      Distinct from [Reason_completion_contract_unsatisfied] ([Disp_pause_human]),
+      which remains for the genuinely-unsatisfied contract variants. Kept as
+      inert dashboard telemetry — it does not raise needs_attention. *)
   | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled

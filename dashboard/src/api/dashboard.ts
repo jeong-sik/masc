@@ -140,6 +140,7 @@ export {
   fetchRuntimeDefaults,
   saveRuntimeTomlConfig,
   patchRuntimeAssignment,
+  patchRuntimeMediaFailover,
   patchRuntimeRouting,
 } from './dashboard-runtime'
 

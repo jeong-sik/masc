@@ -20,8 +20,12 @@ import type {
   RuntimeEntry,
   RuntimeDefaultsResponse,
 } from '../api/dashboard.js'
+import {
+  patchRuntimeMediaFailover,
+  patchRuntimeRouting,
+  type RuntimeRoutingLane,
+} from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
-import { envBool } from '../config/env'
 import { shellConfigResolution, shellRuntimeResolution } from '../store'
 import type { DashboardConfigResolutionItem } from '../types'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
@@ -31,10 +35,17 @@ import { ThemeSwitch } from './theme-switch'
 import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
 import type { ComponentChildren } from 'preact'
+import { errorToString } from '../lib/format-string'
+import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 
 type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
+type RuntimeRoutingSaveState = 'idle' | 'saving' | 'saved' | 'error'
+type RuntimeSelectOption = {
+  readonly id: string
+  readonly label: string
+}
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
 
@@ -264,6 +275,167 @@ function RuntimeCatalogCard({
   `
 }
 
+function uniqueRuntimeSelectOptions(options: RuntimeSelectOption[]): RuntimeSelectOption[] {
+  const seen = new Set<string>()
+  const result: RuntimeSelectOption[] = []
+  for (const option of options) {
+    const id = option.id.trim()
+    if (id === '' || seen.has(id)) continue
+    seen.add(id)
+    result.push({ id, label: option.label })
+  }
+  return result
+}
+
+function runtimeSelectOptionsFromDefaults(entries: readonly RuntimeEntry[]): RuntimeSelectOption[] {
+  return uniqueRuntimeSelectOptions(entries.map(entry => ({
+    id: entry.id,
+    label: `${entry.id} · ${entry.model}`,
+  })))
+}
+
+function runtimeSelectOptionsFromCatalog(entries: readonly DashboardRuntimeProviderSnapshot[]): RuntimeSelectOption[] {
+  return uniqueRuntimeSelectOptions(entries.map(entry => {
+    const id = runtimeCatalogKey(entry)
+    const model = entry.model_api_name ?? entry.model_id ?? entry.models[0] ?? 'model 미수집'
+    return { id, label: `${id} · ${model}` }
+  }))
+}
+
+function RuntimeRoutingSelect({
+  label,
+  hint,
+  value,
+  fallbackLabel,
+  options,
+  disabled,
+  testId,
+  onChange,
+}: {
+  label: string
+  hint: string
+  value: string | null
+  fallbackLabel: string
+  options: readonly RuntimeSelectOption[]
+  disabled: boolean
+  testId: string
+  onChange: (runtimeId: string | null) => void
+}) {
+  return html`
+    <${SetRow} label=${label} hint=${hint}>
+      <select
+        class="set-input mono set-runtime-route-select"
+        data-testid=${testId}
+        value=${value ?? ''}
+        disabled=${disabled || options.length === 0}
+        onInput=${(event: Event) => {
+          const next = (event.currentTarget as HTMLSelectElement).value.trim()
+          onChange(next === '' ? null : next)
+        }}
+      >
+        <option value="">${fallbackLabel}</option>
+        ${options.map(option => html`
+          <option key=${option.id} value=${option.id}>${option.label}</option>
+        `)}
+      </select>
+    <//>
+  `
+}
+
+function RuntimeMediaFailoverEditor({
+  value,
+  options,
+  disabled,
+  onChange,
+}: {
+  value: readonly string[]
+  options: readonly RuntimeSelectOption[]
+  disabled: boolean
+  onChange: (runtimeIds: string[]) => void
+}) {
+  const selected = new Set(value)
+  const addOptions = options.filter(option => !selected.has(option.id))
+  const move = (index: number, delta: number) => {
+    const target = index + delta
+    if (target < 0 || target >= value.length) return
+    const next = [...value]
+    const current = next[index]
+    if (current === undefined) return
+    next[index] = next[target] ?? current
+    next[target] = current
+    onChange(next)
+  }
+  const remove = (runtimeId: string) => {
+    onChange(value.filter(id => id !== runtimeId))
+  }
+
+  return html`
+    <${SetRow} label="Media failover" hint="[runtime].media_failover ordered reroute list">
+      <div class="set-runtime-media" data-testid="runtime-media-failover-editor">
+        <div class="set-runtime-media-list">
+          ${value.length === 0
+            ? html`<span class="set-hint" data-testid="runtime-media-failover-empty">none</span>`
+            : value.map((runtimeId, index) => html`
+              <span class="set-runtime-media-chip" key=${`${runtimeId}-${index}`}>
+                <span class="mono">${runtimeId}</span>
+                <button
+                  type="button"
+                  class="set-route-icon"
+                  disabled=${disabled || index === 0}
+                  aria-label=${`${runtimeId} 위로 이동`}
+                  onClick=${() => move(index, -1)}
+                >↑</button>
+                <button
+                  type="button"
+                  class="set-route-icon"
+                  disabled=${disabled || index === value.length - 1}
+                  aria-label=${`${runtimeId} 아래로 이동`}
+                  onClick=${() => move(index, 1)}
+                >↓</button>
+                <button
+                  type="button"
+                  class="set-route-icon danger"
+                  disabled=${disabled}
+                  data-testid="runtime-media-failover-remove"
+                  aria-label=${`${runtimeId} 제거`}
+                  onClick=${() => remove(runtimeId)}
+                >×</button>
+              </span>
+            `)}
+        </div>
+        <div class="set-runtime-media-actions">
+          <select
+            class="set-input mono set-runtime-route-select"
+            data-testid="runtime-media-failover-add"
+            value=""
+            disabled=${disabled || addOptions.length === 0}
+            onInput=${(event: Event) => {
+              const select = event.currentTarget as HTMLSelectElement
+              const next = select.value.trim()
+              select.value = ''
+              if (next !== '') onChange([...value, next])
+            }}
+          >
+            <option value="">failover 추가</option>
+            ${addOptions.map(option => html`
+              <option key=${option.id} value=${option.id}>${option.label}</option>
+            `)}
+          </select>
+          <button
+            type="button"
+            class="set-route-clear"
+            disabled=${disabled || value.length === 0}
+            data-testid="runtime-media-failover-clear"
+            onClick=${() => onChange([])}
+          >
+            비우기
+          </button>
+        </div>
+      </div>
+    <//>
+  `
+}
+
 function configEntry(data: DashboardConfigResponse | null, env: string): ConfigEntry | null {
   if (!data) return null
   for (const entries of Object.values(data.categories)) {
@@ -385,16 +557,12 @@ type PathResolutionAvailability = 'ready' | 'partial' | 'loading' | 'unavailable
 
 function settingsSectionState(
   section: SectionId,
-  fusionSettingsWritable: boolean,
   pathResolutionAvailability: PathResolutionAvailability = 'ready',
 ): { mode: SettingsSectionMode; label: string } {
   if (section === 'runtime') return { mode: 'live', label: 'runtime.toml + provider catalog' }
   if (section === 'runtimes') return { mode: 'live', label: 'runtime.toml live-backed' }
   if (section === 'prompts') return { mode: 'live', label: 'prompt registry live-backed' }
-  if (section === 'fusion' && fusionSettingsWritable) {
-    return { mode: 'live', label: 'runtime.toml live-backed' }
-  }
-  if (section === 'fusion') return { mode: 'local', label: 'dedicated writer disabled' }
+  if (section === 'fusion') return { mode: 'live', label: 'runtime.toml live-backed' }
   if (section === 'paths') {
     if (pathResolutionAvailability === 'ready') return { mode: 'live', label: 'resolved by server' }
     if (pathResolutionAvailability === 'partial') return { mode: 'mixed', label: 'partial path resolution' }
@@ -617,6 +785,8 @@ export function SettingsSurface() {
   const [runtimeDefaults, setRuntimeDefaults] = useState<RuntimeDefaultsResponse | null>(null)
   const [runtimeProviders, setRuntimeProviders] = useState<DashboardRuntimeProvidersResponse | null>(null)
   const [runtimeCatalogStatus, setRuntimeCatalogStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [runtimeRoutingStatus, setRuntimeRoutingStatus] = useState<RuntimeRoutingSaveState>('idle')
+  const [runtimeRoutingMessage, setRuntimeRoutingMessage] = useState('')
 
   useEffect(() => {
     let active = true
@@ -651,8 +821,82 @@ export function SettingsSurface() {
     return () => { active = false }
   }, [])
 
-  // fusion (config/runtime.toml [fusion]) — keeper-v2 settings.jsx:178-182
-  const fusionSettingsWritable = envBool('VITE_FUSION_SETTINGS_WRITABLE', false)
+  async function reloadRuntimeDefaultsSnapshot(): Promise<void> {
+    try {
+      const resp = await fetchRuntimeDefaults()
+      setRuntimeDefaults(resp)
+    } catch (err) {
+      setRuntimeDefaults(null)
+      throw err
+    }
+  }
+
+  async function reloadRuntimeProvidersSnapshot(): Promise<void> {
+    setRuntimeCatalogStatus('loading')
+    try {
+      const resp = await fetchRuntimeProviders()
+      setRuntimeProviders(resp)
+      setRuntimeCatalogStatus('ready')
+    } catch (err) {
+      setRuntimeProviders(null)
+      setRuntimeCatalogStatus('error')
+      throw err
+    }
+  }
+
+  async function refreshRuntimeSettingsSnapshot(): Promise<void> {
+    await Promise.all([
+      reloadRuntimeDefaultsSnapshot(),
+      reloadRuntimeProvidersSnapshot(),
+    ])
+  }
+
+  async function finishRuntimeRoutingWrite(): Promise<void> {
+    await refreshRuntimeSettingsSnapshot()
+    await refreshRuntimeConfigConsumers()
+  }
+
+  async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null): Promise<void> {
+    if (runtimeRoutingStatus === 'saving') return
+    setRuntimeRoutingStatus('saving')
+    setRuntimeRoutingMessage('')
+    try {
+      await patchRuntimeRouting(lane, runtimeId)
+    } catch (err) {
+      setRuntimeRoutingStatus('error')
+      setRuntimeRoutingMessage(errorToString(err))
+      return
+    }
+    try {
+      await finishRuntimeRoutingWrite()
+      setRuntimeRoutingStatus('saved')
+      setRuntimeRoutingMessage('runtime.toml routing 저장됨')
+    } catch (err) {
+      setRuntimeRoutingStatus('error')
+      setRuntimeRoutingMessage(`저장됨, 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+    }
+  }
+
+  async function applyMediaFailoverPatch(runtimeIds: string[]): Promise<void> {
+    if (runtimeRoutingStatus === 'saving') return
+    setRuntimeRoutingStatus('saving')
+    setRuntimeRoutingMessage('')
+    try {
+      await patchRuntimeMediaFailover(runtimeIds)
+    } catch (err) {
+      setRuntimeRoutingStatus('error')
+      setRuntimeRoutingMessage(errorToString(err))
+      return
+    }
+    try {
+      await finishRuntimeRoutingWrite()
+      setRuntimeRoutingStatus('saved')
+      setRuntimeRoutingMessage('runtime.toml media_failover 저장됨')
+    } catch (err) {
+      setRuntimeRoutingStatus('error')
+      setRuntimeRoutingMessage(`저장됨, 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+    }
+  }
 
   // display
   const density = tweaksDensity.value
@@ -683,8 +927,13 @@ export function SettingsSurface() {
     ? keeperAssignments.length
     : runtimeProviders?.assignment_governance?.assignment_count ?? 0
   const librarianRuntime = runtimeDefaults?.model_routing.librarian_runtime_id ?? null
+  const structuredJudgeRuntime = runtimeDefaults?.model_routing.structured_judge_runtime_id ?? null
   const crossVerifierRuntime = runtimeDefaults?.model_routing.cross_verifier_runtime_id ?? null
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
+  const runtimeSelectOptions = runtimeEntries.length > 0
+    ? runtimeSelectOptionsFromDefaults(runtimeEntries)
+    : runtimeSelectOptionsFromCatalog(runtimeCatalogEntries)
+  const runtimeRoutingSaving = runtimeRoutingStatus === 'saving'
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
   const hasRuntimePathResolution = runtimeResolution !== null
@@ -692,7 +941,7 @@ export function SettingsSurface() {
   const hasShellPathResolution = hasRuntimePathResolution || hasConfigPathResolution
   const hasPartialPathProjection = dashboardConfigStatus === 'ready' || runtimeConfigPath !== null
   const pathAvailability = pathResolutionAvailability(dashboardConfigStatus, hasShellPathResolution, hasPartialPathProjection)
-  const baseSectionState = settingsSectionState(sec, fusionSettingsWritable, pathAvailability)
+  const baseSectionState = settingsSectionState(sec, pathAvailability)
   const sectionState =
     sec === 'notify' && dashboardConfigStatus === 'loading'
       ? { mode: 'mixed' as const, label: 'thresholds loading' }
@@ -883,14 +1132,48 @@ export function SettingsSurface() {
 
                 <div class="settings-runtime-section" data-runtime-section="routing" data-testid="runtime-routing-section">
                   <div class="set-sub-h">Model routing</div>
-                  <div class="set-route-summary" data-testid="runtime-routing-summary">
-                    ${librarianRuntime
-                      ? html`<span><span class="sub-k">librarian</span><span class="mono">${librarianRuntime}</span></span>`
-                      : html`<span><span class="sub-k">librarian</span><span class="mono">default runtime</span></span>`}
-                    ${crossVerifierRuntime
-                      ? html`<span><span class="sub-k">cross verifier</span><span class="mono">${crossVerifierRuntime}</span></span>`
-                      : html`<span><span class="sub-k">cross verifier</span><span class="mono">default runtime</span></span>`}
-                    <span><span class="sub-k">media failover</span><span class="mono">${mediaFailover.length > 0 ? mediaFailover.join(', ') : 'none'}</span></span>
+                  <div class="settings-runtime-routing-editor" data-testid="runtime-routing-summary">
+                    <${RuntimeRoutingSelect}
+                      label="Librarian"
+                      hint="[runtime].librarian"
+                      value=${librarianRuntime}
+                      fallbackLabel="default runtime"
+                      options=${runtimeSelectOptions}
+                      disabled=${runtimeRoutingSaving}
+                      testId="runtime-routing-librarian"
+                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('librarian', runtimeId)}
+                    />
+                    <${RuntimeRoutingSelect}
+                      label="Structured judge"
+                      hint="[runtime].structured_judge"
+                      value=${structuredJudgeRuntime}
+                      fallbackLabel="librarian/default fallback"
+                      options=${runtimeSelectOptions}
+                      disabled=${runtimeRoutingSaving}
+                      testId="runtime-routing-structured-judge"
+                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('structured_judge', runtimeId)}
+                    />
+                    <${RuntimeRoutingSelect}
+                      label="Cross verifier"
+                      hint="[runtime].cross_verifier"
+                      value=${crossVerifierRuntime}
+                      fallbackLabel="default runtime"
+                      options=${runtimeSelectOptions}
+                      disabled=${runtimeRoutingSaving}
+                      testId="runtime-routing-cross-verifier"
+                      onChange=${(runtimeId: string | null) => void applyRuntimeRoutingPatch('cross_verifier', runtimeId)}
+                    />
+                    <${RuntimeMediaFailoverEditor}
+                      value=${mediaFailover}
+                      options=${runtimeSelectOptions}
+                      disabled=${runtimeRoutingSaving}
+                      onChange=${(runtimeIds: string[]) => void applyMediaFailoverPatch(runtimeIds)}
+                    />
+                    ${runtimeRoutingStatus === 'saving'
+                      ? html`<div class="set-hint" data-testid="runtime-routing-saving">runtime.toml 저장 중...</div>`
+                      : runtimeRoutingMessage
+                        ? html`<div class=${runtimeRoutingStatus === 'error' ? 'set-err' : 'set-ok'} data-testid="runtime-routing-message">${runtimeRoutingMessage}</div>`
+                        : null}
                   </div>
                 </div>
 
@@ -923,29 +1206,7 @@ export function SettingsSurface() {
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 <span class="mono">masc_fusion</span> 의 out-of-band 심의 루프 (RFC-0252). 서로 다른 모델 패밀리로 패널을 구성해 관점 다양성을 확보하고, 심판이 종합합니다. fusion이 발화 가치 있는지는 keeper가 판단하고 게이트는 남용만 막습니다.
               </div>
-              ${fusionSettingsWritable
-                ? html`<${FusionSettingsPanel} />`
-                : html`
-                <div data-testid="fusion-readonly-no-writer">
-                  <${SetRow} label="Fusion settings" hint="[fusion] in runtime.toml">
-                    <div class="set-truth-value" data-testid="fusion-no-writer">
-                      <span class="mono">dedicated writer disabled</span>
-                      <span class="set-truth-source">no hardcoded preview</span>
-                    </div>
-                  <//>
-                  <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                    이 섹션은 live 값을 읽지 못할 때 문서 기본값을 흉내 내지 않습니다. 실제 값 확인·수정은 runtime.toml editor에서 합니다.
-                  </div>
-                  <button
-                    type="button"
-                    class="set-rt-open"
-                    data-testid="fusion-open-runtime-toml"
-                    onClick=${() => openSection('runtimes')}
-                  >
-                    runtime.toml 열기
-                  </button>
-                </div>
-              `}
+              <${FusionSettingsPanel} />
             `}
 
             ${sec === 'paths' && html`

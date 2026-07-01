@@ -482,9 +482,14 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   const prefix = `providers.${providerId}`
   const prefixDot = `providers.${providerId}.`
   const bindingPrefixDot = `${providerId}.`
+  const canDeleteBindingNamespace = !isReservedRuntimeTomlId(providerId)
   const sectionsToDelete = document.sections
     .map(s => s.name)
-    .filter(name => name === prefix || name.startsWith(prefixDot) || name.startsWith(bindingPrefixDot))
+    .filter(name =>
+      name === prefix ||
+      name.startsWith(prefixDot) ||
+      (canDeleteBindingNamespace && name.startsWith(bindingPrefixDot)),
+    )
   
   let next = sourceText
   for (const sec of sectionsToDelete) {
@@ -495,9 +500,13 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   const nextDocument = parseDocument(next)
   const runtimeValues = sectionValues(nextDocument, 'runtime')
   const toDeleteBindings = new Set(env.bindings.filter(b => b.providerId === providerId).map(b => b.id))
+  const remainingBindings = parseRuntimeTomlEnvironment(next).bindings.map(binding => binding.id)
   
   if (typeof runtimeValues.default === 'string' && toDeleteBindings.has(runtimeValues.default)) {
-    next = deleteRuntimeTomlKey(next, 'runtime', 'default')
+    const fallback = remainingBindings[0]
+    next = fallback
+      ? setRuntimeTomlKey(next, 'runtime', 'default', fallback)
+      : deleteRuntimeTomlKey(next, 'runtime', 'default')
   }
   if (typeof runtimeValues.librarian === 'string' && toDeleteBindings.has(runtimeValues.librarian)) {
     next = deleteRuntimeTomlKey(next, 'runtime', 'librarian')

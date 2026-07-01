@@ -387,6 +387,44 @@ let test_runtime_route_writer_clears_optional_librarian () =
       (Runtime.librarian_runtime_id ()))
 ;;
 
+let test_runtime_route_writer_updates_media_failover () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.set_runtime_media_failover
+         ~runtime_config_path:path
+         ~runtime_ids:[ "openai.gpt"; "runpod_mtp.qwen" ]
+         ()
+     with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "set_runtime_media_failover failed: %s" msg);
+    Alcotest.(check (list string))
+      "media failover cache"
+      [ "openai.gpt"; "runpod_mtp.qwen" ]
+      (Runtime.media_failover ());
+    Alcotest.(check bool)
+      "runtime.toml media_failover persisted"
+      true
+      (string_contains
+         (Fs_compat.load_file path)
+         "media_failover = [\"openai.gpt\", \"runpod_mtp.qwen\"]");
+    (match
+       Runtime.set_runtime_media_failover
+         ~runtime_config_path:path
+         ~runtime_ids:[]
+         ()
+     with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "clear runtime media_failover failed: %s" msg);
+    Alcotest.(check (list string))
+      "media failover cleared"
+      []
+      (Runtime.media_failover ());
+    Alcotest.(check bool)
+      "runtime.toml media_failover explicitly empty"
+      true
+      (string_contains (Fs_compat.load_file path) "media_failover = []"))
+;;
+
 let test_runtime_config_text_loads_runtime_toml () =
   with_runtime_file (fun path ->
     match Runtime.load_config_text ~runtime_config_path:path () with
@@ -936,6 +974,10 @@ let () =
             "dashboard runtime route writer clears optional librarian"
             `Quick
             test_runtime_route_writer_clears_optional_librarian
+        ; Alcotest.test_case
+            "dashboard runtime route writer updates media_failover"
+            `Quick
+            test_runtime_route_writer_updates_media_failover
         ; Alcotest.test_case
             "dashboard raw runtime.toml load returns full source"
             `Quick

@@ -389,6 +389,9 @@ let parse_keeper_chat_stream_request body_str =
         | Some (`Int value) when value > 0 ->
             Ok (Some (clamp_keeper_msg_timeout_sec value))
         | Some (`Float value) when value > 0.0 ->
+            (* int_of_float is unspecified (not exception-raising) for
+               out-of-range floats (e.g. 1e300, infinity); clamp_keeper_msg_timeout_sec
+               below bounds whatever int comes out into [5, 300] regardless. *)
             Ok (Some (clamp_keeper_msg_timeout_sec (int_of_float (Float.ceil value))))
         | Some (`Int _) | Some (`Float _) -> Ok None
         | Some _ -> Error "timeout_sec must be a positive number"

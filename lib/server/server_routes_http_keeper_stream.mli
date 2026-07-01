@@ -15,7 +15,9 @@
     keep working through the type-passthrough but do not
     add to the surface here.
 
-    External surface (3 entries + 1 record):
+    External surface (4 entries + 1 record):
+    - {b stream tunable} ({!sse_dashboard_retry_backoff_ms}) — SSE
+      reconnect backoff shared with the dashboard route.
     - {b request record} ({!keeper_chat_stream_request})
       returned by the parser, consumed by the handler;
       the dashboard route reaches the [.name] field via

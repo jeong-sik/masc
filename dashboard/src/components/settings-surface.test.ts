@@ -603,6 +603,45 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-worktree-base-input"]')).toBeNull()
   })
 
+  it('paths page does not fabricate unknown rows when path resolution is unavailable', async () => {
+    shellRuntimeResolution.value = null
+    shellConfigResolution.value = null
+    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config unavailable'))
+    stubRuntimeDefaults(makeRuntimeDefaults({ config_path: null }))
+    apiMock.fetchRuntimeProviders.mockResolvedValueOnce(makeRuntimeProviders({ config_path: null }))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('path resolution unavailable')
+      expect(container.querySelector('[data-testid="settings-path-resolution-error"]')?.textContent).toContain('추정값으로 표시하지 않습니다')
+    })
+    expect(container.textContent).not.toContain('미수집')
+    expect(container.textContent).not.toContain('Runtime path resolution')
+    expect(container.textContent).not.toContain('Config env inputs')
+  })
+
+  it('paths page labels provider-only path data as partial resolution', async () => {
+    shellRuntimeResolution.value = null
+    shellConfigResolution.value = null
+    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config unavailable'))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-paths"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('partial path resolution')
+      expect(container.querySelector('[data-testid="settings-runtime-path-resolution-missing"]')?.textContent).toContain('확인 가능한 값만 표시합니다')
+      expect(container.textContent).toContain('/cfg/runtime.toml')
+    })
+    expect(container.querySelector('[data-testid="settings-config-error"]')?.textContent).toContain('dashboard config projection')
+    expect(container.textContent).not.toContain('MASC_BASE_PATH')
+    expect(container.textContent).not.toContain('미수집')
+  })
+
   it('notify page shows live thresholds without fake local routing controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 

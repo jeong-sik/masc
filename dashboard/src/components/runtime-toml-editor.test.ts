@@ -732,9 +732,13 @@ describe('RuntimeTomlEditor', () => {
     const protocolOptions = Array.from(
       container.querySelectorAll('[aria-label="새 provider protocol"] option'),
     ).map(option => (option as HTMLOptionElement).value)
-    expect(protocolOptions).toEqual(['openai-compatible-http', 'ollama-http', 'messages-http'])
+    expect(protocolOptions).toEqual(['openai-compatible-http', 'ollama-http'])
     expect(protocolOptions).not.toContain('openai-compatible-cli')
     expect(protocolOptions).not.toContain('messages-cli')
+    // messages-http maps to Messages_api, which provider_kind_for_http_provider
+    // resolves to None, so a created binding would be silently dropped by
+    // materialize_config. It must not be offered by the add-provider form.
+    expect(protocolOptions).not.toContain('messages-http')
     // No transport-kind selector left to switch to 'command'.
     expect(container.querySelector('[aria-label="새 provider transport 종류"]')).toBeNull()
   })

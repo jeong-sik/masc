@@ -609,12 +609,20 @@ export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
 // (lib/runtime/runtime_adapter.ml:183-189, lib/runtime/runtime.ml:239). The
 // *-cli protocol labels parse fine but pair naturally with `command`
 // transport, so they are excluded here too until CLI materialization is
-// restored. This is an allow-list, not a filter-out of known-bad entries, so
-// a future 6th protocol defaults to non-creatable until reviewed.
+// restored. `messages-http` is excluded for the same reason: it maps to
+// `Messages_api`, and `Runtime_adapter.provider_kind_for_http_provider`
+// returns `None` for `Messages_api` (the runtime dispatches only via Ollama /
+// OpenAI-compat transports; there is no Messages-API runtime provider_kind),
+// so a `messages-http` provider created through this form would save but then
+// be silently dropped by the same `Runtime.materialize_config` `List.filter_map`
+// and never appear in the live runtime list. It stays in RUNTIME_TOML_PROTOCOLS
+// (hand-edited configs still parse) but is not offered for creation until
+// Messages_api materialization exists. This is an allow-list, not a filter-out
+// of known-bad entries, so a future protocol defaults to non-creatable until
+// reviewed.
 export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
   'openai-compatible-http',
   'ollama-http',
-  'messages-http',
 ] as const
 
 // runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],

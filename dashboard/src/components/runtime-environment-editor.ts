@@ -63,7 +63,10 @@ interface RuntimeEnvironmentEditorProps {
   disabled?: boolean
   draftDirty?: boolean
   saving?: boolean
-  onRoutingChange: (lane: 'default' | 'librarian' | 'cross_verifier', runtimeId: string | null) => void
+  onRoutingChange: (
+    lane: 'default' | 'librarian' | 'structured_judge' | 'cross_verifier',
+    runtimeId: string | null,
+  ) => void
   onAssignmentChange: (keeperName: string, runtimeId: string | null) => void
   onBindingFieldChange: (
     runtimeId: string,
@@ -243,7 +246,7 @@ export function RuntimeEnvironmentEditor({
     if (runtimeId !== '') onRoutingChange('default', runtimeId)
   }
 
-  function updateRoutingLane(lane: 'librarian' | 'cross_verifier', runtimeId: string) {
+  function updateRoutingLane(lane: 'librarian' | 'structured_judge' | 'cross_verifier', runtimeId: string) {
     onRoutingChange(lane, runtimeId === '' ? null : runtimeId)
   }
 
@@ -410,7 +413,7 @@ export function RuntimeEnvironmentEditor({
   // the label to one-word-per-line.
 
   function laneRow(
-    lane: 'default' | 'librarian' | 'cross_verifier',
+    lane: 'default' | 'librarian' | 'structured_judge' | 'cross_verifier',
     label: string,
     hint: string,
     value: string,
@@ -535,7 +538,7 @@ export function RuntimeEnvironmentEditor({
       ` : null}
 
       <!-- routing — runtime-editor.jsx:135-141. default lane is live; librarian /
-           cross_verifier are read from [runtime] and written back. -->
+           structured_judge / cross_verifier are read from [runtime] and written back. -->
       <div class=${section === 'routing' ? '' : 'hidden'} data-testid="runtime-section-routing">
         <div class="rt-note">
           런타임 id = <span class="mono">provider.model</span> (binding key). 레인은 등록된 바인딩 중에서 고릅니다.
@@ -554,6 +557,14 @@ export function RuntimeEnvironmentEditor({
           '[runtime].librarian — 턴 후 에피소드 추출, JSON 모드 필요',
           librarianLane,
           runtimeId => updateRoutingLane('librarian', runtimeId),
+          true,
+        )}
+        ${laneRow(
+          'structured_judge',
+          'structured judge',
+          '[runtime].structured_judge — provider-native schema 심판 호출',
+          environment.structuredJudgeRuntimeId,
+          runtimeId => updateRoutingLane('structured_judge', runtimeId),
           true,
         )}
         ${laneRow(

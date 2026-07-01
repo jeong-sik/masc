@@ -39,6 +39,7 @@ const baseConfig = {
 
 const richSourceText = `[runtime]
 default = "runpod_mtp.qwen"
+structured_judge = "runpod_mtp.qwen"
 
 [providers.runpod_mtp]
 display-name = "RunPod"
@@ -117,14 +118,23 @@ describe('RuntimeTomlEditor', () => {
       source_text: `${richConfig.source_text}\n[runtime.assignments]\nsangsu = ${JSON.stringify(runtimeId ?? 'runpod_mtp.qwen')}\n`,
       reloaded: true,
     }))
-    apiMocks.patchRuntimeRouting.mockImplementation(async (lane: string, runtimeId: string | null) => ({
-      ...richConfig,
-      source_text: richConfig.source_text.replace(
+    apiMocks.patchRuntimeRouting.mockImplementation(async (lane: string, runtimeId: string | null) => {
+      let sourceText = richConfig.source_text.replace(
         'default = "runpod_mtp.qwen"',
         lane === 'default' && runtimeId ? `default = "${runtimeId}"` : 'default = "runpod_mtp.qwen"',
-      ),
-      reloaded: true,
-    }))
+      )
+      sourceText = sourceText.replace(
+        'structured_judge = "runpod_mtp.qwen"',
+        lane === 'structured_judge' && runtimeId
+          ? `structured_judge = "${runtimeId}"`
+          : 'structured_judge = "runpod_mtp.qwen"',
+      )
+      return {
+        ...richConfig,
+        source_text: sourceText,
+        reloaded: true,
+      }
+    })
     apiMocks.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => ({
       ...baseConfig,
       source_text: sourceText,
@@ -349,6 +359,28 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
+  })
+
+  it('switches the structured judge runtime through the typed backend routing patch', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect((container.querySelector('[aria-label="structured_judge runtime"]') as HTMLSelectElement | null)?.value)
+        .toBe('runpod_mtp.qwen')
+    })
+
+    fireEvent.change(container.querySelector('[aria-label="structured_judge runtime"]') as HTMLSelectElement, {
+      target: { value: 'openai.gpt' },
+    })
+
+    await waitFor(() => {
+      expect(apiMocks.patchRuntimeRouting).toHaveBeenCalledWith('structured_judge', 'openai.gpt')
+      expect((container.querySelector('textarea') as HTMLTextAreaElement).value)
+        .toContain('structured_judge = "openai.gpt"')
+    })
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
   })
 
@@ -743,6 +775,7 @@ describe('RuntimeTomlEditor', () => {
     await waitFor(() => {
       const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
       expect(source).toContain('default = "openai.gpt"')
+      expect(source).not.toContain('structured_judge = "runpod_mtp.qwen"')
       expect(source).not.toContain('[providers.runpod_mtp]')
       expect(source).not.toContain('[providers.runpod_mtp.credentials]')
       expect(source).not.toContain('[runpod_mtp.qwen]')

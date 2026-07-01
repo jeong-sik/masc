@@ -1263,6 +1263,10 @@ let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
 
 let test_keeper_stream_bridge_preserves_typed_media_source () =
   let open Agent_sdk.Types in
+  (* RFC-0301: media chunks are accumulated and surfaced as a single
+     [Oas_media_delta] carrying the persisted media URL at the block stop, not a
+     per-chunk byte count. A lone [MediaDelta] therefore emits nothing until its
+     [ContentBlockStop] closes the block. *)
   let events =
     translate_oas_stream_events
       [
@@ -1277,18 +1281,22 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
                   data = "abcd";
                 };
           };
+        ContentBlockStop { index = 0 };
       ]
   in
+  let expected_ref = "/api/v1/media/" ^ Digest.to_hex (Digest.string "abcd") in
   match events with
   | [
+      Keeper_chat_events.Oas_content_block_stop { index = stop_index };
       Keeper_chat_events.Oas_media_delta
-        { index; media_type; source_type; bytes };
+        { index; media_type; source_type; media_ref };
     ] ->
+      check int "block stop index" 0 stop_index;
       check int "block index" 0 index;
       check string "media type" "image/png" media_type;
       check bool "source type" true (source_type = Base64);
-      check int "bytes" 4 bytes
-  | _ -> fail "expected typed OAS media delta"
+      check string "media ref is the persisted URL" expected_ref media_ref
+  | _ -> fail "expected typed OAS media delta carrying the persisted URL"
 
 let test_keeper_stream_bridge_preserves_non_tool_block_lifecycle () =
   let open Agent_sdk.Types in

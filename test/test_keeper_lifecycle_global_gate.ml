@@ -21,6 +21,13 @@ open Alcotest
 module WO = Masc.Keeper_world_observation
 module Readiness = Masc.Keeper_activation_readiness
 
+let contains haystack needle =
+  let hl = String.length haystack
+  and nl = String.length needle in
+  let rec at i = i + nl <= hl && (String.sub haystack i nl = needle || at (i + 1)) in
+  nl = 0 || at 0
+;;
+
 let no_provider_cooldown ~keeper_name:_ ~runtime_id:_ = None
 
 let runtime_toml =
@@ -200,7 +207,16 @@ let test_global_autonomous_off_blocks_readiness () =
   check bool "global autonomous off blocks activation" false
     r.autonomous_activation.ok;
   check (option string) "blocker is autoboot_disabled" (Some "autoboot_disabled")
-    r.autonomous_activation.blocker
+    r.autonomous_activation.blocker;
+  (* Review-flagged: the hint must not tell the operator to set
+     autoboot_enabled=true when the per-keeper flag is already true and the
+     *global* kill-switch is the actual cause -- that would send them
+     editing the wrong knob. *)
+  check bool "hint names the global env var, not the already-true meta flag"
+    true
+    (match r.autonomous_activation.hint with
+     | Some hint -> contains hint "MASC_KEEPER_AUTONOMOUS_ENABLED"
+     | None -> false)
 
 let () = init_runtime_default_for_tests ()
 

@@ -184,10 +184,10 @@ let memory_os_selection_policy ~keeper_id ~fact_tail_limit ~recent_episode_limit
   ; episodes_source = "Keeper_memory_os_io.read_episodes_tail"
   ; dashboard_fact_tail_limit = fact_tail_limit
   ; dashboard_episode_tail_limit = recent_episode_limit
-  ; recall_private_fact_limit = Keeper_memory_os_recall.default_max_facts
+  ; recall_private_fact_limit = Keeper_memory_os_policy.recall_default_max_facts
   ; recall_shared_fact_limit =
-      (if has_shared_tier then Keeper_memory_os_recall.default_max_shared_facts else 0)
-  ; recall_episode_limit = Keeper_memory_os_recall.default_max_episodes
+      (if has_shared_tier then Keeper_memory_os_policy.recall_default_max_shared_facts else 0)
+  ; recall_episode_limit = Keeper_memory_os_policy.recall_default_max_episodes
   ; category_source = "Keeper_memory_os_types.category_to_string"
   ; claim_kind_source = "Keeper_memory_os_types.claim_kind_to_string"
   ; recall_block = "Keeper_memory_os_recall.render_if_enabled"
@@ -198,7 +198,7 @@ let memory_os_selection_policy ~keeper_id ~fact_tail_limit ~recent_episode_limit
 let memory_os_dashboard_json ~keeper_id =
   let now = Time_compat.now () in
   let recent_episode_limit = 12 in
-  let fact_tail_limit = Keeper_memory_os_io.fact_store_max in
+  let fact_tail_limit = Keeper_memory_os_policy.fact_store_max in
   let episodes, episode_error =
     memory_os_read_episodes ~keeper_id ~n:recent_episode_limit
   in

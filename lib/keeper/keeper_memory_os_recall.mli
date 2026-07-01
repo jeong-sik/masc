@@ -5,13 +5,13 @@
     OAS [extra_system_context]. *)
 
 val default_max_facts : int
-(** Default number of keeper-local facts injected into the recall prompt block. *)
+(** Alias for {!Keeper_memory_os_policy.recall_default_max_facts}. *)
 
 val default_max_shared_facts : int
-(** Default number of shared-tier facts appended after keeper-local recall facts. *)
+(** Alias for {!Keeper_memory_os_policy.recall_default_max_shared_facts}. *)
 
 val default_max_episodes : int
-(** Default number of memory episodes injected into the recall prompt block. *)
+(** Alias for {!Keeper_memory_os_policy.recall_default_max_episodes}. *)
 
 val render_context
   :  keeper_id:string

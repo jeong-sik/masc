@@ -768,10 +768,18 @@ describe('SettingsSurface', () => {
   })
 
   it('log filter chips filter live rows from the ring', async () => {
-    // 6 ring entries mapped to rows: tool(/masc_/)=3, success(ok)=3, failure(fail)=2.
+    // 7 ring entries mapped to rows: tool(category/details or /masc_/)=4,
+    // success(ok)=4, failure(fail)=2.
     apiMock.fetchLogs.mockResolvedValue({
-      total: 6,
+      total: 7,
       entries: [
+        makeLogEntry({
+          seq: 7,
+          level: 'INFO',
+          message: 'shell exec completed',
+          category: 'tool',
+          details: { tool_name: 'shell.exec' },
+        }),
         makeLogEntry({ seq: 6, level: 'INFO', message: 'masc_start 완료' }),
         makeLogEntry({ seq: 5, level: 'INFO', message: 'masc_compact 완료' }),
         makeLogEntry({ seq: 4, level: 'WARN', message: '컨텍스트 91% — compact 예약' }),
@@ -787,15 +795,16 @@ describe('SettingsSurface', () => {
     await fireEvent.click(logsNav)
 
     const allRows = () => container.querySelectorAll('[data-testid="log-row"]')
-    await waitFor(() => expect(allRows().length).toBe(6))
+    await waitFor(() => expect(allRows().length).toBe(7))
 
     const toolFilter = container.querySelector('[data-filter="tool"]') as HTMLButtonElement
     await fireEvent.click(toolFilter)
-    expect(allRows().length).toBe(3)
+    expect(allRows().length).toBe(4)
+    expect(container.textContent).toContain('shell exec completed')
 
     const successFilter = container.querySelector('[data-filter="success"]') as HTMLButtonElement
     await fireEvent.click(successFilter)
-    expect(allRows().length).toBe(3)
+    expect(allRows().length).toBe(4)
 
     const failureFilter = container.querySelector('[data-filter="failure"]') as HTMLButtonElement
     await fireEvent.click(failureFilter)
@@ -803,7 +812,7 @@ describe('SettingsSurface', () => {
 
     const allFilter = container.querySelector('[data-filter="all"]') as HTMLButtonElement
     await fireEvent.click(allFilter)
-    expect(allRows().length).toBe(6)
+    expect(allRows().length).toBe(7)
   })
 
   it('renders the fusion preset section (panel families + judge) as read-only defaults', async () => {
@@ -1011,7 +1020,18 @@ describe('settings read-surface helpers', () => {
         message: 'masc_trace_window 실패',
       }),
     )
-    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail'])
+    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail', true])
+  })
+
+  it('logEntryToSysRow preserves structured tool classification for filters', () => {
+    const row = logEntryToSysRow(
+      makeLogEntry({
+        category: 'tool',
+        details: { tool_name: 'shell.exec' },
+        message: 'shell exec completed',
+      }),
+    )
+    expect(row[5]).toBe(true)
   })
 
   it('logEntryToSysRow falls back to module then (root) for identity', () => {

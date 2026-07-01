@@ -28,6 +28,7 @@ import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
+import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
 import type { ComponentChildren } from 'preact'
 
@@ -131,12 +132,12 @@ const FUSION: FusionConfig = {
   maxToolCallsPerPanel: 0,
 }
 
-// System-log row: [time, level, identity, message, status]. Derived from live
+// System-log row: [time, level, identity, message, status, isTool]. Derived from live
 // ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
 // polls. Status is derived from the entry level only (error→fail, warn→warn,
 // else→ok); the in-progress "run" state is not knowable from a settled ring
 // entry, so it is never fabricated.
-type SysLogRow = [string, string, string, string, string]
+type SysLogRow = [string, string, string, string, string, boolean]
 
 const SETTINGS_LOG_LEVEL_FAIL = 'error'
 const SETTINGS_LOG_LEVEL_WARN = 'warn'
@@ -166,7 +167,8 @@ function logRowClock(ts: string): string {
 export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   const level = entry.level.toLowerCase()
   const identity = entry.keeper_name?.trim() || entry.module?.trim() || '(root)'
-  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level)]
+  const isTool = logDisplayKind(entry) === 'tool' || /masc_/.test(entry.message)
+  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level), isTool]
 }
 
 function SetSeg({
@@ -517,7 +519,7 @@ function LogViewer() {
 
   const rows = allRows.filter(r => {
     if (filter === 'all') return true
-    if (filter === 'tool') return /masc_/.test(r[3])
+    if (filter === 'tool') return r[5]
     if (filter === 'success') return r[4] === 'ok'
     if (filter === 'failure') return r[4] === 'fail'
     return true

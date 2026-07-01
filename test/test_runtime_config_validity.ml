@@ -507,7 +507,7 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
       , _librarian
       , _structured_judge
       , _cross_verifier
-      , _media_failover ) ->
+      , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
     List.iter
       (fun (runtime : Runtime.t) ->
@@ -580,7 +580,7 @@ let test_repo_runtime_toml_loads () =
       , _librarian
       , structured_judge
       , _cross_verifier
-      , _media_failover ) ->
+      , _media_failover , _lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
@@ -1245,7 +1245,7 @@ let test_runtime_toml_max_concurrent_flows_to_candidate () =
         , _librarian
         , _structured_judge
         , _cross_verifier
-        , _media_failover ) ->
+        , _media_failover , _lanes ) ->
       let expect id expected =
         match
           List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
@@ -1310,12 +1310,12 @@ let test_librarian_runtime_routing () =
         , librarian
         , _structured_judge
         , _cross_verifier
-        , _media_failover ) ->
+        , _media_failover , _lanes ) ->
       check (option string) "librarian runtime id" (Some "local.libr") librarian);
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent librarian should load: %s" msg
-    | Ok (_, _, _, librarian, _structured_judge, _cross_verifier, _media_failover) ->
+    | Ok (_, _, _, librarian, _structured_judge, _cross_verifier, _media_failover, _lanes) ->
       check (option string) "librarian unset is None" None librarian);
   with_temp_runtime_toml (base ^ "librarian = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1331,13 +1331,13 @@ let test_librarian_runtime_routing () =
         , _librarian
         , _structured_judge
         , cross_verifier
-        , _media_failover ) ->
+        , _media_failover , _lanes ) ->
       check (option string) "cross_verifier runtime id" (Some "local.libr")
         cross_verifier);
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, _structured_judge, cross_verifier, _media_failover) ->
+    | Ok (_, _, _, _, _structured_judge, cross_verifier, _media_failover, _lanes) ->
       check (option string) "cross_verifier unset is None" None cross_verifier);
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1381,7 +1381,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "structured_judge routing should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _, _, _) ->
       check
         (option string)
         "structured_judge runtime id"
@@ -1390,7 +1390,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _, _, _) ->
       check (option string) "structured_judge unset is None" None structured_judge);
   with_temp_runtime_toml (base ^ "structured_judge = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with

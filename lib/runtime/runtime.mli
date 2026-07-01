@@ -59,19 +59,21 @@ val load_list :
        * string option
        * string option
        * string list
+       * Runtime_lane.t list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
     keeper_assignments, librarian_runtime_id, structured_judge_runtime_id,
-    cross_verifier_runtime_id, media_failover)]. Fails ([Error]) if
+    cross_verifier_runtime_id, media_failover, lanes)]. Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target does not resolve to a configured runtime, if
     [\[runtime\].librarian] / [\[runtime\].structured_judge] /
-    [\[runtime\].cross_verifier] is set to an unresolved id, or if any
-    [\[runtime\].media_failover] entry does not resolve (mirrors default
+    [\[runtime\].cross_verifier] is set to an unresolved id, if any
+    [\[runtime\].media_failover] entry does not resolve, or if any
+    [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
-    list. *)
+    list; [lanes] is the ordered failover candidate lists. *)
 
 val runtime_ids : t list -> string list
 
@@ -158,6 +160,19 @@ val media_failover : unit -> string list
     the turn reroutes to the first that admits it. [[]] = derive capable runtimes
     from declared [\[models.*.capabilities\]] in declaration order. Every entry is
     validated at load so each resolves to a configured runtime. *)
+
+val lanes : unit -> Runtime_lane.t list
+(** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
+    an ordered list of runtime ids validated at load. *)
+
+val get_lane_by_id : string -> Runtime_lane.t option
+(** Lane with the given id, or [None] if no such lane is configured. *)
+
+val resolve_assignment :
+  string -> [ `Lane of Runtime_lane.t | `Single_runtime of t | `Missing ]
+(** Resolve a keeper assignment id to either a lane or a single runtime. Lanes
+    shadow runtimes. [Missing] means the id does not name a known lane or
+    runtime. *)
 
 val pause_threshold : unit -> pause_threshold
 (** [\[pause\]] threshold knobs from runtime.toml, or

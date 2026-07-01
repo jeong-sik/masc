@@ -755,12 +755,17 @@ describe('SettingsSurface', () => {
     expect(allRows().length).toBe(6)
   })
 
-  it('renders the fusion preset section (panel families + judge) read-only', async () => {
+  it('renders the fusion preset section (panel families + judge) as read-only defaults', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-fusion"]') as HTMLElement)
 
     expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('패널·심판 심의')
+    expect(container.querySelector('[data-testid="fusion-readonly-preview"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="fusion-readonly-enabled"]')?.textContent).toBe('enabled')
+    expect(container.querySelector('[data-testid="fusion-readonly-preset"]')?.textContent).toBe('trio')
+    expect(container.querySelector('[data-testid="fusion-readonly-panels"]')?.textContent).toBe('2')
+    expect(container.querySelector('[data-testid="fusion-readonly-web-tools"]')?.textContent).toBe('disabled')
     // trio preset lanes: 3 panel models + 1 judge, with prototype labels.
     const lanes = container.querySelectorAll('.set-fus-lane')
     expect(lanes.length).toBe(2)
@@ -769,8 +774,10 @@ describe('SettingsSurface', () => {
     expect(models).toContain('glm-coding.glm-5-turbo')
     expect(models).toContain('ollama_cloud.minimax-m3')
     expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('deepseek.deepseek-v4-pro')
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
-    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).disabled).toBe(false)
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('documented defaults preview')
+    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-stepper"]')).toBeNull()
     expect(container.querySelector('[data-testid="fusion-settings-editor"]')).toBeNull()
     expect(container.textContent).not.toContain('per_hour_budget')
   })

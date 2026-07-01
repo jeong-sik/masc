@@ -571,6 +571,7 @@ function settingsSectionState(
   if (section === 'fusion' && fusionSettingsWritable) {
     return { mode: 'live', label: 'runtime.toml live-backed' }
   }
+  if (section === 'fusion') return { mode: 'local', label: 'documented defaults preview' }
   if (section === 'paths') return { mode: 'live', label: 'resolved by server' }
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
@@ -801,10 +802,6 @@ export function SettingsSurface() {
 
   // fusion (config/runtime.toml [fusion]) — keeper-v2 settings.jsx:178-182
   const fusionSettingsWritable = envBool('VITE_FUSION_SETTINGS_WRITABLE', false)
-  const [fusionOn, setFusionOn] = useState(FUSION.enabled)
-  const [fusionPreset, setFusionPreset] = useState(FUSION.defaultPreset)
-  const [fusionPanels, setFusionPanels] = useState(FUSION.maxConcurrentPanels)
-  const [fusionWeb, setFusionWeb] = useState(FUSION.webTools)
 
   // notify / display
   const [notifyCtx, setNotifyCtx] = useState(95)
@@ -1067,18 +1064,30 @@ export function SettingsSurface() {
               ${fusionSettingsWritable
                 ? html`<${FusionSettingsPanel} />`
                 : html`
-                <${SetRow} label="Fusion 심의" hint="끄면 masc_fusion 호출이 게이트에서 Deny 반환">
-                  <${SetToggle} on=${fusionOn} onChange=${setFusionOn} />
-                <//>
-                ${fusionOn && html`
+                <div data-testid="fusion-readonly-preview">
+                  <${SetRow} label="Fusion 심의" hint="[fusion].enabled · 문서화된 기본값">
+                    <div class="set-truth-value">
+                      <span class="mono" data-testid="fusion-readonly-enabled">${FUSION.enabled ? 'enabled' : 'disabled'}</span>
+                      <span class="set-truth-source">read-only</span>
+                    </div>
+                  <//>
                   <${SetRow} label="기본 프리셋" hint="default_preset">
-                    <${SetSeg} value=${fusionPreset} options=${['trio']} onChange=${setFusionPreset} />
+                    <div class="set-truth-value">
+                      <span class="mono" data-testid="fusion-readonly-preset">${FUSION.defaultPreset}</span>
+                      <span class="set-truth-source">read-only</span>
+                    </div>
                   <//>
                   <${SetRow} label="동시 패널 수" hint="max_concurrent_panels · Async_agent.all 상한">
-                    <${SetStepper} v=${fusionPanels} set=${setFusionPanels} min=${1} max=${8} />
+                    <div class="set-truth-value">
+                      <span class="mono" data-testid="fusion-readonly-panels">${FUSION.maxConcurrentPanels}</span>
+                      <span class="set-truth-source">read-only</span>
+                    </div>
                   <//>
                   <${SetRow} label="패널·심판 웹 도구" hint="web_search / web_fetch 주입 여부">
-                    <${SetToggle} on=${fusionWeb} onChange=${setFusionWeb} />
+                    <div class="set-truth-value">
+                      <span class="mono" data-testid="fusion-readonly-web-tools">${FUSION.webTools ? 'enabled' : 'disabled'}</span>
+                      <span class="set-truth-source">read-only</span>
+                    </div>
                   <//>
                   <div class="set-sub-h">trio 프리셋</div>
                   <div class="set-fus-preset">
@@ -1094,7 +1103,7 @@ export function SettingsSurface() {
                   <div class="set-mcp-detail mono" style=${{ marginTop: '10px' }}>
                     panel_timeout ${FUSION.panelTimeoutS}s · judge_timeout ${FUSION.judgeTimeoutS}s · max_tool_calls_per_panel ${FUSION.maxToolCallsPerPanel} (0 = 무제한)
                   </div>
-                `}
+                </div>
               `}
             `}
 

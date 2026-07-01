@@ -693,7 +693,8 @@ export function SettingsSurface() {
   const runtimeCatalogEntries = richRuntimeCatalogEntries.length > 0
     ? richRuntimeCatalogEntries
     : fallbackRuntimeCatalogEntries
-  const runtimeCatalogIsFallback = richRuntimeCatalogEntries.length === 0 && fallbackRuntimeCatalogEntries.length > 0
+  const runtimeCatalogIsFallback =
+    runtimeCatalogStatus === 'error' && richRuntimeCatalogEntries.length === 0 && fallbackRuntimeCatalogEntries.length > 0
   const runtimeConfigPath = runtimeProviders?.config_path ?? runtimeDefaults?.config_path ?? null
   const defaultRuntimeId = runtimeDefaults?.default_runtime_id ?? runtimeProviders?.summary?.default_runtime_id ?? null
   const defaultCatalogEntry = findRuntimeCatalogSnapshot(runtimeCatalogEntries, defaultRuntimeId)
@@ -864,7 +865,7 @@ export function SettingsSurface() {
                   <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
                   ${runtimeCatalogIsFallback ? html`
                     <div class="set-hint" data-testid="runtime-catalog-fallback">
-                      provider catalog를 불러오지 못해 live runtime defaults projection으로 표시합니다.
+                      provider 카탈로그를 불러오지 못해 live runtime defaults projection으로 표시합니다.
                     </div>
                   ` : null}
                   ${runtimeCatalogStatus === 'loading' && runtimeCatalogEntries.length === 0

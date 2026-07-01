@@ -684,8 +684,25 @@ describe('SettingsSurface', () => {
       expect(cards[0]?.textContent).toContain('P')
       expect(cards[0]?.textContent).toContain('m1')
       expect(cards[0]?.textContent).toContain('128K ctx')
+      expect(cards[0]?.textContent).toContain('? tools')
+      expect(cards[0]?.textContent).toContain('? thinking')
+      expect(cards[0]?.textContent).toContain('? streaming')
     })
     expect(container.querySelector('[data-testid="runtime-catalog-error"]')).toBeNull()
+  })
+
+  it('runtime overview does not show the fallback warning while provider catalog is still loading', async () => {
+    apiMock.fetchRuntimeProviders.mockReturnValueOnce(new Promise(() => {}))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+
+    await waitFor(() => {
+      const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
+      expect(cards.length).toBe(3)
+    })
+    expect(container.querySelector('[data-testid="runtime-catalog-fallback"]')).toBeNull()
   })
 
   it('runtime section shows resolved keeper assignments read-only', async () => {

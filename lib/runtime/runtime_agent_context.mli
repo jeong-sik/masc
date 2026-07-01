@@ -143,9 +143,9 @@ type prepared_resume = {
 }
 (** Output of {!prepare_resume}.  [patched_checkpoint] has
     runtime identity fields adjusted, and [agent_config.max_turns]
-    is extended past the checkpoint [turn_count] so resume picks
-    up where the previous run left off without re-counting
-    consumed turns. *)
+    preserves [0] as unbounded; otherwise it is extended past the checkpoint
+    [turn_count] so resume picks up where the previous run left off without
+    re-counting consumed turns. *)
 
 val set_oas_tracer : Agent_sdk.Tracing.t -> unit
 (** Set the OAS tracer used by {!builder_without_approval}.  Called once
@@ -157,6 +157,7 @@ val prepare_resume :
 (** [prepare_resume ~config ~checkpoint] computes the patched
     checkpoint + agent_config + options for an
     [Agent.resume] call.  Pure — no side effects.  The patched
-    agent config extends [config.max_turns] beyond the consumed
-    [checkpoint.turn_count] so the resumed run gets a fresh
-    turn budget instead of inheriting the exhausted one. *)
+    agent config preserves [config.max_turns = 0] as unbounded; otherwise it
+    extends [config.max_turns] beyond the consumed [checkpoint.turn_count] so
+    the resumed run gets a fresh turn budget instead of inheriting the
+    exhausted one. *)

@@ -380,7 +380,7 @@ let test_no_progress_loop_detection_pauses_keeper () =
          None
          paused_meta.auto_resume_after_sec;
        (match paused_meta.runtime.last_blocker with
-        | Some { Keeper_meta_contract.klass = No_progress_loop; detail } ->
+        | Some { Keeper_meta_contract.klass = No_progress_loop; detail; _ } ->
           check
             string
             "blocker detail"
@@ -989,7 +989,7 @@ let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
          false
          (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        (match recovered_meta.runtime.last_blocker with
-        | Some { Keeper_meta_contract.klass = Turn_timeout; detail } ->
+        | Some { Keeper_meta_contract.klass = Turn_timeout; detail; _ } ->
           check string "non-no-progress blocker preserved" blocker.detail detail
         | Some _ -> fail "expected overwritten Turn_timeout blocker to remain"
         | None -> fail "expected non-no-progress blocker to remain");
@@ -1117,6 +1117,7 @@ let test_direct_success_passive_only_no_visible_keeps_no_progress_pause () =
         | Some
             { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop
             ; detail
+            ; _
             } ->
           check string "no-progress blocker preserved" blocker.detail detail
         | Some _ -> fail "expected no-progress blocker to remain"
@@ -1300,7 +1301,7 @@ let test_direct_success_leaves_unrelated_pause_intact () =
          false
          (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        (match recovered_meta.runtime.last_blocker with
-        | Some { Keeper_meta_contract.klass = Turn_timeout; detail } ->
+        | Some { Keeper_meta_contract.klass = Turn_timeout; detail; _ } ->
           check string "unrelated blocker preserved" blocker.detail detail
         | Some _ -> fail "expected unrelated Turn_timeout blocker to remain"
         | None -> fail "expected unrelated blocker to remain");
@@ -1352,7 +1353,7 @@ let test_idle_detected_repeated_failure_pauses_keeper () =
            None
            paused_meta.auto_resume_after_sec;
          (match paused_meta.runtime.last_blocker with
-          | Some { Keeper_meta_contract.klass = Sdk_idle_detected; detail } ->
+          | Some { Keeper_meta_contract.klass = Sdk_idle_detected; detail; _ } ->
             check
               string
               "blocker detail"

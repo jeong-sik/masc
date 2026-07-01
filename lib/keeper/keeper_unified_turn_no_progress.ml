@@ -44,9 +44,13 @@ let mark_loop_detected
        { rt with
          last_blocker =
            Some
-             (Keeper_meta_contract.blocker_info_of_class
+             (Keeper_meta_contract.blocker_info_of_no_progress_loop
                 ~detail
-                Keeper_meta_contract.No_progress_loop)
+                ~reason
+                ~streak
+                ~threshold
+                ~latched:true
+                ())
        })
     meta
   in

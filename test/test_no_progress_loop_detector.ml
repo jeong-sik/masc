@@ -979,6 +979,7 @@ let test_apply_loop_detectors_repeated_identity_blocker_uses_detector_reason () 
   | Some
       { Masc.Keeper_meta_contract.klass = Masc.Keeper_meta_contract.No_progress_loop
       ; detail
+      ; _
       } ->
     Alcotest.(check bool)
       "blocker detail uses detector-final reason"

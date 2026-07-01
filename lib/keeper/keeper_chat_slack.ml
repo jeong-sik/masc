@@ -152,7 +152,8 @@ let slack_block_of_chat_block = function
   | Keeper_chat_blocks.Voice _
   | Keeper_chat_blocks.Attach _
   | Keeper_chat_blocks.Fusion _
-  | Keeper_chat_blocks.Trace _ -> None
+  | Keeper_chat_blocks.Trace _
+  | Keeper_chat_blocks.Thinking _ -> None
 
 let content_blocks_of_text text =
   text

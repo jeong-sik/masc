@@ -70,6 +70,15 @@ let binding_json (binding : binding) =
       ("keeper_name", `String binding.keeper_name);
     ]
 
+(* Durable atomic write delegated to the Fs_compat durability SSOT:
+   tmp -> fsync(tmp) -> rename -> best-effort fsync(parent dir), the same
+   primitive board/event-queue/Memory-OS persistence use. A local hand-rolled
+   tmp+rename here (as before) skips both fsyncs, so a crash between rename
+   and the kernel's dirty-page flush can leave the binding file truncated
+   even though [append_audit_event] already fsynced an audit entry claiming
+   the change landed. Mapping [Error] to [Sys_error] preserves this
+   function's existing raise-on-failure contract, which [bind]/[unbind] in
+   the 3 caller modules already catch via [try ... with Sys_error _ -> ...]. *)
 let save_bindings store (bindings : binding list) =
   let path = store.binding_store_path () in
   let normalized =
@@ -85,12 +94,10 @@ let save_bindings store (bindings : binding list) =
   in
   let dir = Filename.dirname path in
   Fs_compat.mkdir_p dir;
-  let tmp = path ^ ".tmp" in
-  let oc = open_out_bin tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc (Yojson.Safe.pretty_to_string normalized ^ "\n"));
-  Sys.rename tmp path
+  let content = Yojson.Safe.pretty_to_string normalized ^ "\n" in
+  match Fs_compat.save_file_atomic path content with
+  | Ok () -> ()
+  | Error msg -> raise (Sys_error msg)
 
 let guild_id_items store event =
   match store.guild_id_field with

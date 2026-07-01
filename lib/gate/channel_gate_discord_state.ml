@@ -48,7 +48,6 @@ let binding_store =
   Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
     ~binding_audit_read_path ~guild_id_field:Store.Include_event_value
 
-let read_json_file_opt = Store.read_json_file_opt
 let read_bindings () = Store.read_bindings binding_store
 let binding_json = Store.binding_json
 let save_bindings bindings = Store.save_bindings binding_store bindings

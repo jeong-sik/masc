@@ -1061,9 +1061,21 @@ let keeper_cycle_decision
       ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
+      ?(lifecycle_global = Keeper_lifecycle_gate_env.global ())
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
+  (* RFC-0297 P0-1: the scheduled-autonomous (proactive) turn is enabled only
+     when BOTH the global kill-switch ([lifecycle_global.proactive], from
+     MASC_KEEPER_PROACTIVE_ENABLED / [proactive] enabled in runtime.toml) and
+     the per-keeper flag ([meta.proactive.enabled]) are on. Before this the
+     global switch did not exist, so [proactive] enabled = false was silently
+     dropped. [lifecycle_global] defaults to reading the registry; tests pass
+     it explicitly. *)
+  let proactive_gate_enabled =
+    Keeper_lifecycle_gate.gate_enabled Proactive ~global:lifecycle_global
+      ~meta:{ Keeper_lifecycle_gate.all_enabled with proactive = meta.proactive.enabled }
+  in
   let event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
   in
@@ -1115,7 +1127,7 @@ let keeper_cycle_decision
           int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
       in
       let idle_gate_sec = meta.proactive.idle_sec in
-      if not meta.proactive.enabled
+      if not proactive_gate_enabled
       then
         { should_run = false
         ; channel = Scheduled_autonomous

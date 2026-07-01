@@ -64,14 +64,6 @@ module For_testing : sig
 
   val terminal_outcome_of_result : Keeper_agent_run.run_result -> terminal_outcome
   val terminal_outcome_is_completed_turn : terminal_outcome -> bool
-
-  val apply_loop_detectors
-    :  config:Workspace.config
-    -> observation:Keeper_world_observation.world_observation
-    -> meta:Keeper_meta_contract.keeper_meta
-    -> Keeper_meta_contract.keeper_meta
-    -> Keeper_agent_run.run_result
-    -> Keeper_meta_contract.keeper_meta
 end
 
 val handle

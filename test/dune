@@ -281,8 +281,6 @@
   test_keeper_sandbox_docker_route
   test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
-  test_no_progress_loop_detector
-  test_keeper_wake_tombstone
   test_orphan_surfacer
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker
@@ -613,8 +611,6 @@
   test_keeper_sandbox_docker_route
   test_keeper_tool_search_files_via_field
   test_env_git_noninteractive
-  test_no_progress_loop_detector
-  test_keeper_wake_tombstone
   test_orphan_surfacer
   test_cap_blocker_structured_error
   test_context_overflow_action_tracker

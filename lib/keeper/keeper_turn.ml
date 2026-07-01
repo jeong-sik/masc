@@ -143,9 +143,11 @@ let has_no_progress_failure_reason ~base_path keeper_name =
 
 let has_direct_success_no_progress_pause ~(config : Workspace.config)
     (meta : keeper_meta) =
+  (* RFC-0303 Phase 3: the no-progress loop detector is retired; a residual
+     no-progress pause is now recognised only from persisted meta blocker or
+     registry failure_reason (no live detector latch). *)
   meta.paused
   && (has_no_progress_loop_blocker meta
-      || Keeper_no_progress_loop_detector.is_latched ~keeper_name:meta.name
       || has_no_progress_failure_reason ~base_path:config.base_path meta.name)
 
 let clear_no_progress_meta_blocker (meta : keeper_meta) =
@@ -261,7 +263,6 @@ let clear_direct_success_no_progress_pause
            meta.name
            (Keeper_state_machine.transition_error_to_string err)
        | Ok _ -> ());
-      Keeper_no_progress_loop_detector.reset ~keeper_name:resumed_meta.name;
       Keeper_turn_livelock.reset_keeper_livelock
         ~base_path:config.base_path
         ~keeper:resumed_meta.name;

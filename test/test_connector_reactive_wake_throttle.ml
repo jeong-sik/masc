@@ -3,19 +3,20 @@
 
    The ambient-connector wake is gated by
    Keeper_keepalive_signal.connector_reactive_wakeup_allowed, which reuses the
-   board-reactive primitive (RFC-0246 tombstone gate + per-key debounce) with a
-   per-channel dedup key. This pins the throttle: a chatty channel wakes the
-   keeper at most once per debounce window, while a different channel debounces
+   board-reactive per-key debounce primitive with a per-channel dedup key
+   (RFC-0303 Phase 3 retired the no-progress wake-tombstone that used to precede
+   the debounce). This pins the throttle: a chatty channel wakes the keeper at
+   most once per debounce window, while a different channel debounces
    independently (so distinct conversations are not collapsed). *)
 
 open Alcotest
 open Masc
 
-(* [connector_reactive_wakeup_allowed] reaches [Keeper_no_progress_loop_detector.
-   is_latched], which guards its state with [Eio.Mutex]. In production the call
-   runs inside the Discord gateway's forked fiber ([Eio.Fiber.fork ~sw] around
-   [Gw.run] in [server_discord_in_process_gateway.start]), so the effect handler
-   is always present. The test reproduces that context with [Eio_main.run]. *)
+(* [connector_reactive_wakeup_allowed] reaches the registry board-wakeup dedup
+   primitive. In production the call runs inside the Discord gateway's forked
+   fiber ([Eio.Fiber.fork ~sw] around [Gw.run] in
+   [server_discord_in_process_gateway.start]), so the effect handler is always
+   present. The test reproduces that context with [Eio_main.run]. *)
 let with_eio f () = Eio_main.run @@ fun _env -> f ()
 
 let rm_rf path =

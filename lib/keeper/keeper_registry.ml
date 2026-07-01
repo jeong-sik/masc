@@ -396,30 +396,12 @@ let record_spawn_slot_denied ~keeper_name ~surface reason =
   Spawn_slots.record_denied ~keeper_name ~surface reason
 ;;
 
-let wakeup ?(bypass_tombstone = true) ~base_path name =
+let wakeup ~base_path name =
+  (* RFC-0303 Phase 3: the no-progress wake-tombstone gate is removed (the
+     detector that fed it is retired), so a wake always signals the fiber. *)
   match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
   (* tla-lint: allow-mutation: fiber signal — public wakeup API for a single keeper *)
-  | Some entry ->
-    if bypass_tombstone then
-      Atomic.set entry.fiber_wakeup true
-    else begin
-      (* RFC-0246 P2: suppress an automatic (non-operator) wake of a keeper
-         latched in a no-progress loop, so a no-progress self-wake cannot run
-         the same empty turn forever. Operator-direct callers pass
-         [~bypass_tombstone:true] (the default) to override. The detector is
-         the single source of truth for latching. *)
-      (match Keeper_wake_tombstone.decide ~origin:Keeper_wake_tombstone.Heartbeat ~keeper_name:name with
-       | Wake_allowed -> Atomic.set entry.fiber_wakeup true
-       | Suppressed reason ->
-         let label = Keeper_wake_tombstone.suppression_label reason in
-         Otel_metric_store.inc_counter
-           "masc_keeper_wake_suppressed_total"
-           ~labels:[ ("keeper", name); ("reason", label) ]
-           ();
-         Log.Keeper.info
-           "RFC-0246 non-operator wake suppressed keeper=%s reason=%s (no-progress loop latched)"
-           name label)
-    end
+  | Some entry -> Atomic.set entry.fiber_wakeup true
   | None -> ()
 ;;
 
@@ -477,41 +459,28 @@ let restore_supervisor_state ~base_path name ~restart_count ~last_restart_ts ~cr
    re-posts (each with a fresh post_id) collapse into one wake per window. The
    map is otherwise a generic (key -> last_ts) debounce. *)
 let board_wakeup_allowed ~base_path name ~dedup_key ~debounce_sec =
-  (* RFC-0246: tombstone gate first — a keeper latched in a no-progress loop is
-     not woken by board-reactive signals, so it cannot be re-woken by its own or
-     a peer's no-progress board post and thrash forever. The detector is the
-     single source of truth for latching; this gate reads it and refuses the
-     wake (without touching the dedup map) before the per-key debounce runs. *)
-  (match Keeper_wake_tombstone.decide ~origin:Keeper_wake_tombstone.Board_reactive ~keeper_name:name with
-   | Suppressed reason ->
-     let label = Keeper_wake_tombstone.suppression_label reason in
-     Otel_metric_store.inc_counter
-       "masc_keeper_wake_suppressed_total"
-       ~labels:[ ("keeper", name); ("reason", label) ]
-       ();
-     Log.Keeper.info
-       "RFC-0246 board-reactive wake suppressed keeper=%s reason=%s (no-progress loop latched)"
-       name label;
-     false
-   | Wake_allowed ->
-     match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
-     | None -> true
-     | Some entry ->
-       let now_ts = Time_compat.now () in
-       (match StringMap.find_opt dedup_key entry.board_wakeups with
-        | Some last_ts when now_ts -. last_ts < debounce_sec -> false
-        | _ ->
-          (match
-             update_entry ~base_path name (fun e ->
-               { e with board_wakeups = StringMap.add dedup_key now_ts e.board_wakeups })
-           with
-           | Ok () -> ()
-           | Error err ->
-             Log.Keeper.warn
-               "%s: failed to record board wakeup dedupe key: %s"
-               name
-               (registry_entry_validation_error_to_string err));
-          true))
+  (* RFC-0303 Phase 3: the no-progress wake-tombstone gate is removed (the
+     detector that fed it is retired). The per-key debounce (dedup) below is a
+     separate concern and stays: identical re-posts still collapse into one wake
+     per window. *)
+  match StringMap.find_opt (registry_key ~base_path name) (Atomic.get registry) with
+  | None -> true
+  | Some entry ->
+    let now_ts = Time_compat.now () in
+    (match StringMap.find_opt dedup_key entry.board_wakeups with
+     | Some last_ts when now_ts -. last_ts < debounce_sec -> false
+     | _ ->
+       (match
+          update_entry ~base_path name (fun e ->
+            { e with board_wakeups = StringMap.add dedup_key now_ts e.board_wakeups })
+        with
+        | Ok () -> ()
+        | Error err ->
+          Log.Keeper.warn
+            "%s: failed to record board wakeup dedupe key: %s"
+            name
+            (registry_entry_validation_error_to_string err));
+       true)
 ;;
 
 let clear_board_wakeups ~base_path name =

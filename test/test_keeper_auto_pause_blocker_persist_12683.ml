@@ -326,12 +326,6 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> fail ("parse base: " ^ err)
 
-let queue_contains_post_id queue post_id =
-  queue
-  |> Keeper_event_queue.to_list
-  |> List.exists (fun stimulus ->
-    String.equal stimulus.Keeper_event_queue.post_id post_id)
-
 let task_id_of_created_task (created : Masc.Workspace.add_task_success) =
   match Keeper_id.Task_id.of_string created.task_id with
   | Ok task_id -> task_id
@@ -379,104 +373,6 @@ let event_queue_snapshot_path ~base_path ~keeper_name =
   Filename.concat
     (Filename.concat (Common.keepers_runtime_dir_of_base ~base_path) keeper_name)
     "event-queue.json"
-
-let test_no_progress_loop_detection_pauses_keeper () =
-  let base_path = temp_dir "masc-no-progress-pause-" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let keeper_name = "no-progress-paused" in
-       let meta = make_meta keeper_name in
-       Masc.Keeper_registry.clear ();
-       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       let paused_meta =
-         Masc.Keeper_unified_turn_no_progress.mark_loop_detected
-           ~config
-           meta
-           ~streak:10
-           ~threshold:10
-       in
-       check bool "returned meta paused" true paused_meta.paused;
-       check
-         (option (float 0.001))
-         "safety pause has no auto-resume"
-         None
-         paused_meta.auto_resume_after_sec;
-       (match paused_meta.runtime.last_blocker with
-        | Some { Keeper_meta_contract.klass = No_progress_loop; detail; _ } ->
-          check
-            string
-            "blocker detail"
-            "no_progress loop detected: streak=10 threshold=10; reason=unclassified; auto-paused after repeated no-evidence turns; operator resume clears the no-progress latch"
-            detail
-        | Some _ -> fail "expected No_progress_loop blocker"
-        | None -> fail "expected no_progress loop blocker");
-       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
-       | Some entry ->
-         check bool "registry meta paused" true entry.Masc.Keeper_registry.meta.paused;
-         (match entry.Masc.Keeper_registry.last_failure_reason with
-          | Some (Masc.Keeper_registry.Provider_runtime_error { code; _ }) ->
-	            check
-	              string
-	              "registry no-progress failure code"
-	              Masc.Keeper_unified_turn_no_progress.failure_reason_code
-	              code
-	          | Some _ -> fail "expected no_progress provider-runtime failure reason"
-	          | None -> fail "expected no_progress failure reason");
-	         check
-	           bool
-	           "no-progress pause does not queue synthetic recovery stimulus"
-	           true
-	           (Keeper_event_queue.is_empty
-	              (Masc.Keeper_registry_event_queue.snapshot
-	                 ~base_path:config.base_path
-	                 keeper_name))
-	       | None -> fail "expected registered keeper")
-
-let test_no_progress_loop_detection_releases_owned_active_task () =
-  let base_path = temp_dir "masc-no-progress-release-" in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       let _init_msg = Masc.Workspace.init config ~agent_name:(Some "operator") in
-       let keeper_name = "no-progress-owner" in
-       let meta = make_meta keeper_name in
-       let created = create_owned_active_task config meta in
-       let current_task_id = task_id_of_created_task created in
-       let meta = { meta with current_task_id = Some current_task_id } in
-       Masc.Keeper_registry.clear ();
-       (match Keeper_meta_store.write_meta config meta with
-        | Ok () -> ()
-        | Error err -> fail err);
-       let _entry =
-         Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta
-       in
-       let paused_meta =
-         Masc.Keeper_unified_turn_no_progress.mark_loop_detected
-           ~config
-           meta
-           ~streak:10
-           ~threshold:10
-       in
-       check (option string) "returned meta current_task_id cleared" None
-         (Option.map Keeper_id.Task_id.to_string paused_meta.current_task_id);
-       (match task_status_by_id config created.task_id with
-        | Masc_domain.Todo -> ()
-        | status ->
-          fail
-            (Printf.sprintf
-               "expected no-progress pause to release task to todo, got %s"
-               (Masc_domain.task_status_to_string status)));
-       match Keeper_meta_store.read_meta config keeper_name with
-       | Ok (Some persisted) ->
-         check bool "persisted meta paused" true persisted.paused;
-         check (option string) "persisted current_task_id cleared" None
-           (Option.map Keeper_id.Task_id.to_string persisted.current_task_id)
-       | Ok None -> fail "expected persisted keeper meta"
-       | Error err -> fail err)
 
 let test_completion_contract_pause_sync_releases_owned_active_task () =
   let base_path = temp_dir "masc-completion-contract-release-" in
@@ -542,168 +438,54 @@ let test_completion_contract_pause_sync_releases_owned_active_task () =
           | Ok None -> fail "expected persisted keeper meta"
           | Error err -> fail err))
 
-let test_operator_resume_clears_no_progress_loop_latch () =
-  Eio_main.run
-  @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = temp_dir "masc-no-progress-resume-" in
-  Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
-      cleanup_dir base_path)
-    (fun () ->
-       let config = Masc.Workspace.default_config base_path in
-       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let keeper_name = "no-progress-resume" in
-       let meta = make_meta keeper_name in
-       Masc.Keeper_registry.clear ();
-       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       ignore
-         (Masc.Keeper_no_progress_loop_detector.record_turn
-            ~threshold_override:1
-            ~keeper_name
-            ~made_progress:false
-            ());
-       let paused_meta =
-         Masc.Keeper_unified_turn_no_progress.mark_loop_detected
-           ~config
-           meta
-           ~streak:10
-           ~threshold:10
-       in
-       let recovery_post_id = "no-progress-loop:" ^ keeper_name in
-       check bool
-         "detector latched before resume"
-         true
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
-       check bool
-         "no recovery stimulus queued before resume"
-         false
-         (queue_contains_post_id
-            (Masc.Keeper_registry_event_queue.snapshot
-               ~base_path:config.base_path
-               keeper_name)
-            recovery_post_id);
-       let pending_summary =
-         Masc.Keeper_reaction_ledger.summary_for_keeper
-           ~base_path:config.base_path
-           ~keeper_name
-           ~limit:10
-       in
-       check int
-         "no ledger recovery stimulus pending before resume"
-         0
-         (pending_summary
-          |> Yojson.Safe.Util.member "pending_no_progress_recovery_count"
-          |> Yojson.Safe.Util.to_int);
-       let resumed_meta =
-         match
-           Masc.Keeper_unified_turn_no_progress.clear_for_operator_resume
-             ~base_path:config.base_path
-             paused_meta
-         with
-         | Ok meta -> meta
-         | Error err -> fail ("operator resume clear failed: " ^ err)
-       in
-       check bool
-         "detector reset by operator resume"
-         false
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
-       check bool
-         "operator resume drops queued recovery stimulus"
-         false
-         (queue_contains_post_id
-            (Masc.Keeper_registry_event_queue.snapshot
-               ~base_path:config.base_path
-               keeper_name)
-            recovery_post_id);
-       check bool
-         "operator resume drops durable recovery stimulus"
-         false
-         (queue_contains_post_id
-            (Keeper_event_queue_persistence.load
-               ~base_path:config.base_path
-               ~keeper_name)
-            recovery_post_id);
-       let resumed_summary =
-         Masc.Keeper_reaction_ledger.summary_for_keeper
-           ~base_path:config.base_path
-           ~keeper_name
-           ~limit:10
-       in
-       check int
-         "operator resume closes pending recovery ledger stimulus"
-         0
-         (resumed_summary
-          |> Yojson.Safe.Util.member "pending_no_progress_recovery_count"
-          |> Yojson.Safe.Util.to_int);
-       check int
-         "operator resume has no recovery stimulus reaction"
-         0
-         (resumed_summary
-          |> Yojson.Safe.Util.member "operator_escalation_count"
-          |> Yojson.Safe.Util.to_int);
-       (match resumed_meta.runtime.last_blocker with
-        | None -> ()
-        | Some _ -> fail "expected no_progress meta blocker to clear");
-       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
-       | Some entry ->
-         (match entry.Masc.Keeper_registry.last_failure_reason with
-          | None -> ()
-          | Some _ -> fail "expected no_progress failure reason to clear")
-       | None -> fail "expected registered keeper")
-
-(* KLV-2 (RFC-keeper-liveness-ssot §3): [clear_for_operator_resume] used to
-   propagate a recovery-stimulus drop failure as [Error], leaving the
-   detector latch, meta blocker, and failure_reason all in place — so a
-   keeper paused by [Manual_resume_required] could never actually be
-   resumed if that one disk write kept failing (server_dashboard_http_*,
-   masc_keeper_up, and keepalive persist all treat this [Error] as "resume
-   failed" and refuse to unpause). The drop is now best-effort: the
-   critical clears below must succeed regardless of whether the stimulus
-   removal did. *)
+(* KLV-2 (RFC-keeper-liveness-ssot section 3): [clear_for_operator_resume] used to
+   propagate a recovery-stimulus drop failure as [Error], leaving the meta
+   blocker and failure_reason in place, so a keeper paused by
+   [Manual_resume_required] could never actually be resumed if that one disk
+   write kept failing (server_dashboard_http_*, masc_keeper_up, and keepalive
+   persist all treat this [Error] as "resume failed" and refuse to unpause).
+   The drop is now best-effort: the critical clears must succeed regardless of
+   whether the stimulus removal did. RFC-0303 Phase 3: the no-progress detector
+   is retired, so the paused state is seeded via the persisted meta blocker and
+   registry failure_reason (the resume path clears exactly those). *)
 let test_operator_resume_survives_recovery_stimulus_drop_failure () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let base_path = temp_dir "masc-no-progress-resume-drop-fail-" in
   Fun.protect
-    ~finally:(fun () ->
-      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
-      cleanup_dir base_path)
+    ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        let keeper_name = "no-progress-resume-drop-fail" in
-       let meta = make_meta keeper_name in
-       Masc.Keeper_registry.clear ();
-       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       ignore
-         (Masc.Keeper_no_progress_loop_detector.record_turn
-            ~threshold_override:1
-            ~keeper_name
-            ~made_progress:false
-            ());
-       let paused_meta =
-         Masc.Keeper_unified_turn_no_progress.mark_loop_detected
-           ~config
-           meta
-           ~streak:10
-           ~threshold:10
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"latched"
+           Keeper_meta_contract.No_progress_loop
        in
-       let recovery_post_id = "no-progress-loop:" ^ keeper_name in
-       check bool
-         "detector latched before resume"
-         true
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
-       check bool
-         "no synthetic recovery stimulus before resume"
-         false
-         (queue_contains_post_id
-            (Masc.Keeper_registry_event_queue.snapshot
-               ~base_path:config.base_path
-               keeper_name)
-            recovery_post_id);
+       let paused_meta =
+         make_meta keeper_name
+         |> Keeper_meta_contract.map_runtime (fun rt ->
+           { rt with last_blocker = Some blocker })
+       in
+       Masc.Keeper_registry.clear ();
+       ignore
+         (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name paused_meta);
+       Masc.Keeper_registry.set_failure_reason
+         ~base_path:config.base_path
+         keeper_name
+         (Some
+            (Masc.Keeper_registry.Provider_runtime_error
+               { code = Masc.Keeper_unified_turn_no_progress.failure_reason_code
+               ; detail = "latched"
+               ; provider_id = None
+               ; http_status = None
+               ; runtime_id = None
+               ; reason = None
+               }));
+       (* Force the best-effort recovery-stimulus drop to fail by making the
+          event-queue snapshot path a directory. *)
        let pending_path =
          event_queue_snapshot_path ~base_path:config.base_path ~keeper_name
        in
@@ -721,10 +503,6 @@ let test_operator_resume_survives_recovery_stimulus_drop_failure () =
                 stimulus drop fails (best-effort cleanup), got Error %s"
                err)
         | Ok resumed_meta ->
-          check bool
-            "detector unlatched after resume despite drop failure"
-            false
-            (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
           (match resumed_meta.runtime.last_blocker with
            | None -> ()
            | Some _ -> fail "expected no_progress meta blocker to be cleared");
@@ -734,7 +512,6 @@ let test_operator_resume_survives_recovery_stimulus_drop_failure () =
               | None -> ()
               | Some _ -> fail "expected no_progress failure reason to be cleared")
            | None -> fail "expected registered keeper")))
-
 let test_wakeup_directive_persists_no_progress_meta_clear () =
   Eio_main.run
   @@ fun env ->
@@ -742,7 +519,6 @@ let test_wakeup_directive_persists_no_progress_meta_clear () =
   let base_path = temp_dir "masc-no-progress-wakeup-" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
       cleanup_dir base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
@@ -882,7 +658,6 @@ let test_direct_success_clears_no_progress_pause () =
   let base_path = temp_dir "masc-no-progress-direct-success-" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
       Masc.Keeper_registry.clear ();
       cleanup_dir base_path)
     (fun () ->
@@ -904,12 +679,6 @@ let test_direct_success_clears_no_progress_pause () =
        in
        Masc.Keeper_registry.clear ();
        ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       ignore
-         (Masc.Keeper_no_progress_loop_detector.record_turn
-            ~threshold_override:1
-            ~keeper_name
-            ~made_progress:false
-            ());
        Masc.Keeper_registry.set_failure_reason
          ~base_path:config.base_path
          keeper_name
@@ -938,10 +707,6 @@ let test_direct_success_clears_no_progress_pause () =
            meta
        in
        check bool "direct success resumes no-progress pause" false recovered_meta.paused;
-       check bool
-         "detector reset by direct success"
-         false
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        (match recovered_meta.runtime.last_blocker with
         | None -> ()
         | Some _ -> fail "expected direct success to clear no_progress meta blocker");
@@ -981,7 +746,6 @@ let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
   let base_path = temp_dir "masc-no-progress-direct-success-overwrite-" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
       Masc.Keeper_registry.clear ();
       cleanup_dir base_path)
     (fun () ->
@@ -1003,12 +767,6 @@ let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
        in
        Masc.Keeper_registry.clear ();
        ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       ignore
-         (Masc.Keeper_no_progress_loop_detector.record_turn
-            ~threshold_override:1
-            ~keeper_name
-            ~made_progress:false
-            ());
        Masc.Keeper_registry.set_failure_reason
          ~base_path:config.base_path
          keeper_name
@@ -1040,10 +798,6 @@ let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
          "direct success resumes no-progress pause after blocker overwrite"
          false
          recovered_meta.paused;
-       check bool
-         "detector reset after blocker overwrite"
-         false
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        (match recovered_meta.runtime.last_blocker with
         | Some { Keeper_meta_contract.klass = Turn_timeout; detail; _ } ->
           check string "non-no-progress blocker preserved" blocker.detail detail
@@ -1105,7 +859,6 @@ let test_direct_success_passive_only_no_visible_keeps_no_progress_pause () =
   let base_path = temp_dir "masc-no-progress-direct-success-passive-" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
       Masc.Keeper_registry.clear ();
       cleanup_dir base_path)
     (fun () ->
@@ -1127,12 +880,6 @@ let test_direct_success_passive_only_no_visible_keeps_no_progress_pause () =
        in
        Masc.Keeper_registry.clear ();
        ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
-       ignore
-         (Masc.Keeper_no_progress_loop_detector.record_turn
-            ~threshold_override:1
-            ~keeper_name
-            ~made_progress:false
-            ());
        Masc.Keeper_registry.set_failure_reason
          ~base_path:config.base_path
          keeper_name
@@ -1165,10 +912,6 @@ let test_direct_success_passive_only_no_visible_keeps_no_progress_pause () =
          "passive-only no-visible direct success stays paused"
          true
          recovered_meta.paused;
-       check bool
-         "passive-only no-visible direct success keeps detector latched"
-         true
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        (match recovered_meta.runtime.last_blocker with
         | Some
             { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop
@@ -1200,7 +943,6 @@ let test_direct_success_persist_failure_keeps_no_progress_pause () =
   let base_path = temp_dir "masc-no-progress-direct-success-persist-fail-" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
       Masc.Keeper_registry.clear ();
       cleanup_dir base_path)
     (fun () ->
@@ -1249,12 +991,6 @@ let test_direct_success_persist_failure_keeps_no_progress_pause () =
             ~base_path:config.base_path
             ~keeper:keeper_name
             ~turn_id:42);
-       ignore
-         (Masc.Keeper_no_progress_loop_detector.record_turn
-            ~threshold_override:1
-            ~keeper_name
-            ~made_progress:false
-            ());
        Masc.Keeper_registry.set_failure_reason
          ~base_path:config.base_path
          keeper_name
@@ -1284,10 +1020,6 @@ let test_direct_success_persist_failure_keeps_no_progress_pause () =
            invalid_meta
        in
        check bool "failed persistence keeps returned meta paused" true recovered_meta.paused;
-       check bool
-         "failed persistence keeps detector latched"
-         true
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        (match
           Masc.Keeper_turn_livelock.current_state
             ~base_path:config.base_path
@@ -1324,7 +1056,6 @@ let test_direct_success_leaves_unrelated_pause_intact () =
   let base_path = temp_dir "masc-no-progress-direct-success-unrelated-" in
   Fun.protect
     ~finally:(fun () ->
-      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
       Masc.Keeper_registry.clear ();
       cleanup_dir base_path)
     (fun () ->
@@ -1360,10 +1091,6 @@ let test_direct_success_leaves_unrelated_pause_intact () =
          "unrelated auto-resume stays intact"
          (Some 60.0)
          recovered_meta.auto_resume_after_sec;
-       check bool
-         "detector remains unlatched for unrelated pause"
-         false
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        (match recovered_meta.runtime.last_blocker with
         | Some { Keeper_meta_contract.klass = Turn_timeout; detail; _ } ->
           check string "unrelated blocker preserved" blocker.detail detail
@@ -1530,12 +1257,6 @@ let () =
         ] );
       ( "no_progress loop",
         [
-          test_case "loop detection pauses keeper for manual resume" `Quick
-            test_no_progress_loop_detection_pauses_keeper;
-          test_case "loop detection releases owned active task" `Quick
-            test_no_progress_loop_detection_releases_owned_active_task;
-          test_case "operator resume clears no-progress latch" `Quick
-            test_operator_resume_clears_no_progress_loop_latch;
           test_case
             "operator resume survives recovery-stimulus drop failure (KLV-2)"
             `Quick

@@ -30,7 +30,6 @@ let decide_keepalive_scheduling
       ?(keeper_resilience_of_name = fun _ -> None)
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
-      ?(wake_tombstone_decide = Keeper_wake_tombstone.decide)
       ~stop
       ~meta
       obs
@@ -45,33 +44,11 @@ let decide_keepalive_scheduling
   let requested_should_run_turn =
     (not (Atomic.get stop)) && turn_decision.should_run
   in
-  (* RFC-0294 R2b: the RFC-0246 wake-tombstone was wired only into the external
-     wake paths (Keeper_registry Heartbeat / Board_reactive); a keeper latched in
-     a no-progress loop kept re-waking on its OWN self-cadence clock. Gate the
-     scheduled-autonomous wake through the same tombstone here. This is an
-     admission gate (like runtime backpressure), so it suppresses [should_run_turn]
-     while leaving [requested_should_run_turn] ("the world wanted a turn") intact.
-     Only consult the tombstone when a self-cadence turn was actually requested;
-     idle/stop cycles should keep their original skip reason and must not be
-     reported as tombstone suppressions.
-     Reactive turns are gated upstream in the registry, so only the autonomous
-     channel is gated here. *)
-  let self_cadence_evaluated =
-    requested_should_run_turn
-    && Keeper_world_observation.is_autonomous turn_decision.channel
-  in
-  let self_cadence_wake : Keeper_wake_tombstone.wake_decision =
-    if self_cadence_evaluated
-    then
-      wake_tombstone_decide ~origin:Keeper_wake_tombstone.Self_cadence
-        ~keeper_name:meta.name
-    else Keeper_wake_tombstone.Wake_allowed
-  in
-  let self_cadence_wake_allowed =
-    match self_cadence_wake with
-    | Keeper_wake_tombstone.Wake_allowed -> true
-    | Keeper_wake_tombstone.Suppressed _ -> false
-  in
+  (* RFC-0303 Phase 3: the self-cadence wake-tombstone gate is removed. Phase 2
+     stimulus-gated the autonomous cadence (min_interval is now a rate-limit on
+     opportunity-driven turns, not a standalone trigger), so the tombstone that
+     suppressed blind self-wakes no longer has an input. [should_run_turn] is now
+     gated only by runtime backpressure on [requested_should_run_turn]. *)
   let runtime_id = runtime_id_of_meta meta in
   let runtime_backpressure =
     match keeper_resilience_of_name meta.name with
@@ -90,29 +67,11 @@ let decide_keepalive_scheduling
   in
   let should_run_turn =
     match runtime_backpressure with
-    | Runtime_admitted -> requested_should_run_turn && self_cadence_wake_allowed
+    | Runtime_admitted -> requested_should_run_turn
     | Runtime_backpressured _ -> false
   in
   let verdict_reasons =
     let base = Keeper_world_observation.verdict_reasons_to_strings turn_decision.verdict in
-    (* RFC-0303 Phase 1: tag the wake origin on every autonomous self-cadence
-       turn decision (allowed OR suppressed) so the share of blind self-cadence
-       wakes — the ones that manufacture passive turns — is observable before
-       Phase 2 gates wakes on a real stimulus. *)
-    let base =
-      if self_cadence_evaluated
-      then
-        ("wake_origin:"
-         ^ Keeper_wake_tombstone.origin_label Keeper_wake_tombstone.Self_cadence)
-        :: base
-      else base
-    in
-    let base =
-      match self_cadence_wake with
-      | Keeper_wake_tombstone.Suppressed reason ->
-        Keeper_wake_tombstone.suppression_label reason :: base
-      | Keeper_wake_tombstone.Wake_allowed -> base
-    in
     match runtime_backpressure with
     | Runtime_backpressured _ -> "runtime_backpressure" :: base
     | Runtime_admitted -> base

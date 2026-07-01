@@ -158,7 +158,12 @@ val write_state : Workspace_utils.config -> state -> unit
     Does *not* acquire the file lock; callers that need atomicity
     should use {!update_state} instead. *)
 
-val update_state : Workspace_utils.config -> (state -> state) -> state
+val write_state_result :
+  Workspace_utils.config -> state -> (unit, string) result
+(** Result-returning variant of {!write_state}. *)
+
+val update_state :
+  Workspace_utils.config -> (state -> state) -> (state, string) result
 (** Atomic read-modify-write under the goals file lock.
     [f] receives the current state and returns the next state.
     The file lock protects against concurrent truncation races
@@ -183,6 +188,7 @@ type delete_goal_outcome =
 
 type delete_goal_error =
   | Unknown_goal of string
+  | Persistence_failed of string
 
 val delete_goal_error_to_string : delete_goal_error -> string
 

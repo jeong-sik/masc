@@ -491,6 +491,20 @@ let test_mutation_refused_and_preserves_corrupt_ledger () =
   check string "corrupt recovery preserved" recovery_before recovery_after
 ;;
 
+let test_insert_surfaces_primary_write_failure () =
+  with_workspace
+  @@ fun config ->
+  Unix.mkdir (schedules_path config) 0o755;
+  let request =
+    make_request ~schedule_id:"persist-fail" ~risk_class:Read_only ()
+  in
+  match insert_request config request with
+  | Error (Persistence_failed msg) ->
+    check bool "failure detail is surfaced" true (String.length msg > 0)
+  | Error err -> fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+  | Ok _ -> fail "insert unexpectedly succeeded when schedule path is a directory"
+;;
+
 let test_cancel_refused_on_corrupt_ledger () =
   with_workspace
   @@ fun config ->
@@ -537,6 +551,8 @@ let () =
             test_read_state_raises_on_corrupt;
           test_case "mutation refused and corrupt ledger preserved" `Quick
             test_mutation_refused_and_preserves_corrupt_ledger;
+          test_case "primary write failure is surfaced" `Quick
+            test_insert_surfaces_primary_write_failure;
           test_case "cancel refused on corrupt ledger" `Quick
             test_cancel_refused_on_corrupt_ledger;
           test_case "last-good is parseable after good write" `Quick

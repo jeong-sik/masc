@@ -2,6 +2,8 @@
    Legacy [status] remains persisted for compatibility, but it is derived
    from [phase] on write and inferred on read for old rows. *)
 
+let ( let* ) = Result.bind
+
 type goal_status =
   | Active
   | Paused
@@ -327,11 +329,19 @@ let read_state config =
   else
     default_state ()
 
-let write_state config state =
+let write_state_result config state =
   ensure_dirs config;
   let json = state_to_yojson state in
-  Workspace_utils.write_json config (goals_path config) json;
-  Workspace_utils.write_json config (goals_recovery_path config) json
+  let* () = Workspace_utils.write_json_result config (goals_path config) json in
+  Workspace_utils.write_json_result config (goals_recovery_path config) json
+
+let write_state config state =
+  match write_state_result config state with
+  | Ok () -> ()
+  | Error msg ->
+    Log.Misc.warn "goal_store.write_state failed for %s: %s"
+      (goals_path config)
+      msg
 
 let now_ms () =
   int_of_float (Time_compat.now () *. 1000.0)
@@ -351,8 +361,8 @@ let update_state config f =
   Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
-      write_state config next_state;
-      next_state)
+      let* () = write_state_result config next_state in
+      Ok next_state)
 
 let get_goal config ~goal_id =
   read_state config |> fun state -> find_goal state.goals goal_id
@@ -373,7 +383,7 @@ let update_goal config ~goal_id f =
               goals = replace_goal state.goals updated_goal;
             }
           in
-          write_state config next_state;
+          let* () = write_state_result config next_state in
           Ok updated_goal)
 
 type delete_goal_outcome =
@@ -382,9 +392,11 @@ type delete_goal_outcome =
 
 type delete_goal_error =
   | Unknown_goal of string
+  | Persistence_failed of string
 
 let delete_goal_error_to_string = function
   | Unknown_goal msg -> msg
+  | Persistence_failed msg -> "goal persistence failed: " ^ msg
 
 let delete_goal config ~goal_id =
   let deleted =
@@ -393,13 +405,19 @@ let delete_goal config ~goal_id =
       if not (List.exists (fun goal -> String.equal goal.id goal_id) state.goals) then
         Error (Unknown_goal "Goal not found")
       else (
-        write_state
-          config
-          { version = state.version + 1
-          ; goals = List.filter (fun goal -> not (String.equal goal.id goal_id)) state.goals
-          ; updated_at = Masc_domain.now_iso ()
-          };
-        Ok ()))
+        match
+          write_state_result
+            config
+            { version = state.version + 1
+            ; goals =
+                List.filter
+                  (fun goal -> not (String.equal goal.id goal_id))
+                  state.goals
+            ; updated_at = Masc_domain.now_iso ()
+            }
+        with
+        | Ok () -> Ok ()
+        | Error msg -> Error (Persistence_failed msg)))
   in
   match deleted with
   | Error _ as error -> error
@@ -527,7 +545,7 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
          | Error msg -> Error msg
          | Ok () ->
         let was_created = ref false in
-        let state =
+        let state_result =
           update_state config (fun state ->
               match find_goal state.goals resolved_id with
               | Some existing ->
@@ -608,11 +626,14 @@ let upsert_goal config ?id ?title ?metric ?target_value ?due_date
                     goals = state.goals @ [ new_goal ];
                   })
         in
-        match find_goal state.goals resolved_id with
-        | Some goal ->
-            Ok (goal, if !was_created then `created else `updated)
-        | None ->
-            Error "failed to save goal")
+        match state_result with
+        | Error msg -> Error msg
+        | Ok state ->
+          match find_goal state.goals resolved_id with
+          | Some goal ->
+              Ok (goal, if !was_created then `created else `updated)
+          | None ->
+              Error "failed to save goal")
 
 let compute_rollup goals =
   let count predicate =

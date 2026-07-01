@@ -30,8 +30,9 @@ let mark_dispatching state keeper_name =
         true))
 
 let clear_dispatching state keeper_name =
-  with_dispatch_state state (fun () ->
-      Hashtbl.remove state.running_by_keeper keeper_name)
+  Eio.Cancel.protect (fun () ->
+      with_dispatch_state state (fun () ->
+          Hashtbl.remove state.running_by_keeper keeper_name))
 
 let dispatch_queued_turn state ~sw ~handle_turn ~keeper_name ~queued =
   Eio.Fiber.fork ~sw (fun () ->

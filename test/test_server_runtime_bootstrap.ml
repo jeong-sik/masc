@@ -2009,33 +2009,33 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
         with_running_keeper_metas config
           [ paused; running_a; running_b; runtime_only ]
           (fun () ->
-          let request = Httpun.Request.create `GET "/health" in
-          let json = Server_routes_http_runtime.make_health_json request in
-          let open Yojson.Safe.Util in
-	          let paused_keepers = json |> member "paused_keepers" in
-	          let fleet_safety = json |> member "keeper_fleet_safety" in
-	          Alcotest.(check int) "health exposes running reaction capacity" 3
-	            (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
-	          Alcotest.(check int) "health exposes executable reaction capacity" 3
-	            (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
-	          Alcotest.(check (list string))
-	            "health excludes paused registry entries from running capacity"
-	            [ "capacity-running-a"; "capacity-running-b"; "runtime-only" ]
-	            (fleet_safety |> member "running_keeper_names" |> to_list
-	             |> List.map to_string);
-	          Alcotest.(check int) "health exposes failing keeper count" 0
-	            (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
-	          Alcotest.(check int) "health exposes target reaction capacity" 4
-	            (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
-	          Alcotest.(check int) "health exposes paused autoboot target separately" 1
-	            (fleet_safety
-	             |> member "paused_autoboot_enabled_keeper_count"
-	             |> to_int);
-	          Alcotest.(check (list string))
-	            "health keeps durable paused keeper in paused inventory"
-	            [ "capacity-paused" ]
-	            (paused_keepers |> member "durable_names" |> to_list
-	             |> List.map to_string);
+            let request = Httpun.Request.create `GET "/health" in
+            let json = Server_routes_http_runtime.make_health_json request in
+            let open Yojson.Safe.Util in
+            let paused_keepers = json |> member "paused_keepers" in
+            let fleet_safety = json |> member "keeper_fleet_safety" in
+            Alcotest.(check int) "health exposes running reaction capacity" 3
+              (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
+            Alcotest.(check int) "health exposes executable reaction capacity" 3
+              (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
+            Alcotest.(check (list string))
+              "health excludes paused registry entries from running capacity"
+              [ "capacity-running-a"; "capacity-running-b"; "runtime-only" ]
+              (fleet_safety |> member "running_keeper_names" |> to_list
+               |> List.map to_string);
+            Alcotest.(check int) "health exposes failing keeper count" 0
+              (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
+            Alcotest.(check int) "health exposes target reaction capacity" 4
+              (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
+            Alcotest.(check int) "health exposes paused autoboot target separately" 1
+              (fleet_safety
+               |> member "paused_autoboot_enabled_keeper_count"
+               |> to_int);
+            Alcotest.(check (list string))
+              "health keeps durable paused keeper in paused inventory"
+              [ "capacity-paused" ]
+              (paused_keepers |> member "durable_names" |> to_list
+               |> List.map to_string);
           Alcotest.(check int) "health exposes minimum running fibers" 2
             (fleet_safety |> member "minimum_running_fibers" |> to_int);
           Alcotest.(check bool) "health is not below minimum margin" false

@@ -104,8 +104,8 @@ let running_keeper_names ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
        match e.phase with
-       | Keeper_state_machine.Running when not e.meta.paused -> Some e.name
-       | Keeper_state_machine.Running -> None
+       | Keeper_state_machine.Running ->
+         if e.meta.paused then None else Some e.name
        | Keeper_state_machine.Offline
        | Keeper_state_machine.Overflowed
        | Keeper_state_machine.Failing

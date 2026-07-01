@@ -10,6 +10,7 @@
 type persist_error =
   | Unsupported_source_type of Agent_sdk.Types.media_source_kind
   | Invalid_base64 of string
+  | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string
 
 (** Broad category of a media type, driving the keeper-chat block type used when a
@@ -39,6 +40,13 @@ val content_type_of_path : string -> string
 (** [true] iff [token] is a well-formed store token (64-char lowercase hex).
     Guards the serve route path parameter; the token is not a bearer capability. *)
 val valid_token : string -> bool
+
+(** Raw generated-media byte budget used before durable writes. *)
+val max_raw_bytes : unit -> int
+
+(** Encoded-carrier budget for live stream accumulation. Gives base64 expansion
+    headroom over {!max_raw_bytes}. *)
+val max_wire_bytes : unit -> int
 
 (** [file_path_of_token ~base_dir ~token] is the on-disk path of the stored media
     for [token], or [None] if the token is malformed, absent, or reaped. *)

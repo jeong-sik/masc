@@ -8,6 +8,7 @@ type stream_protocol_error_kind =
   | Media_delta_invalid_block
   | Media_source_unsupported
   | Media_decode_failed
+  | Media_payload_too_large
   | Media_persist_failed
   | Sse_error
   | Sse_parse_failed
@@ -118,6 +119,7 @@ let stream_protocol_error_kind_to_string = function
   | Media_delta_invalid_block -> "media_delta_invalid_block"
   | Media_source_unsupported -> "media_source_unsupported"
   | Media_decode_failed -> "media_decode_failed"
+  | Media_payload_too_large -> "media_payload_too_large"
   | Media_persist_failed -> "media_persist_failed"
   | Sse_error -> "sse_error"
   | Sse_parse_failed -> "sse_parse_failed"

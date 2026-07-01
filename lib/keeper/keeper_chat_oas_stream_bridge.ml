@@ -10,6 +10,7 @@ type block_state =
       { media_type : string
       ; source_type : Agent_sdk.Types.media_source_kind
       ; chunks : string list (* reversed: newest chunk first, concatenated at stop *)
+      ; encoded_bytes : int
       }
       (* RFC-0301: model-generated media accumulates here across [MediaDelta]
          chunks and is persisted to {!Keeper_chat_media_store} at the block stop,
@@ -61,12 +62,38 @@ let media_persist_error_kind = function
       Keeper_chat_events.Media_source_unsupported
   | Keeper_chat_media_store.Invalid_base64 _ ->
       Keeper_chat_events.Media_decode_failed
+  | Keeper_chat_media_store.Media_too_large _ ->
+      Keeper_chat_events.Media_payload_too_large
   | Keeper_chat_media_store.Write_failed _ ->
       Keeper_chat_events.Media_persist_failed
 
+let media_payload_too_large_reason ~size_bytes ~max_bytes =
+  Printf.sprintf "generated media payload too large: size_bytes=%d max_bytes=%d"
+    size_bytes
+    max_bytes
+
+let add_media_chunk ~media_type ~source_type ~chunks ~encoded_bytes data =
+  let encoded_bytes = encoded_bytes + String.length data in
+  let max_bytes = Keeper_chat_media_store.max_wire_bytes () in
+  if encoded_bytes > max_bytes
+  then Error (encoded_bytes, max_bytes)
+  else Ok (Active_media { media_type; source_type; chunks = data :: chunks; encoded_bytes })
+
+let media_payload_too_large_event ~index ~size_bytes ~max_bytes =
+  protocol_error ~index ~raw_bytes:size_bytes
+    ~reason:(media_payload_too_large_reason ~size_bytes ~max_bytes)
+    Keeper_chat_events.Media_payload_too_large
+
 let finalize_media_block ~redact_text ~base_dir ~index ~media_type ~source_type
-    ~chunks =
-  let data = String.concat "" (List.rev chunks) in
+    ~chunks ~encoded_bytes =
+  let max_wire_bytes = Keeper_chat_media_store.max_wire_bytes () in
+  if encoded_bytes > max_wire_bytes
+  then
+    [ media_payload_too_large_event ~index ~size_bytes:encoded_bytes
+        ~max_bytes:max_wire_bytes
+    ]
+  else
+    let data = String.concat "" (List.rev chunks) in
   match
     Keeper_chat_media_store.persist_media_source_result ~base_dir ~media_type
       ~source_type ~data
@@ -161,12 +188,12 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
             | Active_tool tool ->
                 [ Tool_call_end { tool_call_id = tool.tool_call_id } ]
             | Invalid_tool_block _ -> []
-            | Active_media { media_type; source_type; chunks } ->
+            | Active_media { media_type; source_type; chunks; encoded_bytes } ->
                 (* RFC-0301: media block still open at message end (no balanced
                    ContentBlockStop) — persist and surface it rather than drop it
                    silently on the block-table clear below. *)
                 finalize_media_block ~redact_text ~base_dir ~index ~media_type
-                  ~source_type ~chunks)
+                  ~source_type ~chunks ~encoded_bytes)
           bridge_state.blocks_by_index
       in
       { bridge_state = empty_state;
@@ -212,12 +239,17 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
        | Some (Active_media m)
          when String.equal m.media_type media_type && m.source_type = source_type
          ->
-           { bridge_state =
-               replace_block bridge_state index
-                 (Active_media
-                    { media_type; source_type; chunks = data :: m.chunks });
-             chat_events = []
-           }
+           (match
+              add_media_chunk ~media_type ~source_type ~chunks:m.chunks
+                ~encoded_bytes:m.encoded_bytes data
+            with
+            | Ok block ->
+                { bridge_state = replace_block bridge_state index block; chat_events = [] }
+            | Error (size_bytes, max_bytes) ->
+                { bridge_state = remove_block bridge_state index;
+                  chat_events =
+                    [ media_payload_too_large_event ~index ~size_bytes ~max_bytes ]
+                })
        | Some (Active_media _) ->
            { bridge_state;
              chat_events =
@@ -240,11 +272,17 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
                    Media_delta_invalid_block ]
            }
        | None ->
-           { bridge_state =
-               replace_block bridge_state index
-                 (Active_media { media_type; source_type; chunks = [ data ] });
-             chat_events = []
-           })
+           (match
+              add_media_chunk ~media_type ~source_type ~chunks:[]
+                ~encoded_bytes:0 data
+            with
+            | Ok block ->
+                { bridge_state = replace_block bridge_state index block; chat_events = [] }
+            | Error (size_bytes, max_bytes) ->
+                { bridge_state;
+                  chat_events =
+                    [ media_payload_too_large_event ~index ~size_bytes ~max_bytes ]
+                }))
   | ContentBlockStart { index; content_type; tool_id; tool_name }
     when stream_start_is_tool ~index ~content_type ~tool_id ~tool_name -> (
       match tool_id, tool_name with
@@ -344,7 +382,7 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
                   ~reason:"content block stop arrived for invalid tool block"
                   Tool_stop_without_start ]
           }
-      | Some (Active_media { media_type; source_type; chunks }) ->
+      | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
           (* RFC-0301: the media block is complete — concat the accumulated chunks,
              persist to the media store, and emit the reader-facing URL (not a
              byte count). *)
@@ -352,7 +390,7 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
             chat_events =
               block_stop
               :: finalize_media_block ~redact_text ~base_dir ~index ~media_type
-                   ~source_type ~chunks
+                   ~source_type ~chunks ~encoded_bytes
           }
       | None ->
           { bridge_state; chat_events = [ block_stop ] })

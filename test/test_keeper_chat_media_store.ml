@@ -2,6 +2,17 @@
 
 module M = Masc.Keeper_chat_media_store
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    (fun () ->
+      Unix.putenv key value;
+      f ())
+
 let with_temp_base f =
   let base = Filename.temp_dir "media_store_test" "" in
   f base
@@ -121,6 +132,28 @@ let test_base64_source_decoded_before_persist () =
          | Some path ->
              Alcotest.(check string) "stored raw bytes" raw (read_file path)))
 
+let test_generated_media_cap_rejects_oversize_raw_media () =
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
+    with_temp_base (fun base_dir ->
+      let raw = "12345" in
+      (match M.persist_result ~base_dir ~media_type:"image/png" ~data:raw with
+       | Ok _ -> Alcotest.fail "oversize raw media must not be persisted"
+       | Error msg ->
+           Alcotest.(check string)
+             "raw persist error"
+             "generated media too large: size_bytes=5 max_bytes=4"
+             msg);
+      match
+        M.persist_media_source_result ~base_dir ~media_type:"image/png"
+          ~source_type:Agent_sdk.Types.Base64 ~data:(Base64.encode_string raw)
+      with
+      | Ok _ -> Alcotest.fail "oversize decoded media must not be persisted"
+      | Error (M.Media_too_large { size_bytes; max_bytes }) ->
+          Alcotest.(check int) "size bytes" 5 size_bytes;
+          Alcotest.(check int) "max bytes" 4 max_bytes
+      | Error err ->
+          Alcotest.failf "unexpected error: %s" (M.persist_error_to_string err)))
+
 let test_unsupported_source_type_rejected () =
   with_temp_base (fun base_dir ->
     match
@@ -152,6 +185,10 @@ let () =
             "base64 source decoded"
             `Quick
             test_base64_source_decoded_before_persist
+        ; Alcotest.test_case
+            "generated media cap rejects oversize raw media"
+            `Quick
+            test_generated_media_cap_rejects_oversize_raw_media
         ; Alcotest.test_case
             "unsupported source rejected"
             `Quick

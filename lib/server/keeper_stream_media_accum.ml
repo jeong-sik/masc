@@ -21,7 +21,8 @@ type block_state =
   | Active_media of
       { media_type : string;
         source_type : Agent_sdk.Types.media_source_kind;
-        chunks : string list
+        chunks : string list;
+        encoded_bytes : int
       }
   | Invalid_block
 
@@ -50,9 +51,16 @@ let stream_start_is_tool ~index ~content_type ~tool_id ~tool_name =
     (Agent_sdk.Types.ContentBlockStart
        { index; content_type; tool_id; tool_name })
 
-let finalize_media t index ~media_type ~source_type ~chunks =
-  let data = String.concat "" (List.rev chunks) in
-  t.finalized_rev <- { index; media_type; source_type; data } :: t.finalized_rev;
+let add_media_chunk ~media_type ~source_type ~chunks ~encoded_bytes data =
+  let encoded_bytes = encoded_bytes + String.length data in
+  if encoded_bytes > Keeper_chat_media_store.max_wire_bytes ()
+  then None
+  else Some (Active_media { media_type; source_type; chunks = data :: chunks; encoded_bytes })
+
+let finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes =
+  if encoded_bytes <= Keeper_chat_media_store.max_wire_bytes () then (
+    let data = String.concat "" (List.rev chunks) in
+    t.finalized_rev <- { index; media_type; source_type; data } :: t.finalized_rev);
   remove_block t index
 
 let finalize_open_media t =
@@ -60,8 +68,8 @@ let finalize_open_media t =
   List.iter
     (fun (index, block) ->
       match block with
-      | Active_media { media_type; source_type; chunks } ->
-          finalize_media t index ~media_type ~source_type ~chunks
+      | Active_media { media_type; source_type; chunks; encoded_bytes } ->
+          finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
       | Invalid_block -> ())
     blocks;
   t.blocks_by_index <- []
@@ -77,20 +85,27 @@ let on_event t (evt : Agent_sdk.Types.sse_event) =
       (match stream_block_for_index t index with
        | Some (Active_media m)
          when String.equal m.media_type media_type && m.source_type = source_type ->
-           replace_block t index
-             (Active_media
-                { media_type; source_type; chunks = data :: m.chunks })
+           (match
+              add_media_chunk ~media_type ~source_type ~chunks:m.chunks
+                ~encoded_bytes:m.encoded_bytes data
+            with
+            | Some block -> replace_block t index block
+            | None -> replace_block t index Invalid_block)
        | Some (Active_media _) ->
            ()
        | Some Invalid_block ->
            ()
        | None ->
-           replace_block t index
-             (Active_media { media_type; source_type; chunks = [ data ] }))
+           (match
+              add_media_chunk ~media_type ~source_type ~chunks:[]
+                ~encoded_bytes:0 data
+            with
+            | Some block -> replace_block t index block
+            | None -> replace_block t index Invalid_block))
   | Agent_sdk.Types.ContentBlockStop { index } -> (
       match stream_block_for_index t index with
-      | Some (Active_media { media_type; source_type; chunks }) ->
-          finalize_media t index ~media_type ~source_type ~chunks
+      | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
+          finalize_media t index ~media_type ~source_type ~chunks ~encoded_bytes
       | Some Invalid_block ->
           remove_block t index
       | None -> ())

@@ -134,6 +134,14 @@ module KeeperVision : sig
   val candidate_backoff_max_sec : unit -> float
 end
 
+(** {1 Keeper generated media} *)
+
+module KeeperGeneratedMedia : sig
+  (** Raw generated-media byte budget for durable store and serve, clamped to
+      [1, 50 MiB]. *)
+  val max_bytes : unit -> int
+end
+
 (** {1 Keeper context reducer} *)
 
 module KeeperReducer : sig

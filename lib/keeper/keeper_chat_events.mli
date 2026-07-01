@@ -18,6 +18,7 @@ type stream_protocol_error_kind =
   | Media_delta_invalid_block
   | Media_source_unsupported
   | Media_decode_failed
+  | Media_payload_too_large
   | Media_persist_failed
   | Sse_error
   | Sse_parse_failed

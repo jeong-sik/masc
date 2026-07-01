@@ -7,15 +7,17 @@
     [/api/v1/voice/audio/<token>]) to an arbitrary [media_type].
 
     Files live under [<masc_dir>/media/] as [<token>.<ext>], where [token] is a
-    deterministic 32-char hex locator derived from the media type and raw payload.
-    Served by [GET /api/v1/media/<token>] behind normal read auth. Retention
-    follows the voice-clip policy: files are GC'd by the same directory sweep. *)
+    deterministic SHA-256 hex locator derived from the media type and raw payload.
+    Served by [GET /api/v1/media/<token>] behind normal read auth. Retention is
+    the media directory's operational policy; the voice-clip TTL sweep only owns
+    [<masc_dir>/audio]. *)
 
 let media_subdir = "media"
 
 type persist_error =
   | Unsupported_source_type of Agent_sdk.Types.media_source_kind
   | Invalid_base64 of string
+  | Media_too_large of { size_bytes : int; max_bytes : int }
   | Write_failed of string
 
 (* Broad category of a media type, driving the keeper-chat block type used when the
@@ -95,6 +97,20 @@ let token_re = Re.compile (Re.Pcre.re "^[a-f0-9]{64}$")
 let valid_token token =
   Re.execp token_re token
 
+let max_raw_bytes () =
+  Env_config_keeper.KeeperGeneratedMedia.max_bytes ()
+
+let max_wire_bytes () =
+  let raw_cap = max_raw_bytes () in
+  ((raw_cap + 2) / 3 * 4) + 4096
+
+let validate_raw_size data =
+  let size_bytes = String.length data in
+  let max_bytes = max_raw_bytes () in
+  if size_bytes > max_bytes
+  then Error (size_bytes, max_bytes)
+  else Ok ()
+
 (* Resolve a token to its on-disk path by locating [<token>.<ext>] — the ext is
    not carried by the token, so the directory is scanned for the single file whose
    basename (sans ext) equals the token. Returns [None] if absent or reaped. *)
@@ -135,21 +151,30 @@ let content_type_of_path path =
   content_type_of_ext (String.lowercase_ascii ext)
 
 let persist_result ~base_dir ~media_type ~data =
-  let token = token_of_payload ~media_type data in
-  let ext = ext_of_media_type media_type in
-  let dir = media_dir ~base_dir in
-  let url = media_url token in
-  try
-    Fs_compat.mkdir_p dir;
-    match file_path_of_token ~base_dir ~token with
-    | Some _ -> Ok (token, url)
-    | None ->
-        let path = Filename.concat dir (token ^ "." ^ ext) in
-        (match Fs_compat.save_file_atomic path data with
-         | Ok () -> Ok (token, url)
-         | Error msg -> Error msg)
-  with
-  | exn -> Error (Printf.sprintf "persist generated media: %s" (Printexc.to_string exn))
+  match validate_raw_size data with
+  | Error (size_bytes, max_bytes) ->
+      Error
+        (Printf.sprintf "generated media too large: size_bytes=%d max_bytes=%d"
+           size_bytes
+           max_bytes)
+  | Ok () ->
+      let token = token_of_payload ~media_type data in
+      let ext = ext_of_media_type media_type in
+      let dir = media_dir ~base_dir in
+      let url = media_url token in
+      try
+        Fs_compat.mkdir_p dir;
+        match file_path_of_token ~base_dir ~token with
+        | Some _ -> Ok (token, url)
+        | None ->
+            let path = Filename.concat dir (token ^ "." ^ ext) in
+            (match Fs_compat.save_file_atomic path data with
+             | Ok () -> Ok (token, url)
+             | Error msg -> Error msg)
+      with
+      | exn ->
+          Error
+            (Printf.sprintf "persist generated media: %s" (Printexc.to_string exn))
 
 let persist ~base_dir ~media_type ~data =
   match persist_result ~base_dir ~media_type ~data with
@@ -162,6 +187,10 @@ let persist_error_to_string = function
         (Agent_sdk.Types.media_source_kind_to_string source_type)
   | Invalid_base64 msg ->
       "invalid base64 media payload: " ^ msg
+  | Media_too_large { size_bytes; max_bytes } ->
+      Printf.sprintf "generated media too large: size_bytes=%d max_bytes=%d"
+        size_bytes
+        max_bytes
   | Write_failed msg ->
       "failed to persist generated media: " ^ msg
 
@@ -178,6 +207,10 @@ let persist_media_source_result ~base_dir ~media_type ~source_type ~data =
   match raw_data_of_source ~source_type ~data with
   | Error err -> Error err
   | Ok raw ->
-      (match persist_result ~base_dir ~media_type ~data:raw with
-       | Ok persisted -> Ok persisted
-       | Error msg -> Error (Write_failed msg))
+      (match validate_raw_size raw with
+       | Error (size_bytes, max_bytes) ->
+           Error (Media_too_large { size_bytes; max_bytes })
+       | Ok () -> (
+           match persist_result ~base_dir ~media_type ~data:raw with
+           | Ok persisted -> Ok persisted
+           | Error msg -> Error (Write_failed msg)))

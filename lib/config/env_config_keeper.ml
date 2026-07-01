@@ -433,6 +433,26 @@ module KeeperVision = struct
   ;;
 end
 
+(** {1 Keeper Generated Media Configuration} *)
+
+module KeeperGeneratedMedia = struct
+  let clamp_int ~min_value ~max_value value =
+    max min_value (min max_value value)
+  ;;
+
+  let max_bytes_default = 10 * 1024 * 1024
+  let max_bytes_ceiling = 50 * 1024 * 1024
+
+  (** Maximum raw generated-media bytes accepted by the durable store and serve
+      route. Default is 10 MiB. Range: [1, 50 MiB].
+
+      @category Policies @ops_class operator *)
+  let max_bytes () =
+    get_int_nonneg ~default:max_bytes_default "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_bytes_ceiling
+  ;;
+end
+
 (** {1 Keeper Context Reducer Configuration}
 
     Controls for the {!Agent_sdk.Context_reducer} stages applied to the

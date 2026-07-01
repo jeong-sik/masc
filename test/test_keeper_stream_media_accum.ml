@@ -5,6 +5,17 @@ open Alcotest
 module A = Keeper_stream_media_accum
 module Blocks = Masc.Keeper_chat_blocks
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    (fun () ->
+      Unix.putenv key value;
+      f ())
+
 let expected_token ~media_type data =
   Digestif.SHA256.(
     digest_string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data)
@@ -163,6 +174,29 @@ let test_metadata_drift_preserves_first_media_block () =
         src
   | _ -> fail "expected metadata drift to preserve the first image media block"
 
+let test_oversize_media_not_persisted () =
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
+    let open Agent_sdk.Types in
+    let accum = A.create () in
+    let oversized =
+      String.make (Masc.Keeper_chat_media_store.max_wire_bytes () + 1) 'A'
+    in
+    List.iter
+      (A.on_event accum)
+      [
+        ContentBlockDelta
+          {
+            index = 0;
+            delta =
+              MediaDelta
+                { media_type = "image/png"; source_type = Base64; data = oversized };
+          };
+        ContentBlockStop { index = 0 };
+      ];
+    let base_dir = Filename.temp_dir "media_accum_test" "" in
+    check int "oversize media is not persisted" 0
+      (List.length (A.to_chat_blocks ~base_dir accum)))
+
 let () =
   run
     "keeper_stream_media_accum"
@@ -177,5 +211,7 @@ let () =
             test_tool_block_media_not_persisted;
           test_case "metadata drift preserves first media block" `Quick
             test_metadata_drift_preserves_first_media_block;
+          test_case "oversize media not persisted" `Quick
+            test_oversize_media_not_persisted;
         ] );
     ]

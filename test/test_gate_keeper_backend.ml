@@ -33,6 +33,17 @@ let string_contains haystack needle =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
+let with_env key value f =
+  let previous = Sys.getenv_opt key in
+  Fun.protect
+    ~finally:(fun () ->
+      match previous with
+      | Some previous -> Unix.putenv key previous
+      | None -> Unix.putenv key "")
+    (fun () ->
+      Unix.putenv key value;
+      f ())
+
 let translate_oas_stream_events ?base_dir events =
   let redact_text text = text in
   let on_text_delta text = text in
@@ -1380,6 +1391,40 @@ let test_keeper_stream_bridge_surfaces_bad_media_base64 () =
         (string_contains reason "invalid base64 media payload")
   | _ -> fail "expected bad media base64 to surface as a protocol error"
 
+let test_keeper_stream_bridge_rejects_oversize_media_payload () =
+  with_env "MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES" "4" (fun () ->
+    let open Agent_sdk.Types in
+    let oversized = String.make (Keeper_chat_media_store.max_wire_bytes () + 1) 'A' in
+    let events =
+      translate_oas_stream_events
+        [
+          ContentBlockDelta
+            {
+              index = 0;
+              delta =
+                MediaDelta
+                  {
+                    media_type = "image/png";
+                    source_type = Base64;
+                    data = oversized;
+                  };
+            };
+          ContentBlockStop { index = 0 };
+        ]
+    in
+    match events with
+    | [ Keeper_chat_events.Oas_stream_protocol_error
+          { kind; index = Some error_index; raw_bytes = Some raw_bytes; reason = Some reason; _ };
+        Keeper_chat_events.Oas_content_block_stop { index = stop_index } ] ->
+        check string "oversize media kind" "media_payload_too_large"
+          (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+        check int "oversize media index" 0 error_index;
+        check int "oversize media bytes" (String.length oversized) raw_bytes;
+        check bool "oversize media reason" true
+          (string_contains reason "generated media payload too large");
+        check int "block stop index" 0 stop_index
+    | _ -> fail "expected oversize media payload to fail before accumulation")
+
 let test_keeper_stream_bridge_rejects_unsupported_media_source () =
   let open Agent_sdk.Types in
   let events =
@@ -2516,6 +2561,8 @@ let () =
             test_keeper_stream_bridge_rejects_media_delta_for_tool_block;
           test_case "stream bridge surfaces bad media base64" `Quick
             test_keeper_stream_bridge_surfaces_bad_media_base64;
+          test_case "stream bridge rejects oversize media payload" `Quick
+            test_keeper_stream_bridge_rejects_oversize_media_payload;
           test_case "stream bridge rejects unsupported media source" `Quick
             test_keeper_stream_bridge_rejects_unsupported_media_source;
           test_case "stream bridge preserves non-tool block lifecycle" `Quick

@@ -22,7 +22,6 @@
       400 — token malformed (not 32 hex chars)
       404 — clip not on disk (never synthesized, or reaped by the 1h TTL of
             [Voice_bridge.cleanup_old_audio_files])
-      413 — generated media exceeds the configured serve cap
       503 — base path unresolvable *)
 
 open Server_utils
@@ -40,7 +39,7 @@ let is_valid_token (s : string) : bool =
        s
 
 let generated_media_serve_max_bytes () =
-  Env_config.KeeperVision.max_image_bytes ()
+  Env_config.KeeperGeneratedMedia.max_bytes ()
 
 (* Clip path under the same audio dir [Voice_bridge_transport.make_audio_file]
    writes to. Reuses [Voice_bridge_core.masc_base_dir] so this route and the
@@ -76,8 +75,8 @@ let serve_clip ~token request reqd =
    capability, so the route is [CanReadState]-gated below. The file is resolved
    under the SAME workspace base_path the bridge persisted it with, so the write
    and read paths agree; content-type is derived from the stored extension. A
-   missing token is a soft 404 (text-only render remains the dashboard fallback),
-   mirroring [serve_clip]. *)
+   missing token is a soft 404 (text-only render remains the dashboard fallback);
+   an oversized stored file returns 413 before it is loaded into memory. *)
 let serve_media ~base_path ~token request reqd =
   match Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token with
   | None ->

@@ -131,11 +131,13 @@ let test_replay_skips_malformed_lines () =
     path
     (String.concat
        "\n"
-       [ {|{"event":"register","run_id":"r1","keeper":"k","preset":"p","started_at":1.0}|}
-       ; {|not-json|}
-       ; {|{"event":"complete","run_id":"r1","ok":false}|}
-       ; ""
-       ]);
+	       [ {|{"event":"register","run_id":"r1","keeper":"k","preset":"p","started_at":1.0}|}
+	       ; {|not-json|}
+	       ; {|{"event":"register","run_id":42,"keeper":"k","preset":"p","started_at":2.0}|}
+	       ; {|{"event":"complete","run_id":"r1","ok":"false"}|}
+	       ; {|{"event":"complete","run_id":"r1","ok":false}|}
+	       ; ""
+	       ]);
   let t = R.replay path in
   match R.get t ~run_id:"r1" with
   | Some { R.status = R.Completed { ok = false; _ }; _ } -> ()

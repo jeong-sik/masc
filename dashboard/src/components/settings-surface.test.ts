@@ -845,13 +845,25 @@ describe('SettingsSurface', () => {
   })
 
   it('runtime section shows resolved model routing controls and keeper assignments', async () => {
+    stubRuntimeDefaults(
+      makeRuntimeDefaults({
+        model_routing: {
+          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
+          librarian_runtime_id: 'rt-b',
+          structured_judge_runtime_id: 'rt-c',
+          cross_verifier_runtime_id: 'rt-a',
+          media_failover: [],
+        },
+      }),
+    )
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Librarian')
-      expect(container.querySelector('[data-testid="runtime-routing-structured-judge"]')).not.toBeNull()
+      expect((container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement | null)?.value)
+        .toBe('rt-c')
       expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
       expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
       const assignments = Array.from(

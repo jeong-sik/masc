@@ -152,6 +152,7 @@ streaming = true
 api-name = "gpt"
 max-context = 64000
 tools-support = true
+supports-structured-output = true
 streaming = true
 
 [runpod_mtp.qwen]
@@ -189,6 +190,7 @@ streaming = true
 api-name = "gpt"
 max-context = 64000
 tools-support = true
+supports-structured-output = true
 streaming = true
 
 [runpod_mtp.qwen]
@@ -423,6 +425,35 @@ let test_runtime_route_writer_updates_media_failover () =
       "runtime.toml media_failover explicitly empty"
       true
       (string_contains (Fs_compat.load_file path) "media_failover = []"))
+;;
+
+let test_runtime_route_writer_clears_optional_structured_judge () =
+  with_runtime_file (fun path ->
+    (match
+       Runtime.set_runtime_structured_judge
+         ~runtime_config_path:path
+         ~runtime_id:(Some "openai.gpt")
+         ()
+     with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "set_runtime_structured_judge failed: %s" msg);
+    Alcotest.(check (option string))
+      "structured judge set"
+      (Some "openai.gpt")
+      (Runtime.structured_judge_runtime_id ());
+    (match
+       Runtime.set_runtime_structured_judge ~runtime_config_path:path ~runtime_id:None ()
+     with
+     | Ok () -> ()
+     | Error msg -> Alcotest.failf "clear runtime structured_judge failed: %s" msg);
+    Alcotest.(check bool)
+      "runtime.toml structured_judge removed"
+      false
+      (string_contains (Fs_compat.load_file path) "structured_judge");
+    Alcotest.(check (option string))
+      "structured judge cache cleared"
+      None
+      (Runtime.structured_judge_runtime_id ()))
 ;;
 
 let test_runtime_config_text_loads_runtime_toml () =
@@ -978,6 +1009,10 @@ let () =
             "dashboard runtime route writer updates media_failover"
             `Quick
             test_runtime_route_writer_updates_media_failover
+        ; Alcotest.test_case
+            "dashboard runtime route writer clears optional structured judge"
+            `Quick
+            test_runtime_route_writer_clears_optional_structured_judge
         ; Alcotest.test_case
             "dashboard raw runtime.toml load returns full source"
             `Quick

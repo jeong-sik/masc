@@ -47,6 +47,7 @@ describe('runtime TOML dashboard editing helpers', () => {
 
     expect(environment.defaultRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.librarianRuntimeId).toBe('')
+    expect(environment.structuredJudgeRuntimeId).toBe('')
     expect(environment.crossVerifierRuntimeId).toBe('')
     expect(environment.assignments).toEqual({})
     expect(environment.providers[0]).toMatchObject({
@@ -77,7 +78,7 @@ describe('runtime TOML dashboard editing helpers', () => {
   it('projects runtime routing lanes and keeper assignments from runtime.toml source', () => {
     const withRouting = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',
-      'default = "runpod_mtp.qwen"\nlibrarian = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
+      'default = "runpod_mtp.qwen"\nlibrarian = "runpod_mtp.qwen"\nstructured_judge = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
     )}
 
 [runtime.assignments]
@@ -88,6 +89,7 @@ mad-improver = "runpod_mtp.qwen"
     const environment = parseRuntimeTomlEnvironment(withRouting)
 
     expect(environment.librarianRuntimeId).toBe('runpod_mtp.qwen')
+    expect(environment.structuredJudgeRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.crossVerifierRuntimeId).toBe('runpod_mtp.qwen')
     expect(environment.assignments).toEqual({
       sangsu: 'runpod_mtp.qwen',
@@ -309,7 +311,7 @@ sangsu = "runpod_mtp.qwen"
   it('retargets default and clears dependent lanes when deleting a provider with a fallback binding', () => {
     const withFallback = `${sourceText.replace(
       'default = "runpod_mtp.qwen"',
-      'default = "runpod_mtp.qwen"\nlibrarian = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
+      'default = "runpod_mtp.qwen"\nlibrarian = "runpod_mtp.qwen"\nstructured_judge = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
     )}
 
 [providers.openai]
@@ -334,6 +336,7 @@ sangsu = "runpod_mtp.qwen"
 
     expect(env.defaultRuntimeId).toBe('openai.gpt')
     expect(env.librarianRuntimeId).toBe('')
+    expect(env.structuredJudgeRuntimeId).toBe('')
     expect(env.crossVerifierRuntimeId).toBe('')
     expect(env.assignments).toEqual({})
     expect(env.providers.map(p => p.id)).toEqual(['openai'])
@@ -341,6 +344,7 @@ sangsu = "runpod_mtp.qwen"
     expect(next).toContain('default = "openai.gpt"')
     expect(next).not.toContain('[providers.runpod_mtp]')
     expect(next).not.toContain('[runpod_mtp.qwen]')
+    expect(next).not.toContain('structured_judge = "runpod_mtp.qwen"')
     expect(next).not.toContain('sangsu = "runpod_mtp.qwen"')
   })
 

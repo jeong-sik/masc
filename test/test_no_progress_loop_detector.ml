@@ -946,6 +946,47 @@ let test_apply_loop_detectors_claim_no_eligible_accrues () =
     (Some "empty")
     (reason_label (D.current_reason ~keeper_name:keeper))
 
+let test_apply_loop_detectors_repeated_identity_blocker_uses_detector_reason () =
+  D.reset_all_for_test ();
+  with_temp_config @@ fun config ->
+  ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+  Masc.Keeper_registry.clear ();
+  let keeper = "apply-repeated-identity-loop" in
+  let meta = make_meta keeper in
+  ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper meta);
+  let result = run_result [ tool_call "tool_execute" ] in
+  let rec apply count current_meta =
+    if count = 0
+    then current_meta
+    else
+      let next_meta =
+        Success.apply_loop_detectors
+          ~config
+          ~observation:scheduled_observation
+          ~meta:current_meta
+          current_meta
+          result
+      in
+      apply (count - 1) next_meta
+  in
+  let final_meta = apply (D.threshold () + 1) meta in
+  Alcotest.(check bool) "repeated identity loop pauses keeper" true final_meta.paused;
+  Alcotest.(check (option string))
+    "detector reason is repeated_identity"
+    (Some "repeated_identity")
+    (reason_label (D.current_reason ~keeper_name:keeper));
+  match final_meta.runtime.last_blocker with
+  | Some
+      { Masc.Keeper_meta_contract.klass = Masc.Keeper_meta_contract.No_progress_loop
+      ; detail
+      } ->
+    Alcotest.(check bool)
+      "blocker detail uses detector-final reason"
+      true
+      (String_util.contains_substring detail "reason=repeated_identity")
+  | Some _ -> Alcotest.fail "expected No_progress_loop blocker"
+  | None -> Alcotest.fail "expected no-progress blocker"
+
 (* RFC-0289 / SSOT: [Keeper_tool_outcome.is_nonprogress] is the single owner of
    the outcome gate (previously inlined in [typed_outcome_is_nonprogress], now a
    thin delegate). Pin its mapping directly against the variant so the
@@ -1030,6 +1071,11 @@ let () =
           Alcotest.test_case
             "apply_loop_detectors typed no-eligible claim accrues"
             `Quick (with_eio test_apply_loop_detectors_claim_no_eligible_accrues);
+          Alcotest.test_case
+            "apply_loop_detectors repeated identity blocker uses detector reason"
+            `Quick
+            (with_eio
+               test_apply_loop_detectors_repeated_identity_blocker_uses_detector_reason);
           Alcotest.test_case "is_nonprogress 4-arm mapping (RFC-0289 SSOT)"
             `Quick test_is_nonprogress_branches;
           Alcotest.test_case

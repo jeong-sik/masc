@@ -106,8 +106,41 @@ function sectionOf(document: TomlDocument, name: string): TomlSection | null {
   return document.sections.find(section => section.name === name) ?? null
 }
 
+// Bare key (letters/digits/underscore/hyphen) OR a quoted key ("..."/'...').
+// [runtime.assignments] keeper entries are written as quoted keys (e.g.
+// `"nick0cave" = "..."`); the earlier bare-key-only pattern silently failed
+// to match those lines, so sectionValues() returned {} for every quoted
+// entry and every keeper appeared to fall back to [runtime].default.
 function keyLineMatch(line: string): RegExpMatchArray | null {
-  return line.match(/^(\s*)([A-Za-z0-9_-]+)(\s*=\s*)(.*)$/)
+  return line.match(/^(\s*)("[^"]*"|'[^']*'|[A-Za-z0-9_-]+)(\s*=\s*)(.*)$/)
+}
+
+// Strip the surrounding quotes from a matched key token so callers compare
+// against the plain keeper/field name regardless of how the TOML author
+// quoted it.
+function dequoteTomlKey(rawKey: string | undefined): string {
+  const trimmed = (rawKey ?? '').trim()
+  if (trimmed.length >= 2) {
+    const first = trimmed[0]
+    const last = trimmed[trimmed.length - 1]
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) {
+      return trimmed.slice(1, -1)
+    }
+  }
+  return trimmed
+}
+
+// TOML bare keys may only contain ASCII letters, digits, underscores, and
+// hyphens (https://toml.io/en/v1.0.0#keys) -- the same charset keyLineMatch
+// accepts unquoted. Anything else must be written as a quoted basic string.
+const BARE_TOML_KEY = /^[A-Za-z0-9_-]+$/
+
+// Serialize a key for a brand-new `key = value` line. JSON.stringify produces
+// a valid TOML basic string for the ASCII range keeper/field names use
+// (matching backslash/double-quote escaping), so a name requiring quoting is
+// never written out as an invalid bare key.
+function serializeTomlKey(key: string): string {
+  return BARE_TOML_KEY.test(key) ? key : JSON.stringify(key)
 }
 
 function stripInlineComment(raw: string): string {
@@ -165,9 +198,30 @@ function sectionValues(document: TomlDocument, name: string): Record<string, Tom
     const line = document.lines[index] ?? ''
     const match = keyLineMatch(line)
     if (!match?.[2] || match[0].trimStart().startsWith('#')) continue
-    values[match[2]] = parseTomlScalar(match[4] ?? '')
+    values[dequoteTomlKey(match[2])] = parseTomlScalar(match[4] ?? '')
   }
   return values
+}
+
+// Line numbers (1-indexed) inside a section that are neither blank, a
+// comment, a nested `[...]` header, nor a key = value pair keyLineMatch can
+// read. A non-empty result means the UI is silently under-reporting that
+// section's contents (exactly how the quoted-key keeper assignments went
+// missing) rather than a real absence of data — surface it instead of
+// hiding it behind a default fallback.
+function sectionUnparsedLineNumbers(document: TomlDocument, name: string): number[] {
+  const section = sectionOf(document, name)
+  if (!section) return []
+  const lineNumbers: number[] = []
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const line = document.lines[index] ?? ''
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    if (/^\[.+\]\s*(#.*)?$/.test(trimmed)) continue
+    if (keyLineMatch(line)) continue
+    lineNumbers.push(index + 1)
+  }
+  return lineNumbers
 }
 
 function asString(value: TomlScalar | undefined, fallback = ''): string {
@@ -272,6 +326,13 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   if (providers.length === 0) warnings.push('providers.* section not found')
   if (models.length === 0) warnings.push('models.* section not found')
   if (bindings.length === 0) warnings.push('provider.model binding section not found')
+  const unparsedAssignmentLines = sectionUnparsedLineNumbers(document, 'runtime.assignments')
+  if (unparsedAssignmentLines.length > 0) {
+    warnings.push(
+      `[runtime.assignments] ${unparsedAssignmentLines.length}줄을 keeper = runtime-id 형식으로 읽지 못했습니다 ` +
+        `(줄 ${unparsedAssignmentLines.join(', ')}) — 아래 배정 목록이 실제 runtime.toml과 다를 수 있습니다.`,
+    )
+  }
   return {
     defaultRuntimeId: asString(runtimeValues.default),
     librarianRuntimeId: asString(runtimeValues.librarian),
@@ -361,12 +422,17 @@ export function setRuntimeTomlKey(
   const serialized = serializeValue(value)
   for (let index = section.start + 1; index < section.end; index += 1) {
     const match = keyLineMatch(lines[index] ?? '')
-    if (match?.[2] === key) {
-      lines[index] = `${match[1] ?? ''}${key}${match[3] ?? ' = '}${serialized}`
+    if (match && dequoteTomlKey(match[2]) === key) {
+      // Reuse the existing key token verbatim -- do not re-serialize it from
+      // the plain `key` argument. A quoted TOML key is not just cosmetic (it
+      // may carry characters illegal in a bare key, or have been emitted
+      // deliberately by the backend/SSOT writer), so updating only the value
+      // must not silently normalize `"nick0cave"` down to `nick0cave`.
+      lines[index] = `${match[1] ?? ''}${match[2]}${match[3] ?? ' = '}${serialized}`
       return joinLines(lines)
     }
   }
-  lines.splice(section.end, 0, `${key} = ${serialized}`)
+  lines.splice(section.end, 0, `${serializeTomlKey(key)} = ${serialized}`)
   return joinLines(lines)
 }
 
@@ -384,7 +450,7 @@ export function getRuntimeTomlKey(
   if (!section) return undefined
   for (let index = section.start + 1; index < section.end; index += 1) {
     const match = keyLineMatch(document.lines[index] ?? '')
-    if (match?.[2] === key) return stripInlineComment(match[4] ?? '').trim()
+    if (match && dequoteTomlKey(match[2]) === key) return stripInlineComment(match[4] ?? '').trim()
   }
   return undefined
 }
@@ -396,7 +462,7 @@ export function deleteRuntimeTomlKey(sourceText: string, sectionName: string, ke
   const lines = [...document.lines]
   for (let index = section.end - 1; index > section.start; index -= 1) {
     const match = keyLineMatch(lines[index] ?? '')
-    if (match?.[2] === key) lines.splice(index, 1)
+    if (match && dequoteTomlKey(match[2]) === key) lines.splice(index, 1)
   }
   return joinLines(lines)
 }

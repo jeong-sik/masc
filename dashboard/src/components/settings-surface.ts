@@ -17,6 +17,7 @@ import type {
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
   LogEntry,
+  RuntimeEntry,
   RuntimeDefaultsResponse,
 } from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
@@ -37,9 +38,7 @@ type PathCheckResult = {
   readonly ok: boolean
   readonly message: string
 }
-type BoolRecordUpdater = Record<string, boolean> | ((prev: Record<string, boolean>) => Record<string, boolean>)
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
-const SETTINGS_LOCAL_STORAGE_PREFIX = 'masc.settings.local.'
 const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
 
 const SET_SECTIONS: [SectionId, string, string][] = [
@@ -100,91 +99,6 @@ export function checkSettingsMcpEndpoint(value: string): PathCheckResult {
   }
 }
 
-function readLocalPreviewString(key: string, fallback: string): string {
-  try {
-    if (typeof sessionStorage === 'undefined') return fallback
-    return sessionStorage.getItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`) ?? fallback
-  } catch {
-    return fallback
-  }
-}
-
-function writeLocalPreviewString(key: string, value: string) {
-  try {
-    if (typeof sessionStorage === 'undefined') return
-    sessionStorage.setItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`, value)
-  } catch {
-    // Local preview settings are best-effort; blocked storage should not break Settings.
-  }
-}
-
-function readLocalPreviewBool(key: string, fallback: boolean): boolean {
-  const raw = readLocalPreviewString(key, fallback ? 'true' : 'false')
-  if (raw === 'true') return true
-  if (raw === 'false') return false
-  return fallback
-}
-
-function readLocalPreviewBoolRecord(key: string, fallback: Record<string, boolean>): Record<string, boolean> {
-  const next = { ...fallback }
-  try {
-    if (typeof sessionStorage === 'undefined') return next
-    const raw = sessionStorage.getItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`)
-    if (raw === null) return next
-    const parsed: unknown = JSON.parse(raw)
-    if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) return next
-    const values = parsed as Record<string, unknown>
-    for (const id of Object.keys(next)) {
-      if (typeof values[id] === 'boolean') next[id] = values[id]
-    }
-  } catch {
-    return next
-  }
-  return next
-}
-
-function writeLocalPreviewBoolRecord(key: string, value: Record<string, boolean>) {
-  try {
-    if (typeof sessionStorage === 'undefined') return
-    sessionStorage.setItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`, JSON.stringify(value))
-  } catch {
-    // Local preview settings are best-effort; blocked storage should not break Settings.
-  }
-}
-
-function useLocalPreviewString(key: string, initialValue: string): [string, (next: string) => void] {
-  const [value, setValue] = useState(() => readLocalPreviewString(key, initialValue))
-  const setStoredValue = (next: string) => {
-    setValue(next)
-    writeLocalPreviewString(key, next)
-  }
-  return [value, setStoredValue]
-}
-
-function useLocalPreviewBool(key: string, initialValue: boolean): [boolean, (next: boolean) => void] {
-  const [value, setValue] = useState(() => readLocalPreviewBool(key, initialValue))
-  const setStoredValue = (next: boolean) => {
-    setValue(next)
-    writeLocalPreviewString(key, next ? 'true' : 'false')
-  }
-  return [value, setStoredValue]
-}
-
-function useLocalPreviewBoolRecord(
-  key: string,
-  initialValue: Record<string, boolean>,
-): [Record<string, boolean>, (next: BoolRecordUpdater) => void] {
-  const [value, setValue] = useState(() => readLocalPreviewBoolRecord(key, initialValue))
-  const setStoredValue = (nextOrUpdate: BoolRecordUpdater) => {
-    setValue(prev => {
-      const next = typeof nextOrUpdate === 'function' ? nextOrUpdate(prev) : nextOrUpdate
-      writeLocalPreviewBoolRecord(key, next)
-      return next
-    })
-  }
-  return [value, setStoredValue]
-}
-
 // [fusion] preset shape from config/runtime.toml [fusion] — keeper-v2
 // settings.jsx:68-81 (FUSION). Describes the trio preset structure (panel
 // families, judge, timeouts). Read-only preview; no fusion config write
@@ -207,11 +121,11 @@ const FUSION: FusionConfig = {
   maxConcurrentPanels: 2,
   webTools: false,
   panel: [
-    'ollama_cloud.deepseek-v4-flash',
-    'glm-coding.glm-5-turbo',
-    'ollama_cloud.minimax-m3',
+    'ollama_cloud.ollama-cloud-devstral-2-123b',
+    'ollama_cloud.ollama-cloud-devstral-small-2-24b',
+    'ollama_cloud.ollama-cloud-ministral-3-14b',
   ],
-  judge: 'deepseek.deepseek-v4-pro',
+  judge: 'ollama_cloud.ollama-cloud-devstral-2-123b',
   panelTimeoutS: 300,
   judgeTimeoutS: 300,
   maxToolCallsPerPanel: 0,
@@ -255,22 +169,6 @@ export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level)]
 }
 
-function SetToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return html`
-    <button
-      type="button"
-      class=${`set-toggle ${on ? 'on' : ''}`}
-      role="switch"
-      aria-checked=${on}
-      data-testid="set-toggle"
-      data-active=${on ? 'true' : 'false'}
-      onClick=${() => onChange(!on)}
-    >
-      <span class="knob"></span>
-    </button>
-  `
-}
-
 function SetSeg({
   value,
   options,
@@ -310,57 +208,7 @@ function SetRow({ label, hint, children }: { label: ComponentChildren; hint?: st
   `
 }
 
-function SetStepper({
-  v,
-  set,
-  min,
-  max,
-}: {
-  v: number
-  set: (n: number) => void
-  min: number
-  max: number
-}) {
-  return html`
-    <div class="set-stepper" data-testid="set-stepper">
-      <button type="button" disabled=${v <= min} onClick=${() => set(Math.max(min, v - 1))}>−</button>
-      <span class="mono">${v}</span>
-      <button type="button" disabled=${v >= max} onClick=${() => set(Math.min(max, v + 1))}>+</button>
-    </div>
-  `
-}
-
-function SetSlider({
-  value,
-  min,
-  max,
-  step,
-  suffix,
-  onChange,
-}: {
-  value: number
-  min: number
-  max: number
-  step?: number
-  suffix?: string
-  onChange: (n: number) => void
-}) {
-  return html`
-    <div class="set-slider" data-testid="set-slider">
-      <input
-        type="range"
-        min=${min}
-        max=${max}
-        step=${step ?? 1}
-        value=${value}
-        onInput=${(e: Event) => onChange(Number((e.target as HTMLInputElement).value))}
-      />
-      <span class="mono">${value}${suffix ?? ''}</span>
-    </div>
-  `
-}
-
-function PreviewBadge({ label = 'local only' }: { label?: string }) {
+function PreviewBadge({ label }: { label: string }) {
   return html`
     <span
       class="set-preview-badge"
@@ -392,8 +240,33 @@ function findRuntimeCatalogSnapshot(
 }
 
 function RuntimeCatalogCapability({ label, value }: { label: string; value: boolean | undefined }) {
+  if (value === undefined) {
+    return html`<span class="rt-cap unknown" title="capability not reported">? ${label}</span>`
+  }
   const isOn = value === true
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
+}
+
+function runtimeCatalogFromDefaults(defaults: RuntimeDefaultsResponse | null): DashboardRuntimeProviderSnapshot[] {
+  if (!defaults) return []
+  return defaults.runtimes.map((entry: RuntimeEntry) => ({
+    provider: entry.id,
+    runtime_id: entry.id,
+    provider_display_name: entry.provider,
+    model_id: entry.model,
+    model_api_name: entry.model,
+    transport: 'runtime-defaults',
+    kind: 'resolved',
+    runtime_kind: 'runtime',
+    status: entry.is_default ? 'default' : 'resolved',
+    is_default_runtime: entry.is_default,
+    max_context: entry.max_context,
+    model_count: 1,
+    models: [entry.model],
+    source: defaults.source ?? 'runtime-defaults',
+    endpoint_url: null,
+    note: 'fallback from /api/v1/dashboard/runtime-defaults',
+  }))
 }
 
 function RuntimeCatalogCard({
@@ -571,12 +444,13 @@ function settingsSectionState(
   if (section === 'fusion' && fusionSettingsWritable) {
     return { mode: 'live', label: 'runtime.toml live-backed' }
   }
+  if (section === 'fusion') return { mode: 'local', label: 'documented defaults preview' }
   if (section === 'paths') return { mode: 'live', label: 'resolved by server' }
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
-  if (section === 'notify') return { mode: 'mixed', label: 'live thresholds + local preview' }
-  if (section === 'display') return { mode: 'mixed', label: 'theme/density live + local preview' }
-  return { mode: 'local', label: 'local preview only' }
+  if (section === 'notify') return { mode: 'live', label: 'live thresholds read-only' }
+  if (section === 'display') return { mode: 'live', label: 'theme/density live' }
+  return { mode: 'local', label: 'read-only preview' }
 }
 
 function LogFilter({
@@ -801,39 +675,26 @@ export function SettingsSurface() {
 
   // fusion (config/runtime.toml [fusion]) — keeper-v2 settings.jsx:178-182
   const fusionSettingsWritable = envBool('VITE_FUSION_SETTINGS_WRITABLE', false)
-  const [fusionOn, setFusionOn] = useState(FUSION.enabled)
-  const [fusionPreset, setFusionPreset] = useState(FUSION.defaultPreset)
-  const [fusionPanels, setFusionPanels] = useState(FUSION.maxConcurrentPanels)
-  const [fusionWeb, setFusionWeb] = useState(FUSION.webTools)
 
-  // notify / display
-  const [notifyCtx, setNotifyCtx] = useState(95)
-  const [notifyFails, setNotifyFails] = useState(3)
-  const [notifyCh, setNotifyCh] = useLocalPreviewString('notifyChannel', 'Slack')
-  const [notifyOn, setNotifyOn] = useLocalPreviewBoolRecord('notifyEvents', {
-    '컨텍스트 임계치 초과': true,
-    '연속 실패': true,
-    'keeper crash/dead': true,
-    '핸드오프 완료': false,
-    '승인 요청': true,
-  })
+  // display
   const density = tweaksDensity.value
   const setDensity = (next: string) => {
     if ((DISPLAY_DENSITY_OPTIONS as string[]).includes(next)) {
       tweaksDensity.value = next as Density
     }
   }
-  const [tz, setTz] = useLocalPreviewString('displayTimezone', 'Asia/Seoul')
-  const [locale, setLocale] = useLocalPreviewString('displayLocale', 'KO')
-  const [clock24, setClock24] = useLocalPreviewBool('displayClock24', true)
-  const clockLabel = clock24 ? '24-hour clock' : '12-hour clock'
-
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
   const sectionState = settingsSectionState(sec, fusionSettingsWritable)
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
-  const runtimeCatalogEntries = runtimeProviders?.providers ?? []
+  const richRuntimeCatalogEntries = runtimeProviders?.providers ?? []
+  const fallbackRuntimeCatalogEntries = runtimeCatalogFromDefaults(runtimeDefaults)
+  const runtimeCatalogEntries = richRuntimeCatalogEntries.length > 0
+    ? richRuntimeCatalogEntries
+    : fallbackRuntimeCatalogEntries
+  const runtimeCatalogIsFallback =
+    runtimeCatalogStatus === 'error' && richRuntimeCatalogEntries.length === 0 && fallbackRuntimeCatalogEntries.length > 0
   const runtimeConfigPath = runtimeProviders?.config_path ?? runtimeDefaults?.config_path ?? null
   const defaultRuntimeId = runtimeDefaults?.default_runtime_id ?? runtimeProviders?.summary?.default_runtime_id ?? null
   const defaultCatalogEntry = findRuntimeCatalogSnapshot(runtimeCatalogEntries, defaultRuntimeId)
@@ -893,8 +754,7 @@ export function SettingsSurface() {
               })}
             </div>
           `)}
-          <!-- keeper-v2 settings.jsx:262 — KO nav-note copy. -->
-          <div class="set-nav-note">live-backed 섹션은 API에 저장됩니다. local preview 섹션은 이 브라우저 세션에서만 바뀝니다.</div>
+          <div class="set-nav-note">live-backed 섹션은 API나 대시보드 shell 상태를 직접 읽고 씁니다. writer가 없는 값은 read-only로만 표시합니다.</div>
         </nav>
 
         <div class="set-content">
@@ -1003,9 +863,14 @@ export function SettingsSurface() {
 
                 <div class="settings-runtime-section" data-runtime-section="catalog" data-testid="runtime-catalog-section">
                   <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
-                  ${runtimeCatalogStatus === 'loading'
+                  ${runtimeCatalogIsFallback ? html`
+                    <div class="set-hint" data-testid="runtime-catalog-fallback">
+                      provider 카탈로그를 불러오지 못해 live runtime defaults projection으로 표시합니다.
+                    </div>
+                  ` : null}
+                  ${runtimeCatalogStatus === 'loading' && runtimeCatalogEntries.length === 0
                     ? html`<div class="set-hint" data-testid="runtime-catalog-loading">runtime catalog 불러오는 중...</div>`
-                    : runtimeCatalogStatus === 'error'
+                    : runtimeCatalogStatus === 'error' && runtimeCatalogEntries.length === 0
                       ? html`<div class="set-hint" data-testid="runtime-catalog-error">runtime catalog를 불러오지 못했습니다.</div>`
                       : runtimeCatalogEntries.length === 0
                         ? html`<div class="set-hint" data-testid="runtime-catalog-empty">표시할 runtime catalog entry가 없습니다.</div>`
@@ -1067,18 +932,30 @@ export function SettingsSurface() {
               ${fusionSettingsWritable
                 ? html`<${FusionSettingsPanel} />`
                 : html`
-                <${SetRow} label="Fusion 심의" hint="끄면 masc_fusion 호출이 게이트에서 Deny 반환">
-                  <${SetToggle} on=${fusionOn} onChange=${setFusionOn} />
-                <//>
-                ${fusionOn && html`
+                <div data-testid="fusion-readonly-preview">
+                  <${SetRow} label="Fusion 심의" hint="[fusion].enabled · 문서화된 기본값">
+                    <div class="set-truth-value">
+                      <span class="mono" data-testid="fusion-readonly-enabled">${FUSION.enabled ? 'enabled' : 'disabled'}</span>
+                      <span class="set-truth-source">read-only</span>
+                    </div>
+                  <//>
                   <${SetRow} label="기본 프리셋" hint="default_preset">
-                    <${SetSeg} value=${fusionPreset} options=${['trio']} onChange=${setFusionPreset} />
+                    <div class="set-truth-value">
+                      <span class="mono" data-testid="fusion-readonly-preset">${FUSION.defaultPreset}</span>
+                      <span class="set-truth-source">read-only</span>
+                    </div>
                   <//>
                   <${SetRow} label="동시 패널 수" hint="max_concurrent_panels · Async_agent.all 상한">
-                    <${SetStepper} v=${fusionPanels} set=${setFusionPanels} min=${1} max=${8} />
+                    <div class="set-truth-value">
+                      <span class="mono" data-testid="fusion-readonly-panels">${FUSION.maxConcurrentPanels}</span>
+                      <span class="set-truth-source">read-only</span>
+                    </div>
                   <//>
                   <${SetRow} label="패널·심판 웹 도구" hint="web_search / web_fetch 주입 여부">
-                    <${SetToggle} on=${fusionWeb} onChange=${setFusionWeb} />
+                    <div class="set-truth-value">
+                      <span class="mono" data-testid="fusion-readonly-web-tools">${FUSION.webTools ? 'enabled' : 'disabled'}</span>
+                      <span class="set-truth-source">read-only</span>
+                    </div>
                   <//>
                   <div class="set-sub-h">trio 프리셋</div>
                   <div class="set-fus-preset">
@@ -1094,7 +971,7 @@ export function SettingsSurface() {
                   <div class="set-mcp-detail mono" style=${{ marginTop: '10px' }}>
                     panel_timeout ${FUSION.panelTimeoutS}s · judge_timeout ${FUSION.judgeTimeoutS}s · max_tool_calls_per_panel ${FUSION.maxToolCallsPerPanel} (0 = 무제한)
                   </div>
-                `}
+                </div>
               `}
             `}
 
@@ -1131,7 +1008,7 @@ export function SettingsSurface() {
 
             ${sec === 'notify' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                알림 임계값은 현재 서버 config projection에서 읽습니다. 아래 라우팅/이벤트 토글은 알림 writer가 생기기 전까지 브라우저 세션 preview입니다.
+                알림 임계값은 현재 서버 config projection에서 읽습니다. 이 화면은 아직 알림 라우팅 writer를 노출하지 않으므로 브라우저-only 토글을 만들지 않습니다.
               </div>
               <div class="set-sub-h">Live alert thresholds</div>
               <${ThresholdTruthRow}
@@ -1151,39 +1028,21 @@ export function SettingsSurface() {
               />
               <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
               <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
-
-              <div class="set-local-summary" data-testid="notify-local-summary">
-                <span>local routing preview</span>
-                <span class="mono">${Object.values(notifyOn).filter(Boolean).length}/${Object.keys(notifyOn).length} events enabled</span>
-                <${PreviewBadge} />
-              </div>
-              <${SetRow} label="Preview context alert" hint="Local what-if threshold; server truth is shown above">
-                <${SetSlider} value=${notifyCtx} min=${70} max=${98} suffix="%" onChange=${setNotifyCtx} />
+              <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
+                <div class="set-truth-value" data-testid="notify-routing-readonly">
+                  <span class="mono">read-only</span>
+                  <span class="set-truth-source">no writer</span>
+                </div>
               <//>
-              <${SetRow} label="Preview failure count" hint="Local what-if count; no backend writer exists yet">
-                <${SetStepper} v=${notifyFails} set=${setNotifyFails} min=${1} max=${10} />
-              <//>
-              <${SetRow} label="Preview channel" hint="Local routing preview">
-                <${SetSeg} value=${notifyCh} options=${['Slack', 'Discord', '없음']} onChange=${setNotifyCh} />
-              <//>
-              <div class="set-sub-h">Notify events</div>
-              ${Object.keys(notifyOn).map(k => html`
-                <${SetRow} key=${k} label=${k}>
-                  <div class="set-tg-control">
-                    <${PreviewBadge} />
-                    <${SetToggle} on=${notifyOn[k] ?? false} onChange=${(v: boolean) => setNotifyOn(p => ({ ...p, [k]: v }))} />
-                  </div>
-                <//>
-              `)}
             `}
 
             ${sec === 'display' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Theme and density apply to this browser immediately. Language, timezone and clock format are browser-session previews only until the dashboard has a renderer-wide locale/time setting.
+                Theme and density apply to this browser immediately. Locale, timezone and clock format are not shown here until the dashboard has a real renderer-wide setting.
               </div>
-              <div class="set-local-summary" data-testid="display-local-summary">
-                <span>display session</span>
-                <span class="mono">${density} · ${locale} · ${tz} · ${clockLabel}</span>
+              <div class="set-local-summary" data-testid="display-live-summary">
+                <span>display shell</span>
+                <span class="mono">${density}</span>
               </div>
               <${SetRow} label="Theme" hint="Live color palette — Dark / StyleSeed / Paper">
                 <${ThemeSwitch} />
@@ -1194,22 +1053,10 @@ export function SettingsSurface() {
                   <${SetSeg} value=${density} options=${DISPLAY_DENSITY_OPTIONS} onChange=${setDensity} />
                 </div>
               <//>
-              <${SetRow} label="Language" hint="Session preview for UI labels">
-                <div class="set-tg-control">
-                  <${PreviewBadge} />
-                  <${SetSeg} value=${locale} options=${['KO', 'EN']} onChange=${setLocale} />
-                </div>
-              <//>
-              <${SetRow} label="Timezone" hint="Session preview for timestamp basis">
-                <div class="set-tg-control">
-                  <${PreviewBadge} />
-                  <${SetSeg} value=${tz} options=${['Asia/Seoul', 'Asia/Tokyo', 'UTC']} onChange=${setTz} />
-                </div>
-              <//>
-              <${SetRow} label="24-hour clock" hint="Session preview for time format">
-                <div class="set-tg-control">
-                  <${PreviewBadge} />
-                  <${SetToggle} on=${clock24} onChange=${setClock24} />
+              <${SetRow} label="Locale / time format" hint="No dashboard-wide renderer setting is exposed yet">
+                <div class="set-truth-value" data-testid="display-locale-readonly">
+                  <span class="mono">read-only</span>
+                  <span class="set-truth-source">no writer</span>
                 </div>
               <//>
             `}

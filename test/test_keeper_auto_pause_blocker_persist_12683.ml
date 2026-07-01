@@ -628,7 +628,16 @@ let test_operator_resume_clears_no_progress_loop_latch () =
           | Some _ -> fail "expected no_progress failure reason to clear")
        | None -> fail "expected registered keeper")
 
-let test_operator_resume_keeps_no_progress_state_on_drop_failure () =
+(* KLV-2 (RFC-keeper-liveness-ssot §3): [clear_for_operator_resume] used to
+   propagate a recovery-stimulus drop failure as [Error], leaving the
+   detector latch, meta blocker, and failure_reason all in place — so a
+   keeper paused by [Manual_resume_required] could never actually be
+   resumed if that one disk write kept failing (server_dashboard_http_*,
+   masc_keeper_up, and keepalive persist all treat this [Error] as "resume
+   failed" and refuse to unpause). The drop is now best-effort: the
+   critical clears below must succeed regardless of whether the stimulus
+   removal did. *)
+let test_operator_resume_survives_recovery_stimulus_drop_failure () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -659,11 +668,11 @@ let test_operator_resume_keeps_no_progress_state_on_drop_failure () =
        in
        let recovery_post_id = "no-progress-loop:" ^ keeper_name in
        check bool
-         "detector latched before failed resume"
+         "detector latched before resume"
          true
          (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
        check bool
-         "no synthetic recovery stimulus before failed resume"
+         "no synthetic recovery stimulus before resume"
          false
          (queue_contains_post_id
             (Masc.Keeper_registry_event_queue.snapshot
@@ -680,38 +689,26 @@ let test_operator_resume_keeps_no_progress_state_on_drop_failure () =
             ~base_path:config.base_path
             paused_meta
         with
-        | Ok _ -> fail "expected operator resume clear to fail"
-        | Error err -> check bool "failure is surfaced" true (String.length err > 0));
-       check bool
-         "detector remains latched after failed resume"
-         true
-         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
-       check bool
-         "live recovery stimulus remains absent after failed resume"
-         false
-         (queue_contains_post_id
-            (Masc.Keeper_registry_event_queue.snapshot
-               ~base_path:config.base_path
-               keeper_name)
-            recovery_post_id);
-       (match paused_meta.runtime.last_blocker with
-        | Some { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop; _ } ->
-          ()
-        | Some _ -> fail "expected no_progress meta blocker to remain"
-        | None -> fail "expected meta blocker to remain");
-       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
-       | Some entry ->
-         (match entry.Masc.Keeper_registry.last_failure_reason with
-          | Some
-              (Masc.Keeper_registry.Provider_runtime_error
-                { code = failure_code; _ })
-            when String.equal
-                   failure_code
-                   Masc.Keeper_unified_turn_no_progress.failure_reason_code ->
-            ()
-          | Some _ -> fail "expected no_progress failure reason to remain"
-          | None -> fail "expected failure reason to remain")
-       | None -> fail "expected registered keeper")
+        | Error err ->
+          fail
+            (Printf.sprintf
+               "expected operator resume to succeed even when the recovery \
+                stimulus drop fails (best-effort cleanup), got Error %s"
+               err)
+        | Ok resumed_meta ->
+          check bool
+            "detector unlatched after resume despite drop failure"
+            false
+            (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+          (match resumed_meta.runtime.last_blocker with
+           | None -> ()
+           | Some _ -> fail "expected no_progress meta blocker to be cleared");
+          (match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+           | Some entry ->
+             (match entry.Masc.Keeper_registry.last_failure_reason with
+              | None -> ()
+              | Some _ -> fail "expected no_progress failure reason to be cleared")
+           | None -> fail "expected registered keeper")))
 
 let test_wakeup_directive_persists_no_progress_meta_clear () =
   Eio_main.run
@@ -1472,9 +1469,9 @@ let () =
           test_case "operator resume clears no-progress latch" `Quick
             test_operator_resume_clears_no_progress_loop_latch;
           test_case
-            "operator resume keeps no-progress state on drop failure"
+            "operator resume survives recovery-stimulus drop failure (KLV-2)"
             `Quick
-            test_operator_resume_keeps_no_progress_state_on_drop_failure;
+            test_operator_resume_survives_recovery_stimulus_drop_failure;
           test_case "wakeup directive persists no-progress meta clear" `Quick
             test_wakeup_directive_persists_no_progress_meta_clear;
           test_case

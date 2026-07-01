@@ -154,24 +154,58 @@ let receipt_contract_attention_reason receipt =
    The provider-runtime classes preserve their originating blocker
    string in the typed payload instead of collapsing to a single
    "provider_error" literal. *)
-let disposition_of_runtime_blocker_class raw_blocker_class =
-  match raw_blocker_class with
-  | "completion_contract_violation" ->
-      Keeper_turn_disposition.Provider_error (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
-  | "turn_timeout"
-  | "turn_timeout_after_queue_wait"
-  | "stale_turn_timeout" ->
-      Keeper_turn_disposition.Turn_wall_clock_timeout
-  | "ambiguous_post_commit_timeout" | "ambiguous_post_commit_failure" ->
-      Keeper_turn_disposition.Post_commit_ambiguous
-  | "sdk_input_required" ->
-      Keeper_turn_disposition.Input_required
-  | ("runtime_exhausted" | "no_capable_provider"
-     | "provider_runtime_error") as cls ->
+let disposition_of_typed_runtime_blocker_class blocker_class =
+  let raw_blocker_class =
+    Keeper_meta_contract.blocker_class_to_string blocker_class
+  in
+  match blocker_class with
+  | Keeper_meta_contract.Completion_contract_violation ->
       Keeper_turn_disposition.Provider_error
-        (Keeper_turn_terminal_code.Provider_runtime_error cls)
-  | _ ->
+        (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
+  | Keeper_meta_contract.Turn_timeout
+  | Keeper_meta_contract.Turn_timeout_after_queue_wait
+  | Keeper_meta_contract.Stale_turn_timeout ->
+      Keeper_turn_disposition.Turn_wall_clock_timeout
+  | Keeper_meta_contract.Ambiguous_post_commit_timeout
+  | Keeper_meta_contract.Ambiguous_post_commit_failure ->
+      Keeper_turn_disposition.Post_commit_ambiguous
+  | Keeper_meta_contract.Sdk_input_required ->
+      Keeper_turn_disposition.Input_required
+  | Keeper_meta_contract.Runtime_exhausted _ ->
+      Keeper_turn_disposition.Provider_error
+        (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class)
+  | Keeper_meta_contract.Capacity_backpressure
+  | Keeper_meta_contract.Admission_queue_wait_timeout
+  | Keeper_meta_contract.Turn_livelock_blocked
+  | Keeper_meta_contract.No_progress_loop
+  | Keeper_meta_contract.Fiber_unresolved
+  | Keeper_meta_contract.Stale_fleet_batch
+  | Keeper_meta_contract.Oas_agent_execution_timeout
+  | Keeper_meta_contract.Sdk_max_turns_exceeded
+  | Keeper_meta_contract.Sdk_token_budget_exceeded
+  | Keeper_meta_contract.Sdk_cost_budget_exceeded
+  | Keeper_meta_contract.Sdk_unrecognized_stop_reason
+  | Keeper_meta_contract.Sdk_idle_detected
+  | Keeper_meta_contract.Sdk_guardrail_violation
+  | Keeper_meta_contract.Sdk_tripwire_violation
+  | Keeper_meta_contract.Sdk_exit_condition_met ->
       Keeper_turn_disposition.Unknown { raw_error = "" }
+
+let legacy_provider_runtime_blocker_disposition raw_blocker_class =
+  match raw_blocker_class with
+  | "no_capable_provider" | "provider_runtime_error" ->
+      Some
+        (Keeper_turn_disposition.Provider_error
+           (Keeper_turn_terminal_code.Provider_runtime_error raw_blocker_class))
+  | _ -> None
+
+let disposition_of_runtime_blocker_class raw_blocker_class =
+  match Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class with
+  | Some blocker_class -> disposition_of_typed_runtime_blocker_class blocker_class
+  | None -> (
+    match legacy_provider_runtime_blocker_disposition raw_blocker_class with
+    | Some disposition -> disposition
+    | None -> Keeper_turn_disposition.Unknown { raw_error = "" })
 
 let terminal_reason_from_runtime_blocker_fields runtime_blocker_fields =
   match assoc_string_opt "runtime_blocker_class" runtime_blocker_fields with
@@ -300,17 +334,32 @@ let disposition_of_snapshot ~pending_approval_count ~runtime_blocker_fields =
   let blocker_summary =
     assoc_string_opt "runtime_blocker_summary" runtime_blocker_fields
   in
+  let sandbox_summary =
+    match blocker_summary with
+    | Some summary when String_util.contains_substring_ci summary "sandbox" ->
+        Some ("Alert", "sandbox_violation")
+    | _ -> None
+  in
   if pending_approval_count > 0 then ("Blocked", "waiting_approval")
   else if continue_gate then ("Blocked", "waiting_human_decision")
   else
-    match blocker_class, blocker_summary with
-    | Some "runtime_exhausted", _ -> ("Alert", "runtime_exhausted")
-    | Some "completion_contract_violation", _ -> ("Alert", "fsm_invariant")
-    | _, Some summary
-      when String_util.contains_substring_ci summary "sandbox" ->
-        ("Alert", "sandbox_violation")
-    | Some _, _ -> ("Alert", "critical_block")
-    | None, _ -> ("Pass", "healthy")
+    match blocker_class with
+    | Some raw_blocker_class -> (
+      match
+        Keeper_meta_contract.blocker_class_of_serialized_string raw_blocker_class
+      with
+      | Some (Keeper_meta_contract.Runtime_exhausted _) ->
+          ("Alert", "runtime_exhausted")
+      | Some Keeper_meta_contract.Completion_contract_violation ->
+          ("Alert", "fsm_invariant")
+      | Some _ | None -> (
+        match sandbox_summary with
+        | Some disposition -> disposition
+        | None -> ("Alert", "critical_block")))
+    | None -> (
+      match sandbox_summary with
+      | Some disposition -> disposition
+      | None -> ("Pass", "healthy"))
 
 let operator_disposition_of_display ~disposition ~disposition_reason =
   match disposition with
@@ -322,22 +371,8 @@ let operator_disposition_of_display ~disposition ~disposition_reason =
 
 let display_disposition_of_operator ~operator_disposition
     ~operator_disposition_reason =
-  let reason default =
-    match String.trim operator_disposition_reason with
-    | "" -> default
-    | value -> value
-  in
-  match String.lowercase_ascii operator_disposition with
-  | "pass" -> ("Pass", "healthy")
-  | "skipped" -> ("Pass", "phase_skipped")
-  | "pass_next_model" -> ("Pass", "runtime_fallback")
-  | "blocked" | "blocked_runtime" -> ("Blocked", reason "runtime_blocked")
-  | "pause_human" -> ("Blocked", reason "needs_human_attention")
-  | "fail_open_next_runtime" -> ("Blocked", reason "degraded_retry")
-  | "user_cancelled" -> ("Blocked", reason "cancelled")
-  | "alert_exhausted" -> ("Alert", reason "runtime_exhausted")
-  | "unknown" -> ("Alert", reason "unmapped_runtime_state")
-  | _ -> ("Alert", reason "unmapped_operator_disposition")
+  Keeper_operator_disposition_display.of_wire ~operator_disposition
+    ~operator_disposition_reason
 
 let display_disposition_requires_attention = function
   | "Blocked" | "Pause" | "Alert" -> true

@@ -120,24 +120,17 @@ val read_episodes_tail : keeper_id:string -> n:int -> episode list
 
 (** {1 Retention (RFC-0239 Q4, supersedes RFC-0238 Capped_by_score)} *)
 
-(** Per-keeper fact retention target: the size the cap trims the store back to.
-    NOT the recall scan window — the store holds up to {!fact_store_max} between
-    caps, so recall scans {!fact_store_max} (not this) to see the whole bounded
-    store. *)
+(** Alias for {!Keeper_memory_os_policy.fact_recall_window}; retained on the IO
+    surface for compatibility with existing callers. *)
 val fact_recall_window : int
 
-(** Upper bound on a bounded store between caps: the retention cap [trigger]
-    (= [fact_recall_window] + [fact_recall_window]/2). SSOT shared by the
-    librarian write path (cap trigger) and recall (tail scan window) so the read
-    side scans the entire bounded store — including the high-rank rows a fresh cap
-    writes at the file head, which a [fact_recall_window]-sized scan would miss. *)
+(** Alias for {!Keeper_memory_os_policy.fact_store_max}; retained on the IO
+    surface for compatibility with existing callers. *)
 val fact_store_max : int
 
-(** RFC-0272 (defect D): episode-log retention bounds, same shape and hysteresis
-    band as the facts cap. [event_recall_window] / [episode_file_window] are the
-    low-water trim targets; [event_store_max] / [episode_file_store_max] are the
-    high-water triggers. The low-water (256) exceeds the recall scan window
-    ([Keeper_memory_os_recall.episode_tail_scan] = 32) so a trim cannot starve
+(** RFC-0272 (defect D): aliases for the episode-log retention bounds in
+    {!Keeper_memory_os_policy}. The low-water values exceed
+    {!Keeper_memory_os_policy.recall_episode_tail_scan}, so a trim cannot starve
     recall. *)
 val event_recall_window : int
 

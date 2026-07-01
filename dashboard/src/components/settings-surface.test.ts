@@ -429,14 +429,14 @@ describe('SettingsSurface', () => {
     expect(themeButton).toBeTruthy()
   })
 
-  it('wires display density to the dashboard density signal and keeps local-only display previews honest', async () => {
+  it('wires display density to the dashboard density signal without fake locale previews', async () => {
     route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
 
     render(html`<${SettingsSurface} />`, container)
 
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
-      .toContain('theme/density live + local preview')
-    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
+      .toContain('theme/density live')
+    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
       .toContain('spacious')
 
     const clickSeg = async (label: string) => {
@@ -447,23 +447,25 @@ describe('SettingsSurface', () => {
     }
 
     await clickSeg('compact')
-    await clickSeg('EN')
-    await clickSeg('UTC')
-    await fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="set-toggle"]') as HTMLButtonElement)
 
     expect(tweaksDensity.value).toBe('compact')
-    expect(sessionStorage.getItem('masc.settings.local.displayLocale')).toBe('EN')
-    expect(sessionStorage.getItem('masc.settings.local.displayTimezone')).toBe('UTC')
-    expect(sessionStorage.getItem('masc.settings.local.displayClock24')).toBe('false')
-    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
-      .toContain('compact · EN · UTC · 12-hour clock')
+    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
+      .toContain('compact')
+    expect(container.querySelector('[data-testid="display-locale-readonly"]')?.textContent)
+      .toContain('no writer')
+    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
+    expect([...container.querySelectorAll('.set-seg-b')].map(b => b.textContent))
+      .toEqual(['compact', 'regular', 'spacious'])
+    expect(sessionStorage.getItem('masc.settings.local.displayLocale')).toBeNull()
+    expect(sessionStorage.getItem('masc.settings.local.displayTimezone')).toBeNull()
+    expect(sessionStorage.getItem('masc.settings.local.displayClock24')).toBeNull()
 
     render(null, container)
     render(html`<${SettingsSurface} />`, container)
 
     expect(tweaksDensity.value).toBe('compact')
-    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
-      .toContain('compact · EN · UTC · 12-hour clock')
+    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
+      .toContain('compact')
   })
 
   it('falls invalid settings sections back to runtime without a fake subsection', () => {
@@ -550,7 +552,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-worktree-base-input"]')).toBeNull()
   })
 
-  it('notify page shows live thresholds plus local routing preview controls', async () => {
+  it('notify page shows live thresholds without fake local routing controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
@@ -558,15 +560,16 @@ describe('SettingsSurface', () => {
     await waitFor(() => {
       expect(container.textContent).toContain('MASC_DASHBOARD_CTX_PREPARING')
       expect(container.textContent).toContain('70%')
-      expect(container.querySelector('[data-testid="notify-local-summary"]')?.textContent).toContain('local routing preview')
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('live thresholds read-only')
+      expect(container.querySelector('[data-testid="notify-routing-readonly"]')?.textContent).toContain('no writer')
     })
 
-    const discord = Array.from(container.querySelectorAll<HTMLButtonElement>('.set-seg-b'))
-      .find(button => button.textContent === 'Discord')
-    expect(discord).toBeTruthy()
-    await fireEvent.click(discord as HTMLButtonElement)
-    expect(discord?.getAttribute('data-active')).toBe('true')
-    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBe('Discord')
+    expect(container.querySelector('[data-testid="notify-local-summary"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-slider"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-stepper"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
+    expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBeNull()
   })
 
   it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {
@@ -659,6 +662,47 @@ describe('SettingsSurface', () => {
       ).toEqual(['catalog', 'routing', 'assignments'])
     })
     expect(container.textContent).not.toContain('oas·seoul-1')
+  })
+
+  it('runtime overview falls back to runtime-defaults when the rich provider catalog is unavailable', async () => {
+    apiMock.fetchRuntimeProviders.mockRejectedValueOnce(new Error('provider catalog unavailable'))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-catalog-fallback"]')?.textContent)
+        .toContain('runtime defaults')
+      const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
+      expect(cards.length).toBe(3)
+      expect(cards.map(card => card.textContent)).toEqual([
+        expect.stringContaining('rt-a'),
+        expect.stringContaining('rt-b'),
+        expect.stringContaining('rt-c'),
+      ])
+      expect(cards[0]?.textContent).toContain('P')
+      expect(cards[0]?.textContent).toContain('m1')
+      expect(cards[0]?.textContent).toContain('128K ctx')
+      expect(cards[0]?.textContent).toContain('? tools')
+      expect(cards[0]?.textContent).toContain('? thinking')
+      expect(cards[0]?.textContent).toContain('? streaming')
+    })
+    expect(container.querySelector('[data-testid="runtime-catalog-error"]')).toBeNull()
+  })
+
+  it('runtime overview does not show the fallback warning while provider catalog is still loading', async () => {
+    apiMock.fetchRuntimeProviders.mockReturnValueOnce(new Promise(() => {}))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+
+    await waitFor(() => {
+      const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
+      expect(cards.length).toBe(3)
+    })
+    expect(container.querySelector('[data-testid="runtime-catalog-fallback"]')).toBeNull()
   })
 
   it('runtime section shows resolved keeper assignments read-only', async () => {
@@ -755,22 +799,29 @@ describe('SettingsSurface', () => {
     expect(allRows().length).toBe(6)
   })
 
-  it('renders the fusion preset section (panel families + judge) read-only', async () => {
+  it('renders the fusion preset section (panel families + judge) as read-only defaults', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-fusion"]') as HTMLElement)
 
     expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('패널·심판 심의')
+    expect(container.querySelector('[data-testid="fusion-readonly-preview"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="fusion-readonly-enabled"]')?.textContent).toBe('enabled')
+    expect(container.querySelector('[data-testid="fusion-readonly-preset"]')?.textContent).toBe('trio')
+    expect(container.querySelector('[data-testid="fusion-readonly-panels"]')?.textContent).toBe('2')
+    expect(container.querySelector('[data-testid="fusion-readonly-web-tools"]')?.textContent).toBe('disabled')
     // trio preset lanes: 3 panel models + 1 judge, with prototype labels.
     const lanes = container.querySelectorAll('.set-fus-lane')
     expect(lanes.length).toBe(2)
     const models = Array.from(container.querySelectorAll('.set-fus-model')).map(n => n.textContent)
-    expect(models).toContain('ollama_cloud.deepseek-v4-flash')
-    expect(models).toContain('glm-coding.glm-5-turbo')
-    expect(models).toContain('ollama_cloud.minimax-m3')
-    expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('deepseek.deepseek-v4-pro')
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('local preview only')
-    expect((container.querySelector('[data-testid="set-toggle"]') as HTMLButtonElement).disabled).toBe(false)
+    expect(models).toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
+    expect(models).toContain('ollama_cloud.ollama-cloud-devstral-small-2-24b')
+    expect(models).toContain('ollama_cloud.ollama-cloud-ministral-3-14b')
+    expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('ollama_cloud.ollama-cloud-devstral-2-123b')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('documented defaults preview')
+    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
+    expect(container.querySelector('[data-testid="set-stepper"]')).toBeNull()
     expect(container.querySelector('[data-testid="fusion-settings-editor"]')).toBeNull()
     expect(container.textContent).not.toContain('per_hour_budget')
   })
@@ -806,7 +857,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
-    expect(container.textContent).not.toContain('ollama_cloud.deepseek-v4-flash')
+    expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
   })
 
   it('opens the live runtime.toml editor from runtime management', async () => {

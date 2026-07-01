@@ -244,6 +244,51 @@ let test_workspace_secret_saved_private () =
       check int "workspace secret mode 0600" 0o600
         (permission_bits (Auth.workspace_secret_file dir)))
 
+(* Every check_permission/resolve_role_with_auth_config call now threads
+   auth_cfg.workspace_secret_hash through, so this cached path is exercised
+   indirectly by test_workspace_secret_grants_recovery_admin. This test pins
+   the ~cached_hash:None fallback directly, since nothing else reaches it. *)
+let test_verify_workspace_secret_falls_back_to_file_when_uncached () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = Auth.init_workspace_secret dir in
+      check bool "correct secret verifies via on-disk fallback"
+        true
+        (Auth.verify_workspace_secret dir ~cached_hash:None secret);
+      check bool "wrong secret is rejected via on-disk fallback"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:None "not-the-secret"))
+
+let test_verify_workspace_secret_uses_cached_hash () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = "a-known-secret-value" in
+      let hash = Auth.sha256_hash secret in
+      check bool "matching cached hash verifies without reading the file"
+        true
+        (Auth.verify_workspace_secret dir ~cached_hash:(Some hash) secret);
+      check bool "mismatched cached hash is rejected"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:(Some hash) "wrong-secret"))
+
+let test_verify_workspace_secret_fails_closed_when_file_unreadable () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = Auth.init_workspace_secret dir in
+      (* Directory in place of the secret file: the on-disk fallback must
+         reject cleanly rather than raise into the caller. *)
+      Sys.remove (Auth.workspace_secret_file dir);
+      Unix.mkdir (Auth.workspace_secret_file dir) 0o755;
+      check bool "unreadable secret file fails closed, does not raise"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:None secret))
+
 let test_verify_token () =
   let dir = setup_test_workspace () in
   let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Admin in
@@ -809,6 +854,75 @@ let test_permission_denied_for_worker_admin_action () =
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
+(* Regression for the bootstrap-grace bypass: the grace branch used to match
+   a bare, unauthenticated [agent_name] string against [read_initial_admin]
+   with no proof of possession. Any caller could self-declare that name via
+   an unauthenticated request header (server_auth.ml's x-masc-agent) and be
+   granted Admin outright. It must now require the workspace secret. *)
+let test_bootstrap_grace_rejects_agent_name_impersonation_without_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result =
+    Auth.check_permission dir ~agent_name:"test-admin" ~token:None
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "agent_name impersonation without a token must not grant access"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_bootstrap_grace_rejects_agent_name_impersonation_with_wrong_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result =
+    Auth.check_permission dir ~agent_name:"test-admin" ~token:(Some "not-the-secret")
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "a wrong/guessed token must not grant recovery admin"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_workspace_secret_grants_recovery_admin () =
+  let dir = setup_test_workspace () in
+  let secret, _bootstrap_token =
+    Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin"
+  in
+  (* Proof of possession of the workspace secret must grant recovery admin
+     regardless of the caller's self-declared agent_name. *)
+  let result =
+    Auth.check_permission dir ~agent_name:"anyone" ~token:(Some secret)
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_resolve_role_rejects_agent_name_impersonation_without_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result = Auth.resolve_role dir ~agent_name:"test-admin" ~token:None in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok role ->
+    fail (Printf.sprintf "impersonation without a token must not resolve a role, got %s"
+      (Masc_domain.show_agent_role role))
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_resolve_role_workspace_secret_grants_admin () =
+  let dir = setup_test_workspace () in
+  let secret, _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result = Auth.resolve_role dir ~agent_name:"anyone" ~token:(Some secret) in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok Masc_domain.Admin -> ()
+  | Ok role -> fail (Printf.sprintf "expected Admin, got %s" (Masc_domain.show_agent_role role))
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
 let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   let dir = setup_test_workspace () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
@@ -1068,6 +1182,16 @@ let () =
       test_case "auth enabled with valid token" `Quick test_auth_enabled_with_valid_token;
       test_case "permission denied for worker admin action" `Quick
         test_permission_denied_for_worker_admin_action;
+      test_case "bootstrap grace rejects agent_name impersonation without token"
+        `Quick test_bootstrap_grace_rejects_agent_name_impersonation_without_token;
+      test_case "bootstrap grace rejects agent_name impersonation with wrong token"
+        `Quick test_bootstrap_grace_rejects_agent_name_impersonation_with_wrong_token;
+      test_case "workspace secret grants recovery admin"
+        `Quick test_workspace_secret_grants_recovery_admin;
+      test_case "resolve_role rejects agent_name impersonation without token"
+        `Quick test_resolve_role_rejects_agent_name_impersonation_without_token;
+      test_case "resolve_role workspace secret grants admin"
+        `Quick test_resolve_role_workspace_secret_grants_admin;
       test_case "strict unknown masc tool allows worker"
         `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
       test_case "strict unknown non-masc tool denied"
@@ -1090,5 +1214,11 @@ let () =
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;
       test_case "workspace secret saved private" `Quick test_workspace_secret_saved_private;
+      test_case "verify_workspace_secret falls back to file when uncached" `Quick
+        test_verify_workspace_secret_falls_back_to_file_when_uncached;
+      test_case "verify_workspace_secret uses cached hash" `Quick
+        test_verify_workspace_secret_uses_cached_hash;
+      test_case "verify_workspace_secret fails closed when file unreadable" `Quick
+        test_verify_workspace_secret_fails_closed_when_file_unreadable;
     ];
   ]

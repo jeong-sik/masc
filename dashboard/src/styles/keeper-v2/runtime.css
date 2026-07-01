@@ -91,11 +91,15 @@
 
 /* assignments */
 .rt-assigns { display: flex; flex-direction: column; }
-.rt-assign { display: flex; align-items: center; gap: 14px; padding: 9px 0; border-top: 1px solid var(--border-soft); }
-.rt-assign:first-of-type { border-top: 0; }
+.rt-assign-summary { font-size: var(--fs-11); color: var(--text-dim); margin-bottom: 10px; }
+.rt-assign-group { margin-bottom: 18px; }
+.rt-assign-group:last-child { margin-bottom: 0; }
+.rt-assign-group-h { font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); padding-bottom: 4px; }
+.rt-assign { display: flex; align-items: center; gap: 14px; padding: 9px 0; }
+.rt-assign + .rt-assign { border-top: 1px solid var(--border-soft); }
 .rt-assign-k { display: inline-flex; align-items: center; gap: 8px; width: 150px; flex: none; font-size: 12.5px; color: var(--text-bright); }
-.rt-assign-tag { font-size: 10.5px; color: var(--text-dim); }
-.rt-assign-tag.pin { color: var(--volt-strong); }
+.rt-assign-tag { font-family: var(--font-mono); font-size: var(--fs-10); padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); color: var(--text-dim); white-space: nowrap; }
+.rt-assign-tag.pin { color: var(--volt-strong); border-color: color-mix(in oklab, var(--volt-strong) 34%, transparent); background: color-mix(in oklab, var(--volt-strong) 12%, transparent); }
 
 /* add-provider / add-model / add-binding forms (providers, models, bindings tabs) */
 .rt-card-add { border-style: dashed; }

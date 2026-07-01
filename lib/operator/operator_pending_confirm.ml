@@ -147,9 +147,12 @@ let raw_pending_confirms config : pending_confirm list =
         entries
   | Some _ -> []
 
+let pending_confirms_to_yojson entries =
+  `List (List.map pending_confirm_to_yojson entries)
+
 let write_pending_confirms config (entries : pending_confirm list) =
-  Workspace_utils.write_json config (pending_confirms_path config)
-    (`List (List.map pending_confirm_to_yojson entries))
+  Workspace_utils.write_json_result config (pending_confirms_path config)
+    (pending_confirms_to_yojson entries)
 
 let pending_confirm_expired (entry : pending_confirm) =
   match entry.expires_at with
@@ -159,7 +162,15 @@ let pending_confirm_expired (entry : pending_confirm) =
 let read_pending_confirms config : pending_confirm list =
   let entries = raw_pending_confirms config in
   let active = List.filter (fun entry -> not (pending_confirm_expired entry)) entries in
-  if List.length active <> List.length entries then write_pending_confirms config active;
+  let () =
+    if List.length active <> List.length entries then
+      match write_pending_confirms config active with
+      | Ok () -> ()
+      | Error msg ->
+        Log.Misc.warn
+          "[operator_pending_confirm] failed to persist expired cleanup: %s"
+          msg
+  in
   active
 
 let upsert_pending_confirm config entry =
@@ -187,8 +198,9 @@ let remove_pending_confirms_by_target config ~target_type ~target_id =
       all
   in
   let removed = List.length all - List.length remaining in
-  if removed > 0 then write_pending_confirms config remaining;
-  removed
+  if removed > 0 then
+    write_pending_confirms config remaining |> Result.map (fun () -> removed)
+  else Ok 0
 
 let normalize_pending_confirm_actor_filter = function
   | Some raw ->

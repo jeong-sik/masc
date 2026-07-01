@@ -18,6 +18,7 @@ import {
   setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
   setRuntimeTomlProviderField,
+  type RuntimeTomlCredentialType,
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
 import { ActionButton } from './common/button'
@@ -30,6 +31,7 @@ import {
   type NewRuntimeModelInput,
   type NewRuntimeProviderInput,
   type RuntimeBindingEditableField,
+  type RuntimeProviderTransportEditableField,
   type RuntimeStructuredSection,
 } from './runtime-environment-editor'
 
@@ -323,6 +325,28 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
     setError(null)
   }
 
+  function handleProviderTransportChange(
+    providerId: string,
+    field: RuntimeProviderTransportEditableField,
+    value: string,
+  ) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleProviderCredentialChange(
+    providerId: string,
+    credentialType: RuntimeTomlCredentialType,
+    value: string,
+  ) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlProviderCredential(current, providerId, credentialType, value))
+    setNotice(null)
+    setError(null)
+  }
+
   async function handleRefresh() {
     if (dirty) {
       const confirmed =
@@ -588,6 +612,8 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
                 onAddProvider=${handleAddProvider}
                 onAddModel=${handleAddModel}
                 onAddBinding=${handleAddBinding}
+                onProviderTransportChange=${handleProviderTransportChange}
+                onProviderCredentialChange=${handleProviderCredentialChange}
               />
             </div>
 

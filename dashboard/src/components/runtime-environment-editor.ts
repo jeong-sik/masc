@@ -24,6 +24,7 @@ export type RuntimeStructuredSection =
   | 'assignments'
 
 export type RuntimeBindingEditableField = 'max-concurrent' | 'keep-alive' | 'num-ctx'
+export type RuntimeProviderTransportEditableField = 'endpoint' | 'command'
 
 // Basic-field-only payloads (RFC-0273 §3.2 reuse boundary). Per-model
 // [models.X.capabilities] flags (supports-tool-choice, thinking-control-format,
@@ -71,6 +72,16 @@ interface RuntimeEnvironmentEditorProps {
   onAddProvider: (input: NewRuntimeProviderInput) => void
   onAddModel: (input: NewRuntimeModelInput) => void
   onAddBinding: (providerId: string, modelId: string) => void
+  onProviderTransportChange: (
+    providerId: string,
+    field: RuntimeProviderTransportEditableField,
+    value: string,
+  ) => void
+  onProviderCredentialChange: (
+    providerId: string,
+    credentialType: RuntimeTomlCredentialType,
+    value: string,
+  ) => void
 }
 
 function firstId<T extends { id: string }>(items: T[]): string {
@@ -142,6 +153,10 @@ function parseRequiredPositiveInteger(raw: string): number | undefined {
   return parsed > 0 ? parsed : undefined
 }
 
+function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransportEditableField {
+  return provider.transportKind === 'command' ? 'command' : 'endpoint'
+}
+
 // Prototype rt-model-ctx label — runtime-editor.jsx:176 `(max/1000).toFixed(0)}k ctx`.
 function protoContext(value: number | null | undefined): string {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return '— ctx'
@@ -187,6 +202,8 @@ export function RuntimeEnvironmentEditor({
   onAddProvider,
   onAddModel,
   onAddBinding,
+  onProviderTransportChange,
+  onProviderCredentialChange,
 }: RuntimeEnvironmentEditorProps) {
   const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
   const [modelQuery, setModelQuery] = useState('')
@@ -396,11 +413,45 @@ export function RuntimeEnvironmentEditor({
     `
   }
 
+  // Explicit ([runtime.assignments]) entries surfaced first, [runtime].default
+  // fallbacks grouped below — the flat alphabetical list made it hard to tell
+  // at a glance which keepers actually have a pinned runtime vs. which are
+  // just inheriting whatever [runtime].default happens to be.
+  const assignmentRows = keeperList.map(keeper => {
+    const current = assignments[keeper.name] ?? environment.defaultRuntimeId
+    return { keeper, current, isDefault: current === environment.defaultRuntimeId }
+  })
+  const pinnedAssignments = assignmentRows.filter(row => !row.isDefault)
+  const fallbackAssignments = assignmentRows.filter(row => row.isDefault)
+
+  function assignRow(row: (typeof assignmentRows)[number]) {
+    return html`
+      <div key=${row.keeper.name} class="rt-assign">
+        <span class="rt-assign-k">
+          <${StatusDot} size="sm" class=${keeperDotTone(row.keeper.status)} />
+          <span class="mono">${row.keeper.name}</span>
+        </span>
+        <select
+          class="rt-select mono"
+          value=${row.current}
+          disabled=${typedPatchDisabled}
+          aria-label=${`${row.keeper.name} 런타임 배정`}
+          onChange=${(event: Event) => updateAssignment(row.keeper.name, (event.currentTarget as HTMLSelectElement).value)}
+        >
+          ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
+        </select>
+        ${row.isDefault
+          ? html`<span class="rt-assign-tag mono">↳ default 폴백</span>`
+          : html`<span class="rt-assign-tag pin mono">고정</span>`}
+      </div>
+    `
+  }
+
   return html`
     <div data-testid="runtime-environment-editor">
       <div class="rt-head-actions" style=${{ justifyContent: 'flex-end', marginBottom: '14px' }}>
         <span class="rt-nav-sub mono" style=${{ marginRight: 'auto' }}>런타임 환경</span>
-        <span class="rt-nav-sub mono">${saving ? '저장 중' : 'routing live · bindings draft'}</span>
+        <span class="rt-nav-sub mono">${saving ? '저장 중' : 'routing live · providers/bindings draft'}</span>
       </div>
 
       ${environment.warnings.length > 0 ? html`
@@ -447,29 +498,41 @@ export function RuntimeEnvironmentEditor({
         )}
       </div>
 
-      <!-- providers — runtime-editor.jsx:144-165. Existing providers are a
-           read-only projection (editing an established provider's endpoint/
-           credential in place stays raw-TOML-only). Adding a brand-new
-           provider is a distinct, lower-risk operation — it cannot silently
-           change an already-wired provider — so it gets a typed form below
-           that mutates the draft through the same validated save path as
-           binding-field edits. -->
+      <!-- providers — runtime-editor.jsx:144-165. Existing providers' endpoint/
+           command and credential fields are draft-editable in place (onProvider
+           TransportChange/onProviderCredentialChange) and applied through the
+           validated Save path. Adding a brand-new provider uses a separate typed
+           form below the list instead of reusing those in-place editors — a typo
+           while creating a new id can never silently rewrite an already-wired
+           provider — but both paths write through the same draft + validated
+           save. -->
       <div class=${section === 'providers' ? '' : 'hidden'} data-testid="runtime-section-providers">
         <div class="rt-cards">
-          ${environment.providers.map(provider => html`
-            <div key=${provider.id} class="rt-card">
+          ${environment.providers.map(provider => {
+            const providerTransportField = transportField(provider)
+            return html`
+            <div key=${provider.id} class="rt-card" data-testid=${`runtime-provider-${provider.id}`}>
               <div class="rt-card-h">
                 <span class="rt-card-id mono">${provider.id}</span>
                 <span class="rt-card-name">${provider.displayName}</span>
                 <span class="rt-proto mono">${provider.protocol || '—'}</span>
               </div>
               <div class="rt-field">
-                <span class="sub-k">endpoint</span>
+                <span class="sub-k">${providerTransportField}</span>
                 <input
                   class="rt-input mono"
                   value=${transportValue(provider)}
-                  readOnly
-                  aria-label="provider transport value"
+                  disabled=${isDisabled}
+                  aria-label=${`${provider.id} provider transport value`}
+                  onInput=${(event: Event) => {
+                    onProviderTransportChange(
+                      provider.id,
+                      providerTransportField,
+                      (event.currentTarget as HTMLInputElement).value,
+                    )
+                  }}
+                  data-testid=${`runtime-provider-${provider.id}-transport`}
+                  data-runtime-provider-transport=${provider.id}
                 />
               </div>
               <div class="rt-field">
@@ -483,8 +546,17 @@ export function RuntimeEnvironmentEditor({
                       class="rt-input mono"
                       type=${provider.credentialType === 'inline' ? 'password' : 'text'}
                       value=${credentialValue(provider)}
-                      readOnly
-                      aria-label="provider credential value"
+                      disabled=${isDisabled}
+                      aria-label=${`${provider.id} provider credential value`}
+                      onInput=${(event: Event) => {
+                        onProviderCredentialChange(
+                          provider.id,
+                          provider.credentialType,
+                          (event.currentTarget as HTMLInputElement).value,
+                        )
+                      }}
+                      data-testid=${`runtime-provider-${provider.id}-credential`}
+                      data-runtime-provider-credential=${provider.id}
                     />
                   </span>
                   `}
@@ -494,7 +566,8 @@ export function RuntimeEnvironmentEditor({
                    provider-capability source exists, rather than implying support
                    with no backing (PR #22081 review P1: no stub). */ ''}
             </div>
-          `)}
+            `
+          })}
           <div class="rt-card rt-card-add" data-testid="runtime-add-provider-card">
             ${!providerFormOpen ? html`
               <button
@@ -878,7 +951,9 @@ export function RuntimeEnvironmentEditor({
       </div>
 
       <!-- assignments — runtime-editor.jsx:216-231. keeper -> runtime id from
-           the live keepers signal + [runtime.assignments]. -->
+           the live keepers signal + [runtime.assignments]. Pinned entries are
+           grouped ahead of default-fallback entries so a long keeper list
+           doesn't force scanning every row to see who is actually pinned. -->
       <div class=${section === 'assignments' ? '' : 'hidden'} data-testid="runtime-section-assignments">
         <div class="rt-assigns">
           <div class="rt-note">
@@ -886,30 +961,23 @@ export function RuntimeEnvironmentEditor({
           </div>
           ${keeperList.length === 0 ? html`
             <div class="rt-note" data-testid="runtime-assignments-empty">표시할 keeper가 없습니다.</div>
-          ` : keeperList.map(keeper => {
-            const current = assignments[keeper.name] ?? environment.defaultRuntimeId
-            const isDefault = current === environment.defaultRuntimeId
-            return html`
-              <div key=${keeper.name} class="rt-assign">
-                <span class="rt-assign-k">
-                  <${StatusDot} size="sm" class=${keeperDotTone(keeper.status)} />
-                  <span class="mono">${keeper.name}</span>
-                </span>
-                <select
-                  class="rt-select mono"
-                  value=${current}
-                  disabled=${typedPatchDisabled}
-                  aria-label=${`${keeper.name} 런타임 배정`}
-                  onChange=${(event: Event) => updateAssignment(keeper.name, (event.currentTarget as HTMLSelectElement).value)}
-                >
-                  ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
-                </select>
-                ${isDefault
-                  ? html`<span class="rt-assign-tag mono">↳ default 폴백</span>`
-                  : html`<span class="rt-assign-tag pin mono">고정</span>`}
+          ` : html`
+            <div class="rt-assign-summary mono" data-testid="runtime-assignments-summary">
+              고정 ${pinnedAssignments.length}개 · default 폴백 ${fallbackAssignments.length}개
+            </div>
+            ${pinnedAssignments.length > 0 ? html`
+              <div class="rt-assign-group" data-testid="runtime-assignments-group-pinned">
+                <div class="rt-assign-group-h mono">고정 배정</div>
+                ${pinnedAssignments.map(row => assignRow(row))}
               </div>
-            `
-          })}
+            ` : null}
+            ${fallbackAssignments.length > 0 ? html`
+              <div class="rt-assign-group" data-testid="runtime-assignments-group-fallback">
+                <div class="rt-assign-group-h mono">default 폴백</div>
+                ${fallbackAssignments.map(row => assignRow(row))}
+              </div>
+            ` : null}
+          `}
         </div>
       </div>
     </div>

@@ -967,7 +967,26 @@ let audio_fields_with_expired ~base_dir audio =
       in
       [ ("audio", `Assoc (audio_to_json { a with expired })) ]
 
-let to_json_array ?base_dir (messages : chat_message list) : Yojson.Safe.t =
+let blocks_with_trace ~trace_block_by_turn_ref (m : chat_message) =
+  let base =
+    match m.blocks with
+    | Some blocks -> blocks
+    | None -> []
+  in
+  match m.role, m.turn_ref, trace_block_by_turn_ref with
+  | Role.Assistant, Some turn_ref, Some trace_block_by_turn_ref -> (
+      match trace_block_by_turn_ref turn_ref with
+      | Some trace_block -> base @ [ trace_block ]
+      | None -> base)
+  | _ -> base
+
+let blocks_fields_of_list = function
+  | [] -> []
+  | blocks -> [ ("blocks", Keeper_chat_blocks.blocks_to_yojson blocks) ]
+;;
+
+let to_json_array ?base_dir ?trace_block_by_turn_ref
+    (messages : chat_message list) : Yojson.Safe.t =
   `List
     (List.map
        (fun m ->
@@ -1015,7 +1034,7 @@ let to_json_array ?base_dir (messages : chat_message list) : Yojson.Safe.t =
                      ) atts in
                      [("attachments", `List att_json)])
               @ audio_fields_with_expired ~base_dir m.audio
-              @ blocks_fields m.blocks
+              @ blocks_fields_of_list (blocks_with_trace ~trace_block_by_turn_ref m)
               @ opt_string_field "turn_ref"
                   (Option.map Ids.Turn_ref.to_string m.turn_ref)))
        messages)

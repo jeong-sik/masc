@@ -226,7 +226,18 @@ let temp_dir prefix =
   Unix.mkdir dir 0o755;
   dir
 
-let tool_matrix_agent_name = "matrix"
+(* Must equal the keeper registry's normalized identity for the keeper
+   fixture registered in test_keeper_tool_matrix_cases.ml's [make_fixture]
+   ("tool-matrix" — Keeper_registry strips the "keeper-" prefix from
+   meta.name when resolving the keeper's own agent_name for dispatch
+   context). Confirmed empirically: ctx.agent_name inside
+   Workspace_goals.principal_matches_authenticated_caller is "tool-matrix",
+   not meta.name/meta.agent_name ("keeper-tool-matrix"). Self-attested
+   actor/principal fields built here (via [goal_principal]) must match, or
+   masc_goal_transition/masc_goal_verify's identity-binding guard rejects
+   every matrix call ("<field> id must match authenticated caller") instead
+   of exercising the real transition/verification path. *)
+let tool_matrix_agent_name = "tool-matrix"
 
 let rec waitpid_nointr pid =
   try Unix.waitpid [] pid with
@@ -758,6 +769,11 @@ let tool_arguments fixture (schema : Masc_domain.tool_schema) =
           (* Schema no longer requires content|author (both are validated at
              the handler layer so body/content aliases both work). Matrix
              test still needs to supply body so board_core accepts it. *)
+          [ "body" ]
+      | "masc_board_post_update" ->
+          (* Same as masc_board_post: body is optional in the schema
+             (validated at the handler layer), but the matrix fixture must
+             supply a non-empty body or the handler rejects the edit. *)
           [ "body" ]
       | "masc_goal_transition" ->
           [ "override_note"; "note" ]

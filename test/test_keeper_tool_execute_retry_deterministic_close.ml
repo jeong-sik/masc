@@ -10,6 +10,8 @@
     reducer. *)
 
 module D = Masc.Keeper_tool_deterministic_error
+module Execute_runtime = Masc.Keeper_tool_execute_runtime.For_testing
+module Shell_dispatch = Keeper_tool_execute_shell_ir
 
 let reason_testable =
   let pp ppf reason = Format.pp_print_string ppf (D.to_telemetry_key reason) in
@@ -46,6 +48,13 @@ let deterministic_marker_raw ?(error = "timeout") reason =
     (`Assoc
        ([ "ok", `Bool false; "error", `String error ]
         @ D.deterministic_retry_fields reason))
+;;
+
+let dispatch_error_marker_raw error =
+  Yojson.Safe.to_string
+    (`Assoc
+       ([ "ok", `Bool false; "error", `String "execute_dispatch_rejected" ]
+        @ Execute_runtime.dispatch_error_deterministic_retry_fields error))
 ;;
 
 let test_command_shape_blocked () =
@@ -145,6 +154,74 @@ let test_typed_deterministic_retry_marker_reports_source () =
     ~expected_reason:D.Write_operation_gated
     ~expected_source:D.Deterministic_retry_marker
     raw
+;;
+
+let test_dispatch_gate_reject_marks_command_shape_blocked () =
+  let raw =
+    dispatch_error_marker_raw
+      (Shell_dispatch.Gate_reject "shell operator token rejected")
+  in
+  check_classify
+    ~name:"dispatch gate reject marker"
+    ~expected:(Some D.Command_shape_blocked)
+    raw
+;;
+
+let test_dispatch_parse_rejects_mark_command_shape_blocked () =
+  List.iter
+    (fun (name, error) ->
+      check_classify
+        ~name
+        ~expected:(Some D.Command_shape_blocked)
+        (dispatch_error_marker_raw error))
+    [ "dispatch cannot_parse marker", Shell_dispatch.Cannot_parse
+    ; "dispatch too_complex marker", Shell_dispatch.Too_complex
+    ]
+;;
+
+let test_dispatch_path_reject_marks_path_reason () =
+  List.iter
+    (fun (name, error, expected) ->
+      check_classify
+        ~name
+        ~expected:(Some expected)
+        (dispatch_error_marker_raw (Shell_dispatch.Path_reject error)))
+    [ ( "dispatch path outside whitelist marker"
+      , "Path blocked: /etc/passwd (outside allowed directories)"
+      , D.Path_outside_sandbox )
+    ; ( "dispatch cwd_not_directory marker"
+      , "cwd_not_directory: /tmp/missing (directory does not exist under cwd)"
+      , D.Cwd_not_directory )
+    ; ( "dispatch path_not_found_under_allowed_roots marker"
+      , "path_not_found_under_allowed_roots: repos/masc/nope.ml"
+      , D.Path_not_found )
+    ; ( "dispatch task state path marker"
+      , "task_state_file_path_blocked: .masc/tasks.json"
+      , D.Task_state_probe_blocked )
+    ]
+;;
+
+let test_dispatch_unknown_path_reject_stays_observed () =
+  check_classify
+    ~name:"dispatch unknown path reject observed"
+    ~expected:None
+    (dispatch_error_marker_raw
+       (Shell_dispatch.Path_reject "new_path_error_without_typed_prefix"))
+;;
+
+let test_dispatch_policy_rejects_mark_policy_blocked () =
+  List.iter
+    (fun (name, error) ->
+      check_classify
+        ~name
+        ~expected:(Some D.Policy_blocked)
+        (dispatch_error_marker_raw error))
+    [ ( "dispatch approval_required marker"
+      , Shell_dispatch.Approval_required
+          { summary = "approval required"; bin = "gh" } )
+    ; ( "dispatch policy_denied marker"
+      , Shell_dispatch.Policy_denied { reason = "policy denied" } )
+    ]
 ;;
 
 let test_plain_error_codes_are_observed_only () =
@@ -408,6 +485,26 @@ let () =
             "typed_deterministic_retry_marker_reports_source"
             `Quick
             test_typed_deterministic_retry_marker_reports_source
+        ; Alcotest.test_case
+            "dispatch_gate_reject_marker"
+            `Quick
+            test_dispatch_gate_reject_marks_command_shape_blocked
+        ; Alcotest.test_case
+            "dispatch_parse_reject_markers"
+            `Quick
+            test_dispatch_parse_rejects_mark_command_shape_blocked
+        ; Alcotest.test_case
+            "dispatch_path_reject_markers"
+            `Quick
+            test_dispatch_path_reject_marks_path_reason
+        ; Alcotest.test_case
+            "dispatch_unknown_path_reject_observed"
+            `Quick
+            test_dispatch_unknown_path_reject_stays_observed
+        ; Alcotest.test_case
+            "dispatch_policy_reject_markers"
+            `Quick
+            test_dispatch_policy_rejects_mark_policy_blocked
         ; Alcotest.test_case
             "plain_error_codes_observed_only"
             `Quick

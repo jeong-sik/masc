@@ -11,8 +11,30 @@ val read_internal_history_lines
   -> trace_id:string
   -> Trajectory.trajectory_line list
 
+val read_internal_history_tail_lines
+  :  max_lines:int
+  -> config:Workspace.config
+  -> trace_id:string
+  -> Trajectory.trajectory_line list
+
 val merge_keeper_trace_lines
   :  config:Workspace.config
   -> trace_id:string
   -> Trajectory.trajectory_line list
   -> Trajectory.trajectory_line list
+
+val merge_keeper_trace_lines_bounded
+  :  max_internal_lines:int
+  -> config:Workspace.config
+  -> trace_id:string
+  -> Trajectory.trajectory_line list
+  -> Trajectory.trajectory_line list
+
+val chat_trace_block_by_turn_ref
+  :  max_lines:int
+  -> max_internal_lines:int
+  -> config:Workspace.config
+  -> keeper_name:string
+  -> allowed_trace_ids:string list
+  -> Ids.Turn_ref.t
+  -> Keeper_chat_blocks.chat_block option

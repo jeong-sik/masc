@@ -56,6 +56,30 @@ let respond_error ?(status = `Bad_request) ~request reqd message =
     reqd
 ;;
 
+let sum_pending_confirm_removals config ~target_type target_ids =
+  target_ids
+  |> List.fold_left
+       (fun acc target_id ->
+         match acc with
+         | Error _ -> acc
+         | Ok total -> (
+           match
+             Operator_pending_confirm.remove_pending_confirms_by_target
+               config
+               ~target_type
+               ~target_id:(Some target_id)
+           with
+           | Ok removed -> Ok (total + removed)
+           | Error msg ->
+             Error
+               (Printf.sprintf
+                  "pending-confirm cleanup failed for %s %s: %s"
+                  target_type
+                  target_id
+                  msg)))
+       (Ok 0)
+;;
+
 let rec rm_rf path =
   if Fs_compat.file_exists path
   then if Sys.is_directory path
@@ -236,37 +260,41 @@ let resolve_agent_purge_targets config agent_names =
 let purge_agent_filesystem_artifacts config agent_names =
   agent_names
   |> resolve_agent_purge_targets config
-  |> List.map (fun { agent_name; aliases } ->
-       let pending_confirms_removed =
-         aliases
-         |> List.map (fun alias ->
-              Operator_pending_confirm.remove_pending_confirms_by_target config
-                ~target_type:"agent" ~target_id:(Some alias))
-         |> List.fold_left ( + ) 0
-       in
-       let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
-       let workspace_unbind_result =
-         Workspace.end_session ~stop_heartbeats:false config ~agent_name
-       in
-       let aliases_label = String.concat "," aliases in
-       Log.Misc.info
-         "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d workspace_unbind=%S"
-         agent_name aliases_label pending_confirms_removed heartbeats_stopped
-         workspace_unbind_result;
-       aliases
-       |> List.iter (fun alias ->
-            remove_path_if_exists ~context:"agent_purge"
-              (agent_file_path config alias);
-            remove_path_if_exists ~context:"agent_purge"
-              (Metrics_store_eio.agent_metrics_dir config alias);
-            Tool_shard.remove_agent_shards alias;
-            credential_aliases alias
-            |> List.iter (Auth.delete_credential config.base_path));
-       { agent_name
-       ; pending_confirms_removed
-       ; heartbeats_stopped
-       ; workspace_unbind_result
-       })
+  |> List.fold_left
+       (fun acc { agent_name; aliases } ->
+         match acc with
+         | Error _ -> acc
+         | Ok results -> (
+           match sum_pending_confirm_removals config ~target_type:"agent" aliases with
+           | Error msg -> Error msg
+           | Ok pending_confirms_removed ->
+             let heartbeats_stopped = Heartbeat.stop_by_agent ~agent_name in
+             let workspace_unbind_result =
+               Workspace.end_session ~stop_heartbeats:false config ~agent_name
+             in
+             let aliases_label = String.concat "," aliases in
+             Log.Misc.info
+               "[agent_purge] cleanup agent=%s aliases=%s pending_confirms_removed=%d heartbeats_stopped=%d workspace_unbind=%S"
+               agent_name aliases_label pending_confirms_removed heartbeats_stopped
+               workspace_unbind_result;
+             aliases
+             |> List.iter (fun alias ->
+                  remove_path_if_exists ~context:"agent_purge"
+                    (agent_file_path config alias);
+                  remove_path_if_exists ~context:"agent_purge"
+                    (Metrics_store_eio.agent_metrics_dir config alias);
+                  Tool_shard.remove_agent_shards alias;
+                  credential_aliases alias
+                  |> List.iter (Auth.delete_credential config.base_path));
+             Ok
+               ({ agent_name
+                ; pending_confirms_removed
+                ; heartbeats_stopped
+                ; workspace_unbind_result
+                }
+                :: results)))
+       (Ok [])
+  |> Result.map List.rev
 ;;
 
 let purge_keeper_artifacts config requested_name
@@ -281,17 +309,26 @@ let purge_keeper_artifacts config requested_name
   cleanup_names
   |> List.iter (fun name ->
        Keeper_keepalive.stop_keepalive ~base_path:config.base_path name);
-  let keeper_pending_confirms_removed =
-    Operator_pending_confirm.remove_pending_confirms_by_target config
-      ~target_type:"keeper" ~target_id:(Some keeper_name)
-  in
+  match
+    Operator_pending_confirm.remove_pending_confirms_by_target
+      config
+      ~target_type:"keeper"
+      ~target_id:(Some keeper_name)
+  with
+  | Error msg ->
+    Error
+      (Printf.sprintf
+         "pending-confirm cleanup failed for keeper %s: %s"
+         keeper_name
+         msg)
+  | Ok keeper_pending_confirms_removed ->
   Log.Misc.info
     "[keeper_purge] cleanup keeper=%s pending_confirms_removed=%d"
     keeper_name keeper_pending_confirms_removed;
   Keeper_registry.unregister ~base_path:config.base_path keeper_name;
-  let agent_cleanup_results =
-    purge_agent_filesystem_artifacts config [ agent_name; keeper_name ]
-  in
+  (match purge_agent_filesystem_artifacts config [ agent_name; keeper_name ] with
+   | Error _ as err -> err
+   | Ok agent_cleanup_results ->
   List.iter
     (remove_path_if_exists ~context:"keeper_purge")
     [
@@ -311,7 +348,7 @@ let purge_keeper_artifacts config requested_name
          (Keeper_types_support.keeper_session_dir config keeper_trace_id))
     trace_id;
   Option.iter (remove_path_if_exists ~context:"keeper_purge") toml_path;
-  { keeper_pending_confirms_removed; agent_cleanup_results }
+  Ok { keeper_pending_confirms_removed; agent_cleanup_results })
 ;;
 
 let add_delete_action_routes router =
@@ -455,9 +492,14 @@ let add_delete_action_routes router =
                (match resolve_keeper_purge_target config requested_name with
                 | Some keeper_target ->
                   let toml_deleted = Option.is_some keeper_target.toml_path in
-                  let purge_result =
-                    purge_keeper_artifacts config requested_name keeper_target
-                  in
+                  (match purge_keeper_artifacts config requested_name keeper_target with
+                   | Error msg ->
+                     respond_error
+                       ~status:`Internal_server_error
+                       ~request:req
+                       reqd
+                       msg
+                   | Ok purge_result ->
                   Http.Response.json_value ~compress:true ~request:req
                     (`Assoc
                        [
@@ -473,14 +515,21 @@ let add_delete_action_routes router =
                              (List.map agent_purge_cleanup_result_to_json
                                 purge_result.agent_cleanup_results) );
                        ])
-                    reqd
+                    reqd)
                 | None -> (
                   match resolve_plain_agent_target config requested_name with
                   | Some agent_name ->
-                    let cleanup_results =
-                      purge_agent_filesystem_artifacts config
-                        [ requested_name; agent_name ]
-                    in
+                    (match
+                       purge_agent_filesystem_artifacts config
+                         [ requested_name; agent_name ]
+                     with
+                     | Error msg ->
+                       respond_error
+                         ~status:`Internal_server_error
+                         ~request:req
+                         reqd
+                         msg
+                     | Ok cleanup_results ->
                     Http.Response.json_value ~compress:true ~request:req
                       (`Assoc
                          [
@@ -492,7 +541,7 @@ let add_delete_action_routes router =
                                (List.map agent_purge_cleanup_result_to_json
                                   cleanup_results) );
                          ])
-                      reqd
+                      reqd)
                   | None ->
                     respond_error ~status:`Not_found ~request:req reqd
                       "agent or keeper not found"))

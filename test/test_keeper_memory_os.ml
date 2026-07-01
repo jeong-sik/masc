@@ -2186,7 +2186,7 @@ let test_gc_waits_for_fact_writer_lock () =
     let allow_writer, resolve_allow_writer = Eio.Promise.create () in
     let writer_done, resolve_writer_done = Eio.Promise.create () in
     let gc_result = ref None in
-    let fact_store_trigger = Memory_io.fact_recall_window + (Memory_io.fact_recall_window / 2) in
+    let fact_store_trigger = Policy.fact_store_max in
     Eio.Fiber.fork ~sw (fun () ->
       File_lock_eio.with_lock (Memory_io.facts_path ~keeper_id) (fun () ->
         Eio.Promise.resolve resolve_writer_entered ();
@@ -2197,7 +2197,7 @@ let test_gc_waits_for_fact_writer_lock () =
             ~keeper_id
             ~merge:(Policy.reobserve_fact ~now)
             ~incoming:[ fresh ]
-            ~keep:Memory_io.fact_recall_window
+            ~keep:Policy.fact_recall_window
             ~trigger:fact_store_trigger
             ~rank:(Policy.retention_rank ~now)
         in
@@ -2503,7 +2503,7 @@ let test_recall_scans_whole_bounded_store () =
           }
         in
         let cap_fillers =
-          List.init Memory_io.fact_store_max (fun i ->
+          List.init Policy.fact_store_max (fun i ->
             { (fact_fixture ~now ()) with
               Types.claim = Printf.sprintf "pre-cap filler durable fact %d" (i + 1)
             ; Types.last_verified_at = Some (now -. days 30 -. float_of_int i)
@@ -2515,15 +2515,15 @@ let test_recall_scans_whole_bounded_store () =
             ~keeper_id
             ~merge:(Policy.reobserve_fact ~now)
             ~incoming:(head :: cap_fillers)
-            ~keep:Memory_io.fact_recall_window
-            ~trigger:Memory_io.fact_store_max
+            ~keep:Policy.fact_recall_window
+            ~trigger:Policy.fact_store_max
             ~rank:(Policy.retention_rank ~now)
         in
         Alcotest.(check bool) "cap rewrite dropped low-ranked rows" true (cap_stats.dropped > 0);
         let capped = Memory_io.read_facts_all ~keeper_id in
         Alcotest.(check int)
           "cap rewrites to the recall window size"
-          Memory_io.fact_recall_window
+          Policy.fact_recall_window
           (List.length capped);
         for i = 1 to 20 do
           let tail =
@@ -2538,7 +2538,7 @@ let test_recall_scans_whole_bounded_store () =
         Alcotest.(check bool)
           "store sits in the (fact_recall_window, fact_store_max] band"
           true
-          (total > Memory_io.fact_recall_window && total <= Memory_io.fact_store_max);
+          (total > Policy.fact_recall_window && total <= Policy.fact_store_max);
         match render_if_enabled_for_test ~keeper_id ~now ~masc_root:keepers_dir () with
         | None -> Alcotest.fail "expected Some recall block for a seeded store"
         | Some block ->
@@ -2932,8 +2932,8 @@ let test_cap_drops_expired_below_trigger () =
       Memory_io.cap_facts
         ~now
         ~keeper_id
-        ~keep:Memory_io.fact_recall_window
-        ~trigger:Memory_io.fact_store_max
+        ~keep:Policy.fact_recall_window
+        ~trigger:Policy.fact_store_max
         ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "one expired row dropped below trigger" 1 dropped;
@@ -2947,8 +2947,8 @@ let test_cap_drops_expired_below_trigger () =
       Memory_io.cap_facts
         ~now
         ~keeper_id
-        ~keep:Memory_io.fact_recall_window
-        ~trigger:Memory_io.fact_store_max
+        ~keep:Policy.fact_recall_window
+        ~trigger:Policy.fact_store_max
         ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "idempotent: no-op once clean" 0 dropped2)
@@ -2974,8 +2974,8 @@ let test_merge_and_cap_drops_expired_no_incoming () =
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now)
         ~incoming:[]
-        ~keep:Memory_io.fact_recall_window
-        ~trigger:Memory_io.fact_store_max
+        ~keep:Policy.fact_recall_window
+        ~trigger:Policy.fact_store_max
         ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "expired counted in dropped" 1 stats.Memory_io.dropped;
@@ -3005,13 +3005,13 @@ let test_trim_target_hysteresis () =
     "episode-file band non-empty"
     true
     (Memory_io.episode_file_window < Memory_io.episode_file_store_max);
-  (* coupling guard: Keeper_memory_os_recall.episode_tail_scan = 32. If a future
-     edit drops the low-water below the recall window, recall starves — fail here
-     instead. *)
+  (* Coupling guard: if a future edit drops the low-water below the policy recall
+     window, recall starves — fail here instead. *)
   Alcotest.(check bool)
-    "low-water clears the recall scan window (32)"
+    "low-water clears the recall scan window"
     true
-    (Memory_io.event_recall_window > 32 && Memory_io.episode_file_window > 32)
+    (Memory_io.event_recall_window > Policy.recall_episode_tail_scan
+     && Memory_io.episode_file_window > Policy.recall_episode_tail_scan)
 ;;
 
 (* RFC-0272 (defect D): cap_events keeps the newest [keep] raw lines once the log
@@ -3263,8 +3263,8 @@ let test_merge_and_cap_upserts_reobserved_claim () =
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now)
         ~incoming:[ reobserved ]
-        ~keep:256
-        ~trigger:384
+        ~keep:Policy.fact_recall_window
+        ~trigger:Policy.fact_store_max
         ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "one claim merged" 1 stats.Memory_io.merged;
@@ -3692,7 +3692,7 @@ let test_recall_scans_whole_shared_store () =
           }
         in
         Memory_io.append_fact ~keeper_id:Types.shared_store_id shared_head;
-        for i = 1 to Memory_io.fact_recall_window + 10 do
+        for i = 1 to Policy.fact_recall_window + 10 do
           let filler =
             { (mk_shared_fixture ~now (Printf.sprintf "old shared filler fact %d" i)) with
               Types.observed_by = [ "alpha"; "beta" ]
@@ -3705,7 +3705,7 @@ let test_recall_scans_whole_shared_store () =
         Alcotest.(check bool)
           "shared store exceeds the private recall tail window"
           true
-          (total > Memory_io.fact_recall_window);
+          (total > Policy.fact_recall_window);
         let observer_block = Recall.render_context ~keeper_id:"observer" ~now () in
         Alcotest.(check bool)
           "shared recall surfaces a head fact beyond the tail window"
@@ -4414,8 +4414,8 @@ let test_merge_and_cap_upserts_same_claim_id () =
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now)
         ~incoming:[ reworded ]
-        ~keep:256
-        ~trigger:384
+        ~keep:Policy.fact_recall_window
+        ~trigger:Policy.fact_store_max
         ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "same-claim_id reworded merged, not appended" 1 stats.Memory_io.merged;
@@ -4464,8 +4464,8 @@ let test_merge_and_cap_no_over_merge_distinct_conclusions () =
         ~keeper_id
         ~merge:(Policy.reobserve_fact ~now)
         ~incoming:[ merged ]
-        ~keep:256
-        ~trigger:384
+        ~keep:Policy.fact_recall_window
+        ~trigger:Policy.fact_store_max
         ~rank:(Policy.retention_rank ~now)
     in
     Alcotest.(check int) "distinct conclusion appended, not merged" 1 stats.Memory_io.appended;
@@ -4756,7 +4756,7 @@ let test_dashboard_json_selection_policy_contract () =
       (string_field "policy" policy "episodes_source");
     Alcotest.(check int)
       "dashboard fact bound"
-      Memory_io.fact_store_max
+      Policy.fact_store_max
       (int_field "policy" policy "dashboard_fact_tail_limit");
     Alcotest.(check int)
       "dashboard episode bound"
@@ -4764,15 +4764,15 @@ let test_dashboard_json_selection_policy_contract () =
       (int_field "policy" policy "dashboard_episode_tail_limit");
     Alcotest.(check int)
       "prompt private fact bound"
-      Recall.default_max_facts
+      Policy.recall_default_max_facts
       (int_field "policy" policy "recall_private_fact_limit");
     Alcotest.(check int)
       "prompt shared fact bound"
-      Recall.default_max_shared_facts
+      Policy.recall_default_max_shared_facts
       (int_field "policy" policy "recall_shared_fact_limit");
     Alcotest.(check int)
       "prompt episode bound"
-      Recall.default_max_episodes
+      Policy.recall_default_max_episodes
       (int_field "policy" policy "recall_episode_limit");
     Alcotest.(check string)
       "category source"

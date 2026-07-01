@@ -2,12 +2,14 @@ import { describe, expect, it } from 'vitest'
 import {
   createRuntimeTomlBinding,
   deleteRuntimeTomlKey,
+  getRuntimeTomlKey,
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
   setRuntimeTomlDefault,
+  setRuntimeTomlKey,
   setRuntimeTomlModelField,
   setRuntimeTomlProviderCredential,
   setRuntimeTomlProviderField,
@@ -91,6 +93,87 @@ mad-improver = "runpod_mtp.qwen"
       sangsu: 'runpod_mtp.qwen',
       'mad-improver': 'runpod_mtp.qwen',
     })
+  })
+
+  // Regression for the live ~/.masc/config/runtime.toml shape: keeper names
+  // under [runtime.assignments] are written as quoted TOML keys
+  // (`"nick0cave" = "..."`), not the bare keys used above. The dashboard
+  // rendered every keeper as "default 폴백" because the parser silently
+  // dropped every quoted-key line instead of erroring or reading it.
+  it('projects keeper assignments written with quoted TOML keys', () => {
+    const withQuotedAssignments = `${sourceText}
+
+[runtime.assignments]
+"nick0cave" = "ollama_cloud.deepseek-v4-flash"
+"mad-improver" = "glm-coding.glm-5-turbo"
+`
+
+    const environment = parseRuntimeTomlEnvironment(withQuotedAssignments)
+
+    expect(environment.assignments).toEqual({
+      nick0cave: 'ollama_cloud.deepseek-v4-flash',
+      'mad-improver': 'glm-coding.glm-5-turbo',
+    })
+  })
+
+  it('updates an existing quoted-key assignment line in place instead of appending a duplicate', () => {
+    const withQuotedAssignments = `${sourceText}
+
+[runtime.assignments]
+"nick0cave" = "ollama_cloud.deepseek-v4-flash"
+`
+
+    const next = setRuntimeTomlKey(
+      withQuotedAssignments,
+      'runtime.assignments',
+      'nick0cave',
+      'ollama_cloud.kimi-k2-6',
+    )
+
+    expect(getRuntimeTomlKey(next, 'runtime.assignments', 'nick0cave')).toBe(
+      '"ollama_cloud.kimi-k2-6"',
+    )
+    expect(next.match(/nick0cave/g)).toHaveLength(1)
+    // The original quoted key spelling must survive an in-place value update --
+    // only the value should change, not the key syntax the TOML author chose.
+    expect(next).toContain('"nick0cave" = "ollama_cloud.kimi-k2-6"')
+    expect(next).not.toContain('\nnick0cave = ')
+  })
+
+  it('does not write a keeper name requiring quotes as an invalid bare key', () => {
+    const withAssignmentsSection = `${sourceText}
+
+[runtime.assignments]
+sangsu = "runpod_mtp.qwen"
+`
+
+    const next = setRuntimeTomlKey(
+      withAssignmentsSection,
+      'runtime.assignments',
+      'qa king',
+      'runpod_mtp.qwen',
+    )
+
+    expect(next).toContain('"qa king" = "runpod_mtp.qwen"')
+    expect(getRuntimeTomlKey(next, 'runtime.assignments', 'qa king')).toBe(
+      '"runpod_mtp.qwen"',
+    )
+  })
+
+  it('warns instead of silently dropping a line keyLineMatch still cannot parse', () => {
+    const withMalformedLine = `${sourceText}
+
+[runtime.assignments]
+"nick0cave" = "ollama_cloud.deepseek-v4-flash"
+this line has no equals sign
+`
+
+    const environment = parseRuntimeTomlEnvironment(withMalformedLine)
+
+    expect(environment.assignments).toEqual({
+      nick0cave: 'ollama_cloud.deepseek-v4-flash',
+    })
+    expect(environment.warnings.some(w => w.includes('[runtime.assignments]'))).toBe(true)
   })
 
   it('patches the runtime default without touching other sections', () => {

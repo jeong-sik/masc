@@ -14,6 +14,19 @@ open Keeper_memory_os_types
    interleave. *)
 let durable_retention_tier = 1.0e15
 
+(* Memory OS recall and retention size policy. Keep raw numbers here so the
+   read, write, dashboard, and test surfaces do not drift independently. *)
+let fact_recall_window = 256
+let fact_store_max = fact_recall_window + (fact_recall_window / 2)
+let event_recall_window = 256
+let event_store_max = event_recall_window + (event_recall_window / 2)
+let episode_file_window = 256
+let episode_file_store_max = episode_file_window + (episode_file_window / 2)
+let recall_default_max_facts = 8
+let recall_default_max_episodes = 2
+let recall_default_max_shared_facts = 4
+let recall_episode_tail_scan = 32
+
 (* RFC-0247 §-1: structural retention rank for the bounded store cap. This is NOT
    a relevance score — it is a deterministic two-tier lexicographic order used
    ONLY to decide which rows the size cap drops when the store grows past its

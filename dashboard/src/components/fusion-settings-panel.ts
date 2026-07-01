@@ -1,8 +1,8 @@
 // Writable Fusion settings editor (RFC-0273 §3.2 deferred Settings editor).
 //
-// Self-contained so it does NOT touch the read-only prototype widgets in
-// settings-surface (their steppers are hardcoded `disabled`). Loads the live
-// runtime.toml via fetchRuntimeTomlConfig, edits the [fusion] settings through
+// Self-contained so it does NOT depend on the read-only defaults preview in
+// settings-surface. Loads the live runtime.toml via fetchRuntimeTomlConfig,
+// edits the [fusion] settings through
 // the pure fusion-settings helpers, and writes back via saveRuntimeTomlConfig
 // (POST /api/v1/runtime/config/raw → Runtime.save_config_text validates +
 // atomically persists + reloads). The backend is the validation SSOT: an

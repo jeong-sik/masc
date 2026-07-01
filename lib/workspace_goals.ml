@@ -863,97 +863,109 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                         ~on_cleared
                     else on_cleared ())
                | Ok (Goal_phase.Move_to next_phase) ->
-                 (match goal.active_verification_request_id, next_phase with
-                  | ( Some request_id
-                    , ( Goal_phase.Blocked
-                      | Goal_phase.Dropped
-                      | Goal_phase.Executing ) )
-                    when goal.phase = Goal_phase.Awaiting_verification ->
-                    (* Leaving verification through an operator transition is
-                       not a quorum verdict. Seal the open request as cancelled;
-                       quorum failure is handled in [handle_goal_verify] as
-                       [Rejected] and moves the goal back to [Executing]. *)
-                    (match Goal_verification.cancel_request_if_open ctx.config ~request_id with
-                     | Ok (Goal_verification.Cancelled_request _) ->
-                       emit_goal_event
-                         ctx
-                         ~goal_id
-                         ~event_type:"goal_verification_resolved"
-                         ~payload:
-                           (`Assoc
-                               [ "request_id", `String request_id
-                               ; "status", `String "cancelled"
-                               ])
-                     | Ok (Goal_verification.Already_resolved_request request) ->
-                       Log.Misc.warn
-                         "goal verification cancel_request skipped for %s: already %s"
-                         request_id
-                         (goal_verification_request_status_label request.status)
-                     | Error msg ->
-                       Log.Misc.warn
-                         "goal verification cancel_request failed for %s: %s"
-                         request_id
-                         msg)
-                  | None, _ -> ()
-                  | Some _, _ -> ());
-                 (match
-                    update_goal_phase
-                      ctx
-                      goal
-                      ~phase:next_phase
-                      ?note
-                      ~clear_active_verification_request:
-                        (not (next_phase = Goal_phase.Awaiting_verification))
-                      ()
-                  with
-                  | Error msg ->
-                    error_result_typed ~tool_name ~start_time ~code:Internal_error msg
-                  | Ok updated_goal ->
-                    let on_cleared () =
-                      emit_goal_event
-                        ctx
-                        ~goal_id
-                        ~event_type:"goal_phase"
-                        ~payload:
-                          (`Assoc
-                              [ "phase", Goal_phase.to_yojson updated_goal.phase
-                              ; "actor", Goal_verification.goal_principal_to_yojson actor
-                              ]);
-                      if
-                        action = Goal_phase.Approve_completion
-                        || action = Goal_phase.Reject_completion
-                      then
+                 let cancel_result =
+                   match goal.active_verification_request_id, next_phase with
+                   | ( Some request_id
+                     , ( Goal_phase.Blocked
+                       | Goal_phase.Dropped
+                       | Goal_phase.Executing ) )
+                     when goal.phase = Goal_phase.Awaiting_verification ->
+                     (* Leaving verification through an operator transition is
+                        not a quorum verdict. Seal the open request as cancelled;
+                        quorum failure is handled in [handle_goal_verify] as
+                        [Rejected] and moves the goal back to [Executing]. *)
+                     (match
+                        Goal_verification.cancel_request_if_open ctx.config ~request_id
+                      with
+                      | Ok (Goal_verification.Cancelled_request _) ->
                         emit_goal_event
                           ctx
                           ~goal_id
-                          ~event_type:"goal_approval_resolved"
+                          ~event_type:"goal_verification_resolved"
                           ~payload:
                             (`Assoc
-                                [ ( "decision"
-                                  , `String
-                                      (if action = Goal_phase.Approve_completion
-                                       then "approve"
-                                       else "reject") )
+                                [ "request_id", `String request_id
+                                ; "status", `String "cancelled"
                                 ]);
-                      ok_result
-                        ~tool_name
-                        ~start_time
-                        [ "goal_id", `String goal_id
-                        ; "action", `String (Goal_phase.action_to_string action)
-                        ; "goal", Goal_store.goal_to_yojson updated_goal
-                        ; ( "verification_summary"
-                          , verification_summary_json updated_goal effective_policy None )
-                        ]
-                    in
-                    if goal.phase = Goal_phase.Awaiting_approval
-                    then
-                      clear_goal_approval_pending_confirm_required
-                        ctx
-                        ~goal_id
-                        ~tool_name
-                        ~start_time
-                        ~on_cleared
-                    else on_cleared ())))))
+                        Ok ()
+                      | Ok (Goal_verification.Already_resolved_request request) ->
+                        Log.Misc.warn
+                          "goal verification cancel_request skipped for %s: already %s"
+                          request_id
+                          (goal_verification_request_status_label request.status);
+                        Ok ()
+                      | Error msg ->
+                        Error
+                          (Printf.sprintf
+                             "goal verification cancel_request failed for %s: %s"
+                             request_id
+                             msg))
+                   | None, _ -> Ok ()
+                   | Some _, _ -> Ok ()
+                 in
+                 (match cancel_result with
+                  | Error msg ->
+                    error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                  | Ok () ->
+                    (match
+                       update_goal_phase
+                         ctx
+                         goal
+                         ~phase:next_phase
+                         ?note
+                         ~clear_active_verification_request:
+                           (not (next_phase = Goal_phase.Awaiting_verification))
+                         ()
+                     with
+                     | Error msg ->
+                       error_result_typed ~tool_name ~start_time ~code:Internal_error msg
+                     | Ok updated_goal ->
+                       let on_cleared () =
+                         emit_goal_event
+                           ctx
+                           ~goal_id
+                           ~event_type:"goal_phase"
+                           ~payload:
+                             (`Assoc
+                                 [ "phase", Goal_phase.to_yojson updated_goal.phase
+                                 ; ( "actor"
+                                   , Goal_verification.goal_principal_to_yojson actor )
+                                 ]);
+                         if
+                           action = Goal_phase.Approve_completion
+                           || action = Goal_phase.Reject_completion
+                         then
+                           emit_goal_event
+                             ctx
+                             ~goal_id
+                             ~event_type:"goal_approval_resolved"
+                             ~payload:
+                               (`Assoc
+                                   [ ( "decision"
+                                     , `String
+                                         (if action = Goal_phase.Approve_completion
+                                          then "approve"
+                                          else "reject") )
+                                   ]);
+                         ok_result
+                           ~tool_name
+                           ~start_time
+                           [ "goal_id", `String goal_id
+                           ; "action", `String (Goal_phase.action_to_string action)
+                           ; "goal", Goal_store.goal_to_yojson updated_goal
+                           ; ( "verification_summary"
+                             , verification_summary_json updated_goal effective_policy None )
+                           ]
+                       in
+                       if goal.phase = Goal_phase.Awaiting_approval
+                       then
+                         clear_goal_approval_pending_confirm_required
+                           ctx
+                           ~goal_id
+                           ~tool_name
+                           ~start_time
+                           ~on_cleared
+                       else on_cleared ())))))
   | Ok _, Ok None, _ ->
     validation_error_result
       ~tool_name

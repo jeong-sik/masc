@@ -466,10 +466,17 @@ let read_state config =
   else
     default_state ()
 
-let write_state config (state : state) =
+let write_state_result config (state : state) =
   let json = state_to_yojson state in
-  Workspace_utils.write_json config (requests_path config) json;
-  Workspace_utils.write_json config (requests_recovery_path config) json
+  let* () = Workspace_utils.write_json_result config (requests_path config) json in
+  (match Workspace_utils.write_json_result config (requests_recovery_path config) json with
+   | Ok () -> ()
+   | Error msg ->
+     Log.Misc.warn
+       "goal_verification: primary requests committed; recovery mirror write failed for %s: %s"
+       (requests_recovery_path config)
+       msg);
+  Ok ()
 
 let principal_key (principal : goal_principal) =
   principal.id
@@ -572,8 +579,8 @@ let update_state config f =
   Workspace_utils.with_file_lock config lock_path (fun () ->
       let state = read_state config in
       let next_state = f state in
-      write_state config next_state;
-      next_state)
+      let* () = write_state_result config next_state in
+      Ok next_state)
 
 let gen_request_id () =
   Printf.sprintf "gvr-%d-%04x"
@@ -596,7 +603,7 @@ let create_request config ~(goal_id : string) ~(requested_by : goal_principal)
       resolved_at = None;
     }
   in
-  let state =
+  let state_result =
     update_state config (fun state ->
         {
           version = state.version + 1;
@@ -604,9 +611,8 @@ let create_request config ~(goal_id : string) ~(requested_by : goal_principal)
           requests = state.requests @ [ request ];
         })
   in
-  let saved =
-    List.find_opt (fun row -> String.equal row.id request.id) state.requests
-  in
+  let* state = state_result in
+  let saved = List.find_opt (fun row -> String.equal row.id request.id) state.requests in
   match saved with
   | Some saved -> Ok saved
   | None -> Error "failed to persist goal verification request"
@@ -665,8 +671,10 @@ let cancel_request_if_open config ~(request_id : string) =
                 if String.equal row.id request_id then updated_request else row)
               state.requests
           in
-          write_state config
-            { version = state.version + 1; updated_at = resolved_at; requests };
+          let* () =
+            write_state_result config
+              { version = state.version + 1; updated_at = resolved_at; requests }
+          in
           Ok (Cancelled_request updated_request))
 
 let cancel_request config ~(request_id : string) =
@@ -729,6 +737,8 @@ let submit_vote config ~(goal_id : string) ~(request_id : string) ~(principal : 
                 if String.equal row.id request_id then next_request else row)
               state.requests
           in
-          write_state config
-            { version = state.version + 1; updated_at = submitted_at; requests };
+          let* () =
+            write_state_result config
+              { version = state.version + 1; updated_at = submitted_at; requests }
+          in
           Ok (next_request, outcome))

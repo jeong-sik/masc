@@ -63,11 +63,11 @@ let read_dir path = run_blocking_io (fun () -> Sys.readdir path)
 
 ### 4.2 2축 — 빈도/알고리즘 감소 (secondary)
 
-오프로드는 스케줄러를 살리지만 systhread 제출 오버헤드가 호출당 발생한다. 따라서 호출 수 자체를 줄인다: 같은 dir을 turn마다 재스캔하는 중복 `readdir` 제거, 재-`stat` 제거, recall/skill 결과를 파일 mtime 기반 캐시로 무효화. (별도 후속 PR 가능.)
+오프로드는 스케줄러를 살리지만 도메인 풀 제출(`Domain_pool_ref.submit_io_or_inline`) 오버헤드가 호출당 발생한다. 따라서 호출 수 자체를 줄인다: 같은 dir을 turn마다 재스캔하는 중복 `readdir` 제거, 재-`stat` 제거, recall/skill 결과를 파일 mtime 기반 캐시로 무효화. (별도 후속 PR 가능.)
 
 ### 4.3 3축 — 관측 (guard)
 
-메모리 I/O 경로에 latency/호출수 메트릭(Turn당 readdir/stat/read 카운트, systhread 제출 수)을 추가해 회귀 감시. "모든건 관측됨" 원칙 정합.
+메모리 I/O 경로에 latency/호출수 메트릭(Turn당 readdir/stat/read 카운트, 도메인 풀 제출 수)을 추가해 회귀 감시. "모든건 관측됨" 원칙 정합.
 
 ## 5. 안전 분석 (CRITICAL) — PURE vs LOCK_MIXED 분류
 

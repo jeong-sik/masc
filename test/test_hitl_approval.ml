@@ -464,13 +464,14 @@ let test_submit_and_await_clock_timeout_skips_critical () =
         ~base_path
         ~clock
         ~timeout_s:0.01
+        ~critical_timeout_s:0.0
         ()
     in
     result := Some decision);
   yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
   Eio.Time.sleep clock 0.03;
   Alcotest.(check bool)
-    "Critical approval still waits past submit timeout"
+    "Critical approval still waits when critical_timeout_s is disabled"
     true
     (Option.is_none !result);
   let id =
@@ -574,6 +575,44 @@ let test_submit_and_await_critical_escalates_then_waits () =
       Alcotest.fail
         ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
   | None -> Alcotest.fail "Critical approval did not resume after escalation")
+
+let test_submit_and_await_critical_timeout_returns_reject () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "critical-bound-timeout-test" in
+  let result = ref None in
+  Eio.Fiber.fork ~sw (fun () ->
+    let decision =
+      AQ.submit_and_await
+        ~keeper_name
+        ~tool_name:"tool_edit_file"
+        ~input:(`Assoc [("path", `String "/dangerous")])
+        ~risk_level:AQ.Critical
+        ~base_path
+        ~clock
+        ~critical_timeout_s:0.05
+        ()
+    in
+    result := Some decision);
+  yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
+  Eio.Time.sleep clock 0.15;
+  yield_until (fun () -> Option.is_some !result);
+  match !result with
+  | Some (Agent_sdk.Hooks.Reject reason) ->
+    Alcotest.(check bool)
+      "Critical timeout reason mentions approval timeout"
+      true
+      (String.starts_with ~prefix:"approval timeout" reason)
+  | Some decision ->
+    Alcotest.fail
+      ("expected Reject from timeout, got "
+       ^ AQ.approval_decision_to_string decision)
+  | None -> Alcotest.fail "Critical approval did not time out")
 
 let test_submit_and_await_clock_returns_manual_decision () =
   Eio_main.run @@ fun env ->
@@ -1829,6 +1868,8 @@ let () =
         test_submit_and_await_clock_timeout_skips_critical;
       Alcotest.test_case "Critical escalation waits for manual decision" `Quick
         test_submit_and_await_critical_escalates_then_waits;
+      Alcotest.test_case "Critical bounded timeout returns Reject" `Quick
+        test_submit_and_await_critical_timeout_returns_reject;
       Alcotest.test_case "submit timeout returns manual winner" `Quick
         test_submit_and_await_clock_returns_manual_decision;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;

@@ -29,6 +29,13 @@ structured_judge = "ollama_cloud_native.minimax-m3-native-structured"
 # this explicit smart lane.
 cross_verifier = "deepseek.deepseek-v4-pro"
 
+[hitl]
+# Human-in-the-loop approval timeout for Critical-risk tool calls.
+# A Keeper turn that reaches this gate will wait at most critical_timeout_s
+# for an operator decision before resuming with a typed timeout rejection.
+# Set to 0 to disable (legacy operator-must-decide behavior, not recommended).
+critical_timeout_s = 3600.0
+
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
 protocol = "openai-compatible-http"

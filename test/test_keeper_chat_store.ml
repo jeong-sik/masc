@@ -1,4 +1,5 @@
 module K = Masc.Keeper_chat_store
+module B = Masc.Keeper_chat_blocks
 module MS = Masc.Keeper_world_observation_message_scope
 module P = Masc.Otel_metric_store
 module KT = Masc.Keeper_turn
@@ -1150,6 +1151,71 @@ let test_turn_ref_persisted_on_turn_rows () =
       Alcotest.(check bool) "turn_ref present in to_json_array" true
         (contains_substring s "trace-abc#7"))
 
+let test_to_json_array_appends_trace_block_to_assistant_turn () =
+  let base_dir = temp_base_path "keeper-chat-store-turn-trace" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      let keeper_name = "keeper-chat-turn-trace" in
+      let tref = Ids.Turn_ref.make ~trace_id:"trace-ui" ~absolute_turn:12 in
+      K.append_turn ~base_dir ~keeper_name ~user_content:"status"
+        ~user_attachments:[]
+        ~tool_calls:[ { K.call_id = "exec-1"; call_name = "keeper_tasks_list"; args = "{}" } ]
+        ~turn_ref:tref ~assistant_content:"done" ();
+      let messages = K.load ~base_dir ~keeper_name in
+      let trace_block_by_turn_ref turn_ref =
+        if Ids.Turn_ref.equal turn_ref tref
+        then
+          Some
+            (B.Trace
+               {
+                 trace =
+                   [
+                     B.Trace_think
+                       {
+                         text = "checking tasks";
+                         ts = Some "2026-07-01T00:00:00Z";
+                         oas_block_index = None;
+                       };
+                     B.Trace_tool
+                         {
+                           name = "keeper_tasks_list";
+                           tool_call_id = Some "exec-1";
+                           status = Some B.Trace_tool_ok;
+                           dur = Some "1ms";
+                         args = Some (`Assoc []);
+                         result = Some (`Assoc [ ("ok", `Bool true) ]);
+                         ts = Some "2026-07-01T00:00:01Z";
+                         oas_block_index = None;
+                       };
+                   ];
+               })
+        else None
+      in
+      let rows =
+        Yojson.Safe.Util.to_list
+          (K.to_json_array ~trace_block_by_turn_ref messages)
+      in
+      let assistant =
+        List.find
+          (function
+            | `Assoc fields -> (
+                match List.assoc_opt "role" fields with
+                | Some (`String "assistant") -> true
+                | _ -> false)
+            | _ -> false)
+          rows
+      in
+      match json_blocks assistant with
+      | Some blocks ->
+        let last = List.nth blocks (List.length blocks - 1) in
+        let open Yojson.Safe.Util in
+        Alcotest.(check string) "trace block appended" "trace"
+          (last |> member "t" |> to_string);
+        Alcotest.(check int) "trace keeps thinking and tool" 2
+          (last |> member "trace" |> to_list |> List.length)
+      | None -> Alcotest.fail "assistant json missing blocks")
+
 (* A malformed persisted turn_ref is surfaced as a read drop and reads as
    [None] — never repaired — while the row itself stays valid. *)
 let test_turn_ref_malformed_reads_none () =
@@ -1277,6 +1343,8 @@ let () =
             test_user_and_tool_rows_have_no_blocks;
           Alcotest.test_case "blocks roundtrip and malformed dropped" `Quick
             test_blocks_roundtrip_and_drop_malformed;
+          Alcotest.test_case "assistant history appends trace block" `Quick
+            test_to_json_array_appends_trace_block_to_assistant_turn;
         ] );
       ( "row_kind",
         [

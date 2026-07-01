@@ -358,6 +358,52 @@ describe('thread history merge & persistence', () => {
     ])
   })
 
+  it('preserves persisted thinking/tool interleaving trace blocks on reload', () => {
+    const entries = chatHistoryEntriesFromRest('echo', [
+      {
+        role: 'assistant',
+        content: 'done',
+        ts: 1_780_000_000,
+        turn_ref: 'trace-ui#12',
+        blocks: [
+          { t: 'p', html: 'done' },
+          {
+            t: 'trace',
+            trace: [
+              { kind: 'think', text: 'checking tasks', ts: '2026-07-01T00:00:00Z' },
+              {
+                kind: 'tool',
+                name: 'keeper_tasks_list',
+                tool_call_id: 'exec-1',
+                status: 'ok',
+                args: {},
+                result: { ok: true },
+                ts: '2026-07-01T00:00:01Z',
+              },
+              { kind: 'think', text: 'summarizing', ts: '2026-07-01T00:00:02Z' },
+            ],
+          },
+        ] as unknown as ChatBlock[],
+      },
+    ])
+
+    const traceBlock = entries[0]?.blocks?.find((block): block is Extract<ChatBlock, { t: 'trace' }> => block.t === 'trace')
+    expect(traceBlock?.trace).toEqual([
+      { kind: 'think', text: 'checking tasks', ts: '2026-07-01T00:00:00Z' },
+      {
+        kind: 'tool',
+        name: 'keeper_tasks_list',
+        toolCallId: 'exec-1',
+        status: 'ok',
+        args: '{}',
+        result: '{\n  "ok": true\n}',
+        ts: '2026-07-01T00:00:01Z',
+      },
+      { kind: 'think', text: 'summarizing', ts: '2026-07-01T00:00:02Z' },
+    ])
+    expect(entries[0]?.turnRef).toBe('trace-ui#12')
+  })
+
   it('maps persisted tool rows to the live tool-entry convention', () => {
     const entries = chatHistoryEntriesFromRest('echo', [
       { role: 'user', content: 'run checks', ts: 1_780_000_000 },

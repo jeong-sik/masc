@@ -97,6 +97,35 @@ type fusion_block = {
   run_id : string;
 }
 
+type trace_tool_status =
+  | Trace_tool_pending
+  | Trace_tool_ok
+  | Trace_tool_err
+
+type trace_step =
+  | Trace_think of {
+      text : string;
+      ts : string option;
+      oas_block_index : int option;
+    }
+  | Trace_reason of {
+      text : string;
+      detail : string option;
+      ts : string option;
+    }
+  | Trace_tool of {
+      name : string;
+      tool_call_id : string option;
+      status : trace_tool_status option;
+      dur : string option;
+      args : Yojson.Safe.t option;
+      result : Yojson.Safe.t option;
+      ts : string option;
+      oas_block_index : int option;
+    }
+
+type trace_block = { trace : trace_step list }
+
 type chat_block =
   | Text of text_block
   | Heading of text_block
@@ -111,6 +140,7 @@ type chat_block =
   | Image of image_block
   | Link of link_block
   | Fusion of fusion_block
+  | Trace of trace_block
 
 type dropped_http_url_reason =
   | Missing_scheme

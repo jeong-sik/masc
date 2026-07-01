@@ -72,6 +72,11 @@ let memory_os_count pred xs =
   List.fold_left (fun count value -> if pred value then count + 1 else count) 0 xs
 ;;
 
+let keeper_chat_allowed_trace_ids (m : Keeper_meta_contract.keeper_meta) =
+  Keeper_id.Trace_id.to_string m.runtime.trace_id :: m.runtime.trace_history
+  |> Json_util.dedupe_keep_order
+;;
+
 let memory_os_read_episodes ~keeper_id ~n =
   try Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n, None with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1023,12 +1028,32 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
     else
-      let base_dir = (Mcp_server.workspace_config state).base_path in
+      let config = Mcp_server.workspace_config state in
+      let base_dir = config.base_path in
       let messages =
         Keeper_chat_store.load ~base_dir ~keeper_name:name
       in
+      let trace_block_by_turn_ref =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some m) ->
+          Some
+            (Server_dashboard_http_keeper_api_trace.chat_trace_block_by_turn_ref
+               ~max_lines:trajectory_max_limit
+               ~max_internal_lines:trajectory_max_limit
+               ~config
+               ~keeper_name:name
+               ~allowed_trace_ids:(keeper_chat_allowed_trace_ids m))
+        | Ok None -> None
+        | Error err ->
+          Log.Keeper.warn
+            "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
+            name
+            err;
+          None
+      in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-        (Keeper_chat_store.to_json_array ~base_dir messages)
+        (Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref
+           messages)
   else if ends_with "/person-notes" then
     (* RFC-0229 P2: keeper-authored person notes for the roster pane.
        Read-only fold over the notes store; same shape as the tool

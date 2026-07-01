@@ -4,15 +4,19 @@ module Trace = Server_dashboard_http_keeper_api_trace
 module Types = Server_dashboard_http_keeper_api_types
 module T = Trajectory
 
-let mk_thinking ~ts ~redacted ~content =
+let mk_thinking_with_turn ~turn ~ts ~redacted ~content =
   T.Thinking
     { ts
     ; ts_iso = "2026-06-29T00:00:00Z"
-    ; turn = 1
+    ; turn
     ; content
     ; content_length = String.length content
     ; redacted
     }
+;;
+
+let mk_thinking ~ts ~redacted ~content =
+  mk_thinking_with_turn ~turn:1 ~ts ~redacted ~content
 ;;
 
 let test_dedupe_preserves_first_order () =
@@ -153,6 +157,59 @@ let test_skip_warns_once_per_file () =
       (List.length trace_warns))
 ;;
 
+let test_chat_trace_block_by_turn_ref_reads_allowed_trace_history () =
+  with_temp_dir (fun dir ->
+    let config = Workspace.default_config dir in
+    let masc_root = Workspace.masc_root_dir config in
+    let keeper_name = "keeper-chat-trace" in
+    T.append_thinking
+      ~masc_root
+      ~keeper_name
+      ~trace_id:"trace-current"
+      { ts = 1.0
+      ; ts_iso = "2026-07-01T00:00:01Z"
+      ; turn = 1
+      ; content = "current turn"
+      ; content_length = String.length "current turn"
+      ; redacted = false
+      };
+    T.append_thinking
+      ~masc_root
+      ~keeper_name
+      ~trace_id:"trace-old"
+      { ts = 2.0
+      ; ts_iso = "2026-07-01T00:00:02Z"
+      ; turn = 42
+      ; content = "old turn"
+      ; content_length = String.length "old turn"
+      ; redacted = false
+      };
+    let trace_block_by_turn_ref =
+      Trace.chat_trace_block_by_turn_ref
+        ~max_lines:10
+        ~max_internal_lines:10
+        ~config
+        ~keeper_name
+        ~allowed_trace_ids:[ "trace-current"; "trace-old" ]
+    in
+    let old_ref = Ids.Turn_ref.make ~trace_id:"trace-old" ~absolute_turn:42 in
+    (match trace_block_by_turn_ref old_ref with
+     | Some
+         (Keeper_chat_blocks.Trace
+           { trace = [ Keeper_chat_blocks.Trace_think { text = "old turn"; _ } ] })
+       -> ()
+     | Some _ -> fail "old trace_id returned unexpected trace block"
+     | None -> fail "old trace_id from trace_history should enrich");
+    let disallowed_ref =
+      Ids.Turn_ref.make ~trace_id:"trace-unlisted" ~absolute_turn:42
+    in
+    check
+      bool
+      "unlisted trace_id is not used as a filesystem read key"
+      true
+      (Option.is_none (trace_block_by_turn_ref disallowed_ref)))
+;;
+
 let () =
   Eio_main.run @@ fun env ->
   Masc_test_deps.init_eio_clock env;
@@ -167,15 +224,21 @@ let () =
       , [ test_case "skips invalid jsonl rows" `Quick test_read_invalid_json_skips
         ; test_case "summarises skips once per file" `Quick test_skip_warns_once_per_file
         ] )
-    ; ( "internal_history_json_to_trajectory_line"
-      , [ test_case
-            "decodes content_blocks rows"
-            `Quick
-            test_converter_decodes_content_blocks
-        ; test_case
-            "rejects flat content rows"
-            `Quick
-            test_converter_rejects_flat_content
-        ] )
-    ]
+     ; ( "internal_history_json_to_trajectory_line"
+       , [ test_case
+             "decodes content_blocks rows"
+             `Quick
+             test_converter_decodes_content_blocks
+         ; test_case
+             "rejects flat content rows"
+             `Quick
+             test_converter_rejects_flat_content
+         ] )
+     ; ( "chat_trace_block_by_turn_ref"
+       , [ test_case
+             "reads allowed trace_history trace ids"
+             `Quick
+             test_chat_trace_block_by_turn_ref_reads_allowed_trace_history
+         ] )
+     ]
 ;;

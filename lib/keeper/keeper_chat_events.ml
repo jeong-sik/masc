@@ -52,7 +52,11 @@ type keeper_chat_event =
       { index : int
       ; media_type : string
       ; source_type : Agent_sdk.Types.media_source_kind
-      ; bytes : int
+      ; media_ref : string
+          (* RFC-0301: reader-facing URL of the persisted media
+             ([/api/v1/media/<token>], via Keeper_chat_media_store), replacing the
+             pre-RFC byte count. The data channel carries the reference to the
+             actual payload, not a telemetry count. *)
       }
   | Oas_stream_protocol_error of stream_protocol_error
   | Tool_call_start of { tool_call_id : string; tool_call_name : string }

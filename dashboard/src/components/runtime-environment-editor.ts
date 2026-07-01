@@ -1,6 +1,7 @@
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
 import {
+  isRuntimeTomlNonMaterializableProtocol,
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
@@ -363,6 +364,12 @@ export function RuntimeEnvironmentEditor({
     if (selectedProvider?.transportKind === 'command') {
       setBindingFormError(
         `"${bindingProviderId}"는 command(CLI) transport라 바인딩을 생성할 수 없습니다 (백엔드가 아직 CLI provider를 라우팅하지 못합니다)`,
+      )
+      return
+    }
+    if (selectedProvider && isRuntimeTomlNonMaterializableProtocol(selectedProvider.protocol)) {
+      setBindingFormError(
+        `"${bindingProviderId}"는 ${selectedProvider.protocol} protocol이라 바인딩을 생성할 수 없습니다 (백엔드가 아직 이 provider를 라우팅하지 못합니다)`,
       )
       return
     }

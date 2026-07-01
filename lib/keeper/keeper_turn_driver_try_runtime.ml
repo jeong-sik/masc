@@ -112,14 +112,15 @@ let http_status_of_http_error = function
    only producer that needs to change; the consuming policy
    ([Keeper_supervisor_pause_policy], [Keeper_failure_policy],
    [Keeper_error_classify.is_auto_recoverable_runtime_exhausted_error]) was
-   already correct and simply unreachable. Capacity-shaped failures
-   ([ProviderFailure { kind = Capacity_exhausted; _ }],
-   [NetworkError { kind = Local_resource_exhaustion; _ }]) are deliberately
-   left to [Keeper_internal_error.Other_detail] here rather than folded into
-   [Capacity_exhausted]/[Capacity_backpressure]: wiring the dedicated
-   backpressure envelope ([Keeper_turn_driver_backpressure], currently
-   dead — no caller constructs [Capacity_backpressure] either) is a
-   separate, larger fix. *)
+   already correct and simply unreachable.
+
+   Capacity-shaped failures are intentionally split by source here:
+   [ProviderFailure { kind = Capacity_exhausted; _ }] maps to the typed,
+   retryable [Capacity_exhausted] runtime exhaustion reason, while transport
+   [NetworkError { kind = Local_resource_exhaustion; _ }] remains bucketed
+   with [All_providers_failed]. Wiring the dedicated backpressure envelope
+   ([Keeper_turn_driver_backpressure], currently dead — no caller constructs
+   [Capacity_backpressure] either) is a separate, larger fix. *)
 let runtime_exhaustion_reason_of_http_error
   : Llm_provider.Http_client.http_error option
     -> Keeper_internal_error.runtime_exhaustion_reason
@@ -162,6 +163,10 @@ let runtime_exhaustion_reason_of_http_error
     Keeper_internal_error.Max_turns_exceeded
   | Some (Llm_provider.Http_client.ProviderTerminal { kind = Llm_provider.Http_client.Other _; message }) ->
     Keeper_internal_error.Other_detail message
+  | Some
+      (Llm_provider.Http_client.ProviderFailure
+         { kind = Llm_provider.Http_client.Capacity_exhausted _; _ }) ->
+    Keeper_internal_error.Capacity_exhausted
   | Some (Llm_provider.Http_client.ProviderFailure { kind; message }) ->
     Keeper_internal_error.Other_detail
       (Llm_provider.Http_client.provider_failure_to_string ~kind ~message)

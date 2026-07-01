@@ -2143,6 +2143,57 @@ let test_no_candidates_exhaustion_classifies_as_no_providers_available () =
     Alcotest.failf "expected typed keeper error, got %s"
       (Agent_sdk.Error.to_string mapped)
 
+let test_capacity_failure_exhaustion_classifies_as_capacity_exhausted () =
+  let capacity_err =
+    Llm_provider.Http_client.ProviderFailure
+      { kind =
+          Llm_provider.Http_client.Capacity_exhausted
+            { scope = Llm_provider.Http_client.Failure_scope_provider
+            ; retry_after = Some "30"
+            ; model = Some "test-model"
+            }
+      ; message = "capacity exhausted"
+      }
+  in
+  let mapped =
+    Masc.Keeper_turn_driver.For_testing.sdk_error_of_exhausted
+      ~runtime_id:"runtime.capacity-test"
+      (Some capacity_err)
+  in
+  match Keeper_internal_error.classify_masc_internal_error mapped with
+  | Some (Keeper_internal_error.Runtime_exhausted { reason; _ }) ->
+    Alcotest.(check bool)
+      "reason is Capacity_exhausted"
+      true
+      (reason = Keeper_internal_error.Capacity_exhausted);
+    Alcotest.(check bool)
+      "Capacity_exhausted is policy-retryable"
+      true
+      (Keeper_internal_error.runtime_exhaustion_reason_retryable reason);
+    Alcotest.(check bool)
+      "capacity exhaustion is auto-recoverable"
+      true
+      (Masc.Keeper_error_classify.is_auto_recoverable_turn_error mapped)
+  | Some other ->
+    Alcotest.failf "expected Runtime_exhausted, got %s"
+      (Keeper_internal_error.kind_of_masc_internal_error other)
+  | None ->
+    Alcotest.failf "expected typed keeper error, got %s"
+      (Agent_sdk.Error.to_string mapped)
+
+let test_runtime_exhaustion_label_caps_free_text_detail () =
+  let detail = String.make 260 'x' ^ "\nwith newline\tand spacing" in
+  let label =
+    Keeper_internal_error.runtime_exhaustion_reason_to_label
+      (Keeper_internal_error.Other_detail detail)
+  in
+  Alcotest.(check bool)
+    "label detail is byte-capped"
+    true
+    (String.length label <= 212);
+  Alcotest.(check bool) "label has no newline" false (contains ~needle:"\n" label);
+  Alcotest.(check bool) "label is marked truncated" true (contains ~needle:"..." label)
+
 let () =
   Alcotest.run "keeper_turn_driver_accept"
     [
@@ -2266,5 +2317,13 @@ let () =
             "no-candidates exhaustion classifies as No_providers_available"
             `Quick
             test_no_candidates_exhaustion_classifies_as_no_providers_available;
+          Alcotest.test_case
+            "capacity exhaustion classifies as retryable Runtime_exhausted"
+            `Quick
+            test_capacity_failure_exhaustion_classifies_as_capacity_exhausted;
+          Alcotest.test_case
+            "runtime exhaustion labels cap free-text detail"
+            `Quick
+            test_runtime_exhaustion_label_caps_free_text_detail;
         ] );
     ]

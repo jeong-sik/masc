@@ -68,6 +68,18 @@ let runtime_exhaustion_reason_retryable = function
   | Structural_attempt_timeout _ -> true
   | Other_detail _ -> false
 
+let runtime_exhaustion_label_payload_max_bytes = 200
+
+let runtime_exhaustion_label_payload detail =
+  let collapsed =
+    detail |> String_util.query_tokens |> String.concat " " |> String.trim
+  in
+  String_util.utf8_safe
+    ~max_bytes:(runtime_exhaustion_label_payload_max_bytes + 3)
+    ~suffix:"..."
+    collapsed
+  |> String_util.to_string
+
 (** Human-readable label for {!summary_of_masc_internal_error} and log
     lines. Distinct from {!runtime_exhaustion_reason_to_json}'s wire tags:
     this carries the [detail]/[message] payload inline so an operator does
@@ -80,9 +92,11 @@ let runtime_exhaustion_reason_to_label = function
   | Candidates_filtered_after_cycles -> "candidates_filtered_after_cycles"
   | Max_turns_exceeded -> "max_turns_exceeded"
   | Structural_attempt_timeout { detail } ->
-    Printf.sprintf "structural_attempt_timeout(%s)" detail
+    Printf.sprintf "structural_attempt_timeout(%s)"
+      (runtime_exhaustion_label_payload detail)
   | Capacity_exhausted -> "capacity_exhausted"
-  | Other_detail detail -> Printf.sprintf "other(%s)" detail
+  | Other_detail detail ->
+    Printf.sprintf "other(%s)" (runtime_exhaustion_label_payload detail)
 
 let runtime_exhaustion_reason_to_json = function
   | Connection_refused -> `String "connection_refused"

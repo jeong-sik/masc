@@ -131,17 +131,6 @@ let test_reputation_json_roundtrip_v2_fields () =
   | None ->
     fail "reputation_of_json returned None"
 
-let test_compute_overall_score_pure () =
-  let score =
-    Reputation.compute_overall_score
-      ~completion_rate:1.0
-      ~response_rate:1.0
-      ~board_posts:10
-      ~board_comments:10
-      ~thompson_confidence:0.5
-  in
-  check bool "score in [0,1]" true (score >= 0.0 && score <= 1.0)
-
 let test_compute_accountability_score_penalty () =
   let penalized =
     Reputation.compute_accountability_score
@@ -178,8 +167,6 @@ let () =
             test_default_reputation_v2_fields
         ; test_case "json round-trip preserves v2 fields" `Quick
             test_reputation_json_roundtrip_v2_fields
-        ; test_case "compute_overall_score in range" `Quick
-            test_compute_overall_score_pure
         ; test_case "full accountability penalty → 0.0" `Quick
             test_compute_accountability_score_penalty
         ] )

@@ -562,8 +562,7 @@ describe('BoardSurface Component', () => {
         body: 'content',
         author: 'ani1999',
         contributor_quality: {
-          score: 0.72,
-          band: 'strong',
+          accountability_score: 0.72,
           source: 'agent_reputation',
         },
       }),

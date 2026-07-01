@@ -387,7 +387,9 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
   : prepared_resume
   =
 
-  let max_turns_for_resume = checkpoint.turn_count + config.max_turns in
+  let max_turns_for_resume =
+    if config.max_turns = 0 then 0 else checkpoint.turn_count + config.max_turns
+  in
   let patched_checkpoint =
     { checkpoint with
       Agent_sdk.Checkpoint.model = config.model_id

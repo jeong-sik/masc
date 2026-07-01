@@ -225,18 +225,10 @@ let board_moderation_fields ~include_moderation ~target_kind ~target_id =
       ("moderation_status", `String summary.Board_moderation.moderation_status);
     ]
 
-let board_contributor_quality_band score =
-  if score >= 0.85 then "excellent"
-  else if score >= 0.65 then "strong"
-  else if score >= 0.35 then "watch"
-  else "low"
-
 let board_contributor_quality_json
     (rep : Reputation.agent_reputation) : Yojson.Safe.t =
   `Assoc
     [
-      ("score", `Float rep.overall_score);
-      ("band", `String (board_contributor_quality_band rep.overall_score));
       ("source", `String "agent_reputation");
       ("completion_rate", `Float rep.completion_rate);
       ("response_rate", `Float rep.response_rate);

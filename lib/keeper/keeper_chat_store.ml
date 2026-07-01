@@ -213,6 +213,17 @@ let persisted_attachment (att : attachment) =
 let redact_tool_call redaction tc =
   { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }
 
+let redact_block redaction = function
+  | Keeper_chat_blocks.Thinking thinking ->
+    Keeper_chat_blocks.Thinking
+      { thinking with
+        content = Keeper_secret_redaction.redact_text redaction thinking.content
+      }
+  | block -> block
+
+let redact_blocks redaction =
+  Option.map (List.map (redact_block redaction))
+
 let redact_message redaction msg =
   let attachments =
     Option.map (List.map (redact_attachment redaction)) msg.attachments
@@ -424,6 +435,7 @@ let append_turn ~base_dir ~keeper_name ~(user_content : string)
     let assistant_content =
       Keeper_secret_redaction.redact_text redaction assistant_content
     in
+    let blocks = redact_blocks redaction blocks in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     (* Speaker identity belongs to the user line only: tool and
@@ -477,6 +489,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     ensure_dir_once ~base_dir;
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
+    let blocks = redact_blocks redaction blocks in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =

@@ -44,7 +44,6 @@ type agent_reputation = {
   accountability_keeper_name: string; (** Keeper identity used for accountability lookup. *)
   accountability_source: string; (** direct_agent | canonical_keeper_fallback | none *)
   accountability_source_label: string; (** Operator-facing provenance label. *)
-  overall_score: float;       (** Weighted composite after accountability penalty, 0.0-1.0 *)
   (* v2 multi-dimensional scores *)
   execution_reliability: float;
   (** Tool-call success rate from the v2 reputation ledger. 0.0–1.0.
@@ -99,14 +98,3 @@ val compute_accountability_score :
 (** Compute an evidence-backed penalty score from accountability metrics.
     A score of [1.0] means no penalty; [0.0] means the agent's activity
     score should not be trusted for routing/reward decisions. *)
-
-val compute_overall_score :
-  completion_rate:float ->
-  response_rate:float ->
-  board_posts:int ->
-  board_comments:int ->
-  thompson_confidence:float ->
-  float
-(** Compute the weighted overall score from individual metrics.
-    Thompson confidence is the Beta expected value from Thompson Sampling.
-    Exposed for testing. *)

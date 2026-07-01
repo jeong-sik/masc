@@ -36,6 +36,9 @@ function makeTask(overrides: Partial<Task> = {}): Task {
 
 function renderInto(ui: ReturnType<typeof html>) {
   const container = document.createElement('div')
+  // Attach to the document so fireEvent (e.g. changing the sort <select>)
+  // dispatches and re-renders reliably; detached nodes drop some events.
+  document.body.appendChild(container)
   render(ui, container)
   return container
 }
@@ -43,6 +46,7 @@ function renderInto(ui: ReturnType<typeof html>) {
 afterEach(() => {
   keepers.value = []
   tasks.value = []
+  document.body.innerHTML = ''
 })
 
 describe('KeeperWorkspaceRoster', () => {
@@ -59,13 +63,12 @@ describe('KeeperWorkspaceRoster', () => {
     // v2 filter chips carry the SHORT label + count ('실행' + '1'), not the old
     // combined '실행중1' chip label (rails.jsx filter chips).
     expect(container.textContent).toContain('실행1')
-    // v2 status group headers render the SHORT label + count in the body and the
-    // FULL label in the .roster-group title attribute; query the title to keep the
-    // exact full-label checks.
-    const groupTitles = Array.from(container.querySelectorAll('.roster-group')).map(g => g.getAttribute('title'))
-    expect(groupTitles).toContain('실행 중')
-    expect(groupTitles).toContain('대기 · 일시정지')
-    expect(groupTitles).toContain('중지 · 종료됨')
+    // The roster now defaults to '최근순' (flat list, no status group headers).
+    // status-bucket grouping/headers are covered exhaustively in
+    // keeper-workspace-roster.test.ts, so this test asserts the flat default and
+    // the counts/search/selection it is named for (no redundant grouping checks).
+    expect(container.querySelectorAll('.roster-group').length).toBe(0)
+    expect(container.querySelectorAll('.kw-kp-row').length).toBe(3)
     // v2 mounts the search input only after toggling the '⌕' .rfilter-icon
     // (searchOpen defaults false); the class is now .roster-search.
     expect(container.querySelector('.roster-search')).toBeNull()

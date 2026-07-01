@@ -21,6 +21,52 @@ let contains ~needle haystack =
   nl = 0 || go 0
 ;;
 
+let temp_base_path prefix =
+  Filename.concat
+    (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s-%d-%d" prefix (Unix.getpid ()) (Random.bits ()))
+;;
+
+let rec remove_tree path =
+  if Sys.file_exists path then
+    if Sys.is_directory path then begin
+      Sys.readdir path
+      |> Array.iter (fun name -> remove_tree (Filename.concat path name));
+      Unix.rmdir path
+    end
+    else Sys.remove path
+;;
+
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> Unix.putenv name ""
+;;
+
+(* Board_dispatch.create_post (via Fusion_sink.emit) needs a live Eio
+   scheduler for its lock/cancellation-context effects (Effect.Unhandled
+   (Eio.Cancel.Get_context) otherwise) — same [Eio_main.run] +
+   [Fs_compat.set_fs] wrapper test_board_dispatch.ml's [with_eio] uses. *)
+let with_isolated_base_path prefix f =
+  let base_dir = temp_base_path prefix in
+  let old_base = Sys.getenv_opt "MASC_BASE_PATH" in
+  let old_base_input = Sys.getenv_opt "MASC_BASE_PATH_INPUT" in
+  Fun.protect
+    ~finally:(fun () ->
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      restore_env "MASC_BASE_PATH" old_base;
+      restore_env "MASC_BASE_PATH_INPUT" old_base_input;
+      try remove_tree base_dir with _ -> ())
+    (fun () ->
+      Unix.putenv "MASC_BASE_PATH" base_dir;
+      Unix.putenv "MASC_BASE_PATH_INPUT" base_dir;
+      Board_dispatch.reset_for_test ();
+      Board.reset_global_for_test ();
+      Eio_main.run @@ fun env ->
+      Fs_compat.set_fs (Eio.Stdenv.fs env);
+      f base_dir)
+;;
+
 let make_meta ?(name = "fusion-keeper") () : Keeper_meta_contract.keeper_meta =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -52,6 +98,17 @@ let fusion_stimulus ?run_id ?ok ?resolved_answer ?board_post_id () : Keeper_even
   ; payload =
       Keeper_event_queue.Fusion_completed
         (fusion_payload ?run_id ?ok ?resolved_answer ?board_post_id ())
+  }
+;;
+
+let judge_synthesis resolved_answer : Fusion_types.judge_synthesis =
+  { consensus = []
+  ; contradictions = []
+  ; partial_coverage = []
+  ; unique_insights = []
+  ; blind_spots = []
+  ; resolved_answer
+  ; decision = Fusion_types.Answer resolved_answer
   }
 ;;
 
@@ -209,6 +266,52 @@ let test_missing_board_post_id_fallback () =
   check string "synthetic fallback post id" "fusion-run:fus-9" ev.post_id
 ;;
 
+let test_emit_board_failure_is_best_effort () =
+  with_isolated_base_path "fusion-board-best-effort" (fun base_dir ->
+    let keeper = "bad/keeper" in
+    let run_id = Printf.sprintf "fus-board-fail-%d" (Random.bits ()) in
+    let resolved_answer = "BOARD-BEST-EFFORT-ANSWER" in
+    Fusion_run_registry.register_running Fusion_run_registry.global ~run_id ~keeper
+      ~preset:"unit-test" ~started_at:1.0;
+    let result =
+      Fusion_sink.emit ~base_dir ~keeper ~run_id ~question:"q" ~panel:[]
+        ~judge:(Ok (judge_synthesis resolved_answer)) ~judges:[]
+        ~judge_usage:Fusion_types.zero_usage
+    in
+    check bool "board failure does not fail emit" true (Result.is_ok result);
+    (match Fusion_run_registry.get Fusion_run_registry.global ~run_id with
+     | Some run ->
+       (match run.Fusion_run_registry.status with
+        | Fusion_run_registry.Completed { ok = true } -> ()
+        | Fusion_run_registry.Completed { ok = false } ->
+          fail "fusion run should complete with ok=true"
+        | Fusion_run_registry.Running -> fail "fusion run should not remain running")
+     | None -> fail "fusion run should remain visible");
+    let messages = Keeper_chat_store.load ~base_dir ~keeper_name:keeper in
+    (* Keeper_chat_store.encode_line auto-derives blocks from message content
+       for assistant rows when the caller passes [blocks:None] (RFC-0235 P3),
+       so [m.blocks] is not [None] here — the check is that no *Fusion* card
+       (which would point at the board post that failed to be created) is
+       among whatever blocks got auto-derived. *)
+    let answer_without_card =
+      List.exists
+        (fun (m : Keeper_chat_store.chat_message) ->
+           contains ~needle:resolved_answer m.content
+           &&
+           match m.blocks with
+           | None -> true
+           | Some blocks ->
+             not
+               (List.exists
+                  (function
+                    | Keeper_chat_blocks.Fusion _ -> true
+                    | _ -> false)
+                  blocks))
+        messages
+    in
+    check bool "chat lane receives answer without fusion card block" true answer_without_card)
+;;
+
 let () =
   run
     "fusion_wake"
@@ -222,6 +325,10 @@ let () =
             "missing board_post_id falls back to fusion-run id"
             `Quick
             test_missing_board_post_id_fallback
+        ; test_case
+            "emit treats board post failure as best-effort"
+            `Quick
+            test_emit_board_failure_is_best_effort
         ; test_case
             "background completion is actionable (non-empty, carries output)"
             `Quick

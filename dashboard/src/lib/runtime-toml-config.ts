@@ -70,7 +70,22 @@ interface TomlDocument {
 
 type TomlScalar = string | number | boolean | null
 
-const RESERVED_TOP_LEVEL = new Set(['providers', 'models', 'runtime', 'system', 'routes', 'profiles'])
+// Mirrors the backend's reserved_namespaces (lib/runtime/runtime_toml.ml:554).
+// A *provider* id equal to one of these would collide with a top-level TOML
+// namespace once used as a binding pin's first segment (`[<providerId>.<modelId>]`,
+// e.g. `[models.foo]` could no longer be told apart from a model definition
+// section). Model ids never occupy that first-segment position, but are
+// checked against the same set here too for naming consistency across the
+// two entity types, not because they carry the same collision risk.
+const RESERVED_TOP_LEVEL = new Set([
+  'providers',
+  'models',
+  'runtime',
+  'system',
+  'routes',
+  'profiles',
+  'web_search',
+])
 
 function parseDocument(sourceText: string): TomlDocument {
   const lines = sourceText.split('\n')
@@ -545,7 +560,7 @@ export function setRuntimeTomlProviderCredential(
     next = deleteRuntimeTomlKey(next, section, 'key')
     return deleteRuntimeTomlKey(next, section, 'value')
   }
-  next = setRuntimeTomlKey(next, section, 'value', value)
+  next = setRuntimeTomlKey(next, section, 'value', normalizedValue)
   next = deleteRuntimeTomlKey(next, section, 'key')
   return deleteRuntimeTomlKey(next, section, 'path')
 }
@@ -568,4 +583,69 @@ export function setRuntimeTomlBindingField(
 ): string {
   if (value === null) return deleteRuntimeTomlKey(sourceText, runtimeId, field)
   return setRuntimeTomlKey(sourceText, runtimeId, field, value)
+}
+
+// Closed set mirroring lib/runtime/runtime_toml.ml's api_format_of_protocol —
+// any other string fails runtime.toml *parse* validation on save
+// (Runtime.save_config_text re-parses via materialize_config). This does not
+// mean every member here can be safely offered by the add-provider form: see
+// RUNTIME_TOML_CREATABLE_PROTOCOLS below for the materialization gate.
+export const RUNTIME_TOML_PROTOCOLS = [
+  'openai-compatible-http',
+  'ollama-http',
+  'openai-compatible-cli',
+  'messages-http',
+  'messages-cli',
+] as const
+
+export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
+
+// Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
+// `Runtime_adapter.provider_kind_of_cli_provider` is hardcoded to `None` (CLI
+// subprocess provider kinds were removed), so any provider using `Cli`
+// transport (the `command` field) resolves to no provider_kind and
+// `Runtime.materialize_config`'s `List.filter_map` silently drops its
+// bindings from the live runtime list instead of failing the save
+// (lib/runtime/runtime_adapter.ml:183-189, lib/runtime/runtime.ml:239). The
+// *-cli protocol labels parse fine but pair naturally with `command`
+// transport, so they are excluded here too until CLI materialization is
+// restored. This is an allow-list, not a filter-out of known-bad entries, so
+// a future 6th protocol defaults to non-creatable until reviewed.
+export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
+  'openai-compatible-http',
+  'ollama-http',
+  'messages-http',
+] as const
+
+// runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],
+// and the binding pin [<providerId>.<modelId>]). parseDocument's section regex
+// and bindingSections' 2-part split both assume an id has no '.', so a bare-key
+// -safe charset is required, not just non-empty. Matches BARE_TOML_KEY above
+// (same TOML bare-key grammar: ASCII letters/digits/underscore/dash, no
+// restriction on the first character) rather than a stricter identifier-style
+// pattern — a leading '_'/'-' is a valid bare key both to keyLineMatch's
+// tokenizer and to the backend TOML parser, so rejecting it here would make
+// this form stricter than the config format it writes into.
+const RUNTIME_TOML_ID_PATTERN = /^[A-Za-z0-9_-]+$/
+
+export function isValidRuntimeTomlIdFormat(id: string): boolean {
+  return RUNTIME_TOML_ID_PATTERN.test(id)
+}
+
+export function isReservedRuntimeTomlId(id: string): boolean {
+  return RESERVED_TOP_LEVEL.has(id)
+}
+
+// Ensures the provider x model pin section exists (e.g. `[ollama_cloud.new-model]`)
+// without setting any field — an empty binding section is a valid, common shape
+// in runtime.toml already (most bindings only carry `is-default`/knobs when they
+// deviate from defaults). No-op if the binding already exists.
+export function createRuntimeTomlBinding(
+  sourceText: string,
+  providerId: string,
+  modelId: string,
+): string {
+  const document = parseDocument(sourceText)
+  const ensured = ensureSection([...document.lines], document, `${providerId}.${modelId}`)
+  return joinLines(ensured.lines)
 }

@@ -811,8 +811,7 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
       check int "third order" 2 third.order_index;
       (match third.adjacent_reasoning with
       | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r0 ] ->
-          check_visible_reasoning "third reasoning" 7
-            (Some "sig-2.1") r0
+          check_visible_reasoning "third reasoning" 7 (Some "sig-2.1") r0
       | _ -> fail "third tool call should carry only its adjacent thinking")
   | _ ->
       failf "expected three projected tool calls, got %d" (List.length calls)

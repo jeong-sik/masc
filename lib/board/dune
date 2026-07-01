@@ -21,6 +21,7 @@
   board_metrics_hooks
   board_moderation
   board_paths
+  board_sort
   board_sub_board_json
   board_votes
   board_votes_json)

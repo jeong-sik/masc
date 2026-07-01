@@ -30,8 +30,6 @@ type curation_snapshot = {
   highlights : string list;
   tag_suggestions : curation_tag_suggestion list;
   answer_matches : curation_answer_match list;
-  health_score : float option;
-  health_components : curation_health_component list;
   rationale : string;
   provenance : Yojson.Safe.t;
 }
@@ -46,13 +44,6 @@ and curation_answer_match = {
   question_post_id : string;
   answer_post_id : string;
   score : float;
-  rationale : string;
-}
-
-and curation_health_component = {
-  name : string;
-  score : float;
-  weight : float;
   rationale : string;
 }
 
@@ -82,14 +73,6 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
       ("rationale", `String m.rationale);
     ]
   in
-  let health_component_to_yojson (c : curation_health_component) =
-    `Assoc [
-      ("name", `String c.name);
-      ("score", `Float c.score);
-      ("weight", `Float c.weight);
-      ("rationale", `String c.rationale);
-    ]
-  in
   `Assoc [
     ("id", `String s.id);
     ("generated_at", `Float s.generated_at);
@@ -99,8 +82,6 @@ let snapshot_to_yojson (s : curation_snapshot) : Yojson.Safe.t =
     ("highlights", `List (List.map (fun id -> `String id) s.highlights));
     ("tag_suggestions", `List (List.map tag_suggestion_to_yojson s.tag_suggestions));
     ("answer_matches", `List (List.map answer_match_to_yojson s.answer_matches));
-    ("health_score", Json_util.float_opt_to_json s.health_score);
-    ("health_components", `List (List.map health_component_to_yojson s.health_components));
     ("rationale", `String s.rationale);
     ("provenance", s.provenance);
   ]

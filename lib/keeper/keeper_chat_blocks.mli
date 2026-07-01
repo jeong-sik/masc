@@ -9,7 +9,8 @@
       codec: p, h4, ul, callout, table, code, mermaid, svg, voice, attach,
       image, link, and fusion. Thinking (RFC-0302) carries assistant
       reasoning content (empty string for a signature-only [RedactedThinking]) so
-      reload replays the trace; not produced by [parse_text_to_blocks].
+      reload can restore the dashboard thinking UI; not produced by
+      [parse_text_to_blocks].
     - Matched fenced code blocks become code blocks with escaped HTML and raw source.
     - Mermaid fenced code blocks become mermaid blocks with raw source.
     - Markdown images [![alt](url)] become image blocks.
@@ -129,7 +130,7 @@ type trace_step =
 type trace_block = { trace : trace_step list }
 
 (** A block of keeper/assistant reasoning persisted so the dashboard can
-    replay the thinking trace on reload (RFC-0302). [content] is the
+    replay assistant thinking on reload (RFC-0302). [content] is the
     thinking/reasoning text (empty string for a signature-only [RedactedThinking]);
     [redacted] marks that case so the dashboard renders a placeholder rather
     than an empty card. Not produced by [parse_text_to_blocks] — text-only

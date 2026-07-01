@@ -8,6 +8,14 @@ val regular_file_is_executable : string -> bool
 (** [regular_file_is_executable path] returns [true] when [path] is an
     executable regular file. *)
 
+val search_path_separator : char
+(** Platform search-path separator for [PATH]-style variables. *)
+
+val split_search_path : ?separator:char -> string -> string list
+(** [split_search_path raw] splits [raw] with {!search_path_separator}.
+    Empty entries are preserved so callers can explicitly reject shell-style
+    current-directory segments. *)
+
 val path_has_executable : ?getenv:(string -> string option) -> string -> bool
 (** [path_has_executable name] returns [true] when [PATH] contains a non-empty
     directory with an executable regular file named [name]. *)

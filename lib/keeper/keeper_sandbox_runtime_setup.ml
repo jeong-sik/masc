@@ -25,7 +25,7 @@ let docker_command () =
             with
             | Unix.Unix_error _ -> loop rest)
        in
-       loop (String.split_on_char ':' path))
+       loop (Executable_path.split_search_path path))
 ;;
 
 let docker_command_argv () =

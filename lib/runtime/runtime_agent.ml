@@ -405,10 +405,28 @@ let checkpoint_messages = function
 let messages_for_run_with_checkpoint
     ~(checkpoint_messages : Agent_sdk.Types.message list)
     ~(initial_messages : Agent_sdk.Types.message list) =
-  let append_if_absent acc (message : Agent_sdk.Types.message) =
-    if List.exists (( = ) message) acc then acc else acc @ [ message ]
+  (* [acc @ [message]] inside a fold plus a linear [List.exists] scan makes
+     this O(n^2) in the combined message count. A checkpointed run can carry
+     a long conversation history, so replace both with an O(n) pass: a
+     Hashtbl for O(1) average membership (structural equality, matching the
+     original [( = )] semantics) and prepend-then-reverse instead of
+     per-element append. *)
+  let seen : (Agent_sdk.Types.message, unit) Hashtbl.t =
+    Hashtbl.create (List.length initial_messages + List.length checkpoint_messages)
   in
-  List.fold_left append_if_absent initial_messages checkpoint_messages
+  List.iter (fun message -> Hashtbl.replace seen message ()) initial_messages;
+  let new_checkpoint_messages_rev =
+    List.fold_left
+      (fun acc message ->
+        if Hashtbl.mem seen message
+        then acc
+        else (
+          Hashtbl.replace seen message ();
+          message :: acc))
+      []
+      checkpoint_messages
+  in
+  initial_messages @ List.rev new_checkpoint_messages_rev
 
 let content_blocks_for_run_with_checkpoint
     ~(checkpoint_messages : Agent_sdk.Types.message list)

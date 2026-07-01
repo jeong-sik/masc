@@ -1,29 +1,30 @@
 (** Unit tests for Board_sort — the extracted Hot/Trending ranking SSOT. *)
 
 open Masc
+module Board_sort = Masc_board_handlers.Board_sort
 
 let post_id_exn s =
-  match Board_types.Post_id.of_string s with
+  match Board.Post_id.of_string s with
   | Ok id -> id
   | Error _ -> Alcotest.fail (Printf.sprintf "invalid post_id fixture: %s" s)
 
 let agent_id_exn s =
-  match Board_types.Agent_id.of_string s with
+  match Board.Agent_id.of_string s with
   | Ok id -> id
   | Error _ -> Alcotest.fail (Printf.sprintf "invalid agent_id fixture: %s" s)
 
 (** Minimal fixture post. [votes_up]/[votes_down]/[reply_count]/[created_at]
     are the only fields Board_sort's formulas read; everything else is a
     fixed placeholder. *)
-let make_post ~id ~created_at ~votes_up ~votes_down ~reply_count () : Board_types.post =
+let make_post ~id ~created_at ~votes_up ~votes_down ~reply_count () : Board.post =
   { id = post_id_exn id
   ; author = agent_id_exn "sort-test-author"
   ; title = ""
   ; body = "fixture"
   ; content = "fixture"
-  ; post_kind = Board_types.Human_post
+  ; post_kind = Board.Human_post
   ; meta_json = None
-  ; visibility = Board_types.Public
+  ; visibility = Board.Public
   ; created_at
   ; updated_at = created_at
   ; expires_at = created_at +. (30.0 *. Masc_time_constants.day)
@@ -58,7 +59,7 @@ let test_trending_ranks_net_vote_not_reply_count () =
   Alcotest.(check string)
     "upvoted low-reply post ranks first despite fewer replies"
     "p-upvoted"
-    (Board_types.Post_id.to_string (List.hd sorted).id)
+    (Board.Post_id.to_string (List.hd sorted).id)
 
 let test_trending_tiebreaks_on_created_at_desc () =
   let now = 1_000_000.0 in
@@ -80,7 +81,7 @@ let test_trending_tiebreaks_on_created_at_desc () =
   Alcotest.(check string)
     "newer post wins the tiebreak"
     "p-newer"
-    (Board_types.Post_id.to_string (List.hd sorted).id)
+    (Board.Post_id.to_string (List.hd sorted).id)
 
 let () =
   Alcotest.run "Board_sort"

@@ -139,7 +139,7 @@ let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
     | Overloaded _ | ServerError _ | RateLimited _ | AuthError _ | NotFound _
-    | ContextOverflow _) ->
+    | ContextOverflow _ | PaymentRequired _) ->
       false
   | Agent_sdk.Error.Provider _ -> false
   | Agent_sdk.Error.Agent _ -> false
@@ -518,6 +518,10 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+         (* 402 payment-required is a billing signal, not a recoverable
+            provider-runtime rotation: pool failover cannot cure an unpaid
+            account, so it stays [None] alongside the other terminal 4xx. *)
+         | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _) -> None
          (* Non-API error families have no rotation reason here: structured
             MASC internal errors are handled by [classify_masc_internal_error]

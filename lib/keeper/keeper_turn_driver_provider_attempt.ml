@@ -173,6 +173,9 @@ let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
   | Llm_provider.Retry.AuthError _
   | Llm_provider.Retry.NotFound _
   | Llm_provider.Retry.ContextOverflow _
+  (* 402 payment-required is a billing signal, not a throughput hard quota;
+     keep its message out of the hard-quota string scan. *)
+  | Llm_provider.Retry.PaymentRequired _
   | Llm_provider.Retry.Timeout _ -> None
 
 let cli_wrapped_hard_quota_indicators = [
@@ -306,6 +309,7 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.NetworkError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.Timeout _)
   | Agent_sdk.Error.Provider _
   | Agent_sdk.Error.Agent _
@@ -342,6 +346,7 @@ let sdk_error_is_server_error (err : Agent_sdk.Error.sdk_error) : bool =
       | Llm_provider.Retry.NotFound _
       | Llm_provider.Retry.ContextOverflow _
       | Llm_provider.Retry.NetworkError _
+      | Llm_provider.Retry.PaymentRequired _
       | Llm_provider.Retry.Timeout _ )
   | Agent_sdk.Error.Provider
       ( Llm_provider.Error.NetworkError _

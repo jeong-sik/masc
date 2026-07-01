@@ -69,6 +69,8 @@ let sdk_api_error_fields = function
     ; "message", `String message
     ; "reason", `String (invalid_request_reason_to_wire reason)
     ]
+  | Agent_sdk.Retry.PaymentRequired { message } ->
+    [ "variant", `String "payment_required"; "message", `String message ]
   | Agent_sdk.Retry.NotFound { message } ->
     [ "variant", `String "not_found"; "message", `String message ]
   | Agent_sdk.Retry.ContextOverflow { message; limit } ->

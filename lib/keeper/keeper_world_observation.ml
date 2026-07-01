@@ -1102,28 +1102,7 @@ let keeper_cycle_decision
   else if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name
   then blocked Approval_pending
   else (
-    match reactive_triggers with
-    | _ :: _ when not reactive_gate_enabled ->
-      (* RFC-0297 P0-1: the global reactive kill-switch is off, so a pending
-         reactive trigger does not open a turn. *)
-      { should_run = false
-      ; channel = Reactive
-      ; verdict = Skip { reasons = Reactive_disabled, [] }
-      ; since_last_scheduled_autonomous = None
-      ; effective_cooldown = None
-      ; task_reactive_cooldown = None
-      ; idle_gate_sec = None
-      }
-    | first :: rest ->
-      { should_run = true
-      ; channel = Reactive
-      ; verdict = Run { reasons = first, rest }
-      ; since_last_scheduled_autonomous = None
-      ; effective_cooldown = None
-      ; task_reactive_cooldown = None
-      ; idle_gate_sec = None
-      }
-    | [] ->
+    let scheduled_autonomous_decision () =
       let since_last_scheduled_autonomous =
         if meta.runtime.proactive_rt.last_ts <= 0.0
         then max_int
@@ -1362,7 +1341,36 @@ let keeper_cycle_decision
         ; effective_cooldown = Some effective_cooldown
         ; task_reactive_cooldown = Some task_reactive_cooldown
         ; idle_gate_sec = Some idle_gate_sec
-        }))
+        })
+    in
+    match reactive_triggers with
+    | first :: rest when reactive_gate_enabled ->
+      { should_run = true
+      ; channel = Reactive
+      ; verdict = Run { reasons = first, rest }
+      ; since_last_scheduled_autonomous = None
+      ; effective_cooldown = None
+      ; task_reactive_cooldown = None
+      ; idle_gate_sec = None
+      }
+    | _ ->
+      (* RFC-0297 P0-1: when the reactive gate is disabled, a pending reactive
+         trigger must not itself starve the scheduled-autonomous decision --
+         otherwise a persistent trigger (e.g. a stuck mention) permanently
+         blocks proactive turns even when MASC_KEEPER_PROACTIVE_ENABLED=true.
+         This arm also covers the original no-reactive-trigger ([]) case.
+         Only relabel the verdict as [Reactive_disabled] when
+         scheduled-autonomous also declines to run, so the more specific,
+         actionable reason survives when a suppressed reactive signal was the
+         only thing pending. Review-flagged. *)
+      let decision = scheduled_autonomous_decision () in
+      if decision.should_run || reactive_gate_enabled || reactive_triggers = []
+      then decision
+      else
+        { decision with
+          channel = Reactive
+        ; verdict = Skip { reasons = Reactive_disabled, [] }
+        })
 ;;
 
 let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =

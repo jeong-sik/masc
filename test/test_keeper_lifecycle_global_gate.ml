@@ -190,6 +190,20 @@ let test_global_reactive_off_suppresses () =
   check bool "skip reason reactive_disabled" true
     (List.exists (( = ) WO.Reactive_disabled) (skip_reasons d))
 
+(* Review-flagged: a pending reactive trigger must not, on its own, starve
+   the scheduled-autonomous decision when the reactive gate is off -- a
+   persistent trigger (e.g. a stuck mention) would otherwise permanently
+   block proactive turns even though MASC_KEEPER_PROACTIVE_ENABLED=true and
+   the keeper is due for scheduled work. *)
+let test_global_reactive_off_does_not_starve_scheduled_autonomous () =
+  with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->
+  let obs = { schedule_attention_obs with pending_mentions = mention_obs.pending_mentions } in
+  let d = decide ~meta:(ready_meta ()) obs in
+  check bool "scheduled-autonomous still runs despite the suppressed reactive trigger"
+    true d.should_run;
+  check bool "runs on the scheduled-autonomous channel, not reactive" true
+    (match d.channel with WO.Scheduled_autonomous -> true | WO.Reactive -> false)
+
 (* Autonomous gate flows through the same SSOT resolver in activation
    readiness. *)
 let test_default_autonomous_ready () =
@@ -231,6 +245,8 @@ let () =
       , [ test_case "default runs" `Quick test_default_reactive_runs
         ; test_case "global off suppresses" `Quick
             test_global_reactive_off_suppresses
+        ; test_case "global off does not starve scheduled-autonomous" `Quick
+            test_global_reactive_off_does_not_starve_scheduled_autonomous
         ] )
     ; ( "autonomous"
       , [ test_case "default ready" `Quick test_default_autonomous_ready

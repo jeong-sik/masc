@@ -67,16 +67,17 @@ let serve_clip ~token request reqd =
     let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
     Httpun.Reqd.respond_with_string reqd response body)
 
-(* RFC-0301: serve a model-generated media file by content-addressed token. Same
-   public-read capability tier as the voice-clip route (token = capability). The
-   file is resolved under the SAME workspace base_path the bridge persisted it
-   with, so the write and read paths agree; content-type is derived from the
-   stored extension. A missing token is a soft 404 (text-only render remains the
-   dashboard fallback), mirroring [serve_clip]. *)
+(* RFC-0301: serve a model-generated media file by deterministic store token.
+   Unlike voice clips, this token is a content-derived locator, not a bearer
+   capability, so the route is [CanReadState]-gated below. The file is resolved
+   under the SAME workspace base_path the bridge persisted it with, so the write
+   and read paths agree; content-type is derived from the stored extension. A
+   missing token is a soft 404 (text-only render remains the dashboard fallback),
+   mirroring [serve_clip]. *)
 let serve_media ~base_path ~token request reqd =
   match Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token with
   | None ->
-    respond_public_read_json_value ~status:`Not_found request reqd
+    respond_json_value_with_cors ~status:`Not_found request reqd
       (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
   | Some path ->
     let body = Fs_compat.load_file path in
@@ -84,7 +85,7 @@ let serve_media ~base_path ~token request reqd =
       Httpun.Headers.of_list
         (("content-type", Keeper_chat_media_store.content_type_of_path path)
          :: ("content-length", string_of_int (String.length body))
-         :: public_read_cors_headers request)
+         :: cors_headers (get_origin request))
     in
     let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
     Httpun.Reqd.respond_with_string reqd response body
@@ -166,19 +167,18 @@ let add_routes router =
            | Some token -> serve_clip ~token request reqd)
          request reqd)
   |> Http.Router.prefix_get "/api/v1/media/" (fun request reqd ->
-       (* RFC-0301: model-generated media (image/audio/document) fetched by
-          content-addressed token. Public-read capability tier (token = capability),
-          same as the voice-clip route. *)
-       with_public_read
+       (* RFC-0301: model-generated media (image/audio/document) fetched by an
+          authenticated content locator. Content hashes are not capabilities. *)
+       with_permission_auth ~permission:Masc_domain.CanReadState
          (fun state _req reqd ->
            let base_path = (Mcp_server.workspace_config state).base_path in
            let path = Http.Request.path request in
            match extract_path_param ~prefix:"/api/v1/media/" path with
            | None ->
-               respond_public_read_json_value ~status:`Bad_request request reqd
+               respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc [ ("error", `String "token path parameter required") ])
            | Some raw when not (Keeper_chat_media_store.valid_token raw) ->
-               respond_public_read_json_value ~status:`Bad_request request reqd
+               respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc
                     [ ("error", `String "invalid token")
                     ; ("reason", `String "expected 32-char hex (128-bit)")

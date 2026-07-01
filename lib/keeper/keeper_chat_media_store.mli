@@ -4,8 +4,13 @@
     the keeper-chat bridge persists it here and surfaces it by URL token instead of
     reducing it to a byte count. Generalizes the voice-clip token/serve pattern
     ([/api/v1/voice/audio/<token>]) to an arbitrary [media_type]. Files live under
-    [<masc_dir>/media/] as [<md5-hex-token>.<ext>]; identical payloads dedup to one
-    file. Served by [GET /api/v1/media/<token>] (public read). *)
+    [<masc_dir>/media/] as [<token>.<ext>]; identical media type + payload pairs
+    dedup to one file. Served by [GET /api/v1/media/<token>] behind read auth. *)
+
+type persist_error =
+  | Unsupported_source_type of Agent_sdk.Types.media_source_kind
+  | Invalid_base64 of string
+  | Write_failed of string
 
 (** Broad category of a media type, driving the keeper-chat block type used when a
     generated media block is persisted for reload (RFC-0301 item 6). *)
@@ -31,16 +36,35 @@ val content_type_of_ext : string -> string
     the serve route. *)
 val content_type_of_path : string -> string
 
-(** [true] iff [token] is a well-formed store token (32-char lowercase hex, the
-    MD5 shape). Guards the serve route path parameter. *)
+(** [true] iff [token] is a well-formed store token (32-char lowercase hex).
+    Guards the serve route path parameter; the token is not a bearer capability. *)
 val valid_token : string -> bool
 
 (** [file_path_of_token ~base_dir ~token] is the on-disk path of the stored media
     for [token], or [None] if the token is malformed, absent, or reaped. *)
 val file_path_of_token : base_dir:string -> token:string -> string option
 
-(** [persist ~base_dir ~media_type ~data] writes [data] under a content-addressed
-    token and returns [(token, url)] where [url] is [/api/v1/media/<token>] — the
-    reader-facing reference the bridge emits in place of the old byte count. The
-    write is idempotent: identical bytes reuse the existing file. *)
+(** [persist_result ~base_dir ~media_type ~data] writes raw [data] under a
+    deterministic token and returns [(token, url)] where [url] is
+    [/api/v1/media/<token>]. The write is idempotent and atomic. *)
+val persist_result :
+  base_dir:string -> media_type:string -> data:string -> (string * string, string) result
+
+(** Raising compatibility wrapper around {!persist_result}. New stream-facing code
+    should use the result-returning functions so storage failures stay observable
+    without tearing down the stream. *)
 val persist : base_dir:string -> media_type:string -> data:string -> string * string
+
+(** Human-readable error for logs and protocol-error events. Does not include the
+    media payload. *)
+val persist_error_to_string : persist_error -> string
+
+(** [persist_media_source_result] decodes the OAS media source carrier first.
+    [Base64] is decoded to raw bytes before persisting; [Url] and [File_id] are
+    rejected until this store has an explicit fetch/resolve implementation. *)
+val persist_media_source_result :
+  base_dir:string ->
+  media_type:string ->
+  source_type:Agent_sdk.Types.media_source_kind ->
+  data:string ->
+  (string * string, persist_error) result

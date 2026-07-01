@@ -6,13 +6,17 @@
     generalizes the voice-clip token/serve pattern (RFC-0235:
     [/api/v1/voice/audio/<token>]) to an arbitrary [media_type].
 
-    Files live under [<masc_dir>/media/] as [<token>.<ext>], where [token] is the
-    lowercase MD5 hex of the payload — so identical media dedup to a single file —
-    and [ext] is derived from [media_type]. Served by [GET /api/v1/media/<token>]
-    (public read), the same capability tier as the voice clip route. Retention
+    Files live under [<masc_dir>/media/] as [<token>.<ext>], where [token] is a
+    deterministic 32-char hex locator derived from the media type and raw payload.
+    Served by [GET /api/v1/media/<token>] behind normal read auth. Retention
     follows the voice-clip policy: files are GC'd by the same directory sweep. *)
 
 let media_subdir = "media"
+
+type persist_error =
+  | Unsupported_source_type of Agent_sdk.Types.media_source_kind
+  | Invalid_base64 of string
+  | Write_failed of string
 
 (* Broad category of a media type, driving the keeper-chat block type used when the
    generated media is persisted for reload (RFC-0301 item 6). Unknown types are
@@ -77,12 +81,19 @@ let content_type_of_ext ext =
 let media_dir ~base_dir =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) media_subdir
 
-(* Token = lowercase MD5 hex (32 chars), mirroring the voice clip 128-bit token so
-   the shared [is_valid_token] shape and public-read route generalize cleanly. *)
-let token_of_data data = Digest.to_hex (Digest.string data)
+(* Token = lowercase MD5 hex (32 chars). This is only an authenticated locator,
+   not a bearer capability: the media route is read-auth gated. Include the
+   normalized media type in the digest material so identical bytes mislabeled as
+   different media types cannot create multiple files for one token. *)
+let token_of_payload ~media_type data =
+  Digest.to_hex (Digest.string (normalize media_type ^ "\000" ^ data))
+
+let media_url token = Printf.sprintf "/api/v1/media/%s" token
+
+let token_re = Re.compile (Re.Pcre.re "^[a-f0-9]{32}$")
 
 let valid_token token =
-  Re.execp (Re.compile (Re.Pcre.re "^[a-f0-9]{32}$")) token
+  Re.execp token_re token
 
 (* Resolve a token to its on-disk path by locating [<token>.<ext>] — the ext is
    not carried by the token, so the directory is scanned for the single file whose
@@ -97,8 +108,11 @@ let file_path_of_token ~base_dir ~token =
     | true ->
       Sys.readdir dir
       |> Array.to_list
-      |> List.find_opt (fun name -> Filename.remove_extension name = token)
-      |> Option.map (fun name -> Filename.concat dir name))
+      |> List.filter (fun name -> Filename.remove_extension name = token)
+      |> List.sort String.compare
+      |> (function
+       | [] -> None
+       | name :: _ -> Some (Filename.concat dir name)))
 
 let content_type_of_path path =
   let ext = Filename.extension path in
@@ -109,16 +123,50 @@ let content_type_of_path path =
   in
   content_type_of_ext (String.lowercase_ascii ext)
 
-(* Persist [data] under a content-addressed token and return
-   [(token, relative_url)]. The write is idempotent: a re-persist of identical
-   bytes reuses the existing file (content-addressed dedup). The URL is the
-   reader-facing reference the bridge emits in place of the old byte count. *)
-let persist ~base_dir ~media_type ~data =
-  let token = token_of_data data in
+let persist_result ~base_dir ~media_type ~data =
+  let token = token_of_payload ~media_type data in
   let ext = ext_of_media_type media_type in
   let dir = media_dir ~base_dir in
-  (try if not (Sys.file_exists dir) then Unix.mkdir dir 0o755 with
-   | Unix.Unix_error (Unix.EEXIST, _, _) -> ());
-  let path = Filename.concat dir (token ^ "." ^ ext) in
-  if not (Sys.file_exists path) then Fs_compat.save_file path data;
-  token, Printf.sprintf "/api/v1/media/%s" token
+  let url = media_url token in
+  try
+    Fs_compat.mkdir_p dir;
+    match file_path_of_token ~base_dir ~token with
+    | Some _ -> Ok (token, url)
+    | None ->
+        let path = Filename.concat dir (token ^ "." ^ ext) in
+        (match Fs_compat.save_file_atomic path data with
+         | Ok () -> Ok (token, url)
+         | Error msg -> Error msg)
+  with
+  | exn -> Error (Printf.sprintf "persist generated media: %s" (Printexc.to_string exn))
+
+let persist ~base_dir ~media_type ~data =
+  match persist_result ~base_dir ~media_type ~data with
+  | Ok persisted -> persisted
+  | Error msg -> failwith msg
+
+let persist_error_to_string = function
+  | Unsupported_source_type source_type ->
+      Printf.sprintf "unsupported media source_type: %s"
+        (Agent_sdk.Types.media_source_kind_to_string source_type)
+  | Invalid_base64 msg ->
+      "invalid base64 media payload: " ^ msg
+  | Write_failed msg ->
+      "failed to persist generated media: " ^ msg
+
+let raw_data_of_source ~source_type ~data =
+  match source_type with
+  | Agent_sdk.Types.Base64 -> (
+      match Base64.decode data with
+      | Ok raw -> Ok raw
+      | Error (`Msg msg) -> Error (Invalid_base64 msg))
+  | Agent_sdk.Types.Url | Agent_sdk.Types.File_id ->
+      Error (Unsupported_source_type source_type)
+
+let persist_media_source_result ~base_dir ~media_type ~source_type ~data =
+  match raw_data_of_source ~source_type ~data with
+  | Error err -> Error err
+  | Ok raw ->
+      (match persist_result ~base_dir ~media_type ~data:raw with
+       | Ok persisted -> Ok persisted
+       | Error msg -> Error (Write_failed msg))

@@ -56,6 +56,31 @@ let protocol_error ?index ?tool_call_id ?event_type ?reason ?raw_bytes kind =
   Keeper_chat_events.Oas_stream_protocol_error
     { kind; index; tool_call_id; event_type; reason; raw_bytes }
 
+let media_persist_error_kind = function
+  | Keeper_chat_media_store.Unsupported_source_type _ ->
+      Keeper_chat_events.Media_source_unsupported
+  | Keeper_chat_media_store.Invalid_base64 _ ->
+      Keeper_chat_events.Media_decode_failed
+  | Keeper_chat_media_store.Write_failed _ ->
+      Keeper_chat_events.Media_persist_failed
+
+let finalize_media_block ~redact_text ~base_dir ~index ~media_type ~source_type
+    ~chunks =
+  let data = String.concat "" (List.rev chunks) in
+  match
+    Keeper_chat_media_store.persist_media_source_result ~base_dir ~media_type
+      ~source_type ~data
+  with
+  | Ok (_token, media_ref) ->
+      [ Keeper_chat_events.Oas_media_delta
+          { index; media_type; source_type; media_ref }
+      ]
+  | Error err ->
+      [ protocol_error ~index ~raw_bytes:(String.length data)
+          ~reason:(redact_text (Keeper_chat_media_store.persist_error_to_string err))
+          (media_persist_error_kind err)
+      ]
+
 let content_block_start_event ~index ~content_type ~tool_id ~tool_name =
   Keeper_chat_events.Oas_content_block_start
     { index
@@ -140,13 +165,11 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
                 (* RFC-0301: media block still open at message end (no balanced
                    ContentBlockStop) — persist and surface it rather than drop it
                    silently on the block-table clear below. *)
-                let data = String.concat "" (List.rev chunks) in
-                let _token, media_ref =
-                  Keeper_chat_media_store.persist ~base_dir ~media_type ~data
-                in
                 Some
-                  (Oas_media_delta { index; media_type; source_type; media_ref }))
+                  (finalize_media_block ~redact_text ~base_dir ~index
+                     ~media_type ~source_type ~chunks))
           bridge_state.blocks_by_index
+        |> List.concat
       in
       { bridge_state = empty_state;
         chat_events = block_ends @ [ Oas_stream_message_stop ]
@@ -187,17 +210,43 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
       (* RFC-0301: accumulate the media payload across chunks in the block state;
          the persisted URL is emitted once at the block stop (or at message end if
          the stream never closes the block), not a per-chunk count. *)
-      let prev_chunks =
-        match stream_block_for_index bridge_state index with
-        | Some (Active_media m) -> m.chunks
-        | _ -> []
-      in
-      { bridge_state =
-          replace_block bridge_state index
-            (Active_media
-               { media_type; source_type; chunks = data :: prev_chunks });
-        chat_events = []
-      }
+      (match stream_block_for_index bridge_state index with
+       | Some (Active_media m)
+         when String.equal m.media_type media_type && m.source_type = source_type
+         ->
+           { bridge_state =
+               replace_block bridge_state index
+                 (Active_media
+                    { media_type; source_type; chunks = data :: m.chunks });
+             chat_events = []
+           }
+       | Some (Active_media _) ->
+           { bridge_state;
+             chat_events =
+               [ protocol_error ~index
+                   ~reason:"media delta metadata changed for active media block"
+                   Media_delta_invalid_block ]
+           }
+       | Some (Active_tool tool) ->
+           { bridge_state;
+             chat_events =
+               [ protocol_error ~index ~tool_call_id:tool.tool_call_id
+                   ~reason:"media delta arrived for an active tool block"
+                   Media_delta_invalid_block ]
+           }
+       | Some (Invalid_tool_block { failed_tool_call_id }) ->
+           { bridge_state;
+             chat_events =
+               [ protocol_error ?tool_call_id:failed_tool_call_id ~index
+                   ~reason:"media delta arrived for an invalid tool block"
+                   Media_delta_invalid_block ]
+           }
+       | None ->
+           { bridge_state =
+               replace_block bridge_state index
+                 (Active_media { media_type; source_type; chunks = [ data ] });
+             chat_events = []
+           })
   | ContentBlockStart { index; content_type; tool_id; tool_name }
     when stream_start_is_tool ~index ~content_type ~tool_id ~tool_name -> (
       match tool_id, tool_name with
@@ -301,14 +350,11 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
           (* RFC-0301: the media block is complete — concat the accumulated chunks,
              persist to the media store, and emit the reader-facing URL (not a
              byte count). *)
-          let data = String.concat "" (List.rev chunks) in
-          let _token, media_ref =
-            Keeper_chat_media_store.persist ~base_dir ~media_type ~data
-          in
           { bridge_state = remove_block bridge_state index;
             chat_events =
-              [ block_stop;
-                Oas_media_delta { index; media_type; source_type; media_ref } ]
+              block_stop
+              :: finalize_media_block ~redact_text ~base_dir ~index ~media_type
+                   ~source_type ~chunks
           }
       | None ->
           { bridge_state; chat_events = [ block_stop ] })

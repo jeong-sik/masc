@@ -5,6 +5,10 @@ type stream_protocol_error_kind =
   | Tool_start_missing_identity
   | Tool_args_without_start
   | Tool_stop_without_start
+  | Media_delta_invalid_block
+  | Media_source_unsupported
+  | Media_decode_failed
+  | Media_persist_failed
   | Sse_error
   | Sse_parse_failed
   | Sse_unknown_event_type
@@ -111,6 +115,10 @@ let stream_protocol_error_kind_to_string = function
   | Tool_start_missing_identity -> "tool_start_missing_identity"
   | Tool_args_without_start -> "tool_args_without_start"
   | Tool_stop_without_start -> "tool_stop_without_start"
+  | Media_delta_invalid_block -> "media_delta_invalid_block"
+  | Media_source_unsupported -> "media_source_unsupported"
+  | Media_decode_failed -> "media_decode_failed"
+  | Media_persist_failed -> "media_persist_failed"
   | Sse_error -> "sse_error"
   | Sse_parse_failed -> "sse_parse_failed"
   | Sse_unknown_event_type -> "sse_unknown_event_type"

@@ -18,8 +18,7 @@ val on_event : t -> Agent_sdk.Types.sse_event -> unit
     so this can be called on every stream event unconditionally. *)
 
 val to_chat_blocks : base_dir:string -> t -> Keeper_chat_blocks.chat_block list
-(** Persist each finalized media payload under [base_dir] (content-addressed via
-    {!Keeper_chat_media_store.persist}, so idempotent with the bridge's live
-    persist — identical bytes reuse one file) and return the reload chat blocks in
-    completion order: [Image] for image media, [Voice] for audio, [Attach] for
-    documents / unrecognized types. Nothing is dropped. *)
+(** Decode and persist each finalized media payload under [base_dir] via
+    {!Keeper_chat_media_store.persist_media_source_result}, then return reload
+    chat blocks in completion order: [Image] for image media, [Voice] for audio,
+    [Attach] for documents / unrecognized types. *)

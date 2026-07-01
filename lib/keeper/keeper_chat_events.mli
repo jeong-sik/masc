@@ -15,6 +15,10 @@ type stream_protocol_error_kind =
   | Tool_start_missing_identity
   | Tool_args_without_start
   | Tool_stop_without_start
+  | Media_delta_invalid_block
+  | Media_source_unsupported
+  | Media_decode_failed
+  | Media_persist_failed
   | Sse_error
   | Sse_parse_failed
   | Sse_unknown_event_type

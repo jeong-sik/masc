@@ -12,6 +12,10 @@ let read_file path =
     ~finally:(fun () -> close_in_noerr ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
+let expected_token ~media_type data =
+  Digest.to_hex
+    (Digest.string (String.lowercase_ascii (String.trim media_type) ^ "\000" ^ data))
+
 let test_persist_round_trip () =
   with_temp_base (fun base_dir ->
     let data = "\137PNG\r\n fake-image-bytes \000\255" in
@@ -36,6 +40,16 @@ let test_content_addressed_dedup () =
     let t1, _ = M.persist ~base_dir ~media_type:"audio/mpeg" ~data in
     let t2, _ = M.persist ~base_dir ~media_type:"audio/mpeg" ~data in
     Alcotest.(check string) "identical payload dedups to one token" t1 t2)
+
+let test_same_bytes_different_media_type_get_distinct_tokens () =
+  with_temp_base (fun base_dir ->
+    let data = "same-bytes" in
+    let image_token, _ = M.persist ~base_dir ~media_type:"image/png" ~data in
+    let audio_token, _ = M.persist ~base_dir ~media_type:"audio/mpeg" ~data in
+    Alcotest.(check bool)
+      "different media types do not share one extensionless token"
+      true
+      (not (String.equal image_token audio_token)))
 
 let test_unknown_token_absent () =
   with_temp_base (fun base_dir ->
@@ -84,6 +98,38 @@ let test_media_category () =
   check "pdf is Document" M.Document (M.category_of_media_type "application/pdf");
   check "unknown is Other" M.Other (M.category_of_media_type "application/x-unknown")
 
+let test_base64_source_decoded_before_persist () =
+  with_temp_base (fun base_dir ->
+    let raw = "raw image bytes" in
+    let encoded = Base64.encode_string raw in
+    match
+      M.persist_media_source_result ~base_dir ~media_type:"image/png"
+        ~source_type:Agent_sdk.Types.Base64 ~data:encoded
+    with
+    | Error err ->
+        Alcotest.failf "unexpected persist error: %s" (M.persist_error_to_string err)
+    | Ok (token, url) ->
+        Alcotest.(check string)
+          "token is derived from decoded raw bytes"
+          (expected_token ~media_type:"image/png" raw)
+          token;
+        Alcotest.(check string) "url" ("/api/v1/media/" ^ token) url;
+        (match M.file_path_of_token ~base_dir ~token with
+         | None -> Alcotest.fail "persisted decoded media not found"
+         | Some path ->
+             Alcotest.(check string) "stored raw bytes" raw (read_file path)))
+
+let test_unsupported_source_type_rejected () =
+  with_temp_base (fun base_dir ->
+    match
+      M.persist_media_source_result ~base_dir ~media_type:"image/png"
+        ~source_type:Agent_sdk.Types.Url ~data:"https://example.invalid/image.png"
+    with
+    | Ok _ -> Alcotest.fail "url source must not be persisted without resolver"
+    | Error (M.Unsupported_source_type Agent_sdk.Types.Url) -> ()
+    | Error err ->
+        Alcotest.failf "unexpected error: %s" (M.persist_error_to_string err))
+
 let () =
   Alcotest.run
     "keeper_chat_media_store"
@@ -93,8 +139,20 @@ let () =
             "content-addressed dedup"
             `Quick
             test_content_addressed_dedup
+        ; Alcotest.test_case
+            "same bytes different media type"
+            `Quick
+            test_same_bytes_different_media_type_get_distinct_tokens
         ; Alcotest.test_case "unknown token absent" `Quick test_unknown_token_absent
         ; Alcotest.test_case "media_type mapping" `Quick test_media_type_mapping
         ; Alcotest.test_case "media category" `Quick test_media_category
+        ; Alcotest.test_case
+            "base64 source decoded"
+            `Quick
+            test_base64_source_decoded_before_persist
+        ; Alcotest.test_case
+            "unsupported source rejected"
+            `Quick
+            test_unsupported_source_type_rejected
         ] )
     ]

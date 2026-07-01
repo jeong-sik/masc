@@ -660,7 +660,7 @@ let run (ctx : ctx)
               ]
             ();
           Log.Keeper.warn
-            "%s: OAS returned context overflow after its owned retry \
+            "%s: OAS returned context overflow after its own retry \
              path; MASC will not compact/retry within this turn — \
              pausing with auto-resume-with-backoff: %s"
             meta.name
@@ -676,11 +676,14 @@ let run (ctx : ctx)
              this pauses the keeper with [Auto_resume_with_backoff] so it
              comes back on its own once the backoff elapses, instead of
              requiring operator intervention. *)
-          let (_ : keeper_meta) =
+          let paused_meta =
             pause_keeper_for_overflow
               ~config
               ~meta
               ~reason:"context_overflow_after_oas_retry"
+          in
+          let turn_state =
+            { turn_state with paused_meta_override = Some paused_meta }
           in
           mark_terminal_error err;
           Error err, turn_state

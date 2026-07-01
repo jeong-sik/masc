@@ -593,13 +593,24 @@ let set_pinned store ~post_id ~pinned : (unit, board_error) Result.t =
               let updated = { post with pinned; updated_at = now } in
               Hashtbl.replace store.posts (Post_id.to_string pid) updated;
               invalidate_post_caches store;
-              Ok updated)
+              Ok (post, updated))
       in
       match result with
       | Error e -> Error e
-      | Ok updated ->
-          with_persist_lock store (fun () -> append_post updated);
-          Ok ()
+      | Ok (previous, updated) ->
+          (match with_persist_lock store (fun () -> append_post updated) with
+           | Ok () -> Ok ()
+           | Error e ->
+               with_lock store (fun () ->
+                 let key = Post_id.to_string previous.id in
+                 (match Hashtbl.find_opt store.posts key with
+                  | Some current
+                    when current.pinned = updated.pinned
+                         && Stdlib.Float.equal current.updated_at updated.updated_at ->
+                    Hashtbl.replace store.posts key previous;
+                    invalidate_post_caches store
+                  | _ -> ()));
+               Error e)
 
 let posts_jsonl_snapshot store =
   let buf = Buffer.create 4096 in

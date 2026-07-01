@@ -24,6 +24,18 @@ let with_eio f () =
   Board_dispatch.init_jsonl ();
   f ()
 
+let block_board_masc_dir_with_file () =
+  let base =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "masc-test-board-persist-blocked-%06x" (Random.bits ()))
+  in
+  Unix.putenv "MASC_BASE_PATH" base;
+  let masc_dir = Filename.dirname (Board.persist_path ()) in
+  Fs_compat.mkdir_p (Filename.dirname masc_dir);
+  Fs_compat.save_file masc_dir "not a directory";
+  base
+
 let seed_legacy_keeper_post () =
   let now = Time_compat.now () in
   let post_id = Printf.sprintf "legacy-keeper-%06x" (Random.bits ()) in
@@ -206,6 +218,15 @@ let contains_substring ~(needle : string) (haystack : string) : bool =
   in
   nlen = 0 || scan 0
 
+let check_io_error ~where = function
+  | Error (Board.Io_error msg) ->
+      Alcotest.(check bool)
+        ("error includes " ^ where)
+        true
+        (contains_substring ~needle:where msg)
+  | Error e -> Alcotest.fail ("expected Io_error, got " ^ Board.show_board_error e)
+  | Ok _ -> Alcotest.fail "expected Io_error"
+
 let test_update_post_lifts_state_block_into_meta () =
   match
     Board_dispatch.create_post ~author:"stateful-agent"
@@ -281,6 +302,33 @@ let test_dedup_hit_does_not_emit_post_created_fanout () =
     (Board.Post_id.to_string second.id);
   Alcotest.(check int) "keeper signal emitted once" 1 !keeper_signals;
   Alcotest.(check int) "SSE post_created emitted once" 1 !sse_post_created
+
+let test_create_post_persistence_failure_returns_error_without_fanout () =
+  let keeper_signals = ref 0 in
+  let sse_post_created = ref 0 in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Post_created _ -> incr sse_post_created
+    | _ -> ());
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"append_post"
+    (Board_dispatch.create_post
+       ~author:"persist-fail-agent"
+       ~content:"this post must not survive a failed append"
+       ~post_kind:Board.Human_post
+       ());
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  Alcotest.(check int) "keeper signal not emitted" 0 !keeper_signals;
+  Alcotest.(check int) "SSE post_created not emitted" 0 !sse_post_created;
+  Alcotest.(check int)
+    "failed create rolled back in-memory post"
+    0
+    (List.length (Board_dispatch.list_posts ~limit:10 ()))
 
 let test_structured_post_roundtrip () =
   let meta = `Assoc [("source", `String "keeper_autonomy")] in
@@ -568,6 +616,52 @@ let test_comment_persists_post_reply_count () =
   | Error e -> Alcotest.fail (Board.show_board_error e)
   | Ok fetched ->
     Alcotest.(check int) "reply_count survives restart" 1 fetched.reply_count
+
+let test_add_comment_persistence_failure_rolls_back_without_fanout () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"comment-persist-fail-author"
+        ~content:"post before comment append failure"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  let keeper_signals = ref 0 in
+  let sse_comment_added = ref 0 in
+  Board_dispatch.set_board_signal_hook (fun _ -> incr keeper_signals);
+  Board_dispatch.set_board_sse_hook (function
+    | Board_dispatch.Comment_added _ -> incr sse_comment_added
+    | _ -> ());
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"append_comment"
+    (Board_dispatch.add_comment
+       ~post_id
+       ~author:"comment-persist-fail-responder"
+       ~content:"this comment must not survive a failed append"
+       ());
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  Alcotest.(check int) "keeper signal not emitted" 0 !keeper_signals;
+  Alcotest.(check int) "SSE comment_added not emitted" 0 !sse_comment_added;
+  (match Board_dispatch.get_post ~post_id with
+   | Error e -> Alcotest.fail (Board.show_board_error e)
+   | Ok fetched ->
+       Alcotest.(check int) "reply_count rolled back" 0 fetched.reply_count);
+  match Board_dispatch.get_comments ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok comments ->
+      Alcotest.(check int)
+        "failed comment rolled back in-memory comment"
+        0
+        (List.length comments)
 
 let test_get_post_and_comments_atomic () =
   match
@@ -1077,6 +1171,33 @@ let test_set_pinned_missing_post () =
   | Error (Board.Post_not_found _) -> ()
   | Error e -> Alcotest.fail (Board.show_board_error e)
 
+let test_set_pinned_persistence_failure_rolls_back () =
+  let post =
+    match
+      Board_dispatch.create_post
+        ~author:"pin-persist-fail-author"
+        ~content:"pin must roll back on failed append"
+        ~post_kind:Board.Human_post
+        ()
+    with
+    | Error e -> Alcotest.fail (Board.show_board_error e)
+    | Ok post -> post
+  in
+  let post_id = Board.Post_id.to_string post.id in
+  ignore (block_board_masc_dir_with_file ());
+  let before_errors = Board.persist_error_count () in
+  check_io_error
+    ~where:"append_post"
+    (Board_dispatch.set_pinned ~post_id ~pinned:true);
+  Alcotest.(check bool)
+    "persist error counter incremented"
+    true
+    (Board.persist_error_count () > before_errors);
+  match Board_dispatch.get_post ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok fetched ->
+      Alcotest.(check bool) "pinned rolled back" false fetched.pinned
+
 let test_flush () =
   Board_dispatch.flush ()
 
@@ -1470,6 +1591,8 @@ let () =
         (with_eio test_keeper_signal_hook_cancellation_propagates);
       Alcotest.test_case "dedup hit does not fan out post_created" `Quick
         (with_eio test_dedup_hit_does_not_emit_post_created_fanout);
+      Alcotest.test_case "create append failure returns error without fanout" `Quick
+        (with_eio test_create_post_persistence_failure_returns_error_without_fanout);
       Alcotest.test_case "structured roundtrip" `Quick (with_eio test_structured_post_roundtrip);
       Alcotest.test_case "SSE post_created includes post_kind" `Quick
         (with_eio test_board_sse_post_created_includes_post_kind);
@@ -1489,6 +1612,8 @@ let () =
       Alcotest.test_case "add and get" `Quick (with_eio test_add_and_get_comments);
       Alcotest.test_case "comment persists post reply_count" `Quick
         (with_eio test_comment_persists_post_reply_count);
+      Alcotest.test_case "comment append failure rolls back without fanout" `Quick
+        (with_eio test_add_comment_persistence_failure_rolls_back_without_fanout);
       Alcotest.test_case "get_post_and_comments atomic" `Quick
         (with_eio test_get_post_and_comments_atomic);
       Alcotest.test_case "get_post_and_comments missing post" `Quick
@@ -1528,6 +1653,8 @@ let () =
       Alcotest.test_case "set_thread_id" `Quick (with_eio test_set_thread_id);
       Alcotest.test_case "set_pinned toggle + restart" `Quick (with_eio test_set_pinned);
       Alcotest.test_case "set_pinned missing post" `Quick (with_eio test_set_pinned_missing_post);
+      Alcotest.test_case "set_pinned append failure rolls back" `Quick
+        (with_eio test_set_pinned_persistence_failure_rolls_back);
       Alcotest.test_case "flush" `Quick (with_eio test_flush);
     ];
     "validation", [

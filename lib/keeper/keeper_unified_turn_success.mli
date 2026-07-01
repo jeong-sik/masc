@@ -4,7 +4,8 @@
     turns whose authoritative receipt/operator disposition is healthy emit
     [Streaming -> Completing -> Done]. Runtime-success turns whose typed
     receipt/operator disposition requires human pause for an unsatisfied
-    completion contract emit
+    completion contract, or whose turn budget is exhausted while the completion
+    contract still requires attention, emit
     [Streaming -> Completing -> Failed completion_contract_violation] instead.
     This function is the single source of truth for those transitions on the
     success path and must be called at most once per turn.

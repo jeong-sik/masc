@@ -4,6 +4,32 @@ open Server_auth
 module Http = Http_server_eio
 module Mcp_eio = Mcp_server_eio
 
+(* Keeper-chat stream tunables (CLAUDE.md Magic Number 규칙: 의미를 드러내는 리터럴은
+   named constant로). Bounds are keeper-message-specific and distinct from the
+   env_config turn/orchestrator clamps. *)
+
+(* Clamp bounds for the client-supplied per-message timeout (seconds). *)
+let keeper_msg_timeout_sec_min = 5
+let keeper_msg_timeout_sec_max = 300
+
+let clamp_keeper_msg_timeout_sec v =
+  max keeper_msg_timeout_sec_min (min keeper_msg_timeout_sec_max v)
+;;
+
+(* Progressive-render hard-wrap width (characters) for streamed keeper replies —
+   a UI readability chunk width, NOT an SSE/transport line-length limit. *)
+let keeper_reply_chunk_hard_wrap_chars = 180
+
+(* Bounded producer-consumer capacity for the worker-event stream; [Eio.Stream.add]
+   blocks (backpressure) when the consumer lags. *)
+let worker_events_buffer_size = 512
+
+(* SSE reconnect backoff (ms) primed on the dashboard keeper-chat streams. Shared
+   with {!Server_routes_http_routes_dashboard} (via [open]) so the two dashboard
+   priming sites cannot silently diverge. Intentionally distinct from
+   {!Server_mcp_transport_http_headers.sse_retry_ms} (3000, the MCP transport). *)
+let sse_dashboard_retry_backoff_ms = 1500
+
 type user_media_block = Keeper_multimodal_input.user_media_block = {
   attachment_id : string;
   name : string;
@@ -360,9 +386,13 @@ let parse_keeper_chat_stream_request body_str =
       let timeout_sec =
         match Json_util.assoc_member_opt "timeout_sec" json with
         | None | Some `Null -> Ok None
-        | Some (`Int value) when value > 0 -> Ok (Some (max 5 (min 300 value)))
+        | Some (`Int value) when value > 0 ->
+            Ok (Some (clamp_keeper_msg_timeout_sec value))
         | Some (`Float value) when value > 0.0 ->
-            Ok (Some (max 5 (min 300 (int_of_float (Float.ceil value)))))
+            (* int_of_float is unspecified (not exception-raising) for
+               out-of-range floats (e.g. 1e300, infinity); clamp_keeper_msg_timeout_sec
+               below bounds whatever int comes out into [5, 300] regardless. *)
+            Ok (Some (clamp_keeper_msg_timeout_sec (int_of_float (Float.ceil value))))
         | Some (`Int _) | Some (`Float _) -> Ok None
         | Some _ -> Error "timeout_sec must be a positive number"
       in
@@ -444,7 +474,7 @@ let split_keeper_reply_chunks (text : string) : string list =
         i + 1 >= len || whitespace text.[i + 1]
       in
       let hard_wrap =
-        i - !start >= 180
+        i - !start >= keeper_reply_chunk_hard_wrap_chars
         &&
         match !last_space with
         | Some idx -> idx > !start
@@ -736,7 +766,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
      [Keeper_stream_text_accum]; see its interface for the #20825/#20854/
      #20869 history this guards against. *)
   let text_accum = Keeper_stream_text_accum.create () in
-  let worker_events = Eio.Stream.create 512 in
+  let worker_events = Eio.Stream.create worker_events_buffer_size in
   let terminal_pushed = Atomic.make false in
   let client_disconnected = Atomic.make false in
   let push_worker_event event =
@@ -1392,7 +1422,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
 
   ignore
     (keeper_stream_send_raw ~on_closed:notify_disconnect writer mutex closed
-       "retry: 1500\n\n");
+       (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms));
   Eio.Fiber.fork ~sw (fun () ->
       ignore
         (Eio.Switch.run @@ fun stream_sw ->

@@ -155,6 +155,7 @@ let test_empty_no_tool_response_violates_contract () =
     KAR.Contract_helpers.observed_completion_contract_status
       ~had_owned_active_task_at_turn_start:false
       ~actual_keeper_tool_names:[]
+      ~stop_reason:Runtime_agent.Completed
       ~response_text_present
     |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
   in
@@ -168,6 +169,42 @@ let test_empty_no_tool_response_violates_contract () =
     "visible no-tool response remains completion"
     "satisfied_completion"
     (result ~response_text_present:true)
+;;
+
+let test_budget_exhausted_tool_only_execution_does_not_satisfy_contract () =
+  let result ?(response_text_present = false) tools =
+    KAR.Contract_helpers.observed_completion_contract_status
+      ~had_owned_active_task_at_turn_start:false
+      ~actual_keeper_tool_names:tools
+      ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 60; limit = 60 })
+      ~response_text_present
+    |> Masc.Keeper_execution_receipt.completion_contract_result_to_string
+  in
+  check
+    string
+    "execution tool with no deliverable reply is not satisfied execution"
+    "needs_execution_progress"
+    (result [ "tool_execute" ]);
+  check
+    string
+    "raw text is ignored when the stop reason suppresses visible text"
+    "needs_execution_progress"
+    (result ~response_text_present:true [ "tool_execute" ]);
+  check
+    string
+    "initial claim also cannot satisfy a budget-exhausted empty reply"
+    "needs_execution_progress"
+    (result [ "keeper_task_claim" ]);
+  check
+    string
+    "explicit completion tool remains completion evidence"
+    "satisfied_completion"
+    (result [ "keeper_task_done" ]);
+  check
+    string
+    "empty no-tool budget exhaustion remains a violation"
+    "violated"
+    (result [])
 ;;
 
 let tool_call_detail ?(outcome = "ok") tool_name : KAR.tool_call_detail =
@@ -267,6 +304,10 @@ let () =
             "empty no-tool response violates completion contract"
             `Quick
             test_empty_no_tool_response_violates_contract
+        ; test_case
+            "budget-exhausted tool-only execution does not satisfy contract"
+            `Quick
+            test_budget_exhausted_tool_only_execution_does_not_satisfy_contract
         ; test_case
             "contract progress filters no-progress tool results"
             `Quick

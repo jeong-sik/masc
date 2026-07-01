@@ -624,6 +624,7 @@ let run_turn
                    Contract_helpers.observed_completion_contract_status
                      ~had_owned_active_task_at_turn_start
                      ~actual_keeper_tool_names:progress_keeper_tool_names
+                     ~stop_reason:result.stop_reason
                      ~response_text_present:(String.trim text <> "")
                  in
                  let contract_status = completion_contract_status () in

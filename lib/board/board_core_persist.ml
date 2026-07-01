@@ -32,6 +32,12 @@ let record_persist_error ~where msg =
   Atomic.incr persist_errors;
   Log.BoardLog.error "persist error (%s): %s" where msg
 ;;
+
+let persist_io_error ~where msg =
+  record_persist_error ~where msg;
+  Error (Io_error (Printf.sprintf "%s: %s" where msg))
+;;
+
 let create_store () =
   { posts = Hashtbl.create 1024
   ; comments = Hashtbl.create 4096
@@ -416,18 +422,35 @@ let append_post (p : post) =
     ensure_masc_dir ();
     let path = persist_path () in
     Fs_compat.append_file path (Yojson.Safe.to_string (post_to_yojson p) ^ "\n");
-    rotate_if_needed path
+    rotate_if_needed path;
+    Ok ()
   with
-  | Sys_error msg -> record_persist_error ~where:"append_post" msg
+  | Sys_error msg -> persist_io_error ~where:"append_post" msg
 ;;
 let append_comment (c : comment) =
   try
     ensure_masc_dir ();
     let path = comments_path () in
     Fs_compat.append_file path (Yojson.Safe.to_string (comment_to_yojson c) ^ "\n");
-    rotate_if_needed path
+    rotate_if_needed path;
+    Ok ()
   with
-  | Sys_error msg -> record_persist_error ~where:"append_comment" msg
+  | Sys_error msg -> persist_io_error ~where:"append_comment" msg
+;;
+
+let rollback_fresh_post store (post : post) =
+  with_lock store (fun () ->
+    let key = Post_id.to_string post.id in
+    match Hashtbl.find_opt store.posts key with
+    | None -> ()
+    | Some current
+      when Stdlib.Float.equal current.created_at post.created_at
+           && Stdlib.Float.equal current.updated_at post.updated_at ->
+      Hashtbl.remove store.posts key;
+      unindex_post_origin store post;
+      store.post_count := max 0 (!(store.post_count) - 1);
+      invalidate_post_caches store
+    | Some _ -> ())
 ;;
 let sub_board_access_to_string = Board_sub_board_json.sub_board_access_to_string
 let sub_board_access_of_string_opt = Board_sub_board_json.sub_board_access_of_string_opt
@@ -677,18 +700,22 @@ let create_post_with_outcome
       in
       match board_result with
       | Ok (`Fresh post) ->
-        with_persist_lock store (fun () -> append_post post);
-        (match
-           Board_effect_hooks.earn
-             ~base_path:(board_base_path ())
-             ~agent_name:author
-             ~kind:Board_post
-             ~reason:"board post"
-             ()
-         with
-         | Ok () -> ()
-         | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
-        Ok (Fresh_post post)
+        (match with_persist_lock store (fun () -> append_post post) with
+         | Ok () ->
+           (match
+              Board_effect_hooks.earn
+                ~base_path:(board_base_path ())
+                ~agent_name:author
+                ~kind:Board_post
+                ~reason:"board post"
+                ()
+            with
+            | Ok () -> ()
+            | Error msg -> Log.BoardLog.warn "economy earn (post): %s" msg);
+           Ok (Fresh_post post)
+         | Error e ->
+           rollback_fresh_post store post;
+           Error e)
       | Ok (`Rolled_up (post, posts_jsonl)) ->
         with_persist_lock store (fun () -> save_posts_jsonl posts_jsonl);
         Ok (Rolled_up_post post)

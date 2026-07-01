@@ -166,6 +166,7 @@ let api_error_message_for_quota_scan (api_err : Llm_provider.Retry.api_error)
     : string option =
   match api_err with
   | Llm_provider.Retry.RateLimited { message; _ } -> Some message
+  | Llm_provider.Retry.PaymentRequired { message } -> Some message
   | Llm_provider.Retry.NetworkError { message; _ } -> Some message
   | Llm_provider.Retry.Overloaded { message } -> Some message
   | Llm_provider.Retry.ServerError { message; _ } -> Some message
@@ -269,6 +270,7 @@ let sdk_error_is_terminal_provider_runtime_failure
         | Llm_provider.Retry.ServerError { message; _ }
         | Llm_provider.Retry.InvalidRequest { message; _ }
         | Llm_provider.Retry.RateLimited { message; _ }
+        | Llm_provider.Retry.PaymentRequired { message }
         | Llm_provider.Retry.AuthError { message }
         | Llm_provider.Retry.NotFound { message }
         | Llm_provider.Retry.ContextOverflow { message; _ }
@@ -302,6 +304,7 @@ let sdk_error_soft_rate_limited (err : Agent_sdk.Error.sdk_error)
   | Agent_sdk.Error.Api (Llm_provider.Retry.Overloaded _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.AuthError _)
+  | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
   | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
@@ -338,6 +341,7 @@ let sdk_error_is_server_error (err : Agent_sdk.Error.sdk_error) : bool =
       ( Llm_provider.Retry.RateLimited _
       | Llm_provider.Retry.Overloaded _
       | Llm_provider.Retry.AuthError _
+      | Llm_provider.Retry.PaymentRequired _
       | Llm_provider.Retry.InvalidRequest _
       | Llm_provider.Retry.NotFound _
       | Llm_provider.Retry.ContextOverflow _

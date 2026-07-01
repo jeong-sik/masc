@@ -33,23 +33,30 @@ let string_contains haystack needle =
 let read_file path =
   In_channel.with_open_bin path In_channel.input_all
 
-let translate_oas_stream_events events =
+let translate_oas_stream_events ?base_dir events =
   let redact_text text = text in
   let on_text_delta text = text in
   (* RFC-0301: [translate] persists model-generated media under [base_dir]; the
-     temp dir suffices for these tool/text stream fixtures. *)
-  let base_dir = Filename.get_temp_dir_name () in
-  let rec loop bridge_state acc = function
-    | [] -> List.rev acc
-    | event :: rest ->
-        let translated =
-          Keeper_chat_oas_stream_bridge.translate ~redact_text ~on_text_delta
-            ~base_dir bridge_state event
-        in
-        loop translated.bridge_state
-          (List.rev_append translated.chat_events acc) rest
+     unique temp dir keeps generated media from leaking across test runs. *)
+  let cleanup, base_dir =
+    match base_dir with
+    | Some base_dir -> (Fun.id, base_dir)
+    | None ->
+        let base_dir = temp_base_path "gate-keeper-stream-bridge" in
+        ((fun () -> try remove_tree base_dir with _ -> ()), base_dir)
   in
-  loop Keeper_chat_oas_stream_bridge.empty_state [] events
+  Fun.protect ~finally:cleanup (fun () ->
+    let rec loop bridge_state acc = function
+      | [] -> List.rev acc
+      | event :: rest ->
+          let translated =
+            Keeper_chat_oas_stream_bridge.translate ~redact_text ~on_text_delta
+              ~base_dir bridge_state event
+          in
+          loop translated.bridge_state
+            (List.rev_append translated.chat_events acc) rest
+    in
+    loop Keeper_chat_oas_stream_bridge.empty_state [] events)
 
 let has_stream_protocol_error events =
   List.exists
@@ -1263,6 +1270,8 @@ let test_keeper_stream_bridge_surfaces_oas_message_metadata () =
 
 let test_keeper_stream_bridge_preserves_typed_media_source () =
   let open Agent_sdk.Types in
+  let raw_media = "raw image bytes" in
+  let encoded_media = Base64.encode_string raw_media in
   (* RFC-0301: media chunks are accumulated and surfaced as a single
      [Oas_media_delta] carrying the persisted media URL at the block stop, not a
      per-chunk byte count. A lone [MediaDelta] therefore emits nothing until its
@@ -1278,13 +1287,16 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
                 {
                   media_type = "image/png";
                   source_type = Base64;
-                  data = "abcd";
+                  data = encoded_media;
                 };
           };
         ContentBlockStop { index = 0 };
       ]
   in
-  let expected_ref = "/api/v1/media/" ^ Digest.to_hex (Digest.string "abcd") in
+  let expected_ref =
+    "/api/v1/media/"
+    ^ Digest.to_hex (Digest.string ("image/png\000" ^ raw_media))
+  in
   match events with
   | [
       Keeper_chat_events.Oas_content_block_stop { index = stop_index };
@@ -1297,6 +1309,110 @@ let test_keeper_stream_bridge_preserves_typed_media_source () =
       check bool "source type" true (source_type = Base64);
       check string "media ref is the persisted URL" expected_ref media_ref
   | _ -> fail "expected typed OAS media delta carrying the persisted URL"
+
+let test_keeper_stream_bridge_rejects_media_delta_for_tool_block () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockStart
+          { index = 2;
+            content_type = "tool_use";
+            tool_id = Some "tc-media-conflict";
+            tool_name = Some "keeper_memory_search" };
+        ContentBlockDelta
+          {
+            index = 2;
+            delta =
+              MediaDelta
+                {
+                  media_type = "image/png";
+                  source_type = Base64;
+                  data = Base64.encode_string "image";
+                };
+          };
+        ContentBlockDelta { index = 2; delta = InputJsonDelta "{\"q\":\"ok\"}" };
+        ContentBlockStop { index = 2 };
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_content_block_start _;
+      Keeper_chat_events.Tool_call_start _;
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind; index = Some index; tool_call_id = Some tool_call_id; reason = Some reason; _ };
+      Keeper_chat_events.Tool_call_args { tool_call_id = args_id; delta };
+      Keeper_chat_events.Oas_content_block_stop { index = stop_index };
+      Keeper_chat_events.Tool_call_end { tool_call_id = end_id } ] ->
+      check string "media conflict kind" "media_delta_invalid_block"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check int "media conflict index" 2 index;
+      check string "media conflict tool id" "tc-media-conflict" tool_call_id;
+      check string "media conflict reason"
+        "media delta arrived for an active tool block" reason;
+      check string "tool args preserved" "tc-media-conflict" args_id;
+      check string "tool args payload" "{\"q\":\"ok\"}" delta;
+      check int "tool stop preserved" 2 stop_index;
+      check string "tool end preserved" "tc-media-conflict" end_id
+  | _ -> fail "expected media delta to error without clobbering the tool block"
+
+let test_keeper_stream_bridge_surfaces_bad_media_base64 () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockDelta
+          {
+            index = 0;
+            delta =
+              MediaDelta
+                { media_type = "image/png"; source_type = Base64; data = "not base64!" };
+          };
+        ContentBlockStop { index = 0 };
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_content_block_stop { index = stop_index };
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind; index = Some error_index; raw_bytes = Some raw_bytes; reason = Some reason; _ } ] ->
+      check int "block stop index" 0 stop_index;
+      check string "bad base64 kind" "media_decode_failed"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check int "bad base64 index" 0 error_index;
+      check int "bad base64 bytes" (String.length "not base64!") raw_bytes;
+      check bool "bad base64 reason" true
+        (string_contains reason "invalid base64 media payload")
+  | _ -> fail "expected bad media base64 to surface as a protocol error"
+
+let test_keeper_stream_bridge_rejects_unsupported_media_source () =
+  let open Agent_sdk.Types in
+  let events =
+    translate_oas_stream_events
+      [
+        ContentBlockDelta
+          {
+            index = 0;
+            delta =
+              MediaDelta
+                {
+                  media_type = "image/png";
+                  source_type = Url;
+                  data = "https://example.invalid/image.png";
+                };
+          };
+        ContentBlockStop { index = 0 };
+      ]
+  in
+  match events with
+  | [ Keeper_chat_events.Oas_content_block_stop { index = stop_index };
+      Keeper_chat_events.Oas_stream_protocol_error
+        { kind; index = Some error_index; reason = Some reason; _ } ] ->
+      check int "block stop index" 0 stop_index;
+      check string "unsupported media source kind" "media_source_unsupported"
+        (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+      check int "unsupported media source index" 0 error_index;
+      check bool "unsupported media source reason" true
+        (string_contains reason "unsupported media source_type: url")
+  | _ -> fail "expected unsupported media source to surface as a protocol error"
 
 let test_keeper_stream_bridge_preserves_non_tool_block_lifecycle () =
   let open Agent_sdk.Types in
@@ -2399,6 +2515,12 @@ let () =
             test_keeper_stream_bridge_surfaces_oas_message_metadata;
           test_case "stream bridge preserves typed media source" `Quick
             test_keeper_stream_bridge_preserves_typed_media_source;
+          test_case "stream bridge rejects media delta for tool block" `Quick
+            test_keeper_stream_bridge_rejects_media_delta_for_tool_block;
+          test_case "stream bridge surfaces bad media base64" `Quick
+            test_keeper_stream_bridge_surfaces_bad_media_base64;
+          test_case "stream bridge rejects unsupported media source" `Quick
+            test_keeper_stream_bridge_rejects_unsupported_media_source;
           test_case "stream bridge preserves non-tool block lifecycle" `Quick
             test_keeper_stream_bridge_preserves_non_tool_block_lifecycle;
           test_case "stream bridge rejects tool start missing identity" `Quick

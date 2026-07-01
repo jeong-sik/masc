@@ -79,12 +79,13 @@ lib/keeper/keeper_chat_events.ml:50-54
 
 선례(완비, 재사용 가능):
 - route: `GET /api/v1/voice/audio/<token>` (`lib/server/server_routes_http_routes_voice.ml:130`, RFC-0235 P1).
-- auth allowlist: `lib/server/server_auth.ml:806`.
+- auth: `GET /api/v1/media/<token>` is a normal `CanReadState` route. The token is
+  a content locator, not a public bearer capability.
 - 토큰 검증 + GC: `lib/keeper/keeper_chat_store.ml:948` `valid_audio_token`, :960 만료 GC.
 - URL 생성: `lib/voice/voice_bridge.ml:17`; persist+emit 패턴: `lib/keeper/keeper_tool_voice_runtime.ml:149-159`.
 
 - 장점: 스트림은 URL만(가벼움). reload 자연 동작(URL은 chat store에 persist). 브라우저 캐시. 기존 voice 패턴과 일관. dedup 가능.
-- 단점: 미디어 스토어 + 보존/GC 정책 필요. 토큰 capability/auth 필요. 이미지/문서용 route 일반화(`/api/v1/media/<token>`?) 필요.
+- 단점: 미디어 스토어 + 보존/GC 정책 필요. 이미지/문서용 route 일반화(`/api/v1/media/<token>`?) 및 read-auth 필요.
 
 ### 권장: Option B
 
@@ -95,7 +96,7 @@ lib/keeper/keeper_chat_events.ml:50-54
 1. `lib/keeper/keeper_chat_events.ml` — `Oas_media_delta`의 `bytes:int`를 제거하고 `media_ref`(token/url) + `media_type` + `source_type`로 교체. (closed variant, 컴파일러가 모든 소비자 강제 갱신.)
 2. `lib/keeper/keeper_chat_oas_stream_bridge.ml:85-91` — `MediaDelta.data`를 청크 누적(`bridge_state`)하고 `Oas_content_block_stop`에서 미디어 스토어에 persist + 토큰 발급.
 3. 미디어 스토어 모듈 — voice-clip persist(`keeper_tool_voice_runtime.ml`) 일반화. 이미지/오디오/문서 media_type 지원.
-4. HTTP route — `GET /api/v1/media/<token>` (voice route 일반화) + `server_auth.ml` allowlist.
+4. HTTP route — `GET /api/v1/media/<token>` (voice route 일반화) + normal read-auth gate.
 5. `lib/server/server_routes_http_keeper_stream.ml:1179` — URL emit.
 6. `keeper_chat_blocks.ml` / `keeper_chat_store.ml` — 생성 미디어를 기존 `Image`/`Voice` 블록(+필요시 문서)으로 persist (reload 노출).
 7. frontend `dashboard/src/keeper-stream.ts` — KEEPER_MEDIA_DELTA 핸들러가 URL로 `ChatImageBlock`/`ChatVoiceBlock` emit.

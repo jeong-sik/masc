@@ -11,6 +11,19 @@ module Atypes = Agent_sdk.Types
 
 let now = 1_000_000.0
 
+let contains substring s =
+  let sub_len = String.length substring in
+  let str_len = String.length s in
+  let rec aux i =
+    if i + sub_len > str_len
+    then false
+    else if String.sub s i sub_len = substring
+    then true
+    else aux (i + 1)
+  in
+  if sub_len = 0 then true else aux 0
+;;
+
 let fact claim =
   { Types.claim
   ; category = Types.Fact
@@ -320,10 +333,16 @@ let test_consolidate_classifies_invalid_structured_response () =
         in
         match outcome with
         | Runtime.Invalid_structured_response detail ->
-          Alcotest.(check string)
-            "detail keeps rejection reason"
-            "consolidation provider returned invalid structured response: non_json"
-            detail
+          Alcotest.(check bool)
+            "detail keeps typed rejection wrapper"
+            true
+            (contains
+               "consolidation provider returned invalid structured response"
+               detail);
+          Alcotest.(check bool)
+            "detail keeps JSON parser reason"
+            true
+            (contains "JSON parse error" detail)
         | _ ->
           Alcotest.fail
             "expected Invalid_structured_response for malformed provider output"))))

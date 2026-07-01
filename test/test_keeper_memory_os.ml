@@ -1554,8 +1554,12 @@ let test_librarian_runtime_rejects_unstructured_fallback () =
              "typed provider error preserves parser reason"
              true
              (contains
-                "librarian provider returned invalid episode JSON"
+                "librarian provider returned invalid structured JSON"
                 reason);
+           Alcotest.(check bool)
+             "typed provider error preserves JSON parser detail"
+             true
+             (contains "JSON parse error" reason);
            Alcotest.(check bool)
              "unparseable provider error enters cadence backoff path"
              true
@@ -1623,7 +1627,13 @@ let test_librarian_runtime_rejects_unparseable_output_across_empty_retries () =
             "error keeps first non-empty invalid-json reason"
             true
             (contains
-               "librarian provider returned invalid episode JSON"
+               "librarian provider returned invalid structured JSON"
+               (Librarian_runtime.extraction_error_to_string err));
+          Alcotest.(check bool)
+            "error keeps first non-empty parser detail"
+            true
+            (contains
+               "JSON parse error"
                (Librarian_runtime.extraction_error_to_string err));
           Alcotest.(check bool)
             "error does not use later empty retry reason"
@@ -1684,11 +1694,19 @@ let test_librarian_unstructured_fallback_does_not_write_facts () =
         Alcotest.(check bool)
           "first error keeps invalid-json reason"
           true
-          (contains "invalid episode JSON" first);
+          (contains "invalid structured JSON" first);
+        Alcotest.(check bool)
+          "first error keeps JSON parser detail"
+          true
+          (contains "JSON parse error" first);
         Alcotest.(check bool)
           "second error keeps invalid-json reason"
           true
-          (contains "invalid episode JSON" second))))
+          (contains "invalid structured JSON" second);
+        Alcotest.(check bool)
+          "second error keeps JSON parser detail"
+          true
+          (contains "JSON parse error" second))))
 ;;
 
 let test_librarian_runtime_reports_fact_upsert_failure () =

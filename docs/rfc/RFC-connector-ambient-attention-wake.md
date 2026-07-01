@@ -194,7 +194,7 @@ the per-heartbeat cheap-gate path. The edge trigger (§3.1) means `observe` does
 
 ## 4. Route adjudication
 
-| | Route A: content-bearing event_queue variant | Route B: poll `pending_for_keeper` level | **Chosen: edge event_id + durable store** |
+| Criterion | Route A: content-bearing event_queue variant | Route B: poll `pending_for_keeper` level | **Chosen: edge event_id + durable store** |
 |---|---|---|---|
 | Wake re-arm | edge (safe) | level (re-wake-forever hazard) | edge (safe) |
 | Durable payload | duplicated in stimulus (split-brain) | single store | single store (stimulus = event_id pointer) |
@@ -218,9 +218,18 @@ and operator digest honest and to support the content read.
   `connector_user_line_recorded_upstream = true` (`lib/server/server_bootstrap_loops.ml:1088`)
   to avoid re-recording.
 - **Approval_pending shadowing** — the `Approval_pending` hard gate returns
-  `blocked` before `reactive_triggers` are matched (`lib/keeper/keeper_world_observation.ml:1096-1099`),
-  so connector attention is held while a HITL approval is pending. Acceptable
-  because the stimulus persists (re-delivered next cycle), but must be intentional.
+  `blocked` before `reactive_triggers` are matched (`lib/keeper/keeper_world_observation.ml:1096-1099`).
+  This is not merely held for later: `Keeper_heartbeat_stimulus_intake.consume_turn_entry_stimuli`
+  unconditionally calls `Keeper_registry_event_queue.dequeue` before `keeper_cycle_decision`
+  ever runs (`lib/keeper/keeper_heartbeat_stimulus_intake.ml:224-232`), and nothing
+  re-enqueues on a `blocked` verdict (`requeue_missing_front`, the one function that
+  could, has zero callers). A `Connector_attention` stimulus dequeued into a cycle
+  that then blocks on `Approval_pending` is **lost**, not re-delivered — the wake
+  only recovers if a genuinely new ambient message arrives later. This is the same
+  gap the Problem section names ("the only recovery is the next periodic tick... for
+  an idle keeper... 'never, in practice'"); this RFC does not close it for the
+  Approval_pending case. Needs either a real re-enqueue-on-block path or an explicit
+  decision that this loss is acceptable for a HITL-gated keeper specifically.
 - **RFC-0020 path drift** — RFC-0020 §4 cites `lib/keeper/keeper_event_queue.*`
   but the module is at `lib/keeper_runtime/keeper_event_queue.*`. Use the real path.
 

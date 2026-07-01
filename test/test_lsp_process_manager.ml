@@ -32,11 +32,21 @@ let touch path =
 let test_executable_path_split_search_path () =
   check
     (list string)
-    "preserves empty entries"
+    "preserves empty entries (explicit separator)"
     [ ""; "/opt/bin"; "/usr/bin" ]
     (Executable_path.split_search_path
        ~separator:';'
-       ";/opt/bin;/usr/bin")
+       ";/opt/bin;/usr/bin");
+  (* Also exercise the default: build the input from the SSOT
+     [search_path_separator] so this asserts the platform-default split (a
+     regression setting the wrong default would fail here) while staying
+     platform-independent. *)
+  let sep = String.make 1 Executable_path.search_path_separator in
+  check
+    (list string)
+    "preserves empty entries (default separator)"
+    [ ""; "/opt/bin"; "/usr/bin" ]
+    (Executable_path.split_search_path (sep ^ "/opt/bin" ^ sep ^ "/usr/bin"))
 ;;
 
 let test_executable_path_lookup_requires_executable_file () =

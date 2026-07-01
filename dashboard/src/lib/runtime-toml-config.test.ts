@@ -133,6 +133,22 @@ mad-improver = "runpod_mtp.qwen"
     expect(next.match(/nick0cave/g)).toHaveLength(1)
   })
 
+  it('warns instead of silently dropping a line keyLineMatch still cannot parse', () => {
+    const withMalformedLine = `${sourceText}
+
+[runtime.assignments]
+"nick0cave" = "ollama_cloud.deepseek-v4-flash"
+this line has no equals sign
+`
+
+    const environment = parseRuntimeTomlEnvironment(withMalformedLine)
+
+    expect(environment.assignments).toEqual({
+      nick0cave: 'ollama_cloud.deepseek-v4-flash',
+    })
+    expect(environment.warnings.some(w => w.includes('[runtime.assignments]'))).toBe(true)
+  })
+
   it('patches the runtime default without touching other sections', () => {
     const next = setRuntimeTomlDefault(sourceText, 'openai.gpt')
 

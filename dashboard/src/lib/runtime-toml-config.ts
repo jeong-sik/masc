@@ -175,6 +175,27 @@ function sectionValues(document: TomlDocument, name: string): Record<string, Tom
   return values
 }
 
+// Line numbers (1-indexed) inside a section that are neither blank, a
+// comment, a nested `[...]` header, nor a key = value pair keyLineMatch can
+// read. A non-empty result means the UI is silently under-reporting that
+// section's contents (exactly how the quoted-key keeper assignments went
+// missing) rather than a real absence of data — surface it instead of
+// hiding it behind a default fallback.
+function sectionUnparsedLineNumbers(document: TomlDocument, name: string): number[] {
+  const section = sectionOf(document, name)
+  if (!section) return []
+  const lineNumbers: number[] = []
+  for (let index = section.start + 1; index < section.end; index += 1) {
+    const line = document.lines[index] ?? ''
+    const trimmed = line.trim()
+    if (trimmed === '' || trimmed.startsWith('#')) continue
+    if (/^\[.+\]\s*(#.*)?$/.test(trimmed)) continue
+    if (keyLineMatch(line)) continue
+    lineNumbers.push(index + 1)
+  }
+  return lineNumbers
+}
+
 function asString(value: TomlScalar | undefined, fallback = ''): string {
   return typeof value === 'string' ? value : fallback
 }
@@ -277,6 +298,13 @@ export function parseRuntimeTomlEnvironment(sourceText: string): RuntimeTomlEnvi
   if (providers.length === 0) warnings.push('providers.* section not found')
   if (models.length === 0) warnings.push('models.* section not found')
   if (bindings.length === 0) warnings.push('provider.model binding section not found')
+  const unparsedAssignmentLines = sectionUnparsedLineNumbers(document, 'runtime.assignments')
+  if (unparsedAssignmentLines.length > 0) {
+    warnings.push(
+      `[runtime.assignments] ${unparsedAssignmentLines.length}줄을 keeper = runtime-id 형식으로 읽지 못했습니다 ` +
+        `(줄 ${unparsedAssignmentLines.join(', ')}) — 아래 배정 목록이 실제 runtime.toml과 다를 수 있습니다.`,
+    )
+  }
   return {
     defaultRuntimeId: asString(runtimeValues.default),
     librarianRuntimeId: asString(runtimeValues.librarian),

@@ -195,6 +195,40 @@ export function RuntimeEnvironmentEditor({
     `
   }
 
+  // Explicit ([runtime.assignments]) entries surfaced first, [runtime].default
+  // fallbacks grouped below — the flat alphabetical list made it hard to tell
+  // at a glance which keepers actually have a pinned runtime vs. which are
+  // just inheriting whatever [runtime].default happens to be.
+  const assignmentRows = keeperList.map(keeper => {
+    const current = assignments[keeper.name] ?? environment.defaultRuntimeId
+    return { keeper, current, isDefault: current === environment.defaultRuntimeId }
+  })
+  const pinnedAssignments = assignmentRows.filter(row => !row.isDefault)
+  const fallbackAssignments = assignmentRows.filter(row => row.isDefault)
+
+  function assignRow(row: (typeof assignmentRows)[number]) {
+    return html`
+      <div key=${row.keeper.name} class="rt-assign">
+        <span class="rt-assign-k">
+          <${StatusDot} size="sm" class=${keeperDotTone(row.keeper.status)} />
+          <span class="mono">${row.keeper.name}</span>
+        </span>
+        <select
+          class="rt-select mono"
+          value=${row.current}
+          disabled=${typedPatchDisabled}
+          aria-label=${`${row.keeper.name} 런타임 배정`}
+          onChange=${(event: Event) => updateAssignment(row.keeper.name, (event.currentTarget as HTMLSelectElement).value)}
+        >
+          ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
+        </select>
+        ${row.isDefault
+          ? html`<span class="rt-assign-tag mono">↳ default 폴백</span>`
+          : html`<span class="rt-assign-tag pin mono">고정</span>`}
+      </div>
+    `
+  }
+
   return html`
     <div data-testid="runtime-environment-editor">
       <div class="rt-head-actions" style=${{ justifyContent: 'flex-end', marginBottom: '14px' }}>
@@ -425,7 +459,9 @@ export function RuntimeEnvironmentEditor({
       </div>
 
       <!-- assignments — runtime-editor.jsx:216-231. keeper -> runtime id from
-           the live keepers signal + [runtime.assignments]. -->
+           the live keepers signal + [runtime.assignments]. Pinned entries are
+           grouped ahead of default-fallback entries so a long keeper list
+           doesn't force scanning every row to see who is actually pinned. -->
       <div class=${section === 'assignments' ? '' : 'hidden'} data-testid="runtime-section-assignments">
         <div class="rt-assigns">
           <div class="rt-note">
@@ -433,30 +469,23 @@ export function RuntimeEnvironmentEditor({
           </div>
           ${keeperList.length === 0 ? html`
             <div class="rt-note" data-testid="runtime-assignments-empty">표시할 keeper가 없습니다.</div>
-          ` : keeperList.map(keeper => {
-            const current = assignments[keeper.name] ?? environment.defaultRuntimeId
-            const isDefault = current === environment.defaultRuntimeId
-            return html`
-              <div key=${keeper.name} class="rt-assign">
-                <span class="rt-assign-k">
-                  <${StatusDot} size="sm" class=${keeperDotTone(keeper.status)} />
-                  <span class="mono">${keeper.name}</span>
-                </span>
-                <select
-                  class="rt-select mono"
-                  value=${current}
-                  disabled=${typedPatchDisabled}
-                  aria-label=${`${keeper.name} 런타임 배정`}
-                  onChange=${(event: Event) => updateAssignment(keeper.name, (event.currentTarget as HTMLSelectElement).value)}
-                >
-                  ${runtimeIds.map(id => html`<option value=${id}>${id}</option>`)}
-                </select>
-                ${isDefault
-                  ? html`<span class="rt-assign-tag mono">↳ default 폴백</span>`
-                  : html`<span class="rt-assign-tag pin mono">고정</span>`}
+          ` : html`
+            <div class="rt-assign-summary mono" data-testid="runtime-assignments-summary">
+              고정 ${pinnedAssignments.length}개 · default 폴백 ${fallbackAssignments.length}개
+            </div>
+            ${pinnedAssignments.length > 0 ? html`
+              <div class="rt-assign-group" data-testid="runtime-assignments-group-pinned">
+                <div class="rt-assign-group-h mono">고정 배정</div>
+                ${pinnedAssignments.map(row => assignRow(row))}
               </div>
-            `
-          })}
+            ` : null}
+            ${fallbackAssignments.length > 0 ? html`
+              <div class="rt-assign-group" data-testid="runtime-assignments-group-fallback">
+                <div class="rt-assign-group-h mono">default 폴백</div>
+                ${fallbackAssignments.map(row => assignRow(row))}
+              </div>
+            ` : null}
+          `}
         </div>
       </div>
     </div>

@@ -776,6 +776,10 @@ let record_completion_contract_attention_failure
     ~base_path
     updated_meta.name
     (Some (Keeper_registry.Completion_contract_violation { detail }));
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ContractViolations)
+    ~labels:[ "keeper", updated_meta.name ]
+    ();
   Health.record_failure
     ~agent_name:updated_meta.name
     ~reason:(Keeper_types_profile.short_preview detail);

@@ -807,6 +807,28 @@ let run_keeper_cycle
                         ~raw_error:e_str
                     with
                     | Some failure_reason ->
+                      (* masc_keeper_contract_violations_total (RFC exhaustive
+                         match, not [_ -> ()]): a new failure_reason variant
+                         must explicitly opt in or out of this counter rather
+                         than silently landing in a catch-all. *)
+                      (match failure_reason with
+                       | Keeper_registry.Completion_contract_violation _ ->
+                         Otel_metric_store.inc_counter
+                           Keeper_metrics.(to_string ContractViolations)
+                           ~labels:[ "keeper", meta.name ]
+                           ()
+                       | Keeper_registry.Heartbeat_consecutive_failures _
+                       | Keeper_registry.Turn_consecutive_failures _
+                       | Keeper_registry.Stale_turn_timeout _
+                       | Keeper_registry.Stale_termination_storm _
+                       | Keeper_registry.Stale_fleet_batch _
+                       | Keeper_registry.Provider_timeout_loop _
+                       | Keeper_registry.Provider_runtime_error _
+                       | Keeper_registry.Ambiguous_partial_commit _
+                       | Keeper_registry.Fiber_unresolved _
+                       | Keeper_registry.Exception _
+                       | Keeper_registry.Turn_overflow_pause
+                       | Keeper_registry.Turn_livelock_pause -> ());
                       Keeper_registry.set_failure_reason
                         ~base_path:config.base_path
                         meta.name

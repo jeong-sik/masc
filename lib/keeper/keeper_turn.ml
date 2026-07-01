@@ -188,19 +188,7 @@ let direct_success_disposition_allows_no_progress_resume
       { disposition = Keeper_execution_receipt.Disp_pass
       ; reason = Keeper_execution_receipt.Reason_healthy
       } -> true
-  | Some
-      { disposition =
-          ( Keeper_execution_receipt.Disp_pause_human
-          | Keeper_execution_receipt.Disp_pass
-          | Keeper_execution_receipt.Disp_alert_exhausted
-          | Keeper_execution_receipt.Disp_fail_open_next_runtime
-          | Keeper_execution_receipt.Disp_pass_next_model
-          | Keeper_execution_receipt.Disp_user_cancelled
-          | Keeper_execution_receipt.Disp_skipped
-          | Keeper_execution_receipt.Disp_unknown )
-      ; _
-      }
-  | None -> false
+  | Some _ | None -> false
 
 let direct_success_tool_call_has_progress
       (detail : Keeper_agent_run.tool_call_detail)

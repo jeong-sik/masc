@@ -1,5 +1,5 @@
 import { html } from 'htm/preact'
-import { signal } from '@preact/signals'
+import { useSignal } from '@preact/signals'
 import { Markdown } from "../common/markdown"
 import { useEffect, useMemo, useState } from 'preact/hooks'
 import {
@@ -208,10 +208,9 @@ export function promptSourceCounts(
   return counts
 }
 
-const sourceFilter = signal<PromptSourceFilter>('all')
-const searchQuery = signal('')
-
 export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean } = {}) {
+  const sourceFilter = useSignal<PromptSourceFilter>('all')
+  const searchQuery = useSignal('')
   const [prompts, setPrompts] = useState<DashboardPromptItem[]>([])
   const [loading, setLoading] = useState(false)
   const [saving, setSaving] = useState(false)
@@ -226,8 +225,11 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const presets = promptPresetOptions(prompts, report)
   const activePreset = presets.some(item => item.id === preset) ? preset : 'all'
   const visiblePrompts = filterPrompts(prompts, sourceFilter.value, searchQuery.value, report, activePreset)
-  const selectedPrompt =
-    (selectedKey ? prompts.find(prompt => prompt.key === selectedKey) : null) ?? visiblePrompts[0] ?? null
+  const selectedPromptFromKey = selectedKey ? prompts.find(prompt => prompt.key === selectedKey) ?? null : null
+  const selectedPromptVisible = selectedPromptFromKey
+    ? visiblePrompts.some(prompt => prompt.key === selectedPromptFromKey.key)
+    : false
+  const selectedPrompt = selectedPromptFromKey ?? visiblePrompts[0] ?? null
   const selectedDestinations = selectedPrompt ? promptDestinationsForKey(report, selectedPrompt.key) : []
   const counts = promptSourceCounts(prompts)
   const draftDirty = selectedPrompt
@@ -240,6 +242,25 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
     setDraft(normalizeDraft(prompt))
     setDraftPromptKey(draftKeyForPrompt(prompt))
   }
+
+  // Depend on the first visible prompt's stable key (a string) rather than the
+  // freshly-allocated [visiblePrompts] array, which changes identity every
+  // render (filterPrompts returns a new array) and would otherwise schedule
+  // this effect after every render/keystroke. [prompts] is stable useState
+  // identity, so re-selection only fires when the fallback target actually
+  // changes.
+  const firstVisibleKey = visiblePrompts[0]?.key ?? null
+
+  useEffect(() => {
+    if (draftDirty || selectedPromptVisible) return
+    if (selectedKey === firstVisibleKey) return
+    const nextPrompt = firstVisibleKey
+      ? prompts.find(prompt => prompt.key === firstVisibleKey) ?? null
+      : null
+    setSelectedKey(firstVisibleKey)
+    setDraftForPrompt(nextPrompt)
+    setStatus(null)
+  }, [draftDirty, selectedKey, selectedPromptVisible, firstVisibleKey, prompts])
 
   async function loadPrompts(preferredKey?: string | null) {
     setLoading(true)

@@ -165,6 +165,27 @@ describe('PromptRegistryPanel', () => {
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe('dry run prompt')
   })
 
+  it('rebinds the clean editor draft to the first visible prompt when filters hide the selection', async () => {
+    render(html`<${PromptRegistryPanel} />`, container)
+    await flush()
+    await flush()
+
+    const textarea = () => container.querySelector('textarea') as HTMLTextAreaElement
+    expect(textarea().value).toBe('override world')
+
+    const fileChip = Array.from(container.querySelectorAll('button')).find(button =>
+      button.textContent?.includes('파일'),
+    ) as HTMLButtonElement | undefined
+    expect(fileChip).toBeTruthy()
+    await fireEvent.click(fileChip!)
+
+    await waitFor(() => {
+      expect(textarea().value).toBe('dry run prompt')
+    })
+    expect(container.textContent).toContain('governance.dry_run')
+    expect(container.textContent).toContain('fixture/config/prompts/governance.dry_run.md')
+  })
+
   it('keeps dirty draft text across filters and confirms before discarding on row selection', async () => {
     render(html`<${PromptRegistryPanel} />`, container)
     await flush()

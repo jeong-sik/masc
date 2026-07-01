@@ -18,10 +18,11 @@
     the dashboard fetches this URL directly from an [<audio>]/[Audio]
     element, which needs the media bytes, not a wrapped payload.
 
-    Errors:
+   Errors:
       400 — token malformed (not 32 hex chars)
       404 — clip not on disk (never synthesized, or reaped by the 1h TTL of
             [Voice_bridge.cleanup_old_audio_files])
+      413 — generated media exceeds the configured serve cap
       503 — base path unresolvable *)
 
 open Server_utils
@@ -37,6 +38,9 @@ let is_valid_token (s : string) : bool =
        (fun c ->
          (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'f'))
        s
+
+let generated_media_serve_max_bytes () =
+  Env_config.KeeperVision.max_image_bytes ()
 
 (* Clip path under the same audio dir [Voice_bridge_transport.make_audio_file]
    writes to. Reuses [Voice_bridge_core.masc_base_dir] so this route and the
@@ -80,15 +84,33 @@ let serve_media ~base_path ~token request reqd =
     respond_json_value_with_cors ~status:`Not_found request reqd
       (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
   | Some path ->
-    let body = Fs_compat.load_file path in
-    let headers =
-      Httpun.Headers.of_list
-        (("content-type", Keeper_chat_media_store.content_type_of_path path)
-         :: ("content-length", string_of_int (String.length body))
-         :: cors_headers (get_origin request))
-    in
-    let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
-    Httpun.Reqd.respond_with_string reqd response body
+    let max_bytes = generated_media_serve_max_bytes () in
+    match Fs_compat.file_size path with
+    | None ->
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
+    | Some size when size > max_bytes ->
+        respond_json_value_with_cors ~status:`Payload_too_large request reqd
+          (`Assoc
+             [ ("error", `String "media too large")
+             ; ("token", `String token)
+             ; ("max_bytes", `Int max_bytes)
+             ; ("size_bytes", `Int size)
+             ])
+    | Some _ -> (
+        match Fs_compat.load_file_opt path with
+        | None ->
+            respond_json_value_with_cors ~status:`Not_found request reqd
+              (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
+        | Some body ->
+            let headers =
+              Httpun.Headers.of_list
+                (("content-type", Keeper_chat_media_store.content_type_of_path path)
+                 :: ("content-length", string_of_int (String.length body))
+                 :: cors_headers (get_origin request))
+            in
+            let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
+            Httpun.Reqd.respond_with_string reqd response body)
 
 (* Owner-route JSON respond helper. Unlike [respond_public_read_json_value],
    this adds no public-read capability headers: the transcribe route is

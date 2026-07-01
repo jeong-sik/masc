@@ -32,18 +32,21 @@ lib/keeper/keeper_chat_oas_stream_bridge.ml:85-91
         [ Oas_media_delta { index; media_type; source_type; bytes = String.length data } ] }
 ```
 
-타입 자체가 카운트만 운반한다:
+pre-RFC 타입은 카운트만 운반했다. 이 RFC의 구현은 아래 shape를
+`media_ref` URL로 교체한다:
 
 ```
-lib/keeper/keeper_chat_events.ml:50-54
+lib/keeper/keeper_chat_events.ml
 | Oas_media_delta of { index : int; media_type : string;
-                       source_type : Agent_sdk.Types.media_source_kind; bytes : int }
+                       source_type : Agent_sdk.Types.media_source_kind;
+                       media_ref : string }
 ```
 
-이후:
-- SSE emit `lib/server/server_routes_http_keeper_stream.ml:1179-1192`가 `{index,media_type,source_type,bytes}`(카운트)를 KEEPER_MEDIA_DELTA로 전송.
-- frontend `dashboard/src/keeper-stream.ts:321-322` `KEEPER_MEDIA_DELTA` 핸들러가 `setAssistantStreamState(...'streaming')`만 호출하고 이벤트를 **폐기**(return null). media accumulator 없음, 블록 emission 없음.
-- `dashboard/src/types/core.ts:837,835`의 `ChatImageBlock`/`ChatVoiceBlock`는 존재하나 생성 미디어 경로에서 아무도 populate하지 않음.
+현재 구현:
+- bridge가 `MediaDelta`를 block별로 누적하고 `ContentBlockStop` 또는 `MessageStop`에서 raw bytes를 persist한다.
+- SSE emit `lib/server/server_routes_http_keeper_stream.ml`가 `{index,media_type,source_type,media_ref}`(URL)를 KEEPER_MEDIA_DELTA로 전송한다.
+- turn persist path가 같은 stream에서 생성 미디어를 `Image`/`Voice`/`Attach` block으로 저장해 reload-visible하게 만든다.
+- `dashboard/src/types/core.ts:837,835`의 `ChatImageBlock`/`ChatVoiceBlock`는 reload path에서 저장된 block을 렌더하는 재사용 대상이다.
 
 이는 **"telemetry-as-fix" 안티패턴이 프로토콜 shape에 박힌 형태**다 — 데이터 채널이어야 할 자리에 카운트(관측치)를 넣었다. 데이터는 OAS에서 가용했으나 경계에서 의도적으로 버려졌다.
 

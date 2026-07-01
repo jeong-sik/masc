@@ -101,18 +101,29 @@ let valid_token token =
 let file_path_of_token ~base_dir ~token =
   if not (valid_token token)
   then None
-  else (
+  else
+    try
     let dir = media_dir ~base_dir in
     match Sys.file_exists dir && Sys.is_directory dir with
     | false -> None
     | true ->
+        let rank name =
+          match normalize (Filename.extension name) with
+          | ".bin" -> 1
+          | _ -> 0
+        in
       Sys.readdir dir
       |> Array.to_list
       |> List.filter (fun name -> Filename.remove_extension name = token)
-      |> List.sort String.compare
+        |> List.sort (fun left right ->
+          match compare (rank left) (rank right) with
+          | 0 -> String.compare left right
+          | by_rank -> by_rank)
       |> (function
        | [] -> None
-       | name :: _ -> Some (Filename.concat dir name)))
+           | name :: _ -> Some (Filename.concat dir name))
+    with
+    | Sys_error _ | Unix.Unix_error _ -> None
 
 let content_type_of_path path =
   let ext = Filename.extension path in

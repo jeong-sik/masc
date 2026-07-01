@@ -309,6 +309,10 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
   with
   | Keeper_no_progress_loop_detector.Normal -> updated_meta
   | Keeper_no_progress_loop_detector.Loop_detected { streak; threshold } ->
+    let no_progress_reason =
+      Keeper_no_progress_loop_detector.current_reason
+        ~keeper_name:updated_meta.Keeper_meta_contract.name
+    in
     Keeper_unified_turn_no_progress.mark_loop_detected
       ?no_progress_reason
       ~config

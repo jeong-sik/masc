@@ -97,6 +97,7 @@ function executionReceiptAttentionReasons(): string[] {
 // out of the attention label union unless the backend changes that contract.
 const EXECUTION_RECEIPT_PASS_ONLY_REASONS: ReadonlySet<string> = new Set([
   'healthy',
+  'passive_no_action',
   'runtime_fallback',
   'phase_skipped',
 ])

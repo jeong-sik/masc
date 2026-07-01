@@ -87,6 +87,36 @@ output_per_million = 0.28
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.02
 
+# Same WORKAROUND class as the openai_compat/deepseek-v4-flash row above: the
+# pinned OAS emits provider_label "openai_compat" for api.deepseek.com, so the
+# [deepseek.deepseek-v4-pro] runtime binding (config/runtime.toml cross_verifier)
+# resolves against "openai_compat/deepseek-v4-pro". Without this row the
+# test_runtime_config_validity gate fails. Capabilities mirror the canonical
+# ../oas/models.toml deepseek-v4-pro row. Removal target: same OAS base_url
+# recognizer for api.deepseek.com that retires the flash row.
+[[models]]
+id_prefix = "openai_compat/deepseek-v4-pro"
+base = "openai_chat"
+provider_name = "deepseek"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "thinking_object"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_caching = true
+supports_prompt_caching = false
+input_per_million = 0.435
+output_per_million = 0.87
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.008333333333333333
+
 # MiniMax Models
 [[models]]
 id_prefix = "minimax-m3"

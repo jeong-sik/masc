@@ -11,9 +11,13 @@ import {
 } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
 import {
+  createRuntimeTomlBinding,
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
+  setRuntimeTomlModelField,
+  setRuntimeTomlProviderCredential,
+  setRuntimeTomlProviderField,
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
 import { ActionButton } from './common/button'
@@ -23,6 +27,8 @@ import { ErrorState, LoadingState } from './common/feedback-state'
 import { ringFocusClasses } from './common/ring'
 import {
   RuntimeEnvironmentEditor,
+  type NewRuntimeModelInput,
+  type NewRuntimeProviderInput,
   type RuntimeBindingEditableField,
   type RuntimeStructuredSection,
 } from './runtime-environment-editor'
@@ -269,6 +275,50 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
   ) {
     if (saving || loadState !== 'loaded') return
     setDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
+    setNotice(null)
+    setError(null)
+  }
+
+  // The three handlers below mutate the draft the same way handleBindingFieldChange
+  // does — no direct API call. The new provider/model/binding only reaches
+  // runtime.toml when the operator hits the existing "저장"/라이브 적용 button,
+  // which re-validates the full text through the same POST /api/v1/runtime/config/raw
+  // -> Runtime.save_config_text path (RFC-0273 §3.2: reuse, don't reimplement).
+  function handleAddProvider(input: NewRuntimeProviderInput) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => {
+      let next = setRuntimeTomlProviderField(current, input.id, 'display-name', input.displayName || input.id)
+      next = setRuntimeTomlProviderField(next, input.id, 'protocol', input.protocol)
+      next = setRuntimeTomlProviderField(next, input.id, input.transportKind, input.transportValue)
+      if (input.credentialType !== 'none' && input.credentialValue.trim() !== '') {
+        next = setRuntimeTomlProviderCredential(next, input.id, input.credentialType, input.credentialValue)
+      }
+      return next
+    })
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleAddModel(input: NewRuntimeModelInput) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => {
+      let next = setRuntimeTomlModelField(current, input.id, 'api-name', input.apiName || input.id)
+      next = setRuntimeTomlModelField(next, input.id, 'max-context', input.maxContext)
+      next = setRuntimeTomlModelField(next, input.id, 'tools-support', input.toolsSupport)
+      next = setRuntimeTomlModelField(next, input.id, 'thinking-support', input.thinkingSupport)
+      next = setRuntimeTomlModelField(next, input.id, 'streaming', input.streaming)
+      if (input.jsonSupport !== null) {
+        next = setRuntimeTomlModelField(next, input.id, 'json-support', input.jsonSupport)
+      }
+      return next
+    })
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleAddBinding(providerId: string, modelId: string) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => createRuntimeTomlBinding(current, providerId, modelId))
     setNotice(null)
     setError(null)
   }
@@ -535,6 +585,9 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
                   void handleAssignmentPatch(keeperName, runtimeId)
                 }}
                 onBindingFieldChange=${handleBindingFieldChange}
+                onAddProvider=${handleAddProvider}
+                onAddModel=${handleAddModel}
+                onAddBinding=${handleAddBinding}
               />
             </div>
 

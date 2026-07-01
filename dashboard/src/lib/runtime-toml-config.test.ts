@@ -1,6 +1,9 @@
 import { describe, expect, it } from 'vitest'
 import {
+  createRuntimeTomlBinding,
   deleteRuntimeTomlKey,
+  isReservedRuntimeTomlId,
+  isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
@@ -219,8 +222,91 @@ sangsu = "runpod_mtp.qwen"
   it('extracts json-support from model config', () => {
     const sourceWithJson = `${sourceText}\n[models.structured]\njson-support = true\n`
     const env = parseRuntimeTomlEnvironment(sourceWithJson)
-    
+
     const structuredModel = env.models.find(m => m.id === 'structured')
     expect(structuredModel?.jsonSupport).toBe(true)
+  })
+
+  it('creates a brand-new provider from fields set on a not-yet-existing id', () => {
+    let next = setRuntimeTomlProviderField(sourceText, 'brand-new', 'display-name', 'Brand New')
+    next = setRuntimeTomlProviderField(next, 'brand-new', 'protocol', 'openai-compatible-http')
+    next = setRuntimeTomlProviderField(next, 'brand-new', 'endpoint', 'https://brand-new.example/v1')
+    next = setRuntimeTomlProviderCredential(next, 'brand-new', 'env', 'BRAND_NEW_API_KEY')
+
+    const env = parseRuntimeTomlEnvironment(next)
+    const provider = env.providers.find(p => p.id === 'brand-new')
+    expect(provider).toMatchObject({
+      id: 'brand-new',
+      displayName: 'Brand New',
+      protocol: 'openai-compatible-http',
+      transportKind: 'endpoint',
+      endpoint: 'https://brand-new.example/v1',
+      credentialType: 'env',
+      credentialKey: 'BRAND_NEW_API_KEY',
+    })
+    // Existing provider/model/binding untouched.
+    expect(env.providers.find(p => p.id === 'runpod_mtp')).toBeDefined()
+  })
+
+  it('creates a brand-new model from fields set on a not-yet-existing id', () => {
+    let next = setRuntimeTomlModelField(sourceText, 'brand-new-model', 'api-name', 'brand-new-model-v1')
+    next = setRuntimeTomlModelField(next, 'brand-new-model', 'max-context', 32000)
+    next = setRuntimeTomlModelField(next, 'brand-new-model', 'streaming', true)
+
+    const env = parseRuntimeTomlEnvironment(next)
+    const model = env.models.find(m => m.id === 'brand-new-model')
+    expect(model).toMatchObject({
+      id: 'brand-new-model',
+      apiName: 'brand-new-model-v1',
+      maxContext: 32000,
+      toolsSupport: false,
+      streaming: true,
+    })
+  })
+
+  describe('createRuntimeTomlBinding', () => {
+    it('creates an empty pin section for a provider x model pair', () => {
+      const next = createRuntimeTomlBinding(sourceText, 'runpod_mtp', 'qwen2')
+      expect(next).toContain('[runpod_mtp.qwen2]')
+
+      const env = parseRuntimeTomlEnvironment(next)
+      expect(env.bindings.find(b => b.id === 'runpod_mtp.qwen2')).toMatchObject({
+        providerId: 'runpod_mtp',
+        modelId: 'qwen2',
+        isDefault: false,
+        maxConcurrent: null,
+      })
+    })
+
+    it('is a no-op when the binding already exists', () => {
+      const next = createRuntimeTomlBinding(sourceText, 'runpod_mtp', 'qwen')
+      expect(next).toBe(sourceText)
+    })
+  })
+
+  describe('isValidRuntimeTomlIdFormat', () => {
+    it.each(['ollama_cloud', 'deepseek-v4-flash', 'a', 'A1-b_2'])('accepts %s', id => {
+      expect(isValidRuntimeTomlIdFormat(id)).toBe(true)
+    })
+
+    it.each(['', 'has.dot', 'has space', '-leading-hyphen', '_leading-underscore', 'has[bracket]'])(
+      'rejects %s',
+      id => {
+        expect(isValidRuntimeTomlIdFormat(id)).toBe(false)
+      },
+    )
+  })
+
+  describe('isReservedRuntimeTomlId', () => {
+    it.each(['providers', 'models', 'runtime', 'system', 'routes', 'profiles', 'web_search'])(
+      'flags reserved top-level namespace %s',
+      id => {
+        expect(isReservedRuntimeTomlId(id)).toBe(true)
+      },
+    )
+
+    it('does not flag an ordinary id', () => {
+      expect(isReservedRuntimeTomlId('ollama_cloud')).toBe(false)
+    })
   })
 })

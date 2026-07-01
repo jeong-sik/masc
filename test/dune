@@ -1302,7 +1302,7 @@
 (test
  (name test_keeper_stream_media_accum)
  (modules test_keeper_stream_media_accum)
- (libraries alcotest masc masc_server agent_sdk base64 digestif eio_main))
+ (libraries alcotest masc masc_server agent_sdk base64 digestif eio_main unix))
 
 ; RFC-0284: goal-loop status SSE broadcast is change-gated (new content emits
 ; one event; unchanged / generated_at-only change emits none).

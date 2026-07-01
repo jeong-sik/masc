@@ -86,11 +86,9 @@ let test_token_lookup_probes_known_extensions_without_scan () =
     let token = String.make 64 'b' in
     let unsupported_token = String.make 64 'c' in
     let media_dir =
-      Filename.concat
-        (Masc.Common.masc_dir_from_base_path ~base_path:base_dir)
-        "media"
+      Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) "media"
     in
-    Masc.Fs_compat.mkdir_p media_dir;
+    Fs_compat.mkdir_p media_dir;
     let bin_path = Filename.concat media_dir (token ^ ".bin") in
     let png_path = Filename.concat media_dir (token ^ ".png") in
     let txt_path = Filename.concat media_dir (unsupported_token ^ ".txt") in

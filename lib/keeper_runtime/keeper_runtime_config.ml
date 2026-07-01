@@ -13,9 +13,14 @@ let key_to_env =
     "bootstrap.max_active_keepers",     "MASC_KEEPER_BOOTSTRAP_MAX_ACTIVE_KEEPERS";
     "bootstrap.autoboot_max",           "MASC_KEEPER_AUTOBOOT_MAX";
     (* [autonomous] *)
+    (* RFC-0297 P0-1: global lifecycle kill-switches. Without these mappings
+       the [reactive]/[proactive]/[autonomous] enabled keys were silently
+       dropped (see load_and_apply — only known key_to_env keys are visited). *)
+    "autonomous.enabled",               "MASC_KEEPER_AUTONOMOUS_ENABLED";
     "autonomous.fairness_cooldown_sec", "MASC_KEEPER_AUTONOMOUS_FAIRNESS_COOLDOWN_SEC";
     "autonomous.max_idle_turns",        "MASC_KEEPER_MAX_IDLE_TURNS_AUTONOMOUS";
     (* [reactive] *)
+    "reactive.enabled",                 "MASC_KEEPER_REACTIVE_ENABLED";
     "reactive.max_idle_turns",          "MASC_KEEPER_MAX_IDLE_TURNS_REACTIVE";
     (* [heartbeat] *)
     "heartbeat.interval_sec",           "MASC_KEEPER_HEARTBEAT_INTERVAL_SEC";
@@ -27,6 +32,7 @@ let key_to_env =
     "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
     "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
     (* [proactive] *)
+    "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
     "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";
     (* [turn] *)
     "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";

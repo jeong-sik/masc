@@ -61,6 +61,10 @@ type skip_reason =
   | Keeper_paused
   | Approval_pending
   | Scheduled_autonomous_disabled
+  | Reactive_disabled
+      (** RFC-0297 P0-1: the global reactive kill-switch
+          (MASC_KEEPER_REACTIVE_ENABLED) is off, so a pending reactive trigger
+          (mention / board event / scope message) does not open a turn. *)
   | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
@@ -97,6 +101,7 @@ let skip_reason_to_string = function
   | Keeper_paused -> "keeper_paused"
   | Approval_pending -> "approval_pending"
   | Scheduled_autonomous_disabled -> "scheduled_autonomous_disabled"
+  | Reactive_disabled -> "reactive_disabled"
   | Provider_cooldown_pending _ -> "provider_cooldown_pending"
   | Idle_gate_pending _ -> "idle_gate_pending"
   | Cooldown_pending _ -> "cooldown_pending"

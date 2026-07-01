@@ -181,6 +181,7 @@ type skip_reason =
   | Keeper_paused
   | Approval_pending
   | Scheduled_autonomous_disabled
+  | Reactive_disabled
   | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }

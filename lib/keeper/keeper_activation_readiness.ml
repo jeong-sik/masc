@@ -13,21 +13,48 @@ type t =
   ; autonomous_activation : autonomous_activation
   }
 
+(* RFC-0297 P0-1: the autonomous and proactive gates are resolved through the
+   single SSOT [Keeper_lifecycle_gate_env.enabled] (global kill-switch AND the
+   per-keeper flag), rather than re-deriving the enabled state from
+   [meta.autoboot_enabled] / [meta.proactive.enabled] here. This is the same
+   resolver [keeper_cycle_decision] uses, so the two sites cannot drift. *)
 let autonomous_blocker (meta : Keeper_meta_contract.keeper_meta) =
   if meta.paused then Some "paused"
-  else if not meta.autoboot_enabled then Some "autoboot_disabled"
-  else if not meta.proactive.enabled then Some "proactive_disabled"
+  else if not (Keeper_lifecycle_gate_env.enabled Autonomous meta) then
+    Some "autoboot_disabled"
+  else if not (Keeper_lifecycle_gate_env.enabled Proactive meta) then
+    Some "proactive_disabled"
   else None
 ;;
 
-let autonomous_hint = function
+(* [blocker] strings ("autoboot_disabled" / "proactive_disabled") are shared
+   with [Keeper_lifecycle_gate_env.enabled]'s combined global-AND-meta
+   verdict, so the same string fires whether the *global* kill-switch or the
+   *per-keeper* meta flag caused the block. The hint must check the meta
+   flag directly to tell an operator which one to fix -- pointing them at
+   meta when it's already true would send them editing the wrong knob. *)
+let autonomous_hint (meta : Keeper_meta_contract.keeper_meta) = function
   | None -> None
   | Some "paused" ->
     Some "resume keeper before expecting autonomous keepalive or PR fan-out"
   | Some "autoboot_disabled" ->
-    Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
+    if meta.autoboot_enabled
+    then
+      Some
+        "set MASC_KEEPER_AUTONOMOUS_ENABLED=true (global kill-switch; \
+         per-keeper autoboot_enabled is already true) before expecting \
+         autonomous keepalive or PR fan-out"
+    else
+      Some "set autoboot_enabled=true before expecting autonomous keepalive or PR fan-out"
   | Some "proactive_disabled" ->
-    Some "set proactive_enabled=true before expecting scheduled autonomous work"
+    if meta.proactive.enabled
+    then
+      Some
+        "set MASC_KEEPER_PROACTIVE_ENABLED=true (global kill-switch; \
+         per-keeper proactive_enabled is already true) before expecting \
+         scheduled autonomous work"
+    else
+      Some "set proactive_enabled=true before expecting scheduled autonomous work"
   | Some reason -> Some ("activation blocked: " ^ reason)
 ;;
 
@@ -38,7 +65,7 @@ let autonomous_activation (meta : Keeper_meta_contract.keeper_meta) =
   ; proactive_enabled = meta.proactive.enabled
   ; paused = meta.paused
   ; blocker
-  ; hint = autonomous_hint blocker
+  ; hint = autonomous_hint meta blocker
   }
 ;;
 

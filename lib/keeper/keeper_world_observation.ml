@@ -133,6 +133,7 @@ type skip_reason = Keeper_world_observation_turn_types.skip_reason =
   | Keeper_paused
   | Approval_pending
   | Scheduled_autonomous_disabled
+  | Reactive_disabled
   | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
@@ -1057,6 +1058,17 @@ let keeper_cycle_decision
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
+  (* RFC-0297 P0-1: reactive and proactive turns run only when their lifecycle
+     gate is enabled — the global kill-switch AND the per-keeper flag. Resolved
+     through the single SSOT [Keeper_lifecycle_gate_env.enabled] so the enabled
+     decision is not re-derived inline. Before this the global switches did not
+     exist, so [reactive]/[proactive] enabled = false were silently dropped. *)
+  let reactive_gate_enabled =
+    Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Reactive meta
+  in
+  let proactive_gate_enabled =
+    Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
+  in
   let event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
   in
@@ -1090,17 +1102,7 @@ let keeper_cycle_decision
   else if Keeper_approval_queue.has_pending_for_keeper ~keeper_name:meta.name
   then blocked Approval_pending
   else (
-    match reactive_triggers with
-    | first :: rest ->
-      { should_run = true
-      ; channel = Reactive
-      ; verdict = Run { reasons = first, rest }
-      ; since_last_scheduled_autonomous = None
-      ; effective_cooldown = None
-      ; task_reactive_cooldown = None
-      ; idle_gate_sec = None
-      }
-    | [] ->
+    let scheduled_autonomous_decision () =
       let since_last_scheduled_autonomous =
         if meta.runtime.proactive_rt.last_ts <= 0.0
         then max_int
@@ -1108,7 +1110,7 @@ let keeper_cycle_decision
           int_of_float (max 0.0 (Time_compat.now () -. meta.runtime.proactive_rt.last_ts))
       in
       let idle_gate_sec = meta.proactive.idle_sec in
-      if not meta.proactive.enabled
+      if not proactive_gate_enabled
       then
         { should_run = false
         ; channel = Scheduled_autonomous
@@ -1363,7 +1365,36 @@ let keeper_cycle_decision
         ; effective_cooldown = Some effective_cooldown
         ; task_reactive_cooldown = Some task_reactive_cooldown
         ; idle_gate_sec = Some idle_gate_sec
-        }))
+        })
+    in
+    match reactive_triggers with
+    | first :: rest when reactive_gate_enabled ->
+      { should_run = true
+      ; channel = Reactive
+      ; verdict = Run { reasons = first, rest }
+      ; since_last_scheduled_autonomous = None
+      ; effective_cooldown = None
+      ; task_reactive_cooldown = None
+      ; idle_gate_sec = None
+      }
+    | _ ->
+      (* RFC-0297 P0-1: when the reactive gate is disabled, a pending reactive
+         trigger must not itself starve the scheduled-autonomous decision --
+         otherwise a persistent trigger (e.g. a stuck mention) permanently
+         blocks proactive turns even when MASC_KEEPER_PROACTIVE_ENABLED=true.
+         This arm also covers the original no-reactive-trigger ([]) case.
+         Only relabel the verdict as [Reactive_disabled] when
+         scheduled-autonomous also declines to run, so the more specific,
+         actionable reason survives when a suppressed reactive signal was the
+         only thing pending. Review-flagged. *)
+      let decision = scheduled_autonomous_decision () in
+      if decision.should_run || reactive_gate_enabled || reactive_triggers = []
+      then decision
+      else
+        { decision with
+          channel = Reactive
+        ; verdict = Skip { reasons = Reactive_disabled, [] }
+        })
 ;;
 
 let should_run_keeper_cycle ~(meta : keeper_meta) (observation : world_observation) =

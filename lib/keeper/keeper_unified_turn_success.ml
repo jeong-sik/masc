@@ -301,21 +301,36 @@ type terminal_outcome =
   | Terminal_checkpoint
   | Terminal_failed_completion_contract of { reason_code : string }
 
+let completion_contract_attention_reason_code result =
+  match result with
+  | Keeper_execution_receipt.Contract_passive_only ->
+    (* Passive-only turns are no-progress detector input, not completion-contract
+       auto-failures. *)
+    None
+  | result
+    when Keeper_execution_receipt.completion_contract_result_requires_attention
+           result ->
+    Some (Keeper_execution_receipt.completion_contract_result_to_string result)
+  | _ -> None
+;;
+
 let completion_contract_terminal_failure_reason_code result =
   match result.Keeper_agent_run.operator_disposition with
   | Some
       { disposition = Keeper_execution_receipt.Disp_pause_human
       ; reason = Keeper_execution_receipt.Reason_completion_contract_unsatisfied
       } ->
-    (match result.Keeper_agent_run.completion_contract_result with
-     | Keeper_execution_receipt.Contract_passive_only ->
-       (* A passive-only runtime success is the no-progress detector's input,
-          not a second, shorter completion-contract auto-pause path. Other
-          unsatisfied contract results still mean the runtime violated the
-          execution/completion contract and remain terminal failures. *)
-       None
-     | result ->
-       Some (Keeper_execution_receipt.completion_contract_result_to_string result))
+    completion_contract_attention_reason_code
+      result.Keeper_agent_run.completion_contract_result
+  | Some
+      { disposition = Keeper_execution_receipt.Disp_alert_exhausted
+      ; reason = Keeper_execution_receipt.Reason_turn_budget_exhausted
+      } ->
+    (match result.Keeper_agent_run.stop_reason with
+     | Runtime_agent.TurnBudgetExhausted _ ->
+       completion_contract_attention_reason_code
+         result.Keeper_agent_run.completion_contract_result
+     | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> None)
   | Some _ -> None
   | None ->
     Some

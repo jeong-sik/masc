@@ -100,6 +100,7 @@ const EXECUTION_RECEIPT_PASS_ONLY_REASONS: ReadonlySet<string> = new Set([
   'passive_no_action',
   'runtime_fallback',
   'phase_skipped',
+  'passive_no_action',
 ])
 
 function completionContractAttentionLabels(): string[] {

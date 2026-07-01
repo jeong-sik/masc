@@ -408,6 +408,89 @@ let test_skill_candidate_store_writes_post_turn_memory_fact_candidates () =
   check int "unchanged candidate skipped" 0 (List.length second)
 ;;
 
+let noisy_index_event ~i =
+  let suffix = Printf.sprintf "%03d" i in
+  let noise_path name = Filename.concat "/tmp/masc-skill-candidate-noise" name in
+  `Assoc
+    [ "schema", `String "masc.skill_candidate.index.v1"
+    ; "id", `String ("noise-" ^ suffix)
+    ; "agent_name", `String "noise"
+    ; "source_kind", `String "memory_os_fact"
+    ; "source_ref", `String ("noise-ref-" ^ suffix)
+    ; "promotion_state", `String "candidate"
+    ; "dir", `String (noise_path suffix)
+    ; "json_path", `String (noise_path (suffix ^ "/candidate.json"))
+    ; "toml_path", `String (noise_path (suffix ^ "/candidate.toml"))
+    ; "skill_md_path", `String (noise_path (suffix ^ "/SKILL.md"))
+    ; "ts", `Float 0.0
+    ]
+;;
+
+let append_noisy_index_rows ~base_path ~count =
+  let index_path = Store.index_path ~base_path in
+  for i = 1 to count do
+    Fs_compat.append_file index_path
+      (Yojson.Safe.to_string (noisy_index_event ~i) ^ "\n")
+  done
+;;
+
+let skill_candidate_index_row_matches candidate json =
+  let open Yojson.Safe.Util in
+  match
+    ( member "id" json
+    , member "agent_name" json
+    , member "source_kind" json
+    , member "source_ref" json )
+  with
+  | `String id, `String agent_name, `String source_kind, `String source_ref ->
+    String.equal id candidate.S.id
+    && String.equal agent_name candidate.agent_name
+    && String.equal source_kind candidate.source_kind
+    && String.equal source_ref candidate.source_ref
+  | _ -> false
+;;
+
+let test_skill_candidate_store_skips_unchanged_candidate_with_noisy_index () =
+  with_temp_base_path
+  @@ fun base_path ->
+  let fact =
+    memory_fact ~category:M.Lesson ~trace_id:"trace-noisy-index-skill" ~turn:14
+      ~tool_call_id:"tool-noisy-index-skill"
+      "When draft skill indexes grow, keep unchanged candidate checks bounded"
+  in
+  let candidate =
+    match S.candidates_of_memory_facts ~agent_name:"keeper" [ fact ] with
+    | [ candidate ] -> candidate
+    | _ -> fail "expected one projected candidate"
+  in
+  write_facts_for_base_path ~base_path ~keeper_id:"keeper" [ fact ];
+  let first =
+    match
+      Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+        ~fact_tail_limit:16 ~procedure_limit:0
+    with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check int "initial candidate written" 1 (List.length first);
+  append_noisy_index_rows ~base_path ~count:250;
+  let second =
+    match
+      Store.write_post_turn_candidates ~base_path ~keeper_id:"keeper"
+        ~fact_tail_limit:16 ~procedure_limit:0
+    with
+    | Ok stored -> stored
+    | Error msg -> fail msg
+  in
+  check int "unchanged candidate skipped despite noisy index" 0 (List.length second);
+  let index_rows = Fs_compat.load_jsonl (Store.index_path ~base_path) in
+  let candidate_rows =
+    List.filter (skill_candidate_index_row_matches candidate) index_rows
+  in
+  check int "no duplicate index append" 251 (List.length index_rows);
+  check int "candidate indexed once" 1 (List.length candidate_rows)
+;;
+
 let test_skill_candidate_store_recovers_partial_candidate_artifacts () =
   with_temp_base_path
   @@ fun base_path ->
@@ -677,6 +760,8 @@ let () =
             test_skill_candidate_store_keeps_same_id_distinct_sources;
           test_case "writes post-turn memory fact candidates" `Quick
             test_skill_candidate_store_writes_post_turn_memory_fact_candidates;
+          test_case "skips unchanged candidate with noisy index" `Quick
+            test_skill_candidate_store_skips_unchanged_candidate_with_noisy_index;
           test_case "recovers partial candidate artifacts" `Quick
             test_skill_candidate_store_recovers_partial_candidate_artifacts;
           test_case "recovers missing index for complete artifacts" `Quick

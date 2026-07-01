@@ -29,59 +29,19 @@ let request_kind_of_provider_cfg (provider_cfg : Llm_provider.Provider_config.t)
   | DashScope -> Agent_sdk.Provider.Openai_chat_completions
 ;;
 
-let agent_capabilities_of_llm_capabilities
-      (caps : Llm_provider.Capabilities.capabilities)
-  : Agent_sdk.Provider.capabilities
-  =
-  { max_context_tokens = caps.max_context_tokens
-  ; max_output_tokens = caps.max_output_tokens
-  ; supports_tools = caps.supports_tools
-  ; supports_tool_choice = caps.supports_tool_choice
-  ; supports_required_tool_choice = caps.supports_required_tool_choice
-  ; supports_named_tool_choice = caps.supports_named_tool_choice
-  ; supports_parallel_tool_calls = caps.supports_parallel_tool_calls
-  ; supports_runtime_mcp_tools = caps.supports_runtime_mcp_tools
-  ; supports_runtime_tool_events = caps.supports_runtime_tool_events
-  ; assistant_tool_content_format = caps.assistant_tool_content_format
-  ; supports_reasoning = caps.supports_reasoning
-  ; supports_extended_thinking = caps.supports_extended_thinking
-  ; supports_reasoning_budget = caps.supports_reasoning_budget
-  ; accepted_reasoning_efforts = caps.accepted_reasoning_efforts
-  ; thinking_control_format = caps.thinking_control_format
-  ; preserve_thinking_control_format = caps.preserve_thinking_control_format
-  ; reasoning_replay_override = caps.reasoning_replay_override
-  ; supports_response_format_json = caps.supports_response_format_json
-  ; supports_structured_output = caps.supports_structured_output
-  ; supports_multimodal_inputs = caps.supports_multimodal_inputs
-  ; supports_image_input = caps.supports_image_input
-  ; supports_audio_input = caps.supports_audio_input
-  ; supports_video_input = caps.supports_video_input
-  ; modality_priority = caps.modality_priority
-  ; supports_native_streaming = caps.supports_native_streaming
-  ; supports_system_prompt = caps.supports_system_prompt
-  ; supports_caching = caps.supports_caching
-  ; supports_prompt_caching = caps.supports_prompt_caching
-  ; prompt_cache_alignment = caps.prompt_cache_alignment
-  ; supports_top_k = caps.supports_top_k
-  ; supports_min_p = caps.supports_min_p
-  ; supports_seed = caps.supports_seed
-  ; supports_seed_with_images = caps.supports_seed_with_images
-  ; supports_computer_use = caps.supports_computer_use
-  ; supports_code_execution = caps.supports_code_execution
-  ; emits_usage_tokens = caps.emits_usage_tokens
-  ; supported_models = caps.supported_models
-  ; reasoning_output_format = caps.reasoning_output_format
-  ; reasoning_streaming_format = caps.reasoning_streaming_format
-  }
-;;
-
 let register_capability_overlay_provider
       ~(name : string)
       ~(provider_cfg : Llm_provider.Provider_config.t)
   =
+  (* OAS 0.208.7 (#2355) exposes
+     [Provider.capabilities = Llm_provider.Capabilities.capabilities], so
+     [capabilities_for_provider_config] already returns the registration type.
+     The former 41-field hand-copy (agent_capabilities_of_llm_capabilities) was
+     the identity and is removed — this ends the recurring capability-mirror
+     drift where adding an OAS field (e.g. reasoning_output_format /
+     reasoning_streaming_format) broke the copy until each field was mirrored. *)
   let capabilities =
     Agent_sdk.Provider_runtime_binding.capabilities_for_provider_config provider_cfg
-    |> agent_capabilities_of_llm_capabilities
   in
   Agent_sdk.Provider.register_provider
     { name

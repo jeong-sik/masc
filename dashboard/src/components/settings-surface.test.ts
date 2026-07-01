@@ -771,10 +771,10 @@ describe('SettingsSurface', () => {
     const lanes = container.querySelectorAll('.set-fus-lane')
     expect(lanes.length).toBe(2)
     const models = Array.from(container.querySelectorAll('.set-fus-model')).map(n => n.textContent)
-    expect(models).toContain('ollama_cloud.deepseek-v4-flash')
-    expect(models).toContain('glm-coding.glm-5-turbo')
-    expect(models).toContain('ollama_cloud.minimax-m3')
-    expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('deepseek.deepseek-v4-pro')
+    expect(models).toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
+    expect(models).toContain('ollama_cloud.ollama-cloud-devstral-small-2-24b')
+    expect(models).toContain('ollama_cloud.ollama-cloud-ministral-3-14b')
+    expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('ollama_cloud.ollama-cloud-devstral-2-123b')
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('documented defaults preview')
     expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
     expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
@@ -814,7 +814,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
-    expect(container.textContent).not.toContain('ollama_cloud.deepseek-v4-flash')
+    expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
   })
 
   it('opens the live runtime.toml editor from runtime management', async () => {

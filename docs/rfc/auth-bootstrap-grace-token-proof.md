@@ -40,7 +40,7 @@ equal the `initial_admin` file's contents, any request with **no**
 identifying header at all) was granted Admin — including on
 `/api/v1/operator/action`, which can boot/recover keepers — with **zero**
 token, credential, or secret presented. Confirmed live on this machine's
-running instance (`~/.masc/auth/initial_admin` = `"dashboard"`, matching the
+running instance (`<base-path>/.masc/auth/initial_admin` = `"dashboard"`, matching the
 unauthenticated-request default in `server_auth.ml`).
 
 `enable_auth` already mints a real, verifiable Admin credential for that

@@ -178,6 +178,30 @@ let test_no_progress_runtime_blocker_facts_include_reason () =
      | _ -> None)
 ;;
 
+(* Regression for the round-trip gap Copilot flagged on PR #22865:
+   [Keeper_unified_turn_no_progress.mark_loop_detected] persists the literal
+   string "unclassified" when no specific reason was classified, but
+   [no_progress_reason_of_string] previously had no matching case for it, so
+   the fact silently came back [None] even though the detail string carried a
+   real (if unclassified) reason token. *)
+let test_no_progress_runtime_blocker_facts_include_unclassified_reason () =
+  init_runtime_default_for_tests ();
+  let detail =
+    "no_progress loop detected: streak=10 threshold=10; reason=unclassified; auto-paused after repeated no-evidence turns"
+  in
+  let facts =
+    runtime_blocker_facts_of_typed_last_blocker
+      Keeper_meta_contract.No_progress_loop
+      ~detail
+  in
+  Alcotest.(check (option string))
+    "unclassified reason still round-trips from persisted blocker detail"
+    (Some "unclassified")
+    (match List.assoc_opt "no_progress_reason" facts with
+     | Some (`String value) -> Some value
+     | _ -> None)
+;;
+
 let defaults_with_prompt_fields =
   { Keeper_types_profile.empty_keeper_profile_defaults with
     manifest_path = Some "/tmp/keeper.toml";
@@ -240,6 +264,10 @@ let () =
             "no-progress blocker facts include typed reason"
             `Quick
             test_no_progress_runtime_blocker_facts_include_reason;
+          Alcotest.test_case
+            "no-progress blocker facts include unclassified reason"
+            `Quick
+            test_no_progress_runtime_blocker_facts_include_unclassified_reason;
         ] );
       ( "profile default override provenance",
         [

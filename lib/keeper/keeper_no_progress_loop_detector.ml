@@ -18,6 +18,13 @@ type no_progress_reason =
   | Repeated_identity
   | Surface_mismatch
   | Stale_task
+  (* A loop was detected (streak crossed threshold) but the turn's delivery
+     shape didn't match any of the specific classifiers above — e.g. a
+     [User_facing] delivery that still failed to produce durable evidence.
+     Distinct from [None]/absent: this records that classification ran and
+     genuinely found no specific match, so downstream readers (status bridge)
+     don't silently drop the fact that a reason segment exists. *)
+  | Unclassified
 
 let no_progress_reason_to_string = function
   | Empty -> "empty"
@@ -26,6 +33,7 @@ let no_progress_reason_to_string = function
   | Repeated_identity -> "repeated_identity"
   | Surface_mismatch -> "surface_mismatch"
   | Stale_task -> "stale_task"
+  | Unclassified -> "unclassified"
 ;;
 
 let no_progress_reason_of_string value =
@@ -36,6 +44,7 @@ let no_progress_reason_of_string value =
   | "repeated_identity" -> Some Repeated_identity
   | "surface_mismatch" -> Some Surface_mismatch
   | "stale_task" -> Some Stale_task
+  | "unclassified" -> Some Unclassified
   | _ -> None
 ;;
 

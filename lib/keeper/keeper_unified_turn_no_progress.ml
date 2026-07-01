@@ -12,9 +12,10 @@ let mark_loop_detected
       ~threshold
   =
   let reason =
-    match no_progress_reason with
-    | Some reason -> Keeper_no_progress_loop_detector.no_progress_reason_to_string reason
-    | None -> "unclassified"
+    (match no_progress_reason with
+     | Some reason -> reason
+     | None -> Keeper_no_progress_loop_detector.Unclassified)
+    |> Keeper_no_progress_loop_detector.no_progress_reason_to_string
   in
   let detail =
     Printf.sprintf

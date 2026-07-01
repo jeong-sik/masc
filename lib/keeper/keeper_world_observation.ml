@@ -1168,12 +1168,18 @@ let keeper_cycle_decision
            observable backlog state.  This breaks the "no signal → no turn →
            no signal" bootstrap deadlock. *)
         let is_bootstrap = since_last_scheduled_autonomous = max_int in
-        (* Phase 2 — Minimum proactive cadence: even with no observable work
-           signals, fire a housekeeping turn once the minimum interval has
-           elapsed.  Default: 900s (15 min).  Prevents permanent silence when
-           external events never arrive and decouples liveness from signal
-           availability.  Controlled by MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC
-           / keeper.proactive.min_interval_sec. *)
+        (* Phase 2 — Minimum proactive cadence rate-limit: tracks whether the
+           minimum interval has elapsed since the last scheduled-autonomous
+           turn.  Default: 900s (15 min).  Controlled by
+           MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC
+           / keeper.proactive.min_interval_sec.
+           RFC-0303 Phase 2: this no longer fires a housekeeping turn on its
+           own with no work signals.  It is stimulus-gated behind
+           [proactive_work_ready] at the should_run site below, so it only
+           rate-limits cadence turns when the keeper already has an
+           opportunity.  Liveness under genuine silence is preserved by the
+           bootstrap turn and by external Reactive-channel wakes, not by this
+           blind cadence. *)
         let proactive_min_interval_sec =
           Keeper_config.keeper_proactive_min_interval_sec ()
         in
@@ -1201,18 +1207,36 @@ let keeper_cycle_decision
            picked up on the keeper's own cadence (sleep Timeout) and by the
            supervisor sweep. Per-keeper signals (mention/board/scope) are handled
            by the Reactive channel above and are unaffected. Time-based liveness
-           reasons (bootstrap / min_interval / idle_gate+cooldown / oscillation)
-           key on the keeper's own clock, so they stay ungated. *)
+           reasons key on the keeper's own clock, so they stay ungated BY THIS
+           reactive-wake check. Note this is a separate axis from the RFC-0303
+           Phase 2 gate below: [min_interval] and [idle_gate+cooldown] are
+           additionally stimulus-gated behind [proactive_work_ready], so they
+           cannot independently drive a scheduled-autonomous run. Only
+           [bootstrap] and a due schedule remain fully self-driving stimuli. *)
         let backlog_drives_turn =
           (not reactive_wake) && (backlog_fresh || backlog_elapsed)
         in
         let schedule_drives_turn = (not reactive_wake) && schedule_elapsed in
+        (* RFC-0303 Phase 2: stimulus-gate the self-cadence wake.
+           [min_interval_elapsed] no longer drives a turn ON ITS OWN — a blind
+           cadence turn
+           with no work signal is what manufactured the "passive" turns the
+           no-progress stack then chased (detect -> pause -> tombstone). It is
+           now a rate-limit INSIDE the [proactive_work_ready] guard: a keeper
+           spends a cadence turn only when it actually has an opportunity (a
+           claimed task, mentions, board/scope activity, or task backlog). With
+           no opportunity the keeper stays idle (verdict [No_signal]) instead of
+           spending a passive turn. Bootstrap (first warm-up turn) and a due
+           schedule remain ungated — each is itself the stimulus. External
+           signals still wake the keeper via the Reactive channel, so gating the
+           blind cadence cannot cause a deadlock. *)
         let should_run =
           is_bootstrap
-          || min_interval_elapsed
           || schedule_drives_turn
           || (proactive_work_ready
-              && (backlog_drives_turn || (idle_gate_elapsed && cooldown_elapsed)))
+              && (min_interval_elapsed
+                  || backlog_drives_turn
+                  || (idle_gate_elapsed && cooldown_elapsed)))
         in
         let runtime_id = runtime_id_of_meta meta in
         let provider_cooldown_remaining_sec =

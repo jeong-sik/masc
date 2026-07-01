@@ -238,6 +238,85 @@ let test_no_progress_event_queue_trigger_runs_warm_keeper () =
   check bool "reason includes no-progress stimulus" true
     (has_run_reason WO.No_progress_recovery_stimulus_pending d)
 
+(* RFC-0303 Phase 2 stimulus-gate: a warm keeper whose [min_interval] HAS
+   elapsed but that has NO opportunity (no signal, no claimed task, no backlog)
+   now stays silent. Before Phase 2, [min_interval_elapsed] drove a blind
+   housekeeping turn (verdict [Min_interval_elapsed]) with nothing to do, which
+   manufactured the "passive" turns the no-progress stack then chased. Now
+   [min_interval] is a rate-limit inside the proactive-work guard, not a
+   standalone trigger. *)
+let elapsed_min_interval_meta () =
+  let meta = make_meta "silence-elapsed" in
+  let now = Time_compat.now () in
+  { meta with
+    proactive = { enabled = true; idle_sec = 600; cooldown_sec = 1800 }
+  ; runtime =
+      { meta.runtime with
+        proactive_rt =
+          { meta.runtime.proactive_rt with
+            last_ts = now -. 100_000.0 (* well past the 900s default min interval *)
+          ; consecutive_noop_count = 0
+          }
+      }
+  }
+;;
+
+let skip_reasons d =
+  match d.WO.verdict with
+  | WO.Skip { reasons = first, rest } -> first :: rest
+  | WO.Run _ -> []
+;;
+
+let test_elapsed_min_interval_no_signal_stays_silent () =
+  let meta = elapsed_min_interval_meta () in
+  let d =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:no_provider_cooldown
+      ~reactive_wake:false
+      ~meta
+      no_signal_obs
+  in
+  check
+    bool
+    "elapsed min_interval + no opportunity stays silent (RFC-0303 P2 stimulus-gate)"
+    false
+    d.should_run;
+  check
+    bool
+    "silence carries the No_signal skip reason"
+    true
+    (List.exists (( = ) WO.No_signal) (skip_reasons d))
+;;
+
+(* Guard: gating the blind cadence must NOT silence a keeper that actually has
+   work. A keeper holding a claimed task is proactive-work-ready, so an elapsed
+   min_interval still drives its cadence turn. *)
+let test_elapsed_min_interval_with_claimed_task_runs () =
+  let task_id =
+    match Keeper_id.Task_id.of_string "TASK-1" with
+    | Ok id -> id
+    | Error e -> Alcotest.failf "Task_id.of_string failed: %s" e
+  in
+  let meta = { (elapsed_min_interval_meta ()) with current_task_id = Some task_id } in
+  let d =
+    WO.keeper_cycle_decision
+      ~provider_cooldown_remaining_sec:no_provider_cooldown
+      ~reactive_wake:false
+      ~meta
+      no_signal_obs
+  in
+  check
+    bool
+    "keeper with a claimed task still runs on cadence (proactive work preserved)"
+    true
+    d.should_run;
+  check
+    bool
+    "run reason includes Min_interval_elapsed"
+    true
+    (has_run_reason WO.Min_interval_elapsed d)
+;;
+
 let () = init_runtime_default_for_tests ()
 
 let () =
@@ -264,6 +343,14 @@ let () =
             "no-progress event queue trigger runs warm keeper"
             `Quick
             test_no_progress_event_queue_trigger_runs_warm_keeper
+        ; test_case
+            "elapsed min_interval + no opportunity stays silent (RFC-0303 P2)"
+            `Quick
+            test_elapsed_min_interval_no_signal_stays_silent
+        ; test_case
+            "elapsed min_interval + claimed task still runs (RFC-0303 P2)"
+            `Quick
+            test_elapsed_min_interval_with_claimed_task_runs
         ] )
     ]
 ;;

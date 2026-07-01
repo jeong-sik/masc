@@ -457,6 +457,18 @@ let run_turn
             ("context_digest", `String context_digest);
           ]))
     Keeper_runtime_manifest.Context_injected;
+  (* Phase O observability: env-gated ([MASC_KEEPER_WIRE_CAPTURE]) redacted
+     capture of the full assembled request. The digest block above proves
+     context changed; this records WHAT it was so the repetition feedback loop
+     (keeper's own prior text replayed into [history_messages]) is observable.
+     No-op and no filesystem access unless the env flag is set. *)
+  Keeper_wire_capture.capture_request
+    ~base_path:config.base_path
+    ~keeper_name:meta.name
+    ~turn_id:manifest_keeper_turn_id
+    ~system_prompt:turn_system_prompt
+    ~user_message
+    ~history_messages;
   (* 7. Set up agent — delegated to Keeper_run_tools *)
   let setup =
     Keeper_run_tools.prepare_agent_setup

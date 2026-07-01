@@ -272,7 +272,7 @@ export function RuntimeEnvironmentEditor({
   function runtimeTomlIdError(id: string, taken: readonly string[]): string | null {
     if (id === '') return 'id를 입력하세요'
     if (!isValidRuntimeTomlIdFormat(id)) {
-      return 'id는 영문/숫자로 시작하고 영문·숫자·-·_ 만 사용할 수 있습니다'
+      return 'id는 영문·숫자·-·_ 만 사용할 수 있습니다'
     }
     if (isReservedRuntimeTomlId(id)) return `"${id}"는 예약된 이름입니다`
     if (taken.includes(id)) return `이미 존재하는 id입니다: ${id}`

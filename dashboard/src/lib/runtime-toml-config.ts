@@ -620,8 +620,13 @@ export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
 // runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],
 // and the binding pin [<providerId>.<modelId>]). parseDocument's section regex
 // and bindingSections' 2-part split both assume an id has no '.', so a bare-key
-// -safe charset is required, not just non-empty.
-const RUNTIME_TOML_ID_PATTERN = /^[A-Za-z0-9][A-Za-z0-9_-]*$/
+// -safe charset is required, not just non-empty. Matches BARE_TOML_KEY above
+// (same TOML bare-key grammar: ASCII letters/digits/underscore/dash, no
+// restriction on the first character) rather than a stricter identifier-style
+// pattern — a leading '_'/'-' is a valid bare key both to keyLineMatch's
+// tokenizer and to the backend TOML parser, so rejecting it here would make
+// this form stricter than the config format it writes into.
+const RUNTIME_TOML_ID_PATTERN = /^[A-Za-z0-9_-]+$/
 
 export function isValidRuntimeTomlIdFormat(id: string): boolean {
   return RUNTIME_TOML_ID_PATTERN.test(id)

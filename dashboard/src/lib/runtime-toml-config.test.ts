@@ -380,16 +380,20 @@ sangsu = "runpod_mtp.qwen"
   })
 
   describe('isValidRuntimeTomlIdFormat', () => {
-    it.each(['ollama_cloud', 'deepseek-v4-flash', 'a', 'A1-b_2'])('accepts %s', id => {
-      expect(isValidRuntimeTomlIdFormat(id)).toBe(true)
-    })
-
-    it.each(['', 'has.dot', 'has space', '-leading-hyphen', '_leading-underscore', 'has[bracket]'])(
-      'rejects %s',
+    // Matches the TOML bare-key grammar (ASCII letters/digits/underscore/dash,
+    // no restriction on the first character) -- a leading '_'/'-' is a valid
+    // bare key to both keyLineMatch's tokenizer and the backend TOML parser,
+    // so this form must accept ids that already work in raw-edited runtime.toml.
+    it.each(['ollama_cloud', 'deepseek-v4-flash', 'a', 'A1-b_2', '-leading-hyphen', '_leading-underscore'])(
+      'accepts %s',
       id => {
-        expect(isValidRuntimeTomlIdFormat(id)).toBe(false)
+        expect(isValidRuntimeTomlIdFormat(id)).toBe(true)
       },
     )
+
+    it.each(['', 'has.dot', 'has space', 'has[bracket]'])('rejects %s', id => {
+      expect(isValidRuntimeTomlIdFormat(id)).toBe(false)
+    })
   })
 
   describe('isReservedRuntimeTomlId', () => {

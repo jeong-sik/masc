@@ -38,12 +38,12 @@ type active_item = {
 }
 
 val task_is_active_wip :
-  now:float -> ?stale_threshold_s:float -> Masc_domain.task -> bool
+  Masc_domain.task -> bool
 val active_item_of_task :
   ?task_goal_index:(string, string list) Hashtbl.t -> Masc_domain.task -> active_item
 val active_items_of_tasks :
-  ?task_goal_index:(string, string list) Hashtbl.t -> ?stale_threshold_s:float ->
-  now:float -> Masc_domain.task list -> active_item list
+  ?task_goal_index:(string, string list) Hashtbl.t ->
+  Masc_domain.task list -> active_item list
 
 type reject_reason =
   | Global_cap

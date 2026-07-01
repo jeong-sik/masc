@@ -294,7 +294,23 @@ let wip_admission_result_fields rejections =
           ; "action", `String wip_admission_action
           ; "rejected_count", `Int (List.length rejections)
           ; "rejections", `List (List.map wip_admission_rejection_json rejections)
-          ] )
+            ] )
+      ]
+;;
+
+let stale_claim_release_fields releases =
+  match releases with
+  | [] -> []
+  | releases ->
+    [ ( "stale_claim_releases"
+      , `List
+          (List.map
+             (fun (task_id, assignee) ->
+                `Assoc
+                  [ "task_id", `String task_id
+                  ; "assignee", `String assignee
+                  ])
+             releases) )
     ]
 ;;
 
@@ -500,19 +516,24 @@ let handle_keeper_task_tool
     let claim_goal_scope =
       Keeper_runtime_contract.resolve_claim_goal_scope ~config ~meta ()
     in
+    let stale_claim_releases =
+      match
+        Workspace.release_stale_claims config
+          ~ttl_seconds:Env_config_runtime.Claim.ttl_seconds
+      with
+      | releases -> Ok releases
+      | exception (Eio.Cancel.Cancelled _ as e) -> raise e
+      | exception exn -> Error (Printexc.to_string exn)
+    in
     let wip_rejections = ref [] in
     let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
     let remember_wip_rejection task_id rejection =
       if not (List.exists (fun (existing_id, _) -> String.equal existing_id task_id) !wip_rejections)
       then wip_rejections := (task_id, rejection) :: !wip_rejections
     in
-    (* DET-OK: boundary read, reused for every admission_filter call below so
-       one claim decision judges all candidates against the same instant. *)
-    let wip_admission_now = Unix.gettimeofday () in
     let wip_admission_filter ~active_tasks task =
       let active_items =
-        Keeper_wip_admission.active_items_of_tasks
-          ~task_goal_index ~now:wip_admission_now active_tasks
+        Keeper_wip_admission.active_items_of_tasks ~task_goal_index active_tasks
       in
       let scope =
         Keeper_wip_admission.scope_of_task ~task_goal_index task
@@ -573,18 +594,32 @@ let handle_keeper_task_tool
         Workspace.Claim_next_error
           (Printf.sprintf "unknown task_id: %s" requested_task_id)
       | Some task -> claim_specific task
+      in
+      let claim_after_stale_release () =
+        if requested_task_id <> "" then
+          explicit_claim_result ()
+        else
+          Workspace.claim_next_r config ~agent_name:meta.agent_name
+            ~task_filter:claim_goal_scope.task_filter
+            ~admission_filter:wip_admission_filter
+            ~allow_scope_fallback:true
+            ()
+      in
+      let result =
+        match stale_claim_releases with
+        | Error err ->
+          Workspace.Claim_next_error
+            (Printf.sprintf
+               "stale-claim release failed before WIP admission: %s"
+               err)
+        | Ok _ -> claim_after_stale_release ()
+      in
+    let stale_claim_releases =
+      match stale_claim_releases with
+      | Ok releases -> releases
+      | Error _ -> []
     in
-    let result =
-      if requested_task_id <> "" then
-        explicit_claim_result ()
-      else
-        Workspace.claim_next_r config ~agent_name:meta.agent_name
-          ~task_filter:claim_goal_scope.task_filter
-          ~admission_filter:wip_admission_filter
-          ~allow_scope_fallback:true
-          ()
-    in
-    let wip_rejections = List.rev !wip_rejections in
+      let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in
     let harness_completed = ref false in
     (match result with
@@ -807,12 +842,13 @@ let handle_keeper_task_tool
             ("claim_scope", claim_scope);
             ("auto_started", `Bool !auto_started_ok);
           ]
-         @ (match typed_outcome_field with
-            | Some field -> [ field ]
-            | None -> [])
-         @ claimed_task_fields
-         @ wip_admission_result_fields wip_rejections
-         @
+           @ (match typed_outcome_field with
+              | Some field -> [ field ]
+              | None -> [])
+           @ claimed_task_fields
+         @ stale_claim_release_fields stale_claim_releases
+           @ wip_admission_result_fields wip_rejections
+           @
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]
          | None -> []))

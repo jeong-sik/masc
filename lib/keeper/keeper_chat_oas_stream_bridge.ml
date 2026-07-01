@@ -6,6 +6,7 @@ type tool_ref = {
 type block_state =
   | Active_tool of tool_ref
   | Invalid_tool_block of { failed_tool_call_id : string option }
+  | Invalid_media_block
   | Active_media of
       { media_type : string
       ; source_type : Agent_sdk.Types.media_source_kind
@@ -35,6 +36,9 @@ let replace_block bridge_state index block =
 
 let invalidate_block bridge_state index ~failed_tool_call_id =
   replace_block bridge_state index (Invalid_tool_block { failed_tool_call_id })
+
+let invalidate_media_block bridge_state index =
+  replace_block bridge_state index Invalid_media_block
 
 let remove_block bridge_state index =
   { blocks_by_index = List.remove_assoc index bridge_state.blocks_by_index }
@@ -141,6 +145,13 @@ let tool_args_event ~redact_text ~snapshot bridge_state index args =
               ~reason:"tool argument event arrived after invalid tool block start"
               Tool_args_without_start ]
       }
+  | Some Invalid_media_block ->
+      { bridge_state;
+        chat_events =
+          [ protocol_error ~index
+              ~reason:"tool argument event arrived after invalid media block"
+              Tool_args_without_start ]
+      }
   | Some (Active_media _) ->
       { bridge_state;
         chat_events =
@@ -192,6 +203,7 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
             | Active_tool tool ->
                 [ Tool_call_end { tool_call_id = tool.tool_call_id } ]
             | Invalid_tool_block _ -> []
+            | Invalid_media_block -> []
             | Active_media { media_type; source_type; chunks; encoded_bytes } ->
                 (* RFC-0301: media block still open at message end (no balanced
                    ContentBlockStop) — persist and surface it rather than drop it
@@ -250,7 +262,7 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
             | Ok block ->
                 { bridge_state = replace_block bridge_state index block; chat_events = [] }
             | Error (size_bytes, max_bytes) ->
-                { bridge_state = remove_block bridge_state index;
+                { bridge_state = invalidate_media_block bridge_state index;
                   chat_events =
                     [ media_payload_too_large_event ~index ~size_bytes ~max_bytes ]
                 })
@@ -268,22 +280,23 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
                    ~reason:"media delta arrived for an active tool block"
                    Media_delta_invalid_block ]
            }
-       | Some (Invalid_tool_block { failed_tool_call_id }) ->
-           { bridge_state;
-             chat_events =
-               [ protocol_error ?tool_call_id:failed_tool_call_id ~index
-                   ~reason:"media delta arrived for an invalid tool block"
-                   Media_delta_invalid_block ]
-           }
-       | None ->
-           (match
-              add_media_chunk ~media_type ~source_type ~chunks:[]
+      | Some (Invalid_tool_block { failed_tool_call_id }) ->
+          { bridge_state;
+            chat_events =
+              [ protocol_error ?tool_call_id:failed_tool_call_id ~index
+                  ~reason:"media delta arrived for an invalid tool block"
+                  Media_delta_invalid_block ]
+          }
+      | Some Invalid_media_block -> { bridge_state; chat_events = [] }
+      | None ->
+          (match
+             add_media_chunk ~media_type ~source_type ~chunks:[]
                 ~encoded_bytes:0 data
             with
             | Ok block ->
                 { bridge_state = replace_block bridge_state index block; chat_events = [] }
             | Error (size_bytes, max_bytes) ->
-                { bridge_state;
+                { bridge_state = invalidate_media_block bridge_state index;
                   chat_events =
                     [ media_payload_too_large_event ~index ~size_bytes ~max_bytes ]
                 }))
@@ -320,6 +333,14 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
                [ block_start;
                  protocol_error ?tool_call_id:failed_tool_call_id ~index
                    ~reason:"tool-use block index already invalid"
+                   Tool_start_duplicate_index ]
+           }
+       | Some Invalid_media_block ->
+           { bridge_state;
+             chat_events =
+               [ block_start;
+                 protocol_error ~index
+                   ~reason:"tool-use block start arrived for an invalid media block index"
                    Tool_start_duplicate_index ]
            }
        | Some (Active_media _) ->
@@ -385,6 +406,10 @@ let translate ~redact_text ~on_text_delta ~base_dir bridge_state
                 protocol_error ?tool_call_id:failed_tool_call_id ~index
                   ~reason:"content block stop arrived for invalid tool block"
                   Tool_stop_without_start ]
+          }
+      | Some Invalid_media_block ->
+          { bridge_state = remove_block bridge_state index;
+            chat_events = [ block_stop ]
           }
       | Some (Active_media { media_type; source_type; chunks; encoded_bytes }) ->
           (* RFC-0301: the media block is complete — concat the accumulated chunks,

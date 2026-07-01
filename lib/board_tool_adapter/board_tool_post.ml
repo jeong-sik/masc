@@ -405,7 +405,7 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
     let post_str = Board_tool_format.format_post post in
     let total_comments = List.length comments in
     let comment_offset = get_int args "comment_offset" 0 in
-    let comment_limit = min (get_int args "comment_limit" 50) 100 in
+    let comment_limit = max 1 (min (get_int args "comment_limit" 50) 100) in
     let clamped_offset = max 0 (min comment_offset total_comments) in
     let sliced =
       List.filteri

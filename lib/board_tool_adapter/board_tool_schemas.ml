@@ -319,8 +319,9 @@ let tool_post_list : Masc_domain.tool_schema =
 let tool_post_get : Masc_domain.tool_schema =
   { name = "masc_board_post_get"
   ; description =
-      "Read one existing board post by exact post_id, including its full comment \
-       thread. Use only after you already have a post_id from masc_board_list, \
+      "Read one existing board post by exact post_id. Comments are paginated by \
+       default; use comment_offset and comment_limit to continue through long \
+       threads. Use only after you already have a post_id from masc_board_list, \
        masc_board_search, or visible board context. If no post_id is visible, call \
        masc_board_list or masc_board_search first; never call this tool with empty \
        arguments."
@@ -341,6 +342,8 @@ let tool_post_get : Masc_domain.tool_schema =
               ; ( "comment_offset"
                 , `Assoc
                     [ "type", `String "integer"
+                    ; "minimum", `Int 0
+                    ; "default", `Int 0
                     ; ( "description"
                       , `String
                           "Zero-based offset into the comment thread (default: 0). \
@@ -349,6 +352,9 @@ let tool_post_get : Masc_domain.tool_schema =
               ; ( "comment_limit"
                 , `Assoc
                     [ "type", `String "integer"
+                    ; "minimum", `Int 1
+                    ; "maximum", `Int 100
+                    ; "default", `Int 50
                     ; ( "description"
                       , `String
                           "Max comments to return (default: 50, max: 100). \

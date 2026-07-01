@@ -1511,6 +1511,70 @@ let test_post_get_success () =
   Alcotest.(check bool) "get ok" true ok2;
   Alcotest.(check bool) "get has content" true (String.length body2 > 0)
 
+let create_post_with_comments ~count =
+  let ok, body =
+    dispatch
+      "masc_board_post"
+      (make_args [ "content", `String "Get comments"; "author", `String "tester" ])
+  in
+  Alcotest.(check bool) "create ok" true ok;
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  for i = 1 to count do
+    let ok, _body =
+      dispatch
+        "masc_board_comment"
+        (make_args
+           [ "post_id", `String post_id
+           ; "content", `String (Printf.sprintf "comment-%03d" i)
+           ; "author", `String (Printf.sprintf "commenter-%03d" i)
+           ])
+    in
+    Alcotest.(check bool) (Printf.sprintf "comment %d ok" i) true ok
+  done;
+  post_id
+
+let check_get_footer ~label post_id args expected =
+  let ok, body =
+    dispatch "masc_board_post_get" (make_args (("post_id", `String post_id) :: args))
+  in
+  Alcotest.(check bool) (label ^ " get ok") true ok;
+  Alcotest.(check bool) label true (contains_substring body expected)
+
+let test_post_get_comment_pagination_clamps_and_advances () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let post_id = create_post_with_comments ~count:105 in
+  check_get_footer
+    ~label:"default limit"
+    post_id
+    []
+    "Showing comments 1-50 of 105. Use comment_offset=50 to see more.";
+  check_get_footer
+    ~label:"over max limit"
+    post_id
+    [ "comment_limit", `Int 999 ]
+    "Showing comments 1-100 of 105. Use comment_offset=100 to see more.";
+  check_get_footer
+    ~label:"zero limit clamps to one"
+    post_id
+    [ "comment_limit", `Int 0 ]
+    "Showing comments 1-1 of 105. Use comment_offset=1 to see more.";
+  check_get_footer
+    ~label:"negative limit clamps to one"
+    post_id
+    [ "comment_limit", `Int (-10) ]
+    "Showing comments 1-1 of 105. Use comment_offset=1 to see more.";
+  check_get_footer
+    ~label:"normal page advances"
+    post_id
+    [ "comment_offset", `Int 2; "comment_limit", `Int 2 ]
+    "Showing comments 3-4 of 105. Use comment_offset=4 to see more."
+
 let test_post_get_not_found () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -2033,6 +2097,10 @@ let () =
           Alcotest.test_case "list filter combinations" `Quick
             test_post_list_filter_combinations;
           Alcotest.test_case "get success" `Quick test_post_get_success;
+          Alcotest.test_case
+            "get comment pagination clamps and advances"
+            `Quick
+            test_post_get_comment_pagination_clamps_and_advances;
           Alcotest.test_case "get not found" `Quick test_post_get_not_found;
         ] );
       ( "voting",

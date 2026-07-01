@@ -15,7 +15,9 @@
     keep working through the type-passthrough but do not
     add to the surface here.
 
-    External surface (3 entries + 1 record):
+    External surface (4 entries + 1 record):
+    - {b stream tunable} ({!sse_dashboard_retry_backoff_ms}) — SSE
+      reconnect backoff shared with the dashboard route.
     - {b request record} ({!keeper_chat_stream_request})
       returned by the parser, consumed by the handler;
       the dashboard route reaches the [.name] field via
@@ -37,6 +39,14 @@
     [keeper_chat_stream_*] sub-renderers + per-event
     framing, connector-context and legacy model-argument
     payload guards). *)
+
+(** {1 Stream tunables} *)
+
+(** SSE reconnect backoff (ms) primed on the dashboard keeper-chat streams.
+    Shared with {!Server_routes_http_routes_dashboard} (reached via [open]) so the
+    two dashboard priming sites cannot silently diverge; intentionally distinct
+    from {!Server_mcp_transport_http_headers.sse_retry_ms} (the MCP transport). *)
+val sse_dashboard_retry_backoff_ms : int
 
 (** {1 Request record} *)
 

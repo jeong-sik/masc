@@ -429,14 +429,14 @@ describe('SettingsSurface', () => {
     expect(themeButton).toBeTruthy()
   })
 
-  it('wires display density to the dashboard density signal and keeps local-only display previews honest', async () => {
+  it('wires display density to the dashboard density signal without fake locale previews', async () => {
     route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
 
     render(html`<${SettingsSurface} />`, container)
 
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
-      .toContain('theme/density live + local preview')
-    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
+      .toContain('theme/density live')
+    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
       .toContain('spacious')
 
     const clickSeg = async (label: string) => {
@@ -447,23 +447,25 @@ describe('SettingsSurface', () => {
     }
 
     await clickSeg('compact')
-    await clickSeg('EN')
-    await clickSeg('UTC')
-    await fireEvent.click(container.querySelector<HTMLButtonElement>('[data-testid="set-toggle"]') as HTMLButtonElement)
 
     expect(tweaksDensity.value).toBe('compact')
-    expect(sessionStorage.getItem('masc.settings.local.displayLocale')).toBe('EN')
-    expect(sessionStorage.getItem('masc.settings.local.displayTimezone')).toBe('UTC')
-    expect(sessionStorage.getItem('masc.settings.local.displayClock24')).toBe('false')
-    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
-      .toContain('compact · EN · UTC · 12-hour clock')
+    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
+      .toContain('compact')
+    expect(container.querySelector('[data-testid="display-locale-readonly"]')?.textContent)
+      .toContain('no writer')
+    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
+    expect([...container.querySelectorAll('.set-seg-b')].map(b => b.textContent))
+      .toEqual(['compact', 'regular', 'spacious'])
+    expect(sessionStorage.getItem('masc.settings.local.displayLocale')).toBeNull()
+    expect(sessionStorage.getItem('masc.settings.local.displayTimezone')).toBeNull()
+    expect(sessionStorage.getItem('masc.settings.local.displayClock24')).toBeNull()
 
     render(null, container)
     render(html`<${SettingsSurface} />`, container)
 
     expect(tweaksDensity.value).toBe('compact')
-    expect(container.querySelector('[data-testid="display-local-summary"]')?.textContent)
-      .toContain('compact · EN · UTC · 12-hour clock')
+    expect(container.querySelector('[data-testid="display-live-summary"]')?.textContent)
+      .toContain('compact')
   })
 
   it('falls invalid settings sections back to runtime without a fake subsection', () => {

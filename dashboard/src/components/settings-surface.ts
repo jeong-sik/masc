@@ -38,7 +38,6 @@ type PathCheckResult = {
   readonly message: string
 }
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
-const SETTINGS_LOCAL_STORAGE_PREFIX = 'masc.settings.local.'
 const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
 
 const SET_SECTIONS: [SectionId, string, string][] = [
@@ -97,49 +96,6 @@ export function checkSettingsMcpEndpoint(value: string): PathCheckResult {
   } catch {
     return { ok: false, message: 'invalid URL' }
   }
-}
-
-function readLocalPreviewString(key: string, fallback: string): string {
-  try {
-    if (typeof sessionStorage === 'undefined') return fallback
-    return sessionStorage.getItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`) ?? fallback
-  } catch {
-    return fallback
-  }
-}
-
-function writeLocalPreviewString(key: string, value: string) {
-  try {
-    if (typeof sessionStorage === 'undefined') return
-    sessionStorage.setItem(`${SETTINGS_LOCAL_STORAGE_PREFIX}${key}`, value)
-  } catch {
-    // Local preview settings are best-effort; blocked storage should not break Settings.
-  }
-}
-
-function readLocalPreviewBool(key: string, fallback: boolean): boolean {
-  const raw = readLocalPreviewString(key, fallback ? 'true' : 'false')
-  if (raw === 'true') return true
-  if (raw === 'false') return false
-  return fallback
-}
-
-function useLocalPreviewString(key: string, initialValue: string): [string, (next: string) => void] {
-  const [value, setValue] = useState(() => readLocalPreviewString(key, initialValue))
-  const setStoredValue = (next: string) => {
-    setValue(next)
-    writeLocalPreviewString(key, next)
-  }
-  return [value, setStoredValue]
-}
-
-function useLocalPreviewBool(key: string, initialValue: boolean): [boolean, (next: boolean) => void] {
-  const [value, setValue] = useState(() => readLocalPreviewBool(key, initialValue))
-  const setStoredValue = (next: boolean) => {
-    setValue(next)
-    writeLocalPreviewString(key, next ? 'true' : 'false')
-  }
-  return [value, setStoredValue]
 }
 
 // [fusion] preset shape from config/runtime.toml [fusion] — keeper-v2
@@ -212,22 +168,6 @@ export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level)]
 }
 
-function SetToggle({ on, onChange }: { on: boolean; onChange: (v: boolean) => void }) {
-  return html`
-    <button
-      type="button"
-      class=${`set-toggle ${on ? 'on' : ''}`}
-      role="switch"
-      aria-checked=${on}
-      data-testid="set-toggle"
-      data-active=${on ? 'true' : 'false'}
-      onClick=${() => onChange(!on)}
-    >
-      <span class="knob"></span>
-    </button>
-  `
-}
-
 function SetSeg({
   value,
   options,
@@ -267,7 +207,7 @@ function SetRow({ label, hint, children }: { label: ComponentChildren; hint?: st
   `
 }
 
-function PreviewBadge({ label = 'local only' }: { label?: string }) {
+function PreviewBadge({ label }: { label: string }) {
   return html`
     <span
       class="set-preview-badge"
@@ -483,8 +423,8 @@ function settingsSectionState(
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
   if (section === 'notify') return { mode: 'live', label: 'live thresholds read-only' }
-  if (section === 'display') return { mode: 'mixed', label: 'theme/density live + local preview' }
-  return { mode: 'local', label: 'local preview only' }
+  if (section === 'display') return { mode: 'live', label: 'theme/density live' }
+  return { mode: 'local', label: 'read-only preview' }
 }
 
 function LogFilter({
@@ -717,11 +657,6 @@ export function SettingsSurface() {
       tweaksDensity.value = next as Density
     }
   }
-  const [tz, setTz] = useLocalPreviewString('displayTimezone', 'Asia/Seoul')
-  const [locale, setLocale] = useLocalPreviewString('displayLocale', 'KO')
-  const [clock24, setClock24] = useLocalPreviewBool('displayClock24', true)
-  const clockLabel = clock24 ? '24-hour clock' : '12-hour clock'
-
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
   const sectionState = settingsSectionState(sec, fusionSettingsWritable)
 
@@ -787,8 +722,7 @@ export function SettingsSurface() {
               })}
             </div>
           `)}
-          <!-- keeper-v2 settings.jsx:262 — KO nav-note copy. -->
-          <div class="set-nav-note">live-backed 섹션은 API에 저장됩니다. local preview 섹션은 이 브라우저 세션에서만 바뀝니다.</div>
+          <div class="set-nav-note">live-backed 섹션은 API나 대시보드 shell 상태를 직접 읽고 씁니다. writer가 없는 값은 read-only로만 표시합니다.</div>
         </nav>
 
         <div class="set-content">
@@ -1067,11 +1001,11 @@ export function SettingsSurface() {
 
             ${sec === 'display' && html`
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
-                Theme and density apply to this browser immediately. Language, timezone and clock format are browser-session previews only until the dashboard has a renderer-wide locale/time setting.
+                Theme and density apply to this browser immediately. Locale, timezone and clock format are not shown here until the dashboard has a real renderer-wide setting.
               </div>
-              <div class="set-local-summary" data-testid="display-local-summary">
-                <span>display session</span>
-                <span class="mono">${density} · ${locale} · ${tz} · ${clockLabel}</span>
+              <div class="set-local-summary" data-testid="display-live-summary">
+                <span>display shell</span>
+                <span class="mono">${density}</span>
               </div>
               <${SetRow} label="Theme" hint="Live color palette — Dark / StyleSeed / Paper">
                 <${ThemeSwitch} />
@@ -1082,22 +1016,10 @@ export function SettingsSurface() {
                   <${SetSeg} value=${density} options=${DISPLAY_DENSITY_OPTIONS} onChange=${setDensity} />
                 </div>
               <//>
-              <${SetRow} label="Language" hint="Session preview for UI labels">
-                <div class="set-tg-control">
-                  <${PreviewBadge} />
-                  <${SetSeg} value=${locale} options=${['KO', 'EN']} onChange=${setLocale} />
-                </div>
-              <//>
-              <${SetRow} label="Timezone" hint="Session preview for timestamp basis">
-                <div class="set-tg-control">
-                  <${PreviewBadge} />
-                  <${SetSeg} value=${tz} options=${['Asia/Seoul', 'Asia/Tokyo', 'UTC']} onChange=${setTz} />
-                </div>
-              <//>
-              <${SetRow} label="24-hour clock" hint="Session preview for time format">
-                <div class="set-tg-control">
-                  <${PreviewBadge} />
-                  <${SetToggle} on=${clock24} onChange=${setClock24} />
+              <${SetRow} label="Locale / time format" hint="No dashboard-wide renderer setting is exposed yet">
+                <div class="set-truth-value" data-testid="display-locale-readonly">
+                  <span class="mono">read-only</span>
+                  <span class="set-truth-source">no writer</span>
                 </div>
               <//>
             `}

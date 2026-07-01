@@ -602,7 +602,13 @@ let () =
     }
   in
   let got = R.operator_disposition passive_receipt in
-  let want = R.Disp_pass, R.Reason_turn_budget_exhausted in
+  (* RFC-0303 Phase 0: passive-only is not an operator page even when the
+     turn also exhausted its budget (review-flagged gap on this PR: the
+     turn_budget_exhausted branch used to return before ever reaching the
+     Contract_passive_only carve-out, so its Disp_pass carried the
+     misleading [Reason_turn_budget_exhausted] instead of
+     [Reason_passive_no_action]). *)
+  let want = R.Disp_pass, R.Reason_passive_no_action in
   check
     (Printf.sprintf
        "no-work passive turn budget exhaustion want=%s got=%s"
@@ -613,7 +619,11 @@ let () =
     { passive_receipt with current_task_id = Some "TASK-1" }
   in
   let got = R.operator_disposition active_passive_receipt in
-  let want = R.Disp_alert_exhausted, R.Reason_turn_budget_exhausted in
+  (* Same carve-out extends to passive-WITH-work-scope turns (current_task_id
+     set): before this fix this case fell through to
+     [Disp_alert_exhausted, Reason_turn_budget_exhausted], paging an operator
+     for activity RFC-0303 says should never page. *)
+  let want = R.Disp_pass, R.Reason_passive_no_action in
   check
     (Printf.sprintf
        "active passive turn budget exhaustion want=%s got=%s"

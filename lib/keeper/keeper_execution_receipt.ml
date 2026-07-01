@@ -361,8 +361,18 @@ let operator_disposition (receipt : t)
       | Pre_dispatch_success _
       | Other _ -> false
     then
-      if completion_contract_satisfied receipt.completion_contract_result
-         || (passive_only_without_work_scope receipt && receipt.outcome = `Ok)
+      (* RFC-0303 Phase 0: a passive-only turn is not an operator page even
+         when it also exhausted its turn budget. Without this, the
+         [Contract_passive_only] carve-out below is unreachable for any
+         turn_budget_exhausted terminal_reason, since this branch already
+         returns first -- exactly the gap review-flagged for this PR.
+         [passive_only_without_work_scope] implies [Contract_passive_only],
+         so checking the result variant directly subsumes it here (the
+         work-scope/outcome refinement only matters for the [Reason_healthy]
+         branch below, which this arm never reaches). *)
+      if receipt.completion_contract_result = Contract_passive_only
+      then Disp_pass, Reason_passive_no_action
+      else if completion_contract_satisfied receipt.completion_contract_result
       then Disp_pass, Reason_turn_budget_exhausted
       else Disp_alert_exhausted, Reason_turn_budget_exhausted
     else if passive_only_without_work_scope receipt

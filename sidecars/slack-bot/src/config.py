@@ -22,7 +22,15 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
-from .constants import SLACK_MESSAGE_LIMIT as SLACK_MESSAGE_LIMIT
+from .constants import SLACK_MESSAGE_LIMIT
+
+__all__ = [
+    "BotConfig",
+    "DEFAULT_BINDING_STORE_PATH",
+    "DEFAULT_STATE_DIR",
+    "DEFAULT_STATUS_PATH",
+    "SLACK_MESSAGE_LIMIT",
+]
 
 DEFAULT_STATE_DIR: Final[str] = ".gate/runtime/slack"
 DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/slack/bindings.json"

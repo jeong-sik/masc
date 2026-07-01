@@ -115,6 +115,19 @@ function dequoteTomlKey(rawKey: string | undefined): string {
   return trimmed
 }
 
+// TOML bare keys may only contain ASCII letters, digits, underscores, and
+// hyphens (https://toml.io/en/v1.0.0#keys) -- the same charset keyLineMatch
+// accepts unquoted. Anything else must be written as a quoted basic string.
+const BARE_TOML_KEY = /^[A-Za-z0-9_-]+$/
+
+// Serialize a key for a brand-new `key = value` line. JSON.stringify produces
+// a valid TOML basic string for the ASCII range keeper/field names use
+// (matching backslash/double-quote escaping), so a name requiring quoting is
+// never written out as an invalid bare key.
+function serializeTomlKey(key: string): string {
+  return BARE_TOML_KEY.test(key) ? key : JSON.stringify(key)
+}
+
 function stripInlineComment(raw: string): string {
   let quote: '"' | "'" | null = null
   let escaped = false
@@ -395,11 +408,16 @@ export function setRuntimeTomlKey(
   for (let index = section.start + 1; index < section.end; index += 1) {
     const match = keyLineMatch(lines[index] ?? '')
     if (match && dequoteTomlKey(match[2]) === key) {
-      lines[index] = `${match[1] ?? ''}${key}${match[3] ?? ' = '}${serialized}`
+      // Reuse the existing key token verbatim -- do not re-serialize it from
+      // the plain `key` argument. A quoted TOML key is not just cosmetic (it
+      // may carry characters illegal in a bare key, or have been emitted
+      // deliberately by the backend/SSOT writer), so updating only the value
+      // must not silently normalize `"nick0cave"` down to `nick0cave`.
+      lines[index] = `${match[1] ?? ''}${match[2]}${match[3] ?? ' = '}${serialized}`
       return joinLines(lines)
     }
   }
-  lines.splice(section.end, 0, `${key} = ${serialized}`)
+  lines.splice(section.end, 0, `${serializeTomlKey(key)} = ${serialized}`)
   return joinLines(lines)
 }
 

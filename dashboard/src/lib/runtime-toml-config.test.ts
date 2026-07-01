@@ -131,6 +131,30 @@ mad-improver = "runpod_mtp.qwen"
       '"ollama_cloud.kimi-k2-6"',
     )
     expect(next.match(/nick0cave/g)).toHaveLength(1)
+    // The original quoted key spelling must survive an in-place value update --
+    // only the value should change, not the key syntax the TOML author chose.
+    expect(next).toContain('"nick0cave" = "ollama_cloud.kimi-k2-6"')
+    expect(next).not.toContain('\nnick0cave = ')
+  })
+
+  it('does not write a keeper name requiring quotes as an invalid bare key', () => {
+    const withAssignmentsSection = `${sourceText}
+
+[runtime.assignments]
+sangsu = "runpod_mtp.qwen"
+`
+
+    const next = setRuntimeTomlKey(
+      withAssignmentsSection,
+      'runtime.assignments',
+      'qa king',
+      'runpod_mtp.qwen',
+    )
+
+    expect(next).toContain('"qa king" = "runpod_mtp.qwen"')
+    expect(getRuntimeTomlKey(next, 'runtime.assignments', 'qa king')).toBe(
+      '"runpod_mtp.qwen"',
+    )
   })
 
   it('warns instead of silently dropping a line keyLineMatch still cannot parse', () => {

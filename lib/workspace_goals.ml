@@ -965,7 +965,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                            ~tool_name
                            ~start_time
                            ~on_cleared
-                       else on_cleared ())))))
+                       else on_cleared ()))))))
   | Ok _, Ok None, _ ->
     validation_error_result
       ~tool_name

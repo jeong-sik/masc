@@ -39,7 +39,7 @@ let test_tool_completion_watchdog_progress_policy () =
     false;
   List.iter
     (fun tool_name -> check_watchdog_completion_progress tool_name false)
-    Keeper_tool_capability_axis.polling_read_tool_names;
+    Masc.Keeper_tool_capability_axis.polling_read_tool_names;
   check_watchdog_completion_progress
     (keeper_tool_name Keeper_tool_name.Task_claim)
     true;

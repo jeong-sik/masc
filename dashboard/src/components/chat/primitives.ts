@@ -1923,10 +1923,9 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
 // regardless of memo (the test 're-renders the settled bubble when action is a
 // new object…' locks this).
 //
-// KNOWN GAP: tool/thinking turns render through the un-memoized TurnWorkBundle,
-// whose `tools` array is rebuilt every render (buildChatRenderUnits), so its
-// trace cards are NOT yet skipped on a stream chunk. Closing that needs the
-// unit arrays stabilized first — a separate follow-up.
+// Tool/thinking turns render through TurnWorkBundle. buildChatRenderUnits
+// rebuilds `tools` arrays each render, so the bundle comparator compares entry
+// references inside those arrays instead of the array object itself.
 const ChatMessageBubble = memo(function ChatMessageBubble({
   entry,
   showMetadata = true,

@@ -147,6 +147,9 @@ describe('applyKeeperStreamEvent', () => {
         ok: true,
       },
     })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
+    })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('완료했습니다.')
@@ -186,6 +189,9 @@ describe('applyKeeperStreamEvent', () => {
         ok: true,
       },
     })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
+    })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('큐에서 완료했습니다.')
@@ -215,6 +221,9 @@ describe('applyKeeperStreamEvent', () => {
         ok: true,
       },
     })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
+    })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.text).toBe('')
@@ -241,6 +250,9 @@ describe('applyKeeperStreamEvent', () => {
         status: 'done',
         ok: true,
       },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
     })).toBeNull()
 
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')

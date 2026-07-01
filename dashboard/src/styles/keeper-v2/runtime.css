@@ -53,6 +53,9 @@
 .rt-card-id { font-size: var(--fs-13); color: var(--volt-strong); }
 .rt-card-name { font-size: 12.5px; color: var(--text-bright); }
 .rt-proto { margin-left: auto; font-size: var(--fs-10); color: var(--text-dim); border: 1px solid var(--border-main); padding: 1px 7px; border-radius: var(--radius-pill); }
+.rt-delete-provider { flex: none; border: 1px solid var(--err-border); border-radius: var(--radius-sm); background: var(--bad-soft); color: var(--bad-light); font-family: var(--font-ui); font-size: var(--fs-11); padding: 4px 9px; cursor: pointer; transition: 0.14s; }
+.rt-delete-provider:hover { background: color-mix(in oklab, var(--bad-light) 18%, transparent); color: var(--text-bright); }
+.rt-delete-provider:disabled { cursor: not-allowed; opacity: 0.55; }
 .rt-field { display: flex; align-items: center; gap: 10px; margin-top: 7px; }
 .rt-field .sub-k { min-width: 78px; }
 .rt-field .rt-input { flex: 1; }

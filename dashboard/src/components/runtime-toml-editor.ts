@@ -11,6 +11,7 @@ import {
 } from '../api/dashboard'
 import { errorToString } from '../lib/format-string'
 import {
+  cascadeDeleteProvider,
   createRuntimeTomlBinding,
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
@@ -329,6 +330,13 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
     setError(null)
   }
 
+  function handleDeleteProvider(providerId: string) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => cascadeDeleteProvider(current, providerId))
+    setNotice(null)
+    setError(null)
+  }
+
   function handleProviderTransportChange(
     providerId: string,
     field: RuntimeProviderTransportEditableField,
@@ -616,6 +624,7 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
                 onAddProvider=${handleAddProvider}
                 onAddModel=${handleAddModel}
                 onAddBinding=${handleAddBinding}
+                onDeleteProvider=${handleDeleteProvider}
                 onProviderTransportChange=${handleProviderTransportChange}
                 onProviderCredentialChange=${handleProviderCredentialChange}
               />

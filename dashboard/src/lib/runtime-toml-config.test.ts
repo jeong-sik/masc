@@ -299,17 +299,78 @@ sangsu = "runpod_mtp.qwen"
   it('cascades provider deletion to credentials, bindings, and default runtime', () => {
     const next = cascadeDeleteProvider(sourceText, 'runpod_mtp')
     const env = parseRuntimeTomlEnvironment(next)
-    
+
     expect(env.providers.length).toBe(0)
     expect(env.bindings.length).toBe(0)
     expect(next).not.toContain('default = "runpod_mtp.qwen"')
     expect(next).not.toContain('[providers.runpod_mtp.credentials]')
   })
 
+  it('retargets default and clears dependent lanes when deleting a provider with a fallback binding', () => {
+    const withFallback = `${sourceText.replace(
+      'default = "runpod_mtp.qwen"',
+      'default = "runpod_mtp.qwen"\nlibrarian = "runpod_mtp.qwen"\ncross_verifier = "runpod_mtp.qwen"',
+    )}
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+streaming = true
+
+[openai.gpt]
+max-concurrent = 1
+
+[runtime.assignments]
+sangsu = "runpod_mtp.qwen"
+`
+
+    const next = cascadeDeleteProvider(withFallback, 'runpod_mtp')
+    const env = parseRuntimeTomlEnvironment(next)
+
+    expect(env.defaultRuntimeId).toBe('openai.gpt')
+    expect(env.librarianRuntimeId).toBe('')
+    expect(env.crossVerifierRuntimeId).toBe('')
+    expect(env.assignments).toEqual({})
+    expect(env.providers.map(p => p.id)).toEqual(['openai'])
+    expect(env.bindings.map(b => b.id)).toEqual(['openai.gpt'])
+    expect(next).toContain('default = "openai.gpt"')
+    expect(next).not.toContain('[providers.runpod_mtp]')
+    expect(next).not.toContain('[runpod_mtp.qwen]')
+    expect(next).not.toContain('sangsu = "runpod_mtp.qwen"')
+  })
+
+  it('does not delete reserved runtime namespaces when a legacy provider id is reserved', () => {
+    const withReservedProvider = `${sourceText}
+
+[providers.runtime]
+display-name = "Legacy Reserved"
+protocol = "openai-compatible-http"
+endpoint = "https://reserved.example/v1"
+
+[runtime.assignments]
+sangsu = "runpod_mtp.qwen"
+`
+
+    const next = cascadeDeleteProvider(withReservedProvider, 'runtime')
+    const env = parseRuntimeTomlEnvironment(next)
+
+    expect(next).not.toContain('[providers.runtime]')
+    expect(next).toContain('[runtime.assignments]')
+    expect(env.defaultRuntimeId).toBe('runpod_mtp.qwen')
+    expect(env.assignments).toEqual({ sangsu: 'runpod_mtp.qwen' })
+    expect(env.providers.map(provider => provider.id)).toEqual(['runpod_mtp'])
+    expect(env.bindings.map(binding => binding.id)).toEqual(['runpod_mtp.qwen'])
+  })
+
   it('can delete max-context field by setting it to null', () => {
     const next = setRuntimeTomlModelField(sourceText, 'qwen', 'max-context', null)
     const env = parseRuntimeTomlEnvironment(next)
-    
+
     expect(env.models[0]?.maxContext).toBeNull()
     expect(next).not.toContain('max-context =')
   })

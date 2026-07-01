@@ -95,8 +95,8 @@ let board_tool_curation_read : Masc_domain.tool_schema =
   { name = "masc_board_curation_read"
   ; description =
       "Read the latest AI curation snapshot for the board: TL;DR summary, post ordering, \
-       highlights, tag suggestions, answer matches, health score, rationale, and \
-       operator-auditable provenance. Returns null when no snapshot has been submitted \
+       highlights, tag suggestions, answer matches, rationale, and operator-auditable \
+       provenance. Returns null when no snapshot has been submitted \
        yet."
   ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
   }
@@ -106,8 +106,8 @@ let board_tool_curation_submit : Masc_domain.tool_schema =
   { name = "masc_board_curation_submit"
   ; description =
       "Submit an AI curation snapshot for the board. This records summary, recommended \
-       ordering, highlights, tag suggestions, answer matches, health score, rationale, \
-       and provenance without mutating board posts/comments/votes."
+       ordering, highlights, tag suggestions, answer matches, rationale, and provenance \
+       without mutating board posts/comments/votes."
   ; input_schema =
       `Assoc
         [ "type", `String "object"
@@ -149,19 +149,6 @@ let board_tool_curation_submit : Masc_domain.tool_schema =
                       , `String
                           "Objects with question_post_id, answer_post_id, score, \
                            rationale" )
-                    ] )
-              ; ( "health_score"
-                , `Assoc
-                    [ "type", `String "number"
-                    ; "minimum", `Float 0.0
-                    ; "maximum", `Float 1.0
-                    ; ( "description"
-                      , `String "Optional normalized health score in [0.0, 1.0]" )
-                    ] )
-              ; ( "health_components"
-                , `Assoc
-                    [ "type", `String "array"
-                    ; "description", `String "Objects with name, score, weight, rationale"
                     ] )
               ; ( "rationale"
                 , `Assoc

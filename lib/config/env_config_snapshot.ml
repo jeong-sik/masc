@@ -388,8 +388,6 @@ let economy_entries =
       "Hustle behavior threshold";
     entry ~default:"5.0" "MASC_ECONOMY_INITIAL_BALANCE"
       "Initial agent balance";
-    entry ~default:"true" "MASC_ECONOMY_REPUTATION_MULTIPLIER"
-      "Enable reputation multiplier";
     entry ~default:"1.0" "MASC_ECONOMY_REWARD_BOARD_POST"
       "Reward for a board post";
     entry ~default:"0.5" "MASC_ECONOMY_REWARD_MENTION_RESPONSE"

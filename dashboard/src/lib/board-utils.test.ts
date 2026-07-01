@@ -1,5 +1,10 @@
 import { describe, it, expect } from 'vitest'
-import { stripInlineMarkdown, dedupeLeadingHeading } from './board-utils'
+import {
+  contributorQualityBandLabel,
+  contributorQualityPercent,
+  dedupeLeadingHeading,
+  stripInlineMarkdown,
+} from './board-utils'
 
 describe('stripInlineMarkdown', () => {
   it('strips bold markers', () => {
@@ -71,5 +76,19 @@ describe('dedupeLeadingHeading', () => {
   it('strips leading heading marker from title when comparing', () => {
     // title 자체가 '# 제목' 형태여도 정규화하여 body 첫 헤더와 비교한다
     expect(dedupeLeadingHeading('# 제목', '# 제목\n본문')).toBe('본문')
+  })
+})
+
+describe('contributor quality helpers', () => {
+  it('uses accountability_score when legacy score is absent', () => {
+    const quality = {
+      source: 'agent_reputation',
+      completion_rate: 0.8,
+      response_rate: 0.6,
+      accountability_score: 0.9,
+    }
+
+    expect(contributorQualityPercent(quality)).toBe(90)
+    expect(contributorQualityBandLabel(quality)).toBe('우수')
   })
 })

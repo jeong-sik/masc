@@ -811,7 +811,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
                      ~now_ts
               in
               (* C0: Trust Observatory — raw signals side-by-side, no synthesis.
-                 Reputation (overall_score), Thompson (alpha/beta).
+                 Reputation (accountability + v2 dimensions), Thompson (alpha/beta).
                  Gated by MASC_DECISION_LAYER_LEVEL >= 3. *)
               let trust_observatory =
                 if compact

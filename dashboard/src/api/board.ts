@@ -412,18 +412,38 @@ function normalizeBoardModerationStatus(raw: unknown): BoardModerationStatus {
 function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality | null {
   if (!isRecord(raw)) return null
   const score = asNumber(raw.score)
-  if (score === undefined) return null
+  const completionRate = asNumber(raw.completion_rate)
+  const responseRate = asNumber(raw.response_rate)
+  const boardPosts = asNumber(raw.board_posts)
+  const boardComments = asNumber(raw.board_comments)
+  const accountabilityScore = asNumber(raw.accountability_score)
+  const thompsonConfidence = asNumber(raw.thompson_confidence)
+  const source = asString(raw.source, '').trim() || undefined
+  const band = normalizeBoardContributorBand(raw.band)
+  const autonomyLevel = asString(raw.autonomy_level, '').trim() || undefined
+  if (
+    score === undefined
+    && completionRate === undefined
+    && responseRate === undefined
+    && boardPosts === undefined
+    && boardComments === undefined
+    && accountabilityScore === undefined
+    && thompsonConfidence === undefined
+    && source === undefined
+    && band === undefined
+    && autonomyLevel === undefined
+  ) return null
   return {
     score,
-    band: normalizeBoardContributorBand(raw.band),
-    source: asString(raw.source, '').trim() || undefined,
-    completion_rate: asNumber(raw.completion_rate),
-    response_rate: asNumber(raw.response_rate),
-    board_posts: asNumber(raw.board_posts),
-    board_comments: asNumber(raw.board_comments),
-    accountability_score: asNumber(raw.accountability_score),
-    autonomy_level: asString(raw.autonomy_level, '').trim() || undefined,
-    thompson_confidence: asNumber(raw.thompson_confidence),
+    band,
+    source,
+    completion_rate: completionRate,
+    response_rate: responseRate,
+    board_posts: boardPosts,
+    board_comments: boardComments,
+    accountability_score: accountabilityScore,
+    autonomy_level: autonomyLevel,
+    thompson_confidence: thompsonConfidence,
   }
 }
 

@@ -300,14 +300,11 @@ let backend () =
           b
 
 let sort_posts_in_memory ~sort_by (posts : Board.post list) =
+  (* Ranking formulas live in [Board_sort] (single source of truth) so the
+     Hot/Trending definitions cannot drift between this in-memory sort and
+     [Board_core.list_posts]'s cached default sort. See [Board_sort]. *)
   match sort_by with
-  | Hot ->
-      List.sort (fun (a : Board.post) (b : Board.post) ->
-        let score_a = a.votes_up - a.votes_down in
-        let score_b = b.votes_up - b.votes_down in
-        let cmp = Stdlib.Int.compare score_b score_a in
-        if cmp <> 0 then cmp
-        else Stdlib.Float.compare b.created_at a.created_at) posts
+  | Hot -> List.sort Board_sort.hot_compare posts
   | Recent ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
         Stdlib.Float.compare b.created_at a.created_at) posts
@@ -315,19 +312,7 @@ let sort_posts_in_memory ~sort_by (posts : Board.post list) =
       List.sort (fun (a : Board.post) (b : Board.post) ->
         Stdlib.Float.compare b.updated_at a.updated_at) posts
   | Trending ->
-      let now = Time_compat.now () in
-      List.sort (fun (a : Board.post) (b : Board.post) ->
-        let age_a = Stdlib.Float.max 1.0 ((now -. a.created_at) /. Masc_time_constants.hour) in
-        let age_b = Stdlib.Float.max 1.0 ((now -. b.created_at) /. Masc_time_constants.hour) in
-        let score_a =
-          Stdlib.Float.of_int (a.votes_up - a.votes_down + (a.reply_count * 2))
-          /. (Stdlib.( **) age_a 0.5)
-        in
-        let score_b =
-          Stdlib.Float.of_int (b.votes_up - b.votes_down + (b.reply_count * 2))
-          /. (Stdlib.( **) age_b 0.5)
-        in
-        Stdlib.Float.compare score_b score_a) posts
+      List.sort (Board_sort.trending_compare ~now:(Time_compat.now ())) posts
   | Discussed ->
       List.sort (fun (a : Board.post) (b : Board.post) ->
         let cmp = Stdlib.Int.compare b.reply_count a.reply_count in
@@ -686,19 +671,9 @@ let backend_name () =
 
 (* AI curation delegate — thin wrappers around Board_curation *)
 
-let validate_curation_health_score = function
-  | None -> None
-  | Some score
-    when Float.is_finite score && score >= 0.0 && score <= 1.0 ->
-    Some score
-  | Some score ->
-    invalid_arg
-      (Printf.sprintf "health_score must be in [0.0, 1.0], got %g" score)
-
 let submit_curation_snapshot ~submitted_by ?summary ~ordering ~highlights
-    ?(tag_suggestions = []) ?(answer_matches = []) ?health_score
-    ?(health_components = []) ~rationale ?(provenance = `Assoc []) () =
-  let health_score = validate_curation_health_score health_score in
+    ?(tag_suggestions = []) ?(answer_matches = []) ~rationale
+    ?(provenance = `Assoc []) () =
   let snap : Board_curation.curation_snapshot = {
     id = Board_curation.generate_id ();
     generated_at = Time_compat.now ();
@@ -708,8 +683,6 @@ let submit_curation_snapshot ~submitted_by ?summary ~ordering ~highlights
     highlights;
     tag_suggestions;
     answer_matches;
-    health_score;
-    health_components;
     rationale;
     provenance;
   } in

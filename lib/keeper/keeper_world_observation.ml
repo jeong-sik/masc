@@ -1015,12 +1015,16 @@ let proactive_work_signal_present ~(meta : keeper_meta) (observation : world_obs
 (** Compute effective scheduled autonomous cooldown with idle decay.
     After extended idle (> base cooldown), halve the cooldown each
     additional period, down to a configurable floor.  This prevents
-    permanent silence when no external events arrive. *)
+    permanent silence when no external events arrive.
+
+    Board health no longer adjusts this cooldown: the curation
+    health_score was an LLM-submitted projection with no rubric, and
+    gating keeper polling on it violated the projection-only contract
+    declared in [Board_curation].  Removed in board-karma-v2 (S1). *)
 let effective_scheduled_autonomous_cooldown
       ~(base_cooldown : int)
       ~(since_last : int)
       ?(consecutive_noop_count = 0)
-      ?(board_health_score : float option)
       ()
   : int
   =
@@ -1037,24 +1041,13 @@ let effective_scheduled_autonomous_cooldown
   (* Floor must not exceed the effective base cooldown — otherwise decay would
      paradoxically increase a short cooldown. *)
   let floor = min min_cooldown effective_base in
-  (* Board health score adjustment: unhealthy board (<0.3) → 2x cooldown
-     (less polling), healthy board (>0.7) → 0.5x (more polling when the
-     board is thriving). Neutral/None → 1.0x. *)
-  let health_multiplier =
-    match board_health_score with
-    | None -> 1.0
-    | Some h when h < 0.3 -> 2.0
-    | Some h when h > 0.7 -> 0.5
-    | Some _ -> 1.0
-  in
-  let health_base = max 1 (int_of_float (Float.round (float_of_int effective_base *. health_multiplier))) in
-  if since_last <= health_base
-  then health_base
+  if since_last <= effective_base
+  then effective_base
   else (
-    let decay_periods = (since_last - health_base) / max 1 health_base in
+    let decay_periods = (since_last - effective_base) / max 1 effective_base in
     let capped_periods = min decay_periods 4 in
     let factor = 1.0 /. Float.pow 2.0 (float_of_int capped_periods) in
-    max floor (int_of_float (Float.round (float_of_int health_base *. factor))))
+    max floor (int_of_float (Float.round (float_of_int effective_base *. factor))))
 ;;
 
 let keeper_cycle_decision
@@ -1126,19 +1119,11 @@ let keeper_cycle_decision
         ; idle_gate_sec = Some idle_gate_sec
         }
       else (
-        (* Read latest board curation snapshot for health-based
-           cooldown adjustment. *)
-        let board_health_score =
-          match Board_curation.latest_snapshot () with
-          | Some { health_score = Some h; _ } -> Some h
-          | _ -> None
-        in
         let effective_cooldown =
           effective_scheduled_autonomous_cooldown
             ~base_cooldown:meta.proactive.cooldown_sec
             ~since_last:since_last_scheduled_autonomous
             ~consecutive_noop_count:meta.runtime.proactive_rt.consecutive_noop_count
-            ?board_health_score
             ()
         in
         let task_cooldown_divisor =

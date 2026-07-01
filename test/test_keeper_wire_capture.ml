@@ -36,6 +36,16 @@ let read_file path =
     ~finally:(fun () -> close_in ic)
     (fun () -> really_input_string ic (in_channel_length ic))
 
+let write_file path content =
+  let oc = open_out_bin path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () -> output_string oc content)
+
+let ensure_dir path =
+  if Sys.file_exists path then ()
+  else Unix.mkdir path 0o755
+
 (* Recursively collect every *.jsonl under [dir]. *)
 let rec find_jsonl dir =
   if not (Sys.file_exists dir) then []
@@ -148,6 +158,24 @@ let response_capture_writes_redacted () =
     Alcotest.(check bool) "turn_id recorded" true
       (contains ~needle:"\"turn_id\":9" content))
 
+let capture_prunes_old_files () =
+  with_flag "1" (fun () ->
+    with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
+      with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "128" (fun () ->
+        let base = Filename.temp_dir "wirecap_prune" "" in
+        let capture_dir = Filename.concat base "wire-capture" in
+        let old_month = Filename.concat capture_dir "2000-01" in
+        ensure_dir capture_dir;
+        ensure_dir old_month;
+        let old_file = Filename.concat old_month "01.jsonl" in
+        write_file old_file (String.make 1024 'x');
+        Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:10
+          ~response_text:"bounded";
+        Alcotest.(check bool) "old capture file pruned" false
+          (Sys.file_exists old_file);
+        Alcotest.(check int) "only current capture remains" 1
+          (List.length (find_jsonl base)))))
+
 let () =
   Alcotest.run "keeper_wire_capture"
     [
@@ -170,5 +198,7 @@ let () =
             response_disabled_is_noop;
           Alcotest.test_case "enabled writes redacted jsonl" `Quick
             response_capture_writes_redacted;
+          Alcotest.test_case "capture store prunes old files" `Quick
+            capture_prunes_old_files;
         ] );
     ]

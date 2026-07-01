@@ -81,6 +81,42 @@ module KeeperMetrics = struct
   let max_rotated_files = get_int_nonneg ~default:1 "MASC_KEEPER_METRICS_MAX_ROTATED"
 end
 
+(** {1 Keeper Wire Capture Configuration} *)
+
+module KeeperWireCapture = struct
+  let clamp_int ~min_value ~max_value value =
+    max min_value (min max_value value)
+  ;;
+
+  let retention_days_default = 3
+  let retention_days_ceiling = 30
+  let max_bytes_default = 64 * 1024 * 1024
+  let max_bytes_ceiling = 1024 * 1024 * 1024
+
+  (** Maximum age for [<masc_root>/wire-capture] day files retained by the
+      diagnostic MASC->OAS wire-capture harness. Default is 3 days. Range:
+      [1, 30] days.
+
+      @category Policies @ops_class operator *)
+  let retention_days () =
+    get_int_nonneg
+      ~default:retention_days_default
+      "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS"
+    |> clamp_int ~min_value:1 ~max_value:retention_days_ceiling
+  ;;
+
+  (** Maximum total bytes retained below [<masc_root>/wire-capture] after
+      opportunistic cleanup. The current day file is preserved by
+      {!Dated_jsonl}, so this is a cross-day retention guard rather than a
+      per-record truncation policy. Default is 64 MiB. Range: [1, 1024] MiB.
+
+      @category Policies @ops_class operator *)
+  let max_bytes () =
+    get_int_nonneg ~default:max_bytes_default "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES"
+    |> clamp_int ~min_value:1 ~max_value:max_bytes_ceiling
+  ;;
+end
+
 (** {1 Keeper Interesting Alert Configuration} *)
 
 module KeeperAlert = struct

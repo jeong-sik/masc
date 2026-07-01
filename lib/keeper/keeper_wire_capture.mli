@@ -9,8 +9,10 @@
 
     Writes are best-effort and dated under
     [<masc_root>/wire-capture/YYYY-MM/DD.jsonl] (same [Dated_jsonl] per-day
-    store the cost ledger uses). A write failure is logged and never interrupts
-    the turn.
+    store the cost ledger uses). Retention is bounded by
+    [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS] and
+    [MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES]. A write failure is logged and never
+    interrupts the turn.
 
     Motivation: the request boundary is the primary suspect for
     self-reinforcing repetition — the keeper's own prior visible text is

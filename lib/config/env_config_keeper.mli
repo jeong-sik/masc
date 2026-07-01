@@ -28,6 +28,13 @@ module KeeperMetrics : sig
   val max_rotated_files : int
 end
 
+(** {1 Keeper wire capture} *)
+
+module KeeperWireCapture : sig
+  val retention_days : unit -> int
+  val max_bytes : unit -> int
+end
+
 (** {1 Keeper interesting-alert fanout} *)
 
 module KeeperAlert : sig

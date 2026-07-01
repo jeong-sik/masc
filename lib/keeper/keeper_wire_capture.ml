@@ -18,7 +18,13 @@ let redact = Llm_provider.Secret_redactor.redact_string
 let wire_capture_dir masc_root = Filename.concat masc_root "wire-capture"
 
 let write_payload ~masc_root (payload : Yojson.Safe.t) =
-  let store = Dated_jsonl.create ~base_dir:(wire_capture_dir masc_root) () in
+  let store =
+    Dated_jsonl.create
+      ~base_dir:(wire_capture_dir masc_root)
+      ~retention_days:(Env_config_keeper.KeeperWireCapture.retention_days ())
+      ~max_bytes:(Env_config_keeper.KeeperWireCapture.max_bytes ())
+      ()
+  in
   Dated_jsonl.append store payload
 
 let best_effort ~masc_root f =

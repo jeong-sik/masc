@@ -266,12 +266,53 @@ let typed_execute_response_cwd_json
     | None -> `String cwd
   else `String cwd
 
+let path_reject_deterministic_reason msg =
+  match Keeper_path_check_error.parse_prefix msg with
+  | Some (Keeper_path_check_error.Path_outside_whitelist _) ->
+    Some Keeper_tool_deterministic_error.Path_outside_sandbox
+  | Some (Keeper_path_check_error.Cwd_not_directory _) ->
+    Some Keeper_tool_deterministic_error.Cwd_not_directory
+  | None ->
+    (match Keeper_path_rejection.parse_rejection_prefix msg with
+     | Some Keeper_path_rejection.Path_required ->
+       Some Keeper_tool_deterministic_error.Command_shape_blocked
+     | Some (Keeper_path_rejection.Not_found_relative _) ->
+       Some Keeper_tool_deterministic_error.Path_not_found
+     | Some (Keeper_path_rejection.Task_state_file_path_blocked _) ->
+       Some Keeper_tool_deterministic_error.Task_state_probe_blocked
+     | Some
+         (Keeper_path_rejection.Absolute_path_rejected _
+         | Keeper_path_rejection.Outside_project_root _
+         | Keeper_path_rejection.Allowed_paths_normalized_empty _
+         | Keeper_path_rejection.Outside_sandbox _
+         | Keeper_path_rejection.Ambiguous_relative_read_path _) ->
+       Some Keeper_tool_deterministic_error.Path_outside_sandbox
+     | None -> None)
+
+let dispatch_error_deterministic_reason = function
+  | Keeper_tool_execute_shell_ir.Gate_reject _
+  | Keeper_tool_execute_shell_ir.Cannot_parse
+  | Keeper_tool_execute_shell_ir.Too_complex ->
+    Some Keeper_tool_deterministic_error.Command_shape_blocked
+  | Keeper_tool_execute_shell_ir.Path_reject msg ->
+    path_reject_deterministic_reason msg
+  | Keeper_tool_execute_shell_ir.Approval_required _
+  | Keeper_tool_execute_shell_ir.Policy_denied _ ->
+    Some Keeper_tool_deterministic_error.Policy_blocked
+
+let dispatch_error_deterministic_retry_fields error =
+  match dispatch_error_deterministic_reason error with
+  | Some reason -> Keeper_tool_deterministic_error.deterministic_retry_fields reason
+  | None -> []
+
 module For_testing = struct
   let elapsed_duration_ms = elapsed_duration_ms
   let path_probe_json ~cwd path = path_probe_json ~cwd (path_probe ~cwd path)
   let repo_root_public_prefix_from_cwd = repo_root_public_prefix_from_cwd
   let repo_cwd_relative_rewrite = repo_cwd_relative_rewrite
   let typed_execute_response_cwd_json = typed_execute_response_cwd_json
+  let dispatch_error_deterministic_retry_fields =
+    dispatch_error_deterministic_retry_fields
 end
 
 (* Typed Execute input projections extracted to
@@ -618,7 +659,17 @@ let handle_tool_execute_typed
                ())
         in
         let envelope = Keeper_tool_execute_shell_ir.classify ir in
-        let typed_error_json msg = error_json ~fields:typed_error_fields msg in
+        let typed_error_json ?dispatch_error ?(extra_fields = []) msg =
+          let deterministic_retry_fields =
+            match dispatch_error with
+            | Some dispatch_error ->
+              dispatch_error_deterministic_retry_fields dispatch_error
+            | None -> []
+          in
+          error_json
+            ~fields:(typed_error_fields @ deterministic_retry_fields @ extra_fields)
+            msg
+        in
         if Masc_exec.Shell_ir_risk.is_destructive envelope
         then
           blocked_result
@@ -754,41 +805,46 @@ let handle_tool_execute_typed
                 envelope
           in
           match dispatch_result with
-          | Error (Keeper_tool_execute_shell_ir.Gate_reject diagnostic) ->
+          | Error (Keeper_tool_execute_shell_ir.Gate_reject diagnostic as err) ->
             (* RFC-0208 P1: gate denial audit line. *)
             Log.Keeper.warn
               "shell_ir gate_reject keeper=%s cmd=%s diagnostic=%s"
               meta.name
               cmd_for_log
               (message_for_log diagnostic);
-            typed_error_json diagnostic
-          | Error Keeper_tool_execute_shell_ir.Cannot_parse -> typed_error_json "Cannot parse command"
-          | Error Keeper_tool_execute_shell_ir.Too_complex -> typed_error_json "Command too complex"
-          | Error (Keeper_tool_execute_shell_ir.Path_reject e) ->
+            typed_error_json ~dispatch_error:err diagnostic
+          | Error (Keeper_tool_execute_shell_ir.Cannot_parse as err) ->
+            typed_error_json ~dispatch_error:err "Cannot parse command"
+          | Error (Keeper_tool_execute_shell_ir.Too_complex as err) ->
+            typed_error_json ~dispatch_error:err "Command too complex"
+          | Error (Keeper_tool_execute_shell_ir.Path_reject e as err) ->
             (* RFC-0208 P1: path-policy denial audit line. *)
             Log.Keeper.warn
               "shell_ir path_reject keeper=%s cmd=%s reason=%s"
               meta.name
               cmd_for_log
               (message_for_log e);
-            error_json
-              ~fields:(("blocked_cmd", `String cmd_for_log) :: typed_error_fields)
+            typed_error_json
+              ~dispatch_error:err
+              ~extra_fields:[ "blocked_cmd", `String cmd_for_log ]
               e
-          | Error (Keeper_tool_execute_shell_ir.Approval_required { summary; bin }) ->
+          | Error
+              (Keeper_tool_execute_shell_ir.Approval_required { summary; bin } as err)
+            ->
             Log.Keeper.warn
               "shell_ir approval_required keeper=%s cmd=%s bin=%s summary=%s"
               meta.name
               cmd_for_log
               bin
               summary;
-            typed_error_json summary
-          | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason }) ->
+            typed_error_json ~dispatch_error:err summary
+          | Error (Keeper_tool_execute_shell_ir.Policy_denied { reason } as err) ->
             Log.Keeper.warn
               "shell_ir policy_denied keeper=%s cmd=%s reason=%s"
               meta.name
               cmd_for_log
               reason;
-            typed_error_json reason
+            typed_error_json ~dispatch_error:err reason
           | Ok result ->
             let elapsed_ms =
               (* NDT-OK: second wall-clock read closes the elapsed telemetry

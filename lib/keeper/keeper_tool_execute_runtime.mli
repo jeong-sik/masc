@@ -22,4 +22,6 @@ module For_testing : sig
     cwd:string ->
     sandbox_extra_fields:(string * Yojson.Safe.t) list ->
     Yojson.Safe.t
+  val dispatch_error_deterministic_retry_fields :
+    Keeper_tool_execute_shell_ir.dispatch_error -> (string * Yojson.Safe.t) list
 end

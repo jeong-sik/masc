@@ -680,6 +680,61 @@ let check_redacted_reasoning label expected_order expected_content
   | Agent_sdk.Canonical_tool.Visible_thinking ->
       fail (label ^ " expected redacted thinking")
 
+let oas_interleaving_event_label = function
+  | Keeper_chat_events.Oas_thinking_delta { delta; _ } ->
+      Some ("thinking:" ^ delta)
+  | Keeper_chat_events.Oas_content_block_start { tool_call_name = Some name; _ } ->
+      Some ("block_start:" ^ name)
+  | Keeper_chat_events.Oas_content_block_stop { index } ->
+      Some ("block_stop:" ^ string_of_int index)
+  | Keeper_chat_events.Tool_call_start { tool_call_name; _ } ->
+      Some ("tool_start:" ^ tool_call_name)
+  | Keeper_chat_events.Tool_call_args_snapshot { tool_call_id; _ } ->
+      Some ("tool_snapshot:" ^ tool_call_id)
+  | Keeper_chat_events.Tool_call_end { tool_call_id } ->
+      Some ("tool_end:" ^ tool_call_id)
+  | _ -> None
+
+let trajectory_interleaving_label = function
+  | Trajectory.Thinking entry -> "thinking:" ^ entry.Trajectory.content
+  | Trajectory.Tool_call entry -> "tool:" ^ entry.Trajectory.tool_name
+
+let receipt_detail_of_provider_call
+    (call : Agent_sdk.Canonical_tool.provider_tool_call)
+  : Keeper_agent_result.tool_call_detail =
+  let provider =
+    match provider_kind_label call with
+    | Some provider -> provider
+    | None -> "unknown"
+  in
+  { tool_name = call.name
+  ; provider
+  ; outcome = "ok"
+  ; typed_outcome = Some Keeper_tool_outcome.Progress
+  ; latency_ms = 1.0
+  ; task_id = None
+  ; route_evidence = None
+  ; input_fingerprint = None
+  ; output_fingerprint = None
+  }
+
+let trajectory_entry_of_provider_call ~ts ~turn ~round
+    (call : Agent_sdk.Canonical_tool.provider_tool_call)
+  : Trajectory.tool_call_entry =
+  { ts
+  ; ts_iso = Types_core.iso8601_of_unix_seconds ts
+  ; turn
+  ; round
+  ; tool_name = call.name
+  ; args_json = Yojson.Safe.to_string call.input
+  ; gate_decision = Trajectory.Pass
+  ; result = Some {|{"ok":true}|}
+  ; duration_ms = 1
+  ; error = None
+  ; cost_usd = Trajectory.tool_cost_estimate call.name
+  ; execution_id = Some ("exec-" ^ call.call_id)
+  }
+
 let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
   let open Agent_sdk.Types in
   let response : api_response =
@@ -753,6 +808,177 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
       | _ -> fail "third tool call should carry only its adjacent thinking")
   | _ ->
       failf "expected three projected tool calls, got %d" (List.length calls)
+
+let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
+  let open Agent_sdk.Types in
+  let thinking_before_read =
+    Thinking { content = "inspect board first"; signature = Some "sig-read" }
+  in
+  let read_tool =
+    ToolUse
+      { id = "tc-read"
+      ; name = "keeper_board_list"
+      ; input = `Assoc [ "limit", `Int 1 ]
+      }
+  in
+  let thinking_before_done =
+    Thinking { content = "complete after evidence"; signature = Some "sig-done" }
+  in
+  let done_tool =
+    ToolUse
+      { id = "tc-done"
+      ; name = "keeper_task_done"
+      ; input =
+          `Assoc
+            [ "task_id", `String "task-1"
+            ; "result", `String "evidence captured"
+            ]
+      }
+  in
+  let response : api_response =
+    { id = "resp-oas-masc-interleaving"
+    ; model = "runtime_lane"
+    ; stop_reason = StopToolUse
+    ; content = [ thinking_before_read; read_tool; thinking_before_done; done_tool ]
+    ; usage = None
+    ; telemetry =
+        Some
+          { default_inference_telemetry with
+            provider_kind = Some Llm_provider.Provider_config.OpenAI_compat
+          }
+    }
+  in
+  let stream_events =
+    translate_oas_stream_events
+      [ ContentBlockDelta { index = 0; delta = ThinkingDelta "inspect board first" }
+      ; ContentBlockStart
+          { index = 1
+          ; content_type = "tool_use"
+          ; tool_id = Some "tc-read"
+          ; tool_name = Some "keeper_board_list"
+          }
+      ; ContentBlockDelta
+          { index = 1; delta = InputJsonSnapshot {|{"limit":1}|} }
+      ; ContentBlockStop { index = 1 }
+      ; ContentBlockDelta
+          { index = 2; delta = ThinkingDelta "complete after evidence" }
+      ; ContentBlockStart
+          { index = 3
+          ; content_type = "tool_use"
+          ; tool_id = Some "tc-done"
+          ; tool_name = Some "keeper_task_done"
+          }
+      ; ContentBlockDelta
+          { index = 3
+          ; delta =
+              InputJsonSnapshot
+                {|{"task_id":"task-1","result":"evidence captured"}|}
+          }
+      ; ContentBlockStop { index = 3 }
+      ]
+  in
+  check (list string) "stream bridge keeps Thinking -> ToolUse order"
+    [ "thinking:inspect board first"
+    ; "block_start:keeper_board_list"
+    ; "tool_start:keeper_board_list"
+    ; "tool_snapshot:tc-read"
+    ; "block_stop:1"
+    ; "tool_end:tc-read"
+    ; "thinking:complete after evidence"
+    ; "block_start:keeper_task_done"
+    ; "tool_start:keeper_task_done"
+    ; "tool_snapshot:tc-done"
+    ; "block_stop:3"
+    ; "tool_end:tc-done"
+    ]
+    (List.filter_map oas_interleaving_event_label stream_events);
+  let calls = Agent_sdk.Canonical_tool.tool_calls_of_response response in
+  match calls with
+  | [ first; second ] ->
+      check string "first canonical call" "keeper_board_list" first.name;
+      check int "first canonical order" 1 first.order_index;
+      (match first.adjacent_reasoning with
+       | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
+           check_visible_reasoning "first adjacent thinking" 0
+             "inspect board first" (Some "sig-read") r
+       | _ -> fail "first call should carry preceding thinking");
+      check string "second canonical call" "keeper_task_done" second.name;
+      check int "second canonical order" 3 second.order_index;
+      (match second.adjacent_reasoning with
+       | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
+           check_visible_reasoning "second adjacent thinking" 2
+             "complete after evidence" (Some "sig-done") r
+       | _ -> fail "second call should carry preceding thinking");
+      let receipt_details = List.map receipt_detail_of_provider_call calls in
+      check (list string) "MASC receipt detail order matches OAS canonical order"
+        [ "keeper_board_list"; "keeper_task_done" ]
+        (Keeper_agent_result.tool_names_of_calls receipt_details);
+      check (list string) "typed receipt outcome survives JSON projection"
+        [ "Progress"; "Progress" ]
+        (List.map
+           (fun detail ->
+              let open Yojson.Safe.Util in
+              Keeper_agent_result.tool_call_detail_to_json detail
+              |> member "typed_outcome"
+              |> member "kind"
+              |> to_string)
+           receipt_details);
+      check bool "read-only receipt alone is not substantive progress" false
+        (Keeper_unified_turn_success.For_testing
+         .has_substantive_tool_calls_with_outcome
+           [ first.name, Some Keeper_tool_outcome.Progress ]);
+      check bool "completion receipt is substantive progress" true
+        (Keeper_unified_turn_success.For_testing
+         .has_substantive_tool_calls_with_outcome
+           [ second.name, Some Keeper_tool_outcome.Progress ]);
+      let delivery =
+        Keeper_unified_turn_success.For_testing.classify_delivery
+          ~is_autonomous:true
+          ~reply_delivery:Keeper_unified_turn_success.For_testing.Internal_only
+          ~tools:(Keeper_agent_result.tool_names_of_calls receipt_details)
+          ~has_visible_text:false
+      in
+      (match delivery with
+       | Keeper_unified_turn_success.For_testing.Peer_only -> ()
+       | Keeper_unified_turn_success.For_testing.User_facing
+       | Keeper_unified_turn_success.For_testing.Internal_prose
+       | Keeper_unified_turn_success.For_testing.Task_claim ->
+           fail "silent autonomous receipt should require evidence");
+      check bool "silent autonomous receipt still requires evidence" true
+        (Keeper_unified_turn_success.For_testing.delivery_requires_evidence delivery);
+      let base_dir = temp_base_path "gate-keeper-oas-masc-interleaving" in
+      Fun.protect
+        ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+        (fun () ->
+           let keeper_name = "interleave-keeper" in
+           let trace_id = "trace-oas-masc-interleaving" in
+           let turn = 7 in
+           let acc =
+             Trajectory.create_accumulator ~masc_root:base_dir ~keeper_name
+               ~trace_id ~generation:0 ()
+           in
+           Keeper_agent_run_thinking_trajectory.persist_response_content
+             ~keeper_name ~trajectory_acc:(Some acc) ~turn
+             [ thinking_before_read ];
+           Trajectory.record_entry acc
+             (trajectory_entry_of_provider_call ~ts:1.1 ~turn ~round:1 first);
+           Trajectory.flush_pending acc;
+           Keeper_agent_run_thinking_trajectory.persist_response_content
+             ~keeper_name ~trajectory_acc:(Some acc) ~turn
+             [ thinking_before_done ];
+           Trajectory.record_entry acc
+             (trajectory_entry_of_provider_call ~ts:1.3 ~turn ~round:2 second);
+           Trajectory.flush_pending acc;
+           check (list string) "MASC trajectory JSONL keeps interleaved facts"
+             [ "thinking:inspect board first"
+             ; "tool:keeper_board_list"
+             ; "thinking:complete after evidence"
+             ; "tool:keeper_task_done"
+             ]
+             (Trajectory.read_all_lines ~masc_root:base_dir ~keeper_name
+                ~trace_id
+              |> List.map trajectory_interleaving_label))
+  | _ -> failf "expected two projected tool calls, got %d" (List.length calls)
 
 let test_keeper_stream_bridge_ignores_replayed_tool_start () =
   let open Agent_sdk.Types in
@@ -2122,6 +2348,8 @@ let () =
             test_keeper_stream_bridge_preserves_tool_args_snapshot;
           test_case "OAS tool-call projection preserves adjacent reasoning" `Quick
             test_oas_tool_call_projection_preserves_adjacent_reasoning_groups;
+          test_case "OAS interleaving matches MASC receipt/progress facts" `Quick
+            test_oas_interleaving_matches_masc_receipt_and_progress_facts;
           test_case "stream bridge ignores replayed tool starts" `Quick
             test_keeper_stream_bridge_ignores_replayed_tool_start;
           test_case "stream bridge rejects replayed tool name drift" `Quick

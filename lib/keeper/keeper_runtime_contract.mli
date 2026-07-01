@@ -34,14 +34,14 @@ val resolve_observation_claim_goal_scope :
 (** Signal-only claim scope for world observations. *)
 
 val runtime_contract_json :
-  ?config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+  config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Keeper-visible runtime contract. Backend implementation details such as
     [sandbox_profile], [network_mode], [backend], and [sandbox_target] are
     intentionally omitted; use [runtime_observability_contract_json] for
     operator-facing status, receipts, and debugging. *)
 
 val runtime_observability_contract_json :
-  ?config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
+  config:Workspace.config -> Keeper_meta_contract.keeper_meta -> Yojson.Safe.t
 (** Operator-facing runtime contract with sandbox backend details included. *)
 
 val runtime_contract_json_from_fields :

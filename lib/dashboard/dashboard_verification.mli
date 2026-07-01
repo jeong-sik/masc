@@ -47,17 +47,16 @@
 
 (** Build the JSON snapshot of verification requests.
 
-    - [base_path]: when provided, read that runtime root instead of the
-      process-wide fallback. HTTP routes pass the active server config so a
-      dashboard bound to a non-default base path does not show stale
-      verification state.
+    - [base_path]: read this runtime root. HTTP routes pass the active
+      server config so a dashboard bound to a non-default base path does not
+      show stale verification state.
     - [task_id]: when [Some id] (non-empty), return only requests whose
       [task_id] equals [id]. When absent or empty, return all tasks.
     - [limit]: clamped into [\[1, 500\]]; defaults to 100. Sort is
       reverse-chronological by [created_at] so the newest request wins
       when the cap trims. *)
 val requests_json :
-  ?base_path:string ->
+  base_path:string ->
   ?task_id:string ->
   ?limit:int ->
   unit ->
@@ -89,7 +88,7 @@ val requests_json :
         ]
       }
     ]} *)
-val summary_json : ?base_path:string -> ?recent:int -> unit -> Yojson.Safe.t
+val summary_json : base_path:string -> ?recent:int -> unit -> Yojson.Safe.t
 
 (** Single-load companion to {!summary_json} + {!requests_json}.
 
@@ -103,7 +102,7 @@ val summary_json : ?base_path:string -> ?recent:int -> unit -> Yojson.Safe.t
     The two returned values use the same shapes documented on
     {!summary_json} and {!requests_json}. *)
 val proof_compose :
-  ?base_path:string ->
+  base_path:string ->
   ?recent:int ->
   ?limit:int ->
   unit ->

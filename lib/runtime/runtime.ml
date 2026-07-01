@@ -481,19 +481,12 @@ let thinking_support_of_runtime_id (id : string) : bool option =
   | None -> None
 ;;
 
-let default_preserve_thinking_for_model (rt : t) : bool option =
-  if not rt.model.thinking_support
-  then None
-  else (
-    match capabilities_for_runtime rt with
-    | None -> None
-    | Some caps ->
-      (match caps.preserve_thinking_control_format with
-       | Llm_provider.Capabilities.Thinking_object_keep_all
-       | Llm_provider.Capabilities.Chat_template_kwargs_preserve_thinking
-       | Llm_provider.Capabilities.Top_level_preserve_thinking -> Some true
-       | Llm_provider.Capabilities.No_preserve_thinking_control
-       | Llm_provider.Capabilities.Always_preserved_thinking -> None))
+let default_preserve_thinking_for_model (_rt : t) : bool option =
+  (* OAS owns provider/model capability truth and can preserve reasoning when
+     the provider contract requires it. MASC must not turn "request-side
+     preserve is supported" into a fleet-wide replay policy; long-running
+     keepers otherwise accumulate hidden reasoning across unrelated turns. *)
+  None
 ;;
 
 let preserve_thinking_of_runtime_id (id : string) : bool option =

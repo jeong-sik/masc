@@ -72,6 +72,7 @@ type config =
   ; cache_system_prompt : bool
   ; yield_on_tool : bool
   ; compact_ratio : float option
+  ; context_window_tokens : int option
   ; oas_auto_context_overflow_retry : bool
   ; context_injector : Agent_sdk.Hooks.context_injector option
   ; context : Agent_sdk.Context.t option
@@ -169,6 +170,7 @@ let default_config
   ; cache_system_prompt = false
   ; yield_on_tool = false
   ; compact_ratio = None
+  ; context_window_tokens = None
   ; oas_auto_context_overflow_retry = true
   ; context_injector = None
   ; context = None
@@ -302,7 +304,14 @@ let builder_without_approval
   in
   let builder =
     match config.compact_ratio with
-    | Some ratio -> Agent_sdk.Builder.with_context_thresholds ~compact_ratio:ratio builder
+    | Some ratio ->
+      (match config.context_window_tokens with
+       | Some window ->
+         Agent_sdk.Builder.with_context_thresholds
+           ~compact_ratio:ratio
+           ~context_window_tokens:window
+           builder
+       | None -> Agent_sdk.Builder.with_context_thresholds ~compact_ratio:ratio builder)
     | None -> builder
   in
   let builder =

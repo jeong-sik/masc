@@ -306,6 +306,16 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
       let max_context_resolution =
         Keeper_context_runtime.resolve_max_context_resolution_of_meta m
       in
+      let context_budget_source =
+        match max_context_resolution.requested_override with
+        | Some requested
+          when requested > 0
+               && max_context_resolution.effective_budget
+                  < max_context_resolution.turn_budget ->
+          "requested_override_clamped_to_provider"
+        | Some requested when requested > 0 -> "requested_override"
+        | Some _ | None -> "runtime_provider_cap"
+      in
       let primary_max_context = max_context_resolution.effective_budget in
       let base_dir = session_base_dir config in
          let ctx_opt =
@@ -906,6 +916,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("tail_order", `String (tail_order_to_string tail_order));
            ]);
            ("context_budget", `Assoc [
+             ("runtime_id", `String (runtime_id_of_meta m));
+             ("provider_context_window", `Int max_context_resolution.primary_budget);
+             ("budget_source", `String context_budget_source);
              ("requested_override", Json_util.int_opt_to_json max_context_resolution.requested_override);
              ("primary_budget", `Int max_context_resolution.primary_budget);
              ("runtime_budget", `Int max_context_resolution.runtime_budget);

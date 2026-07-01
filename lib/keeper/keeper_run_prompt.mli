@@ -18,6 +18,29 @@ type turn_prompt_context =
   ; ctx_work : Keeper_context_runtime.working_context
   }
 
+type tool_schema_context_estimate =
+  { tool_count : int
+  ; tool_schema_tokens : int
+  ; estimated_input_tokens_with_tools : int
+  }
+
+type context_window_budget =
+  { budget_estimated_input_tokens : int
+  ; budget_context_window : int
+  ; remaining_context_tokens : int
+  ; over_context_tokens : int
+  ; context_usage_ratio : float
+  }
+
+type context_layer_budget =
+  { context_layer_name : string
+  ; context_layer_priority : string
+  ; context_layer_estimated_tokens : int
+  ; context_layer_cap_tokens : int
+  ; context_layer_kept_tokens : int
+  ; context_layer_decision : string
+  }
+
 val sanitize_user_message : string -> string
 (** Remove role/jailbreak prefixes from a turn user message before it is
     appended to the OAS context. *)
@@ -51,6 +74,37 @@ val estimate_input_tokens :
   int
 (** Shared pre-call input-token estimate used by retry budget checks and
     normal turn prompt construction. *)
+
+val estimate_tool_schema_context :
+  estimated_input_tokens:int ->
+  tools:Agent_sdk.Tool.t list ->
+  tool_schema_context_estimate
+(** Add the serialized tool-schema payload that OAS sends to providers to the
+    prompt/history estimate. This matches OAS' default full-schema disclosure. *)
+
+val context_window_budget :
+  estimated_input_tokens:int -> max_context:int -> context_window_budget
+(** Token-budget ledger for the final pre-dispatch estimate against the
+    effective provider-aware context window. *)
+
+val estimate_context_layer_budget :
+  layer_name:string ->
+  priority:string ->
+  cap_tokens:int ->
+  text:string ->
+  context_layer_budget
+(** Estimate one prompt/context layer against its deterministic cap and return
+    an auditable decision: [kept], [truncated], or [dropped]. *)
+
+val context_layer_budget_to_json : context_layer_budget -> Yojson.Safe.t
+(** JSON projection for runtime manifests and dashboard/debug surfaces. *)
+
+val preflight_context_window :
+  estimated_input_tokens:int ->
+  max_context:int ->
+  (unit, Agent_sdk.Error.sdk_error) result
+(** Fail closed before provider dispatch when the final pre-call input estimate
+    exceeds the effective runtime/provider context window. *)
 
 val build_turn_context
   :  ctx:Keeper_run_context.run_context

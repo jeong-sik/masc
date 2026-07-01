@@ -70,6 +70,33 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
+type context_window_rebudget =
+  { requested_context_window : int option
+  ; final_runtime_context_window : int
+  ; resolved_context_window : int
+  ; context_window_rebudgeted : bool
+  }
+
+let resolve_context_window_tokens_after_runtime_selection
+    ~(requested_context_window : int option)
+    ~(final_runtime_context_window : int) : context_window_rebudget =
+  let requested =
+    match requested_context_window with
+    | Some value when value > 0 -> value
+    | Some _ | None -> final_runtime_context_window
+  in
+  let resolved_context_window =
+    min requested final_runtime_context_window
+  in
+  { requested_context_window
+  ; final_runtime_context_window
+  ; resolved_context_window
+  ; context_window_rebudgeted =
+      (match requested_context_window with
+       | Some value when value > 0 -> value <> resolved_context_window
+       | Some _ | None -> false)
+  }
+
 let runtime_attempt_decision ~idx ~runtime_id =
   `Assoc [ ("idx", `Int idx); ("runtime_id", `String runtime_id) ]
 
@@ -260,6 +287,7 @@ let run_named
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?compact_ratio
+    ?context_window_tokens
     ?(oas_auto_context_overflow_retry = true)
     ?checkpoint_dir
     ?context_injector
@@ -379,6 +407,53 @@ let run_named
   let attempt_runtimes =
     dedupe_runtimes_preserve_order (first_runtime :: remaining_runtimes)
   in
+  let assigned_runtime_context_window =
+    match Runtime.max_context_of_runtime_id first_candidate_id with
+    | Some value -> Some value
+    | None -> Some first_candidate.Runtime.model.max_context
+  in
+  let first_runtime_context_window =
+    match Runtime.max_context_of_runtime_id first_runtime_id with
+    | Some value -> value
+    | None -> first_runtime.Runtime.model.max_context
+  in
+  let first_context_window_rebudget =
+    resolve_context_window_tokens_after_runtime_selection
+      ~requested_context_window:context_window_tokens
+      ~final_runtime_context_window:first_runtime_context_window
+  in
+  (match reroute_decision with
+   | Runtime_agent.Reroute { reason; _ } ->
+     emit_runtime_manifest
+       ~status:"rerouted"
+       ~decision:
+         (Keeper_runtime_manifest.with_payload_role
+            ~payload_role:Keeper_runtime_manifest.Operator_evidence
+            (`Assoc
+              [
+                ("routing_action", `String "modality_rerouted");
+                ("routing_reason", `String reason);
+                ("assigned_runtime_id", `String first_candidate_id);
+                ("rerouted_runtime_id", `String first_runtime_id);
+                ( "assigned_context_window",
+                  match assigned_runtime_context_window with
+                  | Some value -> `Int value
+                  | None -> `Null );
+                ( "requested_context_window",
+                  match
+                    first_context_window_rebudget.requested_context_window
+                  with
+                  | Some value -> `Int value
+                  | None -> `Null );
+                ( "final_runtime_context_window",
+                  `Int first_context_window_rebudget.final_runtime_context_window );
+                ( "resolved_context_window",
+                  `Int first_context_window_rebudget.resolved_context_window );
+                ( "context_window_rebudgeted",
+                  `Bool first_context_window_rebudget.context_window_rebudgeted );
+              ]))
+       Keeper_runtime_manifest.Runtime_routed
+   | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ());
   (* RFC-0265 follow-up — graceful media degrade floor. When no configured
      runtime can accept the turn's input modality ([No_capable_runtime]), strip
      the unsupported media blocks from the goal, prior [initial_messages], and
@@ -449,11 +524,12 @@ let run_named
   let execution_idle_timeout_s = None in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
-	  attempt_runtime_candidates ~runtime_id
-	    ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
-	    ~emit_runtime_manifest
-	    ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
-	      let error_runtime_id = attempt_runtime_id in
+  attempt_runtime_candidates
+    ~runtime_id
+    ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
+    ~emit_runtime_manifest
+    ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
+      let error_runtime_id = attempt_runtime_id in
       let inference_policy =
         attempt_inference_policy
           ?max_tokens_for_runtime
@@ -462,9 +538,22 @@ let run_named
           ~fallback_max_tokens:max_tokens
           ()
       in
-	      match
-	        match provider_config_transform with
-	        | None -> Ok runtime.Runtime.provider_config
+      let final_runtime_context_window =
+        match Runtime.max_context_of_runtime_id attempt_runtime_id with
+        | Some value -> value
+        | None -> runtime.Runtime.model.max_context
+      in
+      let context_window_rebudget =
+        resolve_context_window_tokens_after_runtime_selection
+          ~requested_context_window:context_window_tokens
+          ~final_runtime_context_window
+      in
+      let context_window_tokens =
+        Some context_window_rebudget.resolved_context_window
+      in
+      match
+        match provider_config_transform with
+        | None -> Ok runtime.Runtime.provider_config
         | Some transform -> transform runtime.Runtime.provider_config
       with
       | Error err -> Error err, None
@@ -490,11 +579,11 @@ let run_named
           ; initial_messages
           ; max_turns
           ; max_idle_turns
-	          ; stream_idle_timeout_s
-	          ; execution_idle_timeout_s
-	          ; body_timeout_s
-	          ; temperature
-	          ; max_tokens = inference_policy.attempt_max_tokens
+          ; stream_idle_timeout_s
+          ; execution_idle_timeout_s
+          ; body_timeout_s
+          ; temperature
+          ; max_tokens = inference_policy.attempt_max_tokens
           ; accept
           ; guardrails
           ; hooks
@@ -507,12 +596,13 @@ let run_named
           ; cache_system_prompt
           ; yield_on_tool
           ; compact_ratio
+          ; context_window_tokens
           ; oas_auto_context_overflow_retry
-	          ; checkpoint_dir
-	          ; context_injector
-	          ; context
-	          ; enable_thinking = inference_policy.attempt_enable_thinking
-	          ; preserve_thinking = inference_policy.attempt_preserve_thinking
+          ; checkpoint_dir
+          ; context_injector
+          ; context
+          ; enable_thinking = inference_policy.attempt_enable_thinking
+          ; preserve_thinking = inference_policy.attempt_preserve_thinking
           ; approval
           ; exit_condition
           ; exit_condition_result
@@ -565,6 +655,9 @@ module For_testing = struct
 	  let media_degrade_manifest_decision = media_degrade_manifest_decision
 	  let attempt_inference_policy = attempt_inference_policy
 	  let attempt_runtime_candidates = attempt_runtime_candidates
+
+  let resolve_context_window_tokens_after_runtime_selection =
+    resolve_context_window_tokens_after_runtime_selection
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing.accept_no_progress_should_try_next

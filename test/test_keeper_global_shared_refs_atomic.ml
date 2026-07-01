@@ -67,6 +67,77 @@ let test_compact_policy_callback () =
   Keeper_compact_policy.register_record_pre_compact (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_ ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
 ;;
 
+let compact_policy_meta () =
+  let open Masc in
+  match
+    Keeper_meta_json_parse.meta_of_json
+      (`Assoc
+        [ "name", `String "compact-policy-window"
+        ; "agent_name", `String "compact-policy-window"
+        ; "trace_id", `String "trace-compact-policy-window"
+        ; "tool_access", `List []
+        ])
+  with
+  | Error err -> fail ("meta_of_json failed: " ^ err)
+  | Ok meta ->
+    { meta with
+      compaction =
+        { meta.compaction with
+          ratio_gate = 0.99
+        ; message_gate = 1
+        ; token_gate = 0
+        ; cooldown_sec = 0
+        }
+    }
+
+let test_pre_compact_context_window_uses_working_context () =
+  let open Masc in
+  let recorded_window = ref None in
+  let restore () =
+    Keeper_compact_policy.register_record_pre_compact
+      (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_
+        ~strategies:_ ~context_window:_ ~is_local_model:_ ~trigger:_ -> None)
+  in
+  Fun.protect
+    ~finally:restore
+    (fun () ->
+       Keeper_compact_policy.register_record_pre_compact
+         (fun ~keeper_name ~context_ratio ~message_count ~token_count
+           ~strategies ~context_window ~is_local_model ~trigger ->
+            recorded_window := Some context_window;
+            Some
+              { Keeper_compact_policy.timestamp = 1.0
+              ; keeper_name
+              ; context_ratio
+              ; message_count
+              ; token_count
+              ; strategies
+              ; context_window
+              ; is_local_model
+              ; trigger
+              });
+       let ctx =
+         Keeper_context_runtime.create ~eio:false
+           ~system_prompt:"pre compact window"
+           ~max_tokens:131_072
+         |> fun ctx ->
+         Keeper_context_runtime.append ctx
+           (Agent_sdk.Types.user_msg "force message-gate compaction")
+       in
+       let _, trigger, decision =
+         Keeper_compact_policy.compact_if_needed_typed
+           ~meta:(compact_policy_meta ())
+           ~now_ts:1.0
+           ctx
+       in
+       check bool "compaction triggered" true (Option.is_some trigger);
+       check bool "decision applied" true
+         (Keeper_compact_policy.compaction_decision_applied decision);
+       check (option int) "pre-compact event uses ctx max_tokens"
+         (Some 131_072)
+         !recorded_window)
+;;
+
 let test_meta_store_hook () =
   let open Masc in
   let called = ref false in
@@ -196,7 +267,10 @@ let () =
     [ ( "compact-audit"
       , [ test_case "store cache is shared per base_path" `Quick test_compact_audit_store_cache ] )
     ; ( "compact-policy"
-      , [ test_case "record_pre_compact callback registration" `Quick test_compact_policy_callback ] )
+      , [ test_case "record_pre_compact callback registration" `Quick test_compact_policy_callback
+        ; test_case "pre_compact context window uses working context" `Quick
+            test_pre_compact_context_window_uses_working_context
+        ] )
     ; ( "meta-store"
       , [ test_case "runtime_meta_write_sync_hook registration" `Quick test_meta_store_hook ] )
     ; ( "tool-dispatch-runtime"

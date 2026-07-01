@@ -69,6 +69,7 @@ type config =
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
+  context_window_tokens : int option;
   oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
@@ -424,13 +425,23 @@ let checkpoint_messages = function
   | None -> []
   | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
 
+let messages_for_run_with_checkpoint
+    ~(checkpoint_messages : Agent_sdk.Types.message list)
+    ~(initial_messages : Agent_sdk.Types.message list) =
+  let append_if_absent acc (message : Agent_sdk.Types.message) =
+    if List.exists (( = ) message) acc then acc else acc @ [ message ]
+  in
+  List.fold_left append_if_absent initial_messages checkpoint_messages
+
 let content_blocks_for_run_with_checkpoint
     ~(checkpoint_messages : Agent_sdk.Types.message list)
     ~(initial_messages : Agent_sdk.Types.message list)
     ~(goal_blocks : Agent_sdk.Types.content_block list) =
-  content_blocks_of_messages initial_messages
-  @ content_blocks_of_messages checkpoint_messages
-  @ goal_blocks
+  let history_blocks =
+    messages_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
+    |> content_blocks_of_messages
+  in
+  history_blocks @ goal_blocks
 
 let content_blocks_for_run
     ~(initial_messages : Agent_sdk.Types.message list)
@@ -807,6 +818,7 @@ module For_testing = struct
   let decide_clock_for_idle = decide_clock_for_idle
   let required_modalities_of_content_blocks = required_modalities_of_content_blocks
   let content_blocks_of_messages = content_blocks_of_messages
+  let messages_for_run_with_checkpoint = messages_for_run_with_checkpoint
   let content_blocks_for_run = content_blocks_for_run
   let content_blocks_for_run_with_checkpoint =
     content_blocks_for_run_with_checkpoint

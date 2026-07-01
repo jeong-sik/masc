@@ -91,6 +91,13 @@ val provider_attempt_started_decision :
 val provider_attempt_finished_decision :
   provider_attempt_finished_record -> Yojson.Safe.t
 
+type context_window_rebudget =
+  { requested_context_window : int option
+  ; final_runtime_context_window : int
+  ; resolved_context_window : int
+  ; context_window_rebudgeted : bool
+  }
+
 (** {1 Named runtime execution} *)
 
 val run_named :
@@ -126,6 +133,7 @@ val run_named :
   ?cache_system_prompt:bool ->
   ?yield_on_tool:bool ->
   ?compact_ratio:float ->
+  ?context_window_tokens:int ->
   ?oas_auto_context_overflow_retry:bool ->
   ?checkpoint_dir:string ->
   ?context_injector:Agent_sdk.Hooks.context_injector ->
@@ -210,6 +218,11 @@ module For_testing : sig
 
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
+
+  val resolve_context_window_tokens_after_runtime_selection :
+    requested_context_window:int option ->
+    final_runtime_context_window:int ->
+    context_window_rebudget
 
   val attempt_inference_policy :
     ?max_tokens_for_runtime:(runtime_id:string -> int) ->

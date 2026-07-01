@@ -84,6 +84,7 @@ type config = Runtime_agent_context.config = {
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
+  context_window_tokens : int option;
   oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
@@ -326,6 +327,11 @@ module For_testing : sig
 
   val content_blocks_of_messages :
     Agent_sdk.Types.message list -> Agent_sdk.Types.content_block list
+
+  val messages_for_run_with_checkpoint :
+    checkpoint_messages:Agent_sdk.Types.message list ->
+    initial_messages:Agent_sdk.Types.message list ->
+    Agent_sdk.Types.message list
 
   val content_blocks_for_run :
     initial_messages:Agent_sdk.Types.message list ->

@@ -206,6 +206,32 @@ let test_checkpoint_media_drives_reroute_and_floor () =
   | Error err ->
       failf "expected InvalidConfig, got %s" (Agent_sdk.Error.to_string err)
 
+let test_checkpoint_resume_deduplicates_initial_history () =
+  let shared =
+    message_with_blocks
+      [ Agent_sdk.Types.Text "shared image history"
+      ; Agent_sdk.Types.image_block ~media_type:"image/png" ~data:"abc" ()
+      ]
+  in
+  let checkpoint_audio =
+    message_with_blocks
+      [ Agent_sdk.Types.Text "checkpoint-only audio"
+      ; Agent_sdk.Types.audio_block ~media_type:"audio/wav" ~data:"def" ()
+      ]
+  in
+  let active_messages =
+    Runtime_agent.For_testing.messages_for_run_with_checkpoint
+      ~initial_messages:[ shared ]
+      ~checkpoint_messages:[ shared; checkpoint_audio ]
+  in
+  check int "shared history is not duplicated" 2 (List.length active_messages);
+  check (list string) "required modalities include both sources"
+    [ "image"; "audio" ]
+    (Runtime_agent.For_testing.required_modalities_for_run_with_checkpoint
+       ~initial_messages:[ shared ]
+       ~checkpoint_messages:[ shared; checkpoint_audio ]
+       ~goal_blocks:[ Agent_sdk.Types.Text "follow up" ])
+
 (* The decision is a pure function: identical inputs yield identical output. *)
 let test_decision_is_deterministic () =
   let candidates = [ ("text_b", caps ()); ("vision_c", caps ~image:true ()) ] in
@@ -337,6 +363,30 @@ let test_driver_degrade_branch_emits_manifest () =
      && string_contains source "media_degrade_manifest_decision"
      && string_contains source "Keeper_runtime_manifest.Runtime_routed")
 
+let test_reroute_context_window_rebudgets_to_final_runtime () =
+  let rebudget =
+    Masc.Keeper_turn_driver.For_testing
+    .resolve_context_window_tokens_after_runtime_selection
+      ~requested_context_window:(Some 524_288)
+      ~final_runtime_context_window:131_072
+  in
+  check (option int) "requested window" (Some 524_288)
+    rebudget.Masc.Keeper_turn_driver.requested_context_window;
+  check int "final runtime window" 131_072
+    rebudget.final_runtime_context_window;
+  check int "resolved window clamps to final runtime" 131_072
+    rebudget.resolved_context_window;
+  check bool "rebudgeted" true rebudget.context_window_rebudgeted
+
+let test_driver_reroute_manifest_records_context_window_rebudget () =
+  let source = read_file "lib/keeper/keeper_turn_driver.ml" in
+  check bool "reroute branch emits context-window rebudget manifest" true
+    (string_contains source "modality_rerouted"
+     && string_contains source "requested_context_window"
+     && string_contains source "final_runtime_context_window"
+     && string_contains source "resolved_context_window"
+     && string_contains source "context_window_rebudgeted")
+
 let test_runtime_agent_oas_tool_hook_fails_typed_not_failwith () =
   let source = read_file "lib/runtime/runtime_agent.ml" in
   check bool "legacy failwith hook removed" false
@@ -360,6 +410,8 @@ let () =
             test_history_media_floor_rejects_before_provider
         ; test_case "checkpoint media drives reroute and floor" `Quick
             test_checkpoint_media_drives_reroute_and_floor
+        ; test_case "checkpoint resume deduplicates initial history" `Quick
+            test_checkpoint_resume_deduplicates_initial_history
         ; test_case "deterministic" `Quick test_decision_is_deterministic
         ] )
     ; ( "caps_admit_required_modalities"
@@ -381,6 +433,10 @@ let () =
             test_degrade_manifest_public_projection
         ; test_case "driver degrade branch emits manifest" `Quick
             test_driver_degrade_branch_emits_manifest
+        ; test_case "reroute context window rebudgets to final runtime" `Quick
+            test_reroute_context_window_rebudgets_to_final_runtime
+        ; test_case "driver reroute manifest records context rebudget" `Quick
+            test_driver_reroute_manifest_records_context_window_rebudget
         ; test_case "runtime agent OAS tool hook typed failure" `Quick
             test_runtime_agent_oas_tool_hook_fails_typed_not_failwith
         ] )

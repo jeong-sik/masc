@@ -213,13 +213,135 @@ let persisted_attachment (att : attachment) =
 let redact_tool_call redaction tc =
   { tc with args = Keeper_secret_redaction.redact_text redaction tc.args }
 
-let redact_block redaction = function
-  | Keeper_chat_blocks.Thinking thinking ->
-    Keeper_chat_blocks.Thinking
-      { thinking with
-        content = Keeper_secret_redaction.redact_text redaction thinking.content
+let redact_string redaction value =
+  Keeper_secret_redaction.redact_text redaction value
+
+let redact_string_opt redaction =
+  Option.map (redact_string redaction)
+
+let rec redact_yojson_strings redaction (json : Yojson.Safe.t) : Yojson.Safe.t =
+  match json with
+  | `String value -> `String (redact_string redaction value)
+  | `Assoc fields ->
+    `Assoc
+      (List.map
+         (fun (key, value) -> key, redact_yojson_strings redaction value)
+         fields)
+  | `List items -> `List (List.map (redact_yojson_strings redaction) items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
+
+let redact_table_cell redaction = function
+  | Keeper_chat_blocks.Cell_text value ->
+    Keeper_chat_blocks.Cell_text (redact_string redaction value)
+  | Keeper_chat_blocks.Cell_value { v; num; muted } ->
+    Keeper_chat_blocks.Cell_value { v = redact_string redaction v; num; muted }
+
+let redact_trace_step redaction = function
+  | Keeper_chat_blocks.Trace_think { text; ts; oas_block_index } ->
+    Keeper_chat_blocks.Trace_think
+      { text = redact_string redaction text
+      ; ts = redact_string_opt redaction ts
+      ; oas_block_index
       }
-  | block -> block
+  | Keeper_chat_blocks.Trace_reason { text; detail; ts } ->
+    Keeper_chat_blocks.Trace_reason
+      { text = redact_string redaction text
+      ; detail = redact_string_opt redaction detail
+      ; ts = redact_string_opt redaction ts
+      }
+  | Keeper_chat_blocks.Trace_tool
+      { name; tool_call_id; status; dur; args; result; ts; oas_block_index } ->
+    Keeper_chat_blocks.Trace_tool
+      { name = redact_string redaction name
+      ; tool_call_id = redact_string_opt redaction tool_call_id
+      ; status
+      ; dur = redact_string_opt redaction dur
+      ; args = Option.map (redact_yojson_strings redaction) args
+      ; result = Option.map (redact_yojson_strings redaction) result
+      ; ts = redact_string_opt redaction ts
+      ; oas_block_index
+      }
+
+let redact_block redaction = function
+  | Keeper_chat_blocks.Text { html } ->
+    Keeper_chat_blocks.Text { html = redact_string redaction html }
+  | Keeper_chat_blocks.Heading { html } ->
+    Keeper_chat_blocks.Heading { html = redact_string redaction html }
+  | Keeper_chat_blocks.Unordered_list { items } ->
+    Keeper_chat_blocks.Unordered_list
+      { items = List.map (redact_string redaction) items }
+  | Keeper_chat_blocks.Callout { severity; html } ->
+    Keeper_chat_blocks.Callout
+      { severity = redact_string_opt redaction severity
+      ; html = redact_string redaction html
+      }
+  | Keeper_chat_blocks.Table { head; rows } ->
+    Keeper_chat_blocks.Table
+      { head = List.map (redact_table_cell redaction) head
+      ; rows = List.map (List.map (redact_table_cell redaction)) rows
+      }
+  | Keeper_chat_blocks.Code { cap; html; source } ->
+    Keeper_chat_blocks.Code
+      { cap = redact_string_opt redaction cap
+      ; html = redact_string redaction html
+      ; source = redact_string_opt redaction source
+      }
+  | Keeper_chat_blocks.Mermaid { source; caption } ->
+    Keeper_chat_blocks.Mermaid
+      { source = redact_string redaction source
+      ; caption = redact_string_opt redaction caption
+      }
+  | Keeper_chat_blocks.Svg { svg; cap } ->
+    Keeper_chat_blocks.Svg
+      { svg = redact_string redaction svg
+      ; cap = redact_string_opt redaction cap
+      }
+  | Keeper_chat_blocks.Voice { secs; wave; via; size; transcript; src } ->
+    Keeper_chat_blocks.Voice
+      { secs
+      ; wave
+      ; via = redact_string_opt redaction via
+      ; size = redact_string_opt redaction size
+      ; transcript = redact_string_opt redaction transcript
+      ; src = redact_string_opt redaction src
+      }
+  | Keeper_chat_blocks.Attach
+      { name; dims; src; svg; ph; via; size; data; mime_type; size_bytes; kind } ->
+    Keeper_chat_blocks.Attach
+      { name = redact_string redaction name
+      ; dims = redact_string_opt redaction dims
+      ; src = redact_string_opt redaction src
+      ; svg = redact_string_opt redaction svg
+      ; ph = redact_string_opt redaction ph
+      ; via = redact_string_opt redaction via
+      ; size = redact_string_opt redaction size
+      ; data = redact_string_opt redaction data
+      ; mime_type = redact_string_opt redaction mime_type
+      ; size_bytes
+      ; kind = redact_string_opt redaction kind
+      }
+  | Keeper_chat_blocks.Image { src; cap } ->
+    Keeper_chat_blocks.Image
+      { src = redact_string redaction src
+      ; cap = redact_string_opt redaction cap
+      }
+  | Keeper_chat_blocks.Link { url; title; meta } ->
+    Keeper_chat_blocks.Link
+      { url = redact_string redaction url
+      ; title = redact_string redaction title
+      ; meta = redact_string redaction meta
+      }
+  | Keeper_chat_blocks.Fusion { board_post_id; run_id } ->
+    Keeper_chat_blocks.Fusion
+      { board_post_id = redact_string redaction board_post_id
+      ; run_id = redact_string redaction run_id
+      }
+  | Keeper_chat_blocks.Trace { trace } ->
+    Keeper_chat_blocks.Trace
+      { trace = List.map (redact_trace_step redaction) trace }
+  | Keeper_chat_blocks.Thinking { content; redacted } ->
+    Keeper_chat_blocks.Thinking
+      { content = redact_string redaction content; redacted }
 
 let redact_blocks redaction =
   Option.map (List.map (redact_block redaction))

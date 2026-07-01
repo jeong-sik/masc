@@ -990,6 +990,10 @@ let process_single_turn ~connector_user_line_recorded_upstream
                        ?turn_ref
                        ()
                  in
+                 let broadcast_chat_appended ?content () =
+                   Keeper_chat_broadcast.chat_appended
+                     ~keeper_name:payload.name ~source:chat_source ?content ()
+                 in
                  (match
                     ( Keeper_turn_outcome.of_reply_payload payload_json_opt,
                       String_util.trim_to_option visible_reply )
@@ -998,7 +1002,9 @@ let process_single_turn ~connector_user_line_recorded_upstream
                      persist_user_message_only ()
                  | Keeper_turn_outcome.No_visible_reply, _
                  | Keeper_turn_outcome.Visible_reply, None ->
-                     if has_visible_blocks then persist_assistant_reply ~assistant_content:""
+                     if has_visible_blocks then (
+                       persist_assistant_reply ~assistant_content:"";
+                       broadcast_chat_appended ())
                      else persist_user_message_only ()
                  | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                      (* RFC-connector-deferred-reply-via-chat-queue §3.4: gate-recorded connector message → the user
@@ -1007,10 +1013,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
                         (mirrors [append_direct_chat_pair_if_reply]'s connector
                         arm). The dashboard route records the full pair. *)
                      persist_assistant_reply ~assistant_content:visible_reply;
-                     Keeper_chat_broadcast.chat_appended
-                       ~keeper_name:payload.name ~source:chat_source
-                       ~content:visible_reply
-                       ());
+                     broadcast_chat_appended ~content:visible_reply ());
                  push_worker_event
                    (Stream_terminal { ok = true; status = "done"; body });
                  Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body)

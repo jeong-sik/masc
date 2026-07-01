@@ -202,7 +202,7 @@ let add_routes router =
                respond_json_value_with_cors ~status:`Bad_request request reqd
                  (`Assoc
                     [ ("error", `String "invalid token")
-                    ; ("reason", `String "expected 64-char hex (SHA-256)")
+                    ; ("reason", `String "expected 64-char lowercase hex (SHA-256)")
                     ])
            | Some token -> serve_media ~base_path ~token request reqd)
          request reqd)

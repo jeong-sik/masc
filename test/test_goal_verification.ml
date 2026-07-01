@@ -36,6 +36,9 @@ let operator ?display_name id : Goal_verification.goal_principal =
 let agent ?display_name id : Goal_verification.goal_principal =
   { id; display_name }
 
+let requests_recovery_path config =
+  Goal_verification.requests_path config ^ ".last-good"
+
 let request_snapshot ~requested_by =
   let reviewer = operator "reviewer-1" in
   let verifier = agent "agent-a" in
@@ -133,6 +136,27 @@ let test_cancel_if_open_reports_already_resolved () =
   check bool "saved status still approved" true
     (saved.status = Goal_verification.Approved)
 
+let test_create_request_keeps_primary_commit_when_recovery_write_fails () =
+  with_workspace @@ fun config ->
+  Unix.mkdir (requests_recovery_path config) 0o755;
+  let requested_by = operator "planner" in
+  let request =
+    match
+      Goal_verification.create_request
+        config
+        ~goal_id:"goal-1"
+        ~requested_by
+        ~policy_snapshot:(request_snapshot ~requested_by)
+    with
+    | Ok request -> request
+    | Error msg ->
+      fail
+        ("recovery mirror failure should not fail committed primary write: " ^ msg)
+  in
+  match Goal_verification.find_request config ~request_id:request.id with
+  | Some stored -> check string "primary has request" request.id stored.id
+  | None -> fail "primary request missing after recovery mirror failure"
+
 let () =
   run "Goal_verification"
     [
@@ -144,5 +168,7 @@ let () =
             test_invalid_vote_does_not_bump;
           test_case "cancel if open reports already resolved" `Quick
             test_cancel_if_open_reports_already_resolved;
+          test_case "recovery mirror write failure preserves primary" `Quick
+            test_create_request_keeps_primary_commit_when_recovery_write_fails;
         ] );
     ]

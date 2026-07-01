@@ -469,7 +469,14 @@ let read_state config =
 let write_state_result config (state : state) =
   let json = state_to_yojson state in
   let* () = Workspace_utils.write_json_result config (requests_path config) json in
-  Workspace_utils.write_json_result config (requests_recovery_path config) json
+  (match Workspace_utils.write_json_result config (requests_recovery_path config) json with
+   | Ok () -> ()
+   | Error msg ->
+     Log.Misc.warn
+       "goal_verification: primary requests committed; recovery mirror write failed for %s: %s"
+       (requests_recovery_path config)
+       msg);
+  Ok ()
 
 let principal_key (principal : goal_principal) =
   principal.id

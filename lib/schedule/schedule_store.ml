@@ -242,8 +242,14 @@ let write_state config state =
     Workspace_utils.write_json_result config (schedules_path config) json
     |> Result.map_error (fun msg -> Persistence_failed msg)
   in
-  Workspace_utils.write_json_result config (recovery_path config) json
-  |> Result.map_error (fun msg -> Persistence_failed msg)
+  (match Workspace_utils.write_json_result config (recovery_path config) json with
+   | Ok () -> ()
+   | Error msg ->
+     Log.Misc.warn
+       "schedule_store: primary ledger committed; recovery mirror write failed for %s: %s"
+       (recovery_path config)
+       msg);
+  Ok ()
 ;;
 
 let bump_state state ~schedules ~grants ~executions =

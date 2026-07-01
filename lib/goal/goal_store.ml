@@ -333,7 +333,14 @@ let write_state_result config state =
   ensure_dirs config;
   let json = state_to_yojson state in
   let* () = Workspace_utils.write_json_result config (goals_path config) json in
-  Workspace_utils.write_json_result config (goals_recovery_path config) json
+  (match Workspace_utils.write_json_result config (goals_recovery_path config) json with
+   | Ok () -> ()
+   | Error msg ->
+     Log.Misc.warn
+       "goal_store: primary goals.json committed; recovery mirror write failed for %s: %s"
+       (goals_recovery_path config)
+       msg);
+  Ok ()
 
 let write_state config state =
   match write_state_result config state with

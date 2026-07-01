@@ -14,4 +14,4 @@
   schedule_store
   schedule_service
   schedule_runner)
- (libraries digestif masc_workspace dated_jsonl unix yojson))
+ (libraries digestif masc_workspace dated_jsonl masc_log unix yojson))

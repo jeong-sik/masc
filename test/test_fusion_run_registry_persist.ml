@@ -159,7 +159,7 @@ let test_replay_streams_and_compacts () =
     content;
   let t = R.replay path in
   (match R.get t ~run_id:"r-stream" with
-   | Some { R.status = Completed { ok = true }; _ } -> ()
+   | Some { R.status = R.Completed { ok = true }; _ } -> ()
    | Some _ -> fail "expected streamed run to be completed"
    | None -> fail "expected streamed run to replay");
   match Fs_compat.file_size path with
@@ -180,7 +180,7 @@ let test_replay_preserves_unterminated_tail () =
     content;
   let t = R.replay path in
   (match R.get t ~run_id:"r-partial" with
-   | Some { R.status = Running; _ } -> ()
+   | Some { R.status = R.Running; _ } -> ()
    | Some _ -> fail "unterminated completion line must not replay"
    | None -> fail "completed line before partial tail should replay");
   check string "partial tail preserved" content (Fs_compat.load_file path)

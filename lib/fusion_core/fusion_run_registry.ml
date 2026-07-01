@@ -86,7 +86,9 @@ let append_event t event =
 ;;
 
 let register_running t ~run_id ~keeper ~preset ~started_at =
-  append_event t (Register { run_id; keeper; preset; started_at });
+  append_event
+    t
+    (Fusion_run_registry_event.Register { run_id; keeper; preset; started_at });
   update t (fun runs ->
     let run = { run_id; keeper; preset; started_at; status = Running } in
     (* defensive: a re-registered run_id replaces its prior entry *)
@@ -95,7 +97,8 @@ let register_running t ~run_id ~keeper ~preset ~started_at =
 ;;
 
 let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
-  append_event t (Complete { run_id; ok; failure; failure_code });
+  append_event t
+    (Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code });
   update t (fun runs ->
     runs
     |> List.map (fun r ->
@@ -192,7 +195,11 @@ let events_of_run (run : run) =
   in
   match run.status with
   | Running -> [ register ]
-  | Completed { ok } -> [ register; Complete { run_id = run.run_id; ok } ]
+  | Completed { ok; failure; failure_code } ->
+    [ register
+    ; Fusion_run_registry_event.Complete
+        { run_id = run.run_id; ok; failure; failure_code }
+    ]
 ;;
 
 let compact_replay_log path runs =

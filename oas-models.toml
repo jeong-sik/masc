@@ -55,15 +55,39 @@ cache_read_multiplier = 0.02
 # has no base_url recognizer for it — only ollama_cloud and openai are matched,
 # everything else falls through to string_of_provider_kind OpenAI_compat =
 # "openai_compat". capabilities_for_config_model therefore looks up
-# "openai_compat/deepseek-v4-flash", and the bare "deepseek-v4-flash" row above
+# "openai_compat/<model>", and the bare "deepseek-v4-*" rows above
 # cannot satisfy it (bare fallback is refused for tool-capable openai_compat
 # models via catalog_entry_requires_endpoint_declaration, provider_config.ml:293).
-# Without this provider-qualified row Runtime.init_default_strict refuses to boot
-# for the [deepseek.deepseek-v4-flash] runtime binding.
+# Without these provider-qualified rows Runtime.init_default_strict refuses to
+# boot for [deepseek.deepseek-v4-flash] and [deepseek.deepseek-v4-pro] runtime
+# bindings.
 # Root fix: add a base_url recognizer for api.deepseek.com in OAS so the label
 # is semantic ("deepseek"), mirroring jeong-sik/oas#2374 for runpod_mtp.
 # Removal target: after that OAS recognizer is pinned here and proven stable.
-# Capabilities mirror the canonical ../oas/models.toml deepseek-v4-flash row.
+# Capabilities mirror the canonical ../oas/models.toml DeepSeek v4 rows.
+[[models]]
+id_prefix = "openai_compat/deepseek-v4-pro"
+base = "openai_chat"
+provider_name = "deepseek"
+max_context_tokens = 1000000
+max_output_tokens = 384000
+supports_tools = true
+supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = true
+thinking_control_format = "thinking_object"
+supports_response_format_json = true
+supports_native_streaming = true
+supports_caching = true
+supports_prompt_caching = false
+input_per_million = 0.435
+output_per_million = 0.87
+cache_write_multiplier = 1.0
+cache_read_multiplier = 0.008333333333333333
+
 [[models]]
 id_prefix = "openai_compat/deepseek-v4-flash"
 base = "openai_chat"

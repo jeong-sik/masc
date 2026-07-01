@@ -900,11 +900,19 @@ let test_direct_success_clears_no_progress_pause () =
                ; runtime_id = None
                ; reason = None
                }));
+       let progress_result =
+         run_result
+           ~tool_calls:
+             [ tool_call
+                 ~typed_outcome:Keeper_tool_outcome.Progress
+                 "masc_deliver" ]
+           ()
+       in
        let recovered_meta =
          Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
            ~config
            ~pre_turn_meta:meta
-           ~result:(run_result ())
+           ~result:progress_result
            meta
        in
        check bool "direct success resumes no-progress pause" false recovered_meta.paused;
@@ -922,9 +930,17 @@ let test_direct_success_clears_no_progress_pause () =
            false
            entry.Masc.Keeper_registry.meta.paused;
          (match entry.Masc.Keeper_registry.last_failure_reason with
-          | None -> ()
+         | None -> ()
          | Some _ -> fail "expected direct success to clear no_progress failure reason")
        | None -> fail "expected registered keeper")
+
+let test_direct_success_visible_text_only_keeps_no_progress_pause () =
+  let result = run_result ~response_text:"direct reply" () in
+  check bool
+    "visible text without typed progress cannot clear no-progress pause"
+    false
+    (Masc.Keeper_turn.For_testing.direct_success_may_clear_no_progress_pause
+       result)
 
 let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
   Eio_main.run
@@ -973,11 +989,19 @@ let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
                ; runtime_id = None
                ; reason = None
                }));
+       let progress_result =
+         run_result
+           ~tool_calls:
+             [ tool_call
+                 ~typed_outcome:Keeper_tool_outcome.Progress
+                 "masc_deliver" ]
+           ()
+       in
        let recovered_meta =
          Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
            ~config
            ~pre_turn_meta:meta
-           ~result:(run_result ())
+           ~result:progress_result
            meta
        in
        check bool
@@ -1211,11 +1235,19 @@ let test_direct_success_persist_failure_keeps_no_progress_pause () =
                ; reason = None
                }));
        let invalid_meta = { meta with agent_name = "" } in
+       let progress_result =
+         run_result
+           ~tool_calls:
+             [ tool_call
+                 ~typed_outcome:Keeper_tool_outcome.Progress
+                 "masc_deliver" ]
+           ()
+       in
        let recovered_meta =
          Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
            ~config
            ~pre_turn_meta:invalid_meta
-           ~result:(run_result ())
+           ~result:progress_result
            invalid_meta
        in
        check bool "failed persistence keeps returned meta paused" true recovered_meta.paused;
@@ -1483,6 +1515,10 @@ let () =
             test_resume_directive_persist_failure_keeps_completion_contract_pause;
           test_case "direct success clears no-progress pause" `Quick
             test_direct_success_clears_no_progress_pause;
+          test_case
+            "direct success visible text-only keeps no-progress pause"
+            `Quick
+            test_direct_success_visible_text_only_keeps_no_progress_pause;
           test_case
             "direct success clears no-progress pause after blocker overwrite"
             `Quick

@@ -83,6 +83,7 @@
   test_host_fd_pressure_poller
   test_operator_control_snapshot_state
   test_operator_control_snapshot
+  test_operator_control_judgment
   test_with_cleanups_on_release
   test_auth_login
   test_audit_log
@@ -412,6 +413,7 @@
   test_host_fd_pressure_poller
   test_operator_control_snapshot_state
   test_operator_control_snapshot
+  test_operator_control_judgment
   test_operator_control_support
   test_with_cleanups_on_release
   test_auth_login

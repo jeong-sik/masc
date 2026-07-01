@@ -413,20 +413,19 @@ let () =
   Atomic.set
     Workspace_hooks.operator_pending_confirm_upsert_fn
     (fun config (entry : Workspace_hooks.operator_pending_confirm_request) ->
-       Operator_pending_confirm.upsert_pending_confirm
-         config
-         { token = entry.token
-         ; trace_id = entry.trace_id
-         ; actor = entry.actor
-         ; action_type = entry.action_type
-         ; target_type = entry.target_type
-         ; target_id = entry.target_id
-         ; payload = entry.payload
-         ; delegated_tool = entry.delegated_tool
-         ; created_at = entry.created_at
-         ; expires_at = entry.expires_at
-         };
-       Ok ());
+      Operator_pending_confirm.upsert_pending_confirm
+        config
+        { token = entry.token
+        ; trace_id = entry.trace_id
+        ; actor = entry.actor
+        ; action_type = entry.action_type
+        ; target_type = entry.target_type
+        ; target_id = entry.target_id
+        ; payload = entry.payload
+        ; delegated_tool = entry.delegated_tool
+        ; created_at = entry.created_at
+        ; expires_at = entry.expires_at
+        });
   Atomic.set
     Workspace_hooks.operator_pending_confirm_remove_fn
     Operator_pending_confirm.remove_pending_confirm;

@@ -75,7 +75,7 @@ val operator_pending_confirm_upsert_fn :
     Atomic.t
 
 val operator_pending_confirm_remove_fn :
-  (Workspace_utils_backend_setup.config -> string -> unit) Atomic.t
+  (Workspace_utils_backend_setup.config -> string -> (unit, string) result) Atomic.t
 
 val subscribe_messages_fn : (subscriber:string -> unit) Atomic.t
 val fsm_drift_observer_fn : (variant:string -> force:bool -> agent_name:string -> unit)

@@ -136,7 +136,7 @@ let test_operator_judgment_write_and_latest_roundtrip () =
             (`Assoc
               [
                 ("surface", `String "command.namespace");
-                ("target_type", `String "root");
+                ("target_type", `String "workspace");
                 ("summary", `String "Operator judge requests a human checkpoint.");
                 ("confidence", `Float 0.88);
                 ("fresh_ttl_sec", `Int 90);
@@ -151,7 +151,8 @@ let test_operator_judgment_write_and_latest_roundtrip () =
       let latest =
         match
           Operator_control.judgment_latest_json ctx
-            (`Assoc [ ("surface", `String "command.namespace"); ("target_type", `String "root") ])
+            (`Assoc
+              [ ("surface", `String "command.namespace"); ("target_type", `String "workspace") ])
         with
         | Ok json -> json
         | Error err -> Alcotest.fail err
@@ -200,7 +201,7 @@ let test_operator_judgment_rejects_retired_target_type_aliases () =
             "write rejects namespace"
             "target_type must be root" err)
 
-let test_confirm_keeps_pending_token_when_delegated_action_fails () =
+let test_confirm_consumes_pending_token_before_delegated_action_fails () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun sw ->
@@ -229,7 +230,16 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
             ("expires_at", `Null);
           ]
       in
-      Workspace_utils.write_json config path (`List [ entry_json ]);
+      (match Workspace_utils.write_json_result config path (`List [ entry_json ]) with
+       | Ok () -> ()
+       | Error err -> Alcotest.failf "failed to persist pending confirm fixture: %s" err);
+      let initial_pending_confirms =
+        Operator_control.pending_confirms_json ~actor:"operator" config
+        |> Yojson.Safe.Util.to_list
+      in
+      Alcotest.(check int)
+        "pending confirm fixture persisted" 1
+        (List.length initial_pending_confirms);
       let ctx = operator_ctx env sw config "operator" in
       (match
          Operator_control.confirm_json ctx
@@ -242,9 +252,25 @@ let test_confirm_keeps_pending_token_when_delegated_action_fails () =
         Operator_control.pending_confirms_json ~actor:"operator" config
         |> Yojson.Safe.Util.to_list
       in
-      Alcotest.(check int) "pending confirm retained" 1 (List.length pending_confirms);
-      Alcotest.(check string) "same token retained" token
-        Yojson.Safe.Util.(List.hd pending_confirms |> member "token" |> to_string))
+      Alcotest.(check int) "pending confirm consumed" 0 (List.length pending_confirms))
 
 (* test_digest_recommends_worker_spawn_batch_for_planned_worker_without_turn
    removed: depended on team session start/update which is no longer available. *)
+
+let tests =
+  [
+    Alcotest.test_case "digest prefers fresh operator judgment" `Quick
+      test_digest_workspace_prefers_fresh_operator_judgment;
+    Alcotest.test_case "digest ignores stale operator judgment" `Quick
+      test_digest_workspace_ignores_stale_operator_judgment;
+    Alcotest.test_case "guidance ignores unsupported target type" `Quick
+      test_guidance_ignores_unsupported_target_type;
+    Alcotest.test_case "operator judgment write/latest roundtrip" `Quick
+      test_operator_judgment_write_and_latest_roundtrip;
+    Alcotest.test_case "rejects retired target type aliases" `Quick
+      test_operator_judgment_rejects_retired_target_type_aliases;
+    Alcotest.test_case "confirm consumes token before delegated action failure" `Quick
+      test_confirm_consumes_pending_token_before_delegated_action_fails;
+  ]
+
+let () = Alcotest.run "operator_control_judgment" [ ("operator_control_judgment", tests) ]

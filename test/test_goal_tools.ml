@@ -68,20 +68,19 @@ let with_operator_pending_confirm_hooks f =
   Atomic.set
     Workspace_hooks.operator_pending_confirm_upsert_fn
     (fun config (entry : Workspace_hooks.operator_pending_confirm_request) ->
-       Operator_pending_confirm.upsert_pending_confirm
-         config
-         { token = entry.token
-         ; trace_id = entry.trace_id
-         ; actor = entry.actor
-         ; action_type = entry.action_type
-         ; target_type = entry.target_type
-         ; target_id = entry.target_id
-         ; payload = entry.payload
-         ; delegated_tool = entry.delegated_tool
-         ; created_at = entry.created_at
-         ; expires_at = entry.expires_at
-         };
-       Ok ());
+      Operator_pending_confirm.upsert_pending_confirm
+        config
+        { token = entry.token
+        ; trace_id = entry.trace_id
+        ; actor = entry.actor
+        ; action_type = entry.action_type
+        ; target_type = entry.target_type
+        ; target_id = entry.target_id
+        ; payload = entry.payload
+        ; delegated_tool = entry.delegated_tool
+        ; created_at = entry.created_at
+        ; expires_at = entry.expires_at
+        });
   Atomic.set
     Workspace_hooks.operator_pending_confirm_remove_fn
     Operator_pending_confirm.remove_pending_confirm;
@@ -1017,6 +1016,51 @@ let test_goal_approval_drop_clears_pending_confirm () =
          (List.length (Operator_pending_confirm.read_pending_confirms config)))
 ;;
 
+let test_goal_approval_clear_failure_is_reported () =
+  with_goal_awaiting_completion_approval
+    ~title:"Reject approval clear failure"
+    (fun config goal ->
+       let previous_remove =
+         Atomic.get Workspace_hooks.operator_pending_confirm_remove_fn
+       in
+       Fun.protect
+         ~finally:(fun () ->
+           Atomic.set Workspace_hooks.operator_pending_confirm_remove_fn previous_remove)
+         (fun () ->
+            Atomic.set
+              Workspace_hooks.operator_pending_confirm_remove_fn
+              (fun _config _token -> Error "forced pending-confirm clear failure");
+            let rejected =
+              Tool_workspace.dispatch
+                (workspace_ctx ~agent_name:"operator" config)
+                ~name:"masc_goal_transition"
+                ~args:
+                  (`Assoc
+                      [ "goal_id", `String goal.id
+                      ; "action", `String "reject_completion"
+                      ; "actor", principal_json ~id:"operator"
+                      ])
+            in
+            let error_json = expect_error rejected in
+            check
+              string
+              "clear failure is surfaced"
+              "internal_error"
+              (get_string_field error_json "error_code");
+            check
+              bool
+              "error names pending confirm clear"
+              true
+              (contains_substring
+                 (get_error_message_field error_json)
+                 "failed to clear goal approval pending confirm");
+            check
+              int
+              "approval request remains when clear fails"
+              1
+              (List.length (Operator_pending_confirm.read_pending_confirms config))))
+;;
+
 let test_goal_principal_display_name_canonicalized () =
   with_workspace
   @@ fun config ->
@@ -1694,19 +1738,23 @@ let test_operator_goal_decision_requires_explicit_decision () =
        ignore (Workspace.init config ~agent_name:(Some "operator"));
        let ctx = operator_ctx env sw config "operator" in
        let assert_rejected ~token payload =
-         Operator_pending_confirm.upsert_pending_confirm
-           config
-           { token
-           ; trace_id = "goal_missing_decision"
-           ; actor = "operator"
-           ; action_type = Operator_action_constants.goal_completion_decision
-           ; target_type = Operator_action_constants.goal_target_type
-           ; target_id = Some "goal-1"
-           ; payload
-           ; delegated_tool = Operator_action_constants.goal_transition_tool
-           ; created_at = Masc_domain.now_iso ()
-           ; expires_at = None
-           };
+        (match
+           Operator_pending_confirm.upsert_pending_confirm
+             config
+             { token
+             ; trace_id = "goal_missing_decision"
+             ; actor = "operator"
+             ; action_type = Operator_action_constants.goal_completion_decision
+             ; target_type = Operator_action_constants.goal_target_type
+             ; target_id = Some "goal-1"
+             ; payload
+             ; delegated_tool = Operator_action_constants.goal_transition_tool
+             ; created_at = Masc_domain.now_iso ()
+             ; expires_at = None
+             }
+         with
+         | Ok () -> ()
+         | Error msg -> fail msg);
          match
            Operator_control.confirm_json
              ctx
@@ -1773,6 +1821,10 @@ let () =
             "approval drop clears pending confirm"
             `Quick
             test_goal_approval_drop_clears_pending_confirm
+        ; test_case
+            "approval clear failure is reported"
+            `Quick
+            test_goal_approval_clear_failure_is_reported
         ; test_case
             "principal display labels are canonicalized"
             `Quick

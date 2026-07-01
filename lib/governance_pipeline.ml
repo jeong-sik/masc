@@ -302,14 +302,25 @@ let auto_approval_soft_forbidden ~tool_name ~input =
 ;;
 
 (* Human-readable reason attached to a forbidden rejection. Hard-forbidden
-   splits on whether the block is a Critical risk or an active runtime blocker
-   so operators can tell the two apart in the decision audit. *)
-let forbidden_reject_reason ~risk ~hard_forbidden =
+   reports every wall that fired — a Critical-risk tool, an active runtime
+   blocker, or both — so operators see the complete disposition in the decision
+   audit rather than only the highest-precedence one. Critical risk and a
+   runtime blocker can hold simultaneously; reporting only one would hide the
+   other from the audit trail. *)
+let forbidden_reject_reason ~risk ~runtime_blocked ~hard_forbidden =
   if hard_forbidden
   then (
-    match risk with
-    | Critical -> "critical risk tool cannot be auto-approved"
-    | Low | Medium | High -> "runtime contract blocks auto-approval")
+    match risk = Critical, runtime_blocked with
+    | true, true ->
+      "critical risk tool and runtime contract both block auto-approval"
+    | true, false -> "critical risk tool cannot be auto-approved"
+    | false, true -> "runtime contract blocks auto-approval"
+    | false, false ->
+      (* [hard_forbidden] is [risk = Critical || runtime_blocked], so this pair
+         cannot arise when the caller passes [hard_forbidden:true]. Kept total
+         (no partial match) to avoid a silent misreport if that invariant ever
+         breaks. *)
+      "auto-approval forbidden by runtime governance")
   else "destructive tool/op cannot be auto-approved without operator HITL"
 ;;
 
@@ -507,7 +518,8 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
            must never be auto-approved or stranded on a queue nobody drains — it is
            rejected outright. This is the branch that closes the HITL-disabled /
            always-approve auto-approval bypass. *)
-        let reason = forbidden_reject_reason ~risk ~hard_forbidden in
+        let runtime_blocked = runtime_auto_approval_blocked meta in
+        let reason = forbidden_reject_reason ~risk ~runtime_blocked ~hard_forbidden in
         let decision = Agent_sdk.Hooks.Reject reason in
         let event_type, disposition_reason =
           if hard_forbidden

@@ -1649,6 +1649,55 @@ let test_hard_forbidden_blocks_critical_risk () =
       true
       (approval_decision_is_reject decision))
 
+let test_hard_forbidden_reports_both_walls () =
+  with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
+    with_test_config @@ fun config ->
+    (* Both walls fire: the tool is Critical risk (tool_edit_file on a system
+       path) AND the runtime is blocked (Completion_contract_violation
+       last_blocker). The rejection reason must name both, not just the
+       Critical-risk one, so the runtime blocker is not hidden from the audit. *)
+    let meta =
+      meta_from_json
+        (`Assoc
+           [ ("name", `String "test-keeper")
+           ; ("trace_id", `String "test-trace")
+           ; ("sandbox_profile", `String "docker")
+           ; ("network_mode", `String "inherit")
+           ; ("always_approve", `Bool true)
+           ])
+    in
+    let meta =
+      { meta with
+        runtime =
+          { meta.runtime with
+            last_blocker =
+              Some
+                (Masc.Keeper_meta_contract.blocker_info_of_class
+                   ~detail:"completion contract failed"
+                   Masc.Keeper_meta_contract.Completion_contract_violation)
+          }
+      }
+    in
+    let cb =
+      GP.to_oas_approval_callback
+        ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+    in
+    let decision =
+      cb ~tool_name:"tool_edit_file" ~input:(`Assoc [ ("path", `String "/etc/passwd") ])
+    in
+    match decision with
+    | Agent_sdk.Hooks.Reject reason ->
+      Alcotest.(check bool)
+        "reason names the critical-risk wall"
+        true
+        (contains_substring reason "critical risk");
+      Alcotest.(check bool)
+        "reason names the runtime-contract wall"
+        true
+        (contains_substring reason "runtime contract")
+    | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ ->
+      Alcotest.fail "expected Reject for a both-wall hard_forbidden request")
+
 let test_soft_forbidden_blocks_destructive_tool () =
   with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
     with_test_config @@ fun config ->
@@ -2099,6 +2148,8 @@ let () =
         test_callback_hitl_disabled_forbidden_rejects_without_queuing;
       Alcotest.test_case "hard_forbidden blocks critical risk" `Quick
         test_hard_forbidden_blocks_critical_risk;
+      Alcotest.test_case "hard_forbidden reason names both walls" `Quick
+        test_hard_forbidden_reports_both_walls;
       Alcotest.test_case "soft_forbidden blocks destructive op" `Quick
         test_soft_forbidden_blocks_destructive_tool;
       Alcotest.test_case "always_approve bypasses only when not hard_forbidden" `Quick

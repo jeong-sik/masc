@@ -18,6 +18,9 @@ val empty_state : state
 val translate :
   redact_text:(string -> string) ->
   on_text_delta:(string -> string) ->
+  base_dir:string ->
   state ->
   Agent_sdk.Types.sse_event ->
   translated_event
+(** [base_dir] is the workspace base path used to persist RFC-0301 model-generated
+    media (via {!Keeper_chat_media_store}) when a media block completes. *)

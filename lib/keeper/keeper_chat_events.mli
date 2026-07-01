@@ -15,6 +15,11 @@ type stream_protocol_error_kind =
   | Tool_start_missing_identity
   | Tool_args_without_start
   | Tool_stop_without_start
+  | Media_delta_invalid_block
+  | Media_source_unsupported
+  | Media_decode_failed
+  | Media_payload_too_large
+  | Media_persist_failed
   | Sse_error
   | Sse_parse_failed
   | Sse_unknown_event_type
@@ -62,7 +67,9 @@ type keeper_chat_event =
       { index : int
       ; media_type : string
       ; source_type : Agent_sdk.Types.media_source_kind
-      ; bytes : int
+      ; media_ref : string
+          (** RFC-0301: reader-facing URL of the persisted media
+              ([/api/v1/media/<token>]), replacing the pre-RFC byte count. *)
       }
   | Oas_stream_protocol_error of stream_protocol_error
   | Tool_call_start of { tool_call_id : string; tool_call_name : string }

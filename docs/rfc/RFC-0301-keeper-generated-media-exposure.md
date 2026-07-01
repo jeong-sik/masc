@@ -20,30 +20,27 @@ OAS는 미디어 데이터를 **완전히 surface한다** (MASC는 OAS를 소비
 
 즉 **OAS는 실제 페이로드(base64/url/file_id)를 전달**한다. OAS 측 변경은 필요 없다.
 
-### 1.2 근본 원인 — MASC 브릿지가 데이터를 카운트로 축소
+### 1.2 근본 원인 — pre-RFC MASC 브릿지가 데이터를 카운트로 축소
 
-MASC가 OAS 스트림을 키퍼 채팅 이벤트로 변환하는 브릿지에서 **데이터를 byte-count로 축소**한다:
-
-```
-lib/keeper/keeper_chat_oas_stream_bridge.ml:85-91
-| ContentBlockDelta { index; delta = MediaDelta { media_type; source_type; data } } ->
-    { bridge_state;
-      chat_events =
-        [ Oas_media_delta { index; media_type; source_type; bytes = String.length data } ] }
-```
-
-타입 자체가 카운트만 운반한다:
+pre-RFC MASC가 OAS 스트림을 키퍼 채팅 이벤트로 변환하는 브릿지에서
+**데이터를 byte-count로 축소**했다. 이 RFC의 구현은 byte-count emit을
+제거하고, block별 누적 후 `ContentBlockStop`/`MessageStop`에서 persist한
+`media_ref` URL emit으로 교체한다:
 
 ```
-lib/keeper/keeper_chat_events.ml:50-54
+lib/keeper/keeper_chat_events.ml (current)
 | Oas_media_delta of { index : int; media_type : string;
-                       source_type : Agent_sdk.Types.media_source_kind; bytes : int }
+                       source_type : Agent_sdk.Types.media_source_kind;
+                       media_ref : string }
 ```
 
-이후:
-- SSE emit `lib/server/server_routes_http_keeper_stream.ml:1179-1192`가 `{index,media_type,source_type,bytes}`(카운트)를 KEEPER_MEDIA_DELTA로 전송.
-- frontend `dashboard/src/keeper-stream.ts:321-322` `KEEPER_MEDIA_DELTA` 핸들러가 `setAssistantStreamState(...'streaming')`만 호출하고 이벤트를 **폐기**(return null). media accumulator 없음, 블록 emission 없음.
-- `dashboard/src/types/core.ts:837,835`의 `ChatImageBlock`/`ChatVoiceBlock`는 존재하나 생성 미디어 경로에서 아무도 populate하지 않음.
+현재 구현:
+- bridge가 `MediaDelta`를 block별로 누적하고 `ContentBlockStop` 또는 `MessageStop`에서 raw bytes를 persist한다.
+- `Base64` source는 raw bytes로 decode하고, `Url`/`File_id`는 explicit resolver가 생기기 전까지 protocol error로 surface한다.
+- generated-media payload는 `MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES` raw-byte cap 및 base64 wire cap을 넘으면 persist 전에 protocol error로 차단한다.
+- SSE emit `lib/server/server_routes_http_keeper_stream.ml`가 `{index,media_type,source_type,media_ref}`(URL)를 KEEPER_MEDIA_DELTA로 전송한다.
+- turn persist path가 같은 stream에서 생성 미디어를 `Image`/`Voice`/`Attach` block으로 저장해 reload-visible하게 만든다.
+- `dashboard/src/types/core.ts:837,835`의 `ChatImageBlock`/`ChatVoiceBlock`는 reload path에서 저장된 block을 렌더하는 재사용 대상이다.
 
 이는 **"telemetry-as-fix" 안티패턴이 프로토콜 shape에 박힌 형태**다 — 데이터 채널이어야 할 자리에 카운트(관측치)를 넣었다. 데이터는 OAS에서 가용했으나 경계에서 의도적으로 버려졌다.
 
@@ -79,12 +76,16 @@ lib/keeper/keeper_chat_events.ml:50-54
 
 선례(완비, 재사용 가능):
 - route: `GET /api/v1/voice/audio/<token>` (`lib/server/server_routes_http_routes_voice.ml:130`, RFC-0235 P1).
-- auth allowlist: `lib/server/server_auth.ml:806`.
-- 토큰 검증 + GC: `lib/keeper/keeper_chat_store.ml:948` `valid_audio_token`, :960 만료 GC.
+- auth: `GET /api/v1/media/<token>` is a normal `CanReadState` route. The token is
+  a content locator, not a public bearer capability.
+- 토큰 검증 + cleanup: `Keeper_chat_media_store` uses lowercase SHA-256 hex
+  tokens, atomic writes, a raw payload cap (`MASC_KEEPER_GENERATED_MEDIA_MAX_BYTES`),
+  and opportunistic media-dir cleanup (`MASC_KEEPER_GENERATED_MEDIA_RETENTION_SEC`,
+  `MASC_KEEPER_GENERATED_MEDIA_DIR_MAX_BYTES`).
 - URL 생성: `lib/voice/voice_bridge.ml:17`; persist+emit 패턴: `lib/keeper/keeper_tool_voice_runtime.ml:149-159`.
 
 - 장점: 스트림은 URL만(가벼움). reload 자연 동작(URL은 chat store에 persist). 브라우저 캐시. 기존 voice 패턴과 일관. dedup 가능.
-- 단점: 미디어 스토어 + 보존/GC 정책 필요. 토큰 capability/auth 필요. 이미지/문서용 route 일반화(`/api/v1/media/<token>`?) 필요.
+- 단점: 미디어 스토어 + 보존/cleanup 정책 필요. 이미지/문서용 route 일반화(`/api/v1/media/<token>`?) 및 read-auth 필요.
 
 ### 권장: Option B
 
@@ -95,7 +96,7 @@ lib/keeper/keeper_chat_events.ml:50-54
 1. `lib/keeper/keeper_chat_events.ml` — `Oas_media_delta`의 `bytes:int`를 제거하고 `media_ref`(token/url) + `media_type` + `source_type`로 교체. (closed variant, 컴파일러가 모든 소비자 강제 갱신.)
 2. `lib/keeper/keeper_chat_oas_stream_bridge.ml:85-91` — `MediaDelta.data`를 청크 누적(`bridge_state`)하고 `Oas_content_block_stop`에서 미디어 스토어에 persist + 토큰 발급.
 3. 미디어 스토어 모듈 — voice-clip persist(`keeper_tool_voice_runtime.ml`) 일반화. 이미지/오디오/문서 media_type 지원.
-4. HTTP route — `GET /api/v1/media/<token>` (voice route 일반화) + `server_auth.ml` allowlist.
+4. HTTP route — `GET /api/v1/media/<token>` (voice route 일반화) + normal read-auth gate.
 5. `lib/server/server_routes_http_keeper_stream.ml:1179` — URL emit.
 6. `keeper_chat_blocks.ml` / `keeper_chat_store.ml` — 생성 미디어를 기존 `Image`/`Voice` 블록(+필요시 문서)으로 persist (reload 노출).
 7. frontend `dashboard/src/keeper-stream.ts` — KEEPER_MEDIA_DELTA 핸들러가 URL로 `ChatImageBlock`/`ChatVoiceBlock` emit.
@@ -119,7 +120,8 @@ lib/keeper/keeper_chat_events.ml:50-54
 
 - `Oas_media_delta.bytes` 소비자는 SSE emit 1곳뿐(`server_routes_http_keeper_stream.ml:1179`) + discord/slack stub(`keeper_chat_discord.ml:430`, `keeper_chat_slack.ml:288`, `_ ->` no-op). closed variant 교체라 컴파일러가 전수 강제.
 - count 필드에 의존하는 소비자 없음 → 제거가 안전.
-- 롤백: 변경 revert. 미디어 스토어는 GC로 자동 정리(voice-clip과 동일 정책).
+- 롤백: 변경 revert. 남은 미디어 파일은 generated-media store의 opportunistic
+  cleanup 정책(기본 24h age, 500 MiB dir cap)이나 운영자 삭제로 정리.
 
 ## 8. 워크어라운드 거부 점검
 

@@ -184,6 +184,7 @@
   test_keeper_token_count
   test_keeper_chat_store
   test_keeper_chat_blocks
+  test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
@@ -516,6 +517,7 @@
   test_keeper_token_count
   test_keeper_chat_store
   test_keeper_chat_blocks
+  test_keeper_chat_media_store
   test_keeper_external_attention
   test_keeper_runtime_trust_snapshot
   test_keeper_tool_audit_snapshot
@@ -1293,6 +1295,14 @@
  (name test_server_auth_warn_log_bound)
  (modules test_server_auth_warn_log_bound)
  (libraries alcotest masc masc_server eio_main))
+
+; RFC-0301 item 6: the turn-local generated-media accumulator turns stream media
+; into reload chat blocks (image / voice / attach) via the content-addressed store.
+
+(test
+ (name test_keeper_stream_media_accum)
+ (modules test_keeper_stream_media_accum)
+ (libraries alcotest masc masc_server agent_sdk base64 digestif eio_main unix))
 
 ; RFC-0284: goal-loop status SSE broadcast is change-gated (new content emits
 ; one event; unchanged / generated_at-only change emits none).

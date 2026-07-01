@@ -652,13 +652,15 @@ let persisted_error_reply err =
 let empty_direct_reply_error =
   "Keeper completed without a visible reply; the runtime returned only thinking or internal state."
 
-let direct_reply_terminal_error payload_json_opt visible_reply =
+let direct_reply_terminal_error ?(has_visible_blocks = false) payload_json_opt visible_reply =
   let turn_outcome = Keeper_turn_outcome.of_reply_payload payload_json_opt in
-  match (turn_outcome, String_util.trim_to_option visible_reply) with
-  | Keeper_turn_outcome.Continuation_checkpoint, _ -> None
-  | Keeper_turn_outcome.No_visible_reply, _ -> Some empty_direct_reply_error
-  | Keeper_turn_outcome.Visible_reply, None -> Some empty_direct_reply_error
-  | Keeper_turn_outcome.Visible_reply, Some _ -> None
+  match (turn_outcome, String_util.trim_to_option visible_reply, has_visible_blocks) with
+  | Keeper_turn_outcome.Continuation_checkpoint, _, _ -> None
+  | Keeper_turn_outcome.No_visible_reply, _, true -> None
+  | Keeper_turn_outcome.Visible_reply, None, true -> None
+  | Keeper_turn_outcome.No_visible_reply, _, false -> Some empty_direct_reply_error
+  | Keeper_turn_outcome.Visible_reply, None, false -> Some empty_direct_reply_error
+  | Keeper_turn_outcome.Visible_reply, Some _, _ -> None
 
 let visible_reply_with_stream_fallback ~streamed_text visible_reply =
   match String.trim visible_reply with
@@ -809,6 +811,11 @@ let process_single_turn ~connector_user_line_recorded_upstream
      while recording the Gate surface label. *)
   let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
   let worker_text_accum = Keeper_stream_text_accum.create () in
+  (* RFC-0301 item 6: collect generated media from the same stream so the assistant
+     turn can persist it as reload-visible chat blocks. The bridge surfaces this
+     media live over SSE; the persist site records it durably (see the persist arm
+     below). Content-addressed, so the two persists reuse one file. *)
+  let worker_media_accum = Keeper_stream_media_accum.create () in
   let on_event evt =
     (match evt with
      | Agent_sdk.Types.ContentBlockDelta
@@ -817,6 +824,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
            (Keeper_stream_text_accum.on_delta worker_text_accum ~redact:redact_text text
             : string)
      | _ -> ());
+    Keeper_stream_media_accum.on_event worker_media_accum evt;
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
@@ -936,52 +944,76 @@ let process_single_turn ~connector_user_line_recorded_upstream
               Keeper_turn_outcome.turn_ref_of_reply_payload payload_json_opt
             in
             let visible_reply = String.trim visible_reply in
-            (match direct_reply_terminal_error payload_json_opt visible_reply with
+            (* RFC-0301 item 6: attach any generated media (accumulated from
+               this turn's stream) as reload-visible chat blocks so a dashboard
+               reload shows media-only replies too, not just text-bearing
+               replies. *)
+            let blocks =
+              match
+                Keeper_stream_media_accum.to_chat_blocks ~base_dir:base_path
+                  worker_media_accum
+              with
+              | [] -> None
+              | media_blocks -> Some media_blocks
+            in
+            let has_visible_blocks = Option.is_some blocks in
+            (match
+               direct_reply_terminal_error ~has_visible_blocks payload_json_opt
+                 visible_reply
+             with
              | Some err ->
                  persist_failure_reply err;
                  push_worker_event
                    (Stream_terminal { ok = false; status = "error"; body = err });
                  Tool_result.error ~tool_name:"masc_keeper_msg" ~start_time err
              | None ->
+                 let persist_assistant_reply ~assistant_content =
+                   if connector_user_line_recorded_upstream then
+                     Keeper_chat_store.append_assistant_message
+                       ~base_dir:base_path
+                       ~keeper_name:payload.name
+                       ~content:assistant_content
+                       ~surface:chat_surface
+                       ?blocks
+                       ?turn_ref
+                       ()
+                   else
+                     Keeper_chat_store.append_turn
+                       ~base_dir:base_path
+                       ~keeper_name:payload.name
+                       ~user_content:payload.message
+                       ~user_attachments:payload.attachments
+                       ~surface:chat_surface
+                       ~speaker:chat_speaker
+                       ~assistant_content
+                       ?blocks
+                       ?turn_ref
+                       ()
+                 in
+                 let broadcast_chat_appended ?content () =
+                   Keeper_chat_broadcast.chat_appended
+                     ~keeper_name:payload.name ~source:chat_source ?content ()
+                 in
                  (match
                     ( Keeper_turn_outcome.of_reply_payload payload_json_opt,
                       String_util.trim_to_option visible_reply )
                   with
                  | Keeper_turn_outcome.Continuation_checkpoint, _ ->
                      persist_user_message_only ()
-                 | Keeper_turn_outcome.No_visible_reply, _ ->
-                     persist_user_message_only ()
+                 | Keeper_turn_outcome.No_visible_reply, _
                  | Keeper_turn_outcome.Visible_reply, None ->
-                     persist_user_message_only ()
+                     if has_visible_blocks then (
+                       persist_assistant_reply ~assistant_content:"";
+                       broadcast_chat_appended ())
+                     else persist_user_message_only ()
                  | Keeper_turn_outcome.Visible_reply, Some visible_reply ->
                      (* RFC-connector-deferred-reply-via-chat-queue §3.4: gate-recorded connector message → the user
                         line is already persisted at the gate inbound boundary,
                         so pair the reply by appending the assistant line only
                         (mirrors [append_direct_chat_pair_if_reply]'s connector
                         arm). The dashboard route records the full pair. *)
-                     if connector_user_line_recorded_upstream then
-                       Keeper_chat_store.append_assistant_message
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~content:visible_reply
-                         ~surface:chat_surface
-                         ?turn_ref
-                         ()
-                     else
-                       Keeper_chat_store.append_turn
-                         ~base_dir:base_path
-                         ~keeper_name:payload.name
-                         ~user_content:payload.message
-                         ~user_attachments:payload.attachments
-                         ~surface:chat_surface
-                         ~speaker:chat_speaker
-                         ~assistant_content:visible_reply
-                         ?turn_ref
-                         ();
-                     Keeper_chat_broadcast.chat_appended
-                       ~keeper_name:payload.name ~source:chat_source
-                       ~content:visible_reply
-                       ());
+                     persist_assistant_reply ~assistant_content:visible_reply;
+                     broadcast_chat_appended ~content:visible_reply ());
                  push_worker_event
                    (Stream_terminal { ok = true; status = "done"; body });
                  Tool_result.ok ~tool_name:"masc_keeper_msg" ~start_time body)
@@ -1059,7 +1091,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
           translate_oas_stream_event ~redact_text
             ~on_text_delta:
               (Keeper_stream_text_accum.on_delta text_accum ~redact:redact_text)
-            bridge_state evt
+            ~base_dir:base_path bridge_state evt
         in
         List.iter (Keeper_chat_events.publish events) translated.chat_events;
         consume_worker_events translated.bridge_state
@@ -1320,7 +1352,10 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                     ("signature_bytes", `Int signature_bytes);
                   ])
             then loop ()
-        | Oas_media_delta { index; media_type; source_type; bytes } ->
+        | Oas_media_delta { index; media_type; source_type; media_ref } ->
+            (* RFC-0301: emit the reader-facing media URL so the dashboard can
+               fetch + render the payload (GET /api/v1/media/<token>), replacing
+               the pre-RFC byte count. *)
             if
               send_custom "KEEPER_MEDIA_DELTA"
                 (`Assoc
@@ -1331,7 +1366,7 @@ let handle_keeper_chat_stream ~sw ~clock state request reqd payload =
                       `String
                         (Agent_sdk.Types.media_source_kind_to_string source_type)
                     );
-                    ("bytes", `Int bytes);
+                    ("media_ref", `String media_ref);
                   ])
             then loop ()
         | Oas_stream_protocol_error error ->

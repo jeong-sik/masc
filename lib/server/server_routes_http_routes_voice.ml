@@ -18,9 +18,9 @@
     the dashboard fetches this URL directly from an [<audio>]/[Audio]
     element, which needs the media bytes, not a wrapped payload.
 
-    Errors:
+   Errors:
       400 — token malformed (not 32 hex chars)
-      404 — clip not on disk (never synthesized, or reaped by the 1h TTL of
+      404 — clip not on disk (never synthesized, or reaped by the 24h TTL of
             [Voice_bridge.cleanup_old_audio_files])
       503 — base path unresolvable *)
 
@@ -35,8 +35,11 @@ let is_valid_token (s : string) : bool =
   String.length s = token_hex_len
   && String.for_all
        (fun c ->
-         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'f'))
+         (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F'))
        s
+
+let generated_media_serve_max_bytes () =
+  Env_config.KeeperGeneratedMedia.max_bytes ()
 
 (* Clip path under the same audio dir [Voice_bridge_transport.make_audio_file]
    writes to. Reuses [Voice_bridge_core.masc_base_dir] so this route and the
@@ -48,7 +51,7 @@ let clip_path ~token =
 let serve_clip ~token request reqd =
   let path = clip_path ~token in
   if not (Sys.file_exists path) then
-    (* Never synthesized, or reaped by the 1h TTL reaper. Text-only render
+    (* Never synthesized, or reaped by the 24h TTL reaper. Text-only render
        remains the dashboard fallback, so 404 is not a hard failure. *)
     respond_public_read_json_value ~status:`Not_found request reqd
       (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
@@ -66,6 +69,47 @@ let serve_clip ~token request reqd =
     in
     let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
     Httpun.Reqd.respond_with_string reqd response body)
+
+(* RFC-0301: serve a model-generated media file by deterministic store token.
+   Unlike voice clips, this token is a content-derived locator, not a bearer
+   capability, so the route is [CanReadState]-gated below. The file is resolved
+   under the SAME workspace base_path the bridge persisted it with, so the write
+   and read paths agree; content-type is derived from the stored extension. A
+   missing token is a soft 404 (text-only render remains the dashboard fallback);
+   an oversized stored file returns 413 before it is loaded into memory. *)
+let serve_media ~base_path ~token request reqd =
+  match Keeper_chat_media_store.file_path_of_token ~base_dir:base_path ~token with
+  | None ->
+    respond_json_value_with_cors ~status:`Not_found request reqd
+      (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
+  | Some path ->
+    let max_bytes = generated_media_serve_max_bytes () in
+    match Fs_compat.file_size path with
+    | None ->
+        respond_json_value_with_cors ~status:`Not_found request reqd
+          (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
+    | Some size when size > max_bytes ->
+        respond_json_value_with_cors ~status:`Payload_too_large request reqd
+          (`Assoc
+             [ ("error", `String "media too large")
+             ; ("token", `String token)
+             ; ("max_bytes", `Int max_bytes)
+             ; ("size_bytes", `Int size)
+             ])
+    | Some _ -> (
+        match Fs_compat.load_file_opt path with
+        | None ->
+            respond_json_value_with_cors ~status:`Not_found request reqd
+              (`Assoc [ ("error", `String "not found"); ("token", `String token) ])
+        | Some body ->
+            let headers =
+              Httpun.Headers.of_list
+                (("content-type", Keeper_chat_media_store.content_type_of_path path)
+                 :: ("content-length", string_of_int (String.length body))
+                 :: cors_headers (get_origin request))
+            in
+            let response = Httpun.Response.create ~headers (`OK :> Httpun.Status.t) in
+            Httpun.Reqd.respond_with_string reqd response body)
 
 (* Owner-route JSON respond helper. Unlike [respond_public_read_json_value],
    this adds no public-read capability headers: the transcribe route is
@@ -142,6 +186,25 @@ let add_routes router =
                     ; ("reason", `String "expected 32-char hex (128-bit)")
                     ])
            | Some token -> serve_clip ~token request reqd)
+         request reqd)
+  |> Http.Router.prefix_get "/api/v1/media/" (fun request reqd ->
+       (* RFC-0301: model-generated media (image/audio/document) fetched by an
+          authenticated content locator. Content hashes are not capabilities. *)
+       with_permission_auth ~permission:Masc_domain.CanReadState
+         (fun state _req reqd ->
+           let base_path = (Mcp_server.workspace_config state).base_path in
+           let path = Http.Request.path request in
+           match extract_path_param ~prefix:"/api/v1/media/" path with
+           | None ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd
+                 (`Assoc [ ("error", `String "token path parameter required") ])
+           | Some raw when not (Keeper_chat_media_store.valid_token raw) ->
+               respond_json_value_with_cors ~status:`Bad_request request reqd
+                 (`Assoc
+                    [ ("error", `String "invalid token")
+                    ; ("reason", `String "expected 64-char lowercase hex (SHA-256)")
+                    ])
+           | Some token -> serve_media ~base_path ~token request reqd)
          request reqd)
   |> Http.Router.post "/api/v1/voice/transcribe" (fun request reqd ->
        (* RFC-0236 P1: browser-captured speech -> text. Admin/owner-only

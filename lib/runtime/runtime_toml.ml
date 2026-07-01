@@ -808,8 +808,11 @@ let parse_runtime_media_failover ~path value =
      in a well-typed array are still caught loudly by
      {!Runtime.validate_media_failover}. *)
   try Ok (Otoml.get_array Otoml.get_string value) with
-  | Otoml.Type_error _ ->
-    Error (error path "media_failover must be an array of string runtime ids")
+  | Otoml.Type_error msg ->
+    Error
+      (error
+         path
+         (Printf.sprintf "media_failover must be an array of string runtime ids; got %s" msg))
 ;;
 
 let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list) result =

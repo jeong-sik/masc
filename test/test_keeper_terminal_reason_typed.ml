@@ -748,10 +748,7 @@ let () =
   in
   check
     "completion-contract terminal failure is not a completed activity turn"
-    (not (UTS.terminal_outcome_is_completed_turn completion_contract_failure));
-  check
-    "completion-contract terminal failure persists keeper turn usage"
-    (UTS.terminal_outcome_persists_turn_usage completion_contract_failure)
+    (not (UTS.terminal_outcome_is_completed_turn completion_contract_failure))
 ;;
 
 let () =

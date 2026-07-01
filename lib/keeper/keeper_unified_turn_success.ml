@@ -246,10 +246,6 @@ let terminal_outcome_is_completed_turn = function
   | Terminal_failed_completion_contract _ -> false
 ;;
 
-let terminal_outcome_persists_turn_usage = function
-  | Terminal_done | Terminal_checkpoint | Terminal_failed_completion_contract _ -> true
-;;
-
 let terminal_outcome_to_activity_kind = function
   | Terminal_failed_completion_contract _ -> "keeper.turn_failed"
   | Terminal_done | Terminal_checkpoint -> "keeper.turn_completed"
@@ -293,7 +289,6 @@ module For_testing = struct
 
   let terminal_outcome_of_result = terminal_outcome_of_result
   let terminal_outcome_is_completed_turn = terminal_outcome_is_completed_turn
-  let terminal_outcome_persists_turn_usage = terminal_outcome_persists_turn_usage
 end
 
 let append_metrics_snapshot
@@ -892,16 +887,15 @@ let handle
     ~turn_mode_label
     ~lifecycle
     ~terminal_outcome;
+  (* Every terminal outcome has consumed a keeper turn id. Persist the updated
+     usage even for completion-contract failures so the next cycle cannot
+     allocate the same turn id again. *)
   let updated_meta =
-    if terminal_outcome_persists_turn_usage terminal_outcome
-    then
-      persist_terminal_turn_meta
-        ~config
-        ~original_meta:meta
-        ~clear_auto_resume_after_sec:
-          (terminal_outcome_is_completed_turn terminal_outcome)
-        ~updated_meta
-    else updated_meta
+    persist_terminal_turn_meta
+      ~config
+      ~original_meta:meta
+      ~clear_auto_resume_after_sec:(terminal_outcome_is_completed_turn terminal_outcome)
+      ~updated_meta
   in
   let tool_call_summaries =
     let max_tool_calls = 10 in

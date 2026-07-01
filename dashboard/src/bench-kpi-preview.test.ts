@@ -1,8 +1,14 @@
 import { readFileSync } from 'node:fs'
-import { resolve } from 'node:path'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+// Resolve relative to this test file's own location, not process.cwd() —
+// cwd varies with how Vitest is invoked (repo root vs dashboard package
+// root), but this file's path relative to design-system/preview/ is fixed.
+const PREVIEW_DIR = resolve(dirname(fileURLToPath(import.meta.url)), '../design-system/preview')
 
 function readPreviewFile(file: string): string {
-  return readFileSync(resolve(process.cwd(), 'design-system/preview', file), 'utf8')
+  return readFileSync(resolve(PREVIEW_DIR, file), 'utf8')
 }
 
 describe('bench KPI design-system preview', () => {

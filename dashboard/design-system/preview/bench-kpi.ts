@@ -123,7 +123,9 @@ function reportResult(label: string, r: BenchResult, count: number, cellsPerStri
     ? r.islandUpdateMs.reduce((a, b) => a + b, 0) / r.islandUpdateMs.length
     : NaN
 
-  const updWinner = islandUpdAvg < preactUpdAvg ? 'Solid' : 'Preact'
+  const updWinner = Number.isNaN(preactUpdAvg) || Number.isNaN(islandUpdAvg)
+    ? 'n/a (no update samples)'
+    : islandUpdAvg < preactUpdAvg ? 'Solid' : 'Preact'
   const updRatio = preactUpdAvg ? (islandUpdAvg / preactUpdAvg).toFixed(2) : 'n/a'
 
   const block = [
@@ -392,7 +394,9 @@ function frameCounter(): { stop: () => number } {
 function p95(values: number[]): number {
   if (values.length === 0) return NaN
   const sorted = [...values].sort((a, b) => a - b)
-  const idx = Math.min(sorted.length - 1, Math.floor(sorted.length * 0.95))
+  // Nearest-rank on (n-1): `floor(n * 0.95)` skews toward the max for small
+  // n (e.g. n=10 picks index 9, the max, not the 95th percentile).
+  const idx = Math.round((sorted.length - 1) * 0.95)
   return sorted[idx] ?? NaN
 }
 

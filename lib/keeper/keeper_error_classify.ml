@@ -85,6 +85,7 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (ServerError _)
   | Agent_sdk.Error.Api (RateLimited _)
   | Agent_sdk.Error.Api (AuthError _)
+  | Agent_sdk.Error.Api (PaymentRequired _)
   | Agent_sdk.Error.Api (InvalidRequest _)
   | Agent_sdk.Error.Api (NotFound _)
   | Agent_sdk.Error.Api (ContextOverflow _) -> false
@@ -139,7 +140,7 @@ let is_model_rejected_parse_error (err : Agent_sdk.Error.sdk_error) : bool =
   match err with
   | Agent_sdk.Error.Api (InvalidRequest _ | NetworkError _ | Timeout _
     | Overloaded _ | ServerError _ | RateLimited _ | AuthError _ | NotFound _
-    | ContextOverflow _) ->
+    | PaymentRequired _ | ContextOverflow _) ->
       false
   | Agent_sdk.Error.Provider _ -> false
   | Agent_sdk.Error.Agent _ -> false
@@ -466,6 +467,8 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
            different runtime with different credentials may succeed.
 
            Hard-quota 429s are already handled above by sdk_error_is_hard_quota.
+           HTTP 402 PaymentRequired is also handled there via OAS
+           Retry.is_hard_quota.
            Soft (non-hard-quota) rate limits intentionally keep [Rate_limit]
            so pool-aware candidate filtering can preserve independent-provider
            failover. *)
@@ -514,6 +517,7 @@ let recoverable_runtime_failure_reason (err : Agent_sdk.Error.sdk_error) =
          (* Sub-500 server errors and remaining 4xx API errors are not
             classified as recoverable runtime failures. *)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ServerError _)
+         | Agent_sdk.Error.Api (Llm_provider.Retry.PaymentRequired _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.InvalidRequest _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.NotFound _)
          | Agent_sdk.Error.Api (Llm_provider.Retry.ContextOverflow _)
@@ -760,6 +764,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (Overloaded _)
   | Agent_sdk.Error.Api (ServerError _)
   | Agent_sdk.Error.Api (AuthError _)
+  | Agent_sdk.Error.Api (PaymentRequired _)
   | Agent_sdk.Error.Api (InvalidRequest _)
   | Agent_sdk.Error.Api (NotFound _)
   | Agent_sdk.Error.Api (NetworkError _)

@@ -93,9 +93,14 @@ let bridge_details fields envelope =
     exits immediately instead of retrying. *)
 
 let with_hitl_approval_headroom timeout_s =
+  let approval_wait_s =
+    Float.max
+      Keeper_approval_queue.default_noncritical_approval_timeout_s
+      (Env_config_hitl.critical_timeout_s ())
+  in
   Float.max
     timeout_s
-    (Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0)
+    (approval_wait_s +. 30.0)
 ;;
 
 

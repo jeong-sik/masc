@@ -216,17 +216,15 @@ let test_unknown_cancel_stays_warn () =
 ;;
 
 let test_hitl_headworkspace_exceeds_default_approval_wait () =
-  let floor =
-    Keeper_approval_queue.default_noncritical_approval_timeout_s +. 30.0
-  in
+  let floor = 3630.0 in
   Alcotest.(check (float 0.001))
     "short bridge timeout is raised above HITL wait"
     floor
     (Keeper_llm_bridge.with_hitl_approval_headroom 292.0);
   Alcotest.(check (float 0.001))
     "long bridge timeout is preserved"
-    900.0
-    (Keeper_llm_bridge.with_hitl_approval_headroom 900.0)
+    3900.0
+    (Keeper_llm_bridge.with_hitl_approval_headroom 3900.0)
 ;;
 
 let test_timeout_inner_cancel_classification () =

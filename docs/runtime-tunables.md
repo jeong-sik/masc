@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 363 unique knobs across 9 modules.
+**Total**: 364 unique knobs across 10 modules.
 
-**Typed getter classification**: 48/219 tagged (`operator`: 48, `algorithm`: 0, `unclassified`: 171).
+**Typed getter classification**: 48/220 tagged (`operator`: 48, `algorithm`: 0, `unclassified`: 172).
 
 ## Env_config_core (27 knobs; typed classification 3/8)
 
@@ -84,6 +84,12 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_RATE_LIMIT_CLEANUP_INTERVAL_SEC` | typed:float | unclassified | unclassified | 54 | Cleanup interval for stale rate limit buckets (seconds) |
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 58 | Max age for rate limit entries before cleanup (seconds) |
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 44 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
+
+## Env_config_hitl (1 knobs; typed classification 0/1)
+
+| Env var | Kind | Category | Ops class | Line | Doc |
+|---|---|---|---|---|---|
+| `MASC_HITL_CRITICAL_TIMEOUT_S` | typed:float | unclassified | unclassified | 10 | HITL (human-in-the-loop) approval configuration. Bounded timeouts prevent dangerous tool approvals from stalling a Ke... |
 
 ## Env_config_keeper (90 knobs; typed classification 26/77)
 

@@ -1,7 +1,7 @@
 (* lib/keeper/keeper_llm_bridge.mli *)
 
 val with_hitl_approval_headroom : float -> float
-(** Raise an OAS bridge timeout floor above the default non-critical HITL
+(** Raise an OAS bridge timeout floor above the longest active HITL
     approval wait. This keeps operator approval latency from being surfaced as
     an OAS/provider timeout before the approval queue itself resolves or
     expires. *)

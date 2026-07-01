@@ -67,6 +67,23 @@ let test_per_caller_env_override () =
   clear_envs ()
 ;;
 
+let test_infinite_env_falls_back () =
+  clear_envs ();
+  Unix.putenv
+    (Cfg.per_caller_env_var ~caller:Cfg.Anti_rationalization)
+    "infinity";
+  Alcotest.(check (float 0.0001))
+    "infinite per-caller env falls back"
+    Cfg.global_default_sec
+    (Cfg.timeout_sec ~caller:Cfg.Anti_rationalization ());
+  Unix.putenv Cfg.global_env_var "infinity";
+  Alcotest.(check (float 0.0001))
+    "infinite global env falls back"
+    Cfg.global_default_sec
+    (Cfg.timeout_sec ~caller:(Cfg.Unknown "unknown_caller_test_10094") ());
+  clear_envs ()
+;;
+
 let test_global_env_does_not_override_known_callers () =
   clear_envs ();
   Unix.putenv Cfg.global_env_var "999.0";
@@ -128,6 +145,10 @@ let () =
             "per-caller env wins over global env"
             `Quick
             test_per_caller_env_beats_global_env
+        ; Alcotest.test_case
+            "infinite env falls back"
+            `Quick
+            test_infinite_env_falls_back
         ] )
     ; ( "naming_contract"
       , [ Alcotest.test_case

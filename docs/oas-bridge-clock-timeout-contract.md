@@ -16,11 +16,11 @@ into unbounded execution.
 Do not add a default-off opt-out flag that restores clockless bridge execution.
 That would preserve the unsafe behavior this contract removes.
 
-Request-path callers registered in `Env_config_oas_bridge.known_callers` must
-have finite checked-in defaults. Advisory dashboard judges keep their
-pre-#22402 `Float.infinity` default until they move to a dedicated no-wrapper
-path; this avoids changing fleet-wide idle behavior in the clock-required
-bridge PR.
+Callers registered in `Env_config_oas_bridge.known_callers` must have finite
+checked-in defaults. The bridge rejects `Float.infinity` even when supplied
+directly, and env parsing treats `infinity` as invalid so a checked-in finite
+fallback is used instead. Advisory dashboard judges are still separately
+bounded, but they no longer bypass the bridge timeout wrapper.
 
 ## Migration
 

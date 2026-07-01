@@ -64,6 +64,7 @@ module For_testing : sig
 
   val terminal_outcome_of_result : Keeper_agent_run.run_result -> terminal_outcome
   val terminal_outcome_is_completed_turn : terminal_outcome -> bool
+  val terminal_outcome_persists_turn_usage : terminal_outcome -> bool
 end
 
 val handle

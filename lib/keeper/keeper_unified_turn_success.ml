@@ -246,6 +246,10 @@ let terminal_outcome_is_completed_turn = function
   | Terminal_failed_completion_contract _ -> false
 ;;
 
+let terminal_outcome_persists_turn_usage = function
+  | Terminal_done | Terminal_checkpoint | Terminal_failed_completion_contract _ -> true
+;;
+
 let terminal_outcome_to_activity_kind = function
   | Terminal_failed_completion_contract _ -> "keeper.turn_failed"
   | Terminal_done | Terminal_checkpoint -> "keeper.turn_completed"
@@ -289,6 +293,7 @@ module For_testing = struct
 
   let terminal_outcome_of_result = terminal_outcome_of_result
   let terminal_outcome_is_completed_turn = terminal_outcome_is_completed_turn
+  let terminal_outcome_persists_turn_usage = terminal_outcome_persists_turn_usage
 end
 
 let append_metrics_snapshot
@@ -602,9 +607,14 @@ let terminal_reason_of_outcome result = function
       ~source:"completion_contract"
       Keeper_turn_disposition.Completion_contract_unsatisfied
 
-let persist_success_meta ~config ~original_meta ~updated_meta =
+let persist_terminal_turn_meta
+      ~config
+      ~original_meta
+      ~clear_auto_resume_after_sec
+      ~updated_meta
+  =
   let updated_meta =
-    if updated_meta.auto_resume_after_sec <> None
+    if clear_auto_resume_after_sec && updated_meta.auto_resume_after_sec <> None
     then { updated_meta with auto_resume_after_sec = None }
     else updated_meta
   in
@@ -883,10 +893,15 @@ let handle
     ~lifecycle
     ~terminal_outcome;
   let updated_meta =
-    match terminal_outcome with
-    | Terminal_failed_completion_contract _ -> updated_meta
-    | Terminal_done | Terminal_checkpoint ->
-      persist_success_meta ~config ~original_meta:meta ~updated_meta
+    if terminal_outcome_persists_turn_usage terminal_outcome
+    then
+      persist_terminal_turn_meta
+        ~config
+        ~original_meta:meta
+        ~clear_auto_resume_after_sec:
+          (terminal_outcome_is_completed_turn terminal_outcome)
+        ~updated_meta
+    else updated_meta
   in
   let tool_call_summaries =
     let max_tool_calls = 10 in

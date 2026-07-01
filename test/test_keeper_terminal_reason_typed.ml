@@ -19,6 +19,7 @@
 module R = Masc.Keeper_execution_receipt
 module C = Masc.Keeper_contract_classifier
 module Tr = Keeper_terminal_reason
+module UTS = Masc.Keeper_unified_turn_success.For_testing
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
@@ -738,6 +739,19 @@ let () =
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want)
+;;
+
+let () =
+  let completion_contract_failure =
+    UTS.Terminal_failed_completion_contract
+      { reason_code = "needs_execution_progress" }
+  in
+  check
+    "completion-contract terminal failure is not a completed activity turn"
+    (not (UTS.terminal_outcome_is_completed_turn completion_contract_failure));
+  check
+    "completion-contract terminal failure persists keeper turn usage"
+    (UTS.terminal_outcome_persists_turn_usage completion_contract_failure)
 ;;
 
 let () =

@@ -53,8 +53,8 @@ let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_to
 
 let response_text ~state_snapshot_source ~raw_response_text =
   match (state_snapshot_source : Keeper_memory_policy.state_snapshot_source) with
-  | Synthesized | Structured_state_reply -> ""
-  | Structured_state_tool | State_block ->
+  | Structured_state_reply -> ""
+  | Synthesized | Structured_state_tool | State_block ->
     Keeper_text_processing.strip_internal_reply_markup raw_response_text
 ;;
 

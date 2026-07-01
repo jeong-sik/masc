@@ -347,6 +347,11 @@ export function applyKeeperStreamEvent(
       setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'sending')
       return null
     case 'TEXT_MESSAGE_START':
+      // Flush any buffered thinking deltas before entering the text phase so a
+      // pending scheduled flush cannot run later and revert streamState to
+      // 'thinking' after text streaming has begun. Mirrors TEXT_MESSAGE_END and
+      // TOOL_CALL_START, which flush at their phase boundaries.
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
       setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
       return null
     case 'TEXT_MESSAGE_CONTENT': {

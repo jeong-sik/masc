@@ -517,6 +517,32 @@ describe('applyKeeperStreamEvent', () => {
     ])
   })
 
+  it('flushes pending thinking deltas at TEXT_MESSAGE_START without reverting stream state', () => {
+    assistantEntry()
+    // Thinking delta schedules a pending flush.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'thinking before text' },
+    })
+    // Text phase begins before the scheduled flush runs.
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'hello',
+    })
+    // A still-scheduled flush must be a no-op: START already flushed it, so it
+    // cannot revert streamState to 'thinking' after text streaming began.
+    _flushPendingKeeperStreamDeltasForTests()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.streamState).toBe('streaming')
+    expect(entry?.text).toBe('hello')
+    expect(entry?.traceSteps).toEqual([
+      { kind: 'think', text: 'thinking before text', ts: expect.any(String) },
+    ])
+  })
+
   it('drops pending thinking deltas when aborting a live stream', () => {
     assistantEntry()
     setActiveStream('sangsu', 'reply-1', new AbortController())

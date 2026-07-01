@@ -70,6 +70,7 @@ const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 
 }
 
 export const CHAT_SUGGESTIONS_LABEL = '추천 후속 질문'
+const STREAMING_THINKING_PREVIEW_CHARS = 6_000
 
 function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'ok' | 'bad' | 'pending'; title: string } {
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']
@@ -552,6 +553,29 @@ function AsyncMarkdownDiv({
   return rendered === null
     ? html`<div class=${className} dangerouslySetInnerHTML=${renderPlainLinkedHtml(text)} />`
     : html`<div class=${className} dangerouslySetInnerHTML=${{ __html: rendered }} />`
+}
+
+function streamingThinkingPreview(text: string): string {
+  if (text.length <= STREAMING_THINKING_PREVIEW_CHARS) return text
+  return `...\n${text.slice(-STREAMING_THINKING_PREVIEW_CHARS)}`
+}
+
+function ChatThinkingText({ text, streaming }: { text: string; streaming: boolean }) {
+  if (streaming) {
+    return html`
+      <div
+        class="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+        data-chat-thinking-preview=${text.length > STREAMING_THINKING_PREVIEW_CHARS ? 'truncated' : 'full'}
+        dangerouslySetInnerHTML=${renderPlainLinkedHtml(streamingThinkingPreview(text))}
+      />
+    `
+  }
+  return html`
+    <${AsyncMarkdownDiv}
+      text=${text}
+      className="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+    />
+  `
 }
 
 function renderInlineHtml(raw: string): { __html: string } {
@@ -1219,11 +1243,11 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   `
 }
 
-function ChatTraceStep({ step }: { step: ChatTraceStep }) {
+function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; streaming?: boolean }) {
   const [open, setOpen] = useState(false)
 
   if (step.kind === 'think') {
-    const longThinking = step.text.length > THINKING_TRACE_PREVIEW_CHARS
+    const longThinking = !streaming && step.text.length > THINKING_TRACE_PREVIEW_CHARS
     const previewText = longThinking
       ? `${step.text.slice(0, THINKING_TRACE_PREVIEW_CHARS).trimEnd()}\n\n... ${step.text.length - THINKING_TRACE_PREVIEW_CHARS} chars hidden`
       : step.text
@@ -1246,7 +1270,9 @@ function ChatTraceStep({ step }: { step: ChatTraceStep }) {
                 `
               : null}
           </div>
-          ${longThinking && !open
+          ${streaming
+            ? html`<${ChatThinkingText} text=${step.text} streaming=${true} />`
+            : longThinking && !open
             ? html`
                 <div
                   class="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
@@ -2724,7 +2750,11 @@ function ToolTraceCard({
               <span class="chat-block-trace-rail"></span>
               ${ordered.map((item, index) =>
                 item.kind === 'trace'
-                  ? html`<${ChatTraceStep} key=${`trace-${index}`} step=${item.step} />`
+                  ? html`<${ChatTraceStep}
+                      key=${`trace-${index}`}
+                      step=${item.step}
+                      streaming=${assistant !== null && !turnComplete}
+                    />`
                   : item.kind === 'tool'
                     ? (() => {
                         const entry = item.entry ?? toolEntryFromTraceStep(item.step)

@@ -341,6 +341,13 @@ let audit_summary ~action ~details =
       | _ -> None)
     | _ -> None
   in
+  let extract_bool key =
+    match details with
+    | `Assoc fields -> (match List.assoc_opt key fields with
+      | Some (`Bool v) -> Some v
+      | _ -> None)
+    | _ -> None
+  in
   match action with
   | ToolCall name ->
     (match extract_str "error_msg" with
@@ -364,9 +371,37 @@ let audit_summary ~action ~details =
      | Some id -> Printf.sprintf "cancel_task %s" id
      | None -> "cancel_task")
   | RuntimeConfigWrite ->
-    (match extract_str "path" with
-     | Some p -> Printf.sprintf "runtime.toml updated: %s" p
-     | None -> "runtime.toml updated")
+    (match extract_str "operation" with
+     | Some "assignment" ->
+       (match extract_str "keeper_name", extract_str "runtime_id", extract_bool "cleared" with
+        | Some keeper, _, Some true ->
+          Printf.sprintf "runtime.toml assignment cleared: %s" keeper
+        | Some keeper, Some runtime_id, _ ->
+          Printf.sprintf "runtime.toml assignment updated: %s -> %s" keeper runtime_id
+        | Some keeper, None, _ ->
+          Printf.sprintf "runtime.toml assignment updated: %s" keeper
+        | None, _, _ -> "runtime.toml assignment updated")
+     | Some "routing" ->
+       (match extract_str "lane", extract_str "runtime_id", extract_bool "cleared" with
+        | Some lane, _, Some true ->
+          Printf.sprintf "runtime.toml routing cleared: %s" lane
+        | Some lane, Some runtime_id, _ ->
+          Printf.sprintf "runtime.toml routing updated: %s -> %s" lane runtime_id
+        | Some lane, None, _ ->
+          Printf.sprintf "runtime.toml routing updated: %s" lane
+        | None, _, _ -> "runtime.toml routing updated")
+     | Some "raw_save" ->
+       (match extract_str "path" with
+        | Some p -> Printf.sprintf "runtime.toml raw save: %s" p
+        | None -> "runtime.toml raw save")
+     | Some "reload" ->
+       (match extract_str "path" with
+        | Some p -> Printf.sprintf "runtime.toml reloaded: %s" p
+        | None -> "runtime.toml reloaded")
+     | _ ->
+       (match extract_str "path" with
+        | Some p -> Printf.sprintf "runtime.toml updated: %s" p
+        | None -> "runtime.toml updated"))
   | _ -> kind
 
 (** Extract primary target from action + details, if any. *)

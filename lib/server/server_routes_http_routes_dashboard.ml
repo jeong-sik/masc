@@ -198,6 +198,11 @@ type runtime_route_lane =
   | Runtime_librarian
   | Runtime_cross_verifier
 
+let runtime_route_lane_to_string = function
+  | Runtime_default -> "default"
+  | Runtime_librarian -> "librarian"
+  | Runtime_cross_verifier -> "cross_verifier"
+
 let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
   | "librarian" -> Ok Runtime_librarian
@@ -256,7 +261,43 @@ let runtime_config_path_error_status message =
   then `Not_found
   else `Internal_server_error
 
-let audit_runtime_config_write state agent_name ?path ~text ~outcome () =
+type runtime_config_write_operation =
+  | Runtime_config_reload
+  | Runtime_config_raw_save
+  | Runtime_config_routing of runtime_route_lane * string option
+  | Runtime_config_assignment of string * string option
+
+let runtime_config_write_operation_details = function
+  | Runtime_config_reload -> [ ("operation", `String "reload") ]
+  | Runtime_config_raw_save -> [ ("operation", `String "raw_save") ]
+  | Runtime_config_routing (lane, runtime_id) ->
+    [ ("operation", `String "routing")
+    ; ("lane", `String (runtime_route_lane_to_string lane))
+    ; ( "cleared"
+      , `Bool
+          (match runtime_id with
+           | None -> true
+           | Some _ -> false) )
+    ]
+    @
+    (match runtime_id with
+     | None -> []
+     | Some id -> [ ("runtime_id", `String id) ])
+  | Runtime_config_assignment (keeper_name, runtime_id) ->
+    [ ("operation", `String "assignment")
+    ; ("keeper_name", `String keeper_name)
+    ; ( "cleared"
+      , `Bool
+          (match runtime_id with
+           | None -> true
+           | Some _ -> false) )
+    ]
+    @
+    (match runtime_id with
+     | None -> []
+     | Some id -> [ ("runtime_id", `String id) ])
+
+let audit_runtime_config_write state agent_name ?path ~operation ~text ~outcome () =
   try
     Audit_log.log_action
       (Mcp_server.workspace_config state)
@@ -267,6 +308,7 @@ let audit_runtime_config_write state agent_name ?path ~text ~outcome () =
            ((match path with
              | Some p -> [ ("path", `String p) ]
              | None -> [])
+            @ runtime_config_write_operation_details operation
             @ [ ("bytes", `Int (String.length text))
               ; ("lines", `Int (runtime_config_line_count text))
               ]))
@@ -279,10 +321,10 @@ let audit_runtime_config_write state agent_name ?path ~text ~outcome () =
       "runtime.toml audit log failed: %s"
       (Printexc.to_string exn)
 
-let respond_runtime_config_reload state agent_name request reqd =
+let respond_runtime_config_reload state agent_name ~operation request reqd =
   match Runtime_config_file.load_config_text () with
   | Ok (path, saved_text) ->
-    audit_runtime_config_write state agent_name ~path ~text:saved_text
+    audit_runtime_config_write state agent_name ~path ~operation ~text:saved_text
       ~outcome:Audit_log.Success ();
     Http.Response.json_value ~compress:true ~request
       (runtime_config_raw_json ~path ~source_text:saved_text ~reloaded:true)
@@ -472,10 +514,13 @@ let add_routes ~sw ~clock router =
                   provider secrets (RFC-0132 redaction). *)
                (match Runtime_config_file.save_config_text source_text with
                 | Error msg ->
-                  audit_runtime_config_write state agent_name ~text:source_text
+                  audit_runtime_config_write state agent_name
+                    ~operation:Runtime_config_raw_save ~text:source_text
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+                | Ok () ->
+                  respond_runtime_config_reload state agent_name
+                    ~operation:Runtime_config_raw_save req reqd)
            )
          ) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/routing" (fun request reqd ->
@@ -488,27 +533,44 @@ let add_routes ~sw ~clock router =
              | Ok (Runtime_default, Some runtime_id) ->
                (match Runtime_config_file.set_runtime_default ~runtime_id () with
                 | Error msg ->
-                  audit_runtime_config_write state agent_name ~text:body_str
+                  audit_runtime_config_write state agent_name
+                    ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
+                    ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+                | Ok () ->
+                  respond_runtime_config_reload state agent_name
+                    ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
+                    req reqd)
              | Ok (Runtime_default, None) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "default runtime_id required"
              | Ok (Runtime_librarian, runtime_id) ->
                (match Runtime_config_file.set_runtime_librarian ~runtime_id () with
                 | Error msg ->
-                  audit_runtime_config_write state agent_name ~text:body_str
+                  audit_runtime_config_write state agent_name
+                    ~operation:(Runtime_config_routing (Runtime_librarian, runtime_id))
+                    ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+                | Ok () ->
+                  respond_runtime_config_reload state agent_name
+                    ~operation:(Runtime_config_routing (Runtime_librarian, runtime_id))
+                    req reqd)
              | Ok (Runtime_cross_verifier, runtime_id) ->
                (match Runtime_config_file.set_runtime_cross_verifier ~runtime_id () with
                 | Error msg ->
-                  audit_runtime_config_write state agent_name ~text:body_str
+                  audit_runtime_config_write state agent_name
+                    ~operation:
+                      (Runtime_config_routing (Runtime_cross_verifier, runtime_id))
+                    ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+                | Ok () ->
+                  respond_runtime_config_reload state agent_name
+                    ~operation:
+                      (Runtime_config_routing (Runtime_cross_verifier, runtime_id))
+                    req reqd)
            )
          ) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/assignment" (fun request reqd ->
@@ -526,17 +588,27 @@ let add_routes ~sw ~clock router =
                     ()
                 with
                 | Error msg ->
-                  audit_runtime_config_write state agent_name ~text:body_str
+                  audit_runtime_config_write state agent_name
+                    ~operation:(Runtime_config_assignment (keeper_name, Some runtime_id))
+                    ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+                | Ok () ->
+                  respond_runtime_config_reload state agent_name
+                    ~operation:(Runtime_config_assignment (keeper_name, Some runtime_id))
+                    req reqd)
              | Ok (keeper_name, None) ->
                (match Runtime_config_file.clear_runtime_id_for_keeper ~keeper_name () with
                 | Error msg ->
-                  audit_runtime_config_write state agent_name ~text:body_str
+                  audit_runtime_config_write state agent_name
+                    ~operation:(Runtime_config_assignment (keeper_name, None))
+                    ~text:body_str
                     ~outcome:(Audit_log.Failure msg) ();
                   respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-                | Ok () -> respond_runtime_config_reload state agent_name req reqd)
+                | Ok () ->
+                  respond_runtime_config_reload state agent_name
+                    ~operation:(Runtime_config_assignment (keeper_name, None))
+                    req reqd)
            )
          ) request reqd)
   (* Phase 1 Action 2 — live Dashboard_cache state surface.  Renders

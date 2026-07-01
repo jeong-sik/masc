@@ -6,6 +6,18 @@
 - Related: issue #22823 (tracking), RFC-0243/0259/0272 (keeper memory store), 2026-06-19 keeper stall (mutex poison via Eio-in-systhread)
 - 근거 메모리: `reference-masc-compaction-not-hol-cause-measured-7ms-20260630.md`
 
+## 0. 정정 (v2) — #22824 선행 + 메커니즘 교정
+
+초안(v1)은 stale memory("사용자 scope 대기")를 근거로 `Eio_guard.run_in_systhread`를 추천했으나, **현재 main SSOT 재확인 결과 교정**한다:
+
+- **#22824 MERGED**(`fix(keeper): run memory render I/O off the main Eio domain`)가 이미 **READ 경로**(user-model render + memory-os recall)를 `keeper_run_tools_hooks.ml`에서 **call-site 오프로드**했다. 사용한 메커니즘 = **`Domain_pool_ref.submit_io_or_inline`**(공유 **도메인 풀**; 풀 미설치 시 inline — 테스트). `Executor_pool_ref`의 policy-preserving 동반자이며 eio_guard.ml:46-48이 지목한 "structural cure(Executor_pool)"의 keeper 정책판.
+- **따라서 메커니즘은 `run_in_systhread`가 아니라 `Domain_pool_ref.submit_io_or_inline`**(established·preferred). run_in_systhread는 (a) 열등하고 (b) #22824의 도메인-풀 오프로드 안에서 read를 또 systhread로 감싸면 nested `run_in_systhread` → 핸들러 없는 스레드에서 `Effect.Unhandled` 위험.
+- **접근도 source→call-site로 교정**: #22824가 확립한 call-site 오프로드 패턴을 **아직 안 된 경로로 확장**한다. 잔여 미오프로드 = **librarian WRITE/cap 경로**(`keeper_librarian_runtime.ml`의 append/cap/merge)와 기타 동기 I/O 호출 사이트.
+- **도메인 풀 오프로드 제약(§5 재프레이밍)**: systhread-poison이 아니라 **read-only + module-level mutable state 없음**이 조건(#22824 주석). 즉 (a) plain-ref memo(`keepers_dir()`의 `cached_resolution`)는 main 선-resolve, (b) `File_lock_eio`의 **process-shared Eio.Mutex는 cross-domain 안전이 아님** → LOCK_MIXED(write/cap)를 도메인 풀에 통째로 넘길 수 없다. lock은 main 유지하고 lock 내부 순수 read/parse/write만 넘기거나, 락 획득을 도메인-안전 구조로 재설계해야 한다.
+- **§5 분류(PURE 37/LOCK_MIXED 15/NO_IO 16)는 여전히 유효**: "read-only·shared-state 없음"이 도메인 풀 오프로드의 안전 기준과 정확히 일치(PURE = 넘길 수 있음, LOCK_MIXED = 락/Fs_compat 때문에 통째로는 불가). §4.1/§5의 `run_in_systhread` 언급은 `Domain_pool_ref.submit_io_or_inline`으로 읽는다.
+
+아래 §1-§9는 문제·분류·마이그레이션 골격으로 유효하되, **메커니즘은 위 정정을 따른다**.
+
 ## 1. 문제 (라이브 측정)
 
 라이브 masc 프로세스(PID 116.7% CPU) `sample` 프로파일에서 main Eio 도메인이 keeper 메모리 서브시스템의 **동기 파일 I/O + JSON 파싱**에 점유됨:

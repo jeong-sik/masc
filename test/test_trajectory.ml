@@ -577,6 +577,51 @@ let test_read_entries_since_no_dir () =
     let entries = Trajectory.read_entries_since ~masc_root:dir ~keeper_name:"nonexistent" ~since:0.0 in
     Alcotest.(check int) "no dir" 0 (List.length entries))
 
+(* P2 silent-failure fix: a malformed/corrupted row in the trajectory JSONL
+   used to vanish from [read_recent_lines]/[read_all_lines] with zero
+   signal (bare [List.filter_map] swallowing the parse exception). This
+   pins the still-correct filtering behavior (malformed rows drop, valid
+   rows survive) after switching to a fold that also tracks skipped/total
+   for a per-read WARN summary (mirrors
+   [Server_dashboard_http_keeper_api_trace.log_internal_history_skips]). *)
+let write_raw_line ~masc_root ~keeper_name ~trace_id raw_line =
+  let dir = Trajectory.trajectories_dir masc_root keeper_name in
+  Fs_compat.mkdir_p dir;
+  let path = Trajectory.trajectory_path masc_root keeper_name trace_id in
+  let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
+  Fun.protect ~finally:(fun () -> close_out oc) (fun () ->
+    output_string oc raw_line;
+    output_char oc '\n')
+
+let test_read_recent_lines_skips_malformed_rows () =
+  with_tmpdir (fun dir ->
+    let acc =
+      Trajectory.create_accumulator
+        ~masc_root:dir ~keeper_name:"test-keeper" ~trace_id:"trace-malformed"
+        ~generation:0 ()
+    in
+    Trajectory.record_entry acc
+      (mk_entry "tool_execute" 10 0.0 "2026-07-01T00:00:00Z");
+    Trajectory.flush_pending acc;
+    write_raw_line ~masc_root:dir ~keeper_name:"test-keeper"
+      ~trace_id:"trace-malformed" "{not valid json";
+    let recent =
+      Trajectory.read_recent_lines ~masc_root:dir ~keeper_name:"test-keeper"
+        ~trace_id:"trace-malformed" ~max_lines:100
+    in
+    Alcotest.(check int)
+      "malformed row dropped, valid row kept (read_recent_lines)"
+      1
+      (List.length recent);
+    let all_lines =
+      Trajectory.read_all_lines ~masc_root:dir ~keeper_name:"test-keeper"
+        ~trace_id:"trace-malformed"
+    in
+    Alcotest.(check int)
+      "malformed row dropped, valid row kept (read_all_lines)"
+      1
+      (List.length all_lines))
+
 let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
   Trajectory.Thinking
     {
@@ -751,6 +796,8 @@ let () =
       Alcotest.test_case "parses persisted gate summary" `Quick
         test_read_entries_since_result_parses_gate_summary;
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
+      Alcotest.test_case "read_recent_lines/read_all_lines skip malformed rows" `Quick
+        test_read_recent_lines_skips_malformed_rows;
     ]);
     ("keeper_trace", [
       Alcotest.test_case "dedupe_thinking_lines uses structural key" `Quick

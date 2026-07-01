@@ -5,7 +5,6 @@ import { html } from 'htm/preact'
 import { fireEvent, waitFor } from '@testing-library/preact'
 import {
   SettingsSurface,
-  checkSettingsMcpEndpoint,
   mcpExposedToolNames,
   logEntryToSysRow,
   logRowStatus,
@@ -36,6 +35,8 @@ const apiMock = vi.hoisted(() => ({
   fetchDashboardTools: vi.fn(),
   fetchRuntimeDefaults: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
+  fetchRuntimeTomlConfig: vi.fn(),
+  saveRuntimeTomlConfig: vi.fn(),
 }))
 
 const mcpMock = vi.hoisted(() => ({
@@ -77,6 +78,8 @@ vi.mock('../api/dashboard.js', async () => {
     fetchDashboardTools: apiMock.fetchDashboardTools,
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
     fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
+    fetchRuntimeTomlConfig: apiMock.fetchRuntimeTomlConfig,
+    saveRuntimeTomlConfig: apiMock.saveRuntimeTomlConfig,
   }
 })
 
@@ -278,6 +281,20 @@ function stubEmptyApi() {
   apiMock.fetchDashboardTools.mockResolvedValue({ tool_inventory: { count: 0, tools: [] } })
   stubRuntimeDefaults()
   apiMock.fetchRuntimeProviders.mockResolvedValue(makeRuntimeProviders())
+  apiMock.fetchRuntimeTomlConfig.mockResolvedValue({
+    ok: true,
+    path: MOCK_RUNTIME_PATH,
+    file_name: 'runtime.toml',
+    source_text: '[runtime]\ndefault = "rt-a"\n',
+    reloaded: false,
+  })
+  apiMock.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => ({
+    ok: true,
+    path: MOCK_RUNTIME_PATH,
+    file_name: 'runtime.toml',
+    source_text: sourceText,
+    reloaded: true,
+  }))
 }
 
 const navigate = vi.fn()
@@ -303,6 +320,8 @@ describe('SettingsSurface', () => {
     apiMock.fetchDashboardTools.mockReset()
     apiMock.fetchRuntimeDefaults.mockReset()
     apiMock.fetchRuntimeProviders.mockReset()
+    apiMock.fetchRuntimeTomlConfig.mockReset()
+    apiMock.saveRuntimeTomlConfig.mockReset()
     mcpMock.callMcpTool.mockClear()
     promptApiMock.clearPromptOverride.mockClear()
     promptApiMock.fetchDashboardPrompts.mockClear()
@@ -418,7 +437,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="log-viewer"]')).not.toBeNull()
   })
 
-  it('renders the theme switch inside the display section (moved out of the top bar)', () => {
+  it('renders a live theme switch inside the display section that can reach Paper', async () => {
     route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
 
     render(html`<${SettingsSurface} />`, container)
@@ -427,6 +446,13 @@ describe('SettingsSurface', () => {
     const themeButton = [...container.querySelectorAll('button')]
       .find(b => /DARK|STYLESEED|PAPER/.test(b.textContent ?? ''))
     expect(themeButton).toBeTruthy()
+
+    await fireEvent.click(themeButton as HTMLButtonElement)
+    expect(document.documentElement.dataset.theme).toBe('styleseed')
+
+    await fireEvent.click(themeButton as HTMLButtonElement)
+    expect(document.documentElement.dataset.theme).toBe('paper')
+    expect(localStorage.getItem('dashboardTheme')).toBe('paper')
   })
 
   it('wires display density to the dashboard density signal without fake locale previews', async () => {
@@ -537,6 +563,31 @@ describe('SettingsSurface', () => {
     })
   })
 
+  it('MCP server page surfaces inventory load failures instead of fabricating an empty tool list', async () => {
+    apiMock.fetchDashboardTools.mockRejectedValueOnce(new Error('inventory offline'))
+    mcpMock.callMcpTool.mockResolvedValueOnce('status ok despite inventory failure')
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mcp-tools-error"]')?.textContent)
+        .toContain('inventory offline')
+    })
+    expect(container.querySelector('[data-testid="mcp-tools-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="mcp-tools-list"]')).toBeNull()
+    expect(container.textContent).toContain('Exposed public MCP tools (—)')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-mcp-check"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(mcpMock.callMcpTool).toHaveBeenCalledWith('masc_status', {})
+      expect(container.querySelector('[data-testid="settings-mcp-check-result"]')?.textContent)
+        .toContain('status ok despite inventory failure')
+    })
+  })
+
   it('paths page shows resolved server paths instead of editable local previews', async () => {
     render(html`<${SettingsSurface} />`, container)
 
@@ -570,6 +621,25 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
     expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
     expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBeNull()
+  })
+
+  it('notify page surfaces config projection failures instead of rendering missing thresholds', async () => {
+    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config projection offline'))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="notify-config-error"]')?.textContent)
+        .toContain('config projection offline')
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
+        .toContain('config unavailable')
+    })
+
+    expect(container.querySelector('[data-testid="notify-thresholds"]')).toBeNull()
+    expect(container.textContent).not.toContain('MASC_DASHBOARD_CTX_PREPARING')
+    expect(container.querySelector('[data-testid="notify-routing-readonly"]')).toBeNull()
   })
 
   it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {
@@ -761,10 +831,18 @@ describe('SettingsSurface', () => {
   })
 
   it('log filter chips filter live rows from the ring', async () => {
-    // 6 ring entries mapped to rows: tool(/masc_/)=3, success(ok)=3, failure(fail)=2.
+    // 7 ring entries mapped to rows: tool(category/details or /masc_/)=4,
+    // success(ok)=4, failure(fail)=2.
     apiMock.fetchLogs.mockResolvedValue({
-      total: 6,
+      total: 7,
       entries: [
+        makeLogEntry({
+          seq: 7,
+          level: 'INFO',
+          message: 'shell exec completed',
+          category: 'tool',
+          details: { tool_name: 'shell.exec' },
+        }),
         makeLogEntry({ seq: 6, level: 'INFO', message: 'masc_start 완료' }),
         makeLogEntry({ seq: 5, level: 'INFO', message: 'masc_compact 완료' }),
         makeLogEntry({ seq: 4, level: 'WARN', message: '컨텍스트 91% — compact 예약' }),
@@ -780,15 +858,16 @@ describe('SettingsSurface', () => {
     await fireEvent.click(logsNav)
 
     const allRows = () => container.querySelectorAll('[data-testid="log-row"]')
-    await waitFor(() => expect(allRows().length).toBe(6))
+    await waitFor(() => expect(allRows().length).toBe(7))
 
     const toolFilter = container.querySelector('[data-filter="tool"]') as HTMLButtonElement
     await fireEvent.click(toolFilter)
-    expect(allRows().length).toBe(3)
+    expect(allRows().length).toBe(4)
+    expect(container.textContent).toContain('shell exec completed')
 
     const successFilter = container.querySelector('[data-filter="success"]') as HTMLButtonElement
     await fireEvent.click(successFilter)
-    expect(allRows().length).toBe(3)
+    expect(allRows().length).toBe(4)
 
     const failureFilter = container.querySelector('[data-filter="failure"]') as HTMLButtonElement
     await fireEvent.click(failureFilter)
@@ -796,64 +875,47 @@ describe('SettingsSurface', () => {
 
     const allFilter = container.querySelector('[data-filter="all"]') as HTMLButtonElement
     await fireEvent.click(allFilter)
-    expect(allRows().length).toBe(6)
+    expect(allRows().length).toBe(7)
   })
 
-  it('renders the fusion preset section (panel families + judge) as read-only defaults', async () => {
+  it('renders fusion as a no-writer handoff instead of hardcoded defaults', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-fusion"]') as HTMLElement)
 
     expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('패널·심판 심의')
-    expect(container.querySelector('[data-testid="fusion-readonly-preview"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="fusion-readonly-enabled"]')?.textContent).toBe('enabled')
-    expect(container.querySelector('[data-testid="fusion-readonly-preset"]')?.textContent).toBe('trio')
-    expect(container.querySelector('[data-testid="fusion-readonly-panels"]')?.textContent).toBe('2')
-    expect(container.querySelector('[data-testid="fusion-readonly-web-tools"]')?.textContent).toBe('disabled')
-    // trio preset lanes: 3 panel models + 1 judge, with prototype labels.
-    const lanes = container.querySelectorAll('.set-fus-lane')
-    expect(lanes.length).toBe(2)
-    const models = Array.from(container.querySelectorAll('.set-fus-model')).map(n => n.textContent)
-    expect(models).toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
-    expect(models).toContain('ollama_cloud.ollama-cloud-devstral-small-2-24b')
-    expect(models).toContain('ollama_cloud.ollama-cloud-ministral-3-14b')
-    expect(container.querySelector('.set-fus-model.judge')?.textContent).toBe('ollama_cloud.ollama-cloud-devstral-2-123b')
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('documented defaults preview')
+    expect(container.querySelector('[data-testid="fusion-readonly-no-writer"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="fusion-no-writer"]')?.textContent).toContain('no hardcoded preview')
+    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('dedicated writer disabled')
+    expect(container.querySelector('[data-testid="fusion-readonly-enabled"]')).toBeNull()
+    expect(container.querySelector('[data-testid="fusion-readonly-preset"]')).toBeNull()
+    expect(container.querySelector('.set-fus-model')).toBeNull()
     expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
     expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
     expect(container.querySelector('[data-testid="set-stepper"]')).toBeNull()
     expect(container.querySelector('[data-testid="fusion-settings-editor"]')).toBeNull()
     expect(container.textContent).not.toContain('per_hour_budget')
+
+    await fireEvent.click(container.querySelector('[data-testid="fusion-open-runtime-toml"]') as HTMLButtonElement)
+    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임 관리')
+    expect(navigate).toHaveBeenLastCalledWith('settings', { section: 'runtimes' })
   })
 
   it('renders the live fusion settings writer only behind VITE_FUSION_SETTINGS_WRITABLE', async () => {
     vi.stubEnv('VITE_FUSION_SETTINGS_WRITABLE', 'true')
-    const fetchMock = vi.fn(async (url: RequestInfo | URL) => {
-      const path = String(url)
-      if (path === '/api/v1/runtime/config/raw') {
-        return new Response(JSON.stringify({
-          ok: true,
-          path: MOCK_RUNTIME_PATH,
-          file_name: 'runtime.toml',
-          source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\nmax_concurrent_panels = 2\n\n[fusion.presets.trio]\nmin_answered = 2\n',
-          reloaded: false,
-        }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      return new Response(JSON.stringify({ message: `unexpected ${path}` }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      })
+    apiMock.fetchRuntimeTomlConfig.mockResolvedValueOnce({
+      ok: true,
+      path: MOCK_RUNTIME_PATH,
+      file_name: 'runtime.toml',
+      source_text: '[fusion]\nenabled = true\ndefault_preset = "trio"\nmax_concurrent_panels = 2\n\n[fusion.presets.trio]\nmin_answered = 2\n',
+      reloaded: false,
     })
-    vi.stubGlobal('fetch', fetchMock)
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-fusion"]') as HTMLElement)
 
     await waitFor(() => expect(container.querySelector('[data-testid="fusion-settings-editor"]')).not.toBeNull())
-    expect(fetchMock).toHaveBeenCalledWith('/api/v1/runtime/config/raw', expect.any(Object))
+    expect(apiMock.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
@@ -868,36 +930,7 @@ describe('SettingsSurface', () => {
       source_text: '[runtime]\ndefault = "runpod_mtp.qwen"\n',
       reloaded: false,
     }
-    const fetchMock = vi.fn(async (input: unknown) => {
-      const requestUrl =
-        typeof input === 'string'
-          ? input
-          : input instanceof URL
-            ? input.href
-            : typeof (input as { url?: unknown }).url === 'string'
-              ? (input as { url: string }).url
-              : ''
-      const path = requestUrl.startsWith('http')
-        ? new URL(requestUrl).pathname
-        : requestUrl.split('?')[0] ?? requestUrl
-      if (path === '/api/v1/dashboard/dev-token') {
-        return new Response(JSON.stringify({ token: 'dev-token', actor: 'dashboard' }), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      if (path === '/api/v1/runtime/config/raw') {
-        return new Response(JSON.stringify(runtimeConfig), {
-          status: 200,
-          headers: { 'Content-Type': 'application/json' },
-        })
-      }
-      return new Response(JSON.stringify({ message: `unexpected ${path}` }), {
-        status: 500,
-        headers: { 'Content-Type': 'application/json' },
-      })
-    })
-    vi.stubGlobal('fetch', fetchMock)
+    apiMock.fetchRuntimeTomlConfig.mockResolvedValueOnce(runtimeConfig)
 
     render(html`<${SettingsSurface} />`, container)
 
@@ -910,12 +943,7 @@ describe('SettingsSurface', () => {
       expect(container.textContent).toContain(MOCK_RUNTIME_PATH)
     })
 
-    expect(fetchMock).toHaveBeenCalledWith(
-      '/api/v1/runtime/config/raw',
-      expect.objectContaining({
-        headers: expect.objectContaining({ Authorization: 'Bearer dev-token' }),
-      }),
-    )
+    expect(apiMock.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
   })
 })
 
@@ -957,21 +985,6 @@ describe('SettingsSurface shell route', () => {
 })
 
 describe('settings read-surface helpers', () => {
-  it('checks Settings MCP endpoint preview values by format only', () => {
-    expect(checkSettingsMcpEndpoint('https://masc.local/mcp')).toEqual({
-      ok: true,
-      message: 'valid MCP URL',
-    })
-    expect(checkSettingsMcpEndpoint('ftp://masc.local/mcp')).toEqual({
-      ok: false,
-      message: 'expected http(s) URL',
-    })
-    expect(checkSettingsMcpEndpoint('https://masc.local/api')).toEqual({
-      ok: false,
-      message: 'path should include /mcp',
-    })
-  })
-
   it('mcpExposedToolNames keeps only public_mcp tools, sorted', () => {
     const names = mcpExposedToolNames([
       makeToolItem({ name: 'masc_start', surfaces: ['public_mcp'] }),
@@ -1004,7 +1017,18 @@ describe('settings read-surface helpers', () => {
         message: 'masc_trace_window 실패',
       }),
     )
-    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail'])
+    expect(row).toEqual(['16:24:51', 'error', 'drifter', 'masc_trace_window 실패', 'fail', true])
+  })
+
+  it('logEntryToSysRow preserves structured tool classification for filters', () => {
+    const row = logEntryToSysRow(
+      makeLogEntry({
+        category: 'tool',
+        details: { tool_name: 'shell.exec' },
+        message: 'shell exec completed',
+      }),
+    )
+    expect(row[5]).toBe(true)
   })
 
   it('logEntryToSysRow falls back to module then (root) for identity', () => {

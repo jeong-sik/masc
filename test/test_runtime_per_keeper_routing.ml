@@ -18,14 +18,12 @@ open Masc
 module J = Yojson.Safe.Util
 module KMC = Keeper_meta_contract
 
-(* Test hermeticity: the per-model thinking gate resolves capabilities through
-   the OAS [Model_catalog], which is loaded once (memoized via Atomic) from the
-   [OAS_MODEL_CATALOG] env var.  Production seeds this in
-   server_runtime_bootstrap; without it [Model_catalog.global ()] is [None], so
-   qwen36's [preserve_thinking_control_format] misses the catalog row and the
-   gate defaults [preserve_thinking] to [None] instead of [Some true].  Set at
-   module top so it precedes the first [global ()] access regardless of test
-   ordering, and only when unset so an external/CI value is honored. *)
+(* Test hermeticity: runtime capability checks resolve through the OAS
+   [Model_catalog], which is loaded once (memoized via Atomic) from the
+   [OAS_MODEL_CATALOG] env var. Production seeds this in
+   server_runtime_bootstrap. Set at module top so it precedes the first
+   [global ()] access regardless of test ordering, and only when unset so an
+   external/CI value is honored. *)
 let () =
   match Sys.getenv_opt "OAS_MODEL_CATALOG" with
   | Some _ -> ()
@@ -738,12 +736,12 @@ let test_thinking_support_true_enables_thinking_and_preserves () =
       seed.Runtime_inference.preserve_thinking)
 ;;
 
-let test_thinking_support_true_defaults_preserve_when_unset () =
+let test_thinking_support_true_leaves_preserve_unset () =
   with_runtime_thinking (fun () ->
     let seed = Runtime_inference.for_runtime ~name:"ollama_cloud.thinkdefault" in
     Alcotest.(check (option bool))
-      "OAS request-side preserve capability defaults preserve to Some true"
-      (Some true)
+      "OAS request-side preserve capability does not auto-enable preserve"
+      None
       seed.Runtime_inference.preserve_thinking)
 ;;
 
@@ -987,11 +985,11 @@ let () =
             `Quick
             test_thinking_support_true_enables_thinking_and_preserves
         ; Alcotest.test_case
-            "request-side preserve capability defaults preserve on"
+            "request-side preserve capability stays policy-neutral"
             `Quick
-            test_thinking_support_true_defaults_preserve_when_unset
+            test_thinking_support_true_leaves_preserve_unset
         ; Alcotest.test_case
-            "explicit preserve-thinking=false overrides capability default"
+            "explicit preserve-thinking=false stays explicit"
             `Quick
             test_explicit_preserve_false_overrides_capability_default
         ; Alcotest.test_case

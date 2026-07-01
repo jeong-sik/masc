@@ -148,7 +148,7 @@ val rotate_if_needed : string -> unit
 (** {1 Append-only persistence} *)
 
 (** Appends one post snapshot to {!persist_path}. *)
-val append_post : post -> unit
+val append_post : post -> (unit, board_error) result
 
 (** RFC-0233 §7: maintain the origin secondary indexes ([posts_by_turn_ref] /
     [posts_by_run_id]) from a post's [origin].  Used by the load path to
@@ -157,7 +157,7 @@ val append_post : post -> unit
 val index_post_origin : store -> post -> unit
 
 (** Appends one comment snapshot to {!comments_path}. *)
-val append_comment : comment -> unit
+val append_comment : comment -> (unit, board_error) result
 
 (** {1 Whole-state JSONL rewrite} *)
 

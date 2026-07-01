@@ -60,6 +60,25 @@ let test_is_context_overflow_only_for_overflow_errors () =
     (EC.is_context_overflow (Agent_sdk.Error.Internal "some error"))
 ;;
 
+(* Regression: ContextOverflow used to fall through to the generic
+   turn_consecutive_failures counter (no auto-recovery, escalates to a hard
+   Keeper_fiber_crash after keeper_max_turn_failures). Now that the retry
+   loop (keeper_unified_turn_execution.ml) drives
+   Keeper_turn_runtime_budget.pause_keeper_for_overflow at the point of
+   detection — the Overflowed/Compacting FSM's retry-exhausted path,
+   auto-resume-with-backoff — this error must be classified as
+   auto-recoverable so [record_failure_and_maybe_escalate] does not also
+   count it toward that same crash threshold. *)
+let test_context_overflow_is_auto_recoverable () =
+  check
+    bool
+    "ContextOverflow is auto-recoverable at turn level (handled by \
+     pause_keeper_for_overflow, not the generic crash counter)"
+    true
+    (EC.is_auto_recoverable_turn_error
+       (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
+;;
+
 let test_summarize_turn_event_bus_extracts_overflow_signal () =
   let events =
     [ Agent_sdk.Event_bus.mk_event
@@ -197,6 +216,11 @@ let () =
             "is_context_overflow only matches ContextOverflow"
             `Quick
             test_is_context_overflow_only_for_overflow_errors
+        ; test_case
+            "context overflow is auto-recoverable (handled by \
+             pause_keeper_for_overflow)"
+            `Quick
+            test_context_overflow_is_auto_recoverable
         ; test_case
             "summarize_turn_event_bus extracts overflow signal"
             `Quick

@@ -28,16 +28,13 @@ import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
+import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
 import type { ComponentChildren } from 'preact'
 
 type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
-type PathCheckResult = {
-  readonly ok: boolean
-  readonly message: string
-}
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
 
@@ -81,62 +78,12 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .sort((a, b) => a.localeCompare(b))
 }
 
-export function checkSettingsMcpEndpoint(value: string): PathCheckResult {
-  const trimmed = value.trim()
-  if (trimmed === '') return { ok: false, message: 'URL required' }
-  try {
-    const url = new URL(trimmed)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return { ok: false, message: 'expected http(s) URL' }
-    }
-    if (url.hostname.trim() === '') return { ok: false, message: 'host required' }
-    if (!url.pathname.toLowerCase().includes('mcp')) {
-      return { ok: false, message: 'path should include /mcp' }
-    }
-    return { ok: true, message: 'valid MCP URL' }
-  } catch {
-    return { ok: false, message: 'invalid URL' }
-  }
-}
-
-// [fusion] preset shape from config/runtime.toml [fusion] — keeper-v2
-// settings.jsx:68-81 (FUSION). Describes the trio preset structure (panel
-// families, judge, timeouts). Read-only preview; no fusion config write
-// endpoint exists yet, so these are the documented config defaults, not live
-// values.
-type FusionConfig = {
-  readonly enabled: boolean
-  readonly defaultPreset: string
-  readonly maxConcurrentPanels: number
-  readonly webTools: boolean
-  readonly panel: readonly string[]
-  readonly judge: string
-  readonly panelTimeoutS: number
-  readonly judgeTimeoutS: number
-  readonly maxToolCallsPerPanel: number
-}
-const FUSION: FusionConfig = {
-  enabled: true,
-  defaultPreset: 'trio',
-  maxConcurrentPanels: 2,
-  webTools: false,
-  panel: [
-    'ollama_cloud.ollama-cloud-devstral-2-123b',
-    'ollama_cloud.ollama-cloud-devstral-small-2-24b',
-    'ollama_cloud.ollama-cloud-ministral-3-14b',
-  ],
-  judge: 'ollama_cloud.ollama-cloud-devstral-2-123b',
-  panelTimeoutS: 300,
-  judgeTimeoutS: 300,
-  maxToolCallsPerPanel: 0,
-}
-
-// System-log row: [time, level, identity, message, status]. Derived from live
+// System-log row: [time, level, identity, message, status, isTool]. Derived from live
 // ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
 // polls. Status is derived from the entry level only (error→fail, warn→warn,
 // else→ok); the in-progress "run" state is not knowable from a settled ring
 // entry, so it is never fabricated.
-type SysLogRow = [string, string, string, string, string]
+type SysLogRow = [string, string, string, string, string, boolean]
 
 const SETTINGS_LOG_LEVEL_FAIL = 'error'
 const SETTINGS_LOG_LEVEL_WARN = 'warn'
@@ -166,7 +113,8 @@ function logRowClock(ts: string): string {
 export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   const level = entry.level.toLowerCase()
   const identity = entry.keeper_name?.trim() || entry.module?.trim() || '(root)'
-  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level)]
+  const isTool = logDisplayKind(entry) === 'tool' || /masc_/.test(entry.message)
+  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level), isTool]
 }
 
 function SetSeg({
@@ -444,7 +392,7 @@ function settingsSectionState(
   if (section === 'fusion' && fusionSettingsWritable) {
     return { mode: 'live', label: 'runtime.toml live-backed' }
   }
-  if (section === 'fusion') return { mode: 'local', label: 'documented defaults preview' }
+  if (section === 'fusion') return { mode: 'local', label: 'dedicated writer disabled' }
   if (section === 'paths') return { mode: 'live', label: 'resolved by server' }
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
@@ -517,7 +465,7 @@ function LogViewer() {
 
   const rows = allRows.filter(r => {
     if (filter === 'all') return true
-    if (filter === 'tool') return /masc_/.test(r[3])
+    if (filter === 'tool') return r[5]
     if (filter === 'success') return r[4] === 'ok'
     if (filter === 'failure') return r[4] === 'fail'
     return true
@@ -578,20 +526,24 @@ export function SettingsSurface() {
   // Server config projection — used by Paths, MCP and Notifications.
   const [dashboardConfig, setDashboardConfig] = useState<DashboardConfigResponse | null>(null)
   const [dashboardConfigStatus, setDashboardConfigStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [dashboardConfigError, setDashboardConfigError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
     setDashboardConfigStatus('loading')
+    setDashboardConfigError(null)
     void (async () => {
       try {
         const resp = await fetchDashboardConfig()
         if (!active) return
         setDashboardConfig(resp)
         setDashboardConfigStatus('ready')
-      } catch {
+        setDashboardConfigError(null)
+      } catch (err) {
         if (!active) return
         setDashboardConfig(null)
         setDashboardConfigStatus('error')
+        setDashboardConfigError(err instanceof Error ? err.message : String(err))
       }
     })()
     return () => { active = false }
@@ -599,6 +551,8 @@ export function SettingsSurface() {
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
   const [mcpTools, setMcpTools] = useState<string[]>([])
+  const [mcpToolsStatus, setMcpToolsStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [mcpToolsError, setMcpToolsError] = useState('')
   const [mcpCheck, setMcpCheck] = useState<{ status: 'idle' | 'checking' | 'ok' | 'error'; message: string }>({
     status: 'idle',
     message: '아직 확인하지 않음',
@@ -606,16 +560,22 @@ export function SettingsSurface() {
 
   useEffect(() => {
     let active = true
+    setMcpToolsStatus('loading')
+    setMcpToolsError('')
     void (async () => {
       try {
         const resp = await fetchDashboardTools()
         if (!active) return
         const names = mcpExposedToolNames(resp.tool_inventory?.tools ?? [])
         setMcpTools(names)
-      } catch {
+        setMcpToolsStatus('ready')
+      } catch (err) {
         if (!active) return
-        // No fabricated tool names on failure.
+        // No fabricated empty inventory on failure.
         setMcpTools([])
+        setMcpToolsStatus('error')
+        const message = err instanceof Error ? err.message : String(err)
+        setMcpToolsError(`도구 inventory를 불러오지 못했습니다: ${message}`)
       }
     })()
     return () => { active = false }
@@ -684,7 +644,13 @@ export function SettingsSurface() {
     }
   }
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
-  const sectionState = settingsSectionState(sec, fusionSettingsWritable)
+  const baseSectionState = settingsSectionState(sec, fusionSettingsWritable)
+  const sectionState =
+    sec === 'notify' && dashboardConfigStatus === 'loading'
+      ? { mode: 'mixed' as const, label: 'thresholds loading' }
+      : sec === 'notify' && dashboardConfigStatus === 'error'
+        ? { mode: 'mixed' as const, label: 'config unavailable' }
+        : baseSectionState
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -711,6 +677,7 @@ export function SettingsSurface() {
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
   const mcpEndpoint = mcpEndpointFromConfig(dashboardConfig)
+  const mcpToolCountLabel = mcpToolsStatus === 'ready' ? String(mcpTools.length) : '—'
   const mcpUrlEntry = configEntry(dashboardConfig, 'MASC_URL')
   const httpBaseUrlEntry = configEntry(dashboardConfig, 'MASC_HTTP_BASE_URL')
   const basePathEntry = configEntry(dashboardConfig, 'MASC_BASE_PATH')
@@ -803,12 +770,16 @@ export function SettingsSurface() {
                   <span class=${`set-mcp-check-result ${mcpCheck.status}`} data-testid="settings-mcp-check-result">${mcpCheck.message}</span>
                 </div>
               <//>
-              <div class="set-sub-h">Exposed public MCP tools (${mcpTools.length})</div>
-              ${mcpTools.length === 0
-                ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
-                : html`<div class="set-tg-tools" data-testid="mcp-tools-list">
-                  ${mcpTools.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}
-                </div>`}
+              <div class="set-sub-h">Exposed public MCP tools (${mcpToolCountLabel})</div>
+              ${mcpToolsStatus === 'loading'
+                ? html`<div class="set-hint" data-testid="mcp-tools-loading">MCP 도구 inventory를 불러오는 중...</div>`
+                : mcpToolsStatus === 'error'
+                  ? html`<div class="set-err" data-testid="mcp-tools-error">${mcpToolsError}</div>`
+                  : mcpTools.length === 0
+                    ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
+                    : html`<div class="set-tg-tools" data-testid="mcp-tools-list">
+                      ${mcpTools.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}
+                    </div>`}
             `}
 
             ${sec === 'runtime' && html`
@@ -932,45 +903,24 @@ export function SettingsSurface() {
               ${fusionSettingsWritable
                 ? html`<${FusionSettingsPanel} />`
                 : html`
-                <div data-testid="fusion-readonly-preview">
-                  <${SetRow} label="Fusion 심의" hint="[fusion].enabled · 문서화된 기본값">
-                    <div class="set-truth-value">
-                      <span class="mono" data-testid="fusion-readonly-enabled">${FUSION.enabled ? 'enabled' : 'disabled'}</span>
-                      <span class="set-truth-source">read-only</span>
+                <div data-testid="fusion-readonly-no-writer">
+                  <${SetRow} label="Fusion settings" hint="[fusion] in runtime.toml">
+                    <div class="set-truth-value" data-testid="fusion-no-writer">
+                      <span class="mono">dedicated writer disabled</span>
+                      <span class="set-truth-source">no hardcoded preview</span>
                     </div>
                   <//>
-                  <${SetRow} label="기본 프리셋" hint="default_preset">
-                    <div class="set-truth-value">
-                      <span class="mono" data-testid="fusion-readonly-preset">${FUSION.defaultPreset}</span>
-                      <span class="set-truth-source">read-only</span>
-                    </div>
-                  <//>
-                  <${SetRow} label="동시 패널 수" hint="max_concurrent_panels · Async_agent.all 상한">
-                    <div class="set-truth-value">
-                      <span class="mono" data-testid="fusion-readonly-panels">${FUSION.maxConcurrentPanels}</span>
-                      <span class="set-truth-source">read-only</span>
-                    </div>
-                  <//>
-                  <${SetRow} label="패널·심판 웹 도구" hint="web_search / web_fetch 주입 여부">
-                    <div class="set-truth-value">
-                      <span class="mono" data-testid="fusion-readonly-web-tools">${FUSION.webTools ? 'enabled' : 'disabled'}</span>
-                      <span class="set-truth-source">read-only</span>
-                    </div>
-                  <//>
-                  <div class="set-sub-h">trio 프리셋</div>
-                  <div class="set-fus-preset">
-                    <div class="set-fus-lane">
-                      <div class="set-fus-lane-h">panel · ${FUSION.panel.length}</div>
-                      ${FUSION.panel.map(id => html`<div key=${id} class="set-fus-model mono">${id}</div>`)}
-                    </div>
-                    <div class="set-fus-lane">
-                      <div class="set-fus-lane-h">judge</div>
-                      <div class="set-fus-model judge mono">${FUSION.judge}</div>
-                    </div>
+                  <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                    이 섹션은 live 값을 읽지 못할 때 문서 기본값을 흉내 내지 않습니다. 실제 값 확인·수정은 runtime.toml editor에서 합니다.
                   </div>
-                  <div class="set-mcp-detail mono" style=${{ marginTop: '10px' }}>
-                    panel_timeout ${FUSION.panelTimeoutS}s · judge_timeout ${FUSION.judgeTimeoutS}s · max_tool_calls_per_panel ${FUSION.maxToolCallsPerPanel} (0 = 무제한)
-                  </div>
+                  <button
+                    type="button"
+                    class="set-rt-open"
+                    data-testid="fusion-open-runtime-toml"
+                    onClick=${() => openSection('runtimes')}
+                  >
+                    runtime.toml 열기
+                  </button>
                 </div>
               `}
             `}
@@ -1010,30 +960,42 @@ export function SettingsSurface() {
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 알림 임계값은 현재 서버 config projection에서 읽습니다. 이 화면은 아직 알림 라우팅 writer를 노출하지 않으므로 브라우저-only 토글을 만들지 않습니다.
               </div>
-              <div class="set-sub-h">Live alert thresholds</div>
-              <${ThresholdTruthRow}
-                label="Preparing context"
-                entry=${ctxPreparingEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(ctxPreparingEntry))}
-              />
-              <${ThresholdTruthRow}
-                label="Handoff imminent"
-                entry=${ctxHandoffEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(ctxHandoffEntry))}
-              />
-              <${ThresholdTruthRow}
-                label="Runtime warning"
-                entry=${runtimeWarningEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
-              />
-              <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
-              <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
-              <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
-                <div class="set-truth-value" data-testid="notify-routing-readonly">
-                  <span class="mono">read-only</span>
-                  <span class="set-truth-source">no writer</span>
-                </div>
-              <//>
+              ${dashboardConfigStatus === 'loading'
+                ? html`<div class="set-hint" data-testid="notify-config-loading">알림 임계값을 불러오는 중...</div>`
+                : dashboardConfigStatus === 'error'
+                  ? html`
+                    <div class="set-hint" data-testid="notify-config-error">
+                      dashboard config projection을 불러오지 못했습니다${dashboardConfigError ? `: ${dashboardConfigError}` : ''}.
+                    </div>
+                  `
+                  : html`
+                    <div data-testid="notify-thresholds">
+                      <div class="set-sub-h">Live alert thresholds</div>
+                      <${ThresholdTruthRow}
+                        label="Preparing context"
+                        entry=${ctxPreparingEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(ctxPreparingEntry))}
+                      />
+                      <${ThresholdTruthRow}
+                        label="Handoff imminent"
+                        entry=${ctxHandoffEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(ctxHandoffEntry))}
+                      />
+                      <${ThresholdTruthRow}
+                        label="Runtime warning"
+                        entry=${runtimeWarningEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
+                      />
+                      <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
+                      <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
+                      <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
+                        <div class="set-truth-value" data-testid="notify-routing-readonly">
+                          <span class="mono">read-only</span>
+                          <span class="set-truth-source">no writer</span>
+                        </div>
+                      <//>
+                    </div>
+                  `}
             `}
 
             ${sec === 'display' && html`

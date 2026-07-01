@@ -10,18 +10,15 @@ import html
 import re
 from typing import Any
 
-SLACK_MESSAGE_LIMIT = 4000
-SLACK_MAX_BLOCKS = 50
-SLACK_BLOCK_TEXT_LIMIT = 3000
+from .constants import SLACK_BLOCK_TEXT_LIMIT, SLACK_MAX_BLOCKS, SLACK_MESSAGE_LIMIT
+
 TRUNCATION_NOTICE = "\n[truncated: Slack block limit]"
 STRUCTURED_TRUNCATION_TEMPLATE = (
     ":warning: {count} structured block(s) omitted because Slack allows "
     f"at most {SLACK_MAX_BLOCKS} blocks per message."
 )
 
-_RE_STATE_BLOCK = re.compile(
-    r"\[STATE\].*?(?:\[/STATE\]|$)", re.DOTALL
-)
+_RE_STATE_BLOCK = re.compile(r"\[STATE\].*?(?:\[/STATE\]|$)", re.DOTALL)
 
 
 def strip_state_blocks(text: str) -> str:
@@ -230,7 +227,10 @@ def _attach_block(raw: dict[str, Any]) -> dict[str, Any] | None:
 
 def _video_block(raw: dict[str, Any]) -> dict[str, Any] | None:
     src = _structured_text(raw.get("src")).strip()
-    caption = _structured_text(raw.get("cap")).strip() or _structured_text(raw.get("name")).strip()
+    caption = (
+        _structured_text(raw.get("cap")).strip()
+        or _structured_text(raw.get("name")).strip()
+    )
     if not src and not caption:
         return None
     lines = [f"*Video:* {escape_mrkdwn_text(caption or src)}"]
@@ -265,7 +265,9 @@ def _slack_block_from_structured(raw: Any) -> dict[str, Any] | None:
             return None
         return _image_block(src, _structured_text(raw.get("cap")))
     if block_type == "code":
-        source = _structured_raw_text(raw.get("source")) or _structured_text(raw.get("html"))
+        source = _structured_raw_text(raw.get("source")) or _structured_text(
+            raw.get("html")
+        )
         if not source:
             return None
         return _code_block(source, _structured_raw_text(raw.get("cap")).strip())
@@ -300,7 +302,9 @@ def _slack_block_from_structured(raw: Any) -> dict[str, Any] | None:
     return None
 
 
-def structured_response_blocks(structured: dict[str, Any] | None) -> list[dict[str, Any]]:
+def structured_response_blocks(
+    structured: dict[str, Any] | None,
+) -> list[dict[str, Any]]:
     """Project GateResponse structured chat blocks into Slack Block Kit blocks."""
     if not isinstance(structured, dict):
         return []

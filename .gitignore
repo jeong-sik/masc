@@ -122,6 +122,16 @@ sidecars/**/.venv/
 issue*.md
 .nvimlog
 config/personas/uranium666
+# Personal flavor personas (system-role personas stay tracked as the roster).
+config/personas/sangsu/
+config/personas/cheolsu/
+config/personas/sojin/
+config/personas/ani1999/
+config/personas/poe/
+config/personas/ramarama/
+config/personas/nick0cave/
+config/keepers/sangsu.toml
+config/keepers/ramarama.toml
 .ci_build/
 /.gitignore.bak
 /.playwright-mcp/

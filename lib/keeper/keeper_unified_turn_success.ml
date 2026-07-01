@@ -301,15 +301,36 @@ type terminal_outcome =
   | Terminal_checkpoint
   | Terminal_failed_completion_contract of { reason_code : string }
 
+let completion_contract_attention_reason_code result =
+  match result with
+  | Keeper_execution_receipt.Contract_passive_only ->
+    (* Passive-only turns are no-progress detector input, not completion-contract
+       auto-failures. *)
+    None
+  | result
+    when Keeper_execution_receipt.completion_contract_result_requires_attention
+           result ->
+    Some (Keeper_execution_receipt.completion_contract_result_to_string result)
+  | _ -> None
+;;
+
 let completion_contract_terminal_failure_reason_code result =
   match result.Keeper_agent_run.operator_disposition with
   | Some
       { disposition = Keeper_execution_receipt.Disp_pause_human
       ; reason = Keeper_execution_receipt.Reason_completion_contract_unsatisfied
       } ->
-    Some
-      (Keeper_execution_receipt.completion_contract_result_to_string
-         result.Keeper_agent_run.completion_contract_result)
+    completion_contract_attention_reason_code
+      result.Keeper_agent_run.completion_contract_result
+  | Some
+      { disposition = Keeper_execution_receipt.Disp_alert_exhausted
+      ; reason = Keeper_execution_receipt.Reason_turn_budget_exhausted
+      } ->
+    (match result.Keeper_agent_run.stop_reason with
+     | Runtime_agent.TurnBudgetExhausted _ ->
+       completion_contract_attention_reason_code
+         result.Keeper_agent_run.completion_contract_result
+     | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> None)
   | Some _ -> None
   | None ->
     Some
@@ -770,6 +791,10 @@ let record_completion_contract_attention_failure
     ~base_path
     updated_meta.name
     (Some (Keeper_registry.Completion_contract_violation { detail }));
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string ContractViolations)
+    ~labels:[ "keeper", updated_meta.name ]
+    ();
   Health.record_failure
     ~agent_name:updated_meta.name
     ~reason:(Keeper_types_profile.short_preview detail);

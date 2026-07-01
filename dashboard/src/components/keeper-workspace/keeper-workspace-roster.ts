@@ -25,6 +25,7 @@ import { formatRelativeSec } from '../../lib/format-time'
 import { keeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import type { KeeperActivityDisplay } from '../../lib/keeper-runtime-display'
 import { keeperActionVisibility } from '../../lib/keeper-predicates'
+import { sortByRecency } from '../../lib/keeper-recency'
 import type { Keeper } from '../../types'
 import { runKeeperAction, type KeeperActionKey } from '../keeper-action-panel'
 import { VirtualList } from '../common/virtual-list'
@@ -40,7 +41,7 @@ import {
 import { phasePulse } from '../v2/keeper-fsm'
 
 type RosterFilter = 'all' | 'run' | 'att'
-type RosterSort = 'status' | 'name' | 'att'
+type RosterSort = 'status' | 'recent' | 'name' | 'att'
 type KeeperWorkspaceRouteSurface = 'monitoring' | 'keepers'
 type RosterMenuState = { keeper: Keeper; x: number; y: number } | null
 type IconComponent = typeof Play
@@ -168,10 +169,10 @@ function attentionScore(keeper: Keeper): number {
   return needsAttention(keeper) ? Math.max(1, attentionCount(keeper)) : 0
 }
 
-/** Comparator for the flat sort modes ('name'/'att'). 'status' keeps the bucket
- *  grouping instead and never reaches here. Name ties break alphabetically so
- *  the order is stable. */
-function compareKeepers(a: Keeper, b: Keeper, sort: Exclude<RosterSort, 'status'>): number {
+/** Comparator for the 'name'/'att' flat sort modes. 'status' keeps the bucket
+ *  grouping and 'recent' uses sortByRecency (decorate-sort-undecorate); neither
+ *  reaches here. Name ties break alphabetically so the order is stable. */
+function compareKeepers(a: Keeper, b: Keeper, sort: 'name' | 'att'): number {
   if (sort === 'name') return a.name.localeCompare(b.name)
   return attentionScore(b) - attentionScore(a) || keeperContextRatio(b) - keeperContextRatio(a) || a.name.localeCompare(b.name)
 }
@@ -475,7 +476,10 @@ export function KeeperWorkspaceRoster({
   const [query, setQuery] = useState('')
   const [searchOpen, setSearchOpen] = useState(false)
   const [filter, setFilter] = useState<RosterFilter>('all')
-  const [sort, setSort] = useState<RosterSort>('status')
+  // Default '최근순' (most-recent-first): returning to #keepers should surface the
+  // keeper that just did something, not an alphabetically-first name. 상태순 remains
+  // available in the sort menu for operators who want running-first grouping.
+  const [sort, setSort] = useState<RosterSort>('recent')
   const [menu, setMenu] = useState<RosterMenuState>(null)
 
   useEffect(() => {
@@ -510,8 +514,13 @@ export function KeeperWorkspaceRoster({
     return matchesQuery(k, query)
   })
 
+  // One clock read per render anchors every 'recent' comparison in this pass so
+  // relative (`*_ago_s`) fallbacks stay mutually consistent.
+  const nowMs = Date.now()
   const sortRows = (rows: Keeper[]): Keeper[] => {
-    return sort === 'status' ? rows : [...rows].sort((a, b) => compareKeepers(a, b, sort))
+    if (sort === 'status') return rows
+    if (sort === 'recent') return sortByRecency(rows, nowMs)
+    return [...rows].sort((a, b) => compareKeepers(a, b, sort))
   }
 
   const select = (name: string) => {
@@ -666,6 +675,7 @@ export function KeeperWorkspaceRoster({
                 value=${sort}
                 onChange=${(e: Event) => setSort((e.target as HTMLSelectElement).value as RosterSort)}
               >
+                <option value="recent">최근순</option>
                 <option value="status">상태순</option>
                 <option value="name">이름순</option>
                 <option value="att">주의순</option>

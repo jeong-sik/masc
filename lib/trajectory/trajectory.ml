@@ -787,12 +787,37 @@ let trajectory_line_of_json json =
        | None -> None)
 ;;
 
-let trajectory_lines_of_jsonl_lines lines =
-  List.filter_map
-    (fun line ->
-       try Yojson.Safe.from_string line |> trajectory_line_of_json with
-       | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
-    lines
+(* Rows that fail to parse or decode here are silently dropped from the
+   dashboard's /trajectory response with no signal at all -- unlike the
+   internal_history merge path (see
+   [Server_dashboard_http_keeper_api_trace.log_internal_history_skips]),
+   which already tracks skipped/total and logs a per-read summary. Follow
+   the same summarized-WARN pattern rather than warn-per-row: a busy trace
+   file re-read on every dashboard poll would otherwise flood the log the
+   same way the internal_history path did before that fix. *)
+let log_trajectory_line_skips ~trace_id ~skipped ~total =
+  if skipped > 0 then
+    Log.Keeper.warn
+      "trajectory trace %s: %d of %d rows did not decode to a trajectory \
+       line (malformed JSON or unrecognized shape)"
+      trace_id skipped total
+;;
+
+let trajectory_lines_of_jsonl_lines ~trace_id lines =
+  let lines_rev, skipped, total =
+    List.fold_left
+      (fun (acc, skipped, total) line ->
+         match
+           try Yojson.Safe.from_string line |> trajectory_line_of_json with
+           | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+         with
+         | Some parsed -> parsed :: acc, skipped, total + 1
+         | None -> acc, skipped + 1, total + 1)
+      ([], 0, 0)
+      lines
+  in
+  log_trajectory_line_skips ~trace_id ~skipped ~total;
+  List.rev lines_rev
 ;;
 
 (** Read all trajectory lines including thinking entries. *)
@@ -804,7 +829,7 @@ let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     let content = Fs_compat.load_file path in
     String.split_on_char '\n' content
     |> List.filter (fun line -> String.trim line <> "")
-    |> trajectory_lines_of_jsonl_lines
+    |> trajectory_lines_of_jsonl_lines ~trace_id
 
 let read_recent_lines
       ~(masc_root : string)
@@ -814,4 +839,5 @@ let read_recent_lines
   : trajectory_line list
   =
   let path = trajectory_path masc_root keeper_name trace_id in
-  Dated_jsonl.load_tail_lines path ~max_lines |> trajectory_lines_of_jsonl_lines
+  Dated_jsonl.load_tail_lines path ~max_lines
+  |> trajectory_lines_of_jsonl_lines ~trace_id

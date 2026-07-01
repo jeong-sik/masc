@@ -1,24 +1,35 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  Template for running MASC under macOS launchd. The default operation mode is
+  script-based start/status/stop (see start-masc.sh); use this only if you want
+  the server kept alive by launchd.
+
+  Copy to ~/Library/LaunchAgents/com.<you>.masc.plist, then replace the
+  __PLACEHOLDER__ tokens with absolute paths for your machine (launchd requires
+  absolute paths — $HOME is not expanded). Per-machine plists are gitignored
+  (infrastructure/launchd/*.plist); only this .template is tracked.
+
+  Tokens:
+    __LABEL__       launchd label, e.g. com.you.masc
+    __REPO_PATH__   absolute path to this repo (dir containing start-masc.sh)
+    __BASE_PATH__   MASC base path (dir containing .masc/), e.g. /Users/you/me
+    __LOG_DIR__     absolute path to a writable log directory
+-->
 <plist version="1.0">
 <dict>
-    <!-- Dev instance (port 8935). Prod uses com.jeong-sik.masc-prod (port 8945, see scripts/deploy.sh). -->
     <key>Label</key>
-    <string>com.jeong-sik.masc</string>
+    <string>__LABEL__</string>
 
-    <!-- NOTE: Paths below are machine-specific. Adjust for your setup:
-         - ProgramArguments: path to start-masc.sh in the repo
-         - StandardOutPath/StandardErrorPath: log directory
-         - MASC_BASE_PATH / WorkingDirectory: your base path -->
     <key>ProgramArguments</key>
     <array>
         <string>/bin/bash</string>
-        <string>/Users/dancer/me/workspace/yousleepwhen/masc/start-masc.sh</string>
+        <string>__REPO_PATH__/start-masc.sh</string>
         <string>--http</string>
         <string>--port</string>
         <string>8935</string>
         <string>--base-path</string>
-        <string>/Users/dancer/me</string>
+        <string>__BASE_PATH__</string>
     </array>
 
     <key>RunAtLoad</key>
@@ -34,10 +45,10 @@
     <integer>30</integer>
 
     <key>StandardOutPath</key>
-    <string>/Users/dancer/me/logs/masc-launchd.out.log</string>
+    <string>__LOG_DIR__/masc-launchd.out.log</string>
 
     <key>StandardErrorPath</key>
-    <string>/Users/dancer/me/logs/masc-launchd.err.log</string>
+    <string>__LOG_DIR__/masc-launchd.err.log</string>
 
     <key>EnvironmentVariables</key>
     <dict>
@@ -46,7 +57,7 @@
         <key>MASC_MCP_PORT</key>
         <string>8935</string>
         <key>MASC_BASE_PATH</key>
-        <string>/Users/dancer/me</string>
+        <string>__BASE_PATH__</string>
         <key>MASC_AUTO_RESPOND</key>
         <string>true</string>
         <key>MASC_ORCHESTRATOR_ENABLED</key>
@@ -62,6 +73,6 @@
     </dict>
 
     <key>WorkingDirectory</key>
-    <string>/Users/dancer/me</string>
+    <string>__BASE_PATH__</string>
 </dict>
 </plist>

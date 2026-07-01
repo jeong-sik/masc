@@ -1,19 +1,9 @@
 module U = Yojson.Safe.Util
+module Store = Channel_gate_binding_store
 
-type binding = {
+type binding = Store.binding = {
   channel_id : string;
   keeper_name : string;
-}
-
-type audit_event = {
-  timestamp : string;
-  action : string;
-  guild_id : string;
-  channel_id : string;
-  keeper_name : string;
-  actor_id : string;
-  actor_name : string;
-  previous_keeper : string;
 }
 
 module Names = Channel_gate_discord_names
@@ -54,95 +44,15 @@ let binding_audit_read_path () =
   Names.configured_write_path "MASC_DISCORD_BINDING_AUDIT_PATH"
     ~default:default_binding_audit_path
 
-let read_json_file_opt path =
-  try Some (Yojson.Safe.from_file path) with
-  | Sys_error _ | Yojson.Json_error _ -> None
+let binding_store =
+  Store.create ~binding_store_path ~binding_store_read_path ~binding_audit_path
+    ~binding_audit_read_path ~guild_id_field:Store.Include_event_value
 
-let normalize_bindings_json (json : Yojson.Safe.t) : binding list =
-  match json with
-  | `Assoc items ->
-      items
-      |> List.filter_map (fun (raw_channel_id, raw_keeper_name) ->
-             let channel_id = String.trim raw_channel_id in
-             let keeper_name =
-               match raw_keeper_name with
-               | `String value -> String.trim value
-               | _ -> ""
-             in
-             if channel_id = "" || keeper_name = "" then None
-             else Some ({ channel_id; keeper_name } : binding))
-      |> List.sort (fun (a : binding) (b : binding) ->
-             String.compare a.channel_id b.channel_id)
-  | _ -> []
-
-let read_bindings () : binding list =
-  match read_json_file_opt (binding_store_read_path ()) with
-  | Some json -> normalize_bindings_json json
-  | None -> []
-
-let binding_json (binding : binding) =
-  `Assoc
-    [
-      ("channel_id", `String binding.channel_id);
-      ("keeper_name", `String binding.keeper_name);
-    ]
-
-let save_bindings (bindings : binding list) =
-  let path = binding_store_path () in
-  let normalized =
-    bindings
-    |> List.sort (fun (a : binding) (b : binding) ->
-           String.compare a.channel_id b.channel_id)
-    |> List.fold_left
-         (fun acc (binding : binding) ->
-           (binding.channel_id, `String binding.keeper_name) :: acc)
-         []
-    |> List.rev
-    |> fun items -> `Assoc items
-  in
-  let dir = Filename.dirname path in
-  Fs_compat.mkdir_p dir;
-  let tmp = path ^ ".tmp" in
-  let oc = open_out_bin tmp in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () -> output_string oc (Yojson.Safe.pretty_to_string normalized ^ "\n"));
-  Sys.rename tmp path
-
-let audit_event_json event =
-  `Assoc
-    [
-      ("timestamp", `String event.timestamp);
-      ("action", `String event.action);
-      ("guild_id", `String event.guild_id);
-      ("channel_id", `String event.channel_id);
-      ("keeper_name", `String event.keeper_name);
-      ("actor_id", `String event.actor_id);
-      ("actor_name", `String event.actor_name);
-      ("previous_keeper", `String event.previous_keeper);
-    ]
-
-let append_audit_event event =
-  let path = binding_audit_path () in
-  let dir = Filename.dirname path in
-  Fs_compat.mkdir_p dir;
-  let oc =
-    open_out_gen [ Open_creat; Open_wronly; Open_append; Open_binary ] 0o644 path
-  in
-  Fun.protect
-    ~finally:(fun () -> close_out_noerr oc)
-    (fun () ->
-      output_string oc (Yojson.Safe.to_string (audit_event_json event));
-      output_char oc '\n';
-      flush oc;
-      Unix.fsync (Unix.descr_of_out_channel oc))
-
-let rec drop_left n xs =
-  if n <= 0 then xs
-  else
-    match xs with
-    | [] -> []
-    | _ :: tl -> drop_left (n - 1) tl
+let read_bindings () = Store.read_bindings binding_store
+let binding_json = Store.binding_json
+let save_bindings bindings = Store.save_bindings binding_store bindings
+let append_audit_event event = Store.append_audit_event binding_store event
+let read_recent_audit ~limit = Store.read_recent_audit binding_store ~limit
 
 (* ── Thread registry ──────────────────────────────────────────────
    Thread→parent mapping populated from THREAD_CREATE gateway events.
@@ -196,33 +106,6 @@ let set_trigger_policy (policy : Discord_gateway_state.trigger_policy) =
   trigger_policy_ref := Some policy
 
 let get_trigger_policy () = !trigger_policy_ref
-
-let read_recent_audit ~limit =
-  let path = binding_audit_read_path () in
-  if limit <= 0 || not (Sys.file_exists path) then
-    []
-  else
-    let ic = open_in_bin path in
-    Fun.protect
-      ~finally:(fun () -> close_in_noerr ic)
-      (fun () ->
-        let rec loop acc =
-          match input_line ic with
-          | line -> loop (line :: acc)
-          | exception End_of_file -> acc
-        in
-        loop []
-        |> List.filter_map (fun line ->
-               let trimmed = String.trim line in
-               if trimmed = "" then None
-               else
-                 try Some (Yojson.Safe.from_string trimmed) with
-                 | Yojson.Json_error _ -> None)
-        |> List.rev
-        |> fun rows ->
-        let total = List.length rows in
-        if total <= limit then List.rev rows
-        else rows |> drop_left (total - limit) |> List.rev)
 
 let string_member json key =
   Json_util.get_string_with_default json ~key ~default:""
@@ -519,10 +402,10 @@ let bind ~channel_id ~keeper_name ~actor_name =
         Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
       in
       append_audit_event
-        {
+        Store.{
           timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
           action = "bind";
-          guild_id;
+          guild_id = Some guild_id;
           channel_id;
           keeper_name;
           actor_id = actor_name;
@@ -560,10 +443,10 @@ let unbind ~channel_id ~actor_name =
             Option.value (Names.resolve_guild_id_for_channel ~channel_id) ~default:""
           in
           append_audit_event
-            {
+            Store.{
               timestamp = Gate_time_util.iso8601_of_unix (Unix.gettimeofday ());
               action = "unbind";
-              guild_id;
+              guild_id = Some guild_id;
               channel_id;
               keeper_name = removed_binding.keeper_name;
               actor_id = actor_name;

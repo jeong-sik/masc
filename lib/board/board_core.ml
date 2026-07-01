@@ -4,6 +4,32 @@
 
 include Board_core_persist
 
+let rollback_fresh_comment store ~(comment : comment) ~(previous_post : post) =
+  with_lock store (fun () ->
+    let post_key = Post_id.to_string comment.post_id in
+    let comment_key = Comment_id.to_string comment.id in
+    Hashtbl.remove store.comments comment_key;
+    (match Hashtbl.find_opt store.comments_by_post post_key with
+     | None -> ()
+     | Some ids ->
+       (match List.filter (fun id -> not (String.equal id comment_key)) ids with
+        | [] -> Hashtbl.remove store.comments_by_post post_key
+        | filtered -> Hashtbl.replace store.comments_by_post post_key filtered));
+    (match Hashtbl.find_opt store.posts post_key with
+     | None -> ()
+     | Some current ->
+       let updated_at =
+         if Stdlib.Float.equal current.updated_at comment.created_at
+         then previous_post.updated_at
+         else current.updated_at
+       in
+       Hashtbl.replace
+         store.posts
+         post_key
+         { current with reply_count = max 0 (current.reply_count - 1); updated_at });
+    invalidate_post_caches store;
+    invalidate_comment_caches store)
+;;
 
 let get_post store ~post_id : (post, board_error) Result.t =
   maybe_sweep store;
@@ -397,20 +423,31 @@ let add_comment_with_status
                       { post with reply_count = post.reply_count + 1; updated_at = now };
                     mark_dirty_post store post_key;
                     mark_dirty_comment store (Comment_id.to_string comment.id);
-                    record_comment_timestamp ~author:author_str ~now;
                     invalidate_post_caches store;
                     invalidate_comment_caches store;
-                    Ok (`Fresh (comment, posts_jsonl_unlocked store))))))
+                    Ok (`Fresh (comment, post, posts_jsonl_unlocked store))))))
             in
             match board_result with
-            | Ok (`Fresh (comment, posts_jsonl)) ->
-              with_persist_lock store (fun () ->
-                append_comment comment;
-                save_posts_jsonl posts_jsonl);
-              with_lock store (fun () ->
-                mark_dirty_post store (Post_id.to_string comment.post_id);
-                mark_dirty_comment store (Comment_id.to_string comment.id));
-              Ok (comment, `Fresh)
+            | Ok (`Fresh (comment, previous_post, posts_jsonl)) ->
+              (match
+                 with_persist_lock store (fun () ->
+                   match append_comment comment with
+                   | Error _ as e -> e
+                   | Ok () ->
+                     save_posts_jsonl posts_jsonl;
+                     Ok ())
+               with
+               | Ok () ->
+                 record_comment_timestamp
+                   ~author:(Agent_id.to_string comment.author)
+                   ~now:comment.created_at;
+                 with_lock store (fun () ->
+                   mark_dirty_post store (Post_id.to_string comment.post_id);
+                   mark_dirty_comment store (Comment_id.to_string comment.id));
+                 Ok (comment, `Fresh)
+               | Error e ->
+                 rollback_fresh_comment store ~comment ~previous_post;
+                 Error e)
             | Ok (`Dedup_hit existing) -> Ok (existing, `Dedup)
             | Error _ as e -> e)))
 ;;

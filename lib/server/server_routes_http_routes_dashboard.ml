@@ -120,7 +120,8 @@ let handle_execute_output_stream ~sw ~clock request reqd =
            close_stream ()
          | Some subscriber ->
            let wrote_initial =
-             write_string "retry: 1500\n\n"
+             write_string
+               (Printf.sprintf "retry: %d\n\n" sse_dashboard_retry_backoff_ms)
              && write_json (Dashboard_execute_output.event_json ~keeper_name)
            in
            if not wrote_initial

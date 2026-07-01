@@ -413,4 +413,11 @@ module For_testing = struct
   let accept_rejected_result_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing
     .accept_rejected_result_should_try_next
+
+  let runtime_exhaustion_reason_of_http_error =
+    Keeper_turn_driver_try_runtime.For_testing
+    .runtime_exhaustion_reason_of_http_error
+
+  let sdk_error_of_exhausted =
+    Keeper_turn_driver_try_runtime.For_testing.sdk_error_of_exhausted
 end

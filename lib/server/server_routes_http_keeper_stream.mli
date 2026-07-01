@@ -15,7 +15,9 @@
     keep working through the type-passthrough but do not
     add to the surface here.
 
-    External surface (3 entries + 1 record):
+    External surface (4 entries + 1 record):
+    - {b stream tunable} ({!sse_dashboard_retry_backoff_ms}) — SSE
+      reconnect backoff shared with the dashboard route.
     - {b request record} ({!keeper_chat_stream_request})
       returned by the parser, consumed by the handler;
       the dashboard route reaches the [.name] field via
@@ -37,6 +39,14 @@
     [keeper_chat_stream_*] sub-renderers + per-event
     framing, connector-context and legacy model-argument
     payload guards). *)
+
+(** {1 Stream tunables} *)
+
+(** SSE reconnect backoff (ms) primed on the dashboard keeper-chat streams.
+    Shared with {!Server_routes_http_routes_dashboard} (reached via [open]) so the
+    two dashboard priming sites cannot silently diverge; intentionally distinct
+    from {!Server_mcp_transport_http_headers.sse_retry_ms} (the MCP transport). *)
+val sse_dashboard_retry_backoff_ms : int
 
 (** {1 Request record} *)
 
@@ -202,7 +212,10 @@ module For_testing : sig
   val redacted_visible_reply_with_stream_fallback :
     redact:(string -> string) -> streamed_text:string -> string -> string
   val reply_payload_with_streamed_visible_reply :
-    Yojson.Safe.t option -> visible_reply:string -> Yojson.Safe.t option
+    Yojson.Safe.t option ->
+    visible_reply:string ->
+    streamed_text_present:bool ->
+    Yojson.Safe.t option
   val format_surface_context : Yojson.Safe.t -> string
   val surface_context_to_instructions : Yojson.Safe.t -> string option
   val empty_stream_bridge_state : keeper_stream_bridge_state

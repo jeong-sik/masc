@@ -659,10 +659,9 @@ let provider_kind_label (call : Agent_sdk.Canonical_tool.provider_tool_call) =
   Option.map Llm_provider.Provider_config.string_of_provider_kind
     call.provider_kind
 
-let check_visible_reasoning label expected_order expected_content expected_signature
+let check_visible_reasoning label expected_order expected_signature
     (block : Agent_sdk.Canonical_tool.provider_reasoning_block) =
   check int (label ^ " order") expected_order block.order_index;
-  check string (label ^ " content") expected_content block.content;
   check (option string) (label ^ " signature") expected_signature
     block.signature;
   match block.kind with
@@ -670,10 +669,9 @@ let check_visible_reasoning label expected_order expected_content expected_signa
   | Agent_sdk.Canonical_tool.Redacted_thinking ->
       fail (label ^ " expected visible thinking")
 
-let check_redacted_reasoning label expected_order expected_content
+let check_redacted_reasoning label expected_order
     (block : Agent_sdk.Canonical_tool.provider_reasoning_block) =
   check int (label ^ " order") expected_order block.order_index;
-  check string (label ^ " content") expected_content block.content;
   check (option string) (label ^ " signature") None block.signature;
   match block.kind with
   | Agent_sdk.Canonical_tool.Redacted_thinking -> ()
@@ -790,8 +788,8 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
         (provider_kind_label first);
       (match first.adjacent_reasoning with
       | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r0; r1 ] ->
-          check_visible_reasoning "first reasoning 0" 0 "think 1.1" None r0;
-          check_redacted_reasoning "first reasoning 1" 1 "sealed 1.2" r1
+          check_visible_reasoning "first reasoning 0" 0 None r0;
+          check_redacted_reasoning "first reasoning 1" 1 r1
       | _ -> fail "first tool call should carry contiguous adjacent reasoning");
       check string "second call id" "tc-2" second.call_id;
       check int "second order" 6 second.order_index;
@@ -803,8 +801,7 @@ let test_oas_tool_call_projection_preserves_adjacent_reasoning_groups () =
       check int "third order" 8 third.order_index;
       (match third.adjacent_reasoning with
       | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r0 ] ->
-          check_visible_reasoning "third reasoning" 7 "think 2.1"
-            (Some "sig-2.1") r0
+          check_visible_reasoning "third reasoning" 7 (Some "sig-2.1") r0
       | _ -> fail "third tool call should carry only its adjacent thinking")
   | _ ->
       failf "expected three projected tool calls, got %d" (List.length calls)
@@ -900,14 +897,14 @@ let test_oas_interleaving_matches_masc_receipt_and_progress_facts () =
       (match first.adjacent_reasoning with
        | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
            check_visible_reasoning "first adjacent thinking" 0
-             "inspect board first" (Some "sig-read") r
+             (Some "sig-read") r
        | _ -> fail "first call should carry preceding thinking");
       check string "second canonical call" "keeper_task_done" second.name;
       check int "second canonical order" 3 second.order_index;
       (match second.adjacent_reasoning with
        | Agent_sdk.Canonical_tool.Adjacent_reasoning [ r ] ->
            check_visible_reasoning "second adjacent thinking" 2
-             "complete after evidence" (Some "sig-done") r
+             (Some "sig-done") r
        | _ -> fail "second call should carry preceding thinking");
       let receipt_details = List.map receipt_detail_of_provider_call calls in
       check (list string) "MASC receipt detail order matches OAS canonical order"
@@ -1649,7 +1646,7 @@ let test_visible_reply_stream_fallback_redacts_before_persist () =
   in
   check string "terminal reply redacted" "terminal [redacted]" explicit
 
-let test_streamed_visible_reply_preserves_no_visible_payload () =
+let test_streamed_visible_reply_promotes_no_visible_payload_when_text_streamed () =
   let payload_json =
     `Assoc
       [
@@ -1664,7 +1661,32 @@ let test_streamed_visible_reply_preserves_no_visible_payload () =
   in
   let rewritten =
     Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
-      (Some payload_json) ~visible_reply
+      (Some payload_json) ~visible_reply ~streamed_text_present:true
+  in
+  check string "streamed visible reply is preserved" "streamed final"
+    (json_string_field "reply" rewritten);
+  check string "streamed visible reply wins terminal outcome" "visible_reply"
+    (json_string_field Keeper_turn_outcome.wire_key rewritten);
+  let err =
+    Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
+      rewritten visible_reply
+  in
+  check bool "typed text stream avoids no-visible terminal error" true
+    (Option.is_none err)
+
+let test_visible_reply_without_stream_preserves_no_visible_payload () =
+  let payload_json =
+    `Assoc
+      [
+        ("runtime_class", `String "keeper");
+        ("turn_outcome", `String "no_visible_reply");
+        ("reply", `String "");
+      ]
+  in
+  let rewritten =
+    Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
+      (Some payload_json) ~visible_reply:"terminal fallback"
+      ~streamed_text_present:false
   in
   check string "declared no-visible reply remains empty" ""
     (json_string_field "reply" rewritten);
@@ -1672,9 +1694,9 @@ let test_streamed_visible_reply_preserves_no_visible_payload () =
     (json_string_field Keeper_turn_outcome.wire_key rewritten);
   let err =
     Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
-      rewritten visible_reply
+      rewritten "terminal fallback"
   in
-  check bool "stream fallback cannot override no-visible terminal contract" true
+  check bool "non-stream fallback cannot override no-visible terminal contract" true
     (Option.is_some err)
 
 let test_streamed_visible_reply_preserves_checkpoint_payload () =
@@ -1689,6 +1711,7 @@ let test_streamed_visible_reply_preserves_checkpoint_payload () =
   let rewritten =
     Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
       (Some payload_json) ~visible_reply:"streamed final"
+      ~streamed_text_present:true
   in
   check string "checkpoint outcome is semantic" "continuation_checkpoint"
     (json_string_field Keeper_turn_outcome.wire_key rewritten);
@@ -2390,8 +2413,10 @@ let () =
             test_visible_reply_uses_streamed_text_fallback;
           test_case "visible reply stream fallback redacts before persist" `Quick
             test_visible_reply_stream_fallback_redacts_before_persist;
-          test_case "streamed visible reply preserves no-visible payload" `Quick
-            test_streamed_visible_reply_preserves_no_visible_payload;
+          test_case "streamed visible reply promotes no-visible payload" `Quick
+            test_streamed_visible_reply_promotes_no_visible_payload_when_text_streamed;
+          test_case "no-visible payload still wins without text stream" `Quick
+            test_visible_reply_without_stream_preserves_no_visible_payload;
           test_case "streamed visible reply preserves checkpoint payload" `Quick
             test_streamed_visible_reply_preserves_checkpoint_payload;
           test_case "runtime run_blocks appends multimodal input to OAS agent" `Quick

@@ -610,8 +610,8 @@ let test_repo_runtime_toml_loads () =
        check int "GLM Coding Plan context" 200000 runtime.model.max_context;
        check bool "GLM Coding Plan thinking enabled" true
          runtime.model.thinking_support;
-       check (option bool) "GLM Coding Plan preserves thinking" (Some true)
-         runtime.model.preserve_thinking;
+      check (option bool) "GLM Coding Plan does not preserve thinking by default" (Some false)
+        runtime.model.preserve_thinking;
        (match runtime.model.capabilities with
         | Some caps ->
           check (option int) "GLM Coding Plan output cap" (Some 128000)
@@ -872,6 +872,65 @@ let test_runtime_toml_allows_runtime_profile_tables () =
     check int "profile tables are not provider bindings" 1
       (List.length cfg.Runtime_schema.bindings)
 
+let test_runtime_toml_rejects_wrong_type_media_failover () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     media_failover = \"local.sample\"\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Ok _ -> failf "wrong-type [runtime].media_failover should fail parse"
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    check bool "error mentions runtime.media_failover" true
+      (String_util.contains_substring rendered "runtime.media_failover");
+    check bool "error explains media_failover type" true
+      (String_util.contains_substring
+         rendered
+         "media_failover must be an array of string runtime ids")
+
+let test_runtime_toml_preserves_explicit_empty_media_failover () =
+  let content =
+    "[providers.local]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"http://127.0.0.1:1/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"sample\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.sample\"\n\
+     media_failover = []\n"
+  in
+  match Runtime_toml.parse_string content with
+  | Error errs ->
+    let rendered =
+      errs
+      |> List.map (fun (err : Runtime_toml.parse_error) ->
+        Printf.sprintf "%s: %s" err.path err.message)
+      |> String.concat "\n"
+    in
+    failf "runtime TOML should parse explicit empty media_failover:\n%s" rendered
+  | Ok cfg -> check (list string) "media_failover" [] cfg.Runtime_schema.media_failover
+
 (** The runtime singletons were migrated from plain [ref]s to [Atomic.t] so
     that reads from worker domains on OCaml 5 see published writes.  This test
     exercises the public getter surface after [init_default] to ensure the
@@ -1073,7 +1132,7 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
               capability gate: %s"
              msg
          | Ok () ->
-           check (option bool) "provider-qualified preserve default" (Some true)
+           check (option bool) "provider-qualified preserve policy" None
              (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
 
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
@@ -1406,6 +1465,10 @@ let () =
             test_runtime_toml_rejects_unknown_runtime_key;
           test_case "runtime table allows profile tables" `Quick
             test_runtime_toml_allows_runtime_profile_tables;
+          test_case "runtime table rejects wrong-type media_failover" `Quick
+            test_runtime_toml_rejects_wrong_type_media_failover;
+          test_case "runtime table preserves empty media_failover" `Quick
+            test_runtime_toml_preserves_explicit_empty_media_failover;
           test_case
             "runtime capability gate uses provider-qualified OAS catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;

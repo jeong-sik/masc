@@ -8,7 +8,7 @@
 
     Coverage:
     - all [api_error] variants (RateLimited / Overloaded / ServerError /
-      AuthError / InvalidRequest / NotFound / ContextOverflow /
+      AuthError / PaymentRequired / InvalidRequest / NotFound / ContextOverflow /
       NetworkError / Timeout)
     - agent_error variants reached via [SdkE.Agent _] routing
     - all top-level non-Agent / non-Api wrappers (Mcp / Config /
@@ -38,6 +38,9 @@ let api_cases : (string * SdkE.api_error * string) list =
     , Retry.ServerError { status = 502; message = "" }
     , "api_error_server:502" )
   ; "AuthError", Retry.AuthError { message = "" }, "api_error_auth"
+  ; ( "PaymentRequired"
+    , Retry.PaymentRequired { message = "billing required" }
+    , "api_error_payment_required" )
   ; ( "InvalidRequest"
     , unknown_invalid_request "bad"
     , "api_error_invalid_request" )
@@ -280,6 +283,21 @@ let test_ollama_session_limit_is_hard_quota () =
   let err = SdkE.Api (Retry.RateLimited { retry_after = None; message }) in
   Alcotest.(check bool)
     "session usage limit is hard quota"
+    true
+    (KTD.sdk_error_is_hard_quota err);
+  match EC.recoverable_runtime_failure_reason err with
+  | Some EC.Hard_quota -> ()
+  | Some reason ->
+    Alcotest.failf
+      "expected hard_quota, got %s"
+      (EC.degraded_retry_reason_to_string reason)
+  | None -> Alcotest.fail "expected hard_quota recoverable reason"
+;;
+
+let test_payment_required_is_hard_quota () =
+  let err = SdkE.Api (Retry.PaymentRequired { message = "Insufficient Balance" }) in
+  Alcotest.(check bool)
+    "payment required is hard quota"
     true
     (KTD.sdk_error_is_hard_quota err);
   match EC.recoverable_runtime_failure_reason err with
@@ -756,6 +774,10 @@ let () =
             "soft rate limits remain rate_limit reasons"
             `Quick
             test_soft_rate_limit_classifies_as_rate_limit
+        ; Alcotest.test_case
+            "payment required is classified as hard quota"
+            `Quick
+            test_payment_required_is_hard_quota
         ; Alcotest.test_case
             "soft rate limits skip same credential-pool candidates"
             `Quick

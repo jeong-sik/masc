@@ -834,4 +834,46 @@ endpoint = "https://example.invalid/v1"
     const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
     expect(sourceAfter).toBe(sourceBefore)
   })
+
+  it('rejects a binding to an existing command-transport (CLI) provider', async () => {
+    // Legacy/hand-edited data: a `command`-transport provider is parseable and
+    // shows up in the binding dropdown even though the add-provider form can
+    // no longer create one (RUNTIME_TOML_CREATABLE_PROTOCOLS/endpoint-only).
+    // Runtime_adapter.provider_kind_of_cli_provider is hardcoded to None, so
+    // materialize_config would silently drop any binding pinned to it.
+    const configWithCliProvider = {
+      ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.cli_like]
+display-name = "CLI Like"
+protocol = "openai-compatible-cli"
+command = "provider-runtime --serve"
+`,
+    }
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(configWithCliProvider)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+
+    const sourceBefore = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
+      target: { value: 'cli_like' },
+    })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
+      target: { value: 'gpt' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain(
+        'command(CLI)',
+      )
+    })
+    const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+    expect(sourceAfter).toBe(sourceBefore)
+  })
 })

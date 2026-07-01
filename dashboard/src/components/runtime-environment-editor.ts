@@ -352,6 +352,20 @@ export function RuntimeEnvironmentEditor({
       setBindingFormError(`"${bindingProviderId}"는 예약된 이름이라 바인딩 provider로 쓸 수 없습니다`)
       return
     }
+    // Same non-materializable-provider trap as the add-provider form (see
+    // RUNTIME_TOML_CREATABLE_PROTOCOLS): a `command` transport provider always
+    // resolves to no provider_kind on the backend, so materialize_config's
+    // filter_map silently drops any binding pinned to it from the live runtime
+    // list. The add-provider form can no longer create one, but this dropdown
+    // lists every parsed provider, including a `command` one that already
+    // exists via raw TOML / legacy config.
+    const selectedProvider = environment.providers.find(p => p.id === bindingProviderId)
+    if (selectedProvider?.transportKind === 'command') {
+      setBindingFormError(
+        `"${bindingProviderId}"는 command(CLI) transport라 바인딩을 생성할 수 없습니다 (백엔드가 아직 CLI provider를 라우팅하지 못합니다)`,
+      )
+      return
+    }
     const exists = environment.bindings.some(
       b => b.providerId === bindingProviderId && b.modelId === bindingModelId,
     )

@@ -330,7 +330,7 @@ let test_repo_fusion_seed_judges_accept_native_schema () =
       , _librarian
       , _structured_judge
       , _cross_verifier
-      , _media_failover ) ->
+      , _media_failover , _lanes ) ->
     let runtime_cfg = fusion_toml_or_fail path in
     (match Fusion_config.of_toml runtime_cfg with
      | Error errs ->
@@ -389,7 +389,7 @@ let test_repo_fusion_panel_presets_are_schema_capable () =
       , _librarian
       , _structured_judge
       , _cross
-      , _media ) ->
+      , _media , _lanes ) ->
     let runtime_cfg = fusion_toml_or_fail path in
     (match Fusion_config.of_toml runtime_cfg with
      | Error errs ->

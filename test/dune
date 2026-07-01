@@ -120,6 +120,7 @@
   test_attempt_state
   test_runtime_attempt_fsm
   test_keeper_turn_driver_accept
+  test_keeper_turn_driver_failover
   test_domain_pool
   test_sse
   test_graphql_api
@@ -453,6 +454,7 @@
   test_attempt_state
   test_runtime_attempt_fsm
   test_keeper_turn_driver_accept
+  test_keeper_turn_driver_failover
   test_domain_pool
   test_sse
   test_graphql_api

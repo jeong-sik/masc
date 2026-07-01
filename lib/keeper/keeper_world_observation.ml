@@ -1063,8 +1063,12 @@ let keeper_cycle_decision
      through the single SSOT [Keeper_lifecycle_gate_env.enabled] so the enabled
      decision is not re-derived inline. Before this the global switches did not
      exist, so [reactive]/[proactive] enabled = false were silently dropped. *)
-  let reactive_gate_enabled = Keeper_lifecycle_gate_env.enabled Reactive meta in
-  let proactive_gate_enabled = Keeper_lifecycle_gate_env.enabled Proactive meta in
+  let reactive_gate_enabled =
+    Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Reactive meta
+  in
+  let proactive_gate_enabled =
+    Keeper_lifecycle_gate_env.enabled Keeper_lifecycle_gate.Proactive meta
+  in
   let event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
   in

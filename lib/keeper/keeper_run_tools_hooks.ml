@@ -514,6 +514,58 @@ let assemble_hooks
                        !recorded_blocks;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
+                (match runtime_manifest_context, runtime_manifest_append with
+                 | Some manifest_context, Some append_manifest ->
+                   let extra_system_context_estimated_tokens =
+                     Option.map Agent_sdk.Context_reducer.estimate_char_tokens ctx
+                   in
+                   let string_opt_to_json = function
+                     | Some value -> `String value
+                     | None -> `Null
+                   in
+                   let int_opt_to_json = function
+                     | Some value -> `Int value
+                     | None -> `Null
+                   in
+                   let post_tool_context =
+                     last_tool_results <> []
+                   in
+                   append_manifest
+                     (Keeper_runtime_manifest.make_for_context
+                        manifest_context
+                        ~event:Keeper_runtime_manifest.Context_injected
+                        ~oas_turn_count:turn
+                        ~runtime_id:runtime_id_string
+                        ~status:
+                          (if post_tool_context
+                           then "post_tool_context_injection"
+                           else "pre_tool_context_injection")
+                        ~decision:
+                          (Keeper_runtime_manifest.with_payload_role
+                             ~payload_role:Keeper_runtime_manifest.Model_input
+                             (`Assoc
+                               [ ( "sdk_turn", `Int turn )
+                               ; ( "post_tool_context_injection",
+                                   `Bool post_tool_context )
+                               ; ( "last_tool_result_count",
+                                   `Int (List.length last_tool_results) )
+                               ; ( "prompt_block_count",
+                                   `Int (List.length acc.prompt_blocks) )
+                               ; ( "extra_system_context_digest",
+                                   string_opt_to_json
+                                     acc.extra_system_context_digest )
+                               ; ( "extra_system_context_computed_size",
+                                   int_opt_to_json
+                                     acc.extra_system_context_size )
+                               ; ( "extra_system_context_injected_size",
+                                   int_opt_to_json
+                                     acc.extra_system_context_size )
+                               ; ( "extra_system_context_estimated_tokens",
+                                   int_opt_to_json
+                                     extra_system_context_estimated_tokens )
+                               ]))
+                        ())
+                 | _ -> ());
                 (* Phase O observability: capture the effective OAS request
                    boundary after keeper-owned context injection has finalized
                    [extra_system_context]. *)
@@ -540,8 +592,6 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    ignore runtime_manifest_context;
-    ignore runtime_manifest_append;
     (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator
      during Agent.run. The drain happens in keeper_post_turn.ml

@@ -268,6 +268,11 @@ val merge_turn_event_bus_summary :
 val summarize_turn_event_bus :
   Agent_sdk.Event_bus.event list -> turn_event_bus_summary
 
+val turn_event_bus_overflow_evidence_detail :
+  turn_event_bus_summary -> string
+(** Compact forensic string for preserving OAS compaction/retry event-bus
+    evidence inside the keeper overflow blocker detail. *)
+
 val context_overflow_event_of_error :
   fallback_tokens:int ->
   ?turn_event_bus:turn_event_bus_summary ->
@@ -280,8 +285,9 @@ val pause_keeper_for_overflow :
   reason:string ->
   keeper_meta
 (** Pause a keeper after unresolved context overflow. Writes meta with merge-CAS
-    and dispatches [Compact_retry_exhausted] then [Operator_pause]. Returns the
-    paused meta. *)
+    using [Auto_resume_with_backoff], records [Sdk_token_budget_exceeded] typed
+    blocker metadata, latches [Turn_overflow_pause], and dispatches
+    [Compact_retry_exhausted] then [Operator_pause]. Returns the paused meta. *)
 
 val sync_keeper_paused_state :
   config:Workspace.config ->

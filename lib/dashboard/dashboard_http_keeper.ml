@@ -718,11 +718,34 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ~registry_entry
           in
 
-          let primary_max_context =
-            let resolution =
-              Keeper_context_runtime.resolve_max_context_resolution_of_meta m
-            in
-            resolution.effective_budget
+          let max_context_resolution =
+            Keeper_context_runtime.resolve_max_context_resolution_of_meta m
+          in
+          let primary_max_context = max_context_resolution.effective_budget in
+          let context_budget_source =
+            match max_context_resolution.requested_override with
+            | Some requested
+              when requested > 0
+                   && max_context_resolution.effective_budget
+                      < max_context_resolution.turn_budget ->
+              "requested_override_clamped_to_provider"
+            | Some requested when requested > 0 -> "requested_override"
+            | Some _ | None -> "runtime_provider_cap"
+          in
+          let context_budget =
+            `Assoc
+              [ ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta m))
+              ; ( "provider_context_window"
+                , `Int max_context_resolution.primary_budget )
+              ; ("budget_source", `String context_budget_source)
+              ; ( "requested_override"
+                , Json_util.int_opt_to_json
+                    max_context_resolution.requested_override )
+              ; ("primary_budget", `Int max_context_resolution.primary_budget)
+              ; ("runtime_budget", `Int max_context_resolution.runtime_budget)
+              ; ("turn_budget", `Int max_context_resolution.turn_budget)
+              ; ("effective_budget", `Int max_context_resolution.effective_budget)
+              ]
           in
           let context =
             match last_metrics with
@@ -1079,6 +1102,7 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
               ("trust", trust_json);
               ("context", context);
               ("context_source", context_source);
+              ("context_budget", context_budget);
               ("runtime_warning_ctx_ratio", `Float runtime_warning_ctx_ratio);
               (* Eval feed: latest verdict snapshot for this keeper (RFC-MASC-005) *)
               ("eval_latest",

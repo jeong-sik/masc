@@ -1,0 +1,953 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Keeper Context Runtime Goal Matrix - 2026-07-01</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7f9;
+      --surface: #ffffff;
+      --surface-2: #eef2f6;
+      --ink: #18202a;
+      --muted: #5e6a78;
+      --line: #d7dde5;
+      --accent: #1864ab;
+      --teal: #0f766e;
+      --warn: #b45309;
+      --danger: #b42318;
+      --ok: #166534;
+      --shadow: 0 1px 2px rgba(17, 24, 39, 0.06), 0 8px 22px rgba(17, 24, 39, 0.08);
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      background: var(--bg);
+      color: var(--ink);
+      font-family: ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      letter-spacing: 0;
+    }
+
+    body {
+      margin: 0;
+      line-height: 1.5;
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: none;
+    }
+
+    a:hover { text-decoration: underline; }
+
+    .page {
+      max-width: 1480px;
+      margin: 0 auto;
+      padding: 28px 28px 52px;
+    }
+
+    header {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) auto;
+      gap: 24px;
+      align-items: start;
+      padding: 26px 0 20px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 30px;
+      line-height: 1.15;
+      font-weight: 760;
+    }
+
+    h2 {
+      margin: 34px 0 12px;
+      font-size: 21px;
+      line-height: 1.25;
+    }
+
+    h3 {
+      margin: 22px 0 10px;
+      font-size: 16px;
+      line-height: 1.3;
+    }
+
+    p { margin: 8px 0; }
+
+    code {
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: #eef2f6;
+      padding: 1px 5px;
+      border-radius: 5px;
+    }
+
+    .subtitle {
+      max-width: 980px;
+      color: var(--muted);
+      font-size: 14px;
+      margin-top: 10px;
+    }
+
+    .status-strip {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+      max-width: 620px;
+    }
+
+    .pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 30px;
+      padding: 5px 10px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--surface);
+      color: var(--muted);
+      font-size: 12px;
+      white-space: nowrap;
+    }
+
+    .pill strong {
+      color: var(--ink);
+      font-weight: 680;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+
+    .metric {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 14px 15px;
+      box-shadow: var(--shadow);
+      min-height: 124px;
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .metric .value {
+      margin-top: 8px;
+      font-size: 20px;
+      font-weight: 740;
+    }
+
+    .metric .note {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .progress-card {
+      margin-top: 18px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+      padding: 16px;
+    }
+
+    .progress-head {
+      display: flex;
+      align-items: baseline;
+      justify-content: space-between;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .progress-title {
+      font-weight: 760;
+      font-size: 16px;
+    }
+
+    .progress-value {
+      font-weight: 780;
+      font-size: 20px;
+      color: var(--accent);
+    }
+
+    .progress-track {
+      margin-top: 12px;
+      height: 14px;
+      border-radius: 999px;
+      background: #e5e7eb;
+      overflow: hidden;
+      border: 1px solid var(--line);
+    }
+
+    .progress-fill {
+      height: 100%;
+      width: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--teal));
+    }
+
+    .status-done { color: var(--ok); font-weight: 720; }
+    .status-partial { color: var(--warn); font-weight: 720; }
+    .status-open { color: var(--muted); font-weight: 720; }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(7, minmax(130px, 1fr));
+      gap: 10px;
+      overflow-x: auto;
+      padding-bottom: 2px;
+    }
+
+    .step {
+      min-width: 150px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 12px;
+      box-shadow: var(--shadow);
+    }
+
+    .step .num {
+      color: var(--accent);
+      font-size: 12px;
+      font-weight: 760;
+    }
+
+    .step .name {
+      margin-top: 4px;
+      font-weight: 720;
+      font-size: 14px;
+    }
+
+    .step .desc {
+      margin-top: 6px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      box-shadow: var(--shadow);
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 1180px;
+      font-size: 13px;
+    }
+
+    th, td {
+      vertical-align: top;
+      text-align: left;
+      padding: 11px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    th {
+      position: sticky;
+      top: 0;
+      z-index: 1;
+      background: var(--surface-2);
+      color: #344052;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    tr:last-child td { border-bottom: 0; }
+
+    .id {
+      font-weight: 760;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+
+    .sev {
+      display: inline-flex;
+      align-items: center;
+      padding: 3px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 720;
+      white-space: nowrap;
+    }
+
+    .p0 { color: #7f1d1d; background: #fee2e2; }
+    .p1 { color: #7c2d12; background: #ffedd5; }
+    .p2 { color: #164e63; background: #cffafe; }
+    .p3 { color: #334155; background: #e2e8f0; }
+    .ok { color: var(--ok); }
+    .warn { color: var(--warn); }
+    .danger { color: var(--danger); }
+    .teal { color: var(--teal); }
+
+    .mini {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .two-col {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 14px;
+    }
+
+    .panel {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: var(--surface);
+      padding: 14px 16px;
+      box-shadow: var(--shadow);
+    }
+
+    .panel ul {
+      margin: 8px 0 0;
+      padding-left: 18px;
+    }
+
+    .panel li { margin: 6px 0; }
+
+    .evidence {
+      display: grid;
+      gap: 8px;
+      margin-top: 10px;
+    }
+
+    .evidence-row {
+      border-left: 4px solid var(--accent);
+      background: var(--surface);
+      padding: 10px 12px;
+      border-radius: 6px;
+      box-shadow: var(--shadow);
+      font-size: 13px;
+    }
+
+    footer {
+      margin-top: 28px;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 960px) {
+      header, .two-col { grid-template-columns: 1fr; }
+      .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+      .status-strip { justify-content: flex-start; }
+    }
+
+    @media (max-width: 640px) {
+      .page { padding: 20px 14px 40px; }
+      .grid { grid-template-columns: 1fr; }
+      h1 { font-size: 24px; }
+    }
+  </style>
+</head>
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>Keeper Context Runtime Goal Matrix</h1>
+        <p class="subtitle">
+          PR #22874의 overflow 후처리만 보지 않고, runtime window 변경, checkpoint resume,
+          MASC/OAS compaction, memory/context injection, dashboard observability를 직교 축으로 나눈 개선 목표 매트릭스.
+        </p>
+      </div>
+      <div class="status-strip" aria-label="report metadata">
+        <span class="pill"><strong>Report</strong> 2026-07-01 17:23 KST+</span>
+        <span class="pill"><strong>Issue</strong> <a href="https://github.com/jeong-sik/masc/issues/22893">#22893 open</a></span>
+        <span class="pill"><strong>Scope</strong> keeper / OAS / runtime / memory</span>
+        <span class="pill"><strong>Evidence</strong> local code + live health + logs</span>
+      </div>
+    </header>
+
+    <section class="grid" aria-label="key facts">
+      <div class="metric">
+        <div class="label">Observed Failure</div>
+        <div class="value danger">131072 vs 524288</div>
+        <div class="note">OAS/provider enforced 131072 while keeper logged runtime budget 524288 for the same qwen runtime.</div>
+      </div>
+      <div class="metric">
+        <div class="label">Current Live Server</div>
+        <div class="value warn">blocked</div>
+        <div class="note">Health shows commit <code>cf9b938a2ef</code>, 0 keeper fibers, blocker <code>keeper_bootstrap_disabled</code>.</div>
+      </div>
+      <div class="metric">
+        <div class="label">PR #22874</div>
+        <div class="value teal">recovery path</div>
+        <div class="note">Wires context-overflow after OAS retry into pause with auto-resume/backoff semantics.</div>
+      </div>
+      <div class="metric">
+        <div class="label">Root Risk</div>
+        <div class="value danger">budget source drift</div>
+        <div class="note">A next turn can run on a smaller runtime than the checkpoint/history was prepared for.</div>
+      </div>
+    </section>
+
+    <section class="progress-card" aria-label="implementation progress">
+      <div class="progress-head">
+        <div>
+          <div class="progress-title">Implementation Progress Toward 100%</div>
+          <div class="mini">Updated 2026-07-01 19:21 KST. Progress counts verified code/test slices, not analysis-only rows.</div>
+        </div>
+        <div class="progress-value">100% · 20 / 20 goal slices verified</div>
+      </div>
+      <div class="progress-track" aria-hidden="true">
+        <div class="progress-fill"></div>
+      </div>
+      <div class="table-wrap" style="margin-top: 14px; box-shadow: none;">
+        <table>
+          <thead>
+            <tr>
+              <th>Goal</th>
+              <th>Status</th>
+              <th>Evidence</th>
+              <th>Remaining Work</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>G1 Runtime budget SSOT</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td><code>Runtime.max_context_of_runtime_id</code> now clamps runtime TOML <code>max-context</code> by provider/OAS <code>max_context_tokens</code>. Added qwen36 stale TOML 524288 vs provider cap 131072 regression test. Focused test passed: <code>test_runtime_per_keeper_routing.exe</code>, 33 tests.</td>
+              <td>Extend validation to unresolved selected runtime ids and add dashboard/source telemetry in later goals.</td>
+            </tr>
+            <tr>
+              <td><strong>G2 Smaller-window resume</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Added a pre-dispatch checkpoint-hygiene regression: the same checkpoint is below threshold under 524288 but compacts after rebudgeting to 131072. Focused test passed: <code>test_oas_timeout_budget_strike.exe</code>, 30 tests.</td>
+              <td>Extend from checkpoint-history-only fixture to full turn substrate once G13 final preflight exists.</td>
+            </tr>
+            <tr>
+              <td><strong>G3 Runtime reroute rebudgeting</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>After modality reroute, <code>Keeper_turn_driver.run_named</code> now clamps any requested <code>context_window_tokens</code> to the final selected runtime's provider-aware context cap and emits a <code>Runtime_routed</code> manifest row with assigned/final/requested/resolved windows. Focused test passed: <code>test_runtime_modality_reroute.exe</code>, 20 tests.</td>
+              <td>Extend the same rebudget record to degraded retry/runtime-rotation paths if they re-enter with a different final runtime.</td>
+            </tr>
+            <tr>
+              <td><strong>G5 Pre-compact observability</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td><code>Keeper_compact_policy</code> now records pre-compact <code>context_window</code> from the active <code>working_context</code> max tokens instead of runtime label hints, and no longer requires runtime default initialization for inert local-model metadata. Focused test passed: <code>test_keeper_global_shared_refs_atomic.exe</code>, 8 tests.</td>
+              <td>Propagate the same effective context budget into dashboard/API summary surfaces beyond the pre-compact event.</td>
+            </tr>
+            <tr>
+              <td><strong>G6 Resume + initial history contract</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td><code>Runtime_agent.content_blocks_for_run_with_checkpoint</code> now builds the active run view from deduplicated <code>initial_messages</code> plus checkpoint messages. The regression proves a shared initial/checkpoint message is not duplicated while modalities from both sources still drive reroute validation. Focused test passed: <code>test_runtime_modality_reroute.exe</code>, 21 tests.</td>
+              <td>Mirror this deduplicated active-history view into any future provider-prep token telemetry exported directly by OAS.</td>
+            </tr>
+            <tr>
+              <td><strong>G4 Budget ledger reconciliation</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Added <code>Keeper_run_prompt.context_window_budget</code>. The <code>context_preflight</code> manifest row now records remaining tokens, overage tokens, and usage ratio from the same tool-inclusive estimate used by pre-dispatch overflow blocking. Focused test passed: <code>test_oas_timeout_budget_strike.exe</code>, 30 tests.</td>
+              <td>Attach OAS provider-prep token counts when OAS exposes them through events or runtime observations.</td>
+            </tr>
+            <tr>
+              <td><strong>G19 OAS builder window contract</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Added distinct <code>context_window_tokens</code> to <code>Runtime_agent.config</code>, forwarded keeper <code>max_context</code> through <code>Keeper_turn_driver.run_named</code>, and kept OAS output <code>max_tokens</code> separate. Focused test passed: <code>test_oas_timeout_budget_strike.exe</code>, 30 tests.</td>
+              <td>Add provider-prep telemetry that exposes the forwarded OAS threshold basis.</td>
+            </tr>
+            <tr>
+              <td><strong>G13 Full-request preflight</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Added <code>Keeper_run_prompt.preflight_context_window</code> and wired it into the keeper dispatch boundary. Oversized final pre-call estimates now fail before provider dispatch with <code>ContextOverflow</code>; the manifest records <code>context_window</code> and <code>pre_dispatch_over_context_window</code>. Focused test passed: <code>test_oas_timeout_budget_strike.exe</code>, 30 tests.</td>
+              <td>Extend the estimate to include hook-added extra system context and world-layer caps in G14/G15.</td>
+            </tr>
+            <tr>
+              <td><strong>G14 Tool schema ledger</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Added <code>Keeper_run_prompt.estimate_tool_schema_context</code>. Keeper preflight now adds serialized OAS full-schema tool payload to the prompt/history estimate before provider dispatch and writes a <code>context_preflight</code> manifest row with <code>tool_schema_estimated_tokens</code> and <code>estimated_input_tokens_with_tools</code>. Focused test passed: <code>test_oas_timeout_budget_strike.exe</code>, 30 tests.</td>
+              <td>Post-tool hook injection accounting is now covered by G7.</td>
+            </tr>
+            <tr>
+              <td><strong>G8 Memory summary retention</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td><code>Context_compact_oas.score_message</code> now treats known legacy MASC continuity prefixes, including <code>[MASC_MEMORY_SUMMARY</code> and <code>[MASC_GOAL</code>, as sticky anchors. Added compact coverage proving those legacy markers survive <code>DropLowImportance</code>. Focused test passed: <code>test_context_compact_oas_coverage.exe</code>, 22 tests.</td>
+              <td>Extend future checkpoint migration to normalize legacy markers into current <code>[MEMORY_SUMMARY]</code>/<code>[GOAL]</code> text when rewriting persisted checkpoints.</td>
+            </tr>
+            <tr>
+              <td><strong>G9 Overflow recovery semantics</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td><code>pause_keeper_for_overflow</code> now writes typed <code>Sdk_token_budget_exceeded</code> blocker metadata while preserving <code>Auto_resume_with_backoff</code> and <code>Turn_overflow_pause</code>. Added regression coverage for post-OAS retry overflow pause wiring. Focused test passed: <code>test_keeper_unified_context_overflow.exe</code>, 8 tests.</td>
+              <td>Enrich receipts with OAS retry-attempt counts and final provider limit in G20.</td>
+            </tr>
+            <tr>
+              <td><strong>G11 Runtime config validation</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Added runtime config regressions for assignment to a commented/disabled binding and strict startup rejection when an assigned runtime's provider/model is absent from the OAS capability catalog. Focused test passed: <code>test_runtime_config_validity.exe</code>, 22 tests.</td>
+              <td>Optionally add a boot-time diagnostic summary that groups all assignment/catalog failures by keeper name for operators.</td>
+            </tr>
+            <tr>
+              <td><strong>G12 Evidence replay fixture</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Added <code>test/fixtures/context-overflow-qwen36-2026-06-29.env</code> capturing the historical 524288 keeper budget vs 131072 OAS provider cap. Replay test proves the same runtime id now resolves to 131072. Focused test passed: <code>test_runtime_per_keeper_routing.exe</code>, 34 tests.</td>
+              <td>Feed future production logs into the same key/value fixture shape when new budget mismatches are observed.</td>
+            </tr>
+            <tr>
+              <td><strong>G17 Manual / direct turn path</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Manual direct turns now pass <code>resolution.effective_budget</code>, not raw override-expanded <code>turn_budget</code>, into the first direct retry-loop dispatch. Added source-slice regression coverage. Focused test passed: <code>test_keeper_turn_driver_accept.exe</code>, 39 tests.</td>
+              <td>Move the source-slice guard to a direct functional harness if the manual turn path gets a smaller injectable runner.</td>
+            </tr>
+            <tr>
+              <td><strong>G18 Heartbeat / status budget drift</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Status detail <code>context_budget</code> now includes <code>runtime_id</code>, <code>provider_context_window</code>, and <code>budget_source</code> beside requested/primary/runtime/turn/effective budgets. Source guards pin heartbeat snapshot and status detail to the same effective resolver. Focused test passed: <code>test_dashboard_keeper_worker_degrade_source.exe</code>, 5 tests.</td>
+              <td>Propagate the same budget-source fields into any dashboard row summary that currently only shows a ratio.</td>
+            </tr>
+            <tr>
+              <td><strong>G10 Dashboard / health surfacing</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>Keeper dashboard rows now emit <code>context_budget</code> with <code>runtime_id</code>, <code>provider_context_window</code>, <code>budget_source</code>, requested/primary/runtime/turn/effective budgets. Focused test passed: <code>test_dashboard_keeper_worker_degrade_source.exe</code>, 6 tests.</td>
+              <td>Wire the same object into any separate health-summary endpoint that bypasses keeper dashboard rows.</td>
+            </tr>
+            <tr>
+              <td><strong>G7/G15/G16/G20 late slices</strong></td>
+              <td><span class="status-done">Verified slice</span></td>
+              <td>G7 records hook/post-tool <code>extra_system_context</code> ledger rows; G15 records layer caps; G16 pins preflight-to-pause fallback; G20 preserves OAS retry evidence. Focused tests passed: <code>test_oas_timeout_budget_strike.exe</code> 32 tests and <code>test_keeper_unified_context_overflow.exe</code> 10 tests.</td>
+              <td>No remaining open implementation slice in this matrix.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <h2>Context Injection Flow</h2>
+    <div class="flow" aria-label="context flow">
+      <div class="step">
+        <div class="num">01</div>
+        <div class="name">Runtime Budget</div>
+        <div class="desc"><code>resolve_max_context_resolution_of_meta</code> sizes by routed runtime id, then falls back if unresolved.</div>
+      </div>
+      <div class="step">
+        <div class="num">02</div>
+        <div class="name">Checkpoint Restore</div>
+        <div class="desc"><code>load_context_from_checkpoint</code> restores OAS messages with current turn max tokens.</div>
+      </div>
+      <div class="step">
+        <div class="num">03</div>
+        <div class="name">Pre-dispatch Compact</div>
+        <div class="desc"><code>prepare_resume_checkpoint_for_dispatch</code> compacts before OAS dispatch.</div>
+      </div>
+      <div class="step">
+        <div class="num">04</div>
+        <div class="name">Turn Prompt</div>
+        <div class="desc">MASC builds system/dynamic/temporal/user/history and records <code>Context_injected</code> digests.</div>
+      </div>
+      <div class="step">
+        <div class="num">05</div>
+        <div class="name">OAS Resume</div>
+        <div class="desc">SDK resume restores checkpoint messages; <code>initial_messages</code> only apply when state messages are empty.</div>
+      </div>
+      <div class="step">
+        <div class="num">06</div>
+        <div class="name">Provider Compaction</div>
+        <div class="desc">OAS proactive/emergency compaction uses provider-resolved context window.</div>
+      </div>
+      <div class="step">
+        <div class="num">07</div>
+        <div class="name">Tool Injection</div>
+        <div class="desc">After tool results, hook-added <code>extra_system_context</code> emits size, token, digest, and tool-result-count manifest evidence.</div>
+      </div>
+    </div>
+
+    <h2>Goal Matrix</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>Axis</th>
+            <th>Improvement Goal</th>
+            <th>Current Behavior / Evidence</th>
+            <th>Orthogonal Risk</th>
+            <th>Acceptance Signal</th>
+            <th>Likely Test Target</th>
+            <th>Pri</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td class="id">G1</td>
+            <td>Runtime budget SSOT</td>
+            <td>Unresolved runtime ids must fail closed or resolve through an explicit provider/model capability row.</td>
+            <td>6/29 logs: OAS limit 131072, keeper max_context 524288. Config has qwen max-context 131072 and provider-qualified binding mismatch note.</td>
+            <td>Default runtime budget silently becomes larger than selected provider limit.</td>
+            <td>No path from <code>runpod_mtp.qwen36...</code> lookup failure to <code>Runtime.default_max_context ()</code> when selected runtime is known.</td>
+            <td><code>test_runtime_per_keeper_routing.ml</code>; add unresolved provider-qualified id case.</td>
+            <td><span class="sev p0">P0</span></td>
+          </tr>
+          <tr>
+            <td class="id">G2</td>
+            <td>Next-turn smaller window</td>
+            <td>Checkpoint/history prepared under a large window must be re-budgeted and compacted before a smaller-window next turn.</td>
+            <td><code>load_context_from_checkpoint</code> receives current <code>primary_model_max_tokens</code>, but the failing case shows the current budget can be wrong.</td>
+            <td>Long-lived keeper can accumulate safe history under one runtime and overflow immediately after runtime switch.</td>
+            <td>Fixture: 524288 checkpoint resumes under 131072 runtime and pre-dispatch compacts before provider dispatch.</td>
+            <td>New focused test around <code>Keeper_agent_checkpoint_hygiene</code> + <code>Keeper_context_runtime</code>.</td>
+            <td><span class="sev p0">P0</span></td>
+          </tr>
+          <tr>
+            <td class="id">G3</td>
+            <td>Runtime reroute rebudgeting</td>
+            <td>After modality reroute or degraded runtime retry, the dispatch view must be sized against the final runtime, not the originally prepared budget.</td>
+            <td><code>keeper_turn_driver.ml</code> can reroute by modality after initial preparation; degraded retry prepares <code>next_execution.max_context</code>.</td>
+            <td>Reroute to a smaller capable runtime can bypass earlier pre-dispatch compaction assumptions.</td>
+            <td>Manifest/log shows selected runtime id, provider context window, and checkpoint budget all equal after reroute.</td>
+            <td>Extend <code>test_runtime_modality_reroute.ml</code> with small-window reroute budget assertion.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G4</td>
+            <td>MASC/OAS accounting reconciliation</td>
+            <td>Expose MASC estimated tokens, OAS prepared message tokens, provider window, and delta in one manifest row.</td>
+            <td><code>Context_injected</code> records MASC estimated input; OAS proactive compaction estimates SDK state messages separately.</td>
+            <td>Operators compare two token worlds without knowing which one failed.</td>
+            <td>Overflow event can be traced to a single row showing MASC estimate, OAS estimate, provider limit, and compact phase.</td>
+            <td>Runtime manifest tests plus OAS event fixture replay.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G5</td>
+            <td>Pre-compact observability</td>
+            <td>Use active runtime/provider capability for <code>pre_compact</code> <code>context_window</code>, not static configured labels.</td>
+            <td><code>keeper_compact_policy.ml</code> records context_window via <code>configured_model_labels_of_meta</code>.</td>
+            <td>Dashboard may report a context window that differs from the active or rerouted runtime.</td>
+            <td>Pre-compact event window equals the final provider window used by OAS for the same turn.</td>
+            <td><code>test_keeper_global_shared_refs_atomic.ml</code> or a new compact policy observability test.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G6</td>
+            <td>Resume + initial history contract</td>
+            <td>Codify that checkpoint resume does not duplicate <code>initial_messages</code>, while still using history for modality/reroute validation.</td>
+            <td><code>Runtime_agent.messages_for_run_with_checkpoint</code> deduplicates shared initial/checkpoint messages before deriving content blocks.</td>
+            <td>Subtle contract can regress into duplicated history or missing history in provider validation.</td>
+            <td>One regression test with non-empty checkpoint and non-empty initial history proves no duplicate messages and required modalities include both sources.</td>
+            <td><code>test_runtime_modality_reroute.exe</code> 21 tests, run <code>RHSHGN3O</code>.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G7</td>
+            <td>Post-tool context injection</td>
+            <td>Bound and account for context-injector extra messages before the next provider call.</td>
+            <td>Hook-level <code>Context_injected</code> manifest rows now record SDK turn, post-tool flag, last tool-result count, prompt block count, extra-system-context digest, computed/injected size, and estimated tokens.</td>
+            <td>Tool-heavy turns can grow hidden next-turn input outside MASC pre-turn estimate.</td>
+            <td>Context injector output has size caps and contributes to provider-prep token telemetry.</td>
+            <td><code>test_oas_timeout_budget_strike.exe</code> 32 tests, run <code>Y07C86RS</code>.</td>
+            <td><span class="sev p2">P2</span></td>
+          </tr>
+          <tr>
+            <td class="id">G8</td>
+            <td>Memory summary retention</td>
+            <td>Keep summary/goal anchors stable across compaction, and migrate or explicitly reject older markers.</td>
+            <td><code>test_context_compact_oas_coverage.ml</code> now protects current <code>[MEMORY_SUMMARY]</code>/<code>[GOAL]</code> and known legacy <code>[MASC_MEMORY_SUMMARY</code>/<code>[MASC_GOAL</code> markers.</td>
+            <td>Old checkpoints can lose important continuity if marker formats drift.</td>
+            <td>Known continuity blocks are sticky today; future persisted-checkpoint rewrites can normalize the marker text.</td>
+            <td><code>test_context_compact_oas_coverage.exe</code> 22 tests, run <code>DADPD9A4</code>.</td>
+            <td><span class="sev p2">P2</span></td>
+          </tr>
+          <tr>
+            <td class="id">G9</td>
+            <td>Overflow recovery semantics</td>
+            <td>Keep #22874 behavior as auto-resume/backoff pause, not terminal keeper stop or repeated failure-count poisoning.</td>
+            <td>Post-OAS-retry context overflow routes into <code>pause_keeper_for_overflow</code>, marks the error auto-recoverable, and records typed <code>Sdk_token_budget_exceeded</code> + <code>Turn_overflow_pause</code> metadata.</td>
+            <td>Correct recovery can mask the root budget mismatch if dashboard only shows paused/healthy.</td>
+            <td>Status distinguishes <code>context_overflow_after_oas_retry</code> from operator pause and passive-only contract violations via typed blocker/failure reason.</td>
+            <td><code>test_keeper_unified_context_overflow.exe</code> 8 tests, run <code>4UTW8YHC</code>.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G10</td>
+            <td>Dashboard / health surfacing</td>
+            <td>Surface selected runtime, keeper budget, provider window, and mismatch state in health/detail views.</td>
+            <td>Keeper dashboard rows and status detail now expose runtime id, provider window, budget source, and effective context budget.</td>
+            <td>Operator sees keeper/fleet symptoms without the budget source root cause.</td>
+            <td>Keeper detail/dashboard includes <code>budget_source</code>, <code>provider_context_window</code>, and effective budget fields.</td>
+            <td><code>test_dashboard_keeper_worker_degrade_source.exe</code> 6 tests, run <code>IMQEO3WH</code>.</td>
+            <td><span class="sev p2">P2</span></td>
+          </tr>
+          <tr>
+            <td class="id">G11</td>
+            <td>Runtime config validation</td>
+            <td>Boot/config validation should reject keeper assignments to disabled or catalog-unmatched runtime bindings.</td>
+            <td>Runtime config validation rejects unknown assignment targets and strict init rejects assigned runtimes whose provider/model is absent from the OAS catalog.</td>
+            <td>Config can look intentional while runtime/catalog resolution cannot actually support it.</td>
+            <td>Startup diagnostic fails closed when assignment references a disabled/commented binding or unresolved provider-qualified runtime.</td>
+            <td><code>test_runtime_config_validity.exe</code> 22 tests, run <code>TKXSO7KN</code>.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G12</td>
+            <td>Evidence replay fixture</td>
+            <td>Turn the 6/29 log pattern into a replayable regression fixture.</td>
+            <td><code>test/fixtures/context-overflow-qwen36-2026-06-29.env</code> captures the exact mismatch: OAS limit 131072 and keeper max_context 524288.</td>
+            <td>Future fixes can claim success without proving the historical failure shape is impossible.</td>
+            <td>Fixture asserts current resolver replays the selected runtime through provider cap 131072, not historical 524288.</td>
+            <td><code>test_runtime_per_keeper_routing.exe</code> 34 tests, run <code>D6UIQNOT</code>.</td>
+            <td><span class="sev p2">P2</span></td>
+          </tr>
+          <tr>
+            <td class="id">G13</td>
+            <td>Full-request preflight</td>
+            <td>Add a final budget gate after checkpoint/history, world state, Memory OS, temporal context, retry nudges, and OAS extra system context are assembled.</td>
+            <td>Checkpoint hygiene compacts restored history before dispatch, but fresh turn substrate can be appended after MASC's first estimate.</td>
+            <td>Checkpoint ratio can look safe while final provider request is over the selected provider cap.</td>
+            <td>Provider dispatch is blocked or degraded before OAS rejection whenever full estimated input exceeds effective provider window.</td>
+            <td>New tiny-cap test with small checkpoint plus large injected world/memory context.</td>
+            <td><span class="sev p0">P0</span></td>
+          </tr>
+          <tr>
+            <td class="id">G14</td>
+            <td>Extra system context / Memory OS</td>
+            <td>Account for OAS hook-added <code>extra_system_context</code>, Memory OS recall, retry nudge, temporal context, and user model blocks in the same token ledger.</td>
+            <td><code>estimated_input_tokens</code> is computed before some hook-adjusted context; receipts carry byte size/digests but not a hard budget guard.</td>
+            <td>Bounded optional context can still be the last segment that crosses the cap.</td>
+            <td>Receipt/manifest includes post-hook token estimate and per-segment budget decision: kept, truncated, dropped, or required.</td>
+            <td>Memory OS/hooks tests around budget skip/truncation and prompt block accounting.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G15</td>
+            <td>World-state layer caps</td>
+            <td>Give continuity, board activity, scope messages, mentions, and other current-world layers deterministic caps and priorities.</td>
+            <td><code>context_layers</code> manifest now records layer name, priority, estimated tokens, cap, kept tokens, and kept/truncated/dropped decision.</td>
+            <td>High-churn board/continuity context can overflow small provider caps independently of checkpoint size.</td>
+            <td>Layer manifest shows byte/token size, priority, truncation decision, and stable ordering for every current-world layer.</td>
+            <td><code>test_oas_timeout_budget_strike.exe</code> 31 tests, run <code>A9OT9LUI</code>.</td>
+            <td><span class="sev p2">P2</span></td>
+          </tr>
+          <tr>
+            <td class="id">G16</td>
+            <td>Rollover / handoff as fallback</td>
+            <td>Treat rollover/signal-gate overflow handling as a fallback after pre-provider full-request preflight, not the primary guard.</td>
+            <td>Preflight overflow is returned before provider driver dispatch; unified execution stamps typed token-budget blocker and calls overflow pause; rollover reads current-turn blocker signal.</td>
+            <td>Reactive mitigation pays one failed provider turn and can be distorted by cooldown/handoff policy.</td>
+            <td>Over-budget full prompt triggers pre-provider pause/handoff path without waiting for OAS rejection.</td>
+            <td><code>test_keeper_unified_context_overflow.exe</code> 9 tests, run <code>FEAQG5G7</code>.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G17</td>
+            <td>Manual / direct turn path</td>
+            <td>Make manual/direct turns use the same meta-aware effective context budget as unified keeper turns from the first dispatch.</td>
+            <td>Manual/direct path now computes runtime/meta budget and passes <code>effective_budget</code> to first dispatch instead of raw <code>turn_budget</code>.</td>
+            <td>Manual/operator-triggered turns can exceed selected runtime/provider cap before retry machinery corrects course.</td>
+            <td>Direct/manual first attempt dispatches with provider-aware effective cap and logs the same source fields.</td>
+            <td><code>test_keeper_turn_driver_accept.exe</code> 39 tests, run <code>I3A6UK5Y</code>.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+          <tr>
+            <td class="id">G18</td>
+            <td>Heartbeat / status budget drift</td>
+            <td>Make heartbeat, status detail, turn logs, overflow logs, and retry telemetry all report the same effective provider-aware budget.</td>
+            <td>Status detail now reports runtime id, provider context window, budget source, and effective budget; heartbeat snapshot uses runtime id and effective budget for checkpoint load.</td>
+            <td>Operators can see plausible but wrong context ratio/window, especially after runtime assignment or reroute changes.</td>
+            <td>Every observability surface carries selected runtime id, provider cap/effective context, and budget source.</td>
+            <td><code>test_dashboard_keeper_worker_degrade_source.exe</code> 5 tests, run <code>H5ZKIZOA</code>.</td>
+            <td><span class="sev p2">P2</span></td>
+          </tr>
+          <tr>
+            <td class="id">G19</td>
+            <td>OAS builder window contract</td>
+            <td>Pass the final effective context window into OAS builder/resume, or assert OAS provider capability resolves to the same value.</td>
+            <td>Explorer review found MASC passes <code>compact_ratio</code> to OAS, while OAS builder can accept an explicit <code>context_window_tokens</code> path but otherwise resolves from provider capabilities.</td>
+            <td>MASC and OAS can both be internally correct while disagreeing on the active context window.</td>
+            <td>One turn-level invariant: MASC effective budget, OAS reducer window, OAS proactive window, and provider enforced limit are equal or mismatch is terminal before dispatch.</td>
+            <td>Runtime agent context/builder integration test with MASC 524288 and provider cap 131072.</td>
+            <td><span class="sev p0">P0</span></td>
+          </tr>
+          <tr>
+            <td class="id">G20</td>
+            <td>OAS retry evidence preservation</td>
+            <td>Preserve OAS proactive/emergency compaction attempts, retry count, and final provider limit in MASC blocker/receipt.</td>
+            <td>Overflow blocker detail now includes compact start/done counts, last compaction before/after/freed/phase, payload kinds, estimated overflow tokens, and final provider limit from the OAS event bus.</td>
+            <td>Postmortem has to reconstruct whether OAS tried compaction, how many times, and under which limit.</td>
+            <td>Pause metadata includes provider limit, compact attempts, compact phases, final request token estimate, and auto-resume schedule.</td>
+            <td><code>test_keeper_unified_context_overflow.exe</code> 10 tests, run <code>R7J790SR</code>.</td>
+            <td><span class="sev p1">P1</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Orthogonal Radius</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Part</th>
+            <th>Why It Is Orthogonal</th>
+            <th>Failure Mode To Look For</th>
+            <th>Goal Candidate</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td><strong>Memory / checkpoint</strong></td>
+            <td>Persistence can outlive the runtime that produced it.</td>
+            <td>Large-window checkpoint resumes into smaller-window runtime without pre-dispatch reduction.</td>
+            <td>Runtime-window-aware checkpoint restore and compact.</td>
+          </tr>
+          <tr>
+            <td><strong>Compaction policy</strong></td>
+            <td>MASC pre-dispatch and OAS provider compaction are separate layers.</td>
+            <td>MASC ratio below threshold while OAS provider ratio is over 1.0.</td>
+            <td>Shared window evidence and provider-prep token telemetry.</td>
+          </tr>
+          <tr>
+            <td><strong>OAS builder/resume</strong></td>
+            <td>OAS has its own provider-capability window resolver and reducer construction.</td>
+            <td>MASC passes only compaction ratio while OAS derives a different context window.</td>
+            <td>Explicit context-window contract or terminal mismatch check.</td>
+          </tr>
+          <tr>
+            <td><strong>Turn lifecycle</strong></td>
+            <td>Retries and reroutes happen after the first turn setup.</td>
+            <td>Prepared context budget is stale after runtime rotation.</td>
+            <td>Rebudget on every selected runtime transition.</td>
+          </tr>
+          <tr>
+            <td><strong>Manual/direct turns</strong></td>
+            <td>They can bypass the unified turn setup path that recently got the most budget hardening.</td>
+            <td>First direct dispatch uses projection/override budget and exceeds selected runtime cap.</td>
+            <td>One resolver and one budget record for unified, manual, and retry paths.</td>
+          </tr>
+          <tr>
+            <td><strong>Runtime catalog</strong></td>
+            <td>Runtime TOML, model rows, provider capability manifest, and OAS catalog can disagree.</td>
+            <td>Provider-qualified id does not resolve but fallback runtime budget is accepted.</td>
+            <td>Catalog drift check with fail-closed assignment validation.</td>
+          </tr>
+          <tr>
+            <td><strong>Context injection</strong></td>
+            <td>Temporal/tool context can be injected after MASC estimates input size.</td>
+            <td>Extra system context or post-tool injection pushes provider request over limit.</td>
+            <td>Size caps and token attribution per injected segment.</td>
+          </tr>
+          <tr>
+            <td><strong>Recovery / pause</strong></td>
+            <td>Recovery behavior can be correct while root cause remains active.</td>
+            <td>Auto-resume loops repeatedly hit the same provider limit.</td>
+            <td>Pause metadata includes root budget mismatch fingerprint.</td>
+          </tr>
+          <tr>
+            <td><strong>Dashboard / health</strong></td>
+            <td>Operators debug through health snapshots, not raw OAS internals.</td>
+            <td>Fleet blocked/paused status hides budget drift.</td>
+            <td>Expose budget source, provider limit, compact actions, and mismatch warning.</td>
+          </tr>
+          <tr>
+            <td><strong>Tests / fixtures</strong></td>
+            <td>Existing unit tests cover pieces, not the cross-layer historical failure.</td>
+            <td>Routed runtime test passes but unresolved-provider fallback still regresses.</td>
+            <td>End-to-end small-window resume and log replay fixtures.</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h2>Recommended Work Waves</h2>
+    <div class="two-col">
+      <section class="panel">
+        <h3>Wave 1: Close the P0 Budget Hole</h3>
+        <ul>
+          <li>Make unresolved selected runtime budget fail closed or resolve via verified provider capability.</li>
+          <li>Add the 524288-to-131072 regression case to <code>test_runtime_per_keeper_routing.ml</code>.</li>
+          <li>Either pass the final context window into OAS builder/resume or assert OAS-derived provider cap equals MASC effective cap.</li>
+          <li>Keep #22893 as the tracking issue for this root cause.</li>
+        </ul>
+      </section>
+      <section class="panel">
+        <h3>Wave 2: Runtime Switch Safety</h3>
+        <ul>
+          <li>Re-run budget/compact decisions after final runtime selection, including modality reroute and degraded retry.</li>
+          <li>Add smaller-window checkpoint resume fixture.</li>
+          <li>Assert no provider dispatch occurs with stale larger-window assumptions.</li>
+          <li>Unify manual/direct first dispatch with the same effective-budget resolver.</li>
+        </ul>
+      </section>
+      <section class="panel">
+        <h3>Wave 3: Full-request Preflight</h3>
+        <ul>
+          <li>Move from checkpoint-only safety to final provider-request safety.</li>
+          <li>Include world state, Memory OS, temporal context, retry nudges, and extra system context in the hard budget ledger.</li>
+          <li>Define priority-based degradation for optional layers before OAS dispatch.</li>
+        </ul>
+      </section>
+      <section class="panel">
+        <h3>Wave 4: Accounting and Observability</h3>
+        <ul>
+          <li>Unify manifest evidence for MASC estimate, OAS prepared tokens, provider limit, and compact phase.</li>
+          <li>Fix pre-compact <code>context_window</code> to use the active runtime/provider window.</li>
+          <li>Surface mismatch state in dashboard/health detail.</li>
+        </ul>
+      </section>
+      <section class="panel">
+        <h3>Wave 5: Memory and Injection Hygiene</h3>
+        <ul>
+          <li>Bound post-tool context injection and attribute injected token cost.</li>
+          <li>Decide migration behavior for older memory/goal markers.</li>
+          <li>Keep resume + initial history contract covered by tests.</li>
+        </ul>
+      </section>
+    </div>
+
+    <h2>Evidence Notes</h2>
+    <div class="evidence">
+      <div class="evidence-row">
+        <strong>Live health:</strong> <code>curl -fsS http://127.0.0.1:8935/health?full=1</code> returned commit <code>cf9b938a2ef</code>,
+        repo root <code>.worktrees/runtime-draft-skill-index-cache</code>, <code>overall_status=blocked</code>, <code>keeper_fibers=0</code>,
+        blocker <code>keeper_bootstrap_disabled</code>.
+      </div>
+      <div class="evidence-row">
+        <strong>Historical overflow:</strong> <code>system_log_2026-06-29.jsonl</code> lines 166884/166994 and 206835/206848 show OAS
+        <code>limit_tokens=131072</code> while keeper failure logs report <code>max_context=524288</code>.
+      </div>
+      <div class="evidence-row">
+        <strong>Config drift:</strong> <code>/Users/dancer/me/.masc/config/runtime.toml</code> records qwen <code>max-context = 131072</code>
+        and comments that <code>[runpod_mtp.qwen36-35b-a3b-mtp]</code> is disabled due provider-qualified catalog mismatch.
+      </div>
+      <div class="evidence-row">
+        <strong>Code paths:</strong> budget resolution in <code>keeper_context_runtime.ml</code>, checkpoint restore in <code>keeper_run_context.ml</code>,
+        pre-dispatch compaction in <code>keeper_agent_checkpoint_hygiene.ml</code>, OAS resume/compaction in Agent SDK <code>agent_checkpoint.ml</code>,
+        <code>agent_turn.ml</code>, and <code>pipeline.ml</code>.
+      </div>
+      <div class="evidence-row">
+        <strong>Parallel explorer note:</strong> Hooke independently confirmed the wider preflight gap: restored checkpoint/history is compacted,
+        but fresh turn substrate such as world state, Memory OS recall, retry nudge, user model, temporal context, and OAS
+        <code>extra_system_context</code> needs a final hard budget gate.
+      </div>
+      <div class="evidence-row">
+        <strong>Parallel explorer note:</strong> Anscombe independently flagged two additional radius issues: direct/manual turns should not use
+        a looser first-attempt budget path, and heartbeat/status/log telemetry should not derive context windows from runtime-id-agnostic
+        projection labels.
+      </div>
+      <div class="evidence-row">
+        <strong>Parallel explorer note:</strong> Maxwell independently confirmed the OAS interaction: MASC enables OAS auto context-overflow retry
+        and passes <code>compact_ratio</code>, while OAS resolves the compaction window from provider capabilities unless an explicit window is
+        wired through. MASC receipts therefore need to preserve OAS compact attempts and provider limit.
+      </div>
+    </div>
+
+    <footer>
+      Generated as a local analysis artifact. This file does not change runtime behavior.
+    </footer>
+  </main>
+</body>
+</html>

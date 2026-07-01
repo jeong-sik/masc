@@ -570,6 +570,42 @@ let summarize_turn_event_bus
     empty_turn_event_bus_summary
     events
 
+let turn_event_bus_overflow_evidence_detail
+    (summary : turn_event_bus_summary) : string =
+  let option_int = function
+    | Some value -> string_of_int value
+    | None -> "none"
+  in
+  let overflow_estimated_tokens, overflow_limit_tokens =
+    match summary.overflow_imminent with
+    | Some overflow ->
+      Some overflow.estimated_tokens, Some overflow.limit_tokens
+    | None -> None, None
+  in
+  let last_compaction_detail =
+    match summary.last_compaction with
+    | None -> "last_compaction=none"
+    | Some compaction ->
+      Printf.sprintf
+        "last_compaction_before_tokens=%d,last_compaction_after_tokens=%d,\
+         last_compaction_tokens_freed=%d,last_compaction_phase=%s"
+        compaction.before_tokens
+        compaction.after_tokens
+        compaction.tokens_freed
+        compaction.phase_hint
+  in
+  Printf.sprintf
+    "oas_retry_evidence(events=%d,payload_kinds=[%s],\
+     context_compact_started=%d,context_compacted=%d,%s,\
+     overflow_estimated_tokens=%s,overflow_limit_tokens=%s)"
+    summary.event_count
+    (String.concat "," summary.payload_kinds)
+    summary.context_compact_started_count
+    summary.context_compacted_count
+    last_compaction_detail
+    (option_int overflow_estimated_tokens)
+    (option_int overflow_limit_tokens)
+
 let context_overflow_event_of_error
     ~(fallback_tokens : int)
     ?(turn_event_bus : turn_event_bus_summary =
@@ -611,7 +647,7 @@ let pause_keeper_for_overflow
       ~reason_tag:"overflow"
       ~lifecycle_detail:(Printf.sprintf "context_overflow %s" reason)
       ~log_message:(Printf.sprintf "keeper paused after unresolved context overflow (%s)" reason)
-      ~blocker_class:None
+      ~blocker_class:(Some Sdk_token_budget_exceeded)
       ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
       ()
   with

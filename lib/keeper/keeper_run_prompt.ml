@@ -18,6 +18,29 @@ type turn_prompt_context =
   ; ctx_work : Keeper_context_runtime.working_context
   }
 
+type tool_schema_context_estimate =
+  { tool_count : int
+  ; tool_schema_tokens : int
+  ; estimated_input_tokens_with_tools : int
+  }
+
+type context_window_budget =
+  { budget_estimated_input_tokens : int
+  ; budget_context_window : int
+  ; remaining_context_tokens : int
+  ; over_context_tokens : int
+  ; context_usage_ratio : float
+  }
+
+type context_layer_budget =
+  { context_layer_name : string
+  ; context_layer_priority : string
+  ; context_layer_estimated_tokens : int
+  ; context_layer_cap_tokens : int
+  ; context_layer_kept_tokens : int
+  ; context_layer_decision : string
+  }
+
 let prompt_injection_prefixes =
   [
     "ignore previous instructions";
@@ -142,6 +165,89 @@ let estimate_input_tokens
   in
   max prompt_metrics.Keeper_agent_prompt_metrics.estimated_total_tokens
       composition.Keeper_agent_prompt_metrics.display_total_tokens
+
+let estimate_tool_schema_context
+    ~(estimated_input_tokens : int)
+    ~(tools : Agent_sdk.Tool.t list) : tool_schema_context_estimate =
+  let tool_schema_tokens =
+    tools
+    |> List.map Agent_sdk.Tool.schema_to_json
+    |> List.fold_left
+         (fun acc json ->
+            acc
+            + Agent_sdk.Context_reducer.estimate_char_tokens
+                (Yojson.Safe.to_string json))
+         0
+  in
+  { tool_count = List.length tools
+  ; tool_schema_tokens
+  ; estimated_input_tokens_with_tools =
+      estimated_input_tokens + tool_schema_tokens
+  }
+
+let context_window_budget ~(estimated_input_tokens : int) ~(max_context : int)
+  : context_window_budget =
+  let remaining_context_tokens = max 0 (max_context - estimated_input_tokens) in
+  let over_context_tokens = max 0 (estimated_input_tokens - max_context) in
+  let context_usage_ratio =
+    if max_context > 0
+    then Float.of_int estimated_input_tokens /. Float.of_int max_context
+    else 0.0
+  in
+  { budget_estimated_input_tokens = estimated_input_tokens
+  ; budget_context_window = max_context
+  ; remaining_context_tokens
+  ; over_context_tokens
+  ; context_usage_ratio
+  }
+
+let estimate_context_layer_budget
+    ~(layer_name : string)
+    ~(priority : string)
+    ~(cap_tokens : int)
+    ~(text : string) : context_layer_budget =
+  let estimated_tokens =
+    Agent_sdk.Context_reducer.estimate_char_tokens text
+  in
+  let cap_tokens = max 0 cap_tokens in
+  let decision, kept_tokens =
+    if String.trim text = "" || cap_tokens = 0 then "dropped", 0
+    else if estimated_tokens > cap_tokens then "truncated", cap_tokens
+    else "kept", estimated_tokens
+  in
+  { context_layer_name = layer_name
+  ; context_layer_priority = priority
+  ; context_layer_estimated_tokens = estimated_tokens
+  ; context_layer_cap_tokens = cap_tokens
+  ; context_layer_kept_tokens = kept_tokens
+  ; context_layer_decision = decision
+  }
+
+let context_layer_budget_to_json layer =
+  `Assoc
+    [ ("name", `String layer.context_layer_name)
+    ; ("priority", `String layer.context_layer_priority)
+    ; ("estimated_tokens", `Int layer.context_layer_estimated_tokens)
+    ; ("cap_tokens", `Int layer.context_layer_cap_tokens)
+    ; ("kept_tokens", `Int layer.context_layer_kept_tokens)
+    ; ("decision", `String layer.context_layer_decision)
+    ]
+
+let preflight_context_window ~(estimated_input_tokens : int) ~(max_context : int)
+  : (unit, Agent_sdk.Error.sdk_error) result =
+  if max_context > 0 && estimated_input_tokens > max_context
+  then
+    Error
+      (Agent_sdk.Error.Api
+         (Llm_provider.Retry.ContextOverflow
+            { message =
+                Printf.sprintf
+                  "pre-dispatch input estimate exceeds context window: %d/%d"
+                  estimated_input_tokens
+                  max_context
+            ; limit = Some max_context
+            }))
+  else Ok ()
 
 let build_turn_context
       ~(ctx : Keeper_run_context.run_context)

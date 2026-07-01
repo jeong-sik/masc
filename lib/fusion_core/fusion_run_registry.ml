@@ -194,7 +194,9 @@ let load_replay_content path =
           (Printexc.to_string exn);
         None)
   in
-  Option.value ~default:"" content
+  match content with
+  | Some content -> content
+  | None -> ""
 ;;
 
 let replay path : t =

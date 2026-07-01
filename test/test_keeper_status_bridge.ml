@@ -35,6 +35,27 @@ let blocker_of_typed_last_blocker klass ~detail =
   Keeper_status_bridge.runtime_blocker_surface_opt config meta
 ;;
 
+let runtime_blocker_facts_of_typed_last_blocker klass ~detail =
+  let config = Workspace.default_config "/tmp/masc-test-status-bridge" in
+  let meta = meta_with_summary "" in
+  let meta =
+    { meta with
+      runtime =
+        { meta.runtime with
+          last_blocker =
+            Some (Keeper_meta_contract.blocker_info_of_class ~detail klass)
+        }
+    }
+  in
+  match
+    Keeper_status_bridge.runtime_blocker_fields_json config meta
+    |> List.assoc_opt "runtime_blocker_facts"
+  with
+  | Some (`Assoc facts) -> facts
+  | Some _ -> Alcotest.fail "expected runtime_blocker_facts object"
+  | None -> Alcotest.fail "missing runtime_blocker_facts"
+;;
+
 let write_file path content =
   let oc = open_out path in
   Fun.protect
@@ -115,6 +136,48 @@ let test_no_progress_loop_summary_normalizes_legacy_detail () =
   | None -> Alcotest.fail "expected no_progress_loop blocker"
 ;;
 
+let test_no_progress_runtime_blocker_facts_include_reason () =
+  init_runtime_default_for_tests ();
+  let detail =
+    "no_progress loop detected: streak=10 threshold=10; reason=read_only; auto-paused after repeated no-evidence turns"
+  in
+  let facts =
+    runtime_blocker_facts_of_typed_last_blocker
+      Keeper_meta_contract.No_progress_loop
+      ~detail
+  in
+  Alcotest.(check (option string))
+    "reason comes from persisted blocker detail"
+    (Some "read_only")
+    (match List.assoc_opt "no_progress_reason" facts with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  Alcotest.(check (option string))
+    "reason source names blocker detail"
+    (Some "blocker_detail")
+    (match List.assoc_opt "no_progress_reason_source" facts with
+     | Some (`String value) -> Some value
+     | _ -> None);
+  Alcotest.(check (option int))
+    "streak comes from persisted blocker detail"
+    (Some 10)
+    (match List.assoc_opt "no_progress_streak" facts with
+     | Some (`Int value) -> Some value
+     | _ -> None);
+  Alcotest.(check (option int))
+    "threshold comes from persisted blocker detail"
+    (Some 10)
+    (match List.assoc_opt "no_progress_threshold" facts with
+     | Some (`Int value) -> Some value
+     | _ -> None);
+  Alcotest.(check (option bool))
+    "typed no-progress blocker is latched"
+    (Some true)
+    (match List.assoc_opt "no_progress_latched" facts with
+     | Some (`Bool value) -> Some value
+     | _ -> None)
+;;
+
 let defaults_with_prompt_fields =
   { Keeper_types_profile.empty_keeper_profile_defaults with
     manifest_path = Some "/tmp/keeper.toml";
@@ -173,6 +236,10 @@ let () =
             "no-progress loop summary normalizes legacy detail"
             `Quick
             test_no_progress_loop_summary_normalizes_legacy_detail;
+          Alcotest.test_case
+            "no-progress blocker facts include typed reason"
+            `Quick
+            test_no_progress_runtime_blocker_facts_include_reason;
         ] );
       ( "profile default override provenance",
         [

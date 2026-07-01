@@ -166,12 +166,69 @@ let last_runtime_attempt_json (meta : keeper_meta) =
   | Some attempt -> runtime_attempt_record_json attempt
 ;;
 
+let no_progress_detail_value ~key detail =
+  let prefix = key ^ "=" in
+  detail
+  |> String.split_on_char ';'
+  |> List.concat_map (fun token -> String.split_on_char ' ' token)
+  |> List.find_map (fun token ->
+    let token = String.trim token in
+    if String.starts_with ~prefix token
+    then
+      Some
+        (String.sub token
+           (String.length prefix)
+           (String.length token - String.length prefix)
+         |> String.trim)
+    else None)
+;;
+
+let no_progress_int_from_detail ~key detail =
+  match no_progress_detail_value ~key detail with
+  | Some value -> int_of_string_opt value
+  | None -> None
+;;
+
+let no_progress_reason_from_detail detail =
+  match no_progress_detail_value ~key:"reason" detail with
+  | Some value -> Keeper_no_progress_loop_detector.no_progress_reason_of_string value
+  | None -> None
+;;
+
+let no_progress_blocker_detail meta =
+  match meta.runtime.last_blocker with
+  | Some { klass = No_progress_loop; detail } -> Some detail
+  | Some _ | None -> None
+;;
+
+let no_progress_runtime_blocker_fact_fields meta =
+  match no_progress_blocker_detail meta with
+  | None -> []
+  | Some detail ->
+    let reason =
+      no_progress_reason_from_detail detail
+      |> Option.map Keeper_no_progress_loop_detector.no_progress_reason_to_string
+    in
+    let reason_source = Option.map (fun _ -> "blocker_detail") reason in
+    [ "no_progress_reason", Json_util.string_opt_to_json reason
+    ; "no_progress_reason_source", Json_util.string_opt_to_json reason_source
+    ; ( "no_progress_threshold"
+      , Json_util.int_opt_to_json (no_progress_int_from_detail ~key:"threshold" detail)
+      )
+    ; ( "no_progress_streak"
+      , Json_util.int_opt_to_json (no_progress_int_from_detail ~key:"streak" detail)
+      )
+    ; "no_progress_latched", `Bool true
+    ]
+;;
+
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
-    [ "source", `String "keeper_runtime.last_runtime_attempt"
-    ; "runtime_id", `String (runtime_id_of_meta meta)
-    ; "last_runtime_attempt", last_runtime_attempt_json meta
-    ]
+    ([ "source", `String "keeper_runtime.last_runtime_attempt"
+     ; "runtime_id", `String (runtime_id_of_meta meta)
+     ; "last_runtime_attempt", last_runtime_attempt_json meta
+     ]
+     @ no_progress_runtime_blocker_fact_fields meta)
 ;;
 
 let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =

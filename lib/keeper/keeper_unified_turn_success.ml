@@ -190,6 +190,27 @@ let claim_bound_work (calls : (string * Keeper_tool_outcome.t option) list) =
     calls
 ;;
 
+let no_progress_reason_of_turn
+      ~delivery
+      ~(calls_with_outcomes : (string * Keeper_tool_outcome.t option) list)
+      ~made_progress
+  =
+  if made_progress
+  then None
+  else
+    match delivery with
+    | User_facing -> None
+    | Internal_prose -> Some Keeper_no_progress_loop_detector.Thinking_only
+    | Task_claim -> Some Keeper_no_progress_loop_detector.Empty
+    | Peer_only ->
+      let calls = List.map fst calls_with_outcomes in
+      if calls = []
+      then Some Keeper_no_progress_loop_detector.Empty
+      else if List.for_all Keeper_tool_progress.is_passive_status_tool_name calls
+      then Some Keeper_no_progress_loop_detector.Read_only
+      else Some Keeper_no_progress_loop_detector.Surface_mismatch
+;;
+
 let apply_loop_detectors ~config ~observation ~meta updated_meta result =
   (* RFC-0239 §3 R3 / RFC-0276 §3.2: feed the loop detector a semantic
      no-progress verdict derived from observed turn facts, not the LLM
@@ -223,8 +244,9 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
     Keeper_unified_metrics_support.is_scheduled_autonomous_cycle_of_observation
       observation
   in
+  let delivery = classify_turn_delivery ~is_autonomous ~reply_delivery:Internal_only result in
   let surface_requires_evidence =
-    match classify_turn_delivery ~is_autonomous ~reply_delivery:Internal_only result with
+    match delivery with
     | Task_claim -> not (claim_bound_work calls_with_outcomes)
     | (Peer_only | User_facing | Internal_prose) as delivery ->
       delivery_requires_evidence delivery
@@ -252,6 +274,9 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
       ~strong_evidence
       ~surface_requires_evidence
   in
+  let no_progress_reason =
+    no_progress_reason_of_turn ~delivery ~calls_with_outcomes ~made_progress
+  in
   let progress_identity =
     if strong_evidence && surface_requires_evidence
     then
@@ -277,6 +302,7 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
     Keeper_no_progress_loop_detector.record_turn
       ?threshold_override
       ?progress_identity
+      ?no_progress_reason
       ~keeper_name:updated_meta.Keeper_meta_contract.name
       ~made_progress
       ()
@@ -284,6 +310,7 @@ let apply_loop_detectors ~config ~observation ~meta updated_meta result =
   | Keeper_no_progress_loop_detector.Normal -> updated_meta
   | Keeper_no_progress_loop_detector.Loop_detected { streak; threshold } ->
     Keeper_unified_turn_no_progress.mark_loop_detected
+      ?no_progress_reason
       ~config
       updated_meta
       ~streak
@@ -365,6 +392,7 @@ module For_testing = struct
   let delivery_requires_evidence = delivery_requires_evidence
   let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
   let claim_bound_work = claim_bound_work
+  let no_progress_reason_of_turn = no_progress_reason_of_turn
 
   let completion_contract_terminal_failure_reason_code =
     completion_contract_terminal_failure_reason_code

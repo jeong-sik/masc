@@ -4,12 +4,24 @@ let failure_reason_code = "no_progress_loop"
 
 let recovery_post_id ~keeper_name = "no-progress-loop:" ^ keeper_name
 
-let mark_loop_detected ~(config : Workspace.config) meta ~streak ~threshold =
+let mark_loop_detected
+      ?no_progress_reason
+      ~(config : Workspace.config)
+      meta
+      ~streak
+      ~threshold
+  =
+  let reason =
+    match no_progress_reason with
+    | Some reason -> Keeper_no_progress_loop_detector.no_progress_reason_to_string reason
+    | None -> "unclassified"
+  in
   let detail =
     Printf.sprintf
-      "no_progress loop detected: streak=%d threshold=%d; auto-paused after repeated no-evidence turns; operator resume clears the no-progress latch"
+      "no_progress loop detected: streak=%d threshold=%d; reason=%s; auto-paused after repeated no-evidence turns; operator resume clears the no-progress latch"
       streak
       threshold
+      reason
   in
   let failure_reason =
     Keeper_registry.Provider_runtime_error

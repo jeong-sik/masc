@@ -47,6 +47,8 @@ let record_turn ~keeper_name ~made_progress =
 let ignore_outcome = function
   | D.Normal | D.Loop_detected _ | D.Loop_reset _ -> ()
 
+let reason_label = Option.map D.no_progress_reason_to_string
+
 let scheduled_observation : WO.world_observation =
   { pending_mentions = []
   ; pending_board_events = []
@@ -103,6 +105,51 @@ let test_any_other_act_resets () =
   record_turn ~keeper_name:k ~made_progress:false |> ignore_outcome;
   Alcotest.(check int) "after new no-progress turn" 1
     (D.current_streak ~keeper_name:k)
+
+let test_no_progress_reason_tracks_and_resets () =
+  D.reset_all_for_test ();
+  let k = "test-keeper-reason-tracks" in
+  D.record_turn
+    ~keeper_name:k
+    ~made_progress:false
+    ~no_progress_reason:D.Read_only
+    ()
+  |> ignore_outcome;
+  Alcotest.(check (option string))
+    "reason tracks current no-progress turn"
+    (Some "read_only")
+    (reason_label (D.current_reason ~keeper_name:k));
+  D.record_turn ~keeper_name:k ~made_progress:true () |> ignore_outcome;
+  Alcotest.(check (option string))
+    "progress clears reason"
+    None
+    (reason_label (D.current_reason ~keeper_name:k))
+
+let test_no_progress_reason_string_mapping () =
+  let cases =
+    [ D.Empty, "empty"
+    ; D.Thinking_only, "thinking_only"
+    ; D.Read_only, "read_only"
+    ; D.Repeated_identity, "repeated_identity"
+    ; D.Surface_mismatch, "surface_mismatch"
+    ; D.Stale_task, "stale_task"
+    ]
+  in
+  List.iter
+    (fun (reason, label) ->
+       Alcotest.(check string)
+         ("to_string " ^ label)
+         label
+         (D.no_progress_reason_to_string reason);
+       Alcotest.(check (option string))
+         ("of_string " ^ label)
+         (Some label)
+         (reason_label (D.no_progress_reason_of_string label)))
+    cases;
+  Alcotest.(check (option string))
+    "unknown reason is rejected"
+    None
+    (reason_label (D.no_progress_reason_of_string "unknown"))
 
 let test_threshold_crossing_fires_counter () =
   D.reset_all_for_test ();
@@ -617,10 +664,18 @@ let test_repeated_progress_identity_accrues_streak () =
   |> ignore_outcome;
   Alcotest.(check int) "first evidence identity is progress" 0
     (D.current_streak ~keeper_name:k);
+  Alcotest.(check (option string))
+    "first evidence identity has no no-progress reason"
+    None
+    (reason_label (D.current_reason ~keeper_name:k));
   D.record_turn ~keeper_name:k ~made_progress:true ~progress_identity ()
   |> ignore_outcome;
   Alcotest.(check int) "same evidence identity repeats => no-progress" 1
     (D.current_streak ~keeper_name:k);
+  Alcotest.(check (option string))
+    "same identity reason is typed"
+    (Some "repeated_identity")
+    (reason_label (D.current_reason ~keeper_name:k));
   D.record_turn ~keeper_name:k ~made_progress:true ~progress_identity ()
   |> ignore_outcome;
   Alcotest.(check int) "same evidence identity keeps accruing" 2
@@ -867,7 +922,11 @@ let test_apply_loop_detectors_passive_only_no_work_now_accrues () =
     (Success.apply_loop_detectors ~config ~observation:scheduled_observation
        ~meta meta result);
   Alcotest.(check int) "production detector path accrues passive no-work (#22747)" 1
-    (D.current_streak ~keeper_name:keeper)
+    (D.current_streak ~keeper_name:keeper);
+  Alcotest.(check (option string))
+    "passive-only no-work reason is read_only"
+    (Some "read_only")
+    (reason_label (D.current_reason ~keeper_name:keeper))
 
 let test_apply_loop_detectors_claim_no_eligible_accrues () =
   D.reset_all_for_test ();
@@ -880,7 +939,11 @@ let test_apply_loop_detectors_claim_no_eligible_accrues () =
     (Success.apply_loop_detectors ~config ~observation:scheduled_observation ~meta
        meta result);
   Alcotest.(check int) "production detector path accrues typed no-eligible claim" 1
-    (D.current_streak ~keeper_name:keeper)
+    (D.current_streak ~keeper_name:keeper);
+  Alcotest.(check (option string))
+    "typed no-eligible claim reason is empty"
+    (Some "empty")
+    (reason_label (D.current_reason ~keeper_name:keeper))
 
 (* RFC-0289 / SSOT: [Keeper_tool_outcome.is_nonprogress] is the single owner of
    the outcome gate (previously inlined in [typed_outcome_is_nonprogress], now a
@@ -909,6 +972,10 @@ let () =
             `Quick (with_eio test_any_other_act_resets);
           Alcotest.test_case "explicit reset"
             `Quick (with_eio test_explicit_reset);
+          Alcotest.test_case "no-progress reason tracks and resets"
+            `Quick (with_eio test_no_progress_reason_tracks_and_resets);
+          Alcotest.test_case "no-progress reason string mapping"
+            `Quick test_no_progress_reason_string_mapping;
           Alcotest.test_case "no-progress predicate (RFC-0239 R3)"
             `Quick (with_eio test_made_progress_predicate);
           Alcotest.test_case "no-progress board post accrues streak (RFC-0239 R3)"

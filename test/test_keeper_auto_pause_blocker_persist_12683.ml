@@ -384,7 +384,7 @@ let test_no_progress_loop_detection_pauses_keeper () =
           check
             string
             "blocker detail"
-            "no_progress loop detected: streak=10 threshold=10; auto-paused after repeated no-evidence turns; operator resume clears the no-progress latch"
+            "no_progress loop detected: streak=10 threshold=10; reason=unclassified; auto-paused after repeated no-evidence turns; operator resume clears the no-progress latch"
             detail
         | Some _ -> fail "expected No_progress_loop blocker"
         | None -> fail "expected no_progress loop blocker");

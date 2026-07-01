@@ -111,15 +111,28 @@ let verify_optional_token config ~agent_name ~token
 (** Verify a caller-presented secret against the workspace root secret
     minted once by [init_workspace_secret] (and shown to the operator at
     that time). This is the only proof-of-possession the bootstrap/recovery
-    grace below accepts. *)
-let verify_workspace_secret config secret : bool =
+    grace below accepts.
+
+    Compares against [cached_hash] (the [auth_config.workspace_secret_hash]
+    the caller already loaded via [load_auth_config]/[resolve_role_with_
+    auth_config]) instead of re-reading [workspace_secret_file] on every
+    call - this sits on the hot path for every authenticated request, and a
+    per-call blocking read can raise on a permission error or a partial
+    write, turning an auth check into a request failure. Falls back to a
+    guarded on-disk read only when the config predates the cache (or a
+    concurrent write raced this read); that read fails closed (verification
+    fails) rather than raising. *)
+let verify_workspace_secret config ~cached_hash secret : bool =
   let hash = sha256_hash secret in
-  let file = workspace_secret_file config in
-  if Sys.file_exists file
-  then (
-    let stored_hash = String.trim (In_channel.with_open_text file In_channel.input_all) in
-    hash = stored_hash)
-  else false
+  match cached_hash with
+  | Some stored_hash -> constant_time_string_equal hash stored_hash
+  | None ->
+    let file = workspace_secret_file config in
+    (try
+       if Sys.file_exists file
+       then constant_time_string_equal hash (String.trim (In_channel.with_open_text file In_channel.input_all))
+       else false
+     with _ -> false)
 ;;
 
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =
@@ -130,7 +143,8 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
     Ok ()
   else if
     match token with
-    | Some raw -> verify_workspace_secret config raw
+    | Some raw ->
+      verify_workspace_secret config ~cached_hash:auth_cfg.workspace_secret_hash raw
     | None -> false
   then (
     (* Recovery grace: presenting the workspace secret proves possession of
@@ -241,7 +255,8 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
   then Ok Admin (* Auth disabled = full access *)
   else if
     match token with
-    | Some raw -> verify_workspace_secret config raw
+    | Some raw ->
+      verify_workspace_secret config ~cached_hash:auth_cfg.workspace_secret_hash raw
     | None -> false
   then Ok Admin (* Recovery grace via workspace secret possession; see check_permission *)
   else if

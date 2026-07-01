@@ -57,8 +57,12 @@ already mints a **workspace secret** (`init_workspace_secret`) at the same
 time as the bootstrap admin token, hashes and persists it
 (`workspace_secret_hash`), and returns the raw value once for the operator
 to keep. `verify_workspace_secret` (defined, but with zero callers before
-this change — a second, independent audit finding) already implements
-constant-effort hash comparison against that stored value.
+this change — a second, independent audit finding) compares the caller's
+hashed secret against the caller's already-loaded `auth_config.
+workspace_secret_hash` using `Auth_credential_token.constant_time_string_equal`
+(XOR-accumulated over every byte, no early exit on the first mismatch),
+falling back to a guarded read of the on-disk hash file only when the
+config predates the cache.
 
 The bootstrap/recovery grace branch in both `check_permission` and
 `resolve_role_with_auth_config` now requires the caller's `token` to verify
@@ -68,7 +72,8 @@ against the workspace secret, not `agent_name` to string-match
 ```ocaml
 else if
   match token with
-  | Some raw -> verify_workspace_secret config raw
+  | Some raw ->
+    verify_workspace_secret config ~cached_hash:auth_cfg.workspace_secret_hash raw
   | None -> false
 then (ignore permission; Ok ())
 ```

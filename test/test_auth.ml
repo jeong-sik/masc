@@ -244,6 +244,51 @@ let test_workspace_secret_saved_private () =
       check int "workspace secret mode 0600" 0o600
         (permission_bits (Auth.workspace_secret_file dir)))
 
+(* Every check_permission/resolve_role_with_auth_config call now threads
+   auth_cfg.workspace_secret_hash through, so this cached path is exercised
+   indirectly by test_workspace_secret_grants_recovery_admin. This test pins
+   the ~cached_hash:None fallback directly, since nothing else reaches it. *)
+let test_verify_workspace_secret_falls_back_to_file_when_uncached () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = Auth.init_workspace_secret dir in
+      check bool "correct secret verifies via on-disk fallback"
+        true
+        (Auth.verify_workspace_secret dir ~cached_hash:None secret);
+      check bool "wrong secret is rejected via on-disk fallback"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:None "not-the-secret"))
+
+let test_verify_workspace_secret_uses_cached_hash () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = "a-known-secret-value" in
+      let hash = Auth.sha256_hash secret in
+      check bool "matching cached hash verifies without reading the file"
+        true
+        (Auth.verify_workspace_secret dir ~cached_hash:(Some hash) secret);
+      check bool "mismatched cached hash is rejected"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:(Some hash) "wrong-secret"))
+
+let test_verify_workspace_secret_fails_closed_when_file_unreadable () =
+  let dir = setup_test_workspace () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_test_workspace dir)
+    (fun () ->
+      let secret = Auth.init_workspace_secret dir in
+      (* Directory in place of the secret file: the on-disk fallback must
+         reject cleanly rather than raise into the caller. *)
+      Sys.remove (Auth.workspace_secret_file dir);
+      Unix.mkdir (Auth.workspace_secret_file dir) 0o755;
+      check bool "unreadable secret file fails closed, does not raise"
+        false
+        (Auth.verify_workspace_secret dir ~cached_hash:None secret))
+
 let test_verify_token () =
   let dir = setup_test_workspace () in
   let create_result = Auth.create_token dir ~agent_name:"claude" ~role:Masc_domain.Admin in
@@ -1169,5 +1214,11 @@ let () =
     "enable_disable", [
       test_case "enable/disable auth" `Quick test_enable_disable_auth;
       test_case "workspace secret saved private" `Quick test_workspace_secret_saved_private;
+      test_case "verify_workspace_secret falls back to file when uncached" `Quick
+        test_verify_workspace_secret_falls_back_to_file_when_uncached;
+      test_case "verify_workspace_secret uses cached hash" `Quick
+        test_verify_workspace_secret_uses_cached_hash;
+      test_case "verify_workspace_secret fails closed when file unreadable" `Quick
+        test_verify_workspace_secret_fails_closed_when_file_unreadable;
     ];
   ]

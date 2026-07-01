@@ -143,6 +143,20 @@ let execution_cache : cached_surface =
         ])
 ;;
 
+let execution_default_light_cache_key = "execution:default:light"
+let execution_default_light_http_body : string option Atomic.t = Atomic.make None
+
+let clear_execution_default_light_http_body () =
+  Atomic.set execution_default_light_http_body None
+;;
+
+let execution_surface_has_fresh_success () =
+  match execution_cache.last_success_unix, execution_cache.last_error_unix with
+  | Some success_ts, Some error_ts when error_ts > success_ts -> false
+  | Some _, _ -> true
+  | None, _ -> false
+;;
+
 let execution_trust_cache_key = "execution-trust:default"
 
 let execution_trust_cache : cached_surface =
@@ -207,9 +221,11 @@ let invalidate_execution_cache_with_hooks_for_testing
 
 let invalidate_execution_cache () =
   invalidate_execution_cache_with_hooks_for_testing
-    ~invalidate_execution_surface:(fun () -> Server_dashboard_http_cache.invalidate_cached_surface execution_cache)
+    ~invalidate_execution_surface:(fun () ->
+      clear_execution_default_light_http_body ();
+      Server_dashboard_http_cache.invalidate_cached_surface execution_cache)
     ~invalidate_light_cache:(fun () ->
-      Dashboard_cache.invalidate "execution:default:light")
+      Dashboard_cache.invalidate execution_default_light_cache_key)
     ()
 ;;
 
@@ -365,6 +381,16 @@ let execution_query_json ~actor ~fixture ~full_mode ~light ~default_light_reques
     ]
 ;;
 
+let default_light_execution_query =
+  execution_query_json
+    ~actor:None
+    ~fixture:None
+    ~full_mode:false
+    ~light:true
+    ~default_light_request:true
+    ~force:false
+;;
+
 let with_execution_metadata ~config ?cache_key ~query json =
   with_cached_dashboard_surface_metadata
     ~config
@@ -379,6 +405,29 @@ let with_execution_metadata ~config ?cache_key ~query json =
     ~background_refresh_interval_s:60.0
     ~query
     json
+;;
+
+let execution_default_light_response_json ~config =
+  Server_dashboard_http_cache.cached_surface_json execution_cache
+  |> with_execution_metadata
+       ~config
+       ~cache_key:execution_default_light_cache_key
+       ~query:default_light_execution_query
+;;
+
+let cache_execution_default_light_http_body response_json =
+  if execution_surface_has_fresh_success ()
+  then
+    Atomic.set
+      execution_default_light_http_body
+      (Some (Yojson.Safe.to_string response_json))
+  else clear_execution_default_light_http_body ()
+;;
+
+let refresh_execution_default_light_http_body ~config =
+  let response_json = execution_default_light_response_json ~config in
+  cache_execution_default_light_http_body response_json;
+  response_json
 ;;
 
 let transport_health_query_json () =
@@ -616,6 +665,7 @@ let patch_surface_json_for_running_keepers (config : Workspace.config) = functio
 ;;
 
 let patchexecution_cache_for_keeper ~keeper_name ~event ~keepalive_running =
+  clear_execution_default_light_http_body ();
   match execution_cache.json with
   | `Assoc fields ->
     (match List.assoc_opt "keepers" fields with
@@ -684,6 +734,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       ~max_v:300.0
   in
   let compute () =
+    clear_execution_default_light_http_body ();
     Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
     let started_at = Unix.gettimeofday () in
     try
@@ -707,6 +758,7 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     with
     | Eio.Cancel.Cancelled _ as e -> raise e
     | exn ->
+      clear_execution_default_light_http_body ();
       Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
       raise exn
   in
@@ -716,7 +768,11 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
     ~config:
       { (Proactive_refresh.default_config ~label:"execution" ~interval_s:60.0) with
         timeout_s = execution_refresh_timeout_s
-      ; on_error = Some (Server_dashboard_http_cache.mark_cached_surface_error execution_cache)
+      ; on_error =
+          Some
+            (fun exn ->
+              clear_execution_default_light_http_body ();
+              Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn)
       ; warm_delay_s = 0.0
       }
     ~compute
@@ -724,18 +780,20 @@ let start_execution_refresh_loop ~state ~sw ~clock ~net ~mono_clock =
       Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
       broadcast_cached_surface
         ~event_type:"execution_snapshot"
-        (Server_dashboard_http_cache.cached_surface_json execution_cache
-         |> with_execution_metadata
-              ~config:workspace_config
-              ~query:
-                (execution_query_json
-                   ~actor:None
-                   ~fixture:None
-                   ~full_mode:false
-                   ~light:true
-                   ~default_light_request:true
-                   ~force:false));
+        (refresh_execution_default_light_http_body ~config:workspace_config);
       !broadcast_namespace_truth_ref state)
+;;
+
+let dashboard_execution_cached_http_body ~state request =
+  let config = Mcp_server.workspace_config state in
+  let fixture = query_param request "fixture" in
+  let actor = execution_actor_for_request ~base_path:config.base_path request in
+  let full_mode = bool_query_param request "full" ~default:false in
+  let force = bool_query_param request "force" ~default:false in
+  match fixture, actor, full_mode, force, Atomic.get execution_default_light_http_body with
+  | None, None, false, false, Some body when execution_surface_has_fresh_success () ->
+    Some body
+  | _ -> None
 ;;
 
 let start_transport_health_refresh_loop ~state ~sw ~clock =
@@ -847,7 +905,6 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       ~default_light_request:(fixture = None && actor = None && not full_mode && not force)
       ~force
   in
-  let default_light_cache_key = "execution:default:light" in
   let compute ?actor ?fixture ~light () =
     let started_at = Unix.gettimeofday () in
     run_dashboard_compute
@@ -879,14 +936,17 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
   | None, None, false when force ->
     let timeout_sec = Env_config_runtime.Dashboard.execution_timeout_sec in
     let compute_and_track () =
+      clear_execution_default_light_http_body ();
       Server_dashboard_http_cache.mark_cached_surface_attempt execution_cache;
       try
         let json = compute ~light:true () in
         Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
+        ignore (refresh_execution_default_light_http_body ~config);
         Server_dashboard_http_cache.cached_surface_json execution_cache
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
+        clear_execution_default_light_http_body ();
         Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
         raise exn
     in
@@ -895,11 +955,14 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
      with
      | Ok json -> json
      | Error `Timeout ->
-       let exn = Dashboard_cache.Compute_timeout (default_light_cache_key, false) in
+       let exn =
+         Dashboard_cache.Compute_timeout (execution_default_light_cache_key, false)
+       in
+       clear_execution_default_light_http_body ();
        Server_dashboard_http_cache.mark_cached_surface_error execution_cache exn;
        Log.Dashboard.warn
          "dashboard execution force refresh timed out: %s (%.0fs)"
-         default_light_cache_key
+         execution_default_light_cache_key
          timeout_sec;
        `Assoc
          [ "error", `String "computation_timeout"
@@ -907,32 +970,39 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
            `String
              (Printf.sprintf
                 "Dashboard %s timed out after %.0fs"
-                default_light_cache_key
+                execution_default_light_cache_key
                 timeout_sec)
          ; "generated_at", `String (Masc_domain.now_iso ())
          ; "timeout_kind", `String "owner"
          ; "timeout_sec", `Float timeout_sec
-         ; "key", `String default_light_cache_key
+         ; "key", `String execution_default_light_cache_key
          ])
     |> with_execution_metadata
          ~config
-         ~cache_key:default_light_cache_key
+         ~cache_key:execution_default_light_cache_key
          ~query
   | None, None, false ->
     (* Default light mode: stay instant after first success, but avoid
          serving the empty initializing payload forever when proactive warm-up
          misses its first build window. *)
-    Server_dashboard_http_cache.cached_surface_or_first_success_json
-      execution_cache
-      ~cache_key:default_light_cache_key
-      ~ttl:deep_surface_cache_ttl_s
-      ~clock
-      ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
-      (compute ~light:true)
-    |> with_execution_metadata
-         ~config
-         ~cache_key:default_light_cache_key
-         ~query
+    let json =
+      Server_dashboard_http_cache.cached_surface_or_first_success_json
+        execution_cache
+        ~cache_key:execution_default_light_cache_key
+        ~ttl:deep_surface_cache_ttl_s
+        ~clock
+        ~timeout_sec:Env_config_runtime.Dashboard.execution_timeout_sec
+        (compute ~light:true)
+    in
+    let response_json =
+      with_execution_metadata
+        ~config
+        ~cache_key:execution_default_light_cache_key
+        ~query
+        json
+    in
+    cache_execution_default_light_http_body response_json;
+    response_json
   | _ ->
     (* Parameterized requests (fixture/actor/full): on-demand with SWR cache.
          These are rare (test fixtures, actor-specific views, full mode). *)

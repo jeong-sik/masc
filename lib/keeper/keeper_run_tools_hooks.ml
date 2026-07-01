@@ -17,11 +17,13 @@ type agent_setup =
   ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
+  ; post_hook_context_window_error_ref : Agent_sdk.Error.sdk_error option ref
   }
 
 type ctx =
@@ -36,7 +38,9 @@ type ctx =
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
+  ; max_context : int
   ; meta : Keeper_meta_contract.keeper_meta
+  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_oas. *)
@@ -45,6 +49,7 @@ type ctx =
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
+  ; post_hook_context_window_error_ref : Agent_sdk.Error.sdk_error option ref
   ; tools : Agent_sdk.Tool.t list
   }
 
@@ -82,13 +87,16 @@ let assemble_hooks
   let config = ctx.config in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
+  let max_context = ctx.max_context in
   let meta = ctx.meta in
+  let tool_context_estimate = ctx.tool_context_estimate in
   let turn_ctx_cell = ctx.turn_ctx_cell in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
   let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
+  let post_hook_context_window_error_ref = ctx.post_hook_context_window_error_ref in
   let tools = ctx.tools in
   let all_tool_names = ctx.all_tool_names in
   let initial_schema_filter, initial_turn_lane =
@@ -514,11 +522,34 @@ let assemble_hooks
                        !recorded_blocks;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
+                let extra_system_context_estimated_tokens =
+                  Option.map Keeper_context_core_accessors.estimate_char_tokens ctx
+                in
+                let hook_extra_system_context_estimated_tokens =
+                  Keeper_run_prompt.estimate_unaccounted_extra_system_context_tokens
+                    !recorded_blocks
+                in
+                let post_hook_estimated_input_tokens =
+                  tool_context_estimate.estimated_input_tokens_with_tools
+                  + hook_extra_system_context_estimated_tokens
+                in
+                let post_hook_context_window_budget =
+                  Keeper_run_prompt.context_window_budget
+                    ~estimated_input_tokens:post_hook_estimated_input_tokens
+                    ~max_context
+                in
+                let post_hook_context_window_error =
+                  Keeper_run_prompt.preflight_context_window
+                    ~estimated_input_tokens:post_hook_estimated_input_tokens
+                    ~max_context
+                in
+                let post_hook_over_context_window =
+                  match post_hook_context_window_error with
+                  | Ok () -> false
+                  | Error _ -> true
+                in
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
-                   let extra_system_context_estimated_tokens =
-                     Option.map Agent_sdk.Context_reducer.estimate_char_tokens ctx
-                   in
                    let string_opt_to_json = function
                      | Some value -> `String value
                      | None -> `Null
@@ -537,7 +568,9 @@ let assemble_hooks
                         ~oas_turn_count:turn
                         ~runtime_id:runtime_id_string
                         ~status:
-                          (if post_tool_context
+                          (if post_hook_over_context_window
+                           then "post_hook_context_overflow"
+                           else if post_tool_context
                            then "post_tool_context_injection"
                            else "pre_tool_context_injection")
                         ~decision:
@@ -563,31 +596,66 @@ let assemble_hooks
                                ; ( "extra_system_context_estimated_tokens",
                                    int_opt_to_json
                                      extra_system_context_estimated_tokens )
+                               ; ( "hook_extra_system_context_estimated_tokens",
+                                   `Int hook_extra_system_context_estimated_tokens )
+                               ; ( "estimated_input_tokens_with_tools",
+                                   `Int
+                                     tool_context_estimate.estimated_input_tokens_with_tools )
+                               ; ( "post_hook_estimated_input_tokens",
+                                   `Int post_hook_estimated_input_tokens )
+                               ; ( "context_window",
+                                   `Int max_context )
+                               ; ( "post_hook_remaining_context_tokens",
+                                   `Int
+                                     post_hook_context_window_budget
+                                       .remaining_context_tokens )
+                               ; ( "post_hook_over_context_tokens",
+                                   `Int
+                                     post_hook_context_window_budget
+                                       .over_context_tokens )
+                               ; ( "post_hook_context_usage_ratio",
+                                   `Float
+                                     post_hook_context_window_budget
+                                       .context_usage_ratio )
+                               ; ( "post_hook_over_context_window",
+                                   `Bool post_hook_over_context_window )
                                ]))
                         ())
                  | _ -> ());
-                (* Phase O observability: capture the effective OAS request
-                   boundary after keeper-owned context injection has finalized
-                   [extra_system_context]. *)
-                Option.iter
-                  (fun turn_id ->
-                     Keeper_wire_capture.capture_request
-                       ~masc_root:(Workspace.masc_root_dir config)
-                       ~keeper_name:meta.name
-                       ~turn_id
-                       ~sdk_turn:turn
-                       ~system_prompt:turn_system_prompt
-                       ~extra_system_context:ctx
-                       ~user_message
-                       ~history_messages:messages)
-                  manifest_keeper_turn_id;
-                Eio.Fiber.yield ();
-                Agent_sdk.Hooks.AdjustParams
-                  { current_params with
-                    extra_system_context = ctx
-                  ; tool_choice
-                  ; tool_filter_override = Some tool_filter
-                  }
+                (match post_hook_context_window_error with
+                 | Error err ->
+                   post_hook_context_window_error_ref := Some err;
+                   Agent_sdk.Hooks.HookFailed
+                     { stage = "before_turn_params"
+                     ; detail =
+                         Printf.sprintf
+                           "post-hook extra_system_context estimate exceeds context \
+                            window: %s"
+                           (Agent_sdk.Error.to_string err)
+                     }
+                 | Ok () ->
+                  (* Phase O observability: capture the effective OAS request
+                     boundary after keeper-owned context injection has finalized
+                     [extra_system_context]. *)
+                  Option.iter
+                    (fun turn_id ->
+                       Keeper_wire_capture.capture_request
+                         ~masc_root:(Workspace.masc_root_dir config)
+                         ~keeper_name:meta.name
+                         ~turn_id
+                         ~sdk_turn:turn
+                         ~system_prompt:turn_system_prompt
+                         ~extra_system_context:ctx
+                         ~user_message
+                         ~history_messages:messages)
+                    manifest_keeper_turn_id;
+                  Eio.Fiber.yield ();
+                  Agent_sdk.Hooks.AdjustParams
+                    { current_params with
+                      extra_system_context = ctx
+                    ; tool_choice
+                    ; tool_filter_override = Some tool_filter
+                    })
               | _event -> Agent_sdk.Hooks.Continue)
       }
     in
@@ -679,10 +747,12 @@ let assemble_hooks
       ; reducer
       ; acc
       ; all_tool_names
+      ; tool_context_estimate
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref
       ; receipt_runtime_observation_ref
       ; receipt_response_text_present_ref
+      ; post_hook_context_window_error_ref
       }
 ;;

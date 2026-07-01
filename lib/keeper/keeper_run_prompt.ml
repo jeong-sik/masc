@@ -175,7 +175,7 @@ let estimate_tool_schema_context
     |> List.fold_left
          (fun acc json ->
             acc
-            + Agent_sdk.Context_reducer.estimate_char_tokens
+            + Keeper_context_core_accessors.estimate_char_tokens
                 (Yojson.Safe.to_string json))
          0
   in
@@ -184,6 +184,27 @@ let estimate_tool_schema_context
   ; estimated_input_tokens_with_tools =
       estimated_input_tokens + tool_schema_tokens
   }
+
+let hook_block_already_accounted_in_preflight = function
+  | Prompt_block_id.Dynamic_context | Prompt_block_id.Temporal_summary -> true
+  | Prompt_block_id.Persona
+  | Prompt_block_id.Continuity
+  | Prompt_block_id.Claimed_task_nudge
+  | Prompt_block_id.Retry_nudge
+  | Prompt_block_id.Memory_os_recall
+  | Prompt_block_id.User_model
+  | Prompt_block_id.Connected_surface
+  | Prompt_block_id.Other _ ->
+    false
+
+let estimate_unaccounted_extra_system_context_tokens blocks =
+  List.fold_left
+    (fun acc (block, text) ->
+       if hook_block_already_accounted_in_preflight block
+       then acc
+       else acc + Keeper_context_core_accessors.estimate_char_tokens text)
+    0
+    blocks
 
 let context_window_budget ~(estimated_input_tokens : int) ~(max_context : int)
   : context_window_budget =
@@ -207,7 +228,7 @@ let estimate_context_layer_budget
     ~(cap_tokens : int)
     ~(text : string) : context_layer_budget =
   let estimated_tokens =
-    Agent_sdk.Context_reducer.estimate_char_tokens text
+    Keeper_context_core_accessors.estimate_char_tokens text
   in
   let cap_tokens = max 0 cap_tokens in
   let decision, kept_tokens =

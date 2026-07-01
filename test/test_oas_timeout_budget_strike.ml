@@ -432,20 +432,40 @@ let test_tool_schema_estimate_adds_provider_payload () =
       ("expected tool-inclusive ContextOverflow, got "
        ^ Agent_sdk.Error.to_string err)
 
+let test_hook_context_estimate_skips_base_prompt_layers () =
+  let dynamic = String.make 400 'd' in
+  let temporal = String.make 400 't' in
+  let retry = String.make 400 'r' in
+  let user_model = String.make 400 'u' in
+  let expected =
+    Agent_sdk.Context_reducer.estimate_char_tokens retry
+    + Agent_sdk.Context_reducer.estimate_char_tokens user_model
+  in
+  Alcotest.(check int)
+    "only hook-only blocks are added to the post-hook estimate"
+    expected
+    (Keeper_run_prompt.estimate_unaccounted_extra_system_context_tokens
+       [ Prompt_block_id.Dynamic_context, dynamic
+       ; Prompt_block_id.Temporal_summary, temporal
+       ; Prompt_block_id.Retry_nudge, retry
+       ; Prompt_block_id.User_model, user_model
+       ])
+
 let test_keeper_preflight_wires_tool_inclusive_estimate () =
-  let source = read_file "lib/keeper/keeper_agent_run.ml" in
+  let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
+  let setup_source = read_file "lib/keeper/keeper_run_tools_setup.ml" in
   Alcotest.(check bool)
     "keeper computes tool schema context estimate"
     true
-    (contains_substring source "estimate_tool_schema_context");
+    (contains_substring setup_source "estimate_tool_schema_context");
   Alcotest.(check bool)
     "keeper preflight uses tool-inclusive estimate"
     true
-    (contains_substring source "estimated_input_tokens_with_tools");
+    (contains_substring agent_run_source "estimated_input_tokens_with_tools");
   Alcotest.(check bool)
     "keeper writes context preflight manifest"
     true
-    (contains_substring source "context_preflight")
+    (contains_substring agent_run_source "context_preflight")
 
 let test_context_window_budget_reports_remaining_and_overage () =
   let within =
@@ -552,7 +572,53 @@ let test_context_injection_hook_records_post_tool_ledger () =
   Alcotest.(check bool)
     "hook records extra system context token estimate"
     true
-    (contains_substring hook_source "extra_system_context_estimated_tokens")
+    (contains_substring hook_source "extra_system_context_estimated_tokens");
+  Alcotest.(check bool)
+    "hook gates post-hook context against context window"
+    true
+    (contains_substring hook_source "post_hook_estimated_input_tokens");
+  Alcotest.(check bool)
+    "hook fails closed before provider dispatch"
+    true
+    (contains_substring hook_source "post-hook extra_system_context estimate"
+     && contains_substring hook_source "Agent_sdk.Hooks.HookFailed");
+  Alcotest.(check bool)
+    "hook preserves typed overflow error for keeper caller"
+    true
+    (contains_substring hook_source "post_hook_context_window_error_ref := Some err");
+  Alcotest.(check bool)
+    "keeper caller returns typed post-hook overflow"
+    true
+    (contains_substring agent_run_source "post_hook_context_window_error_ref")
+
+let test_keeper_preflight_reuses_setup_tool_estimate () =
+  let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
+  Alcotest.(check bool)
+    "keeper run reads setup tool estimate"
+    true
+    (contains_substring agent_run_source "s.Keeper_run_tools.tool_context_estimate");
+  Alcotest.(check bool)
+    "keeper run does not recompute tool schemas"
+    false
+    (contains_substring agent_run_source "estimate_tool_schema_context")
+
+let test_keeper_budget_estimates_use_context_facade () =
+  let prompt_source = read_file "lib/keeper/keeper_run_prompt.ml" in
+  let hook_source = read_file "lib/keeper/keeper_run_tools_hooks.ml" in
+  Alcotest.(check bool)
+    "budgeting uses keeper estimation facade"
+    true
+    (contains_substring prompt_source
+       "Keeper_context_core_accessors.estimate_char_tokens"
+     && contains_substring hook_source
+          "Keeper_context_core_accessors.estimate_char_tokens");
+  Alcotest.(check bool)
+    "budgeting avoids direct OAS estimator calls"
+    false
+    (contains_substring prompt_source
+       "Agent_sdk.Context_reducer.estimate_char_tokens"
+     || contains_substring hook_source
+          "Agent_sdk.Context_reducer.estimate_char_tokens")
 
 let checkpoint_hygiene_meta () =
   match
@@ -759,6 +825,10 @@ let () =
           test_preflight_context_window_blocks_before_provider;
         Alcotest.test_case "tool schema estimate adds provider payload" `Quick
           test_tool_schema_estimate_adds_provider_payload;
+        Alcotest.test_case
+          "hook context estimate skips base prompt layers"
+          `Quick
+          test_hook_context_estimate_skips_base_prompt_layers;
         Alcotest.test_case "keeper preflight wires tool-inclusive estimate" `Quick
           test_keeper_preflight_wires_tool_inclusive_estimate;
         Alcotest.test_case "context window budget reports remaining and overage" `Quick
@@ -769,6 +839,10 @@ let () =
           test_context_preflight_manifest_records_budget_delta;
         Alcotest.test_case "context injection hook records post-tool ledger" `Quick
           test_context_injection_hook_records_post_tool_ledger;
+        Alcotest.test_case "keeper preflight reuses setup tool estimate" `Quick
+          test_keeper_preflight_reuses_setup_tool_estimate;
+        Alcotest.test_case "keeper budget estimates use context facade" `Quick
+          test_keeper_budget_estimates_use_context_facade;
         Alcotest.test_case
           "pre-dispatch hygiene rebudgets checkpoint against smaller window"
           `Quick

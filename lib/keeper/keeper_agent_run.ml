@@ -472,6 +472,8 @@ let run_turn
       ~dynamic_context
       ~history_messages
       ~prompt_metrics
+      ~estimated_input_tokens
+      ~max_context
       ~shared_context
       ~context_injector
       ~start_turn_count
@@ -503,9 +505,7 @@ let run_turn
     @@ fun () ->
     let tools = s.Keeper_run_tools.tools in
     let tool_context_estimate =
-      Keeper_run_prompt.estimate_tool_schema_context
-        ~estimated_input_tokens
-        ~tools
+      s.Keeper_run_tools.tool_context_estimate
     in
     let context_window_budget =
       Keeper_run_prompt.context_window_budget
@@ -594,6 +594,9 @@ let run_turn
     in
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
+    in
+    let post_hook_context_window_error_ref =
+      s.Keeper_run_tools.post_hook_context_window_error_ref
     in
     let keeper_has_owned_active_task () =
       Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
@@ -750,7 +753,10 @@ let run_turn
                    ~initial_messages:history_messages
                    ()
                with
-               | Error e -> Error e
+               | Error e ->
+                 (match !post_hook_context_window_error_ref with
+                  | Some err -> Error err
+                  | None -> Error e)
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in
                  (* Checkpoint save is deferred until after [STATE] synthesis so the

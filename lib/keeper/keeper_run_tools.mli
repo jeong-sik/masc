@@ -76,11 +76,13 @@ type agent_setup =
   ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
+  ; post_hook_context_window_error_ref : Agent_sdk.Error.sdk_error option ref
   }
 
 val prepare_agent_setup
@@ -95,6 +97,8 @@ val prepare_agent_setup
   -> dynamic_context:string
   -> history_messages:Agent_sdk.Types.message list
   -> prompt_metrics:Keeper_agent_prompt_metrics.prompt_metrics
+  -> estimated_input_tokens:int
+  -> max_context:int
   -> shared_context:Agent_sdk.Context.t
   -> context_injector:Agent_sdk.Hooks.context_injector
   -> start_turn_count:int

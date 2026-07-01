@@ -3,10 +3,16 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
+  setActiveStream,
   setActiveStreamRequestId,
 } from './keeper-state'
 import { keeperThreads } from './keeper-state'
-import { applyKeeperStreamEvent } from './keeper-stream'
+import {
+  _flushPendingKeeperStreamDeltasForTests,
+  _resetKeeperStreamBuffersForTests,
+  abortKeeperThreadMessage,
+  applyKeeperStreamEvent,
+} from './keeper-stream'
 
 function assistantEntry(): void {
   appendThreadEntry('sangsu', {
@@ -25,6 +31,7 @@ function assistantEntry(): void {
 
 describe('applyKeeperStreamEvent', () => {
   beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
     keeperThreads.value = {}
     _resetLiveSendRequestOwnersForTests()
   })
@@ -118,6 +125,150 @@ describe('applyKeeperStreamEvent', () => {
     expect(entry?.streamState).toBeNull()
     expect(entry?.error).toBeNull()
     expect(entry?.text).toBe('요청이 취소되었습니다.')
+  })
+
+  it('finalizes successful request terminal events after streamed thinking', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'checking state' },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        request_id: 'kmsg_current',
+        reply: '완료했습니다.',
+        turn_outcome: 'visible_reply',
+      },
+    })
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'done',
+        ok: true,
+      },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('완료했습니다.')
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.error).toBeNull()
+    expect(activeStreamRequestId('sangsu')).toBeNull()
+  })
+
+  it('finalizes queued visible replies when a successful terminal follows reply details', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_QUEUE_REQUEST',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'queued',
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        request_id: 'kmsg_current',
+        reply: '큐에서 완료했습니다.',
+        turn_outcome: 'visible_reply',
+      },
+    })
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'done',
+        ok: true,
+      },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('큐에서 완료했습니다.')
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.error).toBeNull()
+    expect(activeStreamRequestId('sangsu')).toBeNull()
+  })
+
+  it('keeps explicit continuation checkpoints queued when a successful terminal follows', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTINUATION_CHECKPOINT',
+      value: {
+        message: 'Continuation checkpoint saved; keeper remains scheduled.',
+      },
+    })
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'done',
+        ok: true,
+      },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('')
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.details?.turnOutcome).toBe('continuation_checkpoint')
+    expect(activeStreamRequestId('sangsu')).toBeNull()
+  })
+
+  it('does not leave successful terminal events in a live thinking state without reply details', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'checking state' },
+    })
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'done',
+        ok: true,
+      },
+    })).toBeNull()
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_END',
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.traceSteps).toEqual([
+      { kind: 'think', text: 'checking state', ts: expect.any(String) },
+    ])
+    expect(activeStreamRequestId('sangsu')).toBeNull()
   })
 
   it('ignores terminal events for a different active request id', () => {
@@ -336,6 +487,7 @@ describe('applyKeeperStreamEvent', () => {
       value: { delta: 'reasoning about the problem...' },
     })).toBeNull()
 
+    _flushPendingKeeperStreamDeltasForTests()
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.streamState).toBe('thinking')
     expect(entry?.delivery).toBe('streaming')
@@ -357,10 +509,56 @@ describe('applyKeeperStreamEvent', () => {
       value: { delta: 'tools' },
     })
 
+    expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')?.traceSteps).toBeUndefined()
+    _flushPendingKeeperStreamDeltasForTests()
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.traceSteps).toEqual([
       { kind: 'think', text: 'checking tools', ts: expect.any(String) },
     ])
+  })
+
+  it('flushes pending thinking deltas at TEXT_MESSAGE_START without reverting stream state', () => {
+    assistantEntry()
+    // Thinking delta schedules a pending flush.
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'thinking before text' },
+    })
+    // Text phase begins before the scheduled flush runs.
+    applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START' })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'TEXT_MESSAGE_CONTENT',
+      delta: 'hello',
+    })
+    // A still-scheduled flush must be a no-op: START already flushed it, so it
+    // cannot revert streamState to 'thinking' after text streaming began.
+    _flushPendingKeeperStreamDeltasForTests()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.streamState).toBe('streaming')
+    expect(entry?.text).toBe('hello')
+    expect(entry?.traceSteps).toEqual([
+      { kind: 'think', text: 'thinking before text', ts: expect.any(String) },
+    ])
+  })
+
+  it('drops pending thinking deltas when aborting a live stream', () => {
+    assistantEntry()
+    setActiveStream('sangsu', 'reply-1', new AbortController())
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'half-written reasoning' },
+    })
+
+    abortKeeperThreadMessage('sangsu')
+    _flushPendingKeeperStreamDeltasForTests()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('cancelled')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.traceSteps).toBeUndefined()
   })
 
   it('splits thinking trace steps by OAS content block index', () => {
@@ -381,6 +579,7 @@ describe('applyKeeperStreamEvent', () => {
       value: { index: 2, delta: 'next block' },
     })
 
+    _flushPendingKeeperStreamDeltasForTests()
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.traceSteps).toEqual([
       { kind: 'think', text: 'checking tools', ts: expect.any(String), oasBlockIndex: 1 },
@@ -391,6 +590,7 @@ describe('applyKeeperStreamEvent', () => {
 
 describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
     keeperThreads.value = {}
     _resetLiveSendRequestOwnersForTests()
   })
@@ -495,6 +695,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
       value: { delta: 'think B' },
     })
 
+    _flushPendingKeeperStreamDeltasForTests()
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(reply?.traceSteps).toEqual([
       { kind: 'think', text: 'think A', ts: expect.any(String) },

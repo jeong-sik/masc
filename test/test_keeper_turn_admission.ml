@@ -83,9 +83,57 @@ let test_chat_turns_serialize () =
   check "all 4 chat turns completed" (!completed = 4)
 ;;
 
+let test_distinct_keepers_do_not_block_each_other () =
+  reset ();
+  Printf.printf "Test 4: distinct keepers have independent turn slots\n%!";
+  let keeper_a = keeper_name ^ "-a" in
+  let keeper_b = keeper_name ^ "-b" in
+  Eio.Switch.run (fun sw ->
+    let started, set_started = Eio.Promise.create () in
+    let release, set_release = Eio.Promise.create () in
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Keeper_turn_admission.run_serialized ~base_path ~keeper_name:keeper_a (fun () ->
+          Eio.Promise.resolve set_started ();
+          Eio.Promise.await release)
+      with
+      | `Ran () -> ()
+      | `Rejected _ -> check "first keeper chat turn admitted" false);
+    Eio.Promise.await started;
+    (match
+       Keeper_turn_admission.run_if_free ~base_path ~keeper_name:keeper_b (fun () ->
+         true)
+     with
+     | `Ran true ->
+       check "autonomous lane for another keeper runs while first keeper is busy" true
+     | `Ran false | `Busy _ ->
+       check "autonomous lane for another keeper runs while first keeper is busy" false);
+    let other_chat_entered = ref false in
+    let other_chat_completed = ref false in
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Keeper_turn_admission.run_serialized ~base_path ~keeper_name:keeper_b (fun () ->
+          other_chat_entered := true;
+          Eio.Fiber.yield ();
+          other_chat_completed := true)
+      with
+      | `Ran () -> ()
+      | `Rejected _ -> check "other keeper chat turn is not rejected" false);
+    for _ = 1 to 4 do
+      Eio.Fiber.yield ()
+    done;
+    check
+      "chat lane for another keeper enters while first keeper is in flight"
+      !other_chat_entered;
+    check
+      "chat lane for another keeper completes before first keeper releases"
+      !other_chat_completed;
+    Eio.Promise.resolve set_release ())
+;;
+
 let test_waiting_cap_rejects () =
   reset ();
-  Printf.printf "Test 4: chat requests beyond the waiting cap are rejected\n%!";
+  Printf.printf "Test 5: chat requests beyond the waiting cap are rejected\n%!";
   Eio.Switch.run (fun sw ->
     let started, set_started = Eio.Promise.create () in
     let release, set_release = Eio.Promise.create () in
@@ -132,7 +180,7 @@ let test_waiting_cap_rejects () =
 
 let test_exception_releases_slot () =
   reset ();
-  Printf.printf "Test 5: an exception inside the turn releases the slot\n%!";
+  Printf.printf "Test 6: an exception inside the turn releases the slot\n%!";
   (try
      ignore
        (Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->
@@ -146,7 +194,7 @@ let test_exception_releases_slot () =
 
 let test_cancelled_waiter_leaves_queue () =
   reset ();
-  Printf.printf "Test 6: a cancelled waiter leaves the queue\n%!";
+  Printf.printf "Test 7: a cancelled waiter leaves the queue\n%!";
   Eio.Switch.run (fun sw ->
     let started, set_started = Eio.Promise.create () in
     let release, set_release = Eio.Promise.create () in
@@ -176,6 +224,7 @@ let () =
   test_free_slot_admits ();
   test_autonomous_skips_in_flight_chat ();
   test_chat_turns_serialize ();
+  test_distinct_keepers_do_not_block_each_other ();
   test_waiting_cap_rejects ();
   test_exception_releases_slot ();
   test_cancelled_waiter_leaves_queue ();

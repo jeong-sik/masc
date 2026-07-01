@@ -35,6 +35,125 @@ const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
 
 const pendingOasToolBlockIndexes = new Map<string, number>()
+type ScheduledFlushHandle = ReturnType<typeof setTimeout> | number
+interface PendingThinkingBatch {
+  text: string
+  oasBlockIndex?: number
+}
+interface PendingThinkingState {
+  batches: PendingThinkingBatch[]
+  flushHandle: ScheduledFlushHandle | null
+  flushViaAnimationFrame: boolean
+}
+
+const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
+
+function streamEntryKey(keeperName: string, assistantEntryId: string): string {
+  return `${keeperName}\u0000${assistantEntryId}`
+}
+
+function scheduleStreamFlush(callback: () => void): {
+  handle: ScheduledFlushHandle
+  viaAnimationFrame: boolean
+} {
+  if (typeof globalThis.requestAnimationFrame === 'function') {
+    return {
+      handle: globalThis.requestAnimationFrame(callback),
+      viaAnimationFrame: true,
+    }
+  }
+  return {
+    handle: setTimeout(callback, 16),
+    viaAnimationFrame: false,
+  }
+}
+
+function cancelStreamFlush(handle: ScheduledFlushHandle, viaAnimationFrame: boolean): void {
+  if (viaAnimationFrame && typeof globalThis.cancelAnimationFrame === 'function') {
+    globalThis.cancelAnimationFrame(handle as number)
+    return
+  }
+  clearTimeout(handle as ReturnType<typeof setTimeout>)
+}
+
+function sameOasBlockIndex(left: number | undefined, right: number | undefined): boolean {
+  return left === undefined ? right === undefined : left === right
+}
+
+function flushPendingThinkingDeltas(keeperName: string, assistantEntryId: string): void {
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  const pending = pendingThinkingDeltas.get(key)
+  if (!pending) return
+  pendingThinkingDeltas.delete(key)
+  if (pending.flushHandle !== null) {
+    cancelStreamFlush(pending.flushHandle, pending.flushViaAnimationFrame)
+  }
+  for (const batch of pending.batches) {
+    appendAssistantThinkingDelta(keeperName, assistantEntryId, batch.text, {
+      oasBlockIndex: batch.oasBlockIndex,
+    })
+  }
+}
+
+function dropPendingThinkingDeltas(keeperName: string, assistantEntryId: string): void {
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  const pending = pendingThinkingDeltas.get(key)
+  if (!pending) return
+  pendingThinkingDeltas.delete(key)
+  if (pending.flushHandle !== null) {
+    cancelStreamFlush(pending.flushHandle, pending.flushViaAnimationFrame)
+  }
+}
+
+function flushAllPendingThinkingDeltas(): void {
+  for (const key of Array.from(pendingThinkingDeltas.keys())) {
+    const [keeperName, assistantEntryId] = key.split('\u0000')
+    if (keeperName && assistantEntryId) {
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
+    }
+  }
+}
+
+function enqueueThinkingDelta(
+  keeperName: string,
+  assistantEntryId: string,
+  delta: string,
+  meta: { oasBlockIndex?: number } = {},
+): void {
+  if (!delta.trim()) return
+  const key = streamEntryKey(keeperName, assistantEntryId)
+  let pending = pendingThinkingDeltas.get(key)
+  if (!pending) {
+    pending = { batches: [], flushHandle: null, flushViaAnimationFrame: false }
+    pendingThinkingDeltas.set(key, pending)
+  }
+  const last = pending.batches[pending.batches.length - 1]
+  if (last && sameOasBlockIndex(last.oasBlockIndex, meta.oasBlockIndex)) {
+    last.text += delta
+  } else {
+    pending.batches.push({ text: delta, oasBlockIndex: meta.oasBlockIndex })
+  }
+  if (pending.flushHandle !== null) return
+  const scheduled = scheduleStreamFlush(() => {
+    flushPendingThinkingDeltas(keeperName, assistantEntryId)
+  })
+  pending.flushHandle = scheduled.handle
+  pending.flushViaAnimationFrame = scheduled.viaAnimationFrame
+}
+
+export function _flushPendingKeeperStreamDeltasForTests(): void {
+  flushAllPendingThinkingDeltas()
+}
+
+export function _resetKeeperStreamBuffersForTests(): void {
+  for (const pending of pendingThinkingDeltas.values()) {
+    if (pending.flushHandle !== null) {
+      cancelStreamFlush(pending.flushHandle, pending.flushViaAnimationFrame)
+    }
+  }
+  pendingThinkingDeltas.clear()
+  pendingOasToolBlockIndexes.clear()
+}
 
 export interface KeeperThreadAbortResult {
   readonly keeperName: string
@@ -177,6 +296,7 @@ export function abortKeeperThreadMessage(name: string): KeeperThreadAbortResult 
   console.debug(`[keeper-stream] aborting stream for ${keeperName}${entryId ? ` (entry=${entryId})` : ''}${requestId ? ` request=${requestId}` : ''}`)
   if (controller) controller.abort()
   if (entryId) {
+    dropPendingThinkingDeltas(keeperName, entryId)
     finalizeAssistantEntry(keeperName, entryId, {
       text: KEEPER_MESSAGE_CANCELLED_TEXT,
       rawText: KEEPER_MESSAGE_CANCELLED_TEXT,
@@ -205,7 +325,21 @@ export function applyKeeperStreamEvent(
 ): string | null {
   const applyTextDelta = (payload: unknown): void => {
     if (typeof payload !== 'string') return
-    if (payload) appendAssistantDelta(keeperName, assistantEntryId, payload)
+    if (payload) {
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
+      appendAssistantDelta(keeperName, assistantEntryId, payload)
+    }
+  }
+  const markFinalizingIfLive = (): void => {
+    updateThreadEntry(keeperName, assistantEntryId, entry => {
+      if (entry.streamState === null) return entry
+      if (entry.delivery !== 'sending' && entry.delivery !== 'streaming') return entry
+      return {
+        ...entry,
+        streamState: 'finalizing',
+        delivery: 'streaming',
+      }
+    })
   }
 
   switch (event.type) {
@@ -213,6 +347,11 @@ export function applyKeeperStreamEvent(
       setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'sending')
       return null
     case 'TEXT_MESSAGE_START':
+      // Flush any buffered thinking deltas before entering the text phase so a
+      // pending scheduled flush cannot run later and revert streamState to
+      // 'thinking' after text streaming has begun. Mirrors TEXT_MESSAGE_END and
+      // TOOL_CALL_START, which flush at their phase boundaries.
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
       setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
       return null
     case 'TEXT_MESSAGE_CONTENT': {
@@ -220,10 +359,12 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TEXT_MESSAGE_END':
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
       clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-      setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+      markFinalizingIfLive()
       return null
     case 'TOOL_CALL_START': {
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = event.toolCallId?.trim()
       const toolName = (event.toolCallName ?? event.name)?.trim()
       if (!toolCallId || !toolName) {
@@ -256,6 +397,7 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TOOL_CALL_ARGS': {
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = event.toolCallId?.trim()
       if (!toolCallId) {
         recordStreamProtocolError(
@@ -284,6 +426,7 @@ export function applyKeeperStreamEvent(
       return null
     }
     case 'TOOL_CALL_END': {
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
       const toolCallId = event.toolCallId?.trim()
       if (!toolCallId) {
         recordStreamProtocolError(
@@ -305,6 +448,7 @@ export function applyKeeperStreamEvent(
     }
     case 'CUSTOM':
       if (event.name === 'KEEPER_STREAM_MESSAGE_START') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         const patch: Partial<KeeperConversationDetails> = {}
         const providerMessageId = asString(value?.provider_message_id)
@@ -319,6 +463,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_DELTA') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         const patch: Partial<KeeperConversationDetails> = {}
         const stopReason = asString(value?.stop_reason)
@@ -327,12 +472,13 @@ export function applyKeeperStreamEvent(
         if (usage) patch.usage = usage
         if (usage?.costUsd !== undefined) patch.costUsd = usage.costUsd
         if (Object.keys(patch).length > 0) mergeAssistantStreamDetails(keeperName, assistantEntryId, patch)
-        if (stopReason) setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+        if (stopReason) markFinalizingIfLive()
         return null
       }
       if (event.name === 'KEEPER_STREAM_MESSAGE_STOP') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
-        setAssistantStreamState(keeperName, assistantEntryId, 'finalizing', 'streaming')
+        markFinalizingIfLive()
         return null
       }
       if (event.name === 'KEEPER_STREAM_PING') {
@@ -340,6 +486,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_START') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         const oasBlockIndex = asNumber(value?.index) ?? asNumber(value?.block_index)
         const toolCallId = asString(value?.tool_call_id)
@@ -351,6 +498,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_CONTENT_BLOCK_STOP') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         forgetOasToolBlockIndexByIndex(
           keeperName,
@@ -374,11 +522,12 @@ export function applyKeeperStreamEvent(
         const oasBlockIndex = value
           ? asNumber(value.index) ?? asNumber(value.block_index)
           : undefined
-        if (delta) appendAssistantThinkingDelta(keeperName, assistantEntryId, delta, { oasBlockIndex })
+        if (delta) enqueueThinkingDelta(keeperName, assistantEntryId, delta, { oasBlockIndex })
         else setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
         return null
       }
       if (event.name === 'KEEPER_STREAM_PROTOCOL_ERROR') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const value = isRecord(event.value) ? event.value : null
         forgetOasToolBlockIndexByIndex(
           keeperName,
@@ -394,23 +543,32 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_THINKING_SIGNATURE_DELTA') {
-        setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
+        if (!pendingThinkingDeltas.has(streamEntryKey(keeperName, assistantEntryId))) {
+          setAssistantStreamState(keeperName, assistantEntryId, 'thinking', 'streaming')
+        }
         return null
       }
       if (event.name === 'KEEPER_MEDIA_DELTA') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         setAssistantStreamState(keeperName, assistantEntryId, 'streaming', 'streaming')
         return null
       }
       if (event.name === 'KEEPER_QUEUE_REQUEST') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         setAssistantStreamState(keeperName, assistantEntryId, 'opening', 'queued')
         return null
       }
       if (event.name === 'KEEPER_CONTINUATION_CHECKPOINT') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const rawText = isRecord(event.value)
           ? asString(event.value.message, '')
           : ''
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
+          details: {
+            ...(entry.details ?? {}),
+            turnOutcome: 'continuation_checkpoint',
+          },
           text: '',
           rawText: rawText || entry.rawText,
           delivery: 'queued',
@@ -419,6 +577,7 @@ export function applyKeeperStreamEvent(
         return null
       }
       if (event.name === 'KEEPER_REQUEST_TERMINAL') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const terminal = isRecord(event.value) ? event.value : null
         const terminalRequestId = asString(terminal?.request_id, '').trim()
         const currentRequestId = activeStreamRequestId(keeperName)
@@ -461,9 +620,26 @@ export function applyKeeperStreamEvent(
           }))
           return message
         }
+        if (status === 'done' && terminal?.ok !== false) {
+          updateThreadEntry(keeperName, assistantEntryId, entry => {
+            const delivery =
+              entry.delivery === 'no_reply'
+                || (entry.delivery === 'queued'
+                  && keeperTurnOutcomeSuppressesReply(entry.details?.turnOutcome))
+                ? entry.delivery
+                : 'delivered'
+            return {
+              ...entry,
+              delivery,
+              streamState: null,
+              error: null,
+            }
+          })
+        }
         return null
       }
       if (event.name === 'KEEPER_REPLY_DETAILS') {
+        flushPendingThinkingDeltas(keeperName, assistantEntryId)
         const details = normalizeKeeperConversationDetails(event.value)
         if (details) {
           updateThreadEntry(keeperName, assistantEntryId, entry => {
@@ -502,7 +678,13 @@ export function applyKeeperStreamEvent(
         }
       }
       return null
+    case 'RUN_FINISHED':
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
+      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
+      return null
     case 'RUN_ERROR':
+      flushPendingThinkingDeltas(keeperName, assistantEntryId)
+      clearPendingOasToolBlockIndexesForEntry(keeperName, assistantEntryId)
       return typeof event.value === 'string'
         ? event.value
         : (isRecord(event.value) ? asString(event.value.message) : null) ?? 'Keeper stream failed'

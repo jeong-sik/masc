@@ -93,6 +93,19 @@ let test_self_cadence_not_paused_when_not_latched () =
     "self-cadence wake allowed for non-latched (recovered) keeper"
     false (is_suppressed T.Self_cadence "tombstone-recover")
 
+(* RFC-0303 Phase 1: stable origin labels for the turn-decision observability
+   tag (wake_origin:<label>). Pin every constructor so a new origin cannot ship
+   without a label, and so the dashboard/log parser keys stay stable. *)
+let test_origin_label_is_stable () =
+  Alcotest.(check string) "mention" "mention" (T.origin_label T.Mention);
+  Alcotest.(check string)
+    "board_reactive" "board_reactive" (T.origin_label T.Board_reactive);
+  Alcotest.(check string) "heartbeat" "heartbeat" (T.origin_label T.Heartbeat);
+  Alcotest.(check string)
+    "operator_direct" "operator_direct" (T.origin_label T.Operator_direct);
+  Alcotest.(check string)
+    "self_cadence" "self_cadence" (T.origin_label T.Self_cadence)
+
 let () =
   Alcotest.run "keeper_wake_tombstone"
     [
@@ -119,5 +132,8 @@ let () =
           ( "R2b self-cadence allowed when not latched (recovered)",
             `Quick,
             with_eio test_self_cadence_not_paused_when_not_latched );
+          ( "origin_label is stable per constructor",
+            `Quick,
+            test_origin_label_is_stable );
         ] );
     ]

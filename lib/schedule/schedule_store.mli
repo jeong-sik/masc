@@ -20,6 +20,7 @@ type store_error =
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Grant_validation_failed of Schedule_domain.grant_error
+  | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
       ; recovery_err : string option

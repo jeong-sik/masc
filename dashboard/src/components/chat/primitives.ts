@@ -70,6 +70,7 @@ const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 
 }
 
 export const CHAT_SUGGESTIONS_LABEL = '추천 후속 질문'
+const STREAMING_THINKING_PREVIEW_CHARS = 6_000
 
 function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'ok' | 'bad' | 'pending'; title: string } {
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']
@@ -176,6 +177,8 @@ type ChatTranscriptAction = {
   title?: string
   onClick: (entry: KeeperConversationEntry) => void
 }
+
+export const THINKING_TRACE_PREVIEW_CHARS = 2400
 
 function timeLabel(timestamp?: string | null): string | null {
   if (!timestamp) return null
@@ -550,6 +553,29 @@ function AsyncMarkdownDiv({
   return rendered === null
     ? html`<div class=${className} dangerouslySetInnerHTML=${renderPlainLinkedHtml(text)} />`
     : html`<div class=${className} dangerouslySetInnerHTML=${{ __html: rendered }} />`
+}
+
+function streamingThinkingPreview(text: string): string {
+  if (text.length <= STREAMING_THINKING_PREVIEW_CHARS) return text
+  return `...\n${text.slice(-STREAMING_THINKING_PREVIEW_CHARS)}`
+}
+
+function ChatThinkingText({ text, streaming }: { text: string; streaming: boolean }) {
+  if (streaming) {
+    return html`
+      <div
+        class="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+        data-chat-thinking-preview=${text.length > STREAMING_THINKING_PREVIEW_CHARS ? 'truncated' : 'full'}
+        dangerouslySetInnerHTML=${renderPlainLinkedHtml(streamingThinkingPreview(text))}
+      />
+    `
+  }
+  return html`
+    <${AsyncMarkdownDiv}
+      text=${text}
+      className="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+    />
+  `
 }
 
 function renderInlineHtml(raw: string): { __html: string } {
@@ -1217,21 +1243,48 @@ function ChatMermaidBlock({ source, caption }: ChatMermaidBlock) {
   `
 }
 
-function ChatTraceStep({ step }: { step: ChatTraceStep }) {
+function ChatTraceStep({ step, streaming = false }: { step: ChatTraceStep; streaming?: boolean }) {
   const [open, setOpen] = useState(false)
 
   if (step.kind === 'think') {
+    const longThinking = !streaming && step.text.length > THINKING_TRACE_PREVIEW_CHARS
+    const previewText = longThinking
+      ? `${step.text.slice(0, THINKING_TRACE_PREVIEW_CHARS).trimEnd()}\n\n... ${step.text.length - THINKING_TRACE_PREVIEW_CHARS} chars hidden`
+      : step.text
     return html`
       <div class="chat-block-tstep think" data-chat-trace-step="think">
         <span class="chat-block-tnode"></span>
         <div class="min-w-0 flex-1">
           <div class="chat-block-tstep-row">
             <span class="chat-block-tstep-kind">Thinking</span>
+            ${longThinking
+              ? html`
+                  <button
+                    type="button"
+                    class="chat-block-tstep-chev"
+                    aria-expanded=${open}
+                    onClick=${() => setOpen((o) => !o)}
+                  >
+                    ${open ? '접기' : '전체 보기'}
+                  </button>
+                `
+              : null}
           </div>
-          <${AsyncMarkdownDiv}
-            text=${step.text}
-            className="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
-          />
+          ${streaming
+            ? html`<${ChatThinkingText} text=${step.text} streaming=${true} />`
+            : longThinking && !open
+            ? html`
+                <div
+                  class="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+                  dangerouslySetInnerHTML=${renderPlainLinkedHtml(previewText)}
+                />
+              `
+            : html`
+                <${AsyncMarkdownDiv}
+                  text=${step.text}
+                  className="chat-block-tstep-text markdown-body whitespace-pre-wrap break-words"
+                />
+              `}
         </div>
       </div>
     `
@@ -1896,10 +1949,9 @@ const CARD_BLOCK_TYPES: ReadonlySet<ChatBlock['t']> = new Set([
 // regardless of memo (the test 're-renders the settled bubble when action is a
 // new object…' locks this).
 //
-// KNOWN GAP: tool/thinking turns render through the un-memoized TurnWorkBundle,
-// whose `tools` array is rebuilt every render (buildChatRenderUnits), so its
-// trace cards are NOT yet skipped on a stream chunk. Closing that needs the
-// unit arrays stabilized first — a separate follow-up.
+// Tool/thinking turns render through TurnWorkBundle. buildChatRenderUnits
+// rebuilds `tools` arrays each render, so the bundle comparator compares entry
+// references inside those arrays instead of the array object itself.
 const ChatMessageBubble = memo(function ChatMessageBubble({
   entry,
   showMetadata = true,
@@ -2698,7 +2750,11 @@ function ToolTraceCard({
               <span class="chat-block-trace-rail"></span>
               ${ordered.map((item, index) =>
                 item.kind === 'trace'
-                  ? html`<${ChatTraceStep} key=${`trace-${index}`} step=${item.step} />`
+                  ? html`<${ChatTraceStep}
+                      key=${`trace-${index}`}
+                      step=${item.step}
+                      streaming=${assistant !== null && !turnComplete}
+                    />`
                   : item.kind === 'tool'
                     ? (() => {
                         const entry = item.entry ?? toolEntryFromTraceStep(item.step)
@@ -2725,7 +2781,14 @@ function ToolTraceCard({
   `
 }
 
-function TurnWorkBundle({
+function sameEntryRefs(
+  left: readonly KeeperConversationEntry[],
+  right: readonly KeeperConversationEntry[],
+): boolean {
+  return left.length === right.length && left.every((entry, index) => entry === right[index])
+}
+
+const TurnWorkBundle = memo(function TurnWorkBundle({
   tools,
   assistant,
   showMetadata,
@@ -2767,7 +2830,16 @@ function TurnWorkBundle({
       />
     </div>
   `
-}
+}, (prev, next) =>
+  prev.assistant === next.assistant
+  && sameEntryRefs(prev.tools, next.tools)
+  && prev.showMetadata === next.showMetadata
+  && prev.variant === next.variant
+  && prev.showSourceBadge === next.showSourceBadge
+  && prev.toolOutputsCoveredSinceMs === next.toolOutputsCoveredSinceMs
+  && prev.toolOutputsCoveredThroughMs === next.toolOutputsCoveredThroughMs
+  && prev.action === next.action
+)
 
 // A reader within this distance of the bottom is considered "pinned":
 // new content keeps auto-scrolling. Scrolling further up unpins so the

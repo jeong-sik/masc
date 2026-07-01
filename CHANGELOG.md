@@ -3,6 +3,9 @@
 ## Unreleased
 
 ### Changed
+- Bump OAS agent_sdk pin to v0.208.12 (`2f3d6846`), carrying the
+  default-unbounded agent turn budget release so MASC keeper/OAS runs no longer
+  inherit the older finite default turn cap.
 - Bump OAS agent_sdk pin to the 0.207.22 main follow-up (`c741324`),
   carrying #2254 typed GLM forced-tool-choice rejection, #2248
   provider-qualified capability lookup, #2244 assistant tool-content,

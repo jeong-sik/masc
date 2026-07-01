@@ -56,3 +56,15 @@ let decide ~(origin : wake_origin) ~keeper_name =
 (** Stable label for metrics/logs. *)
 let suppression_label (s : wake_suppression) =
   match s with Tombstoned_no_progress_loop -> "tombstone_no_progress_loop"
+
+(** Stable wake-origin label for metrics/logs (RFC-0303 Phase 1). Lets the turn
+    decision surface record WHY a keeper woke, so the share of automatic
+    [Self_cadence] wakes (the ones that manufacture passive turns) is
+    observable before Phase 2 gates them on a stimulus. *)
+let origin_label (o : wake_origin) =
+  match o with
+  | Mention -> "mention"
+  | Board_reactive -> "board_reactive"
+  | Heartbeat -> "heartbeat"
+  | Operator_direct -> "operator_direct"
+  | Self_cadence -> "self_cadence"

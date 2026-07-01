@@ -143,19 +143,7 @@ let task_is_blocked (task : Masc_domain.task) =
   | Masc_domain.Cancelled _ ->
     false
 
-let goal_progress_json ?config (meta : keeper_meta) =
-  match config with
-  | None ->
-      `Assoc
-        [
-          ("active_goal_count", `Int (List.length meta.active_goal_ids));
-          ("linked_task_count", `Int 0);
-          ("done_task_count", `Int 0);
-          ("open_task_count", `Int 0);
-          ("blocked_task_count", `Int 0);
-          ("convergence", `Null);
-        ]
-  | Some config ->
+let goal_progress_json ~(config : Workspace.config) (meta : keeper_meta) =
       let task_goal_index =
         Workspace_goal_index.build_task_goal_index_for_config config
       in
@@ -199,12 +187,7 @@ let goal_progress_json ?config (meta : keeper_meta) =
           ("convergence", convergence);
         ]
 
-let approval_policy_effective_json ?config (meta : keeper_meta) =
-  let base_path =
-    match config with
-    | Some (config : Workspace.config) -> config.base_path
-    | None -> Env_config_core.base_path ()
-  in
+let approval_policy_effective_json ~base_path (meta : keeper_meta) =
   Keeper_approval_queue.policy_summary_json ~base_path ~keeper_name:meta.name
 
 let string_opt_json = function
@@ -374,8 +357,8 @@ let action_radius_json ~tool_name ~input ~success ~duration_ms ?error
       ("error", string_opt_json error);
     ]
 
-let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
-  let goal_progress = goal_progress_json ?config meta in
+let runtime_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yojson.Safe.t =
+  let goal_progress = goal_progress_json ~config meta in
   let blocked_task_count =
     Safe_ops.json_int "blocked_task_count" ~default:0 goal_progress
   in
@@ -386,12 +369,12 @@ let runtime_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
       ("goal_ids", `List (List.map (fun goal_id -> `String goal_id) meta.active_goal_ids));
       ("goal_progress", goal_progress);
       ("blocked_task_count", `Int blocked_task_count);
-      ("approval_policy_effective", approval_policy_effective_json ?config meta);
+      ("approval_policy_effective", approval_policy_effective_json ~base_path:config.base_path meta);
     ]
 
-let runtime_observability_contract_json ?config (meta : keeper_meta) : Yojson.Safe.t =
+let runtime_observability_contract_json ~(config : Workspace.config) (meta : keeper_meta) : Yojson.Safe.t =
   let sandbox_target = backend_of_meta meta in
-  match runtime_contract_json ?config meta with
+  match runtime_contract_json ~config meta with
   | `Assoc fields ->
     `Assoc
       ([

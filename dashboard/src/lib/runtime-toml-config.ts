@@ -482,9 +482,14 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   const prefix = `providers.${providerId}`
   const prefixDot = `providers.${providerId}.`
   const bindingPrefixDot = `${providerId}.`
+  const canDeleteBindingNamespace = !isReservedRuntimeTomlId(providerId)
   const sectionsToDelete = document.sections
     .map(s => s.name)
-    .filter(name => name === prefix || name.startsWith(prefixDot) || name.startsWith(bindingPrefixDot))
+    .filter(name =>
+      name === prefix ||
+      name.startsWith(prefixDot) ||
+      (canDeleteBindingNamespace && name.startsWith(bindingPrefixDot)),
+    )
   
   let next = sourceText
   for (const sec of sectionsToDelete) {
@@ -495,9 +500,13 @@ export function cascadeDeleteProvider(sourceText: string, providerId: string): s
   const nextDocument = parseDocument(next)
   const runtimeValues = sectionValues(nextDocument, 'runtime')
   const toDeleteBindings = new Set(env.bindings.filter(b => b.providerId === providerId).map(b => b.id))
+  const remainingBindings = parseRuntimeTomlEnvironment(next).bindings.map(binding => binding.id)
   
   if (typeof runtimeValues.default === 'string' && toDeleteBindings.has(runtimeValues.default)) {
-    next = deleteRuntimeTomlKey(next, 'runtime', 'default')
+    const fallback = remainingBindings[0]
+    next = fallback
+      ? setRuntimeTomlKey(next, 'runtime', 'default', fallback)
+      : deleteRuntimeTomlKey(next, 'runtime', 'default')
   }
   if (typeof runtimeValues.librarian === 'string' && toDeleteBindings.has(runtimeValues.librarian)) {
     next = deleteRuntimeTomlKey(next, 'runtime', 'librarian')
@@ -601,21 +610,35 @@ export const RUNTIME_TOML_PROTOCOLS = [
 export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
 
 // Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
-// `Runtime_adapter.provider_kind_of_cli_provider` is hardcoded to `None` (CLI
-// subprocess provider kinds were removed), so any provider using `Cli`
-// transport (the `command` field) resolves to no provider_kind and
-// `Runtime.materialize_config`'s `List.filter_map` silently drops its
-// bindings from the live runtime list instead of failing the save
-// (lib/runtime/runtime_adapter.ml:183-189, lib/runtime/runtime.ml:239). The
-// *-cli protocol labels parse fine but pair naturally with `command`
-// transport, so they are excluded here too until CLI materialization is
-// restored. This is an allow-list, not a filter-out of known-bad entries, so
-// a future 6th protocol defaults to non-creatable until reviewed.
+// The add-provider form only creates endpoint-backed providers. Command
+// transport is blocked at the binding form via transportKind, while
+// `provider_kind_for_http_provider` still returns `None` for `Messages_api`.
+// Messages providers parse and save, but resolve to no provider_kind and
+// `Runtime.materialize_config`'s `List.filter_map` silently drops their bindings
+// from the live runtime list instead of failing the save
+// (lib/runtime/runtime_adapter.ml:183-203, lib/runtime/runtime.ml:239).
+// This is an allow-list of materializable endpoint protocols, so a future 6th
+// protocol defaults to non-creatable until reviewed.
 export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
   'openai-compatible-http',
   'ollama-http',
-  'messages-http',
+  'openai-compatible-cli',
 ] as const
+
+export type RuntimeTomlCreatableProtocol = (typeof RUNTIME_TOML_CREATABLE_PROTOCOLS)[number]
+
+export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is RuntimeTomlCreatableProtocol {
+  return (RUNTIME_TOML_CREATABLE_PROTOCOLS as readonly string[]).includes(protocol)
+}
+
+const RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS = new Set([
+  'messages-http',
+  'messages-cli',
+])
+
+export function isRuntimeTomlNonMaterializableProtocol(protocol: string): boolean {
+  return RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS.has(protocol)
+}
 
 // runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],
 // and the binding pin [<providerId>.<modelId>]). parseDocument's section regex

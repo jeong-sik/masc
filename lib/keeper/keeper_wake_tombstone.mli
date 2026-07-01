@@ -33,3 +33,6 @@ val bypasses_tombstone : wake_origin -> bool
 val decide : origin:wake_origin -> keeper_name:string -> wake_decision
 
 val suppression_label : wake_suppression -> string
+
+(** Stable wake-origin label for metrics/logs (RFC-0303 Phase 1). *)
+val origin_label : wake_origin -> string

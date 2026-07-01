@@ -151,17 +151,12 @@ let request_to_json (req : V.verification_request) : Yojson.Safe.t =
 
 (* ── Snapshot assembly ──────────────────────────────── *)
 
-(** Load the raw verification request list from the current MASC base_path.
+(** Load the raw verification request list from the supplied MASC base_path.
 
-    Protected against missing base_path or filesystem errors — failures
-    surface as an empty list plus a log line, matching the tolerance
+    Protected against filesystem errors — failures surface as an empty
+    list plus a log line, matching the tolerance
     [Verification.list_requests] already offers on a missing dir. *)
-let load_requests ?base_path () : V.verification_request list =
-  let base_path =
-    match base_path with
-    | Some value -> value
-    | None -> Env_config_core.base_path ()
-  in
+let load_requests ~base_path () : V.verification_request list =
   try V.list_requests base_path
   with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -204,9 +199,9 @@ let requests_json_of_requests ?task_id ~limit all : Yojson.Safe.t =
      ]
      @ fd_pressure_fields ())
 
-let requests_json ?base_path ?task_id ?limit () : Yojson.Safe.t =
+let requests_json ~base_path ?task_id ?limit () : Yojson.Safe.t =
   let limit = clamp_limit limit in
-  let all = load_requests ?base_path () in
+  let all = load_requests ~base_path () in
   requests_json_of_requests ?task_id ~limit all
 
 (* ── Summary projection ─────────────────────────────── *)
@@ -282,9 +277,9 @@ let summary_json_of_requests ~recent all : Yojson.Safe.t =
      ]
      @ fd_pressure_fields ())
 
-let summary_json ?base_path ?recent () : Yojson.Safe.t =
+let summary_json ~base_path ?recent () : Yojson.Safe.t =
   let recent = Option.value recent ~default:default_recent in
-  let all = load_requests ?base_path () in
+  let all = load_requests ~base_path () in
   summary_json_of_requests ~recent all
 
 (* Single-load companion for handlers that emit both projections
@@ -294,10 +289,10 @@ let summary_json ?base_path ?recent () : Yojson.Safe.t =
    the historic proof handler scanned the verification store twice
    per refresh.  This helper performs one scan and folds the two
    projections from the shared list. *)
-let proof_compose ?base_path ?recent ?limit () : Yojson.Safe.t * Yojson.Safe.t =
+let proof_compose ~base_path ?recent ?limit () : Yojson.Safe.t * Yojson.Safe.t =
   let recent = Option.value recent ~default:default_recent in
   let limit = clamp_limit limit in
-  let all = load_requests ?base_path () in
+  let all = load_requests ~base_path () in
   let summary = summary_json_of_requests ~recent all in
   let requests = requests_json_of_requests ~limit all in
   summary, requests

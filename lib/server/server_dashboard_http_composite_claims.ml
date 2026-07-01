@@ -346,24 +346,21 @@ let composite_execution_config_drift execution =
 
 let keeper_activation_readiness_json = Server_dashboard_fleet_readiness.keeper_activation_readiness_json
 
-let composite_execution_passive_only_without_work_scope execution =
-  match completion_contract_result_of_execution execution with
-  | Some Completion_contract_result.Passive_only ->
-    Option.is_none (json_string "current_task_id" execution)
-    && Json_util.json_string_list_member "goal_ids" execution = []
-  | Some _ | None -> false
-;;
-
 let composite_execution_completion_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
-  | Some Completion_contract_result.Passive_only
-    when composite_execution_passive_only_without_work_scope execution ->
+  | Some Completion_contract_result.Passive_only ->
+    (* RFC-0303 Phase 0: a passive-only turn is activity (thinking / defer /
+       choosing to wait), NOT a dashboard block — regardless of whether the
+       keeper held a claimed task or the world offered work. "Should it have
+       acted on available work?" is a goal-layer semantic judgment, not a
+       per-turn attention flag. The prior work-scope carve-out
+       ([passive_only_without_work_scope]) is removed: passive is uniformly
+       non-blocking now. *)
     None
   | Some
       ( Completion_contract_result.Violated
       | Completion_contract_result.Claim_only_after_owned_task
-      | Completion_contract_result.Needs_execution_progress
-      | Completion_contract_result.Passive_only as result ) ->
+      | Completion_contract_result.Needs_execution_progress as result ) ->
     Some ("completion_contract_result:" ^ Completion_contract_result.to_string result)
   | Some _
   | None -> None
@@ -371,8 +368,11 @@ let composite_execution_completion_unsatisfied_reason execution =
 
 let composite_execution_budget_unsatisfied_reason execution =
   match completion_contract_result_of_execution execution with
-  | Some Completion_contract_result.Passive_only
-    when composite_execution_passive_only_without_work_scope execution ->
+  | Some Completion_contract_result.Passive_only ->
+    (* RFC-0303 Phase 0: passive-only under turn-budget exhaustion is not a
+       block. A budget-exhausted turn that only did passive things is still
+       activity; the exhaustion itself is surfaced via the budget disposition,
+       not by re-classifying passive as an unsatisfied contract. *)
     None
   | Some
       (* TEL-OK: pure dashboard classifier; maps typed receipt labels to a
@@ -383,8 +383,7 @@ let composite_execution_budget_unsatisfied_reason execution =
       | Completion_contract_result.Surface_mismatch
       | Completion_contract_result.No_capable_provider
       | Completion_contract_result.Claim_only_after_owned_task
-      | Completion_contract_result.Needs_execution_progress
-      | Completion_contract_result.Passive_only as result ) ->
+      | Completion_contract_result.Needs_execution_progress as result ) ->
     Some ("completion_contract_result:" ^ Completion_contract_result.to_string result)
   | Some _
   | None -> None

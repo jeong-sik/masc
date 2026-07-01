@@ -10,11 +10,19 @@ const apiMocks = vi.hoisted(() => ({
   saveRuntimeTomlConfig: vi.fn(),
 }))
 
+const runtimeRefreshMock = vi.hoisted(() => ({
+  refreshRuntimeConfigConsumers: vi.fn(async () => undefined),
+}))
+
 vi.mock('../api/dashboard', () => ({
   fetchRuntimeTomlConfig: apiMocks.fetchRuntimeTomlConfig,
   patchRuntimeAssignment: apiMocks.patchRuntimeAssignment,
   patchRuntimeRouting: apiMocks.patchRuntimeRouting,
   saveRuntimeTomlConfig: apiMocks.saveRuntimeTomlConfig,
+}))
+
+vi.mock('../lib/runtime-config-refresh', () => ({
+  refreshRuntimeConfigConsumers: runtimeRefreshMock.refreshRuntimeConfigConsumers,
 }))
 
 import { RuntimeTomlEditor } from './runtime-toml-editor'
@@ -102,6 +110,7 @@ describe('RuntimeTomlEditor', () => {
     apiMocks.patchRuntimeAssignment.mockReset()
     apiMocks.patchRuntimeRouting.mockReset()
     apiMocks.saveRuntimeTomlConfig.mockReset()
+    runtimeRefreshMock.refreshRuntimeConfigConsumers.mockClear()
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValue(baseConfig)
     apiMocks.patchRuntimeAssignment.mockImplementation(async (_keeperName: string, runtimeId: string | null) => ({
       ...richConfig,
@@ -181,6 +190,7 @@ describe('RuntimeTomlEditor', () => {
     expect(saveButton.disabled).toBe(true)
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(nextSource)
     expect(container.querySelector('[data-testid="runtime-toml-impact-preview"]')).toBeNull()
+    expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
   })
 
   it('renders runtime environment fields as structured projections', async () => {
@@ -338,6 +348,7 @@ describe('RuntimeTomlEditor', () => {
       expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('default = "openai.gpt"')
     })
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
   })
 
@@ -719,7 +730,60 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
-  it('does not offer CLI protocols or command transport in the add-provider form', async () => {
+  it('deletes a provider alias as a draft and retargets the default runtime to a remaining binding', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-provider-runpod_mtp-delete"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('default = "openai.gpt"')
+      expect(source).not.toContain('[providers.runpod_mtp]')
+      expect(source).not.toContain('[providers.runpod_mtp.credentials]')
+      expect(source).not.toContain('[runpod_mtp.qwen]')
+      expect(source).toContain('[providers.openai]')
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => {
+      const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+      expect(savedSource).toContain('default = "openai.gpt"')
+      expect(savedSource).not.toContain('[providers.runpod_mtp]')
+    })
+  })
+
+  it('blocks deleting the final runtime-bearing provider alias from the structured view', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({
+      ...baseConfig,
+      source_text: `${richSourceText
+        .replace(/\n\[providers\.openai\][\s\S]*?\n\[models\.qwen\]/, '\n[models.qwen]')
+        .replace(/\n\[models\.gpt\][\s\S]*?\n\[runpod_mtp\.qwen\]/, '\n[runpod_mtp.qwen]')
+        .replace(/\n\[openai\.gpt\][\s\S]*$/m, '\n')}`,
+    })
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-provider-runpod_mtp-delete"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-delete-provider-error"]')?.textContent)
+        .toContain('마지막 runtime binding')
+    })
+    expect(container.querySelector('[data-testid="runtime-delete-provider-error"]')?.getAttribute('role')).toBe('alert')
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).not.toContain('modified')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('does not offer messages protocols or command transport in the add-provider form', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -732,8 +796,8 @@ describe('RuntimeTomlEditor', () => {
     const protocolOptions = Array.from(
       container.querySelectorAll('[aria-label="새 provider protocol"] option'),
     ).map(option => (option as HTMLOptionElement).value)
-    expect(protocolOptions).toEqual(['openai-compatible-http', 'ollama-http', 'messages-http'])
-    expect(protocolOptions).not.toContain('openai-compatible-cli')
+    expect(protocolOptions).toEqual(['openai-compatible-http', 'ollama-http', 'openai-compatible-cli'])
+    expect(protocolOptions).not.toContain('messages-http')
     expect(protocolOptions).not.toContain('messages-cli')
     // No transport-kind selector left to switch to 'command'.
     expect(container.querySelector('[aria-label="새 provider transport 종류"]')).toBeNull()
@@ -891,6 +955,47 @@ command = "provider-runtime --serve"
     await waitFor(() => {
       expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain(
         'command(CLI)',
+      )
+    })
+    const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+    expect(sourceAfter).toBe(sourceBefore)
+  })
+
+  it('rejects a binding to an existing non-materializable messages-http provider', async () => {
+    // Legacy/hand-edited data: messages-http providers parse and can be rendered
+    // in the structured binding dropdown, but Runtime_adapter currently returns
+    // no Provider_config for Messages_api, so materialize_config would silently
+    // drop a binding pinned to one.
+    const configWithMessagesProvider = {
+      ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.messages_api]
+display-name = "Messages API"
+protocol = "messages-http"
+endpoint = "https://messages.example/v1"
+`,
+    }
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(configWithMessagesProvider)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+
+    const sourceBefore = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
+      target: { value: 'messages_api' },
+    })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
+      target: { value: 'gpt' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain(
+        'messages-http',
       )
     })
     const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value

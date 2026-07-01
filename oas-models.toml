@@ -30,13 +30,29 @@ output_per_million = 0.87
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.008333333333333333
 
+# WORKAROUND: same gap as the deepseek-v4-flash row below (see its comment for
+# the full explanation) — provider_config.ml has no base_url recognizer for
+# api.deepseek.com, so capabilities_for_config_model looks up
+# "openai_compat/deepseek-v4-pro" and the bare row above cannot satisfy it.
+# This provider-qualified row was missing here while the flash sibling had
+# already been fixed, which left [cross_verifier = "deepseek.deepseek-v4-pro"]
+# (config/runtime.toml) failing test_repo_runtime_bindings_resolve_through_oas_catalog
+# and breaking Runtime.init_default_strict / the CI "Runtime TOML gate" for
+# every PR built off main.
+# Root fix: same as deepseek-v4-flash's — a base_url recognizer for
+# api.deepseek.com in OAS (jeong-sik/oas#2374 precedent for runpod_mtp).
+# Removal target: after that OAS recognizer is pinned here and proven stable.
+# Capabilities mirror the bare deepseek-v4-pro row above.
 [[models]]
 id_prefix = "openai_compat/deepseek-v4-pro"
 base = "openai_chat"
+provider_name = "deepseek"
 max_context_tokens = 1000000
 max_output_tokens = 384000
 supports_tools = true
 supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true
@@ -71,13 +87,30 @@ output_per_million = 0.28
 cache_write_multiplier = 1.0
 cache_read_multiplier = 0.02
 
+# WORKAROUND: the pinned OAS emits provider_label "openai_compat" for the
+# DeepSeek direct endpoint (https://api.deepseek.com) because provider_config.ml
+# has no base_url recognizer for it — only ollama_cloud and openai are matched,
+# everything else falls through to string_of_provider_kind OpenAI_compat =
+# "openai_compat". capabilities_for_config_model therefore looks up
+# "openai_compat/deepseek-v4-flash", and the bare "deepseek-v4-flash" row above
+# cannot satisfy it (bare fallback is refused for tool-capable openai_compat
+# models via catalog_entry_requires_endpoint_declaration, provider_config.ml:293).
+# Without this provider-qualified row Runtime.init_default_strict refuses to boot
+# for the [deepseek.deepseek-v4-flash] runtime binding.
+# Root fix: add a base_url recognizer for api.deepseek.com in OAS so the label
+# is semantic ("deepseek"), mirroring jeong-sik/oas#2374 for runpod_mtp.
+# Removal target: after that OAS recognizer is pinned here and proven stable.
+# Capabilities mirror the canonical ../oas/models.toml deepseek-v4-flash row.
 [[models]]
 id_prefix = "openai_compat/deepseek-v4-flash"
 base = "openai_chat"
+provider_name = "deepseek"
 max_context_tokens = 1000000
 max_output_tokens = 384000
 supports_tools = true
 supports_tool_choice = true
+supports_required_tool_choice = false
+supports_named_tool_choice = false
 supports_reasoning = true
 supports_extended_thinking = true
 supports_reasoning_budget = true

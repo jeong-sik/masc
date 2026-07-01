@@ -166,12 +166,37 @@ let last_runtime_attempt_json (meta : keeper_meta) =
   | Some attempt -> runtime_attempt_record_json attempt
 ;;
 
+let no_progress_blocker_facts meta =
+  match meta.runtime.last_blocker with
+  | Some
+      { klass = No_progress_loop
+      ; facts = Some (No_progress_loop_facts facts)
+      ; _
+      } -> Some facts
+  | Some _ | None -> None
+;;
+
+let no_progress_runtime_blocker_fact_fields meta =
+  match no_progress_blocker_facts meta with
+  | None -> []
+  | Some facts ->
+    [ "no_progress_reason", `String facts.no_progress_reason
+    ; "no_progress_reason_source", `String "blocker_facts"
+    ; ( "no_progress_threshold"
+      , `Int facts.no_progress_threshold )
+    ; ( "no_progress_streak"
+      , `Int facts.no_progress_streak )
+    ; "no_progress_latched", `Bool facts.no_progress_latched
+    ]
+;;
+
 let runtime_blocker_facts_json (meta : keeper_meta) =
   `Assoc
-    [ "source", `String "keeper_runtime.last_runtime_attempt"
-    ; "runtime_id", `String (runtime_id_of_meta meta)
-    ; "last_runtime_attempt", last_runtime_attempt_json meta
-    ]
+    ([ "source", `String "keeper_runtime.last_runtime_attempt"
+     ; "runtime_id", `String (runtime_id_of_meta meta)
+     ; "last_runtime_attempt", last_runtime_attempt_json meta
+     ]
+     @ no_progress_runtime_blocker_fact_fields meta)
 ;;
 
 let runtime_blocker_fields_json (config : Workspace_utils.config) (meta : keeper_meta) =

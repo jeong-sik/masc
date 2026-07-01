@@ -59,6 +59,7 @@ import {
   keeperRecovering,
   keeperSending,
   keeperStatusDetails,
+  keeperStreamLastEventAt,
   keeperStreamStartedAt,
   keeperThreads,
   activeStreamRequestId,
@@ -249,6 +250,7 @@ describe('sendKeeperThreadMessage stream outcome', () => {
   beforeEach(() => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
+    keeperStreamLastEventAt.value = {}
     _clearPendingKeeperChatRequestsForTests()
     _resetKeeperThreadMessageSendGuardsForTests()
     _resetLiveSendRequestOwnersForTests()
@@ -338,6 +340,49 @@ describe('sendKeeperThreadMessage stream outcome', () => {
       clientActionId: 'send-button-click-2',
     })
     expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+  })
+
+  it('keeps another keeper lane available while one keeper stream is in flight', async () => {
+    let resolveEcho: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementation(async (
+      name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      if (name === 'echo') {
+        opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'echo reply' })
+        return new Promise<{ terminal: boolean }>(resolve => {
+          resolveEcho = resolve
+        })
+      }
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: `${name} reply` })
+      return { terminal: true }
+    })
+
+    const echoSend = sendKeeperThreadMessage('echo', 'slow turn')
+    await Promise.resolve()
+
+    expect(keeperSending.value.echo).toBe(true)
+    expect(activeStreamEntryId('echo')).not.toBeNull()
+
+    await sendKeeperThreadMessage('rama', 'status?')
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect(streamKeeperMessage.mock.calls.map(call => call[0])).toEqual(['echo', 'rama'])
+    expect(keeperSending.value.echo).toBe(true)
+    expect(activeStreamEntryId('echo')).not.toBeNull()
+    expect(keeperSending.value.rama).toBe(false)
+    expect(activeStreamEntryId('rama')).toBeNull()
+    expect((keeperThreads.value.rama ?? []).map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', 'status?', 'delivered'],
+      ['assistant', 'rama reply', 'delivered'],
+    ])
+
+    resolveEcho({ terminal: true })
+    await echoSend
+
+    expect(keeperSending.value.echo).toBe(false)
+    expect(activeStreamEntryId('echo')).toBeNull()
   })
 
   it('keeps queued client action ids guarded while a batched queue send is in flight', async () => {
@@ -721,6 +766,43 @@ describe('sendKeeperThreadMessage stream outcome', () => {
     // whole dashboard after every chat send (user-visible "refresh").
     expect(refreshDashboard).not.toHaveBeenCalled()
     expect(invalidateDashboardCache).not.toHaveBeenCalled()
+  })
+
+  it('throttles stream heartbeat signal updates during dense event bursts', async () => {
+    vi.useFakeTimers()
+    vi.setSystemTime(0)
+    try {
+      const observed: Array<number | null> = []
+      streamKeeperMessage.mockImplementation(async (
+        _name: string,
+        _message: string,
+        opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+      ) => {
+        vi.setSystemTime(1_000)
+        opts.onEvent({ type: 'RUN_STARTED' })
+        observed.push(keeperStreamLastEventAt.value.echo ?? null)
+
+        vi.setSystemTime(1_200)
+        opts.onEvent({ type: 'TEXT_MESSAGE_START' })
+        observed.push(keeperStreamLastEventAt.value.echo ?? null)
+
+        vi.setSystemTime(1_500)
+        opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: 'ok' })
+        observed.push(keeperStreamLastEventAt.value.echo ?? null)
+
+        vi.setSystemTime(2_100)
+        opts.onEvent({ type: 'RUN_FINISHED' })
+        observed.push(keeperStreamLastEventAt.value.echo ?? null)
+        return { terminal: true }
+      })
+
+      await sendKeeperThreadMessage('echo', '진행 상황?')
+
+      expect(observed).toEqual([1_000, 1_000, 1_000, 2_100])
+      expect(keeperStreamLastEventAt.value.echo).toBeNull()
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('hydrates tool outputs when a live stream finishes a tool call', async () => {

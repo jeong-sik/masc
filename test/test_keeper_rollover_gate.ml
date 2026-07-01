@@ -74,10 +74,14 @@ let non_overflow_classes_are_not_matched () =
    intentionally redacted to placeholder text — the gate semantics depend
    only on [klass]. *)
 let overflow_info : Keeper_meta_contract.blocker_info =
-  { klass = Keeper_meta_contract.Sdk_token_budget_exceeded; detail = "<opaque-detail>" }
+  Keeper_meta_contract.blocker_info_of_class
+    ~detail:"<opaque-detail>"
+    Keeper_meta_contract.Sdk_token_budget_exceeded
 
 let non_overflow_info : Keeper_meta_contract.blocker_info =
-  { klass = Keeper_meta_contract.Sdk_max_turns_exceeded; detail = "<opaque-detail>" }
+  Keeper_meta_contract.blocker_info_of_class
+    ~detail:"<opaque-detail>"
+    Keeper_meta_contract.Sdk_max_turns_exceeded
 
 let gate_skips_when_auto_handoff_disabled () =
   let decision =

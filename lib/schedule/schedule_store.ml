@@ -17,6 +17,7 @@ type store_error =
   | Schedule_not_due_candidate
   | Schedule_not_running
   | Grant_validation_failed of Schedule_domain.grant_error
+  | Persistence_failed of string
   | Corrupt_ledger of
       { primary_err : string
       ; recovery_err : string option
@@ -73,6 +74,7 @@ let store_error_to_string = function
   | Schedule_not_running -> "schedule is not running"
   | Grant_validation_failed err ->
     "grant validation failed: " ^ Schedule_domain.grant_error_to_string err
+  | Persistence_failed msg -> "schedule persistence failed: " ^ msg
   | Corrupt_ledger { primary_err; recovery_err } ->
     corrupt_message ~primary_err ~recovery_err
 ;;
@@ -236,8 +238,18 @@ let load_for_mutation config : (state, store_error) result =
 let write_state config state =
   ensure_dirs config;
   let json = state_to_yojson state in
-  Workspace_utils.write_json config (schedules_path config) json;
-  Workspace_utils.write_json config (recovery_path config) json
+  let* () =
+    Workspace_utils.write_json_result config (schedules_path config) json
+    |> Result.map_error (fun msg -> Persistence_failed msg)
+  in
+  (match Workspace_utils.write_json_result config (recovery_path config) json with
+   | Ok () -> ()
+   | Error msg ->
+     Log.Misc.warn
+       "schedule_store: primary ledger committed; recovery mirror write failed for %s: %s"
+       (recovery_path config)
+       msg);
+  Ok ()
 ;;
 
 let bump_state state ~schedules ~grants ~executions =
@@ -397,7 +409,7 @@ let insert_request config (request : Schedule_domain.schedule_request) =
         bump_state state ~schedules ~grants:state.grants
           ~executions:state.executions
       in
-      write_state config next_state;
+      let* () = write_state config next_state in
       Ok request)
 ;;
 
@@ -418,7 +430,7 @@ let record_grant config (grant : Schedule_domain.execution_grant) =
           let next_state =
             bump_state state ~schedules ~grants ~executions:state.executions
           in
-          write_state config next_state;
+          let* () = write_state config next_state in
           Ok updated_request))
 ;;
 
@@ -442,7 +454,7 @@ let cancel_request config ~schedule_id =
           bump_state state ~schedules ~grants:state.grants
             ~executions:state.executions
         in
-        write_state config next_state;
+        let* () = write_state config next_state in
         Ok updated_request)
 ;;
 
@@ -466,7 +478,7 @@ let refresh_due config ~now =
         bump_state state ~schedules ~grants:state.grants
           ~executions:state.executions
       in
-      write_state config next_state;
+      let* () = write_state config next_state in
       Ok (next_state, !changed)))
 ;;
 
@@ -496,7 +508,7 @@ let reschedule_due_recurring config ~now ~schedule_ids =
         bump_state state ~schedules ~grants:state.grants
           ~executions:state.executions
       in
-      write_state config next_state;
+      let* () = write_state config next_state in
       Ok (next_state, !changed)))
 ;;
 
@@ -513,7 +525,7 @@ let start_due_candidate config ~now ~schedule_id =
         let schedules = replace_schedule state.schedules updated in
         let executions = make_execution_record ~now request :: state.executions in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
-        write_state config next_state;
+        let* () = write_state config next_state in
         Ok updated)
 ;;
 
@@ -543,7 +555,7 @@ let complete_running config ~now ~schedule_id ?detail () =
                })
         in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
-        write_state config next_state;
+        let* () = write_state config next_state in
         Ok updated)
 ;;
 
@@ -569,7 +581,7 @@ let fail_running config ~now ~schedule_id ~error =
                })
         in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
-        write_state config next_state;
+        let* () = write_state config next_state in
         Ok updated)
 ;;
 
@@ -593,7 +605,7 @@ let fail_due_candidate config ~now ~schedule_id ~error =
         let schedules = replace_schedule state.schedules updated in
         let executions = execution :: state.executions in
         let next_state = bump_state state ~schedules ~grants:state.grants ~executions in
-        write_state config next_state;
+        let* () = write_state config next_state in
         Ok updated)
 ;;
 

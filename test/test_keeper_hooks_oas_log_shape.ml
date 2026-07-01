@@ -21,6 +21,38 @@ let test_tool_arg_shapes_keep_field_names () =
   check string "keys preserve input order" "argv,cwd,executable"
     (Under_test.tool_input_keys_for_log input)
 
+let keeper_tool_name name = Keeper_tool_name.to_string name
+
+let check_watchdog_completion_progress name expected =
+  check bool name expected
+    (Under_test.tool_completion_records_watchdog_progress name)
+
+let test_tool_completion_watchdog_progress_policy () =
+  check_watchdog_completion_progress
+    (keeper_tool_name Keeper_tool_name.Tasks_list)
+    false;
+  check_watchdog_completion_progress
+    (keeper_tool_name Keeper_tool_name.Board_list)
+    false;
+  check_watchdog_completion_progress
+    (keeper_tool_name Keeper_tool_name.Board_post_get)
+    false;
+  List.iter
+    (fun tool_name -> check_watchdog_completion_progress tool_name false)
+    Masc.Keeper_tool_capability_axis.polling_read_tool_names;
+  check_watchdog_completion_progress
+    (keeper_tool_name Keeper_tool_name.Task_claim)
+    true;
+  check_watchdog_completion_progress
+    (keeper_tool_name Keeper_tool_name.Task_done)
+    true;
+  check_watchdog_completion_progress
+    (keeper_tool_name Keeper_tool_name.Board_comment)
+    true;
+  check_watchdog_completion_progress
+    (keeper_tool_name Keeper_tool_name.Execute)
+    true
+
 (* F2 canonical projection consumption: block counting in
    [summarize_thinking_blocks] is delegated to OAS [Response_shape.summarize_blocks];
    MASC keeps the policy shaping (thinking_present + thinking_kind classifier).
@@ -77,6 +109,8 @@ let () =
             test_empty_tool_args_are_explicit_object_shape
         ; test_case "field shapes are explicit" `Quick
             test_tool_arg_shapes_keep_field_names
+        ; test_case "watchdog progress ignores passive reads" `Quick
+            test_tool_completion_watchdog_progress_policy
         ] )
     ; ( "thinking-summary-classifier"
       , [ test_case "empty -> none" `Quick test_thinking_summary_none_empty

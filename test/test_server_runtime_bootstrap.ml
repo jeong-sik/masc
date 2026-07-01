@@ -1346,13 +1346,13 @@ let test_health_json_surfaces_durable_paused_keepers () =
             Fd_accountant.all_kinds;
           Alcotest.(check int) "health exposes bootable keeper count" 1
             (fleet_safety |> member "bootable_keeper_count" |> to_int);
-          Alcotest.(check int) "health exposes autoboot keeper count" 2
+          Alcotest.(check int) "health exposes autoboot keeper count" 1
             (fleet_safety |> member "autoboot_enabled_keeper_count" |> to_int);
           Alcotest.(check int) "health exposes paused autoboot keeper count" 1
             (fleet_safety |> member "paused_autoboot_enabled_keeper_count" |> to_int);
-          Alcotest.(check int) "health exposes target reaction capacity" 2
+          Alcotest.(check int) "health exposes target reaction capacity" 1
             (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
-          Alcotest.(check int) "health exposes minimum running fibers" 2
+          Alcotest.(check int) "health exposes minimum running fibers" 1
             (fleet_safety |> member "minimum_running_fibers" |> to_int);
           Alcotest.(check string) "health marks fleet blocked" "blocked"
             (fleet_safety |> member "status" |> to_string);
@@ -1363,7 +1363,7 @@ let test_health_json_surfaces_durable_paused_keepers () =
             (fleet_safety |> member "no_executable_keeper_fibers" |> to_bool);
           Alcotest.(check bool) "health marks capacity below target" true
             (fleet_safety |> member "reaction_capacity_below_target" |> to_bool);
-          Alcotest.(check int) "health exposes capacity shortfall" 2
+          Alcotest.(check int) "health exposes capacity shortfall" 1
             (fleet_safety |> member "reaction_capacity_shortfall_count" |> to_int);
           Alcotest.(check bool) "health fleet asks for operator action" true
             (fleet_safety |> member "operator_action_required" |> to_bool);
@@ -1957,7 +1957,12 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
     let config_root = make_config_root dir in
     List.iter
       (write_config_root_keeper_toml config_root)
-      [ "capacity-paused"; "capacity-running-a"; "capacity-running-b" ];
+      [
+        "capacity-paused";
+        "capacity-running-a";
+        "capacity-running-b";
+        "capacity-missing";
+      ];
     with_env "MASC_CONFIG_DIR" (Some config_root) @@ fun () ->
     let previous_state = !Server_auth.server_state in
     Config_dir_resolver.reset ();
@@ -2001,19 +2006,36 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
         List.iter
           (write_keeper_meta_exn config)
           [ paused; running_a; running_b; runtime_only ];
-        with_running_keeper_metas config [ running_a; running_b; runtime_only ] (fun () ->
+        with_running_keeper_metas config
+          [ paused; running_a; running_b; runtime_only ]
+          (fun () ->
           let request = Httpun.Request.create `GET "/health" in
           let json = Server_routes_http_runtime.make_health_json request in
           let open Yojson.Safe.Util in
-          let fleet_safety = json |> member "keeper_fleet_safety" in
-          Alcotest.(check int) "health exposes running reaction capacity" 3
-            (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
-          Alcotest.(check int) "health exposes executable reaction capacity" 3
-            (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
-          Alcotest.(check int) "health exposes failing keeper count" 0
-            (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
-          Alcotest.(check int) "health exposes target reaction capacity" 4
-            (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
+	          let paused_keepers = json |> member "paused_keepers" in
+	          let fleet_safety = json |> member "keeper_fleet_safety" in
+	          Alcotest.(check int) "health exposes running reaction capacity" 3
+	            (fleet_safety |> member "effective_reaction_capacity_count" |> to_int);
+	          Alcotest.(check int) "health exposes executable reaction capacity" 3
+	            (fleet_safety |> member "executable_reaction_capacity_count" |> to_int);
+	          Alcotest.(check (list string))
+	            "health excludes paused registry entries from running capacity"
+	            [ "capacity-running-a"; "capacity-running-b"; "runtime-only" ]
+	            (fleet_safety |> member "running_keeper_names" |> to_list
+	             |> List.map to_string);
+	          Alcotest.(check int) "health exposes failing keeper count" 0
+	            (fleet_safety |> member "failing_keeper_fiber_count" |> to_int);
+	          Alcotest.(check int) "health exposes target reaction capacity" 4
+	            (fleet_safety |> member "target_reaction_capacity_count" |> to_int);
+	          Alcotest.(check int) "health exposes paused autoboot target separately" 1
+	            (fleet_safety
+	             |> member "paused_autoboot_enabled_keeper_count"
+	             |> to_int);
+	          Alcotest.(check (list string))
+	            "health keeps durable paused keeper in paused inventory"
+	            [ "capacity-paused" ]
+	            (paused_keepers |> member "durable_names" |> to_list
+	             |> List.map to_string);
           Alcotest.(check int) "health exposes minimum running fibers" 2
             (fleet_safety |> member "minimum_running_fibers" |> to_int);
           Alcotest.(check bool) "health is not below minimum margin" false
@@ -2029,40 +2051,25 @@ let test_health_json_degrades_when_reaction_capacity_below_target () =
           Alcotest.(check int) "health exposes blocked keeper count" 2
             (fleet_safety |> member "blocked_count" |> to_int);
           Alcotest.(check (list string)) "health exposes blocked keeper names"
-            [ "capacity-paused"; "example" ]
+            [ "capacity-missing"; "example" ]
             (fleet_safety |> member "blocked_keeper_names" |> to_list
              |> List.map to_string);
           Alcotest.(check (list (pair string string)))
             "health explains blocked keeper reasons"
-            [ ("capacity-paused", "durable_paused_autoboot_enabled")
-            ; ("example", "not_registered")
-            ]
+            [ ("capacity-missing", "not_registered"); ("example", "not_registered") ]
             (fleet_safety |> member "blocked_keeper_reasons" |> to_list
              |> List.map (fun row ->
-                  ( row |> member "keeper" |> to_string
-                  , row |> member "reason" |> to_string )));
+                  (row |> member "keeper" |> to_string, row |> member "reason" |> to_string)));
           let blocked_detail name =
             fleet_safety |> member "blocked_keeper_reasons" |> to_list
             |> List.find (fun row -> row |> member "keeper" |> to_string = name)
           in
           Alcotest.(check string) "health keeps typed row name alias"
-            "capacity-paused"
-            (blocked_detail "capacity-paused" |> member "name" |> to_string);
-          Alcotest.(check string) "health suggests paused action"
-            "resume_or_leave_paused"
-            (blocked_detail "capacity-paused" |> member "action" |> to_string);
-          Alcotest.(check string) "health preserves paused blocker class"
-            "no_progress_loop"
-            (blocked_detail "capacity-paused"
-             |> member "last_blocker"
-             |> member "klass"
-             |> to_string);
-          Alcotest.(check string) "health preserves paused blocker detail"
-            "no_progress loop detected"
-            (blocked_detail "capacity-paused"
-             |> member "last_blocker"
-             |> member "detail"
-             |> to_string);
+            "capacity-missing"
+            (blocked_detail "capacity-missing" |> member "name" |> to_string);
+          Alcotest.(check string) "health suggests missing target action"
+            "start_or_recover_keeper"
+            (blocked_detail "capacity-missing" |> member "action" |> to_string);
           Alcotest.(check string) "health suggests unregistered action"
             "start_or_recover_keeper"
             (blocked_detail "example" |> member "action" |> to_string);

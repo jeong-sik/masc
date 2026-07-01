@@ -146,13 +146,12 @@ let record_failure_and_maybe_escalate
           then
             Log.Keeper.warn
               "%s: auto-paused after %d completion contract no-progress failures \
-               (pause_threshold=%d, crash_threshold=%d, released_task=%s); operator \
-               must inspect provider/model reasoning output before resuming"
+               (pause_threshold=%d, crash_threshold=%d, task_release=policy_checked); \
+               operator must inspect provider/model reasoning output before resuming"
               meta.name
               count
               turn_fail_streak_threshold
               threshold
-              "none"
           else
             Log.Keeper.warn
               "%s: auto-paused after %d idle-detected loop failures \

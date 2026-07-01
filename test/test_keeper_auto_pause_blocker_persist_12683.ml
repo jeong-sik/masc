@@ -358,6 +358,70 @@ let test_no_progress_loop_detection_releases_owned_active_task () =
        | Ok None -> fail "expected persisted keeper meta"
        | Error err -> fail err)
 
+let test_completion_contract_pause_sync_releases_owned_active_task () =
+  let base_path = temp_dir "masc-completion-contract-release-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       let _init_msg = Masc.Workspace.init config ~agent_name:(Some "operator") in
+       let keeper_name = "completion-contract-owner" in
+       let meta = make_meta keeper_name in
+       let created = create_owned_active_task config meta in
+       let current_task_id = task_id_of_created_task created in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"completion contract violated"
+           Keeper_meta_contract.Completion_contract_violation
+       in
+       let meta =
+         { meta with
+           current_task_id = Some current_task_id
+         ; runtime = { meta.runtime with last_blocker = Some blocker }
+         }
+       in
+       Masc.Keeper_registry.clear ();
+       (match Keeper_meta_store.write_meta config meta with
+        | Ok () -> ()
+        | Error err -> fail err);
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       match
+         Masc.Keeper_turn_runtime_budget.sync_keeper_paused_state_with_resume_policy
+           ~config
+           ~meta
+           ~paused:true
+           ~resume_policy:Masc.Keeper_supervisor_pause_policy.Manual_resume_required
+       with
+       | Error err -> fail err
+       | Ok paused_meta ->
+         check bool "returned meta paused" true paused_meta.paused;
+         check (option string) "returned meta current_task_id cleared" None
+           (Option.map Keeper_id.Task_id.to_string paused_meta.current_task_id);
+         (match task_status_by_id config created.task_id with
+          | Masc_domain.Todo -> ()
+          | status ->
+            fail
+              (Printf.sprintf
+                 "expected completion-contract pause to release task to todo, got %s"
+                 (Masc_domain.task_status_to_string status)));
+         (match Keeper_meta_store.read_meta config keeper_name with
+          | Ok (Some persisted) ->
+            check bool "persisted meta paused" true persisted.paused;
+            check (option string) "persisted current_task_id cleared" None
+              (Option.map Keeper_id.Task_id.to_string persisted.current_task_id);
+            (match persisted.runtime.last_blocker with
+             | Some
+                 { Keeper_meta_contract.klass =
+                     Keeper_meta_contract.Completion_contract_violation
+                 ; _
+                 } -> ()
+             | Some _ -> fail "expected completion-contract blocker to remain"
+             | None -> fail "expected completion-contract blocker to remain")
+          | Ok None -> fail "expected persisted keeper meta"
+          | Error err -> fail err))
+
 let test_operator_resume_clears_no_progress_loop_latch () =
   Eio_main.run
   @@ fun env ->
@@ -1198,6 +1262,11 @@ let () =
             test_direct_success_persist_failure_keeps_no_progress_pause;
           test_case "direct success leaves unrelated pause intact" `Quick
             test_direct_success_leaves_unrelated_pause_intact;
+        ] );
+      ( "completion_contract pause",
+        [
+          test_case "pause sync releases owned active task" `Quick
+            test_completion_contract_pause_sync_releases_owned_active_task;
         ] );
       ( "idle-detected loop",
         [

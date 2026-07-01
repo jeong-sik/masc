@@ -93,10 +93,22 @@ val handle_auto_pause_from_meta
   -> unit
   -> (Keeper_meta_contract.keeper_meta, string) result
 
+(** [release_owned_active_tasks_after_typed_pause ~config ~meta
+      ~reason_tag] releases keeper-owned active tasks for persisted
+    [paused=true] metas whose typed [last_blocker] is an execution-stopping
+    pause class. Human/non-keeper ownership is not affected because owned-task
+    discovery is constrained by [meta.agent_name] and its resolved keeper
+    aliases. *)
+val release_owned_active_tasks_after_typed_pause
+  :  config:Workspace.config
+  -> meta:Keeper_meta_contract.keeper_meta
+  -> reason_tag:string
+  -> (Keeper_meta_contract.keeper_meta, string) result
+
 (** [reconcile_persisted_auto_pause_task_release ~config ~meta] repairs
     durable paused meta left behind by an earlier runtime before the pause
     policy could clear task ownership. It only acts on typed blocker classes
-    whose pause path already owns task release semantics; operator/manual
+    whose pause class owns task release semantics; operator/manual
     pauses without such a blocker are left untouched. *)
 val reconcile_persisted_auto_pause_task_release
   :  config:Workspace.config

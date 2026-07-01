@@ -139,14 +139,16 @@ let clear_current_task_id_after_successful_pause_release ~config ~meta ~reason_t
 ;;
 
 let blocker_class_releases_owned_tasks_on_pause = function
-  | Turn_timeout | Turn_livelock_blocked | No_progress_loop -> true
+  | Turn_timeout
+  | Turn_livelock_blocked
+  | No_progress_loop
+  | Completion_contract_violation -> true
   | Runtime_exhausted _
   | Capacity_backpressure
   | Ambiguous_post_commit_timeout
   | Ambiguous_post_commit_failure
   | Admission_queue_wait_timeout
   | Turn_timeout_after_queue_wait
-  | Completion_contract_violation
   | Fiber_unresolved
   | Stale_turn_timeout
   | Stale_fleet_batch
@@ -162,7 +164,7 @@ let blocker_class_releases_owned_tasks_on_pause = function
   | Sdk_input_required -> false
 ;;
 
-let reconcile_persisted_auto_pause_task_release ~config ~meta =
+let release_owned_active_tasks_after_typed_pause ~config ~meta ~reason_tag =
   let release_required =
     meta.paused
     &&
@@ -173,14 +175,14 @@ let reconcile_persisted_auto_pause_task_release ~config ~meta =
   if not release_required
   then Ok meta
   else (
-    let reason_tag = "persisted_auto_pause_reconcile" in
     let release_ok = release_owned_active_tasks_after_pause ~config ~meta ~reason_tag in
     if not release_ok
     then
       Error
         (Printf.sprintf
-           "%s: persisted auto-pause task release failed"
-           meta.name)
+           "%s: %s task release failed"
+           meta.name
+           reason_tag)
     else if
       clear_current_task_id_after_successful_pause_release
         ~config
@@ -190,8 +192,16 @@ let reconcile_persisted_auto_pause_task_release ~config ~meta =
     else
       Error
         (Printf.sprintf
-           "%s: persisted auto-pause current_task_id clear failed"
-           meta.name))
+           "%s: %s current_task_id clear failed"
+           meta.name
+           reason_tag))
+;;
+
+let reconcile_persisted_auto_pause_task_release ~config ~meta =
+  release_owned_active_tasks_after_typed_pause
+    ~config
+    ~meta
+    ~reason_tag:"persisted_auto_pause_reconcile"
 ;;
 
 let handle_crash_auto_pause

@@ -716,6 +716,30 @@ let sync_keeper_paused_state_impl
         (if paused
          then Keeper_state_machine.Operator_pause
          else Keeper_state_machine.Operator_resume);
+      let synced_meta =
+        if paused
+        then
+          match
+            Keeper_supervisor_pause_policy.release_owned_active_tasks_after_typed_pause
+              ~config
+              ~meta:synced_meta
+              ~reason_tag:"pause_sync"
+          with
+          | Ok released_meta -> released_meta
+          | Error err ->
+            Otel_metric_store.inc_counter
+              Keeper_metrics.(to_string RuntimeSyncFailures)
+              ~labels:[("keeper", meta.name); ("site", "pause_sync_task_release")]
+              ();
+            Keeper_turn_helpers.report_keeper_cycle_side_effect_issue
+              ~config
+              ~keeper_name:meta.name
+              ~side_effect:"pause sync task release"
+              ~severity:`Error
+              err;
+            synced_meta
+        else synced_meta
+      in
       (if not paused then
          match Keeper_registry.get ~base_path:config.base_path meta.name with
          (* tla-lint: allow-mutation: fiber signal — wake on resume from runtime budget gate *)

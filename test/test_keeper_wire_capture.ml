@@ -6,7 +6,20 @@
 module Wire = Masc.Keeper_wire_capture
 
 let flag = "MASC_KEEPER_WIRE_CAPTURE"
-let set v = Unix.putenv flag v
+
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
+let with_env key value f =
+  let prev = Sys.getenv_opt key in
+  Unix.putenv key value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv key v
+      | None -> unsetenv key)
+    f
+
+let with_flag value f = with_env flag value f
 
 let contains ~needle haystack =
   let nl = String.length needle and hl = String.length haystack in
@@ -37,93 +50,119 @@ let rec find_jsonl dir =
    [ghp_] prefix regardless. *)
 let fake_github_token = "ghp_" ^ String.make 36 '7'
 
+let check_enabled_value label value expected =
+  with_flag value (fun () -> Alcotest.(check bool) label expected (Wire.enabled ()))
+
 let enabled_parsing () =
-  set "1";
-  Alcotest.(check bool) "1 enables" true (Wire.enabled ());
-  set "true";
-  Alcotest.(check bool) "true enables" true (Wire.enabled ());
-  set "YES";
-  Alcotest.(check bool) "YES (case-insensitive) enables" true (Wire.enabled ());
-  set "on";
-  Alcotest.(check bool) "on enables" true (Wire.enabled ());
-  set "";
-  Alcotest.(check bool) "empty disables" false (Wire.enabled ());
-  set "0";
-  Alcotest.(check bool) "0 disables" false (Wire.enabled ());
-  set "nope";
-  Alcotest.(check bool) "unknown value disables" false (Wire.enabled ())
+  check_enabled_value "1 enables" "1" true;
+  check_enabled_value "true enables" "true" true;
+  check_enabled_value "YES (case-insensitive) enables" "YES" true;
+  check_enabled_value "on enables" "on" true;
+  check_enabled_value "empty disables" "" false;
+  check_enabled_value "0 disables" "0" false;
+  check_enabled_value "unknown value disables" "nope" false
+
+let env_is_restored () =
+  unsetenv flag;
+  Alcotest.(check (option string)) "starts unset" None (Sys.getenv_opt flag);
+  with_flag "1" (fun () ->
+    Alcotest.(check bool) "enabled inside scope" true (Wire.enabled ()));
+  Alcotest.(check (option string)) "restored unset" None (Sys.getenv_opt flag)
 
 let disabled_is_noop () =
-  set "";
-  let base = Filename.temp_dir "wirecap_off" "" in
-  Wire.capture_request ~base_path:base ~keeper_name:"sangsu" ~turn_id:1
-    ~system_prompt:"sys" ~user_message:"u" ~history_messages:[];
-  Alcotest.(check (list string))
-    "no jsonl written when disabled" [] (find_jsonl base)
+  with_flag "" (fun () ->
+    let base = Filename.temp_dir "wirecap_off" "" in
+    Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
+      ~sdk_turn:0 ~system_prompt:"sys" ~extra_system_context:None
+      ~user_message:"u" ~history_messages:[];
+    Alcotest.(check (list string))
+      "no jsonl written when disabled" [] (find_jsonl base))
 
 let enabled_writes_redacted () =
-  set "1";
-  let base = Filename.temp_dir "wirecap_on" "" in
-  let history =
-    [
-      Agent_sdk.Types.assistant_msg "좋아, 연구 시작한다";
-      Agent_sdk.Types.user_msg "continue";
-    ]
-  in
-  Wire.capture_request ~base_path:base ~keeper_name:"sangsu" ~turn_id:7
-    ~system_prompt:("token " ^ fake_github_token ^ " end")
-    ~user_message:"hello world" ~history_messages:history;
-  let files = find_jsonl base in
-  Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
-  let content = read_file (List.hd files) in
-  Alcotest.(check bool) "raw github token is redacted" false
-    (contains ~needle:fake_github_token content);
-  Alcotest.(check bool) "redaction marker present" true
-    (contains ~needle:"[REDACTED]" content);
-  Alcotest.(check bool) "history_message_count recorded" true
-    (contains ~needle:"\"history_message_count\":2" content);
-  Alcotest.(check bool) "keeper name recorded" true
-    (contains ~needle:"sangsu" content);
-  Alcotest.(check bool) "turn_id recorded" true
-    (contains ~needle:"\"turn_id\":7" content);
-  Alcotest.(check bool) "replayed history text recorded" true
-    (contains ~needle:"좋아, 연구 시작한다" content);
-  Alcotest.(check bool) "request kind recorded" true
-    (contains ~needle:"\"kind\":\"request\"" content)
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_on" "" in
+    let history =
+      [
+        Agent_sdk.Types.assistant_msg "좋아, 연구 시작한다";
+        Agent_sdk.Types.user_msg "continue";
+      ]
+    in
+    Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:7
+      ~sdk_turn:3
+      ~system_prompt:("token " ^ fake_github_token ^ " end")
+      ~extra_system_context:(Some "dynamic context")
+      ~user_message:"hello world" ~history_messages:history;
+    let files = find_jsonl base in
+    Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
+    let content = read_file (List.hd files) in
+    Alcotest.(check bool) "raw github token is redacted" false
+      (contains ~needle:fake_github_token content);
+    Alcotest.(check bool) "redaction marker present" true
+      (contains ~needle:"[REDACTED]" content);
+    Alcotest.(check bool) "history_message_count recorded" true
+      (contains ~needle:"\"history_message_count\":2" content);
+    Alcotest.(check bool) "keeper name recorded" true
+      (contains ~needle:"sangsu" content);
+    Alcotest.(check bool) "turn_id recorded" true
+      (contains ~needle:"\"turn_id\":7" content);
+    Alcotest.(check bool) "sdk_turn recorded" true
+      (contains ~needle:"\"sdk_turn\":3" content);
+    Alcotest.(check bool) "assistant role recorded" true
+      (contains ~needle:"\"role\":\"assistant\"" content);
+    Alcotest.(check bool) "user role recorded" true
+      (contains ~needle:"\"role\":\"user\"" content);
+    Alcotest.(check bool) "extra context recorded" true
+      (contains ~needle:"dynamic context" content);
+    Alcotest.(check bool) "replayed history text recorded" true
+      (contains ~needle:"좋아, 연구 시작한다" content);
+    Alcotest.(check bool) "request kind recorded" true
+      (contains ~needle:"\"kind\":\"request\"" content))
+
+let request_capture_failure_is_best_effort () =
+  with_flag "1" (fun () ->
+    let root_file = Filename.temp_file "wirecap_root_file" "" in
+    Wire.capture_request ~masc_root:root_file ~keeper_name:"sangsu" ~turn_id:1
+      ~sdk_turn:0 ~system_prompt:"sys" ~extra_system_context:None
+      ~user_message:"hello" ~history_messages:[])
 
 let response_disabled_is_noop () =
-  set "";
-  let base = Filename.temp_dir "wirecap_resp_off" "" in
-  Wire.capture_response ~base_path:base ~keeper_name:"sangsu" ~turn_id:1
-    ~response_text:"anything";
-  Alcotest.(check (list string))
-    "no jsonl written when disabled" [] (find_jsonl base)
+  with_flag "" (fun () ->
+    let base = Filename.temp_dir "wirecap_resp_off" "" in
+    Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
+      ~response_text:"anything";
+    Alcotest.(check (list string))
+      "no jsonl written when disabled" [] (find_jsonl base))
 
 let response_capture_writes_redacted () =
-  set "1";
-  let base = Filename.temp_dir "wirecap_resp_on" "" in
-  Wire.capture_response ~base_path:base ~keeper_name:"sangsu" ~turn_id:9
-    ~response_text:("out " ^ fake_github_token ^ " done");
-  let files = find_jsonl base in
-  Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
-  let content = read_file (List.hd files) in
-  Alcotest.(check bool) "response kind recorded" true
-    (contains ~needle:"\"kind\":\"response\"" content);
-  Alcotest.(check bool) "raw github token is redacted" false
-    (contains ~needle:fake_github_token content);
-  Alcotest.(check bool) "turn_id recorded" true
-    (contains ~needle:"\"turn_id\":9" content)
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_resp_on" "" in
+    Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:9
+      ~response_text:("out " ^ fake_github_token ^ " done");
+    let files = find_jsonl base in
+    Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
+    let content = read_file (List.hd files) in
+    Alcotest.(check bool) "response kind recorded" true
+      (contains ~needle:"\"kind\":\"response\"" content);
+    Alcotest.(check bool) "raw github token is redacted" false
+      (contains ~needle:fake_github_token content);
+    Alcotest.(check bool) "turn_id recorded" true
+      (contains ~needle:"\"turn_id\":9" content))
 
 let () =
   Alcotest.run "keeper_wire_capture"
     [
       ( "enabled",
-        [ Alcotest.test_case "env flag parsing" `Quick enabled_parsing ] );
+        [
+          Alcotest.test_case "env flag parsing" `Quick enabled_parsing;
+          Alcotest.test_case "env scope restores unset" `Quick env_is_restored;
+        ] );
       ( "capture_request",
         [
           Alcotest.test_case "disabled is a no-op" `Quick disabled_is_noop;
           Alcotest.test_case "enabled writes redacted jsonl" `Quick
             enabled_writes_redacted;
+          Alcotest.test_case "write failure is best effort" `Quick
+            request_capture_failure_is_best_effort;
         ] );
       ( "capture_response",
         [

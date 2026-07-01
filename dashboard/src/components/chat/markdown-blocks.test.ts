@@ -232,8 +232,8 @@ describe('parseMarkdownToBlocks', () => {
     // ...and the trailing prose survives (not swallowed into a code box).
     expect(p.html).toContain('This prose should not be trapped.')
     expect(p.html).toContain('More prose.')
-    // The fenced JSON body is rendered literally (escapeHtml escapes &<> only).
-    expect(p.html).toContain('{"x":1}')
+    // The fenced JSON body is rendered literally after HTML escaping.
+    expect(p.html).toContain('{&quot;x&quot;:1}')
     // Newlines are preserved as <br> for the multi-line body.
     expect(p.html).toContain('<br>')
   })

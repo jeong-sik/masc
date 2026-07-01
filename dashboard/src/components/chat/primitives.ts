@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import type { ComponentChildren, VNode } from 'preact'
 import { JsonViewerCard } from '../common/json-viewer'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
+import { escapeHtml } from '../../lib/html-escape'
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'preact/hooks'
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
@@ -3076,10 +3077,6 @@ export const STREAM_STALL_THRESHOLD_S = 15
 export const CHAT_COMPOSER_DEFAULT_KEEPER_LABEL = 'keeper'
 export const CHAT_COMPOSER_COMMAND_HEADER_SUFFIX = '명령'
 export const CHAT_COMPOSER_DROP_PLACEHOLDER = '여기에 놓아 첨부…'
-
-function escapeHtml(raw: string): string {
-  return raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
 
 export function AttachDraftChip({
   attachment,

@@ -1,12 +1,9 @@
 import { marked, type Token, type Tokens } from 'marked'
 import { sanitizeHtml as purifyHtml } from '../../lib/dompurify'
+import { escapeHtml } from '../../lib/html-escape'
 import type { ChatBlock, ChatCalloutSeverity, ChatTableCellValue } from '../../types'
 import { linkifyHtmlReferences } from './chat-linkify'
 import { FENCE_OPEN_RE, STANDALONE_URL_RE, isSvgDocument } from './markdown-cue'
-
-function escapeHtml(raw: string): string {
-  return raw.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
-}
 
 // A standalone URL occupying the whole paragraph renders as a link/image card,
 // matching the line-based parser in lib/chat-blocks.ts so this rich parser is a

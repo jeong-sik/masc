@@ -1,16 +1,9 @@
+import { escapeHtml } from '../../lib/html-escape'
+
 const URL_RE = /(^|[\s(>])(https?:\/\/[^\s<)]+[^\s<).,!?:;])/g
 const BOARD_POST_ID_RE = /(^|[\s([{"'`>])(p-[a-f0-9]{32})(?=$|[\s)\].,!?:;}"'`<])/gi
 const ANCHOR_RE = /(<a\b[\s\S]*?<\/a>)/gi
 const HTML_TAG_RE = /(<[^>]+>)/g
-
-function escapeHtml(raw: string): string {
-  return raw
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
 
 function boardPostHref(postId: string): string {
   return `#board?post=${encodeURIComponent(postId)}`

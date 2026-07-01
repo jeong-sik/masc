@@ -59,7 +59,30 @@ let test_media_type_mapping () =
   Alcotest.(check string)
     "unknown ext content-type"
     "application/octet-stream"
-    (M.content_type_of_ext "bin")
+    (M.content_type_of_ext "bin");
+  (* jpg canonicalizes to image/jpeg, mp3 to audio/mpeg (SSOT table first-wins). *)
+  Alcotest.(check string) "jpg content-type" "image/jpeg" (M.content_type_of_ext "jpg");
+  Alcotest.(check string) "mp3 content-type" "audio/mpeg" (M.content_type_of_ext "mp3")
+
+let media_category_testable =
+  Alcotest.testable
+    (fun ppf c ->
+      Format.pp_print_string ppf
+        (match c with
+         | M.Image -> "Image"
+         | M.Audio -> "Audio"
+         | M.Document -> "Document"
+         | M.Other -> "Other"))
+    ( = )
+
+let test_media_category () =
+  let check = Alcotest.(check media_category_testable) in
+  check "png is Image" M.Image (M.category_of_media_type "image/png");
+  check "jpeg is Image" M.Image (M.category_of_media_type "image/jpeg");
+  check "mp3 is Audio" M.Audio (M.category_of_media_type "audio/mpeg");
+  check "wav is Audio" M.Audio (M.category_of_media_type "audio/wav");
+  check "pdf is Document" M.Document (M.category_of_media_type "application/pdf");
+  check "unknown is Other" M.Other (M.category_of_media_type "application/x-unknown")
 
 let () =
   Alcotest.run
@@ -72,5 +95,6 @@ let () =
             test_content_addressed_dedup
         ; Alcotest.test_case "unknown token absent" `Quick test_unknown_token_absent
         ; Alcotest.test_case "media_type mapping" `Quick test_media_type_mapping
+        ; Alcotest.test_case "media category" `Quick test_media_category
         ] )
     ]

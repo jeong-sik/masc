@@ -776,6 +776,11 @@ let process_single_turn ~connector_user_line_recorded_upstream
      while recording the Gate surface label. *)
   let chat_speaker : Keeper_chat_store.speaker = chat_speaker_of_request payload in
   let worker_text_accum = Keeper_stream_text_accum.create () in
+  (* RFC-0301 item 6: collect generated media from the same stream so the assistant
+     turn can persist it as reload-visible chat blocks. The bridge surfaces this
+     media live over SSE; the persist site records it durably (see the persist arm
+     below). Content-addressed, so the two persists reuse one file. *)
+  let worker_media_accum = Keeper_stream_media_accum.create () in
   let on_event evt =
     (match evt with
      | Agent_sdk.Types.ContentBlockDelta
@@ -784,6 +789,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
            (Keeper_stream_text_accum.on_delta worker_text_accum ~redact:redact_text text
             : string)
      | _ -> ());
+    Keeper_stream_media_accum.on_event worker_media_accum evt;
     push_worker_event (Stream_event evt)
   in
   let persist_user_message_only () =
@@ -920,12 +926,24 @@ let process_single_turn ~connector_user_line_recorded_upstream
                         so pair the reply by appending the assistant line only
                         (mirrors [append_direct_chat_pair_if_reply]'s connector
                         arm). The dashboard route records the full pair. *)
+                     (* RFC-0301 item 6: attach any generated media (accumulated
+                        from this turn's stream) as reload-visible chat blocks so a
+                        dashboard reload shows the image/audio, not just the text. *)
+                     let blocks =
+                       match
+                         Keeper_stream_media_accum.to_chat_blocks
+                           ~base_dir:base_path worker_media_accum
+                       with
+                       | [] -> None
+                       | media_blocks -> Some media_blocks
+                     in
                      if connector_user_line_recorded_upstream then
                        Keeper_chat_store.append_assistant_message
                          ~base_dir:base_path
                          ~keeper_name:payload.name
                          ~content:visible_reply
                          ~surface:chat_surface
+                         ?blocks
                          ?turn_ref
                          ()
                      else
@@ -937,6 +955,7 @@ let process_single_turn ~connector_user_line_recorded_upstream
                          ~surface:chat_surface
                          ~speaker:chat_speaker
                          ~assistant_content:visible_reply
+                         ?blocks
                          ?turn_ref
                          ();
                      Keeper_chat_broadcast.chat_appended

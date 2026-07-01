@@ -14,31 +14,65 @@
 
 let media_subdir = "media"
 
+(* Broad category of a media type, driving the keeper-chat block type used when the
+   generated media is persisted for reload (RFC-0301 item 6). Unknown types are
+   [Other] and are stored/served opaquely rather than dropped. *)
+type media_category =
+  | Image
+  | Audio
+  | Document
+  | Other
+
+(* Single source of truth for the media types the store names, serves, and
+   classifies: [ext] is the on-disk extension, [content_type] the canonical IANA
+   type served for that ext, and [category] the reload block type. Deriving
+   [ext_of_media_type] / [content_type_of_ext] / [category_of_media_type] from one
+   table avoids three parallel media-type match arms drifting apart. *)
+type known_media = {
+  media_type : string;
+  ext : string;
+  content_type : string;
+  category : media_category;
+}
+
+let known_media =
+  [ { media_type = "image/png"; ext = "png"; content_type = "image/png"; category = Image }
+  ; { media_type = "image/jpeg"; ext = "jpg"; content_type = "image/jpeg"; category = Image }
+  ; { media_type = "image/jpg"; ext = "jpg"; content_type = "image/jpeg"; category = Image }
+  ; { media_type = "image/gif"; ext = "gif"; content_type = "image/gif"; category = Image }
+  ; { media_type = "image/webp"; ext = "webp"; content_type = "image/webp"; category = Image }
+  ; { media_type = "audio/mpeg"; ext = "mp3"; content_type = "audio/mpeg"; category = Audio }
+  ; { media_type = "audio/mp3"; ext = "mp3"; content_type = "audio/mpeg"; category = Audio }
+  ; { media_type = "audio/wav"; ext = "wav"; content_type = "audio/wav"; category = Audio }
+  ; { media_type = "audio/x-wav"; ext = "wav"; content_type = "audio/wav"; category = Audio }
+  ; { media_type = "audio/ogg"; ext = "ogg"; content_type = "audio/ogg"; category = Audio }
+  ; { media_type = "application/pdf"; ext = "pdf"; content_type = "application/pdf"; category = Document }
+  ]
+
+let normalize s = String.lowercase_ascii (String.trim s)
+
 (* [media_type] (an IANA type from the OAS media block) -> file extension. Unknown
    types fall back to [bin]; the content-type served is re-derived from the ext so
    the two stay consistent. *)
 let ext_of_media_type media_type =
-  match String.lowercase_ascii (String.trim media_type) with
-  | "image/png" -> "png"
-  | "image/jpeg" | "image/jpg" -> "jpg"
-  | "image/gif" -> "gif"
-  | "image/webp" -> "webp"
-  | "audio/mpeg" | "audio/mp3" -> "mp3"
-  | "audio/wav" | "audio/x-wav" -> "wav"
-  | "audio/ogg" -> "ogg"
-  | "application/pdf" -> "pdf"
-  | _ -> "bin"
+  let m = normalize media_type in
+  match List.find_opt (fun k -> String.equal k.media_type m) known_media with
+  | Some k -> k.ext
+  | None -> "bin"
 
-let content_type_of_ext = function
-  | "png" -> "image/png"
-  | "jpg" -> "image/jpeg"
-  | "gif" -> "image/gif"
-  | "webp" -> "image/webp"
-  | "mp3" -> "audio/mpeg"
-  | "wav" -> "audio/wav"
-  | "ogg" -> "audio/ogg"
-  | "pdf" -> "application/pdf"
-  | _ -> "application/octet-stream"
+let category_of_media_type media_type =
+  let m = normalize media_type in
+  match List.find_opt (fun k -> String.equal k.media_type m) known_media with
+  | Some k -> k.category
+  | None -> Other
+
+(* [ext] -> canonical content-type. The first table entry for an ext wins, so
+   ["jpg"] canonicalizes to ["image/jpeg"] and ["mp3"] to ["audio/mpeg"]. *)
+let content_type_of_ext ext =
+  let e = normalize ext in
+  match List.find_opt (fun k -> String.equal k.ext e) known_media with
+  | Some k -> k.content_type
+  | None -> "application/octet-stream"
 
 let media_dir ~base_dir =
   Filename.concat (Common.masc_dir_from_base_path ~base_path:base_dir) media_subdir

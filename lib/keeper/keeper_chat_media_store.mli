@@ -7,9 +7,21 @@
     [<masc_dir>/media/] as [<md5-hex-token>.<ext>]; identical payloads dedup to one
     file. Served by [GET /api/v1/media/<token>] (public read). *)
 
+(** Broad category of a media type, driving the keeper-chat block type used when a
+    generated media block is persisted for reload (RFC-0301 item 6). *)
+type media_category =
+  | Image
+  | Audio
+  | Document
+  | Other
+
 (** [media_type] (IANA type from the OAS media block) -> file extension; unknown
     types fall back to ["bin"]. *)
 val ext_of_media_type : string -> string
+
+(** [media_type] -> broad {!media_category}; unknown types are [Other]. Single SSOT
+    with {!ext_of_media_type} / {!content_type_of_ext}. *)
+val category_of_media_type : string -> media_category
 
 (** File extension (no leading dot) -> HTTP content-type; unknown ->
     ["application/octet-stream"]. *)

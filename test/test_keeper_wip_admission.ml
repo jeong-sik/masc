@@ -295,7 +295,7 @@ let test_active_items_only_include_claimed_or_in_progress () =
     ; task ~title:"fix: still todo" "task-003"
     ]
   in
-  let active = Admission.active_items_of_tasks tasks in
+  let active = Admission.active_items_of_tasks ~now:(Unix.gettimeofday ()) tasks in
   check (list string) "active ids" [ "task-001"; "task-002" ]
     (List.map (fun item -> item.Admission.id) active);
   check (list string) "categories" [ "fix"; "docs" ]
@@ -322,7 +322,7 @@ let test_active_items_include_all_active_assignees () =
         "task-progress-b"
     ]
   in
-  let active = Admission.active_items_of_tasks tasks in
+  let active = Admission.active_items_of_tasks ~now:(Unix.gettimeofday ()) tasks in
   check (list string) "all active ids"
     [ "task-claimed-a"; "task-progress-a"; "task-claimed-b"; "task-progress-b" ]
     (List.map (fun item -> item.Admission.id) active)
@@ -335,7 +335,8 @@ let iso8601_of_unix_time t =
 
 let test_stale_claimed_task_not_active () =
   (* claimed 2 hours ago, default threshold is 1 hour -> stale, not active *)
-  let two_hours_ago = iso8601_of_unix_time (Unix.gettimeofday () -. 7200.) in
+  let now = Unix.gettimeofday () in
+  let two_hours_ago = iso8601_of_unix_time (now -. 7200.) in
   let tasks =
     [ task
         ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = two_hours_ago })
@@ -343,23 +344,25 @@ let test_stale_claimed_task_not_active () =
     ]
   in
   check (list string) "no active ids" []
-    (List.map (fun item -> item.Admission.id) (Admission.active_items_of_tasks tasks))
+    (List.map (fun item -> item.Admission.id)
+       (Admission.active_items_of_tasks ~now tasks))
 
 let test_fresh_claimed_task_stays_active_under_custom_threshold () =
   (* claimed 30 minutes ago, custom threshold 10 minutes -> stale under that
      threshold, but active under the (higher) default. Exercises the
      ?stale_threshold_s override on both task_is_active_wip and
      active_items_of_tasks. *)
-  let thirty_min_ago = iso8601_of_unix_time (Unix.gettimeofday () -. 1800.) in
+  let now = Unix.gettimeofday () in
+  let thirty_min_ago = iso8601_of_unix_time (now -. 1800.) in
   let claimed_task =
     task
       ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = thirty_min_ago })
       "task-recent"
   in
   check bool "active under default (1h) threshold" true
-    (Admission.task_is_active_wip claimed_task);
+    (Admission.task_is_active_wip ~now claimed_task);
   check bool "stale under a 10-minute threshold" false
-    (Admission.task_is_active_wip ~stale_threshold_s:600. claimed_task)
+    (Admission.task_is_active_wip ~now ~stale_threshold_s:600. claimed_task)
 
 let test_unparseable_claimed_at_treated_as_stale () =
   (* Fail-closed: a malformed/unparseable claimed_at must not silently be
@@ -372,7 +375,8 @@ let test_unparseable_claimed_at_treated_as_stale () =
     ]
   in
   check (list string) "no active ids for malformed timestamp" []
-    (List.map (fun item -> item.Admission.id) (Admission.active_items_of_tasks tasks))
+    (List.map (fun item -> item.Admission.id)
+       (Admission.active_items_of_tasks ~now:(Unix.gettimeofday ()) tasks))
 
 let test_goalless_task_exempt_from_goal_cap () =
   (* RFC-0245: a goalless claim must not be rejected by the per-goal cap even

@@ -100,10 +100,9 @@ type active_item = {
    admission caps. *)
 let default_wip_stale_threshold_s = Masc_time_constants.hour
 
-let task_is_active_wip ?(stale_threshold_s = default_wip_stale_threshold_s)
+let task_is_active_wip ~now ?(stale_threshold_s = default_wip_stale_threshold_s)
     (task : Masc_domain.task)
   =
-  let now = Unix.gettimeofday () in
   let is_stale ts =
     (* Fail-closed: an unparseable timestamp is treated as stale rather than
        silently defaulting to "60 seconds ago" (parse_iso8601's own default),
@@ -126,9 +125,9 @@ let task_is_active_wip ?(stale_threshold_s = default_wip_stale_threshold_s)
 let active_item_of_task ?task_goal_index (task : Masc_domain.task) =
   { id = task.id; scope = scope_of_task ?task_goal_index task }
 
-let active_items_of_tasks ?task_goal_index ?stale_threshold_s tasks =
+let active_items_of_tasks ?task_goal_index ?stale_threshold_s ~now tasks =
   tasks
-  |> List.filter (task_is_active_wip ?stale_threshold_s)
+  |> List.filter (task_is_active_wip ~now ?stale_threshold_s)
   |> List.map (active_item_of_task ?task_goal_index)
 
 type reject_reason =

@@ -23,6 +23,7 @@ import {
 } from '../../src/components/kpi-strip-island'
 
 interface SeedRow {
+  id: number
   total: number
   ok: number
   warn: number
@@ -31,10 +32,13 @@ interface SeedRow {
   rate: number
 }
 
+const MAX_CELLS_PER_STRIP = 6
+
 function makeSeed(count: number): SeedRow[] {
   const out: SeedRow[] = []
   for (let i = 0; i < count; i += 1) {
     out.push({
+      id: i,
       total: 100 + i,
       ok: 70 + (i % 30),
       warn: 10 + (i % 5),
@@ -44,6 +48,12 @@ function makeSeed(count: number): SeedRow[] {
     })
   }
   return out
+}
+
+function readCellsPerStrip(): number {
+  const parsed = Number(cellsInput.value)
+  if (!Number.isFinite(parsed)) return MAX_CELLS_PER_STRIP
+  return Math.min(MAX_CELLS_PER_STRIP, Math.max(1, Math.trunc(parsed)))
 }
 
 function rowToCells(row: SeedRow, cellsPerStrip: number): KpiStripIslandData['cells'] {
@@ -56,6 +66,24 @@ function rowToCells(row: SeedRow, cellsPerStrip: number): KpiStripIslandData['ce
     { variant: 'stacked' as const, label: 'rate', value: `${row.rate}%` },
   ]
   return all.slice(0, cellsPerStrip)
+}
+
+function preactBenchRow(row: SeedRow, cellsPerStrip: number) {
+  return html`
+    <div data-bench-row=${String(row.id)}>
+      <${KpiStrip} ariaLabel="bench" cols=${cellsPerStrip}>
+        ${rowToCells(row, cellsPerStrip).map((cell) => html`<${KpiCell} ...${cell} />`)}
+      <//>
+    </div>
+  `
+}
+
+function islandBenchRow(row: SeedRow, cellsPerStrip: number) {
+  return html`
+    <div data-bench-row=${String(row.id)}>
+      <${KpiStripIsland} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(row, cellsPerStrip)} />
+    </div>
+  `
 }
 
 const preactHost = document.getElementById('preact-host') as HTMLElement
@@ -162,11 +190,7 @@ async function runMount(count: number, cellsPerStrip: number): Promise<{
   const preactMountMs = await timeRenderToDom(
     () => {
       render(
-        html`<div>${rows.map((r) => html`
-          <${KpiStrip} ariaLabel="bench" cols=${cellsPerStrip}>
-            ${rowToCells(r, cellsPerStrip).map((cell) => html`<${KpiCell} ...${cell} />`)}
-          <//>
-        `)}</div>`,
+        html`<div>${rows.map((r) => preactBenchRow(r, cellsPerStrip))}</div>`,
         preactHost,
       )
     },
@@ -177,9 +201,7 @@ async function runMount(count: number, cellsPerStrip: number): Promise<{
   const islandMountMs = await timeRenderToDom(
     () => {
       render(
-        html`<div>${rows.map((r) => html`
-          <${KpiStripIsland} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(r, cellsPerStrip)} />
-        `)}</div>`,
+        html`<div>${rows.map((r) => islandBenchRow(r, cellsPerStrip))}</div>`,
         islandHost,
       )
     },
@@ -190,14 +212,19 @@ async function runMount(count: number, cellsPerStrip: number): Promise<{
   return { preactMountMs, islandMountMs, rows }
 }
 
+interface ExpectedRow {
+  id: number
+  totalText: string
+}
+
 // For updates we mutate every row, then measure how long until the new
-// `total` value is reflected in *every* corresponding cell. We pick a
-// per-row sentinel value (`row.total`) that's unique post-mutation and
-// verify all of them landed in the DOM.
+// `total` value is reflected in each corresponding row wrapper. The row
+// scope matters: totals are intentionally consecutive, so checking the
+// whole host text can be satisfied by a neighboring row's previous value.
 function timeUpdateToDom(
   renderFn: () => void,
   host: HTMLElement,
-  expectedTexts: ReadonlyArray<string>,
+  expectedRows: ReadonlyArray<ExpectedRow>,
   budgetMs = 5000,
 ): Promise<number> {
   return new Promise((resolve, reject) => {
@@ -207,11 +234,10 @@ function timeUpdateToDom(
     renderFn()
 
     const check = (): void => {
-      // Cheap O(1) heuristic: textContent of host contains every sentinel.
-      // For 500 rows this is ~500 substring scans of a multi-KB string, still
-      // fast enough not to dominate the measurement.
-      const text = host.textContent ?? ''
-      const allFound = expectedTexts.every((t) => text.includes(t))
+      const allFound = expectedRows.every((row) => {
+        const el = host.querySelector(`[data-bench-row="${row.id}"]`)
+        return (el?.textContent ?? '').includes(row.totalText)
+      })
       const now = performance.now()
       if (allFound) {
         resolve(now - start)
@@ -232,34 +258,28 @@ async function runUpdate(rows: SeedRow[], cellsPerStrip: number): Promise<{
   islandUpdateMs: number
 }> {
   for (const row of rows) row.total += 1
-  const sentinels = rows.map((r) => String(r.total))
+  const expectedRows = rows.map((r) => ({ id: r.id, totalText: String(r.total) }))
 
   const preactUpdateMs = await timeUpdateToDom(
     () => {
       render(
-        html`<div>${rows.map((r) => html`
-          <${KpiStrip} ariaLabel="bench" cols=${cellsPerStrip}>
-            ${rowToCells(r, cellsPerStrip).map((cell) => html`<${KpiCell} ...${cell} />`)}
-          <//>
-        `)}</div>`,
+        html`<div>${rows.map((r) => preactBenchRow(r, cellsPerStrip))}</div>`,
         preactHost,
       )
     },
     preactHost,
-    sentinels,
+    expectedRows,
   )
 
   const islandUpdateMs = await timeUpdateToDom(
     () => {
       render(
-        html`<div>${rows.map((r) => html`
-          <${KpiStripIsland} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(r, cellsPerStrip)} />
-        `)}</div>`,
+        html`<div>${rows.map((r) => islandBenchRow(r, cellsPerStrip))}</div>`,
         islandHost,
       )
     },
     islandHost,
-    sentinels,
+    expectedRows,
   )
 
   return { preactUpdateMs, islandUpdateMs }
@@ -288,14 +308,14 @@ async function runFullBench(label: string, count: number, cellsPerStrip: number,
 
 document.getElementById('run-mount')?.addEventListener('click', () => {
   const count = Number(countInput.value)
-  const cellsPerStrip = Number(cellsInput.value)
+  const cellsPerStrip = readCellsPerStrip()
   resultsEl.textContent = ''
   void runFullBench(`mount (n=${count})`, count, cellsPerStrip, 0)
 })
 
 document.getElementById('run-update')?.addEventListener('click', () => {
   const count = Number(countInput.value)
-  const cellsPerStrip = Number(cellsInput.value)
+  const cellsPerStrip = readCellsPerStrip()
   void runFullBench(`update (n=${count})`, count, cellsPerStrip, 3)
 })
 
@@ -307,7 +327,7 @@ document.getElementById('run-clear')?.addEventListener('click', () => {
 document.getElementById('run-warmup')?.addEventListener('click', async () => {
   resultsEl.textContent = 'warming up (3 silent rounds)...\n'
   const count = Number(countInput.value)
-  const cellsPerStrip = Number(cellsInput.value)
+  const cellsPerStrip = readCellsPerStrip()
   for (let i = 0; i < 3; i += 1) {
     await runMount(count, cellsPerStrip)
   }
@@ -317,7 +337,7 @@ document.getElementById('run-warmup')?.addEventListener('click', async () => {
 
 document.getElementById('run-suite')?.addEventListener('click', async () => {
   resultsEl.textContent = ''
-  const cellsPerStrip = Number(cellsInput.value)
+  const cellsPerStrip = readCellsPerStrip()
   for (const n of [10, 16, 50, 100, 250, 500]) {
     countInput.value = String(n)
     await runFullBench(`suite n=${n}`, n, cellsPerStrip, 3)
@@ -393,25 +413,19 @@ async function runSustainedSide(
 
   while (performance.now() < deadline) {
     for (const r of rows) r.total += 1
-    const sentinels = rows.map((r) => String(r.total))
+    const expectedRows = rows.map((r) => ({ id: r.id, totalText: String(r.total) }))
     const renderFn = side === 'preact'
       ? () => render(
-          html`<div>${rows.map((r) => html`
-            <${KpiStrip} ariaLabel="bench" cols=${cellsPerStrip}>
-              ${rowToCells(r, cellsPerStrip).map((cell) => html`<${KpiCell} ...${cell} />`)}
-            <//>
-          `)}</div>`,
+          html`<div>${rows.map((r) => preactBenchRow(r, cellsPerStrip))}</div>`,
           host,
         )
       : () => render(
-          html`<div>${rows.map((r) => html`
-            <${KpiStripIsland} ariaLabel="bench" cols=${cellsPerStrip} cells=${rowToCells(r, cellsPerStrip)} />
-          `)}</div>`,
+          html`<div>${rows.map((r) => islandBenchRow(r, cellsPerStrip))}</div>`,
           host,
         )
 
     try {
-      const ms = await timeUpdateToDom(renderFn, host, sentinels, 1000)
+      const ms = await timeUpdateToDom(renderFn, host, expectedRows, 1000)
       samples.push(ms)
       updates += 1
     } catch {
@@ -453,7 +467,7 @@ function reportSustained(label: string, n: number, preactR: SustainedResult, isl
 document.getElementById('run-sustained')?.addEventListener('click', async () => {
   resultsEl.textContent = 'sustained: warmup mount n=16...\n'
   const n = 16
-  const cellsPerStrip = Number(cellsInput.value)
+  const cellsPerStrip = readCellsPerStrip()
   const mount = await runMount(n, cellsPerStrip)
 
   // Run each side for 5s separately so the slow one doesn't poison
@@ -473,7 +487,7 @@ document.getElementById('run-sustained')?.addEventListener('click', async () => 
 document.getElementById('run-keeper-shape')?.addEventListener('click', async () => {
   resultsEl.textContent = ''
   const n = 16
-  const cellsPerStrip = Number(cellsInput.value)
+  const cellsPerStrip = readCellsPerStrip()
   const mount = await runMount(n, cellsPerStrip)
 
   const burstUpdates = 60

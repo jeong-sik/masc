@@ -910,6 +910,67 @@ let test_resolve_with_policy_does_not_remember_high_allow () =
       | Error err ->
           Alcotest.fail ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err)
 
+let test_runtime_contract_policy_uses_workspace_base_path () =
+  let env_base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir env_base)
+    (fun () ->
+      with_test_config @@ fun config ->
+      AQ.For_testing.reset_audit_store ();
+      Fun.protect
+        ~finally:AQ.For_testing.reset_audit_store
+        (fun () ->
+          with_env "MASC_BASE_PATH" env_base @@ fun () ->
+          with_env "MASC_BASE_PATH_INPUT" env_base @@ fun () ->
+          let keeper_name = "runtime-contract-policy-keeper" in
+          let id =
+            AQ.submit_pending
+              ~base_path:config.base_path
+              ~keeper_name
+              ~tool_name:"masc_transition"
+              ~input:(`Assoc [ ("action", `String "claim") ])
+              ~risk_level:AQ.Medium
+              ~on_resolution:(fun _ -> ())
+              ()
+          in
+          (match
+             AQ.resolve_with_policy ~base_path:config.base_path ~id
+               ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
+           with
+           | Ok { remembered_rule = Some _ } -> ()
+           | Ok { remembered_rule = None } ->
+               Alcotest.fail "expected remembered workspace approval rule"
+           | Error err ->
+               Alcotest.fail
+                 ("resolve_with_policy failed: "
+                  ^ AQ.resolve_error_to_string err));
+          let meta =
+            meta_from_json
+              (`Assoc
+                [
+                  ("name", `String keeper_name);
+                  ("trace_id", `String "runtime-contract-policy-trace");
+                  ("sandbox_profile", `String "docker");
+                  ("network_mode", `String "inherit");
+                ])
+          in
+          let runtime_contract =
+            Masc.Keeper_runtime_contract.runtime_contract_json ~config meta
+          in
+          let open Yojson.Safe.Util in
+          let policy =
+            runtime_contract |> member "approval_policy_effective"
+          in
+          Alcotest.(check int) "workspace policy allow rule"
+            1
+            (policy |> member "allow_rules" |> to_int);
+          let env_policy =
+            AQ.policy_summary_json ~base_path:env_base ~keeper_name
+          in
+          Alcotest.(check int) "env fallback has no allow rule"
+            0
+            (env_policy |> member "allow_rules" |> to_int)))
+
 let test_dashboard_resolve_and_delete_rules_use_workspace_base_path () =
   let env_base = temp_dir () in
   let workspace_base = temp_dir () in
@@ -1571,6 +1632,8 @@ let () =
         test_resolve_with_policy_remembers_medium_allow;
       Alcotest.test_case "resolve_with_policy skips high allow memory" `Quick
         test_resolve_with_policy_does_not_remember_high_allow;
+      Alcotest.test_case "runtime_contract policy uses workspace base_path" `Quick
+        test_runtime_contract_policy_uses_workspace_base_path;
       Alcotest.test_case "dashboard approve-always rules use workspace base_path" `Quick
         test_dashboard_resolve_and_delete_rules_use_workspace_base_path;
       Alcotest.test_case "submit_pending audit uses workspace base_path" `Quick

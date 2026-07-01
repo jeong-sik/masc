@@ -72,6 +72,68 @@ let memory_os_count pred xs =
   List.fold_left (fun count value -> if pred value then count + 1 else count) 0 xs
 ;;
 
+let trajectory_line_to_chat_trace_step = function
+  | Trajectory.Thinking entry ->
+    Some
+      (Keeper_chat_blocks.Trace_think
+         { text = entry.content
+         ; ts = Some entry.ts_iso
+         ; oas_block_index = None
+         })
+  | Trajectory.Tool_call entry ->
+    let result =
+      Option.map
+        (fun text ->
+          try Yojson.Safe.from_string text with
+          | Yojson.Json_error _ -> `String text)
+        entry.result
+    in
+    Some
+      (Keeper_chat_blocks.Trace_tool
+         { name = entry.tool_name
+         ; tool_call_id = entry.execution_id
+         ; status =
+             (match entry.error with
+              | Some _ -> Some Keeper_chat_blocks.Trace_tool_err
+              | None -> Some Keeper_chat_blocks.Trace_tool_ok)
+         ; dur = Some (Printf.sprintf "%dms" entry.duration_ms)
+         ; args =
+             Some
+               (try Yojson.Safe.from_string entry.args_json with
+                | Yojson.Json_error _ -> `String entry.args_json)
+         ; result
+         ; ts = Some entry.ts_iso
+         ; oas_block_index = None
+         })
+;;
+
+let keeper_chat_trace_block_by_turn_ref ~config ~keeper_name ~trace_id =
+  let masc_root = Workspace.masc_root_dir config in
+  let trajectory_lines =
+    Trajectory.read_recent_lines ~masc_root ~keeper_name ~trace_id
+      ~max_lines:trajectory_max_limit
+  in
+  let all_lines =
+    Server_dashboard_http_keeper_api_trace.merge_keeper_trace_lines_bounded
+      ~config ~trace_id ~max_internal_lines:trajectory_max_limit
+      trajectory_lines
+  in
+  fun turn_ref ->
+    if not (String.equal (Ids.Turn_ref.trace_id turn_ref) trace_id) then None
+    else
+      let absolute_turn = Ids.Turn_ref.absolute_turn turn_ref in
+      let trace =
+        all_lines
+        |> List.filter (function
+             | Trajectory.Thinking entry -> entry.turn = absolute_turn
+             | Trajectory.Tool_call entry -> entry.turn = absolute_turn)
+        |> List.filter_map trajectory_line_to_chat_trace_step
+      in
+      match trace with
+      | [] -> None
+      | trace -> Some (Keeper_chat_blocks.Trace { trace })
+;;
+
 let memory_os_read_episodes ~keeper_id ~n =
   try Keeper_memory_os_io.read_episodes_tail ~keeper_id ~n, None with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
@@ -1023,12 +1085,29 @@ let handle_keeper_get_subroutes state req request reqd =
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
         (error_json "missing keeper name")
     else
-      let base_dir = (Mcp_server.workspace_config state).base_path in
+      let config = Mcp_server.workspace_config state in
+      let base_dir = config.base_path in
       let messages =
         Keeper_chat_store.load ~base_dir ~keeper_name:name
       in
+      let trace_block_by_turn_ref =
+        match Keeper_meta_store.read_meta config name with
+        | Ok (Some m) ->
+          let trace_id = Keeper_id.Trace_id.to_string m.runtime.trace_id in
+          Some
+            (keeper_chat_trace_block_by_turn_ref ~config ~keeper_name:name
+               ~trace_id)
+        | Ok None -> None
+        | Error err ->
+          Log.Keeper.warn
+            "dashboard keeper chat history: read_meta failed for %s; trace enrichment skipped: %s"
+            name
+            err;
+          None
+      in
       Server_auth.respond_json_value_with_cors ~status:`OK request reqd
-        (Keeper_chat_store.to_json_array ~base_dir messages)
+        (Keeper_chat_store.to_json_array ~base_dir ?trace_block_by_turn_ref
+           messages)
   else if ends_with "/person-notes" then
     (* RFC-0229 P2: keeper-authored person notes for the roster pane.
        Read-only fold over the notes store; same shape as the tool

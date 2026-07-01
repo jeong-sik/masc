@@ -289,7 +289,11 @@ val load_page :
     [speaker_id] / [speaker_name] / [speaker_authority] appear only
     when present. When [base_dir] is supplied, the history endpoint marks
     audio clips as [expired] when the underlying MP3 file is gone. *)
-val to_json_array : ?base_dir:string -> chat_message list -> Yojson.Safe.t
+val to_json_array :
+  ?base_dir:string ->
+  ?trace_block_by_turn_ref:(Ids.Turn_ref.t -> chat_block option) ->
+  chat_message list ->
+  Yojson.Safe.t
 
 (** {1 Turn transcript (RFC-0233 §7)} *)
 

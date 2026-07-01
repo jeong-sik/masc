@@ -221,6 +221,35 @@ let test_dashboard_rich_blocks_roundtrip () =
           size_bytes = Some 42;
           kind = Some "video";
         };
+      B.Trace
+        {
+          trace =
+            [
+              B.Trace_think
+                {
+                  text = "checking";
+                  ts = Some "2026-07-01T00:00:00Z";
+                  oas_block_index = Some 0;
+                };
+              B.Trace_tool
+                {
+                  name = "keeper_tasks_list";
+                  tool_call_id = Some "exec-1";
+                  status = Some B.Trace_tool_ok;
+                  dur = Some "2ms";
+                  args = Some (`Assoc [ ("limit", `Int 5) ]);
+                  result = Some (`Assoc [ ("ok", `Bool true) ]);
+                  ts = Some "2026-07-01T00:00:01Z";
+                  oas_block_index = Some 1;
+                };
+              B.Trace_reason
+                {
+                  text = "done";
+                  detail = Some "visible";
+                  ts = Some "2026-07-01T00:00:02Z";
+                };
+            ];
+        };
     ]
   in
   match B.blocks_of_yojson (B.blocks_to_yojson original) with

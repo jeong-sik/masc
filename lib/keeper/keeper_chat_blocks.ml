@@ -81,6 +81,35 @@ type fusion_block = {
   run_id : string;
 }
 
+type trace_tool_status =
+  | Trace_tool_pending
+  | Trace_tool_ok
+  | Trace_tool_err
+
+type trace_step =
+  | Trace_think of {
+      text : string;
+      ts : string option;
+      oas_block_index : int option;
+    }
+  | Trace_reason of {
+      text : string;
+      detail : string option;
+      ts : string option;
+    }
+  | Trace_tool of {
+      name : string;
+      tool_call_id : string option;
+      status : trace_tool_status option;
+      dur : string option;
+      args : Yojson.Safe.t option;
+      result : Yojson.Safe.t option;
+      ts : string option;
+      oas_block_index : int option;
+    }
+
+type trace_block = { trace : trace_step list }
+
 type chat_block =
   | Text of text_block
   | Heading of text_block
@@ -95,6 +124,7 @@ type chat_block =
   | Image of image_block
   | Link of link_block
   | Fusion of fusion_block
+  | Trace of trace_block
 
 let escape_html raw =
   raw
@@ -208,11 +238,58 @@ let opt_int_field key = function
   | Some value -> [ (key, `Int value) ]
 ;;
 
+let opt_json_field key = function
+  | None -> []
+  | Some value -> [ (key, value) ]
+;;
+
 let table_cell_to_yojson = function
   | Cell_text value -> `String value
   | Cell_value { v; num; muted } ->
     `Assoc
       ([ ("v", `String v) ] @ opt_bool_field "num" num @ opt_bool_field "muted" muted)
+;;
+
+let trace_tool_status_to_label = function
+  | Trace_tool_pending -> "pending"
+  | Trace_tool_ok -> "ok"
+  | Trace_tool_err -> "err"
+;;
+
+let trace_tool_status_of_label = function
+  | "pending" -> Some Trace_tool_pending
+  | "ok" -> Some Trace_tool_ok
+  | "err" -> Some Trace_tool_err
+  | _ -> None
+;;
+
+let trace_status_to_yojson = function
+  | None -> []
+  | Some status -> [ ("status", `String (trace_tool_status_to_label status)) ]
+;;
+
+let trace_step_to_yojson = function
+  | Trace_think { text; ts; oas_block_index } ->
+    `Assoc
+      ([ ("kind", `String "think"); ("text", `String text) ]
+       @ opt_string_field "ts" ts
+       @ opt_int_field "oas_block_index" oas_block_index)
+  | Trace_reason { text; detail; ts } ->
+    `Assoc
+      ([ ("kind", `String "reason"); ("text", `String text) ]
+       @ opt_string_field "detail" detail
+       @ opt_string_field "ts" ts)
+  | Trace_tool
+      { name; tool_call_id; status; dur; args; result; ts; oas_block_index } ->
+    `Assoc
+      ([ ("kind", `String "tool"); ("name", `String name) ]
+       @ opt_string_field "tool_call_id" tool_call_id
+       @ trace_status_to_yojson status
+       @ opt_string_field "dur" dur
+       @ opt_json_field "args" args
+       @ opt_json_field "result" result
+       @ opt_string_field "ts" ts
+       @ opt_int_field "oas_block_index" oas_block_index)
 ;;
 
 let table_cell_of_yojson = function
@@ -456,6 +533,11 @@ let block_to_yojson = function
       ; ("board_post_id", `String board_post_id)
       ; ("run_id", `String run_id)
       ]
+  | Trace { trace } ->
+    `Assoc
+      [ ("t", `String "trace")
+      ; ("trace", `List (List.map trace_step_to_yojson trace))
+      ]
 ;;
 
 let blocks_to_yojson blocks = `List (List.map block_to_yojson blocks)
@@ -477,6 +559,68 @@ let block_of_yojson json : chat_block option =
     let get_int key =
       match List.assoc_opt key fields with
       | Some (`Int i) -> Some i
+      | _ -> None
+    in
+    let trace_step_of_yojson = function
+      | `Assoc step_fields ->
+        let get_step_string key =
+          match List.assoc_opt key step_fields with
+          | Some (`String s) -> Some s
+          | _ -> None
+        in
+        let get_step_int key =
+          match List.assoc_opt key step_fields with
+          | Some (`Int i) -> Some i
+          | _ -> None
+        in
+        (match get_step_string "kind" with
+         | Some "think" ->
+           Option.bind (get_step_string "text") (fun text ->
+             Some
+               (Trace_think
+                  { text
+                  ; ts = get_step_string "ts"
+                  ; oas_block_index = get_step_int "oas_block_index"
+                  }))
+         | Some "reason" ->
+           Option.bind (get_step_string "text") (fun text ->
+             Some
+               (Trace_reason
+                  { text
+                  ; detail = get_step_string "detail"
+                  ; ts = get_step_string "ts"
+                  }))
+         | Some "tool" ->
+           Option.bind (get_step_string "name") (fun name ->
+             let status_result =
+               match get_step_string "status" with
+               | None -> Some None
+               | Some status -> Option.map Option.some (trace_tool_status_of_label status)
+             in
+             Option.map
+               (fun status ->
+                 Trace_tool
+                   { name
+                   ; tool_call_id =
+                       (match get_step_string "tool_call_id" with
+                        | Some _ as v -> v
+                        | None -> get_step_string "toolCallId")
+                   ; status
+                   ; dur = get_step_string "dur"
+                   ; args = List.assoc_opt "args" step_fields
+                   ; result = List.assoc_opt "result" step_fields
+                   ; ts = get_step_string "ts"
+                   ; oas_block_index =
+                       (match get_step_int "oas_block_index" with
+                        | Some _ as v -> v
+                        | None -> get_step_int "oasBlockIndex")
+                   })
+               status_result)
+         | _ -> None)
+      | _ -> None
+    in
+    let trace_steps_of_yojson = function
+      | `List items -> list_all_map trace_step_of_yojson items
       | _ -> None
     in
     (match get_string "t" with
@@ -561,6 +705,10 @@ let block_of_yojson json : chat_block option =
        Option.bind (get_string "board_post_id") (fun board_post_id ->
          let run_id = Option.value (get_string "run_id") ~default:"" in
          Some (Fusion { board_post_id; run_id }))
+     | Some "trace" ->
+       Option.bind (List.assoc_opt "trace" fields) (fun trace_json ->
+         Option.bind (trace_steps_of_yojson trace_json) (fun trace ->
+           if trace = [] then None else Some (Trace { trace })))
      | _ -> None)
   | _ -> None
 ;;

@@ -80,6 +80,8 @@ const EMPTY_VISIBLE_REPLY_TEXT =
 const pendingKeeperThreadCancels = new Map<string, Promise<boolean>>()
 const KEEPER_THREAD_CANCEL_TIMEOUT_MS = 5_000
 const KEEPER_THREAD_CANCEL_SETTLE_GRACE_MS = 500
+const KEEPER_STREAM_SIGNAL_THROTTLE_MS = 1_000
+const keeperStreamSignalWrites = new Map<string, number>()
 
 interface KeeperInterjectCommand {
   readonly kind: KeeperInterjectActionKind
@@ -106,6 +108,7 @@ function keeperThreadCancelFailureMessage(keeperName: string, requestId: string,
 
 export function _resetCancelledKeeperThreadRequestsForTests(): void {
   pendingKeeperThreadCancels.clear()
+  keeperStreamSignalWrites.clear()
 }
 
 function keeperThreadCancelSignal(): AbortSignal {
@@ -114,6 +117,30 @@ function keeperThreadCancelSignal(): AbortSignal {
 
 function releaseKeeperThreadCancelTracking(requestId: string): void {
   pendingKeeperThreadCancels.delete(requestId)
+}
+
+function markKeeperStreamSignal(keeperName: string, opts: { force?: boolean } = {}): void {
+  const name = keeperName.trim()
+  if (!name) return
+  const now = Date.now()
+  const previous = keeperStreamSignalWrites.get(name)
+  if (
+    !opts.force
+    && previous !== undefined
+    && now >= previous
+    && now - previous < KEEPER_STREAM_SIGNAL_THROTTLE_MS
+  ) {
+    return
+  }
+  keeperStreamSignalWrites.set(name, now)
+  setRecordValue(keeperStreamLastEventAt, name, now)
+}
+
+function clearKeeperStreamSignal(keeperName: string): void {
+  const name = keeperName.trim()
+  if (!name) return
+  keeperStreamSignalWrites.delete(name)
+  setRecordValue(keeperStreamLastEventAt, name, null)
 }
 
 function cancelTrackingTimeoutMs(): number {
@@ -504,11 +531,11 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
   setRecordValue(keeperSending, request.keeperName, true)
   setRecordValue(keeperActionErrors, request.keeperName, null)
   setRecordValue(keeperStreamStartedAt, request.keeperName, request.submittedAt)
-  setRecordValue(keeperStreamLastEventAt, request.keeperName, Date.now())
+  markKeeperStreamSignal(request.keeperName, { force: true })
   try {
     for (;;) {
       const result = await fetchQueuedKeeperMessageResult(request.requestId)
-      setRecordValue(keeperStreamLastEventAt, request.keeperName, Date.now())
+      markKeeperStreamSignal(request.keeperName)
       if (!isTerminalQueuedKeeperMessage(result)) {
         await sleep(PENDING_KEEPER_CHAT_POLL_MS)
         continue
@@ -609,7 +636,7 @@ async function resumePendingKeeperChatRequest(request: PendingKeeperChatRequest)
     if (!hasPendingKeeperChatRequest(request.keeperName)) {
       setRecordValue(keeperSending, request.keeperName, false)
       setRecordValue(keeperStreamStartedAt, request.keeperName, null)
-      setRecordValue(keeperStreamLastEventAt, request.keeperName, null)
+      clearKeeperStreamSignal(request.keeperName)
     }
   }
 }
@@ -823,7 +850,7 @@ export async function sendKeeperThreadMessage(
       attachments,
       userBlocks,
       onEvent: event => {
-        setRecordValue(keeperStreamLastEventAt, keeperName, Date.now())
+        markKeeperStreamSignal(keeperName)
         if (event.type === 'CUSTOM' && event.name === 'KEEPER_QUEUE_REQUEST') {
           const nextRequestId = isRecord(event.value)
             ? asString(event.value.request_id, '').trim()
@@ -1024,7 +1051,7 @@ export async function sendKeeperThreadMessage(
       clearActiveStream(keeperName)
       setRecordValue(keeperSending, keeperName, false)
       setRecordValue(keeperStreamStartedAt, keeperName, null)
-      setRecordValue(keeperStreamLastEventAt, keeperName, null)
+      clearKeeperStreamSignal(keeperName)
     }
     // No refreshDashboardState() here: forcing a full dashboard
     // refetch after every chat message re-rendered every panel and was

@@ -1994,6 +1994,38 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     expect(think?.textContent).toContain(hiddenTail)
   })
 
+  it('bounds live thinking preview without parsing markdown on every stream chunk', () => {
+    const longThinking = `old heading **gone**\n${'x'.repeat(6_500)}\nlatest **tail**`
+
+    render(
+      html`<${ChatTranscript}
+        entries=${[
+          entry({
+            id: 'a',
+            text: '응답 작성 중',
+            role: 'assistant',
+            source: 'direct_assistant',
+            streamState: 'streaming',
+            delivery: 'streaming',
+            traceSteps: [{ kind: 'think', text: longThinking }],
+          }),
+        ]}
+        emptyText="empty"
+        groupToolCalls=${true}
+        variant="messenger"
+      />`,
+      container,
+    )
+
+    const think = container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement | null
+    expect(think).not.toBeNull()
+    expect(think?.getAttribute('data-chat-thinking-preview')).toBe('truncated')
+    expect(think?.textContent).not.toContain('old heading')
+    expect(think?.textContent).toContain('latest **tail**')
+    expect(think?.querySelector('strong')).toBeNull()
+    expect((think?.textContent ?? '').length).toBeLessThan(longThinking.length)
+  })
+
   it('renders board post ids in assistant prose as board detail links', () => {
     const postId = 'p-59e2917e15de5367e81b2244a8f5095a'
     const label = postId.slice(0, 8)

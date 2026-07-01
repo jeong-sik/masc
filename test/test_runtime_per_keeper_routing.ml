@@ -152,8 +152,10 @@ streaming = true
 api-name = "gpt"
 max-context = 64000
 tools-support = true
-supports-structured-output = true
 streaming = true
+
+[models.gpt.capabilities]
+supports-structured-output = true
 
 [runpod_mtp.qwen]
 is-default = true
@@ -190,8 +192,10 @@ streaming = true
 api-name = "gpt"
 max-context = 64000
 tools-support = true
-supports-structured-output = true
 streaming = true
+
+[models.gpt.capabilities]
+supports-structured-output = true
 
 [runpod_mtp.qwen]
 is-default = true

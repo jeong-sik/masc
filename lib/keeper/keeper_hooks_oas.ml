@@ -149,9 +149,14 @@ let tool_error_failure_class ?base_path error =
 
 let self_correcting_tool_failure_class ?base_path error =
   match tool_error_failure_class ?base_path error with
-  | Some ("workflow_rejection" | "policy_rejection" as failure_class) ->
-    Some failure_class
-  | Some _ | None -> None
+  | Some failure_class -> (
+    match Tool_result.tool_failure_class_of_string failure_class with
+    | Some Tool_result.Workflow_rejection ->
+      Some (Tool_result.tool_failure_class_to_string Tool_result.Workflow_rejection)
+    | Some Tool_result.Policy_rejection ->
+      Some (Tool_result.tool_failure_class_to_string Tool_result.Policy_rejection)
+    | Some (Tool_result.Transient_error | Tool_result.Runtime_failure) | None -> None)
+  | None -> None
 
 include Keeper_hooks_oas_response_metrics
 

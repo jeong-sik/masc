@@ -83,6 +83,18 @@ let operator_disposition_kind_to_string = function
   | Disp_unknown -> "unknown"
 ;;
 
+let operator_disposition_kind_of_string = function
+  | "pass" -> Some Disp_pass
+  | "pause_human" -> Some Disp_pause_human
+  | "alert_exhausted" -> Some Disp_alert_exhausted
+  | "fail_open_next_runtime" -> Some Disp_fail_open_next_runtime
+  | "pass_next_model" -> Some Disp_pass_next_model
+  | "user_cancelled" -> Some Disp_user_cancelled
+  | "skipped" -> Some Disp_skipped
+  | "unknown" -> Some Disp_unknown
+  | _ -> None
+;;
+
 type operator_disposition_reason =
   | Reason_healthy
   | Reason_runtime_exhausted

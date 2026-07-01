@@ -162,9 +162,10 @@ let display_disposition_of_receipt_json receipt =
      (2) [operator_disposition = "unknown"] — the producer explicitly
          declared the state unmapped at the runtime layer.
 
-     Using a bracketed marker as the default lets the match below
-     fall through to the [_ -> "Alert"/"unmapped_operator_disposition"]
-     catch-all, which is the more accurate classification for case (1).
+     Using a bracketed marker as the default lets the shared display
+     projection classify it as
+     ["Alert"/"unmapped_operator_disposition"], which is the more accurate
+     classification for case (1).
      Both cases still surface as "Alert" severity (no operator-visible
      regression in alerting), but the reason label now distinguishes
      them so the operator can chase the right producer fix. *)
@@ -176,43 +177,8 @@ let display_disposition_of_receipt_json receipt =
     Json_util.get_string receipt "operator_disposition_reason"
     |> Option.value ~default:""
   in
-  let reason fallback =
-    match String.trim operator_disposition_reason with
-    | "" -> fallback
-    | value -> value
+  let disposition, disposition_reason =
+    Keeper_operator_disposition_display.of_wire ~operator_disposition
+      ~operator_disposition_reason
   in
-  match String.lowercase_ascii operator_disposition with
-  | "pass" -> ("Pass", "healthy", operator_disposition, operator_disposition_reason)
-  | "skipped" ->
-      ("Pass", "phase_skipped", operator_disposition, operator_disposition_reason)
-  | "pass_next_model" ->
-      ("Pass", "runtime_fallback", operator_disposition, operator_disposition_reason)
-  | "blocked" | "blocked_runtime" ->
-      ( "Blocked",
-        reason "runtime_blocked",
-        operator_disposition,
-        operator_disposition_reason )
-  | "pause_human" ->
-      ( "Blocked",
-        reason "needs_human_attention",
-        operator_disposition,
-        operator_disposition_reason )
-  | "fail_open_next_runtime" ->
-      ( "Blocked",
-        reason "degraded_retry",
-        operator_disposition,
-        operator_disposition_reason )
-  | "user_cancelled" ->
-      ("Blocked", reason "cancelled", operator_disposition, operator_disposition_reason)
-  | "alert_exhausted" ->
-      ("Alert", reason "runtime_exhausted", operator_disposition, operator_disposition_reason)
-  | "unknown" ->
-      ( "Alert",
-        reason "unmapped_runtime_state",
-        operator_disposition,
-        operator_disposition_reason )
-  | _ ->
-      ( "Alert",
-        reason "unmapped_operator_disposition",
-        operator_disposition,
-        operator_disposition_reason )
+  disposition, disposition_reason, operator_disposition, operator_disposition_reason

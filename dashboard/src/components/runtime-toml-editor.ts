@@ -155,6 +155,10 @@ function runtimeStatusToneClass(statusLabel: string): string {
   return ''
 }
 
+function stopOverlayContentClick(event: MouseEvent) {
+  event.stopPropagation()
+}
+
 export interface RuntimeTomlEditorProps {
   onClose?: () => void
 }
@@ -616,7 +620,9 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
   if (onClose) {
     return html`
       <div class="rt-overlay" data-testid="runtime-toml-editor" onClick=${onClose}>
-        ${body}
+        <div class="rt-overlay-content" onClick=${stopOverlayContentClick}>
+          ${body}
+        </div>
       </div>
     `
   }

@@ -549,6 +549,26 @@ describe('RuntimeTomlEditor', () => {
     expect((container.querySelector('[data-testid="runtime-toml-section"]') as HTMLElement).classList.contains('hidden')).toBe(false)
   })
 
+  it('does not close overlay mode when interacting with editor controls', async () => {
+    const onClose = vi.fn()
+    render(html`<${RuntimeTomlEditor} onClose=${onClose} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-models"]')).not.toBeNull()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-models"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-section-title"]')?.textContent).toBe('모델')
+    })
+    expect(onClose).not.toHaveBeenCalled()
+
+    fireEvent.click(container.querySelector('.rt-overlay') as HTMLElement)
+
+    expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
   it('keeps the raw-TOML editor path working after navigating into the toml section', async () => {
     render(html`<${RuntimeTomlEditor} />`, container)
 

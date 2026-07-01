@@ -1,14 +1,5 @@
 import type { ChatBlock, ChatImageBlock, ChatLinkBlock } from '../types'
-
-/** Escape plain text so it can be safely injected as HTML. */
-function escapeHtml(raw: string): string {
-  return raw
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#39;')
-}
+import { escapeHtml } from './html-escape'
 
 const IMAGE_EXTENSIONS = new Set(['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg'])
 

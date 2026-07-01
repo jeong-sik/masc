@@ -214,6 +214,16 @@ include Keeper_hooks_oas_cost_events
 
 include Keeper_hooks_oas_idle
 
+(* Passive observations are receipt evidence, not semantic watchdog progress.
+   Active tool execution is tracked separately by the in-flight tool state. *)
+let tool_completion_records_watchdog_progress tool_name =
+  match Keeper_tool_progress.classify_tool_progress tool_name with
+  | Keeper_tool_progress.Passive_status -> false
+  | Keeper_tool_progress.Claim_context
+  | Keeper_tool_progress.Execution
+  | Keeper_tool_progress.Completion ->
+    true
+
 let make_hooks
     ~(config : Workspace.config)
     ~(meta_ref : Keeper_meta_contract.keeper_meta ref)
@@ -522,7 +532,8 @@ let make_hooks
       match event with
       | Agent_sdk.Hooks.PostToolUse
           { tool_name; input; output; duration_ms = hook_duration_ms; tool_use_id; _ } ->
-        record_progress ("tool_completed:" ^ tool_name);
+        if tool_completion_records_watchdog_progress tool_name then
+          record_progress ("tool_completed:" ^ tool_name);
         incr tool_call_count_ref;
         (* Extract typed_outcome from structured tool output JSON and strip it
            from the LLM-facing output so the internal metadata does not leak
@@ -901,4 +912,6 @@ let hook_introspection_json
 module For_testing = struct
   let tool_input_shape_for_log = tool_input_shape_for_log
   let tool_input_keys_for_log = tool_input_keys_for_log
+  let tool_completion_records_watchdog_progress =
+    tool_completion_records_watchdog_progress
 end

@@ -17,6 +17,7 @@ import type {
   DashboardRuntimeProvidersResponse,
   DashboardToolInventoryItem,
   LogEntry,
+  RuntimeEntry,
   RuntimeDefaultsResponse,
 } from '../api/dashboard.js'
 import { callMcpTool } from '../api/mcp'
@@ -239,8 +240,33 @@ function findRuntimeCatalogSnapshot(
 }
 
 function RuntimeCatalogCapability({ label, value }: { label: string; value: boolean | undefined }) {
+  if (value === undefined) {
+    return html`<span class="rt-cap unknown" title="capability not reported">? ${label}</span>`
+  }
   const isOn = value === true
   return html`<span class=${`rt-cap ${isOn ? 'on' : ''}`}>${isOn ? '✓' : '·'} ${label}</span>`
+}
+
+function runtimeCatalogFromDefaults(defaults: RuntimeDefaultsResponse | null): DashboardRuntimeProviderSnapshot[] {
+  if (!defaults) return []
+  return defaults.runtimes.map((entry: RuntimeEntry) => ({
+    provider: entry.id,
+    runtime_id: entry.id,
+    provider_display_name: entry.provider,
+    model_id: entry.model,
+    model_api_name: entry.model,
+    transport: 'runtime-defaults',
+    kind: 'resolved',
+    runtime_kind: 'runtime',
+    status: entry.is_default ? 'default' : 'resolved',
+    is_default_runtime: entry.is_default,
+    max_context: entry.max_context,
+    model_count: 1,
+    models: [entry.model],
+    source: defaults.source ?? 'runtime-defaults',
+    endpoint_url: null,
+    note: 'fallback from /api/v1/dashboard/runtime-defaults',
+  }))
 }
 
 function RuntimeCatalogCard({
@@ -662,7 +688,13 @@ export function SettingsSurface() {
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
-  const runtimeCatalogEntries = runtimeProviders?.providers ?? []
+  const richRuntimeCatalogEntries = runtimeProviders?.providers ?? []
+  const fallbackRuntimeCatalogEntries = runtimeCatalogFromDefaults(runtimeDefaults)
+  const runtimeCatalogEntries = richRuntimeCatalogEntries.length > 0
+    ? richRuntimeCatalogEntries
+    : fallbackRuntimeCatalogEntries
+  const runtimeCatalogIsFallback =
+    runtimeCatalogStatus === 'error' && richRuntimeCatalogEntries.length === 0 && fallbackRuntimeCatalogEntries.length > 0
   const runtimeConfigPath = runtimeProviders?.config_path ?? runtimeDefaults?.config_path ?? null
   const defaultRuntimeId = runtimeDefaults?.default_runtime_id ?? runtimeProviders?.summary?.default_runtime_id ?? null
   const defaultCatalogEntry = findRuntimeCatalogSnapshot(runtimeCatalogEntries, defaultRuntimeId)
@@ -831,9 +863,14 @@ export function SettingsSurface() {
 
                 <div class="settings-runtime-section" data-runtime-section="catalog" data-testid="runtime-catalog-section">
                   <div class="set-sub-h">Runtime catalog (${runtimeCatalogEntries.length})</div>
-                  ${runtimeCatalogStatus === 'loading'
+                  ${runtimeCatalogIsFallback ? html`
+                    <div class="set-hint" data-testid="runtime-catalog-fallback">
+                      provider 카탈로그를 불러오지 못해 live runtime defaults projection으로 표시합니다.
+                    </div>
+                  ` : null}
+                  ${runtimeCatalogStatus === 'loading' && runtimeCatalogEntries.length === 0
                     ? html`<div class="set-hint" data-testid="runtime-catalog-loading">runtime catalog 불러오는 중...</div>`
-                    : runtimeCatalogStatus === 'error'
+                    : runtimeCatalogStatus === 'error' && runtimeCatalogEntries.length === 0
                       ? html`<div class="set-hint" data-testid="runtime-catalog-error">runtime catalog를 불러오지 못했습니다.</div>`
                       : runtimeCatalogEntries.length === 0
                         ? html`<div class="set-hint" data-testid="runtime-catalog-empty">표시할 runtime catalog entry가 없습니다.</div>`

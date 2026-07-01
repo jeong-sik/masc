@@ -617,6 +617,9 @@ describe('RuntimeTomlEditor', () => {
       expect(container.querySelector('[data-testid="runtime-add-provider-error"]')?.textContent)
         .toContain('이미 존재하는')
     })
+    // Form-validation errors need role="alert" so screen readers announce them
+    // immediately -- they appear without any focus change or navigation.
+    expect(container.querySelector('[data-testid="runtime-add-provider-error"]')?.getAttribute('role')).toBe('alert')
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).not.toContain('modified')
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })

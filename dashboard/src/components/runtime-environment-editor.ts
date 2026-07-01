@@ -579,7 +579,7 @@ export function RuntimeEnvironmentEditor({
                     />
                   ` : null}
                 </div>
-                ${providerFormError ? html`<div class="rt-warn" data-testid="runtime-add-provider-error">${providerFormError}</div>` : null}
+                ${providerFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-provider-error">${providerFormError}</div>` : null}
                 <div class="rt-add-actions">
                   <button
                     type="button"
@@ -738,7 +738,7 @@ export function RuntimeEnvironmentEditor({
                   </label>
                 </div>
                 <div class="rt-note">capability 세부 항목(tool-choice, thinking-control-format 등)은 runtime.toml 탭에서 편집하세요.</div>
-                ${modelFormError ? html`<div class="rt-warn" data-testid="runtime-add-model-error">${modelFormError}</div>` : null}
+                ${modelFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-model-error">${modelFormError}</div>` : null}
                 <div class="rt-add-actions">
                   <button
                     type="button"
@@ -803,7 +803,7 @@ export function RuntimeEnvironmentEditor({
                 onClick=${submitAddBinding}
               >+ 바인딩 추가</button>
             </div>
-            ${bindingFormError ? html`<div class="rt-warn" data-testid="runtime-add-binding-error">${bindingFormError}</div>` : null}
+            ${bindingFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-binding-error">${bindingFormError}</div>` : null}
           </div>
           ${environment.bindings.map(binding => {
             const isDefault = binding.id === environment.defaultRuntimeId || binding.isDefault

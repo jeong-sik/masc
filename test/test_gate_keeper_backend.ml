@@ -1423,7 +1423,7 @@ let test_visible_reply_stream_fallback_redacts_before_persist () =
   in
   check string "terminal reply redacted" "terminal [redacted]" explicit
 
-let test_streamed_visible_reply_rewrites_no_visible_payload () =
+let test_streamed_visible_reply_preserves_no_visible_payload () =
   let payload_json =
     `Assoc
       [
@@ -1440,15 +1440,15 @@ let test_streamed_visible_reply_rewrites_no_visible_payload () =
     Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
       (Some payload_json) ~visible_reply
   in
-  check string "streamed text becomes typed reply" "streamed final"
+  check string "declared no-visible reply remains empty" ""
     (json_string_field "reply" rewritten);
-  check string "streamed text promotes visible outcome" "visible_reply"
+  check string "declared no-visible outcome remains semantic" "no_visible_reply"
     (json_string_field Keeper_turn_outcome.wire_key rewritten);
   let err =
     Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
       rewritten visible_reply
   in
-  check bool "streamed visible text is not terminal no-reply" false
+  check bool "stream fallback cannot override no-visible terminal contract" true
     (Option.is_some err)
 
 let test_streamed_visible_reply_preserves_checkpoint_payload () =
@@ -2162,8 +2162,8 @@ let () =
             test_visible_reply_uses_streamed_text_fallback;
           test_case "visible reply stream fallback redacts before persist" `Quick
             test_visible_reply_stream_fallback_redacts_before_persist;
-          test_case "streamed visible reply rewrites no-visible payload" `Quick
-            test_streamed_visible_reply_rewrites_no_visible_payload;
+          test_case "streamed visible reply preserves no-visible payload" `Quick
+            test_streamed_visible_reply_preserves_no_visible_payload;
           test_case "streamed visible reply preserves checkpoint payload" `Quick
             test_streamed_visible_reply_preserves_checkpoint_payload;
           test_case "runtime run_blocks appends multimodal input to OAS agent" `Quick

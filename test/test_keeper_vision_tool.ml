@@ -690,7 +690,7 @@ let test_invalid_structured_vision_response_is_runtime_failure () =
            (assoc_string "error" json)
            "invalid_structured_response");
       assert (String.equal (assoc_string "failure_class" json) "runtime_failure");
-      assert (contains_substring (assoc_string "detail" json) "not valid JSON")))
+      assert (contains_substring (assoc_string "detail" json) "JSON parse error")))
 
 let test_run_vision_invalid_structured_response_is_typed () =
   with_temp_runtime_toml single_vision_runtime_toml (fun () ->
@@ -712,7 +712,7 @@ let test_run_vision_invalid_structured_response_is_typed () =
     in
     match outcome with
     | Vt.Vo_invalid_structured_response detail ->
-      assert (contains_substring detail "not valid JSON")
+      assert (contains_substring detail "JSON parse error")
     | _ -> failwith "expected Vo_invalid_structured_response")
 
 let test_retryable_provider_error_tries_next_runtime () =

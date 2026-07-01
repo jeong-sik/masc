@@ -301,7 +301,10 @@ let test_apply_external_state_group_inherits_effective_horizon () =
     ]
   in
   let expected =
-    Some (first_seen +. Types.external_state_ttl_seconds)
+    let compatibility_horizon =
+      Types.external_state_valid_until_from_first_seen ~first_seen
+    in
+    Some (Float.min compatibility_horizon stored_horizon)
   in
   let plan =
     { Consolidation.groups =

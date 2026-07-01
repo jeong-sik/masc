@@ -648,7 +648,7 @@ let reply_payload_with_streamed_visible_reply payload_json_opt ~visible_reply =
   | Some visible_reply -> (
       match Keeper_turn_outcome.of_reply_payload payload_json_opt with
       | Keeper_turn_outcome.Continuation_checkpoint -> payload_json_opt
-      | Keeper_turn_outcome.No_visible_reply
+      | Keeper_turn_outcome.No_visible_reply -> payload_json_opt
       | Keeper_turn_outcome.Visible_reply -> (
           match payload_json_opt with
           | Some (`Assoc fields) ->

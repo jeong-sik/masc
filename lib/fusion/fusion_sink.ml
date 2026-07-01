@@ -408,33 +408,40 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
          | Error _ as e -> e)
       | Error _ -> Ok ()
     in
-    (* RFC-0266: completion 성공 경로(board post 생성됨)에서만 깨운다. board 생성
-       실패(Error)는 orchestrator가 [Sink_failed]로 바꿔 fusion_tool의
-       append_chat_failure가 깨우므로, 여기서도 깨우면 중복 wake가 된다. judge가
-       Error여도 fusion은 끝났으니 ok=false로 통지한다(board엔 실패도 증거로 남음).
-       chat lane append가 실패하면 board 실패와 동일하게 Error를 반환한다(.mli 계약):
-       board post는 이미 증거로 남아 board/fusion surface엔 결과가 보이지만, 메인 chat
-       전달이 실패했으니 여기서 mark_completed/wake 하지 않고 orchestrator의 Sink_failed
-       경로가 처리하게 한다(board Error 경로와 일관). *)
+    (* RFC-0266 (개정, board best-effort): completion 여부는 *키퍼가 결론을 받았는가*
+       (chat lane)로 판정한다. board post는 증거 카드일 뿐이므로 그 생성 실패는 fatal이
+       아니다. chat lane append가 성공하면 board 결과와 무관하게 여기서 한 번
+       mark_completed/broadcast/wake 한다: board Ok면 카드 post id를, board Error면
+       경고 로그 후 빈 id를 넘긴다(append_chat_failure의 [board_post_id:""] 선례와 대칭).
+       chat lane append가 실패한 경우에만 [Error]를 반환해 orchestrator의 [Sink_failed]
+       → fusion_tool.append_chat_failure가 통지하게 한다(키퍼가 결론을 못 받은 유일한
+       경우). 과거엔 board Error도 [Error]로 반환해, 결론 전달이 성공했는데도
+       append_chat_failure가 그 위에 모순된 "(sink failed)" note + ok=false wake를 덧대고
+       (이중 통지), 완료/wake 경로 자체는 board Error 시 건너뛰던 버그가 있었다. *)
     (match chat_lane_result with
      | Error msg -> Error msg
-     | Ok () -> (
-       match board_result with
-       | Ok post ->
-         let ok, resolved_answer =
-           match judge with
-           | Ok j -> true, j.Fusion_types.resolved_answer
-           | Error e -> false, Printf.sprintf "judge failed: %s" (Fusion_types.judge_failure_text e)
-         in
-         (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake와 무관하게 run
-            상태를 반영해야 하므로 wake 직전 무조건 호출. *)
-         Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok;
-         broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
-         wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok
-           ~resolved_answer
-           ~board_post_id:(Board.Post_id.to_string post.id);
-         Ok ()
-       | Error e -> Error (Board.show_board_error e)))
+     | Ok () ->
+       let board_post_id =
+         match board_result with
+         | Ok (post : Board.post) -> Board.Post_id.to_string post.id
+         | Error e ->
+           Log.Keeper.warn ~keeper_name:keeper
+             "fusion board card unavailable run_id=%s: %s" run_id
+             (Board.show_board_error e);
+           ""
+       in
+       let ok, resolved_answer =
+         match judge with
+         | Ok j -> true, j.Fusion_types.resolved_answer
+         | Error e ->
+           false, Printf.sprintf "judge failed: %s" (Fusion_types.judge_failure_text e)
+       in
+       (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake 직전 무조건 호출. *)
+       Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok;
+       broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
+       wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok
+         ~resolved_answer ~board_post_id;
+       Ok ())
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn
   | exn -> Error (Printexc.to_string exn)

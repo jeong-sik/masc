@@ -57,6 +57,21 @@ let test_masc_delegates_oas_response_shape_metrics () =
   check_calls ~file ~callee:"Response_shape.content_shape_to_string" ~expected:1
 ;;
 
+let test_masc_routes_response_text_projection_through_adapter () =
+  check_calls
+    ~file:"lib/agent_sdk_response.ml"
+    ~callee:"Agent_sdk.Types.visible_text_of_response"
+    ~expected:1;
+  check_calls
+    ~file:"lib/fusion/fusion_oas.ml"
+    ~callee:"Agent_sdk.Types.visible_text_of_response"
+    ~expected:0;
+  check_calls
+    ~file:"lib/worker_oas.ml"
+    ~callee:"Agent_sdk.Types.visible_text_of_response"
+    ~expected:0
+;;
+
 let test_masc_delegates_oas_tool_call_projection () =
   check_calls
     ~file:"lib/keeper/keeper_context_tool_message_pairs.ml"
@@ -123,6 +138,10 @@ let () =
             "MASC delegates response shape metrics to OAS"
             `Quick
             test_masc_delegates_oas_response_shape_metrics
+        ; test_case
+            "MASC routes response text projection through adapter"
+            `Quick
+            test_masc_routes_response_text_projection_through_adapter
         ; test_case
             "MASC delegates tool-call block projection to OAS"
             `Quick

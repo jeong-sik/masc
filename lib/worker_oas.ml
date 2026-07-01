@@ -751,9 +751,7 @@ and run_existing_worker_agent
          ~raw_trace;
        match result with
        | Ok response ->
-         let output =
-           Agent_sdk.Types.visible_text_of_response response
-         in
+         let output = Agent_sdk_response.text_of_response response in
          let* () =
            Worker_container.append_worker_completion_log
              ~base_path

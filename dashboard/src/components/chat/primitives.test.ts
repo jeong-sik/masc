@@ -2017,13 +2017,72 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
       container,
     )
 
+    const trace = container.querySelector('[data-chat-tool-trace]') as HTMLElement | null
+    const traceToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+    expect(trace).not.toBeNull()
+    expect(traceToggle).not.toBeNull()
+    expect(traceToggle?.getAttribute('aria-expanded')).toBe('false')
+    expect(trace?.textContent).toContain('턴 타임라인')
+    expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
+    expect(trace?.textContent).not.toContain('latest **tail**')
+
+    fireEvent.click(traceToggle!)
+
     const think = container.querySelector('[data-chat-trace-step="think"] .chat-block-tstep-text') as HTMLElement | null
     expect(think).not.toBeNull()
+    expect(traceToggle?.getAttribute('aria-expanded')).toBe('true')
     expect(think?.getAttribute('data-chat-thinking-preview')).toBe('truncated')
     expect(think?.textContent).not.toContain('old heading')
     expect(think?.textContent).toContain('latest **tail**')
     expect(think?.querySelector('strong')).toBeNull()
     expect((think?.textContent ?? '').length).toBeLessThan(longThinking.length)
+  })
+
+  it('auto-opens a live thinking timeline when the assistant turn settles', async () => {
+    const thinking = 'checked context and selected the final answer'
+    const renderTurn = (assistant: KeeperConversationEntry): void => {
+      render(
+        html`<${ChatTranscript}
+          entries=${[assistant]}
+          emptyText="empty"
+          groupToolCalls=${true}
+          variant="messenger"
+        />`,
+        container,
+      )
+    }
+
+    renderTurn(entry({
+      id: 'a',
+      text: '응답 작성 중',
+      role: 'assistant',
+      source: 'direct_assistant',
+      streamState: 'streaming',
+      delivery: 'streaming',
+      traceSteps: [{ kind: 'think', text: thinking }],
+    }))
+
+    const initialToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+    expect(initialToggle).not.toBeNull()
+    expect(initialToggle?.getAttribute('aria-expanded')).toBe('false')
+    expect(container.querySelector('[data-chat-trace-step="think"]')).toBeNull()
+
+    renderTurn(entry({
+      id: 'a',
+      text: '완료된 응답',
+      role: 'assistant',
+      source: 'direct_assistant',
+      streamState: null,
+      delivery: 'history',
+      traceSteps: [{ kind: 'think', text: thinking }],
+    }))
+
+    await waitFor(() => {
+      const settledToggle = container.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+      expect(settledToggle?.getAttribute('aria-expanded')).toBe('true')
+    })
+    expect(container.querySelector('[data-chat-trace-step="think"]')?.textContent).toContain(thinking)
+    expect(container.querySelector('[data-chat-trace-step="chat"]')?.textContent).toContain('완료된 응답')
   })
 
   it('renders board post ids in assistant prose as board detail links', () => {
@@ -2252,6 +2311,10 @@ describe('ChatTranscript — tool-call grouping (turn timeline)', () => {
     )
 
     const bundle = container.querySelector('[data-chat-turn-bundle]')
+    const traceToggle = bundle?.querySelector('.chat-block-trace-hd') as HTMLButtonElement | null
+    expect(traceToggle).not.toBeNull()
+    fireEvent.click(traceToggle!)
+
     const step = bundle?.querySelector('[data-chat-trace-step="tool"]')
     // Output may still arrive while the turn streams, so keep it pending.
     expect(step?.querySelector('.chat-block-tstep-status.pending')).not.toBeNull()

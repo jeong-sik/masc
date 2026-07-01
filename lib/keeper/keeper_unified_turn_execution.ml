@@ -661,9 +661,27 @@ let run (ctx : ctx)
             ();
           Log.Keeper.warn
             "%s: OAS returned context overflow after its owned retry \
-             path; MASC will not compact/retry at keeper layer: %s"
+             path; MASC will not compact/retry within this turn — \
+             pausing with auto-resume-with-backoff: %s"
             meta.name
             (short_preview (Agent_sdk.Error.to_string err));
+          (* OAS already exhausted its own proactive + emergency compaction
+             for this turn (that's what [Degraded_retry_step_not_allowed]
+             plus [is_context_overflow] means here), so there is nothing
+             left for MASC to retry within this turn. Rather than letting
+             this fall through to the generic turn_consecutive_failures
+             counter (which has no auto-recovery and only escalates to a
+             hard [Keeper_fiber_crash]), drive the already-implemented
+             Overflowed/Compacting FSM's retry-exhausted path directly:
+             this pauses the keeper with [Auto_resume_with_backoff] so it
+             comes back on its own once the backoff elapses, instead of
+             requiring operator intervention. *)
+          let (_ : keeper_meta) =
+            pause_keeper_for_overflow
+              ~config
+              ~meta
+              ~reason:"context_overflow_after_oas_retry"
+          in
           mark_terminal_error err;
           Error err, turn_state
         | Keeper_turn_runtime_budget.Degraded_retry_step_not_allowed ->

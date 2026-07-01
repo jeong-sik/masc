@@ -751,10 +751,49 @@ let degraded_rotation_after_recoverable_error
          (* Contract violation or quota/rate-limit exhaustion: cap rotation. *)
          None)
 
+(** [true] when a structured error indicates context overflow. *)
+let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
+  match err with
+  | Agent_sdk.Error.Api (ContextOverflow _) -> true
+  (* Other API error variants do not indicate context overflow. *)
+  | Agent_sdk.Error.Api (RateLimited _)
+  | Agent_sdk.Error.Api (Overloaded _)
+  | Agent_sdk.Error.Api (ServerError _)
+  | Agent_sdk.Error.Api (AuthError _)
+  | Agent_sdk.Error.Api (InvalidRequest _)
+  | Agent_sdk.Error.Api (NotFound _)
+  | Agent_sdk.Error.Api (NetworkError _)
+  | Agent_sdk.Error.Api (Timeout _) -> false
+  | Agent_sdk.Error.Provider _ -> false
+  (* Other agent error variants. *)
+  | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
+  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
+  | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
+  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
+  | Agent_sdk.Error.Agent (IdleDetected _)
+  | Agent_sdk.Error.Agent (GuardrailViolation _)
+  | Agent_sdk.Error.Agent (TripwireViolation _)
+  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
+  | Agent_sdk.Error.Agent (InputRequired _) -> false
+  (* Non-API / non-Agent error families. *)
+  | Agent_sdk.Error.Mcp _
+  | Agent_sdk.Error.Config _
+  | Agent_sdk.Error.Serialization _
+  | Agent_sdk.Error.Io _
+  | Agent_sdk.Error.Orchestration _
+  | Agent_sdk.Error.Internal _ -> false
+
 let is_auto_recoverable_turn_error (err : Agent_sdk.Error.sdk_error) : bool =
   is_transient_network_error err
   || is_server_rejected_parse_error err
   || is_auto_recoverable_runtime_exhausted_error err
+  (* Context overflow is handled explicitly by
+     [Keeper_turn_runtime_budget.pause_keeper_for_overflow] at the point of
+     detection (Overflowed/Compacting FSM retry-exhausted path, auto-resume
+     with backoff) rather than by accumulating turn_consecutive_failures
+     toward a hard crash — counting it here too would double-penalize an
+     event that already has its own graceful pause. *)
+  || is_context_overflow err
 
 let should_warn_keeper_cycle_failed (err : Agent_sdk.Error.sdk_error) : bool =
   if Keeper_provider_runtime_boundary.is_provider_timeout_error err
@@ -797,37 +836,8 @@ let max_transient_retries () =
 let transient_backoff_sec (attempt : int) : float =
   Env_config_keeper.KeeperRetryBackoff.transient_backoff_sec attempt
 
-(** [true] when a structured error indicates context overflow. *)
-let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
-  match err with
-  | Agent_sdk.Error.Api (ContextOverflow _) -> true
-  (* Other API error variants do not indicate context overflow. *)
-  | Agent_sdk.Error.Api (RateLimited _)
-  | Agent_sdk.Error.Api (Overloaded _)
-  | Agent_sdk.Error.Api (ServerError _)
-  | Agent_sdk.Error.Api (AuthError _)
-  | Agent_sdk.Error.Api (InvalidRequest _)
-  | Agent_sdk.Error.Api (NotFound _)
-  | Agent_sdk.Error.Api (NetworkError _)
-  | Agent_sdk.Error.Api (Timeout _) -> false
-  | Agent_sdk.Error.Provider _ -> false
-  (* Other agent error variants. *)
-  | Agent_sdk.Error.Agent (MaxTurnsExceeded _)
-  | Agent_sdk.Error.Agent (AgentExecutionTimeout _)
-  | Agent_sdk.Error.Agent (AgentExecutionIdleTimeout _)
-  | Agent_sdk.Error.Agent (UnrecognizedStopReason _)
-  | Agent_sdk.Error.Agent (IdleDetected _)
-  | Agent_sdk.Error.Agent (GuardrailViolation _)
-  | Agent_sdk.Error.Agent (TripwireViolation _)
-  | Agent_sdk.Error.Agent (ExitConditionMet _) -> false
-  | Agent_sdk.Error.Agent (InputRequired _) -> false
-  (* Non-API / non-Agent error families. *)
-  | Agent_sdk.Error.Mcp _
-  | Agent_sdk.Error.Config _
-  | Agent_sdk.Error.Serialization _
-  | Agent_sdk.Error.Io _
-  | Agent_sdk.Error.Orchestration _
-  | Agent_sdk.Error.Internal _ -> false
+(* [is_context_overflow] now lives earlier in this file, above
+   [is_auto_recoverable_turn_error], since that predicate depends on it. *)
 
 (** Extract the [InputRequired] payload from an [sdk_error], if any.
     Typed companion to {!is_input_required_error}; callers that need

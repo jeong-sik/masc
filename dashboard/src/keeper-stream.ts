@@ -461,6 +461,17 @@ export function applyKeeperStreamEvent(
           }))
           return message
         }
+        if (status === 'done' && terminal?.ok !== false) {
+          updateThreadEntry(keeperName, assistantEntryId, entry => ({
+            ...entry,
+            delivery:
+              entry.delivery === 'queued' || entry.delivery === 'no_reply'
+                ? entry.delivery
+                : 'delivered',
+            streamState: null,
+            error: null,
+          }))
+        }
         return null
       }
       if (event.name === 'KEEPER_REPLY_DETAILS') {

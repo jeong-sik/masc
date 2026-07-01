@@ -75,9 +75,6 @@ let frugal_threshold () =
 let hustle_threshold () =
   Env_config_core.get_float ~default:0.0 "MASC_ECONOMY_HUSTLE_THRESHOLD"
 
-let reputation_multiplier_enabled () =
-  Env_config_core.get_bool ~default:true "MASC_ECONOMY_REPUTATION_MULTIPLIER"
-
 (** {1 Transaction Kind Helpers} *)
 
 let transaction_kind_to_string = function

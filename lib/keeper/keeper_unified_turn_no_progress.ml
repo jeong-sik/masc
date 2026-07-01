@@ -124,7 +124,7 @@ let clear_for_operator_resume ~base_path meta =
     with
     | Ok dropped -> dropped
     | Error msg ->
-      Log.Keeper.warn
+      Log.Keeper.info
         "%s: operator resume could not drop recovery stimulus (best-effort \
          cleanup; resume proceeds): %s"
         keeper_name

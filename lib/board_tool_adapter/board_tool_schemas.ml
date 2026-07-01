@@ -338,6 +338,22 @@ let tool_post_get : Masc_domain.tool_schema =
                            masc_board_list, masc_board_search, or visible board context \
                            before calling masc_board_post_get." )
                     ] )
+              ; ( "comment_offset"
+                , `Assoc
+                    [ "type", `String "integer"
+                    ; ( "description"
+                      , `String
+                          "Zero-based offset into the comment thread (default: 0). \
+                           Use to paginate through long threads." )
+                    ] )
+              ; ( "comment_limit"
+                , `Assoc
+                    [ "type", `String "integer"
+                    ; ( "description"
+                      , `String
+                          "Max comments to return (default: 50, max: 100). \
+                           Response includes pagination metadata when truncated." )
+                    ] )
               ] )
         ; "required", `List [ `String "post_id" ]
         ]

@@ -154,6 +154,26 @@ let clear_goal_approval_pending_confirm_best_effort ctx ~goal_id =
       msg
 ;;
 
+let clear_goal_approval_pending_confirm_required
+      ctx
+      ~goal_id
+      ~tool_name
+      ~start_time
+      ~on_cleared
+  =
+  match clear_goal_approval_pending_confirm ctx ~goal_id with
+  | Ok () -> on_cleared ()
+  | Error msg ->
+    error_result_typed
+      ~tool_name
+      ~start_time
+      ~code:Internal_error
+      (Printf.sprintf
+         "failed to clear goal approval pending confirm for %s: %s"
+         goal_id
+         msg)
+;;
+
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
 
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
@@ -813,26 +833,35 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                   | Error msg ->
                     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                   | Ok updated_goal ->
+                    let on_cleared () =
+                      emit_goal_event
+                        ctx
+                        ~goal_id
+                        ~event_type:"goal_phase"
+                        ~payload:
+                          (`Assoc
+                              [ "phase", Goal_phase.to_yojson updated_goal.phase
+                              ; "actor", Goal_verification.goal_principal_to_yojson actor
+                              ]);
+                      ok_result
+                        ~tool_name
+                        ~start_time
+                        [ "goal_id", `String goal_id
+                        ; "action", `String (Goal_phase.action_to_string action)
+                        ; "goal", Goal_store.goal_to_yojson updated_goal
+                        ; ( "verification_summary"
+                          , verification_summary_json updated_goal effective_policy None )
+                        ]
+                    in
                     if goal.phase = Goal_phase.Awaiting_approval
-                    then clear_goal_approval_pending_confirm_best_effort ctx ~goal_id;
-                    emit_goal_event
-                      ctx
-                      ~goal_id
-                      ~event_type:"goal_phase"
-                      ~payload:
-                        (`Assoc
-                            [ "phase", Goal_phase.to_yojson updated_goal.phase
-                            ; "actor", Goal_verification.goal_principal_to_yojson actor
-                            ]);
-                    ok_result
-                      ~tool_name
-                      ~start_time
-                      [ "goal_id", `String goal_id
-                      ; "action", `String (Goal_phase.action_to_string action)
-                      ; "goal", Goal_store.goal_to_yojson updated_goal
-                      ; ( "verification_summary"
-                        , verification_summary_json updated_goal effective_policy None )
-                      ])
+                    then
+                      clear_goal_approval_pending_confirm_required
+                        ctx
+                        ~goal_id
+                        ~tool_name
+                        ~start_time
+                        ~on_cleared
+                    else on_cleared ())
                | Ok (Goal_phase.Move_to next_phase) ->
                  (match goal.active_verification_request_id, next_phase with
                   | ( Some request_id
@@ -880,42 +909,51 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                   | Error msg ->
                     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                   | Ok updated_goal ->
-                    if goal.phase = Goal_phase.Awaiting_approval
-                    then clear_goal_approval_pending_confirm_best_effort ctx ~goal_id;
-                    emit_goal_event
-                      ctx
-                      ~goal_id
-                      ~event_type:"goal_phase"
-                      ~payload:
-                        (`Assoc
-                            [ "phase", Goal_phase.to_yojson updated_goal.phase
-                            ; "actor", Goal_verification.goal_principal_to_yojson actor
-                            ]);
-                    if
-                      action = Goal_phase.Approve_completion
-                      || action = Goal_phase.Reject_completion
-                    then
+                    let on_cleared () =
                       emit_goal_event
                         ctx
                         ~goal_id
-                        ~event_type:"goal_approval_resolved"
+                        ~event_type:"goal_phase"
                         ~payload:
                           (`Assoc
-                              [ ( "decision"
-                                , `String
-                                    (if action = Goal_phase.Approve_completion
-                                     then "approve"
-                                     else "reject") )
+                              [ "phase", Goal_phase.to_yojson updated_goal.phase
+                              ; "actor", Goal_verification.goal_principal_to_yojson actor
                               ]);
-                    ok_result
-                      ~tool_name
-                      ~start_time
-                      [ "goal_id", `String goal_id
-                      ; "action", `String (Goal_phase.action_to_string action)
-                      ; "goal", Goal_store.goal_to_yojson updated_goal
-                      ; ( "verification_summary"
-                        , verification_summary_json updated_goal effective_policy None )
-                      ])))))
+                      if
+                        action = Goal_phase.Approve_completion
+                        || action = Goal_phase.Reject_completion
+                      then
+                        emit_goal_event
+                          ctx
+                          ~goal_id
+                          ~event_type:"goal_approval_resolved"
+                          ~payload:
+                            (`Assoc
+                                [ ( "decision"
+                                  , `String
+                                      (if action = Goal_phase.Approve_completion
+                                       then "approve"
+                                       else "reject") )
+                                ]);
+                      ok_result
+                        ~tool_name
+                        ~start_time
+                        [ "goal_id", `String goal_id
+                        ; "action", `String (Goal_phase.action_to_string action)
+                        ; "goal", Goal_store.goal_to_yojson updated_goal
+                        ; ( "verification_summary"
+                          , verification_summary_json updated_goal effective_policy None )
+                        ]
+                    in
+                    if goal.phase = Goal_phase.Awaiting_approval
+                    then
+                      clear_goal_approval_pending_confirm_required
+                        ctx
+                        ~goal_id
+                        ~tool_name
+                        ~start_time
+                        ~on_cleared
+                    else on_cleared ())))))
   | Ok _, Ok None, _ ->
     validation_error_result
       ~tool_name

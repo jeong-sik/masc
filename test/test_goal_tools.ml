@@ -1016,6 +1016,51 @@ let test_goal_approval_drop_clears_pending_confirm () =
          (List.length (Operator_pending_confirm.read_pending_confirms config)))
 ;;
 
+let test_goal_approval_clear_failure_is_reported () =
+  with_goal_awaiting_completion_approval
+    ~title:"Reject approval clear failure"
+    (fun config goal ->
+       let previous_remove =
+         Atomic.get Workspace_hooks.operator_pending_confirm_remove_fn
+       in
+       Fun.protect
+         ~finally:(fun () ->
+           Atomic.set Workspace_hooks.operator_pending_confirm_remove_fn previous_remove)
+         (fun () ->
+            Atomic.set
+              Workspace_hooks.operator_pending_confirm_remove_fn
+              (fun _config _token -> Error "forced pending-confirm clear failure");
+            let rejected =
+              Tool_workspace.dispatch
+                (workspace_ctx ~agent_name:"operator" config)
+                ~name:"masc_goal_transition"
+                ~args:
+                  (`Assoc
+                      [ "goal_id", `String goal.id
+                      ; "action", `String "reject_completion"
+                      ; "actor", principal_json ~id:"operator"
+                      ])
+            in
+            let error_json = expect_error rejected in
+            check
+              string
+              "clear failure is surfaced"
+              "internal_error"
+              (get_string_field error_json "error_code");
+            check
+              bool
+              "error names pending confirm clear"
+              true
+              (contains_substring
+                 (get_error_message_field error_json)
+                 "failed to clear goal approval pending confirm");
+            check
+              int
+              "approval request remains when clear fails"
+              1
+              (List.length (Operator_pending_confirm.read_pending_confirms config))))
+;;
+
 let test_goal_principal_display_name_canonicalized () =
   with_workspace
   @@ fun config ->
@@ -1776,6 +1821,10 @@ let () =
             "approval drop clears pending confirm"
             `Quick
             test_goal_approval_drop_clears_pending_confirm
+        ; test_case
+            "approval clear failure is reported"
+            `Quick
+            test_goal_approval_clear_failure_is_reported
         ; test_case
             "principal display labels are canonicalized"
             `Quick

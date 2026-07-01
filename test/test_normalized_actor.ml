@@ -64,7 +64,7 @@ let test_upsert_reports_persistence_failure () =
       | Error msg ->
           check bool "error mentions local write" true
             (String.contains msg ':'
-            && String.contains msg '/'
+            && String.contains msg Filename.dir_sep.[0]
             && String.length msg > 0))
 
 let test_remove_reports_persistence_failure () =
@@ -87,7 +87,7 @@ let test_remove_reports_persistence_failure () =
       | Error msg ->
           check bool "error mentions local write" true
             (String.contains msg ':'
-            && String.contains msg '/'
+            && String.contains msg Filename.dir_sep.[0]
             && String.length msg > 0))
 
 let tests =

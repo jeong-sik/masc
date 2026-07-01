@@ -25,6 +25,21 @@ let completion_contract_drops_current_turn_replay
     completion_contract_result
 ;;
 
+let direct_assistant_source = "direct_assistant"
+
+let completion_contract_suppresses_visible_response
+      ~history_assistant_source
+      (completion_contract_result :
+         Keeper_execution_receipt.completion_contract_result)
+  =
+  match completion_contract_result with
+  | Keeper_execution_receipt.Contract_passive_only ->
+    not (String.equal history_assistant_source direct_assistant_source)
+  | _ ->
+    Keeper_execution_receipt.completion_contract_result_requires_attention
+      completion_contract_result
+;;
+
 type replay_suffix_prune_reason =
   | Completion_contract_requires_attention
   | Synthetic_empty_state_snapshot
@@ -219,6 +234,9 @@ module For_testing = struct
   let completion_contract_drops_current_turn_replay =
     completion_contract_drops_current_turn_replay
 
+  let completion_contract_suppresses_visible_response =
+    completion_contract_suppresses_visible_response
+
   let replay_suffix_prune_reason_to_string =
     replay_suffix_prune_reason_to_string
 
@@ -259,15 +277,18 @@ let finalize
       result.stop_reason
   in
   let completion_contract_result = acc.receipt_completion_contract_result in
-  let contract_requires_attention =
-    Keeper_execution_receipt.completion_contract_result_requires_attention
+  let contract_suppresses_visible_response =
+    completion_contract_suppresses_visible_response
+      ~history_assistant_source
       completion_contract_result
   in
-  let suppress_visible_response = budget_exhausted || contract_requires_attention in
+  let suppress_visible_response =
+    budget_exhausted || contract_suppresses_visible_response
+  in
   let raw_response_text_present =
     (not budget_exhausted) && String.trim raw_response_text <> ""
   in
-  if contract_requires_attention && raw_response_text_present
+  if contract_suppresses_visible_response && raw_response_text_present
   then
     Log.Keeper.info ~keeper_name:meta.name
       "suppressing keeper-visible response for completion_contract_result=%s"
@@ -290,6 +311,7 @@ let finalize
       ~completion_contract_result
       ~stop_reason:result.stop_reason
       ~raw_response_text
+      ~suppress_response_text:suppress_visible_response
       ()
   in
   (* Gate the working-state resume merge (ResumeFromDigest) to turns where active

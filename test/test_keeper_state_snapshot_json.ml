@@ -1027,6 +1027,63 @@ let test_contract_attention_finalizer_drops_raw_response_text () =
        (fun text -> contains_substring text "edit it, and commit")
        finalized.state_snapshot.decisions)
 
+let passive_suppresses_for_source source =
+  Finalize.completion_contract_suppresses_visible_response
+    ~history_assistant_source:source
+    Receipt.Contract_passive_only
+
+let test_direct_passive_only_finalizer_preserves_raw_response_text () =
+  let raw_response_text =
+    "I cannot act on that from the current keeper state, but I am still here."
+  in
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"sangsu"
+      ~goal:"Maintain direct conversation"
+      ~actual_keeper_tool_names:["keeper_context_status"]
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text
+      ~suppress_response_text:
+        (passive_suppresses_for_source "direct_assistant")
+      ()
+  in
+  Alcotest.(check bool)
+    "direct passive-only is not suppressed"
+    false
+    (passive_suppresses_for_source "direct_assistant");
+  Alcotest.(check string)
+    "direct passive-only keeps visible response"
+    raw_response_text
+    finalized.response_text
+
+let test_internal_passive_only_finalizer_still_drops_raw_response_text () =
+  let raw_response_text =
+    "No actionable signal. I will wait for a future autonomous cycle."
+  in
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"sangsu"
+      ~goal:"Maintain direct conversation"
+      ~actual_keeper_tool_names:["keeper_context_status"]
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text
+      ~suppress_response_text:
+        (passive_suppresses_for_source "internal_assistant")
+      ()
+  in
+  Alcotest.(check bool)
+    "internal passive-only remains suppressed"
+    true
+    (passive_suppresses_for_source "internal_assistant");
+  Alcotest.(check string)
+    "internal passive-only drops visible response"
+    ""
+    finalized.response_text
+
 (* ── Test runner ─────────────────────────────────────────────────── *)
 
 let () =
@@ -1132,5 +1189,13 @@ let () =
             "contract attention finalizer drops raw response text"
             `Quick
             test_contract_attention_finalizer_drops_raw_response_text;
+          Alcotest.test_case
+            "direct passive-only finalizer preserves raw response text"
+            `Quick
+            test_direct_passive_only_finalizer_preserves_raw_response_text;
+          Alcotest.test_case
+            "internal passive-only finalizer still drops raw response text"
+            `Quick
+            test_internal_passive_only_finalizer_still_drops_raw_response_text;
         ] );
     ]

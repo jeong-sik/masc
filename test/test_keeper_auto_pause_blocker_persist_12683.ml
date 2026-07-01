@@ -144,6 +144,13 @@ let pause_operator_disposition
   ; reason = Masc.Keeper_execution_receipt.Reason_completion_contract_unsatisfied
   }
 
+let non_healthy_pass_operator_disposition
+  : Masc.Keeper_agent_result.operator_disposition
+  =
+  { disposition = Masc.Keeper_execution_receipt.Disp_pass
+  ; reason = Masc.Keeper_execution_receipt.Reason_turn_budget_exhausted
+  }
+
 let run_result
       ?(response_text = "direct reply")
       ?(stop_reason = Runtime_agent.Completed)
@@ -936,6 +943,16 @@ let test_direct_success_operator_pause_keeps_no_progress_pause () =
     (Masc.Keeper_turn.For_testing.direct_success_may_clear_no_progress_pause
        result)
 
+let test_direct_success_non_healthy_pass_keeps_no_progress_pause () =
+  let result =
+    run_result ~operator_disposition:(Some non_healthy_pass_operator_disposition) ()
+  in
+  check bool
+    "non-healthy pass disposition cannot clear no-progress pause"
+    false
+    (Masc.Keeper_turn.For_testing.direct_success_may_clear_no_progress_pause
+       result)
+
 let test_direct_success_passive_only_no_visible_keeps_no_progress_pause () =
   Eio_main.run
   @@ fun env ->
@@ -1385,6 +1402,10 @@ let () =
             "direct success operator pause keeps no-progress pause"
             `Quick
             test_direct_success_operator_pause_keeps_no_progress_pause;
+          test_case
+            "direct success non-healthy pass keeps no-progress pause"
+            `Quick
+            test_direct_success_non_healthy_pass_keeps_no_progress_pause;
           test_case
             "direct success passive-only no-visible keeps no-progress pause"
             `Quick

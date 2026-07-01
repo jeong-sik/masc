@@ -184,10 +184,14 @@ let direct_success_disposition_allows_no_progress_resume
   : bool
   =
   match result.operator_disposition with
-  | Some { disposition = Keeper_execution_receipt.Disp_pass; _ } -> true
+  | Some
+      { disposition = Keeper_execution_receipt.Disp_pass
+      ; reason = Keeper_execution_receipt.Reason_healthy
+      } -> true
   | Some
       { disposition =
           ( Keeper_execution_receipt.Disp_pause_human
+          | Keeper_execution_receipt.Disp_pass
           | Keeper_execution_receipt.Disp_alert_exhausted
           | Keeper_execution_receipt.Disp_fail_open_next_runtime
           | Keeper_execution_receipt.Disp_pass_next_model
@@ -247,7 +251,7 @@ let clear_direct_success_no_progress_pause
   then (
     Log.Keeper.info
       "%s: direct keeper_msg success kept no_progress pause/blocker because \
-       result lacked typed resume evidence"
+       result lacked healthy operator disposition or typed resume evidence"
       meta.name;
     meta)
   else

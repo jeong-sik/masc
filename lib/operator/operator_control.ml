@@ -401,7 +401,7 @@ let action_json ?actor_hint (ctx : _ context) args :
         expires_at = Some expires_at;
       }
     in
-    upsert_pending_confirm ctx.config entry;
+    let* () = upsert_pending_confirm ctx.config entry in
     append_action_log ctx.config
       {
         trace_id;
@@ -473,7 +473,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
       with
       | None -> Error "pending confirmation not found"
       | Some entry when pending_confirm_expired entry ->
-          remove_pending_confirm ctx.config confirm_token;
+          let* () = remove_pending_confirm ctx.config confirm_token in
           append_action_log ctx.config
             {
               trace_id = entry.trace_id;
@@ -517,7 +517,7 @@ let confirm_json ?actor_hint (ctx : _ context) args :
           Error "actor is not allowed to confirm this action"
       | Some entry ->
           if String.equal decision "deny" then (
-            let goal_denial_result =
+            let goal_denial_request =
               if
                 String.equal
                   entry.action_type
@@ -528,18 +528,23 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                     Operator_action_constants.goal_decision_reject
                     entry.payload
                 in
-                execute_action
-                  ctx
-                  { actor = entry.actor
-                  ; action_type = entry.action_type
-                  ; target_type = entry.target_type
-                  ; target_id = entry.target_id
-                  ; payload
-                  }
-                |> Result.map Option.some
+                Ok
+                  (Some
+                     { actor = entry.actor
+                     ; action_type = entry.action_type
+                     ; target_type = entry.target_type
+                     ; target_id = entry.target_id
+                     ; payload
+                     })
               else Ok None
             in
-            remove_pending_confirm ctx.config confirm_token;
+            let* goal_denial_request = goal_denial_request in
+            let* () = remove_pending_confirm ctx.config confirm_token in
+            let goal_denial_result =
+              match goal_denial_request with
+              | Some request -> execute_action ctx request |> Result.map Option.some
+              | None -> Ok None
+            in
             append_action_log ctx.config
               {
                 trace_id = entry.trace_id;
@@ -586,8 +591,8 @@ let confirm_json ?actor_hint (ctx : _ context) args :
                 payload = entry.payload;
               }
             in
+            let* () = remove_pending_confirm ctx.config confirm_token in
             let* executed = execute_action ctx request in
-            remove_pending_confirm ctx.config confirm_token;
             let latency_ms = int_of_float ((Unix.gettimeofday () -. started_at) *. 1000.0) in
             append_action_log ctx.config
               {

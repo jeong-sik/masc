@@ -144,6 +144,16 @@ let clear_goal_approval_pending_confirm ctx ~goal_id =
     (goal_approval_pending_confirm_token goal_id)
 ;;
 
+let clear_goal_approval_pending_confirm_best_effort ctx ~goal_id =
+  match clear_goal_approval_pending_confirm ctx ~goal_id with
+  | Ok () -> ()
+  | Error msg ->
+    Log.Misc.warn
+      "failed to clear goal approval pending confirm for %s: %s"
+      goal_id
+      msg
+;;
+
 let goal_status_strings = [ "active"; "paused"; "done"; "dropped" ]
 
 (* RFC-0089: derive the accepted-value sets from the Goal_phase ADT (the goal
@@ -762,7 +772,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                          ()
                      with
                   | Error msg ->
-                    clear_goal_approval_pending_confirm ctx ~goal_id;
+                    clear_goal_approval_pending_confirm_best_effort ctx ~goal_id;
                     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                   | Ok updated_goal ->
                     emit_goal_event
@@ -804,7 +814,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                   | Ok updated_goal ->
                     if goal.phase = Goal_phase.Awaiting_approval
-                    then clear_goal_approval_pending_confirm ctx ~goal_id;
+                    then clear_goal_approval_pending_confirm_best_effort ctx ~goal_id;
                     emit_goal_event
                       ctx
                       ~goal_id
@@ -871,7 +881,7 @@ let handle_goal_transition ~tool_name ~start_time (ctx : context) args : Tool_re
                     error_result_typed ~tool_name ~start_time ~code:Internal_error msg
                   | Ok updated_goal ->
                     if goal.phase = Goal_phase.Awaiting_approval
-                    then clear_goal_approval_pending_confirm ctx ~goal_id;
+                    then clear_goal_approval_pending_confirm_best_effort ctx ~goal_id;
                     emit_goal_event
                       ctx
                       ~goal_id
@@ -1097,7 +1107,7 @@ let handle_goal_verify ~tool_name ~start_time (ctx : context) args : Tool_result
                        ~goal_id
                        ~event_type:"goal_approval_opened"
                        ~payload:(`Assoc [ "request_id", `String request.id ])
-                   else clear_goal_approval_pending_confirm ctx ~goal_id;
+                   else clear_goal_approval_pending_confirm_best_effort ctx ~goal_id;
                    result)
                 else finalize ~phase:Goal_phase.Completed ~event_status:"approved"
               | Goal_verification.Failed ->

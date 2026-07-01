@@ -12,9 +12,13 @@ open Keeper_keepalive
 type tool_result = Keeper_types_profile.tool_result
 
 let remove_pending_confirms_by_target_callback
-    : (Workspace.config -> target_type:string -> target_id:string option -> int) Atomic.t
+    : (Workspace.config ->
+       target_type:string ->
+       target_id:string option ->
+       (int, string) result)
+        Atomic.t
   =
-  Atomic.make (fun _config ~target_type:_ ~target_id:_ -> 0)
+  Atomic.make (fun _config ~target_type:_ ~target_id:_ -> Ok 0)
 
 let register_remove_pending_confirms_by_target fn =
   Atomic.set remove_pending_confirms_by_target_callback fn
@@ -35,10 +39,17 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
     | Error e -> tool_result_error e
     | Ok None -> tool_result_ok (Printf.sprintf "keeper already absent: %s" requested_name)
     | Ok (Some (name, m)) ->
-      let pending_confirms_removed =
-        Atomic.get remove_pending_confirms_by_target_callback config
-          ~target_type:"keeper" ~target_id:(Some name)
-      in
+      (match
+         Atomic.get remove_pending_confirms_by_target_callback config
+           ~target_type:"keeper" ~target_id:(Some name)
+       with
+       | Error msg ->
+         tool_result_error
+           (Printf.sprintf
+              "keeper pending-confirm cleanup failed for %s: %s"
+              name
+              msg)
+       | Ok pending_confirms_removed ->
       Log.Misc.info
         "[keeper_down] cleanup keeper=%s pending_confirms_removed=%d \
          remove_meta=%b remove_session=%b"
@@ -110,7 +121,7 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
         ("remove_session", `Bool remove_session);
         ("pending_confirms_removed", `Int pending_confirms_removed);
       ] in
-      tool_result_ok (Yojson.Safe.to_string json)
+      tool_result_ok (Yojson.Safe.to_string json))
 
 let handle_keeper_down (ctx : _ context) args = handle_keeper_down_config ~config:ctx.config args
 
@@ -119,5 +130,6 @@ module For_testing = struct
     Atomic.get remove_pending_confirms_by_target_callback config ~target_type ~target_id
 
   let reset_remove_pending_confirms_by_target () =
-    Atomic.set remove_pending_confirms_by_target_callback (fun _config ~target_type:_ ~target_id:_ -> 0)
+    Atomic.set remove_pending_confirms_by_target_callback
+      (fun _config ~target_type:_ ~target_id:_ -> Ok 0)
 end

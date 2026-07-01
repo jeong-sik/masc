@@ -68,20 +68,19 @@ let with_operator_pending_confirm_hooks f =
   Atomic.set
     Workspace_hooks.operator_pending_confirm_upsert_fn
     (fun config (entry : Workspace_hooks.operator_pending_confirm_request) ->
-       Operator_pending_confirm.upsert_pending_confirm
-         config
-         { token = entry.token
-         ; trace_id = entry.trace_id
-         ; actor = entry.actor
-         ; action_type = entry.action_type
-         ; target_type = entry.target_type
-         ; target_id = entry.target_id
-         ; payload = entry.payload
-         ; delegated_tool = entry.delegated_tool
-         ; created_at = entry.created_at
-         ; expires_at = entry.expires_at
-         };
-       Ok ());
+      Operator_pending_confirm.upsert_pending_confirm
+        config
+        { token = entry.token
+        ; trace_id = entry.trace_id
+        ; actor = entry.actor
+        ; action_type = entry.action_type
+        ; target_type = entry.target_type
+        ; target_id = entry.target_id
+        ; payload = entry.payload
+        ; delegated_tool = entry.delegated_tool
+        ; created_at = entry.created_at
+        ; expires_at = entry.expires_at
+        });
   Atomic.set
     Workspace_hooks.operator_pending_confirm_remove_fn
     Operator_pending_confirm.remove_pending_confirm;
@@ -1694,19 +1693,23 @@ let test_operator_goal_decision_requires_explicit_decision () =
        ignore (Workspace.init config ~agent_name:(Some "operator"));
        let ctx = operator_ctx env sw config "operator" in
        let assert_rejected ~token payload =
-         Operator_pending_confirm.upsert_pending_confirm
-           config
-           { token
-           ; trace_id = "goal_missing_decision"
-           ; actor = "operator"
-           ; action_type = Operator_action_constants.goal_completion_decision
-           ; target_type = Operator_action_constants.goal_target_type
-           ; target_id = Some "goal-1"
-           ; payload
-           ; delegated_tool = Operator_action_constants.goal_transition_tool
-           ; created_at = Masc_domain.now_iso ()
-           ; expires_at = None
-           };
+        (match
+           Operator_pending_confirm.upsert_pending_confirm
+             config
+             { token
+             ; trace_id = "goal_missing_decision"
+             ; actor = "operator"
+             ; action_type = Operator_action_constants.goal_completion_decision
+             ; target_type = Operator_action_constants.goal_target_type
+             ; target_id = Some "goal-1"
+             ; payload
+             ; delegated_tool = Operator_action_constants.goal_transition_tool
+             ; created_at = Masc_domain.now_iso ()
+             ; expires_at = None
+             }
+         with
+         | Ok () -> ()
+         | Error msg -> fail msg);
          match
            Operator_control.confirm_json
              ctx

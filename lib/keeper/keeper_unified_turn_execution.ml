@@ -328,6 +328,8 @@ let run (ctx : ctx)
         let reason =
           if EC.is_server_rejected_parse_error err
           then "server parse rejection"
+          else if EC.is_context_overflow err
+          then "context overflow"
           else "transient error"
         in
         Log.Keeper.warn

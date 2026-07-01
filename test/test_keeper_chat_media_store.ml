@@ -81,6 +81,31 @@ let test_unknown_token_absent () =
       None
       (M.file_path_of_token ~base_dir ~token:(String.make 64 '0')))
 
+let test_token_lookup_probes_known_extensions_without_scan () =
+  with_temp_base (fun base_dir ->
+    let token = String.make 64 'b' in
+    let unsupported_token = String.make 64 'c' in
+    let media_dir =
+      Filename.concat
+        (Masc.Common.masc_dir_from_base_path ~base_path:base_dir)
+        "media"
+    in
+    Masc.Fs_compat.mkdir_p media_dir;
+    let bin_path = Filename.concat media_dir (token ^ ".bin") in
+    let png_path = Filename.concat media_dir (token ^ ".png") in
+    let txt_path = Filename.concat media_dir (unsupported_token ^ ".txt") in
+    write_file bin_path "bin";
+    write_file png_path "png";
+    write_file txt_path "txt";
+    Alcotest.(check (option string))
+      "known ext wins over bin fallback"
+      (Some png_path)
+      (M.file_path_of_token ~base_dir ~token);
+    Alcotest.(check (option string))
+      "unsupported extension is not resolved"
+      None
+      (M.file_path_of_token ~base_dir ~token:unsupported_token))
+
 let test_media_type_mapping () =
   Alcotest.(check string) "png ext" "png" (M.ext_of_media_type "image/png");
   Alcotest.(check string) "mp3 ext" "mp3" (M.ext_of_media_type "audio/mpeg");
@@ -204,6 +229,10 @@ let () =
             `Quick
             test_same_bytes_different_media_type_get_distinct_tokens
         ; Alcotest.test_case "unknown token absent" `Quick test_unknown_token_absent
+        ; Alcotest.test_case
+            "token lookup probes known extensions"
+            `Quick
+            test_token_lookup_probes_known_extensions_without_scan
         ; Alcotest.test_case "media_type mapping" `Quick test_media_type_mapping
         ; Alcotest.test_case "media category" `Quick test_media_category
         ; Alcotest.test_case

@@ -72,6 +72,10 @@ let media_payload_too_large_reason ~size_bytes ~max_bytes =
     size_bytes
     max_bytes
 
+let media_persist_protocol_reason = function
+  | Keeper_chat_media_store.Write_failed _ -> "failed to persist generated media"
+  | err -> Keeper_chat_media_store.persist_error_to_string err
+
 let add_media_chunk ~media_type ~source_type ~chunks ~encoded_bytes data =
   let encoded_bytes = encoded_bytes + String.length data in
   let max_bytes = Keeper_chat_media_store.max_wire_bytes () in
@@ -104,7 +108,7 @@ let finalize_media_block ~redact_text ~base_dir ~index ~media_type ~source_type
       ]
   | Error err ->
       [ protocol_error ~index ~raw_bytes:(String.length data)
-          ~reason:(redact_text (Keeper_chat_media_store.persist_error_to_string err))
+          ~reason:(redact_text (media_persist_protocol_reason err))
           (media_persist_error_kind err)
       ]
 

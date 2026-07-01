@@ -55,6 +55,19 @@ let known_media =
   ; { media_type = "application/pdf"; ext = "pdf"; content_type = "application/pdf"; category = Document }
   ]
 
+let known_storage_exts =
+  let dedup_preserving_first entries =
+    List.fold_right
+      (fun entry acc ->
+        if List.exists (String.equal entry) acc then acc else entry :: acc)
+      entries
+      []
+  in
+  let exts =
+    known_media |> List.map (fun media -> media.ext) |> dedup_preserving_first
+  in
+  if List.exists (String.equal "bin") exts then exts else exts @ [ "bin" ]
+
 let normalize s = String.lowercase_ascii (String.trim s)
 
 (* [media_type] (an IANA type from the OAS media block) -> file extension. Unknown
@@ -170,35 +183,22 @@ let cleanup_old_files_in_dir dir =
     with
     | Sys_error _ | Unix.Unix_error _ -> ()
 
-(* Resolve a token to its on-disk path by locating [<token>.<ext>] — the ext is
-   not carried by the token, so the directory is scanned for the single file whose
-   basename (sans ext) equals the token. Returns [None] if absent or reaped. *)
+let regular_file_exists path =
+  try (Unix.stat path).st_kind = Unix.S_REG with
+  | Sys_error _ | Unix.Unix_error _ -> false
+
+(* Resolve a token to its on-disk path by probing the extensions this module can
+   write. [bin] is last, so known content types win over the opaque fallback. *)
 let file_path_of_token ~base_dir ~token =
   if not (valid_token token)
   then None
   else
-    try
     let dir = media_dir ~base_dir in
-    match Sys.file_exists dir && Sys.is_directory dir with
-    | false -> None
-    | true ->
-        let rank name =
-          match normalize (Filename.extension name) with
-          | ".bin" -> 1
-          | _ -> 0
-        in
-      Sys.readdir dir
-      |> Array.to_list
-      |> List.filter (fun name -> Filename.remove_extension name = token)
-        |> List.sort (fun left right ->
-          match compare (rank left) (rank right) with
-          | 0 -> String.compare left right
-          | by_rank -> by_rank)
-      |> (function
-       | [] -> None
-           | name :: _ -> Some (Filename.concat dir name))
-    with
-    | Sys_error _ | Unix.Unix_error _ -> None
+    List.find_map
+      (fun ext ->
+        let path = Filename.concat dir (token ^ "." ^ ext) in
+        if regular_file_exists path then Some path else None)
+      known_storage_exts
 
 let content_type_of_path path =
   let ext = Filename.extension path in

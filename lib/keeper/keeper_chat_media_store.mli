@@ -65,8 +65,9 @@ val persist_result :
     without tearing down the stream. *)
 val persist : base_dir:string -> media_type:string -> data:string -> string * string
 
-(** Human-readable error for logs and protocol-error events. Does not include the
-    media payload. *)
+(** Human-readable error for logs. Does not include the media payload; callers
+    exposing failures to clients should still mask [Write_failed] details because
+    filesystem errors may carry internal paths. *)
 val persist_error_to_string : persist_error -> string
 
 (** [persist_media_source_result] decodes the OAS media source carrier first.

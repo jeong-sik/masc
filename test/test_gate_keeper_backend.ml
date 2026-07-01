@@ -1456,6 +1456,39 @@ let test_keeper_stream_bridge_rejects_unsupported_media_source () =
         (string_contains reason "unsupported media source_type: url")
   | _ -> fail "expected unsupported media source to surface as a protocol error"
 
+let test_keeper_stream_bridge_masks_media_write_failure_reason () =
+  let open Agent_sdk.Types in
+  let base_file = temp_base_path "gate-keeper-stream-bridge-base-file" in
+  let oc = open_out_bin base_file in
+  close_out_noerr oc;
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_file with _ -> ())
+    (fun () ->
+      let events =
+        translate_oas_stream_events ~base_dir:base_file
+          [ ContentBlockDelta
+              { index = 0;
+                delta =
+                  MediaDelta
+                    { media_type = "image/png";
+                      source_type = Base64;
+                      data = Base64.encode_string "image" } };
+            ContentBlockStop { index = 0 } ]
+      in
+      match events with
+      | [ Keeper_chat_events.Oas_content_block_stop { index = stop_index };
+          Keeper_chat_events.Oas_stream_protocol_error
+            { kind; index = Some error_index; reason = Some reason; _ } ] ->
+          check int "block stop index" 0 stop_index;
+          check string "write failure kind" "media_persist_failed"
+            (Keeper_chat_events.stream_protocol_error_kind_to_string kind);
+          check int "write failure index" 0 error_index;
+          check string "write failure reason is generic"
+            "failed to persist generated media" reason;
+          check bool "internal base path not leaked" false
+            (string_contains reason base_file)
+      | _ -> fail "expected media write failure to surface with a masked reason")
+
 let test_keeper_stream_bridge_preserves_non_tool_block_lifecycle () =
   let open Agent_sdk.Types in
   let events =
@@ -2565,6 +2598,8 @@ let () =
             test_keeper_stream_bridge_rejects_oversize_media_payload;
           test_case "stream bridge rejects unsupported media source" `Quick
             test_keeper_stream_bridge_rejects_unsupported_media_source;
+          test_case "stream bridge masks media write failure reason" `Quick
+            test_keeper_stream_bridge_masks_media_write_failure_reason;
           test_case "stream bridge preserves non-tool block lifecycle" `Quick
             test_keeper_stream_bridge_preserves_non_tool_block_lifecycle;
           test_case "stream bridge rejects tool start missing identity" `Quick

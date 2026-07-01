@@ -470,8 +470,11 @@ let add_delete_action_routes router =
              | Ok Goal_store.Deleted -> respond_ok ~request:req reqd
              | Ok (Goal_store.Deleted_with_orphaned_links warning) ->
                  respond_ok_with_warning ~request:req reqd warning
-             | Error err ->
+             | Error (Goal_store.Unknown_goal _ as err) ->
                  respond_error ~status:`Not_found ~request:req reqd
+                  (Goal_store.delete_goal_error_to_string err)
+             | Error (Goal_store.Persistence_failed _ as err) ->
+                 respond_error ~status:`Internal_server_error ~request:req reqd
                    (Goal_store.delete_goal_error_to_string err)
            with Yojson.Json_error _ ->
              respond_error ~request:req reqd (invalid_request "goal_id")

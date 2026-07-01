@@ -749,6 +749,85 @@ let test_goal_transition_manual_reject_blocks_and_cancels_request () =
     (saved_request.status = Goal_verification.Cancelled)
 ;;
 
+let test_goal_transition_manual_reject_aborts_when_cancel_fails () =
+  with_workspace
+  @@ fun config ->
+  let verifier_policy =
+    { Goal_verification.inherit_mode = Goal_verification.Extend
+    ; principals =
+        [ { id = "agent-alpha"; display_name = Some "agent-alpha" } ]
+    ; required_verdicts = Some 1
+    }
+  in
+  let goal, _kind =
+    match Goal_store.upsert_goal config ~title:"Reject with missing request" ~verifier_policy () with
+    | Ok payload -> payload
+    | Error msg -> fail msg
+  in
+  create_done_task config ~goal_id:goal.id ~title:"Reject missing request task";
+  let transitioned =
+    Tool_workspace.dispatch
+      (workspace_ctx config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "request_complete"
+            ; "actor", principal_json ~id:"planner"
+            ])
+  in
+  let transitioned_json =
+    match transitioned with
+    | Some result -> parse_json_result result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  let request_id =
+    transitioned_json
+    |> Yojson.Safe.Util.member "verification_request"
+    |> fun json -> get_string_field json "id"
+  in
+  Sys.remove (Goal_verification.requests_path config);
+  seed_goal_operator config ~agent_name:"operator";
+  let rejected =
+    Tool_workspace.dispatch
+      (workspace_ctx ~agent_name:"operator" config)
+      ~name:"masc_goal_transition"
+      ~args:
+        (`Assoc
+            [ "goal_id", `String goal.id
+            ; "action", `String "reject_completion"
+            ; "actor", principal_json ~id:"operator"
+            ; "note", `String "operator rejected the completion claim"
+            ])
+  in
+  let result =
+    match rejected with
+    | Some result -> result
+    | None -> fail "masc_goal_transition not handled"
+  in
+  check bool "reject fails when cancel fails" false (Tool_result.is_success result);
+  check
+    bool
+    "failure reports cancel"
+    true
+    (contains_substring (Tool_result.message result) request_id);
+  let saved_goal =
+    match Goal_store.get_goal config ~goal_id:goal.id with
+    | Some goal -> goal
+    | None -> fail "goal missing after failed reject"
+  in
+  check
+    string
+    "phase preserved"
+    "awaiting_verification"
+    (Goal_phase.to_string saved_goal.phase);
+  check
+    (option string)
+    "active request preserved"
+    (Some request_id)
+    saved_goal.active_verification_request_id
+;;
+
 let test_goal_transition_approval_gate () =
   with_operator_pending_confirm_hooks
   @@ fun () ->
@@ -1812,6 +1891,10 @@ let () =
             "manual reject cancels verification"
             `Quick
             test_goal_transition_manual_reject_blocks_and_cancels_request
+        ; test_case
+            "manual reject aborts when cancel fails"
+            `Quick
+            test_goal_transition_manual_reject_aborts_when_cancel_fails
         ; test_case "approval gate" `Quick test_goal_transition_approval_gate
         ; test_case
             "approval reject clears pending confirm"

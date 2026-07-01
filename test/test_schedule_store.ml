@@ -35,6 +35,8 @@ let with_workspace f =
   f config
 ;;
 
+let schedules_recovery_path config = schedules_path config ^ ".last-good"
+
 let human ?display_name id = { id; kind = Human_operator; display_name }
 
 let payload_json () =
@@ -480,15 +482,59 @@ let test_mutation_refused_and_preserves_corrupt_ledger () =
   ignore (insert_ok config req);
   corrupt_both config;
   let primary_before = Workspace_core.read_text config (schedules_path config) in
-  let recovery_before = Workspace_core.read_text config (recovery_path config) in
+  let recovery_before = Workspace_core.read_text config (schedules_recovery_path config) in
   (match insert_request config (make_request ~schedule_id:"sched-2" ~risk_class:Read_only ()) with
    | Ok _ -> fail "insert on corrupt ledger unexpectedly succeeded"
    | Error (Corrupt_ledger _) -> ()
    | Error err -> fail ("expected Corrupt_ledger, got: " ^ store_error_to_string err));
   let primary_after = Workspace_core.read_text config (schedules_path config) in
-  let recovery_after = Workspace_core.read_text config (recovery_path config) in
+  let recovery_after = Workspace_core.read_text config (schedules_recovery_path config) in
   check string "corrupt primary preserved" primary_before primary_after;
   check string "corrupt recovery preserved" recovery_before recovery_after
+;;
+
+let test_insert_surfaces_primary_write_failure () =
+  with_workspace
+  @@ fun config ->
+  (* A directory at schedules_path breaks the *read* load_for_mutation does
+     before ever reaching write_state (Eio.Io reports "Is a directory" on the
+     readv, which load classifies as Corrupt_ledger) - it never exercises the
+     write-failure path this test names. Inject a write-only failure instead:
+     the ledger directory itself is made read-only *after* the (nonexistent-
+     file / Fresh) read succeeds, so save_file_atomic's temp-file creation for
+     the write is what fails. *)
+  let masc_dir = Workspace_utils.masc_dir config in
+  Unix.chmod masc_dir 0o500;
+  Fun.protect
+    ~finally:(fun () -> Unix.chmod masc_dir 0o755)
+    (fun () ->
+       let request =
+         make_request ~schedule_id:"persist-fail" ~risk_class:Read_only ()
+       in
+       match insert_request config request with
+       | Error (Persistence_failed msg) ->
+         check bool "failure detail is surfaced" true (String.length msg > 0)
+       | Error err ->
+         fail ("expected Persistence_failed, got: " ^ store_error_to_string err)
+       | Ok _ -> fail "insert unexpectedly succeeded when the ledger dir is read-only")
+;;
+
+let test_insert_keeps_primary_commit_when_recovery_write_fails () =
+  with_workspace
+  @@ fun config ->
+  Unix.mkdir (schedules_recovery_path config) 0o755;
+  let request =
+    make_request ~schedule_id:"recovery-mirror-fail" ~risk_class:Read_only ()
+  in
+  (match insert_request config request with
+   | Ok stored -> check string "stored id" request.schedule_id stored.schedule_id
+   | Error err ->
+     fail
+       ("recovery mirror failure should not fail committed primary write: "
+        ^ store_error_to_string err));
+  match get_schedule config ~schedule_id:request.schedule_id with
+  | Some stored -> check string "primary has schedule" request.schedule_id stored.schedule_id
+  | None -> fail "primary schedule missing after recovery mirror failure"
 ;;
 
 let test_cancel_refused_on_corrupt_ledger () =
@@ -509,7 +555,7 @@ let test_last_good_is_parseable_after_good_write () =
   @@ fun config ->
   let req = make_request ~risk_class:Read_only () in
   ignore (insert_ok config req);
-  let recovery_json = Workspace_core.read_json config (recovery_path config) in
+  let recovery_json = Workspace_core.read_json config (schedules_recovery_path config) in
   match Schedule_store.state_of_yojson recovery_json with
   | Ok state -> check int "last-good holds the schedule" 1 (List.length state.schedules)
   | Error msg -> fail (".last-good is not parseable: " ^ msg)
@@ -537,6 +583,10 @@ let () =
             test_read_state_raises_on_corrupt;
           test_case "mutation refused and corrupt ledger preserved" `Quick
             test_mutation_refused_and_preserves_corrupt_ledger;
+          test_case "primary write failure is surfaced" `Quick
+            test_insert_surfaces_primary_write_failure;
+          test_case "recovery mirror write failure preserves primary" `Quick
+            test_insert_keeps_primary_commit_when_recovery_write_fails;
           test_case "cancel refused on corrupt ledger" `Quick
             test_cancel_refused_on_corrupt_ledger;
           test_case "last-good is parseable after good write" `Quick

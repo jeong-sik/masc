@@ -798,16 +798,18 @@ let parse_runtime_string_leaf ~path ~key value =
   | _ -> Error (error path (key ^ " must be a string runtime id"))
 ;;
 
-let parse_runtime_media_failover value =
-  (* RFC-0265 — ordered runtime ids for modality-gated reroute. RFC-0145:
-     narrow to the [Otoml.get_array] wrong-type exception; a malformed value
-     degrades to [] (→ derive-from-declared-caps), and any id typo is caught
-     loudly at load by {!Runtime.validate_media_failover}. *)
-  try Otoml.get_array Otoml.get_string value with
+let parse_runtime_media_failover ~path value =
+  (* RFC-0265 — ordered runtime ids for modality-gated reroute. A genuine type
+     mismatch (a scalar where an ordered array is required — a bare string cannot
+     mean a list) is surfaced as a load [Error], consistent with the sibling
+     string leaves ({!parse_runtime_string_leaf}), instead of silently degrading
+     to [] (the repo's Unknown→Permissive anti-pattern). An explicit empty array
+     [] is preserved as the intentional derive-from-declared-caps signal; id typos
+     in a well-typed array are still caught loudly by
+     {!Runtime.validate_media_failover}. *)
+  try Ok (Otoml.get_array Otoml.get_string value) with
   | Otoml.Type_error _ ->
-    Log.Runtime.warn
-      "runtime_toml: [runtime].media_failover — expected string array, ignoring";
-    []
+    Error (error path "media_failover must be an array of string runtime ids")
 ;;
 
 let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list) result =
@@ -847,7 +849,9 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                 errs
               | Error e -> section, errs @ e)
            | "media_failover" ->
-             { section with media_failover = parse_runtime_media_failover value }, errs
+             (match parse_runtime_media_failover ~path:"runtime.media_failover" value with
+              | Ok media_failover -> { section with media_failover }, errs
+              | Error e -> section, errs @ e)
            | "assignments" ->
              (* Parsed by [parse_keeper_assignments], including table-shape
                 validation. It is still recognized here so a malformed scalar

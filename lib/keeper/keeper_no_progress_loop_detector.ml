@@ -11,6 +11,43 @@ type record_outcome =
 
 type progress_identity = Keeper_tool_progress_identity.t
 
+type no_progress_reason =
+  | Empty
+  | Thinking_only
+  | Read_only
+  | Repeated_identity
+  | Surface_mismatch
+  | Stale_task
+  (* A loop was detected (streak crossed threshold) but the turn's delivery
+     shape didn't match any of the specific classifiers above — e.g. a
+     [User_facing] delivery that still failed to produce durable evidence.
+     Distinct from [None]/absent: this records that classification ran and
+     genuinely found no specific match, so downstream readers (status bridge)
+     don't silently drop the fact that a reason segment exists. *)
+  | Unclassified
+
+let no_progress_reason_to_string = function
+  | Empty -> "empty"
+  | Thinking_only -> "thinking_only"
+  | Read_only -> "read_only"
+  | Repeated_identity -> "repeated_identity"
+  | Surface_mismatch -> "surface_mismatch"
+  | Stale_task -> "stale_task"
+  | Unclassified -> "unclassified"
+;;
+
+let no_progress_reason_of_string value =
+  match String.trim value |> String.lowercase_ascii with
+  | "empty" -> Some Empty
+  | "thinking_only" -> Some Thinking_only
+  | "read_only" -> Some Read_only
+  | "repeated_identity" -> Some Repeated_identity
+  | "surface_mismatch" -> Some Surface_mismatch
+  | "stale_task" -> Some Stale_task
+  | "unclassified" -> Some Unclassified
+  | _ -> None
+;;
+
 (* Per-keeper state: current streak + latched flag so the
    detected-counter only bumps once per loop episode, not on every
    turn while the keeper is stuck. *)
@@ -18,6 +55,7 @@ type keeper_state = {
   mutable streak : int;
   mutable detected_latched : bool;
   mutable last_progress_identity : progress_identity option;
+  mutable last_no_progress_reason : no_progress_reason option;
 }
 
 let state : (string, keeper_state) Hashtbl.t = Hashtbl.create 16
@@ -35,7 +73,11 @@ let get_or_create keeper_name =
   | Some s -> s
   | None ->
       let s =
-        { streak = 0; detected_latched = false; last_progress_identity = None }
+        { streak = 0
+        ; detected_latched = false
+        ; last_progress_identity = None
+        ; last_no_progress_reason = None
+        }
       in
       Hashtbl.replace state keeper_name s;
       s
@@ -76,12 +118,21 @@ let repeated_progress_identity s progress_identity =
     repeated
 ;;
 
-let record_turn ?threshold_override ?progress_identity ~keeper_name ~made_progress () =
+let record_turn
+      ?threshold_override
+      ?progress_identity
+      ?no_progress_reason
+      ~keeper_name
+      ~made_progress
+      ()
+  =
   with_lock (fun () ->
     let s = get_or_create keeper_name in
     let repeated_identity = repeated_progress_identity s progress_identity in
     let made_progress = made_progress && not repeated_identity in
     if not made_progress then begin
+      s.last_no_progress_reason <-
+        (if repeated_identity then Some Repeated_identity else no_progress_reason);
       s.streak <- s.streak + 1;
       update_streak_gauge keeper_name s.streak;
       let t =
@@ -111,6 +162,7 @@ let record_turn ?threshold_override ?progress_identity ~keeper_name ~made_progre
         update_streak_gauge keeper_name 0;
       s.streak <- 0;
       s.detected_latched <- false;
+      s.last_no_progress_reason <- None;
       if previous_streak = 0 then Normal else Loop_reset { previous_streak; was_latched }
     end)
 
@@ -119,6 +171,12 @@ let current_streak ~keeper_name =
     match Hashtbl.find_opt state keeper_name with
     | Some s -> s.streak
     | None -> 0)
+
+let current_reason ~keeper_name =
+  with_lock (fun () ->
+    match Hashtbl.find_opt state keeper_name with
+    | Some s -> s.last_no_progress_reason
+    | None -> None)
 
 (* RFC-0246: expose latched state so the wake-tombstone gate can suppress
    automatic wake for a keeper stuck in a no-progress loop. The detector owns

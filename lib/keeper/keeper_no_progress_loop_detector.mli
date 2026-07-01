@@ -35,6 +35,18 @@ type record_outcome =
 
 type progress_identity = Keeper_tool_progress_identity.t
 
+type no_progress_reason =
+  | Empty
+  | Thinking_only
+  | Read_only
+  | Repeated_identity
+  | Surface_mismatch
+  | Stale_task
+  | Unclassified
+
+val no_progress_reason_to_string : no_progress_reason -> string
+val no_progress_reason_of_string : string -> no_progress_reason option
+
 (** [turn_made_progress ~strong_evidence ~surface_requires_evidence] is the
     no-progress predicate (RFC-0239 §3 R3). A turn makes progress when it
     produced durable evidence ([strong_evidence]), or when its delivery surface
@@ -64,6 +76,7 @@ val turn_made_progress :
 val record_turn :
   ?threshold_override:int ->
   ?progress_identity:progress_identity ->
+  ?no_progress_reason:no_progress_reason ->
   keeper_name:string ->
   made_progress:bool ->
   unit ->
@@ -71,6 +84,11 @@ val record_turn :
 
 (** Current consecutive no-progress count for [keeper_name]. *)
 val current_streak : keeper_name:string -> int
+
+(** Current no-progress reason for [keeper_name], if the current streak was
+    classified by the caller. Repeated progress identities are classified in
+    this module and override the caller-supplied reason. *)
+val current_reason : keeper_name:string -> no_progress_reason option
 
 (** RFC-0246: true iff this keeper is latched in a no-progress loop — the
     streak crossed the threshold and has not been reset by a progress turn.

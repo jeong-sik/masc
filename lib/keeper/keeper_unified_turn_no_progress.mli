@@ -3,7 +3,9 @@
 val failure_reason_code : string
 
 val mark_loop_detected
-  :  config:Workspace.config
+  :  ?no_progress_reason:
+       Keeper_no_progress_loop_detector.no_progress_reason
+  -> config:Workspace.config
   -> Keeper_meta_contract.keeper_meta
   -> streak:int
   -> threshold:int

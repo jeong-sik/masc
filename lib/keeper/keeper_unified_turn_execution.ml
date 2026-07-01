@@ -643,13 +643,12 @@ let run (ctx : ctx)
             { turn_state with
               current_turn_blocker_info =
                 Some
-                  { klass = Sdk_token_budget_exceeded
-                  ; detail =
-                      Keeper_state_machine.event_to_string
-                        overflow_event
-                      ^ ": "
-                      ^ Agent_sdk.Error.to_string err
-                  }
+                  (Keeper_meta_contract.blocker_info_of_class
+                     ~detail:
+                       (Keeper_state_machine.event_to_string overflow_event
+                        ^ ": "
+                        ^ Agent_sdk.Error.to_string err)
+                     Sdk_token_budget_exceeded)
             }
           in
           Otel_metric_store.inc_counter

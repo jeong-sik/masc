@@ -1,108 +1,109 @@
 open Alcotest
-open Runtime
 
-(* ── toml_quote tests ── *)
+let contains = String_util.contains_substring
 
-let test_toml_quote_simple_string () =
-  let result = toml_quote "hello" in
-  check string "simple string" {|"hello"|} result
+let with_catalog_content content f =
+  let path = Filename.temp_file "runtime-catalog-backfill" ".toml" in
+  let oc = open_out path in
+  output_string oc content;
+  close_out oc;
+  Fun.protect
+    ~finally:(fun () ->
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+      match Llm_provider.Model_catalog.load_file path with
+      | Error msg -> failf "catalog fixture should load: %s" msg
+      | Ok catalog -> f catalog)
+;;
 
-let test_toml_quote_contains_double_quote () =
-  let result = toml_quote {|say "hello"|} in
-  check string "double quote escaped" {|"say \"hello\""|} result
+let source_entry_exn catalog =
+  match catalog with
+  | entry :: _ -> entry
+  | [] -> fail "catalog fixture unexpectedly empty"
+;;
 
-let test_toml_quote_contains_backslash () =
-  let result = toml_quote "a\\b" in
-  check string "backslash escaped" {|"a\\b"|} result
+let backfill_entry_exn missing =
+  match Runtime.model_catalog_backfill_entries [ missing ] with
+  | Error msg -> failf "backfill entries should render: %s" msg
+  | Ok [ entry ] -> entry
+  | Ok entries -> failf "expected one backfill entry, got %d" (List.length entries)
+;;
 
-let test_toml_quote_contains_newline () =
-  let result = toml_quote "line1\nline2" in
-  check string "newline escaped" {|"line1\nline2"|} result
+let test_backfill_toml_escapes_strings_and_renders_floats () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"sample-family-\"\n\
+     base = \"openai_chat\"\n\
+     provider_name = \"say \\\"hello\\\"\"\n\
+     max_context_tokens = 2048\n\
+     supports_tools = true\n\
+     accepted_reasoning_efforts = [\"low\", \"high\"]\n\
+     input_per_million = 42\n\
+     output_per_million = 3.14\n"
+  in
+  with_catalog_content catalog @@ fun loaded ->
+  let source = source_entry_exn loaded in
+  let missing : Runtime.missing_catalog_model =
+    { runtime_id = "custom.sample"
+    ; provider_id = "custom"
+    ; provider_label = "openai_compat"
+    ; model_id = "sample-line1\nline2\t\"family\"\\variant"
+    ; source_catalog_entry = Some source
+    }
+  in
+  let entry = backfill_entry_exn missing in
+  check string "runtime id" "custom.sample" entry.runtime_id;
+  check
+    string
+    "provider-qualified id_prefix"
+    "openai_compat/sample-line1\nline2\t\"family\"\\variant"
+    entry.id_prefix;
+  check string "source id_prefix" "sample-family-" entry.source_id_prefix;
+  check bool "toml carries source row" true
+    (contains entry.toml "Source OAS catalog row: sample-family-");
+  check bool "toml escapes id_prefix quotes and slashes" true
+    (contains
+       entry.toml
+       {|id_prefix = "openai_compat/sample-line1\nline2\t\"family\"\\variant"|});
+  check bool "toml escapes provider_name quotes" true
+    (contains entry.toml {|provider_name = "say \"hello\""|});
+  check bool "toml preserves accepted reasoning efforts" true
+    (contains entry.toml {|accepted_reasoning_efforts = ["low", "high"]|});
+  check bool "integer float gets decimal suffix" true
+    (contains entry.toml "input_per_million = 42.0");
+  check bool "decimal float is rendered deterministically" true
+    (contains entry.toml "output_per_million = 3.1400000000000001")
+;;
 
-let test_toml_quote_contains_carriage_return () =
-  let result = toml_quote "line1\rline2" in
-  check string "carriage return escaped" {|"line1\rline2"|} result
-
-let test_toml_quote_contains_tab () =
-  let result = toml_quote "col1\tcol2" in
-  check string "tab escaped" {|"col1\tcol2"|} result
-
-let test_toml_quote_control_char () =
-  let ctrl_a = String.make 1 (Char.chr 1) in
-  let result = toml_quote ("a" ^ ctrl_a ^ "b") in
-  check string "control char unicode escaped" {|"a\u0001b"|} result
-
-let test_toml_quote_empty_string () =
-  let result = toml_quote "" in
-  check string "empty string" {|""|} result
-
-let test_toml_quote_unicode () =
-  let result = toml_quote "héllo" in
-  check string "unicode preserved" {|"héllo"|} result
-
-(* ── toml_float tests ── *)
-
-let test_toml_float_integer_value () =
-  let result = toml_float 42.0 in
-  check string "integer value gets .0" "42.0" result
-
-let test_toml_float_decimal () =
-  let result = toml_float 3.14 in
-  check string "decimal preserved" "3.1400000000000001" result
-
-let test_toml_float_scientific () =
-  let result = toml_float 1.5e10 in
-  check string "scientific notation" "15000000000.0" result
-
-let test_toml_float_negative () =
-  let result = toml_float (-3.14) in
-  check string "negative float" "-3.1400000000000001" result
-
-let test_toml_float_zero () =
-  let result = toml_float 0.0 in
-  check string "zero" "0.0" result
-
-let test_toml_float_small () =
-  let result = toml_float 1e-10 in
-  check string "very small" "1.0000000000000001e-10" result
-
-(* ── missing_catalog_model_label tests ── *)
-
-let test_missing_catalog_model_label_basic () =
-  let missing = { runtime_id = "openai/gpt-4"; model_id = "gpt-4-turbo" } in
-  let result = missing_catalog_model_label missing in
-  check string "basic label" "openai/gpt-4 (model=gpt-4-turbo)" result
-
-let test_missing_catalog_model_label_with_special_chars () =
-  let missing = { runtime_id = "azure/gpt-4-32k"; model_id = "gpt-4-32k-0613" } in
-  let result = missing_catalog_model_label missing in
-  check string "special chars" "azure/gpt-4-32k (model=gpt-4-32k-0613)" result
-
-(* ── test registration ── *)
+let test_backfill_refuses_missing_source_row_with_runtime_label () =
+  let missing : Runtime.missing_catalog_model =
+    { runtime_id = "custom.uncatalogued"
+    ; provider_id = "custom"
+    ; provider_label = "openai_compat"
+    ; model_id = "uncatalogued"
+    ; source_catalog_entry = None
+    }
+  in
+  match Runtime.model_catalog_backfill_entries [ missing ] with
+  | Ok _ -> fail "backfill must not invent capabilities without a source row"
+  | Error msg ->
+    check bool "error names runtime/model label" true
+      (contains msg "custom.uncatalogued (model=uncatalogued)")
+;;
 
 let () =
-  Alcotest.run "Runtime Catalog Backfill"
-    [ ( "toml_quote"
-      , [ test_case "simple string" `Quick test_toml_quote_simple_string
-        ; test_case "double quote" `Quick test_toml_quote_contains_double_quote
-        ; test_case "backslash" `Quick test_toml_quote_contains_backslash
-        ; test_case "newline" `Quick test_toml_quote_contains_newline
-        ; test_case "carriage return" `Quick test_toml_quote_contains_carriage_return
-        ; test_case "tab" `Quick test_toml_quote_contains_tab
-        ; test_case "control char" `Quick test_toml_quote_control_char
-        ; test_case "empty string" `Quick test_toml_quote_empty_string
-        ; test_case "unicode" `Quick test_toml_quote_unicode
-        ] )
-    ; ( "toml_float"
-      , [ test_case "integer value" `Quick test_toml_float_integer_value
-        ; test_case "decimal" `Quick test_toml_float_decimal
-        ; test_case "scientific" `Quick test_toml_float_scientific
-        ; test_case "negative" `Quick test_toml_float_negative
-        ; test_case "zero" `Quick test_toml_float_zero
-        ; test_case "very small" `Quick test_toml_float_small
-        ] )
-    ; ( "missing_catalog_model_label"
-      , [ test_case "basic" `Quick test_missing_catalog_model_label_basic
-        ; test_case "special chars" `Quick test_missing_catalog_model_label_with_special_chars
+  Alcotest.run
+    "Runtime Catalog Backfill"
+    [ ( "model_catalog_backfill_entries"
+      , [ test_case
+            "escapes strings and renders floats"
+            `Quick
+            test_backfill_toml_escapes_strings_and_renders_floats
+        ; test_case
+            "refuses missing source row"
+            `Quick
+            test_backfill_refuses_missing_source_row_with_runtime_label
         ] )
     ]
+;;

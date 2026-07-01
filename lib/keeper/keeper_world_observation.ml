@@ -1207,12 +1207,25 @@ let keeper_cycle_decision
           (not reactive_wake) && (backlog_fresh || backlog_elapsed)
         in
         let schedule_drives_turn = (not reactive_wake) && schedule_elapsed in
+        (* RFC-0303 Phase 2: stimulus-gate the self-cadence wake. [min_interval_
+           elapsed] no longer drives a turn ON ITS OWN — a blind cadence turn
+           with no work signal is what manufactured the "passive" turns the
+           no-progress stack then chased (detect -> pause -> tombstone). It is
+           now a rate-limit INSIDE the [proactive_work_ready] guard: a keeper
+           spends a cadence turn only when it actually has an opportunity (a
+           claimed task, mentions, board/scope activity, or task backlog). With
+           no opportunity the keeper stays idle (verdict [No_signal]) instead of
+           spending a passive turn. Bootstrap (first warm-up turn) and a due
+           schedule remain ungated — each is itself the stimulus. External
+           signals still wake the keeper via the Reactive channel, so gating the
+           blind cadence cannot cause a deadlock. *)
         let should_run =
           is_bootstrap
-          || min_interval_elapsed
           || schedule_drives_turn
           || (proactive_work_ready
-              && (backlog_drives_turn || (idle_gate_elapsed && cooldown_elapsed)))
+              && (min_interval_elapsed
+                  || backlog_drives_turn
+                  || (idle_gate_elapsed && cooldown_elapsed)))
         in
         let runtime_id = runtime_id_of_meta meta in
         let provider_cooldown_remaining_sec =

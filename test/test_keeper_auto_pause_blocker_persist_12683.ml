@@ -967,7 +967,7 @@ let test_direct_success_pass_next_model_keeps_no_progress_pause () =
       ~operator_disposition:(Some pass_next_model_operator_disposition)
       ~tool_calls:
         [ tool_call
-            ~typed_outcome:Masc.Keeper_tool_outcome.Progress
+            ~typed_outcome:Keeper_tool_outcome.Progress
             "masc_deliver"
         ]
       ()

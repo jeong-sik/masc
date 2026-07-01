@@ -71,8 +71,12 @@ interface TomlDocument {
 type TomlScalar = string | number | boolean | null
 
 // Mirrors the backend's reserved_namespaces (lib/runtime/runtime_toml.ml:554).
-// A provider/model id equal to one of these would collide with a top-level
-// TOML namespace once used as a binding's first segment (`[<id>.<model>]`).
+// A *provider* id equal to one of these would collide with a top-level TOML
+// namespace once used as a binding pin's first segment (`[<providerId>.<modelId>]`,
+// e.g. `[models.foo]` could no longer be told apart from a model definition
+// section). Model ids never occupy that first-segment position, but are
+// checked against the same set here too for naming consistency across the
+// two entity types, not because they carry the same collision risk.
 const RESERVED_TOP_LEVEL = new Set([
   'providers',
   'models',
@@ -490,7 +494,7 @@ export function setRuntimeTomlProviderCredential(
     next = deleteRuntimeTomlKey(next, section, 'key')
     return deleteRuntimeTomlKey(next, section, 'value')
   }
-  next = setRuntimeTomlKey(next, section, 'value', value)
+  next = setRuntimeTomlKey(next, section, 'value', normalizedValue)
   next = deleteRuntimeTomlKey(next, section, 'key')
   return deleteRuntimeTomlKey(next, section, 'path')
 }

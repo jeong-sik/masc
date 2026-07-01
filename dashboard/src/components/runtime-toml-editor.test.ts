@@ -621,6 +621,39 @@ describe('RuntimeTomlEditor', () => {
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
   })
 
+  it('trims a whitespace-only display name to fall back to the id, and trims credential padding', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+
+    fireEvent.input(container.querySelector('[data-testid="runtime-add-provider-id"]') as HTMLInputElement, {
+      target: { value: 'brandnew2' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider 표시 이름"]') as HTMLInputElement, {
+      target: { value: '   ' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider transport 값"]') as HTMLInputElement, {
+      target: { value: 'https://brandnew2.example/v1' },
+    })
+    fireEvent.input(container.querySelector('[aria-label="새 provider credential 값"]') as HTMLInputElement, {
+      target: { value: '  BRANDNEW2_KEY  ' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('display-name = "brandnew2"')
+      expect(source).toContain('key = "BRANDNEW2_KEY"')
+      expect(source).not.toContain('display-name = "   "')
+      expect(source).not.toContain('key = "  BRANDNEW2_KEY  "')
+    })
+  })
+
   it('adds a new model through the form', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)

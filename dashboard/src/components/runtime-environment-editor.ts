@@ -271,11 +271,18 @@ export function RuntimeEnvironmentEditor({
       )
       return
     }
-    if (newProvider.credentialType !== 'none' && newProvider.credentialValue.trim() === '') {
+    const trimmedCredentialValue = newProvider.credentialValue.trim()
+    if (newProvider.credentialType !== 'none' && trimmedCredentialValue === '') {
       setProviderFormError('credential 값을 입력하거나 credential 타입을 "없음"으로 두세요')
       return
     }
-    onAddProvider({ ...newProvider, id, transportValue })
+    onAddProvider({
+      ...newProvider,
+      id,
+      displayName: newProvider.displayName.trim(),
+      transportValue,
+      credentialValue: trimmedCredentialValue,
+    })
     setNewProvider(DEFAULT_NEW_PROVIDER)
     setProviderFormError(null)
     setProviderFormOpen(false)

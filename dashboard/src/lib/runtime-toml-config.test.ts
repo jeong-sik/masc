@@ -154,6 +154,18 @@ mad-improver = "runpod_mtp.qwen"
     expect(next).toContain('key = "OLLAMA_CLOUD_API_KEY"')
   })
 
+  it('trims inline credential values before writing them', () => {
+    const next = setRuntimeTomlProviderCredential(
+      sourceText,
+      'runpod_mtp',
+      'inline',
+      '  sk-inline-secret  ',
+    )
+
+    expect(next).toContain('value = "sk-inline-secret"')
+    expect(next).not.toContain('  sk-inline-secret  ')
+  })
+
   it('deletes optional keys when requested', () => {
     const next = deleteRuntimeTomlKey(sourceText, 'runpod_mtp.qwen', 'keep-alive')
 

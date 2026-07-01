@@ -13,10 +13,17 @@ type t =
   ; autonomous_activation : autonomous_activation
   }
 
+(* RFC-0297 P0-1: the autonomous and proactive gates are resolved through the
+   single SSOT [Keeper_lifecycle_gate_env.enabled] (global kill-switch AND the
+   per-keeper flag), rather than re-deriving the enabled state from
+   [meta.autoboot_enabled] / [meta.proactive.enabled] here. This is the same
+   resolver [keeper_cycle_decision] uses, so the two sites cannot drift. *)
 let autonomous_blocker (meta : Keeper_meta_contract.keeper_meta) =
   if meta.paused then Some "paused"
-  else if not meta.autoboot_enabled then Some "autoboot_disabled"
-  else if not meta.proactive.enabled then Some "proactive_disabled"
+  else if not (Keeper_lifecycle_gate_env.enabled Autonomous meta) then
+    Some "autoboot_disabled"
+  else if not (Keeper_lifecycle_gate_env.enabled Proactive meta) then
+    Some "proactive_disabled"
   else None
 ;;
 

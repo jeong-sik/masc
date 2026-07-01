@@ -133,6 +133,7 @@ type skip_reason = Keeper_world_observation_turn_types.skip_reason =
   | Keeper_paused
   | Approval_pending
   | Scheduled_autonomous_disabled
+  | Reactive_disabled
   | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
@@ -1061,21 +1062,16 @@ let keeper_cycle_decision
       ?(provider_cooldown_remaining_sec = provider_cooldown_remaining_sec_for_runtime)
       ?(reactive_wake = false)
       ?(event_queue_triggers = [])
-      ?(lifecycle_global = Keeper_lifecycle_gate_env.global ())
       ~(meta : keeper_meta)
       (observation : world_observation)
   =
-  (* RFC-0297 P0-1: the scheduled-autonomous (proactive) turn is enabled only
-     when BOTH the global kill-switch ([lifecycle_global.proactive], from
-     MASC_KEEPER_PROACTIVE_ENABLED / [proactive] enabled in runtime.toml) and
-     the per-keeper flag ([meta.proactive.enabled]) are on. Before this the
-     global switch did not exist, so [proactive] enabled = false was silently
-     dropped. [lifecycle_global] defaults to reading the registry; tests pass
-     it explicitly. *)
-  let proactive_gate_enabled =
-    Keeper_lifecycle_gate.gate_enabled Proactive ~global:lifecycle_global
-      ~meta:{ Keeper_lifecycle_gate.all_enabled with proactive = meta.proactive.enabled }
-  in
+  (* RFC-0297 P0-1: reactive and proactive turns run only when their lifecycle
+     gate is enabled — the global kill-switch AND the per-keeper flag. Resolved
+     through the single SSOT [Keeper_lifecycle_gate_env.enabled] so the enabled
+     decision is not re-derived inline. Before this the global switches did not
+     exist, so [reactive]/[proactive] enabled = false were silently dropped. *)
+  let reactive_gate_enabled = Keeper_lifecycle_gate_env.enabled Reactive meta in
+  let proactive_gate_enabled = Keeper_lifecycle_gate_env.enabled Proactive meta in
   let event_queue_reactive_triggers =
     List.map turn_reason_of_event_queue_trigger event_queue_triggers
   in
@@ -1110,6 +1106,17 @@ let keeper_cycle_decision
   then blocked Approval_pending
   else (
     match reactive_triggers with
+    | _ :: _ when not reactive_gate_enabled ->
+      (* RFC-0297 P0-1: the global reactive kill-switch is off, so a pending
+         reactive trigger does not open a turn. *)
+      { should_run = false
+      ; channel = Reactive
+      ; verdict = Skip { reasons = Reactive_disabled, [] }
+      ; since_last_scheduled_autonomous = None
+      ; effective_cooldown = None
+      ; task_reactive_cooldown = None
+      ; idle_gate_sec = None
+      }
     | first :: rest ->
       { should_run = true
       ; channel = Reactive

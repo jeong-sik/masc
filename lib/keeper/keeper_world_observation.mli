@@ -181,6 +181,7 @@ type skip_reason =
   | Keeper_paused
   | Approval_pending
   | Scheduled_autonomous_disabled
+  | Reactive_disabled
   | Provider_cooldown_pending of { remaining_sec : int }
   | Idle_gate_pending of { remaining_sec : int }
   | Cooldown_pending of { remaining_sec : int }
@@ -391,7 +392,6 @@ val keeper_cycle_decision :
     (keeper_name:string -> runtime_id:string -> int option) ->
   ?reactive_wake:bool ->
   ?event_queue_triggers:event_queue_trigger list ->
-  ?lifecycle_global:Keeper_lifecycle_gate.flags ->
   meta:Keeper_meta_contract.keeper_meta -> world_observation -> keeper_cycle_decision
 (** [reactive_wake] (default [false]) marks evaluations triggered by an external
     broadcast wakeup rather than the keeper's own cadence timer. When set, a

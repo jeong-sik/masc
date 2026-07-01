@@ -1,23 +1,25 @@
-(** RFC-0297 Phase 1 (P0-1): the global proactive kill-switch actually
-    suppresses the scheduled-autonomous turn.
+(** RFC-0297 Phase 1 (P0-1): the global lifecycle kill-switches actually
+    suppress their turns, resolved through the single SSOT
+    [Keeper_lifecycle_gate_env.enabled].
 
-    Before this, [key_to_env] had no [proactive.enabled] mapping and
-    [keeper_cycle_decision] gated only on the per-keeper [meta.proactive.enabled];
-    an operator's global "proactive off" intent was silently dropped. These
-    tests pin that:
+    Before this, [key_to_env] had no reactive/proactive/autonomous
+    [.enabled] mapping and each site gated only on the per-keeper meta flag;
+    an operator's global "off" intent was silently dropped. These tests drive
+    the real registry flag (via a boot override — the same precedence a
+    runtime.toml value takes) and pin:
 
-    1. A keeper that WOULD run a scheduled-automation turn is suppressed
-       ([Skip Scheduled_autonomous_disabled]) when the global proactive gate is
-       off, even though [meta.proactive.enabled = true].
-    2. With the gate on (default all-enabled) the same keeper runs — so the gate
-       is the cause of the suppression, not some other branch.
-    3. The reactive path is unaffected: a pending mention still runs even with
-       the global proactive gate off (the gate does not disable direct
-       responses). *)
+    1. MASC_KEEPER_PROACTIVE_ENABLED=false suppresses the scheduled-autonomous
+       turn even though meta.proactive.enabled is true.
+    2. MASC_KEEPER_REACTIVE_ENABLED=false suppresses a reactive (mention) turn
+       (Skip Reactive_disabled).
+    3. MASC_KEEPER_AUTONOMOUS_ENABLED=false blocks autonomous activation
+       readiness even though meta.autoboot_enabled is true.
+    4. With no override (default all-true) the same keeper runs / is ready —
+       so the gate is the cause of the suppression. *)
 
 open Alcotest
 module WO = Masc.Keeper_world_observation
-module Gate = Masc.Keeper_lifecycle_gate
+module Readiness = Masc.Keeper_activation_readiness
 
 let no_provider_cooldown ~keeper_name:_ ~runtime_id:_ = None
 
@@ -68,13 +70,15 @@ let make_meta name =
   | Error err -> Alcotest.fail ("make_meta failed: " ^ err)
 ;;
 
-(* Warm keeper whose scheduled-automation cooldown has elapsed, so with the
-   attention observation below it WOULD open a scheduled-autonomous turn. *)
-let schedule_ready_meta () =
+(* Warm keeper whose scheduled-automation cooldown has elapsed, with both
+   per-keeper flags on, so it WOULD open a scheduled-autonomous turn / be
+   autonomously ready. Isolates the global gate as the cause of suppression. *)
+let ready_meta () =
   let meta = make_meta "gate" in
   let now = Time_compat.now () in
   { meta with
-    proactive = { enabled = true; idle_sec = 600; cooldown_sec = 60 }
+    autoboot_enabled = true
+  ; proactive = { enabled = true; idle_sec = 600; cooldown_sec = 60 }
   ; runtime =
       { meta.runtime with
         proactive_rt =
@@ -116,11 +120,24 @@ let schedule_attention_obs =
   }
 ;;
 
-let decide ?lifecycle_global ~meta obs =
+let mention_obs = { base_obs with pending_mentions = [ ("peer", "ping") ] }
+
+(* Drive a real registry flag through a boot override, cleaned up afterwards. *)
+let with_flag name value f =
+  Config_boot_overrides.reset_for_tests ();
+  Config_boot_overrides.set name value;
+  Fun.protect ~finally:(fun () -> Config_boot_overrides.reset_for_tests ()) f
+;;
+
+let without_overrides f =
+  Config_boot_overrides.reset_for_tests ();
+  Fun.protect ~finally:(fun () -> Config_boot_overrides.reset_for_tests ()) f
+;;
+
+let decide ~meta obs =
   WO.keeper_cycle_decision
     ~provider_cooldown_remaining_sec:no_provider_cooldown
     ~reactive_wake:false
-    ?lifecycle_global
     ~meta
     obs
 ;;
@@ -131,57 +148,78 @@ let skip_reasons d =
   | WO.Run _ -> []
 ;;
 
-(* Control: with the gate on (default), the scheduled-automation attention
-   opens a turn. Anchors that the suppression below is caused by the gate. *)
-let test_gate_on_runs () =
-  let meta = schedule_ready_meta () in
-  let d = decide ~lifecycle_global:Gate.all_enabled ~meta schedule_attention_obs in
-  check bool "gate on: scheduled automation attention runs" true d.should_run
+(* Control: defaults on → scheduled turn runs. *)
+let test_default_proactive_runs () =
+  without_overrides @@ fun () ->
+  let d = decide ~meta:(ready_meta ()) schedule_attention_obs in
+  check bool "default: scheduled automation attention runs" true d.should_run
 
-(* RFC-0297 P0-1: global proactive kill-switch suppresses the turn even though
-   the per-keeper meta flag is still enabled. *)
-let test_global_gate_off_suppresses () =
-  let meta = schedule_ready_meta () in
+let test_global_proactive_off_suppresses () =
+  with_flag "MASC_KEEPER_PROACTIVE_ENABLED" "false" @@ fun () ->
+  let meta = ready_meta () in
   check bool "precondition: per-keeper proactive still enabled" true
     meta.proactive.enabled;
-  let d =
-    decide
-      ~lifecycle_global:{ Gate.all_enabled with proactive = false }
-      ~meta
-      schedule_attention_obs
-  in
+  let d = decide ~meta schedule_attention_obs in
   check bool "global proactive off suppresses the turn" false d.should_run;
   check bool "suppressed on scheduled-autonomous channel" true
-    (match d.channel with
-     | WO.Scheduled_autonomous -> true
-     | WO.Reactive -> false);
-  check bool "skip reason is scheduled_autonomous_disabled" true
+    (match d.channel with WO.Scheduled_autonomous -> true | WO.Reactive -> false);
+  check bool "skip reason scheduled_autonomous_disabled" true
     (List.exists (( = ) WO.Scheduled_autonomous_disabled) (skip_reasons d))
 
-(* The gate does not disable reactive responses: a pending mention still runs
-   even with the global proactive gate off. *)
-let test_reactive_path_unaffected_by_proactive_gate () =
-  let meta = schedule_ready_meta () in
-  let obs = { base_obs with pending_mentions = [ ("peer", "ping") ] } in
-  let d =
-    decide ~lifecycle_global:{ Gate.all_enabled with proactive = false } ~meta obs
-  in
-  check bool "reactive turn still runs with proactive gate off" true d.should_run;
-  check bool "reactive turn stays on the reactive channel" true
-    (match d.channel with
-     | WO.Reactive -> true
-     | WO.Scheduled_autonomous -> false)
+(* Control: defaults on → mention runs a reactive turn. *)
+let test_default_reactive_runs () =
+  without_overrides @@ fun () ->
+  let d = decide ~meta:(ready_meta ()) mention_obs in
+  check bool "default: mention runs" true d.should_run;
+  check bool "on reactive channel" true
+    (match d.channel with WO.Reactive -> true | WO.Scheduled_autonomous -> false)
+
+let test_global_reactive_off_suppresses () =
+  with_flag "MASC_KEEPER_REACTIVE_ENABLED" "false" @@ fun () ->
+  let d = decide ~meta:(ready_meta ()) mention_obs in
+  check bool "global reactive off suppresses the mention turn" false d.should_run;
+  check bool "suppressed on reactive channel" true
+    (match d.channel with WO.Reactive -> true | WO.Scheduled_autonomous -> false);
+  check bool "skip reason reactive_disabled" true
+    (List.exists (( = ) WO.Reactive_disabled) (skip_reasons d))
+
+(* Autonomous gate flows through the same SSOT resolver in activation
+   readiness. *)
+let test_default_autonomous_ready () =
+  without_overrides @@ fun () ->
+  let r = Readiness.of_meta (ready_meta ()) in
+  check bool "default: autonomous activation ready" true
+    r.autonomous_activation.ok
+
+let test_global_autonomous_off_blocks_readiness () =
+  with_flag "MASC_KEEPER_AUTONOMOUS_ENABLED" "false" @@ fun () ->
+  let meta = ready_meta () in
+  check bool "precondition: per-keeper autoboot still enabled" true
+    meta.autoboot_enabled;
+  let r = Readiness.of_meta meta in
+  check bool "global autonomous off blocks activation" false
+    r.autonomous_activation.ok;
+  check (option string) "blocker is autoboot_disabled" (Some "autoboot_disabled")
+    r.autonomous_activation.blocker
 
 let () = init_runtime_default_for_tests ()
 
 let () =
   run "keeper_lifecycle_global_gate"
-    [ ( "proactive_kill_switch"
-      , [ test_case "gate on runs" `Quick test_gate_on_runs
-        ; test_case "global gate off suppresses" `Quick
-            test_global_gate_off_suppresses
-        ; test_case "reactive path unaffected" `Quick
-            test_reactive_path_unaffected_by_proactive_gate
+    [ ( "proactive"
+      , [ test_case "default runs" `Quick test_default_proactive_runs
+        ; test_case "global off suppresses" `Quick
+            test_global_proactive_off_suppresses
+        ] )
+    ; ( "reactive"
+      , [ test_case "default runs" `Quick test_default_reactive_runs
+        ; test_case "global off suppresses" `Quick
+            test_global_reactive_off_suppresses
+        ] )
+    ; ( "autonomous"
+      , [ test_case "default ready" `Quick test_default_autonomous_ready
+        ; test_case "global off blocks readiness" `Quick
+            test_global_autonomous_off_blocks_readiness
         ] )
     ]
 ;;

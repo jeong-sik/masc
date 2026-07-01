@@ -664,6 +664,30 @@ describe('SettingsSurface', () => {
     expect(container.textContent).not.toContain('oas·seoul-1')
   })
 
+  it('runtime overview falls back to runtime-defaults when the rich provider catalog is unavailable', async () => {
+    apiMock.fetchRuntimeProviders.mockRejectedValueOnce(new Error('provider catalog unavailable'))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-catalog-fallback"]')?.textContent)
+        .toContain('runtime defaults')
+      const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
+      expect(cards.length).toBe(3)
+      expect(cards.map(card => card.textContent)).toEqual([
+        expect.stringContaining('rt-a'),
+        expect.stringContaining('rt-b'),
+        expect.stringContaining('rt-c'),
+      ])
+      expect(cards[0]?.textContent).toContain('P')
+      expect(cards[0]?.textContent).toContain('m1')
+      expect(cards[0]?.textContent).toContain('128K ctx')
+    })
+    expect(container.querySelector('[data-testid="runtime-catalog-error"]')).toBeNull()
+  })
+
   it('runtime section shows resolved keeper assignments read-only', async () => {
     render(html`<${SettingsSurface} />`, container)
 

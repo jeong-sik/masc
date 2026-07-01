@@ -223,9 +223,13 @@ let rec redact_yojson_strings redaction (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
   | `String value -> `String (redact_string redaction value)
   | `Assoc fields ->
+    (* Caller-supplied trace tool args/results can carry a secret embedded in
+       a key name (e.g. a header/param used as a dict key), not only in
+       values -- redact both sides of each field. *)
     `Assoc
       (List.map
-         (fun (key, value) -> key, redact_yojson_strings redaction value)
+         (fun (key, value) ->
+           redact_string redaction key, redact_yojson_strings redaction value)
          fields)
   | `List items -> `List (List.map (redact_yojson_strings redaction) items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value

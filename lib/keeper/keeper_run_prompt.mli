@@ -82,6 +82,11 @@ val estimate_tool_schema_context :
 (** Add the serialized tool-schema payload that OAS sends to providers to the
     prompt/history estimate. This matches OAS' default full-schema disclosure. *)
 
+val estimate_unaccounted_extra_system_context_tokens :
+  (Prompt_block_id.t * string) list -> int
+(** Estimate the hook-injected [extra_system_context] blocks that were not
+    already included in the pre-dispatch prompt estimate. *)
+
 val context_window_budget :
   estimated_input_tokens:int -> max_context:int -> context_window_budget
 (** Token-budget ledger for the final pre-dispatch estimate against the

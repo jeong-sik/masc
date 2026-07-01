@@ -153,7 +153,10 @@ let test_preflight_overflow_uses_providerless_pause_fallback () =
   check bool "overflow branch stamps current turn blocker" true
     (contains_substring ~needle:"current_turn_blocker_info =" execution_src);
   check bool "overflow blocker uses typed token-budget class" true
-    (contains_substring ~needle:"{ klass = Sdk_token_budget_exceeded" execution_src);
+    (contains_substring
+       ~needle:"Keeper_meta_contract.blocker_info_of_class"
+       execution_src
+     && contains_substring ~needle:"Sdk_token_budget_exceeded" execution_src);
   check bool "overflow branch pauses with fallback helper" true
     (contains_substring ~needle:"pause_keeper_for_overflow" execution_src);
   let rollover_src = read_file "lib/keeper/keeper_rollover.ml" in

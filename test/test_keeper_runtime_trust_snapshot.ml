@@ -550,7 +550,7 @@ let test_operator_disposition_display_uses_typed_parser () =
   let check_case ~operator_disposition ~operator_disposition_reason
       ~expected_disposition ~expected_reason =
     let disposition, reason =
-      Masc.Operator_disposition_display.of_wire ~operator_disposition
+      Masc.Keeper_operator_disposition_display.of_wire ~operator_disposition
         ~operator_disposition_reason
     in
     Alcotest.(check string)

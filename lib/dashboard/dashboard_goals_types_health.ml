@@ -178,7 +178,7 @@ let display_disposition_of_receipt_json receipt =
     |> Option.value ~default:""
   in
   let disposition, disposition_reason =
-    Operator_disposition_display.of_wire ~operator_disposition
+    Keeper_operator_disposition_display.of_wire ~operator_disposition
       ~operator_disposition_reason
   in
   disposition, disposition_reason, operator_disposition, operator_disposition_reason

@@ -371,7 +371,7 @@ let operator_disposition_of_display ~disposition ~disposition_reason =
 
 let display_disposition_of_operator ~operator_disposition
     ~operator_disposition_reason =
-  Operator_disposition_display.of_wire ~operator_disposition
+  Keeper_operator_disposition_display.of_wire ~operator_disposition
     ~operator_disposition_reason
 
 let display_disposition_requires_attention = function

@@ -1,6 +1,7 @@
-# RFC-0302 — Stimulus-gated Keeper Wake (retire self-cadence no-progress detect/pause/tombstone)
+# RFC-0303 — Stimulus-gated Keeper Wake (retire self-cadence no-progress detect/pause/tombstone)
 
 - Status: Draft
+- Renumbered from RFC-0302: `0302` was already claimed by "keeper memory I/O off-main-domain offload (HOL fix)" (`b7d9072b1c9`, phase-1/2a/2b implemented, referenced by `lib/keeper/keeper_chat_blocks.mli`). This RFC (merged as #22934 under the wrong number) is moved to 0303.
 - Area: `lib/keeper/` (keeper lifecycle, heartbeat/keepalive wake, no-progress loop, wake-tombstone), `lib/dashboard/` (attention projection)
 - Supersedes: RFC-0246 (Wake-cascade Recovery Tombstone) — inverts its remedy
 - Builds on / touches: RFC-0239 (no-progress), RFC-0020 (typed wake carrier), RFC-0246 (tombstone)

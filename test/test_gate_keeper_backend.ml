@@ -36,12 +36,15 @@ let read_file path =
 let translate_oas_stream_events events =
   let redact_text text = text in
   let on_text_delta text = text in
+  (* RFC-0301: [translate] persists model-generated media under [base_dir]; the
+     temp dir suffices for these tool/text stream fixtures. *)
+  let base_dir = Filename.get_temp_dir_name () in
   let rec loop bridge_state acc = function
     | [] -> List.rev acc
     | event :: rest ->
         let translated =
           Keeper_chat_oas_stream_bridge.translate ~redact_text ~on_text_delta
-            bridge_state event
+            ~base_dir bridge_state event
         in
         loop translated.bridge_state
           (List.rev_append translated.chat_events acc) rest

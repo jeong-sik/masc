@@ -12,8 +12,9 @@
     reattempts and RESETS on forward advance, so it cannot catch a livelock that
     emits a fresh turn id each cycle (which this one did).
 
-    A liveness companion pins that R1g does not fully silence the keeper: past
-    [min_interval] the housekeeping turn still fires. *)
+    A companion case pins the RFC-0303 interaction: [min_interval] is only a
+    rate-limit for real work signals now, so a read-only orphan still must not
+    open a blind housekeeping turn after [min_interval]. *)
 
 open Alcotest
 
@@ -129,12 +130,13 @@ let test_static_orphan_drives_zero_turns () =
     (List.length fired)
 ;;
 
-(* Liveness: R1g must not fully silence the keeper — the min_interval (900s)
-   housekeeping turn still fires even with only an orphan present. *)
-let test_housekeeping_still_fires_past_min_interval () =
+(* RFC-0303: a read-only orphan is not a proactive work signal.  Crossing
+   min_interval must not reintroduce the blind cadence turn that manufactured
+   passive no-op cycles. *)
+let test_orphan_stays_silent_past_min_interval () =
   Alcotest.(check bool)
-    "housekeeping turn fires past min_interval"
-    true
+    "orphan stays silent past min_interval"
+    false
     (decide ~since_sec:1000.0)
 ;;
 
@@ -144,8 +146,8 @@ let () =
     [ ( "livelock"
       , [ test_case "static orphan drives zero turns" `Quick
             test_static_orphan_drives_zero_turns
-        ; test_case "housekeeping still fires" `Quick
-            test_housekeeping_still_fires_past_min_interval
+        ; test_case "orphan stays silent past min_interval" `Quick
+            test_orphan_stays_silent_past_min_interval
         ] )
     ]
 ;;

@@ -1,17 +1,18 @@
 (* Fusion — in-memory run registry for in-progress + recent fusion visibility
-   (RFC-0266 §7 Phase 2). The fusion tool registers a run [Running] at fork
-   start and the sink/failure path marks it [Completed] on finish, so an
-   operator surface (masc_fusion_status tool = Phase 3, dashboard = Phase 4) can
-   show what is deliberating now and what just finished — instead of run_id only
-   living in the caller's tool-result.
+   (RFC-0266 §7 Phase 2/Phase D). The fusion tool registers a run [Running] at
+   fork start and the sink/failure path marks it [Completed] on finish, so an
+   operator surface (masc_fusion_status tool = Phase 3, dashboard = Phase 4)
+   can show what is deliberating now and what just finished — instead of run_id
+   only living in the caller's tool-result.
 
-   Lock-free Atomic + CAS; no extra deps. Server-lifetime: a fork that dies on
-   server shutdown takes its registry entry with it, so no orphan [Running]
-   survives a restart (RFC-0266 §10 #4).
+   Lock-free Atomic + CAS; optional append-only JSONL backing under
+   [<base-path>/.masc/fusion-runs.jsonl] so history survives server restart.
+   Server-lifetime: a fork that dies on server shutdown takes its registry entry
+   with it, so no orphan [Running] survives a restart (RFC-0266 §10 #4).
 
    This module never wakes a keeper (that is the WAKE half, Phase 1). Recording
-   a run is the visibility half and is intentionally side-effect-free beyond the
-   in-memory table. *)
+   a run is the visibility half and is intentionally side-effect-free beyond
+   the in-memory table and the append-only log. *)
 
 type run_status =
   | Running
@@ -32,7 +33,10 @@ type run = {
   status : run_status;
 }
 
-type t = run list Atomic.t
+type t = {
+  runs : run list Atomic.t;
+  path : Eio.Fs.dir_ty Eio.Path.t option;
+}
 
 (* Recent-history retention for [Completed] runs. [Running] runs are never
    evicted (active state must stay accurate). NOTE: 이전 주석은 [Running]이
@@ -43,7 +47,7 @@ type t = run list Atomic.t
    server lifetime. *)
 let max_completed_retained = 64
 
-let create () : t = Atomic.make []
+let create ?path () : t = { runs = Atomic.make []; path }
 
 let is_running (r : run) =
   match r.status with
@@ -64,12 +68,27 @@ let prune (runs : run list) : run list =
 ;;
 
 let rec update (t : t) (f : run list -> run list) =
-  let cur = Atomic.get t in
+  let cur = Atomic.get t.runs in
   let next = f cur in
-  if not (Atomic.compare_and_set t cur next) then update t f
+  if not (Atomic.compare_and_set t.runs cur next) then update t f
 ;;
 
-let register_running (t : t) ~run_id ~keeper ~preset ~started_at =
+let append_event t event =
+  match t.path with
+  | None -> ()
+  | Some path ->
+    let line = Fusion_run_registry_event.to_jsonl event in
+    (* Persistence is best-effort: a failed append must not abort the fusion
+       fork or corrupt in-memory state. The in-memory registry remains
+       authoritative for this process lifetime; the next successful append
+       will catch the log back up for any runs still tracked. *)
+    try Eio.Path.save ~append:true ~create:(`If_missing 0o600) path line with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | _exn -> ()
+;;
+
+let register_running t ~run_id ~keeper ~preset ~started_at =
+  append_event t (Register { run_id; keeper; preset; started_at });
   update t (fun runs ->
     let run = { run_id; keeper; preset; started_at; status = Running } in
     (* defensive: a re-registered run_id replaces its prior entry *)
@@ -78,6 +97,7 @@ let register_running (t : t) ~run_id ~keeper ~preset ~started_at =
 ;;
 
 let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
+  append_event t (Complete { run_id; ok; failure; failure_code });
   update t (fun runs ->
     runs
     |> List.map (fun r ->
@@ -88,11 +108,11 @@ let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
 ;;
 
 let list_runs (t : t) : run list =
-  Atomic.get t |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
+  Atomic.get t.runs |> List.sort (fun a b -> Float.compare b.started_at a.started_at)
 ;;
 
 let get (t : t) ~run_id : run option =
-  List.find_opt (fun r -> String.equal r.run_id run_id) (Atomic.get t)
+  List.find_opt (fun r -> String.equal r.run_id run_id) (Atomic.get t.runs)
 ;;
 
 (* Stable status vocabulary shared by every fusion-run surface (Phase 3 keeper
@@ -131,6 +151,48 @@ let run_to_yojson (r : run) : Yojson.Safe.t =
   `Assoc (base @ failure_fields)
 ;;
 
+(* Replay helpers — used to hydrate the in-memory table from disk at boot. *)
+let apply_event runs = function
+  | Fusion_run_registry_event.Register { run_id; keeper; preset; started_at } ->
+    let run = { run_id; keeper; preset; started_at; status = Running } in
+    let without_dup = List.filter (fun r -> not (String.equal r.run_id run_id)) runs in
+    run :: without_dup
+  | Fusion_run_registry_event.Complete { run_id; ok; failure; failure_code } ->
+    List.map
+      (fun r ->
+         if String.equal r.run_id run_id
+         then { r with status = Completed { ok; failure; failure_code } }
+         else r)
+      runs
+;;
+
+let replay path : t =
+  let content =
+    try Eio.Path.load path with
+    | Eio.Io _ -> ""
+  in
+  let lines = String.split_on_char '\n' content in
+  let events =
+    List.filter_map
+      (fun line ->
+         if String.equal line ""
+         then None
+         else
+           match Yojson.Safe.from_string line |> Fusion_run_registry_event.of_yojson with
+           | Ok e -> Some e
+           | Error _ -> None)
+      lines
+  in
+  let runs = List.fold_left apply_event [] events |> prune in
+  { runs = Atomic.make runs; path = Some path }
+;;
+
 (* Process-wide registry the fusion tool/sink write to (server-lifetime). Tests
-   use a fresh [create ()] for state isolation, avoiding a reset backdoor. *)
-let global : t = create ()
+   use a fresh [create ()] for state isolation, avoiding a reset backdoor.
+   The backing path is set at server boot via [set_global] after replaying the
+   persisted JSONL. *)
+let global_atomic : t Atomic.t = Atomic.make (create ())
+
+let global () : t = Atomic.get global_atomic
+
+let set_global (t : t) = Atomic.set global_atomic t

@@ -958,6 +958,46 @@ let test_runtime_agent_context_uses_configured_turn_budget () =
   check int "resume adds fresh per-call turn budget" 31
     prepared.agent_config.max_turns
 
+let test_runtime_agent_context_preserves_unbounded_resume_budget () =
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:(provider_cfg ())
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let config = { config with max_turns = 0 } in
+  let checkpoint =
+    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "oas-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_sdk.Types.empty_usage
+    ; turn_count = 24
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_sdk.Types.default_config.response_format
+    ; thinking_budget = None
+    ; cache_system_prompt = false
+    ; context = Agent_sdk.Context.create ~eio:false ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  check int "resume preserves unbounded turn budget" 0
+    prepared.agent_config.max_turns
+
 let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   let tool =
     Agent_sdk.Tool.create
@@ -1169,6 +1209,10 @@ let () =
             "runtime agent context uses configured turn budget"
             `Quick
             test_runtime_agent_context_uses_configured_turn_budget
+        ; test_case
+            "runtime agent context preserves unbounded resume budget"
+            `Quick
+            test_runtime_agent_context_preserves_unbounded_resume_budget
         ; test_case
             "runtime agent context leaves tool_choice unset with tools"
             `Quick

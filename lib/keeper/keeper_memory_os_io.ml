@@ -738,8 +738,9 @@ let trim_target ~count ~keep ~trigger = if count <= trigger then None else Some 
    (diagnostic; the rewrite is the mechanism). *)
 let cap_events ~keeper_id ~keep ~trigger =
   let path = events_path ~keeper_id in
-  (* RFC-0302 (#22823): offload the blocking full read off the main Eio domain so
-     it does not starve the cooperative scheduler. [path] is resolved on main;
+  (* RFC-0302 (#22823): submit the blocking full read to the domain pool so it
+     does not starve the main Eio scheduler when a pool is installed (inline
+     fallback in tests / before the pool is set up). [path] is resolved on main;
      the atomic rewrite below (write_file_atomically -> Fs_compat, an Eio.Path.save)
      stays on main. The closure reads only [path] and no shared mutable state. *)
   let all = Domain_pool_ref.submit_io_or_inline (fun () -> read_lines_all path) in

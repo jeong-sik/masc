@@ -11,22 +11,32 @@
     Determinism (the memory-os offline/reproducible tenet): the output is a pure
     function of the input facts, emitted in normalized-claim order, so a test can
     assert exact output and a re-run on an unchanged fleet rewrites the same file.
-    RFC-0247 (purge): corroboration is structural. The prior confidence floor and
-    noisy-OR aggregation were removed with the score; there is no confidence
-    number to recompute. Shared promotion is additionally limited to categories
-    that already encode outcome-derived knowledge, so `_shared` does not amplify
-    merely repeated facts before the outcome evaluator can prove usefulness. *)
+    RFC-0247 (purge): corroboration is structural — a claim is shared when
+    [>= min_keepers] DISTINCT keepers hold it on a promotable category. The prior
+    confidence floor and noisy-OR aggregation were removed with the score; there
+    is no confidence number to recompute. *)
 
 open Keeper_memory_os_types
 
 module Io = Keeper_memory_os_io
 
-(* Which categories are durable enough to consider, and which are
-   outcome-positive enough to cross keepers, are compile-time properties of the
-   closed [category] taxonomy. Default-deny is structural: a new arm (e.g. the
-   [Ephemeral] coordination-boilerplate kind, RFC-0247 §2.5 / #21244) cannot leak
-   into the shared tier unless it is classified both promotable and
-   outcome-positive at the type level. *)
+(* RFC-0244 §3.6 / task-1612: env-gated default-off.
+   Set MASC_KEEPER_MEMORY_OS_CONSOLIDATE=true to enable cross-keeper consolidation.
+   Default false — consolidation is opt-in until RFC-0244 Tier 2 is production-hardened.
+   Uses the same memory_env_bool_logged pattern as keeper_librarian_runtime.ml:99. *)
+let consolidation_enabled () =
+  Keeper_memory_bank_env.memory_env_bool_logged
+    "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" ~default:false
+
+(* Which categories are objective enough to share across keepers is a
+   compile-time property of the closed [category] taxonomy
+   (Keeper_memory_os_types.is_promotable: only Fact/Constraint), not a runtime
+   list. Default-deny is structural: a new arm (e.g. the [Ephemeral]
+   coordination-boilerplate kind, RFC-0247 §2.5 / #21244) cannot leak into the
+   shared tier unless it is classified promotable at the type level. This
+   strengthens #21241's typed [category list] into an exhaustive predicate, so a
+   future arm forces a compile-time promotability decision rather than silently
+   defaulting out of a list. *)
 
 (* Minimum distinct keepers that must hold a claim before it is shared. Two is
    the smallest set that distinguishes corroboration from a single keeper's echo
@@ -46,21 +56,19 @@ type contribution =
   ; fact : fact
   }
 
-(* RFC-0247 (purge): eligibility is structural — a promotable, outcome-positive
-   category. The prior confidence floor (only claims above 0.5 count as
-   corroboration) was a score gate and is gone. *)
-(* RFC-0285 §3.5: only objective claim kinds cross keepers. [Self_observation] is
-   transient keeper-local state, [External_state] is time-sensitive world state,
-   and [Diagnostic] is system-authored evidence for operators, not shared semantic
-   memory. Keep this exhaustive so a future [claim_kind] cannot promote by
-   accident. *)
+(* RFC-0247 (purge): eligibility is purely structural — a promotable category.
+   The prior confidence floor (only claims above 0.5 count as corroboration) was
+   a score gate and is gone. *)
+(* RFC-0259 §3.2(b): a volatile (external-ref) claim is per-keeper status, not
+   durable cross-keeper knowledge — exclude it from promotion so it cannot be
+   resurrected as an immortal shared fact (the #21363 shape). *)
+(* RFC-0285 §3.5: a [Self_observation] is transient keeper-local self-state, never
+   cross-keeper knowledge — gate it here (the single promotion SSOT) rather than
+   widening [is_promotable]'s exhaustive category signature. *)
 let eligible fact =
   is_promotable fact.category
-  && is_outcome_positive_for_shared_promotion fact.category
-  &&
-  match fact.claim_kind with
-  | Some Durable_knowledge | None -> true
-  | Some Self_observation | Some External_state | Some Diagnostic -> false
+  && Option.is_none fact.external_ref
+  && fact.claim_kind <> Some Self_observation
 
 (* Pick the representative fact for a claim group by a structural total order:
    earliest first_seen, then lexically smallest claim, then keeper id — so
@@ -100,21 +108,23 @@ let consolidate_into_shared ~now ~min_keepers contribs =
       Some
         { claim = rep.fact.claim
         ; category = rep.fact.category
-        ; external_ref = None
-          (* External refs are context-only, not shared-store identity or retention
-             policy. Keep promoted shared facts free of legacy ref metadata. *)
+        ; external_ref = rep.fact.external_ref
+          (* RFC-0285 §3.5: carry the representative's tag (parallel to [claim_id]).
+             [eligible] already drops [Self_observation], so a promoted shared fact is
+             never self-observation; this preserves [External_state]/[None] verbatim. *)
         ; claim_kind = rep.fact.claim_kind
         ; source = rep.fact.source
         ; observed_by = keepers
         ; first_seen =
             List.fold_left (fun acc c -> Float.min acc c.fact.first_seen) rep.fact.first_seen contribs
-          (* Route through [fact_valid_until] so self-observation/category TTL policy
-             stays centralized. External refs are context-only and do not affect
-             retention. *)
+          (* RFC-0259 §3.2(b): route through [fact_valid_until] as a structural
+             backstop — [eligible] already excludes external-ref claims, so this is
+             [None] for promotable facts, but a volatile claim could never become an
+             immortal shared fact even if that filter regressed. *)
         ; valid_until =
             fact_valid_until
               ~now
-              ~external_ref:None
+              ~external_ref:rep.fact.external_ref
               ~claim_kind:rep.fact.claim_kind
               rep.fact.category
           (* The consolidation IS the verification of the shared fact. *)
@@ -210,6 +220,10 @@ let log_run_summary ~dry_run ~min_keepers ~source_ids ~keeper_facts ~considered 
    is filtered out of the source list so a prior sweep's output is never folded
    back in as a "keeper". *)
 let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
+  if not (consolidation_enabled ()) then (
+    Log.info "consolidation: skipped (MASC_KEEPER_MEMORY_OS_CONSOLIDATE=false)";
+    { keepers_scanned = 0; claims_considered = 0; promoted = 0; dry_run }
+  ) else
   let source_ids =
     List.filter (fun id -> not (String.equal id shared_store_id)) keeper_ids
   in

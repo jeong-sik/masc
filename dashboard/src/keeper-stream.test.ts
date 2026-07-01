@@ -156,6 +156,74 @@ describe('applyKeeperStreamEvent', () => {
     expect(activeStreamRequestId('sangsu')).toBeNull()
   })
 
+  it('finalizes queued visible replies when a successful terminal follows reply details', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_QUEUE_REQUEST',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'queued',
+      },
+    })
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REPLY_DETAILS',
+      value: {
+        request_id: 'kmsg_current',
+        reply: '큐에서 완료했습니다.',
+        turn_outcome: 'visible_reply',
+      },
+    })
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'done',
+        ok: true,
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('큐에서 완료했습니다.')
+    expect(entry?.delivery).toBe('delivered')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.error).toBeNull()
+    expect(activeStreamRequestId('sangsu')).toBeNull()
+  })
+
+  it('keeps explicit continuation checkpoints queued when a successful terminal follows', () => {
+    assistantEntry()
+    setActiveStreamRequestId('sangsu', 'kmsg_current')
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_CONTINUATION_CHECKPOINT',
+      value: {
+        message: 'Continuation checkpoint saved; keeper remains scheduled.',
+      },
+    })
+
+    expect(applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_REQUEST_TERMINAL',
+      value: {
+        request_id: 'kmsg_current',
+        status: 'done',
+        ok: true,
+      },
+    })).toBeNull()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.text).toBe('')
+    expect(entry?.delivery).toBe('queued')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.details?.turnOutcome).toBe('continuation_checkpoint')
+    expect(activeStreamRequestId('sangsu')).toBeNull()
+  })
+
   it('does not leave successful terminal events in a live thinking state without reply details', () => {
     assistantEntry()
     setActiveStreamRequestId('sangsu', 'kmsg_current')

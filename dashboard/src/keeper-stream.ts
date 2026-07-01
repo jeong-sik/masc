@@ -411,6 +411,10 @@ export function applyKeeperStreamEvent(
           : ''
         updateThreadEntry(keeperName, assistantEntryId, entry => ({
           ...entry,
+          details: {
+            ...(entry.details ?? {}),
+            turnOutcome: 'continuation_checkpoint',
+          },
           text: '',
           rawText: rawText || entry.rawText,
           delivery: 'queued',
@@ -462,15 +466,20 @@ export function applyKeeperStreamEvent(
           return message
         }
         if (status === 'done' && terminal?.ok !== false) {
-          updateThreadEntry(keeperName, assistantEntryId, entry => ({
-            ...entry,
-            delivery:
-              entry.delivery === 'queued' || entry.delivery === 'no_reply'
+          updateThreadEntry(keeperName, assistantEntryId, entry => {
+            const delivery =
+              entry.delivery === 'no_reply'
+                || (entry.delivery === 'queued'
+                  && keeperTurnOutcomeSuppressesReply(entry.details?.turnOutcome))
                 ? entry.delivery
-                : 'delivered',
-            streamState: null,
-            error: null,
-          }))
+                : 'delivered'
+            return {
+              ...entry,
+              delivery,
+              streamState: null,
+              error: null,
+            }
+          })
         }
         return null
       }

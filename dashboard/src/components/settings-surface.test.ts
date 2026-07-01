@@ -563,6 +563,31 @@ describe('SettingsSurface', () => {
     })
   })
 
+  it('MCP server page surfaces inventory load failures instead of fabricating an empty tool list', async () => {
+    apiMock.fetchDashboardTools.mockRejectedValueOnce(new Error('inventory offline'))
+    mcpMock.callMcpTool.mockResolvedValueOnce('status ok despite inventory failure')
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-mcp"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mcp-tools-error"]')?.textContent)
+        .toContain('inventory offline')
+    })
+    expect(container.querySelector('[data-testid="mcp-tools-empty"]')).toBeNull()
+    expect(container.querySelector('[data-testid="mcp-tools-list"]')).toBeNull()
+    expect(container.textContent).toContain('Exposed public MCP tools (—)')
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-mcp-check"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(mcpMock.callMcpTool).toHaveBeenCalledWith('masc_status', {})
+      expect(container.querySelector('[data-testid="settings-mcp-check-result"]')?.textContent)
+        .toContain('status ok despite inventory failure')
+    })
+  })
+
   it('paths page shows resolved server paths instead of editable local previews', async () => {
     render(html`<${SettingsSurface} />`, container)
 

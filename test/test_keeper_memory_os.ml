@@ -3015,7 +3015,12 @@ let test_trim_target_hysteresis () =
 ;;
 
 (* RFC-0272 (defect D): cap_events keeps the newest [keep] raw lines once the log
-   passes [trigger], and is a no-op once back under it. *)
+   passes [trigger], and is a no-op once back under it.
+   RFC-0302 (#22823): cap_events now offloads its blocking full read via
+   Domain_pool_ref.submit_io_or_inline, which runs INLINE with no pool installed
+   (as here) — so this case also asserts the offload is behavior-transparent (the
+   trim result is identical to the pre-offload synchronous read). Same for
+   cap_episode_files below. *)
 let test_cap_events_drops_oldest_over_trigger () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "virtual-memory-keeper" in

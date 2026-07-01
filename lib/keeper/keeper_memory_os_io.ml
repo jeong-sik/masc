@@ -724,7 +724,11 @@ let trim_target ~count ~keep ~trigger = if count <= trigger then None else Some 
    (diagnostic; the rewrite is the mechanism). *)
 let cap_events ~keeper_id ~keep ~trigger =
   let path = events_path ~keeper_id in
-  let all = read_lines_all path in
+  (* RFC-0302 (#22823): offload the blocking full read off the main Eio domain so
+     it does not starve the cooperative scheduler. [path] is resolved on main;
+     the atomic rewrite below (write_file_atomically -> Fs_compat, an Eio.Path.save)
+     stays on main. The closure reads only [path] and no shared mutable state. *)
+  let all = Domain_pool_ref.submit_io_or_inline (fun () -> read_lines_all path) in
   match trim_target ~count:(List.length all) ~keep ~trigger with
   | None -> 0
   | Some keep_n ->
@@ -747,24 +751,33 @@ let cap_events ~keeper_id ~keep ~trigger =
    fine, and no lock is taken here that could deadlock with the bundle lock the
    caller already holds. Returns the number unlinked. *)
 let cap_episode_files ~keeper_id ~keep ~trigger =
+  (* RFC-0302 (#22823): resolve [episodes_dir] on the main domain (it touches the
+     Config_dir_resolver plain-ref memo + mkdir), then offload the blocking
+     readdir + per-file episode read + best-effort unlink scan to the shared
+     domain pool so the scan does not starve the main Eio scheduler. The offloaded
+     closure reads only the resolved [dir] string and does no Eio/lock/shared-
+     mutable work (Sys.remove is a filesystem unlink, not OCaml shared state), so
+     it is domain-safe; the caller's bundle flock stays held on main across the
+     (inline-fallback in tests) submit. *)
   let dir = episodes_dir ~keeper_id in
-  let parsed =
-    Sys.readdir dir
-    |> Array.to_list
-    |> List.filter (fun name -> Filename.check_suffix name ".json")
-    |> List.map (fun name -> Filename.concat dir name)
-    |> List.filter Sys.file_exists
-    |> List.filter_map (fun p ->
-      match read_episode_file p with
-      | Some ep -> Some (p, ep)
-      | None -> None)
-  in
-  match trim_target ~count:(List.length parsed) ~keep ~trigger with
-  | None -> 0
-  | Some keep_n ->
-    let sorted = List.sort (fun (_, a) (_, b) -> compare_episode_recency a b) parsed in
-    let n_drop = List.length sorted - keep_n in
-    let to_drop = sorted |> List.filteri (fun i _ -> i < n_drop) |> List.map fst in
-    List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) to_drop;
-    List.length to_drop
+  Domain_pool_ref.submit_io_or_inline (fun () ->
+    let parsed =
+      Sys.readdir dir
+      |> Array.to_list
+      |> List.filter (fun name -> Filename.check_suffix name ".json")
+      |> List.map (fun name -> Filename.concat dir name)
+      |> List.filter Sys.file_exists
+      |> List.filter_map (fun p ->
+        match read_episode_file p with
+        | Some ep -> Some (p, ep)
+        | None -> None)
+    in
+    match trim_target ~count:(List.length parsed) ~keep ~trigger with
+    | None -> 0
+    | Some keep_n ->
+      let sorted = List.sort (fun (_, a) (_, b) -> compare_episode_recency a b) parsed in
+      let n_drop = List.length sorted - keep_n in
+      let to_drop = sorted |> List.filteri (fun i _ -> i < n_drop) |> List.map fst in
+      List.iter (fun p -> try Sys.remove p with Sys_error _ -> ()) to_drop;
+      List.length to_drop)
 ;;

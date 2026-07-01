@@ -547,6 +547,8 @@ export function SettingsSurface() {
 
   // mcp — exposed tools come from the live capability registry (public_mcp surface)
   const [mcpTools, setMcpTools] = useState<string[]>([])
+  const [mcpToolsStatus, setMcpToolsStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [mcpToolsError, setMcpToolsError] = useState('')
   const [mcpCheck, setMcpCheck] = useState<{ status: 'idle' | 'checking' | 'ok' | 'error'; message: string }>({
     status: 'idle',
     message: '아직 확인하지 않음',
@@ -554,16 +556,22 @@ export function SettingsSurface() {
 
   useEffect(() => {
     let active = true
+    setMcpToolsStatus('loading')
+    setMcpToolsError('')
     void (async () => {
       try {
         const resp = await fetchDashboardTools()
         if (!active) return
         const names = mcpExposedToolNames(resp.tool_inventory?.tools ?? [])
         setMcpTools(names)
-      } catch {
+        setMcpToolsStatus('ready')
+      } catch (err) {
         if (!active) return
-        // No fabricated tool names on failure.
+        // No fabricated empty inventory on failure.
         setMcpTools([])
+        setMcpToolsStatus('error')
+        const message = err instanceof Error ? err.message : String(err)
+        setMcpToolsError(`도구 inventory를 불러오지 못했습니다: ${message}`)
       }
     })()
     return () => { active = false }
@@ -659,6 +667,7 @@ export function SettingsSurface() {
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
   const mcpEndpoint = mcpEndpointFromConfig(dashboardConfig)
+  const mcpToolCountLabel = mcpToolsStatus === 'ready' ? String(mcpTools.length) : '—'
   const mcpUrlEntry = configEntry(dashboardConfig, 'MASC_URL')
   const httpBaseUrlEntry = configEntry(dashboardConfig, 'MASC_HTTP_BASE_URL')
   const basePathEntry = configEntry(dashboardConfig, 'MASC_BASE_PATH')
@@ -751,12 +760,16 @@ export function SettingsSurface() {
                   <span class=${`set-mcp-check-result ${mcpCheck.status}`} data-testid="settings-mcp-check-result">${mcpCheck.message}</span>
                 </div>
               <//>
-              <div class="set-sub-h">Exposed public MCP tools (${mcpTools.length})</div>
-              ${mcpTools.length === 0
-                ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
-                : html`<div class="set-tg-tools" data-testid="mcp-tools-list">
-                  ${mcpTools.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}
-                </div>`}
+              <div class="set-sub-h">Exposed public MCP tools (${mcpToolCountLabel})</div>
+              ${mcpToolsStatus === 'loading'
+                ? html`<div class="set-hint" data-testid="mcp-tools-loading">MCP 도구 inventory를 불러오는 중...</div>`
+                : mcpToolsStatus === 'error'
+                  ? html`<div class="set-err" data-testid="mcp-tools-error">${mcpToolsError}</div>`
+                  : mcpTools.length === 0
+                    ? html`<div class="set-hint" data-testid="mcp-tools-empty">노출된 MCP 도구가 없습니다.</div>`
+                    : html`<div class="set-tg-tools" data-testid="mcp-tools-list">
+                      ${mcpTools.map(t => html`<span key=${t} class="set-tg-chip mono">${t}</span>`)}
+                    </div>`}
             `}
 
             ${sec === 'runtime' && html`

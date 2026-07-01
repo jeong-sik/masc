@@ -10,6 +10,17 @@ module R = Fusion_run_registry
 
 let parse s = Yojson.Safe.from_string s
 
+let remove_if_exists path =
+  try Sys.remove path with
+  | Sys_error _ -> ()
+;;
+
+let fresh_path suffix =
+  let path = Filename.temp_file "fusion-runs-" suffix in
+  remove_if_exists path;
+  path
+;;
+
 let field j k =
   match j with
   | `Assoc l -> List.assoc_opt k l
@@ -36,13 +47,11 @@ let float_ j k =
 
 (* (1) Register + complete writes two JSONL lines plus a trailing newline. *)
 let test_persist_register_complete () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun _sw ->
-  let path = Eio.Path.(env#cwd / "tmp-fusion-runs.jsonl") in
+  let path = fresh_path ".jsonl" in
   let t = R.create ~path () in
   R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~started_at:1.0;
   R.mark_completed t ~run_id:"r1" ~ok:true ();
-  let content = Eio.Path.load path in
+  let content = Fs_compat.load_file path in
   let lines = String.split_on_char '\n' content in
   check int "two events + trailing newline" 3 (List.length lines);
   let event1 = parse (List.nth lines 0) in
@@ -58,14 +67,12 @@ let test_persist_register_complete () =
 ;;
 
 let test_persist_failure_detail () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun _sw ->
-  let path = Eio.Path.(env#cwd / "tmp-fusion-runs-failure.jsonl") in
+  let path = fresh_path "-failure.jsonl" in
   let t = R.create ~path () in
   R.register_running t ~run_id:"r-fail" ~keeper:"k" ~preset:"p" ~started_at:1.0;
   R.mark_completed t ~run_id:"r-fail" ~failure:"judge failed: bad json"
     ~failure_code:"parse_error" ~ok:false ();
-  let content = Eio.Path.load path in
+  let content = Fs_compat.load_file path in
   let lines = String.split_on_char '\n' content in
   let event2 = parse (List.nth lines 1) in
   check string "event2 failure" "judge failed: bad json" (str event2 "failure");
@@ -84,9 +91,7 @@ let test_persist_failure_detail () =
 (* (2) Replay prunes completed runs to the newest [max_completed_retained]
    while preserving all running runs. *)
 let test_replay_prunes_completed () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun _sw ->
-  let path = Eio.Path.(env#cwd / "tmp-fusion-runs-prune.jsonl") in
+  let path = fresh_path "-prune.jsonl" in
   let t = R.create ~path () in
   for i = 1 to 70 do
     R.register_running
@@ -112,20 +117,30 @@ let test_replay_prunes_completed () =
 
 (* (3) A fresh registry without a backing path does not write files. *)
 let test_no_path_is_in_memory_only () =
-  Eio_main.run @@ fun env ->
-  Eio.Switch.run @@ fun _sw ->
-  let path = Eio.Path.(env#cwd / "no-such-fusion-runs.jsonl") in
+  let path = fresh_path "-no-path.jsonl" in
   let t = R.create () in
   R.register_running t ~run_id:"r1" ~keeper:"k" ~preset:"p" ~started_at:1.0;
   R.mark_completed t ~run_id:"r1" ~ok:true ();
-  let file_exists =
-    try
-      ignore (Eio.Path.stat ~follow:true path);
-      true
-    with
-    | Eio.Io _ -> false
-  in
-  check bool "no file created" false file_exists
+  check bool "no file created" false (Sys.file_exists path)
+;;
+
+(* (4) Replay skips malformed lines without dropping valid neighboring events. *)
+let test_replay_skips_malformed_lines () =
+  let path = fresh_path "-malformed.jsonl" in
+  Fs_compat.save_file
+    path
+    (String.concat
+       "\n"
+       [ {|{"event":"register","run_id":"r1","keeper":"k","preset":"p","started_at":1.0}|}
+       ; {|not-json|}
+       ; {|{"event":"complete","run_id":"r1","ok":false}|}
+       ; ""
+       ]);
+  let t = R.replay path in
+  match R.get t ~run_id:"r1" with
+  | Some { R.status = R.Completed { ok = false; _ }; _ } -> ()
+  | Some _ -> fail "expected replayed run to be completed as failed"
+  | None -> fail "expected valid replay events around malformed line to load"
 ;;
 
 let () =
@@ -136,6 +151,7 @@ let () =
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
         ; test_case "replay prunes completed runs" `Quick test_replay_prunes_completed
         ; test_case "no-path registry is in-memory only" `Quick test_no_path_is_in_memory_only
+        ; test_case "replay skips malformed lines" `Quick test_replay_skips_malformed_lines
         ] )
     ]
 ;;

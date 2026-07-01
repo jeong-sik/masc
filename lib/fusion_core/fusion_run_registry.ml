@@ -35,7 +35,7 @@ type run = {
 
 type t = {
   runs : run list Atomic.t;
-  path : Eio.Fs.dir_ty Eio.Path.t option;
+  path : string option;
 }
 
 (* Recent-history retention for [Completed] runs. [Running] runs are never
@@ -77,14 +77,12 @@ let append_event t event =
   match t.path with
   | None -> ()
   | Some path ->
-    let line = Fusion_run_registry_event.to_jsonl event in
-    (* Persistence is best-effort: a failed append must not abort the fusion
-       fork or corrupt in-memory state. The in-memory registry remains
-       authoritative for this process lifetime; the next successful append
-       will catch the log back up for any runs still tracked. *)
-    try Eio.Path.save ~append:true ~create:(`If_missing 0o600) path line with
-    | Eio.Cancel.Cancelled _ as exn -> raise exn
-    | _exn -> ()
+    (try Fs_compat.append_jsonl path (Fusion_run_registry_event.to_yojson event) with
+     | exn ->
+       Log.Misc.warn
+         "fusion_run_registry: append failed for %s: %s"
+         path
+         (Printexc.to_string exn))
 ;;
 
 let register_running t ~run_id ~keeper ~preset ~started_at =
@@ -166,23 +164,62 @@ let apply_event runs = function
       runs
 ;;
 
-let replay path : t =
+let parse_event_line ~path ~line_no line =
+  match String.trim line with
+  | "" -> Ok None
+  | line ->
+    (match
+       try Ok (Yojson.Safe.from_string line) with
+       | Yojson.Json_error msg -> Error ("invalid JSON: " ^ msg)
+     with
+     | Error msg -> Error msg
+     | Ok json ->
+       (match Fusion_run_registry_event.of_yojson json with
+        | Ok event -> Ok (Some event)
+        | Error msg -> Error msg))
+    |> Result.map_error (fun msg ->
+      Printf.sprintf "%s:%d: %s" path line_no msg)
+;;
+
+let load_replay_content path =
   let content =
-    try Eio.Path.load path with
-    | Eio.Io _ -> ""
+    if not (Fs_compat.file_exists path)
+    then None
+    else (
+      try Some (Fs_compat.load_file path) with
+      | exn ->
+        Log.Misc.warn
+          "fusion_run_registry: replay load failed for %s: %s"
+          path
+          (Printexc.to_string exn);
+        None)
   in
-  let lines = String.split_on_char '\n' content in
+  Option.value ~default:"" content
+;;
+
+let replay path : t =
+  let lines = String.split_on_char '\n' (load_replay_content path) in
+  let malformed = ref [] in
   let events =
-    List.filter_map
-      (fun line ->
-         if String.equal line ""
-         then None
-         else
-           match Yojson.Safe.from_string line |> Fusion_run_registry_event.of_yojson with
-           | Ok e -> Some e
-           | Error _ -> None)
-      lines
+    let rec loop line_no acc = function
+      | [] -> List.rev acc
+      | line :: rest ->
+        (match parse_event_line ~path ~line_no line with
+         | Ok None -> loop (line_no + 1) acc rest
+         | Ok (Some event) -> loop (line_no + 1) (event :: acc) rest
+         | Error msg ->
+           malformed := msg :: !malformed;
+           loop (line_no + 1) acc rest)
+    in
+    loop 1 [] lines
   in
+  (match !malformed with
+   | [] -> ()
+   | errors ->
+     Log.Misc.warn
+       "fusion_run_registry: skipped %d malformed replay line(s); first=%s"
+       (List.length errors)
+       (List.hd (List.rev errors)));
   let runs = List.fold_left apply_event [] events |> prune in
   { runs = Atomic.make runs; path = Some path }
 ;;

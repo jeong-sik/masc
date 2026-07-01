@@ -33,15 +33,17 @@ type run = {
 
 type t
 
-val create : ?path:Eio.Fs.dir_ty Eio.Path.t -> unit -> t
+val create : ?path:string -> unit -> t
 (** A fresh, isolated registry. Production uses the process-wide {!global}
     (initialized from disk at server boot); tests use [create ()] so each case
     starts empty (no shared-state reset backdoor). *)
 
-val replay : Eio.Fs.dir_ty Eio.Path.t -> t
-(** Hydrate a registry from an append-only JSONL file. Missing or unreadable
-    files yield an empty registry. Replayed completed runs are pruned to the
-    newest {!max_completed_retained}. *)
+val replay : string -> t
+(** Hydrate a registry from an append-only JSONL file. Missing files yield an
+    empty registry. Unreadable files and malformed lines are logged and skipped,
+    so persistence problems are visible without blocking in-memory status
+    tracking. Replayed completed runs are pruned to the newest
+    {!max_completed_retained}. *)
 
 val register_running :
   t -> run_id:string -> keeper:string -> preset:string -> started_at:float -> unit

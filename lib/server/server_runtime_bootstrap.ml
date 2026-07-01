@@ -272,9 +272,11 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   Fs_compat.set_fs fs;
   (* RFC-0266 §7 Phase D: replay persisted fusion run history into the
      process-wide registry so in-progress + recently-completed runs survive
-     server restart. A missing or corrupt JSONL file yields an empty registry;
-     the in-memory table remains authoritative after boot. *)
-  let registry_path = Eio.Path.(fs / base_path / ".masc" / "fusion-runs.jsonl") in
+     server restart. Missing files yield an empty registry; malformed replay
+     lines are logged and skipped. *)
+  let registry_path =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) "fusion-runs.jsonl"
+  in
   Fusion_run_registry.set_global (Fusion_run_registry.replay registry_path);
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;

@@ -1575,7 +1575,16 @@ let test_callback_always_approve_respects_forbidden () =
    rejected outright, never suspended into the approval queue — a queued
    forbidden call would be unconditionally approvable by whoever drains the
    queue, which is exactly the always-approve bypass this change closes.
-   Exercised through the async Fiber callback path used in production. *)
+   Exercised through the async Fiber callback path used in production.
+
+   Uses Eio.Fiber.fork_promise + Eio.Promise.await instead of the ref+
+   yield_until polling pattern used elsewhere in this file: the reject path
+   here does real audit-log I/O dispatched through Eio_unix.Thread_pool,
+   which can take longer than yield_until's fixed attempt budget under CI's
+   scheduling, producing a false "did not return a decision" failure
+   (observed reproducing on every CI run of masc#22706 and masc#22907, never
+   locally). A promise genuinely suspends the awaiting fiber until the forked
+   fiber finishes, regardless of how long that takes. *)
 let test_callback_hitl_disabled_forbidden_rejects_without_queuing () =
   with_env Env_config_core.disable_hitl_env_key "true" @@ fun () ->
   Eio_main.run @@ fun env ->
@@ -1585,33 +1594,31 @@ let test_callback_hitl_disabled_forbidden_rejects_without_queuing () =
   Eio.Switch.run @@ fun sw ->
   let keeper_name = "hitl-disabled-forbidden-keeper" in
   let initial_pending = AQ.pending_count () in
-  let result = ref None in
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let config = Mcp_server.workspace_config state in
-      Eio.Fiber.fork ~sw (fun () ->
-        let cb =
-          GP.to_oas_approval_callback
-            ~config ~governance_level:"production" ~keeper_name ()
-        in
-        let decision =
+      let decision_promise =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          let cb =
+            GP.to_oas_approval_callback
+              ~config ~governance_level:"production" ~keeper_name ()
+          in
           cb
             ~tool_name:"tool_edit_file"
-            ~input:(`Assoc [ ("path", `String "/dangerous") ])
-        in
-        result := Some decision);
-      yield_until (fun () -> Option.is_some !result);
-      (match !result with
-       | Some decision ->
-         Alcotest.(check bool)
-           "hard-forbidden tool rejects immediately when HITL is disabled"
-           true
-           (approval_decision_is_reject decision)
-       | None ->
-         Alcotest.fail "HITL-disabled forbidden callback did not return a decision");
+            ~input:(`Assoc [ ("path", `String "/dangerous") ]))
+      in
+      let decision =
+        match Eio.Promise.await decision_promise with
+        | Ok decision -> decision
+        | Error exn -> Alcotest.failf "approval callback raised: %s" (Printexc.to_string exn)
+      in
+      Alcotest.(check bool)
+        "hard-forbidden tool rejects immediately when HITL is disabled"
+        true
+        (approval_decision_is_reject decision);
       Alcotest.(check int)
         "hard-forbidden rejection never enters the approval queue"
         initial_pending

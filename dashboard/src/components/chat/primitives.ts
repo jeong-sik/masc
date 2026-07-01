@@ -2696,7 +2696,16 @@ function ToolTraceCard({
   toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
 }) {
-  const [open, setOpen] = useState(true)
+  const liveTurn = assistant !== null && !turnComplete
+  const userToggledRef = useRef(false)
+  const [open, setOpen] = useState(() => !liveTurn)
+  useEffect(() => {
+    if (!liveTurn && !userToggledRef.current) setOpen(true)
+  }, [liveTurn])
+  const toggleOpen = () => {
+    userToggledRef.current = true
+    setOpen((o) => !o)
+  }
   const steps = tools.map((entry) => ({ entry, output: lookupToolCallOutput(entry.id) }))
   const canMarkMissingForEntry = (entry: KeeperConversationEntry): boolean =>
     turnComplete && isToolOutputCoveredByHydration(entry, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs)
@@ -2728,7 +2737,7 @@ function ToolTraceCard({
       <button
         type="button"
         class="chat-block-trace-hd"
-        onClick=${() => setOpen((o) => !o)}
+        onClick=${toggleOpen}
         aria-expanded=${open}
       >
         <span class="chat-block-trace-chev">${open ? '▾' : '▸'}</span>

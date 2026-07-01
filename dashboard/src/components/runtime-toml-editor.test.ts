@@ -743,4 +743,50 @@ describe('RuntimeTomlEditor', () => {
       expect(source).toContain('[runpod_mtp.gpt]')
     })
   })
+
+  it('rejects a binding whose provider id is a reserved top-level namespace', async () => {
+    // Legacy/hand-edited data: a provider table literally named "models" is
+    // parseable (providerIds() has no reserved check on read), so it can show
+    // up in the binding form's provider dropdown even though a *new* provider
+    // could never be created with this id (runtimeTomlIdError blocks it).
+    // bindingSections() excludes RESERVED_TOP_LEVEL first segments on read,
+    // so a binding pinned to it would be silently unreadable -- or collide
+    // with a real [models.<id>] model definition outright.
+    const configWithReservedProvider = {
+      ...richConfig,
+      source_text: `${richConfig.source_text}
+[providers.models]
+display-name = "Bad Provider"
+protocol = "openai-http"
+endpoint = "https://example.invalid/v1"
+`,
+    }
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(configWithReservedProvider)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-bindings"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-bindings"]') as HTMLButtonElement)
+
+    const sourceBefore = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-provider"]') as HTMLSelectElement, {
+      target: { value: 'models' },
+    })
+    fireEvent.change(container.querySelector('[data-testid="runtime-add-binding-model"]') as HTMLSelectElement, {
+      target: { value: 'gpt' },
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-binding-submit"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-add-binding-error"]')?.textContent).toContain(
+        '예약된 이름',
+      )
+    })
+    // A rejected submit must never touch the draft source -- onAddBinding
+    // should not have been called at all, not just "called harmlessly".
+    const sourceAfter = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+    expect(sourceAfter).toBe(sourceBefore)
+  })
 })

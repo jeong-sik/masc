@@ -322,6 +322,19 @@ export function RuntimeEnvironmentEditor({
       setBindingFormError('provider와 model을 모두 선택하세요')
       return
     }
+    // A binding pin is written as a top-level `[providerId.modelId]` table.
+    // bindingSections() on read already excludes RESERVED_TOP_LEVEL first
+    // segments (providers/models/runtime/...), so a provider id that collides
+    // with one of those is silently unreadable after save -- or worse, if the
+    // model id also matches an existing `[models.<id>]` model definition, the
+    // binding table collides with it outright. New providers can never get a
+    // reserved id (runtimeTomlIdError), but this dropdown lists whatever is
+    // already in environment.providers, which can include a legacy/hand-edited
+    // provider that predates that check -- so guard here too.
+    if (isReservedRuntimeTomlId(bindingProviderId)) {
+      setBindingFormError(`"${bindingProviderId}"는 예약된 이름이라 바인딩 provider로 쓸 수 없습니다`)
+      return
+    }
     const exists = environment.bindings.some(
       b => b.providerId === bindingProviderId && b.modelId === bindingModelId,
     )

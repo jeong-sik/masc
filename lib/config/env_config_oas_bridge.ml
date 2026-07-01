@@ -85,7 +85,7 @@ let timeout_env_value_opt ~name raw =
   let reject () =
     let type_name = "positive finite float" in
     Log.Misc.warn
-      "malformed env %s=%S (expected %s); using default"
+      "malformed env %s=%S (expected %s); falling back"
       name
       raw
       type_name;

@@ -87,7 +87,32 @@ let enabled_writes_redacted () =
   Alcotest.(check bool) "turn_id recorded" true
     (contains ~needle:"\"turn_id\":7" content);
   Alcotest.(check bool) "replayed history text recorded" true
-    (contains ~needle:"좋아, 연구 시작한다" content)
+    (contains ~needle:"좋아, 연구 시작한다" content);
+  Alcotest.(check bool) "request kind recorded" true
+    (contains ~needle:"\"kind\":\"request\"" content)
+
+let response_disabled_is_noop () =
+  set "";
+  let base = Filename.temp_dir "wirecap_resp_off" "" in
+  Wire.capture_response ~base_path:base ~keeper_name:"sangsu" ~turn_id:1
+    ~response_text:"anything";
+  Alcotest.(check (list string))
+    "no jsonl written when disabled" [] (find_jsonl base)
+
+let response_capture_writes_redacted () =
+  set "1";
+  let base = Filename.temp_dir "wirecap_resp_on" "" in
+  Wire.capture_response ~base_path:base ~keeper_name:"sangsu" ~turn_id:9
+    ~response_text:("out " ^ fake_github_token ^ " done");
+  let files = find_jsonl base in
+  Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
+  let content = read_file (List.hd files) in
+  Alcotest.(check bool) "response kind recorded" true
+    (contains ~needle:"\"kind\":\"response\"" content);
+  Alcotest.(check bool) "raw github token is redacted" false
+    (contains ~needle:fake_github_token content);
+  Alcotest.(check bool) "turn_id recorded" true
+    (contains ~needle:"\"turn_id\":9" content)
 
 let () =
   Alcotest.run "keeper_wire_capture"
@@ -99,5 +124,12 @@ let () =
           Alcotest.test_case "disabled is a no-op" `Quick disabled_is_noop;
           Alcotest.test_case "enabled writes redacted jsonl" `Quick
             enabled_writes_redacted;
+        ] );
+      ( "capture_response",
+        [
+          Alcotest.test_case "disabled is a no-op" `Quick
+            response_disabled_is_noop;
+          Alcotest.test_case "enabled writes redacted jsonl" `Quick
+            response_capture_writes_redacted;
         ] );
     ]

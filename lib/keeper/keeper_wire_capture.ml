@@ -18,6 +18,14 @@ let redact = Llm_provider.Secret_redactor.redact_string
 let wire_capture_dir base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "wire-capture"
 
+let write_payload ~base_path (payload : Yojson.Safe.t) =
+  let store = Dated_jsonl.create ~base_dir:(wire_capture_dir base_path) () in
+  try Dated_jsonl.append store payload with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+      Log.Keeper.error "keeper_wire_capture: write failed to %s: %s"
+        (Dated_jsonl.base_dir store) (Printexc.to_string exn)
+
 let capture_request ~base_path ~keeper_name ~turn_id ~system_prompt
     ~user_message ~history_messages =
   if not (enabled ()) then ()
@@ -33,6 +41,7 @@ let capture_request ~base_path ~keeper_name ~turn_id ~system_prompt
       `Assoc
         [
           ("ts", `String (Masc_domain.now_iso ()));
+          ("kind", `String "request");
           ("keeper", `String keeper_name);
           ("turn_id", `Int turn_id);
           ("system_prompt", `String (redact system_prompt));
@@ -41,9 +50,19 @@ let capture_request ~base_path ~keeper_name ~turn_id ~system_prompt
           ("history", `List history);
         ]
     in
-    let store = Dated_jsonl.create ~base_dir:(wire_capture_dir base_path) () in
-    try Dated_jsonl.append store payload with
-    | Eio.Cancel.Cancelled _ as e -> raise e
-    | exn ->
-        Log.Keeper.error "keeper_wire_capture: write failed to %s: %s"
-          (Dated_jsonl.base_dir store) (Printexc.to_string exn)
+    write_payload ~base_path payload
+
+let capture_response ~base_path ~keeper_name ~turn_id ~response_text =
+  if not (enabled ()) then ()
+  else
+    let payload : Yojson.Safe.t =
+      `Assoc
+        [
+          ("ts", `String (Masc_domain.now_iso ()));
+          ("kind", `String "response");
+          ("keeper", `String keeper_name);
+          ("turn_id", `Int turn_id);
+          ("response_text", `String (redact response_text));
+        ]
+    in
+    write_payload ~base_path payload

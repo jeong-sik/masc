@@ -34,5 +34,17 @@ val capture_request :
   history_messages:Agent_sdk.Types.message list ->
   unit
 (** [capture_request ~base_path ~keeper_name ~turn_id ~system_prompt
-    ~user_message ~history_messages] appends one redacted request record.
-    No-op unless {!enabled}. [turn_id] is the 1-based keeper turn index. *)
+    ~user_message ~history_messages] appends one redacted request record
+    ([kind:"request"]). No-op unless {!enabled}. [turn_id] is the 1-based
+    keeper turn index. *)
+
+val capture_response :
+  base_path:string ->
+  keeper_name:string ->
+  turn_id:int ->
+  response_text:string ->
+  unit
+(** [capture_response ~base_path ~keeper_name ~turn_id ~response_text] appends
+    one redacted response record ([kind:"response"]) paired with the request of
+    the same [turn_id]. This closes the loop for analysis: turn N's response is
+    turn N+1's replayed history input. No-op unless {!enabled}. *)

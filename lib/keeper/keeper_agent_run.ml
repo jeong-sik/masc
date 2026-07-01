@@ -682,6 +682,15 @@ let run_turn
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
                  let text = Agent_sdk.Types.text_of_content result.response.content in
+                 (* Phase O observability (iter-2): pair this turn's response
+                    with the request captured pre-run under the same turn_id, so
+                    the feedback loop (turn N output -> turn N+1 replayed history)
+                    is directly analyzable. No-op unless MASC_KEEPER_WIRE_CAPTURE. *)
+                 Keeper_wire_capture.capture_response
+                   ~base_path:config.base_path
+                   ~keeper_name:meta.name
+                   ~turn_id:manifest_keeper_turn_id
+                   ~response_text:text;
                  (* RFC-0132 PR-2: receipt model surface = external boundary; redact via SSOT. *)
                  let model =
                    Boundary_redaction.to_string

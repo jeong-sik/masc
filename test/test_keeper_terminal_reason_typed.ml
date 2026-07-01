@@ -431,22 +431,37 @@ let () =
     (R.operator_disposition_kind_of_string "blocked_runtime" = None)
 ;;
 
-let intentional_passive_only_no_work_policy_change (receipt : R.t) got =
-  if
-    receipt.completion_contract_result = R.Contract_passive_only
-    && Option.is_none receipt.current_task_id
-    && receipt.actionable_signal = Some C.No_actionable_signal
-  then (
-    let terminal_reason = String.lowercase_ascii receipt.terminal_reason_code in
-    match terminal_reason, receipt.outcome, got with
-    | code, `Ok, (R.Disp_pass, R.Reason_turn_budget_exhausted)
-      when String.starts_with ~prefix:"turn_budget_exhausted" code ->
+let intentional_passive_only_policy_change (receipt : R.t) got =
+  if receipt.completion_contract_result <> R.Contract_passive_only
+  then false
+  else
+    match got with
+    (* RFC-0303 Phase 0: passive-only is activity, not a page. Wherever the
+       frozen oracle routed a passive turn to the contract-unsatisfied pause
+       ([Disp_pause_human]/[completion_contract_unsatisfied]), the live function
+       now returns a non-paging [Disp_pass]/[passive_no_action] — regardless of
+       work scope. This is the intended reversal of the albini "85 pages/day"
+       classification. *)
+    | R.Disp_pass, R.Reason_passive_no_action -> true
+    (* Pre-existing no-work carve-outs (frozen oracle predates them): a passive
+       turn with no claimed task and no actionable signal already passed. *)
+    | R.Disp_pass, R.Reason_turn_budget_exhausted
+      when Option.is_none receipt.current_task_id
+           && receipt.actionable_signal = Some C.No_actionable_signal
+           && receipt.outcome = `Ok
+           && String.starts_with
+                ~prefix:"turn_budget_exhausted"
+                (String.lowercase_ascii receipt.terminal_reason_code) ->
       true
-    | ("completed" | "success"), `Ok, (R.Disp_pass, R.Reason_healthy)
-      when receipt.runtime_outcome = R.Runtime_completed ->
+    | R.Disp_pass, R.Reason_healthy
+      when Option.is_none receipt.current_task_id
+           && receipt.actionable_signal = Some C.No_actionable_signal
+           && receipt.outcome = `Ok
+           && receipt.runtime_outcome = R.Runtime_completed
+           && (let c = String.lowercase_ascii receipt.terminal_reason_code in
+               c = "completed" || c = "success") ->
       true
-    | _ -> false)
-  else false
+    | _ -> false
 ;;
 
 (* To keep the product bounded we vary the most behaviour-determining axes
@@ -489,7 +504,7 @@ let () =
                                      in
                                      if want <> got
                                         && not
-                                             (intentional_passive_only_no_work_policy_change
+                                             (intentional_passive_only_policy_change
                                                 receipt
                                                 got)
                                      then (
@@ -637,15 +652,22 @@ let () =
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
+  (* RFC-0303 Phase 0: a passive-only turn is activity, not a page — even when
+     the keeper holds a claimed task. It maps to [Disp_pass]/[passive_no_action],
+     NOT [Disp_pause_human]. "Should it have worked the claimed task?" is a
+     goal-layer judgment, not a per-turn contract failure. *)
   let active_receipt = { receipt with current_task_id = Some "TASK-1" } in
   let got = R.operator_disposition active_receipt in
-  let want = R.Disp_pause_human, R.Reason_completion_contract_unsatisfied in
+  let want = R.Disp_pass, R.Reason_passive_no_action in
   check
     (Printf.sprintf
-       "completed active passive-only receipt want=%s got=%s"
+       "completed active passive-only receipt is pass (not a page) want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
-    (got = want)
+    (got = want);
+  check
+    "active passive-only turn does NOT need an operator broadcast"
+    (not (R.needs_operator_broadcast (fst got)))
 ;;
 
 (* Root B (#22710) regression: a coordination keeper always carries goals
@@ -679,21 +701,29 @@ let () =
     R.operator_disposition
       (coordination_passive ~actionable_signal:(Some C.Has_unclaimed_tasks) ())
   in
-  let want = R.Disp_pause_human, R.Reason_completion_contract_unsatisfied in
+  (* RFC-0303 Phase 0: the albini "85 pages/day" root. A coordination keeper
+     that saw unclaimed tasks but chose not to claim one this turn is NOT a
+     page — choosing not to act on available work is a decision, not a contract
+     failure. Passive-only is uniformly [Disp_pass]/[passive_no_action]. *)
+  let want = R.Disp_pass, R.Reason_passive_no_action in
   check
     (Printf.sprintf
-       "coordination keeper with unclaimed tasks still pages an operator want=%s got=%s"
+       "coordination keeper with unclaimed tasks does NOT page (passive is a \
+        decision, not a failure) want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))
     (got = want);
   check
-    "unclaimed-task passive turn needs an operator broadcast"
-    (R.needs_operator_broadcast (fst got));
+    "unclaimed-task passive turn does NOT need an operator broadcast"
+    (not (R.needs_operator_broadcast (fst got)));
+  (* RFC-0303 Phase 0: with no world observation threaded, a passive-only turn
+     is still not a page. Observability loss is a runtime concern (surfaced on
+     the runtime error path), not a manufactured passive-turn operator page. *)
   let got = R.operator_disposition (coordination_passive ~actionable_signal:None ()) in
-  let want = R.Disp_pause_human, R.Reason_completion_contract_unsatisfied in
+  let want = R.Disp_pass, R.Reason_passive_no_action in
   check
     (Printf.sprintf
-       "coordination keeper with no observation falls back to broadcast-required \
+       "coordination keeper with no observation is pass (passive is not a page) \
         want=%s got=%s"
        (disp_pair_to_string want)
        (disp_pair_to_string got))

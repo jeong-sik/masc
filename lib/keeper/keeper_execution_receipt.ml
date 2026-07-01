@@ -106,6 +106,14 @@ type operator_disposition_reason =
   | Reason_internal_error
   | Reason_tool_route_recoverable_failure
   | Reason_completion_contract_unsatisfied
+  | Reason_passive_no_action
+      (* RFC-0303 Phase 0: a passive-only turn is activity (thinking / deciding
+         to defer / choosing to wait), not an operator-pageable failure. It maps
+         to [Disp_pass] with this reason so the dashboard keeps the "was passive"
+         telemetry WITHOUT raising needs_attention. Distinct from
+         [Reason_completion_contract_unsatisfied], which stays a pause for the
+         genuinely-unsatisfied contract variants (violated / claim-only /
+         needs-execution-progress). *)
   | Reason_turn_budget_exhausted
   | Reason_turn_livelock_blocked
   | Reason_cancelled
@@ -123,6 +131,7 @@ let operator_disposition_reason_to_string = function
   | Reason_internal_error -> "internal_error"
   | Reason_tool_route_recoverable_failure -> "tool_route_recoverable_failure"
   | Reason_completion_contract_unsatisfied -> "completion_contract_unsatisfied"
+  | Reason_passive_no_action -> "passive_no_action"
   | Reason_turn_budget_exhausted -> "turn_budget_exhausted"
   | Reason_turn_livelock_blocked -> "turn_livelock_blocked"
   | Reason_cancelled -> "cancelled"
@@ -361,6 +370,17 @@ let operator_disposition (receipt : t)
             && receipt.runtime_outcome = Runtime_completed
             && terminal_reason_is_success receipt
     then Disp_pass, Reason_healthy
+    else if receipt.completion_contract_result = Contract_passive_only
+    then
+      (* RFC-0303 Phase 0: passive-only is NOT an operator page. The turn still
+         produced activity (thinking / defer / choosing to wait); "should it have
+         acted on available work?" is a goal-layer semantic judgment, not a
+         per-turn pause. This carve-out precedes [completion_contract_unsatisfied]
+         so the genuinely-unsatisfied variants (violated / claim-only /
+         needs-execution-progress) still page via the branch below. The prior
+         [passive_only_without_work_scope] arm above already passed the no-work
+         case; this extends Disp_pass to passive-WITH-work-scope turns too. *)
+      Disp_pass, Reason_passive_no_action
     else if completion_contract_unsatisfied receipt.completion_contract_result
     then Disp_pause_human, Reason_completion_contract_unsatisfied
     else if

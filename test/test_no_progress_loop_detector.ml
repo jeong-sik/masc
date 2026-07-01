@@ -566,6 +566,7 @@ let run_result
            ; reason = Masc.Keeper_execution_receipt.Reason_healthy
            }
              : Masc.Keeper_agent_result.operator_disposition))
+      ?(stop_reason = Runtime_agent.Completed)
       tool_calls
     : Masc.Keeper_agent_run.run_result
   =
@@ -583,7 +584,7 @@ let run_result
   ; checkpoint = None
   ; trace_ref = None
   ; run_validation = None
-  ; stop_reason = Runtime_agent.Completed
+  ; stop_reason
   ; inference_telemetry = None
   ; tool_surface
   ; pre_dispatch_compacted = false
@@ -732,6 +733,39 @@ let test_completion_contract_terminal_failure_reason_code () =
     true
     (Success.terminal_outcome_is_completed_turn
        (Success.terminal_outcome_of_result failed_passive_only));
+  let budget_exhausted_needs_progress =
+    run_result
+      ~completion_contract_result:
+        Masc.Keeper_execution_receipt.Contract_needs_execution_progress
+      ~operator_disposition:
+        (Some
+           ({ disposition = Masc.Keeper_execution_receipt.Disp_alert_exhausted
+            ; reason = Masc.Keeper_execution_receipt.Reason_turn_budget_exhausted
+            }
+              : Masc.Keeper_agent_result.operator_disposition))
+      ~stop_reason:(Runtime_agent.TurnBudgetExhausted { turns_used = 60; limit = 60 })
+      [ tool_call "tool_execute" ]
+  in
+  Alcotest.(check string)
+    "budget-exhausted contract attention is terminally visible"
+    "needs_execution_progress"
+    (Option.value
+       ~default:""
+       (Success.completion_contract_terminal_failure_reason_code
+          budget_exhausted_needs_progress));
+  (match Success.terminal_outcome_of_result budget_exhausted_needs_progress with
+   | Success.Terminal_failed_completion_contract { reason_code } ->
+     Alcotest.(check string)
+       "budget-exhausted unsatisfied contract cannot become ContractOk"
+       "needs_execution_progress"
+       reason_code
+   | Success.Terminal_done | Success.Terminal_checkpoint ->
+     Alcotest.fail "expected budget-exhausted unsatisfied contract failure");
+  Alcotest.(check bool)
+    "budget-exhausted unsatisfied contract is not a completed turn"
+    false
+    (Success.terminal_outcome_is_completed_turn
+       (Success.terminal_outcome_of_result budget_exhausted_needs_progress));
   let needs_execution_progress =
     run_result
       ~completion_contract_result:

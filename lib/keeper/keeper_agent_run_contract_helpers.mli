@@ -16,5 +16,6 @@ val progress_keeper_tool_names_for_contract :
 val observed_completion_contract_status :
   had_owned_active_task_at_turn_start:bool ->
   actual_keeper_tool_names:string list ->
+  stop_reason:Runtime_agent.stop_reason ->
   response_text_present:bool ->
   Keeper_execution_receipt.completion_contract_result

@@ -209,6 +209,7 @@ module For_testing : sig
   val translate_oas_stream_event :
     redact_text:(string -> string) ->
     on_text_delta:(string -> string) ->
+    base_dir:string ->
     keeper_stream_bridge_state ->
     Agent_sdk.Types.sse_event ->
     translated_keeper_stream_event

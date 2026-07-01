@@ -101,11 +101,23 @@
 .rt-card-add { border-style: dashed; }
 .rt-add-toggle { width: 100%; background: none; border: 1px dashed var(--border-main); border-radius: var(--radius-sm); padding: 9px 12px; color: var(--text-dim); font-family: var(--font-ui); font-size: var(--fs-12); cursor: pointer; transition: 0.14s; }
 .rt-add-toggle:hover { border-color: var(--volt-dim); color: var(--volt); }
-.rt-add-form { display: flex; flex-direction: column; gap: 4px; }
+/* gap is the sole spacing authority inside an add-form: .rt-field/.rt-check-row
+   normally self-space via their own margin-top (block-flow convention used in
+   .rt-card), but as flex children here that margin would stack on top of the
+   gap instead of collapsing, producing uneven rhythm (a cramped edge into
+   .rt-note, then a doubled gap out of it). Neutralize the child margins that
+   would otherwise double up; .rt-add-actions keeps its own margin-top for a
+   deliberately larger break before the commit buttons. */
+.rt-add-form { display: flex; flex-direction: column; gap: 7px; }
+.rt-add-form > .rt-field { margin-top: 0; }
+.rt-add-form > .rt-check-row { margin-top: 0; }
+.rt-add-form > .rt-note { margin-bottom: 0; }
 .rt-add-binding { border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-card); padding: 11px 13px; margin-bottom: 9px; }
 .rt-select-narrow { max-width: 140px; flex: none; }
 .rt-check-row { display: flex; flex-wrap: wrap; gap: 14px; margin-top: 7px; }
 .rt-check { display: inline-flex; align-items: center; gap: 6px; font-size: 11.5px; color: var(--text-dim); cursor: pointer; }
+.rt-check:hover { color: var(--text-mid); }
+.rt-check input[type="checkbox"] { accent-color: var(--volt); }
 .rt-add-actions { display: flex; align-items: center; gap: 8px; margin-top: 9px; }
 .rt-add-cancel { background: none; border: 1px solid var(--border-main); border-radius: var(--radius-sm); padding: 7px 15px; color: var(--text-dim); font-family: var(--font-ui); font-size: var(--fs-12); cursor: pointer; }
 .rt-add-cancel:hover { border-color: var(--volt-dim); color: var(--volt); }

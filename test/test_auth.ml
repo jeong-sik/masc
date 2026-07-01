@@ -809,6 +809,75 @@ let test_permission_denied_for_worker_admin_action () =
   | Error (Masc_domain.Auth (Masc_domain.Auth_error.Forbidden _)) -> ()
   | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
 
+(* Regression for the bootstrap-grace bypass: the grace branch used to match
+   a bare, unauthenticated [agent_name] string against [read_initial_admin]
+   with no proof of possession. Any caller could self-declare that name via
+   an unauthenticated request header (server_auth.ml's x-masc-agent) and be
+   granted Admin outright. It must now require the workspace secret. *)
+let test_bootstrap_grace_rejects_agent_name_impersonation_without_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result =
+    Auth.check_permission dir ~agent_name:"test-admin" ~token:None
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "agent_name impersonation without a token must not grant access"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_bootstrap_grace_rejects_agent_name_impersonation_with_wrong_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result =
+    Auth.check_permission dir ~agent_name:"test-admin" ~token:(Some "not-the-secret")
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> fail "a wrong/guessed token must not grant recovery admin"
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.InvalidToken _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_workspace_secret_grants_recovery_admin () =
+  let dir = setup_test_workspace () in
+  let secret, _bootstrap_token =
+    Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin"
+  in
+  (* Proof of possession of the workspace secret must grant recovery admin
+     regardless of the caller's self-declared agent_name. *)
+  let result =
+    Auth.check_permission dir ~agent_name:"anyone" ~token:(Some secret)
+      ~permission:Masc_domain.CanAdmin
+  in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok () -> ()
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
+let test_resolve_role_rejects_agent_name_impersonation_without_token () =
+  let dir = setup_test_workspace () in
+  let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result = Auth.resolve_role dir ~agent_name:"test-admin" ~token:None in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok role ->
+    fail (Printf.sprintf "impersonation without a token must not resolve a role, got %s"
+      (Masc_domain.show_agent_role role))
+  | Error (Masc_domain.Auth (Masc_domain.Auth_error.Unauthorized _)) -> ()
+  | Error e -> fail (Printf.sprintf "wrong error: %s" (Masc_domain.masc_error_to_string e))
+
+let test_resolve_role_workspace_secret_grants_admin () =
+  let dir = setup_test_workspace () in
+  let secret, _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
+  let result = Auth.resolve_role dir ~agent_name:"anyone" ~token:(Some secret) in
+  cleanup_test_workspace dir;
+  match result with
+  | Ok Masc_domain.Admin -> ()
+  | Ok role -> fail (Printf.sprintf "expected Admin, got %s" (Masc_domain.show_agent_role role))
+  | Error e -> fail (Masc_domain.masc_error_to_string e)
+
 let test_authorize_unknown_masc_tool_strict_worker_allowed () =
   let dir = setup_test_workspace () in
   let _ = Auth.enable_auth dir ~require_token:true ~agent_name:"test-admin" in
@@ -1068,6 +1137,16 @@ let () =
       test_case "auth enabled with valid token" `Quick test_auth_enabled_with_valid_token;
       test_case "permission denied for worker admin action" `Quick
         test_permission_denied_for_worker_admin_action;
+      test_case "bootstrap grace rejects agent_name impersonation without token"
+        `Quick test_bootstrap_grace_rejects_agent_name_impersonation_without_token;
+      test_case "bootstrap grace rejects agent_name impersonation with wrong token"
+        `Quick test_bootstrap_grace_rejects_agent_name_impersonation_with_wrong_token;
+      test_case "workspace secret grants recovery admin"
+        `Quick test_workspace_secret_grants_recovery_admin;
+      test_case "resolve_role rejects agent_name impersonation without token"
+        `Quick test_resolve_role_rejects_agent_name_impersonation_without_token;
+      test_case "resolve_role workspace secret grants admin"
+        `Quick test_resolve_role_workspace_secret_grants_admin;
       test_case "strict unknown masc tool allows worker"
         `Quick test_authorize_unknown_masc_tool_strict_worker_allowed;
       test_case "strict unknown non-masc tool denied"

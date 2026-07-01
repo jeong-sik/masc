@@ -108,6 +108,20 @@ let verify_optional_token config ~agent_name ~token
      | Error e -> Error e)
 ;;
 
+(** Verify a caller-presented secret against the workspace root secret
+    minted once by [init_workspace_secret] (and shown to the operator at
+    that time). This is the only proof-of-possession the bootstrap/recovery
+    grace below accepts. *)
+let verify_workspace_secret config secret : bool =
+  let hash = sha256_hash secret in
+  let file = workspace_secret_file config in
+  if Sys.file_exists file
+  then (
+    let stored_hash = String.trim (In_channel.with_open_text file In_channel.input_all) in
+    hash = stored_hash)
+  else false
+;;
+
 let check_permission config ~agent_name ~token ~permission : (unit, masc_error) result =
   let auth_cfg = load_auth_config config in
   if not auth_cfg.enabled
@@ -115,11 +129,18 @@ let check_permission config ~agent_name ~token ~permission : (unit, masc_error) 
     (* Auth disabled - allow everything *)
     Ok ()
   else if
-    match read_initial_admin config with
-    | Some admin -> String.equal agent_name admin
+    match token with
+    | Some raw -> verify_workspace_secret config raw
     | None -> false
   then (
-    (* Bootstrap grace: the agent who enabled auth always has full access *)
+    (* Recovery grace: presenting the workspace secret proves possession of
+       the root credential minted at [enable_auth] time, so the caller can
+       always regain admin access (prevents BUG-025's circular permission
+       deadlock if the bootstrap admin's own token has expired/been lost).
+       The previous version of this branch matched [agent_name] against
+       [read_initial_admin] with no proof of possession at all — any
+       unauthenticated caller could self-declare that name via a plain
+       request header and be granted Admin outright. *)
     ignore permission;
     Ok ())
   else if
@@ -219,10 +240,10 @@ let resolve_role_with_auth_config config ~auth_cfg ~agent_name ~token
   if not auth_cfg.enabled
   then Ok Admin (* Auth disabled = full access *)
   else if
-    match read_initial_admin config with
-    | Some admin -> String.equal agent_name admin
+    match token with
+    | Some raw -> verify_workspace_secret config raw
     | None -> false
-  then Ok Admin (* Bootstrap admin = full access *)
+  then Ok Admin (* Recovery grace via workspace secret possession; see check_permission *)
   else if
     match token with
     | Some raw -> verify_internal_keeper_token config ~token:raw
@@ -286,16 +307,9 @@ let init_workspace_secret config : string =
   secret (* Return raw secret to show user once *)
 ;;
 
-(** Verify workspace secret *)
-let verify_workspace_secret config secret : bool =
-  let hash = sha256_hash secret in
-  let file = workspace_secret_file config in
-  if Sys.file_exists file
-  then (
-    let stored_hash = String.trim (In_channel.with_open_text file In_channel.input_all) in
-    hash = stored_hash)
-  else false
-;;
+(* [verify_workspace_secret] now lives earlier in this file, above
+   [check_permission], since the bootstrap/recovery grace branch there
+   depends on it. *)
 
 (* ============================================ *)
 (* High-level auth operations                   *)

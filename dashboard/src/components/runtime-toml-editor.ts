@@ -14,6 +14,9 @@ import {
   parseRuntimeTomlEnvironment,
   runtimeTomlImpactSummary,
   setRuntimeTomlBindingField,
+  setRuntimeTomlProviderCredential,
+  setRuntimeTomlProviderField,
+  type RuntimeTomlCredentialType,
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
 import { ActionButton } from './common/button'
@@ -24,6 +27,7 @@ import { ringFocusClasses } from './common/ring'
 import {
   RuntimeEnvironmentEditor,
   type RuntimeBindingEditableField,
+  type RuntimeProviderTransportEditableField,
   type RuntimeStructuredSection,
 } from './runtime-environment-editor'
 
@@ -269,6 +273,28 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
   ) {
     if (saving || loadState !== 'loaded') return
     setDraft(current => setRuntimeTomlBindingField(current, runtimeId, field, value))
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleProviderTransportChange(
+    providerId: string,
+    field: RuntimeProviderTransportEditableField,
+    value: string,
+  ) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlProviderField(current, providerId, field, value))
+    setNotice(null)
+    setError(null)
+  }
+
+  function handleProviderCredentialChange(
+    providerId: string,
+    credentialType: RuntimeTomlCredentialType,
+    value: string,
+  ) {
+    if (saving || loadState !== 'loaded') return
+    setDraft(current => setRuntimeTomlProviderCredential(current, providerId, credentialType, value))
     setNotice(null)
     setError(null)
   }
@@ -535,6 +561,8 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
                   void handleAssignmentPatch(keeperName, runtimeId)
                 }}
                 onBindingFieldChange=${handleBindingFieldChange}
+                onProviderTransportChange=${handleProviderTransportChange}
+                onProviderCredentialChange=${handleProviderCredentialChange}
               />
             </div>
 

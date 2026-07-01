@@ -183,7 +183,7 @@ describe('RuntimeTomlEditor', () => {
     expect(container.querySelector('[data-testid="runtime-toml-impact-preview"]')).toBeNull()
   })
 
-  it('renders runtime environment fields as structured projections without raw TOML mutation', async () => {
+  it('renders runtime environment fields as structured projections', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)
 
@@ -195,13 +195,55 @@ describe('RuntimeTomlEditor', () => {
       const modelsSection = container.querySelector('[data-testid="runtime-section-models"]')
       expect(modelsSection?.textContent).toContain('qwen')
       expect(modelsSection?.textContent).toContain('128k ctx')
-      expect((container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement | null)?.value)
+      expect((container.querySelector('[data-testid="runtime-provider-runpod_mtp-transport"]') as HTMLInputElement | null)?.value)
         .toBe('https://runpod.example/v1')
     })
 
-    expect((container.querySelector('[aria-label="provider transport value"]') as HTMLInputElement).readOnly).toBe(true)
     expect(container.querySelector('[data-testid="runtime-environment-save"]')).toBeNull()
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
+  it('edits provider transport and credentials as a draft and applies them through the existing save path', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+
+    const transport = container.querySelector('[data-testid="runtime-provider-runpod_mtp-transport"]') as HTMLInputElement
+    const credential = container.querySelector('[data-testid="runtime-provider-runpod_mtp-credential"]') as HTMLInputElement
+
+    expect(transport.readOnly).toBe(false)
+    expect(transport.disabled).toBe(false)
+    expect(transport.value).toBe('https://runpod.example/v1')
+    expect(credential.value).toBe('RUNPOD_API_KEY')
+
+    fireEvent.input(transport, { target: { value: 'https://runpod.example/v2' } })
+    fireEvent.input(credential, { target: { value: 'RUNPOD_API_KEY_NEXT' } })
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('endpoint = "https://runpod.example/v2"')
+      expect(source).toContain('key = "RUNPOD_API_KEY_NEXT"')
+      expect(source).not.toContain('endpoint = "https://runpod.example/v1"')
+      expect(source).not.toContain('key = "RUNPOD_API_KEY"')
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+      expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+      expect(savedSource).toContain('endpoint = "https://runpod.example/v2"')
+      expect(savedSource).toContain('key = "RUNPOD_API_KEY_NEXT"')
+      expect(container.textContent).toContain('적용됨')
+    })
+    expect(apiMocks.patchRuntimeRouting).not.toHaveBeenCalled()
+    expect(apiMocks.patchRuntimeAssignment).not.toHaveBeenCalled()
   })
 
   it('edits binding runtime knobs as a draft and applies them through the existing save path', async () => {

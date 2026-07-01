@@ -2,6 +2,7 @@ import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
 import {
   parseRuntimeTomlEnvironment,
+  type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
   type RuntimeTomlProvider,
 } from '../lib/runtime-toml-config'
@@ -19,6 +20,7 @@ export type RuntimeStructuredSection =
   | 'assignments'
 
 export type RuntimeBindingEditableField = 'max-concurrent' | 'keep-alive' | 'num-ctx'
+export type RuntimeProviderTransportEditableField = 'endpoint' | 'command'
 
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
@@ -32,6 +34,16 @@ interface RuntimeEnvironmentEditorProps {
     runtimeId: string,
     field: RuntimeBindingEditableField,
     value: string | number | null,
+  ) => void
+  onProviderTransportChange: (
+    providerId: string,
+    field: RuntimeProviderTransportEditableField,
+    value: string,
+  ) => void
+  onProviderCredentialChange: (
+    providerId: string,
+    credentialType: RuntimeTomlCredentialType,
+    value: string,
   ) => void
 }
 
@@ -53,6 +65,10 @@ function credentialValue(provider: RuntimeTomlProvider): string {
 function transportValue(provider: RuntimeTomlProvider): string {
   if (provider.transportKind === 'command') return provider.command
   return provider.endpoint
+}
+
+function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransportEditableField {
+  return provider.transportKind === 'command' ? 'command' : 'endpoint'
 }
 
 // Prototype rt-model-ctx label — runtime-editor.jsx:176 `(max/1000).toFixed(0)}k ctx`.
@@ -97,6 +113,8 @@ export function RuntimeEnvironmentEditor({
   onRoutingChange,
   onAssignmentChange,
   onBindingFieldChange,
+  onProviderTransportChange,
+  onProviderCredentialChange,
 }: RuntimeEnvironmentEditorProps) {
   const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
   const [modelQuery, setModelQuery] = useState('')
@@ -199,7 +217,7 @@ export function RuntimeEnvironmentEditor({
     <div data-testid="runtime-environment-editor">
       <div class="rt-head-actions" style=${{ justifyContent: 'flex-end', marginBottom: '14px' }}>
         <span class="rt-nav-sub mono" style=${{ marginRight: 'auto' }}>런타임 환경</span>
-        <span class="rt-nav-sub mono">${saving ? '저장 중' : 'routing live · bindings draft'}</span>
+        <span class="rt-nav-sub mono">${saving ? '저장 중' : 'routing live · providers/bindings draft'}</span>
       </div>
 
       ${environment.warnings.length > 0 ? html`
@@ -246,25 +264,35 @@ export function RuntimeEnvironmentEditor({
         )}
       </div>
 
-      <!-- providers — runtime-editor.jsx:144-165. Read-only projection. Live
-           writes stay behind backend typed routes or the raw editor's validated
-           save; this component does not rewrite TOML text. -->
+      <!-- providers — runtime-editor.jsx:144-165. Endpoint/credential edits update
+           the draft runtime.toml and are applied through the validated Save path. -->
       <div class=${section === 'providers' ? '' : 'hidden'} data-testid="runtime-section-providers">
         <div class="rt-cards">
-          ${environment.providers.map(provider => html`
-            <div key=${provider.id} class="rt-card">
+          ${environment.providers.map(provider => {
+            const providerTransportField = transportField(provider)
+            return html`
+            <div key=${provider.id} class="rt-card" data-testid=${`runtime-provider-${provider.id}`}>
               <div class="rt-card-h">
                 <span class="rt-card-id mono">${provider.id}</span>
                 <span class="rt-card-name">${provider.displayName}</span>
                 <span class="rt-proto mono">${provider.protocol || '—'}</span>
               </div>
               <div class="rt-field">
-                <span class="sub-k">endpoint</span>
+                <span class="sub-k">${providerTransportField}</span>
                 <input
                   class="rt-input mono"
                   value=${transportValue(provider)}
-                  readOnly
-                  aria-label="provider transport value"
+                  disabled=${isDisabled}
+                  aria-label=${`${provider.id} provider transport value`}
+                  onInput=${(event: Event) => {
+                    onProviderTransportChange(
+                      provider.id,
+                      providerTransportField,
+                      (event.currentTarget as HTMLInputElement).value,
+                    )
+                  }}
+                  data-testid=${`runtime-provider-${provider.id}-transport`}
+                  data-runtime-provider-transport=${provider.id}
                 />
               </div>
               <div class="rt-field">
@@ -278,8 +306,17 @@ export function RuntimeEnvironmentEditor({
                       class="rt-input mono"
                       type=${provider.credentialType === 'inline' ? 'password' : 'text'}
                       value=${credentialValue(provider)}
-                      readOnly
-                      aria-label="provider credential value"
+                      disabled=${isDisabled}
+                      aria-label=${`${provider.id} provider credential value`}
+                      onInput=${(event: Event) => {
+                        onProviderCredentialChange(
+                          provider.id,
+                          provider.credentialType,
+                          (event.currentTarget as HTMLInputElement).value,
+                        )
+                      }}
+                      data-testid=${`runtime-provider-${provider.id}-credential`}
+                      data-runtime-provider-credential=${provider.id}
                     />
                   </span>
                   `}
@@ -289,7 +326,8 @@ export function RuntimeEnvironmentEditor({
                    provider-capability source exists, rather than implying support
                    with no backing (PR #22081 review P1: no stub). */ ''}
             </div>
-          `)}
+          `
+          })}
         </div>
       </div>
 

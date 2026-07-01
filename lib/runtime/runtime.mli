@@ -165,10 +165,12 @@ val thinking_support_of_runtime_id : string -> bool option
     runtime.toml SSOT. *)
 
 val preserve_thinking_of_runtime_id : string -> bool option
-(** Explicit [preserve-thinking] for runtime [id], or the OAS typed default for
-    models whose capability declares a request-side preserve-thinking control.
-    [None] means unknown runtime, uninitialized cache, no explicit TOML field,
-    and no OAS request-side preserve control.  Consumed by
+(** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
+    uninitialized cache, or no explicit TOML field.
+
+    OAS owns provider/model capability truth and applies provider-required
+    reasoning replay internally. MASC does not promote a request-side preserve
+    capability into default keeper policy. Consumed by
     {!Runtime_inference.for_runtime} without provider/model string matching. *)
 
 val pricing_of_runtime_id : string -> float option * float option

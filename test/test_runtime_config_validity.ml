@@ -610,8 +610,8 @@ let test_repo_runtime_toml_loads () =
        check int "GLM Coding Plan context" 200000 runtime.model.max_context;
        check bool "GLM Coding Plan thinking enabled" true
          runtime.model.thinking_support;
-       check (option bool) "GLM Coding Plan preserves thinking" (Some true)
-         runtime.model.preserve_thinking;
+      check (option bool) "GLM Coding Plan does not preserve thinking by default" (Some false)
+        runtime.model.preserve_thinking;
        (match runtime.model.capabilities with
         | Some caps ->
           check (option int) "GLM Coding Plan output cap" (Some 128000)
@@ -1073,7 +1073,7 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
               capability gate: %s"
              msg
          | Ok () ->
-           check (option bool) "provider-qualified preserve default" (Some true)
+           check (option bool) "provider-qualified preserve policy" None
              (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
 
 let test_runtime_toml_max_concurrent_flows_to_candidate () =

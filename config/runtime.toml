@@ -122,9 +122,10 @@ api-name = "glm-4.7"
 max-context = 200000
 tools-support = true
 thinking-support = true
-# GLM Coding Plan uses Z.AI's preserved-thinking path. OAS maps this runtime
-# seed to thinking.clear_thinking=false when preserve-thinking is enabled.
-preserve-thinking = true
+# Keep long-running keeper turns on non-preserved reasoning by default. OAS owns
+# GLM's clear_thinking wire contract; enabling preserved thinking here replays
+# historical reasoning into every subsequent keeper turn.
+preserve-thinking = false
 streaming = true
 
 [models.glm-4-7-coding.capabilities]
@@ -172,7 +173,10 @@ api-name = "GLM-5-Turbo"
 max-context = 203000
 tools-support = true
 thinking-support = true
-preserve-thinking = true
+# Keep long-running keeper turns on non-preserved reasoning by default. OAS owns
+# GLM's clear_thinking wire contract; enabling preserved thinking here replays
+# historical reasoning into every subsequent keeper turn.
+preserve-thinking = false
 streaming = true
 
 [models.glm-5-turbo.capabilities]

@@ -86,11 +86,21 @@ function islandBenchRow(row: SeedRow, cellsPerStrip: number) {
   `
 }
 
-const preactHost = document.getElementById('preact-host') as HTMLElement
-const islandHost = document.getElementById('island-host') as HTMLElement
-const resultsEl = document.getElementById('results') as HTMLElement
-const countInput = document.getElementById('count') as HTMLInputElement
-const cellsInput = document.getElementById('cells') as HTMLInputElement
+function requireElementById<T extends Element>(id: string): T {
+  const el = document.getElementById(id)
+  if (el === null) {
+    throw new Error(
+      `bench-kpi.ts: expected element #${id} in bench-kpi.html — check the preview HTML wasn't loaded on the wrong page or its ids drifted`,
+    )
+  }
+  return el as T
+}
+
+const preactHost = requireElementById<HTMLElement>('preact-host')
+const islandHost = requireElementById<HTMLElement>('island-host')
+const resultsEl = requireElementById<HTMLElement>('results')
+const countInput = requireElementById<HTMLInputElement>('count')
+const cellsInput = requireElementById<HTMLInputElement>('cells')
 
 interface BenchResult {
   preactMountMs: number
@@ -111,10 +121,19 @@ function summariseUpdates(values: number[]): string {
   return `min=${min.toFixed(2)} avg=${avg.toFixed(2)} max=${max.toFixed(2)} ms (${values.length} samples)`
 }
 
+// `toFixed()` doesn't throw on non-finite input (NaN.toFixed(2) === "NaN"),
+// but a 0ms/NaN denominator still produces a misleading "Infinity"/"NaN"
+// ratio in the report. Report "n/a" for any non-finite or non-positive
+// denominator instead.
+function formatRatio(numerator: number, denominator: number): string {
+  if (!Number.isFinite(denominator) || denominator <= 0) return 'n/a'
+  return (numerator / denominator).toFixed(2)
+}
+
 function reportResult(label: string, r: BenchResult, count: number, cellsPerStrip: number): void {
   const expected = count * cellsPerStrip
   const mountWinner = r.islandMountMs < r.preactMountMs ? 'Solid' : 'Preact'
-  const mountRatio = (r.islandMountMs / r.preactMountMs).toFixed(2)
+  const mountRatio = formatRatio(r.islandMountMs, r.preactMountMs)
 
   const preactUpdAvg = r.preactUpdateMs.length
     ? r.preactUpdateMs.reduce((a, b) => a + b, 0) / r.preactUpdateMs.length
@@ -126,7 +145,7 @@ function reportResult(label: string, r: BenchResult, count: number, cellsPerStri
   const updWinner = Number.isNaN(preactUpdAvg) || Number.isNaN(islandUpdAvg)
     ? 'n/a (no update samples)'
     : islandUpdAvg < preactUpdAvg ? 'Solid' : 'Preact'
-  const updRatio = preactUpdAvg ? (islandUpdAvg / preactUpdAvg).toFixed(2) : 'n/a'
+  const updRatio = formatRatio(islandUpdAvg, preactUpdAvg)
 
   const block = [
     `=== ${label} (strips=${count}, cells/strip=${cellsPerStrip}, expected listitems=${expected}) ===`,
@@ -238,7 +257,14 @@ function timeUpdateToDom(
     const check = (): void => {
       const allFound = expectedRows.every((row) => {
         const el = host.querySelector(`[data-bench-row="${row.id}"]`)
-        return (el?.textContent ?? '').includes(row.totalText)
+        // Match the "total" cell's aria-label exactly ("total: <value>"), not
+        // a substring of the whole row's rendered text: with 6 numeric
+        // cells sharing one row wrapper, a plain `.includes()` on totalText
+        // can false-positive against a neighboring ok/warn/err/pending/rate
+        // value (or, at 4-digit totals, against a substring of a larger
+        // number) even when the actual total has not updated yet.
+        const totalCell = el?.querySelector('[aria-label^="total: "]')
+        return totalCell?.getAttribute('aria-label') === `total: ${row.totalText}`
       })
       const now = performance.now()
       if (allFound) {
@@ -394,9 +420,11 @@ function frameCounter(): { stop: () => number } {
 function p95(values: number[]): number {
   if (values.length === 0) return NaN
   const sorted = [...values].sort((a, b) => a - b)
-  // Nearest-rank on (n-1): `floor(n * 0.95)` skews toward the max for small
-  // n (e.g. n=10 picks index 9, the max, not the 95th percentile).
-  const idx = Math.round((sorted.length - 1) * 0.95)
+  // floor, not round: `Math.round((n - 1) * 0.95)` still lands on the max
+  // index for n=10 (round(8.55) = 9), which is exactly the skew this is
+  // meant to avoid. `Math.floor` keeps p95 strictly below the max index for
+  // every n >= 2.
+  const idx = Math.floor((sorted.length - 1) * 0.95)
   return sorted[idx] ?? NaN
 }
 

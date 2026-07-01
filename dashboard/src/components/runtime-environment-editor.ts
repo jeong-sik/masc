@@ -4,7 +4,7 @@ import {
   isReservedRuntimeTomlId,
   isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
-  RUNTIME_TOML_PROTOCOLS,
+  RUNTIME_TOML_CREATABLE_PROTOCOLS,
   type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
   type RuntimeTomlProtocol,
@@ -30,11 +30,16 @@ export type RuntimeBindingEditableField = 'max-concurrent' | 'keep-alive' | 'num
 // ...) are deliberately excluded — those are semantically coupled to real,
 // per-model verified behavior (see runtime.toml's own inline caveats), not
 // something a generic add form can default safely. They stay raw-TOML-only.
+// transportKind is fixed to 'endpoint': CLI (`command`) transport providers
+// resolve to no provider_kind on the backend today and get silently dropped
+// from the live runtime list rather than failing the save (see
+// RUNTIME_TOML_CREATABLE_PROTOCOLS in lib/runtime-toml-config.ts). Until that
+// backend limitation is lifted, this form cannot offer command transport.
 export interface NewRuntimeProviderInput {
   id: string
   displayName: string
   protocol: RuntimeTomlProtocol
-  transportKind: 'endpoint' | 'command'
+  transportKind: 'endpoint'
   transportValue: string
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
@@ -92,7 +97,7 @@ interface NewProviderDraft {
   id: string
   displayName: string
   protocol: RuntimeTomlProtocol
-  transportKind: 'endpoint' | 'command'
+  transportKind: 'endpoint'
   transportValue: string
   credentialType: RuntimeTomlCredentialType
   credentialValue: string
@@ -101,7 +106,7 @@ interface NewProviderDraft {
 const DEFAULT_NEW_PROVIDER: NewProviderDraft = {
   id: '',
   displayName: '',
-  protocol: RUNTIME_TOML_PROTOCOLS[0],
+  protocol: RUNTIME_TOML_CREATABLE_PROTOCOLS[0],
   transportKind: 'endpoint',
   transportValue: '',
   credentialType: 'env',
@@ -266,9 +271,7 @@ export function RuntimeEnvironmentEditor({
     }
     const transportValue = newProvider.transportValue.trim()
     if (transportValue === '') {
-      setProviderFormError(
-        newProvider.transportKind === 'endpoint' ? 'endpoint를 입력하세요' : 'command를 입력하세요',
-      )
+      setProviderFormError('endpoint를 입력하세요')
       return
     }
     const trimmedCredentialValue = newProvider.credentialValue.trim()
@@ -522,30 +525,21 @@ export function RuntimeEnvironmentEditor({
                     aria-label="새 provider protocol"
                     onChange=${(event: Event) => setNewProvider({ ...newProvider, protocol: (event.currentTarget as HTMLSelectElement).value as RuntimeTomlProtocol })}
                   >
-                    ${RUNTIME_TOML_PROTOCOLS.map(p => html`<option value=${p}>${p}</option>`)}
+                    ${RUNTIME_TOML_CREATABLE_PROTOCOLS.map(p => html`<option value=${p}>${p}</option>`)}
                   </select>
                 </div>
                 <div class="rt-field">
-                  <span class="sub-k">transport</span>
-                  <select
-                    class="rt-select rt-select-narrow"
-                    value=${newProvider.transportKind}
-                    disabled=${isDisabled}
-                    aria-label="새 provider transport 종류"
-                    onChange=${(event: Event) => setNewProvider({ ...newProvider, transportKind: (event.currentTarget as HTMLSelectElement).value as 'endpoint' | 'command' })}
-                  >
-                    <option value="endpoint">endpoint</option>
-                    <option value="command">command</option>
-                  </select>
+                  <span class="sub-k">endpoint</span>
                   <input
                     class="rt-input mono"
                     value=${newProvider.transportValue}
-                    placeholder=${newProvider.transportKind === 'endpoint' ? 'https://...' : '실행 커맨드'}
+                    placeholder="https://..."
                     disabled=${isDisabled}
                     aria-label="새 provider transport 값"
                     onInput=${(event: Event) => setNewProvider({ ...newProvider, transportValue: (event.currentTarget as HTMLInputElement).value })}
                   />
                 </div>
+                <div class="rt-note">CLI(command) provider는 현재 백엔드에서 라우팅되지 않아 이 폼에서 생성할 수 없습니다. raw TOML 탭을 이용하세요.</div>
                 <div class="rt-field">
                   <span class="sub-k">credential</span>
                   <select

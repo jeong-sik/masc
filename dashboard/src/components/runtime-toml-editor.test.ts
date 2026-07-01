@@ -654,6 +654,26 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it('does not offer CLI protocols or command transport in the add-provider form', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-add-provider-toggle"]') as HTMLButtonElement)
+
+    const protocolOptions = Array.from(
+      container.querySelectorAll('[aria-label="새 provider protocol"] option'),
+    ).map(option => (option as HTMLOptionElement).value)
+    expect(protocolOptions).toEqual(['openai-compatible-http', 'ollama-http', 'messages-http'])
+    expect(protocolOptions).not.toContain('openai-compatible-cli')
+    expect(protocolOptions).not.toContain('messages-cli')
+    // No transport-kind selector left to switch to 'command'.
+    expect(container.querySelector('[aria-label="새 provider transport 종류"]')).toBeNull()
+  })
+
   it('adds a new model through the form', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)

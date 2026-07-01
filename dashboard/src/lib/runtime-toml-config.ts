@@ -520,9 +520,10 @@ export function setRuntimeTomlBindingField(
 }
 
 // Closed set mirroring lib/runtime/runtime_toml.ml's api_format_of_protocol —
-// any other string fails runtime.toml validation on save (Runtime.save_config_text
-// re-parses via materialize_config). Kept here, not hardcoded in the form, so
-// the add-provider UI can never offer a protocol the backend will reject.
+// any other string fails runtime.toml *parse* validation on save
+// (Runtime.save_config_text re-parses via materialize_config). This does not
+// mean every member here can be safely offered by the add-provider form: see
+// RUNTIME_TOML_CREATABLE_PROTOCOLS below for the materialization gate.
 export const RUNTIME_TOML_PROTOCOLS = [
   'openai-compatible-http',
   'ollama-http',
@@ -532,6 +533,23 @@ export const RUNTIME_TOML_PROTOCOLS = [
 ] as const
 
 export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
+
+// Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
+// `Runtime_adapter.provider_kind_of_cli_provider` is hardcoded to `None` (CLI
+// subprocess provider kinds were removed), so any provider using `Cli`
+// transport (the `command` field) resolves to no provider_kind and
+// `Runtime.materialize_config`'s `List.filter_map` silently drops its
+// bindings from the live runtime list instead of failing the save
+// (lib/runtime/runtime_adapter.ml:183-189, lib/runtime/runtime.ml:239). The
+// *-cli protocol labels parse fine but pair naturally with `command`
+// transport, so they are excluded here too until CLI materialization is
+// restored. This is an allow-list, not a filter-out of known-bad entries, so
+// a future 6th protocol defaults to non-creatable until reviewed.
+export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
+  'openai-compatible-http',
+  'ollama-http',
+  'messages-http',
+] as const
 
 // runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],
 // and the binding pin [<providerId>.<modelId>]). parseDocument's section regex

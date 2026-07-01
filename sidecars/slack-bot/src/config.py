@@ -22,9 +22,12 @@ from pydantic_settings import (
     TomlConfigSettingsSource,
 )
 
+from .constants import SLACK_MESSAGE_LIMIT as SLACK_MESSAGE_LIMIT
+
 DEFAULT_STATE_DIR: Final[str] = ".gate/runtime/slack"
 DEFAULT_BINDING_STORE_PATH: Final[str] = ".gate/runtime/slack/bindings.json"
 DEFAULT_STATUS_PATH: Final[str] = ".gate/runtime/slack/status.json"
+
 
 def _runtime_toml_path() -> Path:
     raw = os.getenv("MASC_BASE_PATH", "").strip()
@@ -66,7 +69,13 @@ class BotConfig(BaseSettings):
         toml_source = TomlConfigSettingsSource(
             settings_cls, toml_file=_runtime_toml_path()
         )
-        return (init_settings, env_settings, dotenv_settings, toml_source, file_secret_settings)
+        return (
+            init_settings,
+            env_settings,
+            dotenv_settings,
+            toml_source,
+            file_secret_settings,
+        )
 
     # Required: Slack Bot Token (xoxb-...)
     slack_bot_token: str = Field(
@@ -108,7 +117,9 @@ class BotConfig(BaseSettings):
     )
     gate_breaker_reset_sec: int = Field(
         default=30,
-        validation_alias=AliasChoices("GATE_BREAKER_RESET_SEC", "gate_breaker_reset_sec"),
+        validation_alias=AliasChoices(
+            "GATE_BREAKER_RESET_SEC", "gate_breaker_reset_sec"
+        ),
     )
     status_cache_ttl_sec: int = Field(
         default=15,
@@ -138,6 +149,7 @@ class BotConfig(BaseSettings):
             "status_path",
         ),
     )
+
     @field_validator("slack_bot_token")
     @classmethod
     def bot_token_not_empty(cls, v: str) -> str:
@@ -172,8 +184,6 @@ class BotConfig(BaseSettings):
 
 
 _config: BotConfig | None = None
-
-SLACK_MESSAGE_LIMIT: Final[int] = 4000  # Slack blocks text limit
 
 
 def get_config() -> BotConfig:

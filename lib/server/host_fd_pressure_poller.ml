@@ -27,15 +27,20 @@ let state_file_source_to_string = function
   | Legacy_env -> Env_config_core.legacy_host_fd_pressure_state_file_env_key
   | Default -> "default"
 
-let resolve_state_file_path () =
+let default_state_file_path ~base_path =
+  Filename.concat
+    (Common.masc_dir_from_base_path ~base_path)
+    "masc-host-pressure.state"
+;;
+
+let resolve_state_file_path ~base_path () =
   match
     ( Env_config_core.host_fd_pressure_state_file_path_opt ()
     , Env_config_core.legacy_host_fd_pressure_state_file_path_opt () )
   with
   | Some path, _ -> { path; source = Canonical_env }
   | None, Some path -> { path; source = Legacy_env }
-  | None, None ->
-    { path = Env_config_core.default_host_fd_pressure_state_file_path; source = Default }
+  | None, None -> { path = default_state_file_path ~base_path; source = Default }
 ;;
 
 let state_file_env_conflict () =
@@ -196,9 +201,9 @@ let one_tick path =
            truncated))
 ;;
 
-let start ~sw ~clock =
+let start ~sw ~clock ~base_path =
   Eio.Fiber.fork ~sw (fun () ->
-    let resolution = resolve_state_file_path () in
+    let resolution = resolve_state_file_path ~base_path () in
     let path = resolution.path in
     let interval = poll_interval_sec () in
     (match state_file_env_conflict () with

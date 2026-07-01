@@ -1660,7 +1660,7 @@ let test_visible_reply_stream_fallback_redacts_before_persist () =
   in
   check string "terminal reply redacted" "terminal [redacted]" explicit
 
-let test_streamed_visible_reply_preserves_no_visible_payload () =
+let test_streamed_visible_reply_promotes_no_visible_payload_when_text_streamed () =
   let payload_json =
     `Assoc
       [
@@ -1675,7 +1675,32 @@ let test_streamed_visible_reply_preserves_no_visible_payload () =
   in
   let rewritten =
     Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
-      (Some payload_json) ~visible_reply
+      (Some payload_json) ~visible_reply ~streamed_text_present:true
+  in
+  check string "streamed visible reply is preserved" "streamed final"
+    (json_string_field "reply" rewritten);
+  check string "streamed visible reply wins terminal outcome" "visible_reply"
+    (json_string_field Keeper_turn_outcome.wire_key rewritten);
+  let err =
+    Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
+      rewritten visible_reply
+  in
+  check bool "typed text stream avoids no-visible terminal error" true
+    (Option.is_none err)
+
+let test_visible_reply_without_stream_preserves_no_visible_payload () =
+  let payload_json =
+    `Assoc
+      [
+        ("runtime_class", `String "keeper");
+        ("turn_outcome", `String "no_visible_reply");
+        ("reply", `String "");
+      ]
+  in
+  let rewritten =
+    Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
+      (Some payload_json) ~visible_reply:"terminal fallback"
+      ~streamed_text_present:false
   in
   check string "declared no-visible reply remains empty" ""
     (json_string_field "reply" rewritten);
@@ -1683,9 +1708,9 @@ let test_streamed_visible_reply_preserves_no_visible_payload () =
     (json_string_field Keeper_turn_outcome.wire_key rewritten);
   let err =
     Server_routes_http_keeper_stream.For_testing.direct_reply_terminal_error
-      rewritten visible_reply
+      rewritten "terminal fallback"
   in
-  check bool "stream fallback cannot override no-visible terminal contract" true
+  check bool "non-stream fallback cannot override no-visible terminal contract" true
     (Option.is_some err)
 
 let test_streamed_visible_reply_preserves_checkpoint_payload () =
@@ -1700,6 +1725,7 @@ let test_streamed_visible_reply_preserves_checkpoint_payload () =
   let rewritten =
     Server_routes_http_keeper_stream.For_testing.reply_payload_with_streamed_visible_reply
       (Some payload_json) ~visible_reply:"streamed final"
+      ~streamed_text_present:true
   in
   check string "checkpoint outcome is semantic" "continuation_checkpoint"
     (json_string_field Keeper_turn_outcome.wire_key rewritten);
@@ -2401,8 +2427,10 @@ let () =
             test_visible_reply_uses_streamed_text_fallback;
           test_case "visible reply stream fallback redacts before persist" `Quick
             test_visible_reply_stream_fallback_redacts_before_persist;
-          test_case "streamed visible reply preserves no-visible payload" `Quick
-            test_streamed_visible_reply_preserves_no_visible_payload;
+          test_case "streamed visible reply promotes no-visible payload" `Quick
+            test_streamed_visible_reply_promotes_no_visible_payload_when_text_streamed;
+          test_case "no-visible payload still wins without text stream" `Quick
+            test_visible_reply_without_stream_preserves_no_visible_payload;
           test_case "streamed visible reply preserves checkpoint payload" `Quick
             test_streamed_visible_reply_preserves_checkpoint_payload;
           test_case "runtime run_blocks appends multimodal input to OAS agent" `Quick

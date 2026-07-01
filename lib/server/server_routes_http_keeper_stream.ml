@@ -642,13 +642,16 @@ let assoc_replace key value fields =
   (key, value)
   :: List.filter (fun (field_key, _) -> not (String.equal field_key key)) fields
 
-let reply_payload_with_streamed_visible_reply payload_json_opt ~visible_reply =
+let reply_payload_with_streamed_visible_reply payload_json_opt ~visible_reply
+    ~streamed_text_present =
   match String_util.trim_to_option visible_reply with
   | None -> payload_json_opt
   | Some visible_reply -> (
       match Keeper_turn_outcome.of_reply_payload payload_json_opt with
       | Keeper_turn_outcome.Continuation_checkpoint -> payload_json_opt
-      | Keeper_turn_outcome.No_visible_reply -> payload_json_opt
+      | Keeper_turn_outcome.No_visible_reply when not streamed_text_present ->
+          payload_json_opt
+      | Keeper_turn_outcome.No_visible_reply
       | Keeper_turn_outcome.Visible_reply -> (
           match payload_json_opt with
           | Some (`Assoc fields) ->
@@ -882,15 +885,21 @@ let process_single_turn ~connector_user_line_recorded_upstream
         match dispatch_result with
         | Ok (true, body) ->
             let payload_json_opt, visible_reply = extract_visible_reply body in
+            let streamed_text =
+              Keeper_stream_text_accum.streamed_text worker_text_accum
+            in
+            let streamed_text_present =
+              Option.is_some (String_util.trim_to_option streamed_text)
+            in
             let visible_reply =
               redacted_visible_reply_with_stream_fallback
                 ~redact:redact_text
-                ~streamed_text:(Keeper_stream_text_accum.streamed_text worker_text_accum)
+                ~streamed_text
                 visible_reply
             in
             let payload_json_opt =
               reply_payload_with_streamed_visible_reply payload_json_opt
-                ~visible_reply
+                ~visible_reply ~streamed_text_present
             in
             let body =
               body_with_rewritten_payload ~fallback:body payload_json_opt

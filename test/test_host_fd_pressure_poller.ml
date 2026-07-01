@@ -6,7 +6,12 @@ external unsetenv : string -> unit = "masc_test_unsetenv"
 
 let canonical_env = Env_config_core.host_fd_pressure_state_file_env_key
 let legacy_env = Env_config_core.legacy_host_fd_pressure_state_file_env_key
-let default_path = Env_config_core.default_host_fd_pressure_state_file_path
+let base_path = Filename.concat (Filename.get_temp_dir_name ()) "masc-fd-pressure-test"
+
+let default_path =
+  Filename.concat
+    (Workspace_utils.masc_dir_from_base_path ~base_path)
+    "masc-host-pressure.state"
 
 let restore_env name = function
   | Some value -> Unix.putenv name value
@@ -25,7 +30,7 @@ let with_env bindings f =
     List.iter (fun (name, value) -> restore_env name value) original)
 
 let check_resolution label expected_path expected_source =
-  let actual = Poller.resolve_state_file_path () in
+  let actual = Poller.resolve_state_file_path ~base_path () in
   check string (label ^ " path") expected_path actual.path;
   check bool (label ^ " source") true (actual.source = expected_source)
 

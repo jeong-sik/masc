@@ -24,7 +24,7 @@ describe('ThemeSwitch', () => {
     expect(container.textContent).toContain('SEED')
   })
 
-  it('toggles from styleseed to dark on click', () => {
+  it('toggles from styleseed to paper on click', () => {
     document.documentElement.dataset.theme = 'styleseed'
     window.history.replaceState(null, '', '/?theme=styleseed')
     const container = document.createElement('div')
@@ -32,9 +32,9 @@ describe('ThemeSwitch', () => {
     const btn = container.querySelector('button')
     expect(btn).not.toBeNull()
     btn!.click()
-    expect(document.documentElement.dataset.theme).toBeUndefined()
-    expect(localStorage.getItem('dashboardTheme')).toBeNull()
-    expect(window.location.search).not.toContain('theme=')
+    expect(document.documentElement.dataset.theme).toBe('paper')
+    expect(localStorage.getItem('dashboardTheme')).toBe('paper')
+    expect(window.location.search).toContain('theme=paper')
   })
 
   it('toggles from dark to styleseed on click', () => {
@@ -71,16 +71,15 @@ describe('ThemeSwitch', () => {
     expect(btn!.classList.contains('v2-shell-action')).toBe(true)
   })
 
-  it('migrates paper to styleseed on click', () => {
+  it('toggles from paper to dark on click', () => {
     document.documentElement.dataset.theme = 'paper'
     window.history.replaceState(null, '', '/?theme=paper')
     const container = document.createElement('div')
     render(h(ThemeSwitch), container)
     const btn = container.querySelector('button')
     btn!.click()
-    expect(document.documentElement.dataset.theme).toBe('styleseed')
-    expect(localStorage.getItem('dashboardTheme')).toBe('styleseed')
-    expect(window.location.search).toContain('theme=styleseed')
+    expect(document.documentElement.dataset.theme).toBeUndefined()
+    expect(localStorage.getItem('dashboardTheme')).toBeNull()
     expect(window.location.search).not.toContain('theme=paper')
   })
 })

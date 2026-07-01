@@ -117,66 +117,31 @@ let index_event_json (c : Skill_candidate_projection.skill_candidate) ~dir ~json
 
 let ( let* ) = Result.bind
 
-let candidate_json_content candidate =
-  Yojson.Safe.pretty_to_string (Skill_candidate_projection.to_json candidate) ^ "\n"
-;;
-
 let json_string_opt name json =
   match Yojson.Safe.Util.member name json with
   | `String s -> Some s
   | _ -> None
 ;;
 
-let candidate_artifacts ~base_path candidate =
-  [ candidate_json_path ~base_path candidate, candidate_json_content candidate
-  ; candidate_toml_path ~base_path candidate, render_candidate_toml candidate
-  ; ( candidate_skill_md_path ~base_path candidate
-    , Skill_candidate_projection.render_skill_draft candidate )
-  ]
+let candidate_index_key
+      (c : Skill_candidate_projection.skill_candidate)
+      ~dir
+      ~json_path
+      ~toml_path
+      ~skill_md_path
+  =
+  ( c.id
+  , c.agent_name
+  , c.source_kind
+  , c.source_ref
+  , Skill_candidate_projection.promotion_state_to_string c.promotion_state
+  , dir
+  , json_path
+  , toml_path
+  , skill_md_path )
 ;;
 
-let stored_candidate ~base_path candidate =
-  { candidate
-  ; dir = draft_dir ~base_path candidate
-  ; json_path = candidate_json_path ~base_path candidate
-  ; toml_path = candidate_toml_path ~base_path candidate
-  ; skill_md_path = candidate_skill_md_path ~base_path candidate
-  ; index_path = index_path ~base_path
-  }
-;;
-
-let write_candidate ~base_path (candidate : Skill_candidate_projection.skill_candidate) =
-  let stored = stored_candidate ~base_path candidate in
-  let* () =
-    Review_artifact_store.write_artifacts
-      ~index_path:stored.index_path
-      ~artifacts:(candidate_artifacts ~base_path candidate)
-      ~index_event:
-        (index_event_json candidate
-           ~dir:stored.dir
-           ~json_path:stored.json_path
-           ~toml_path:stored.toml_path
-           ~skill_md_path:stored.skill_md_path)
-  in
-  Ok stored
-;;
-
-let write_candidates ~base_path candidates =
-  let rec loop acc = function
-    | [] -> Ok (List.rev acc)
-    | candidate :: rest ->
-      let* stored = write_candidate ~base_path candidate in
-      loop (stored :: acc) rest
-  in
-  loop [] candidates
-;;
-
-let index_event_matches_candidate ~base_path
-    (candidate : Skill_candidate_projection.skill_candidate) json =
-  let dir = draft_dir ~base_path candidate in
-  let json_path = candidate_json_path ~base_path candidate in
-  let toml_path = candidate_toml_path ~base_path candidate in
-  let skill_md_path = candidate_skill_md_path ~base_path candidate in
+let index_key_of_json json =
   match
     ( json_string_opt "id" json
     , json_string_opt "agent_name" json
@@ -193,42 +158,121 @@ let index_event_matches_candidate ~base_path
     , Some source_kind
     , Some source_ref
     , Some promotion_state
-    , Some indexed_dir
-    , Some indexed_json_path
-    , Some indexed_toml_path
-    , Some indexed_skill_md_path ) ->
-    String.equal id candidate.id
-    && String.equal agent_name candidate.agent_name
-    && String.equal source_kind candidate.source_kind
-    && String.equal source_ref candidate.source_ref
-    && String.equal promotion_state
-         (Skill_candidate_projection.promotion_state_to_string
-            candidate.promotion_state)
-    && String.equal indexed_dir dir
-    && String.equal indexed_json_path json_path
-    && String.equal indexed_toml_path toml_path
-    && String.equal indexed_skill_md_path skill_md_path
-  | _ -> false
+    , Some dir
+    , Some json_path
+    , Some toml_path
+    , Some skill_md_path ) ->
+    Some
+      ( id
+      , agent_name
+      , source_kind
+      , source_ref
+      , promotion_state
+      , dir
+      , json_path
+      , toml_path
+      , skill_md_path )
+  | _ -> None
 ;;
 
-let write_candidate_if_changed ~base_path candidate =
+let load_index_keys ~index_path =
+  try
+    let keys = Hashtbl.create 1024 in
+    let keys =
+      Fs_compat.fold_jsonl_lines index_path ~init:keys
+        ~f:(fun keys ~line_no:_ json ->
+          match index_key_of_json json with
+          | Some key ->
+            Hashtbl.replace keys key ();
+            keys
+          | None -> keys)
+    in
+    Ok keys
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | exn -> Error (Printf.sprintf "%s: %s" index_path (Printexc.to_string exn))
+;;
+
+let candidate_json_content candidate =
+  Yojson.Safe.pretty_to_string (Skill_candidate_projection.to_json candidate) ^ "\n"
+;;
+
+let stored_candidate ~base_path candidate =
+  { candidate
+  ; dir = draft_dir ~base_path candidate
+  ; json_path = candidate_json_path ~base_path candidate
+  ; toml_path = candidate_toml_path ~base_path candidate
+  ; skill_md_path = candidate_skill_md_path ~base_path candidate
+  ; index_path = index_path ~base_path
+  }
+;;
+
+let stored_candidate_artifacts (stored : stored_draft) =
+  [ stored.json_path, candidate_json_content stored.candidate
+  ; stored.toml_path, render_candidate_toml stored.candidate
+  ; stored.skill_md_path, Skill_candidate_projection.render_skill_draft stored.candidate
+  ]
+;;
+
+let stored_candidate_index_event (stored : stored_draft) =
+  index_event_json stored.candidate
+    ~dir:stored.dir
+    ~json_path:stored.json_path
+    ~toml_path:stored.toml_path
+    ~skill_md_path:stored.skill_md_path
+;;
+
+let stored_candidate_index_key (stored : stored_draft) =
+  candidate_index_key stored.candidate
+    ~dir:stored.dir
+    ~json_path:stored.json_path
+    ~toml_path:stored.toml_path
+    ~skill_md_path:stored.skill_md_path
+;;
+
+let write_candidate ~base_path (candidate : Skill_candidate_projection.skill_candidate) =
+  let stored = stored_candidate ~base_path candidate in
+  let* () =
+    Review_artifact_store.write_artifacts
+      ~index_path:stored.index_path
+      ~artifacts:(stored_candidate_artifacts stored)
+      ~index_event:(stored_candidate_index_event stored)
+  in
+  Ok stored
+;;
+
+let write_candidates ~base_path candidates =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | candidate :: rest ->
+      let* stored = write_candidate ~base_path candidate in
+      loop (stored :: acc) rest
+  in
+  loop [] candidates
+;;
+
+let write_candidate_if_changed_with_index ~index_keys ~base_path candidate =
   (* Artifact files and the index are intentionally checked together: a prior
      write can leave complete artifacts but miss the final index append. The
      next post-turn pass should repair that listing row instead of treating the
      draft as fully persisted. This is a safety net until #21871 makes the
      index/artifact persistence atomic or derives one side from the other. *)
   let stored = stored_candidate ~base_path candidate in
+  let key = stored_candidate_index_key stored in
+  let indexed = Hashtbl.mem index_keys key in
+  let artifacts = stored_candidate_artifacts stored in
   let* changed =
-    Review_artifact_store.write_if_changed
-      ~index_path:stored.index_path
-      ~artifacts:(candidate_artifacts ~base_path candidate)
-      ~index_event:
-        (index_event_json candidate
-           ~dir:stored.dir
-           ~json_path:stored.json_path
-           ~toml_path:stored.toml_path
-           ~skill_md_path:stored.skill_md_path)
-      ~matches:(index_event_matches_candidate ~base_path candidate)
+    if Review_artifact_store.artifacts_unchanged artifacts && indexed
+    then Ok false
+    else
+      let* () =
+        Review_artifact_store.write_artifacts
+          ~index_path:stored.index_path
+          ~artifacts
+          ~index_event:(stored_candidate_index_event stored)
+      in
+      Hashtbl.replace index_keys key ();
+      Ok true
   in
   if changed then Ok (Some stored) else Ok None
 ;;
@@ -265,10 +309,11 @@ let write_post_turn_candidates ~base_path ~keeper_id ~fact_tail_limit ~procedure
         ~limit:procedure_limit
   in
   let candidates = dedup_candidates (fact_candidates @ procedure_candidates) in
+  let* index_keys = load_index_keys ~index_path:(index_path ~base_path) in
   let rec loop acc = function
     | [] -> Ok (List.rev acc)
     | candidate :: rest ->
-      let* stored = write_candidate_if_changed ~base_path candidate in
+      let* stored = write_candidate_if_changed_with_index ~index_keys ~base_path candidate in
       let acc =
         match stored with
         | Some stored -> stored :: acc

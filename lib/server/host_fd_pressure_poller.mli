@@ -29,14 +29,14 @@ type state_file_resolution =
   ; source : state_file_source
   }
 
-val resolve_state_file_path : unit -> state_file_resolution
-(** Resolve the state-file path via
-    {!Env_config_core.host_fd_pressure_state_file_path}. *)
+val resolve_state_file_path : base_path:string -> unit -> state_file_resolution
+(** Resolve the state-file path. Explicit env overrides win; otherwise the
+    default state file lives under [<base_path>/.masc]. *)
 
 val state_file_env_conflict : unit -> (string * string) option
 (** [Some (canonical, legacy)] when both env vars are set to different paths. *)
 
-val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> unit
-(** [start ~sw ~clock] forks the poller fiber under [sw]. Wired from
+val start : sw:Eio.Switch.t -> clock:_ Eio.Time.clock -> base_path:string -> unit
+(** [start ~sw ~clock ~base_path] forks the poller fiber under [sw]. Wired from
     [Server_bootstrap_loops.start_background_maintenance]. Cancelled
     when [sw] terminates. *)

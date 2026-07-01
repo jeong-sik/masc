@@ -28,16 +28,13 @@ import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
+import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
 import type { ComponentChildren } from 'preact'
 
 type SectionId = SettingsRouteSectionId
 
 type LogFilter = 'all' | 'tool' | 'success' | 'failure'
-type PathCheckResult = {
-  readonly ok: boolean
-  readonly message: string
-}
 const SETTINGS_ROUTE_SECTION_SET = new Set<string>(SETTINGS_ROUTE_SECTION_IDS)
 const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
 
@@ -81,62 +78,12 @@ export function mcpExposedToolNames(items: readonly DashboardToolInventoryItem[]
     .sort((a, b) => a.localeCompare(b))
 }
 
-export function checkSettingsMcpEndpoint(value: string): PathCheckResult {
-  const trimmed = value.trim()
-  if (trimmed === '') return { ok: false, message: 'URL required' }
-  try {
-    const url = new URL(trimmed)
-    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
-      return { ok: false, message: 'expected http(s) URL' }
-    }
-    if (url.hostname.trim() === '') return { ok: false, message: 'host required' }
-    if (!url.pathname.toLowerCase().includes('mcp')) {
-      return { ok: false, message: 'path should include /mcp' }
-    }
-    return { ok: true, message: 'valid MCP URL' }
-  } catch {
-    return { ok: false, message: 'invalid URL' }
-  }
-}
-
-// [fusion] preset shape from config/runtime.toml [fusion] — keeper-v2
-// settings.jsx:68-81 (FUSION). Describes the trio preset structure (panel
-// families, judge, timeouts). Read-only preview; no fusion config write
-// endpoint exists yet, so these are the documented config defaults, not live
-// values.
-type FusionConfig = {
-  readonly enabled: boolean
-  readonly defaultPreset: string
-  readonly maxConcurrentPanels: number
-  readonly webTools: boolean
-  readonly panel: readonly string[]
-  readonly judge: string
-  readonly panelTimeoutS: number
-  readonly judgeTimeoutS: number
-  readonly maxToolCallsPerPanel: number
-}
-const FUSION: FusionConfig = {
-  enabled: true,
-  defaultPreset: 'trio',
-  maxConcurrentPanels: 2,
-  webTools: false,
-  panel: [
-    'ollama_cloud.ollama-cloud-devstral-2-123b',
-    'ollama_cloud.ollama-cloud-devstral-small-2-24b',
-    'ollama_cloud.ollama-cloud-ministral-3-14b',
-  ],
-  judge: 'ollama_cloud.ollama-cloud-devstral-2-123b',
-  panelTimeoutS: 300,
-  judgeTimeoutS: 300,
-  maxToolCallsPerPanel: 0,
-}
-
-// System-log row: [time, level, identity, message, status]. Derived from live
+// System-log row: [time, level, identity, message, status, isTool]. Derived from live
 // ring entries (`/api/v1/dashboard/logs`) — the same source the Logs surface
 // polls. Status is derived from the entry level only (error→fail, warn→warn,
 // else→ok); the in-progress "run" state is not knowable from a settled ring
 // entry, so it is never fabricated.
-type SysLogRow = [string, string, string, string, string]
+type SysLogRow = [string, string, string, string, string, boolean]
 
 const SETTINGS_LOG_LEVEL_FAIL = 'error'
 const SETTINGS_LOG_LEVEL_WARN = 'warn'
@@ -166,7 +113,8 @@ function logRowClock(ts: string): string {
 export function logEntryToSysRow(entry: LogEntry): SysLogRow {
   const level = entry.level.toLowerCase()
   const identity = entry.keeper_name?.trim() || entry.module?.trim() || '(root)'
-  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level)]
+  const isTool = logDisplayKind(entry) === 'tool' || /masc_/.test(entry.message)
+  return [logRowClock(entry.ts), level, identity, entry.message, logRowStatus(entry.level), isTool]
 }
 
 function SetSeg({
@@ -444,7 +392,7 @@ function settingsSectionState(
   if (section === 'fusion' && fusionSettingsWritable) {
     return { mode: 'live', label: 'runtime.toml live-backed' }
   }
-  if (section === 'fusion') return { mode: 'local', label: 'documented defaults preview' }
+  if (section === 'fusion') return { mode: 'local', label: 'dedicated writer disabled' }
   if (section === 'paths') return { mode: 'live', label: 'resolved by server' }
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
@@ -517,7 +465,7 @@ function LogViewer() {
 
   const rows = allRows.filter(r => {
     if (filter === 'all') return true
-    if (filter === 'tool') return /masc_/.test(r[3])
+    if (filter === 'tool') return r[5]
     if (filter === 'success') return r[4] === 'ok'
     if (filter === 'failure') return r[4] === 'fail'
     return true
@@ -932,45 +880,24 @@ export function SettingsSurface() {
               ${fusionSettingsWritable
                 ? html`<${FusionSettingsPanel} />`
                 : html`
-                <div data-testid="fusion-readonly-preview">
-                  <${SetRow} label="Fusion 심의" hint="[fusion].enabled · 문서화된 기본값">
-                    <div class="set-truth-value">
-                      <span class="mono" data-testid="fusion-readonly-enabled">${FUSION.enabled ? 'enabled' : 'disabled'}</span>
-                      <span class="set-truth-source">read-only</span>
+                <div data-testid="fusion-readonly-no-writer">
+                  <${SetRow} label="Fusion settings" hint="[fusion] in runtime.toml">
+                    <div class="set-truth-value" data-testid="fusion-no-writer">
+                      <span class="mono">dedicated writer disabled</span>
+                      <span class="set-truth-source">no hardcoded preview</span>
                     </div>
                   <//>
-                  <${SetRow} label="기본 프리셋" hint="default_preset">
-                    <div class="set-truth-value">
-                      <span class="mono" data-testid="fusion-readonly-preset">${FUSION.defaultPreset}</span>
-                      <span class="set-truth-source">read-only</span>
-                    </div>
-                  <//>
-                  <${SetRow} label="동시 패널 수" hint="max_concurrent_panels · Async_agent.all 상한">
-                    <div class="set-truth-value">
-                      <span class="mono" data-testid="fusion-readonly-panels">${FUSION.maxConcurrentPanels}</span>
-                      <span class="set-truth-source">read-only</span>
-                    </div>
-                  <//>
-                  <${SetRow} label="패널·심판 웹 도구" hint="web_search / web_fetch 주입 여부">
-                    <div class="set-truth-value">
-                      <span class="mono" data-testid="fusion-readonly-web-tools">${FUSION.webTools ? 'enabled' : 'disabled'}</span>
-                      <span class="set-truth-source">read-only</span>
-                    </div>
-                  <//>
-                  <div class="set-sub-h">trio 프리셋</div>
-                  <div class="set-fus-preset">
-                    <div class="set-fus-lane">
-                      <div class="set-fus-lane-h">panel · ${FUSION.panel.length}</div>
-                      ${FUSION.panel.map(id => html`<div key=${id} class="set-fus-model mono">${id}</div>`)}
-                    </div>
-                    <div class="set-fus-lane">
-                      <div class="set-fus-lane-h">judge</div>
-                      <div class="set-fus-model judge mono">${FUSION.judge}</div>
-                    </div>
+                  <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                    이 섹션은 live 값을 읽지 못할 때 문서 기본값을 흉내 내지 않습니다. 실제 값 확인·수정은 runtime.toml editor에서 합니다.
                   </div>
-                  <div class="set-mcp-detail mono" style=${{ marginTop: '10px' }}>
-                    panel_timeout ${FUSION.panelTimeoutS}s · judge_timeout ${FUSION.judgeTimeoutS}s · max_tool_calls_per_panel ${FUSION.maxToolCallsPerPanel} (0 = 무제한)
-                  </div>
+                  <button
+                    type="button"
+                    class="set-rt-open"
+                    data-testid="fusion-open-runtime-toml"
+                    onClick=${() => openSection('runtimes')}
+                  >
+                    runtime.toml 열기
+                  </button>
                 </div>
               `}
             `}

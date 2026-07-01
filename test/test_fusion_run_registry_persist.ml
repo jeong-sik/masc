@@ -106,7 +106,7 @@ let test_replay_prunes_completed () =
   R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~started_at:71.0;
   let t2 = R.replay path in
   let runs = R.list_runs t2 in
-  check int "pruned completed + kept running" 65 (List.length runs);
+  check int "pruned completed + kept running" (R.max_completed_retained + 1) (List.length runs);
   (* The running run must still be present. *)
   check bool "running run preserved" true
     (Option.is_some (R.get t2 ~run_id:"r-running"));
@@ -145,6 +145,47 @@ let test_replay_skips_malformed_lines () =
   | None -> fail "expected valid replay events around malformed line to load"
 ;;
 
+(* (5) Replay streams raw JSONL lines and compacts the retained state. *)
+let test_replay_streams_and_compacts () =
+  let path = fresh_path "-stream.jsonl" in
+  let before =
+    {|{"event":"register","run_id":"r-stream","keeper":"k","preset":"p","started_at":1.0}|}
+  in
+  let after = {|{"event":"complete","run_id":"r-stream","ok":true}|} in
+  let malformed_padding = String.make 70000 'x' in
+  let content = String.concat "\n" [ before; malformed_padding; after; "" ] in
+  Fs_compat.save_file
+    path
+    content;
+  let t = R.replay path in
+  (match R.get t ~run_id:"r-stream" with
+   | Some { R.status = Completed { ok = true }; _ } -> ()
+   | Some _ -> fail "expected streamed run to be completed"
+   | None -> fail "expected streamed run to replay");
+  match Fs_compat.file_size path with
+  | Some size -> check bool "log compacted" true (size < String.length content)
+  | None -> fail "expected compacted replay log to exist"
+;;
+
+(* (6) Replay does not compact away an unterminated tail line. *)
+let test_replay_preserves_unterminated_tail () =
+  let path = fresh_path "-partial-tail.jsonl" in
+  let complete =
+    {|{"event":"register","run_id":"r-partial","keeper":"k","preset":"p","started_at":1.0}|}
+  in
+  let partial = {|{"event":"complete","run_id":"r-partial","ok":true}|} in
+  let content = String.concat "\n" [ complete; partial ] in
+  Fs_compat.save_file
+    path
+    content;
+  let t = R.replay path in
+  (match R.get t ~run_id:"r-partial" with
+   | Some { R.status = Running; _ } -> ()
+   | Some _ -> fail "unterminated completion line must not replay"
+   | None -> fail "completed line before partial tail should replay");
+  check string "partial tail preserved" content (Fs_compat.load_file path)
+;;
+
 let () =
   run
     "fusion_run_registry_persist"
@@ -154,6 +195,11 @@ let () =
         ; test_case "replay prunes completed runs" `Quick test_replay_prunes_completed
         ; test_case "no-path registry is in-memory only" `Quick test_no_path_is_in_memory_only
         ; test_case "replay skips malformed lines" `Quick test_replay_skips_malformed_lines
+        ; test_case "replay streams and compacts log" `Quick test_replay_streams_and_compacts
+        ; test_case
+            "replay preserves unterminated tail"
+            `Quick
+            test_replay_preserves_unterminated_tail
         ] )
     ]
 ;;

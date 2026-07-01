@@ -181,48 +181,96 @@ let parse_event_line ~path ~line_no line =
       Printf.sprintf "%s:%d: %s" path line_no msg)
 ;;
 
-let load_replay_content path =
-  let content =
-    if not (Fs_compat.file_exists path)
-    then None
-    else (
-      try Some (Fs_compat.load_file path) with
-      | exn ->
-        Log.Misc.warn
-          "fusion_run_registry: replay load failed for %s: %s"
-          path
-          (Printexc.to_string exn);
-        None)
+let events_of_run (run : run) =
+  let register =
+    Fusion_run_registry_event.Register
+      { run_id = run.run_id
+      ; keeper = run.keeper
+      ; preset = run.preset
+      ; started_at = run.started_at
+      }
   in
-  match content with
-  | Some content -> content
-  | None -> ""
+  match run.status with
+  | Running -> [ register ]
+  | Completed { ok } -> [ register; Complete { run_id = run.run_id; ok } ]
+;;
+
+let compact_replay_log path runs =
+  let events =
+    runs
+    |> List.sort (fun a b -> Float.compare a.started_at b.started_at)
+    |> List.concat_map events_of_run
+  in
+  let content =
+    events
+    |> List.map Fusion_run_registry_event.to_jsonl
+    |> String.concat ""
+  in
+  try
+    match Fs_compat.save_file_atomic path content with
+    | Ok () -> ()
+    | Error msg ->
+      Log.Misc.warn "fusion_run_registry: replay compaction failed for %s: %s" path msg
+  with
+  | exn ->
+    Log.Misc.warn
+      "fusion_run_registry: replay compaction raised for %s: %s"
+      path
+      (Printexc.to_string exn)
+;;
+
+let fold_replay_events path =
+  if not (Fs_compat.file_exists path)
+  then [], [], false
+  else (
+    try
+      let (events, malformed, _line_no), _boundary =
+        Fs_compat.fold_appended_lines
+          ~path
+          ~from:0
+          ~init:([], [], 1)
+          ~f:(fun (events, malformed, line_no) line ->
+            match parse_event_line ~path ~line_no line with
+            | Ok None -> events, malformed, line_no + 1
+            | Ok (Some event) -> event :: events, malformed, line_no + 1
+            | Error msg -> events, msg :: malformed, line_no + 1)
+      in
+      let should_compact =
+        match Fs_compat.file_size path with
+        | Some size when _boundary < size ->
+          Log.Misc.warn
+            "fusion_run_registry: replay left unterminated tail in %s (%d/%d bytes \
+             consumed)"
+            path
+            _boundary
+            size;
+          false
+        | Some _ -> true
+        | None ->
+          Log.Misc.warn "fusion_run_registry: replay stat failed after streaming %s" path;
+          false
+      in
+      List.rev events, List.rev malformed, should_compact
+    with
+    | exn ->
+      Log.Misc.warn
+        "fusion_run_registry: replay stream failed for %s: %s"
+        path
+        (Printexc.to_string exn);
+      [], [], false)
 ;;
 
 let replay path : t =
-  let lines = String.split_on_char '\n' (load_replay_content path) in
-  let malformed = ref [] in
-  let events =
-    let rec loop line_no acc = function
-      | [] -> List.rev acc
-      | line :: rest ->
-        (match parse_event_line ~path ~line_no line with
-         | Ok None -> loop (line_no + 1) acc rest
-         | Ok (Some event) -> loop (line_no + 1) (event :: acc) rest
-         | Error msg ->
-           malformed := msg :: !malformed;
-           loop (line_no + 1) acc rest)
-    in
-    loop 1 [] lines
-  in
-  (match !malformed with
+  let events, malformed, should_compact = fold_replay_events path in
+  (match malformed with
    | [] -> ()
-   | errors ->
+   | first :: _ as errors ->
      Log.Misc.warn
        "fusion_run_registry: skipped %d malformed replay line(s); first=%s"
        (List.length errors)
-       (List.hd (List.rev errors)));
+       first);
   let runs = List.fold_left apply_event [] events |> prune in
+  if should_compact then compact_replay_log path runs;
   { runs = Atomic.make runs; path = Some path }
 ;;
 

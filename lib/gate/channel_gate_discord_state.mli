@@ -4,15 +4,10 @@
     can be registered at server startup via
     [Channel_gate_connector.register (module Channel_gate_discord_state)].
 
-    Internal helpers (the [U] / [Names] aliases, the [binding] /
-    [audit_event] records, the [default_*_path] / [legacy_*_path] /
-    [status_path] / [status_write_path] / [binding_store_path] /
-    [binding_store_read_path] / [binding_audit_path] /
-    [binding_audit_read_path] resolvers, [stale_after_sec],
-    [read_json_file_opt], [normalize_bindings_json],
-    [read_bindings] / [save_bindings] / [binding_json] /
-    [audit_event_json] / [append_audit_event] / [read_recent_audit] /
-    [drop_left], the [string_member] / [int_member] / [bool_member] /
+    Internal helpers (the [U] / [Names] / [Store] aliases, the
+    [binding] record, the [default_*_path] / [legacy_*_path] /
+    path resolvers, the shared binding-store wrappers, the
+    [string_member] / [int_member] / [bool_member] /
     [bool_option_member] yojson lookups, [stale_of_updated_at],
     [connector_state_label], [list_assoc_field],
     [find_assoc_by_string_field], and [rollback_bindings]) are

@@ -127,6 +127,7 @@
   test_progress
   test_validation
   test_response
+  test_channel_gate_binding_store
   test_channel_gate_connector_routes
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state
@@ -458,6 +459,7 @@
   test_progress
   test_validation
   test_response
+  test_channel_gate_binding_store
   test_channel_gate_connector_routes
   test_sidecar_lifecycle_routes
   test_channel_gate_imessage_state

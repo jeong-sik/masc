@@ -93,17 +93,17 @@ let all_flags : flag list = [
   { env_name = "MASC_KEEPER_REACTIVE_ENABLED";
     description = "Global kill-switch for keeper reactive turns (mention/board/scope/event-queue triggers)";
     default = true; category = "keeper";
-    lifecycle = Active; since = "0.19.52" };
+    lifecycle = Active; since = "2.253.0" };
 
   { env_name = "MASC_KEEPER_PROACTIVE_ENABLED";
     description = "Global kill-switch for keeper proactive (scheduled) turns";
     default = true; category = "keeper";
-    lifecycle = Active; since = "0.19.52" };
+    lifecycle = Active; since = "2.253.0" };
 
   { env_name = "MASC_KEEPER_AUTONOMOUS_ENABLED";
     description = "Global kill-switch for keeper autonomous keepalive/PR fan-out";
     default = true; category = "keeper";
-    lifecycle = Active; since = "0.19.52" };
+    lifecycle = Active; since = "2.253.0" };
 
   { env_name = "MASC_KEEPER_WORK_AS_HEARTBEAT";
     description = "Count successful workspace heartbeat after a turn as presence proof";

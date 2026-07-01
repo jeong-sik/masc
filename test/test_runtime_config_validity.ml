@@ -398,6 +398,39 @@ let test_repo_oas_model_catalog_covers_live_runpod_mtp () =
        | Some gate_caps -> expect_runpod_caps name gate_caps)
     [ "runpod_mtp"; "openai_compat" ]
 
+let test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma () =
+  with_repo_oas_model_catalog @@ fun catalog ->
+  let model_id = "gemma4-coder-fable5-q4km" in
+  let provider_model_id = "openai_compat/" ^ model_id in
+  (match Llm_provider.Model_catalog.lookup catalog provider_model_id with
+   | None -> failf "expected repo OAS catalog row for %s" provider_model_id
+   | Some entry ->
+     check (option string) (provider_model_id ^ " base") (Some "openai_chat")
+       entry.base_label;
+     check (option int) (provider_model_id ^ " context") (Some 262144)
+       entry.max_context_tokens);
+  match
+    Llm_provider.Capabilities.for_provider_model_id
+      ~allow_bare_fallback:false
+      ~provider_label:"openai_compat"
+      ~model_id
+  with
+  | None ->
+    failf
+      "live RunPod RTX A6000 Gemma runtime must resolve via raw \
+       OpenAI-compatible gate path"
+  | Some caps ->
+    check bool "RunPod RTX A6000 Gemma tools" true caps.supports_tools;
+    check bool "RunPod RTX A6000 Gemma tool choice" true
+      caps.supports_tool_choice;
+    check bool "RunPod RTX A6000 Gemma extended thinking" true
+      caps.supports_extended_thinking;
+    check bool "RunPod RTX A6000 Gemma top_k" true caps.supports_top_k;
+    check bool "RunPod RTX A6000 Gemma seed" true caps.supports_seed;
+    check bool "RunPod RTX A6000 Gemma chat-template token thinking" true
+      (Llm_provider.Capabilities.(
+         caps.thinking_control_format = Chat_template_token))
+
 let test_repo_oas_model_catalog_preserve_axes_resolve () =
   with_repo_oas_model_catalog @@ fun catalog ->
   let expect_catalog_field ~field_name ~get model_id expected =
@@ -1466,6 +1499,9 @@ let () =
             test_runtime_json_not_in_repo_config;
           test_case "repo OAS catalog covers live RunPod MTP runtime" `Quick
             test_repo_oas_model_catalog_covers_live_runpod_mtp;
+          test_case
+            "repo OAS catalog covers live RunPod RTX A6000 Gemma runtime"
+            `Quick test_repo_oas_model_catalog_covers_live_runpod_rtxa6000_gemma;
           test_case
             "repo OAS catalog preserves typed thinking/replay axes"
             `Quick test_repo_oas_model_catalog_preserve_axes_resolve;

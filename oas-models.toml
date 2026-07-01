@@ -210,6 +210,28 @@ supports_seed = true
 input_per_million = 0.0
 output_per_million = 0.0
 
+# Live runtime config can bind Gemma coder through a dedicated RunPod endpoint
+# ([providers.runpod_rtxa6000]), but the OAS binding label for raw
+# OpenAI-compatible endpoints is openai_compat. Strict runtime init refuses the
+# bare gemma4-coder- fallback for tool-capable OpenAI-compatible endpoints
+# because that would silently drop thinking/sampling controls.
+# Capabilities mirror the bare Gemma coder row above.
+[[models]]
+id_prefix = "openai_compat/gemma4-coder-fable5-q4km"
+base = "openai_chat"
+max_context_tokens = 262144
+supports_tools = true
+supports_tool_choice = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_reasoning_budget = false
+thinking_control_format = "chat_template_token"
+supports_native_streaming = true
+supports_top_k = true
+supports_seed = true
+input_per_million = 0.0
+output_per_million = 0.0
+
 # RunPod Models
 # WORKAROUND: current pinned OAS emits provider_label "openai_compat" for
 # RunPod proxy URLs because it does not recognize *.proxy.runpod.net base URLs.

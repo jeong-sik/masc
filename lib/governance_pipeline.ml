@@ -301,6 +301,18 @@ let auto_approval_soft_forbidden ~tool_name ~input =
   destructive_tool_or_op ~tool_name ~input
 ;;
 
+(* Human-readable reason attached to a forbidden rejection. Hard-forbidden
+   splits on whether the block is a Critical risk or an active runtime blocker
+   so operators can tell the two apart in the decision audit. *)
+let forbidden_reject_reason ~risk ~hard_forbidden =
+  if hard_forbidden
+  then (
+    match risk with
+    | Critical -> "critical risk tool cannot be auto-approved"
+    | Low | Medium | High -> "runtime contract blocks auto-approval")
+  else "destructive tool/op cannot be auto-approved without operator HITL"
+;;
+
 let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock ()
   : Agent_sdk.Hooks.approval_callback
   =
@@ -388,88 +400,132 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
       let base_path = (config : Workspace.config).base_path in
-      let always_approve =
-        Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
-        |> Option.value ~default:false
-      in
-      let rule_match =
-        if auto_approval_forbidden
-        then None
-        else
-          Keeper_approval_queue.find_matching_rule
+      if needs_approval
+      then (
+        (* An operator threshold is engaged, so the request goes through the
+           normal HITL path. A forbidden request is never auto-approved here —
+           [always_approve] is gated by [not auto_approval_forbidden] and rule
+           matching is skipped — so it falls through to [submit_and_await] and
+           waits for an explicit operator decision. *)
+        let always_approve =
+          Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
+          |> Option.value ~default:false
+        in
+        let rule_match =
+          if auto_approval_forbidden
+          then None
+          else
+            Keeper_approval_queue.find_matching_rule
+              ~base_path
+              ~keeper_name
+              ~tool_name
+              ~input
+              ~risk_level
+              ?sandbox_profile
+              ?backend
+              ?runtime_contract
+              ()
+        in
+        if (not auto_approval_forbidden) && always_approve
+        then (
+          Keeper_approval_queue.audit_approval_event
             ~base_path
+            ~event_type:"auto_approved_always"
+            ~id:(Printf.sprintf "auto_always_%s_%s" keeper_name tool_name)
             ~keeper_name
             ~tool_name
-            ~input
             ~risk_level
-            ?sandbox_profile
-            ?backend
+            ?turn_id
+            ?task_id
+            ?goal_id
+            ~goal_ids:(Option.value ~default:[] goal_ids)
+            ?sandbox_target
             ?runtime_contract
-            ()
-      in
-      if (not auto_approval_forbidden) && always_approve
-      then (
+            ?selected_model
+            ~disposition:"Pass"
+            ~disposition_reason:"always_approve_enabled"
+            ~auto_approved:true
+            ();
+          Agent_sdk.Hooks.Approve)
+        else (
+          match rule_match with
+          | Some matched ->
+            Keeper_approval_queue.audit_approval_event
+              ~base_path
+              ~event_type:"auto_approved_rule_match"
+              ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
+              ~keeper_name
+              ~tool_name
+              ~risk_level
+              ?turn_id
+              ?task_id
+              ?goal_id
+              ~goal_ids:(Option.value ~default:[] goal_ids)
+              ?sandbox_target
+              ?runtime_contract
+              ?selected_model
+              ~disposition:"Pass"
+              ~disposition_reason:"healthy"
+              ~rule_match:matched
+              ~auto_approved:true
+              ();
+            Agent_sdk.Hooks.Approve
+          | None ->
+            Keeper_approval_queue.submit_and_await
+              ~keeper_name
+              ~tool_name
+              ~input
+              ~base_path
+              ?turn_id
+              ?task_id
+              ?goal_id
+              ?goal_ids
+              ?sandbox_target
+              ?sandbox_profile
+              ?backend
+              ?runtime_contract
+              ?selected_model
+              ~disposition:"Blocked"
+              ~disposition_reason:"waiting_approval"
+              ~risk_level
+              ?clock
+              ()))
+      else (
+        (* [requires_operator_approval] holds without [needs_approval], so this is
+           an [auto_approval_forbidden] request with no operator threshold engaged
+           (HITL disabled, or the effective risk sits below the confirm threshold).
+           There is no operator to review a queued entry, so the forbidden tool
+           must never be auto-approved or stranded on a queue nobody drains — it is
+           rejected outright. This is the branch that closes the HITL-disabled /
+           always-approve auto-approval bypass. *)
+        let reason = forbidden_reject_reason ~risk ~hard_forbidden in
+        let decision = Agent_sdk.Hooks.Reject reason in
+        let event_type, disposition_reason =
+          if hard_forbidden
+          then
+            Keeper_approval_queue.approval_audit_hard_forbidden_event, "hard_forbidden"
+          else
+            Keeper_approval_queue.approval_audit_soft_forbidden_event, "soft_forbidden"
+        in
         Keeper_approval_queue.audit_approval_event
           ~base_path
-          ~event_type:"auto_approved_always"
-          ~id:(Printf.sprintf "auto_always_%s_%s" keeper_name tool_name)
+          ~event_type
+          ~id:(Printf.sprintf "%s_%s_%s" disposition_reason keeper_name tool_name)
           ~keeper_name
           ~tool_name
           ~risk_level
           ?turn_id
           ?task_id
           ?goal_id
-          ~goal_ids:(Option.value ~default:[] goal_ids)
+          ?goal_ids
           ?sandbox_target
           ?runtime_contract
           ?selected_model
-          ~disposition:"Pass"
-          ~disposition_reason:"always_approve_enabled"
-          ~auto_approved:true
+          ~disposition:"Blocked"
+          ~disposition_reason
+          ~auto_approved:false
+          ~decision:(Keeper_approval_queue.Approval_resolved decision)
           ();
-        Agent_sdk.Hooks.Approve)
-      else (
-        match rule_match with
-           | Some matched ->
-             Keeper_approval_queue.audit_approval_event
-               ~base_path
-               ~event_type:"auto_approved_rule_match"
-               ~id:(Printf.sprintf "auto_%s_%s" keeper_name matched.rule_id)
-               ~keeper_name
-               ~tool_name
-               ~risk_level
-               ?turn_id
-               ?task_id
-               ?goal_id
-               ~goal_ids:(Option.value ~default:[] goal_ids)
-               ?sandbox_target
-               ?runtime_contract
-               ?selected_model
-               ~disposition:"Pass"
-               ~disposition_reason:"healthy"
-               ~rule_match:matched
-               ~auto_approved:true
-               ();
-             Agent_sdk.Hooks.Approve
-           | None ->
-             Keeper_approval_queue.submit_and_await
-               ~keeper_name
-               ~tool_name
-               ~input
-               ~base_path
-               ?turn_id
-               ?task_id
-               ?goal_id
-               ?goal_ids
-               ?sandbox_target
-               ?sandbox_profile
-               ?backend
-               ?runtime_contract
-               ?selected_model
-               ~disposition:"Blocked"
-               ~disposition_reason:"waiting_approval"
-               ~risk_level
-               ?clock
-               ()))
+        decision))
     else Agent_sdk.Hooks.Approve
 ;;

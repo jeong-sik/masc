@@ -93,6 +93,10 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let approval_decision_is_reject = function
+  | Agent_sdk.Hooks.Reject _ -> true
+  | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ -> false
+
 let audit_event_names ~base_path ~keeper_name =
   AQ.read_recent_audit ~base_path ~keeper_name ~n:10 ()
   |> List.map (fun json ->
@@ -1567,8 +1571,13 @@ let test_callback_always_approve_respects_forbidden () =
       | Some _ -> Alcotest.fail "expected Approve after operator resolution"
       | None -> Alcotest.fail "destructive tool callback did not suspend for approval")
 
-let test_callback_hitl_disabled_forbidden_requires_approval () =
-  with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
+(* MASC_DISABLE_HITL removes the *operator*. A hard-forbidden tool must then be
+   rejected outright, never suspended into the approval queue — a queued
+   forbidden call would be unconditionally approvable by whoever drains the
+   queue, which is exactly the always-approve bypass this change closes.
+   Exercised through the async Fiber callback path used in production. *)
+let test_callback_hitl_disabled_forbidden_rejects_without_queuing () =
+  with_env Env_config_core.disable_hitl_env_key "true" @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1594,29 +1603,222 @@ let test_callback_hitl_disabled_forbidden_requires_approval () =
             ~input:(`Assoc [ ("path", `String "/dangerous") ])
         in
         result := Some decision);
-      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
-      Alcotest.(check int)
-        "forbidden tool still requires approval when HITL threshold is disabled"
-        (initial_pending + 1)
-        (AQ.pending_count ());
-      let id =
-        match pending_id_for_keeper ~keeper_name with
-        | Some id -> id
-        | None -> Alcotest.fail "expected pending approval for HITL-disabled forbidden tool"
-      in
-      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-       | Ok () -> ()
-       | Error err ->
-         Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
       yield_until (fun () -> Option.is_some !result);
-      match !result with
-      | Some Agent_sdk.Hooks.Approve -> ()
-      | Some Agent_sdk.Hooks.Reject reason ->
-        Alcotest.fail ("expected Approve after operator resolution, got reject: " ^ reason)
-      | Some Agent_sdk.Hooks.Edit _ ->
-        Alcotest.fail "expected Approve after operator resolution, got edit"
-      | None ->
-        Alcotest.fail "HITL-disabled forbidden callback did not suspend for approval")
+      (match !result with
+       | Some decision ->
+         Alcotest.(check bool)
+           "hard-forbidden tool rejects immediately when HITL is disabled"
+           true
+           (approval_decision_is_reject decision)
+       | None ->
+         Alcotest.fail "HITL-disabled forbidden callback did not return a decision");
+      Alcotest.(check int)
+        "hard-forbidden rejection never enters the approval queue"
+        initial_pending
+        (AQ.pending_count ()))
+
+let test_hard_forbidden_blocks_critical_risk () =
+  with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
+    with_test_config @@ fun config ->
+    let meta =
+      meta_from_json
+        (`Assoc
+           [ ("name", `String "test-keeper")
+           ; ("trace_id", `String "test-trace")
+           ; ("sandbox_profile", `String "docker")
+           ; ("network_mode", `String "inherit")
+           ; ("always_approve", `Bool true)
+           ])
+    in
+    let cb =
+      GP.to_oas_approval_callback
+        ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+    in
+    let decision =
+      cb ~tool_name:"tool_edit_file" ~input:(`Assoc [ ("path", `String "/etc/passwd") ])
+    in
+    Alcotest.(check bool)
+      "critical risk tool is hard_forbidden and blocked"
+      true
+      (approval_decision_is_reject decision))
+
+let test_hard_forbidden_blocks_destructive_tool () =
+  with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
+    with_test_config @@ fun config ->
+    let meta =
+      meta_from_json
+        (`Assoc
+           [ ("name", `String "test-keeper")
+           ; ("trace_id", `String "test-trace")
+           ; ("sandbox_profile", `String "docker")
+           ; ("network_mode", `String "inherit")
+           ; ("always_approve", `Bool true)
+           ])
+    in
+    let cb =
+      GP.to_oas_approval_callback
+        ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+    in
+    (* Soft-forbidden: a destructive git op is rejected, never queued/approved. *)
+    let decision =
+      cb ~tool_name:"masc_status" ~input:(`Assoc [ ("op", `String "git") ])
+    in
+    Alcotest.(check bool)
+      "destructive tool/op is soft_forbidden and blocked"
+      true
+      (approval_decision_is_reject decision))
+
+let test_always_approve_bypasses_only_when_not_hard_forbidden () =
+  with_test_config @@ fun config ->
+  let meta =
+    meta_from_json
+      (`Assoc
+         [ ("name", `String "test-keeper")
+         ; ("trace_id", `String "test-trace")
+         ; ("sandbox_profile", `String "docker")
+         ; ("network_mode", `String "inherit")
+         ; ("always_approve", `Bool true)
+         ])
+  in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+  in
+  let decision =
+    cb ~tool_name:"tool_read_file" ~input:(`Assoc [ ("path", `String "/safe/path") ])
+  in
+  Alcotest.(check bool)
+    "safe tool with always_approve is auto-approved"
+    true
+    (decision = Agent_sdk.Hooks.Approve)
+
+let test_hard_forbidden_hoisted_outside_needs_approval () =
+  with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
+    with_test_config @@ fun config ->
+    let meta =
+      meta_from_json
+        (`Assoc
+           [ ("name", `String "test-keeper")
+           ; ("trace_id", `String "test-trace")
+           ; ("sandbox_profile", `String "docker")
+           ; ("network_mode", `String "inherit")
+           ; ("always_approve", `Bool true)
+           ])
+    in
+    let cb =
+      GP.to_oas_approval_callback
+        ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+    in
+    let decision1 =
+      cb ~tool_name:"tool_edit_file" ~input:(`Assoc [ ("path", `String "/etc/passwd") ])
+    in
+    let decision2 =
+      cb ~tool_name:"tool_read_file" ~input:(`Assoc [ ("path", `String "/safe/path") ])
+    in
+    Alcotest.(check bool)
+      "critical tool blocked regardless of needs_approval"
+      true
+      (approval_decision_is_reject decision1);
+    Alcotest.(check bool)
+      "safe tool approved"
+      true
+      (decision2 = Agent_sdk.Hooks.Approve))
+
+let test_hard_forbidden_writes_audit_and_read_model () =
+  with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect ~finally:AQ.For_testing.reset_audit_store (fun () ->
+      with_test_config @@ fun config ->
+      let keeper_name = "hard-forbidden-audit-keeper" in
+      let meta =
+        meta_from_json
+          (`Assoc
+             [ ("name", `String keeper_name)
+             ; ("trace_id", `String "trace-hard-forbidden-audit")
+             ; ("sandbox_profile", `String "docker")
+             ; ("network_mode", `String "inherit")
+             ; ("always_approve", `Bool true)
+             ])
+      in
+      let cb =
+        GP.to_oas_approval_callback
+          ~config ~governance_level:"production" ~keeper_name ~meta ()
+      in
+      let decision =
+        cb ~tool_name:"tool_edit_file" ~input:(`Assoc [ ("path", `String "/etc/passwd") ])
+      in
+      Alcotest.(check bool) "critical risk rejected" true (approval_decision_is_reject decision);
+      (match AQ.read_recent_audit ~base_path:config.base_path ~keeper_name ~n:1 () with
+       | latest :: _ ->
+         let open Yojson.Safe.Util in
+         Alcotest.(check string)
+           "event"
+           AQ.approval_audit_hard_forbidden_event
+           (latest |> member "event" |> to_string);
+         Alcotest.(check string) "disposition" "Blocked" (latest |> member "disposition" |> to_string);
+         Alcotest.(check string)
+           "disposition reason"
+           "hard_forbidden"
+           (latest |> member "disposition_reason" |> to_string);
+         Alcotest.(check string) "decision kind" "reject" (latest |> member "decision_kind" |> to_string)
+       | [] -> Alcotest.fail "expected hard-forbidden audit row");
+      let snapshot = Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta in
+      let open Yojson.Safe.Util in
+      let approval = snapshot |> member "approval" in
+      Alcotest.(check string) "approval state" "hard_forbidden" (approval |> member "state" |> to_string);
+      Alcotest.(check string)
+        "latest event kind"
+        AQ.approval_audit_hard_forbidden_event
+        (approval |> member "latest_event_kind" |> to_string)))
+
+let test_soft_forbidden_writes_soft_audit_and_read_model () =
+  with_env Env_config_core.disable_hitl_env_key "true" (fun () ->
+    AQ.For_testing.reset_audit_store ();
+    Fun.protect ~finally:AQ.For_testing.reset_audit_store (fun () ->
+      with_test_config @@ fun config ->
+      let keeper_name = "soft-forbidden-audit-keeper" in
+      let meta =
+        meta_from_json
+          (`Assoc
+             [ ("name", `String keeper_name)
+             ; ("trace_id", `String "trace-soft-forbidden-audit")
+             ; ("sandbox_profile", `String "docker")
+             ; ("network_mode", `String "inherit")
+             ; ("always_approve", `Bool true)
+             ])
+      in
+      let cb =
+        GP.to_oas_approval_callback
+          ~config ~governance_level:"production" ~keeper_name ~meta ()
+      in
+      let decision =
+        cb ~tool_name:"masc_status" ~input:(`Assoc [ ("op", `String "git") ])
+      in
+      Alcotest.(check bool)
+        "soft-forbidden rejected"
+        true
+        (approval_decision_is_reject decision);
+      (match AQ.read_recent_audit ~base_path:config.base_path ~keeper_name ~n:1 () with
+       | latest :: _ ->
+         let open Yojson.Safe.Util in
+         Alcotest.(check string)
+           "event"
+           AQ.approval_audit_soft_forbidden_event
+           (latest |> member "event" |> to_string);
+         Alcotest.(check string)
+           "disposition reason"
+           "soft_forbidden"
+           (latest |> member "disposition_reason" |> to_string);
+         Alcotest.(check string) "decision kind" "reject" (latest |> member "decision_kind" |> to_string)
+       | [] -> Alcotest.fail "expected soft-forbidden audit row");
+      let snapshot = Masc.Keeper_runtime_trust_snapshot.snapshot_json ~config ~meta in
+      let open Yojson.Safe.Util in
+      let approval = snapshot |> member "approval" in
+      Alcotest.(check string) "approval state" "soft_forbidden" (approval |> member "state" |> to_string);
+      Alcotest.(check string)
+        "latest event kind"
+        AQ.approval_audit_soft_forbidden_event
+        (approval |> member "latest_event_kind" |> to_string)))
 
 let test_callback_hitl_disabled_soft_forbidden_auto_approved () =
   with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
@@ -1886,8 +2088,20 @@ let () =
         test_runtime_trust_classifies_always_approve_flag;
       Alcotest.test_case "always_approve respects forbidden" `Quick
         test_callback_always_approve_respects_forbidden;
-      Alcotest.test_case "HITL disabled still gates forbidden tools" `Quick
-        test_callback_hitl_disabled_forbidden_requires_approval;
+      Alcotest.test_case "HITL disabled rejects forbidden tools without queuing" `Quick
+        test_callback_hitl_disabled_forbidden_rejects_without_queuing;
+      Alcotest.test_case "hard_forbidden blocks critical risk" `Quick
+        test_hard_forbidden_blocks_critical_risk;
+      Alcotest.test_case "soft_forbidden blocks destructive op" `Quick
+        test_hard_forbidden_blocks_destructive_tool;
+      Alcotest.test_case "always_approve bypasses only when not hard_forbidden" `Quick
+        test_always_approve_bypasses_only_when_not_hard_forbidden;
+      Alcotest.test_case "hard_forbidden hoisted outside needs_approval" `Quick
+        test_hard_forbidden_hoisted_outside_needs_approval;
+      Alcotest.test_case "hard_forbidden writes audit and read model" `Quick
+        test_hard_forbidden_writes_audit_and_read_model;
+      Alcotest.test_case "soft_forbidden writes soft audit and read model" `Quick
+        test_soft_forbidden_writes_soft_audit_and_read_model;
       Alcotest.test_case "HITL disabled allows soft forbidden tools" `Quick
         test_callback_hitl_disabled_soft_forbidden_auto_approved;
     ]);

@@ -574,14 +574,17 @@ let block_of_yojson json : chat_block option =
           | _ -> None
         in
         (match get_step_string "kind" with
-         | Some "think" ->
-           Option.bind (get_step_string "text") (fun text ->
-             Some
-               (Trace_think
-                  { text
-                  ; ts = get_step_string "ts"
-                  ; oas_block_index = get_step_int "oas_block_index"
-                  }))
+          | Some "think" ->
+            Option.bind (get_step_string "text") (fun text ->
+              Some
+                (Trace_think
+                   { text
+                   ; ts = get_step_string "ts"
+                   ; oas_block_index =
+                       (match get_step_int "oas_block_index" with
+                        | Some _ as v -> v
+                        | None -> get_step_int "oasBlockIndex")
+                   }))
          | Some "reason" ->
            Option.bind (get_step_string "text") (fun text ->
              Some
@@ -590,32 +593,30 @@ let block_of_yojson json : chat_block option =
                   ; detail = get_step_string "detail"
                   ; ts = get_step_string "ts"
                   }))
-         | Some "tool" ->
-           Option.bind (get_step_string "name") (fun name ->
-             let status_result =
-               match get_step_string "status" with
-               | None -> Some None
-               | Some status -> Option.map Option.some (trace_tool_status_of_label status)
-             in
-             Option.map
-               (fun status ->
-                 Trace_tool
-                   { name
-                   ; tool_call_id =
-                       (match get_step_string "tool_call_id" with
-                        | Some _ as v -> v
-                        | None -> get_step_string "toolCallId")
-                   ; status
-                   ; dur = get_step_string "dur"
-                   ; args = List.assoc_opt "args" step_fields
-                   ; result = List.assoc_opt "result" step_fields
-                   ; ts = get_step_string "ts"
-                   ; oas_block_index =
-                       (match get_step_int "oas_block_index" with
-                        | Some _ as v -> v
-                        | None -> get_step_int "oasBlockIndex")
-                   })
-               status_result)
+          | Some "tool" ->
+            Option.bind (get_step_string "name") (fun name ->
+             let status =
+                match get_step_string "status" with
+                | None -> None
+                | Some status -> trace_tool_status_of_label status
+              in
+             Some
+               (Trace_tool
+                  { name
+                  ; tool_call_id =
+                      (match get_step_string "tool_call_id" with
+                       | Some _ as v -> v
+                       | None -> get_step_string "toolCallId")
+                  ; status
+                  ; dur = get_step_string "dur"
+                  ; args = List.assoc_opt "args" step_fields
+                  ; result = List.assoc_opt "result" step_fields
+                  ; ts = get_step_string "ts"
+                  ; oas_block_index =
+                      (match get_step_int "oas_block_index" with
+                       | Some _ as v -> v
+                       | None -> get_step_int "oasBlockIndex")
+                  }))
          | _ -> None)
       | _ -> None
     in

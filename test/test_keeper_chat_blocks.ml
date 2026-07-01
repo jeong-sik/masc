@@ -260,6 +260,40 @@ let test_dashboard_rich_blocks_roundtrip () =
       (blocks_to_json_list parsed)
   | None -> Alcotest.fail "blocks_of_yojson rejected valid dashboard rich blocks"
 
+let test_trace_decoder_accepts_dashboard_fallbacks () =
+  let json =
+    `List
+      [ `Assoc
+          [ ("t", `String "trace")
+          ; ( "trace"
+            , `List
+                [ `Assoc
+                    [ ("kind", `String "think")
+                    ; ("text", `String "thinking")
+                    ; ("oasBlockIndex", `Int 7)
+                    ]
+                ; `Assoc
+                    [ ("kind", `String "tool")
+                    ; ("name", `String "keeper_tasks_list")
+                    ; ("status", `String "paused")
+                    ; ("oasBlockIndex", `Int 8)
+                    ]
+                ] )
+          ]
+      ]
+  in
+  match B.blocks_of_yojson json with
+  | Some
+      [ B.Trace
+          { trace =
+              [ B.Trace_think { oas_block_index = Some 7; _ }
+              ; B.Trace_tool { status = None; oas_block_index = Some 8; _ }
+              ]
+          }
+      ] -> ()
+  | Some _ -> Alcotest.fail "unexpected trace block shape"
+  | None -> Alcotest.fail "trace decoder rejected dashboard-compatible fields"
+
 let test_non_http_markdown_image_becomes_text () =
   let blocks = B.parse_text_to_blocks "before ![alt](ftp://example.com/a.png) after" in
   Alcotest.(check (list yojson_testable))
@@ -404,10 +438,12 @@ let () =
             test_blocks_of_yojson_roundtrip;
           Alcotest.test_case "code block roundtrip" `Quick
             test_code_block_roundtrip;
-          Alcotest.test_case "dashboard rich blocks roundtrip" `Quick
-            test_dashboard_rich_blocks_roundtrip;
-          Alcotest.test_case "blocks_of_yojson rejects malformed" `Quick
-            test_blocks_of_yojson_rejects_malformed;
+           Alcotest.test_case "dashboard rich blocks roundtrip" `Quick
+             test_dashboard_rich_blocks_roundtrip;
+           Alcotest.test_case "trace decoder accepts dashboard fallbacks" `Quick
+             test_trace_decoder_accepts_dashboard_fallbacks;
+           Alcotest.test_case "blocks_of_yojson rejects malformed" `Quick
+             test_blocks_of_yojson_rejects_malformed;
           Alcotest.test_case "fusion block roundtrip" `Quick
             test_fusion_block_roundtrip;
           Alcotest.test_case "fusion block requires board_post_id" `Quick

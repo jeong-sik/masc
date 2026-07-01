@@ -466,10 +466,47 @@ let test_completion_blocker_supersedes_passive_only_receipt () =
          true
          (String.equal
             blocker_detail
-            (snapshot
-             |> member "runtime_blockers"
-             |> member "runtime_blocker_summary"
-             |> to_string)))
+               (snapshot
+                |> member "runtime_blockers"
+                |> member "runtime_blocker_summary"
+                |> to_string)))
+;;
+
+let test_runtime_exhausted_blocker_uses_typed_parser () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> remove_tree base_dir)
+    (fun () ->
+       with_env "MASC_BASE_PATH" base_dir
+       @@ fun () ->
+       let config = Masc.Workspace.default_config base_dir in
+       let keeper_name = "runtime-trust-runtime-exhausted" in
+       let blocker =
+         Masc.Keeper_meta_contract.blocker_info_of_class
+           (Masc.Keeper_meta_contract.Runtime_exhausted
+              (Masc.Keeper_meta_contract.Other_detail "runtime_exhausted"))
+       in
+       let meta =
+         make_meta keeper_name
+         |> Masc.Keeper_meta_contract.map_runtime (fun rt ->
+           { rt with last_blocker = Some blocker })
+       in
+       let snapshot = K.snapshot_json ~config ~meta in
+       let open Yojson.Safe.Util in
+       Alcotest.(check string)
+         "runtime exhausted blocker display reason"
+         "runtime_exhausted"
+         (snapshot |> member "disposition_reason" |> to_string);
+       Alcotest.(check string)
+         "runtime exhausted blocker class"
+         "runtime_exhausted"
+         (snapshot
+          |> member "runtime_blockers"
+          |> member "runtime_blocker_class"
+          |> to_string))
 ;;
 
 let test_unknown_completion_contract_result_is_explicit () =
@@ -507,6 +544,32 @@ let test_unknown_completion_contract_result_is_explicit () =
          "unknown result uses explicit sentinel"
          "unknown_completion_contract_result:passive-only"
          (snapshot |> member "execution" |> member "mutation_guard_summary" |> to_string))
+;;
+
+let test_operator_disposition_display_uses_typed_parser () =
+  let check_case ~operator_disposition ~operator_disposition_reason
+      ~expected_disposition ~expected_reason =
+    let disposition, reason =
+      Masc.Operator_disposition_display.of_wire ~operator_disposition
+        ~operator_disposition_reason
+    in
+    Alcotest.(check string)
+      (operator_disposition ^ " disposition")
+      expected_disposition disposition;
+    Alcotest.(check string)
+      (operator_disposition ^ " reason")
+      expected_reason reason
+  in
+  check_case ~operator_disposition:"pass_next_model" ~operator_disposition_reason:""
+    ~expected_disposition:"Pass" ~expected_reason:"runtime_fallback";
+  check_case ~operator_disposition:"pause_human"
+    ~operator_disposition_reason:"manual_review" ~expected_disposition:"Blocked"
+    ~expected_reason:"manual_review";
+  check_case ~operator_disposition:"blocked_runtime" ~operator_disposition_reason:""
+    ~expected_disposition:"Blocked" ~expected_reason:"runtime_blocked";
+  check_case ~operator_disposition:"<missing operator_disposition field>"
+    ~operator_disposition_reason:"" ~expected_disposition:"Alert"
+    ~expected_reason:"unmapped_operator_disposition"
 ;;
 
 let test_model_observability_uses_runtime_trust_selected_model () =
@@ -619,6 +682,10 @@ let () =
             `Quick
             test_completion_blocker_supersedes_passive_only_receipt
         ; Alcotest.test_case
+            "runtime exhausted blocker display uses typed parser"
+            `Quick
+            test_runtime_exhausted_blocker_uses_typed_parser
+        ; Alcotest.test_case
             "completion-contract labels reject drift before typed parser"
             `Quick
             test_completion_contract_result_rejects_drifted_label_before_parser
@@ -630,6 +697,10 @@ let () =
             "unknown completion-contract label uses explicit sentinel"
             `Quick
             test_unknown_completion_contract_result_is_explicit
+        ; Alcotest.test_case
+            "operator disposition display uses typed parser"
+            `Quick
+            test_operator_disposition_display_uses_typed_parser
         ; Alcotest.test_case
             "status model observability reuses runtime-trust execution selected model"
             `Quick

@@ -236,6 +236,7 @@ type operator_disposition_kind =
   | Disp_unknown
 
 val operator_disposition_kind_to_string : operator_disposition_kind -> string
+val operator_disposition_kind_of_string : string -> operator_disposition_kind option
 
 (** Reason paired with [operator_disposition_kind]. Closed set; the wire
     form is byte-compatible with the pre-typing string. *)

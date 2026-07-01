@@ -400,6 +400,37 @@ let disp_pair_to_string (d, r) =
     (R.operator_disposition_reason_to_string r)
 ;;
 
+let operator_disposition_kinds =
+  [ R.Disp_pass
+  ; R.Disp_pause_human
+  ; R.Disp_alert_exhausted
+  ; R.Disp_fail_open_next_runtime
+  ; R.Disp_pass_next_model
+  ; R.Disp_user_cancelled
+  ; R.Disp_skipped
+  ; R.Disp_unknown
+  ]
+;;
+
+let () =
+  List.iter
+    (fun disposition ->
+       let label = R.operator_disposition_kind_to_string disposition in
+       let parsed =
+         R.operator_disposition_kind_of_string label
+         |> Option.map R.operator_disposition_kind_to_string
+       in
+       check
+         (Printf.sprintf
+            "operator_disposition_kind_of_string round-trips %s"
+            label)
+         (parsed = Some label))
+    operator_disposition_kinds;
+  check
+    "operator_disposition_kind_of_string rejects legacy blocked_runtime"
+    (R.operator_disposition_kind_of_string "blocked_runtime" = None)
+;;
+
 let intentional_passive_only_no_work_policy_change (receipt : R.t) got =
   if
     receipt.completion_contract_result = R.Contract_passive_only

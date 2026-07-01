@@ -4,9 +4,9 @@
     library leaves up to each caller:
 
     {ol
-    {- A default [domain_count] that reserves one core for the Eio
-       scheduler driving HTTP / SSE / fiber dispatch on the main
-       domain.}
+    {- A default [domain_count] that reserves the main Eio scheduler
+       domain plus one spare domain for HTTP / SSE / keeper dispatch
+       under host pressure.}
     {- Named submit variants for IO-bound vs CPU-bound work, fixing
        the [~weight] argument that [Eio.Executor_pool] requires per
        call.  Centralising weight policy here keeps it consistent
@@ -27,13 +27,14 @@ type t
     plus the resolved [domain_count] for telemetry. *)
 
 val recommended_domain_count : unit -> int
-(** [max 2 (Domain.recommended_domain_count () - 1)].
+(** [max 1 (Domain.recommended_domain_count () - 2)].
 
-    The [-1] reserves the original main domain for the Eio scheduler
-    so HTTP listeners, SSE drains, and fiber dispatch don't compete
-    with worker domains for OS-thread time.  The floor of [2] keeps
-    the default sensible on 1- or 2-core systems where the
-    recommendation can be [1]. *)
+    The [-2] reserves the original main domain for the Eio scheduler
+    and one additional domain of host scheduling headroom, so HTTP
+    listeners, SSE drains, keeper dispatch, and response finalisation
+    are not competing with a pool that claims every recommended
+    domain.  The floor of [1] preserves a usable executor on small
+    systems. *)
 
 val create :
   sw:Eio.Switch.t ->

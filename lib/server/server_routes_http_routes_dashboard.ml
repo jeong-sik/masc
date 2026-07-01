@@ -905,7 +905,12 @@ let add_routes ~sw ~clock router =
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
          let json = dashboard_execution_http_json ~state ~sw ~clock request in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         (* The default execution surface is a large proactive cached snapshot.
+            Re-compressing it on every dashboard poll burns the same serving
+            domain that accepts health/chat/keeper requests; serve identity JSON
+            here and keep the compute/cache policy in
+            [dashboard_execution_http_json]. *)
+         Http.Response.json_value ~compress:false ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution-trust" (fun request reqd ->
        with_public_read (fun state req reqd ->

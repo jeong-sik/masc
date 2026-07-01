@@ -804,6 +804,10 @@ let is_public_read_path path =
      capability, and the browser <audio> element cannot send a bearer
      token in its request headers. *)
   || String.starts_with ~prefix:"/api/v1/voice/audio/" path
+  (* RFC-0301: model-generated media served by content-addressed token — same
+     token-as-capability rationale as the voice clip route above; the browser
+     <img>/<audio> element cannot send a bearer header. *)
+  || String.starts_with ~prefix:"/api/v1/media/" path
 
 let resolve_agent_name_for_auth ~base_path request ~token :
     (string option, Masc_domain.masc_error) result =

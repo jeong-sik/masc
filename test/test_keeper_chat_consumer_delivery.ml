@@ -168,10 +168,66 @@ let test_gates_while_turn_in_flight () =
        | `Timeout -> check "consumer drains once the slot frees" false));
     check "delivered exactly once after release" (List.length !captured = 1))
 
+let test_queued_dispatch_is_per_keeper () =
+  Printf.printf "Test: queued dispatch is independent per keeper\n%!";
+  with_env (fun ~base ~clock ->
+    let keeper_a = keeper_name ^ "-a" in
+    let keeper_b = keeper_name ^ "-b" in
+    Keeper_chat_queue.clear ~keeper_name:keeper_a;
+    Keeper_chat_queue.clear ~keeper_name:keeper_b;
+    Keeper_chat_queue.enqueue ~keeper_name:keeper_a
+      (discord_msg ~content:"alpha waits" ~channel_id:"chan-a" ~user_id:"u-a"
+         ~ts:1.0);
+    Keeper_chat_queue.enqueue ~keeper_name:keeper_b
+      (discord_msg ~content:"beta should pass" ~channel_id:"chan-b"
+         ~user_id:"u-b" ~ts:2.0);
+    let first_keeper = ref None in
+    let second_keeper = ref None in
+    let first_started, set_first_started = Eio.Promise.create () in
+    let release_first, set_release_first = Eio.Promise.create () in
+    let second_seen, set_second_seen = Eio.Promise.create () in
+    let first_resolved = ref false in
+    let second_resolved = ref false in
+    let handle_turn ~sw:_ ~keeper_name:kn ~queued_message:_ =
+      match !first_keeper with
+      | None ->
+          first_keeper := Some kn;
+          if not !first_resolved then (
+            first_resolved := true;
+            Eio.Promise.resolve set_first_started ());
+          Eio.Promise.await release_first
+      | Some first when String.equal first kn ->
+          check "same keeper is not dispatched again while its queued turn runs"
+            false
+      | Some _ ->
+          second_keeper := Some kn;
+          if not !second_resolved then (
+            second_resolved := true;
+            Eio.Promise.resolve set_second_seen ())
+    in
+    with_consumer_switch (fun sw ->
+      Keeper_chat_consumer.start ~sw ~clock ~base_path:base ~handle_turn;
+      (match await_or_timeout ~clock ~secs:5.0 first_started with
+       | `Got -> ()
+       | `Timeout -> check "first queued keeper dispatch started" false);
+      (match await_or_timeout ~clock ~secs:0.5 second_seen with
+       | `Got ->
+           check "another keeper dispatches while first handler is blocked" true
+       | `Timeout ->
+           check "another keeper dispatches while first handler is blocked" false);
+      Eio.Promise.resolve set_release_first);
+    match (!first_keeper, !second_keeper) with
+    | Some first, Some second ->
+        check "second dispatch uses the other keeper"
+          ((String.equal first keeper_a && String.equal second keeper_b)
+          || (String.equal first keeper_b && String.equal second keeper_a))
+    | _ -> check "both keeper dispatches were observed" false)
+
 let () =
   test_drains_discord_to_handle_turn ();
   test_coalesces_same_source_run ();
   test_gates_while_turn_in_flight ();
+  test_queued_dispatch_is_per_keeper ();
   if !failures > 0 then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;
     exit 1)

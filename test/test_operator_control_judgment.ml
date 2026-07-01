@@ -136,7 +136,7 @@ let test_operator_judgment_write_and_latest_roundtrip () =
             (`Assoc
               [
                 ("surface", `String "command.namespace");
-                ("target_type", `String "root");
+                ("target_type", `String "workspace");
                 ("summary", `String "Operator judge requests a human checkpoint.");
                 ("confidence", `Float 0.88);
                 ("fresh_ttl_sec", `Int 90);
@@ -151,7 +151,8 @@ let test_operator_judgment_write_and_latest_roundtrip () =
       let latest =
         match
           Operator_control.judgment_latest_json ctx
-            (`Assoc [ ("surface", `String "command.namespace"); ("target_type", `String "root") ])
+            (`Assoc
+              [ ("surface", `String "command.namespace"); ("target_type", `String "workspace") ])
         with
         | Ok json -> json
         | Error err -> Alcotest.fail err

@@ -226,6 +226,7 @@ val submit_and_await :
   ?disposition_reason:string ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
+  ?critical_timeout_s:float ->
   unit ->
   Agent_sdk.Hooks.approval_decision
 

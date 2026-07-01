@@ -7,6 +7,7 @@
 include Env_config_core
 include Env_config_runtime
 include Env_config_governance
+include Env_config_hitl
 include Env_config_keeper
 
 let print_summary () =

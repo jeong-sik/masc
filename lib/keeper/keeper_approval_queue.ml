@@ -735,10 +735,11 @@ let default_noncritical_approval_timeout_s = 600.0
     30s wrapper used by A2 for generic [Eio.Promise.await] sites: a HITL
     approval is bounded by an operator's response time, not by an SLA on
     autonomous progress.
-    [Critical] approvals are exempt, matching [expire_stale]'s
-    operator-must-decide policy. Drop the default only after measuring
-    the operator-response distribution — premature shortening turns
-    every distracted operator into an [Approval_expired] event. *)
+
+    [critical_timeout_s] defaults to {!Env_config_hitl.critical_timeout_s}
+    and bounds how long a [Critical] approval may stall the Keeper fiber
+    waiting for an operator. A value <= [0.0] disables the critical timeout
+    and reverts to the legacy operator-must-decide behavior. *)
 let submit_and_await
       ~keeper_name
       ~tool_name
@@ -758,6 +759,7 @@ let submit_and_await
       ?disposition_reason
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
+      ?(critical_timeout_s = Env_config_hitl.critical_timeout_s ())
       ()
   : Agent_sdk.Hooks.approval_decision
   =
@@ -801,37 +803,41 @@ let submit_and_await
        | None -> decision)
   in
   let await_with_timeout () =
+    let use_timeout clock timeout_s =
+      match
+        Eio.Fiber.first
+          (fun () -> `Decision (Eio.Promise.await promise))
+          (fun () ->
+             Eio.Time.sleep clock timeout_s;
+             `Timeout)
+      with
+      | `Decision d -> d
+      | `Timeout ->
+        let reason = Printf.sprintf "approval timeout after %.0fs" timeout_s in
+        audit_approval_event
+          ~base_path:entry.audit_base_path
+          ~event_type:"approval_timeout"
+          ~id
+          ~keeper_name
+          ~tool_name
+          ~risk_level
+          ?turn_id
+          ?task_id
+          ?goal_id
+          ~goal_ids
+          ~sandbox_target:entry.sandbox_target
+          ?runtime_contract
+          ?selected_model
+          ~decision:(Approval_expired reason)
+          ();
+        (* Mirror expire_stale's teardown, but preserve any concurrent
+           operator decision that wins the promise resolution race. *)
+        timeout_decision reason
+    in
     match clock, risk_level with
-    | Some clock, (Low | Medium | High) ->
-      (match
-         Eio.Fiber.first
-           (fun () -> `Decision (Eio.Promise.await promise))
-           (fun () ->
-              Eio.Time.sleep clock timeout_s;
-              `Timeout)
-       with
-       | `Decision d -> d
-       | `Timeout ->
-         let reason = Printf.sprintf "approval timeout after %.0fs" timeout_s in
-         audit_approval_event
-           ~base_path:entry.audit_base_path
-           ~event_type:"approval_timeout"
-           ~id
-           ~keeper_name
-           ~tool_name
-           ~risk_level
-           ?turn_id
-           ?task_id
-           ?goal_id
-           ~goal_ids
-           ~sandbox_target:entry.sandbox_target
-           ?runtime_contract
-           ?selected_model
-           ~decision:(Approval_expired reason)
-           ();
-         (* Mirror expire_stale's teardown, but preserve any concurrent
-            operator decision that wins the promise resolution race. *)
-         timeout_decision reason)
+    | Some clock, (Low | Medium | High) -> use_timeout clock timeout_s
+    | Some clock, Critical when critical_timeout_s > 0.0 ->
+      use_timeout clock critical_timeout_s
     | Some _, Critical | None, _ -> Eio.Promise.await promise
   in
   Eio_guard.protect await_with_timeout ~finally:(fun () ->

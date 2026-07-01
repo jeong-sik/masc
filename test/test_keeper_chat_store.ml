@@ -1122,6 +1122,47 @@ let test_blocks_roundtrip_and_drop_malformed () =
           | None -> Alcotest.fail "blocks missing")
       | messages -> Alcotest.failf "expected 1 row, got %d" (List.length messages))
 
+let test_append_turn_redacts_supplied_thinking_blocks () =
+  let base_dir = temp_base_path "keeper-chat-store-thinking-redact" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-thinking-redact" in
+      let root = secret_root_default ~base_dir ~keeper_name in
+      let secret = "thinking.secret!" in
+      write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
+      K.append_turn
+        ~base_dir
+        ~keeper_name
+        ~user_content:"think"
+        ~user_attachments:[]
+        ~assistant_content:"done"
+        ~blocks:
+          [ B.Thinking
+              { content = "private reasoning uses " ^ secret; redacted = false }
+          ]
+        ();
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "thinking secret not persisted" false
+        (contains_substring raw secret);
+      Alcotest.(check bool) "redaction marker persisted" true
+        (contains_substring raw "[REDACTED]");
+      let messages = K.load ~base_dir ~keeper_name in
+      let assistant =
+        List.find
+          (fun (m : K.chat_message) -> K.Role.equal m.role K.Role.Assistant)
+          messages
+      in
+      match assistant.K.blocks with
+      | Some [ B.Thinking thinking ] ->
+        Alcotest.(check bool) "thinking content redacted on load" false
+          (contains_substring thinking.content secret);
+        Alcotest.(check bool) "thinking redaction marker visible" true
+          (contains_substring thinking.content "[REDACTED]")
+      | Some _ -> Alcotest.fail "expected exactly one thinking block"
+      | None -> Alcotest.fail "assistant thinking block missing")
+
 (* RFC-0233 §7: append_turn stamps the supplied turn_ref on every row of the
    completed turn, it round-trips through load, and to_json_array exposes it
    for the history endpoint. *)
@@ -1343,6 +1384,8 @@ let () =
             test_user_and_tool_rows_have_no_blocks;
           Alcotest.test_case "blocks roundtrip and malformed dropped" `Quick
             test_blocks_roundtrip_and_drop_malformed;
+          Alcotest.test_case "supplied thinking blocks are redacted" `Quick
+            test_append_turn_redacts_supplied_thinking_blocks;
           Alcotest.test_case "assistant history appends trace block" `Quick
             test_to_json_array_appends_trace_block_to_assistant_turn;
         ] );

@@ -110,6 +110,11 @@ type trace_step =
 
 type trace_block = { trace : trace_step list }
 
+type thinking_block = {
+  content : string;
+  redacted : bool;
+}
+
 type chat_block =
   | Text of text_block
   | Heading of text_block
@@ -125,6 +130,7 @@ type chat_block =
   | Link of link_block
   | Fusion of fusion_block
   | Trace of trace_block
+  | Thinking of thinking_block
 
 let escape_html raw =
   raw
@@ -538,6 +544,19 @@ let block_to_yojson = function
       [ ("t", `String "trace")
       ; ("trace", `List (List.map trace_step_to_yojson trace))
       ]
+  | Thinking { content; redacted } ->
+    (* redacted defaults to false (omitted); only emit when true so the
+       common non-redacted case stays minimal and legacy decoders that do
+       not know "thinking" still parse the rest of the list.
+
+       [redacted = true] is a signature-only marker: force [content] to ""
+       at the wire boundary regardless of what the in-memory record holds,
+       so a caller-side bug that builds [Thinking { content = <real text>;
+       redacted = true }] can never persist or transmit the reasoning text
+       behind a flag that claims it was scrubbed. *)
+    let wire_content = if redacted then "" else content in
+    let base = [ ("t", `String "thinking"); ("content", `String wire_content) ] in
+    `Assoc (if redacted then base @ [ ("redacted", `Bool true) ] else base)
 ;;
 
 let blocks_to_yojson blocks = `List (List.map block_to_yojson blocks)
@@ -710,6 +729,24 @@ let block_of_yojson json : chat_block option =
        Option.bind (List.assoc_opt "trace" fields) (fun trace_json ->
          Option.bind (trace_steps_of_yojson trace_json) (fun trace ->
            if trace = [] then None else Some (Trace { trace })))
+     | Some "thinking" ->
+       (* content is required (empty string for signature-only redacted thinking);
+          redacted defaults to false and is only honoured when explicitly
+          [true], matching the encoder's omission rule. *)
+       Option.bind (get_string "content") (fun content ->
+         let redacted =
+           match List.assoc_opt "redacted" fields with
+           | Some (`Bool true) -> true
+           | _ -> false
+         in
+         (* Scrub any smuggled content at the decode boundary too: a legacy
+            writer, a hand-crafted payload, or a replayed record could carry
+            [redacted=true] alongside non-empty content. The in-memory
+            [Thinking] value must never expose reasoning text behind a flag
+            that claims it was redacted, regardless of how the JSON reached
+            this decoder. *)
+         let content = if redacted then "" else content in
+         Some (Thinking { content; redacted }))
      | _ -> None)
   | _ -> None
 ;;

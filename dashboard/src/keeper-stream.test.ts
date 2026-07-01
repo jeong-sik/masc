@@ -3,10 +3,16 @@ import {
   _resetLiveSendRequestOwnersForTests,
   activeStreamRequestId,
   appendThreadEntry,
+  setActiveStream,
   setActiveStreamRequestId,
 } from './keeper-state'
 import { keeperThreads } from './keeper-state'
-import { applyKeeperStreamEvent } from './keeper-stream'
+import {
+  _flushPendingKeeperStreamDeltasForTests,
+  _resetKeeperStreamBuffersForTests,
+  abortKeeperThreadMessage,
+  applyKeeperStreamEvent,
+} from './keeper-stream'
 
 function assistantEntry(): void {
   appendThreadEntry('sangsu', {
@@ -25,6 +31,7 @@ function assistantEntry(): void {
 
 describe('applyKeeperStreamEvent', () => {
   beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
     keeperThreads.value = {}
     _resetLiveSendRequestOwnersForTests()
   })
@@ -480,6 +487,7 @@ describe('applyKeeperStreamEvent', () => {
       value: { delta: 'reasoning about the problem...' },
     })).toBeNull()
 
+    _flushPendingKeeperStreamDeltasForTests()
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.streamState).toBe('thinking')
     expect(entry?.delivery).toBe('streaming')
@@ -501,10 +509,30 @@ describe('applyKeeperStreamEvent', () => {
       value: { delta: 'tools' },
     })
 
+    expect(keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')?.traceSteps).toBeUndefined()
+    _flushPendingKeeperStreamDeltasForTests()
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.traceSteps).toEqual([
       { kind: 'think', text: 'checking tools', ts: expect.any(String) },
     ])
+  })
+
+  it('drops pending thinking deltas when aborting a live stream', () => {
+    assistantEntry()
+    setActiveStream('sangsu', 'reply-1', new AbortController())
+    applyKeeperStreamEvent('sangsu', 'reply-1', {
+      type: 'CUSTOM',
+      name: 'KEEPER_THINKING_DELTA',
+      value: { delta: 'half-written reasoning' },
+    })
+
+    abortKeeperThreadMessage('sangsu')
+    _flushPendingKeeperStreamDeltasForTests()
+
+    const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+    expect(entry?.delivery).toBe('cancelled')
+    expect(entry?.streamState).toBeNull()
+    expect(entry?.traceSteps).toBeUndefined()
   })
 
   it('splits thinking trace steps by OAS content block index', () => {
@@ -525,6 +553,7 @@ describe('applyKeeperStreamEvent', () => {
       value: { index: 2, delta: 'next block' },
     })
 
+    _flushPendingKeeperStreamDeltasForTests()
     const entry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
     expect(entry?.traceSteps).toEqual([
       { kind: 'think', text: 'checking tools', ts: expect.any(String), oasBlockIndex: 1 },
@@ -535,6 +564,7 @@ describe('applyKeeperStreamEvent', () => {
 
 describe('applyKeeperStreamEvent tool calls', () => {
   beforeEach(() => {
+    _resetKeeperStreamBuffersForTests()
     keeperThreads.value = {}
     _resetLiveSendRequestOwnersForTests()
   })
@@ -639,6 +669,7 @@ describe('applyKeeperStreamEvent tool calls', () => {
       value: { delta: 'think B' },
     })
 
+    _flushPendingKeeperStreamDeltasForTests()
     const reply = keeperThreads.value.sangsu?.find(entry => entry.id === 'reply-1')
     expect(reply?.traceSteps).toEqual([
       { kind: 'think', text: 'think A', ts: expect.any(String) },

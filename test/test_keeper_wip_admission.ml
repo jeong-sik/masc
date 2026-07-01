@@ -283,12 +283,13 @@ let test_keeper_task_claim_no_unclaimed_emits_no_work_outcome () =
          (typed |> U.member "reason" |> U.member "kind" |> U.to_string))
 
 let test_active_items_only_include_claimed_or_in_progress () =
+  let now = Masc_domain.now_iso () in
   let tasks =
     [ task
-        ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = "now" })
+        ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = now })
         "task-001"
     ; task
-        ~status:(Masc_domain.InProgress { assignee = "b"; started_at = "now" })
+        ~status:(Masc_domain.InProgress { assignee = "b"; started_at = now })
         ~title:"docs: update runbook"
         "task-002"
     ; task ~title:"fix: still todo" "task-003"
@@ -303,20 +304,21 @@ let test_active_items_only_include_claimed_or_in_progress () =
        active)
 
 let test_active_items_include_all_active_assignees () =
+  let now = Masc_domain.now_iso () in
   let tasks =
     [ task
-        ~status:(Masc_domain.Claimed { assignee = "keeper-a"; claimed_at = "now" })
+        ~status:(Masc_domain.Claimed { assignee = "keeper-a"; claimed_at = now })
         "task-claimed-a"
     ; task
         ~status:
-          (Masc_domain.InProgress { assignee = "keeper-a"; started_at = "now" })
+          (Masc_domain.InProgress { assignee = "keeper-a"; started_at = now })
         "task-progress-a"
     ; task
-        ~status:(Masc_domain.Claimed { assignee = "keeper-b"; claimed_at = "now" })
+        ~status:(Masc_domain.Claimed { assignee = "keeper-b"; claimed_at = now })
         "task-claimed-b"
     ; task
         ~status:
-          (Masc_domain.InProgress { assignee = "keeper-b"; started_at = "now" })
+          (Masc_domain.InProgress { assignee = "keeper-b"; started_at = now })
         "task-progress-b"
     ]
   in
@@ -324,6 +326,53 @@ let test_active_items_include_all_active_assignees () =
   check (list string) "all active ids"
     [ "task-claimed-a"; "task-progress-a"; "task-claimed-b"; "task-progress-b" ]
     (List.map (fun item -> item.Admission.id) active)
+
+let iso8601_of_unix_time t =
+  let tm = Unix.gmtime t in
+  Printf.sprintf "%04d-%02d-%02dT%02d:%02d:%02dZ"
+    (tm.Unix.tm_year + 1900) (tm.Unix.tm_mon + 1) tm.Unix.tm_mday
+    tm.Unix.tm_hour tm.Unix.tm_min tm.Unix.tm_sec
+
+let test_stale_claimed_task_not_active () =
+  (* claimed 2 hours ago, default threshold is 1 hour -> stale, not active *)
+  let two_hours_ago = iso8601_of_unix_time (Unix.gettimeofday () -. 7200.) in
+  let tasks =
+    [ task
+        ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = two_hours_ago })
+        "task-stale"
+    ]
+  in
+  check (list string) "no active ids" []
+    (List.map (fun item -> item.Admission.id) (Admission.active_items_of_tasks tasks))
+
+let test_fresh_claimed_task_stays_active_under_custom_threshold () =
+  (* claimed 30 minutes ago, custom threshold 10 minutes -> stale under that
+     threshold, but active under the (higher) default. Exercises the
+     ?stale_threshold_s override on both task_is_active_wip and
+     active_items_of_tasks. *)
+  let thirty_min_ago = iso8601_of_unix_time (Unix.gettimeofday () -. 1800.) in
+  let claimed_task =
+    task
+      ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = thirty_min_ago })
+      "task-recent"
+  in
+  check bool "active under default (1h) threshold" true
+    (Admission.task_is_active_wip claimed_task);
+  check bool "stale under a 10-minute threshold" false
+    (Admission.task_is_active_wip ~stale_threshold_s:600. claimed_task)
+
+let test_unparseable_claimed_at_treated_as_stale () =
+  (* Fail-closed: a malformed/unparseable claimed_at must not silently be
+     treated as fresh WIP (parse_iso8601's own default is "60 seconds ago",
+     which would otherwise always admit it). *)
+  let tasks =
+    [ task
+        ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = "not-a-timestamp" })
+        "task-malformed"
+    ]
+  in
+  check (list string) "no active ids for malformed timestamp" []
+    (List.map (fun item -> item.Admission.id) (Admission.active_items_of_tasks tasks))
 
 let test_goalless_task_exempt_from_goal_cap () =
   (* RFC-0245: a goalless claim must not be rejected by the per-goal cap even
@@ -405,5 +454,11 @@ let () =
             test_goalless_tasks_never_goal_capped
         ; test_case "goalless still bounded by global cap" `Quick
             test_goalless_still_bounded_by_global_cap
+        ; test_case "stale claimed task not active" `Quick
+            test_stale_claimed_task_not_active
+        ; test_case "fresh claimed task stays active under custom threshold" `Quick
+            test_fresh_claimed_task_stays_active_under_custom_threshold
+        ; test_case "unparseable claimed_at treated as stale" `Quick
+            test_unparseable_claimed_at_treated_as_stale
         ] )
     ]

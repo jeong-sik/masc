@@ -95,10 +95,29 @@ type active_item = {
   scope : scope;
 }
 
-let task_is_active_wip (task : Masc_domain.task) =
+(* WIP admission's own default: a claim/in-progress task with no observed
+   progress for one hour is stale enough to stop counting against the
+   admission caps. *)
+let default_wip_stale_threshold_s = Masc_time_constants.hour
+
+let task_is_active_wip ?(stale_threshold_s = default_wip_stale_threshold_s)
+    (task : Masc_domain.task)
+  =
+  let now = Unix.gettimeofday () in
+  let is_stale ts =
+    (* Fail-closed: an unparseable timestamp is treated as stale rather than
+       silently defaulting to "60 seconds ago" (parse_iso8601's own default),
+       which would admit a task with a malformed claimed_at/started_at as
+       fresh WIP. Matches workspace_resilience.ml's existing is_stale
+       convention for unparseable timestamps. *)
+    match Masc_domain.parse_iso8601_opt ts with
+    | None -> true
+    | Some t -> now -. t > stale_threshold_s
+  in
   match task.task_status with
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _ -> true
+  | Masc_domain.Claimed { claimed_at; _ } when is_stale claimed_at -> false
+  | Masc_domain.InProgress { started_at; _ } when is_stale started_at -> false
+  | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> true
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _
@@ -107,9 +126,9 @@ let task_is_active_wip (task : Masc_domain.task) =
 let active_item_of_task ?task_goal_index (task : Masc_domain.task) =
   { id = task.id; scope = scope_of_task ?task_goal_index task }
 
-let active_items_of_tasks ?task_goal_index tasks =
+let active_items_of_tasks ?task_goal_index ?stale_threshold_s tasks =
   tasks
-  |> List.filter task_is_active_wip
+  |> List.filter (task_is_active_wip ?stale_threshold_s)
   |> List.map (active_item_of_task ?task_goal_index)
 
 type reject_reason =

@@ -17,9 +17,11 @@
     ([Keeper_turn_admission.in_flight]), queued messages are left to
     accumulate; once the slot is free, the head run of same-source
     messages is drained ([Keeper_chat_queue.dequeue_batch]) and merged
-    into ONE coalesced message ([Keeper_chat_queue.merge_batch]) before
-    [handle_turn] runs — messages sent during a turn answer together in
-    a single follow-up turn instead of one turn each.
+    into ONE coalesced message ([Keeper_chat_queue.merge_batch]).  The
+    merged turn then runs in a keeper-scoped child fiber, so a slow queued
+    turn for one keeper does not block polling or delivery for other
+    keepers.  A keeper-local dispatch gate preserves the single follow-up
+    turn contract for messages sent during an existing queued turn.
 
     The fiber runs until [sw] is released.
 

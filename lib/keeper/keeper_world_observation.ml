@@ -1168,12 +1168,18 @@ let keeper_cycle_decision
            observable backlog state.  This breaks the "no signal → no turn →
            no signal" bootstrap deadlock. *)
         let is_bootstrap = since_last_scheduled_autonomous = max_int in
-        (* Phase 2 — Minimum proactive cadence: even with no observable work
-           signals, fire a housekeeping turn once the minimum interval has
-           elapsed.  Default: 900s (15 min).  Prevents permanent silence when
-           external events never arrive and decouples liveness from signal
-           availability.  Controlled by MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC
-           / keeper.proactive.min_interval_sec. *)
+        (* Phase 2 — Minimum proactive cadence rate-limit: tracks whether the
+           minimum interval has elapsed since the last scheduled-autonomous
+           turn.  Default: 900s (15 min).  Controlled by
+           MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC
+           / keeper.proactive.min_interval_sec.
+           RFC-0303 Phase 2: this no longer fires a housekeeping turn on its
+           own with no work signals.  It is stimulus-gated behind
+           [proactive_work_ready] at the should_run site below, so it only
+           rate-limits cadence turns when the keeper already has an
+           opportunity.  Liveness under genuine silence is preserved by the
+           bootstrap turn and by external Reactive-channel wakes, not by this
+           blind cadence. *)
         let proactive_min_interval_sec =
           Keeper_config.keeper_proactive_min_interval_sec ()
         in
@@ -1201,14 +1207,19 @@ let keeper_cycle_decision
            picked up on the keeper's own cadence (sleep Timeout) and by the
            supervisor sweep. Per-keeper signals (mention/board/scope) are handled
            by the Reactive channel above and are unaffected. Time-based liveness
-           reasons (bootstrap / min_interval / idle_gate+cooldown / oscillation)
-           key on the keeper's own clock, so they stay ungated. *)
+           reasons key on the keeper's own clock, so they stay ungated BY THIS
+           reactive-wake check. Note this is a separate axis from the RFC-0303
+           Phase 2 gate below: [min_interval] and [idle_gate+cooldown] are
+           additionally stimulus-gated behind [proactive_work_ready], so they
+           cannot independently drive a scheduled-autonomous run. Only
+           [bootstrap] and a due schedule remain fully self-driving stimuli. *)
         let backlog_drives_turn =
           (not reactive_wake) && (backlog_fresh || backlog_elapsed)
         in
         let schedule_drives_turn = (not reactive_wake) && schedule_elapsed in
-        (* RFC-0303 Phase 2: stimulus-gate the self-cadence wake. [min_interval_
-           elapsed] no longer drives a turn ON ITS OWN — a blind cadence turn
+        (* RFC-0303 Phase 2: stimulus-gate the self-cadence wake.
+           [min_interval_elapsed] no longer drives a turn ON ITS OWN — a blind
+           cadence turn
            with no work signal is what manufactured the "passive" turns the
            no-progress stack then chased (detect -> pause -> tombstone). It is
            now a rate-limit INSIDE the [proactive_work_ready] guard: a keeper

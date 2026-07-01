@@ -48,13 +48,15 @@ let make_config
   let idle_threshold_s = Float.max 60.0 (Float.min Masc_time_constants.hour idle_threshold_s) in
   { base_interval_s; idle_multiplier; busy_skip; idle_threshold_s }
 
-let effective_interval ~config ~last_activity =
-  let now = Time_compat.now () in
+let effective_interval_at ~config ~now ~last_activity =
   let idle_duration = now -. last_activity in
   if idle_duration > config.idle_threshold_s then
     config.base_interval_s *. config.idle_multiplier
   else
     config.base_interval_s
+
+let effective_interval ~config ~last_activity =
+  effective_interval_at ~config ~now:(Time_compat.now ()) ~last_activity
 
 let should_emit ~config ~agent_status ~last_activity ~last_heartbeat =
   let now = Time_compat.now () in

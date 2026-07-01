@@ -58,6 +58,12 @@ val should_emit :
 *)
 val effective_interval : config:config -> last_activity:float -> float
 
+(** Calculate the effective interval with an explicit clock value.
+
+    This keeps boundary tests and deterministic callers from sampling wall time
+    twice around the idle-threshold comparison. *)
+val effective_interval_at : config:config -> now:float -> last_activity:float -> float
+
 (** Convert decision to human-readable string (for logging) *)
 val decision_to_string : decision -> string
 

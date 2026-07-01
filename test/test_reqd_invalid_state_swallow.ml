@@ -306,7 +306,8 @@ let () =
   assert_contains
     ~label:"KS3: worker uses server switch"
     keeper_stream_src
-    "process_single_turn ~state ~clock ~sw\n";
+    "process_single_turn ~connector_user_line_recorded_upstream:false\n\
+     \             ~state ~clock ~sw\n";
   assert_contains
     ~label:"KS4: disconnect watcher uses stream switch"
     keeper_stream_src

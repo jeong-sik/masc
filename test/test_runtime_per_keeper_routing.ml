@@ -676,7 +676,7 @@ max-concurrent = 1
 let runtime_thinking_model_catalog =
   {|
 [[models]]
-id_prefix = "qwen36-35b-a3b-mtp"
+id_prefix = "openai_compat/qwen36-35b-a3b-mtp"
 base = "openai_chat"
 max_context_tokens = 131072
 supports_tools = true
@@ -689,7 +689,7 @@ preserve_thinking_control_format = "chat_template_kwargs_preserve_thinking"
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "reasoning-small-out"
+id_prefix = "openai_compat/reasoning-small-out"
 base = "openai_chat"
 max_context_tokens = 131072
 max_output_tokens = 4096
@@ -699,7 +699,7 @@ supports_extended_thinking = true
 supports_native_streaming = true
 
 [[models]]
-id_prefix = "reasoning-big-out"
+id_prefix = "openai_compat/reasoning-big-out"
 base = "openai_chat"
 max_context_tokens = 1000000
 max_output_tokens = 200000

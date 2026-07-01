@@ -84,14 +84,14 @@ let record_response_content_quality_metric ~keeper_name
     (response : Agent_sdk.Types.api_response) =
   let shape = Response_shape.summarize response in
   if not (Response_shape.has_deliverable_content shape) then
+    let content_shape = Response_shape.content_shape response shape in
+    let shape_label = Response_shape.content_shape_to_string content_shape in
     Otel_metric_store.inc_counter empty_response_content_metric
       ~labels:
         [
           (label_keeper, keeper_name);
           (label_stop_reason, stop_reason_to_label response.stop_reason);
-          ( label_shape,
-            Response_shape.(
-              content_shape response shape |> content_shape_to_string) );
+          (label_shape, shape_label);
         ]
       ()
 

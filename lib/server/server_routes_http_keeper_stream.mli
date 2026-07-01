@@ -38,6 +38,14 @@
     framing, connector-context and legacy model-argument
     payload guards). *)
 
+(** {1 Stream tunables} *)
+
+(** SSE reconnect backoff (ms) primed on the dashboard keeper-chat streams.
+    Shared with {!Server_routes_http_routes_dashboard} (reached via [open]) so the
+    two dashboard priming sites cannot silently diverge; intentionally distinct
+    from {!Server_mcp_transport_http_headers.sse_retry_ms} (the MCP transport). *)
+val sse_dashboard_retry_backoff_ms : int
+
 (** {1 Request record} *)
 
 type user_media_block = Keeper_multimodal_input.user_media_block = {

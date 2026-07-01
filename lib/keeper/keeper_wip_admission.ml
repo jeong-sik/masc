@@ -96,9 +96,17 @@ type active_item = {
 }
 
 let task_is_active_wip (task : Masc_domain.task) =
+  let threshold_sec = 1800.0 in
+  let now = Unix.gettimeofday () in
   match task.task_status with
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _ -> true
+  | Masc_domain.InProgress { started_at; _ } ->
+      (match Masc_domain.parse_iso8601_opt started_at with
+       | Some started_ts -> now -. started_ts < threshold_sec
+       | None -> true)
+  | Masc_domain.Claimed { claimed_at; _ } ->
+      (match Masc_domain.parse_iso8601_opt claimed_at with
+       | Some claimed_ts -> now -. claimed_ts < threshold_sec
+       | None -> true)
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _

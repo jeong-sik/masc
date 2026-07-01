@@ -43,10 +43,6 @@ type curation_snapshot = {
   (** Suggested tags by post. *)
   answer_matches : curation_answer_match list;
   (** Candidate question/answer matches. *)
-  health_score : float option;
-  (** Optional normalized community health score in the range [0.0, 1.0]. *)
-  health_components : curation_health_component list;
-  (** Auditable health-score component breakdown. *)
   rationale : string;
   (** Human-readable explanation of the curation decisions. *)
   provenance : Yojson.Safe.t;
@@ -64,13 +60,6 @@ and curation_answer_match = {
   question_post_id : string;
   answer_post_id : string;
   score : float;
-  rationale : string;
-}
-
-and curation_health_component = {
-  name : string;
-  score : float;
-  weight : float;
   rationale : string;
 }
 

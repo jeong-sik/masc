@@ -121,12 +121,12 @@ export function boardActorTitle(
 }
 
 export function contributorQualityPercent(quality?: BoardContributorQuality | null): number | null {
-  if (!quality || !Number.isFinite(quality.score)) return null
-  return clampPct(Math.round(quality.score * 100))
+  const score = contributorQualityDisplayScore(quality)
+  return score === null ? null : clampPct(Math.round(score * 100))
 }
 
 export function contributorQualityBandLabel(quality?: BoardContributorQuality | null): string {
-  switch (quality?.band) {
+  switch (contributorQualityDisplayBand(quality)) {
     case 'excellent':
       return '우수'
     case 'strong':
@@ -141,7 +141,7 @@ export function contributorQualityBandLabel(quality?: BoardContributorQuality | 
 }
 
 export function contributorQualityBadgeClass(quality?: BoardContributorQuality | null): string {
-  switch (quality?.band) {
+  switch (contributorQualityDisplayBand(quality)) {
     case 'excellent':
     case 'strong':
       return 'bg-[var(--ok-10)] text-[var(--ok-fg)] border-[var(--ok-20)]'
@@ -152,6 +152,31 @@ export function contributorQualityBadgeClass(quality?: BoardContributorQuality |
     default:
       return 'bg-[var(--color-bg-muted)] text-[var(--color-fg-muted)] border-[var(--color-border-divider)]'
   }
+}
+
+function contributorQualityDisplayScore(
+  quality?: BoardContributorQuality | null,
+): number | null {
+  if (!quality) return null
+  const legacyScore = quality.score
+  if (legacyScore !== undefined && Number.isFinite(legacyScore)) return legacyScore
+  const accountabilityScore = quality.accountability_score
+  if (accountabilityScore !== undefined && Number.isFinite(accountabilityScore)) {
+    return accountabilityScore
+  }
+  return null
+}
+
+function contributorQualityDisplayBand(
+  quality?: BoardContributorQuality | null,
+): BoardContributorQuality['band'] | null {
+  if (quality?.band) return quality.band
+  const score = contributorQualityDisplayScore(quality)
+  if (score === null) return null
+  if (score >= 0.85) return 'excellent'
+  if (score >= 0.65) return 'strong'
+  if (score >= 0.35) return 'watch'
+  return 'low'
 }
 
 /** Navigate to keeper detail if author is a keeper, otherwise agent profile. */

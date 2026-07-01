@@ -75,9 +75,6 @@ let frugal_threshold () =
 let hustle_threshold () =
   Env_config_core.get_float ~default:0.0 "MASC_ECONOMY_HUSTLE_THRESHOLD"
 
-let reputation_multiplier_enabled () =
-  Env_config_core.get_bool ~default:true "MASC_ECONOMY_REPUTATION_MULTIPLIER"
-
 (** {1 Transaction Kind Helpers} *)
 
 let transaction_kind_to_string = function
@@ -248,13 +245,6 @@ let list_transactions ~base_path =
               "agent_economy: skipping malformed ledger entry: %s" msg;
             None)
 
-(** {1 Reputation Integration} *)
-
-let reward_multiplier ~overall_score =
-  (* Map 0.0-1.0 score to 0.5x-1.5x multiplier *)
-  let clamped = Stdlib.Float.max 0.0 (Stdlib.Float.min 1.0 overall_score) in
-  0.5 +. clamped
-
 let base_reward_for_kind = function
   | Earn_task_done -> reward_task_done ()
   | Earn_board_post -> reward_board_post ()
@@ -270,21 +260,14 @@ let current_balance_locked ~base_path ~agent_name =
   | Some b -> b
   | None -> initial_balance ()
 
-let earn ~base_path ~agent_name ~kind ~reason ?reputation_score ?(metadata = `Null) () =
+let earn ~base_path ~agent_name ~kind ~reason ?(metadata = `Null) () =
   if not (enabled ()) then Ok (get_balance ~base_path ~agent_name)
   else
     let base_amount = base_reward_for_kind kind in
     if Stdlib.Float.compare base_amount 0.0 <= 0 then
       Error "[agent_economy] earn called with non-earning kind"
     else
-      let multiplier =
-        if reputation_multiplier_enabled () then
-          match reputation_score with
-          | Some score -> reward_multiplier ~overall_score:score
-          | None -> 1.0
-        else 1.0
-      in
-      let amount = base_amount *. multiplier in
+      let amount = base_amount in
       (* Load ledger outside the lock (has its own locking + load-once
          semantics), then run read-compute-write under the lock so two
          concurrent earn/spend cannot both read the same [current] and

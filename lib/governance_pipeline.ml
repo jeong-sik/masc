@@ -380,7 +380,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       let runtime_contract =
         Option.map
           (fun keeper_meta ->
-             Keeper_runtime_contract.runtime_contract_json ?config:(Some config) keeper_meta)
+             Keeper_runtime_contract.runtime_contract_json ~config keeper_meta)
           meta
       in
       let sandbox_profile, backend, sandbox_target =

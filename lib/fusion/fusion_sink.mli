@@ -44,7 +44,9 @@ val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
     실행된 심판 노드 관측 배열(RFC-0284)로 board meta_json [judges] 키에 panel과 동형으로
     직렬화된다 — canonical 단일 [judge] 키는 ADDITIVE 유지. [base_dir]는 호출자 주입.
 
-    chat store append 또는 board post 생성 실패는 [Error msg]로 반환한다.
+    chat store append 실패는 [Error msg]로 반환한다. board post 생성 실패는 결론
+    전달을 실패로 되돌리지 않는다: 경고를 남기고 [board_post_id = ""]로
+    completion/wake를 진행한 뒤 [Ok ()]를 반환한다.
     [chat_appended] SSE broadcast는 {!Keeper_chat_broadcast} 정책을 따른다:
     non-cancel 예외는 counter+warn으로 흡수하는 best-effort 알림이며, chat/board
     영속 성공을 실패로 되돌리지 않는다. [Eio.Cancel.Cancelled]는 재전파한다. *)
@@ -65,8 +67,9 @@ val emit
     chat append 영속과 별개의 hint+payload 경로). [ok = false]는 denied/sink_failed/
     aborted 실패 라벨을 [resolved_answer]에 싣고, board post가 없으면 [board_post_id = ""].
 
-    [emit]은 성공 경로(board post 생성됨)에서 이를 호출하고, 실패 경로는 fusion_tool의
-    append_chat_failure가 호출한다(completion 타입당 단일 wake로 중복 방지).
+    [emit]은 chat lane append 성공 경로에서 이를 호출한다(board post가 없으면
+    [board_post_id = ""]). 실패 경로는 fusion_tool의 append_chat_failure가
+    호출한다(completion 타입당 단일 wake로 중복 방지).
 
     예외 안전: [Eio.Cancel.Cancelled]는 재전파, 그 외 예외는 흡수(sink 결과 비오염).
     Running이 아닌 키퍼는 silent no-op이며 결과는 board/chat 영속으로 남는다. *)

@@ -37,6 +37,9 @@ let with_workspace f =
 
 let iso_now () = Masc_domain.now_iso ()
 
+let goals_recovery_path config =
+  Goal_store.goals_path config ^ ".last-good"
+
 let make_goal id title =
   let ts = iso_now () in
   {
@@ -87,6 +90,8 @@ let test_delete_nonexistent_does_not_bump () =
   let v_before = (Goal_store.read_state config).version in
   (match Goal_store.delete_goal config ~goal_id:"ghost" with
    | Error (Goal_store.Unknown_goal _) -> ()
+   | Error err ->
+     fail ("expected Unknown_goal, got: " ^ Goal_store.delete_goal_error_to_string err)
    | Ok _ -> fail "expected error for missing goal");
   let v_after = (Goal_store.read_state config).version in
   check int "version unchanged on error" v_before v_after
@@ -267,6 +272,19 @@ let test_write_state_sanitizes_invalid_utf8_before_persisting () =
   let stats = Safe_ops.persistence_utf8_repair_stats () in
   check int "read path did not repair goal store" 0 stats.repaired_reads
 
+let test_write_state_result_keeps_primary_commit_when_recovery_write_fails () =
+  with_workspace @@ fun config ->
+  Unix.mkdir (goals_recovery_path config) 0o755;
+  let goal = make_goal "recovery-mirror-fail" "recovery mirror fail" in
+  let state = { Goal_store.version = 3; updated_at = iso_now (); goals = [ goal ] } in
+  (match Goal_store.write_state_result config state with
+   | Ok () -> ()
+   | Error msg ->
+     fail ("recovery mirror failure should not fail committed primary write: " ^ msg));
+  match Goal_store.get_goal config ~goal_id:goal.Goal_store.id with
+  | Some stored -> check string "primary has goal" goal.title stored.title
+  | None -> fail "primary goal missing after recovery mirror failure"
+
 let () =
   run "Goal_store.delete_goal"
     [ ( "regression-7690",
@@ -290,4 +308,6 @@ let () =
           test_case "missing update: no bump" `Quick
             test_update_missing_goal_does_not_bump;
           test_case "write_state sanitizes invalid utf8" `Quick
-            test_write_state_sanitizes_invalid_utf8_before_persisting ] ) ]
+            test_write_state_sanitizes_invalid_utf8_before_persisting;
+          test_case "recovery mirror write failure preserves primary" `Quick
+            test_write_state_result_keeps_primary_commit_when_recovery_write_fails ] ) ]

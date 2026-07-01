@@ -135,7 +135,7 @@ export type BoardVoteDirection = 'up' | 'down'
 export type BoardModerationStatus = 'none' | 'flagged' | 'approved' | 'removed' | 'hidden' | 'warned'
 
 export interface BoardContributorQuality {
-  score: number
+  score?: number
   band?: 'low' | 'watch' | 'strong' | 'excellent'
   source?: string
   completion_rate?: number

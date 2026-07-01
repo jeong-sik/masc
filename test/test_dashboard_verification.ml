@@ -2,10 +2,9 @@
     verification requests.
 
     The projection reads [Verification.list_requests] against
-    [Env_config_core.base_path ()], so these tests override
-    [MASC_BASE_PATH] with a throwaway temp dir before invoking the
-    projection. That keeps the tests independent from whatever is sitting
-    in the user's real [.masc/verifications/] directory. *)
+    the explicitly supplied base path. Tests use a throwaway temp dir so
+    they stay independent from whatever is sitting in the user's real
+    [.masc/verifications/] directory. *)
 
 (* Mirage_crypto_rng is consumed by Verification.generate_id. *)
 let () = Mirage_crypto_rng_unix.use_default ()
@@ -129,7 +128,7 @@ let test_temp_base_path_overrides_and_restores_env_inputs () =
             ~worker:"keeper-alpha" ~criteria:[V.Custom "env isolated"]
             ~evidence:["ref-env"]
         in
-        let j = D.requests_json () in
+        let j = D.requests_json ~base_path () in
         match member "total" j with
         | `Int 1 -> ()
         | `Int n ->
@@ -153,7 +152,7 @@ let test_requests_json_shape () =
           V.Custom "Must pass integration tests";
         ]
         ~evidence:["artifacts/lsof.before"; "artifacts/lsof.after"] in
-    let j = D.requests_json () in
+    let j = D.requests_json ~base_path () in
     (* Envelope: updated_at, total, requests *)
     (match member "updated_at" j with
      | `String _ -> ()
@@ -225,6 +224,49 @@ let test_requests_json_shape () =
          Alcotest.fail (Printf.sprintf "task_title mismatch: got %S" s)
      | _ -> Alcotest.fail "task_title should be string"))
 
+let test_requests_json_uses_explicit_base_path_not_env () =
+  let workspace_base = Filename.temp_dir "masc_dashboard_verify_workspace" "" in
+  let env_base = Filename.temp_dir "masc_dashboard_verify_env" "" in
+  let prior_base = snapshot_config_input "MASC_BASE_PATH" in
+  let prior_input = snapshot_config_input "MASC_BASE_PATH_INPUT" in
+  override_config_input "MASC_BASE_PATH" env_base;
+  override_config_input "MASC_BASE_PATH_INPUT" env_base;
+  Fun.protect
+    ~finally:(fun () ->
+      restore_config_input "MASC_BASE_PATH" prior_base;
+      restore_config_input "MASC_BASE_PATH_INPUT" prior_input;
+      rm_rf workspace_base;
+      rm_rf env_base)
+    (fun () ->
+      let _ =
+        create_pending_request ~base_path:workspace_base
+          ~task_id:"task-workspace"
+          ~worker:"keeper-workspace"
+          ~criteria:[V.Custom "workspace criterion"]
+          ~evidence:["ref-workspace"]
+      in
+      let _ =
+        create_pending_request ~base_path:env_base
+          ~task_id:"task-env"
+          ~worker:"keeper-env"
+          ~criteria:[V.Custom "env criterion"]
+          ~evidence:["ref-env"]
+      in
+      let j = D.requests_json ~base_path:workspace_base () in
+      Alcotest.(check int) "explicit base path total"
+        1
+        (match member "total" j with
+         | `Int n -> n
+         | _ -> Alcotest.fail "total should be int");
+      match member "requests" j with
+      | `List [row] ->
+          Alcotest.(check string) "workspace task visible"
+            "task-workspace"
+            (match member "task_id" row with
+             | `String value -> value
+             | _ -> Alcotest.fail "task_id should be string")
+      | _ -> Alcotest.fail "expected one explicit-base request")
+
 let test_task_id_filter () =
   with_temp_base_path (fun base_path ->
     let _ = create_pending_request ~base_path
@@ -238,7 +280,7 @@ let test_task_id_filter () =
         ~criteria:[V.Custom "B criterion"] ~evidence:["ref-B"] in
 
     (* Unfiltered: all 3 requests *)
-    let j_all = D.requests_json () in
+    let j_all = D.requests_json ~base_path () in
     (match member "total" j_all with
      | `Int 3 -> ()
      | `Int n ->
@@ -246,7 +288,7 @@ let test_task_id_filter () =
      | _ -> Alcotest.fail "total not int");
 
     (* Filter task_id="task-A": exactly 2 requests, all with task_id = task-A *)
-    let j_a = D.requests_json ~task_id:"task-A" () in
+    let j_a = D.requests_json ~base_path ~task_id:"task-A" () in
     (match member "total" j_a with
      | `Int 2 -> ()
      | `Int n ->
@@ -265,7 +307,7 @@ let test_task_id_filter () =
      | _ -> Alcotest.fail "requests not list");
 
     (* Filter task_id="nonexistent": 0 entries *)
-    let j_none = D.requests_json ~task_id:"task-missing" () in
+    let j_none = D.requests_json ~base_path ~task_id:"task-missing" () in
     (match member "total" j_none with
      | `Int 0 -> ()
      | `Int n ->
@@ -288,7 +330,7 @@ let test_requests_json_ignores_legacy_root_entries () =
       {|{"id":"vrf-foreign","task_id":"task-legacy","evaluator":"oracle","overall_verdict":"approve"}|};
     Alcotest.(check bool) "active store exists" true
       (Sys.file_exists (active_verifications_dir base_path));
-    let j = D.requests_json () in
+    let j = D.requests_json ~base_path () in
     (match member "total" j with
      | `Int 1 -> ()
      | `Int n -> Alcotest.fail (Printf.sprintf "expected 1 live row, got %d" n)
@@ -319,7 +361,7 @@ let test_requests_json_surfaces_conflict_triage_fields () =
       | Ok req -> req
       | Error e -> Alcotest.fail (Printf.sprintf "create_request failed: %s" e)
     in
-    let j = D.requests_json ~task_id:"task-conflict" () in
+    let j = D.requests_json ~base_path ~task_id:"task-conflict" () in
     let reqs =
       match member "requests" j with
       | `List xs -> xs
@@ -370,7 +412,7 @@ let test_requests_and_summary_degrade_under_fd_pressure () =
     Fun.protect
       ~finally:FD.reset_for_tests
       (fun () ->
-        let requests = D.requests_json () in
+        let requests = D.requests_json ~base_path () in
         Alcotest.(check int) "requests total degraded" 0 (int_field "total" requests);
         Alcotest.(check bool)
           "requests degraded flag"
@@ -379,7 +421,7 @@ let test_requests_and_summary_degrade_under_fd_pressure () =
         (match member "requests" requests with
          | `List [] -> ()
          | _ -> Alcotest.fail "requests should be empty during fd pressure");
-        let summary = D.summary_json () in
+        let summary = D.summary_json ~base_path () in
         Alcotest.(check int) "summary total degraded" 0 (int_field "total" summary);
         Alcotest.(check bool)
           "summary degraded flag"
@@ -387,8 +429,8 @@ let test_requests_and_summary_degrade_under_fd_pressure () =
           (bool_field "degraded" summary)))
 
 let test_summary_empty () =
-  with_temp_base_path (fun _base_path ->
-    let j = D.summary_json () in
+  with_temp_base_path (fun base_path ->
+    let j = D.summary_json ~base_path () in
     Alcotest.(check int) "total" 0 (int_field "total" j);
     let by = member "by_status" j in
     Alcotest.(check int) "pending" 0 (int_field "pending" by);
@@ -422,7 +464,7 @@ let test_summary_bucket_counts () =
     verdict_of r1 ~verdict:(V.Fail "r1 reason");
     verdict_of r2 ~verdict:(V.Fail "r2 reason");
 
-    let j = D.summary_json () in
+    let j = D.summary_json ~base_path () in
     Alcotest.(check int) "total" 5 (int_field "total" j);
     let by = member "by_status" j in
     Alcotest.(check int) "pending" 2 (int_field "pending" by);
@@ -447,12 +489,12 @@ let test_summary_recent_clamp () =
     (match V.submit_verdict ~base_path ~req_id:r.V.id
              ~verifier:"v" ~verdict:(V.Fail "x") with
      | Ok _ -> () | Error e -> Alcotest.fail e);
-    let j = D.summary_json ~recent:0 () in
+    let j = D.summary_json ~base_path ~recent:0 () in
     (match member "recent_rejections" j with
      | `List [] -> ()
      | _ -> Alcotest.fail "expected empty list at recent=0");
     (* recent > 20 clamps to 20 (smoke: ensures no crash) *)
-    let _ = D.summary_json ~recent:999 () in ())
+    let _ = D.summary_json ~base_path ~recent:999 () in ())
 
 (* ── Registration ───────────────────────────────────── *)
 
@@ -464,6 +506,8 @@ let () =
       Alcotest.test_case "overrides and restores env inputs" `Quick
         test_temp_base_path_overrides_and_restores_env_inputs;
       Alcotest.test_case "shape" `Quick test_requests_json_shape;
+      Alcotest.test_case "uses explicit base_path, not env" `Quick
+        test_requests_json_uses_explicit_base_path_not_env;
       Alcotest.test_case "task_id filter" `Quick test_task_id_filter;
       Alcotest.test_case "ignores legacy root entries" `Quick
         test_requests_json_ignores_legacy_root_entries;

@@ -70,7 +70,22 @@ interface TomlDocument {
 
 type TomlScalar = string | number | boolean | null
 
-const RESERVED_TOP_LEVEL = new Set(['providers', 'models', 'runtime', 'system', 'routes', 'profiles'])
+// Mirrors the backend's reserved_namespaces (lib/runtime/runtime_toml.ml:554).
+// A *provider* id equal to one of these would collide with a top-level TOML
+// namespace once used as a binding pin's first segment (`[<providerId>.<modelId>]`,
+// e.g. `[models.foo]` could no longer be told apart from a model definition
+// section). Model ids never occupy that first-segment position, but are
+// checked against the same set here too for naming consistency across the
+// two entity types, not because they carry the same collision risk.
+const RESERVED_TOP_LEVEL = new Set([
+  'providers',
+  'models',
+  'runtime',
+  'system',
+  'routes',
+  'profiles',
+  'web_search',
+])
 
 function parseDocument(sourceText: string): TomlDocument {
   const lines = sourceText.split('\n')
@@ -545,7 +560,7 @@ export function setRuntimeTomlProviderCredential(
     next = deleteRuntimeTomlKey(next, section, 'key')
     return deleteRuntimeTomlKey(next, section, 'value')
   }
-  next = setRuntimeTomlKey(next, section, 'value', value)
+  next = setRuntimeTomlKey(next, section, 'value', normalizedValue)
   next = deleteRuntimeTomlKey(next, section, 'key')
   return deleteRuntimeTomlKey(next, section, 'path')
 }
@@ -568,4 +583,83 @@ export function setRuntimeTomlBindingField(
 ): string {
   if (value === null) return deleteRuntimeTomlKey(sourceText, runtimeId, field)
   return setRuntimeTomlKey(sourceText, runtimeId, field, value)
+}
+
+// Closed set mirroring lib/runtime/runtime_toml.ml's api_format_of_protocol —
+// any other string fails runtime.toml *parse* validation on save
+// (Runtime.save_config_text re-parses via materialize_config). This does not
+// mean every member here can be safely offered by the add-provider form: see
+// RUNTIME_TOML_CREATABLE_PROTOCOLS below for the materialization gate.
+export const RUNTIME_TOML_PROTOCOLS = [
+  'openai-compatible-http',
+  'ollama-http',
+  'openai-compatible-cli',
+  'messages-http',
+  'messages-cli',
+] as const
+
+export type RuntimeTomlProtocol = (typeof RUNTIME_TOML_PROTOCOLS)[number]
+
+// Subset of RUNTIME_TOML_PROTOCOLS the add-provider form is allowed to offer.
+// The add-provider form only creates endpoint-backed providers. Command
+// transport is blocked at the binding form via transportKind, while
+// `provider_kind_for_http_provider` still returns `None` for `Messages_api`.
+// Messages providers parse and save, but resolve to no provider_kind and
+// `Runtime.materialize_config`'s `List.filter_map` silently drops their bindings
+// from the live runtime list instead of failing the save
+// (lib/runtime/runtime_adapter.ml:183-203, lib/runtime/runtime.ml:239).
+// This is an allow-list of materializable endpoint protocols, so a future 6th
+// protocol defaults to non-creatable until reviewed.
+export const RUNTIME_TOML_CREATABLE_PROTOCOLS = [
+  'openai-compatible-http',
+  'ollama-http',
+  'openai-compatible-cli',
+] as const
+
+export type RuntimeTomlCreatableProtocol = (typeof RUNTIME_TOML_CREATABLE_PROTOCOLS)[number]
+
+export function isRuntimeTomlCreatableProtocol(protocol: string): protocol is RuntimeTomlCreatableProtocol {
+  return (RUNTIME_TOML_CREATABLE_PROTOCOLS as readonly string[]).includes(protocol)
+}
+
+const RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS = new Set([
+  'messages-http',
+  'messages-cli',
+])
+
+export function isRuntimeTomlNonMaterializableProtocol(protocol: string): boolean {
+  return RUNTIME_TOML_NON_MATERIALIZABLE_PROTOCOLS.has(protocol)
+}
+
+// runtime.toml ids become TOML table headers ([providers.<id>], [models.<id>],
+// and the binding pin [<providerId>.<modelId>]). parseDocument's section regex
+// and bindingSections' 2-part split both assume an id has no '.', so a bare-key
+// -safe charset is required, not just non-empty. Matches BARE_TOML_KEY above
+// (same TOML bare-key grammar: ASCII letters/digits/underscore/dash, no
+// restriction on the first character) rather than a stricter identifier-style
+// pattern — a leading '_'/'-' is a valid bare key both to keyLineMatch's
+// tokenizer and to the backend TOML parser, so rejecting it here would make
+// this form stricter than the config format it writes into.
+const RUNTIME_TOML_ID_PATTERN = /^[A-Za-z0-9_-]+$/
+
+export function isValidRuntimeTomlIdFormat(id: string): boolean {
+  return RUNTIME_TOML_ID_PATTERN.test(id)
+}
+
+export function isReservedRuntimeTomlId(id: string): boolean {
+  return RESERVED_TOP_LEVEL.has(id)
+}
+
+// Ensures the provider x model pin section exists (e.g. `[ollama_cloud.new-model]`)
+// without setting any field — an empty binding section is a valid, common shape
+// in runtime.toml already (most bindings only carry `is-default`/knobs when they
+// deviate from defaults). No-op if the binding already exists.
+export function createRuntimeTomlBinding(
+  sourceText: string,
+  providerId: string,
+  modelId: string,
+): string {
+  const document = parseDocument(sourceText)
+  const ensured = ensureSection([...document.lines], document, `${providerId}.${modelId}`)
+  return joinLines(ensured.lines)
 }

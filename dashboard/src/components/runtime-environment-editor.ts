@@ -1,9 +1,14 @@
 import { html } from 'htm/preact'
 import { useMemo, useState } from 'preact/hooks'
 import {
+  isRuntimeTomlNonMaterializableProtocol,
+  isReservedRuntimeTomlId,
+  isValidRuntimeTomlIdFormat,
   parseRuntimeTomlEnvironment,
+  RUNTIME_TOML_CREATABLE_PROTOCOLS,
   type RuntimeTomlCredentialType,
   type RuntimeTomlEnvironment,
+  type RuntimeTomlProtocol,
   type RuntimeTomlProvider,
 } from '../lib/runtime-toml-config'
 import { keepers } from '../store'
@@ -22,6 +27,36 @@ export type RuntimeStructuredSection =
 export type RuntimeBindingEditableField = 'max-concurrent' | 'keep-alive' | 'num-ctx'
 export type RuntimeProviderTransportEditableField = 'endpoint' | 'command'
 
+// Basic-field-only payloads (RFC-0273 §3.2 reuse boundary). Per-model
+// [models.X.capabilities] flags (supports-tool-choice, thinking-control-format,
+// ...) are deliberately excluded — those are semantically coupled to real,
+// per-model verified behavior (see runtime.toml's own inline caveats), not
+// something a generic add form can default safely. They stay raw-TOML-only.
+// transportKind is fixed to 'endpoint': CLI (`command`) transport providers
+// resolve to no provider_kind on the backend today and get silently dropped
+// from the live runtime list rather than failing the save (see
+// RUNTIME_TOML_CREATABLE_PROTOCOLS in lib/runtime-toml-config.ts). Until that
+// backend limitation is lifted, this form cannot offer command transport.
+export interface NewRuntimeProviderInput {
+  id: string
+  displayName: string
+  protocol: RuntimeTomlProtocol
+  transportKind: 'endpoint'
+  transportValue: string
+  credentialType: RuntimeTomlCredentialType
+  credentialValue: string
+}
+
+export interface NewRuntimeModelInput {
+  id: string
+  apiName: string
+  maxContext: number
+  toolsSupport: boolean
+  thinkingSupport: boolean
+  streaming: boolean
+  jsonSupport: boolean | null
+}
+
 interface RuntimeEnvironmentEditorProps {
   sourceText: string
   section: RuntimeStructuredSection
@@ -35,6 +70,9 @@ interface RuntimeEnvironmentEditorProps {
     field: RuntimeBindingEditableField,
     value: string | number | null,
   ) => void
+  onAddProvider: (input: NewRuntimeProviderInput) => void
+  onAddModel: (input: NewRuntimeModelInput) => void
+  onAddBinding: (providerId: string, modelId: string) => void
   onProviderTransportChange: (
     providerId: string,
     field: RuntimeProviderTransportEditableField,
@@ -65,6 +103,55 @@ function credentialValue(provider: RuntimeTomlProvider): string {
 function transportValue(provider: RuntimeTomlProvider): string {
   if (provider.transportKind === 'command') return provider.command
   return provider.endpoint
+}
+
+interface NewProviderDraft {
+  id: string
+  displayName: string
+  protocol: RuntimeTomlProtocol
+  transportKind: 'endpoint'
+  transportValue: string
+  credentialType: RuntimeTomlCredentialType
+  credentialValue: string
+}
+
+const DEFAULT_NEW_PROVIDER: NewProviderDraft = {
+  id: '',
+  displayName: '',
+  protocol: RUNTIME_TOML_CREATABLE_PROTOCOLS[0],
+  transportKind: 'endpoint',
+  transportValue: '',
+  credentialType: 'env',
+  credentialValue: '',
+}
+
+// jsonSupport as a 3-way string enum (not boolean|null) because <select> values
+// must be strings; 'unset' means omit the key (backend default: unconfirmed).
+interface NewModelDraft {
+  id: string
+  apiName: string
+  maxContext: string
+  toolsSupport: boolean
+  thinkingSupport: boolean
+  streaming: boolean
+  jsonSupport: 'unset' | 'true' | 'false'
+}
+
+const DEFAULT_NEW_MODEL: NewModelDraft = {
+  id: '',
+  apiName: '',
+  maxContext: '',
+  toolsSupport: false,
+  thinkingSupport: false,
+  streaming: true,
+  jsonSupport: 'unset',
+}
+
+function parseRequiredPositiveInteger(raw: string): number | undefined {
+  const trimmed = raw.trim()
+  if (!/^\d+$/.test(trimmed)) return undefined
+  const parsed = Number.parseInt(trimmed, 10)
+  return parsed > 0 ? parsed : undefined
 }
 
 function transportField(provider: RuntimeTomlProvider): RuntimeProviderTransportEditableField {
@@ -113,11 +200,26 @@ export function RuntimeEnvironmentEditor({
   onRoutingChange,
   onAssignmentChange,
   onBindingFieldChange,
+  onAddProvider,
+  onAddModel,
+  onAddBinding,
   onProviderTransportChange,
   onProviderCredentialChange,
 }: RuntimeEnvironmentEditorProps) {
   const environment = useMemo(() => parseRuntimeTomlEnvironment(sourceText), [sourceText])
   const [modelQuery, setModelQuery] = useState('')
+
+  const [providerFormOpen, setProviderFormOpen] = useState(false)
+  const [newProvider, setNewProvider] = useState<NewProviderDraft>(DEFAULT_NEW_PROVIDER)
+  const [providerFormError, setProviderFormError] = useState<string | null>(null)
+
+  const [modelFormOpen, setModelFormOpen] = useState(false)
+  const [newModel, setNewModel] = useState<NewModelDraft>(DEFAULT_NEW_MODEL)
+  const [modelFormError, setModelFormError] = useState<string | null>(null)
+
+  const [bindingProviderId, setBindingProviderId] = useState('')
+  const [bindingModelId, setBindingModelId] = useState('')
+  const [bindingFormError, setBindingFormError] = useState<string | null>(null)
 
   const runtimeIds = runtimeOptions(environment)
   const isDisabled = disabled === true || saving === true
@@ -163,6 +265,126 @@ export function RuntimeEnvironmentEditor({
   function updateBindingKeepAlive(runtimeId: string, raw: string) {
     const next = raw.trim()
     onBindingFieldChange(runtimeId, 'keep-alive', next === '' ? null : next)
+  }
+
+  // Shared id checks for the three add-forms below: format (TOML-header-safe),
+  // reserved namespace (would collide with providers./models./runtime. etc.),
+  // and uniqueness against the current draft (never silently overwrite).
+  function runtimeTomlIdError(id: string, taken: readonly string[]): string | null {
+    if (id === '') return 'id를 입력하세요'
+    if (!isValidRuntimeTomlIdFormat(id)) {
+      return 'id는 영문·숫자·-·_ 만 사용할 수 있습니다'
+    }
+    if (isReservedRuntimeTomlId(id)) return `"${id}"는 예약된 이름입니다`
+    if (taken.includes(id)) return `이미 존재하는 id입니다: ${id}`
+    return null
+  }
+
+  function submitAddProvider() {
+    const id = newProvider.id.trim()
+    const idError = runtimeTomlIdError(id, environment.providers.map(p => p.id))
+    if (idError) {
+      setProviderFormError(idError)
+      return
+    }
+    const transportValue = newProvider.transportValue.trim()
+    if (transportValue === '') {
+      setProviderFormError('endpoint를 입력하세요')
+      return
+    }
+    const trimmedCredentialValue = newProvider.credentialValue.trim()
+    if (newProvider.credentialType !== 'none' && trimmedCredentialValue === '') {
+      setProviderFormError('credential 값을 입력하거나 credential 타입을 "없음"으로 두세요')
+      return
+    }
+    onAddProvider({
+      ...newProvider,
+      id,
+      displayName: newProvider.displayName.trim(),
+      transportValue,
+      credentialValue: trimmedCredentialValue,
+    })
+    setNewProvider(DEFAULT_NEW_PROVIDER)
+    setProviderFormError(null)
+    setProviderFormOpen(false)
+  }
+
+  function submitAddModel() {
+    const id = newModel.id.trim()
+    const idError = runtimeTomlIdError(id, environment.models.map(m => m.id))
+    if (idError) {
+      setModelFormError(idError)
+      return
+    }
+    const maxContext = parseRequiredPositiveInteger(newModel.maxContext)
+    if (maxContext === undefined) {
+      setModelFormError('max-context는 1 이상의 정수여야 합니다')
+      return
+    }
+    onAddModel({
+      id,
+      apiName: newModel.apiName.trim(),
+      maxContext,
+      toolsSupport: newModel.toolsSupport,
+      thinkingSupport: newModel.thinkingSupport,
+      streaming: newModel.streaming,
+      jsonSupport: newModel.jsonSupport === 'unset' ? null : newModel.jsonSupport === 'true',
+    })
+    setNewModel(DEFAULT_NEW_MODEL)
+    setModelFormError(null)
+    setModelFormOpen(false)
+  }
+
+  function submitAddBinding() {
+    if (bindingProviderId === '' || bindingModelId === '') {
+      setBindingFormError('provider와 model을 모두 선택하세요')
+      return
+    }
+    // A binding pin is written as a top-level `[providerId.modelId]` table.
+    // bindingSections() on read already excludes RESERVED_TOP_LEVEL first
+    // segments (providers/models/runtime/...), so a provider id that collides
+    // with one of those is silently unreadable after save -- or worse, if the
+    // model id also matches an existing `[models.<id>]` model definition, the
+    // binding table collides with it outright. New providers can never get a
+    // reserved id (runtimeTomlIdError), but this dropdown lists whatever is
+    // already in environment.providers, which can include a legacy/hand-edited
+    // provider that predates that check -- so guard here too.
+    if (isReservedRuntimeTomlId(bindingProviderId)) {
+      setBindingFormError(`"${bindingProviderId}"는 예약된 이름이라 바인딩 provider로 쓸 수 없습니다`)
+      return
+    }
+    // A `command` transport provider always resolves to no provider_kind on the
+    // backend, so materialize_config's filter_map silently drops any binding
+    // pinned to it from the live runtime list. The add-provider form can no
+    // longer create one, but this dropdown lists every parsed provider,
+    // including a `command` one that already exists via raw TOML / legacy config.
+    const selectedProvider = environment.providers.find(p => p.id === bindingProviderId)
+    if (selectedProvider?.transportKind === 'command') {
+      setBindingFormError(
+        `"${bindingProviderId}"는 command(CLI) transport라 바인딩을 생성할 수 없습니다 (백엔드가 아직 CLI provider를 라우팅하지 못합니다)`,
+      )
+      return
+    }
+    // Protocol-only non-materialization is limited to Messages_api. Other
+    // protocols, including openai-compatible-cli, are valid when the provider
+    // uses endpoint/HTTP transport.
+    if (selectedProvider && isRuntimeTomlNonMaterializableProtocol(selectedProvider.protocol)) {
+      setBindingFormError(
+        `"${bindingProviderId}"는 ${selectedProvider.protocol} protocol이라 바인딩을 생성할 수 없습니다 (백엔드가 아직 이 provider를 라우팅하지 못합니다)`,
+      )
+      return
+    }
+    const exists = environment.bindings.some(
+      b => b.providerId === bindingProviderId && b.modelId === bindingModelId,
+    )
+    if (exists) {
+      setBindingFormError(`이미 존재하는 바인딩입니다: ${bindingProviderId}.${bindingModelId}`)
+      return
+    }
+    onAddBinding(bindingProviderId, bindingModelId)
+    setBindingProviderId('')
+    setBindingModelId('')
+    setBindingFormError(null)
   }
 
   // rt-select — runtime.css:43. Inline width cap so the 248px min-width never
@@ -298,8 +520,14 @@ export function RuntimeEnvironmentEditor({
         )}
       </div>
 
-      <!-- providers — runtime-editor.jsx:144-165. Endpoint/credential edits update
-           the draft runtime.toml and are applied through the validated Save path. -->
+      <!-- providers — runtime-editor.jsx:144-165. Existing providers' endpoint/
+           command and credential fields are draft-editable in place (onProvider
+           TransportChange/onProviderCredentialChange) and applied through the
+           validated Save path. Adding a brand-new provider uses a separate typed
+           form below the list instead of reusing those in-place editors — a typo
+           while creating a new id can never silently rewrite an already-wired
+           provider — but both paths write through the same draft + validated
+           save. -->
       <div class=${section === 'providers' ? '' : 'hidden'} data-testid="runtime-section-providers">
         <div class="rt-cards">
           ${environment.providers.map(provider => {
@@ -360,8 +588,111 @@ export function RuntimeEnvironmentEditor({
                    provider-capability source exists, rather than implying support
                    with no backing (PR #22081 review P1: no stub). */ ''}
             </div>
-          `
+            `
           })}
+          <div class="rt-card rt-card-add" data-testid="runtime-add-provider-card">
+            ${!providerFormOpen ? html`
+              <button
+                type="button"
+                class="rt-add-toggle"
+                disabled=${isDisabled}
+                data-testid="runtime-add-provider-toggle"
+                onClick=${() => setProviderFormOpen(true)}
+              >+ 프로바이더 추가</button>
+            ` : html`
+              <div class="rt-add-form">
+                <div class="rt-field">
+                  <span class="sub-k">id</span>
+                  <input
+                    class="rt-input mono"
+                    value=${newProvider.id}
+                    placeholder="예: my-provider"
+                    disabled=${isDisabled}
+                    aria-label="새 provider id"
+                    data-testid="runtime-add-provider-id"
+                    onInput=${(event: Event) => setNewProvider({ ...newProvider, id: (event.currentTarget as HTMLInputElement).value })}
+                  />
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">표시 이름</span>
+                  <input
+                    class="rt-input"
+                    value=${newProvider.displayName}
+                    placeholder="비우면 id 사용"
+                    disabled=${isDisabled}
+                    aria-label="새 provider 표시 이름"
+                    onInput=${(event: Event) => setNewProvider({ ...newProvider, displayName: (event.currentTarget as HTMLInputElement).value })}
+                  />
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">protocol</span>
+                  <select
+                    class="rt-select"
+                    value=${newProvider.protocol}
+                    disabled=${isDisabled}
+                    aria-label="새 provider protocol"
+                    onChange=${(event: Event) => setNewProvider({ ...newProvider, protocol: (event.currentTarget as HTMLSelectElement).value as RuntimeTomlProtocol })}
+                  >
+                    ${RUNTIME_TOML_CREATABLE_PROTOCOLS.map(p => html`<option value=${p}>${p}</option>`)}
+                  </select>
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">endpoint</span>
+                  <input
+                    class="rt-input mono"
+                    value=${newProvider.transportValue}
+                    placeholder="https://..."
+                    disabled=${isDisabled}
+                    aria-label="새 provider transport 값"
+                    onInput=${(event: Event) => setNewProvider({ ...newProvider, transportValue: (event.currentTarget as HTMLInputElement).value })}
+                  />
+                </div>
+                <div class="rt-note">CLI(command) provider는 현재 백엔드에서 라우팅되지 않아 이 폼에서 생성할 수 없습니다. raw TOML 탭을 이용하세요.</div>
+                <div class="rt-field">
+                  <span class="sub-k">credential</span>
+                  <select
+                    class="rt-select rt-select-narrow"
+                    value=${newProvider.credentialType}
+                    disabled=${isDisabled}
+                    aria-label="새 provider credential 종류"
+                    onChange=${(event: Event) => setNewProvider({ ...newProvider, credentialType: (event.currentTarget as HTMLSelectElement).value as RuntimeTomlCredentialType })}
+                  >
+                    <option value="none">없음</option>
+                    <option value="env">env</option>
+                    <option value="file">file</option>
+                    <option value="inline">inline</option>
+                  </select>
+                  ${newProvider.credentialType !== 'none' ? html`
+                    <input
+                      class="rt-input mono"
+                      type=${newProvider.credentialType === 'inline' ? 'password' : 'text'}
+                      value=${newProvider.credentialValue}
+                      placeholder=${newProvider.credentialType === 'env' ? 'ENV 변수명' : newProvider.credentialType === 'file' ? '파일 경로' : '값'}
+                      disabled=${isDisabled}
+                      aria-label="새 provider credential 값"
+                      onInput=${(event: Event) => setNewProvider({ ...newProvider, credentialValue: (event.currentTarget as HTMLInputElement).value })}
+                    />
+                  ` : null}
+                </div>
+                ${providerFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-provider-error">${providerFormError}</div>` : null}
+                <div class="rt-add-actions">
+                  <button
+                    type="button"
+                    class="rt-save"
+                    disabled=${isDisabled}
+                    data-testid="runtime-add-provider-submit"
+                    onClick=${submitAddProvider}
+                  >추가</button>
+                  <button
+                    type="button"
+                    class="rt-add-cancel"
+                    disabled=${isDisabled}
+                    onClick=${() => { setProviderFormOpen(false); setNewProvider(DEFAULT_NEW_PROVIDER); setProviderFormError(null) }}
+                  >취소</button>
+                </div>
+              </div>
+            `}
+          </div>
         </div>
       </div>
 
@@ -412,6 +743,115 @@ export function RuntimeEnvironmentEditor({
           ${filteredModels.length === 0 ? html`
             <div class="rt-note" data-testid="runtime-models-empty">일치하는 모델이 없습니다.</div>
           ` : null}
+          <div class="rt-model rt-card-add" data-testid="runtime-add-model-card">
+            ${!modelFormOpen ? html`
+              <button
+                type="button"
+                class="rt-add-toggle"
+                disabled=${isDisabled}
+                data-testid="runtime-add-model-toggle"
+                onClick=${() => setModelFormOpen(true)}
+              >+ 모델 추가</button>
+            ` : html`
+              <div class="rt-add-form">
+                <div class="rt-field">
+                  <span class="sub-k">id</span>
+                  <input
+                    class="rt-input mono"
+                    value=${newModel.id}
+                    placeholder="예: my-model"
+                    disabled=${isDisabled}
+                    aria-label="새 model id"
+                    data-testid="runtime-add-model-id"
+                    onInput=${(event: Event) => setNewModel({ ...newModel, id: (event.currentTarget as HTMLInputElement).value })}
+                  />
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">api-name</span>
+                  <input
+                    class="rt-input mono"
+                    value=${newModel.apiName}
+                    placeholder="비우면 id 사용"
+                    disabled=${isDisabled}
+                    aria-label="새 model api-name"
+                    onInput=${(event: Event) => setNewModel({ ...newModel, apiName: (event.currentTarget as HTMLInputElement).value })}
+                  />
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">max-context</span>
+                  <input
+                    class="rt-input-sm mono"
+                    type="number"
+                    min="1"
+                    step="1"
+                    value=${newModel.maxContext}
+                    placeholder="필수"
+                    disabled=${isDisabled}
+                    aria-label="새 model max-context"
+                    data-testid="runtime-add-model-max-context"
+                    onInput=${(event: Event) => setNewModel({ ...newModel, maxContext: (event.currentTarget as HTMLInputElement).value })}
+                  />
+                </div>
+                <div class="rt-field">
+                  <span class="sub-k">json 지원</span>
+                  <select
+                    class="rt-select rt-select-narrow"
+                    value=${newModel.jsonSupport}
+                    disabled=${isDisabled}
+                    aria-label="새 model json 지원 여부"
+                    onChange=${(event: Event) => setNewModel({ ...newModel, jsonSupport: (event.currentTarget as HTMLSelectElement).value as 'unset' | 'true' | 'false' })}
+                  >
+                    <option value="unset">미확인</option>
+                    <option value="true">지원</option>
+                    <option value="false">미지원</option>
+                  </select>
+                </div>
+                <div class="rt-check-row">
+                  <label class="rt-check">
+                    <input
+                      type="checkbox"
+                      checked=${newModel.toolsSupport}
+                      disabled=${isDisabled}
+                      onChange=${(event: Event) => setNewModel({ ...newModel, toolsSupport: (event.currentTarget as HTMLInputElement).checked })}
+                    /><span>tools</span>
+                  </label>
+                  <label class="rt-check">
+                    <input
+                      type="checkbox"
+                      checked=${newModel.thinkingSupport}
+                      disabled=${isDisabled}
+                      onChange=${(event: Event) => setNewModel({ ...newModel, thinkingSupport: (event.currentTarget as HTMLInputElement).checked })}
+                    /><span>thinking</span>
+                  </label>
+                  <label class="rt-check">
+                    <input
+                      type="checkbox"
+                      checked=${newModel.streaming}
+                      disabled=${isDisabled}
+                      onChange=${(event: Event) => setNewModel({ ...newModel, streaming: (event.currentTarget as HTMLInputElement).checked })}
+                    /><span>streaming</span>
+                  </label>
+                </div>
+                <div class="rt-note">capability 세부 항목(tool-choice, thinking-control-format 등)은 runtime.toml 탭에서 편집하세요.</div>
+                ${modelFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-model-error">${modelFormError}</div>` : null}
+                <div class="rt-add-actions">
+                  <button
+                    type="button"
+                    class="rt-save"
+                    disabled=${isDisabled}
+                    data-testid="runtime-add-model-submit"
+                    onClick=${submitAddModel}
+                  >추가</button>
+                  <button
+                    type="button"
+                    class="rt-add-cancel"
+                    disabled=${isDisabled}
+                    onClick=${() => { setModelFormOpen(false); setNewModel(DEFAULT_NEW_MODEL); setModelFormError(null) }}
+                  >취소</button>
+                </div>
+              </div>
+            `}
+          </div>
         </div>
       </div>
 
@@ -423,6 +863,42 @@ export function RuntimeEnvironmentEditor({
         <div class="rt-binds">
           <div class="rt-note">
             바인딩 = 런타임 id <span class="mono">provider.model</span>. 라디오는 기본 런타임을 즉시 적용하고, 숫자/keep-alive 변경은 draft를 만든 뒤 라이브 적용 버튼으로 저장합니다.
+          </div>
+          <div class="rt-add-form rt-add-binding" data-testid="runtime-add-binding-form">
+            <div class="rt-field">
+              <span class="sub-k">provider</span>
+              <select
+                class="rt-select"
+                value=${bindingProviderId}
+                disabled=${isDisabled}
+                aria-label="새 바인딩 provider"
+                data-testid="runtime-add-binding-provider"
+                onChange=${(event: Event) => setBindingProviderId((event.currentTarget as HTMLSelectElement).value)}
+              >
+                <option value="">선택</option>
+                ${environment.providers.map(p => html`<option value=${p.id}>${p.id}</option>`)}
+              </select>
+              <span class="mono">.</span>
+              <select
+                class="rt-select"
+                value=${bindingModelId}
+                disabled=${isDisabled}
+                aria-label="새 바인딩 model"
+                data-testid="runtime-add-binding-model"
+                onChange=${(event: Event) => setBindingModelId((event.currentTarget as HTMLSelectElement).value)}
+              >
+                <option value="">선택</option>
+                ${environment.models.map(m => html`<option value=${m.id}>${m.id}</option>`)}
+              </select>
+              <button
+                type="button"
+                class="rt-save"
+                disabled=${isDisabled}
+                data-testid="runtime-add-binding-submit"
+                onClick=${submitAddBinding}
+              >+ 바인딩 추가</button>
+            </div>
+            ${bindingFormError ? html`<div class="rt-warn" role="alert" data-testid="runtime-add-binding-error">${bindingFormError}</div>` : null}
           </div>
           ${environment.bindings.map(binding => {
             const isDefault = binding.id === environment.defaultRuntimeId || binding.isDefault

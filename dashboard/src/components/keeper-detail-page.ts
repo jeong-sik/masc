@@ -9,6 +9,7 @@ import { selectKeeper } from '../keeper-actions'
 import { loadKeeperConfig } from './keeper-config-state'
 import { findKeeper } from '../lib/keeper-utils'
 import { resolveKeeperForDetail } from '../lib/keeper-detail-resolution'
+import { mostRecentlyActiveKeeper } from '../lib/keeper-recency'
 import { keeperDisplayStatus } from '../lib/keeper-runtime-display'
 import { clearKeeper, fetchKeeperTransitions } from '../api/keeper'
 import { purgeAgent } from '../api/actions'
@@ -75,7 +76,7 @@ const LazyKeeperConfigPanel = lazy(async () => ({
 export function KeeperDetailPage() {
   const routeSurface = route.value.tab === 'keepers' ? 'keepers' : 'monitoring'
   const keeperName = route.value.tab === 'keepers'
-    ? route.value.params.keeper?.trim() || selectedKeeper.peek()?.name || keepers.value[0]?.name || ''
+    ? route.value.params.keeper?.trim() || selectedKeeper.peek()?.name || mostRecentlyActiveKeeper(keepers.value)?.name || ''
     : route.value.tab === 'monitoring' && route.value.params.section === 'agents'
       ? route.value.params.keeper?.trim()
       : ''

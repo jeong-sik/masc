@@ -381,10 +381,12 @@ function PathTruthRow({
 }
 
 type SettingsSectionMode = 'live' | 'mixed' | 'local'
+type PathResolutionAvailability = 'ready' | 'partial' | 'loading' | 'unavailable'
 
 function settingsSectionState(
   section: SectionId,
   fusionSettingsWritable: boolean,
+  pathResolutionAvailability: PathResolutionAvailability = 'ready',
 ): { mode: SettingsSectionMode; label: string } {
   if (section === 'runtime') return { mode: 'live', label: 'runtime.toml + provider catalog' }
   if (section === 'runtimes') return { mode: 'live', label: 'runtime.toml live-backed' }
@@ -393,12 +395,28 @@ function settingsSectionState(
     return { mode: 'live', label: 'runtime.toml live-backed' }
   }
   if (section === 'fusion') return { mode: 'local', label: 'dedicated writer disabled' }
-  if (section === 'paths') return { mode: 'live', label: 'resolved by server' }
+  if (section === 'paths') {
+    if (pathResolutionAvailability === 'ready') return { mode: 'live', label: 'resolved by server' }
+    if (pathResolutionAvailability === 'partial') return { mode: 'mixed', label: 'partial path resolution' }
+    if (pathResolutionAvailability === 'loading') return { mode: 'mixed', label: 'path resolution loading' }
+    return { mode: 'local', label: 'path resolution unavailable' }
+  }
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
   if (section === 'notify') return { mode: 'live', label: 'live thresholds read-only' }
   if (section === 'display') return { mode: 'live', label: 'theme/density live' }
   return { mode: 'local', label: 'read-only preview' }
+}
+
+function pathResolutionAvailability(
+  dashboardConfigStatus: 'loading' | 'ready' | 'error',
+  hasShellPathResolution: boolean,
+  hasPartialPathProjection: boolean,
+): PathResolutionAvailability {
+  if (hasShellPathResolution) return 'ready'
+  if (hasPartialPathProjection) return 'partial'
+  if (dashboardConfigStatus === 'loading') return 'loading'
+  return 'unavailable'
 }
 
 function LogFilter({
@@ -526,20 +544,24 @@ export function SettingsSurface() {
   // Server config projection — used by Paths, MCP and Notifications.
   const [dashboardConfig, setDashboardConfig] = useState<DashboardConfigResponse | null>(null)
   const [dashboardConfigStatus, setDashboardConfigStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [dashboardConfigError, setDashboardConfigError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
     setDashboardConfigStatus('loading')
+    setDashboardConfigError(null)
     void (async () => {
       try {
         const resp = await fetchDashboardConfig()
         if (!active) return
         setDashboardConfig(resp)
         setDashboardConfigStatus('ready')
-      } catch {
+        setDashboardConfigError(null)
+      } catch (err) {
         if (!active) return
         setDashboardConfig(null)
         setDashboardConfigStatus('error')
+        setDashboardConfigError(err instanceof Error ? err.message : String(err))
       }
     })()
     return () => { active = false }
@@ -640,7 +662,6 @@ export function SettingsSurface() {
     }
   }
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
-  const sectionState = settingsSectionState(sec, fusionSettingsWritable)
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -666,6 +687,18 @@ export function SettingsSurface() {
   const mediaFailover = runtimeDefaults?.model_routing.media_failover ?? []
   const runtimeResolution = shellRuntimeResolution.value
   const configResolution = shellConfigResolution.value
+  const hasRuntimePathResolution = runtimeResolution !== null
+  const hasConfigPathResolution = configResolution !== null
+  const hasShellPathResolution = hasRuntimePathResolution || hasConfigPathResolution
+  const hasPartialPathProjection = dashboardConfigStatus === 'ready' || runtimeConfigPath !== null
+  const pathAvailability = pathResolutionAvailability(dashboardConfigStatus, hasShellPathResolution, hasPartialPathProjection)
+  const baseSectionState = settingsSectionState(sec, fusionSettingsWritable, pathAvailability)
+  const sectionState =
+    sec === 'notify' && dashboardConfigStatus === 'loading'
+      ? { mode: 'mixed' as const, label: 'thresholds loading' }
+      : sec === 'notify' && dashboardConfigStatus === 'error'
+        ? { mode: 'mixed' as const, label: 'config unavailable' }
+        : baseSectionState
   const mcpEndpoint = mcpEndpointFromConfig(dashboardConfig)
   const mcpToolCountLabel = mcpToolsStatus === 'ready' ? String(mcpTools.length) : '—'
   const mcpUrlEntry = configEntry(dashboardConfig, 'MASC_URL')
@@ -919,23 +952,58 @@ export function SettingsSurface() {
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 서버가 실제로 해석한 base path, data/config root, runtime.toml 경로입니다. 값은 dashboard shell/config projection에서 읽고, 입력 필드로 덮어쓰지 않습니다.
               </div>
-              ${dashboardConfigStatus === 'error'
+              ${pathAvailability === 'loading'
+                ? html`<div class="set-hint" data-testid="settings-path-resolution-loading">dashboard shell path resolution을 기다리는 중입니다.</div>`
+                : null}
+              ${pathAvailability === 'unavailable'
+                ? html`
+                  <div class="set-hint" data-testid="settings-path-resolution-error">
+                    dashboard shell path resolution과 config projection을 불러오지 못했습니다. 경로 행을 추정값으로 표시하지 않습니다.
+                  </div>
+                `
+                : null}
+              ${pathAvailability === 'partial'
+                ? html`
+                  <div class="set-hint" data-testid="settings-runtime-path-resolution-missing">
+                    dashboard shell path resolution을 아직 받지 못했습니다. config projection/runtime provider에서 확인 가능한 값만 표시합니다.
+                  </div>
+                `
+                : null}
+              ${dashboardConfigStatus === 'error' && pathAvailability !== 'unavailable'
                 ? html`<div class="set-hint" data-testid="settings-config-error">dashboard config projection을 불러오지 못했습니다.</div>`
                 : null}
-              <div class="set-sub-h">Runtime path resolution</div>
-              <${PathTruthRow} label="Base path" item=${runtimeResolution?.base_path ?? null} fallback=${concreteConfigValue(basePathEntry)} />
-              <${PathTruthRow} label="Resolved base path" item=${runtimeResolution?.resolved_base_path ?? null} />
-              <${PathTruthRow} label="Workspace path" item=${runtimeResolution?.workspace_path ?? null} />
-              <${PathTruthRow} label="Data root" item=${runtimeResolution?.data_root ?? null} fallback=${concreteConfigValue(dataDirEntry)} />
-              <${PathTruthRow} label="Prompt markdown dir" item=${runtimeResolution?.prompt_markdown_dir ?? null} />
-              <${PathTruthRow} label="Runtime TOML" item=${configResolution?.runtime ?? null} fallback=${runtimeConfigPath} />
-              <${PathTruthRow} label="Config root" item=${configResolution?.config_root ?? null} fallback=${concreteConfigValue(configDirEntry)} />
-
-              <div class="set-sub-h">Config env inputs</div>
-              <${ConfigTruthRow} label="MASC_BASE_PATH" entry=${basePathEntry} />
-              <${ConfigTruthRow} label="MASC_CONFIG_DIR" entry=${configDirEntry} />
-              <${ConfigTruthRow} label="MASC_DATA_DIR" entry=${dataDirEntry} />
-              <${ConfigTruthRow} label="MCP endpoint" entry=${mcpUrlEntry} fallback=${mcpEndpoint} />
+              ${pathAvailability === 'loading' || pathAvailability === 'unavailable'
+                ? null
+                : html`
+                  ${hasRuntimePathResolution
+                    ? html`
+                      <div class="set-sub-h">Runtime path resolution</div>
+                      <${PathTruthRow} label="Base path" item=${runtimeResolution?.base_path ?? null} fallback=${concreteConfigValue(basePathEntry)} />
+                      <${PathTruthRow} label="Resolved base path" item=${runtimeResolution?.resolved_base_path ?? null} />
+                      <${PathTruthRow} label="Workspace path" item=${runtimeResolution?.workspace_path ?? null} />
+                      <${PathTruthRow} label="Data root" item=${runtimeResolution?.data_root ?? null} fallback=${concreteConfigValue(dataDirEntry)} />
+                      <${PathTruthRow} label="Prompt markdown dir" item=${runtimeResolution?.prompt_markdown_dir ?? null} />
+                    `
+                    : null}
+                  ${hasConfigPathResolution || runtimeConfigPath
+                    ? html`
+                      <div class="set-sub-h">Config path resolution</div>
+                      <${PathTruthRow} label="Runtime TOML" item=${configResolution?.runtime ?? null} fallback=${runtimeConfigPath} />
+                      ${hasConfigPathResolution || dashboardConfigStatus === 'ready'
+                        ? html`<${PathTruthRow} label="Config root" item=${configResolution?.config_root ?? null} fallback=${concreteConfigValue(configDirEntry)} />`
+                        : null}
+                    `
+                    : null}
+                  ${dashboardConfigStatus === 'ready'
+                    ? html`
+                      <div class="set-sub-h">Config env inputs</div>
+                      <${ConfigTruthRow} label="MASC_BASE_PATH" entry=${basePathEntry} />
+                      <${ConfigTruthRow} label="MASC_CONFIG_DIR" entry=${configDirEntry} />
+                      <${ConfigTruthRow} label="MASC_DATA_DIR" entry=${dataDirEntry} />
+                      <${ConfigTruthRow} label="MCP endpoint" entry=${mcpUrlEntry} fallback=${mcpEndpoint} />
+                    `
+                    : null}
+                `}
             `}
 
             ${sec === 'logs' && html`
@@ -950,30 +1018,42 @@ export function SettingsSurface() {
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 알림 임계값은 현재 서버 config projection에서 읽습니다. 이 화면은 아직 알림 라우팅 writer를 노출하지 않으므로 브라우저-only 토글을 만들지 않습니다.
               </div>
-              <div class="set-sub-h">Live alert thresholds</div>
-              <${ThresholdTruthRow}
-                label="Preparing context"
-                entry=${ctxPreparingEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(ctxPreparingEntry))}
-              />
-              <${ThresholdTruthRow}
-                label="Handoff imminent"
-                entry=${ctxHandoffEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(ctxHandoffEntry))}
-              />
-              <${ThresholdTruthRow}
-                label="Runtime warning"
-                entry=${runtimeWarningEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
-              />
-              <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
-              <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
-              <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
-                <div class="set-truth-value" data-testid="notify-routing-readonly">
-                  <span class="mono">read-only</span>
-                  <span class="set-truth-source">no writer</span>
-                </div>
-              <//>
+              ${dashboardConfigStatus === 'loading'
+                ? html`<div class="set-hint" data-testid="notify-config-loading">알림 임계값을 불러오는 중...</div>`
+                : dashboardConfigStatus === 'error'
+                  ? html`
+                    <div class="set-hint" data-testid="notify-config-error">
+                      dashboard config projection을 불러오지 못했습니다${dashboardConfigError ? `: ${dashboardConfigError}` : ''}.
+                    </div>
+                  `
+                  : html`
+                    <div data-testid="notify-thresholds">
+                      <div class="set-sub-h">Live alert thresholds</div>
+                      <${ThresholdTruthRow}
+                        label="Preparing context"
+                        entry=${ctxPreparingEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(ctxPreparingEntry))}
+                      />
+                      <${ThresholdTruthRow}
+                        label="Handoff imminent"
+                        entry=${ctxHandoffEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(ctxHandoffEntry))}
+                      />
+                      <${ThresholdTruthRow}
+                        label="Runtime warning"
+                        entry=${runtimeWarningEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
+                      />
+                      <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
+                      <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
+                      <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
+                        <div class="set-truth-value" data-testid="notify-routing-readonly">
+                          <span class="mono">read-only</span>
+                          <span class="set-truth-source">no writer</span>
+                        </div>
+                      <//>
+                    </div>
+                  `}
             `}
 
             ${sec === 'display' && html`

@@ -42,21 +42,6 @@ let curation_answer_matches_arg args =
         })
 ;;
 
-let curation_health_components_arg args =
-  Board_tool_format.object_list_arg args "health_components"
-  |> List.filter_map (fun fields ->
-    let name = Board_tool_format.string_field fields "name" "" in
-    if String.equal name ""
-    then None
-    else
-      Some
-        { Board_curation.name
-        ; score = Board_tool_format.float_field fields "score" 0.0
-        ; weight = Board_tool_format.float_field fields "weight" 0.0
-        ; rationale = Board_tool_format.string_field fields "rationale" ""
-        })
-;;
-
 (** {1 Handlers} *)
 
 (* RFC-0189 PR-1b.3 — handlers in this module return typed
@@ -94,8 +79,6 @@ let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.resul
     let highlights = Board_tool_format.string_list_arg args "highlights" in
     let tag_suggestions = curation_tag_suggestions_arg args in
     let answer_matches = curation_answer_matches_arg args in
-    let health_score = get_float_opt args "health_score" in
-    let health_components = curation_health_components_arg args in
     match Board_tool_format.provenance_arg args with
     | Error msg ->
       Tool_result.make_err
@@ -113,8 +96,6 @@ let handle_board_curation_submit ~tool_name ~start_time args : Tool_result.resul
              ~highlights
              ~tag_suggestions
              ~answer_matches
-             ?health_score
-             ~health_components
              ~rationale
              ~provenance
              ()

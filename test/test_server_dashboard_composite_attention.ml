@@ -210,20 +210,20 @@ let test_passive_budget_exhaustion_without_work_scope_is_not_blocked () =
   check (option string) "reason" None attention.cra_reason
 ;;
 
-let test_active_passive_budget_exhaustion_is_blocked () =
+let test_active_passive_budget_exhaustion_is_not_blocked () =
+  (* RFC-0303 Phase 0: passive-only is activity, not a block — even with a
+     claimed task (work scope) under turn-budget exhaustion. The budget
+     disposition ("pass") is not an operator page, and passive no longer
+     re-classifies as an unsatisfied contract. *)
   let attention =
     Server_dashboard_http_composite.composite_runtime_attention
       ~snapshot
       ~execution:active_passive_budget_execution
   in
-  check bool "blocked" true attention.cra_blocked;
-  check bool "needs_attention" true attention.cra_needs_attention;
-  check string "state" "blocked" attention.cra_state;
-  check
-    (option string)
-    "reason"
-    (Some "completion_contract_result:passive_only")
-    attention.cra_reason
+  check bool "blocked" false attention.cra_blocked;
+  check bool "needs_attention" false attention.cra_needs_attention;
+  check string "state" "ok" attention.cra_state;
+  check (option string) "reason" None attention.cra_reason
 ;;
 
 let test_completed_passive_receipt_without_work_scope_is_not_blocked () =
@@ -238,20 +238,19 @@ let test_completed_passive_receipt_without_work_scope_is_not_blocked () =
   check (option string) "reason" None attention.cra_reason
 ;;
 
-let test_active_completed_passive_receipt_is_blocked () =
+let test_active_completed_passive_receipt_is_not_blocked () =
+  (* RFC-0303 Phase 0: a completed passive-only turn with work scope is not a
+     block. "Should it have acted on the claimed task?" is a goal-layer semantic
+     judgment, not a per-turn dashboard attention flag. *)
   let attention =
     Server_dashboard_http_composite.composite_runtime_attention
       ~snapshot
       ~execution:active_completed_passive_execution
   in
-  check bool "blocked" true attention.cra_blocked;
-  check bool "needs_attention" true attention.cra_needs_attention;
-  check string "state" "blocked" attention.cra_state;
-  check
-    (option string)
-    "reason"
-    (Some "completion_contract_result:passive_only")
-    attention.cra_reason
+  check bool "blocked" false attention.cra_blocked;
+  check bool "needs_attention" false attention.cra_needs_attention;
+  check string "state" "ok" attention.cra_state;
+  check (option string) "reason" None attention.cra_reason
 ;;
 
 let test_not_dispatched_budget_exhaustion_is_blocked () =
@@ -290,17 +289,17 @@ let () =
             `Quick
             test_passive_budget_exhaustion_without_work_scope_is_not_blocked
         ; test_case
-            "active passive turn-budget exhaustion is blocked"
+            "active passive turn-budget exhaustion is not blocked"
             `Quick
-            test_active_passive_budget_exhaustion_is_blocked
+            test_active_passive_budget_exhaustion_is_not_blocked
         ; test_case
             "completed passive receipt without work scope is not blocked"
             `Quick
             test_completed_passive_receipt_without_work_scope_is_not_blocked
         ; test_case
-            "active completed passive receipt is blocked"
+            "active completed passive receipt is not blocked"
             `Quick
-            test_active_completed_passive_receipt_is_blocked
+            test_active_completed_passive_receipt_is_not_blocked
         ; test_case
             "not-dispatched turn-budget exhaustion is blocked"
             `Quick

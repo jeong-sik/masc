@@ -131,14 +131,6 @@ let classify_delivery ~is_autonomous ~reply_delivery ~tools ~has_visible_text =
   else Peer_only
 ;;
 
-let classify_turn_delivery ~is_autonomous ~reply_delivery result =
-  classify_delivery
-    ~is_autonomous
-    ~reply_delivery
-    ~tools:(Keeper_agent_result.tool_names result)
-    ~has_visible_text:(String.trim result.Keeper_agent_run.response_text <> "")
-;;
-
 (* A peer-only/silent turn, or internal prose-only turn, must show durable
    evidence to count as progress; an externally delivered reactive user-facing
    reply or a task claim is exempt. Exhaustive, no [_ ->] catch-all (CLAUDE.md
@@ -190,142 +182,11 @@ let claim_bound_work (calls : (string * Keeper_tool_outcome.t option) list) =
     calls
 ;;
 
-let no_progress_reason_of_turn
-      ~delivery
-      ~(calls_with_outcomes : (string * Keeper_tool_outcome.t option) list)
-      ~made_progress
-  =
-  if made_progress
-  then None
-  else
-    match delivery with
-    | User_facing -> None
-    | Internal_prose -> Some Keeper_no_progress_loop_detector.Thinking_only
-    | Task_claim -> Some Keeper_no_progress_loop_detector.Empty
-    | Peer_only ->
-      let calls = List.map fst calls_with_outcomes in
-      if calls = []
-      then Some Keeper_no_progress_loop_detector.Empty
-      else if List.for_all Keeper_tool_progress.is_passive_status_tool_name calls
-      then Some Keeper_no_progress_loop_detector.Read_only
-      else Some Keeper_no_progress_loop_detector.Surface_mismatch
-;;
-
-let apply_loop_detectors ~config ~observation ~meta updated_meta result =
-  (* RFC-0239 §3 R3 / RFC-0276 §3.2: feed the loop detector a semantic
-     no-progress verdict derived from observed turn facts, not the LLM
-     self-declared header. A turn makes progress if it produced durable
-     evidence (substantive tool calls or validated output); a turn that only
-     posts to peers (board/comment/broadcast) or stays silent without such
-     evidence accrues the streak. The retired self-report "stay silent" reset
-     the streak whenever a keeper *posted* its "nothing to do" conclusion, so a
-     cluster that thrashed by re-posting never tripped the detector. *)
-  let calls_with_outcomes =
-    List.map
-      (fun (d : Keeper_agent_result.tool_call_detail) ->
-         d.tool_name, d.typed_outcome)
-      result.Keeper_agent_run.tool_calls
-  in
-  let strong_evidence =
-    has_substantive_tool_calls_with_outcome calls_with_outcomes
-    || Option.is_some (KUM.visible_run_validation result)
-  in
-  (* [Task_claim] is exempt only when a claim bound work; a claim that typed
-     [No_progress] (e.g. No_eligible_tasks) now requires evidence and so accrues
-     the streak. Other surfaces keep the exhaustive name-based mapping.
-     RFC-0294 R2a/R3: a prose-only reply is exempt only when it is a delivered
-     reply to an external prompt. This success handler runs the unified keeper
-     cycle, whose visible text is written to internal decision/metrics artifacts
-     and is not appended to keeper_chat. A pending scope message therefore cannot
-     make internal prose count as progress; otherwise a stale owner line can keep
-     waking the keeper while every text-only response both fails to clear the
-     lane and resets the no-progress streak. *)
-  let is_autonomous =
-    Keeper_unified_metrics_support.is_scheduled_autonomous_cycle_of_observation
-      observation
-  in
-  let delivery = classify_turn_delivery ~is_autonomous ~reply_delivery:Internal_only result in
-  let surface_requires_evidence =
-    match delivery with
-    | Task_claim -> not (claim_bound_work calls_with_outcomes)
-    | (Peer_only | User_facing | Internal_prose) as delivery ->
-      delivery_requires_evidence delivery
-  in
-  (* #22747 / RFC-keeper-proactive-wake-actionability-invariant: a passive-only
-     no-work turn (only [Passive_status] tools, no owned task, no actionable
-     signal) is NOT treated as progress. The retired [legitimate_no_work_passive_only]
-     carve-out marked such turns as progress, which RESET the no-progress streak
-     every cycle, so the detector never latched — and the RFC-0246/0294 R2b
-     wake-tombstone (which suppresses self-cadence re-wakes only while latched)
-     could never engage. A keeper with nothing to do therefore re-woke on its
-     min-interval cadence forever, ran keeper_context_status, found no work, and
-     produced no visible reply: the idle spin.
-
-     Letting these turns accrue the streak makes passive-no-work consistent with
-     the already-shipped claim-no-eligible loop (PR #21065, test
-     test_sangsu_claim_idle_loop_accrues): both are "repeatedly found nothing to
-     do" and both now latch at the threshold. The threshold (default 10) already
-     tolerates a single legitimate idle check, so a healthy keeper that gets work
-     before the threshold resets cleanly; only a persistent idle loop latches and
-     is paused for operator resume (Keeper_unified_turn_no_progress.mark_loop_detected),
-     which also arms the self-cadence wake-tombstone. *)
-  let made_progress =
-    Keeper_no_progress_loop_detector.turn_made_progress
-      ~strong_evidence
-      ~surface_requires_evidence
-  in
-  let no_progress_reason =
-    no_progress_reason_of_turn ~delivery ~calls_with_outcomes ~made_progress
-  in
-  let progress_identity =
-    if strong_evidence && surface_requires_evidence
-    then
-      result.Keeper_agent_run.tool_calls
-      |> List.map (fun (detail : Keeper_agent_result.tool_call_detail) ->
-        { Keeper_tool_progress_identity.tool_name = detail.tool_name
-        ; typed_outcome = detail.typed_outcome
-        ; task_id = detail.task_id
-        ; input_fingerprint = detail.input_fingerprint
-        ; output_fingerprint = detail.output_fingerprint
-        })
-      |> Keeper_tool_progress_identity.of_calls
-    else None
-  in
-  let threshold_override =
-    budget_exhausted_no_progress_threshold_override
-      ~stop_reason:result.Keeper_agent_run.stop_reason
-      ~strong_evidence
-      ~surface_requires_evidence
-      ~observation
-  in
-  match
-    Keeper_no_progress_loop_detector.record_turn
-      ?threshold_override
-      ?progress_identity
-      ?no_progress_reason
-      ~keeper_name:updated_meta.Keeper_meta_contract.name
-      ~made_progress
-      ()
-  with
-  | Keeper_no_progress_loop_detector.Normal -> updated_meta
-  | Keeper_no_progress_loop_detector.Loop_detected { streak; threshold } ->
-    let no_progress_reason =
-      Keeper_no_progress_loop_detector.current_reason
-        ~keeper_name:updated_meta.Keeper_meta_contract.name
-    in
-    Keeper_unified_turn_no_progress.mark_loop_detected
-      ?no_progress_reason
-      ~config
-      updated_meta
-      ~streak
-      ~threshold
-  | Keeper_no_progress_loop_detector.Loop_reset { previous_streak; was_latched } ->
-    Keeper_unified_turn_no_progress.clear_if_recovered
-      ~config
-      updated_meta
-      ~previous_streak
-      ~was_latched
-;;
+(* RFC-0303 Phase 3: [no_progress_reason_of_turn] and [apply_loop_detectors]
+   are retired. Phase 2 removed the blind self-cadence wake that manufactured
+   the passive turns the no-progress loop detector chased, so the success path
+   no longer runs loop detection. [Contract_passive_only] remains inert
+   telemetry (see [completion_contract_attention_reason_code] below). *)
 
 type terminal_outcome =
   | Terminal_done
@@ -417,7 +278,6 @@ module For_testing = struct
   let delivery_requires_evidence = delivery_requires_evidence
   let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
   let claim_bound_work = claim_bound_work
-  let no_progress_reason_of_turn = no_progress_reason_of_turn
 
   let completion_contract_terminal_failure_reason_code =
     completion_contract_terminal_failure_reason_code
@@ -429,8 +289,6 @@ module For_testing = struct
 
   let terminal_outcome_of_result = terminal_outcome_of_result
   let terminal_outcome_is_completed_turn = terminal_outcome_is_completed_turn
-
-  let apply_loop_detectors = apply_loop_detectors
 end
 
 let append_metrics_snapshot
@@ -954,9 +812,8 @@ let handle
       ~update_proactive_rt:true
       result
   in
-  let updated_meta =
-    apply_loop_detectors ~config ~observation ~meta updated_meta result
-  in
+  (* RFC-0303 Phase 3: the no-progress loop detector is retired, so the
+     metrics-updated meta flows through unchanged (no loop-detection rebind). *)
   let terminal_outcome = terminal_outcome_of_result result in
   append_metrics_snapshot
     ~config

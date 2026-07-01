@@ -208,12 +208,12 @@ let test_no_progress_runtime_blocker_facts_include_reason () =
      | _ -> None)
 ;;
 
-(* Regression for the round-trip gap Copilot flagged on PR #22865:
-   [Keeper_unified_turn_no_progress.mark_loop_detected] persists the literal
-   string "unclassified" when no specific reason was classified, but
-   [no_progress_reason_of_string] previously had no matching case for it, so
-   the fact silently came back [None] even though the detail string carried a
-   real (if unclassified) reason token. *)
+(* Regression for the round-trip gap Copilot flagged on PR #22865: a persisted
+   no-progress blocker can carry the literal string "unclassified" when no
+   specific reason was classified, and [runtime_blocker_facts_of_no_progress_blocker]
+   must round-trip it rather than silently returning [None]. RFC-0303 Phase 3
+   retired the live no-progress detector, but the status bridge still surfaces
+   facts from a persisted no-progress blocker (Keeper_meta_contract.No_progress_loop). *)
 let test_no_progress_runtime_blocker_facts_include_unclassified_reason () =
   init_runtime_default_for_tests ();
   let detail =

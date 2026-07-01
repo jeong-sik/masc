@@ -129,9 +129,6 @@ let directive_paused_meta (meta : keeper_meta) paused =
 ;;
 
 let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry_entry) =
-  let was_latched =
-    Keeper_no_progress_loop_detector.is_latched ~keeper_name:entry.name
-  in
   let previous_failure_reason = entry.last_failure_reason in
   match
     Keeper_unified_turn_no_progress.clear_for_operator_resume
@@ -145,18 +142,13 @@ let clear_no_progress_loop_for_operator_resume (entry : Keeper_registry.registry
       match persist_directive_meta_update entry ~updated_meta with
       | Ok () -> Ok updated_meta
       | Error msg ->
+        (* RFC-0303 Phase 3: restore the prior failure_reason on persist failure.
+           The no-progress detector re-latch that used to run here is gone with
+           the retired detector. *)
         Keeper_registry.set_failure_reason
           ~base_path:entry.base_path
           entry.name
           previous_failure_reason;
-        if was_latched
-        then
-          ignore
-            (Keeper_no_progress_loop_detector.record_turn
-               ~threshold_override:1
-               ~keeper_name:entry.name
-               ~made_progress:false
-               ());
         Error msg)
 ;;
 

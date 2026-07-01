@@ -27,6 +27,11 @@ export function resetRuntimeCatalog(): void {
   runtimeCatalogResource.reset()
 }
 
+export function reloadRuntimeCatalog(): void {
+  runtimeCatalogResource.reset()
+  loadRuntimeCatalog()
+}
+
 export function findRuntimeCatalogEntry(
   catalog: readonly DashboardRuntimeProviderSnapshot[],
   runtimeId: string,

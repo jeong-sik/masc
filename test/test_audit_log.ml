@@ -235,6 +235,45 @@ let test_runtime_config_write_assignment_projection () =
   check string "target" "/x/config/runtime.toml" (field "target");
   check string "severity" "warn" (field "severity")
 
+let test_runtime_config_write_routing_list_projection () =
+  let entry : Audit_log.audit_entry =
+    {
+      timestamp = 1_700_000_002.0;
+      agent_id = "dashboard";
+      action = Audit_log.RuntimeConfigWrite;
+      workspace_id = None;
+      details =
+        `Assoc
+          [
+            ("path", `String "/x/config/runtime.toml");
+            ("operation", `String "routing");
+            ("lane", `String "media_failover");
+            ("runtime_ids", `List [ `String "rt-a"; `String "rt-b" ]);
+            ("cleared", `Bool false);
+            ("bytes", `Int 18783);
+            ("lines", `Int 464);
+          ];
+      outcome = Audit_log.Success;
+      cost_estimate = None;
+      token_count = None;
+      trace_id = None;
+    }
+  in
+  let json = Audit_log.audit_event_json entry in
+  let field key =
+    match json with
+    | `Assoc fields -> (
+        match List.assoc_opt key fields with
+        | Some (`String v) -> v
+        | _ -> failf "missing string field %s" key)
+    | _ -> failf "audit_event_json is not an object"
+  in
+  check string "summary"
+    "runtime.toml routing updated: media_failover -> [rt-a, rt-b]"
+    (field "summary");
+  check string "target" "/x/config/runtime.toml" (field "target");
+  check string "severity" "warn" (field "severity")
+
 let () =
   run "Audit_log"
     [
@@ -259,5 +298,7 @@ let () =
             test_runtime_config_write_event_projection;
           test_case "runtime_config_write assignment projection" `Quick
             test_runtime_config_write_assignment_projection;
+          test_case "runtime_config_write routing list projection" `Quick
+            test_runtime_config_write_routing_list_projection;
         ] );
     ]

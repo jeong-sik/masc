@@ -196,18 +196,28 @@ let parse_runtime_config_raw_body body_str =
 type runtime_route_lane =
   | Runtime_default
   | Runtime_librarian
+  | Runtime_structured_judge
   | Runtime_cross_verifier
+  | Runtime_media_failover
 
 let runtime_route_lane_to_string = function
   | Runtime_default -> "default"
   | Runtime_librarian -> "librarian"
+  | Runtime_structured_judge -> "structured_judge"
   | Runtime_cross_verifier -> "cross_verifier"
+  | Runtime_media_failover -> "media_failover"
 
 let parse_runtime_route_lane = function
   | "default" -> Ok Runtime_default
   | "librarian" -> Ok Runtime_librarian
+  | "structured_judge" -> Ok Runtime_structured_judge
   | "cross_verifier" -> Ok Runtime_cross_verifier
+  | "media_failover" -> Ok Runtime_media_failover
   | lane -> Error (Printf.sprintf "unknown runtime routing lane: %s" lane)
+
+type runtime_route_body =
+  | Runtime_route_runtime_id of runtime_route_lane * string option
+  | Runtime_route_runtime_ids of runtime_route_lane * string list
 
 let required_string_field json name =
   match Json_util.assoc_member_opt name json with
@@ -225,6 +235,23 @@ let optional_string_field json name =
     if String.equal trimmed "" then Ok None else Ok (Some trimmed)
   | Some _ -> Error (name ^ " must be a string or null")
 
+let required_string_array_field json name =
+  match Json_util.assoc_member_opt name json with
+  | Some (`List values) ->
+    let rec loop acc = function
+      | [] -> Ok (List.rev acc)
+      | `String value :: rest ->
+        let trimmed = String.trim value in
+        if String.equal trimmed ""
+        then Error (name ^ " must not contain empty entries")
+        else loop (trimmed :: acc) rest
+      | _ :: _ -> Error (name ^ " must be an array of strings")
+    in
+    loop [] values
+  | Some _ -> Error (name ^ " must be an array of strings")
+  | None -> Error (name ^ " required")
+;;
+
 let parse_runtime_route_body body_str =
   try
     match Yojson.Safe.from_string body_str with
@@ -233,11 +260,19 @@ let parse_runtime_route_body body_str =
        | Error _ as err -> err
        | Ok lane ->
          (match parse_runtime_route_lane lane with
-          | Error _ as err -> err
-          | Ok parsed_lane ->
-            (match optional_string_field json "runtime_id" with
-             | Error _ as err -> err
-             | Ok runtime_id -> Ok (parsed_lane, runtime_id))))
+         | Error _ as err -> err
+         | Ok parsed_lane ->
+           (match parsed_lane with
+            | Runtime_media_failover ->
+              (match required_string_array_field json "runtime_ids" with
+               | Error _ as err -> err
+               | Ok runtime_ids ->
+                 Ok (Runtime_route_runtime_ids (parsed_lane, runtime_ids)))
+            | _ ->
+              (match optional_string_field json "runtime_id" with
+               | Error _ as err -> err
+               | Ok runtime_id ->
+                 Ok (Runtime_route_runtime_id (parsed_lane, runtime_id)))))
     | _ -> Error "JSON object body required"
   with
   | Yojson.Json_error err -> Error ("invalid json: " ^ err)
@@ -265,6 +300,7 @@ type runtime_config_write_operation =
   | Runtime_config_reload
   | Runtime_config_raw_save
   | Runtime_config_routing of runtime_route_lane * string option
+  | Runtime_config_routing_list of runtime_route_lane * string list
   | Runtime_config_assignment of string * string option
 
 let runtime_config_write_operation_details = function
@@ -283,6 +319,12 @@ let runtime_config_write_operation_details = function
     (match runtime_id with
      | None -> []
      | Some id -> [ ("runtime_id", `String id) ])
+  | Runtime_config_routing_list (lane, runtime_ids) ->
+    [ ("operation", `String "routing")
+    ; ("lane", `String (runtime_route_lane_to_string lane))
+    ; ("cleared", `Bool (List.length runtime_ids = 0))
+    ; "runtime_ids", `List (List.map (fun id -> `String id) runtime_ids)
+    ]
   | Runtime_config_assignment (keeper_name, runtime_id) ->
     [ ("operation", `String "assignment")
     ; ("keeper_name", `String keeper_name)
@@ -530,7 +572,7 @@ let add_routes ~sw ~clock router =
              match parse_runtime_route_body body_str with
              | Error msg ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
-             | Ok (Runtime_default, Some runtime_id) ->
+             | Ok (Runtime_route_runtime_id (Runtime_default, Some runtime_id)) ->
                (match Runtime_config_file.set_runtime_default ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
@@ -542,10 +584,10 @@ let add_routes ~sw ~clock router =
                   respond_runtime_config_reload state agent_name
                     ~operation:(Runtime_config_routing (Runtime_default, Some runtime_id))
                     req reqd)
-             | Ok (Runtime_default, None) ->
+             | Ok (Runtime_route_runtime_id (Runtime_default, None)) ->
                respond_dashboard_error ~status:`Bad_request ~request:req reqd
                  "default runtime_id required"
-             | Ok (Runtime_librarian, runtime_id) ->
+             | Ok (Runtime_route_runtime_id (Runtime_librarian, runtime_id)) ->
                (match Runtime_config_file.set_runtime_librarian ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
@@ -557,7 +599,21 @@ let add_routes ~sw ~clock router =
                   respond_runtime_config_reload state agent_name
                     ~operation:(Runtime_config_routing (Runtime_librarian, runtime_id))
                     req reqd)
-             | Ok (Runtime_cross_verifier, runtime_id) ->
+             | Ok (Runtime_route_runtime_id (Runtime_structured_judge, runtime_id)) ->
+               (match Runtime_config_file.set_runtime_structured_judge ~runtime_id () with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name
+                    ~operation:
+                      (Runtime_config_routing (Runtime_structured_judge, runtime_id))
+                    ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () ->
+                  respond_runtime_config_reload state agent_name
+                    ~operation:
+                      (Runtime_config_routing (Runtime_structured_judge, runtime_id))
+                    req reqd)
+             | Ok (Runtime_route_runtime_id (Runtime_cross_verifier, runtime_id)) ->
                (match Runtime_config_file.set_runtime_cross_verifier ~runtime_id () with
                 | Error msg ->
                   audit_runtime_config_write state agent_name
@@ -571,6 +627,28 @@ let add_routes ~sw ~clock router =
                     ~operation:
                       (Runtime_config_routing (Runtime_cross_verifier, runtime_id))
                     req reqd)
+             | Ok (Runtime_route_runtime_id (Runtime_media_failover, _)) ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd
+                 "media_failover runtime_ids required"
+             | Ok (Runtime_route_runtime_ids (Runtime_media_failover, runtime_ids)) ->
+               (match Runtime_config_file.set_runtime_media_failover ~runtime_ids () with
+                | Error msg ->
+                  audit_runtime_config_write state agent_name
+                    ~operation:
+                      (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
+                    ~text:body_str
+                    ~outcome:(Audit_log.Failure msg) ();
+                  respond_dashboard_error ~status:`Bad_request ~request:req reqd msg
+                | Ok () ->
+                  respond_runtime_config_reload state agent_name
+                    ~operation:
+                      (Runtime_config_routing_list (Runtime_media_failover, runtime_ids))
+                    req reqd)
+             | Ok (Runtime_route_runtime_ids (lane, _)) ->
+               respond_dashboard_error ~status:`Bad_request ~request:req reqd
+                 (Printf.sprintf
+                    "%s runtime_id required"
+                    (runtime_route_lane_to_string lane))
            )
          ) request reqd)
   |> Http.Router.post "/api/v1/runtime/config/assignment" (fun request reqd ->

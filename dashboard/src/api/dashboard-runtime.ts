@@ -477,7 +477,7 @@ export async function saveRuntimeTomlConfig(sourceText: string): Promise<Runtime
   }).then(normalizeRuntimeTomlConfig)
 }
 
-export type RuntimeRoutingLane = 'default' | 'librarian' | 'cross_verifier'
+export type RuntimeRoutingLane = 'default' | 'librarian' | 'structured_judge' | 'cross_verifier'
 
 export async function patchRuntimeRouting(
   lane: RuntimeRoutingLane,
@@ -487,6 +487,16 @@ export async function patchRuntimeRouting(
   return post<unknown>('/api/v1/runtime/config/routing', {
     lane,
     runtime_id: runtimeId,
+  }).then(normalizeRuntimeTomlConfig)
+}
+
+export async function patchRuntimeMediaFailover(
+  runtimeIds: readonly string[],
+): Promise<RuntimeTomlConfig> {
+  await ensureDevToken()
+  return post<unknown>('/api/v1/runtime/config/routing', {
+    lane: 'media_failover',
+    runtime_ids: [...runtimeIds],
   }).then(normalizeRuntimeTomlConfig)
 }
 

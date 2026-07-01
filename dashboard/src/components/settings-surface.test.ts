@@ -36,6 +36,8 @@ const apiMock = vi.hoisted(() => ({
   fetchRuntimeDefaults: vi.fn(),
   fetchRuntimeProviders: vi.fn(),
   fetchRuntimeTomlConfig: vi.fn(),
+  patchRuntimeMediaFailover: vi.fn(),
+  patchRuntimeRouting: vi.fn(),
   saveRuntimeTomlConfig: vi.fn(),
 }))
 
@@ -69,6 +71,10 @@ const promptApiMock = vi.hoisted(() => ({
   savePromptOverride: vi.fn(async () => ({ ok: true, message: 'override set' })),
 }))
 
+const runtimeRefreshMock = vi.hoisted(() => ({
+  refreshRuntimeConfigConsumers: vi.fn(async () => undefined),
+}))
+
 vi.mock('../api/dashboard.js', async () => {
   const actual = await vi.importActual<typeof import('../api/dashboard')>('../api/dashboard')
   return {
@@ -79,9 +85,15 @@ vi.mock('../api/dashboard.js', async () => {
     fetchRuntimeDefaults: apiMock.fetchRuntimeDefaults,
     fetchRuntimeProviders: apiMock.fetchRuntimeProviders,
     fetchRuntimeTomlConfig: apiMock.fetchRuntimeTomlConfig,
+    patchRuntimeMediaFailover: apiMock.patchRuntimeMediaFailover,
+    patchRuntimeRouting: apiMock.patchRuntimeRouting,
     saveRuntimeTomlConfig: apiMock.saveRuntimeTomlConfig,
   }
 })
+
+vi.mock('../lib/runtime-config-refresh', () => ({
+  refreshRuntimeConfigConsumers: runtimeRefreshMock.refreshRuntimeConfigConsumers,
+}))
 
 vi.mock('../api/mcp', () => ({
   callMcpTool: mcpMock.callMcpTool,
@@ -150,6 +162,7 @@ function makeRuntimeDefaults(
     model_routing: {
       keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
       librarian_runtime_id: null,
+      structured_judge_runtime_id: null,
       cross_verifier_runtime_id: null,
       media_failover: [],
     },
@@ -288,6 +301,20 @@ function stubEmptyApi() {
     source_text: '[runtime]\ndefault = "rt-a"\n',
     reloaded: false,
   })
+  apiMock.patchRuntimeMediaFailover.mockImplementation(async () => ({
+    ok: true,
+    path: MOCK_RUNTIME_PATH,
+    file_name: 'runtime.toml',
+    source_text: '[runtime]\ndefault = "rt-a"\n',
+    reloaded: true,
+  }))
+  apiMock.patchRuntimeRouting.mockImplementation(async () => ({
+    ok: true,
+    path: MOCK_RUNTIME_PATH,
+    file_name: 'runtime.toml',
+    source_text: '[runtime]\ndefault = "rt-a"\n',
+    reloaded: true,
+  }))
   apiMock.saveRuntimeTomlConfig.mockImplementation(async (sourceText: string) => ({
     ok: true,
     path: MOCK_RUNTIME_PATH,
@@ -321,7 +348,10 @@ describe('SettingsSurface', () => {
     apiMock.fetchRuntimeDefaults.mockReset()
     apiMock.fetchRuntimeProviders.mockReset()
     apiMock.fetchRuntimeTomlConfig.mockReset()
+    apiMock.patchRuntimeMediaFailover.mockReset()
+    apiMock.patchRuntimeRouting.mockReset()
     apiMock.saveRuntimeTomlConfig.mockReset()
+    runtimeRefreshMock.refreshRuntimeConfigConsumers.mockClear()
     mcpMock.callMcpTool.mockClear()
     promptApiMock.clearPromptOverride.mockClear()
     promptApiMock.fetchDashboardPrompts.mockClear()
@@ -814,17 +844,96 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="runtime-catalog-fallback"]')).toBeNull()
   })
 
-  it('runtime section shows resolved keeper assignments read-only', async () => {
+  it('runtime section shows resolved model routing controls and keeper assignments', async () => {
     render(html`<${SettingsSurface} />`, container)
 
     await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('librarian')
+      expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Librarian')
+      expect(container.querySelector('[data-testid="runtime-routing-structured-judge"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
+      expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')).not.toBeNull()
       const assignments = Array.from(
         container.querySelectorAll('[data-testid="routing-assignment"]'),
       ).map(n => n.textContent)
       expect(assignments).toEqual(['rt-b'])
+    })
+  })
+
+  it('patches scalar model routing lanes from settings and refreshes the projection', async () => {
+    apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.fetchRuntimeDefaults
+      .mockResolvedValueOnce(makeRuntimeDefaults())
+      .mockResolvedValueOnce(makeRuntimeDefaults({
+        model_routing: {
+          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
+          librarian_runtime_id: 'rt-b',
+          structured_judge_runtime_id: null,
+          cross_verifier_runtime_id: null,
+          media_failover: [],
+        },
+      }))
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    await waitFor(() => {
+      const select = container.querySelector('[data-testid="runtime-routing-librarian"]') as HTMLSelectElement | null
+      expect(select).not.toBeNull()
+      expect(select?.disabled).toBe(false)
+      expect(select?.options.length).toBeGreaterThan(1)
+    })
+
+    const librarian = container.querySelector('[data-testid="runtime-routing-librarian"]') as HTMLSelectElement
+    await fireEvent.input(librarian, { target: { value: 'rt-b' } })
+
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('librarian', 'rt-b')
+      expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
+      expect((container.querySelector('[data-testid="runtime-routing-librarian"]') as HTMLSelectElement).value)
+        .toBe('rt-b')
+    })
+    expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent).toContain('저장됨')
+  })
+
+  it('patches ordered media failover from settings', async () => {
+    apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.fetchRuntimeDefaults
+      .mockResolvedValueOnce(makeRuntimeDefaults({
+        model_routing: {
+          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
+          librarian_runtime_id: null,
+          structured_judge_runtime_id: null,
+          cross_verifier_runtime_id: null,
+          media_failover: ['rt-b'],
+        },
+      }))
+      .mockResolvedValueOnce(makeRuntimeDefaults({
+        model_routing: {
+          keeper_assignments: [{ keeper: 'analyst', runtime_id: 'rt-b' }],
+          librarian_runtime_id: null,
+          structured_judge_runtime_id: null,
+          cross_verifier_runtime_id: null,
+          media_failover: ['rt-b', 'rt-c'],
+        },
+      }))
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    await waitFor(() => {
+      const select = container.querySelector('[data-testid="runtime-media-failover-add"]') as HTMLSelectElement | null
+      expect(select).not.toBeNull()
+      expect(select?.disabled).toBe(false)
+      expect(select?.options.length).toBeGreaterThan(1)
+    })
+
+    const add = container.querySelector('[data-testid="runtime-media-failover-add"]') as HTMLSelectElement
+    await fireEvent.input(add, { target: { value: 'rt-c' } })
+
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeMediaFailover).toHaveBeenCalledWith(['rt-b', 'rt-c'])
+      expect(container.querySelector('[data-testid="runtime-media-failover-editor"]')?.textContent)
+        .toContain('rt-c')
     })
   })
 
@@ -834,6 +943,7 @@ describe('SettingsSurface', () => {
         model_routing: {
           keeper_assignments: [],
           librarian_runtime_id: null,
+          structured_judge_runtime_id: null,
           cross_verifier_runtime_id: null,
           media_failover: [],
         },
@@ -917,31 +1027,7 @@ describe('SettingsSurface', () => {
     expect(allRows().length).toBe(7)
   })
 
-  it('renders fusion as a no-writer handoff instead of hardcoded defaults', async () => {
-    render(html`<${SettingsSurface} />`, container)
-
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-fusion"]') as HTMLElement)
-
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('패널·심판 심의')
-    expect(container.querySelector('[data-testid="fusion-readonly-no-writer"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="fusion-no-writer"]')?.textContent).toContain('no hardcoded preview')
-    expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('dedicated writer disabled')
-    expect(container.querySelector('[data-testid="fusion-readonly-enabled"]')).toBeNull()
-    expect(container.querySelector('[data-testid="fusion-readonly-preset"]')).toBeNull()
-    expect(container.querySelector('.set-fus-model')).toBeNull()
-    expect(container.querySelector('[data-testid="set-toggle"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-seg"]')).toBeNull()
-    expect(container.querySelector('[data-testid="set-stepper"]')).toBeNull()
-    expect(container.querySelector('[data-testid="fusion-settings-editor"]')).toBeNull()
-    expect(container.textContent).not.toContain('per_hour_budget')
-
-    await fireEvent.click(container.querySelector('[data-testid="fusion-open-runtime-toml"]') as HTMLButtonElement)
-    expect(container.querySelector('[data-testid="settings-section-title"]')?.textContent).toBe('런타임 관리')
-    expect(navigate).toHaveBeenLastCalledWith('settings', { section: 'runtimes' })
-  })
-
-  it('renders the live fusion settings writer only behind VITE_FUSION_SETTINGS_WRITABLE', async () => {
-    vi.stubEnv('VITE_FUSION_SETTINGS_WRITABLE', 'true')
+  it('renders the live fusion settings writer from runtime.toml without an env gate', async () => {
     apiMock.fetchRuntimeTomlConfig.mockResolvedValueOnce({
       ok: true,
       path: MOCK_RUNTIME_PATH,
@@ -956,8 +1042,10 @@ describe('SettingsSurface', () => {
     await waitFor(() => expect(container.querySelector('[data-testid="fusion-settings-editor"]')).not.toBeNull())
     expect(apiMock.fetchRuntimeTomlConfig).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent).toContain('runtime.toml live-backed')
+    expect(container.querySelector('[data-testid="fusion-readonly-no-writer"]')).toBeNull()
     expect(container.querySelector('.set-card-b')?.getAttribute('data-preview-locked')).toBe('false')
     expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
+    expect(container.textContent).not.toContain('per_hour_budget')
     expect(container.textContent).not.toContain('ollama_cloud.ollama-cloud-devstral-2-123b')
   })
 

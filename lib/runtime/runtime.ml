@@ -611,6 +611,15 @@ let runtime_scalar_line ~key ~runtime_id =
   Printf.sprintf "%s = \"%s\"" key (toml_escape_string runtime_id)
 ;;
 
+let runtime_string_array_line ~key ~values =
+  let rendered =
+    values
+    |> List.map (fun value -> Printf.sprintf "\"%s\"" (toml_escape_string value))
+    |> String.concat ", "
+  in
+  Printf.sprintf "%s = [%s]" key rendered
+;;
+
 let split_lines content =
   if String.equal content "" then [], false
   else (
@@ -765,6 +774,19 @@ let replace_or_append_runtime_scalar section_lines ~key ~runtime_id =
   loop [] section_lines
 ;;
 
+let replace_or_append_runtime_string_array section_lines ~key ~values =
+  let line = runtime_string_array_line ~key ~values in
+  let rec loop acc = function
+    | [] -> List.rev_append acc [ line ]
+    | existing :: rest ->
+      (match assignment_key_of_line existing with
+       | Some existing_key when String.equal existing_key key ->
+         List.rev_append acc (line :: rest)
+       | _ -> loop (existing :: acc) rest)
+  in
+  loop [] section_lines
+;;
+
 let remove_runtime_scalar section_lines ~key =
   List.filter
     (fun existing ->
@@ -776,6 +798,14 @@ let remove_runtime_scalar section_lines ~key =
 
 let append_runtime_section lines ~key ~runtime_id =
   let section = [ "[runtime]"; runtime_scalar_line ~key ~runtime_id ] in
+  match List.rev lines with
+  | [] -> section
+  | last :: _ when String.equal (String.trim last) "" -> lines @ section
+  | _ -> lines @ ("" :: section)
+;;
+
+let append_runtime_string_array_section lines ~key ~values =
+  let section = [ "[runtime]"; runtime_string_array_line ~key ~values ] in
   match List.rev lines with
   | [] -> section
   | last :: _ when String.equal (String.trim last) "" -> lines @ section
@@ -843,6 +873,28 @@ let update_runtime_scalar_text content ~key ~runtime_id =
            | Some runtime_id -> replace_or_append_runtime_scalar section_lines ~key ~runtime_id
          in
          before @ (header :: next_section_lines) @ after_section)
+  in
+  join_lines updated_lines ~trailing_newline:true
+;;
+
+let update_runtime_string_array_text content ~key ~values =
+  let lines, _trailing_newline = split_lines content in
+  let updated_lines =
+    match find_index is_runtime_header lines with
+    | None -> append_runtime_string_array_section lines ~key ~values
+    | Some header_index ->
+      let before, from_header = split_at header_index lines in
+      (match from_header with
+       | [] -> append_runtime_string_array_section lines ~key ~values
+       | header :: after_header ->
+         let section_lines, after_section =
+           match find_index is_toml_table_header after_header with
+           | None -> after_header, []
+           | Some next_header_index -> split_at next_header_index after_header
+         in
+         before
+         @ (header :: replace_or_append_runtime_string_array section_lines ~key ~values)
+         @ after_section)
   in
   join_lines updated_lines ~trailing_newline:true
 ;;
@@ -964,6 +1016,27 @@ let set_runtime_scalar ?runtime_config_path ~key ~runtime_id () =
       Ok ()
 ;;
 
+let set_runtime_string_array ?runtime_config_path ~key ~runtime_ids () =
+  let key = String.trim key in
+  let runtime_ids = List.map String.trim runtime_ids in
+  if String.equal key ""
+  then Error "runtime key must not be empty"
+  else if contains_newline key
+  then Error "runtime key must not contain newlines"
+  else if List.exists (String.equal "") runtime_ids
+  then Error "runtime_ids must not contain empty entries"
+  else if List.exists contains_newline runtime_ids
+  then Error "runtime_ids must not contain newlines"
+  else (
+    let* path = runtime_config_path_result ?runtime_config_path () in
+    let* content = load_file_result path in
+    let next = update_runtime_string_array_text content ~key ~values:runtime_ids in
+    let* () = validate_runtime_config_text ~config_path:path next in
+    let* () = Fs_compat.save_file_atomic path next in
+    let* () = init_default ~config_path:path in
+    Ok ())
+;;
+
 let set_runtime_default ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"default" ~runtime_id:(Some runtime_id) ()
 ;;
@@ -972,8 +1045,16 @@ let set_runtime_librarian ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"librarian" ~runtime_id ()
 ;;
 
+let set_runtime_structured_judge ?runtime_config_path ~runtime_id () =
+  set_runtime_scalar ?runtime_config_path ~key:"structured_judge" ~runtime_id ()
+;;
+
 let set_runtime_cross_verifier ?runtime_config_path ~runtime_id () =
   set_runtime_scalar ?runtime_config_path ~key:"cross_verifier" ~runtime_id ()
+;;
+
+let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
+  set_runtime_string_array ?runtime_config_path ~key:"media_failover" ~runtime_ids ()
 ;;
 
 (* RFC-0206 single-binding: the deleted [Runtime_runtime.resolve_*_max_context]

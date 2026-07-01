@@ -22,6 +22,7 @@ import {
   type RuntimeTomlCredentialType,
   type RuntimeTomlImpactSummary,
 } from '../lib/runtime-toml-config'
+import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 import { ActionButton } from './common/button'
 import { SectionCard } from './common/card'
 import { copyToClipboard } from './common/copyable-code'
@@ -193,6 +194,18 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
 
   const dirty = config !== null && draft !== config.source_text
 
+  async function adoptSavedRuntimeConfig(saved: RuntimeTomlConfig) {
+    setConfig(saved)
+    setDraft(saved.source_text)
+    try {
+      await refreshRuntimeConfigConsumers()
+      setNotice('적용됨')
+    } catch (err: unknown) {
+      setNotice('적용됨')
+      setError(`대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+    }
+  }
+
   const refresh = useCallback(async () => {
     setLoadState('loading')
     setError(null)
@@ -231,9 +244,7 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
     setNotice(null)
     try {
       const saved = await saveRuntimeTomlConfig(nextSourceText)
-      setConfig(saved)
-      setDraft(saved.source_text)
-      setNotice('적용됨')
+      await adoptSavedRuntimeConfig(saved)
     } catch (err: unknown) {
       setError(errorToString(err))
     } finally {
@@ -248,9 +259,7 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
     setNotice(null)
     try {
       const saved = await patchRuntimeRouting(lane, runtimeId)
-      setConfig(saved)
-      setDraft(saved.source_text)
-      setNotice('적용됨')
+      await adoptSavedRuntimeConfig(saved)
     } catch (err: unknown) {
       setError(errorToString(err))
     } finally {
@@ -265,9 +274,7 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
     setNotice(null)
     try {
       const saved = await patchRuntimeAssignment(keeperName, runtimeId)
-      setConfig(saved)
-      setDraft(saved.source_text)
-      setNotice('적용됨')
+      await adoptSavedRuntimeConfig(saved)
     } catch (err: unknown) {
       setError(errorToString(err))
     } finally {

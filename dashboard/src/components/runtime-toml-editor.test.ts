@@ -10,11 +10,19 @@ const apiMocks = vi.hoisted(() => ({
   saveRuntimeTomlConfig: vi.fn(),
 }))
 
+const runtimeRefreshMock = vi.hoisted(() => ({
+  refreshRuntimeConfigConsumers: vi.fn(async () => undefined),
+}))
+
 vi.mock('../api/dashboard', () => ({
   fetchRuntimeTomlConfig: apiMocks.fetchRuntimeTomlConfig,
   patchRuntimeAssignment: apiMocks.patchRuntimeAssignment,
   patchRuntimeRouting: apiMocks.patchRuntimeRouting,
   saveRuntimeTomlConfig: apiMocks.saveRuntimeTomlConfig,
+}))
+
+vi.mock('../lib/runtime-config-refresh', () => ({
+  refreshRuntimeConfigConsumers: runtimeRefreshMock.refreshRuntimeConfigConsumers,
 }))
 
 import { RuntimeTomlEditor } from './runtime-toml-editor'
@@ -102,6 +110,7 @@ describe('RuntimeTomlEditor', () => {
     apiMocks.patchRuntimeAssignment.mockReset()
     apiMocks.patchRuntimeRouting.mockReset()
     apiMocks.saveRuntimeTomlConfig.mockReset()
+    runtimeRefreshMock.refreshRuntimeConfigConsumers.mockClear()
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValue(baseConfig)
     apiMocks.patchRuntimeAssignment.mockImplementation(async (_keeperName: string, runtimeId: string | null) => ({
       ...richConfig,
@@ -181,6 +190,7 @@ describe('RuntimeTomlEditor', () => {
     expect(saveButton.disabled).toBe(true)
     expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toBe(nextSource)
     expect(container.querySelector('[data-testid="runtime-toml-impact-preview"]')).toBeNull()
+    expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
   })
 
   it('renders runtime environment fields as structured projections', async () => {
@@ -338,6 +348,7 @@ describe('RuntimeTomlEditor', () => {
       expect((container.querySelector('textarea') as HTMLTextAreaElement).value).toContain('default = "openai.gpt"')
     })
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+    expect(runtimeRefreshMock.refreshRuntimeConfigConsumers).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
   })
 

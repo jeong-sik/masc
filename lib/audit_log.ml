@@ -348,6 +348,21 @@ let audit_summary ~action ~details =
       | _ -> None)
     | _ -> None
   in
+  let extract_string_list key =
+    match details with
+    | `Assoc fields ->
+      (match List.assoc_opt key fields with
+       | Some (`List values) ->
+         let rec loop acc = function
+           | [] -> Some (List.rev acc)
+           | `String v :: rest ->
+             loop (String.sub v 0 (min (String.length v) 80) :: acc) rest
+           | _ :: _ -> None
+         in
+         loop [] values
+       | _ -> None)
+    | _ -> None
+  in
   match action with
   | ToolCall name ->
     (match extract_str "error_msg" with
@@ -382,14 +397,24 @@ let audit_summary ~action ~details =
           Printf.sprintf "runtime.toml assignment updated: %s" keeper
         | None, _, _ -> "runtime.toml assignment updated")
      | Some "routing" ->
-       (match extract_str "lane", extract_str "runtime_id", extract_bool "cleared" with
-        | Some lane, _, Some true ->
+       (match
+          ( extract_str "lane"
+          , extract_str "runtime_id"
+          , extract_string_list "runtime_ids"
+          , extract_bool "cleared" )
+        with
+        | Some lane, _, _, Some true ->
           Printf.sprintf "runtime.toml routing cleared: %s" lane
-        | Some lane, Some runtime_id, _ ->
+        | Some lane, Some runtime_id, _, _ ->
           Printf.sprintf "runtime.toml routing updated: %s -> %s" lane runtime_id
-        | Some lane, None, _ ->
+        | Some lane, None, Some runtime_ids, _ ->
+          Printf.sprintf
+            "runtime.toml routing updated: %s -> [%s]"
+            lane
+            (String.concat ", " runtime_ids)
+        | Some lane, None, None, _ ->
           Printf.sprintf "runtime.toml routing updated: %s" lane
-        | None, _, _ -> "runtime.toml routing updated")
+        | None, _, _, _ -> "runtime.toml routing updated")
      | Some "raw_save" ->
        (match extract_str "path" with
         | Some p -> Printf.sprintf "runtime.toml raw save: %s" p

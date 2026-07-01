@@ -154,7 +154,11 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
      [MASC_HOST_FD_PRESSURE_POLLER_DISABLED=1]. Sunsets when RFC-0097
      (sandbox container reuse) reaches steady state — see RFC-0137 §9. *)
   let poller_disabled = Env_config_core.host_fd_pressure_poller_disabled () in
-  if not poller_disabled then Host_fd_pressure_poller.start ~sw ~clock;
+  if not poller_disabled then
+    Host_fd_pressure_poller.start
+      ~sw
+      ~clock
+      ~base_path:(Mcp_server.workspace_config state).base_path;
   (* Deterministic output budget enforcement: truncate oversized tool outputs
      with structured metadata before metrics/OTEL hooks see them. *)
   Tool_output_validation.install ();

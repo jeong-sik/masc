@@ -40,8 +40,11 @@ ALERT_COOLDOWN="${MASC_SYSMON_ALERT_COOLDOWN:-300}"
 # Pressure flag file. masc server (future) is expected to poll this
 # and engage Keeper_fd_pressure when level=CRIT. We always rewrite it
 # atomically so a reader sees a consistent snapshot.
-PRESSURE_STATE_FILE="${MASC_HOST_FD_PRESSURE_STATE_FILE:-${MASC_SYSMON_PRESSURE_STATE:-/tmp/masc-host-pressure.state}}"
-PRESSURE_EVENTS_FILE="${MASC_SYSMON_PRESSURE_EVENTS:-/tmp/masc-host-pressure.events.jsonl}"
+DEFAULT_MASC_BASE_PATH="${MASC_BASE_PATH:-$REPO_ROOT}"
+PRESSURE_STATE_DEFAULT="$DEFAULT_MASC_BASE_PATH/.masc/masc-host-pressure.state"
+PRESSURE_EVENTS_DEFAULT="$DEFAULT_MASC_BASE_PATH/.masc/masc-host-pressure.events.jsonl"
+PRESSURE_STATE_FILE="${MASC_HOST_FD_PRESSURE_STATE_FILE:-${MASC_SYSMON_PRESSURE_STATE:-$PRESSURE_STATE_DEFAULT}}"
+PRESSURE_EVENTS_FILE="${MASC_SYSMON_PRESSURE_EVENTS:-$PRESSURE_EVENTS_DEFAULT}"
 
 usage() {
   cat <<'EOF'
@@ -70,9 +73,11 @@ Logs:
   <log-dir>/sysmon-alerts.log  one line per fired alert
 
 Pressure flag (for masc server integration, future):
-  /tmp/masc-host-pressure.state    latest snapshot when level != OK;
+  <base-path>/.masc/masc-host-pressure.state
+                                   latest snapshot when level != OK;
                                    removed when system is OK.
-  /tmp/masc-host-pressure.events.jsonl  append-only history.
+  <base-path>/.masc/masc-host-pressure.events.jsonl
+                                   append-only history.
   Override state path via MASC_HOST_FD_PRESSURE_STATE_FILE.
   Override events path via MASC_SYSMON_PRESSURE_EVENTS.
   Reader contract: parse JSON line for level/kinds/summary/ts/pid.
@@ -105,6 +110,7 @@ if [ "$(uname)" != "Darwin" ]; then
 fi
 
 mkdir -p "$LOG_DIR"
+mkdir -p "$(dirname "$PRESSURE_STATE_FILE")" "$(dirname "$PRESSURE_EVENTS_FILE")" 2>/dev/null || true
 LOG="$LOG_DIR/sysmon.log"
 ALERT_LOG="$LOG_DIR/sysmon-alerts.log"
 COOLDOWN_DIR="${TMPDIR:-/tmp}/masc-sysmon-cooldown.$$"

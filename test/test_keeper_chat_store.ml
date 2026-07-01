@@ -1211,6 +1211,7 @@ let test_append_turn_redacts_all_supplied_block_strings () =
                             (`Assoc
                               [ "token", `String secret
                               ; "nested", `List [ `String ("nested " ^ secret) ]
+                              ; "key " ^ secret, `String "benign value"
                               ])
                       ; result = Some (`String ("result " ^ secret))
                       ; ts = Some ("ts " ^ secret)

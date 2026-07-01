@@ -418,7 +418,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="log-viewer"]')).not.toBeNull()
   })
 
-  it('renders the theme switch inside the display section (moved out of the top bar)', () => {
+  it('renders a live theme switch inside the display section that can reach Paper', async () => {
     route.value = { tab: 'settings', params: { section: 'display' }, postId: null }
 
     render(html`<${SettingsSurface} />`, container)
@@ -427,6 +427,13 @@ describe('SettingsSurface', () => {
     const themeButton = [...container.querySelectorAll('button')]
       .find(b => /DARK|STYLESEED|PAPER/.test(b.textContent ?? ''))
     expect(themeButton).toBeTruthy()
+
+    await fireEvent.click(themeButton as HTMLButtonElement)
+    expect(document.documentElement.dataset.theme).toBe('styleseed')
+
+    await fireEvent.click(themeButton as HTMLButtonElement)
+    expect(document.documentElement.dataset.theme).toBe('paper')
+    expect(localStorage.getItem('dashboardTheme')).toBe('paper')
   })
 
   it('wires display density to the dashboard density signal without fake locale previews', async () => {

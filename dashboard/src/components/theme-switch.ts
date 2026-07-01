@@ -1,6 +1,6 @@
 // ThemeSwitch — compact header theme toggle.
 //
-// Cycles between the default StyleSeed palette and the legacy dark palette.
+// Cycles between the default dark palette, StyleSeed, and Paper.
 // The actual token swaps live in styles/styleseed-theme.css and
 // styles/paper-theme.css; this component only flips
 // document.documentElement.dataset.theme and persists the choice to
@@ -59,8 +59,14 @@ function syncThemeSearchParam(next: ThemeId): void {
   history.replaceState(null, '', url.toString())
 }
 
+function nextTheme(current: ThemeId): ThemeId {
+  if (current === null) return 'styleseed'
+  if (current === 'styleseed') return 'paper'
+  return null
+}
+
 function toggleTheme(): void {
-  applyTheme(currentTheme.value === 'styleseed' ? null : 'styleseed')
+  applyTheme(nextTheme(currentTheme.value))
 }
 
 const LABEL: Record<'default' | 'styleseed' | 'paper', string> = {
@@ -71,8 +77,8 @@ const LABEL: Record<'default' | 'styleseed' | 'paper', string> = {
 
 const TITLE: Record<'default' | 'styleseed' | 'paper', string> = {
   default: '현재 테마: Dark · 클릭하여 StyleSeed 테마로 전환',
-  styleseed: '현재 테마: StyleSeed · 클릭하여 Dark 테마로 전환',
-  paper: '현재 테마: Paper · 클릭하여 StyleSeed 테마로 전환',
+  styleseed: '현재 테마: StyleSeed · 클릭하여 Paper 테마로 전환',
+  paper: '현재 테마: Paper · 클릭하여 Dark 테마로 전환',
 }
 
 export function ThemeSwitch() {

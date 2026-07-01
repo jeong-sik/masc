@@ -133,6 +133,7 @@ let test_no_progress_reason_string_mapping () =
     ; D.Repeated_identity, "repeated_identity"
     ; D.Surface_mismatch, "surface_mismatch"
     ; D.Stale_task, "stale_task"
+    ; D.Unclassified, "unclassified"
     ]
   in
   List.iter

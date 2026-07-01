@@ -92,8 +92,89 @@ let with_runtime_config content f =
        Config_dir_resolver.reset ();
        (match Runtime.init_default ~config_path:runtime_config_path with
         | Ok () -> ()
-        | Error err -> fail ("runtime init: " ^ err));
+       | Error err -> fail ("runtime init: " ^ err));
        f ())
+
+let prompt_metrics =
+  Masc.Keeper_agent_prompt_metrics.build_prompt_metrics ~system_prompt:""
+    ~dynamic_context:"" ~user_message:""
+
+let ctx_composition : Masc.Keeper_agent_prompt_metrics.ctx_composition_metrics =
+  { actual_input_tokens = None
+  ; display_total_tokens = 0
+  ; estimated_known_tokens = 0
+  ; segments = []
+  }
+
+let tool_surface : Masc.Keeper_agent_tool_surface.tool_surface_metrics =
+  { turn_lane = Masc.Keeper_agent_tool_surface.Lane_tool_optional
+  ; config_root = ""
+  ; runtime_config_path = None
+  }
+
+let tool_call
+      ?typed_outcome
+      ?(input_fingerprint = Some "input")
+      ?(output_fingerprint = Some "output")
+      tool_name
+  : Masc.Keeper_agent_result.tool_call_detail
+  =
+  { tool_name
+  ; provider = "test"
+  ; outcome = "ok"
+  ; typed_outcome
+  ; latency_ms = 0.0
+  ; task_id = None
+  ; route_evidence = None
+  ; input_fingerprint
+  ; output_fingerprint
+  }
+
+let healthy_operator_disposition
+  : Masc.Keeper_agent_result.operator_disposition
+  =
+  { disposition = Masc.Keeper_execution_receipt.Disp_pass
+  ; reason = Masc.Keeper_execution_receipt.Reason_healthy
+  }
+
+let pause_operator_disposition
+  : Masc.Keeper_agent_result.operator_disposition
+  =
+  { disposition = Masc.Keeper_execution_receipt.Disp_pause_human
+  ; reason = Masc.Keeper_execution_receipt.Reason_completion_contract_unsatisfied
+  }
+
+let run_result
+      ?(response_text = "direct reply")
+      ?(stop_reason = Runtime_agent.Completed)
+      ?(operator_disposition = Some healthy_operator_disposition)
+      ?(tool_calls = [])
+      ()
+  : Masc.Keeper_agent_run.run_result
+  =
+  { response_text
+  ; model_used = "test-model"
+  ; prompt_metrics
+  ; ctx_composition
+  ; runtime_observation = None
+  ; turn_count = 1
+  ; usage = Masc.Inference_utils.zero_usage
+  ; usage_reported = true
+  ; tool_calls
+  ; completion_contract_result =
+      Masc.Keeper_execution_receipt.Contract_satisfied_execution
+  ; operator_disposition
+  ; checkpoint = None
+  ; trace_ref = None
+  ; run_validation = None
+  ; stop_reason
+  ; inference_telemetry = None
+  ; tool_surface
+  ; pre_dispatch_compacted = false
+  ; pre_dispatch_compaction_trigger = None
+  ; pre_dispatch_compaction_before_tokens = None
+  ; pre_dispatch_compaction_after_tokens = None
+  }
 
 let test_turn_timeout_blocker_class_roundtrip () =
   let cls = Keeper_meta_contract.Turn_timeout in
@@ -745,6 +826,7 @@ let test_direct_success_clears_no_progress_pause () =
          Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
            ~config
            ~pre_turn_meta:meta
+           ~result:(run_result ())
            meta
        in
        check bool "direct success resumes no-progress pause" false recovered_meta.paused;
@@ -817,6 +899,7 @@ let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
          Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
            ~config
            ~pre_turn_meta:meta
+           ~result:(run_result ())
            meta
        in
        check bool
@@ -841,6 +924,110 @@ let test_direct_success_clears_no_progress_pause_after_blocker_overwrite () =
          (match entry.Masc.Keeper_registry.last_failure_reason with
           | None -> ()
          | Some _ -> fail "expected overwritten no-progress failure reason to clear")
+       | None -> fail "expected registered keeper")
+
+let test_direct_success_operator_pause_keeps_no_progress_pause () =
+  let result =
+    run_result ~operator_disposition:(Some pause_operator_disposition) ()
+  in
+  check bool
+    "operator pause disposition cannot clear no-progress pause"
+    false
+    (Masc.Keeper_turn.For_testing.direct_success_may_clear_no_progress_pause
+       result)
+
+let test_direct_success_passive_only_no_visible_keeps_no_progress_pause () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-no-progress-direct-success-passive-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Masc.Keeper_no_progress_loop_detector.reset_all_for_test ();
+      Masc.Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "no-progress-direct-success-passive" in
+       let blocker =
+         Keeper_meta_contract.blocker_info_of_class
+           ~detail:"latched"
+           Keeper_meta_contract.No_progress_loop
+       in
+       let meta =
+         { (make_meta keeper_name
+            |> Keeper_meta_contract.map_runtime (fun rt ->
+              { rt with last_blocker = Some blocker }))
+           with
+           paused = true
+         }
+       in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       ignore
+         (Masc.Keeper_no_progress_loop_detector.record_turn
+            ~threshold_override:1
+            ~keeper_name
+            ~made_progress:false
+            ());
+       Masc.Keeper_registry.set_failure_reason
+         ~base_path:config.base_path
+         keeper_name
+         (Some
+            (Masc.Keeper_registry.Provider_runtime_error
+               { code = Masc.Keeper_unified_turn_no_progress.failure_reason_code
+               ; detail = "latched"
+               ; provider_id = None
+               ; http_status = None
+               ; runtime_id = None
+               ; reason = None
+               }));
+       let result =
+         run_result
+           ~response_text:""
+           ~tool_calls:
+             [ tool_call
+                 ~typed_outcome:Keeper_tool_outcome.Progress
+                 "keeper_tasks_list" ]
+           ()
+       in
+       let recovered_meta =
+         Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
+           ~config
+           ~pre_turn_meta:meta
+           ~result
+           meta
+       in
+       check bool
+         "passive-only no-visible direct success stays paused"
+         true
+         recovered_meta.paused;
+       check bool
+         "passive-only no-visible direct success keeps detector latched"
+         true
+         (Masc.Keeper_no_progress_loop_detector.is_latched ~keeper_name);
+       (match recovered_meta.runtime.last_blocker with
+        | Some
+            { Keeper_meta_contract.klass = Keeper_meta_contract.No_progress_loop
+            ; detail
+            } ->
+          check string "no-progress blocker preserved" blocker.detail detail
+        | Some _ -> fail "expected no-progress blocker to remain"
+        | None -> fail "expected no-progress blocker to remain");
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         check bool
+           "registry meta remains paused after passive-only direct success"
+           true
+           entry.Masc.Keeper_registry.meta.paused;
+         (match entry.Masc.Keeper_registry.last_failure_reason with
+          | Some (Masc.Keeper_registry.Provider_runtime_error { code; _ })
+            when String.equal
+                   code
+                   Masc.Keeper_unified_turn_no_progress.failure_reason_code -> ()
+          | Some _ -> fail "expected no_progress failure reason to remain"
+          | None -> fail "expected no_progress failure reason to remain")
        | None -> fail "expected registered keeper")
 
 let test_direct_success_persist_failure_keeps_no_progress_pause () =
@@ -922,6 +1109,7 @@ let test_direct_success_persist_failure_keeps_no_progress_pause () =
          Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
            ~config
            ~pre_turn_meta:invalid_meta
+           ~result:(run_result ())
            invalid_meta
        in
        check bool "failed persistence keeps returned meta paused" true recovered_meta.paused;
@@ -992,6 +1180,7 @@ let test_direct_success_leaves_unrelated_pause_intact () =
          Masc.Keeper_turn.For_testing.clear_direct_success_no_progress_pause
            ~config
            ~pre_turn_meta:meta
+           ~result:(run_result ())
            meta
        in
        check bool "unrelated pause stays paused" true recovered_meta.paused;
@@ -1192,6 +1381,14 @@ let () =
             "direct success clears no-progress pause after blocker overwrite"
             `Quick
             test_direct_success_clears_no_progress_pause_after_blocker_overwrite;
+          test_case
+            "direct success operator pause keeps no-progress pause"
+            `Quick
+            test_direct_success_operator_pause_keeps_no_progress_pause;
+          test_case
+            "direct success passive-only no-visible keeps no-progress pause"
+            `Quick
+            test_direct_success_passive_only_no_visible_keeps_no_progress_pause;
           test_case
             "direct success persistence failure keeps no-progress pause"
             `Quick

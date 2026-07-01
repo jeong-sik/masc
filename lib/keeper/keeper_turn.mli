@@ -43,9 +43,16 @@ module For_testing : sig
   (** Format a dashboard co-view context object ({ label, route, scene, fields })
       into turn instructions when no explicit [turn_instructions] is supplied. *)
 
+  val direct_success_may_clear_no_progress_pause :
+    Keeper_agent_run.run_result -> bool
+  (** Typed recovery predicate for direct-message success: only a healthy
+      operator disposition plus visible reply or non-passive typed progress
+      / validated run evidence may clear a no-progress forced pause. *)
+
   val clear_direct_success_no_progress_pause :
     config:Workspace.config ->
     pre_turn_meta:Keeper_meta_contract.keeper_meta ->
+    result:Keeper_agent_run.run_result ->
     Keeper_meta_contract.keeper_meta ->
     Keeper_meta_contract.keeper_meta
   (** Apply the direct-message success recovery that clears a no-progress

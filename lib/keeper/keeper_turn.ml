@@ -179,14 +179,77 @@ let persist_direct_success_no_progress_resume ~base_path (resumed_meta : keeper_
       (Keeper_registry.registry_entry_validation_error_to_string err);
     Error err
 
+let direct_success_disposition_allows_no_progress_resume
+      (result : Keeper_agent_run.run_result)
+  : bool
+  =
+  match result.operator_disposition with
+  | Some { disposition = Keeper_execution_receipt.Disp_pass; _ } -> true
+  | Some
+      { disposition =
+          ( Keeper_execution_receipt.Disp_pause_human
+          | Keeper_execution_receipt.Disp_alert_exhausted
+          | Keeper_execution_receipt.Disp_fail_open_next_runtime
+          | Keeper_execution_receipt.Disp_pass_next_model
+          | Keeper_execution_receipt.Disp_user_cancelled
+          | Keeper_execution_receipt.Disp_skipped
+          | Keeper_execution_receipt.Disp_unknown )
+      ; _
+      }
+  | None -> false
+
+let direct_success_tool_call_has_progress
+      (detail : Keeper_agent_run.tool_call_detail)
+  : bool
+  =
+  match detail.typed_outcome with
+  | Some Keeper_tool_outcome.Progress -> (
+    match Keeper_tool_progress.classify_tool_progress detail.tool_name with
+    | Keeper_tool_progress.Passive_status -> false
+    | Keeper_tool_progress.Claim_context
+    | Keeper_tool_progress.Execution
+    | Keeper_tool_progress.Completion -> true)
+  | Some (Keeper_tool_outcome.No_progress _ | Keeper_tool_outcome.Error _)
+  | None -> false
+
+let direct_success_has_progress_evidence (result : Keeper_agent_run.run_result) :
+    bool
+  =
+  List.exists direct_success_tool_call_has_progress result.tool_calls
+  || Option.is_some (Keeper_unified_metrics_support.visible_run_validation result)
+
+let direct_success_may_clear_no_progress_pause
+      (result : Keeper_agent_run.run_result)
+  : bool
+  =
+  direct_success_disposition_allows_no_progress_resume result
+  &&
+  match
+    Keeper_turn_outcome.of_result_surface
+      ~response_text:result.response_text
+      result.stop_reason
+  with
+  | Keeper_turn_outcome.Visible_reply -> true
+  | Keeper_turn_outcome.Continuation_checkpoint
+  | Keeper_turn_outcome.No_visible_reply ->
+    direct_success_has_progress_evidence result
+
 let clear_direct_success_no_progress_pause
       ~(config : Workspace.config)
       ~(pre_turn_meta : keeper_meta)
+      ~(result : Keeper_agent_run.run_result)
       (meta : keeper_meta)
   : keeper_meta
   =
   if not (has_direct_success_no_progress_pause ~config pre_turn_meta)
   then meta
+  else if not (direct_success_may_clear_no_progress_pause result)
+  then (
+    Log.Keeper.info
+      "%s: direct keeper_msg success kept no_progress pause/blocker because \
+       result lacked typed resume evidence"
+      meta.name;
+    meta)
   else
     let cleared_meta = clear_no_progress_meta_blocker meta in
     let resumed_meta =
@@ -339,6 +402,8 @@ let surface_context_to_instructions (ctx : Yojson.Safe.t) : string option =
 module For_testing = struct
   let direct_owner_conversation_context = direct_owner_conversation_context
   let surface_context_to_instructions = surface_context_to_instructions
+  let direct_success_may_clear_no_progress_pause =
+    direct_success_may_clear_no_progress_pause
   let clear_direct_success_no_progress_pause =
     clear_direct_success_no_progress_pause
   let direct_no_progress_retry_reason =
@@ -1183,6 +1248,7 @@ let run_keeper_msg_turn_admitted ?on_text_delta ?on_event ?event_bus ctx args : 
                 clear_direct_success_no_progress_pause
                   ~config:ctx.config
                   ~pre_turn_meta:meta
+                  ~result
                   lifecycle.updated_meta
               in
               let updated_meta =

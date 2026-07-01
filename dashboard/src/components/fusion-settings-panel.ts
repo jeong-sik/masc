@@ -20,6 +20,7 @@ import {
   type FusionSettings,
   type FusionSettingsParseIssue,
 } from '../lib/fusion-settings'
+import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 
 type EditorState = 'loading' | 'idle' | 'saving' | 'saved' | 'error'
 type FusionSettingsDraft = {
@@ -193,7 +194,14 @@ export function FusionSettingsPanel() {
       }
       setSource(cfg.source_text)
       setDraft(draftFromSettings(parsed.settings))
-      setSavedMessage(cfg.reloaded ? '저장됨 (reload 완료)' : '저장됨')
+      try {
+        await refreshRuntimeConfigConsumers()
+        setSavedMessage(cfg.reloaded ? '저장됨 (reload 완료)' : '저장됨')
+      } catch (err) {
+        setError(`저장됨, 대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+        setState('error')
+        return
+      }
       setState('saved')
     } catch (err) {
       if (!mountedRef.current) return

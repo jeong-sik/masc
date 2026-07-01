@@ -229,11 +229,23 @@ val set_runtime_librarian :
     writer, validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
 
+val set_runtime_structured_judge :
+  ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
+(** Persist or clear [\[runtime\]].structured_judge through the runtime.toml
+    SSOT writer, validate the resulting config, atomically write it, and refresh
+    the in-process runtime cache. *)
+
 val set_runtime_cross_verifier :
   ?runtime_config_path:string -> runtime_id:string option -> unit -> (unit, string) result
 (** Persist or clear [\[runtime\]].cross_verifier through the runtime.toml SSOT
     writer, validate the resulting config, atomically write it, and refresh the
     in-process runtime cache. *)
+
+val set_runtime_media_failover :
+  ?runtime_config_path:string -> runtime_ids:string list -> unit -> (unit, string) result
+(** Persist [\[runtime\]].media_failover through the runtime.toml SSOT writer,
+    validate the resulting config, atomically write it, and refresh the
+    in-process runtime cache. The list order is preserved. *)
 
 val default_max_context : unit -> int
 (** Context-window budget of the default runtime's model (RFC-0206

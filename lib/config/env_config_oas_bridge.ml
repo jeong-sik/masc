@@ -83,10 +83,17 @@ let trimmed_value_opt name =
     timeout wrapper, so it is treated like any other invalid env value. *)
 let timeout_env_value_opt ~name raw =
   let reject () =
-    Env_config_core.reject_malformed_env
-      ~name
-      ~raw
-      ~type_name:"positive finite float";
+    let type_name = "positive finite float" in
+    Log.Misc.warn
+      "malformed env %s=%S (expected %s); using default"
+      name
+      raw
+      type_name;
+    if Env_config_core.parse_warn_enabled ()
+    then
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf "malformed env %s=%S (expected %s)" name raw type_name));
     None
   in
   match Safe_ops.float_of_string_safe raw with

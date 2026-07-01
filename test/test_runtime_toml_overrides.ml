@@ -145,6 +145,33 @@ let test_applies_proactive_min_interval_override () =
     (Some "1234")
     (List.assoc_opt "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC" overrides)
 
+(* RFC-0297 P0-1: the three lifecycle kill-switches must map TOML ->
+   canonical env instead of being silently dropped. Before the key_to_env
+   mappings existed, [reactive]/[proactive]/[autonomous] enabled were never
+   visited by load_and_apply and vanished. *)
+let test_applies_lifecycle_enabled_overrides () =
+  let doc = parse_or_fail
+    "[reactive]\n\
+     enabled = false\n\
+     [proactive]\n\
+     enabled = false\n\
+     [autonomous]\n\
+     enabled = true\n"
+  in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied three lifecycle enabled overrides" 3 count;
+  check (option string) "reactive enabled maps to canonical env"
+    (Some "false")
+    (List.assoc_opt "MASC_KEEPER_REACTIVE_ENABLED" overrides);
+  check (option string) "proactive enabled maps to canonical env"
+    (Some "false")
+    (List.assoc_opt "MASC_KEEPER_PROACTIVE_ENABLED" overrides);
+  check (option string) "autonomous enabled maps to canonical env"
+    (Some "true")
+    (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_ENABLED" overrides)
+
 let test_applies_memory_overrides () =
   let doc = parse_or_fail
     "[memory]\n\
@@ -493,6 +520,7 @@ let () =
         ; test_case "applies sleep/throttle overrides" `Quick test_applies_sleep_and_throttle_overrides
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies proactive min interval override" `Quick test_applies_proactive_min_interval_override
+        ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs
         ; test_case

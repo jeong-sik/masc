@@ -526,20 +526,24 @@ export function SettingsSurface() {
   // Server config projection — used by Paths, MCP and Notifications.
   const [dashboardConfig, setDashboardConfig] = useState<DashboardConfigResponse | null>(null)
   const [dashboardConfigStatus, setDashboardConfigStatus] = useState<'loading' | 'ready' | 'error'>('loading')
+  const [dashboardConfigError, setDashboardConfigError] = useState<string | null>(null)
 
   useEffect(() => {
     let active = true
     setDashboardConfigStatus('loading')
+    setDashboardConfigError(null)
     void (async () => {
       try {
         const resp = await fetchDashboardConfig()
         if (!active) return
         setDashboardConfig(resp)
         setDashboardConfigStatus('ready')
-      } catch {
+        setDashboardConfigError(null)
+      } catch (err) {
         if (!active) return
         setDashboardConfig(null)
         setDashboardConfigStatus('error')
+        setDashboardConfigError(err instanceof Error ? err.message : String(err))
       }
     })()
     return () => { active = false }
@@ -640,7 +644,13 @@ export function SettingsSurface() {
     }
   }
   const cur = SET_SECTIONS.find(s => s[0] === sec) ?? SET_SECTIONS[0]!
-  const sectionState = settingsSectionState(sec, fusionSettingsWritable)
+  const baseSectionState = settingsSectionState(sec, fusionSettingsWritable)
+  const sectionState =
+    sec === 'notify' && dashboardConfigStatus === 'loading'
+      ? { mode: 'mixed' as const, label: 'thresholds loading' }
+      : sec === 'notify' && dashboardConfigStatus === 'error'
+        ? { mode: 'mixed' as const, label: 'config unavailable' }
+        : baseSectionState
 
   // Resolved runtime options (de-duplicated, derived from the live registry).
   const runtimeEntries = runtimeDefaults?.runtimes ?? []
@@ -950,30 +960,42 @@ export function SettingsSurface() {
               <div class="set-hint" style=${{ marginBottom: '12px' }}>
                 알림 임계값은 현재 서버 config projection에서 읽습니다. 이 화면은 아직 알림 라우팅 writer를 노출하지 않으므로 브라우저-only 토글을 만들지 않습니다.
               </div>
-              <div class="set-sub-h">Live alert thresholds</div>
-              <${ThresholdTruthRow}
-                label="Preparing context"
-                entry=${ctxPreparingEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(ctxPreparingEntry))}
-              />
-              <${ThresholdTruthRow}
-                label="Handoff imminent"
-                entry=${ctxHandoffEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(ctxHandoffEntry))}
-              />
-              <${ThresholdTruthRow}
-                label="Runtime warning"
-                entry=${runtimeWarningEntry}
-                value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
-              />
-              <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
-              <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
-              <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
-                <div class="set-truth-value" data-testid="notify-routing-readonly">
-                  <span class="mono">read-only</span>
-                  <span class="set-truth-source">no writer</span>
-                </div>
-              <//>
+              ${dashboardConfigStatus === 'loading'
+                ? html`<div class="set-hint" data-testid="notify-config-loading">알림 임계값을 불러오는 중...</div>`
+                : dashboardConfigStatus === 'error'
+                  ? html`
+                    <div class="set-hint" data-testid="notify-config-error">
+                      dashboard config projection을 불러오지 못했습니다${dashboardConfigError ? `: ${dashboardConfigError}` : ''}.
+                    </div>
+                  `
+                  : html`
+                    <div data-testid="notify-thresholds">
+                      <div class="set-sub-h">Live alert thresholds</div>
+                      <${ThresholdTruthRow}
+                        label="Preparing context"
+                        entry=${ctxPreparingEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(ctxPreparingEntry))}
+                      />
+                      <${ThresholdTruthRow}
+                        label="Handoff imminent"
+                        entry=${ctxHandoffEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(ctxHandoffEntry))}
+                      />
+                      <${ThresholdTruthRow}
+                        label="Runtime warning"
+                        entry=${runtimeWarningEntry}
+                        value=${formatThresholdPercent(configEntryDisplayValue(runtimeWarningEntry))}
+                      />
+                      <${ConfigTruthRow} label="Signal stale seconds" entry=${signalStaleEntry} />
+                      <${ConfigTruthRow} label="Alert dedup window" entry=${alertDedupEntry} />
+                      <${SetRow} label="Notification routing" hint="No dashboard writer is exposed for alert channels or event toggles yet">
+                        <div class="set-truth-value" data-testid="notify-routing-readonly">
+                          <span class="mono">read-only</span>
+                          <span class="set-truth-source">no writer</span>
+                        </div>
+                      <//>
+                    </div>
+                  `}
             `}
 
             ${sec === 'display' && html`

@@ -623,6 +623,25 @@ describe('SettingsSurface', () => {
     expect(sessionStorage.getItem('masc.settings.local.notifyChannel')).toBeNull()
   })
 
+  it('notify page surfaces config projection failures instead of rendering missing thresholds', async () => {
+    apiMock.fetchDashboardConfig.mockRejectedValueOnce(new Error('config projection offline'))
+
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-notify"]') as HTMLElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="notify-config-error"]')?.textContent)
+        .toContain('config projection offline')
+      expect(container.querySelector('[data-testid="settings-section-state"]')?.textContent)
+        .toContain('config unavailable')
+    })
+
+    expect(container.querySelector('[data-testid="notify-thresholds"]')).toBeNull()
+    expect(container.textContent).not.toContain('MASC_DASHBOARD_CTX_PREPARING')
+    expect(container.querySelector('[data-testid="notify-routing-readonly"]')).toBeNull()
+  })
+
   it('renders runtime settings as a live-backed entry point instead of fake local controls', async () => {
     render(html`<${SettingsSurface} />`, container)
 

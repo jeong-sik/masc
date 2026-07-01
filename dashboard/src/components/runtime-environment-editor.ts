@@ -73,6 +73,7 @@ interface RuntimeEnvironmentEditorProps {
   onAddProvider: (input: NewRuntimeProviderInput) => void
   onAddModel: (input: NewRuntimeModelInput) => void
   onAddBinding: (providerId: string, modelId: string) => void
+  onDeleteProvider: (providerId: string) => void
   onProviderTransportChange: (
     providerId: string,
     field: RuntimeProviderTransportEditableField,
@@ -203,6 +204,7 @@ export function RuntimeEnvironmentEditor({
   onAddProvider,
   onAddModel,
   onAddBinding,
+  onDeleteProvider,
   onProviderTransportChange,
   onProviderCredentialChange,
 }: RuntimeEnvironmentEditorProps) {
@@ -212,6 +214,7 @@ export function RuntimeEnvironmentEditor({
   const [providerFormOpen, setProviderFormOpen] = useState(false)
   const [newProvider, setNewProvider] = useState<NewProviderDraft>(DEFAULT_NEW_PROVIDER)
   const [providerFormError, setProviderFormError] = useState<string | null>(null)
+  const [providerDeleteError, setProviderDeleteError] = useState<string | null>(null)
 
   const [modelFormOpen, setModelFormOpen] = useState(false)
   const [newModel, setNewModel] = useState<NewModelDraft>(DEFAULT_NEW_MODEL)
@@ -306,7 +309,21 @@ export function RuntimeEnvironmentEditor({
     })
     setNewProvider(DEFAULT_NEW_PROVIDER)
     setProviderFormError(null)
+    setProviderDeleteError(null)
     setProviderFormOpen(false)
+  }
+
+  function deleteProvider(providerId: string) {
+    const providerBindings = environment.bindings.filter(b => b.providerId === providerId)
+    const remainingBindings = environment.bindings.filter(b => b.providerId !== providerId)
+    if (providerBindings.length > 0 && remainingBindings.length === 0) {
+      setProviderDeleteError(
+        '마지막 runtime binding을 가진 provider alias는 삭제할 수 없습니다. 새 provider/model/binding을 먼저 추가하세요.',
+      )
+      return
+    }
+    setProviderDeleteError(null)
+    onDeleteProvider(providerId)
   }
 
   function submitAddModel() {
@@ -530,6 +547,9 @@ export function RuntimeEnvironmentEditor({
            save. -->
       <div class=${section === 'providers' ? '' : 'hidden'} data-testid="runtime-section-providers">
         <div class="rt-cards">
+          ${providerDeleteError ? html`
+            <div class="rt-warn" role="alert" data-testid="runtime-delete-provider-error">${providerDeleteError}</div>
+          ` : null}
           ${environment.providers.map(provider => {
             const providerTransportField = transportField(provider)
             return html`
@@ -538,6 +558,13 @@ export function RuntimeEnvironmentEditor({
                 <span class="rt-card-id mono">${provider.id}</span>
                 <span class="rt-card-name">${provider.displayName}</span>
                 <span class="rt-proto mono">${provider.protocol || '—'}</span>
+                <button
+                  type="button"
+                  class="rt-delete-provider"
+                  disabled=${isDisabled}
+                  data-testid=${`runtime-provider-${provider.id}-delete`}
+                  onClick=${() => deleteProvider(provider.id)}
+                >삭제</button>
               </div>
               <div class="rt-field">
                 <span class="sub-k">${providerTransportField}</span>

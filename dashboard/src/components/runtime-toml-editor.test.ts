@@ -719,6 +719,59 @@ describe('RuntimeTomlEditor', () => {
     })
   })
 
+  it('deletes a provider alias as a draft and retargets the default runtime to a remaining binding', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-provider-runpod_mtp-delete"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      const source = (container.querySelector('[data-testid="runtime-toml-source"]') as HTMLTextAreaElement).value
+      expect(source).toContain('default = "openai.gpt"')
+      expect(source).not.toContain('[providers.runpod_mtp]')
+      expect(source).not.toContain('[providers.runpod_mtp.credentials]')
+      expect(source).not.toContain('[runpod_mtp.qwen]')
+      expect(source).toContain('[providers.openai]')
+      expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('modified')
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+    await waitFor(() => {
+      const savedSource = apiMocks.saveRuntimeTomlConfig.mock.calls[0]?.[0] as string
+      expect(savedSource).toContain('default = "openai.gpt"')
+      expect(savedSource).not.toContain('[providers.runpod_mtp]')
+    })
+  })
+
+  it('blocks deleting the final runtime-bearing provider alias from the structured view', async () => {
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce({
+      ...baseConfig,
+      source_text: `${richSourceText
+        .replace(/\n\[providers\.openai\][\s\S]*?\n\[models\.qwen\]/, '\n[models.qwen]')
+        .replace(/\n\[models\.gpt\][\s\S]*?\n\[runpod_mtp\.qwen\]/, '\n[runpod_mtp.qwen]')
+        .replace(/\n\[openai\.gpt\][\s\S]*$/m, '\n')}`,
+    })
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-providers"]')).not.toBeNull()
+    })
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-providers"]') as HTMLButtonElement)
+    fireEvent.click(container.querySelector('[data-testid="runtime-provider-runpod_mtp-delete"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-delete-provider-error"]')?.textContent)
+        .toContain('마지막 runtime binding')
+    })
+    expect(container.querySelector('[data-testid="runtime-delete-provider-error"]')?.getAttribute('role')).toBe('alert')
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).not.toContain('modified')
+    expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
+  })
+
   it('does not offer messages protocols or command transport in the add-provider form', async () => {
     apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
     render(html`<${RuntimeTomlEditor} />`, container)

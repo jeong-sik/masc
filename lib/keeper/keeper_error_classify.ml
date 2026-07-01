@@ -87,6 +87,7 @@ let is_transient_network_error (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (AuthError _)
   | Agent_sdk.Error.Api (InvalidRequest _)
   | Agent_sdk.Error.Api (NotFound _)
+  | Agent_sdk.Error.Api (PaymentRequired _)
   | Agent_sdk.Error.Api (ContextOverflow _) -> false
   (* Non-API error families are by definition not transient network errors. *)
   | Agent_sdk.Error.Provider _
@@ -766,6 +767,7 @@ let is_context_overflow (err : Agent_sdk.Error.sdk_error) : bool =
   | Agent_sdk.Error.Api (AuthError _)
   | Agent_sdk.Error.Api (InvalidRequest _)
   | Agent_sdk.Error.Api (NotFound _)
+  | Agent_sdk.Error.Api (PaymentRequired _)
   | Agent_sdk.Error.Api (NetworkError _)
   | Agent_sdk.Error.Api (Timeout _) -> false
   | Agent_sdk.Error.Provider _ -> false

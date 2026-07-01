@@ -104,6 +104,7 @@ let reclassify_error_after_side_effect
       | Agent_sdk.Error.Api (AuthError _)
       | Agent_sdk.Error.Api (InvalidRequest _)
       | Agent_sdk.Error.Api (NotFound _)
+      | Agent_sdk.Error.Api (PaymentRequired _)
       | Agent_sdk.Error.Api (ContextOverflow _)
       | Agent_sdk.Error.Api (NetworkError _)
       | Agent_sdk.Error.Provider _
@@ -133,6 +134,7 @@ let post_commit_failure_kind_of_error (err : Agent_sdk.Error.sdk_error) =
   | Agent_sdk.Error.Api (AuthError _)
   | Agent_sdk.Error.Api (InvalidRequest _)
   | Agent_sdk.Error.Api (NotFound _)
+  | Agent_sdk.Error.Api (PaymentRequired _)
   | Agent_sdk.Error.Api (ContextOverflow _)
   | Agent_sdk.Error.Api (NetworkError _)
   | Agent_sdk.Error.Provider _

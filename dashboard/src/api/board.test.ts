@@ -645,6 +645,38 @@ describe('fetchBoard', () => {
     expect(result.posts[0]?.id).toBe('post-legacy')
     expect(result.posts[0]?.origin).toBeNull()
   })
+
+  it('keeps contributor_quality when only band and autonomy_level are present', async () => {
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({
+        posts: [
+          {
+            id: 'post-band-only',
+            author: 'analyst',
+            title: 'Band only',
+            body: 'contributor_quality has no numeric fields',
+            created_at: 1_713_000_000,
+            updated_at: 1_713_000_000,
+            contributor_quality: {
+              band: 'strong',
+              autonomy_level: 'elevated',
+            },
+          },
+        ],
+      }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    const result = await fetchBoard()
+
+    expect(result.posts[0]?.contributor_quality).toEqual({
+      band: 'strong',
+      autonomy_level: 'elevated',
+    })
+  })
 })
 
 describe('fetchBoardHearths', () => {

@@ -42,8 +42,13 @@ let trending_score ~now (p : Board_types.post) : float =
   let age_hours =
     Stdlib.Float.max 1.0 ((now -. p.created_at) /. Masc_time_constants.hour)
   in
-  Stdlib.Float.of_int (net_vote p) /. (Stdlib.( ** ) age_hours 0.5)
+  Stdlib.Float.of_int (net_vote p) /. Stdlib.sqrt age_hours
 
-(** Trending ordering comparator. [compare a b]: trending score DESC. *)
+(** Trending ordering comparator. [compare a b]: trending score DESC, then
+    created_at DESC (newer first) — matches [hot_compare]'s tiebreak so
+    posts with an identical score have a deterministic, not [List.sort]-
+    implementation-dependent, order. *)
 let trending_compare ~now (a : Board_types.post) (b : Board_types.post) : int =
-  Stdlib.Float.compare (trending_score ~now b) (trending_score ~now a)
+  let cmp = Stdlib.Float.compare (trending_score ~now b) (trending_score ~now a) in
+  if cmp <> 0 then cmp
+  else Stdlib.Float.compare b.created_at a.created_at

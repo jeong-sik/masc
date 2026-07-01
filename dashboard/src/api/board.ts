@@ -419,6 +419,8 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
   const accountabilityScore = asNumber(raw.accountability_score)
   const thompsonConfidence = asNumber(raw.thompson_confidence)
   const source = asString(raw.source, '').trim() || undefined
+  const band = normalizeBoardContributorBand(raw.band)
+  const autonomyLevel = asString(raw.autonomy_level, '').trim() || undefined
   if (
     score === undefined
     && completionRate === undefined
@@ -428,17 +430,19 @@ function normalizeBoardContributorQuality(raw: unknown): BoardContributorQuality
     && accountabilityScore === undefined
     && thompsonConfidence === undefined
     && source === undefined
+    && band === undefined
+    && autonomyLevel === undefined
   ) return null
   return {
     score,
-    band: normalizeBoardContributorBand(raw.band),
+    band,
     source,
     completion_rate: completionRate,
     response_rate: responseRate,
     board_posts: boardPosts,
     board_comments: boardComments,
     accountability_score: accountabilityScore,
-    autonomy_level: asString(raw.autonomy_level, '').trim() || undefined,
+    autonomy_level: autonomyLevel,
     thompson_confidence: thompsonConfidence,
   }
 }

@@ -971,6 +971,7 @@
   test_eio_mutex_concurrency
   test_eio_guard_yield_meter
   test_board_dispatch
+  test_board_sort
   test_board_fixture_detector
   test_vote_ts_preservation_10086
   test_board_karma_ledger
@@ -1163,6 +1164,7 @@
   test_eio_mutex_concurrency
   test_eio_guard_yield_meter
   test_board_dispatch
+  test_board_sort
   test_board_fixture_detector
   test_vote_ts_preservation_10086
   test_board_karma_ledger

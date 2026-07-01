@@ -2,14 +2,14 @@
 
 open Keeper_memory_os_types
 
-let default_max_facts = 8
-let default_max_episodes = 2
+let default_max_facts = Keeper_memory_os_policy.recall_default_max_facts
+let default_max_episodes = Keeper_memory_os_policy.recall_default_max_episodes
 
 (* RFC-0244 Tier 2: how many shared-semantic facts to append after the keeper's
    own (private-precedence) facts. Kept small so the communal tier informs
    without crowding out keeper-local memory. *)
-let default_max_shared_facts = 4
-let episode_tail_scan = 32
+let default_max_shared_facts = Keeper_memory_os_policy.recall_default_max_shared_facts
+let episode_tail_scan = Keeper_memory_os_policy.recall_episode_tail_scan
 let max_fact_text_len = 260
 let max_episode_text_len = 360
 let max_atom_len = 48

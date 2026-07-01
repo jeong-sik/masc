@@ -6,6 +6,40 @@
 
 open Keeper_memory_os_types
 
+(** {1 Recall and retention size policy} *)
+
+(** Per-keeper fact retention target: the low-water size the facts cap trims
+    back to. This is not the recall scan window; recall scans
+    {!fact_store_max} so it can see the whole bounded store between caps. *)
+val fact_recall_window : int
+
+(** High-water fact cap trigger and full bounded-store recall scan window. *)
+val fact_store_max : int
+
+(** Low-water event-log retention target. *)
+val event_recall_window : int
+
+(** High-water event-log retention trigger. *)
+val event_store_max : int
+
+(** Low-water episode-file retention target. *)
+val episode_file_window : int
+
+(** High-water episode-file retention trigger. *)
+val episode_file_store_max : int
+
+(** Default number of keeper-local facts injected into recall context. *)
+val recall_default_max_facts : int
+
+(** Default number of memory episodes injected into recall context. *)
+val recall_default_max_episodes : int
+
+(** Default number of shared-tier facts appended after keeper-local recall. *)
+val recall_default_max_shared_facts : int
+
+(** Episode tail scan used before current/prompt-recallable filtering. *)
+val recall_episode_tail_scan : int
+
 (** Structural retention rank for the bounded store cap (RFC-0247 §-1). NOT a
     relevance score: a deterministic two-tier order — durable categories outrank
     Ephemeral, then most-recently-verified (else first-seen) wins. Used only to

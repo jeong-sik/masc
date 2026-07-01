@@ -721,19 +721,37 @@ let test_completion_contract_terminal_failure_reason_code () =
               : Masc.Keeper_agent_result.operator_disposition))
       []
   in
+  Alcotest.(check bool)
+    "passive-only routes through no-progress, not contract auto-pause"
+    true
+    (Option.is_none
+       (Success.completion_contract_terminal_failure_reason_code
+          failed_passive_only));
+  Alcotest.(check bool)
+    "passive-only remains a completed turn for terminal bookkeeping"
+    true
+    (Success.terminal_outcome_is_completed_turn
+       (Success.terminal_outcome_of_result failed_passive_only));
+  let needs_execution_progress =
+    run_result
+      ~completion_contract_result:
+        Masc.Keeper_execution_receipt.Contract_needs_execution_progress
+      ~operator_disposition:
+        (Some
+           ({ disposition = Masc.Keeper_execution_receipt.Disp_pause_human
+            ; reason =
+                Masc.Keeper_execution_receipt.Reason_completion_contract_unsatisfied
+            }
+              : Masc.Keeper_agent_result.operator_disposition))
+      []
+  in
   Alcotest.(check string)
-    "failed passive-only reason is the typed contract label"
-    "passive_only"
+    "execution-progress failure still uses completion-contract terminal path"
+    "needs_execution_progress"
     (Option.value
        ~default:""
        (Success.completion_contract_terminal_failure_reason_code
-          failed_passive_only))
-  ;
-  Alcotest.(check bool)
-    "failed passive-only is not counted as completed turn"
-    false
-    (Success.terminal_outcome_is_completed_turn
-       (Success.terminal_outcome_of_result failed_passive_only));
+          needs_execution_progress));
   let no_capable_provider =
     run_result
       ~completion_contract_result:

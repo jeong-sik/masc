@@ -307,9 +307,15 @@ let completion_contract_terminal_failure_reason_code result =
       { disposition = Keeper_execution_receipt.Disp_pause_human
       ; reason = Keeper_execution_receipt.Reason_completion_contract_unsatisfied
       } ->
-    Some
-      (Keeper_execution_receipt.completion_contract_result_to_string
-         result.Keeper_agent_run.completion_contract_result)
+    (match result.Keeper_agent_run.completion_contract_result with
+     | Keeper_execution_receipt.Contract_passive_only ->
+       (* A passive-only runtime success is the no-progress detector's input,
+          not a second, shorter completion-contract auto-pause path. Other
+          unsatisfied contract results still mean the runtime violated the
+          execution/completion contract and remain terminal failures. *)
+       None
+     | result ->
+       Some (Keeper_execution_receipt.completion_contract_result_to_string result))
   | Some _ -> None
   | None ->
     Some

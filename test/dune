@@ -55,6 +55,7 @@
   test_tool_agent_timeline_name_match
   test_keeper_idle_threshold_contract
   test_provider_tool_support_caps
+  test_runtime_request_config_merge
   test_keeper_context_layers
   test_keeper_hooks_oas_introspection
   test_board_activity_cache
@@ -389,6 +390,7 @@
   test_tool_agent_timeline_name_match
   test_keeper_idle_threshold_contract
   test_provider_tool_support_caps
+  test_runtime_request_config_merge
   test_keeper_context_layers
   test_keeper_hooks_oas_introspection
   test_board_activity_cache

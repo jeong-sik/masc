@@ -17,16 +17,14 @@
    checked-in default is bounded separately while env overrides stay
    available.
 
-   2026-06-27 follow-up (#22402): the dashboard judge default flip to 300s
-   is reverted here as an interim compatibility step.  A dedicated
-   advisory no-wrapper path should handle the contract split separately,
-   without changing fleet-wide idle behavior in the clock-required bridge PR.
+   2026-07-01 follow-up: the no-wrapper default is retired. Dashboard
+   judges are still advisory, but they must use a finite bridge budget so
+   stale dashboard work cannot pin OAS bridge execution indefinitely.
 
    This test pins:
 
      1. Both judges resolve to [dashboard_judge_default_sec] by default,
-        preserving the advisory no-wrapper behavior until the dedicated
-        path lands.
+        preserving one shared advisory default.
      2. The canonical per-caller env var
         ([MASC_OAS_BRIDGE_TIMEOUT_GOVERNANCE_JUDGE_SEC] etc.) is the
         only per-judge override surface. *)
@@ -55,14 +53,18 @@ let check_timeout_equal label expected actual =
       (Float.is_infinite actual && Float.compare expected actual = 0)
   else Alcotest.(check (float 0.0001)) label expected actual
 
-let test_dashboard_judge_default_is_no_wrapper () =
+let test_dashboard_judge_default_is_finite () =
   Alcotest.(check bool)
-    "dashboard_judge_default_sec preserves no-wrapper default"
+    "dashboard_judge_default_sec is finite"
     true
-    (Float.is_infinite Cfg.dashboard_judge_default_sec
-     && Cfg.dashboard_judge_default_sec > 0.0)
+    (not (Float.is_infinite Cfg.dashboard_judge_default_sec)
+     && Cfg.dashboard_judge_default_sec > 0.0);
+  Alcotest.(check (float 0.0001))
+    "dashboard_judge_default_sec"
+    180.0
+    Cfg.dashboard_judge_default_sec
 
-let test_judge_defaults_preserve_no_wrapper_timeout () =
+let test_judge_defaults_preserve_bounded_timeout () =
   clear_all_envs ();
   check_timeout_equal
     "Governance_judge default equals dashboard_judge_default_sec"
@@ -102,10 +104,10 @@ let () =
     [
       ( "defaults",
         [
-          Alcotest.test_case "dashboard_judge_default_sec is no-wrapper"
-            `Quick test_dashboard_judge_default_is_no_wrapper;
-          Alcotest.test_case "judge defaults preserve no-wrapper timeout"
-            `Quick test_judge_defaults_preserve_no_wrapper_timeout;
+          Alcotest.test_case "dashboard_judge_default_sec is finite"
+            `Quick test_dashboard_judge_default_is_finite;
+          Alcotest.test_case "judge defaults preserve bounded timeout"
+            `Quick test_judge_defaults_preserve_bounded_timeout;
           Alcotest.test_case "judges listed in known_callers"
             `Quick test_judges_listed_in_known_callers;
         ] );

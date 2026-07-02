@@ -216,6 +216,7 @@ module For_testing : sig
     runtime_id:string ->
     fallback_enable_thinking:bool option ->
     fallback_max_tokens:int ->
+    unit ->
     attempt_inference_policy
 
   val attempt_runtime_candidates :

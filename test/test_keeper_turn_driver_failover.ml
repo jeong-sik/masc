@@ -327,7 +327,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
   with_model_catalog_content runtime_thinking_lane_model_catalog @@ fun () ->
   with_runtime_config runtime_toml_thinking_lane (fun () ->
     let max_tokens_for_runtime ~runtime_id =
-      Keeper_run_context.resolve_max_tokens_for_runtime
+      Masc.Keeper_run_context.resolve_max_tokens_for_runtime
         ~keeper_name:"policy-test"
         ~runtime_id
         ()
@@ -338,6 +338,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
         ~runtime_id:"mixed"
         ~fallback_enable_thinking:None
         ~fallback_max_tokens:8192
+        ()
     in
     Alcotest.(check (option bool))
       "lane id has no runtime thinking policy"
@@ -357,6 +358,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
         ~runtime_id:"thinking.reasoning_big"
         ~fallback_enable_thinking:(Some false)
         ~fallback_max_tokens:8192
+        ()
     in
     Alcotest.(check (option bool))
       "thinking candidate enables thinking"
@@ -376,6 +378,7 @@ let test_attempt_inference_policy_uses_attempt_runtime () =
         ~runtime_id:"plain.non_reasoning"
         ~fallback_enable_thinking:(Some true)
         ~fallback_max_tokens:8192
+        ()
     in
     Alcotest.(check (option bool))
       "non-thinking candidate forces thinking off"

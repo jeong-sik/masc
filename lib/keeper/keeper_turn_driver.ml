@@ -209,6 +209,7 @@ let attempt_inference_policy
     ~runtime_id
     ~fallback_enable_thinking
     ~fallback_max_tokens
+    ()
   =
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
   let attempt_enable_thinking =
@@ -458,8 +459,9 @@ let run_named
           ?max_tokens_for_runtime
           ~runtime_id:attempt_runtime_id
           ~fallback_enable_thinking:enable_thinking
-	          ~fallback_max_tokens:max_tokens
-	      in
+          ~fallback_max_tokens:max_tokens
+          ()
+      in
 	      match
 	        match provider_config_transform with
 	        | None -> Ok runtime.Runtime.provider_config

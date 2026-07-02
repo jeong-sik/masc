@@ -417,6 +417,7 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
       if total_comments = 0
       then "\n\nNo comments."
       else (
+        let shown_count = List.length sliced in
         let formatted = Board_tool_format.format_comment_tree sliced in
         let pagination =
           if has_more
@@ -425,14 +426,26 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
               "\n[Showing comments %d-%d of %d. Use comment_offset=%d to \
                see more.]"
               (clamped_offset + 1)
-              (clamped_offset + List.length sliced)
+              (clamped_offset + shown_count)
               total_comments
               (clamped_offset + comment_limit)
-          else Printf.sprintf "\n[Showing all %d comments.]" total_comments
+          else if clamped_offset = 0 && shown_count = total_comments
+          then Printf.sprintf "\n[Showing all %d comments.]" total_comments
+          else if shown_count = 0
+          then
+            Printf.sprintf
+              "\n[Showing comments 0 of %d. No more comments.]"
+              total_comments
+          else
+            Printf.sprintf
+              "\n[Showing comments %d-%d of %d. No more comments.]"
+              (clamped_offset + 1)
+              (clamped_offset + shown_count)
+              total_comments
         in
         Printf.sprintf
           "\n\n**Comments (%d of %d)**:\n%s%s"
-          (List.length sliced)
+          shown_count
           total_comments
           (String.concat "\n" formatted)
           pagination)

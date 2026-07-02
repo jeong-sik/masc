@@ -1573,7 +1573,23 @@ let test_post_get_comment_pagination_clamps_and_advances () =
     ~label:"normal page advances"
     post_id
     [ "comment_offset", `Int 2; "comment_limit", `Int 2 ]
-    "Showing comments 3-4 of 105. Use comment_offset=4 to see more."
+    "Showing comments 3-4 of 105. Use comment_offset=4 to see more.";
+  check_get_footer
+    ~label:"final page names returned range"
+    post_id
+    [ "comment_offset", `Int 100; "comment_limit", `Int 100 ]
+    "Showing comments 101-105 of 105. No more comments.";
+  check_get_footer
+    ~label:"offset at end is empty final page"
+    post_id
+    [ "comment_offset", `Int 105; "comment_limit", `Int 100 ]
+    "Showing comments 0 of 105. No more comments.";
+  let small_post_id = create_post_with_comments ~count:2 in
+  check_get_footer
+    ~label:"all comments only when first page spans whole thread"
+    small_post_id
+    []
+    "Showing all 2 comments."
 
 let test_post_get_not_found () =
   with_eio @@ fun env ->

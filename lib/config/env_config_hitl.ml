@@ -11,7 +11,7 @@ open Env_config_core
 
 let default_critical_timeout_s = 3600.0
 
-let critical_timeout_s_value =
+let critical_timeout_s () =
   let raw =
     get_float
       ~default:default_critical_timeout_s
@@ -38,5 +38,4 @@ let critical_timeout_s_value =
 
     Env: [MASC_HITL_CRITICAL_TIMEOUT_S]. Default: [3600.0] (1 hour).
     Values <= [0.0] disable the timeout and revert to the legacy
-    operator-must-decide behavior (warned once at module load). *)
-let critical_timeout_s () = critical_timeout_s_value
+    operator-must-decide behavior. *)

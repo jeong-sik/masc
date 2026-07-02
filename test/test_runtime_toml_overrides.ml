@@ -8,6 +8,8 @@
 open Alcotest
 open Masc
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 let rec rm_rf path =
   if Sys.file_exists path then
     if Sys.is_directory path then begin
@@ -54,6 +56,16 @@ let with_clean_boot_overrides f =
     ~finally:(fun () ->
       Config_boot_overrides.reset_for_tests ();
       Keeper_runtime_resolved.reset_for_tests ())
+    f
+
+let with_unset_env name f =
+  let prev = Sys.getenv_opt name in
+  unsetenv name;
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some value -> Unix.putenv name value
+      | None -> unsetenv name)
     f
 
 (* --- Tests using resolve_overrides (pure, no env side effects) --- *)
@@ -181,6 +193,25 @@ let test_applies_hitl_critical_timeout_override () =
   check (option string) "hitl timeout maps to canonical env"
     (Some "42.5")
     (List.assoc_opt "MASC_HITL_CRITICAL_TIMEOUT_S" overrides)
+
+let test_hitl_timeout_reader_observes_boot_override_after_preload () =
+  with_clean_boot_overrides @@ fun () ->
+  with_unset_env "MASC_HITL_CRITICAL_TIMEOUT_S" @@ fun () ->
+  check (float 0.0001) "preload sees default"
+    Env_config_hitl.default_critical_timeout_s
+    (Env_config_hitl.critical_timeout_s ());
+  with_base_path @@ fun base_path ->
+  write_toml base_path "[hitl]\ncritical_timeout_s = 42.5\n";
+  match Keeper_runtime_config.load_and_apply ~base_path with
+  | Error msg -> failf "unexpected error: %s" msg
+  | Ok n ->
+    check int "applied count" 1 n;
+    check (option string) "boot override stored"
+      (Some "42.5")
+      (Config_boot_overrides.get_opt "MASC_HITL_CRITICAL_TIMEOUT_S");
+    check (float 0.0001) "production reader sees boot override"
+      42.5
+      (Env_config_hitl.critical_timeout_s ())
 
 let test_applies_memory_overrides () =
   let doc = parse_or_fail
@@ -532,6 +563,10 @@ let () =
         ; test_case "applies proactive min interval override" `Quick test_applies_proactive_min_interval_override
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
         ; test_case "applies HITL critical timeout override" `Quick test_applies_hitl_critical_timeout_override
+        ; test_case
+            "HITL timeout reader observes boot override after preload"
+            `Quick
+            test_hitl_timeout_reader_observes_boot_override_after_preload
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs
         ; test_case

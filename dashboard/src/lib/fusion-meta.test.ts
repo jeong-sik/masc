@@ -266,11 +266,31 @@ describe('normalizeFusionJudgeNodes', () => {
       { role: 'first', identity: 'gemini', status: 'failed', error: 'timeout', input_tokens: 5, output_tokens: 0 },
       { role: 'meta', identity: 'o1', input_tokens: 2000, output_tokens: 418 },
     ])
-    expect(nodes).toEqual([
-      { role: 'first', identity: 'gpt-4o', failed: false, error: undefined, inputTokens: 100, outputTokens: 10 },
-      { role: 'first', identity: 'gemini', failed: true, error: 'timeout', inputTokens: 5, outputTokens: 0 },
-      { role: 'meta', identity: 'o1', failed: false, error: undefined, inputTokens: 2000, outputTokens: 418 },
-    ])
+    expect(nodes).toHaveLength(3)
+    expect(nodes[0]).toMatchObject({
+      role: 'first',
+      identity: 'gpt-4o',
+      failed: false,
+      error: undefined,
+      inputTokens: 100,
+      outputTokens: 10,
+    })
+    expect(nodes[1]).toMatchObject({
+      role: 'first',
+      identity: 'gemini',
+      failed: true,
+      error: 'timeout',
+      inputTokens: 5,
+      outputTokens: 0,
+    })
+    expect(nodes[2]).toMatchObject({
+      role: 'meta',
+      identity: 'o1',
+      failed: false,
+      error: undefined,
+      inputTokens: 2000,
+      outputTokens: 418,
+    })
   })
 
   it('drops non-record elements and defaults a missing role/identity', () => {
@@ -304,6 +324,39 @@ describe('normalizeFusionJudgeNodes', () => {
       { role: 'first', identity: 'lit', decision: 'insufficient — missing: data', synthesis: '**Decision**: insufficient' },
     ])
     expect(node.summary).toBe('**Decision**: insufficient')
+  })
+
+  it('extracts failure_code / elapsed_s / timed_out from a Judge_failed node', () => {
+    const [node] = normalizeFusionJudgeNodes([
+      {
+        role: 'meta',
+        identity: 'o1',
+        status: 'failed',
+        error: 'judge budget exceeded',
+        failure_code: 'budget_exceeded',
+        elapsed_s: 12.5,
+        timed_out: true,
+        input_tokens: 800,
+        output_tokens: 0,
+      },
+    ])
+    expect(node).toMatchObject({
+      role: 'meta',
+      failed: true,
+      error: 'judge budget exceeded',
+      failureCode: 'budget_exceeded',
+      elapsedS: 12.5,
+      timedOut: true,
+    })
+  })
+
+  it('leaves failure attribution undefined on a successful node', () => {
+    const [node] = normalizeFusionJudgeNodes([
+      { role: 'first', identity: 'gpt-4o', input_tokens: 100, output_tokens: 10 },
+    ])
+    expect(node.failureCode).toBeUndefined()
+    expect(node.elapsedS).toBeUndefined()
+    expect(node.timedOut).toBeUndefined()
   })
 })
 

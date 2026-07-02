@@ -157,21 +157,27 @@ let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
    영구 불능으로 만든다(2026-06-17~06-30 prompt 계약만으로 성공한 run 다수).
    Prompt tier는 silent downgrade가 아니다 — 결정 시점에 로그로 관측되고, 파싱은
    여전히 strict다. *)
-let apply_fusion_judge_output_contract provider_cfg =
+let apply_fusion_judge_output_contract_with_validate ~validate provider_cfg =
   let schema = Keeper_structured_output_schema.fusion_judge_output_schema in
   let native_schema_provider_cfg =
     Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
   in
-  match
-    Llm_provider.Provider_config.validate_output_schema_request
-      native_schema_provider_cfg
-  with
+  match validate native_schema_provider_cfg with
   | Ok () -> Ok native_schema_provider_cfg
   | Error detail ->
     Log.Keeper.info
       "fusion judge output contract: prompt tier (native schema unavailable: %s)"
       detail;
-    Ok provider_cfg
+    Ok
+      { provider_cfg with
+        response_format = Agent_sdk.Types.Off
+      ; output_schema = None
+      }
+
+let apply_fusion_judge_output_contract provider_cfg =
+  apply_fusion_judge_output_contract_with_validate
+    ~validate:Llm_provider.Provider_config.validate_output_schema_request
+    provider_cfg
 
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
    서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고
@@ -251,4 +257,7 @@ let run_meta ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~
 
 module For_testing = struct
   let apply_output_contract = apply_fusion_judge_output_contract
+  let apply_output_contract_with_validate =
+    apply_fusion_judge_output_contract_with_validate
+  ;;
 end

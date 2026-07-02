@@ -81,6 +81,40 @@ let test_output_contract_keeps_native_schema_when_supported () =
        | Some schema -> Yojson.Safe.equal fusion_schema schema
        | None -> false)
 
+let test_output_contract_prompt_tier_when_native_schema_rejected () =
+  let full_schema_seen = ref false in
+  let schema_free_seen = ref false in
+  let validate configured =
+    match configured.Llm_provider.Provider_config.output_schema with
+    | Some schema when Yojson.Safe.equal fusion_schema schema ->
+      full_schema_seen := true;
+      Error "full schema rejected by provider boundary"
+    | Some _ -> Error "unexpected schema"
+    | None ->
+      schema_free_seen := true;
+      Error "validator must not be called for prompt tier"
+  in
+  let cfg =
+    provider_cfg
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"non-native-provider"
+      ~base_url:"https://non-native.example.invalid/v1"
+  in
+  match
+    Fusion_judge.For_testing.apply_output_contract_with_validate ~validate cfg
+  with
+  | Error msg -> fail ("prompt tier must not fail the build: " ^ msg)
+  | Ok configured ->
+    check bool "full schema was attempted first" true !full_schema_seen;
+    check bool "validator was not called for schema-free prompt tier" false
+      !schema_free_seen;
+    check bool "response_format is disabled for prompt tier" true
+      (match configured.response_format with
+       | Agent_sdk.Types.Off -> true
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+    check bool "output_schema is absent for prompt tier" true
+      (Option.is_none configured.output_schema)
+
 (* Prompt tier: native schema 미선언이면 schema를 싣지 않고 base config 그대로
    통과한다(빌드 실패 아님). 계약은 프롬프트의 expected_json_doc + strict 파싱이
    나른다. 2026-07-01 사고 이후 #22768의 "native or fail before HTTP"를 뒤집은
@@ -265,6 +299,10 @@ let () =
             "prompt tier when native schema is not available"
             `Quick
             test_output_contract_prompt_tier_when_schema_is_not_native
+        ; test_case
+            "prompt tier when native schema is rejected"
+            `Quick
+            test_output_contract_prompt_tier_when_native_schema_rejected
         ; test_case
             "prompt tier when no JSON output contract is known"
             `Quick

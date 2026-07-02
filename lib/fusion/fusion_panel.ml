@@ -25,12 +25,13 @@ let outcome_of_result ~(panelist : string) ~(model : string)
         }
     else (
       match Yojson.Safe.from_string raw with
-      | exception Yojson.Json_error msg ->
-        Fusion_types.Failed
-          { failed_model = panelist
-          ; reason =
-              Fusion_types.Invalid_structured_response
-                ("panel response is not valid JSON: " ^ msg)
+      | exception Yojson.Json_error _msg ->
+        (* Free-text fallback: ollama_cloud trio panels may return unstructured text.
+           The judge wraps panel answers in XML tags, so raw text is acceptable. *)
+        Fusion_types.Answered
+          { model = panelist
+          ; answer = raw
+          ; usage = Fusion_oas.usage_of resp
           }
       | `Assoc fields ->
         (match List.assoc_opt "answer" fields with

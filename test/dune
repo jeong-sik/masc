@@ -250,7 +250,7 @@
   test_keeper_secret_projection
   test_keeper_secret_redaction
   test_keeper_toml
-  test_runtime_catalog_backfill
+  test_runtime_missing_catalog_report
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
@@ -584,7 +584,7 @@
   test_keeper_secret_projection
   test_keeper_secret_redaction
   test_keeper_toml
-  test_runtime_catalog_backfill
+  test_runtime_missing_catalog_report
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking

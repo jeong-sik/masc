@@ -92,6 +92,7 @@ import {
   toolCallOutputsCoveredSinceMs,
   toolCallOutputsCoveredThroughMs,
 } from './tool-call-output-store'
+import { _resetKeeperStreamBuffersForTests } from './keeper-stream'
 import type { KeeperChatStreamEvent } from './api'
 import type { KeeperToolReply } from './api/keeper'
 import type { ToolCallEntry } from './api/dashboard'
@@ -101,6 +102,7 @@ beforeEach(() => {
   fetchKeeperToolCalls.mockReset()
   fetchKeeperToolCalls.mockResolvedValue({ entries: [] })
   resetToolCallOutputs()
+  _resetKeeperStreamBuffersForTests()
 })
 
 describe('noteKeeperChatAppended', () => {
@@ -383,6 +385,86 @@ describe('sendKeeperThreadMessage stream outcome', () => {
 
     expect(keeperSending.value.echo).toBe(false)
     expect(activeStreamEntryId('echo')).toBeNull()
+  })
+
+  it('keeps another keeper lane available while one keeper is streaming thinking', async () => {
+    let resolveEcho: (outcome: { terminal: boolean }) => void = () => {}
+    streamKeeperMessage.mockImplementation(async (
+      name: string,
+      _message: string,
+      opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+    ) => {
+      if (name === 'echo') {
+        for (let i = 0; i < 200; i += 1) {
+          opts.onEvent({
+            type: 'CUSTOM',
+            name: 'KEEPER_THINKING_DELTA',
+            value: { delta: `thought-${i} ` },
+          })
+        }
+        return new Promise<{ terminal: boolean }>(resolve => {
+          resolveEcho = resolve
+        })
+      }
+      opts.onEvent({ type: 'TEXT_MESSAGE_CONTENT', delta: `${name} reply` })
+      return { terminal: true }
+    })
+
+    const echoSend = sendKeeperThreadMessage('echo', 'slow thinking turn')
+    await Promise.resolve()
+
+    expect(keeperSending.value.echo).toBe(true)
+    expect(activeStreamEntryId('echo')).not.toBeNull()
+
+    await sendKeeperThreadMessage('rama', 'status?')
+
+    expect(streamKeeperMessage).toHaveBeenCalledTimes(2)
+    expect(streamKeeperMessage.mock.calls.map(call => call[0])).toEqual(['echo', 'rama'])
+    expect(keeperSending.value.echo).toBe(true)
+    expect(keeperSending.value.rama).toBe(false)
+    expect((keeperThreads.value.rama ?? []).map(entry => [entry.role, entry.text, entry.delivery])).toEqual([
+      ['user', 'status?', 'delivered'],
+      ['assistant', 'rama reply', 'delivered'],
+    ])
+
+    resolveEcho({ terminal: true })
+    await echoSend
+
+    expect(keeperSending.value.echo).toBe(false)
+    expect(activeStreamEntryId('echo')).toBeNull()
+  })
+
+  it('flushes pending thinking before finalizing a terminal stream outcome', async () => {
+    vi.useFakeTimers()
+    try {
+      streamKeeperMessage.mockImplementation(async (
+        _name: string,
+        _message: string,
+        opts: { onEvent: (event: KeeperChatStreamEvent) => void },
+      ) => {
+        opts.onEvent({
+          type: 'CUSTOM',
+          name: 'KEEPER_THINKING_DELTA',
+          value: { delta: 'thinking-only terminal outcome' },
+        })
+        return { terminal: true }
+      })
+
+      await sendKeeperThreadMessage('echo', 'thinking only')
+
+      const assistant = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+      expect(assistant?.traceSteps).toEqual([
+        { kind: 'think', text: 'thinking-only terminal outcome', ts: expect.any(String) },
+      ])
+      expect(assistant?.streamState).toBeNull()
+
+      await vi.runOnlyPendingTimersAsync()
+      const afterTimer = (keeperThreads.value.echo ?? []).find(entry => entry.role === 'assistant')
+      expect(afterTimer?.streamState).toBeNull()
+      expect(afterTimer?.traceSteps).toEqual(assistant?.traceSteps)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('keeps queued client action ids guarded while a batched queue send is in flight', async () => {

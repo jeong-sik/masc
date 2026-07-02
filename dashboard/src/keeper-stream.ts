@@ -33,9 +33,10 @@ import { toolEntryIdFromCallId } from './tool-call-output-store'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
+export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingOasToolBlockIndexes = new Map<string, number>()
-type ScheduledFlushHandle = ReturnType<typeof setTimeout> | number
+type ScheduledFlushHandle = ReturnType<typeof setTimeout>
 interface PendingThinkingBatch {
   text: string
   oasBlockIndex?: number
@@ -43,7 +44,6 @@ interface PendingThinkingBatch {
 interface PendingThinkingState {
   batches: PendingThinkingBatch[]
   flushHandle: ScheduledFlushHandle | null
-  flushViaAnimationFrame: boolean
 }
 
 const pendingThinkingDeltas = new Map<string, PendingThinkingState>()
@@ -52,28 +52,12 @@ function streamEntryKey(keeperName: string, assistantEntryId: string): string {
   return `${keeperName}\u0000${assistantEntryId}`
 }
 
-function scheduleStreamFlush(callback: () => void): {
-  handle: ScheduledFlushHandle
-  viaAnimationFrame: boolean
-} {
-  if (typeof globalThis.requestAnimationFrame === 'function') {
-    return {
-      handle: globalThis.requestAnimationFrame(callback),
-      viaAnimationFrame: true,
-    }
-  }
-  return {
-    handle: setTimeout(callback, 16),
-    viaAnimationFrame: false,
-  }
+function scheduleThinkingFlush(callback: () => void): ScheduledFlushHandle {
+  return setTimeout(callback, KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
 }
 
-function cancelStreamFlush(handle: ScheduledFlushHandle, viaAnimationFrame: boolean): void {
-  if (viaAnimationFrame && typeof globalThis.cancelAnimationFrame === 'function') {
-    globalThis.cancelAnimationFrame(handle as number)
-    return
-  }
-  clearTimeout(handle as ReturnType<typeof setTimeout>)
+function cancelStreamFlush(handle: ScheduledFlushHandle): void {
+  clearTimeout(handle)
 }
 
 function sameOasBlockIndex(left: number | undefined, right: number | undefined): boolean {
@@ -86,7 +70,7 @@ function flushPendingThinkingDeltas(keeperName: string, assistantEntryId: string
   if (!pending) return
   pendingThinkingDeltas.delete(key)
   if (pending.flushHandle !== null) {
-    cancelStreamFlush(pending.flushHandle, pending.flushViaAnimationFrame)
+    cancelStreamFlush(pending.flushHandle)
   }
   for (const batch of pending.batches) {
     appendAssistantThinkingDelta(keeperName, assistantEntryId, batch.text, {
@@ -101,7 +85,7 @@ function dropPendingThinkingDeltas(keeperName: string, assistantEntryId: string)
   if (!pending) return
   pendingThinkingDeltas.delete(key)
   if (pending.flushHandle !== null) {
-    cancelStreamFlush(pending.flushHandle, pending.flushViaAnimationFrame)
+    cancelStreamFlush(pending.flushHandle)
   }
 }
 
@@ -124,7 +108,7 @@ function enqueueThinkingDelta(
   const key = streamEntryKey(keeperName, assistantEntryId)
   let pending = pendingThinkingDeltas.get(key)
   if (!pending) {
-    pending = { batches: [], flushHandle: null, flushViaAnimationFrame: false }
+    pending = { batches: [], flushHandle: null }
     pendingThinkingDeltas.set(key, pending)
   }
   const last = pending.batches[pending.batches.length - 1]
@@ -134,21 +118,23 @@ function enqueueThinkingDelta(
     pending.batches.push({ text: delta, oasBlockIndex: meta.oasBlockIndex })
   }
   if (pending.flushHandle !== null) return
-  const scheduled = scheduleStreamFlush(() => {
+  pending.flushHandle = scheduleThinkingFlush(() => {
     flushPendingThinkingDeltas(keeperName, assistantEntryId)
   })
-  pending.flushHandle = scheduled.handle
-  pending.flushViaAnimationFrame = scheduled.viaAnimationFrame
 }
 
 export function _flushPendingKeeperStreamDeltasForTests(): void {
   flushAllPendingThinkingDeltas()
 }
 
+export function flushPendingKeeperStreamDeltas(keeperName: string, assistantEntryId: string): void {
+  flushPendingThinkingDeltas(keeperName, assistantEntryId)
+}
+
 export function _resetKeeperStreamBuffersForTests(): void {
   for (const pending of pendingThinkingDeltas.values()) {
     if (pending.flushHandle !== null) {
-      cancelStreamFlush(pending.flushHandle, pending.flushViaAnimationFrame)
+      cancelStreamFlush(pending.flushHandle)
     }
   }
   pendingThinkingDeltas.clear()

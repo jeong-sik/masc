@@ -60,7 +60,12 @@ import {
   setRecordValue,
   setStatusDetail,
 } from './keeper-state'
-import { abortKeeperThreadMessage, applyKeeperStreamEvent, TERMINAL_REQUEST_STATUSES } from './keeper-stream'
+import {
+  abortKeeperThreadMessage,
+  applyKeeperStreamEvent,
+  flushPendingKeeperStreamDeltas,
+  TERMINAL_REQUEST_STATUSES,
+} from './keeper-stream'
 import {
   KEEPER_HISTORY_TAIL_MESSAGES,
 } from './config/constants'
@@ -899,6 +904,7 @@ export async function sendKeeperThreadMessage(
       },
     })
 
+    flushPendingKeeperStreamDeltas(keeperName, assistantId)
     const finalEntry =
       (keeperThreads.value[keeperName] ?? []).find(entry => entry.id === assistantId) ?? null
     const finalText = finalEntry?.text.trim() ?? ''
@@ -974,6 +980,7 @@ export async function sendKeeperThreadMessage(
       releaseActiveStreamRequestId(requestId)
     }
   } catch (err) {
+    flushPendingKeeperStreamDeltas(keeperName, assistantId)
     if (isAbortError(err)) {
       const shouldAttemptServerCancel = Boolean(requestId && liveSendOwnsRequest(requestId))
       const serverCancelAlreadyFinalized = Boolean(

@@ -1210,10 +1210,16 @@ let test_append_turn_redacts_all_supplied_block_strings () =
                           Some
                             (`Assoc
                               [ "token", `String secret
+                              ; "api_token", `String "plain-non-pattern-value"
                               ; "nested", `List [ `String ("nested " ^ secret) ]
                               ; "key " ^ secret, `String "benign value"
                               ])
-                      ; result = Some (`String ("result " ^ secret))
+                      ; result =
+                          Some
+                            (`Assoc
+                              [ "password", `String "ordinary-value"
+                              ; "summary", `String ("result " ^ secret)
+                              ])
                       ; ts = Some ("ts " ^ secret)
                       ; oas_block_index = None
                       }
@@ -1224,6 +1230,10 @@ let test_append_turn_redacts_all_supplied_block_strings () =
       let raw = read_file (chat_path ~base_dir ~keeper_name) in
       Alcotest.(check bool) "rich block secret not persisted" false
         (contains_substring raw secret);
+      Alcotest.(check bool) "sensitive keyed value not persisted" false
+        (contains_substring raw "plain-non-pattern-value");
+      Alcotest.(check bool) "sensitive password value not persisted" false
+        (contains_substring raw "ordinary-value");
       Alcotest.(check bool) "rich block redaction marker persisted" true
         (contains_substring raw "[REDACTED]");
       let messages = K.load ~base_dir ~keeper_name in
@@ -1237,6 +1247,10 @@ let test_append_turn_redacts_all_supplied_block_strings () =
         let json = Yojson.Safe.to_string (B.blocks_to_yojson blocks) in
         Alcotest.(check bool) "loaded blocks hide secret" false
           (contains_substring json secret);
+        Alcotest.(check bool) "loaded blocks hide sensitive keyed value" false
+          (contains_substring json "plain-non-pattern-value");
+        Alcotest.(check bool) "loaded blocks hide sensitive password value" false
+          (contains_substring json "ordinary-value");
         Alcotest.(check bool) "loaded blocks keep redaction marker" true
           (contains_substring json "[REDACTED]")
       | None -> Alcotest.fail "assistant rich blocks missing")

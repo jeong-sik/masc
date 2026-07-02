@@ -219,20 +219,27 @@ let redact_string redaction value =
 let redact_string_opt redaction =
   Option.map (redact_string redaction)
 
-let rec redact_yojson_strings redaction (json : Yojson.Safe.t) : Yojson.Safe.t =
+let rec redact_yojson_keys redaction (json : Yojson.Safe.t) : Yojson.Safe.t =
   match json with
-  | `String value -> `String (redact_string redaction value)
+  | `String _ as value -> value
   | `Assoc fields ->
     (* Caller-supplied trace tool args/results can carry a secret embedded in
        a key name (e.g. a header/param used as a dict key), not only in
-       values -- redact both sides of each field. *)
+       values. Keeper_secret_redaction.redact_json owns value and sensitive-key
+       value redaction; this pass only scrubs projected secret literals in
+       field names. *)
     `Assoc
       (List.map
          (fun (key, value) ->
-           redact_string redaction key, redact_yojson_strings redaction value)
+           redact_string redaction key, redact_yojson_keys redaction value)
          fields)
-  | `List items -> `List (List.map (redact_yojson_strings redaction) items)
+  | `List items -> `List (List.map (redact_yojson_keys redaction) items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
+
+let redact_trace_json redaction json =
+  json
+  |> redact_yojson_keys redaction
+  |> Keeper_secret_redaction.redact_json redaction
 
 let redact_table_cell redaction = function
   | Keeper_chat_blocks.Cell_text value ->
@@ -260,8 +267,8 @@ let redact_trace_step redaction = function
       ; tool_call_id = redact_string_opt redaction tool_call_id
       ; status
       ; dur = redact_string_opt redaction dur
-      ; args = Option.map (redact_yojson_strings redaction) args
-      ; result = Option.map (redact_yojson_strings redaction) result
+      ; args = Option.map (redact_trace_json redaction) args
+      ; result = Option.map (redact_trace_json redaction) result
       ; ts = redact_string_opt redaction ts
       ; oas_block_index
       }

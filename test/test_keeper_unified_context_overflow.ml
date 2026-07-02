@@ -38,6 +38,18 @@ let index_of_substring ~needle haystack =
     in
     loop 0
 
+let index_of_substring_from ~start ~needle haystack =
+  let haystack_len = String.length haystack in
+  let needle_len = String.length needle in
+  if needle_len = 0 then Some (max 0 start)
+  else
+    let rec loop index =
+      if index + needle_len > haystack_len then None
+      else if String.sub haystack index needle_len = needle then Some index
+      else loop (index + 1)
+    in
+    loop (max 0 start)
+
 (* context_overflow_limit is now in OAS as Retry.extract_context_limit.
    These tests verify the OAS SSOT API is accessible from MASC. *)
 let test_context_overflow_limit_parses_common_oas_errors () =
@@ -141,14 +153,24 @@ let test_preflight_overflow_uses_providerless_pause_fallback () =
     (contains_substring ~needle:"pre_dispatch_context_window_error" agent_run_src);
   check bool "preflight error returns before provider driver" true
     (match
-       ( index_of_substring ~needle:"let pre_dispatch_error =" agent_run_src
-       , index_of_substring ~needle:"| Some err -> Error err" agent_run_src
-       , index_of_substring ~needle:"let call_run_named ~initial_messages =" agent_run_src
-       )
+       index_of_substring ~needle:"let pre_dispatch_error =" agent_run_src
      with
-     | Some preflight, Some blocked_return, Some driver ->
+     | Some preflight ->
+       (match
+          ( index_of_substring_from
+              ~start:preflight
+              ~needle:"| Some err -> Error err"
+              agent_run_src
+          , index_of_substring_from
+              ~start:preflight
+              ~needle:"let call_run_named ?raw_trace ~initial_messages () ="
+              agent_run_src
+          )
+        with
+        | Some blocked_return, Some driver ->
        preflight < blocked_return && blocked_return < driver
-     | _ -> false);
+        | _ -> false)
+     | None -> false);
   let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in
   check bool "overflow branch stamps current turn blocker" true
     (contains_substring ~needle:"current_turn_blocker_info =" execution_src);

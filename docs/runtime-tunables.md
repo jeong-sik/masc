@@ -85,11 +85,11 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_RATE_LIMIT_ENTRY_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 58 | Max age for rate limit entries before cleanup (seconds) |
 | `MASC_SPAWN_CACHE_POLICY` | typed:string | unclassified | unclassified | 44 | Spawn cache policy: - off - safe_only (GLM direct HTTP only, no MCP-tool side effects) |
 
-## Env_config_hitl (1 knob; typed classification 1/1)
+## Env_config_hitl (1 knobs; typed classification 1/1)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
-| `MASC_HITL_CRITICAL_TIMEOUT_S` | typed:float | Timeouts | operator | 13 | HITL (human-in-the-loop) approval configuration. Bounded timeouts prevent dangerous tool approvals from stalling a Ke... |
+| `MASC_HITL_CRITICAL_TIMEOUT_S` | typed:float | Timeouts | operator | 18 | HITL (human-in-the-loop) approval configuration. Bounded timeouts prevent dangerous tool approvals from stalling a Ke... |
 
 ## Env_config_keeper (90 knobs; typed classification 26/77)
 

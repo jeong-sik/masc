@@ -198,6 +198,34 @@ let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
          reason;
        to_runtime_id, rerouted)
 
+type attempt_inference_policy =
+  { attempt_enable_thinking : bool option
+  ; attempt_preserve_thinking : bool option
+  ; attempt_max_tokens : int
+  }
+
+let attempt_inference_policy
+    ?max_tokens_for_runtime
+    ~runtime_id
+    ~fallback_enable_thinking
+    ~fallback_max_tokens
+  =
+  let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
+  let attempt_enable_thinking =
+    match runtime_seed.thinking_enabled with
+    | Some _ as enabled -> enabled
+    | None -> fallback_enable_thinking
+  in
+  let attempt_max_tokens =
+    match max_tokens_for_runtime with
+    | Some resolver -> resolver ~runtime_id
+    | None -> fallback_max_tokens
+  in
+  { attempt_enable_thinking
+  ; attempt_preserve_thinking = runtime_seed.preserve_thinking
+  ; attempt_max_tokens
+  }
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -215,6 +243,7 @@ let run_named
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
+    ?max_tokens_for_runtime
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -254,19 +283,12 @@ let run_named
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
-  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
-     attempt candidates sequentially with manifest evidence per attempt. *)
-  let runtime_id = String.trim runtime_id in
-  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~base_path ~keeper_name tools in
-  let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
-  let enable_thinking =
-    match runtime_seed.thinking_enabled with
-    | Some enabled -> Some enabled
-    | None -> enable_thinking
-  in
-  let preserve_thinking = runtime_seed.preserve_thinking in
-  (* Audit F8: removed dead routing knobs from the signature so callers cannot
-     pass values that would be silently ignored. *)
+	  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
+	     attempt candidates sequentially with manifest evidence per attempt. *)
+	  let runtime_id = String.trim runtime_id in
+	  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~base_path ~keeper_name tools in
+	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
+	     pass values that would be silently ignored. *)
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
   let emit_runtime_manifest ?status ?decision event =
@@ -426,14 +448,21 @@ let run_named
   let execution_idle_timeout_s = None in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
      move to the next candidate; on success we record completion and return. *)
-  attempt_runtime_candidates ~runtime_id
-    ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
-    ~emit_runtime_manifest
-    ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
-      let error_runtime_id = attempt_runtime_id in
-      match
-        match provider_config_transform with
-        | None -> Ok runtime.Runtime.provider_config
+	  attempt_runtime_candidates ~runtime_id
+	    ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
+	    ~emit_runtime_manifest
+	    ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
+	      let error_runtime_id = attempt_runtime_id in
+      let inference_policy =
+        attempt_inference_policy
+          ?max_tokens_for_runtime
+          ~runtime_id:attempt_runtime_id
+          ~fallback_enable_thinking:enable_thinking
+	          ~fallback_max_tokens:max_tokens
+	      in
+	      match
+	        match provider_config_transform with
+	        | None -> Ok runtime.Runtime.provider_config
         | Some transform -> transform runtime.Runtime.provider_config
       with
       | Error err -> Error err, None
@@ -459,11 +488,11 @@ let run_named
           ; initial_messages
           ; max_turns
           ; max_idle_turns
-          ; stream_idle_timeout_s
-          ; execution_idle_timeout_s
-          ; body_timeout_s
-          ; temperature
-          ; max_tokens
+	          ; stream_idle_timeout_s
+	          ; execution_idle_timeout_s
+	          ; body_timeout_s
+	          ; temperature
+	          ; max_tokens = inference_policy.attempt_max_tokens
           ; accept
           ; guardrails
           ; hooks
@@ -477,11 +506,11 @@ let run_named
           ; yield_on_tool
           ; compact_ratio
           ; oas_auto_context_overflow_retry
-          ; checkpoint_dir
-          ; context_injector
-          ; context
-          ; enable_thinking
-          ; preserve_thinking
+	          ; checkpoint_dir
+	          ; context_injector
+	          ; context
+	          ; enable_thinking = inference_policy.attempt_enable_thinking
+	          ; preserve_thinking = inference_policy.attempt_preserve_thinking
           ; approval
           ; exit_condition
           ; exit_condition_result
@@ -531,8 +560,9 @@ module For_testing = struct
 
   let lane_modality_reroute_decision = lane_modality_reroute_decision
   let dedupe_runtimes_preserve_order = dedupe_runtimes_preserve_order
-  let media_degrade_manifest_decision = media_degrade_manifest_decision
-  let attempt_runtime_candidates = attempt_runtime_candidates
+	  let media_degrade_manifest_decision = media_degrade_manifest_decision
+	  let attempt_inference_policy = attempt_inference_policy
+	  let attempt_runtime_candidates = attempt_runtime_candidates
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing.accept_no_progress_should_try_next

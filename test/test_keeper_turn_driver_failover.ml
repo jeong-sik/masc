@@ -16,6 +16,24 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let with_model_catalog_content content f =
+  let original = Llm_provider.Model_catalog.global () in
+  let path = Filename.temp_file "runtime-failover-oas-models" ".toml" in
+  Fun.protect
+    ~finally:(fun () ->
+      (match original with
+       | Some catalog -> Llm_provider.Model_catalog.set_global catalog
+       | None -> Llm_provider.Model_catalog.clear_global ());
+      try Sys.remove path with
+      | _ -> ())
+    (fun () ->
+      write_file path content;
+      match Llm_provider.Model_catalog.load_file path with
+      | Error msg -> Alcotest.failf "test OAS model catalog should load: %s" msg
+      | Ok catalog ->
+        Llm_provider.Model_catalog.set_global catalog;
+        f ())
+
 let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
   { version = Agent_sdk.Checkpoint.checkpoint_version
   ; session_id
@@ -79,6 +97,62 @@ max-concurrent = 1
 
 [fallback.test_model]
 max-concurrent = 1
+|}
+
+let runtime_toml_thinking_lane =
+  {|
+[runtime]
+default = "thinking.reasoning_big"
+
+[runtime.lanes.mixed]
+strategy = "ordered"
+candidates = [ "thinking.reasoning_big", "plain.non_reasoning" ]
+
+[providers.thinking]
+display-name = "Thinking Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.plain]
+display-name = "Plain Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[models.reasoning_big]
+api-name = "reasoning-big-out"
+max-context = 1000000
+tools-support = true
+thinking-support = true
+preserve-thinking = true
+streaming = true
+
+[models.non_reasoning]
+api-name = "non-reasoning"
+max-context = 8192
+tools-support = true
+thinking-support = false
+preserve-thinking = false
+streaming = true
+
+[thinking.reasoning_big]
+is-default = true
+max-concurrent = 1
+
+[plain.non_reasoning]
+max-concurrent = 1
+|}
+
+let runtime_thinking_lane_model_catalog =
+  {|
+[[models]]
+id_prefix = "openai_compat/reasoning-big-out"
+base = "openai_chat"
+max_context_tokens = 1000000
+max_output_tokens = 200000
+supports_tools = true
+supports_reasoning = true
+supports_extended_thinking = true
+supports_native_streaming = true
 |}
 
 let runtime_toml_media_lane_with_global_outside =
@@ -248,6 +322,73 @@ let test_resolve_assignment_to_single_runtime () =
     | `Lane _ -> Alcotest.fail "expected single runtime, not lane"
     | `Single_runtime rt ->
       Alcotest.(check string) "runtime id" "fallback.test_model" rt.Runtime.id)
+
+let test_attempt_inference_policy_uses_attempt_runtime () =
+  with_model_catalog_content runtime_thinking_lane_model_catalog @@ fun () ->
+  with_runtime_config runtime_toml_thinking_lane (fun () ->
+    let max_tokens_for_runtime ~runtime_id =
+      Keeper_run_context.resolve_max_tokens_for_runtime
+        ~keeper_name:"policy-test"
+        ~runtime_id
+        ()
+    in
+    let lane_policy =
+      Driver.For_testing.attempt_inference_policy
+        ~max_tokens_for_runtime
+        ~runtime_id:"mixed"
+        ~fallback_enable_thinking:None
+        ~fallback_max_tokens:8192
+    in
+    Alcotest.(check (option bool))
+      "lane id has no runtime thinking policy"
+      None
+      lane_policy.Driver.attempt_enable_thinking;
+    Alcotest.(check (option bool))
+      "lane id has no preserve thinking policy"
+      None
+      lane_policy.Driver.attempt_preserve_thinking;
+    Alcotest.(check int)
+      "lane id keeps caller max_tokens fallback"
+      8192
+      lane_policy.Driver.attempt_max_tokens;
+    let thinking_policy =
+      Driver.For_testing.attempt_inference_policy
+        ~max_tokens_for_runtime
+        ~runtime_id:"thinking.reasoning_big"
+        ~fallback_enable_thinking:(Some false)
+        ~fallback_max_tokens:8192
+    in
+    Alcotest.(check (option bool))
+      "thinking candidate enables thinking"
+      (Some true)
+      thinking_policy.Driver.attempt_enable_thinking;
+    Alcotest.(check (option bool))
+      "thinking candidate preserves thinking when configured"
+      (Some true)
+      thinking_policy.Driver.attempt_preserve_thinking;
+    Alcotest.(check int)
+      "thinking candidate sizes from catalog ceiling"
+      32768
+      thinking_policy.Driver.attempt_max_tokens;
+    let non_thinking_policy =
+      Driver.For_testing.attempt_inference_policy
+        ~max_tokens_for_runtime
+        ~runtime_id:"plain.non_reasoning"
+        ~fallback_enable_thinking:(Some true)
+        ~fallback_max_tokens:8192
+    in
+    Alcotest.(check (option bool))
+      "non-thinking candidate forces thinking off"
+      (Some false)
+      non_thinking_policy.Driver.attempt_enable_thinking;
+    Alcotest.(check (option bool))
+      "non-thinking candidate disables preserve thinking"
+      (Some false)
+      non_thinking_policy.Driver.attempt_preserve_thinking;
+    Alcotest.(check int)
+      "non-thinking candidate keeps caller max_tokens fallback"
+      8192
+      non_thinking_policy.Driver.attempt_max_tokens)
 
 let test_resolve_assignment_missing () =
   with_runtime_config runtime_toml_with_lane (fun () ->
@@ -582,6 +723,10 @@ let () =
             "runtime dedupe preserves first occurrence"
             `Quick
             test_runtime_dedupe_preserves_first_occurrence;
+          Alcotest.test_case
+            "attempt inference policy uses attempt runtime"
+            `Quick
+            test_attempt_inference_policy_uses_attempt_runtime;
           Alcotest.test_case
             "attempt loop stops on nonretryable failure"
             `Quick

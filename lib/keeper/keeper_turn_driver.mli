@@ -110,6 +110,7 @@ val run_named :
   ?body_timeout_s:float ->
   ?temperature:float ->
   ?max_tokens:int ->
+  ?max_tokens_for_runtime:(runtime_id:string -> int) ->
   ?accept:(Agent_sdk_response.api_response -> bool) ->
   ?guardrails:Agent_sdk.Guardrails.t ->
   ?hooks:Agent_sdk.Hooks.hooks ->
@@ -152,6 +153,12 @@ val run_named :
     MASC drives the runtime FSM directly: resolves runtime providers,
     tries each with OAS, and uses [Runtime_fsm.decide] on failure.
     The runtime loop runs inside a capacity-managed queue permit. *)
+
+type attempt_inference_policy =
+  { attempt_enable_thinking : bool option
+  ; attempt_preserve_thinking : bool option
+  ; attempt_max_tokens : int
+  }
 
 module For_testing : sig
   val checkpoint_after_attempt :
@@ -203,6 +210,13 @@ module For_testing : sig
 
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
+
+  val attempt_inference_policy :
+    ?max_tokens_for_runtime:(runtime_id:string -> int) ->
+    runtime_id:string ->
+    fallback_enable_thinking:bool option ->
+    fallback_max_tokens:int ->
+    attempt_inference_policy
 
   val attempt_runtime_candidates :
     runtime_id:string ->

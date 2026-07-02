@@ -315,6 +315,7 @@ let run_turn
       ~generation
       ()
   in
+  let requested_max_tokens = max_tokens in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
   let max_output_ceiling =
@@ -577,6 +578,13 @@ let run_turn
               let keeper_oas_guardrails =
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
+              let max_tokens_for_runtime ~runtime_id =
+                Keeper_run_context.resolve_max_tokens_for_runtime
+                  ~keeper_name:meta.name
+                  ~runtime_id
+                  ?max_tokens:requested_max_tokens
+                  ()
+              in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* The keeper turn deadline must own the OAS Agent.run switch.
                    Stream/body idle budgets catch liveness gaps; this hard
@@ -616,6 +624,7 @@ let run_turn
                     ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
+                    ~max_tokens_for_runtime
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ~guardrails:keeper_oas_guardrails

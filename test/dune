@@ -1963,6 +1963,8 @@
 
 (include stanzas/test_keeper_receipt_outcome_tla_parity.inc)
 
+(include stanzas/test_keeper_raw_trace_sink.inc)
+
 (include stanzas/test_keeper_sandbox_docker_cwd_response.inc)
 
 (include stanzas/test_keeper_state_snapshot_json.inc)

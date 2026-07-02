@@ -63,6 +63,33 @@ let normalize_response_text_for_finalization
          ~response:run_result.response)
 ;;
 
+(* OAS raw-trace sink for keeper turns: parsed Run_started / Assistant_block /
+   Tool_execution / Run_finished records appended per turn to the per-keeper
+   JSONL (worker precedent: Worker_container_runners.create_raw_trace).
+   Passing the sink into [Keeper_turn_driver.run_named] is what populates
+   [run_result.trace_ref]/[run_validation] for the unified-metrics consumers
+   and the progress-evidence gate. Creation failure is a typed dispatch
+   error, not a silent [None]: an unwritable keeper dir also breaks the
+   receipt/checkpoint stores, so the turn must not run untraced. *)
+let keeper_raw_trace_sink
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+  : (Agent_sdk.Raw_trace.t, Agent_sdk.Error.sdk_error) result
+  =
+  match
+    Agent_sdk.Raw_trace.create
+      ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+      ~path:(Keeper_types_support.keeper_raw_trace_path config meta.name)
+      ()
+  with
+  | Ok sink -> Ok sink
+  | Error err ->
+    Log.Keeper.warn ~keeper_name:meta.name
+      "raw-trace sink create failed: %s"
+      (Agent_sdk.Error.to_string err);
+    Error err
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let sse_event_watchdog_progress_kind =
@@ -74,6 +101,7 @@ module For_testing = struct
     keeper_oas_visibility_neutral_guardrails
   let normalize_response_text_for_finalization =
     normalize_response_text_for_finalization
+  let keeper_raw_trace_sink = keeper_raw_trace_sink
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -502,7 +530,7 @@ let run_turn
               let keeper_oas_guardrails =
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
-              let call_run_named ~initial_messages =
+              let call_run_named ~raw_trace ~initial_messages =
                 (* The keeper turn deadline must own the OAS Agent.run switch.
                    Stream/body idle budgets catch liveness gaps; this hard
                    ceiling is the final guard that releases a stuck turn slot. *)
@@ -514,6 +542,7 @@ let run_turn
                     ?goal_blocks:user_blocks
                     ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                    ~raw_trace
                     ~system_prompt:turn_system_prompt
                     ~tools
                     ~compact_ratio:meta.compaction.ratio_gate
@@ -572,7 +601,12 @@ let run_turn
                     ?per_provider_timeout_s
                     ()
               in
-              (match call_run_named ~initial_messages:history_messages with
+              (match
+                 (match keeper_raw_trace_sink ~config ~meta with
+                  | Error e -> Error e
+                  | Ok raw_trace ->
+                    call_run_named ~raw_trace ~initial_messages:history_messages)
+               with
                | Error e -> Error e
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in

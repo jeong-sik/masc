@@ -40,6 +40,12 @@ val keeper_execution_receipt_store : Workspace.config -> string -> Dated_jsonl.t
     [.masc/keepers/<name>/turn-records/YYYY-MM/DD.jsonl]. *)
 val keeper_turn_record_store : Workspace.config -> string -> Dated_jsonl.t
 
+(** Per-keeper OAS raw-trace sink:
+    [.masc/keepers/<name>/raw-trace.jsonl]. Appended across turns —
+    [Agent_sdk.Raw_trace.create] resumes its seq counter from the existing
+    file, so each turn's run is a seq range inside one file. *)
+val keeper_raw_trace_path : Workspace.config -> string -> string
+
 val keeper_memory_bank_path : Workspace.config -> string -> string
 val keeper_progress_path : Workspace.config -> string -> string
 val keeper_generation_index_path : Workspace.config -> string -> string

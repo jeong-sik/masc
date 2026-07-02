@@ -45,6 +45,15 @@ module For_testing : sig
     -> tool_names:string list
     -> unit
     -> (string, Agent_sdk.Error.sdk_error) result
+
+  (** OAS raw-trace sink for keeper turns, appended per turn to
+      [Keeper_types_support.keeper_raw_trace_path]. The dispatch section
+      passes it into [Keeper_turn_driver.run_named] so
+      [run_result.trace_ref]/[run_validation] are populated. *)
+  val keeper_raw_trace_sink
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> (Agent_sdk.Raw_trace.t, Agent_sdk.Error.sdk_error) result
 end
 
 val per_provider_timeout_for_turn

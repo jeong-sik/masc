@@ -346,7 +346,23 @@ let test_remove_matching_not_found () =
     "an unqueued target reports Not_found"
     (Keeper_chat_queue.remove_matching ~keeper_name
        (msg ~content:"nope" ~ts:9.0 Keeper_chat_queue.Dashboard)
-     = `Not_found)
+     = `Not_found);
+  Keeper_chat_queue.clear ~keeper_name;
+  let with_block =
+    { (msg ~content:"same-text" ~ts:3.0 Keeper_chat_queue.Dashboard) with
+      Keeper_chat_queue.user_blocks = [ image_block ~attachment_id:"img-1" ] }
+  in
+  let without_block = msg ~content:"same-text" ~ts:3.0 Keeper_chat_queue.Dashboard in
+  Keeper_chat_queue.enqueue ~keeper_name with_block;
+  check
+    "same text/source/timestamp but different user_blocks reports Not_found"
+    (Keeper_chat_queue.remove_matching ~keeper_name without_block = `Not_found);
+  check
+    "near-match payload stays queued"
+    (match Keeper_chat_queue.dequeue_batch ~keeper_name with
+     | [ msg ] ->
+       Keeper_multimodal_input.modalities msg.Keeper_chat_queue.user_blocks = [ "image" ]
+     | _ -> false)
 ;;
 
 let test_remove_matching_persist_failure_aborts () =

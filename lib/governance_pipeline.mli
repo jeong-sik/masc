@@ -49,6 +49,10 @@ val assess_risk : tool_name:string -> input:Yojson.Safe.t -> risk_level
     - Medium: state-changing reads
     - Low: readonly/status/query surfaces *)
 
+val auto_approval_hard_forbidden :
+  risk:risk_level -> Keeper_meta_contract.keeper_meta option -> bool
+(** True when auto-approval must be blocked regardless of HITL threshold. *)
+
 val decide :
   governance_level:string ->
   tool_name:string ->

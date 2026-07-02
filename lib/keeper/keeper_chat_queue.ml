@@ -340,6 +340,54 @@ let merge_batch batch =
           source = first.source;
         }
 
+(* Structural equality over an entire queued_message. Every field is immutable
+   first-order data (strings, a float, [int option], and closed variants whose
+   payloads are the same shape), so polymorphic [=] is total here: it cannot
+   reach the functional/abstract/cyclic values that make [=] partial. *)
+let queued_message_equal (a : queued_message) (b : queued_message) = a = b
+
+(* Remove the first message structurally equal to [target] from the head run —
+   the leading messages sharing the head message's source, i.e. the exact set
+   [dequeue_batch] coalesces into one turn. Returns the item list with that one
+   message dropped, or [None] when no head-run message matches. Confining the
+   search to the head run keeps [remove_matching] and [dequeue_batch] acting on
+   the same region under the shared per-keeper mutex, so a queued message is
+   answered by at most one of them. *)
+let remove_first_in_head_run items target =
+  match items with
+  | [] -> None
+  | head :: _ ->
+      let rec loop acc = function
+        | [] -> None
+        | msg :: rest ->
+            if not (same_source head.source msg.source)
+            then None
+            else if queued_message_equal msg target
+            then Some (List.rev_append acc rest)
+            else loop (msg :: acc) rest
+      in
+      loop [] items
+
+let remove_matching ~keeper_name target =
+  match find_entry keeper_name with
+  | None -> `Not_found
+  | Some entry ->
+      with_entry_lock entry (fun () ->
+          let before = queue_to_list entry.q in
+          match remove_first_in_head_run before target with
+          | None -> `Not_found
+          | Some remaining ->
+              replace_queue entry.q remaining;
+              (* Reuse the persist-abort idiom: on snapshot rewrite failure
+                 [persist_or_rollback] restores [before] and re-raises, so the
+                 removal is aborted (queue unchanged) before it is reported.
+                 Only [Persistence_failed] becomes a typed result; [Cancelled]
+                 and any other exception still propagate. *)
+              (try
+                 persist_or_rollback ~keeper_name entry.q ~before;
+                 `Removed
+               with Persistence_failed msg -> `Persist_failed msg))
+
 let length ~keeper_name =
   match find_entry keeper_name with
   | None -> 0

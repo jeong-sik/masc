@@ -576,13 +576,16 @@ let tool_affinity_aggregate_of_json (json : Yojson.Safe.t) :
             | _ -> None
           in
           let tools = List.map tool_affinity_bucket_series_of_json tool_jsons in
-          if Option.is_none updated_at || List.exists Option.is_none tools then None
+          if List.exists Option.is_none tools then None
           else
-            Some
-              { aggregate_version = version;
-                aggregate_keeper_name = keeper_name;
-                aggregate_updated_at = Option.value ~default:0.0 updated_at;
-                aggregate_tools = List.filter_map Fun.id tools }
+            (match updated_at with
+            | None -> None
+            | Some aggregate_updated_at ->
+              Some
+                { aggregate_version = version;
+                  aggregate_keeper_name = keeper_name;
+                  aggregate_updated_at;
+                  aggregate_tools = List.filter_map Fun.id tools })
       | _ -> None)
   | _ -> None
 

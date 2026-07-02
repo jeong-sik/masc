@@ -950,7 +950,39 @@ done\n\
 printf 'retry-ok\n'\n\
 exit 0\n"
 
-let test_docker_run_retries_on_daemon_timeout () =
+let fake_docker_daemon_unavailable_then_ok_script =
+  "#!/bin/sh\n\
+state_dir=$(dirname \"$0\")\n\
+run_count_file=\"$state_dir/daemon-unavailable-run.count\"\n\
+log_file=${MASC_KEEPER_TEST_DOCKER_LOG:-}\n\
+if [ -n \"$log_file\" ]; then\n\
+  printf '%s\n' \"$*\" >> \"$log_file\"\n\
+fi\n\
+read_count() { if [ -f \"$1\" ]; then cat \"$1\"; else printf '0'; fi }\n\
+write_count() { printf '%s' \"$2\" > \"$1\"; }\n\
+if [ \"$1\" = \"info\" ]; then printf '[]\n'; exit 0; fi\n\
+if [ \"$1\" = \"image\" ] && [ \"$2\" = \"inspect\" ]; then printf '[]\n'; exit 0; fi\n\
+if [ \"$1\" = \"rm\" ]; then exit 0; fi\n\
+if [ \"$1\" != \"run\" ]; then\n\
+  printf 'unexpected docker invocation: %s\n' \"$1\" >&2\n\
+  exit 2\n\
+fi\n\
+count=$(read_count \"$run_count_file\")\n\
+count=$((count + 1))\n\
+write_count \"$run_count_file\" \"$count\"\n\
+if [ \"$count\" = \"1\" ]; then\n\
+  printf 'Cannot connect to the Docker daemon at unix:///var/run/docker.sock\n' >&2\n\
+  exit 1\n\
+fi\n\
+shift\n\
+while [ \"$#\" -gt 0 ]; do\n\
+  if [ \"$1\" = \"alpine:test\" ]; then shift; break; fi\n\
+  shift\n\
+done\n\
+printf 'retry-ok\n'\n\
+exit 0\n"
+
+let test_docker_run_does_not_retry_generic_timeout () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
   with_fake_docker fake_docker_timeout_then_ok_script @@ fun () ->
   setup ~sandbox:Keeper_types_profile_sandbox.Docker
@@ -964,13 +996,36 @@ let test_docker_run_retries_on_daemon_timeout () =
       ~cmd:"echo hi"
       ~network_mode:Keeper_types_profile_sandbox.Network_none
   with
-  | Error msg -> Alcotest.failf "unexpected error after daemon-timeout retry: %s" msg
+  | Error msg -> Alcotest.failf "unexpected docker timeout result error: %s" msg
   | Ok result ->
-    Alcotest.(check int) "retry succeeds exit 0" 0
+    Alcotest.(check int) "generic timeout is terminal" 124
       (match result.status with
        | Unix.WEXITED n -> n
        | _ -> -1);
-    Alcotest.(check bool) "output from second run" true
+    Alcotest.(check bool) "second run was not replayed" false
+      (contains_substring result.output "retry-ok")
+
+let test_docker_run_retries_on_daemon_unavailable () =
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
+  with_fake_docker fake_docker_daemon_unavailable_then_ok_script @@ fun () ->
+  setup ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~config ~meta ~playground ->
+  match
+    Keeper_sandbox_docker.run_docker_shell_command_with_status
+      ~config
+      ~meta
+      ~cwd:playground
+      ~timeout_sec:5.0
+      ~cmd:"echo hi"
+      ~network_mode:Keeper_types_profile_sandbox.Network_none
+  with
+  | Error msg -> Alcotest.failf "unexpected error after daemon-unavailable retry: %s" msg
+  | Ok result ->
+    Alcotest.(check int) "daemon unavailable retry succeeds" 0
+      (match result.status with
+       | Unix.WEXITED n -> n
+       | _ -> -1);
+    Alcotest.(check bool) "output from daemon retry" true
       (contains_substring result.output "retry-ok")
 
 let test_execute_git_routes_through_docker () =
@@ -2436,8 +2491,12 @@ let () =
             `Quick
             test_cmd_prefix_uses_shell_command_words;
           Alcotest.test_case
-            "docker run retries once on daemon timeout/back-pressure"
+            "docker run does not retry generic timeout"
             `Quick
-            test_docker_run_retries_on_daemon_timeout;
+            test_docker_run_does_not_retry_generic_timeout;
+          Alcotest.test_case
+            "docker run retries once on daemon unavailable"
+            `Quick
+            test_docker_run_retries_on_daemon_unavailable;
         ] );
     ]

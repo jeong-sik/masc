@@ -1077,10 +1077,10 @@ let test_docker_config_mount_and_env_args () =
        ~base_path:base
        ~container_root)
 
-let test_docker_run_looks_daemon_pressure_classifies_timeout () =
+let test_docker_run_looks_daemon_pressure_does_not_retry_timeout () =
   Alcotest.(check bool)
-    "WEXITED 124 with timeout output is daemon pressure"
-    true
+    "WEXITED 124 with timeout output is not daemon pressure"
+    false
     (Keeper_sandbox_runtime.docker_run_looks_daemon_pressure
        ~status:(Unix.WEXITED 124)
        ~output:"process error: timeout after 5s")
@@ -2318,8 +2318,8 @@ let run_tests ~clock () =
             test_docker_masc_config_binding_pins_container_runtime_paths;
           Alcotest.test_case "docker config mount and env args" `Quick
             test_docker_config_mount_and_env_args;
-          Alcotest.test_case "docker run classifies timeout as daemon pressure" `Quick
-            test_docker_run_looks_daemon_pressure_classifies_timeout;
+          Alcotest.test_case "docker run timeout is terminal" `Quick
+            test_docker_run_looks_daemon_pressure_does_not_retry_timeout;
           Alcotest.test_case "docker run classifies daemon unavailable as pressure" `Quick
             test_docker_run_looks_daemon_pressure_classifies_daemon_unavailable;
           Alcotest.test_case "docker run does not classify command error as pressure" `Quick

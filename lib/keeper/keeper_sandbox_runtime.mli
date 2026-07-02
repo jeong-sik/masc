@@ -85,9 +85,10 @@ val docker_image_missing_next_action : string
     daemon/socket access failures as well as missing-image failures. *)
 val docker_image_present : image:string -> timeout_sec:float -> (unit, string) result
 
-(** [true] when a docker run result/status/output looks like daemon back-pressure
-    or a daemon-side timeout, i.e. when a single retry may succeed once the
-    Docker daemon drains. *)
+(** [true] when a docker run result/status/output proves Docker daemon
+    unavailability or back-pressure before command execution. Generic
+    [docker run] timeouts are terminal because the container command may have
+    already started and replaying it can duplicate side effects. *)
 val docker_run_looks_daemon_pressure : status:Unix.process_status -> output:string -> bool
 
 (** Docker [--label] argv fragment for containers owned by the keeper

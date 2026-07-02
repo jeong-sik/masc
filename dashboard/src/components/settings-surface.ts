@@ -32,6 +32,7 @@ import { RuntimeTomlEditor } from './runtime-toml-editor'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
+import { StatusChip } from './common/status-chip'
 import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
 import type { ComponentChildren } from 'preact'
@@ -402,6 +403,10 @@ function RuntimeMediaFailoverEditor({
                 >×</button>
               </span>
             `)}
+        </div>
+        <div class="set-hint flex flex-wrap items-center gap-2" data-testid="runtime-media-failover-reality">
+          <${StatusChip} tone="warn" uppercase=${false}>수동 reroute<//>
+          <span>provider 실패 자동 전환이 아니라 <span class="mono">runtime.toml</span>의 media lane 후보 목록입니다.</span>
         </div>
         <div class="set-runtime-media-actions">
           <select

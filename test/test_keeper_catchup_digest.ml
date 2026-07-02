@@ -102,6 +102,26 @@ let audit_row ~ts ~agent_id ~action ~transition ~task_id =
         ])
 ;;
 
+let audit_row_without_task_id ~ts ~agent_id ~action ~transition =
+  json_line
+    (`Assoc
+       [ "timestamp", `Float ts
+       ; "agent_id", `String agent_id
+       ; "action", `String action
+       ; "workspace_id", `String "default"
+       ; ( "details"
+         , `Assoc
+             [ "event_family", `String "task_transition"
+             ; "transition", `String transition
+             ; "agent_id", `String agent_id
+             ; "from_status", `String "todo"
+             ; "to_status", `String "claimed"
+             ; "forced", `Bool false
+             ] )
+       ; "outcome", `Assoc [ "status", `String "success" ]
+       ])
+;;
+
 let activity_row ~seq ~ts ~kind ~actor_id =
   json_line
     (`Assoc
@@ -310,6 +330,41 @@ let test_items_cap () =
     | [] -> Alcotest.fail "expected capped items")
 ;;
 
+let test_task_items_are_sound_partial () =
+  with_workspace (fun base ->
+    let ad = audit_dir base in
+    let ts_missing = since_unix +. 200. in
+    let ts_invalid = since_unix +. 300. in
+    append_line
+      (day_file ~dir:ad ts_missing)
+      (audit_row_without_task_id
+         ~ts:ts_missing
+         ~agent_id:keeper
+         ~action:"claim_task"
+         ~transition:"claim");
+    append_line
+      (day_file ~dir:ad ts_invalid)
+      (audit_row
+         ~ts:ts_invalid
+         ~agent_id:keeper
+         ~action:"done_task"
+         ~transition:"done"
+         ~task_id:"../bad");
+    let digest = D.build ~base_path:base ~keeper_name:keeper ~since_unix ~now_unix in
+    let { D.tasks = { claimed; done_; items; _ }; read_errors; _ } = digest in
+    Alcotest.(check int) "missing-id task action still counted" 1 claimed;
+    Alcotest.(check int) "invalid-id task action still counted" 1 done_;
+    Alcotest.(check int) "invalid task ids do not create items" 0 (List.length items);
+    Alcotest.(check bool)
+      "missing task_id is fail-visible"
+      true
+      (List.exists (str_contains ~needle:"missing task_id") read_errors);
+    Alcotest.(check bool)
+      "invalid task_id is fail-visible"
+      true
+      (List.exists (str_contains ~needle:"invalid task_id") read_errors))
+;;
+
 let test_to_json_shape () =
   with_workspace (fun base ->
     write_rich_fixture base;
@@ -345,6 +400,7 @@ let () =
       , [ Alcotest.test_case "counts + since boundary + identity + read_errors" `Quick test_counts_and_boundary
         ; Alcotest.test_case "missing stores are zero, not errors" `Quick test_missing_stores_are_zero
         ; Alcotest.test_case "items cap with full counts" `Quick test_items_cap
+        ; Alcotest.test_case "task items are sound-partial" `Quick test_task_items_are_sound_partial
         ; Alcotest.test_case "to_json shape round-trips" `Quick test_to_json_shape
         ] )
     ]

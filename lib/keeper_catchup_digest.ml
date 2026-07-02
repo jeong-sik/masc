@@ -139,6 +139,19 @@ let json_num_field name json =
    silently dropped. The list is bounded by {!read_errors_cap}. *)
 let bounded_add errs msg = if List.length !errs < read_errors_cap then errs := msg :: !errs
 
+let task_id_of_audit_details ~errs details =
+  match Safe_ops.json_string_opt "task_id" details with
+  | None ->
+    bounded_add errs "audit: task transition missing task_id";
+    None
+  | Some raw ->
+    (match Validation.Task_id.validate raw with
+     | Ok task_id -> Some (Validation.Task_id.to_string task_id)
+     | Error reason ->
+       bounded_add errs (Printf.sprintf "audit: invalid task_id: %s" reason);
+       None)
+;;
+
 let read_jsonl_file ~errs ~label ~path ~f =
   match In_channel.with_open_bin path In_channel.input_all with
   | exception Sys_error detail ->
@@ -359,11 +372,11 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
         ->
         if timestamp > since_unix && identity_of agent_id
         then (
-          let task_id =
-            Option.value ~default:"" (Safe_ops.json_string_opt "task_id" details)
-          in
           let record transition =
-            task_items := { task_id; transition; ts = timestamp } :: !task_items
+            match task_id_of_audit_details ~errs details with
+            | Some task_id ->
+              task_items := { task_id; transition; ts = timestamp } :: !task_items
+            | None -> ()
           in
           match action with
           | Audit_log.ClaimTask ->

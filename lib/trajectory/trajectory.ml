@@ -690,10 +690,35 @@ let build_tool_affinity_aggregate ~(keeper_name : string) ~(now : float)
     (entries : tool_call_entry list) : tool_affinity_aggregate =
   merge_entries_into_aggregate ~now (empty_tool_affinity_aggregate keeper_name) entries
 
-(* Serializes snapshot read-modify-write across domains. A single global
-   mutex is sufficient: writes only happen on flush/rebuild (batched, small
-   files), never on the per-tool-call hot path. *)
+(* Serializes snapshot read-modify-write across domains. Snapshot files are
+   small; same-keeper JSONL/rebuild races are guarded separately below. *)
 let aggregate_persist_mu = Stdlib.Mutex.create ()
+
+(* A cold/corrupt snapshot rebuild scans JSONL and then seeds the aggregate.
+   Same-keeper JSONL writes must not interleave with that scan: otherwise a
+   just-persisted entry can be missed by the scan and then no-op while the
+   snapshot is still missing, or be scanned and incremented again. This guard
+   wraps the append/flush write plus aggregate update for that keeper. *)
+let aggregate_rebuild_guards :
+    (string * string, Stdlib.Mutex.t) Hashtbl.t =
+  Hashtbl.create 32
+
+let aggregate_rebuild_guards_mu = Stdlib.Mutex.create ()
+
+let aggregate_rebuild_guard ~(masc_root : string) ~(keeper_name : string) :
+    Stdlib.Mutex.t =
+  Stdlib.Mutex.protect aggregate_rebuild_guards_mu (fun () ->
+    let key = (masc_root, keeper_name) in
+    match Hashtbl.find_opt aggregate_rebuild_guards key with
+    | Some mu -> mu
+    | None ->
+      let mu = Stdlib.Mutex.create () in
+      Hashtbl.add aggregate_rebuild_guards key mu;
+      mu)
+
+let with_aggregate_rebuild_guard ~(masc_root : string) ~(keeper_name : string)
+    (f : unit -> 'a) : 'a =
+  Stdlib.Mutex.protect (aggregate_rebuild_guard ~masc_root ~keeper_name) f
 
 let update_aggregate_from_entries ~(masc_root : string) ~(keeper_name : string)
     (entries : tool_call_entry list) : unit =
@@ -730,12 +755,13 @@ let update_aggregate_from_entries ~(masc_root : string) ~(keeper_name : string)
 let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
     unit =
-  let dir = trajectories_dir masc_root keeper_name in
-  Fs_compat.mkdir_p dir;
-  let path = trajectory_path masc_root keeper_name trace_id in
-  let json = entry_to_json ?runtime_contract ?action_radius entry in
-  Fs_compat.append_jsonl path json;
-  update_aggregate_from_entries ~masc_root ~keeper_name [ entry ]
+  with_aggregate_rebuild_guard ~masc_root ~keeper_name (fun () ->
+    let dir = trajectories_dir masc_root keeper_name in
+    Fs_compat.mkdir_p dir;
+    let path = trajectory_path masc_root keeper_name trace_id in
+    let json = entry_to_json ?runtime_contract ?action_radius entry in
+    Fs_compat.append_jsonl path json;
+    update_aggregate_from_entries ~masc_root ~keeper_name [ entry ])
 
 (* ================================================================ *)
 (* Trajectory accumulator (mutable, per-session)                    *)
@@ -837,29 +863,35 @@ let flush_pending (acc : accumulator) : unit =
   match entries_to_flush with
   | [] -> ()
   | _ ->
-    let dir = trajectories_dir acc.masc_root acc.keeper_name in
-    Fs_compat.mkdir_p dir;
-    let path = trajectory_path acc.masc_root acc.keeper_name acc.trace_id in
-    let jsons = List.map (fun pe -> pe.pe_json) entries_to_flush in
     (try
-       Fs_compat.append_jsonl_batch path jsons;
-       acc.last_flush <- Time_compat.now ();
-       (* Fold the just-persisted batch into the per-keeper tool-affinity
-          aggregate so Keeper_tool_affinity reads it instead of rescanning
-          the full trajectory (the P0 freeze). Gated on the JSONL write
-          succeeding; the aggregate is a rebuildable derived cache, so the
-          update is best-effort — [update_aggregate_from_entries] never
-          raises and only increments an already-seeded snapshot. *)
-       let flushed_entries =
-         List.filter_map
-           (fun pe ->
-             match tool_call_entry_of_json pe.pe_json with
-             | Some (entry, _parsed_gate) -> Some entry
-             | None -> None)
-           entries_to_flush
-       in
-       update_aggregate_from_entries
-         ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name flushed_entries
+       with_aggregate_rebuild_guard
+         ~masc_root:acc.masc_root
+         ~keeper_name:acc.keeper_name
+         (fun () ->
+           let dir = trajectories_dir acc.masc_root acc.keeper_name in
+           Fs_compat.mkdir_p dir;
+           let path = trajectory_path acc.masc_root acc.keeper_name acc.trace_id in
+           let jsons = List.map (fun pe -> pe.pe_json) entries_to_flush in
+           Fs_compat.append_jsonl_batch path jsons;
+           acc.last_flush <- Time_compat.now ();
+           (* Fold the just-persisted batch into the per-keeper tool-affinity
+              aggregate so Keeper_tool_affinity reads it instead of rescanning
+              the full trajectory (the P0 freeze). Gated on the JSONL write
+              succeeding; the aggregate is a rebuildable derived cache, so the
+              update is best-effort — [update_aggregate_from_entries] never
+              raises and only increments an already-seeded snapshot. *)
+           let flushed_entries =
+             List.filter_map
+               (fun pe ->
+                 match tool_call_entry_of_json pe.pe_json with
+                 | Some (entry, _parsed_gate) -> Some entry
+                 | None -> None)
+               entries_to_flush
+           in
+           update_aggregate_from_entries
+             ~masc_root:acc.masc_root
+             ~keeper_name:acc.keeper_name
+             flushed_entries)
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -1147,28 +1179,32 @@ let windowed_affinity_tool_stats (agg : tool_affinity_aggregate)
     [Domain_pool_ref.submit_io_or_inline] to keep it off the main Eio
     domain (see Keeper_tool_affinity.pre_populate_from_history). Scans over
     the retention horizon so the snapshot serves any lookback up to the cap;
-    the read then windows to the configured lookback. Persists only when no
-    valid snapshot has appeared meanwhile, so a concurrent rebuild plus the
-    incremental flushes that follow it are never overwritten by a staler
-    scan. *)
+    the read then windows to the configured lookback. The missing/corrupt
+    snapshot scan is serialized with same-keeper JSONL append/flush writes,
+    so concurrent durable entries are either included in this scan or
+    incremented immediately after the snapshot exists. *)
 let rebuild_tool_affinity_aggregate ~(masc_root : string)
     ~(keeper_name : string) ~(now : float) : tool_affinity_aggregate =
-  let since =
-    now -. (float_of_int affinity_aggregate_retention_days *. seconds_per_day)
-  in
-  let entries = read_entries_since ~masc_root ~keeper_name ~since in
-  let scanned = build_tool_affinity_aggregate ~keeper_name ~now entries in
-  Stdlib.Mutex.protect aggregate_persist_mu (fun () ->
+  with_aggregate_rebuild_guard ~masc_root ~keeper_name (fun () ->
     match read_aggregate_snapshot ~masc_root ~keeper_name with
     | Ok existing -> existing
     | Error (Aggregate_missing | Aggregate_unreadable _ | Aggregate_corrupt _) ->
-      (match persist_aggregate_snapshot ~masc_root ~keeper_name scanned with
-       | Ok () -> ()
-       | Error msg ->
-         Log.Keeper.warn
-           "trajectory: failed to persist rebuilt tool-affinity aggregate for %s: %s"
-           keeper_name msg);
-      scanned)
+      let since =
+        now -. (float_of_int affinity_aggregate_retention_days *. seconds_per_day)
+      in
+      let entries = read_entries_since ~masc_root ~keeper_name ~since in
+      let scanned = build_tool_affinity_aggregate ~keeper_name ~now entries in
+      Stdlib.Mutex.protect aggregate_persist_mu (fun () ->
+        match read_aggregate_snapshot ~masc_root ~keeper_name with
+        | Ok existing -> existing
+        | Error (Aggregate_missing | Aggregate_unreadable _ | Aggregate_corrupt _) ->
+          (match persist_aggregate_snapshot ~masc_root ~keeper_name scanned with
+           | Ok () -> ()
+           | Error msg ->
+             Log.Keeper.warn
+               "trajectory: failed to persist rebuilt tool-affinity aggregate for %s: %s"
+               keeper_name msg);
+          scanned))
 
 (* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)

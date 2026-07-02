@@ -333,6 +333,9 @@ val windowed_affinity_tool_stats :
 val rebuild_tool_affinity_aggregate :
   masc_root:string -> keeper_name:string -> now:float ->
   tool_affinity_aggregate
-(** Full-scan reconstruction from JSONL, persisted (only if no valid
-    snapshot has appeared meanwhile). The scan is expensive; wrap in
+(** Full-scan reconstruction from JSONL, persisted when no valid snapshot
+    exists. The missing/corrupt snapshot scan is serialized with same-keeper
+    JSONL append/flush writes, so concurrent durable entries are either
+    included in the scan or increment the rebuilt snapshot immediately
+    afterwards. The scan is expensive; wrap in
     [Domain_pool_ref.submit_io_or_inline] to keep it off the main domain. *)

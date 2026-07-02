@@ -1409,6 +1409,76 @@ let test_callback_always_approve_bypasses_threshold () =
     Alcotest.fail ("expected Approve with always_approve, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
+let test_callback_typed_last_blocker_overrides_always_approve () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "typed-blocked-keeper" in
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      let meta =
+        let base =
+          meta_from_json
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
+                ("trace_id", `String "runtime-blocked-trace");
+                ("sandbox_profile", `String "docker");
+                ("network_mode", `String "inherit");
+                ("always_approve", `Bool true);
+              ])
+        in
+        let blocker =
+          let open Masc.Keeper_meta_contract in
+          blocker_info_of_class ~detail:"previous turn timed out" Turn_timeout
+        in
+        { base with
+          runtime = { base.runtime with last_blocker = Some blocker };
+        }
+      in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cb =
+          GP.to_oas_approval_callback
+            ~config ~governance_level:"production" ~keeper_name ~meta ()
+        in
+        let decision =
+          cb
+            ~tool_name:"masc_create_task"
+            ~input:(`Assoc [ ("title", `String "test") ])
+        in
+        result := Some decision);
+      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
+      Alcotest.(check int)
+        "typed last_blocker prevents always_approve bypass"
+        (initial_pending + 1)
+        (AQ.pending_count ());
+      let id =
+        match pending_id_for_keeper ~keeper_name with
+        | Some id -> id
+        | None -> Alcotest.fail "expected pending approval for runtime blocker"
+      in
+      (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "blocked") with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+      yield_until (fun () -> Option.is_some !result);
+      match !result with
+      | Some (Agent_sdk.Hooks.Reject "blocked") -> ()
+      | Some Agent_sdk.Hooks.Approve ->
+        Alcotest.fail "typed last_blocker must not auto-approve"
+      | Some (Agent_sdk.Hooks.Reject reason) ->
+        Alcotest.fail ("unexpected reject reason: " ^ reason)
+      | Some (Agent_sdk.Hooks.Edit _) -> Alcotest.fail "unexpected edit"
+      | None -> Alcotest.fail "runtime blocker callback did not suspend")
+
 let test_runtime_trust_classifies_always_approve_flag () =
   with_test_config @@ fun config ->
   AQ.For_testing.reset_audit_store ();
@@ -1810,6 +1880,8 @@ let () =
         test_callback_paranoid_medium_risk_uses_remembered_policy;
       Alcotest.test_case "always_approve bypasses threshold" `Quick
         test_callback_always_approve_bypasses_threshold;
+      Alcotest.test_case "typed last_blocker overrides always_approve" `Quick
+        test_callback_typed_last_blocker_overrides_always_approve;
       Alcotest.test_case "runtime trust classifies always_approve flag" `Quick
         test_runtime_trust_classifies_always_approve_flag;
       Alcotest.test_case "always_approve respects forbidden" `Quick

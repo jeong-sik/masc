@@ -40,6 +40,34 @@ val keeper_execution_receipt_store : Workspace.config -> string -> Dated_jsonl.t
     [.masc/keepers/<name>/turn-records/YYYY-MM/DD.jsonl]. *)
 val keeper_turn_record_store : Workspace.config -> string -> Dated_jsonl.t
 
+(** Per-keeper OAS raw-trace store directory:
+    [.masc/keepers/<name>/raw-traces/]. One JSONL file per keeper turn —
+    a fresh file per turn keeps [Agent_sdk.Raw_trace.create] from scanning
+    previous turns' data, so a corrupt or oversized historical trace can
+    never block keeper dispatch. Path derivation only; no filesystem
+    effects. *)
+val keeper_raw_trace_dir : Workspace.config -> string -> string
+
+(** Retention bound for the per-turn raw-trace store (log retention, not
+    a behavioral cap): the oldest turn files beyond this count are removed
+    by {!prune_keeper_raw_trace_turn_files}. *)
+val raw_trace_retained_turn_files : int
+
+(** Fresh per-turn raw-trace file path under {!keeper_raw_trace_dir}.
+    Ensures the directory exists (keeper dir included) and returns a path
+    that does not collide with any previous turn's file, so the OAS sink
+    starts from an empty file. Raises when the directory cannot be
+    created — callers on the dispatch path must degrade, not fail the
+    turn (see [Keeper_agent_run.raw_trace_sink_outcome]). *)
+val keeper_raw_trace_turn_path : Workspace.config -> string -> string
+
+(** Remove the oldest per-turn raw-trace files beyond
+    {!raw_trace_retained_turn_files}, ordered by file name ascending
+    (chronological via the zero-padded timestamp prefix). Total: missing
+    dir or failed unlinks are logged and skipped. Returns the number of
+    files removed. *)
+val prune_keeper_raw_trace_turn_files : Workspace.config -> string -> int
+
 val keeper_memory_bank_path : Workspace.config -> string -> string
 val keeper_progress_path : Workspace.config -> string -> string
 val keeper_generation_index_path : Workspace.config -> string -> string

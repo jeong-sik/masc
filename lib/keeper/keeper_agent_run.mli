@@ -13,6 +13,16 @@ include module type of Keeper_agent_checkpoint_hygiene
 module Contract_helpers = Keeper_agent_run_contract_helpers
 module Turn_helpers = Keeper_agent_run_turn_helpers
 
+(** Outcome of building the per-turn OAS raw-trace sink
+    ([.masc/keepers/<name>/raw-traces/turn-*.jsonl]). [Sink_degraded] is
+    the typed health record for trace-store failures: the turn still
+    dispatches (untraced, so [run_result.trace_ref]/[run_validation] stay
+    [None] for that turn) — trace-store state never fails a turn
+    pre-dispatch. *)
+type raw_trace_sink_outcome =
+  | Sink_ready of Agent_sdk.Raw_trace.t
+  | Sink_degraded of Agent_sdk.Error.sdk_error
+
 val completion_contract_result_for_progress_evidence
   :  had_owned_active_task_at_turn_start:bool
   -> actual_keeper_tool_names:string list
@@ -45,6 +55,25 @@ module For_testing : sig
     -> tool_names:string list
     -> unit
     -> (string, Agent_sdk.Error.sdk_error) result
+
+  (** OAS raw-trace sink for keeper turns: a fresh per-turn file under
+      [Keeper_types_support.keeper_raw_trace_dir], pruned to
+      [Keeper_types_support.raw_trace_retained_turn_files]. The dispatch
+      section passes it into [Keeper_turn_driver.run_named] so
+      [run_result.trace_ref]/[run_validation] are populated. *)
+  val keeper_raw_trace_sink
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> raw_trace_sink_outcome
+
+  (** Dispatch adapter over {!keeper_raw_trace_sink}: [Sink_degraded]
+      becomes [None] (turn runs untraced) after emitting the typed
+      degrade record (warn log + [Keeper_metrics.RawTraceSinkDegraded]
+      counter). Never raises; never fails the turn. *)
+  val raw_trace_for_dispatch
+    :  config:Workspace.config
+    -> meta:Keeper_meta_contract.keeper_meta
+    -> Agent_sdk.Raw_trace.t option
 end
 
 val per_provider_timeout_for_turn

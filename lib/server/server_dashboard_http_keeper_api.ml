@@ -1022,7 +1022,34 @@ let handle_keeper_get_subroutes state req request reqd =
     let slen = String.length suffix in
     String.trim (String.sub req_path plen (tlen - plen - slen))
   in
-  if ends_with "/chat/history" then
+  if ends_with "/digest" then (
+    (* Keeper catch-up digest (since-last-seen). Inherits the enclosing
+       prefix_get "/api/v1/keepers/" + with_public_read gating, same as the
+       sibling arms below; no separate router wiring. *)
+    let name = extract_name "/digest" in
+    if name = "" then
+      Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+        (error_json "missing keeper name")
+    else
+      match Server_utils.query_param req "since_unix" with
+      | None ->
+        Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd
+          (error_json "missing required query param: since_unix")
+      | Some raw ->
+        (match float_of_string_opt (String.trim raw) with
+         | None ->
+           Server_auth.respond_json_value_with_cors ~status:`Bad_request request
+             reqd
+             (error_json "since_unix must be a unix-seconds float")
+         | Some since_unix ->
+           let config = Mcp_server.workspace_config state in
+           let digest =
+             Keeper_catchup_digest.build ~base_path:config.base_path
+               ~keeper_name:name ~since_unix ~now_unix:(Time_compat.now ())
+           in
+           Server_auth.respond_json_value_with_cors ~status:`OK request reqd
+             (Keeper_catchup_digest.to_json digest)))
+  else if ends_with "/chat/history" then
     let name = extract_name "/chat/history" in
     if name = "" then
       Server_auth.respond_json_value_with_cors ~status:`Bad_request request reqd

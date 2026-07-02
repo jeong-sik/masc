@@ -146,14 +146,33 @@ let apply_fusion_judge_output_contract provider_cfg =
   let native_schema_provider_cfg =
     Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
   in
-  (* The tier is decided by OAS capability facts, never by provider-name
-     special cases: native schema or fail before an HTTP request. *)
+  (* Tier 1: full native schema. *)
   match
     Llm_provider.Provider_config.validate_output_schema_request
       native_schema_provider_cfg
   with
   | Ok () -> Ok native_schema_provider_cfg
-  | Error detail -> Error (Printf.sprintf "fusion.judge.output_schema: %s" detail)
+  | Error _detail ->
+    (* Tier 2: compact schema (resolved_answer + decision only).
+       ollama_cloud and similar providers reject complex nested schemas. *)
+    let compact_schema =
+      Keeper_structured_output_schema.compact_fusion_judge_output_schema
+    in
+    let compact_cfg =
+      Keeper_structured_output_schema.apply_to_provider_config compact_schema
+        provider_cfg
+    in
+    (match
+       Llm_provider.Provider_config.validate_output_schema_request compact_cfg
+     with
+     | Ok () ->
+       Log.info (fun f ->
+         f "fusion_judge: fell back to compact output schema (tier 2)");
+       Ok compact_cfg
+     | Error detail ->
+       Error
+         (Printf.sprintf "fusion.judge.output_schema: %s (tried both tiers)"
+            detail))
 
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
    서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고

@@ -24,11 +24,6 @@ type approval_audit_decision =
 type approval_audit_disposition =
   | Approval_escalated of string
 
-(** Pending phase for a HITL approval. *)
-type pending_phase =
-  | Awaiting_operator
-  | Escalated of { escalated_at : float }
-
 (** Pending approval entry — the suspended-fiber side of the
     Eio.Promise rendez-vous. *)
 type pending_approval =
@@ -42,7 +37,6 @@ type pending_approval =
   ; backend : string option
   ; input : Yojson.Safe.t
   ; risk_level : risk_level
-  ; phase : pending_phase
   ; requested_at : float
   ; turn_id : int option
   ; task_id : string option
@@ -215,16 +209,12 @@ val default_noncritical_approval_timeout_s : float
     provider idleness. *)
 
 val default_critical_approval_escalation_after_s : float
-(** Code constant (RFC-0304): time in seconds after which a [Critical]
-    approval transitions from [Awaiting_operator] to [Escalated].  This is
-    a policy value, not a runtime knob; the janitor applies it. *)
+(** Default wait before a [Critical] approval emits an escalation audit event
+    while still waiting for a manual operator decision. *)
 
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
-    Called from the OAS approval_callback (inside the agent fiber).
-
-    [Critical] approvals never time out: escalation is a typed pending-phase
-    transition driven by [escalate_critical] in the approval janitor. *)
+    Called from the OAS approval_callback (inside the agent fiber). *)
 val submit_and_await :
   keeper_name:string ->
   tool_name:string ->
@@ -244,6 +234,7 @@ val submit_and_await :
   ?disposition_reason:string ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
+  ?critical_escalation_after_s:float ->
   unit ->
   Agent_sdk.Hooks.approval_decision
 
@@ -314,10 +305,3 @@ val has_pending_for_keeper : keeper_name:string -> bool
     from indefinite-wait operator gates and must be resolved
     manually. *)
 val expire_stale : max_wait_s:float -> unit
-
-(** Transition [Critical] approvals that have been waiting longer than
-    [after_s] from [Awaiting_operator] to [Escalated].  The entry stays
-    pending; no promise is resolved.  Idempotent and race-safe against
-    concurrent operator resolution.  [now] is supplied by the caller so
-    wall-clock sampling stays at the bootstrap boundary. *)
-val escalate_critical : now:float -> after_s:float -> unit

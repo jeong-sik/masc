@@ -81,10 +81,8 @@ let read_recent_audit_raw store limit =
 
 let approval_audit_pending_event = "pending"
 let approval_audit_resolved_event = "resolved"
-let approval_audit_escalated_event = "approval_escalated"
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
-let approval_sse_escalated_event = "approval:escalated"
 
 let non_empty_reason reason =
   let reason = String.trim reason in
@@ -458,7 +456,6 @@ let create_entry
       ~tool_name
       ~input
       ~risk_level
-      ?(phase = Awaiting_operator)
       ?turn_id
       ?task_id
       ?goal_id
@@ -496,7 +493,6 @@ let create_entry
   ; backend
   ; input
   ; risk_level
-  ; phase
   ; requested_at = Unix.gettimeofday ()
   ; turn_id
   ; task_id
@@ -524,7 +520,6 @@ let pending_entry_json_fields
   ; "action_key", `String entry.action_key
   ; "sandbox_target", `String entry.sandbox_target
   ; "risk_level", `String (risk_level_to_string entry.risk_level)
-  ; "phase", `String (pending_phase_to_string entry.phase)
   ; "requested_at", `Float entry.requested_at
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
@@ -535,17 +530,6 @@ let pending_entry_json_fields
   ; "disposition", Json_util.string_opt_to_json entry.disposition
   ; "disposition_reason", Json_util.string_opt_to_json entry.disposition_reason
   ]
-  @
-  (match entry.phase with
-   | Awaiting_operator -> []
-   | Escalated { escalated_at } ->
-     [ "escalated_at", `Float escalated_at
-     ; "escalated_at_iso", `String (Masc_domain.iso8601_of_unix_seconds escalated_at)
-     ; ( "escalated_waiting_s"
-       , `Float (Unix.gettimeofday () -. escalated_at) )
-       (* NDT-OK: wall-clock age rendered for dashboard/SSE observability only;
-          never used for a control decision. *)
-     ])
   @ (if include_requested_at_iso
      then
        [ ( "requested_at_iso"
@@ -620,29 +604,6 @@ let record_pending (entry : pending_approval) =
     ?disposition_reason:entry.disposition_reason
     ();
   broadcast_pending entry
-;;
-
-let broadcast_escalated (entry : pending_approval) =
-  try
-    Sse.broadcast
-      (`Assoc
-         [ "type", `String approval_sse_escalated_event
-         ; ( "payload"
-           , `Assoc
-               (pending_entry_json_fields
-                  ~include_runtime_contract:true
-                  ~include_input:true
-                  entry) )
-         ])
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
-    record_queue_failure
-      ~keeper_name:entry.keeper_name
-      ~site:"broadcast_escalated"
-      ~id:entry.id
-      ~event_type:approval_audit_escalated_event
-      exn
 ;;
 
 let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
@@ -791,12 +752,10 @@ let default_critical_approval_escalation_after_s = 1800.0
     30s wrapper used by A2 for generic [Eio.Promise.await] sites: a HITL
     approval is bounded by an operator's response time, not by an SLA on
     autonomous progress.
-
-    [Critical] approvals are exempt from timeout and expiration, matching
-    [expire_stale]'s operator-must-decide policy.  Escalation after
-    {!default_critical_approval_escalation_after_s} is a typed pending-phase
-    transition driven by the approval janitor ([escalate_critical]); the
-    fiber stays suspended until the operator decides. *)
+    [Critical] approvals are exempt, matching [expire_stale]'s
+    operator-must-decide policy. Drop the default only after measuring
+    the operator-response distribution — premature shortening turns
+    every distracted operator into an [Approval_expired] event. *)
 let submit_and_await
       ~keeper_name
       ~tool_name
@@ -816,6 +775,7 @@ let submit_and_await
       ?disposition_reason
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
+      ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
       ()
   : Agent_sdk.Hooks.approval_decision
   =
@@ -891,11 +851,34 @@ let submit_and_await
             operator decision that wins the promise resolution race. *)
          timeout_decision reason)
     | Some clock, Critical ->
-      (* Critical never auto-decides.  Escalation is a typed phase
-         transition performed by the janitor so visibility is bounded
-         without resolving the promise. *)
-      ignore clock;
-      Eio.Promise.await promise
+      (match
+         Eio.Fiber.first
+           (fun () -> `Decision (Eio.Promise.await promise))
+           (fun () ->
+              Eio.Time.sleep clock critical_escalation_after_s;
+              `Escalated)
+       with
+       | `Decision d -> d
+       | `Escalated ->
+         let reason = "critical approval escalated — operator must decide" in
+         audit_approval_event
+           ~base_path:entry.audit_base_path
+           ~event_type:"approval_escalated"
+           ~id
+           ~keeper_name
+           ~tool_name
+           ~risk_level
+           ?turn_id
+           ?task_id
+           ?goal_id
+           ~goal_ids
+           ~sandbox_target:entry.sandbox_target
+           ?runtime_contract
+           ?selected_model
+           ~audit_disposition:(Approval_escalated reason)
+           ();
+         (* Escalated — keep waiting for operator, do not reject *)
+         Eio.Promise.await promise)
     | None, _ -> Eio.Promise.await promise
   in
   Eio_guard.protect await_with_timeout ~finally:(fun () ->
@@ -1265,63 +1248,4 @@ let expire_stale ~max_wait_s =
            (fun () -> f (Agent_sdk.Hooks.Reject reason))
        | None -> ())
     stale
-;;
-
-(** Transition [Critical] approvals older than [after_s] from
-    [Awaiting_operator] to [Escalated].  The entry stays pending and the
-    promise stays unresolved; escalation is visibility only (RFC-0304).
-
-    The caller supplies [now] so that wall-clock sampling stays at the
-    server/bootstrap boundary and this function remains deterministic in
-    its inputs.
-
-    The transition is performed under the queue lock and re-checked after
-    acquiring the lock, so concurrent operator resolution always wins.  The
-    function is idempotent: an already-[Escalated] entry is not re-audited. *)
-let escalate_critical ~now ~after_s =
-  let escalated_ref : (string * pending_approval) list ref = ref [] in
-  atomic_update pending (fun map ->
-    let to_escalate : (string * pending_approval) list ref = ref [] in
-    let updated =
-      SMap.fold
-        (fun id (entry : pending_approval) map_acc ->
-           match entry.risk_level, entry.phase with
-           | Critical, Awaiting_operator when now -. entry.requested_at > after_s ->
-             let escalated_entry =
-               { entry with phase = Escalated { escalated_at = now } }
-             in
-             to_escalate := (id, escalated_entry) :: !to_escalate;
-             SMap.add id escalated_entry map_acc
-           | _ -> map_acc)
-        map
-        map
-    in
-    escalated_ref := !to_escalate;
-    updated);
-  List.iter
-    (fun (id, (entry : pending_approval)) ->
-       let reason = "critical approval escalated — operator must decide" in
-       Log.Keeper.warn
-         "HITL_APPROVAL_ESCALATED: id=%s keeper=%s tool=%s"
-         id
-         entry.keeper_name
-         entry.tool_name;
-       audit_approval_event
-         ~base_path:entry.audit_base_path
-         ~event_type:approval_audit_escalated_event
-         ~id
-         ~keeper_name:entry.keeper_name
-         ~tool_name:entry.tool_name
-         ~risk_level:entry.risk_level
-         ?turn_id:entry.turn_id
-         ?task_id:entry.task_id
-         ?goal_id:entry.goal_id
-         ~goal_ids:entry.goal_ids
-         ~sandbox_target:entry.sandbox_target
-         ?runtime_contract:entry.runtime_contract
-         ?selected_model:entry.selected_model
-         ~audit_disposition:(Approval_escalated reason)
-         ();
-       broadcast_escalated entry)
-    !escalated_ref
 ;;

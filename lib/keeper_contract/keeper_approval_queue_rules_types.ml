@@ -11,15 +11,6 @@ type risk_level =
   | High
   | Critical
 
-type pending_phase =
-  | Awaiting_operator
-  | Escalated of { escalated_at : float }
-
-let pending_phase_to_string = function
-  | Awaiting_operator -> "awaiting_operator"
-  | Escalated _ -> "escalated"
-;;
-
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -31,7 +22,6 @@ type pending_approval =
   ; backend : string option
   ; input : Yojson.Safe.t
   ; risk_level : risk_level
-  ; phase : pending_phase
   ; requested_at : float
   ; turn_id : int option
   ; task_id : string option

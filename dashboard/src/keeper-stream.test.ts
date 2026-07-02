@@ -14,6 +14,7 @@ import {
   abortKeeperThreadMessage,
   applyKeeperStreamEvent,
 } from './keeper-stream'
+import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 
 function assistantEntry(): void {
   appendThreadEntry('sangsu', {
@@ -543,6 +544,50 @@ describe('applyKeeperStreamEvent', () => {
       expect(entry?.traceSteps).toEqual([
         { kind: 'think', text: 'checking tool evidence', ts: expect.any(String) },
       ])
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('keeps live thinking state bounded until a phase boundary commits the full text', async () => {
+    vi.useFakeTimers()
+    try {
+      const hiddenHead = 'hidden-head-marker'
+      const visibleTail = 'visible-tail-marker'
+      assistantEntry()
+
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA',
+        value: { delta: `${hiddenHead} ${'x'.repeat(STREAMING_THINKING_PREVIEW_CHARS + 200)} ` },
+      })
+      applyKeeperStreamEvent('sangsu', 'reply-1', {
+        type: 'CUSTOM',
+        name: 'KEEPER_THINKING_DELTA',
+        value: { delta: visibleTail },
+      })
+
+      await vi.advanceTimersByTimeAsync(KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS)
+
+      const liveEntry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+      const liveThinking = liveEntry?.traceSteps?.[0]
+      if (!liveThinking || liveThinking.kind !== 'think') {
+        throw new Error('expected live thinking trace step')
+      }
+      expect(liveThinking.text).toContain(visibleTail)
+      expect(liveThinking.text).not.toContain(hiddenHead)
+      expect(liveThinking.text.length).toBeLessThanOrEqual(STREAMING_THINKING_PREVIEW_CHARS)
+
+      applyKeeperStreamEvent('sangsu', 'reply-1', { type: 'TEXT_MESSAGE_START' })
+
+      const committedEntry = keeperThreads.value.sangsu?.find(item => item.id === 'reply-1')
+      const committedThinking = committedEntry?.traceSteps?.[0]
+      if (!committedThinking || committedThinking.kind !== 'think') {
+        throw new Error('expected committed thinking trace step')
+      }
+      expect(committedThinking.text).toContain(hiddenHead)
+      expect(committedThinking.text).toContain(visibleTail)
+      expect(committedThinking.text.length).toBeGreaterThan(STREAMING_THINKING_PREVIEW_CHARS)
     } finally {
       vi.useRealTimers()
     }

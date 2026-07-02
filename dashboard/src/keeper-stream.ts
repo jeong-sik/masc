@@ -8,10 +8,10 @@ import type { KeeperChatStreamEvent } from './api'
 import type { KeeperConversationDetails } from './types'
 import {
   appendAssistantDelta,
-  appendAssistantThinkingDelta,
   appendAssistantToolTraceArgsDelta,
   setAssistantToolTraceArgsSnapshot,
   appendAssistantToolTraceStep,
+  setAssistantThinkingSnapshot,
   setAssistantStreamState,
   updateThreadEntry,
   insertThreadEntryBefore,
@@ -30,6 +30,7 @@ import {
 } from './keeper-state'
 import { isRecord, asNumber, asString } from './components/common/normalize'
 import { toolEntryIdFromCallId } from './tool-call-output-store'
+import { STREAMING_THINKING_PREVIEW_CHARS } from './config/constants'
 
 const KEEPER_MESSAGE_CANCELLED_TEXT = '요청이 취소되었습니다.'
 export const TERMINAL_REQUEST_STATUSES = new Set(['done', 'error', 'lost', 'cancelled'])
@@ -37,12 +38,10 @@ export const KEEPER_THINKING_DELTA_FLUSH_INTERVAL_MS = 100
 
 const pendingOasToolBlockIndexes = new Map<string, number>()
 type ScheduledFlushHandle = ReturnType<typeof setTimeout>
-interface PendingThinkingBatch {
-  text: string
-  oasBlockIndex?: number
-}
 interface PendingThinkingState {
-  batches: PendingThinkingBatch[]
+  chunks: string[]
+  preview: string
+  oasBlockIndex?: number
   flushHandle: ScheduledFlushHandle | null
 }
 
@@ -64,19 +63,39 @@ function sameOasBlockIndex(left: number | undefined, right: number | undefined):
   return left === undefined ? right === undefined : left === right
 }
 
-function flushPendingThinkingDeltas(keeperName: string, assistantEntryId: string): void {
+function nextThinkingPreview(current: string, delta: string): string {
+  const next = `${current}${delta}`
+  if (next.length <= STREAMING_THINKING_PREVIEW_CHARS) return next
+  const marker = '...\n'
+  return `${marker}${next.slice(-(STREAMING_THINKING_PREVIEW_CHARS - marker.length))}`
+}
+
+function fullPendingThinkingText(pending: PendingThinkingState): string {
+  return pending.chunks.join('')
+}
+
+function flushPendingThinkingDeltas(
+  keeperName: string,
+  assistantEntryId: string,
+  mode: 'commit' | 'preview' = 'commit',
+): void {
   const key = streamEntryKey(keeperName, assistantEntryId)
   const pending = pendingThinkingDeltas.get(key)
   if (!pending) return
-  pendingThinkingDeltas.delete(key)
   if (pending.flushHandle !== null) {
     cancelStreamFlush(pending.flushHandle)
+    pending.flushHandle = null
   }
-  for (const batch of pending.batches) {
-    appendAssistantThinkingDelta(keeperName, assistantEntryId, batch.text, {
-      oasBlockIndex: batch.oasBlockIndex,
+  if (mode === 'preview') {
+    setAssistantThinkingSnapshot(keeperName, assistantEntryId, pending.preview, {
+      oasBlockIndex: pending.oasBlockIndex,
     })
+    return
   }
+  pendingThinkingDeltas.delete(key)
+  setAssistantThinkingSnapshot(keeperName, assistantEntryId, fullPendingThinkingText(pending), {
+    oasBlockIndex: pending.oasBlockIndex,
+  })
 }
 
 function dropPendingThinkingDeltas(keeperName: string, assistantEntryId: string): void {
@@ -107,19 +126,26 @@ function enqueueThinkingDelta(
   if (!delta.trim()) return
   const key = streamEntryKey(keeperName, assistantEntryId)
   let pending = pendingThinkingDeltas.get(key)
-  if (!pending) {
-    pending = { batches: [], flushHandle: null }
-    pendingThinkingDeltas.set(key, pending)
+  if (pending && !sameOasBlockIndex(pending.oasBlockIndex, meta.oasBlockIndex)) {
+    flushPendingThinkingDeltas(keeperName, assistantEntryId)
+    pending = undefined
   }
-  const last = pending.batches[pending.batches.length - 1]
-  if (last && sameOasBlockIndex(last.oasBlockIndex, meta.oasBlockIndex)) {
-    last.text += delta
+  if (!pending) {
+    const text = delta.trimStart()
+    pending = {
+      chunks: [text],
+      preview: text,
+      oasBlockIndex: meta.oasBlockIndex,
+      flushHandle: null,
+    }
+    pendingThinkingDeltas.set(key, pending)
   } else {
-    pending.batches.push({ text: delta, oasBlockIndex: meta.oasBlockIndex })
+    pending.chunks.push(delta)
+    pending.preview = nextThinkingPreview(pending.preview, delta)
   }
   if (pending.flushHandle !== null) return
   pending.flushHandle = scheduleThinkingFlush(() => {
-    flushPendingThinkingDeltas(keeperName, assistantEntryId)
+    flushPendingThinkingDeltas(keeperName, assistantEntryId, 'preview')
   })
 }
 

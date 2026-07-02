@@ -206,7 +206,7 @@ let request_runtime_fields_on_base_config
   let output_schema =
     match req_config.response_format, req_config.output_schema with
     | Agent_sdk.Types.Off, None -> base.output_schema
-    | _, Some _ as requested -> requested
+    | _, (Some _ as requested) -> requested
     | (Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _), None ->
       Llm_provider.Provider_config.output_schema_of_response_format response_format
   in

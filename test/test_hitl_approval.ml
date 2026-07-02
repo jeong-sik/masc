@@ -98,6 +98,11 @@ let audit_event_names ~base_path ~keeper_name =
   |> List.map (fun json ->
          Yojson.Safe.Util.(json |> member "event" |> to_string))
 
+let find_audit_event ~base_path ~keeper_name ~event_type =
+  AQ.read_recent_audit ~base_path ~keeper_name ~n:10 ()
+  |> List.find_opt (fun json ->
+         Yojson.Safe.Util.(json |> member "event" |> to_string = event_type))
+
 let test_first_cmd_token_uses_shared_words () =
   Alcotest.(check (option string))
     "quoted command basename preserved"
@@ -523,6 +528,32 @@ let test_submit_and_await_critical_escalates_then_waits () =
     (List.exists
        (String.equal "approval_escalated")
        (audit_event_names ~base_path ~keeper_name));
+  let escalation_event =
+    match find_audit_event ~base_path ~keeper_name ~event_type:"approval_escalated" with
+    | Some json -> json
+    | None -> Alcotest.fail "expected Critical escalation audit row"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "Critical escalation is not a terminal decision"
+    ""
+    (escalation_event |> member "decision" |> to_string);
+  Alcotest.(check bool)
+    "Critical escalation has no decision kind"
+    true
+    (escalation_event |> member "decision_kind" = `Null);
+  Alcotest.(check bool)
+    "Critical escalation has no decision reason"
+    true
+    (escalation_event |> member "decision_reason" = `Null);
+  Alcotest.(check string)
+    "Critical escalation disposition"
+    "escalated"
+    (escalation_event |> member "disposition" |> to_string);
+  Alcotest.(check string)
+    "Critical escalation disposition reason"
+    "critical approval escalated — operator must decide"
+    (escalation_event |> member "disposition_reason" |> to_string);
   Alcotest.(check bool)
     "Critical escalation does not auto-resolve"
     true

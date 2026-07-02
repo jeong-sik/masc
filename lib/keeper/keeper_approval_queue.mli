@@ -21,6 +21,9 @@ type approval_audit_decision =
   | Approval_resolved of decision
   | Approval_expired of string
 
+type approval_audit_disposition =
+  | Approval_escalated of string
+
 (** Pending approval entry — the suspended-fiber side of the
     Eio.Promise rendez-vous. *)
 type pending_approval =
@@ -157,6 +160,7 @@ val audit_approval_event :
   ?sandbox_target:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?selected_model:string ->
+  ?audit_disposition:approval_audit_disposition ->
   ?disposition:string ->
   ?disposition_reason:string ->
   ?rule_match:rule_match ->

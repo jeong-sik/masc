@@ -96,6 +96,10 @@ let approval_audit_decision_kind_and_reason = function
   | Approval_expired reason -> "reject", non_empty_reason reason
 ;;
 
+let approval_audit_disposition_fields = function
+  | Approval_escalated reason -> "escalated", non_empty_reason reason
+;;
+
 let keeper_audit_metric_label = function
   | Some keeper when String.trim keeper <> "" -> keeper
   | Some _ | None -> "aggregate"
@@ -167,6 +171,7 @@ let audit_approval_event
       ?sandbox_target
       ?runtime_contract
       ?selected_model
+      ?audit_disposition
       ?disposition
       ?disposition_reason
       ?rule_match
@@ -181,6 +186,16 @@ let audit_approval_event
     | Some decision ->
       let kind, reason = approval_audit_decision_kind_and_reason decision in
       approval_audit_decision_to_string decision, Some kind, reason
+  in
+  let disposition, disposition_reason =
+    match audit_disposition with
+    | None -> disposition, disposition_reason
+    | Some audit_disposition ->
+      if Option.is_some disposition || Option.is_some disposition_reason then
+        invalid_arg
+          "audit_approval_event: audit_disposition cannot be combined with raw disposition fields";
+      let disposition, reason = approval_audit_disposition_fields audit_disposition in
+      Some disposition, reason
   in
   match get_audit_store ~base_path () with
   | None -> ()
@@ -860,7 +875,7 @@ let submit_and_await
            ~sandbox_target:entry.sandbox_target
            ?runtime_contract
            ?selected_model
-           ~decision:(Approval_expired reason)
+           ~audit_disposition:(Approval_escalated reason)
            ();
          (* Escalated — keep waiting for operator, do not reject *)
          Eio.Promise.await promise)

@@ -539,11 +539,12 @@ let pending_entry_json_fields
   (match entry.phase with
    | Awaiting_operator -> []
    | Escalated { escalated_at } ->
-     (* NDT-OK: wall-clock age rendered for dashboard/SSE observability only;
-        never used for a control decision. *)
      [ "escalated_at", `Float escalated_at
      ; "escalated_at_iso", `String (Masc_domain.iso8601_of_unix_seconds escalated_at)
-     ; "escalated_waiting_s", `Float (Unix.gettimeofday () -. escalated_at)
+     ; ( "escalated_waiting_s"
+       , `Float (Unix.gettimeofday () -. escalated_at) )
+       (* NDT-OK: wall-clock age rendered for dashboard/SSE observability only;
+          never used for a control decision. *)
      ])
   @ (if include_requested_at_iso
      then

@@ -122,8 +122,8 @@ val to_oas_approval_callback :
     ([server_dashboard_http.ml]), resuming the fiber.
 
     Tools below the threshold are auto-approved unless auto-approval is
-    explicitly forbidden by critical risk, destructive payload semantics, or
-    runtime safety blockers. Those calls still enter the operator approval
-    queue even when HITL thresholds are otherwise disabled.
+    explicitly forbidden. Critical risk and runtime safety blockers still enter
+    the operator approval queue even when HITL thresholds are otherwise
+    disabled. Soft destructive tool-name/op heuristics are HITL-dependent.
 
     @since 2.262.0 (#5902, #5907) *)

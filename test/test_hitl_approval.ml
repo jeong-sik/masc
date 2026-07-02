@@ -1548,6 +1548,65 @@ let test_callback_hitl_disabled_forbidden_requires_approval () =
       | None ->
         Alcotest.fail "HITL-disabled forbidden callback did not suspend for approval")
 
+let test_callback_hitl_disabled_soft_forbidden_auto_approved () =
+  with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "hitl-disabled-soft-forbidden-keeper" in
+  let input = `Assoc [ ("op", `String "git") ] in
+  Alcotest.(check string)
+    "soft-only fixture stays below hard-forbidden risk"
+    "low"
+    (GP.assess_risk ~tool_name:"masc_status" ~input |> GP.risk_level_to_string);
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cb =
+          GP.to_oas_approval_callback
+            ~config ~governance_level:"production" ~keeper_name ()
+        in
+        let decision = cb ~tool_name:"masc_status" ~input in
+        result := Some decision);
+      yield_until (fun () ->
+        Option.is_some !result
+        || Option.is_some (pending_id_for_keeper ~keeper_name));
+      let queued =
+        match pending_id_for_keeper ~keeper_name with
+        | Some id ->
+          (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+           | Ok () -> ()
+           | Error err ->
+             Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+          true
+        | None -> false
+      in
+      yield_until (fun () -> Option.is_some !result);
+      Alcotest.(check bool)
+        "soft destructive op does not queue when HITL threshold is disabled"
+        false
+        queued;
+      Alcotest.(check int)
+        "pending count unchanged"
+        initial_pending
+        (AQ.pending_count ());
+      match !result with
+      | Some Agent_sdk.Hooks.Approve -> ()
+      | Some Agent_sdk.Hooks.Reject reason ->
+        Alcotest.fail ("expected Approve for HITL-disabled soft match, got reject: " ^ reason)
+      | Some Agent_sdk.Hooks.Edit _ ->
+        Alcotest.fail "expected Approve for HITL-disabled soft match, got edit"
+      | None ->
+        Alcotest.fail "HITL-disabled soft-forbidden callback did not return")
+
 let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun base_path ->
   let keeper_name = "audit-target-keeper" in
@@ -1757,5 +1816,7 @@ let () =
         test_callback_always_approve_respects_forbidden;
       Alcotest.test_case "HITL disabled still gates forbidden tools" `Quick
         test_callback_hitl_disabled_forbidden_requires_approval;
+      Alcotest.test_case "HITL disabled allows soft forbidden tools" `Quick
+        test_callback_hitl_disabled_soft_forbidden_auto_approved;
     ]);
   ]

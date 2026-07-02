@@ -23,7 +23,6 @@ type agent_setup =
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
-  ; post_hook_context_window_error_ref : Agent_sdk.Error.sdk_error option ref
   }
 
 type ctx =
@@ -49,7 +48,6 @@ type ctx =
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
   ; receipt_runtime_observation_ref : Runtime_observation.runtime_observation option ref
   ; receipt_response_text_present_ref : bool ref
-  ; post_hook_context_window_error_ref : Agent_sdk.Error.sdk_error option ref
   ; tools : Agent_sdk.Tool.t list
   }
 
@@ -96,7 +94,6 @@ let assemble_hooks
   let receipt_stop_reason_ref = ctx.receipt_stop_reason_ref in
   let receipt_runtime_observation_ref = ctx.receipt_runtime_observation_ref in
   let receipt_response_text_present_ref = ctx.receipt_response_text_present_ref in
-  let post_hook_context_window_error_ref = ctx.post_hook_context_window_error_ref in
   let tools = ctx.tools in
   let all_tool_names = ctx.all_tool_names in
   let initial_schema_filter, initial_turn_lane =
@@ -622,40 +619,28 @@ let assemble_hooks
                                ]))
                         ())
                  | _ -> ());
-                (match post_hook_context_window_error with
-                 | Error err ->
-                   post_hook_context_window_error_ref := Some err;
-                   Agent_sdk.Hooks.HookFailed
-                     { stage = "before_turn_params"
-                     ; detail =
-                         Printf.sprintf
-                           "post-hook extra_system_context estimate exceeds context \
-                            window: %s"
-                           (Agent_sdk.Error.to_string err)
-                     }
-                 | Ok () ->
-                  (* Phase O observability: capture the effective OAS request
-                     boundary after keeper-owned context injection has finalized
-                     [extra_system_context]. *)
-                  Option.iter
-                    (fun turn_id ->
-                       Keeper_wire_capture.capture_request
-                         ~masc_root:(Workspace.masc_root_dir config)
-                         ~keeper_name:meta.name
-                         ~turn_id
-                         ~sdk_turn:turn
-                         ~system_prompt:turn_system_prompt
-                         ~extra_system_context:ctx
-                         ~user_message
-                         ~history_messages:messages)
-                    manifest_keeper_turn_id;
-                  Eio.Fiber.yield ();
-                  Agent_sdk.Hooks.AdjustParams
-                    { current_params with
-                      extra_system_context = ctx
-                    ; tool_choice
-                    ; tool_filter_override = Some tool_filter
-                    })
+                (* Phase O observability: capture the effective OAS request
+                   boundary after keeper-owned context injection has finalized
+                   [extra_system_context]. *)
+                Option.iter
+                  (fun turn_id ->
+                     Keeper_wire_capture.capture_request
+                       ~masc_root:(Workspace.masc_root_dir config)
+                       ~keeper_name:meta.name
+                       ~turn_id
+                       ~sdk_turn:turn
+                       ~system_prompt:turn_system_prompt
+                       ~extra_system_context:ctx
+                       ~user_message
+                       ~history_messages:messages)
+                  manifest_keeper_turn_id;
+                Eio.Fiber.yield ();
+                Agent_sdk.Hooks.AdjustParams
+                  { current_params with
+                    extra_system_context = ctx
+                  ; tool_choice
+                  ; tool_filter_override = Some tool_filter
+                  }
               | _event -> Agent_sdk.Hooks.Continue)
       }
     in
@@ -753,6 +738,5 @@ let assemble_hooks
       ; receipt_stop_reason_ref
       ; receipt_runtime_observation_ref
       ; receipt_response_text_present_ref
-      ; post_hook_context_window_error_ref
       }
 ;;

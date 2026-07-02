@@ -551,7 +551,7 @@ let run_turn
       ~keeper_turn_id:manifest_keeper_turn_id
       ~status:
         (if Option.is_some pre_dispatch_context_window_error
-         then "blocked"
+         then "over_context_window_observed"
          else "ok")
       ~decision:
         (Keeper_runtime_manifest.with_payload_role ~payload_role:Model_input
@@ -594,9 +594,6 @@ let run_turn
     in
     let receipt_response_text_present_ref =
       s.Keeper_run_tools.receipt_response_text_present_ref
-    in
-    let post_hook_context_window_error_ref =
-      s.Keeper_run_tools.post_hook_context_window_error_ref
     in
     let keeper_has_owned_active_task () =
       Option.is_some (owned_active_task_id_for_meta ~config ~meta:acc.meta)
@@ -660,10 +657,7 @@ let run_turn
        let pre_dispatch_error =
          match pre_dispatch_checkpoint_error with
          | Some err -> Some err
-         | None ->
-           (match pre_dispatch_context_window_error with
-            | Some err -> Some err
-            | None -> pre_dispatch_max_tokens_error)
+         | None -> pre_dispatch_max_tokens_error
        in
        let turn_result =
          match pre_dispatch_error with
@@ -753,10 +747,7 @@ let run_turn
                    ~initial_messages:history_messages
                    ()
                with
-               | Error e ->
-                 (match !post_hook_context_window_error_ref with
-                  | Some err -> Error err
-                  | None -> Error e)
+               | Error e -> Error e
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in
                  (* Checkpoint save is deferred until after [STATE] synthesis so the

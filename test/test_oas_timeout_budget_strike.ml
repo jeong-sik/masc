@@ -578,18 +578,16 @@ let test_context_injection_hook_records_post_tool_ledger () =
     true
     (contains_substring hook_source "post_hook_estimated_input_tokens");
   Alcotest.(check bool)
-    "hook fails closed before provider dispatch"
+    "hook over-window estimate is observational, not terminal"
     true
-    (contains_substring hook_source "post-hook extra_system_context estimate"
-     && contains_substring hook_source "Agent_sdk.Hooks.HookFailed");
+    (contains_substring hook_source "post_hook_over_context_window"
+     && contains_substring hook_source "Agent_sdk.Hooks.AdjustParams");
   Alcotest.(check bool)
-    "hook preserves typed overflow error for keeper caller"
-    true
-    (contains_substring hook_source "post_hook_context_window_error_ref := Some err");
-  Alcotest.(check bool)
-    "keeper caller returns typed post-hook overflow"
-    true
-    (contains_substring agent_run_source "post_hook_context_window_error_ref")
+    "hook does not bypass provider driver on post-hook overflow estimate"
+    false
+    (contains_substring hook_source "post_hook_context_window_error_ref"
+     || contains_substring agent_run_source "post_hook_context_window_error_ref"
+     || contains_substring hook_source "post-hook extra_system_context estimate")
 
 let test_keeper_preflight_reuses_setup_tool_estimate () =
   let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in

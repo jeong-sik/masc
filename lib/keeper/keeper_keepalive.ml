@@ -861,6 +861,10 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
           live_meta.name
           (Time_compat.now ())
           reason;
+        Keeper_registry_error_recording.record
+          ~base_path:ctx.config.base_path
+          live_meta.name
+          reason;
         if resolve_registry_done reg ~source:"keepalive_launch_rejected" (`Crashed reason)
         then
           publish_keeper_phase_lifecycle

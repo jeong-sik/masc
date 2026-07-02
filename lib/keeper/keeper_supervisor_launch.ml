@@ -560,6 +560,7 @@ let launch_supervised_fiber
       meta.name
       (Some (Keeper_registry.Exception reason));
     Keeper_registry.record_crash ~base_path meta.name (Time_compat.now ()) reason;
+    Keeper_registry_error_recording.record ~base_path meta.name reason;
     if
       Keeper_registry.resolve_done reg ~source:"supervisor_launch_rejected" (`Crashed reason)
       |> done_signal_of_registry_result

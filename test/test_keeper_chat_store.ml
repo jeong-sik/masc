@@ -1163,6 +1163,98 @@ let test_append_turn_redacts_supplied_thinking_blocks () =
       | Some _ -> Alcotest.fail "expected exactly one thinking block"
       | None -> Alcotest.fail "assistant thinking block missing")
 
+let test_append_turn_redacts_all_supplied_block_strings () =
+  let base_dir = temp_base_path "keeper-chat-store-rich-block-redact" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-rich-block-redact" in
+      let root = secret_root_default ~base_dir ~keeper_name in
+      let secret = "rich-block.secret!" in
+      write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
+      K.append_turn
+        ~base_dir
+        ~keeper_name
+        ~user_content:"render"
+        ~user_attachments:[]
+        ~assistant_content:"done"
+        ~blocks:
+          [ B.Code
+              { cap = Some ("shell " ^ secret)
+              ; html = "echo " ^ secret
+              ; source = Some ("source " ^ secret)
+              }
+          ; B.Mermaid
+              { source = "graph TD\nA[" ^ secret ^ "]"
+              ; caption = Some ("flow " ^ secret)
+              }
+          ; B.Trace
+              { trace =
+                  [ B.Trace_think
+                      { text = "thinking " ^ secret
+                      ; ts = Some ("ts-" ^ secret)
+                      ; oas_block_index = None
+                      }
+                  ; B.Trace_reason
+                      { text = "reason " ^ secret
+                      ; detail = Some ("detail " ^ secret)
+                      ; ts = None
+                      }
+                  ; B.Trace_tool
+                      { name = "tool " ^ secret
+                      ; tool_call_id = Some ("call " ^ secret)
+                      ; status = Some B.Trace_tool_err
+                      ; dur = Some ("dur " ^ secret)
+                      ; args =
+                          Some
+                            (`Assoc
+                              [ "token", `String secret
+                              ; "api_token", `String "plain-non-pattern-value"
+                              ; "nested", `List [ `String ("nested " ^ secret) ]
+                              ; "key " ^ secret, `String "benign value"
+                              ])
+                      ; result =
+                          Some
+                            (`Assoc
+                              [ "password", `String "ordinary-value"
+                              ; "summary", `String ("result " ^ secret)
+                              ])
+                      ; ts = Some ("ts " ^ secret)
+                      ; oas_block_index = None
+                      }
+                  ]
+              }
+          ]
+        ();
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "rich block secret not persisted" false
+        (contains_substring raw secret);
+      Alcotest.(check bool) "sensitive keyed value not persisted" false
+        (contains_substring raw "plain-non-pattern-value");
+      Alcotest.(check bool) "sensitive password value not persisted" false
+        (contains_substring raw "ordinary-value");
+      Alcotest.(check bool) "rich block redaction marker persisted" true
+        (contains_substring raw "[REDACTED]");
+      let messages = K.load ~base_dir ~keeper_name in
+      let assistant =
+        List.find
+          (fun (m : K.chat_message) -> K.Role.equal m.role K.Role.Assistant)
+          messages
+      in
+      match assistant.K.blocks with
+      | Some blocks ->
+        let json = Yojson.Safe.to_string (B.blocks_to_yojson blocks) in
+        Alcotest.(check bool) "loaded blocks hide secret" false
+          (contains_substring json secret);
+        Alcotest.(check bool) "loaded blocks hide sensitive keyed value" false
+          (contains_substring json "plain-non-pattern-value");
+        Alcotest.(check bool) "loaded blocks hide sensitive password value" false
+          (contains_substring json "ordinary-value");
+        Alcotest.(check bool) "loaded blocks keep redaction marker" true
+          (contains_substring json "[REDACTED]")
+      | None -> Alcotest.fail "assistant rich blocks missing")
+
 (* RFC-0233 §7: append_turn stamps the supplied turn_ref on every row of the
    completed turn, it round-trips through load, and to_json_array exposes it
    for the history endpoint. *)
@@ -1386,6 +1478,8 @@ let () =
             test_blocks_roundtrip_and_drop_malformed;
           Alcotest.test_case "supplied thinking blocks are redacted" `Quick
             test_append_turn_redacts_supplied_thinking_blocks;
+          Alcotest.test_case "supplied rich block strings are redacted" `Quick
+            test_append_turn_redacts_all_supplied_block_strings;
           Alcotest.test_case "assistant history appends trace block" `Quick
             test_to_json_array_appends_trace_block_to_assistant_turn;
         ] );

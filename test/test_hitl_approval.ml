@@ -1439,7 +1439,9 @@ let test_callback_typed_last_blocker_overrides_always_approve () =
         in
         let blocker =
           let open Masc.Keeper_meta_contract in
-          blocker_info_of_class ~detail:"previous turn timed out" Turn_timeout
+          blocker_info_of_class
+            ~detail:"completion contract violated"
+            Completion_contract_violation
         in
         { base with
           runtime = { base.runtime with last_blocker = Some blocker };
@@ -1478,6 +1480,44 @@ let test_callback_typed_last_blocker_overrides_always_approve () =
         Alcotest.fail ("unexpected reject reason: " ^ reason)
       | Some (Agent_sdk.Hooks.Edit _) -> Alcotest.fail "unexpected edit"
       | None -> Alcotest.fail "runtime blocker callback did not suspend")
+
+let test_callback_transient_last_blocker_allows_always_approve () =
+  with_test_config @@ fun config ->
+  let keeper_name = "transient-blocked-keeper" in
+  let meta =
+    let base =
+      meta_from_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
+            ("trace_id", `String "transient-blocked-trace");
+            ("sandbox_profile", `String "docker");
+            ("network_mode", `String "inherit");
+            ("always_approve", `Bool true);
+          ])
+    in
+    let blocker =
+      let open Masc.Keeper_meta_contract in
+      blocker_info_of_class ~detail:"previous turn timed out" Turn_timeout
+    in
+    { base with
+      runtime = { base.runtime with last_blocker = Some blocker };
+    }
+  in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name ~meta ()
+  in
+  let decision =
+    cb ~tool_name:"masc_create_task" ~input:(`Assoc [ ("title", `String "test") ])
+  in
+  match decision with
+  | Agent_sdk.Hooks.Approve -> ()
+  | Agent_sdk.Hooks.Reject r ->
+    Alcotest.fail
+      ("transient last_blocker must not block always_approve, got Reject: " ^ r)
+  | Agent_sdk.Hooks.Edit _ -> Alcotest.fail "unexpected edit"
 
 let test_runtime_trust_classifies_always_approve_flag () =
   with_test_config @@ fun config ->
@@ -1882,6 +1922,8 @@ let () =
         test_callback_always_approve_bypasses_threshold;
       Alcotest.test_case "typed last_blocker overrides always_approve" `Quick
         test_callback_typed_last_blocker_overrides_always_approve;
+      Alcotest.test_case "transient last_blocker allows always_approve" `Quick
+        test_callback_transient_last_blocker_allows_always_approve;
       Alcotest.test_case "runtime trust classifies always_approve flag" `Quick
         test_runtime_trust_classifies_always_approve_flag;
       Alcotest.test_case "always_approve respects forbidden" `Quick

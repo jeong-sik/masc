@@ -82,7 +82,10 @@ let keeper_confirm_threshold governance_level =
 let runtime_auto_approval_blocked = function
   | None -> false
   | Some (meta : Keeper_meta_contract.keeper_meta) ->
-    Option.is_some meta.runtime.last_blocker
+    match meta.runtime.last_blocker with
+    | None -> false
+    | Some blocker ->
+      Keeper_meta_contract.blocker_class_auto_approval_blocked blocker.klass
 ;;
 
 (** PR-E (Plan v3 Leak 1): split the legacy [auto_approval_forbidden]

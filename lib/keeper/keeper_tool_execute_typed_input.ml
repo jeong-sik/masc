@@ -410,23 +410,11 @@ let check_env env =
   loop env
 ;;
 
-(* Keeper frequently emits typed Execute inputs where argv[0] repeats the
-   executable name because many command examples include it.  In execve-style
-   argv the executable is implicit, so a leading duplicate is a harmless
-   schema mismatch.  Drop it automatically instead of forcing a costly
-   self-correction round-trip. *)
-let drop_duplicate_argv0 ~executable argv =
-  match argv with
-  | first :: (_ :: _ as rest) when String.equal first executable -> rest
-  | _ -> argv
-;;
-
 let check_exec ~executable ~argv ~cwd ~env =
   let ( let* ) = Result.bind in
   let trimmed = String.trim executable in
   if String.length trimmed = 0 then Error (Empty_executable { argv })
   else (
-    let argv = drop_duplicate_argv0 ~executable:trimmed argv in
     let* () =
       if argv = [] then Ok () else check_argv ~executable argv
     in
@@ -530,11 +518,7 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input 
   let ( let* ) = Result.bind in
   match input with
   | Exec { executable; argv; cwd; env; stdin; stdout; stderr } ->
-    let stage =
-      { executable
-      ; argv = drop_duplicate_argv0 ~executable:(String.trim executable) argv
-      }
-    in
+    let stage = { executable; argv } in
     let redirects = redirects_of ~cwd ~stdin ~stdout ~stderr in
     shell_simple ~sandbox ?cwd ~env ~redirects stage
   | Pipeline { stages; cwd; env } ->
@@ -542,11 +526,7 @@ let to_shell_ir_unvalidated ?(sandbox = Masc_exec.Sandbox_target.host ()) input 
       let rec loop acc = function
         | [] -> Ok (List.rev acc)
         | { executable; argv } :: rest ->
-          let stage =
-            { executable
-            ; argv = drop_duplicate_argv0 ~executable:(String.trim executable) argv
-            }
-          in
+          let stage = { executable; argv } in
           let* simple = shell_simple ~sandbox ?cwd ~env stage in
           loop (simple :: acc) rest
       in

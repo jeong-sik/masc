@@ -729,7 +729,7 @@ let test_execute_typed_single_stage_pipeline_rejected () =
     ()
   |> check_typed_validation_error "pipeline requires at least two stages"
 
-let test_execute_typed_repeated_executable_is_autocorrected () =
+let test_execute_typed_repeated_executable_arg_is_preserved () =
   setup ~sandbox:Keeper_types_profile_sandbox.Local
   @@ fun ~config ~meta ~playground ->
   let raw =
@@ -741,15 +741,19 @@ let test_execute_typed_repeated_executable_is_autocorrected () =
       ~args:
         (tool_execute_typed_exec_args
            ~cwd:playground
-           ~argv:[ "find"; "."; "-name"; "*.ml" ]
-           "find")
+           ~argv:[ "echo"; "hello" ]
+           "echo")
       ()
   in
-  Alcotest.(check (option bool)) "autocorrected repeated argv[0] succeeds" (Some true)
+  Alcotest.(check (option bool)) "repeated argv[0] remains valid" (Some true)
     (parse_bool_field raw "ok");
   Alcotest.(check (option bool)) "typed response" (Some true)
     (parse_bool_field raw "typed");
-  Alcotest.(check int) "find exit status" 0 (parse_status_exit_code raw)
+  Alcotest.(check int) "echo exit status" 0 (parse_status_exit_code raw);
+  Alcotest.(check bool)
+    "output preserves caller-authored argv"
+    true
+    (response_mentions raw "output" "echo hello")
 
 let test_execute_typed_pipeline_falls_back_to_local_playground () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "missing:test" @@ fun () ->
@@ -2391,8 +2395,8 @@ let () =
             "tool_execute typed single-stage pipeline is rejected"
             `Quick test_execute_typed_single_stage_pipeline_rejected;
           Alcotest.test_case
-            "tool_execute typed repeated executable is autocorrected"
-            `Quick test_execute_typed_repeated_executable_is_autocorrected;
+            "tool_execute typed repeated executable arg is preserved"
+            `Quick test_execute_typed_repeated_executable_arg_is_preserved;
           Alcotest.test_case
             "tool_execute typed pipeline falls back to local playground"
             `Quick test_execute_typed_pipeline_falls_back_to_local_playground;

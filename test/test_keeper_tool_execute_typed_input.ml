@@ -78,8 +78,8 @@ let cases : case list =
     ; typed = mk_exec "cat" [ "cat"; "README.md" ]
     ; expect_typed = true
     ; rationale =
-        "typed Execute autocorrects a leading duplicate argv[0] by dropping \
-         it before validation and lowering"
+        "typed Execute preserves caller-authored argv; a leading token equal \
+         to executable may be intentional payload"
     }
   ; { name = "unknown_executable"
     ; sample_cmd = "unknown_cmd foo"
@@ -556,23 +556,23 @@ let to_shell_ir_exn input =
       error
 ;;
 
-let test_duplicate_executable_argv0_autocorrected () =
+let test_duplicate_executable_argv0_preserved () =
   let input = mk_exec "git" [ "git"; "status"; "--short" ] in
   Alcotest.(check bool)
-    "validate accepts duplicate argv[0] after autocorrection"
+    "validate accepts caller-authored argv"
     true
     (typed_ok input);
   match Execute_input.to_shell_ir input with
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
     Alcotest.(check (pair string (list string)))
-      "lowered IR drops duplicated argv[0]"
-      ("git", [ "status"; "--short" ])
+      "lowered IR preserves duplicated argv[0]"
+      ("git", [ "git"; "status"; "--short" ])
       (shell_simple_tuple simple)
   | Ok (Masc_exec.Shell_ir.Pipeline _) ->
     Alcotest.fail "single Exec must not lower to Pipeline"
   | Error err ->
     Alcotest.failf
-      "to_shell_ir should autocorrect duplicate argv[0], got %a"
+      "to_shell_ir should preserve duplicate argv[0], got %a"
       Execute_input.pp_validation_error
       err
 ;;
@@ -611,7 +611,7 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
     Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
 ;;
 
-let test_exec_lowering_autocorrects_duplicate_executable_argv () =
+let test_exec_lowering_preserves_duplicate_executable_argv () =
   let input =
     Execute_input.Exec
       { executable = "git"
@@ -626,14 +626,14 @@ let test_exec_lowering_autocorrects_duplicate_executable_argv () =
   match Execute_input.to_shell_ir input with
   | Ok (Masc_exec.Shell_ir.Simple simple) ->
     Alcotest.(check (pair string (list string)))
-      "lowered IR drops duplicated argv[0]"
-      ("git", [ "status" ])
+      "lowered IR preserves caller-authored argv"
+      ("git", [ "git"; "status" ])
       (shell_simple_tuple simple)
   | Ok (Masc_exec.Shell_ir.Pipeline _) ->
     Alcotest.fail "single Exec must not lower to Pipeline"
   | Error error ->
     Alcotest.failf
-      "duplicated argv[0] should be autocorrected, got %a"
+      "duplicated argv[0] should remain caller-authored, got %a"
       Execute_input.pp_validation_error
       error
 ;;
@@ -693,6 +693,38 @@ let test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable () =
   | Error error ->
     Alcotest.failf
       "pipeline with single argv equal to executable should remain valid, got %a"
+      Execute_input.pp_validation_error
+      error
+;;
+
+let test_pipeline_lowering_preserves_duplicate_stage_argv () =
+  let input =
+    Execute_input.Pipeline
+      { stages =
+          [ { executable = "printf"; argv = [ "printf"; "hello" ] }
+          ; { executable = "wc"; argv = [ "wc"; "-c" ] }
+          ]
+      ; cwd = None
+      ; env = []
+      }
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok
+      (Masc_exec.Shell_ir.Pipeline
+        [ Masc_exec.Shell_ir.Simple first; Masc_exec.Shell_ir.Simple second ]) ->
+    Alcotest.(check (pair string (list string)))
+      "first stage preserves caller-authored argv"
+      ("printf", [ "printf"; "hello" ])
+      (shell_simple_tuple first);
+    Alcotest.(check (pair string (list string)))
+      "second stage preserves caller-authored argv"
+      ("wc", [ "wc"; "-c" ])
+      (shell_simple_tuple second)
+  | Ok other ->
+    Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
+  | Error error ->
+    Alcotest.failf
+      "pipeline duplicated argv[0] should remain caller-authored, got %a"
       Execute_input.pp_validation_error
       error
 ;;
@@ -1235,9 +1267,9 @@ let suite =
           `Quick
           test_empty_executable_with_argv_hints_rewrite
       ; Alcotest.test_case
-          "duplicate_executable_argv0_autocorrected"
+          "duplicate_executable_argv0_preserved"
           `Quick
-          test_duplicate_executable_argv0_autocorrected
+          test_duplicate_executable_argv0_preserved
       ; Alcotest.test_case
           "unvalidated_path_preserves_argv_in_error"
           `Quick
@@ -1301,9 +1333,9 @@ let suite =
           `Quick
           test_pipeline_lowers_to_shell_ir_pipeline
       ; Alcotest.test_case
-          "exec_lowering_autocorrects_duplicate_executable_argv"
+          "exec_lowering_preserves_duplicate_executable_argv"
           `Quick
-          test_exec_lowering_autocorrects_duplicate_executable_argv
+          test_exec_lowering_preserves_duplicate_executable_argv
       ; Alcotest.test_case
           "exec_lowering_preserves_single_argv_equal_to_executable"
           `Quick
@@ -1312,6 +1344,10 @@ let suite =
           "pipeline_lowering_preserves_single_stage_argv_equal_to_executable"
           `Quick
           test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable
+      ; Alcotest.test_case
+          "pipeline_lowering_preserves_duplicate_stage_argv"
+          `Quick
+          test_pipeline_lowering_preserves_duplicate_stage_argv
       ; Alcotest.test_case
           "pipeline_lowers_with_injected_docker_sandbox"
           `Quick

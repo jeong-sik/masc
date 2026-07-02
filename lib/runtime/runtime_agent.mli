@@ -261,6 +261,17 @@ val decide_modality_reroute_for_runtime :
     content blocks. Composes [input_capabilities_of_runtime] /
     [media_reroute_candidates] / [decide_modality_reroute]. *)
 
+val decide_modality_reroute_for_runtime_candidates :
+  assigned:Runtime.t ->
+  candidates:Runtime.t list ->
+  ?checkpoint_messages:Agent_sdk.Types.message list ->
+  ?initial_messages:Agent_sdk.Types.message list ->
+  Agent_sdk.Types.content_block list ->
+  reroute_decision
+(** Keeper-dispatch variant for scoped candidate sets such as explicit runtime
+    lanes. It preserves the caller-provided candidate order and does not consult
+    global [runtime.media_failover]. *)
+
 val strip_unsupported_modality_blocks :
   Llm_provider.Capabilities.capabilities ->
   Agent_sdk.Types.content_block list ->

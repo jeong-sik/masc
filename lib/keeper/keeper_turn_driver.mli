@@ -183,8 +183,43 @@ module For_testing : sig
     Llm_provider.Http_client.http_error ->
     Agent_sdk.Error.sdk_error
 
+  val first_runtime_after_modality_reroute :
+    keeper_name:string ->
+    assignment_id:string ->
+    first_candidate_id:string ->
+    first_candidate:Runtime.t ->
+    Runtime_agent.reroute_decision ->
+    string * Runtime.t
+
+  val lane_modality_reroute_decision :
+    checkpoint_messages:Agent_sdk.Types.message list ->
+    initial_messages:Agent_sdk.Types.message list ->
+    goal_blocks:Agent_sdk.Types.content_block list ->
+    first_candidate:Runtime.t ->
+    remaining_runtimes:Runtime.t list ->
+    Runtime_agent.reroute_decision
+
+  val dedupe_runtimes_preserve_order : Runtime.t list -> Runtime.t list
+
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
+
+  val attempt_runtime_candidates :
+    runtime_id:string ->
+    runtime_id_of:('candidate -> string) ->
+    emit_runtime_manifest:
+      (?status:string ->
+      ?decision:Yojson.Safe.t ->
+      Keeper_runtime_manifest.event_kind ->
+      unit) ->
+    run_attempt:
+      (?resume_checkpoint:Agent_sdk.Checkpoint.t ->
+      idx:int ->
+      runtime_id:string ->
+      'candidate ->
+      ('result, Agent_sdk.Error.sdk_error) result * Agent_sdk.Checkpoint.t option) ->
+    'candidate list ->
+    ('result, Agent_sdk.Error.sdk_error) result
 
   val accept_no_progress_should_try_next : Agent_sdk.Error.sdk_error -> bool
 

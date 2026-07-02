@@ -32,6 +32,7 @@ module Io = Keeper_memory_os_io
    the smallest set that distinguishes corroboration from a single keeper's echo
    (RFC-0244 §2.2). *)
 let default_min_keepers = 2
+let default_stale_threshold_sec = 3600.0
 
 type report =
   { keepers_scanned : int
@@ -54,7 +55,13 @@ type contribution =
    and [Diagnostic] is system-authored evidence for operators, not shared semantic
    memory. Keep this exhaustive so a future [claim_kind] cannot promote by
    accident. *)
-let eligible fact =\n  is_promotable fact.category\n  && is_outcome_positive_for_shared_promotion fact.category\n  &&\n  match fact.claim_kind with\n  | Some Durable_knowledge | None -> true\n  | Some Self_observation | Some External_state | Some Diagnostic -> false\n\n(* A fact is stale if it has never been re-verified ([last_verified_at = None])\n   and was first seen more than one hour ago. Re-verified facts are never\n   considered stale, even if their verification happened long ago — the\n   caller (e.g. per-keeper GC) decides how long to keep them. *)\nlet is_stale_as_of ~now fact =\n  match fact.last_verified_at with\n  | Some _ -> false\n  | None -> now -. fact.first_seen > 3600.0
+let eligible fact =
+  is_promotable fact.category
+  && is_outcome_positive_for_shared_promotion fact.category
+  &&
+  match fact.claim_kind with
+  | Some Durable_knowledge | None -> true
+  | Some Self_observation | Some External_state | Some Diagnostic -> false
 
 (* Pick the representative fact for a claim group by a structural total order:
    earliest first_seen, then lexically smallest claim, then keeper id — so
@@ -62,12 +69,6 @@ let eligible fact =\n  is_promotable fact.category\n  && is_outcome_positive_for
    highest confidence was removed with the score. *)
 let representative contribs =
   let better a b =
-    match a.fact.last_verified_at, b.fact.last_verified_at with
-    | Some _, None -> true
-    | None, Some _ -> false
-    | Some ta, Some tb when tb < ta -> true
-    | Some _, Some _ -> false
-    | None, None ->
     match Float.compare a.fact.first_seen b.fact.first_seen with
     | c when c < 0 -> true
     | c when c > 0 -> false
@@ -90,10 +91,9 @@ let distinct_keepers contribs =
 ;;
 
 let consolidate_into_shared ~now ~min_keepers contribs =
-  match representative contribs with
+  let fresh = List.filter (fun c -> not (is_stale_as_of ~now c.fact)) contribs in match representative fresh with
   | None -> None
   | Some rep ->
-    if is_stale_as_of ~now rep.fact then None else
     let keepers = distinct_keepers contribs in
     if List.length keepers < min_keepers
     then None

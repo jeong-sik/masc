@@ -48,12 +48,13 @@ type load_result =
 
 (** [submit ?clock ?timeout_sec ~sw ~f ~keeper_name] forks a background daemon fiber on
     [sw] that runs [f] and stores the result. Returns the fresh
-    [request_id] synchronously. When both [clock] and [timeout_sec] are
-    provided, the worker records a terminal timeout error if [f] does not
-    return before the deadline. Cancellation of [sw] interrupts the worker
-    and records a terminal [Cancelled] state before stopping, so pollers do
-    not observe an indefinite [Running] request. [Lost] is reserved for
-    persisted non-terminal requests recovered without a live worker. *)
+    [request_id] synchronously. When [clock] is provided, the worker records a
+    terminal timeout error if [f] does not return before the deadline:
+    [timeout_sec] when explicitly supplied, otherwise the runtime-resolved
+    keeper turn timeout. Cancellation of [sw] interrupts the worker and records
+    a terminal [Cancelled] state before stopping, so pollers do not observe an
+    indefinite [Running] request. [Lost] is reserved for persisted non-terminal
+    requests recovered without a live worker. *)
 val submit
   :  ?clock:_ Eio.Time.clock
   -> ?timeout_sec:float
@@ -97,4 +98,5 @@ module For_testing : sig
   val load_record : base_path:string -> request_id:string -> load_result
   val gc_stale_disk : base_path:string -> int
   val active_switch_count : unit -> int
+  val effective_timeout_sec : ?timeout_sec:float -> unit -> float
 end

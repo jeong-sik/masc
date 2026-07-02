@@ -337,7 +337,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
     let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
     let soft_forbidden = auto_approval_soft_forbidden ~tool_name ~input in
     let hitl_disabled = Env_config_core.disable_hitl () in
-    let auto_approval_forbidden = not hitl_disabled && (hard_forbidden || soft_forbidden) in
+    let auto_approval_forbidden = hard_forbidden || (not hitl_disabled && soft_forbidden) in
     let requires_operator_approval = needs_approval || auto_approval_forbidden in
     if trifecta_active
     then

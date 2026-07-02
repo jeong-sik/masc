@@ -1,5 +1,8 @@
 (** HITL (human-in-the-loop) approval configuration. *)
 
+val default_critical_timeout_s : float
+(** Default critical-tool approval timeout in seconds. *)
+
 val critical_timeout_s : unit -> float
 (** Critical-tool approval timeout in seconds.
 

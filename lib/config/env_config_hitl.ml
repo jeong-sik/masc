@@ -9,9 +9,22 @@ open Env_config_core
     @category Timeouts
     @ops_class operator *)
 
+let default_critical_timeout_s = 3600.0
+
 let critical_timeout_s_value =
-  let raw = get_float ~default:3600.0 "MASC_HITL_CRITICAL_TIMEOUT_S" in
-  if raw <= 0.0
+  let raw =
+    get_float
+      ~default:default_critical_timeout_s
+      "MASC_HITL_CRITICAL_TIMEOUT_S"
+  in
+  if not (Float.is_finite raw)
+  then (
+    Log.Misc.warn
+      "MASC_HITL_CRITICAL_TIMEOUT_S=%g is non-finite; using default %.2f"
+      raw
+      default_critical_timeout_s;
+    default_critical_timeout_s)
+  else if raw <= 0.0
   then (
     Log.Misc.warn
       "MASC_HITL_CRITICAL_TIMEOUT_S=%.2f disables the critical approval timeout; \

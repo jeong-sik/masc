@@ -36,6 +36,8 @@ let key_to_env =
     (* [proactive] *)
     "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
     "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";
+    (* [hitl] *)
+    "hitl.critical_timeout_s",          "MASC_HITL_CRITICAL_TIMEOUT_S";
     (* [turn] *)
     "turn.timeout_sec",                 "MASC_KEEPER_TURN_TIMEOUT_SEC";
     "turn.oas_timeout_sec",             "MASC_KEEPER_OAS_TIMEOUT_SEC";

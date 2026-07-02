@@ -172,6 +172,16 @@ let test_applies_lifecycle_enabled_overrides () =
     (Some "true")
     (List.assoc_opt "MASC_KEEPER_AUTONOMOUS_ENABLED" overrides)
 
+let test_applies_hitl_critical_timeout_override () =
+  let doc = parse_or_fail "[hitl]\ncritical_timeout_s = 42.5\n" in
+  let count, overrides =
+    Keeper_runtime_config.resolve_overrides ~env_lookup:empty_env doc
+  in
+  check int "applied hitl timeout override" 1 count;
+  check (option string) "hitl timeout maps to canonical env"
+    (Some "42.5")
+    (List.assoc_opt "MASC_HITL_CRITICAL_TIMEOUT_S" overrides)
+
 let test_applies_memory_overrides () =
   let doc = parse_or_fail
     "[memory]\n\
@@ -521,6 +531,7 @@ let () =
         ; test_case "applies turn execution overrides" `Quick test_applies_turn_execution_overrides
         ; test_case "applies proactive min interval override" `Quick test_applies_proactive_min_interval_override
         ; test_case "applies lifecycle enabled overrides (RFC-0297 P0-1)" `Quick test_applies_lifecycle_enabled_overrides
+        ; test_case "applies HITL critical timeout override" `Quick test_applies_hitl_critical_timeout_override
         ; test_case "applies memory overrides" `Quick test_applies_memory_overrides
         ; test_case "memory bank reads boot override knobs" `Quick test_memory_bank_reads_boot_override_knobs
         ; test_case

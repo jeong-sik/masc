@@ -3388,6 +3388,169 @@ let test_consolidator_promotes_carries_claim_id () =
   | _ -> Alcotest.fail "expected one shared fact"
 ;;
 
+let promote_one ~now keeper_facts =
+  match Consolidator.promote_facts ~now ~keeper_facts () with
+  | _, [ f ] -> f
+  | _, shared -> Alcotest.failf "expected one shared fact, got %d" (List.length shared)
+;;
+
+let test_consolidator_representative_prefers_verified () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "representative-verified-priority" in
+  let unverified =
+    { (mk_shared_fixture ~now ~category:"lesson" "old unverified wording") with
+      Types.first_seen = now -. 20_000.0
+    ; Types.last_verified_at = None
+    ; Types.claim_id = claim_id
+    }
+  in
+  let verified =
+    { (mk_shared_fixture ~now ~category:"lesson" "verified wording") with
+      Types.first_seen = now -. 10.0
+    ; Types.last_verified_at = Some (now -. 100.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let promoted =
+    promote_one ~now [ "alpha", [ unverified ]; "beta", [ verified ] ]
+  in
+  Alcotest.(check string)
+    "explicit verification beats never-verified legacy row"
+    "verified wording"
+    promoted.Types.claim
+;;
+
+let test_consolidator_representative_prefers_newest_verification () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "representative-newest-verification" in
+  let old_verified =
+    { (mk_shared_fixture ~now ~category:"validated_approach" "older verified wording") with
+      Types.last_verified_at = Some (now -. 500.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let new_verified =
+    { (mk_shared_fixture ~now ~category:"validated_approach" "newer verified wording") with
+      Types.last_verified_at = Some (now -. 5.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let promoted =
+    promote_one ~now [ "alpha", [ old_verified ]; "beta", [ new_verified ] ]
+  in
+  Alcotest.(check string)
+    "newer last_verified_at wins among verified rows"
+    "newer verified wording"
+    promoted.Types.claim
+;;
+
+let test_consolidator_unverified_fallback_order () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "representative-unverified-fallback" in
+  let unverified ?(source = "trace") ~first_seen claim =
+    { (mk_shared_fixture ~now ~category:"lesson" claim) with
+      Types.first_seen
+    ; Types.last_verified_at = None
+    ; Types.claim_id = claim_id
+    ; Types.source =
+        { Types.trace_id = source; Types.turn = 1; Types.tool_call_id = None }
+    }
+  in
+  let by_claim =
+    promote_one
+      ~now
+      [ "gamma", [ unverified ~first_seen:(now -. 1.0) "aaa later wording" ]
+      ; "beta", [ unverified ~first_seen:(now -. 10.0) "z earliest wording" ]
+      ; "alpha", [ unverified ~first_seen:(now -. 10.0) "a earliest wording" ]
+      ]
+  in
+  Alcotest.(check string)
+    "unverified fallback uses first_seen before claim text"
+    "a earliest wording"
+    by_claim.Types.claim;
+  let by_keeper =
+    promote_one
+      ~now
+      [ "beta", [ unverified ~source:"from-beta" ~first_seen:(now -. 10.0) "same wording" ]
+      ; "alpha", [ unverified ~source:"from-alpha" ~first_seen:(now -. 10.0) "same wording" ]
+      ]
+  in
+  Alcotest.(check string)
+    "unverified fallback ties finally by keeper id"
+    "from-alpha"
+    by_keeper.Types.source.Types.trace_id
+;;
+
+let test_consolidator_filters_stale_before_shared_fields () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "fresh-contributors-only" in
+  let stale =
+    { (mk_shared_fixture ~now ~category:"lesson" "stale ancient wording") with
+      Types.first_seen = 1.0
+    ; Types.valid_until = Some (now -. 1.0)
+    ; Types.last_verified_at = Some (now -. 1.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let fresh_old =
+    { (mk_shared_fixture ~now ~category:"lesson" "fresh older wording") with
+      Types.first_seen = 100.0
+    ; Types.last_verified_at = Some (now -. 100.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let fresh_new =
+    { (mk_shared_fixture ~now ~category:"lesson" "fresh newest wording") with
+      Types.first_seen = 200.0
+    ; Types.last_verified_at = Some (now -. 5.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let promoted =
+    promote_one
+      ~now
+      [ "stale", [ stale ]; "fresh-a", [ fresh_old ]; "fresh-b", [ fresh_new ] ]
+  in
+  Alcotest.(check string)
+    "representative comes from current contributors only"
+    "fresh newest wording"
+    promoted.Types.claim;
+  Alcotest.(check (list string))
+    "observed_by excludes stale contributors"
+    [ "fresh-a"; "fresh-b" ]
+    promoted.Types.observed_by;
+  Alcotest.(check (float 1e-9))
+    "first_seen excludes stale contributors"
+    100.0
+    promoted.Types.first_seen
+;;
+
+let test_consolidator_stale_peer_does_not_satisfy_min_keepers () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "stale-peer-no-quorum" in
+  let fresh =
+    { (mk_shared_fixture ~now ~category:"validated_approach" "fresh single keeper") with
+      Types.claim_id = claim_id
+    }
+  in
+  let stale =
+    { (mk_shared_fixture ~now ~category:"validated_approach" "expired peer") with
+      Types.valid_until = Some (now -. 1.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let _considered, shared =
+    Consolidator.promote_facts
+      ~now
+      ~keeper_facts:[ "fresh", [ fresh ]; "stale", [ stale ] ]
+      ()
+  in
+  Alcotest.(check int)
+    "one current keeper plus one stale peer is still below min_keepers"
+    0
+    (List.length shared)
+;;
+
 (* A claim held by a single keeper is never shared (below min_keepers). *)
 let test_consolidator_solo_not_promoted () =
   let now = 1_000_000.0 in
@@ -5583,6 +5746,26 @@ let () =
             "promoted shared fact carries the group claim_id (cross-tier dedup)"
             `Quick
             test_consolidator_promotes_carries_claim_id
+        ; Alcotest.test_case
+            "representative prefers verified rows"
+            `Quick
+            test_consolidator_representative_prefers_verified
+        ; Alcotest.test_case
+            "representative prefers newest verification"
+            `Quick
+            test_consolidator_representative_prefers_newest_verification
+        ; Alcotest.test_case
+            "unverified representative fallback is deterministic"
+            `Quick
+            test_consolidator_unverified_fallback_order
+        ; Alcotest.test_case
+            "stale contributors are filtered before shared fields"
+            `Quick
+            test_consolidator_filters_stale_before_shared_fields
+        ; Alcotest.test_case
+            "stale peer does not satisfy min_keepers"
+            `Quick
+            test_consolidator_stale_peer_does_not_satisfy_min_keepers
         ; Alcotest.test_case
             "solo claim not promoted"
             `Quick

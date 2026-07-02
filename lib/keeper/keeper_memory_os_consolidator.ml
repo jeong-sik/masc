@@ -32,7 +32,6 @@ module Io = Keeper_memory_os_io
    the smallest set that distinguishes corroboration from a single keeper's echo
    (RFC-0244 §2.2). *)
 let default_min_keepers = 2
-let default_stale_threshold_sec = 3600.0
 
 type report =
   { keepers_scanned : int
@@ -64,8 +63,9 @@ let eligible fact =
   | Some Self_observation | Some External_state | Some Diagnostic -> false
 
 (* Pick the representative fact for a claim group by a structural total order:
-   earliest first_seen, then lexically smallest claim, then keeper id — so
-   selection is deterministic regardless of input order. The prior tie-breaker on
+   freshest explicit verification first; unverified legacy rows fall back to
+   earliest first_seen, then lexically smallest claim, then keeper id. Selection
+   stays deterministic regardless of input order. The prior tie-breaker on
    highest confidence was removed with the score. *)
 let representative contribs =
   let better a b =
@@ -96,10 +96,13 @@ let distinct_keepers contribs =
 ;;
 
 let consolidate_into_shared ~now ~min_keepers contribs =
-  let fresh = List.filter (fun c -> not (is_stale_as_of ~now c.fact)) contribs in match representative fresh with
+  let current_contribs =
+    List.filter (fun c -> fact_is_current ~now c.fact) contribs
+  in
+  match representative current_contribs with
   | None -> None
   | Some rep ->
-    let keepers = distinct_keepers contribs in
+    let keepers = distinct_keepers current_contribs in
     if List.length keepers < min_keepers
     then None
     else
@@ -113,7 +116,10 @@ let consolidate_into_shared ~now ~min_keepers contribs =
         ; source = rep.fact.source
         ; observed_by = keepers
         ; first_seen =
-            List.fold_left (fun acc c -> Float.min acc c.fact.first_seen) rep.fact.first_seen contribs
+            List.fold_left
+              (fun acc c -> Float.min acc c.fact.first_seen)
+              rep.fact.first_seen
+              current_contribs
           (* Route through [fact_valid_until] so self-observation/category TTL policy
              stays centralized. External refs are context-only and do not affect
              retention. *)

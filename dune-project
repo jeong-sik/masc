@@ -55,7 +55,7 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.12+ so MASC consumes the default-unbounded
+  ;; Pinned to OAS v0.208.13+ so MASC consumes the default-unbounded
   ;; agent turn budget, explicit resume-time thinking-policy precedence (#2412),
   ;; RFC-OAS-029 provider capability
   ;; fields, canonical stream/tool surfaces, typed tool-call/reasoning

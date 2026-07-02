@@ -159,6 +159,7 @@
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
   test_keeper_tool_duration_buckets
+  test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
@@ -356,7 +357,8 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_keeper_behavior_trace)
+  test_keeper_behavior_trace
+  test_keeper_wire_capture)
  (modules
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
@@ -492,6 +494,7 @@
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
   test_keeper_tool_duration_buckets
+  test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
   test_keeper_usage_trust_counter
@@ -694,7 +697,8 @@
   test_env_keeper_scrub
   test_event_log
   test_relation_materializer
-  test_keeper_behavior_trace)
+  test_keeper_behavior_trace
+  test_keeper_wire_capture)
  (libraries masc_test_deps multimodal))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
@@ -877,6 +881,7 @@
  (names
   test_keeper_busy_connector_deferred
   test_keeper_chat_consumer_delivery
+  test_keeper_chat_consumer_dispatch
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
@@ -1070,6 +1075,7 @@
  (modules
   test_keeper_busy_connector_deferred
   test_keeper_chat_consumer_delivery
+  test_keeper_chat_consumer_dispatch
   test_runtime_params
   test_config_dir_resolver
   test_workspace_coverage
@@ -1302,7 +1308,15 @@
 (test
  (name test_keeper_stream_media_accum)
  (modules test_keeper_stream_media_accum)
- (libraries alcotest masc masc_server agent_sdk base64 digestif eio_main unix))
+ (libraries
+  alcotest
+  masc
+  masc_server
+  agent_sdk
+  base64
+  digestif
+  eio_main
+  unix))
 
 ; RFC-0284: goal-loop status SSE broadcast is change-gated (new content emits
 ; one event; unchanged / generated_at-only change emits none).
@@ -1953,6 +1967,7 @@
 (include stanzas/test_keeper_personality_round_trip.inc)
 
 (include stanzas/test_keeper_post_turn_wirein_order.inc)
+
 (include stanzas/test_keeper_post_turn_snapshot_goal_log.inc)
 
 (include stanzas/test_keeper_readonly_hints.inc)

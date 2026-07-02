@@ -13,6 +13,11 @@ val stop_reason_label : Runtime_agent.stop_reason -> string
     mutation-boundary stop). Used by finalize to tag budget-limited turns. *)
 val stop_reason_is_turn_budget_exhausted : Runtime_agent.stop_reason -> bool
 
+val completion_contract_suppresses_visible_response :
+  history_assistant_source:string ->
+  Keeper_execution_receipt.completion_contract_result ->
+  bool
+
 val finalize :
   reported_state_snapshot:Keeper_memory_policy.keeper_state_snapshot option ->
   keeper_name:string ->
@@ -21,5 +26,6 @@ val finalize :
   completion_contract_result:Keeper_execution_receipt.completion_contract_result ->
   stop_reason:Runtime_agent.stop_reason ->
   raw_response_text:string ->
+  ?suppress_response_text:bool ->
   unit ->
   finalized

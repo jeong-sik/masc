@@ -171,7 +171,12 @@ OAS  ──does not know──→ MASC
   Provider-error and OAS-run-timeout metric counters follow the same
   projection rule: they retain error kind, runtime, capacity scope, and timeout
   source, but the historical `provider` label value is the neutral `runtime`
-  lane rather than a concrete provider/model identity.
+  lane rather than a concrete provider/model identity. The keeper
+  memory-summary outcome counter (`masc_keeper_memory_llm_summary_outcomes_total`)
+  and its warn logs follow the same rule: they keep the historical `provider`
+  label key and the `runtime_id`/`outcome` evidence, but the `provider` value is
+  the neutral `runtime` lane and the warn logs name the runtime rather than the
+  model id.
   The typed `Provider_error` contract itself is also runtime-lane scoped:
   variants no longer store provider/model identifiers, and legacy JSON keys
   such as `provider`, `affected`, and `model_name` emit neutral `runtime`
@@ -202,6 +207,15 @@ OAS  ──does not know──→ MASC
   `Runtime_oas_runner`, provider-attempt FSM APIs, or config/preflight helpers
   from `Runtime_error_classify`; provider/model-shaped helpers stay behind
   lower-level OAS boundary modules instead of the keeper facade.
+  Documented boundary-allow exception: `keeper_runtime_attempt.ml`
+  `enrich_sdk_error` (`openai_compat_not_found_detail`) intentionally
+  interpolates `model_id`, `base_url`, `request_path`, and the composed
+  `endpoint` into the OpenAI-compatible 404/invalid-request error message it
+  appends. This is a diagnostic-only leak: it exists so an operator can see the
+  exact misconfigured endpoint that a neutral runtime lane would hide, the
+  values come from the masc-owned `runtime.toml` provider binding, and they are
+  surfaced only on the error message path — never in metric labels or product
+  telemetry. It is retained deliberately rather than redacted.
   The stricter OAS-owned provider/model migration is tracked in
   <https://github.com/jeong-sik/masc/issues/15028>.
 

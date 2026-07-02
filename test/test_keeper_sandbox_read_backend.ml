@@ -1077,6 +1077,30 @@ let test_docker_config_mount_and_env_args () =
        ~base_path:base
        ~container_root)
 
+let test_docker_run_looks_daemon_pressure_does_not_retry_timeout () =
+  Alcotest.(check bool)
+    "WEXITED 124 with timeout output is not daemon pressure"
+    false
+    (Keeper_sandbox_runtime.docker_run_looks_daemon_pressure
+       ~status:(Unix.WEXITED 124)
+       ~output:"process error: timeout after 5s")
+
+let test_docker_run_looks_daemon_pressure_classifies_daemon_unavailable () =
+  Alcotest.(check bool)
+    "daemon unavailable output is daemon pressure"
+    true
+    (Keeper_sandbox_runtime.docker_run_looks_daemon_pressure
+       ~status:(Unix.WEXITED 1)
+       ~output:"Cannot connect to the Docker daemon at unix:///var/run/docker.sock")
+
+let test_docker_run_looks_daemon_pressure_not_pressure_on_command_error () =
+  Alcotest.(check bool)
+    "normal command failure is not daemon pressure"
+    false
+    (Keeper_sandbox_runtime.docker_run_looks_daemon_pressure
+       ~status:(Unix.WEXITED 1)
+       ~output:"No such file or directory")
+
 let test_docker_workspace_state_mount_args_expose_safe_subset () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -2294,6 +2318,12 @@ let run_tests ~clock () =
             test_docker_masc_config_binding_pins_container_runtime_paths;
           Alcotest.test_case "docker config mount and env args" `Quick
             test_docker_config_mount_and_env_args;
+          Alcotest.test_case "docker run timeout is terminal" `Quick
+            test_docker_run_looks_daemon_pressure_does_not_retry_timeout;
+          Alcotest.test_case "docker run classifies daemon unavailable as pressure" `Quick
+            test_docker_run_looks_daemon_pressure_classifies_daemon_unavailable;
+          Alcotest.test_case "docker run does not classify command error as pressure" `Quick
+            test_docker_run_looks_daemon_pressure_not_pressure_on_command_error;
           Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
             test_docker_workspace_state_mount_args_expose_safe_subset;
           Alcotest.test_case "managed label args include ttl" `Quick

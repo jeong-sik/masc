@@ -318,8 +318,15 @@ let dispatch_option_to_string ~name = function
     if Tool_result.is_success result
     then Tool_result.message result
     else
-      Yojson.Safe.to_string
-        (`Assoc [ "error", `String (Tool_result.message result) ])
+      let fields =
+        match Tool_result.failure_class result with
+        | None -> [ "error", `String (Tool_result.message result) ]
+        | Some cls ->
+          [ "error", `String (Tool_result.message result)
+          ; "failure_class", `String (Tool_result.tool_failure_class_to_string cls)
+          ]
+      in
+      Yojson.Safe.to_string (`Assoc fields)
   | None ->
     Yojson.Safe.to_string
       (`Assoc

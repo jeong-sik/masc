@@ -448,6 +448,24 @@ let test_to_string_non_empty_for_every_variant () =
     variants
 ;;
 
+let test_read_repo_access_denial_is_policy_blocked () =
+  let raw =
+    Yojson.Safe.to_string
+      (`Assoc
+         [ "ok", `Bool false
+         ; "error", `String "Keeper rondo is not allowed to access repository masc-mcp"
+         ; "path", `String "/Users/dancer/me/.masc/playground/docker/rondo/repos/masc-mcp/lib/foo.ml"
+         ; ( "deterministic_retry"
+           , `Assoc [ "reason", `String "policy_blocked"; "retry_same_args", `Bool false ] )
+         ])
+  in
+  check_classify_source
+    ~name:"read_repo_access_denial"
+    ~expected_reason:D.Policy_blocked
+    ~expected_source:D.Deterministic_retry_marker
+    raw
+;;
+
 let () =
   Alcotest.run
     "tool_execute_retry_deterministic_close"
@@ -469,6 +487,10 @@ let () =
             "gh_irreversible_blocked"
             `Quick
             test_policy_blocked_gh_irreversible
+        ; Alcotest.test_case
+            "read_repo_access_denial"
+            `Quick
+            test_read_repo_access_denial_is_policy_blocked
         ; Alcotest.test_case
             "completion_contract_violation"
             `Quick

@@ -3,7 +3,6 @@
 (library
  (name masc)
  (public_name masc)
-
  (libraries
   mcp_protocol
   mcp_protocol.eio

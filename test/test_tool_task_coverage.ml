@@ -143,6 +143,15 @@ let str_contains s substring =
     in
     loop 0
 
+let json_member keys json =
+  List.fold_left (fun acc key -> Yojson.Safe.Util.member key acc) json keys
+
+let json_string path json =
+  json_member path json |> Yojson.Safe.Util.to_string
+
+let json_bool path json =
+  json_member path json |> Yojson.Safe.Util.to_bool
+
 let str_starts_with ~prefix s =
   let len_s = String.length s in
   let len_prefix = String.length prefix in
@@ -739,6 +748,12 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
   assert (str_contains (Tool_result.message result) "todo");
   assert (str_contains (Tool_result.message result) "Valid actions");
   assert (str_contains (Tool_result.message result) "claim");
+  (* The output must be a structured workflow rejection so the OAS retry
+     ladder treats it as deterministic non-retryable. *)
+  let rejection_json = Yojson.Safe.from_string (Tool_result.message result) in
+  assert (json_string [ "failure_class" ] rejection_json = "workflow_rejection");
+  assert (json_string [ "error_class" ] rejection_json = "deterministic");
+  assert (not (json_bool [ "recoverable" ] rejection_json));
   let task_entries =
     Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
   in

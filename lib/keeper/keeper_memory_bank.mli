@@ -187,7 +187,6 @@ val synthesize_state_from_run_result :
   goal:string ->
   tools_used:string list ->
   stop_reason:string -> response_text:string -> keeper_state_snapshot
-val render_state_block : keeper_state_snapshot -> string
 
 (** {1 Bank-specific: candidate selection} *)
 

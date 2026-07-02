@@ -117,9 +117,8 @@ let vision_runtime_candidates () : (string * Runtime.t) list =
          then Some (rt.Runtime.id, rt)
          else (
            Log.Keeper.warn
-             "vision runtime skipped runtime=%s provider=%s: provider does not support native structured output"
-             rt.Runtime.id
-             rt.Runtime.provider_config.Llm_provider.Provider_config.model_id;
+             "vision runtime skipped runtime=%s: provider does not support native structured output"
+             rt.Runtime.id;
            None)
        else None)
 

@@ -749,11 +749,16 @@ let read_entries ~(masc_root : string) ~(keeper_name : string) ~(trace_id : stri
           | None -> None
         with Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None)
 
+type trajectory_line_decode_result =
+  | Parsed_line of trajectory_line
+  | Skipped_line
+  | Malformed_line
+
 let trajectory_line_of_json json =
   match Json_util.assoc_member_opt "type" json with
-  | Some (`String "trajectory_summary") -> None
+  | Some (`String "trajectory_summary") -> Skipped_line
   | Some (`String "thinking") ->
-      Some
+      Parsed_line
         (Thinking
            { ts =
                (match Json_util.assoc_member_opt "ts" json with
@@ -783,8 +788,8 @@ let trajectory_line_of_json json =
            })
   | _ ->
       (match tool_call_entry_of_json json with
-       | Some (entry, _parsed_gate) -> Some (Tool_call entry)
-       | None -> None)
+       | Some (entry, _parsed_gate) -> Parsed_line (Tool_call entry)
+       | None -> Malformed_line)
 ;;
 
 (* Rows that fail to parse or decode here are silently dropped from the
@@ -807,17 +812,19 @@ let trajectory_lines_of_jsonl_lines ~trace_id lines =
   let lines_rev, skipped, total =
     List.fold_left
       (fun (acc, skipped, total) line ->
-         match
+         let decode =
            try Yojson.Safe.from_string line |> trajectory_line_of_json with
-           | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
-         with
-         | Some parsed -> parsed :: acc, skipped, total + 1
-         | None -> acc, skipped + 1, total + 1)
+           | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> Malformed_line
+         in
+         match decode with
+         | Parsed_line parsed -> parsed :: acc, skipped, total + 1
+         | Skipped_line -> acc, skipped, total + 1
+         | Malformed_line -> acc, skipped + 1, total + 1)
       ([], 0, 0)
       lines
   in
   log_trajectory_line_skips ~trace_id ~skipped ~total;
-  List.rev lines_rev
+  List.rev lines_rev, skipped, total
 ;;
 
 (** Read all trajectory lines including thinking entries. *)
@@ -830,6 +837,7 @@ let read_all_lines ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
     String.split_on_char '\n' content
     |> List.filter (fun line -> String.trim line <> "")
     |> trajectory_lines_of_jsonl_lines ~trace_id
+    |> fun (lines, _skipped, _total) -> lines
 
 let read_recent_lines
       ~(masc_root : string)
@@ -841,3 +849,4 @@ let read_recent_lines
   let path = trajectory_path masc_root keeper_name trace_id in
   Dated_jsonl.load_tail_lines path ~max_lines
   |> trajectory_lines_of_jsonl_lines ~trace_id
+  |> fun (lines, _skipped, _total) -> lines

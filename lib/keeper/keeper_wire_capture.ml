@@ -1,14 +1,6 @@
 (** See [keeper_wire_capture.mli]. *)
 
-let env_flag = "MASC_KEEPER_WIRE_CAPTURE"
-
-let enabled () =
-  match Sys.getenv_opt env_flag with
-  | Some v -> (
-      match String.lowercase_ascii (String.trim v) with
-      | "1" | "true" | "yes" | "on" -> true
-      | _ -> false)
-  | None -> false
+let enabled () = Env_config_keeper.KeeperWireCapture.enabled ()
 
 let redact = Llm_provider.Secret_redactor.redact_string
 
@@ -18,14 +10,26 @@ let redact = Llm_provider.Secret_redactor.redact_string
 let wire_capture_dir masc_root = Filename.concat masc_root "wire-capture"
 
 let write_payload ~masc_root (payload : Yojson.Safe.t) =
+  let max_bytes = Env_config_keeper.KeeperWireCapture.max_bytes () in
   let store =
     Dated_jsonl.create
       ~base_dir:(wire_capture_dir masc_root)
       ~retention_days:(Env_config_keeper.KeeperWireCapture.retention_days ())
-      ~max_bytes:(Env_config_keeper.KeeperWireCapture.max_bytes ())
+      ~max_bytes
       ()
   in
-  Dated_jsonl.append store payload
+  if
+    not
+      (Dated_jsonl.append_if_current_file_fits
+         store
+         ~max_current_file_bytes:max_bytes
+         payload)
+  then
+    Log.Keeper.warn
+      "keeper_wire_capture: skipped record because current day file would exceed %d \
+       bytes under %s"
+      max_bytes
+      (Dated_jsonl.base_dir store)
 
 let best_effort ~masc_root f =
   let base_dir = wire_capture_dir masc_root in

@@ -31,6 +31,7 @@ end
 (** {1 Keeper wire capture} *)
 
 module KeeperWireCapture : sig
+  val enabled : unit -> bool
   val retention_days : unit -> int
   val max_bytes : unit -> int
 end

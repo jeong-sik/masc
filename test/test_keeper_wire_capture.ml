@@ -161,7 +161,7 @@ let response_capture_writes_redacted () =
 let capture_prunes_old_files () =
   with_flag "1" (fun () ->
     with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
-      with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "128" (fun () ->
+      with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "4096" (fun () ->
         let base = Filename.temp_dir "wirecap_prune" "" in
         let capture_dir = Filename.concat base "wire-capture" in
         let old_month = Filename.concat capture_dir "2000-01" in
@@ -175,6 +175,23 @@ let capture_prunes_old_files () =
           (Sys.file_exists old_file);
         Alcotest.(check int) "only current capture remains" 1
           (List.length (find_jsonl base)))))
+
+let capture_skips_when_current_file_cap_would_be_exceeded () =
+  with_flag "1" (fun () ->
+    with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "512" (fun () ->
+      let base = Filename.temp_dir "wirecap_cap" "" in
+      Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:11
+        ~response_text:"small";
+      let files = find_jsonl base in
+      Alcotest.(check int) "small record written" 1 (List.length files);
+      let before = read_file (List.hd files) in
+      Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:12
+        ~response_text:(String.make 4096 'x');
+      let after = read_file (List.hd files) in
+      Alcotest.(check string)
+        "oversized record skipped without mutating current day file"
+        before
+        after))
 
 let () =
   Alcotest.run "keeper_wire_capture"
@@ -200,5 +217,7 @@ let () =
             response_capture_writes_redacted;
           Alcotest.test_case "capture store prunes old files" `Quick
             capture_prunes_old_files;
+          Alcotest.test_case "current file cap skips oversized record" `Quick
+            capture_skips_when_current_file_cap_would_be_exceeded;
         ] );
     ]

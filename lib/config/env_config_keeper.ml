@@ -88,6 +88,10 @@ module KeeperWireCapture = struct
     max min_value (min max_value value)
   ;;
 
+  (** Master switch for diagnostic MASC->OAS wire capture. Default off.
+      @category Policies @ops_class operator *)
+  let enabled () = Feature_flag_registry.get_bool "MASC_KEEPER_WIRE_CAPTURE"
+
   let retention_days_default = 3
   let retention_days_ceiling = 30
   let max_bytes_default = 64 * 1024 * 1024
@@ -105,10 +109,10 @@ module KeeperWireCapture = struct
     |> clamp_int ~min_value:1 ~max_value:retention_days_ceiling
   ;;
 
-  (** Maximum total bytes retained below [<masc_root>/wire-capture] after
-      opportunistic cleanup. The current day file is preserved by
-      {!Dated_jsonl}, so this is a cross-day retention guard rather than a
-      per-record truncation policy. Default is 64 MiB. Range: [1, 1024] MiB.
+  (** Maximum bytes for the active [<masc_root>/wire-capture/YYYY-MM/DD.jsonl]
+      file and maximum total bytes retained below [<masc_root>/wire-capture]
+      after opportunistic completed-day cleanup. Default is 64 MiB. Range:
+      [1, 1024] MiB.
 
       @category Policies @ops_class operator *)
   let max_bytes () =

@@ -31,6 +31,8 @@ let key_to_env =
     "heartbeat.jitter_factor",          "MASC_KEEPER_HEARTBEAT_JITTER_FACTOR";
     "heartbeat.sleep_chunk_sec",        "MASC_KEEPER_SLEEP_CHUNK_SEC";
     "heartbeat.board_wakeup_max",       "MASC_KEEPER_BOARD_WAKEUP_MAX";
+    (* [wire_capture] *)
+    "wire_capture.enabled",             "MASC_KEEPER_WIRE_CAPTURE";
     (* [proactive] *)
     "proactive.enabled",                "MASC_KEEPER_PROACTIVE_ENABLED";
     "proactive.min_interval_sec",       "MASC_KEEPER_PROACTIVE_MIN_INTERVAL_SEC";

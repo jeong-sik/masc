@@ -9,7 +9,8 @@
 
     Writes are best-effort and dated under
     [<masc_root>/wire-capture/YYYY-MM/DD.jsonl] (same [Dated_jsonl] per-day
-    store the cost ledger uses). Retention is bounded by
+    store the cost ledger uses). The active day file and completed-file
+    retention are bounded by
     [MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS] and
     [MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES]. A write failure is logged and never
     interrupts the turn.
@@ -20,12 +21,13 @@
     capture makes that input observable. See
     [docs/masc-keeper-repetition-blast-radius-design-2026-07-02.html] (Phase O).
 
-    Disabled unless [MASC_KEEPER_WIRE_CAPTURE] is [1]/[true]/[yes]/[on]. *)
+    Disabled unless [MASC_KEEPER_WIRE_CAPTURE] is enabled through the feature
+    flag registry / runtime config. *)
 
 val enabled : unit -> bool
-(** [enabled ()] is [true] when [MASC_KEEPER_WIRE_CAPTURE] is set to an
-    affirmative value ([1], [true], [yes], [on], case-insensitive). When [false],
-    {!capture_request} is a no-op with no filesystem access. *)
+(** [enabled ()] is [true] when [MASC_KEEPER_WIRE_CAPTURE] is enabled through
+    {!Env_config_keeper.KeeperWireCapture}. When [false], {!capture_request} is
+    a no-op with no filesystem access. *)
 
 val capture_request :
   masc_root:string ->

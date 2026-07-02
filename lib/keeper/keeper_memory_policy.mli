@@ -181,10 +181,8 @@ val memory_horizon_of_json_opt : Yojson.Safe.t -> string option
 
 (** {1 [STATE] block parsing} *)
 
-(** [Some trimmed] when [text] is non-blank, else [None]. *)
-
 val split_state_items : string -> string list
-(** Split a comma- or bullet-delimited [STATE] item list. *)
+(** Split a ';'-delimited [STATE] item list, keeping at most 6 items. *)
 
 val strip_prefix_ci : prefix:string -> string -> string option
 (** Case-insensitive [String.starts_with]: returns the suffix when
@@ -386,6 +384,3 @@ val synthesize_state_from_run_result :
   stop_reason:string -> response_text:string -> keeper_state_snapshot
 (** Build a snapshot from a turn's run result when the assistant did
     not emit a [STATE] block. *)
-
-val render_state_block : keeper_state_snapshot -> string
-(** Render the canonical [STATE]…[/STATE] block from a snapshot. *)

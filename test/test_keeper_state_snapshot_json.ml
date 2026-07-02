@@ -858,6 +858,8 @@ let test_text_parse_matches_json_parse () =
      | Some json_snap ->
        Alcotest.(check (option string)) "goal" text_snap.goal json_snap.goal;
        Alcotest.(check (option string)) "done" text_snap.done_summary json_snap.done_summary;
+       Alcotest.(check (option string)) "next_summary" text_snap.next_summary json_snap.next_summary;
+       Alcotest.(check (list string)) "next_items" text_snap.next_items json_snap.next_items;
        Alcotest.(check (list string)) "decisions" text_snap.decisions json_snap.decisions;
        Alcotest.(check (list string)) "open_questions" text_snap.open_questions json_snap.open_questions;
        Alcotest.(check (list string)) "constraints" text_snap.constraints json_snap.constraints)
@@ -1084,6 +1086,73 @@ let test_internal_passive_only_finalizer_still_drops_raw_response_text () =
     ""
     finalized.response_text
 
+(* ── Continuity NEXT parsing / text round-trip ───────────────────────
+   Regression coverage for the parser/renderer asymmetry that let a single
+   [STATE] "NEXT:" line populate both next_summary and next_items and then
+   degenerate next_summary into the joined next_items on every text
+   round-trip. "NEXT PLAN:" now feeds next_summary, "NEXT:" feeds
+   next_items, and the two labels round-trip through the summary text. *)
+
+let parse_state_block body =
+  KMP.parse_state_snapshot_from_reply ("[STATE]\n" ^ body ^ "\n[/STATE]")
+
+let test_next_line_populates_items_only () =
+  match parse_state_block "NEXT: a; b" with
+  | None -> Alcotest.fail "expected Some snapshot for a NEXT: line"
+  | Some s ->
+    Alcotest.(check (list string)) "next_items split on ;" [ "a"; "b" ] s.next_items;
+    Alcotest.(check (option string)) "next_summary untouched" None s.next_summary
+
+let test_next_plan_line_populates_summary_only () =
+  match parse_state_block "NEXT PLAN: do X first" with
+  | None -> Alcotest.fail "expected Some snapshot for a NEXT PLAN: line"
+  | Some s ->
+    Alcotest.(check (option string)) "next_summary set" (Some "do X first") s.next_summary;
+    Alcotest.(check (list string)) "next_items untouched" [] s.next_items
+
+let test_next_case_variants_are_items_only () =
+  List.iter
+    (fun line ->
+      match parse_state_block line with
+      | None -> Alcotest.fail ("expected Some snapshot for " ^ line)
+      | Some s ->
+        Alcotest.(check (list string)) ("next_items for " ^ line) [ "c" ] s.next_items;
+        Alcotest.(check (option string)) ("next_summary None for " ^ line) None s.next_summary)
+    [ "next: c"; "Next: c"; "NEXT: c" ]
+
+let test_summary_text_round_trip_is_faithful () =
+  let original =
+    make_snapshot ~goal:None ~progress:None ~done_summary:None
+      ~next_summary:(Some "prose plan") ~next_items:[ "a"; "b" ] ~decisions:[]
+      ~open_questions:[] ~constraints:[] ()
+  in
+  let text = KMP.keeper_state_snapshot_to_summary_text original in
+  match KMP.state_snapshot_of_summary_text text with
+  | None -> Alcotest.fail "summary-text round-trip returned None"
+  | Some restored ->
+    Alcotest.(check (option string)) "next_summary preserved" original.next_summary
+      restored.next_summary;
+    Alcotest.(check (list string)) "next_items preserved" original.next_items
+      restored.next_items
+
+let test_summary_text_render_parse_render_is_fixed_point () =
+  let original =
+    make_snapshot ~goal:(Some "ship it") ~progress:None ~done_summary:None
+      ~next_summary:(Some "prose plan") ~next_items:[ "a"; "b" ] ~decisions:[]
+      ~open_questions:[] ~constraints:[] ()
+  in
+  let once = KMP.keeper_state_snapshot_to_summary_text original in
+  match KMP.state_snapshot_of_summary_text once with
+  | None -> Alcotest.fail "first parse returned None"
+  | Some reparsed ->
+    let twice = KMP.keeper_state_snapshot_to_summary_text reparsed in
+    Alcotest.(check string) "render -> parse -> render is a fixed point" once twice
+
+let test_next_plan_only_block_yields_snapshot () =
+  match parse_state_block "NEXT PLAN: x" with
+  | None -> Alcotest.fail "a NEXT PLAN:-only block should yield Some snapshot"
+  | Some s -> Alcotest.(check (option string)) "next_summary set" (Some "x") s.next_summary
+
 (* ── Test runner ─────────────────────────────────────────────────── *)
 
 let () =
@@ -1197,5 +1266,32 @@ let () =
             "internal passive-only finalizer still drops raw response text"
             `Quick
             test_internal_passive_only_finalizer_still_drops_raw_response_text;
+        ] );
+      ( "continuity_next",
+        [
+          Alcotest.test_case
+            "NEXT: populates next_items only"
+            `Quick
+            test_next_line_populates_items_only;
+          Alcotest.test_case
+            "NEXT PLAN: populates next_summary only"
+            `Quick
+            test_next_plan_line_populates_summary_only;
+          Alcotest.test_case
+            "next case variants are items only"
+            `Quick
+            test_next_case_variants_are_items_only;
+          Alcotest.test_case
+            "summary text round-trip is faithful"
+            `Quick
+            test_summary_text_round_trip_is_faithful;
+          Alcotest.test_case
+            "render -> parse -> render is a fixed point"
+            `Quick
+            test_summary_text_render_parse_render_is_fixed_point;
+          Alcotest.test_case
+            "NEXT PLAN:-only block yields snapshot"
+            `Quick
+            test_next_plan_only_block_yields_snapshot;
         ] );
     ]

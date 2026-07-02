@@ -37,6 +37,9 @@ type approval_audit_decision =
   | Approval_resolved of decision
   | Approval_expired of string
 
+type approval_audit_disposition =
+  | Approval_escalated of string
+
 type approval_rule =
   { id : string
   ; keeper_name : string

@@ -98,6 +98,11 @@ let audit_event_names ~base_path ~keeper_name =
   |> List.map (fun json ->
          Yojson.Safe.Util.(json |> member "event" |> to_string))
 
+let find_audit_event ~base_path ~keeper_name ~event_type =
+  AQ.read_recent_audit ~base_path ~keeper_name ~n:10 ()
+  |> List.find_opt (fun json ->
+         Yojson.Safe.Util.(json |> member "event" |> to_string = event_type))
+
 let test_first_cmd_token_uses_shared_words () =
   Alcotest.(check (option string))
     "quoted command basename preserved"
@@ -484,6 +489,91 @@ let test_submit_and_await_clock_timeout_skips_critical () =
       Alcotest.fail
         ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
   | None -> Alcotest.fail "Critical approval did not resume")
+
+let test_submit_and_await_critical_escalates_then_waits () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let base_path = temp_dir () in
+  AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "critical-escalation-test" in
+  let result = ref None in
+  Eio.Fiber.fork ~sw (fun () ->
+    let decision =
+      AQ.submit_and_await
+        ~keeper_name
+        ~tool_name:"keeper_continue_after_partial_commit"
+        ~input:(`Assoc [ ("kind", `String "critical_gate") ])
+        ~risk_level:AQ.Critical
+        ~base_path
+        ~clock
+        ~critical_escalation_after_s:0.01
+        ()
+    in
+    result := Some decision);
+  yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
+  Eio.Time.sleep clock 0.03;
+  yield_until (fun () ->
+    List.exists
+      (String.equal "approval_escalated")
+      (audit_event_names ~base_path ~keeper_name));
+  Alcotest.(check bool)
+    "Critical escalation audit recorded"
+    true
+    (List.exists
+       (String.equal "approval_escalated")
+       (audit_event_names ~base_path ~keeper_name));
+  let escalation_event =
+    match find_audit_event ~base_path ~keeper_name ~event_type:"approval_escalated" with
+    | Some json -> json
+    | None -> Alcotest.fail "expected Critical escalation audit row"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "Critical escalation is not a terminal decision"
+    ""
+    (escalation_event |> member "decision" |> to_string);
+  Alcotest.(check bool)
+    "Critical escalation has no decision kind"
+    true
+    (escalation_event |> member "decision_kind" = `Null);
+  Alcotest.(check bool)
+    "Critical escalation has no decision reason"
+    true
+    (escalation_event |> member "decision_reason" = `Null);
+  Alcotest.(check string)
+    "Critical escalation disposition"
+    "escalated"
+    (escalation_event |> member "disposition" |> to_string);
+  Alcotest.(check string)
+    "Critical escalation disposition reason"
+    "critical approval escalated — operator must decide"
+    (escalation_event |> member "disposition_reason" |> to_string);
+  Alcotest.(check bool)
+    "Critical escalation does not auto-resolve"
+    true
+    (Option.is_none !result);
+  let id =
+    match pending_id_for_keeper ~keeper_name with
+    | Some id -> id
+    | None -> Alcotest.fail "Critical approval was removed after escalation"
+  in
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error err ->
+      Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+  yield_until (fun () -> Option.is_some !result);
+  match !result with
+  | Some Agent_sdk.Hooks.Approve -> ()
+  | Some decision ->
+      Alcotest.fail
+        ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
+  | None -> Alcotest.fail "Critical approval did not resume after escalation")
 
 let test_submit_and_await_clock_returns_manual_decision () =
   Eio_main.run @@ fun env ->
@@ -1608,6 +1698,8 @@ let () =
       Alcotest.test_case "expire skips Critical" `Quick test_approval_queue_expire_skips_critical;
       Alcotest.test_case "submit timeout skips Critical" `Quick
         test_submit_and_await_clock_timeout_skips_critical;
+      Alcotest.test_case "Critical escalation waits for manual decision" `Quick
+        test_submit_and_await_critical_escalates_then_waits;
       Alcotest.test_case "submit timeout returns manual winner" `Quick
         test_submit_and_await_clock_returns_manual_decision;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;

@@ -21,6 +21,9 @@ type approval_audit_decision =
   | Approval_resolved of decision
   | Approval_expired of string
 
+type approval_audit_disposition =
+  | Approval_escalated of string
+
 (** Pending approval entry — the suspended-fiber side of the
     Eio.Promise rendez-vous. *)
 type pending_approval =
@@ -157,6 +160,7 @@ val audit_approval_event :
   ?sandbox_target:string ->
   ?runtime_contract:Yojson.Safe.t ->
   ?selected_model:string ->
+  ?audit_disposition:approval_audit_disposition ->
   ?disposition:string ->
   ?disposition_reason:string ->
   ?rule_match:rule_match ->
@@ -204,6 +208,10 @@ val default_noncritical_approval_timeout_s : float
     not be shorter than this, otherwise a valid HITL wait is misclassified as
     provider idleness. *)
 
+val default_critical_approval_escalation_after_s : float
+(** Default wait before a [Critical] approval emits an escalation audit event
+    while still waiting for a manual operator decision. *)
+
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside the agent fiber). *)
@@ -226,6 +234,7 @@ val submit_and_await :
   ?disposition_reason:string ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
+  ?critical_escalation_after_s:float ->
   unit ->
   Agent_sdk.Hooks.approval_decision
 

@@ -87,13 +87,106 @@ let keeper_runtime_dir config name =
   let dir = Filename.concat (keeper_dir_ config) name in
   ensure_dir_ dir
 
-(* Per-keeper OAS raw-trace sink: [.masc/keepers/<name>/raw-trace.jsonl].
-   One file per keeper, appended across turns — [Agent_sdk.Raw_trace.create]
-   resumes its seq counter from the existing file, so each turn's run is a
-   seq range inside this file (worker precedent:
-   [Worker_container.worker_raw_trace_path]). *)
-let keeper_raw_trace_path config name =
-  Filename.concat (keeper_runtime_dir config name) "raw-trace.jsonl"
+(* Per-keeper OAS raw-trace store: one JSONL file per keeper turn under
+   [.masc/keepers/<name>/raw-traces/].  A fresh file per turn keeps
+   [Agent_sdk.Raw_trace.create] from ever scanning previous turns' data
+   (OAS [create -> scan_next_seq -> read_all] parses the whole target
+   file to resume its seq counter), so a corrupt or oversized historical
+   trace cannot block keeper dispatch and per-turn sink creation stays
+   O(1) in lifetime trace volume.  Each turn's [run_ref] (path + seq
+   range) recorded in the run result is the index into this store. *)
+let raw_traces_dirname = "raw-traces"
+let raw_trace_file_extension = ".jsonl"
+
+(** Retention bound for the per-turn raw-trace store.  This is log
+    retention, not a behavioral cap: every turn still runs and still
+    traces; only the oldest persisted turn files beyond this count are
+    deleted at sink-creation time.  The steady-state on-disk bound is
+    [raw_trace_retained_turn_files + 1] files per keeper (the freshly
+    created turn file materializes after the prune that precedes it). *)
+let raw_trace_retained_turn_files = 200
+
+let keeper_raw_trace_dir config name =
+  Filename.concat
+    (Filename.concat (Workspace.keepers_runtime_dir config) name)
+    raw_traces_dirname
+
+(* Strictly-increasing per-process discriminator so two turns created in
+   the same millisecond never share a file name. *)
+let raw_trace_turn_counter = Atomic.make 0
+
+(* Cross-process same-millisecond collisions are disambiguated by the pid
+   fragment; the bounded retry below covers even that residue.  If the
+   bound is ever exhausted the candidate is still safe: [Raw_trace.create]
+   resume-appends to the (tiny, same-millisecond) existing file. *)
+let raw_trace_fresh_name_attempts = 8
+
+let raw_trace_turn_basename () =
+  (* NDT-OK: the wall-clock prefix only orders turn files chronologically
+     for retention pruning (zero-padded ms sorts lexicographically);
+     keeper control flow never branches on it.  Shape mirrors OAS
+     [Raw_trace.next_worker_run_id] (ts + pid + counter). *)
+  Printf.sprintf "turn-%013Ld-%04x-%06d%s"
+    (Int64.of_float (Unix.gettimeofday () *. 1000.0))
+    (Unix.getpid () land 0xFFFF)
+    (Atomic.fetch_and_add raw_trace_turn_counter 1)
+    raw_trace_file_extension
+
+let keeper_raw_trace_turn_path config name =
+  (* [keeper_runtime_dir] keeps the keeper dir creation of the receipt /
+     checkpoint stores; the raw-traces subdir is ensured on top of it. *)
+  let dir =
+    ensure_dir_
+      (Filename.concat (keeper_runtime_dir config name) raw_traces_dirname)
+  in
+  let rec fresh attempts =
+    let candidate = Filename.concat dir (raw_trace_turn_basename ()) in
+    if Fs_compat.file_exists candidate && attempts < raw_trace_fresh_name_attempts
+    then fresh (attempts + 1)
+    else candidate
+  in
+  fresh 0
+
+(** Delete the oldest per-turn raw-trace files beyond
+    [raw_trace_retained_turn_files].  Deterministic: candidates are the
+    [.jsonl] entries of the raw-traces dir sorted by file name ascending
+    (the zero-padded timestamp prefix makes that chronological), and the
+    excess prefix of that order is removed.  Total: a missing dir or a
+    failed unlink is logged and skipped, never raised — retention runs on
+    the turn dispatch path and must not gate keeper liveness.  Returns the
+    number of files removed. *)
+let prune_keeper_raw_trace_turn_files config name =
+  let dir = keeper_raw_trace_dir config name in
+  let entries =
+    try Sys.readdir dir with
+    | Sys_error _ -> [||]
+  in
+  let trace_files =
+    entries
+    |> Array.to_list
+    |> List.filter (fun entry ->
+      Filename.check_suffix entry raw_trace_file_extension)
+    |> List.sort String.compare
+  in
+  let excess = List.length trace_files - raw_trace_retained_turn_files in
+  if excess <= 0 then 0
+  else begin
+    let removed = ref 0 in
+    List.iteri
+      (fun idx entry ->
+        if idx < excess then begin
+          let path = Filename.concat dir entry in
+          try
+            Sys.remove path;
+            incr removed
+          with
+          | Sys_error msg ->
+            Log.Keeper.warn ~keeper_name:name
+              "raw-trace retention: failed to remove %s: %s" path msg
+        end)
+      trace_files;
+    !removed
+  end
 
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")

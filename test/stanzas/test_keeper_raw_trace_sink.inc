@@ -1,7 +1,8 @@
-; Keeper OAS raw-trace wiring guard: keeper dispatch must pass ~raw_trace
-; into Keeper_turn_driver.run_named (dead ?raw_trace regression), and the
-; per-keeper sink must append across turns at the SSOT path
-; (.masc/keepers/<name>/raw-trace.jsonl).
+; Keeper OAS raw-trace wiring guard: keeper dispatch must pass ?raw_trace
+; into Keeper_turn_driver.run_named (dead ?raw_trace regression), the
+; per-turn store (.masc/keepers/<name>/raw-traces/turn-*.jsonl) must stay
+; bounded and immune to corrupt history, and a degraded trace store must
+; dispatch the turn untraced instead of failing it (PR #22984 review).
 
 (test
  (name test_keeper_raw_trace_sink)

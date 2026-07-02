@@ -9,6 +9,23 @@ let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
 ;;
 
+let empty_object_schema =
+  `Assoc
+    [ "type", `String "object"
+    ; "properties", `Assoc []
+    ; "required", `List []
+    ]
+;;
+
+let test_tool_schema name : Masc_domain.tool_schema =
+  { name; description = "test tool " ^ name; input_schema = empty_object_schema }
+;;
+
+let register_test_tool ~tool_name ~handler =
+  Tool_dispatch.register ~tool_name ~handler;
+  Tool_dispatch.register_module_tag ~schemas:[ test_tool_schema tool_name ] ~tag:Mod_misc
+;;
+
 let str_contains haystack needle =
   let hlen = String.length haystack in
   let nlen = String.length needle in
@@ -203,20 +220,9 @@ let test_message_json_roundtrip () =
 
 let test_dispatch_structured () =
   (* Register a test handler *)
-  Tool_dispatch.register ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
-    Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
-  (* Register a schema (not just a tag) so the tool clears the input-schema
-     validation pre-hook that Mcp_server_eio installs at module load. An
-     empty-object schema dispatched with no args passes validation, keeping the
-     test focused on structured dispatch while matching production, where every
-     dispatchable tool carries a schema. *)
-  Tool_dispatch.register_module_tag
-    ~schemas:
-      [ { Masc_domain.name = "__test_tool"
-        ; description = "test dispatch tool"
-        ; input_schema = `Assoc [ "type", `String "object" ]
-        } ]
-    ~tag:Mod_misc;
+  register_test_tool
+    ~tool_name:"__test_tool"
+    ~handler:(fun ~name ~args:_ -> Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with
     | Ok t -> t

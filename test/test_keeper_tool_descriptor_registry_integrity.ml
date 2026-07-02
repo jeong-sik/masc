@@ -1000,23 +1000,32 @@ let test_effective_core_tools_is_subset_of_discovery () =
     effective
 ;;
 
+let with_masc_schemas schemas f =
+  let prior = Registry.masc_schemas_snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Registry.set_masc_schemas prior)
+    (fun () ->
+      Registry.set_masc_schemas schemas;
+      f ())
+;;
+
 let test_effective_core_tools_without_universe_has_no_descriptor_publics () =
   (* Establish the empty-universe precondition explicitly: descriptor public
      names must NOT appear in effective_core_tools when their internal_name is
      absent from the universe. Mcp_server_eio's module-load bootstrap injects
      the full schema universe when it is linked into this executable, so the
      universe cannot be assumed to start empty. *)
-  Registry.set_masc_schemas [];
-  let effective = Registry.effective_core_tools () in
-  let descriptor_publics = Descriptor.public_names () in
-  List.iter
-    (fun name ->
-       if List.mem name effective
-       then
-         Alcotest.failf
-           "effective_core_tools contains descriptor public %S when universe is empty"
-           name)
-    descriptor_publics
+  with_masc_schemas [] (fun () ->
+    let effective = Registry.effective_core_tools () in
+    let descriptor_publics = Descriptor.public_names () in
+    List.iter
+      (fun name ->
+         if List.mem name effective
+         then
+           Alcotest.failf
+             "effective_core_tools contains descriptor public %S when universe is empty"
+             name)
+      descriptor_publics)
 ;;
 
 let test_effective_core_tools_with_full_universe_matches_discovery () =
@@ -1029,13 +1038,13 @@ let test_effective_core_tools_with_full_universe_matches_discovery () =
          })
       (all_descriptors ())
   in
-  Registry.set_masc_schemas all_schemas;
-  let effective = Registry.effective_core_tools () in
-  let discovery = Registry.core_discovery_tools in
-  Alcotest.(check (list string))
-    "effective_core_tools with full universe matches core_discovery_tools"
-    (List.sort String.compare discovery)
-    (List.sort String.compare effective)
+  with_masc_schemas all_schemas (fun () ->
+    let effective = Registry.effective_core_tools () in
+    let discovery = Registry.core_discovery_tools in
+    Alcotest.(check (list string))
+      "effective_core_tools with full universe matches core_discovery_tools"
+      (List.sort String.compare discovery)
+      (List.sort String.compare effective))
 ;;
 
 let () =

@@ -20,6 +20,14 @@ let schema : Yojson.Safe.t =
     ; ("required", `List [ `String "answer" ])
     ]
 
+let alternate_schema : Yojson.Safe.t =
+  `Assoc
+    [ ("type", `String "object")
+    ; ( "properties"
+      , `Assoc [ ("verdict", `Assoc [ ("type", `String "string") ]) ] )
+    ; ("required", `List [ `String "verdict" ])
+    ]
+
 let base_with_schema () =
   let cfg =
     Llm_provider.Provider_config.make
@@ -65,7 +73,7 @@ let test_base_schema_survives_opinionless_request () =
   check (option string) "request system_prompt still wins" (Some "req prompt")
     merged.Llm_provider.Provider_config.system_prompt
 
-let test_request_opinion_wins () =
+let test_request_json_mode_clears_base_schema () =
   let req =
     { (request_without_opinion ()) with
       Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonMode
@@ -75,7 +83,26 @@ let test_request_opinion_wins () =
   check bool "explicit request JsonMode overrides base JsonSchema" true
     (match merged.Llm_provider.Provider_config.response_format with
      | Agent_sdk.Types.JsonMode -> true
-     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false)
+     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false);
+  check bool "explicit request JsonMode clears base output_schema" true
+    (Option.is_none merged.Llm_provider.Provider_config.output_schema)
+
+let test_request_json_schema_replaces_base_schema () =
+  let req =
+    { (request_without_opinion ()) with
+      Llm_provider.Provider_config.response_format =
+        Agent_sdk.Types.JsonSchema alternate_schema
+    }
+  in
+  let merged = merge ~base:(base_with_schema ()) req in
+  check bool "explicit request JsonSchema overrides base JsonSchema" true
+    (match merged.Llm_provider.Provider_config.response_format with
+     | Agent_sdk.Types.JsonSchema s -> Yojson.Safe.equal s alternate_schema
+     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonMode -> false);
+  check bool "explicit request JsonSchema replaces base output_schema" true
+    (match merged.Llm_provider.Provider_config.output_schema with
+     | Some s -> Yojson.Safe.equal s alternate_schema
+     | None -> false)
 
 let test_both_opinionless_stays_off () =
   let base =
@@ -98,7 +125,10 @@ let () =
     [ ( "structured output merge"
       , [ test_case "base schema survives opinionless request" `Quick
             test_base_schema_survives_opinionless_request
-        ; test_case "explicit request opinion wins" `Quick test_request_opinion_wins
+        ; test_case "explicit request JsonMode clears base schema" `Quick
+            test_request_json_mode_clears_base_schema
+        ; test_case "explicit request JsonSchema replaces base schema" `Quick
+            test_request_json_schema_replaces_base_schema
         ; test_case "both opinionless stays Off" `Quick
             test_both_opinionless_stays_off
         ] )

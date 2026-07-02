@@ -197,6 +197,19 @@ let request_runtime_fields_on_base_config
     ~(base : Llm_provider.Provider_config.t)
     (req_config : Llm_provider.Provider_config.t)
   =
+  let response_format =
+    match req_config.response_format with
+    | Agent_sdk.Types.Off -> base.response_format
+    | (Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _) as requested ->
+      requested
+  in
+  let output_schema =
+    match req_config.response_format, req_config.output_schema with
+    | Agent_sdk.Types.Off, None -> base.output_schema
+    | _, Some _ as requested -> requested
+    | (Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _), None ->
+      Llm_provider.Provider_config.output_schema_of_response_format response_format
+  in
   { base with
     max_tokens = req_config.max_tokens;
     temperature = req_config.temperature;
@@ -220,15 +233,8 @@ let request_runtime_fields_on_base_config
        verifier, dashboard judge 등 모든 Keeper_structured_output_schema 소비자의
        native schema가 HTTP body에 실린 적이 없었다 (2026-07-02 hop-by-hop 추적,
        masc#23003 후속). [Off]/[None] = 무의견 → base 유지; 요청이 명시하면 요청 우선. *)
-    response_format =
-      (match req_config.response_format with
-       | Agent_sdk.Types.Off -> base.response_format
-       | (Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _) as requested ->
-         requested);
-    output_schema =
-      (match req_config.output_schema with
-       | None -> base.output_schema
-       | Some _ as requested -> requested);
+    response_format;
+    output_schema;
     cache_system_prompt = req_config.cache_system_prompt;
     supports_tool_choice_override =
       (match req_config.supports_tool_choice_override with

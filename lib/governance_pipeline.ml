@@ -79,32 +79,10 @@ let keeper_confirm_threshold governance_level =
     | other -> confirm_threshold other
 ;;
 
-let nonempty_trimmed value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-;;
-
 let runtime_auto_approval_blocked = function
   | None -> false
   | Some (meta : Keeper_meta_contract.keeper_meta) ->
-    (match meta.runtime.last_blocker with
-     | None -> false
-     | Some info ->
-       let continue_gate = Keeper_meta_contract.blocker_class_continue_gate info.klass in
-       let typed_blocked =
-         match info.klass with
-         | Keeper_meta_contract.Completion_contract_violation
-         | Keeper_meta_contract.Runtime_exhausted _ -> true
-         | _ -> false
-       in
-       let detail_blocked =
-         match nonempty_trimmed info.detail with
-         | Some summary ->
-           String_util.contains_substring_ci summary "manual block"
-           || String_util.contains_substring_ci summary "sandbox"
-         | None -> false
-       in
-       continue_gate || typed_blocked || detail_blocked)
+    Option.is_some meta.runtime.last_blocker
 ;;
 
 (** PR-E (Plan v3 Leak 1): split the legacy [auto_approval_forbidden]
@@ -112,10 +90,11 @@ let runtime_auto_approval_blocked = function
     component that a narrowly-scoped routine allowlist match is
     permitted to override.
 
-    - Hard forbidden = the request is at Critical risk OR a runtime
-      blocker (runtime_exhausted, completion_contract_violation,
-      sandbox/manual block) is set.  Routine matchers must not
-      bypass these — this is where real safety walls live.
+    - Hard forbidden = the request is at Critical risk OR structured
+      [runtime.last_blocker] is set.  Routine matchers must not
+      bypass these — this is where real safety walls live.  The
+      blocker [detail] is free-form UI/debug context, not a policy
+      classifier.
     - Soft forbidden = the tool name or op string trips
       [destructive_tool_or_op] (a substring filter on "shell"/"git"
       plus a small list of bash/git ops).

@@ -1319,13 +1319,13 @@ let test_callback_always_approve_bypasses_threshold () =
     Alcotest.fail ("expected Approve with always_approve, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
-let test_callback_runtime_blocker_overrides_always_approve () =
+let test_callback_typed_last_blocker_overrides_always_approve () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
-  let keeper_name = "runtime-blocked-keeper" in
+  let keeper_name = "typed-blocked-keeper" in
   let initial_pending = AQ.pending_count () in
   let result = ref None in
   let base_path = temp_dir () in
@@ -1349,7 +1349,7 @@ let test_callback_runtime_blocker_overrides_always_approve () =
         in
         let blocker =
           let open Masc.Keeper_meta_contract in
-          blocker_info_of_class (Runtime_exhausted No_providers_available)
+          blocker_info_of_class ~detail:"previous turn timed out" Turn_timeout
         in
         { base with
           runtime = { base.runtime with last_blocker = Some blocker };
@@ -1368,7 +1368,7 @@ let test_callback_runtime_blocker_overrides_always_approve () =
         result := Some decision);
       yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
       Alcotest.(check int)
-        "runtime blocker prevents always_approve bypass"
+        "typed last_blocker prevents always_approve bypass"
         (initial_pending + 1)
         (AQ.pending_count ());
       let id =
@@ -1383,7 +1383,7 @@ let test_callback_runtime_blocker_overrides_always_approve () =
       match !result with
       | Some (Agent_sdk.Hooks.Reject "blocked") -> ()
       | Some Agent_sdk.Hooks.Approve ->
-        Alcotest.fail "runtime blocker must not auto-approve"
+        Alcotest.fail "typed last_blocker must not auto-approve"
       | Some (Agent_sdk.Hooks.Reject reason) ->
         Alcotest.fail ("unexpected reject reason: " ^ reason)
       | Some (Agent_sdk.Hooks.Edit _) -> Alcotest.fail "unexpected edit"
@@ -1729,8 +1729,8 @@ let () =
         test_callback_paranoid_medium_risk_uses_remembered_policy;
       Alcotest.test_case "always_approve bypasses threshold" `Quick
         test_callback_always_approve_bypasses_threshold;
-      Alcotest.test_case "runtime blocker overrides always_approve" `Quick
-        test_callback_runtime_blocker_overrides_always_approve;
+      Alcotest.test_case "typed last_blocker overrides always_approve" `Quick
+        test_callback_typed_last_blocker_overrides_always_approve;
       Alcotest.test_case "runtime trust classifies always_approve flag" `Quick
         test_runtime_trust_classifies_always_approve_flag;
       Alcotest.test_case "always_approve respects forbidden" `Quick

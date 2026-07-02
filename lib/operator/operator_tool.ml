@@ -351,7 +351,7 @@ let operator_tool_name name = operator_remote_tool_name (Operator_remote_name.Op
 let surface_audit_tool_name = operator_remote_tool_name Operator_remote_name.Surface_audit
 
 (* ================================================================ *)
-(* Tool_spec registration                                           *)
+(* Catalog metadata registration                                    *)
 (* ================================================================ *)
 
 let tool_spec_read_only =
@@ -365,27 +365,30 @@ let tool_spec_read_only =
 let tool_spec_hidden = [ "masc_operator_judgment_write"; surface_audit_tool_name ]
 let tool_spec_hidden_destructive = [ operator_tool_name Operator_name.Operator_action ]
 
+let register_catalog_metadata_only (s : tool_schema) =
+  let is_read_only = List.mem s.name tool_spec_read_only in
+  let is_destructive = List.mem s.name tool_spec_hidden_destructive in
+  let is_hidden = List.mem s.name tool_spec_hidden || is_destructive in
+  let existing = Tool_catalog.metadata s.name in
+  Tool_catalog.register_metadata s.name
+    { Tool_catalog.visibility = (if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
+    ; lifecycle = Tool_catalog.Active
+    ; implementation_status = Tool_catalog.Real
+    ; canonical_name = None
+    ; replacement = None
+    ; reason = existing.reason
+    ; allow_direct_call_when_hidden = is_hidden
+    ; readonly = Some is_read_only
+    ; mcp_context_required = Some false
+    ; destructive = Some is_destructive
+    ; idempotent = Some is_read_only
+    ; effect_domain = None
+    ; requires_actor_binding = existing.requires_actor_binding
+    }
+;;
+
 let () =
-  List.iter
-    (fun (s : tool_schema) ->
-      let is_destructive = List.mem s.name tool_spec_hidden_destructive in
-      let is_hidden = List.mem s.name tool_spec_hidden || is_destructive in
-      let existing = Tool_catalog.metadata s.name in
-      Tool_spec.register
-        (Tool_spec.create
-           ~name:s.name
-           ~description:s.description
-           ~module_tag:Tool_dispatch.Mod_operator
-           ~input_schema:s.input_schema
-           ~handler_binding:Tag_dispatch
-           ~is_read_only:(List.mem s.name tool_spec_read_only)
-           ~is_idempotent:(List.mem s.name tool_spec_read_only)
-           ~visibility:(if is_hidden then Tool_catalog.Hidden else Tool_catalog.Default)
-           ~is_destructive
-           ~allow_direct_call_when_hidden:is_hidden
-           ?reason:existing.reason
-           ()))
-    schemas
+  List.iter register_catalog_metadata_only schemas
 
 let () =
   Tool_operator.register_operator_tools ~dispatch ~schemas ~remote_schemas;

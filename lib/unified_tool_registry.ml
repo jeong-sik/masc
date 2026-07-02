@@ -66,6 +66,22 @@ let keeper_task_tool_names =
 
 let is_keeper_task_tool_name name = List.mem name keeper_task_tool_names
 
+(** Local operator front-door names are served through the operator remote
+    profile / HTTP transport, not the generic Tool_dispatch registry. Keep
+    catalog metadata elsewhere, but do not mint generic dispatch tokens for
+    these retired local surfaces. *)
+let retired_local_operator_tool_names =
+  [ "masc_operator_snapshot"
+  ; "masc_operator_digest"
+  ; "masc_operator_action"
+  ; "masc_operator_confirm"
+  ; "masc_operator_judgment_write"
+  ; "masc_surface_audit"
+  ]
+
+let is_retired_local_operator_tool name =
+  List.mem name retired_local_operator_tool_names
+
 (** Workspace state tools are handled by [Tool_workspace.dispatch] and share
     [Mod_state] even when the module-load [Tool_spec] side effect has not run
     yet. The schema facade is the owned source for this dispatch cluster. *)
@@ -118,7 +134,7 @@ let tag_of_name name : TD.module_tag option =
 (** Register a tag + schema only if the name is not already in the tag
     registry. Existing [Tool_spec] registrations are preserved. *)
 let register_name_if_missing name tag =
-  if Option.is_none (TD.lookup_tag name)
+  if (not (is_retired_local_operator_tool name)) && Option.is_none (TD.lookup_tag name)
   then TD.register_module_tag ~schemas:[ schema_for_name name ] ~tag
 
 (** 1. Register every LLM-visible schema from [Config.raw_all_tool_schemas]
@@ -165,7 +181,8 @@ let register_all () =
 let visible_schemas_missing_tags () =
   Config.visible_tool_schemas ()
   |> List.filter (fun (s : Masc_domain.tool_schema) ->
-       Option.is_none (TD.lookup_tag s.name))
+       (not (is_retired_local_operator_tool s.name))
+       && Option.is_none (TD.lookup_tag s.name))
   |> List.map (fun (s : Masc_domain.tool_schema) -> s.name)
 
 (** Startup invariant: every LLM-visible schema has a dispatch tag.

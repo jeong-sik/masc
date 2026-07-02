@@ -202,10 +202,17 @@ let test_message_json_roundtrip () =
 ;;
 
 let test_dispatch_structured () =
+  let tool_schema =
+    { Masc_domain.name = "__test_tool"
+    ; description = "test structured dispatch tool"
+    ; input_schema =
+        `Assoc [ "type", `String "object"; "properties", `Assoc []; "required", `List [] ]
+    }
+  in
   (* Register a test handler *)
   Tool_dispatch.register ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
     Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
-  Tool_dispatch.register_name_tag ~tool_name:"__test_tool" ~tag:Mod_misc;
+  Tool_dispatch.register_module_tag ~schemas:[ tool_schema ] ~tag:Mod_misc;
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with
     | Ok t -> t

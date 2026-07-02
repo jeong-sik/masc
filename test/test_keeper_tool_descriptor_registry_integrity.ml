@@ -1004,6 +1004,7 @@ let test_effective_core_tools_without_universe_has_no_descriptor_publics () =
   (* Before set_masc_schemas, injected_masc_tool_names () returns [].
      Descriptor public names should NOT appear in effective_core_tools
      when their internal_name is absent from the universe. *)
+  Registry.set_masc_schemas [];
   let effective = Registry.effective_core_tools () in
   let descriptor_publics = Descriptor.public_names () in
   List.iter
@@ -1032,7 +1033,8 @@ let test_effective_core_tools_with_full_universe_matches_discovery () =
   Alcotest.(check (list string))
     "effective_core_tools with full universe matches core_discovery_tools"
     (List.sort String.compare discovery)
-    (List.sort String.compare effective)
+    (List.sort String.compare effective);
+  Registry.set_masc_schemas []
 ;;
 
 let () =

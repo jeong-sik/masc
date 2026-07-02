@@ -84,9 +84,16 @@ let test_token_name_readable () =
 
 let test_mint_token_registered () =
   let tool = "__test_token_registered" in
+  let tool_schema =
+    { Masc_domain.name = tool
+    ; description = "test token registered tool"
+    ; input_schema =
+        `Assoc [ "type", `String "object"; "properties", `Assoc []; "required", `List [] ]
+    }
+  in
   Tool_dispatch.register ~tool_name:tool
     ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "ok"));
-  Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
+  Tool_dispatch.register_module_tag ~schemas:[ tool_schema ] ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Ok token -> check string "name" tool token.name
   | Error e -> fail (Printf.sprintf "mint_token failed for registered tool: %s" e)
@@ -98,9 +105,16 @@ let test_mint_token_unregistered () =
 
 let test_dispatch_with_token () =
   let tool = "__test_token_dispatch" in
+  let tool_schema =
+    { Masc_domain.name = tool
+    ; description = "test token dispatch tool"
+    ; input_schema =
+        `Assoc [ "type", `String "object"; "properties", `Assoc []; "required", `List [] ]
+    }
+  in
   Tool_dispatch.register ~tool_name:tool
     ~handler:(fun ~name ~args:_ -> Some (tool_ok ~tool_name:name ("dispatched:" ^ name)));
-  Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
+  Tool_dispatch.register_module_tag ~schemas:[ tool_schema ] ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Error e -> fail e
   | Ok token ->

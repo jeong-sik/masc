@@ -317,6 +317,8 @@ val find_post_by_run_id : store -> run_id:string -> post option
 val get_post_and_comments
   :  store
   -> post_id:string
+  -> ?comment_offset:int
+  -> ?comment_limit:int
   -> (post * comment list, board_error) Result.t
 
 (** Re-runs {!legacy_migrate_post_kind} against persisted

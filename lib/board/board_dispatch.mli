@@ -214,6 +214,8 @@ val get_comments :
   (Board.comment list, Board.board_error) Result.t
 
 val get_post_and_comments :
+  ?comment_offset:int ->
+  ?comment_limit:int ->
   post_id:string ->
   (Board.post * Board.comment list, Board.board_error) Result.t
 

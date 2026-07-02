@@ -161,6 +161,28 @@ let test_workspace_schemas_have_tool_spec_metadata () =
     workspace_names
 ;;
 
+let test_operator_remote_tools_are_dispatch_registered () =
+  init ();
+  Operator_tool.remote_tool_names
+  |> List.iter (fun name ->
+       Alcotest.(check bool)
+         (Printf.sprintf "%s has schema" name)
+         true
+         (Option.is_some (Tool_dispatch.lookup_schema name));
+       Alcotest.(check bool)
+         (Printf.sprintf "%s mints token" name)
+         true
+         (match Tool_dispatch.mint_token ~name with
+          | Ok _ -> true
+          | Error _ -> false);
+       Alcotest.(check bool)
+         (Printf.sprintf "%s routes to Mod_operator" name)
+         true
+         (match Tool_dispatch.lookup_tag name with
+          | Some Tool_dispatch.Mod_operator -> true
+          | Some _ | None -> false))
+;;
+
 let test_retired_tools_are_absent () =
   init ();
   (* Only fully retired tools — no live dispatch handler and no keeper
@@ -225,6 +247,10 @@ let () =
             test_workspace_schemas_match_dispatch_bindings
         ; test_case "workspace schemas have ToolSpec metadata" `Quick
             test_workspace_schemas_have_tool_spec_metadata
+        ] )
+    ; ( "operator_tools"
+      , [ test_case "operator remote tools are dispatch registered" `Quick
+            test_operator_remote_tools_are_dispatch_registered
         ] )
     ; ( "retired_tools"
       , [ test_case "retired tools are absent" `Quick test_retired_tools_are_absent

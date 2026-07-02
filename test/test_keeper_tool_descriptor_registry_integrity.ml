@@ -1002,11 +1002,15 @@ let test_effective_core_tools_is_subset_of_discovery () =
 
 let with_masc_schemas schemas f =
   let prior = Registry.masc_schemas_snapshot () in
-  Fun.protect
-    ~finally:(fun () -> Registry.set_masc_schemas prior)
-    (fun () ->
-      Registry.set_masc_schemas schemas;
-      f ())
+  Registry.set_masc_schemas schemas;
+  match f () with
+  | result ->
+    Registry.set_masc_schemas prior;
+    result
+  | exception exn ->
+    let backtrace = Printexc.get_raw_backtrace () in
+    Registry.set_masc_schemas prior;
+    Printexc.raise_with_backtrace exn backtrace
 ;;
 
 let test_effective_core_tools_without_universe_has_no_descriptor_publics () =

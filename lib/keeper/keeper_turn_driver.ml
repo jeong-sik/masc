@@ -70,6 +70,33 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
+type context_window_rebudget =
+  { requested_context_window : int option
+  ; final_runtime_context_window : int
+  ; resolved_context_window : int
+  ; context_window_rebudgeted : bool
+  }
+
+let resolve_context_window_tokens_after_runtime_selection
+    ~(requested_context_window : int option)
+    ~(final_runtime_context_window : int) : context_window_rebudget =
+  let requested =
+    match requested_context_window with
+    | Some value when value > 0 -> value
+    | Some _ | None -> final_runtime_context_window
+  in
+  let resolved_context_window =
+    min requested final_runtime_context_window
+  in
+  { requested_context_window
+  ; final_runtime_context_window
+  ; resolved_context_window
+  ; context_window_rebudgeted =
+      (match requested_context_window with
+       | Some value when value > 0 -> value <> resolved_context_window
+       | Some _ | None -> false)
+  }
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -102,6 +129,7 @@ let run_named
     ?(cache_system_prompt = false)
     ?(yield_on_tool = false)
     ?compact_ratio
+    ?context_window_tokens
     ?(oas_auto_context_overflow_retry = true)
     ?checkpoint_dir
     ?context_injector
@@ -196,6 +224,7 @@ let run_named
              (no silent fallback to default — RFC-0207/RFC-0206 §2.1)"
             runtime_id))
   | Some assigned_runtime ->
+  let assigned_runtime_id = runtime_id in
   (* RFC-0265: proactively reroute a turn whose active input modality
      (image/audio/document) the assigned runtime cannot accept to a capable
      configured runtime ([\[runtime\].media_failover] order, else declaration
@@ -241,6 +270,56 @@ let run_named
            reason;
          to_runtime_id, rerouted)
   in
+  let final_runtime_context_window =
+    match Runtime.max_context_of_runtime_id runtime_id with
+    | Some value -> value
+    | None -> runtime.Runtime.model.max_context
+  in
+  let assigned_runtime_context_window =
+    match Runtime.max_context_of_runtime_id assigned_runtime_id with
+    | Some value -> Some value
+    | None -> Some assigned_runtime.Runtime.model.max_context
+  in
+  let context_window_rebudget =
+    resolve_context_window_tokens_after_runtime_selection
+      ~requested_context_window:context_window_tokens
+      ~final_runtime_context_window
+  in
+  let context_window_tokens =
+    Some context_window_rebudget.resolved_context_window
+  in
+  (match reroute_decision with
+   | Runtime_agent.Reroute { reason; _ } ->
+     emit_runtime_manifest
+       ~status:"rerouted"
+       ~decision:
+         (Keeper_runtime_manifest.with_payload_role
+            ~payload_role:Keeper_runtime_manifest.Operator_evidence
+            (`Assoc
+              [
+                ("routing_action", `String "modality_rerouted");
+                ("routing_reason", `String reason);
+                ("assigned_runtime_id", `String assigned_runtime_id);
+                ("rerouted_runtime_id", `String runtime_id);
+                ( "assigned_context_window",
+                  match assigned_runtime_context_window with
+                  | Some value -> `Int value
+                  | None -> `Null );
+                ( "requested_context_window",
+                  match
+                    context_window_rebudget.requested_context_window
+                  with
+                  | Some value -> `Int value
+                  | None -> `Null );
+                ( "final_runtime_context_window",
+                  `Int context_window_rebudget.final_runtime_context_window );
+                ( "resolved_context_window",
+                  `Int context_window_rebudget.resolved_context_window );
+                ( "context_window_rebudgeted",
+                  `Bool context_window_rebudget.context_window_rebudgeted );
+              ]))
+       Keeper_runtime_manifest.Runtime_routed
+   | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ -> ());
   (* RFC-0265 follow-up — graceful media degrade floor. When no configured
      runtime can accept the turn's input modality ([No_capable_runtime]), strip
      the unsupported media blocks from the goal, prior [initial_messages], and
@@ -353,6 +432,7 @@ let run_named
     cache_system_prompt;
     yield_on_tool;
     compact_ratio;
+    context_window_tokens;
     oas_auto_context_overflow_retry;
     checkpoint_dir;
     context_injector;
@@ -402,6 +482,9 @@ module For_testing = struct
     Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
 
   let media_degrade_manifest_decision = media_degrade_manifest_decision
+
+  let resolve_context_window_tokens_after_runtime_selection =
+    resolve_context_window_tokens_after_runtime_selection
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing.accept_no_progress_should_try_next

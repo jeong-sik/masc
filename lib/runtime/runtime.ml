@@ -453,9 +453,19 @@ let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
 ;;
 
+let max_context_of_runtime (rt : t) : int =
+  match capabilities_for_runtime rt with
+  | Some caps ->
+    (match caps.Llm_provider.Capabilities.max_context_tokens with
+     | Some provider_cap when provider_cap > 0 ->
+       min rt.model.max_context provider_cap
+     | Some _ | None -> rt.model.max_context)
+  | None -> rt.model.max_context
+;;
+
 let max_context_of_runtime_id (id : string) : int option =
   match get_runtime_by_id id with
-  | Some rt -> Some rt.model.max_context
+  | Some rt -> Some (max_context_of_runtime rt)
   | None -> None
 ;;
 
@@ -1065,7 +1075,7 @@ let set_runtime_media_failover ?runtime_config_path ~runtime_ids () =
    initialized (config-less test binaries). *)
 let default_max_context () : int =
   match get_default_runtime () with
-  | Some rt -> rt.model.max_context
+  | Some rt -> max_context_of_runtime rt
   | None -> Runtime_constants.fallback_context_window
 ;;
 

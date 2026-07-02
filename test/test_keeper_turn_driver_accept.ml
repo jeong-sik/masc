@@ -89,6 +89,26 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let source_path path =
+  if Filename.is_relative path then
+    match Sys.getenv_opt "DUNE_SOURCEROOT" with
+    | Some root -> Filename.concat root path
+    | None -> path
+  else path
+
+let read_source_file path =
+  In_channel.with_open_text (source_path path) In_channel.input_all
+
+let index_of ~needle haystack =
+  let needle_len = String.length needle in
+  let haystack_len = String.length haystack in
+  let rec loop i =
+    if i + needle_len > haystack_len then None
+    else if String.equal (String.sub haystack i needle_len) needle then Some i
+    else loop (i + 1)
+  in
+  if needle_len = 0 then Some 0 else loop 0
+
 let direct_retry_runtime_toml =
   {|
 [runtime]
@@ -1484,6 +1504,39 @@ let test_direct_retry_loop_publishes_non_retry_terminal_cascade () =
   | rows ->
     Alcotest.failf "expected one cascade event, got %d" (List.length rows)
 
+let test_manual_direct_turn_uses_effective_context_budget () =
+  let source = read_source_file "lib/keeper/keeper_turn.ml" in
+  let start_marker = "let max_runtime_context =" in
+  let end_marker = "~initial_max_context:max_runtime_context" in
+  let start =
+    match index_of ~needle:start_marker source with
+    | Some index -> index
+    | None -> Alcotest.fail "manual max_runtime_context block missing"
+  in
+  let stop =
+    match index_of ~needle:end_marker source with
+    | Some index -> index + String.length end_marker
+    | None -> Alcotest.fail "manual direct initial_max_context call missing"
+  in
+  let slice = String.sub source start (stop - start) in
+  Alcotest.(check bool)
+    "manual direct turn resolves max context from runtime/meta"
+    true
+    (contains
+       ~needle:
+         "Keeper_context_runtime.resolve_max_context_resolution\n\
+          \t                  ~requested_override:meta.max_context_override \
+          effective_models"
+       slice);
+  Alcotest.(check bool)
+    "manual direct first attempt uses provider-effective budget"
+    true
+    (contains ~needle:"resolution.effective_budget" slice);
+  Alcotest.(check bool)
+    "manual direct first attempt does not use raw turn_budget"
+    false
+    (contains ~needle:"resolution.turn_budget\n\t            in" slice)
+
 let test_thinking_with_text_is_accepted () =
   let result =
     Masc.Keeper_turn_driver.For_testing.apply_accept
@@ -2271,6 +2324,10 @@ let () =
             "direct retry publishes terminal non-retry cascade"
             `Quick
             test_direct_retry_loop_publishes_non_retry_terminal_cascade;
+          Alcotest.test_case
+            "manual direct turn uses effective context budget"
+            `Quick
+            test_manual_direct_turn_uses_effective_context_budget;
 	          Alcotest.test_case "thinking plus text is accepted" `Quick
 	            test_thinking_with_text_is_accepted;
           Alcotest.test_case "thinking plus tool use is accepted" `Quick

@@ -285,10 +285,7 @@ let compact_if_needed_typed
       msg_count
       tok_count
       trigger_human;
-    let model_meta =
-      let model_labels = Keeper_model_labels.configured_model_labels_of_meta meta in
-      Runtime_provider_binding.context_window_hint_of_labels model_labels
-    in
+    let pre_compact_context_window = max_tokens_of_context ctx in
     (* record_pre_compact's JSONL append is wrapped by
        append_store_json_fail_open in Dashboard_harness_health, so this call
        does not propagate non-Cancel exceptions today.  Keep the call
@@ -302,8 +299,8 @@ let compact_if_needed_typed
           ~message_count:msg_count
           ~token_count:tok_count
           ~strategies:strategy_names
-          ~context_window:model_meta.context_window
-          ~is_local_model:model_meta.is_local_model
+          ~context_window:pre_compact_context_window
+          ~is_local_model:false
           ~trigger
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

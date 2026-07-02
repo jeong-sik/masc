@@ -56,6 +56,30 @@ let write_file path content =
   Fun.protect ~finally:(fun () -> close_out_noerr oc) (fun () -> output_string oc content)
 ;;
 
+let read_file path = In_channel.with_open_text path In_channel.input_all
+
+let fixture_path rel = Masc_test_deps.source_path rel
+
+let parse_key_value_fixture path =
+  read_file path
+  |> String.split_on_char '\n'
+  |> List.filter_map (fun line ->
+    match String.split_on_char '=' line with
+    | [ key; value ] ->
+      let key = String.trim key in
+      if String.equal key "" then None else Some (key, String.trim value)
+    | _ -> None)
+
+let fixture_field fields key =
+  match List.assoc_opt key fields with
+  | Some value -> value
+  | None -> Alcotest.failf "fixture field %S missing" key
+
+let fixture_int_field fields key =
+  match int_of_string_opt (fixture_field fields key) with
+  | Some value -> value
+  | None -> Alcotest.failf "fixture field %S is not an int" key
+
 let with_model_catalog_content content f =
   let path = Filename.temp_file "runtime-thinking-oas-models" ".toml" in
   Fun.protect
@@ -746,6 +770,13 @@ tools-support = true
 thinking-support = true
 streaming = true
 
+[models.stalecontext]
+api-name = "qwen36-35b-a3b-mtp"
+max-context = 524288
+tools-support = true
+thinking-support = true
+streaming = true
+
 [ollama_cloud.think]
 is-default = true
 max-concurrent = 1
@@ -763,6 +794,9 @@ max-concurrent = 1
 max-concurrent = 1
 
 [ollama_cloud.bigout]
+max-concurrent = 1
+
+[ollama_cloud.stalecontext]
 max-concurrent = 1
 |}
 ;;
@@ -992,6 +1026,66 @@ let test_max_output_tokens_accessor_projects_catalog () =
       (Runtime.max_output_tokens_of_runtime_id "bogus.binding"))
 ;;
 
+let test_max_context_accessor_clamps_to_provider_cap () =
+  with_runtime_thinking (fun () ->
+    Alcotest.(check (option int))
+      "runtime TOML 524288 is clamped to provider/OAS qwen36 cap 131072"
+      (Some 131072)
+      (Runtime.max_context_of_runtime_id "ollama_cloud.stalecontext");
+    let resolution =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override:None
+        [ "ollama_cloud.stalecontext" ]
+    in
+    Alcotest.(check int)
+      "keeper context budget uses provider-effective cap"
+      131072
+      resolution.Keeper_context_runtime.effective_budget)
+;;
+
+let test_historical_qwen36_context_overflow_fixture_replays_provider_cap () =
+  let fields =
+    parse_key_value_fixture
+      (fixture_path "test/fixtures/context-overflow-qwen36-2026-06-29.env")
+  in
+  let runtime_id = fixture_field fields "runtime_id" in
+  let keeper_logged_max_context =
+    fixture_int_field fields "keeper_logged_max_context"
+  in
+  let oas_provider_limit = fixture_int_field fields "oas_provider_limit" in
+  Alcotest.(check string)
+    "fixture runtime id"
+    "ollama_cloud.stalecontext"
+    runtime_id;
+  Alcotest.(check int)
+    "fixture captures historical keeper-side oversized budget"
+    524288
+    keeper_logged_max_context;
+  Alcotest.(check int)
+    "fixture captures OAS provider cap"
+    131072
+    oas_provider_limit;
+  with_runtime_thinking (fun () ->
+    Alcotest.(check (option int))
+      "current runtime accessor replays fixture through provider cap"
+      (Some oas_provider_limit)
+      (Runtime.max_context_of_runtime_id runtime_id);
+    let resolution =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override:None
+        [ runtime_id ]
+    in
+    Alcotest.(check int)
+      "current keeper budget no longer reproduces historical oversized value"
+      oas_provider_limit
+      resolution.Keeper_context_runtime.effective_budget;
+    Alcotest.(check bool)
+      "historical oversized keeper budget is not current effective budget"
+      false
+      (resolution.Keeper_context_runtime.effective_budget
+       = keeper_logged_max_context))
+;;
+
 let () =
   Alcotest.run
     "runtime_per_keeper_routing"
@@ -1138,6 +1232,14 @@ let () =
             "max_output_tokens_of_runtime_id projects catalog ceiling"
             `Quick
             test_max_output_tokens_accessor_projects_catalog
+        ; Alcotest.test_case
+            "max_context_of_runtime_id clamps runtime TOML to provider cap"
+            `Quick
+            test_max_context_accessor_clamps_to_provider_cap
+        ; Alcotest.test_case
+            "historical qwen36 overflow fixture replays provider cap"
+            `Quick
+            test_historical_qwen36_context_overflow_fixture_replays_provider_cap
         ] )
     ]
 ;;

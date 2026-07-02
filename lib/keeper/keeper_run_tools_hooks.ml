@@ -17,6 +17,7 @@ type agent_setup =
   ; reducer : Agent_sdk.Context_reducer.t
   ; acc : hook_accumulator
   ; all_tool_names : string list
+  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; receipt_turn_count_ref : int option ref
   ; receipt_model_used_ref : string option ref
   ; receipt_stop_reason_ref : Runtime_agent.stop_reason option ref
@@ -36,7 +37,9 @@ type ctx =
   ; config : Workspace.config
   ; keeper_tools_cleanup : unit -> unit
   ; manifest_keeper_turn_id : int option
+  ; max_context : int
   ; meta : Keeper_meta_contract.keeper_meta
+  ; tool_context_estimate : Keeper_run_prompt.tool_schema_context_estimate
   ; turn_ctx_cell : Keeper_tool_call_log.turn_ctx_cell
     (* RFC-0225 §3.3: per-run carrier; written by the pre-request hook
        below, read by the post-tool hooks in Keeper_hooks_oas. *)
@@ -82,7 +85,9 @@ let assemble_hooks
   let config = ctx.config in
   let keeper_tools_cleanup = ctx.keeper_tools_cleanup in
   let manifest_keeper_turn_id = ctx.manifest_keeper_turn_id in
+  let max_context = ctx.max_context in
   let meta = ctx.meta in
+  let tool_context_estimate = ctx.tool_context_estimate in
   let turn_ctx_cell = ctx.turn_ctx_cell in
   let receipt_turn_count_ref = ctx.receipt_turn_count_ref in
   let receipt_model_used_ref = ctx.receipt_model_used_ref in
@@ -514,6 +519,106 @@ let assemble_hooks
                        !recorded_blocks;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
+                let extra_system_context_estimated_tokens =
+                  Option.map Keeper_context_core_accessors.estimate_char_tokens ctx
+                in
+                let hook_extra_system_context_estimated_tokens =
+                  Keeper_run_prompt.estimate_unaccounted_extra_system_context_tokens
+                    !recorded_blocks
+                in
+                let post_hook_estimated_input_tokens =
+                  tool_context_estimate.estimated_input_tokens_with_tools
+                  + hook_extra_system_context_estimated_tokens
+                in
+                let post_hook_context_window_budget =
+                  Keeper_run_prompt.context_window_budget
+                    ~estimated_input_tokens:post_hook_estimated_input_tokens
+                    ~max_context
+                in
+                let post_hook_context_window_error =
+                  Keeper_run_prompt.preflight_context_window
+                    ~estimated_input_tokens:post_hook_estimated_input_tokens
+                    ~max_context
+                in
+                let post_hook_over_context_window =
+                  match post_hook_context_window_error with
+                  | Ok () -> false
+                  | Error _ -> true
+                in
+                (match runtime_manifest_context, runtime_manifest_append with
+                 | Some manifest_context, Some append_manifest ->
+                   let string_opt_to_json = function
+                     | Some value -> `String value
+                     | None -> `Null
+                   in
+                   let int_opt_to_json = function
+                     | Some value -> `Int value
+                     | None -> `Null
+                   in
+                   let post_tool_context =
+                     last_tool_results <> []
+                   in
+                   append_manifest
+                     (Keeper_runtime_manifest.make_for_context
+                        manifest_context
+                        ~event:Keeper_runtime_manifest.Context_injected
+                        ~oas_turn_count:turn
+                        ~runtime_id:runtime_id_string
+                        ~status:
+                          (if post_hook_over_context_window
+                           then "post_hook_context_overflow"
+                           else if post_tool_context
+                           then "post_tool_context_injection"
+                           else "pre_tool_context_injection")
+                        ~decision:
+                          (Keeper_runtime_manifest.with_payload_role
+                             ~payload_role:Keeper_runtime_manifest.Model_input
+                             (`Assoc
+                               [ ( "sdk_turn", `Int turn )
+                               ; ( "post_tool_context_injection",
+                                   `Bool post_tool_context )
+                               ; ( "last_tool_result_count",
+                                   `Int (List.length last_tool_results) )
+                               ; ( "prompt_block_count",
+                                   `Int (List.length acc.prompt_blocks) )
+                               ; ( "extra_system_context_digest",
+                                   string_opt_to_json
+                                     acc.extra_system_context_digest )
+                               ; ( "extra_system_context_computed_size",
+                                   int_opt_to_json
+                                     acc.extra_system_context_size )
+                               ; ( "extra_system_context_injected_size",
+                                   int_opt_to_json
+                                     acc.extra_system_context_size )
+                               ; ( "extra_system_context_estimated_tokens",
+                                   int_opt_to_json
+                                     extra_system_context_estimated_tokens )
+                               ; ( "hook_extra_system_context_estimated_tokens",
+                                   `Int hook_extra_system_context_estimated_tokens )
+                               ; ( "estimated_input_tokens_with_tools",
+                                   `Int
+                                     tool_context_estimate.estimated_input_tokens_with_tools )
+                               ; ( "post_hook_estimated_input_tokens",
+                                   `Int post_hook_estimated_input_tokens )
+                               ; ( "context_window",
+                                   `Int max_context )
+                               ; ( "post_hook_remaining_context_tokens",
+                                   `Int
+                                     post_hook_context_window_budget
+                                       .remaining_context_tokens )
+                               ; ( "post_hook_over_context_tokens",
+                                   `Int
+                                     post_hook_context_window_budget
+                                       .over_context_tokens )
+                               ; ( "post_hook_context_usage_ratio",
+                                   `Float
+                                     post_hook_context_window_budget
+                                       .context_usage_ratio )
+                               ; ( "post_hook_over_context_window",
+                                   `Bool post_hook_over_context_window )
+                               ]))
+                        ())
+                 | _ -> ());
                 (* Phase O observability: capture the effective OAS request
                    boundary after keeper-owned context injection has finalized
                    [extra_system_context]. *)
@@ -540,8 +645,6 @@ let assemble_hooks
       }
     in
     let hooks = Agent_sdk.Hooks.compose ~outer:before_turn_hook ~inner:base_hooks in
-    ignore runtime_manifest_context;
-    ignore runtime_manifest_append;
     (* Tier K4b/K4c: install the tool-emission PostToolUse hook so
      tagged tool results flow into this keeper's own accumulator
      during Agent.run. The drain happens in keeper_post_turn.ml
@@ -629,6 +732,7 @@ let assemble_hooks
       ; reducer
       ; acc
       ; all_tool_names
+      ; tool_context_estimate
       ; receipt_turn_count_ref
       ; receipt_model_used_ref
       ; receipt_stop_reason_ref

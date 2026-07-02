@@ -68,6 +68,7 @@ type config =
   cache_system_prompt : bool;
   yield_on_tool : bool;
   compact_ratio : float option;
+  context_window_tokens : int option;
   oas_auto_context_overflow_retry : bool;
   context_injector : Agent_sdk.Hooks.context_injector option;
   context : Agent_sdk.Context.t option;
@@ -401,13 +402,41 @@ let checkpoint_messages = function
   | None -> []
   | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
 
+let messages_for_run_with_checkpoint
+    ~(checkpoint_messages : Agent_sdk.Types.message list)
+    ~(initial_messages : Agent_sdk.Types.message list) =
+  (* [acc @ [message]] inside a fold plus a linear [List.exists] scan makes
+     this O(n^2) in the combined message count. A checkpointed run can carry
+     a long conversation history, so replace both with an O(n) pass: a
+     Hashtbl for O(1) average membership (structural equality, matching the
+     original [( = )] semantics) and prepend-then-reverse instead of
+     per-element append. *)
+  let seen : (Agent_sdk.Types.message, unit) Hashtbl.t =
+    Hashtbl.create (List.length initial_messages + List.length checkpoint_messages)
+  in
+  List.iter (fun message -> Hashtbl.replace seen message ()) initial_messages;
+  let new_checkpoint_messages_rev =
+    List.fold_left
+      (fun acc message ->
+        if Hashtbl.mem seen message
+        then acc
+        else (
+          Hashtbl.replace seen message ();
+          message :: acc))
+      []
+      checkpoint_messages
+  in
+  initial_messages @ List.rev new_checkpoint_messages_rev
+
 let content_blocks_for_run_with_checkpoint
     ~(checkpoint_messages : Agent_sdk.Types.message list)
     ~(initial_messages : Agent_sdk.Types.message list)
     ~(goal_blocks : Agent_sdk.Types.content_block list) =
-  content_blocks_of_messages initial_messages
-  @ content_blocks_of_messages checkpoint_messages
-  @ goal_blocks
+  let history_blocks =
+    messages_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
+    |> content_blocks_of_messages
+  in
+  history_blocks @ goal_blocks
 
 let content_blocks_for_run
     ~(initial_messages : Agent_sdk.Types.message list)
@@ -767,6 +796,7 @@ module For_testing = struct
   let decide_clock_for_idle = decide_clock_for_idle
   let required_modalities_of_content_blocks = required_modalities_of_content_blocks
   let content_blocks_of_messages = content_blocks_of_messages
+  let messages_for_run_with_checkpoint = messages_for_run_with_checkpoint
   let content_blocks_for_run = content_blocks_for_run
   let content_blocks_for_run_with_checkpoint =
     content_blocks_for_run_with_checkpoint

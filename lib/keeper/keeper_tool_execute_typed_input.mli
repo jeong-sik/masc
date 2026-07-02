@@ -129,14 +129,16 @@ val of_json : Yojson.Safe.t -> (execute_input, string) result
     [timeout_sec] is accepted at this layer and consumed by the caller.
     [executable] and [pipeline] together, raw command-string fields, [{stages =
     ...}], and other unsupported fields are intentionally rejected here.  No
-    compatibility normalization is applied: missing [find .] paths, empty
-    [executable] fields, and duplicated executable tokens in [argv] remain
-    caller errors. *)
+    compatibility normalization is applied at parse time: missing [find .]
+    paths, empty [executable] fields, and duplicated executable tokens in
+    [argv] remain caller-authored input for validation/lowering. *)
 
 val validate : execute_input -> (unit, validation_error) result
 (** Run all structural checks against [input].  Returns [Ok ()] on
-    success, or the first {!validation_error} encountered.  No side
-    effects, no exceptions. *)
+    success, or the first {!validation_error} encountered.  Validation
+    mirrors lowering's bounded argv0 autocorrection: a leading executable
+    duplicate with at least one following argument is tolerated, while the
+    caller-authored input is not mutated.  No side effects, no exceptions. *)
 
 val to_shell_ir_unvalidated :
   ?sandbox:Masc_exec.Sandbox_target.t ->
@@ -144,7 +146,10 @@ val to_shell_ir_unvalidated :
   (Masc_exec.Shell_ir.t, validation_error) result
 (** Lower [input] into {!Masc_exec.Shell_ir.t} without structural validation.
     Callers that use the Shell IR facade ([Shell_command_gate.gate_typed])
-    may use this entrypoint when the boundary has already been checked. *)
+    may use this entrypoint when the boundary has already been checked.
+    Lowering drops a leading duplicated executable token only when at least
+    one real argument remains after it; a single argument equal to the
+    executable is preserved as caller-authored data. *)
 
 val to_shell_ir :
   ?sandbox:Masc_exec.Sandbox_target.t ->
@@ -154,10 +159,10 @@ val to_shell_ir :
     inputs become an explicit {!Masc_exec.Shell_ir.Pipeline}; embedded pipe
     characters inside payload argv tokens remain ordinary argument data, while
     standalone pipe operator argv tokens are rejected before lowering.  [Exec]
-    argv is passed through as authored after validation; duplicated executable
-    tokens at [argv[0]] are rejected rather than silently stripped.  [sandbox]
-    defaults to host execution; keeper callers may provide Docker runtime
-    targets after sandbox/profile resolution. *)
+    and pipeline-stage argv are lowered with the same bounded argv0
+    autocorrection as {!to_shell_ir_unvalidated}.  [sandbox] defaults to host
+    execution; keeper callers may provide Docker runtime targets after
+    sandbox/profile resolution. *)
 
 val pp_validation_error : Format.formatter -> validation_error -> unit
 (** Human-readable formatter for {!validation_error}.  Stable across

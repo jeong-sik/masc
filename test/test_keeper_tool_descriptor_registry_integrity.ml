@@ -26,6 +26,15 @@ module Resolution = Masc.Keeper_tool_descriptor_resolution
 module Surface = Masc.Keeper_agent_tool_surface
 module Board = Tool_shard_types
 module Board_tool_registry = Board_tool_registry
+module Keeper_dispatch_ref = Masc.Keeper_dispatch_ref
+module Workspace = Masc.Workspace
+module Task = Masc.Task
+module Keeper_tool_surface = Masc.Keeper_tool_surface
+
+(* Force-link [Keeper_tool_surface] so its module-load registration of
+   keeper tools into [Keeper_dispatch_ref.dispatch] runs before the
+   dispatch gap test. *)
+let () = ignore Masc.Keeper_tool_surface.schemas
 
 let all_descriptors () : Descriptor.t list = Descriptor.all_descriptors ()
 
@@ -834,6 +843,102 @@ let test_rfc_0182_clusters_have_descriptor_projection () =
     cluster_projection_table
 ;;
 
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Unix.unlink dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      let rec rm path =
+        if Sys.file_exists path
+        then
+          if Sys.is_directory path
+          then begin
+            Sys.readdir path |> Array.iter (fun name -> rm (Filename.concat path name));
+            Unix.rmdir path
+          end else Unix.unlink path
+      in
+      try rm dir with _ -> ())
+    (fun () -> f dir)
+;;
+
+(* RFC-0267 Phase 2 — [masc_task_set_goal] must have a descriptor that
+   projects from the task schema registry and must actually dispatch
+   through [Task.Tool.dispatch]. The descriptor makes the tool visible
+   to the keeper surface; the dispatch check proves the runtime handler
+   wiring is not stale. *)
+let test_masc_task_set_goal_is_described_and_dispatched () =
+  let descriptor = required_internal_descriptor "masc_task_set_goal" in
+  Alcotest.(check string)
+    "masc_task_set_goal descriptor id"
+    "masc.task.set_goal"
+    descriptor.Descriptor.id;
+  Alcotest.(check string)
+    "masc_task_set_goal runtime handler"
+    "tool_masc_task_dispatch"
+    (Descriptor.runtime_handler_to_string descriptor.runtime_handler);
+  let expected_schema =
+    match
+      List.find_opt
+        (fun (s : Masc_domain.tool_schema) -> String.equal s.name "masc_task_set_goal")
+        Task.Schemas.schemas
+    with
+    | Some schema -> schema.input_schema
+    | None -> Alcotest.fail "missing Task.Schemas schema for masc_task_set_goal"
+  in
+  Alcotest.(check bool)
+    "masc_task_set_goal schema projected from Task.Schemas"
+    true
+    (descriptor.Descriptor.input_schema = expected_schema);
+  with_temp_dir "masc_task_set_goal_dispatch" (fun dir ->
+    let config = Workspace.default_config dir in
+    ignore (Workspace.init config ~agent_name:(Some "test-agent"));
+    let ctx : Task.Tool.context =
+      { config; agent_name = "test-agent"; sw = None }
+    in
+    let args =
+      `Assoc [ "task_id", `String "task-001"; "goal_id", `String "goal-001" ]
+    in
+    match Task.Tool.dispatch ctx ~name:"masc_task_set_goal" ~args with
+    | Some _ -> ()
+    | None -> Alcotest.fail "masc_task_set_goal dispatch returned None")
+;;
+
+(* Dispatch gap integrity: every descriptor backed by the keeper
+   dispatch cluster must be reachable through [Keeper_dispatch_ref.dispatch].
+   This catches the common failure mode where a descriptor is added to
+   [internal_descriptors] but its ctx-free registration in
+   [Keeper_tool_surface] is forgotten. *)
+let test_keeper_dispatch_ref_reaches_every_keeper_descriptor () =
+  with_temp_dir "keeper_dispatch_gap" (fun dir ->
+    let config = Workspace.default_config dir in
+    let agent_name = "test-agent" in
+    let keeper_descriptors =
+      Descriptor.all_descriptors ()
+      |> List.filter (fun d ->
+        match d.Descriptor.runtime_handler with
+        | Descriptor.Tool_masc_keeper_dispatch -> true
+        | _ -> false)
+    in
+    let unreachable =
+      List.filter_map
+        (fun d ->
+           let name = d.Descriptor.internal_name in
+           match
+             !Keeper_dispatch_ref.dispatch ~config ~agent_name ~name ~args:(`Assoc []) ()
+           with
+           | Some _ -> None
+           | None -> Some name)
+        keeper_descriptors
+    in
+    if unreachable <> []
+    then
+      Alcotest.failf
+        "Keeper_dispatch_ref.dispatch returned None for %d keeper descriptor(s): %s"
+        (List.length unreachable)
+        (String.concat ", " unreachable))
+;;
+
 (* RFC-0190 — every entry of [public_mcp_surface_tools] must either have
    a descriptor or be on the [public_mcp_non_descriptor]
    allowlist. New surface additions without a descriptor are rejected. *)
@@ -992,6 +1097,16 @@ let () =
             "keeper/surface_audit project to descriptors"
             `Quick
             test_rfc_0182_clusters_have_descriptor_projection
+        ] )
+    ; ( "dispatch-gap"
+      , [ test_case
+            "masc_task_set_goal is described and dispatched"
+            `Quick
+            test_masc_task_set_goal_is_described_and_dispatched
+        ; test_case
+            "every keeper descriptor is reachable via Keeper_dispatch_ref.dispatch"
+            `Quick
+            test_keeper_dispatch_ref_reaches_every_keeper_descriptor
         ] )
     ; ( "rfc-0190-surface-projection"
       , [ test_case

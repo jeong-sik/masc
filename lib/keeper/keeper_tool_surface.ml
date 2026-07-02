@@ -835,6 +835,16 @@ let () =
               ~tool_name:name
               (handle_keeper_sandbox_status ctx args))
        | _ -> eio_context_missing name)
+    | "masc_keeper_sandbox_start" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (keeper_sandbox_start_body ~config args))
+    | "masc_keeper_sandbox_stop" ->
+      Some
+        (tool_result_with_tool_name
+           ~tool_name:name
+           (keeper_sandbox_stop_body ~config args))
     | "masc_keeper_down" ->
       Keeper_tool_surface_ops.invalidate_keeper_list_cache ();
       Keeper_tool_surface_ops.invalidate_status_cache (Tool_args.get_string args "name" "");

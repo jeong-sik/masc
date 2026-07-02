@@ -335,6 +335,28 @@ and handle_transition ~tool_name ~start_time ctx args =
          message)
   | None ->
   match client_side_transition_gate_error ~task_opt ~action ~action_s with
+  | Some (Masc_domain.Task_error.InvalidState message as err) ->
+    log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
+    Tool_result.error
+      ~failure_class:(Some Tool_result.Workflow_rejection)
+      ~tool_name
+      ~start_time
+      (workflow_rejection_payload_json
+         ~rule_id:"task_transition_invalid_state"
+         ~tool_suggestion:"keeper_tasks_list"
+         ~hint:
+           "The requested lifecycle transition is not valid for the task's current \
+            state. Inspect the task status and use a valid next action instead of \
+            retrying the same transition."
+         ~scope_policy:"observe"
+         ~recoverable:false
+         ~alternatives:[ "keeper_tasks_list"; "masc_tasks"; "masc_transition" ]
+         ~extra_fields:
+           [ "task_id", `String task_id
+           ; "action", `String action_s
+           ; "requested_agent", `String ctx.agent_name
+           ]
+         (Printf.sprintf "Invalid task state: %s" message))
   | Some err ->
     log_task_transition_failed ~agent_name:ctx.agent_name (Masc_domain.Task err);
     result_to_response ~tool_name ~start_time (Error (Masc_domain.Task err))

@@ -267,9 +267,44 @@ let handle_keeper_chat_request_cancel state request reqd =
    A fixed external timeout conflicts with multi-turn tool-use loops and
    causes lost turn metrics when the timeout fires mid-Agent.run().
    Aligned with MCP path (mcp_server_eio_call_tool.ml:139-143). *)
+
+(** Build a compact error-detail string for audit/telemetry, mirroring the
+    MCP tool path.  Keeps long error bodies from dominating log/JSONL rows
+    while preserving a diagnostic preview. *)
+let keeper_tool_failure_error_detail ~duration_ms ~error_body =
+  let error_preview_max = 200 in
+  let truncated =
+    String_util.utf8_safe ~max_bytes:(error_preview_max + 3) ~suffix:"..." error_body
+    |> String_util.to_string
+  in
+  Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated
+
+(** Structured details for the dashboard [tool_call_failure] log event.
+    Includes the typed [failure_class] and a bounded error preview. The full
+    provider/tool body can be large or sensitive, so log rows carry size and
+    truncation metadata instead of the raw body. *)
+let keeper_tool_failure_log_details ~tool_name ~agent_name ~duration_ms
+    ~streaming ~error_body ~failure_class =
+  let preview =
+    String_util.utf8_safe ~max_bytes:200 ~suffix:"..." error_body
+  in
+  `Assoc
+    [
+      ("event_family", `String "tool_call_failure");
+      ( "failure_class",
+        `String (Tool_result.tool_failure_class_to_string failure_class) );
+      ("tool_name", `String tool_name);
+      ("agent_name", `String agent_name);
+      ("duration_ms", `Int duration_ms);
+      ("streaming", `Bool streaming);
+      ("error_body_preview", `String (String_util.to_string preview));
+      ("error_body_truncated", `Bool (String_util.was_truncated preview));
+      ("error_body_bytes", `Int (String.length error_body));
+    ]
+
 let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~arguments =
   let start_time = Eio.Time.now clock in
-  let success, body =
+  let success, body, failure_class =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
@@ -282,36 +317,41 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
         }
       in
       match Keeper_tool_surface.dispatch keeper_ctx ~name:"masc_keeper_msg" ~args:arguments with
-      | Some result -> Tool_result.is_success result, Tool_result.message result
-      | None -> (false, "masc_keeper_msg dispatch unavailable")
+      | Some result ->
+          let success = Tool_result.is_success result in
+          let body = Tool_result.message result in
+          let failure_class =
+            match Tool_result.failure_class result with
+            | Some cls -> cls
+            | None -> Tool_result.Runtime_failure
+          in
+          success, body, failure_class
+      | None -> false, "masc_keeper_msg dispatch unavailable", Tool_result.Runtime_failure
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Workspace.Not_initialized ->
-        (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+        ( false,
+          Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized),
+          Tool_result.Runtime_failure )
     | exn ->
         let err = Printexc.to_string exn in
         Log.Mcp.error "tools/call crashed: %s" err;
-        (false, Printf.sprintf "Internal error: %s" err)
+        false, Printf.sprintf "Internal error: %s" err, Tool_result.Runtime_failure
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
-  let error_msg =
+  let error_detail =
     if success then None
-    else Some (Printf.sprintf "duration_ms=%d" duration_ms)
+    else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
   in
   Audit_log.log_tool_call (Mcp_server.workspace_config state)
-    ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
+    ~agent_id:agent_name ~tool_name:"masc_keeper_msg" ~success ~error_msg:error_detail ();
   if not success then
     Log.Keeper.emit Log.Error
       ~details:
-        (`Assoc
-          [
-            ("event_family", `String "tool_call_failure");
-            ("tool_name", `String "masc_keeper_msg");
-            ("agent_name", `String agent_name);
-            ("duration_ms", `Int duration_ms);
-            ("streaming", `Bool false);
-          ])
+        (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
+           ~agent_name ~duration_ms ~streaming:false ~error_body:body
+           ~failure_class)
       "keeper tool call failed: masc_keeper_msg";
   let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then (
@@ -322,10 +362,14 @@ let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~argum
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
+           let telemetry_failure_class =
+             if success then None else Some failure_class
+           in
            Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success ~duration_ms
              ~source:(Tool_registry.string_of_source Agent_internal)
-             ?error_kind:telemetry_error_kind ?error_message:error_msg ()
+             ?failure_class:telemetry_failure_class
+             ?error_kind:telemetry_error_kind ?error_message:error_detail ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -535,7 +579,7 @@ let keeper_stream_send_event ?on_closed writer mutex closed event =
 let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event state
     ~agent_name ~arguments ~on_text_delta =
   let start_time = Eio.Time.now clock in
-  let success, body =
+  let success, body, failure_class =
     try
       let keeper_ctx : _ Keeper_tool_surface.context =
         {
@@ -551,36 +595,41 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
         Keeper_tool_surface.dispatch_stream ~on_text_delta ?on_event keeper_ctx
           ~name:"masc_keeper_msg" ~args:arguments
       with
-      | Some result -> Tool_result.is_success result, Tool_result.message result
-      | None -> (false, "masc_keeper_msg stream dispatch unavailable")
+      | Some result ->
+          let success = Tool_result.is_success result in
+          let body = Tool_result.message result in
+          let failure_class =
+            match Tool_result.failure_class result with
+            | Some cls -> cls
+            | None -> Tool_result.Runtime_failure
+          in
+          success, body, failure_class
+      | None -> false, "masc_keeper_msg stream dispatch unavailable", Tool_result.Runtime_failure
     with
     | Eio.Cancel.Cancelled _ as exn -> raise exn
     | Workspace.Not_initialized ->
-        (false, Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized))
+        ( false,
+          Masc_domain.masc_error_to_string (Masc_domain.System Masc_domain.System_error.NotInitialized),
+          Tool_result.Runtime_failure )
     | exn ->
         let err = Printexc.to_string exn in
         Log.Mcp.error "tools/call crashed (stream): %s" err;
-        (false, Printf.sprintf "Internal error: %s" err)
+        false, Printf.sprintf "Internal error: %s" err, Tool_result.Runtime_failure
   in
   let end_time = Eio.Time.now clock in
   let duration_ms = Keeper_timing.elapsed_duration_ms ~start_time ~end_time in
-  let error_msg =
+  let error_detail =
     if success then None
-    else Some (Printf.sprintf "duration_ms=%d" duration_ms)
+    else Some (keeper_tool_failure_error_detail ~duration_ms ~error_body:body)
   in
   Audit_log.log_tool_call (Mcp_server.workspace_config state) ~agent_id:agent_name
-    ~tool_name:"masc_keeper_msg" ~success ~error_msg ();
+    ~tool_name:"masc_keeper_msg" ~success ~error_msg:error_detail ();
   if not success then
     Log.Keeper.emit Log.Error
       ~details:
-        (`Assoc
-          [
-            ("event_family", `String "tool_call_failure");
-            ("tool_name", `String "masc_keeper_msg");
-            ("agent_name", `String agent_name);
-            ("duration_ms", `Int duration_ms);
-            ("streaming", `Bool true);
-          ])
+        (keeper_tool_failure_log_details ~tool_name:"masc_keeper_msg"
+           ~agent_name ~duration_ms ~streaming:true ~error_body:body
+           ~failure_class)
       "keeper tool call failed: masc_keeper_msg";
   let telemetry_enabled = Env_config_core.telemetry_enabled () in
   if telemetry_enabled then (
@@ -591,10 +640,14 @@ let execute_keeper_stream_tool_streaming ~sw ~clock ?auth_token:_ ?on_event stat
              if success then None
              else Some (Telemetry_eio.error_kind_of_string "tool_failure")
            in
+           let telemetry_failure_class =
+             if success then None else Some failure_class
+           in
            Telemetry_eio.track_tool_called ~fs (Mcp_server.workspace_config state)
              ~tool_name:"masc_keeper_msg" ~agent_id:agent_name ~success
              ~duration_ms ~source:(Tool_registry.string_of_source Agent_internal)
-             ?error_kind:telemetry_error_kind ?error_message:error_msg ()
+             ?failure_class:telemetry_failure_class
+             ?error_kind:telemetry_error_kind ?error_message:error_detail ()
          with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
@@ -1495,4 +1548,5 @@ module For_testing = struct
   let surface_context_to_instructions = surface_context_to_instructions
   let empty_stream_bridge_state = empty_keeper_stream_bridge_state
   let translate_oas_stream_event = translate_oas_stream_event
+  let keeper_tool_failure_log_details = keeper_tool_failure_log_details
 end

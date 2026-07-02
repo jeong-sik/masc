@@ -138,6 +138,13 @@ val next_round :
   masc_root:string -> keeper_name:string -> trace_id:string -> turn:int ->
   int
 
+val trajectory_lines_of_jsonl_lines :
+  trace_id:string -> string list -> trajectory_line list * int * int
+(** Decode JSONL lines into parsed trajectory lines, the number of malformed
+    or unrecognized rows, and the total number of non-empty rows seen.
+    Intentionally skipped rows such as [trajectory_summary] do not count as
+    malformed. *)
+
 val read_all_lines :
   masc_root:string -> keeper_name:string -> trace_id:string ->
   trajectory_line list

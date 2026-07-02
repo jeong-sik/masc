@@ -11,7 +11,7 @@ open Keeper_tool_shared_runtime
 open Keeper_workspace_ops_setup
 
 (* Ripgrep input validation: reject malformed --type values and regex
-   patterns before any Docker spawn or host rg execution. *)
+   patterns before any Docker spawn or workspace search. *)
 let rg_type_name_re = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
 
 let validate_rg_type file_type =
@@ -25,14 +25,53 @@ let validate_rg_type file_type =
          file_type)
 ;;
 
+let read_process_channel ic =
+  let buf = Buffer.create 256 in
+  let chunk = Bytes.create 4096 in
+  let rec loop () =
+    match input ic chunk 0 (Bytes.length chunk) with
+    | 0 -> Buffer.contents buf
+    | n ->
+      Buffer.add_subbytes buf chunk 0 n;
+      loop ()
+    | exception End_of_file -> Buffer.contents buf
+  in
+  loop ()
+;;
+
 let validate_rg_pattern pattern =
+  let argv = [| "rg"; "--regexp"; pattern; "--files-with-matches"; "/dev/null" |] in
   try
-    let _ = Re.Pcre.re pattern |> Re.compile in
-    Ok ()
-  with exn ->
+    let ic, oc, ec = Unix.open_process_args_full "rg" argv (Unix.environment ()) in
+    let _stdout = read_process_channel ic in
+    let stderr = read_process_channel ec in
+    match Unix.close_process_full (ic, oc, ec) with
+    | Unix.WEXITED 0 | Unix.WEXITED 1 -> Ok ()
+    | Unix.WEXITED code ->
+      let detail =
+        String.trim stderr
+        |> String_util.utf8_safe ~max_bytes:240 ~suffix:"..."
+        |> String_util.to_string
+      in
+      Error
+        (Printf.sprintf
+           "invalid ripgrep regex pattern %S: rg exited %d%s"
+           pattern
+           code
+           (if detail = "" then "" else ": " ^ detail))
+    | Unix.WSIGNALED signal | Unix.WSTOPPED signal ->
+      Error
+        (Printf.sprintf
+           "invalid ripgrep regex pattern %S: rg interrupted by signal %d"
+           pattern
+           signal)
+  with
+  | Unix.Unix_error (Unix.ENOENT, _, _) ->
+    Error "ripgrep executable not found while validating regex pattern"
+  | exn ->
     Error
       (Printf.sprintf
-         "invalid regex pattern %S: %s"
+         "ripgrep regex validation failed for %S: %s"
          pattern
          (Printexc.to_string exn))
 ;;

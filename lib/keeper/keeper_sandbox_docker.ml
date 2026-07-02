@@ -325,7 +325,6 @@ let docker_run_argv
   @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
       ~base_path:config.base_path
       ~container_root
-  @ Keeper_sandbox_runtime.docker_gitconfig_mount_args ()
   @ secret_args
   @ network_args
   @ identity_mounts

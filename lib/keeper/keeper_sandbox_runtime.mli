@@ -229,16 +229,6 @@ val docker_config_mount_args
   -> container_root:string
   -> string list
 
-(** Host-side gitconfig path resolved from [$HOME]. *)
-val host_gitconfig_path : unit -> string
-
-(** Container-side gitconfig path ([/tmp/.gitconfig]). *)
-val container_gitconfig_path : unit -> string
-
-(** Docker [-v ...] argv fragment that exposes the host gitconfig read-only
-    at {!container_gitconfig_path} when it exists. *)
-val docker_gitconfig_mount_args : unit -> string list
-
 (** Docker [-v ...] specs for the read-only workspace-state subset that keeper
     task worktrees may read through their container-side runtime [.masc]
     projection. This intentionally excludes auth, credentials, locks,

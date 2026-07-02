@@ -1873,31 +1873,42 @@ let json_string_field key = function
       | _ -> "")
   | Some _ | None -> ""
 
-let test_keeper_tool_failure_log_details_include_body_and_class () =
+let test_keeper_tool_failure_log_details_include_preview_and_class () =
+  let error_body = String.make 260 'x' in
   let details =
     Server_routes_http_keeper_stream.For_testing.keeper_tool_failure_log_details
       ~tool_name:"masc_keeper_msg"
       ~agent_name:"agent-1"
       ~duration_ms:123
       ~streaming:true
-      ~error_body:"policy denied"
+      ~error_body
       ~failure_class:Tool_result.Policy_rejection
   in
   check string "event_family" "tool_call_failure"
     (json_string_field "event_family" (Some details));
   check string "failure_class" "policy_rejection"
     (json_string_field "failure_class" (Some details));
-  check string "error_body" "policy denied"
-    (json_string_field "error_body" (Some details));
+  check string "error_body_preview" (String.make 197 'x' ^ "...")
+    (json_string_field "error_body_preview" (Some details));
   check string "tool_name" "masc_keeper_msg"
     (json_string_field "tool_name" (Some details));
   check string "agent_name" "agent-1"
     (json_string_field "agent_name" (Some details));
   match details with
-  | `Assoc fields -> (
-      match List.assoc_opt "streaming" fields with
+  | `Assoc fields ->
+      (match List.assoc_opt "streaming" fields with
       | Some (`Bool true) -> ()
-      | _ -> fail "expected streaming=true")
+      | _ -> fail "expected streaming=true");
+      (match List.assoc_opt "error_body_truncated" fields with
+       | Some (`Bool true) -> ()
+       | _ -> fail "expected error_body_truncated=true");
+      (match List.assoc_opt "error_body_bytes" fields with
+       | Some (`Int 260) -> ()
+       | _ -> fail "expected error_body_bytes=260");
+      Alcotest.(check bool)
+        "full error body omitted from log details"
+        false
+        (List.mem_assoc "error_body" fields)
   | _ -> fail "expected Assoc"
 
 let test_visible_reply_uses_streamed_text_fallback () =
@@ -2703,7 +2714,7 @@ let () =
           test_case "visible reply uses typed reply field only" `Quick
             test_extract_visible_reply_uses_typed_reply_field_only;
           test_case "tool failure log details include error body and failure_class"
-            `Quick test_keeper_tool_failure_log_details_include_body_and_class;
+            `Quick test_keeper_tool_failure_log_details_include_preview_and_class;
           test_case "direct reply rejects no visible reply" `Quick
             test_direct_reply_terminal_error_rejects_no_visible_reply;
           test_case "direct reply allows continuation checkpoint" `Quick

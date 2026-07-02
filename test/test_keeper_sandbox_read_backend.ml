@@ -1077,27 +1077,6 @@ let test_docker_config_mount_and_env_args () =
        ~base_path:base
        ~container_root)
 
-let test_docker_gitconfig_mount_args_skips_when_missing () =
-  with_env "HOME" "/nonexistent/missing_home_for_gitconfig_test" @@ fun () ->
-  Alcotest.(check (list string))
-    "missing gitconfig yields no mount args"
-    []
-    (Keeper_sandbox_runtime.docker_gitconfig_mount_args ())
-
-let test_docker_gitconfig_mount_args_includes_when_present () =
-  let home = temp_dir () in
-  let gitconfig = Filename.concat home ".gitconfig" in
-  write_file gitconfig "[user]\nname = MASC Test\n";
-  Fun.protect ~finally:(fun () -> cleanup_dir home) @@ fun () ->
-  with_env "HOME" home @@ fun () ->
-  let args = Keeper_sandbox_runtime.docker_gitconfig_mount_args () in
-  Alcotest.(check bool) "args contain -v flag" true (List.mem "-v" args);
-  let expected = home ^ "/.gitconfig:/tmp/.gitconfig:ro" in
-  Alcotest.(check bool)
-    "mount spec points to container gitconfig"
-    true
-    (List.mem expected args)
-
 let test_docker_run_looks_daemon_pressure_classifies_timeout () =
   Alcotest.(check bool)
     "WEXITED 124 with timeout output is daemon pressure"
@@ -2339,10 +2318,6 @@ let run_tests ~clock () =
             test_docker_masc_config_binding_pins_container_runtime_paths;
           Alcotest.test_case "docker config mount and env args" `Quick
             test_docker_config_mount_and_env_args;
-          Alcotest.test_case "docker gitconfig mount skipped when missing" `Quick
-            test_docker_gitconfig_mount_args_skips_when_missing;
-          Alcotest.test_case "docker gitconfig mount present when host file exists" `Quick
-            test_docker_gitconfig_mount_args_includes_when_present;
           Alcotest.test_case "docker run classifies timeout as daemon pressure" `Quick
             test_docker_run_looks_daemon_pressure_classifies_timeout;
           Alcotest.test_case "docker run classifies daemon unavailable as pressure" `Quick

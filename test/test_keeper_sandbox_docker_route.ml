@@ -973,34 +973,6 @@ let test_docker_run_retries_on_daemon_timeout () =
     Alcotest.(check bool) "output from second run" true
       (contains_substring result.output "retry-ok")
 
-let test_docker_run_mounts_host_gitconfig () =
-  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "alpine:test" @@ fun () ->
-  with_fake_docker fake_docker_echo_script @@ fun () ->
-  let home = temp_dir () in
-  let gitconfig = Filename.concat home ".gitconfig" in
-  write_file gitconfig "[user]\nname = MASC Test\n";
-  Fun.protect ~finally:(fun () -> cleanup_dir home) @@ fun () ->
-  with_env "HOME" home @@ fun () ->
-  setup ~sandbox:Keeper_types_profile_sandbox.Docker
-  @@ fun ~config ~meta ~playground ->
-  let log_path = Filename.concat config.Workspace.base_path "docker.log" in
-  with_env "MASC_KEEPER_TEST_DOCKER_LOG" log_path @@ fun () ->
-  match
-    Keeper_sandbox_docker.run_docker_shell_command_with_status
-      ~config
-      ~meta
-      ~cwd:playground
-      ~timeout_sec:5.0
-      ~cmd:"echo hi"
-      ~network_mode:Keeper_types_profile_sandbox.Network_none
-  with
-  | Error msg -> Alcotest.failf "unexpected error mounting gitconfig: %s" msg
-  | Ok _ ->
-    let log = read_file log_path in
-    let expected = home ^ "/.gitconfig:/tmp/.gitconfig:ro" in
-    Alcotest.(check bool) "docker run mounts host gitconfig" true
-      (contains_substring log expected)
-
 let test_execute_git_routes_through_docker () =
   with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
   setup_with_tool_access ~sandbox:Keeper_types_profile_sandbox.Docker @@ fun ~config ~meta ~playground ->
@@ -2467,9 +2439,5 @@ let () =
             "docker run retries once on daemon timeout/back-pressure"
             `Quick
             test_docker_run_retries_on_daemon_timeout;
-          Alcotest.test_case
-            "docker run mounts host gitconfig into container"
-            `Quick
-            test_docker_run_mounts_host_gitconfig;
         ] );
     ]

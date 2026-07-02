@@ -383,6 +383,37 @@ let test_docker_keeper_malformed_regex_rejects_before_docker_spawn () =
       false
       (String_util.contains_substring err "docker image is not configured")
 
+let test_docker_keeper_rust_regex_rejects_before_docker_spawn () =
+  setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
+  @@ fun ~base:_ ~config ~meta ~playground:_ ->
+  with_env "MASC_KEEPER_SANDBOX_DOCKER_IMAGE" "" @@ fun () ->
+  let raw =
+    Keeper_tool_command_runtime.handle_tool_search_files
+      ~turn_sandbox_factory:None
+      ~exec_cache:None
+      ~config
+      ~meta
+      ~args:
+        (`Assoc
+          [
+            ("op", `String "rg");
+            ("pattern", `String "(?=secret)");
+            ("path", `String ".");
+          ])
+  in
+  match parse_field raw "error" with
+  | None ->
+    Alcotest.failf "expected error for non-ripgrep regex; raw=%s" raw
+  | Some err ->
+    Alcotest.(check bool)
+      "error explains invalid ripgrep regex"
+      true
+      (String_util.contains_substring err "invalid ripgrep regex");
+    Alcotest.(check bool)
+      "docker image was not pulled"
+      false
+      (String_util.contains_substring err "docker image is not configured")
+
 let test_docker_keeper_blocks_second_rg_outside () =
   setup ~keeper_name:"minjae" ~sandbox:Keeper_types_profile_sandbox.Docker
   @@ fun ~base ~config ~meta ~playground:_ ->
@@ -597,6 +628,9 @@ let () =
           Alcotest.test_case
             "docker keeper malformed regex rejects before docker spawn"
             `Quick test_docker_keeper_malformed_regex_rejects_before_docker_spawn;
+          Alcotest.test_case
+            "docker keeper rejects non-ripgrep regex before docker spawn"
+            `Quick test_docker_keeper_rust_regex_rejects_before_docker_spawn;
           Alcotest.test_case "docker keeper blocks second rg outside" `Quick
             test_docker_keeper_blocks_second_rg_outside;
           Alcotest.test_case "docker keeper allows inside playground"

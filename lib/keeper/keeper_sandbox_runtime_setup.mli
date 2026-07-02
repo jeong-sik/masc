@@ -110,9 +110,6 @@ val docker_config_container_root : container_root:'a -> string
 val docker_config_available : string -> bool
 val docker_config_mount_args :
   base_path:string -> container_root:'a -> string list
-val host_gitconfig_path : unit -> string
-val container_gitconfig_path : unit -> string
-val docker_gitconfig_mount_args : unit -> string list
 type workspace_state_mount_kind = Workspace_state_file | Workspace_state_dir
 val docker_workspace_state_mounts : (workspace_state_mount_kind * string) list
 val workspace_state_path_available : workspace_state_mount_kind -> string -> bool

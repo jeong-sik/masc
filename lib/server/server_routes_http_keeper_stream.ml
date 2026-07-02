@@ -280,10 +280,14 @@ let keeper_tool_failure_error_detail ~duration_ms ~error_body =
   Printf.sprintf "duration_ms=%d|detail=%s" duration_ms truncated
 
 (** Structured details for the dashboard [tool_call_failure] log event.
-    Includes the typed [failure_class] and the actual error body so the
-    dashboard can surface classification and the full message. *)
+    Includes the typed [failure_class] and a bounded error preview. The full
+    provider/tool body can be large or sensitive, so log rows carry size and
+    truncation metadata instead of the raw body. *)
 let keeper_tool_failure_log_details ~tool_name ~agent_name ~duration_ms
     ~streaming ~error_body ~failure_class =
+  let preview =
+    String_util.utf8_safe ~max_bytes:200 ~suffix:"..." error_body
+  in
   `Assoc
     [
       ("event_family", `String "tool_call_failure");
@@ -293,7 +297,9 @@ let keeper_tool_failure_log_details ~tool_name ~agent_name ~duration_ms
       ("agent_name", `String agent_name);
       ("duration_ms", `Int duration_ms);
       ("streaming", `Bool streaming);
-      ("error_body", `String error_body);
+      ("error_body_preview", `String (String_util.to_string preview));
+      ("error_body_truncated", `Bool (String_util.was_truncated preview));
+      ("error_body_bytes", `Int (String.length error_body));
     ]
 
 let execute_keeper_stream_tool ~sw ~clock ?auth_token:_ state ~agent_name ~arguments =

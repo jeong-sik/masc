@@ -500,7 +500,11 @@ let extra_guard_fragments_for_name = function
         "keeper not found";
       ]
   | "masc_keeper_sandbox_start" | "masc_keeper_sandbox_stop" ->
-      [ "sandbox image not found"; "no such container"; "Docker" ]
+      [
+        "keeper sandbox docker image is not configured";
+        "docker_container_start_failed";
+        "no such container";
+      ]
   | "masc_keeper_list" | "masc_keeper_msg_result"
   | "masc_keeper_msg_cancel" | "masc_keeper_msg_queue" | "masc_keeper_status" ->
       [ "keeper management tool"; "use MCP client" ]

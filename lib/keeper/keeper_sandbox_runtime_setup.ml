@@ -352,23 +352,6 @@ let docker_config_mount_args ~base_path ~container_root =
     ]
 ;;
 
-let host_gitconfig_path () =
-  match Sys.getenv_opt "HOME" with
-  | None -> ""
-  | Some home -> Filename.concat home ".gitconfig"
-;;
-
-let container_gitconfig_path () = "/tmp/.gitconfig"
-
-let docker_gitconfig_mount_args () =
-  let host = host_gitconfig_path () in
-  if host = ""
-  then []
-  else if not (Sys.file_exists host)
-  then []
-  else [ "-v"; host ^ ":" ^ container_gitconfig_path () ^ ":ro" ]
-;;
-
 type workspace_state_mount_kind =
   | Workspace_state_file
   | Workspace_state_dir

@@ -1002,6 +1002,61 @@ let test_runtime_agent_context_preserves_unbounded_resume_budget () =
   check int "resume preserves unbounded turn budget" 0
     prepared.agent_config.max_turns
 
+let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
+  let resume_schema : Yojson.Safe.t =
+    `Assoc
+      [ ("type", `String "object")
+      ; ("properties", `Assoc [ ("answer", `Assoc [("type", `String "string")]) ])
+      ; ("required", `List [ `String "answer" ])
+      ]
+  in
+  let provider_cfg_with_schema =
+    let base = provider_cfg () in
+    { base with
+      Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonSchema resume_schema
+    ; output_schema = Some resume_schema
+    }
+  in
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:provider_cfg_with_schema
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let checkpoint =
+    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "oas-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_sdk.Types.empty_usage
+    ; turn_count = 3
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_sdk.Types.Off
+    ; thinking_budget = None
+    ; cache_system_prompt = false
+    ; context = Agent_sdk.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  check bool "resume patches checkpoint response_format to base JsonSchema" true
+    (match prepared.patched_checkpoint.Agent_sdk.Checkpoint.response_format with
+     | Agent_sdk.Types.JsonSchema s -> Yojson.Safe.equal s resume_schema
+     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonMode -> false)
+
 let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   let tool =
     Agent_sdk.Tool.create
@@ -1217,6 +1272,10 @@ let () =
             "runtime agent context preserves unbounded resume budget"
             `Quick
             test_runtime_agent_context_preserves_unbounded_resume_budget
+        ; test_case
+            "runtime agent context resume patches stale response_format to base contract"
+            `Quick
+            test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract
         ; test_case
             "runtime agent context leaves tool_choice unset with tools"
             `Quick

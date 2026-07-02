@@ -730,9 +730,8 @@ let run_best_effort ?complete ?timeout_sec ~runtime_id ~keeper_id (inp : Keeper_
            if not (Keeper_memory_llm_summary.is_direct_completion_provider provider_cfg)
            then
              Log.Keeper.warn ~keeper_name:keeper_id
-               "memory os librarian skipped runtime=%s provider=%s: provider does not support direct completion"
+               "memory os librarian skipped runtime=%s: provider does not support direct completion"
                runtime_id
-               provider_cfg.Llm_provider.Provider_config.model_id
            else (
              let clock = Eio_context.get_clock_opt () in
              let timeout_sec =

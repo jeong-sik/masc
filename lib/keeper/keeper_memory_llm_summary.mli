@@ -31,6 +31,14 @@ module For_testing : sig
 
   val summary_text_result_of_response :
     Agent_sdk.Types.api_response -> (string, summary_parse_error) result
+
+  (** Emits the [masc_keeper_memory_llm_summary_outcomes_total] counter.
+      Exposed for the label-redaction regression test; the [provider]
+      label value is the neutral runtime lane, never the model id. *)
+  val record_summary_outcome :
+    runtime_id:string ->
+    outcome:Keeper_memory_llm_summary_outcome.t ->
+    unit
 end
 
 val make :

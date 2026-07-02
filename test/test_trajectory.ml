@@ -753,6 +753,97 @@ let test_persist_response_content_per_turn_full () =
     Alcotest.(check int) "first block untruncated (5000B)" 5000
       (List.hd lines |> member "content" |> to_string |> String.length))
 
+(* ================================================================ *)
+(* Test: tool-affinity aggregate (append-time materialization)       *)
+(* ================================================================ *)
+
+(* [update_aggregate_from_entries] deliberately does not seed a snapshot
+   from a flush batch — seeding is the affinity read path's full-scan
+   rebuild. So on a fresh keeper the update must be a no-op. *)
+let test_aggregate_update_noop_when_missing () =
+  with_tmpdir (fun dir ->
+    let masc_root = dir and keeper = "agg-missing" in
+    let now = Unix.gettimeofday () in
+    Trajectory.update_aggregate_from_entries ~masc_root ~keeper_name:keeper
+      [ mk_entry ~ts:now "tool_execute" 100 0.0 "iso" ];
+    match Trajectory.read_aggregate_snapshot ~masc_root ~keeper_name:keeper with
+    | Error Trajectory.Aggregate_missing -> ()
+    | Ok _ -> Alcotest.fail "update must not seed a snapshot from a flush batch"
+    | Error _ -> Alcotest.fail "unexpected load error")
+
+(* Once a snapshot exists, an incremental update folds success/failure
+   counts and advances last_used to the max-ts entry. *)
+let test_aggregate_increment_after_seed () =
+  with_tmpdir (fun dir ->
+    let masc_root = dir and keeper = "agg-inc" in
+    let now = Unix.gettimeofday () in
+    (* Seed an (empty) snapshot via rebuild so the incremental path applies. *)
+    let _ = Trajectory.rebuild_tool_affinity_aggregate ~masc_root ~keeper_name:keeper ~now in
+    let entries = [
+      mk_entry ~ts:(now -. 20.) "tool_execute" 100 0.0 "iso-a";
+      mk_entry ~ts:(now -. 10.) "tool_execute" 100 0.0 "iso-b";
+      mk_entry ~ts:now ~error:(Some "boom") "tool_execute" 0 0.0 "iso-c";
+    ] in
+    Trajectory.update_aggregate_from_entries ~masc_root ~keeper_name:keeper entries;
+    match Trajectory.read_aggregate_snapshot ~masc_root ~keeper_name:keeper with
+    | Ok agg ->
+      let stats = Trajectory.windowed_affinity_tool_stats agg ~since:(now -. 86400.) in
+      (match
+         List.find_opt (fun (s : Trajectory.tool_stat) -> s.Trajectory.name = "tool_execute") stats
+       with
+       | Some s ->
+         Alcotest.(check int) "call_count folds all 3" 3 s.Trajectory.call_count;
+         Alcotest.(check int) "success_count excludes the error call" 2 s.Trajectory.success_count;
+         Alcotest.(check string) "last_used_at = max-ts entry" "iso-c" s.Trajectory.last_used_at
+       | None -> Alcotest.fail "tool_execute missing from aggregate")
+    | Error _ -> Alcotest.fail "snapshot should be present after seed+update")
+
+(* A corrupt or schema-mismatched snapshot surfaces as a typed
+   [Aggregate_corrupt], never a silent empty aggregate. *)
+let test_aggregate_corrupt_typed_error () =
+  with_tmpdir (fun dir ->
+    let masc_root = dir and keeper = "agg-corrupt" in
+    let path = Trajectory.aggregate_snapshot_path masc_root keeper in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Fs_compat.save_file path "{ this is not valid json";
+    (match Trajectory.read_aggregate_snapshot ~masc_root ~keeper_name:keeper with
+     | Error (Trajectory.Aggregate_corrupt _) -> ()
+     | _ -> Alcotest.fail "invalid json must be Aggregate_corrupt");
+    (* Valid JSON, wrong schema version *)
+    Fs_compat.save_file path
+      {|{"version":999,"keeper_name":"x","updated_at":0.0,"tools":[]}|};
+    match Trajectory.read_aggregate_snapshot ~masc_root ~keeper_name:keeper with
+    | Error (Trajectory.Aggregate_corrupt _) -> ()
+    | _ -> Alcotest.fail "wrong schema version must be Aggregate_corrupt")
+
+(* Rebuild reconstructs per-tool counts across all trace files and persists
+   the snapshot. *)
+let test_aggregate_rebuild_from_jsonl () =
+  with_tmpdir (fun dir ->
+    let masc_root = dir and keeper = "agg-rebuild" in
+    let now = Unix.gettimeofday () in
+    let entries = [
+      mk_entry ~ts:(now -. 100.) "tool_execute" 100 0.0 "iso-1";
+      mk_entry ~ts:(now -. 50.) "tool_read_file" 50 0.0 "iso-2";
+      mk_entry ~ts:(now -. 10.) "tool_execute" 120 0.0 "iso-3";
+    ] in
+    (* Distinct trace_ids so aggregation spans multiple files. *)
+    List.iteri (fun i e ->
+      Trajectory.append_entry ~masc_root ~keeper_name:keeper
+        ~trace_id:(Printf.sprintf "t-%d" i) e)
+      entries;
+    let agg = Trajectory.rebuild_tool_affinity_aggregate ~masc_root ~keeper_name:keeper ~now in
+    Alcotest.(check bool) "snapshot persisted by rebuild" true
+      (Sys.file_exists (Trajectory.aggregate_snapshot_path masc_root keeper));
+    let stats = Trajectory.windowed_affinity_tool_stats agg ~since:(now -. 86400.) in
+    let count_of name =
+      match List.find_opt (fun (s : Trajectory.tool_stat) -> s.Trajectory.name = name) stats with
+      | Some s -> s.Trajectory.call_count
+      | None -> 0
+    in
+    Alcotest.(check int) "tool_execute count across traces" 2 (count_of "tool_execute");
+    Alcotest.(check int) "tool_read_file count" 1 (count_of "tool_read_file"))
+
 let () =
   Alcotest.run "Trajectory" [
     ("tool_cost", [
@@ -828,5 +919,15 @@ let () =
         test_append_thinking_persists_untruncated;
       Alcotest.test_case "persist_response_content stamps hook turn, all blocks" `Quick
         test_persist_response_content_per_turn_full;
+    ]);
+    ("tool_affinity_aggregate", [
+      Alcotest.test_case "update is a no-op on a missing snapshot" `Quick
+        test_aggregate_update_noop_when_missing;
+      Alcotest.test_case "incremental update folds success/failure and last_used" `Quick
+        test_aggregate_increment_after_seed;
+      Alcotest.test_case "corrupt/schema-mismatch snapshot is a typed error" `Quick
+        test_aggregate_corrupt_typed_error;
+      Alcotest.test_case "rebuild reconstructs counts across trace files" `Quick
+        test_aggregate_rebuild_from_jsonl;
     ]);
   ]

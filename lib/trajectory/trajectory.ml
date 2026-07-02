@@ -223,6 +223,78 @@ let trajectory_to_json (t : trajectory) : Yojson.Safe.t =
   ]
 
 (* ================================================================ *)
+(* JSON deserialization                                             *)
+(* ================================================================ *)
+(* Decoders live next to the serializers above so both the read paths and
+   the append-time affinity aggregate (below) can reuse them; they depend
+   only on the [tool_call_entry] type and [Json_util], not on any file I/O
+   or accumulator state. *)
+
+let gate_decision_of_json = function
+  | `Assoc fields -> (
+      match List.assoc_opt "status" fields with
+      | Some (`String status) -> (
+          match String.lowercase_ascii status with
+          | "pass" | "passed" -> (Pass, true)
+          | "reject" | "rejected" | "gated" ->
+              let reason =
+                match List.assoc_opt "reason" fields with
+                | Some (`String value) when String.trim value <> "" -> value
+                | _ -> "persisted gate rejection"
+              in
+              (Reject reason, true)
+          | _ -> (Pass, false))
+      | _ -> (Pass, false))
+  | _ -> (Pass, false)
+
+let tool_call_entry_of_json (json : Yojson.Safe.t) :
+    (tool_call_entry * bool) option =
+  try
+    match Json_util.assoc_member_opt "type" json with
+    | Some (`String "trajectory_summary") -> None
+    | Some (`String "thinking") -> None
+    | _ ->
+        let gate_decision, parsed_gate =
+          gate_decision_of_json (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
+        in
+        Some
+          ( {
+              ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
+              ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
+              turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
+              round = (match Json_util.assoc_member_opt "round" json with Some (`Int n) -> n | _ -> 0);
+              tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "");
+              args_json = Option.value ~default:`Null (Json_util.assoc_member_opt "args" json) |> Yojson.Safe.to_string;
+              gate_decision;
+              result =
+                (match Json_util.assoc_member_opt "result" json with
+                 | None | Some `Null -> None
+                 | Some (`String s) -> Some s
+                 | Some _ -> None);
+              duration_ms = (match Json_util.assoc_member_opt "duration_ms" json with Some (`Int n) -> n | _ -> 0);
+              error =
+                (match Json_util.assoc_member_opt "error" json with
+                 | None | Some `Null -> None
+                 | Some (`String s) -> Some s
+                 | Some _ -> None);
+              cost_usd = (match Json_util.assoc_member_opt "cost_usd" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
+              execution_id =
+                (match Json_util.assoc_member_opt "execution_id" json with
+                 | Some (`String s) -> Some s
+                 | _ -> None);
+            },
+            parsed_gate )
+  with
+  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
+
+(** Single definition of "this tool call counts as a failure" so the
+    dashboard aggregation ([aggregate_tool_stats]) and the append-time
+    affinity aggregate classify identically and cannot drift apart. *)
+let entry_is_failure (e : tool_call_entry) : bool =
+  Option.is_some e.error
+  || (match e.gate_decision with Reject _ -> true | Pass -> false)
+
+(* ================================================================ *)
 (* File I/O                                                         *)
 (* ================================================================ *)
 
@@ -332,6 +404,336 @@ let append_summary ~(masc_root : string) ~(keeper_name : string) ~(trace_id : st
   Fs_compat.append_jsonl path summary
 
 (* ================================================================ *)
+(* Tool-affinity aggregate (append-time, per-keeper)                 *)
+(* ================================================================ *)
+(* Keeper_tool_affinity.pre_populate_from_history used to rescan every
+   .jsonl trace file for a keeper on every turn's tool setup (up to GBs of
+   history parsed per turn on the main Eio domain — the "server freeze" P0).
+   This section materializes the counts that scan produced at APPEND time
+   instead: a small per-keeper snapshot file that is updated incrementally
+   on flush and read cheaply at setup. Only tool_name/call_count/
+   success_count/last_used timestamp are tracked — the exact inputs
+   [Keeper_tool_affinity.compute_affinity] scores on.
+
+   Windowing: counts are bucketed by UTC day so the affinity read can still
+   honour its rolling lookback window (default 7d, capped 30d). A pure
+   lifetime total would keep pre-populating tools unused for weeks; day
+   buckets preserve the windowed semantics. The one deviation from the old
+   per-second [ts >= since] cutoff is that the boundary day is included
+   whole — entries in the partial [since] day are counted even if their
+   timestamp is just before [since]. Buckets fully inside/outside the
+   window match the old scan exactly. *)
+
+(* Seconds per UTC day for day-bucketing. Mirrors [Masc_time_constants.day]
+   (workspace SSOT for 86400.0); kept local so [Trajectory] stays the
+   dependency leaf its dune stanza documents, rather than pulling in
+   masc.config for one conversion factor. *)
+let seconds_per_day = 86_400.
+
+(* Bucket retention horizon. Must be >= the largest lookback window
+   Keeper_tool_affinity can request (its LOOKBACK_DAYS env clamps at 30);
+   the extra day keeps the window's boundary day present despite sub-day
+   read/prune skew. Lowering this below that cap would silently drop
+   buckets a windowed read still needs. *)
+let affinity_aggregate_retention_days = 31
+
+let aggregate_schema_version = 1
+
+(* Snapshot lives in the keeper trajectory dir but must never be picked up
+   by the .jsonl trace scanners (read_entries_since / telemetry_unified);
+   the ".json" (not ".jsonl") suffix keeps it out of every [check_suffix
+   ".jsonl"] filter. *)
+let aggregate_snapshot_basename = "_tool_affinity_aggregate.v1.json"
+
+type tool_day_bucket = {
+  bucket_day : int;              (** [floor(ts / seconds_per_day)], UTC day index. *)
+  bucket_call_count : int;
+  bucket_success_count : int;
+  bucket_last_ts : float;        (** max [ts] observed in this (tool, day). *)
+  bucket_last_iso : string;      (** [ts_iso] paired with [bucket_last_ts]. *)
+}
+
+type tool_affinity_bucket_series = {
+  series_tool_name : string;
+  series_buckets : tool_day_bucket list;
+}
+
+type tool_affinity_aggregate = {
+  aggregate_version : int;
+  aggregate_keeper_name : string;
+  aggregate_updated_at : float;
+  aggregate_tools : tool_affinity_bucket_series list;
+}
+
+type aggregate_load_error =
+  | Aggregate_missing            (** No snapshot file yet. *)
+  | Aggregate_unreadable of string  (** File exists but I/O failed. *)
+  | Aggregate_corrupt of string     (** File read but JSON/schema invalid. *)
+
+let day_index_of_ts (ts : float) : int =
+  int_of_float (Float.floor (ts /. seconds_per_day))
+
+let aggregate_snapshot_path (masc_root : string) (keeper_name : string) : string =
+  Filename.concat (trajectories_dir masc_root keeper_name) aggregate_snapshot_basename
+
+(* ── Serialization ── *)
+
+let tool_day_bucket_to_json (b : tool_day_bucket) : Yojson.Safe.t =
+  `Assoc [
+    ("day", `Int b.bucket_day);
+    ("count", `Int b.bucket_call_count);
+    ("success", `Int b.bucket_success_count);
+    ("last_ts", `Float b.bucket_last_ts);
+    ("last_iso", `String b.bucket_last_iso);
+  ]
+
+let tool_affinity_aggregate_to_json (a : tool_affinity_aggregate) : Yojson.Safe.t =
+  `Assoc [
+    ("version", `Int a.aggregate_version);
+    ("keeper_name", `String a.aggregate_keeper_name);
+    ("updated_at", `Float a.aggregate_updated_at);
+    ( "tools",
+      `List
+        (List.map
+           (fun (s : tool_affinity_bucket_series) ->
+             `Assoc
+               [ ("name", `String s.series_tool_name);
+                 ("buckets", `List (List.map tool_day_bucket_to_json s.series_buckets)) ])
+           a.aggregate_tools) );
+  ]
+
+(* Strict decoders: a malformed bucket/series fails the whole snapshot
+   (returns None) rather than silently dropping rows. A None surfaces as
+   [Aggregate_corrupt] and triggers a full-scan rebuild, so partial data is
+   never trusted. (Parse, don't validate.) *)
+let tool_day_bucket_of_json (json : Yojson.Safe.t) : tool_day_bucket option =
+  match json with
+  | `Assoc _ -> (
+      match
+        ( Json_util.assoc_member_opt "day" json,
+          Json_util.assoc_member_opt "count" json,
+          Json_util.assoc_member_opt "success" json,
+          Json_util.assoc_member_opt "last_ts" json,
+          Json_util.assoc_member_opt "last_iso" json )
+      with
+      | ( Some (`Int day),
+          Some (`Int count),
+          Some (`Int success),
+          Some last_ts_json,
+          Some (`String last_iso) ) ->
+          let last_ts =
+            match last_ts_json with
+            | `Float f -> Some f
+            | `Int n -> Some (Float.of_int n)
+            | _ -> None
+          in
+          Option.map
+            (fun bucket_last_ts ->
+              { bucket_day = day; bucket_call_count = count;
+                bucket_success_count = success; bucket_last_ts;
+                bucket_last_iso = last_iso })
+            last_ts
+      | _ -> None)
+  | _ -> None
+
+let tool_affinity_bucket_series_of_json (json : Yojson.Safe.t) :
+    tool_affinity_bucket_series option =
+  match json with
+  | `Assoc _ -> (
+      match
+        ( Json_util.assoc_member_opt "name" json,
+          Json_util.assoc_member_opt "buckets" json )
+      with
+      | Some (`String name), Some (`List bucket_jsons) ->
+          let buckets = List.map tool_day_bucket_of_json bucket_jsons in
+          if List.exists Option.is_none buckets then None
+          else
+            Some
+              { series_tool_name = name;
+                series_buckets = List.filter_map Fun.id buckets }
+      | _ -> None)
+  | _ -> None
+
+let tool_affinity_aggregate_of_json (json : Yojson.Safe.t) :
+    tool_affinity_aggregate option =
+  match json with
+  | `Assoc _ -> (
+      match
+        ( Json_util.assoc_member_opt "version" json,
+          Json_util.assoc_member_opt "keeper_name" json,
+          Json_util.assoc_member_opt "updated_at" json,
+          Json_util.assoc_member_opt "tools" json )
+      with
+      | ( Some (`Int version),
+          Some (`String keeper_name),
+          Some updated_at_json,
+          Some (`List tool_jsons) )
+        when version = aggregate_schema_version ->
+          let updated_at =
+            match updated_at_json with
+            | `Float f -> Some f
+            | `Int n -> Some (Float.of_int n)
+            | _ -> None
+          in
+          let tools = List.map tool_affinity_bucket_series_of_json tool_jsons in
+          if Option.is_none updated_at || List.exists Option.is_none tools then None
+          else
+            Some
+              { aggregate_version = version;
+                aggregate_keeper_name = keeper_name;
+                aggregate_updated_at = Option.value ~default:0.0 updated_at;
+                aggregate_tools = List.filter_map Fun.id tools }
+      | _ -> None)
+  | _ -> None
+
+(* ── Snapshot persistence ── *)
+
+let read_aggregate_snapshot ~(masc_root : string) ~(keeper_name : string) :
+    (tool_affinity_aggregate, aggregate_load_error) result =
+  let path = aggregate_snapshot_path masc_root keeper_name in
+  match
+    (try `Loaded (Fs_compat.load_file_opt path)
+     with Sys_error msg -> `Io msg)
+  with
+  | `Io msg -> Error (Aggregate_unreadable msg)
+  | `Loaded None -> Error Aggregate_missing
+  | `Loaded (Some content) -> (
+      match
+        (try Some (Yojson.Safe.from_string content)
+         with Yojson.Json_error _ -> None)
+      with
+      | None -> Error (Aggregate_corrupt "invalid json")
+      | Some json -> (
+          match tool_affinity_aggregate_of_json json with
+          | Some agg -> Ok agg
+          | None -> Error (Aggregate_corrupt "schema mismatch")))
+
+let persist_aggregate_snapshot ~(masc_root : string) ~(keeper_name : string)
+    (agg : tool_affinity_aggregate) : (unit, string) result =
+  let dir = trajectories_dir masc_root keeper_name in
+  Fs_compat.mkdir_p dir;
+  let path = aggregate_snapshot_path masc_root keeper_name in
+  Fs_compat.save_file_atomic path
+    (Yojson.Safe.to_string (tool_affinity_aggregate_to_json agg))
+
+(* ── In-memory aggregation ── *)
+
+let empty_tool_affinity_aggregate (keeper_name : string) : tool_affinity_aggregate =
+  { aggregate_version = aggregate_schema_version;
+    aggregate_keeper_name = keeper_name;
+    aggregate_updated_at = 0.0;
+    aggregate_tools = [] }
+
+let fold_entry_into_aggregate (agg : tool_affinity_aggregate)
+    (e : tool_call_entry) : tool_affinity_aggregate =
+  let day = day_index_of_ts e.ts in
+  let is_fail = entry_is_failure e in
+  let success_delta = if is_fail then 0 else 1 in
+  let new_bucket () =
+    { bucket_day = day; bucket_call_count = 1;
+      bucket_success_count = success_delta;
+      bucket_last_ts = e.ts; bucket_last_iso = e.ts_iso }
+  in
+  let inc_bucket (b : tool_day_bucket) =
+    let last_ts, last_iso =
+      if e.ts > b.bucket_last_ts then (e.ts, e.ts_iso)
+      else (b.bucket_last_ts, b.bucket_last_iso)
+    in
+    { b with
+      bucket_call_count = b.bucket_call_count + 1;
+      bucket_success_count = b.bucket_success_count + success_delta;
+      bucket_last_ts = last_ts;
+      bucket_last_iso = last_iso }
+  in
+  let update_series (s : tool_affinity_bucket_series) =
+    let matched = ref false in
+    let buckets =
+      List.map
+        (fun (b : tool_day_bucket) ->
+          if b.bucket_day = day then (matched := true; inc_bucket b) else b)
+        s.series_buckets
+    in
+    let buckets = if !matched then buckets else new_bucket () :: buckets in
+    { s with series_buckets = buckets }
+  in
+  let matched_tool = ref false in
+  let tools =
+    List.map
+      (fun (s : tool_affinity_bucket_series) ->
+        if s.series_tool_name = e.tool_name then (matched_tool := true; update_series s)
+        else s)
+      agg.aggregate_tools
+  in
+  let tools =
+    if !matched_tool then tools
+    else { series_tool_name = e.tool_name; series_buckets = [ new_bucket () ] } :: tools
+  in
+  { agg with aggregate_tools = tools }
+
+let prune_aggregate ~(now : float) (agg : tool_affinity_aggregate) :
+    tool_affinity_aggregate =
+  let cutoff_day =
+    day_index_of_ts
+      (now -. (float_of_int affinity_aggregate_retention_days *. seconds_per_day))
+  in
+  let tools =
+    List.filter_map
+      (fun (s : tool_affinity_bucket_series) ->
+        match
+          List.filter (fun (b : tool_day_bucket) -> b.bucket_day >= cutoff_day) s.series_buckets
+        with
+        | [] -> None
+        | kept -> Some { s with series_buckets = kept })
+      agg.aggregate_tools
+  in
+  { agg with aggregate_tools = tools; aggregate_updated_at = now }
+
+let merge_entries_into_aggregate ~(now : float) (agg : tool_affinity_aggregate)
+    (entries : tool_call_entry list) : tool_affinity_aggregate =
+  List.fold_left fold_entry_into_aggregate agg entries |> prune_aggregate ~now
+
+let build_tool_affinity_aggregate ~(keeper_name : string) ~(now : float)
+    (entries : tool_call_entry list) : tool_affinity_aggregate =
+  merge_entries_into_aggregate ~now (empty_tool_affinity_aggregate keeper_name) entries
+
+(* Serializes snapshot read-modify-write across domains. A single global
+   mutex is sufficient: writes only happen on flush/rebuild (batched, small
+   files), never on the per-tool-call hot path. *)
+let aggregate_persist_mu = Stdlib.Mutex.create ()
+
+let update_aggregate_from_entries ~(masc_root : string) ~(keeper_name : string)
+    (entries : tool_call_entry list) : unit =
+  match entries with
+  | [] -> ()
+  | _ ->
+    Stdlib.Mutex.protect aggregate_persist_mu (fun () ->
+      match read_aggregate_snapshot ~masc_root ~keeper_name with
+      | Error Aggregate_missing ->
+        (* No seeded snapshot yet. Seeding is done by the affinity read
+           path's one-time full-scan rebuild, which produces a COMPLETE
+           snapshot from on-disk history. Creating one from only this flush
+           batch would be a partial the read path would then trust without
+           rebuilding. Skip — the entries are already durable in JSONL and
+           will be picked up by that rebuild. *)
+        ()
+      | Error (Aggregate_corrupt reason | Aggregate_unreadable reason) ->
+        (* Do not overwrite a broken snapshot with a partial. Leave it so
+           pre_populate_from_history's rebuild reseeds from disk. *)
+        Log.Keeper.warn
+          "trajectory: tool-affinity aggregate for %s not incremented (%s); \
+           awaiting rebuild by pre_populate_from_history"
+          keeper_name reason
+      | Ok agg ->
+        let now = Time_compat.now () in
+        let updated = merge_entries_into_aggregate ~now agg entries in
+        (match persist_aggregate_snapshot ~masc_root ~keeper_name updated with
+         | Ok () -> ()
+         | Error msg ->
+           Log.Keeper.warn
+             "trajectory: failed to persist tool-affinity aggregate for %s: %s"
+             keeper_name msg))
+
+(* ================================================================ *)
 (* Trajectory accumulator (mutable, per-session)                    *)
 (* ================================================================ *)
 
@@ -437,7 +839,23 @@ let flush_pending (acc : accumulator) : unit =
     let jsons = List.map (fun pe -> pe.pe_json) entries_to_flush in
     (try
        Fs_compat.append_jsonl_batch path jsons;
-       acc.last_flush <- Time_compat.now ()
+       acc.last_flush <- Time_compat.now ();
+       (* Fold the just-persisted batch into the per-keeper tool-affinity
+          aggregate so Keeper_tool_affinity reads it instead of rescanning
+          the full trajectory (the P0 freeze). Gated on the JSONL write
+          succeeding; the aggregate is a rebuildable derived cache, so the
+          update is best-effort — [update_aggregate_from_entries] never
+          raises and only increments an already-seeded snapshot. *)
+       let flushed_entries =
+         List.filter_map
+           (fun pe ->
+             match tool_call_entry_of_json pe.pe_json with
+             | Some (entry, _parsed_gate) -> Some entry
+             | None -> None)
+           entries_to_flush
+       in
+       update_aggregate_from_entries
+         ~masc_root:acc.masc_root ~keeper_name:acc.keeper_name flushed_entries
      with
      | Eio.Cancel.Cancelled _ as e -> raise e
      | exn ->
@@ -550,7 +968,7 @@ let aggregate_tool_stats (entries : tool_call_entry list) : tool_stat list =
     Hashtbl.create 32
   in
   List.iter (fun (e : tool_call_entry) ->
-    let is_failure = Option.is_some e.error || (match e.gate_decision with Reject _ -> true | Pass -> false) in
+    let is_failure = entry_is_failure e in
     match Hashtbl.find_opt tbl e.tool_name with
     | None ->
       let succ = if is_failure then 0 else 1 in
@@ -624,63 +1042,6 @@ let hourly_bucket_to_json (b : hourly_bucket) : Yojson.Safe.t =
     ("error_count", `Int b.error_count);
   ]
 
-let gate_decision_of_json = function
-  | `Assoc fields -> (
-      match List.assoc_opt "status" fields with
-      | Some (`String status) -> (
-          match String.lowercase_ascii status with
-          | "pass" | "passed" -> (Pass, true)
-          | "reject" | "rejected" | "gated" ->
-              let reason =
-                match List.assoc_opt "reason" fields with
-                | Some (`String value) when String.trim value <> "" -> value
-                | _ -> "persisted gate rejection"
-              in
-              (Reject reason, true)
-          | _ -> (Pass, false))
-      | _ -> (Pass, false))
-  | _ -> (Pass, false)
-
-let tool_call_entry_of_json (json : Yojson.Safe.t) :
-    (tool_call_entry * bool) option =
-  try
-    match Json_util.assoc_member_opt "type" json with
-    | Some (`String "trajectory_summary") -> None
-    | Some (`String "thinking") -> None
-    | _ ->
-        let gate_decision, parsed_gate =
-          gate_decision_of_json (Option.value ~default:`Null (Json_util.assoc_member_opt "gate" json))
-        in
-        Some
-          ( {
-              ts = (match Json_util.assoc_member_opt "ts" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
-              ts_iso = (match Json_util.assoc_member_opt "ts_iso" json with Some (`String s) -> s | _ -> "");
-              turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0);
-              round = (match Json_util.assoc_member_opt "round" json with Some (`Int n) -> n | _ -> 0);
-              tool_name = (match Json_util.assoc_member_opt "tool_name" json with Some (`String s) -> s | _ -> "");
-              args_json = Option.value ~default:`Null (Json_util.assoc_member_opt "args" json) |> Yojson.Safe.to_string;
-              gate_decision;
-              result =
-                (match Json_util.assoc_member_opt "result" json with
-                 | None | Some `Null -> None
-                 | Some (`String s) -> Some s
-                 | Some _ -> None);
-              duration_ms = (match Json_util.assoc_member_opt "duration_ms" json with Some (`Int n) -> n | _ -> 0);
-              error =
-                (match Json_util.assoc_member_opt "error" json with
-                 | None | Some `Null -> None
-                 | Some (`String s) -> Some s
-                 | Some _ -> None);
-              cost_usd = (match Json_util.assoc_member_opt "cost_usd" json with Some (`Float f) -> f | Some (`Int n) -> Float.of_int n | _ -> 0.0);
-              execution_id =
-                (match Json_util.assoc_member_opt "execution_id" json with
-                 | Some (`String s) -> Some s
-                 | _ -> None);
-            },
-            parsed_gate )
-  with
-  | Yojson.Json_error _ | Yojson.Safe.Util.Type_error _ -> None
-
 (** Read all .jsonl trace files for a keeper. Filter entries with ts >= since.
     Scans the keeper's trajectory directory for all trace files. *)
 let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
@@ -728,6 +1089,82 @@ let read_entries_since_result ~(masc_root : string) ~(keeper_name : string)
 let read_entries_since ~(masc_root : string) ~(keeper_name : string)
     ~(since : float) : tool_call_entry list =
   (read_entries_since_result ~masc_root ~keeper_name ~since).entries
+
+(* ── Tool-affinity aggregate: windowed read + full-scan rebuild ── *)
+
+(** Project the day-bucketed aggregate to per-tool [tool_stat]s over the
+    rolling window [ts >= since]. Equivalent to
+    [aggregate_tool_stats (read_entries_since ~since)] for the fields
+    [Keeper_tool_affinity] consumes (call_count, success_count,
+    last_used_at); latency and cost are 0 because this aggregate does not
+    track them (compute_affinity ignores them). Buckets are day-aligned, so
+    the window boundary is inclusive of the whole [since] day (see the
+    section header). *)
+let windowed_affinity_tool_stats (agg : tool_affinity_aggregate)
+    ~(since : float) : tool_stat list =
+  let since_day = day_index_of_ts since in
+  agg.aggregate_tools
+  |> List.filter_map (fun (s : tool_affinity_bucket_series) ->
+    match
+      List.filter (fun (b : tool_day_bucket) -> b.bucket_day >= since_day) s.series_buckets
+    with
+    | [] -> None
+    | buckets ->
+      let call_count =
+        List.fold_left (fun acc (b : tool_day_bucket) -> acc + b.bucket_call_count) 0 buckets
+      in
+      let success_count =
+        List.fold_left (fun acc (b : tool_day_bucket) -> acc + b.bucket_success_count) 0 buckets
+      in
+      let _, last_iso =
+        List.fold_left
+          (fun (max_ts, max_iso) (b : tool_day_bucket) ->
+            if b.bucket_last_ts > max_ts then (b.bucket_last_ts, b.bucket_last_iso)
+            else (max_ts, max_iso))
+          (neg_infinity, "")
+          buckets
+      in
+      Some
+        { name = s.series_tool_name;
+          call_count;
+          success_count;
+          failure_count = call_count - success_count;
+          avg_duration_ms = 0;
+          p95_duration_ms = 0;
+          max_duration_ms = 0;
+          total_cost_usd = 0.0;
+          last_used_at = last_iso })
+  (* Mirror aggregate_tool_stats' call_count-descending order so
+     compute_affinity receives the same pre-sort ordering. *)
+  |> List.sort (fun (a : tool_stat) (b : tool_stat) -> compare b.call_count a.call_count)
+
+(** Reconstruct the aggregate from a full JSONL scan and persist it. The
+    scan is the P0-freeze cost; callers wrap this in
+    [Domain_pool_ref.submit_io_or_inline] to keep it off the main Eio
+    domain (see Keeper_tool_affinity.pre_populate_from_history). Scans over
+    the retention horizon so the snapshot serves any lookback up to the cap;
+    the read then windows to the configured lookback. Persists only when no
+    valid snapshot has appeared meanwhile, so a concurrent rebuild plus the
+    incremental flushes that follow it are never overwritten by a staler
+    scan. *)
+let rebuild_tool_affinity_aggregate ~(masc_root : string)
+    ~(keeper_name : string) ~(now : float) : tool_affinity_aggregate =
+  let since =
+    now -. (float_of_int affinity_aggregate_retention_days *. seconds_per_day)
+  in
+  let entries = read_entries_since ~masc_root ~keeper_name ~since in
+  let scanned = build_tool_affinity_aggregate ~keeper_name ~now entries in
+  Stdlib.Mutex.protect aggregate_persist_mu (fun () ->
+    match read_aggregate_snapshot ~masc_root ~keeper_name with
+    | Ok existing -> existing
+    | Error (Aggregate_missing | Aggregate_unreadable _ | Aggregate_corrupt _) ->
+      (match persist_aggregate_snapshot ~masc_root ~keeper_name scanned with
+       | Ok () -> ()
+       | Error msg ->
+         Log.Keeper.warn
+           "trajectory: failed to persist rebuilt tool-affinity aggregate for %s: %s"
+           keeper_name msg);
+      scanned)
 
 (* ================================================================ *)
 (* Read trajectory from JSONL (for replay/eval)                     *)

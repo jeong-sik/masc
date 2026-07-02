@@ -62,6 +62,28 @@ describe('refreshKeeperCatchupDigest', () => {
     expect(keeperCatchupDigests.value.garnet?.since_unix).toBe(1000)
   })
 
+  it('does not let an older in-flight baseline overwrite a newer one', async () => {
+    const resolvers = new Map<number, (digest: KeeperCatchupDigest) => void>()
+    fetchKeeperCatchupDigest.mockImplementation(
+      (_keeper: string, sinceUnix: number) => new Promise<KeeperCatchupDigest>((resolve) => {
+        resolvers.set(sinceUnix, resolve)
+      }),
+    )
+
+    const older = refreshKeeperCatchupDigest('garnet', 1000)
+    const newer = refreshKeeperCatchupDigest('garnet', 2000)
+    resolvers.get(2000)?.(makeDigest(2000))
+    await newer
+    resolvers.get(1000)?.(makeDigest(1000))
+    await older
+
+    expect(fetchKeeperCatchupDigest).toHaveBeenCalledTimes(2)
+    expect(fetchKeeperCatchupDigest).toHaveBeenNthCalledWith(1, 'garnet', 1000)
+    expect(fetchKeeperCatchupDigest).toHaveBeenNthCalledWith(2, 'garnet', 2000)
+    expect(keeperCatchupDigests.value.garnet?.since_unix).toBe(2000)
+    expect(keeperDigestLoading.value.garnet).toBe(false)
+  })
+
   it('surfaces fetch errors on keeperDigestError without throwing', async () => {
     fetchKeeperCatchupDigest.mockRejectedValue(new Error('boom'))
 

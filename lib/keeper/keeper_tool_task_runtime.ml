@@ -507,8 +507,9 @@ let handle_keeper_task_tool
       then wip_rejections := (task_id, rejection) :: !wip_rejections
     in
     let wip_admission_filter ~active_tasks task =
+      let now = Unix.gettimeofday () in
       let active_items =
-        Keeper_wip_admission.active_items_of_tasks ~task_goal_index active_tasks
+        Keeper_wip_admission.active_items_of_tasks ~task_goal_index ~now active_tasks
       in
       let scope =
         Keeper_wip_admission.scope_of_task ~task_goal_index task

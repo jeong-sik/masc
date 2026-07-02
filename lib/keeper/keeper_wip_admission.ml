@@ -95,9 +95,10 @@ type active_item = {
   scope : scope;
 }
 
-let task_is_active_wip (task : Masc_domain.task) =
-  let threshold_sec = 1800.0 in
-  let now = Unix.gettimeofday () in
+let wip_staleness_threshold_sec = 1800.0
+
+let task_is_active_wip ~now (task : Masc_domain.task) =
+  let threshold_sec = wip_staleness_threshold_sec in
   match task.task_status with
   | Masc_domain.InProgress { started_at; _ } ->
       (match Masc_domain.parse_iso8601_opt started_at with
@@ -115,9 +116,9 @@ let task_is_active_wip (task : Masc_domain.task) =
 let active_item_of_task ?task_goal_index (task : Masc_domain.task) =
   { id = task.id; scope = scope_of_task ?task_goal_index task }
 
-let active_items_of_tasks ?task_goal_index tasks =
+let active_items_of_tasks ?task_goal_index ~now tasks =
   tasks
-  |> List.filter task_is_active_wip
+  |> List.filter (task_is_active_wip ~now)
   |> List.map (active_item_of_task ?task_goal_index)
 
 type reject_reason =

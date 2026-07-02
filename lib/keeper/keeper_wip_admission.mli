@@ -37,7 +37,9 @@ type active_item = {
   scope : scope;
 }
 
-val task_is_active_wip : Masc_domain.task -> bool
+val wip_staleness_threshold_sec : float
+
+val task_is_active_wip : now:float -> Masc_domain.task -> bool
 val active_item_of_task :
   ?task_goal_index:(string, string list) Hashtbl.t -> Masc_domain.task -> active_item
 val active_items_of_tasks :

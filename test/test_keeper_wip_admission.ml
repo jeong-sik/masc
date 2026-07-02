@@ -365,37 +365,37 @@ let test_task_is_active_wip_inprogress_fresh () =
   let now = Unix.gettimeofday () in
   let started_at = Masc_domain.iso8601_of_unix_seconds now in
   let t = task ~status:(Masc_domain.InProgress { assignee = "executor"; started_at }) "t1" in
-  check bool "fresh InProgress is active" true (Admission.task_is_active_wip t)
+  check bool "fresh InProgress is active" true (Admission.task_is_active_wip ~now t)
 
 let test_task_is_active_wip_inprogress_stale () =
   let long_ago = Unix.gettimeofday () -. 3600.0 in
   let started_at = Masc_domain.iso8601_of_unix_seconds long_ago in
   let t = task ~status:(Masc_domain.InProgress { assignee = "executor"; started_at }) "t2" in
-  check bool "stale InProgress (>30min) is inactive" false (Admission.task_is_active_wip t)
+  check bool "stale InProgress (>30min) is inactive" false (Admission.task_is_active_wip ~now t)
 
 let test_task_is_active_wip_claimed_fresh () =
   let now = Unix.gettimeofday () in
   let claimed_at = Masc_domain.iso8601_of_unix_seconds now in
   let t = task ~status:(Masc_domain.Claimed { assignee = "executor"; claimed_at }) "t3" in
-  check bool "fresh Claimed is active" true (Admission.task_is_active_wip t)
+  check bool "fresh Claimed is active" true (Admission.task_is_active_wip ~now t)
 
 let test_task_is_active_wip_claimed_stale () =
   let long_ago = Unix.gettimeofday () -. 3600.0 in
   let claimed_at = Masc_domain.iso8601_of_unix_seconds long_ago in
   let t = task ~status:(Masc_domain.Claimed { assignee = "executor"; claimed_at }) "t4" in
-  check bool "stale Claimed (>30min) is inactive" false (Admission.task_is_active_wip t)
+  check bool "stale Claimed (>30min) is inactive" false (Admission.task_is_active_wip ~now t)
 
 let test_task_is_active_wip_todo () =
   let t = task ~status:Masc_domain.Todo "t5" in
-  check bool "Todo is inactive" false (Admission.task_is_active_wip t)
+  check bool "Todo is inactive" false (Admission.task_is_active_wip ~now t)
 
 let test_task_is_active_wip_done () =
   let t = task ~status:(Masc_domain.Done { completed_at = "2026-01-01T00:00:00Z"; outcome = "success" }) "t6" in
-  check bool "Done is inactive" false (Admission.task_is_active_wip t)
+  check bool "Done is inactive" false (Admission.task_is_active_wip ~now t)
 
 let test_task_is_active_wip_unparseable () =
   let t = task ~status:(Masc_domain.InProgress { assignee = "executor"; started_at = "not-a-timestamp" }) "t7" in
-  check bool "unparseable timestamp defaults to active" true (Admission.task_is_active_wip t)
+  check bool "unparseable timestamp defaults to active" true (Admission.task_is_active_wip ~now t)
 
 let test_goalless_still_bounded_by_global_cap () =
   (* RFC-0245 non-goal: exempting goalless from the *goal* cap must NOT remove

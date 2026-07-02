@@ -580,18 +580,10 @@ let run_docker_shell_command_with_status_internal
                           in
                           (try
                              let run_once () =
-                               Docker_spawn_throttle.with_slot (fun () ->
-                                 Masc_exec.Exec_gate.run_argv_with_stdin_and_status
-                                   ~actor:`System_sandbox
-                                   ~raw_source:(String.concat " " argv)
-                                   ~summary:"keeper docker command"
-                                   ~env:
-                                     (Env_keeper_scrub.filter_environment
-                                        (Unix.environment ()))
-                                   ~cwd:(Config_dir_resolver.current_working_dir ())
-                                   ~timeout_sec
-                                   ~stdin_content:cmd
-                                   argv)
+                               Keeper_turn_sandbox_runtime.run_argv_with_stdin_and_status_retry_eintr
+                                 ~timeout_sec
+                                 ~stdin_content:cmd
+                                 argv
                              in
                              Eio_guard.protect
                                ~finally:(fun () -> secret_projection.cleanup ())

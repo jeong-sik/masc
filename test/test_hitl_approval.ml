@@ -517,7 +517,11 @@ let test_submit_and_await_critical_timeout_returns_reject () =
     Alcotest.(check bool)
       "Critical timeout reason mentions approval timeout"
       true
-      (String.starts_with ~prefix:"approval timeout" reason)
+      (String.starts_with ~prefix:"approval timeout" reason);
+    Alcotest.(check string)
+      "sub-second timeout reason preserves precision"
+      "approval timeout after 0.05s"
+      reason
   | Some decision ->
     Alcotest.fail
       ("expected Reject from timeout, got "

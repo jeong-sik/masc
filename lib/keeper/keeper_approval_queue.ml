@@ -726,6 +726,10 @@ let sort_entries_by_requested_at entries =
 
 let default_noncritical_approval_timeout_s = 600.0
 
+let approval_timeout_reason timeout_s =
+  Printf.sprintf "approval timeout after %gs" timeout_s
+;;
+
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside agent fiber).
@@ -813,7 +817,7 @@ let submit_and_await
       with
       | `Decision d -> d
       | `Timeout ->
-        let reason = Printf.sprintf "approval timeout after %.0fs" timeout_s in
+        let reason = approval_timeout_reason timeout_s in
         audit_approval_event
           ~base_path:entry.audit_base_path
           ~event_type:"approval_timeout"

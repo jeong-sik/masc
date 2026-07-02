@@ -27,7 +27,7 @@ let validate_rg_type file_type =
 
 let validate_rg_pattern pattern =
   try
-    ignore (Re.Pcre.re pattern |> Re.compile);
+    let _ = Re.Pcre.re pattern |> Re.compile in
     Ok ()
   with exn ->
     Error

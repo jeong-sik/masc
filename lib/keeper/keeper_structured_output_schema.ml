@@ -332,23 +332,6 @@ let fusion_judge_output_schema =
     fields
 ;;
 
-(* Tier 2: compact judge schema (resolved_answer + decision only).
-   Providers such as ollama_cloud reject complex nested schemas
-   but accept a flat { resolved_answer, decision }. *)
-let compact_fusion_judge_output_schema =
-  let fields =
-    [ Fusion_judge_parse.wire_field_resolved_answer, string_schema
-    ; Fusion_judge_parse.wire_field_decision, fusion_decision_schema
-    ]
-  in
-  object_schema
-    ~required:
-      [ Fusion_judge_parse.wire_field_resolved_answer
-      ; Fusion_judge_parse.wire_field_decision
-      ]
-    fields
-;;
-
 let fusion_panel_answer_output_schema =
   let fields = [ "answer", string_schema ] in
   object_schema ~required:(List.map fst fields) fields

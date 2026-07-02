@@ -24,9 +24,6 @@ let sample_synthesis : Fusion_types.judge_synthesis =
   }
 
 let fusion_schema = Keeper_structured_output_schema.fusion_judge_output_schema
-let compact_fusion_schema =
-  Keeper_structured_output_schema.compact_fusion_judge_output_schema
-
 let panel_schema = Keeper_structured_output_schema.fusion_panel_answer_output_schema
 
 let restore_model_catalog previous =
@@ -85,45 +82,41 @@ let test_output_contract_keeps_native_schema_when_supported () =
        | Some schema -> Yojson.Safe.equal fusion_schema schema
        | None -> false)
 
-let test_output_contract_falls_back_to_compact_schema_when_full_rejected () =
+let test_output_contract_uses_prompt_tier_when_native_schema_rejected () =
   let full_schema_seen = ref false in
-  let compact_schema_seen = ref false in
+  let schema_free_seen = ref false in
   let validate configured =
     match configured.Llm_provider.Provider_config.output_schema with
     | Some schema when Yojson.Safe.equal fusion_schema schema ->
       full_schema_seen := true;
       Error "full schema rejected by provider boundary"
-    | Some schema when Yojson.Safe.equal compact_fusion_schema schema ->
-      compact_schema_seen := true;
-      Ok ()
     | Some _ -> Error "unexpected schema"
-    | None -> Error "missing schema"
+    | None ->
+      schema_free_seen := true;
+      Error "validator must not be called for prompt tier"
   in
   let cfg =
     provider_cfg
       ~kind:Llm_provider.Provider_config.OpenAI_compat
-      ~model_id:"shape-sensitive-provider"
-      ~base_url:"https://shape-sensitive.example.invalid/v1"
+      ~model_id:"non-native-provider"
+      ~base_url:"https://non-native.example.invalid/v1"
   in
   match
     Fusion_judge.For_testing.apply_output_contract_with_validate ~validate cfg
   with
-  | Error msg -> fail ("expected compact fallback config: " ^ msg)
+  | Error msg -> fail ("expected prompt-tier fallback config: " ^ msg)
   | Ok configured ->
     check bool "full schema was attempted first" true !full_schema_seen;
-    check bool "compact schema was attempted after rejection" true
-      !compact_schema_seen;
-    check bool "response_format uses compact JsonSchema" true
+    check bool "validator was not called for schema-free prompt tier" false
+      !schema_free_seen;
+    check bool "response_format is disabled for prompt tier" true
       (match configured.response_format with
-       | Agent_sdk.Types.JsonSchema schema ->
-         Yojson.Safe.equal compact_fusion_schema schema
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-    check bool "output_schema mirrors compact schema" true
-      (match configured.output_schema with
-       | Some schema -> Yojson.Safe.equal compact_fusion_schema schema
-       | None -> false)
+       | Agent_sdk.Types.Off -> true
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+    check bool "output_schema is absent for prompt tier" true
+      (Option.is_none configured.output_schema)
 
-let test_output_contract_fails_loud_when_schema_is_not_native () =
+let test_output_contract_uses_prompt_tier_when_schema_is_not_native () =
   with_repo_oas_model_catalog @@ fun () ->
   let cfg =
     provider_cfg
@@ -132,14 +125,16 @@ let test_output_contract_fails_loud_when_schema_is_not_native () =
       ~base_url:"https://api.deepseek.com"
   in
   match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Ok _ -> fail "expected schema-native fusion judge to fail loud"
-  | Error msg ->
-    check bool "full schema failure is retained" true
-      (String_util.string_contains_substring ~needle:"full schema rejected" msg);
-    check bool "compact schema failure is retained" true
-      (String_util.string_contains_substring ~needle:"compact schema rejected" msg)
+  | Error msg -> fail ("expected prompt-tier fallback config: " ^ msg)
+  | Ok configured ->
+    check bool "response_format is disabled" true
+      (match configured.response_format with
+       | Agent_sdk.Types.Off -> true
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+    check bool "output_schema is absent" true
+      (Option.is_none configured.output_schema)
 
-let test_output_contract_fails_loud_when_no_output_contract_is_known () =
+let test_output_contract_uses_prompt_tier_when_no_output_contract_is_known () =
   with_empty_oas_model_catalog @@ fun () ->
   let cfg =
     provider_cfg
@@ -148,12 +143,14 @@ let test_output_contract_fails_loud_when_no_output_contract_is_known () =
       ~base_url:"https://api.example.invalid/v1"
   in
   match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Ok _ -> fail "expected unknown provider/model to fail loud"
-  | Error msg ->
-    check bool "full schema failure is retained" true
-      (String_util.string_contains_substring ~needle:"full schema rejected" msg);
-    check bool "compact schema failure is retained" true
-      (String_util.string_contains_substring ~needle:"compact schema rejected" msg)
+  | Error msg -> fail ("expected prompt-tier fallback config: " ^ msg)
+  | Ok configured ->
+    check bool "response_format is disabled" true
+      (match configured.response_format with
+       | Agent_sdk.Types.Off -> true
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+    check bool "output_schema is absent" true
+      (Option.is_none configured.output_schema)
 
 let test_panel_output_contract_keeps_native_schema_when_supported () =
   let cfg =
@@ -310,17 +307,17 @@ let () =
             `Quick
             test_output_contract_keeps_native_schema_when_supported
         ; test_case
-            "fails loud when native schema is not available"
+            "uses prompt tier when native schema is not available"
             `Quick
-            test_output_contract_fails_loud_when_schema_is_not_native
+            test_output_contract_uses_prompt_tier_when_schema_is_not_native
         ; test_case
-            "falls back to compact schema when full schema is rejected"
+            "uses prompt tier when native schema is rejected"
             `Quick
-            test_output_contract_falls_back_to_compact_schema_when_full_rejected
+            test_output_contract_uses_prompt_tier_when_native_schema_rejected
         ; test_case
-            "fails loud when no JSON output contract is known"
+            "uses prompt tier when no JSON output contract is known"
             `Quick
-            test_output_contract_fails_loud_when_no_output_contract_is_known
+            test_output_contract_uses_prompt_tier_when_no_output_contract_is_known
         ; test_case
             "panel keeps native answer schema when supported"
             `Quick

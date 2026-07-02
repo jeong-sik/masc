@@ -15,12 +15,6 @@ let schema_property key schema =
   | _ -> failf "schema has no object properties while looking for %S" key
 ;;
 
-let schema_has_property key schema =
-  match schema_member "properties" schema with
-  | Some (`Assoc properties) -> List.mem_assoc key properties
-  | _ -> false
-;;
-
 let schema_items schema =
   match schema_member "items" schema with
   | Some value -> value
@@ -63,8 +57,6 @@ let all_provider_native_schema_cases =
   ; "operator_judge", Keeper_structured_output_schema.operator_judge_output_schema
   ; "governance_judge", Keeper_structured_output_schema.governance_judge_output_schema
   ; "fusion_judge", Keeper_structured_output_schema.fusion_judge_output_schema
-  ; ( "compact_fusion_judge"
-    , Keeper_structured_output_schema.compact_fusion_judge_output_schema )
   ; "fusion_panel", Keeper_structured_output_schema.fusion_panel_answer_output_schema
   ; "verification_verdict", Keeper_structured_output_schema.verification_verdict_output_schema
   ; ( "anti_rationalization_verdict"
@@ -233,42 +225,6 @@ let test_fusion_judge_schema_uses_parser_wire_contract () =
   check bool "fusion schema exposes parser wire fields" true true
 ;;
 
-let test_compact_fusion_judge_schema_uses_parser_minimum_contract () =
-  let schema =
-    Keeper_structured_output_schema.compact_fusion_judge_output_schema
-  in
-  check
-    (list string)
-    "compact fusion judge required fields"
-    (List.sort
-       String.compare
-       [ Fusion_judge_parse.wire_field_decision
-       ; Fusion_judge_parse.wire_field_resolved_answer
-       ])
-    (required_strings schema);
-  let decision_kind_schema =
-    schema
-    |> schema_property Fusion_judge_parse.wire_field_decision
-    |> schema_property Fusion_judge_parse.wire_field_decision_kind
-  in
-  check
-    (list string)
-    "compact fusion decision enum"
-    (List.sort
-       String.compare
-       [ Fusion_judge_parse.wire_decision_answer
-       ; Fusion_judge_parse.wire_decision_insufficient
-       ; Fusion_judge_parse.wire_decision_recommend
-       ])
-    (enum_strings decision_kind_schema);
-  check bool "compact schema keeps resolved_answer" true
-    (schema_has_property Fusion_judge_parse.wire_field_resolved_answer schema);
-  check bool "compact schema omits nested consensus payload" false
-    (schema_has_property Fusion_judge_parse.wire_field_consensus schema);
-  check bool "compact fusion judge schema is closed" false
-    (allows_additional_properties schema)
-;;
-
 let test_fusion_panel_schema_uses_answer_contract () =
   let schema = Keeper_structured_output_schema.fusion_panel_answer_output_schema in
   check
@@ -367,10 +323,6 @@ let () =
             "fusion judge schema uses parser wire contract"
             `Quick
             test_fusion_judge_schema_uses_parser_wire_contract
-        ; test_case
-            "compact fusion judge schema uses parser minimum contract"
-            `Quick
-            test_compact_fusion_judge_schema_uses_parser_minimum_contract
         ; test_case
             "fusion panel schema uses answer contract"
             `Quick

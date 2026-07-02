@@ -146,34 +146,23 @@ let apply_fusion_judge_output_contract_with_validate ~validate provider_cfg =
   let native_schema_provider_cfg =
     Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
   in
-  (* Tier 1: full schema. The validator owns provider/capability/schema-shape
-     policy; MASC only retries the smaller contract when that boundary rejects
-     the full one. *)
+  (* Tier 1: provider-native structured output. OAS owns the capability
+     decision; when it rejects this request today, the reason is provider/model
+     capability or endpoint support, not schema shape. Retrying a smaller native
+     schema would fabricate a distinction that the current boundary does not
+     expose. *)
   match validate native_schema_provider_cfg with
   | Ok () -> Ok native_schema_provider_cfg
   | Error full_detail ->
-    (* Tier 2: compact schema (resolved_answer + decision only).
-       This preserves Fusion's typed judge parser contract while giving
-       providers a smaller native-output schema to validate. *)
-    let compact_schema =
-      Keeper_structured_output_schema.compact_fusion_judge_output_schema
-    in
-    let compact_cfg =
-      Keeper_structured_output_schema.apply_to_provider_config compact_schema
-        provider_cfg
-    in
-    (match validate compact_cfg with
-     | Ok () ->
-       Log.info
-         "fusion_judge: fell back to compact output schema (tier 2): %s"
-         full_detail;
-       Ok compact_cfg
-     | Error compact_detail ->
-       Error
-         (Printf.sprintf
-            "fusion.judge.output_schema: full schema rejected: %s; compact \
-             schema rejected: %s"
-            full_detail compact_detail))
+    Log.info
+      "fusion_judge: native output schema rejected; using prompt-tier judge \
+       contract: %s"
+      full_detail;
+    Ok
+      { provider_cfg with
+        response_format = Agent_sdk.Types.Off
+      ; output_schema = None
+      }
 
 let apply_fusion_judge_output_contract provider_cfg =
   apply_fusion_judge_output_contract_with_validate

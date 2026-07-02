@@ -25,10 +25,6 @@ val governance_judge_output_schema : Yojson.Safe.t
 
 val fusion_judge_output_schema : Yojson.Safe.t
 
-val compact_fusion_judge_output_schema : Yojson.Safe.t
-(** Smaller JSON object the Fusion judge provider may return when the full
-    native schema contract is rejected by the provider boundary. *)
-
 val fusion_panel_answer_output_schema : Yojson.Safe.t
 (** JSON object each Fusion panel provider must return. *)
 

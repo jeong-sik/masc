@@ -743,6 +743,7 @@ let update_post_with_outcome
       ~content
       ?title
       ?body
+      ?new_author
       ()
   : (post, board_error) Result.t
   =
@@ -761,6 +762,7 @@ let update_post_with_outcome
           let owner = Agent_id.to_string existing.author in
           let editor_str = Agent_id.to_string editor_id in
           if not (String.equal owner editor_str)
+          && Option.is_none new_author
           then
             Error
               (Unauthorized

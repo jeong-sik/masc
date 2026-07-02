@@ -369,11 +369,11 @@ let create_post ~author ~content ?title ?body ~post_kind ?meta_json
       | Ok (Board.Dedup_hit post) | Ok (Board.Rolled_up_post post) -> Ok post
       | Error _ as err -> err)
 
-let update_post ~post_id ~editor ~content ?title ?body () =
+let update_post ~post_id ~editor ~content ?title ?body ?new_author () =
   match backend () with
   | Jsonl store ->
       Board.update_post_with_outcome store ~post_id ~editor ~content ?title
-        ?body ()
+        ?body ?new_author ()
 
 let get_post ~post_id =
   match backend () with

@@ -40,6 +40,14 @@ let tool_post_create : Masc_domain.tool_schema =
                           "Author name. Auto-filled from caller's agent_name when \
                            omitted." )
                     ] )
+              ; ( "new_author"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Transfer ownership to a new author. Only the current \
+                           owner (or a matching `author`) can set this field." )
+                    ] )
               ; ( "meta"
                 , `Assoc
                     [ "type", `String "object"

@@ -120,4 +120,9 @@ module For_testing : sig
   val apply_output_contract
     :  Llm_provider.Provider_config.t
     -> (Llm_provider.Provider_config.t, string) result
+
+  val apply_output_contract_with_validate
+    :  validate:(Llm_provider.Provider_config.t -> (unit, string) result)
+    -> Llm_provider.Provider_config.t
+    -> (Llm_provider.Provider_config.t, string) result
 end

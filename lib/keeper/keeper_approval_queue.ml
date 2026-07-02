@@ -81,6 +81,8 @@ let read_recent_audit_raw store limit =
 
 let approval_audit_pending_event = "pending"
 let approval_audit_resolved_event = "resolved"
+let approval_audit_hard_forbidden_event = "hard_forbidden"
+let approval_audit_soft_forbidden_event = "soft_forbidden"
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
 
@@ -338,10 +340,20 @@ let resolved_approval_decision_kind json =
     Option.bind (Safe_ops.json_string_opt "decision" json) legacy_decision_kind_of_string
 ;;
 
+let resolved_history_event json =
+  match Safe_ops.json_string_opt "event" json with
+  | Some event ->
+    String.equal event approval_audit_resolved_event
+    || String.equal event approval_audit_hard_forbidden_event
+    || String.equal event approval_audit_soft_forbidden_event
+  | None -> false
+;;
+
 let resolved_approval_json_of_audit_event json =
   let resolved_at = Safe_ops.json_float_opt "ts" json in
   `Assoc
     [ "id", `String (Safe_ops.json_string ~default:"" "id" json)
+    ; "event", `String (Safe_ops.json_string ~default:"" "event" json)
     ; "keeper_name", `String (Safe_ops.json_string ~default:"" "keeper" json)
     ; "tool_name", `String (Safe_ops.json_string ~default:"" "tool" json)
     ; "risk_level", `String (Safe_ops.json_string ~default:"" "risk" json)
@@ -375,9 +387,7 @@ let list_recent_resolved_json ~base_path ?(n = recent_resolved_history_limit) ()
     | Some store ->
       try
         read_recent_audit_raw store (resolved_audit_scan_window n)
-        |> List.filter (fun json ->
-             String.equal approval_audit_resolved_event
-               (Safe_ops.json_string ~default:"" "event" json))
+        |> List.filter resolved_history_event
         |> List.rev
         |> List.filteri (fun idx _ -> idx < n)
         |> List.map resolved_approval_json_of_audit_event

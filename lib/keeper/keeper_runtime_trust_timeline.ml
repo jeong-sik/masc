@@ -86,6 +86,10 @@ let severity_of_approval_event event decision =
   match event with
   | "pending" -> "warn"
   | "expired" | "approval_timeout" | "cancelled" -> "bad"
+  | event
+    when String.equal event Keeper_approval_queue.approval_audit_hard_forbidden_event
+         || String.equal event Keeper_approval_queue.approval_audit_soft_forbidden_event ->
+    "bad"
   | "resolved" -> (
       match decision with
       | Some raw when String_util.contains_substring_ci raw "reject" -> "bad"

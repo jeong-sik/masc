@@ -159,6 +159,40 @@ let test_panel_outcome_rejects_invalid_structured_answer () =
       ("expected invalid structured response failure, got: "
        ^ Fusion_types.show_panel_outcome other)
 
+let test_panel_outcome_rejects_free_text_without_contract () =
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model"
+      (Ok (response_with_text "plain panel answer"))
+  with
+  | Fusion_types.Failed
+      { failed_model = "panel-a"
+      ; reason = Fusion_types.Invalid_structured_response detail
+      } ->
+    check bool "free text is not an implicit success" true
+      (String_util.string_contains_substring ~needle:"not valid JSON" detail)
+  | other ->
+    fail
+      ("expected free text to fail without an explicit contract, got: "
+       ^ Fusion_types.show_panel_outcome other)
+
+let test_panel_outcome_rejects_malformed_structured_answer () =
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model"
+      (Ok (response_with_text {|{"answer":|}))
+  with
+  | Fusion_types.Failed
+      { failed_model = "panel-a"
+      ; reason = Fusion_types.Invalid_structured_response detail
+      } ->
+    check bool "malformed JSON detail is retained" true
+      (String_util.string_contains_substring ~needle:"not valid JSON" detail)
+  | other ->
+    fail
+      ("expected malformed structured response failure, got: "
+       ^ Fusion_types.show_panel_outcome other)
+
 let test_panel_outcome_rejects_empty_answer () =
   match
     Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
@@ -281,6 +315,10 @@ let () =
             test_panel_outcome_parses_structured_answer
         ; test_case "rejects invalid structured answer" `Quick
             test_panel_outcome_rejects_invalid_structured_answer
+        ; test_case "rejects free text without contract" `Quick
+            test_panel_outcome_rejects_free_text_without_contract
+        ; test_case "rejects malformed structured answer" `Quick
+            test_panel_outcome_rejects_malformed_structured_answer
         ; test_case "rejects empty answer" `Quick
             test_panel_outcome_rejects_empty_answer
         ] )

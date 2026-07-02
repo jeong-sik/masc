@@ -16,6 +16,38 @@ let write_file path content =
     ~finally:(fun () -> close_out_noerr oc)
     (fun () -> output_string oc content)
 
+let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
+  { version = Agent_sdk.Checkpoint.checkpoint_version
+  ; session_id
+  ; agent_name = "agent-test"
+  ; model = "model-test"
+  ; system_prompt = None
+  ; messages = []
+  ; usage = Agent_sdk.Types.empty_usage
+  ; turn_count = 1
+  ; created_at = 0.0
+  ; tools = []
+  ; tool_choice = None
+  ; disable_parallel_tool_use = false
+  ; temperature = None
+  ; top_p = None
+  ; top_k = None
+  ; min_p = None
+  ; enable_thinking = None
+  ; preserve_thinking = None
+  ; response_format = Agent_sdk.Types.Off
+  ; thinking_budget = None
+  ; cache_system_prompt = false
+  ; context = Agent_sdk.Context.create ~eio:false ()
+  ; mcp_sessions = []
+  ; working_context = None
+  }
+
+let retryable_network_error message =
+  Agent_sdk.Error.Api
+    (Agent_sdk.Retry.NetworkError
+       { message; kind = Llm_provider.Http_client.Unknown })
+
 let runtime_toml_with_lane =
   {|
 [runtime]
@@ -46,6 +78,57 @@ is-default = true
 max-concurrent = 1
 
 [fallback.test_model]
+max-concurrent = 1
+|}
+
+let runtime_toml_media_lane_with_global_outside =
+  {|
+[runtime]
+default = "primary.text_model"
+media_failover = [ "outsidevision.vision_model" ]
+
+[runtime.lanes.resilient]
+strategy = "ordered"
+candidates = [ "primary.text_model", "lanevision.vision_model" ]
+
+[providers.primary]
+display-name = "Primary Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:1"
+
+[providers.lanevision]
+display-name = "Lane Vision Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:2"
+
+[providers.outsidevision]
+display-name = "Outside Vision Provider"
+protocol = "openai-compatible-http"
+endpoint = "http://127.0.0.1:3"
+
+[models.text_model]
+api-name = "text-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[models.vision_model]
+api-name = "vision-model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[models.vision_model.capabilities]
+supports-image-input = true
+
+[primary.text_model]
+is-default = true
+max-concurrent = 1
+
+[lanevision.vision_model]
+max-concurrent = 1
+
+[outsidevision.vision_model]
 max-concurrent = 1
 |}
 
@@ -249,7 +332,82 @@ let test_lane_media_degrade_uses_first_candidate_runtime_id () =
         "primary.test_model"
         (string_member "degraded_runtime_id" decision))
 
-let test_attempt_loop_tries_fallback_after_failure () =
+let test_lane_media_reroute_stays_within_lane () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    match Runtime.resolve_assignment "resilient" with
+    | `Missing | `Single_runtime _ ->
+      Alcotest.fail "expected resilient assignment to resolve to a lane"
+    | `Lane lane ->
+      let first_candidate_id, remaining_candidate_ids =
+        match Runtime_lane.ordered_candidates lane with
+        | first :: rest -> first, rest
+        | [] -> Alcotest.fail "expected non-empty lane candidates"
+      in
+      let first_candidate =
+        match Runtime.get_runtime_by_id first_candidate_id with
+        | Some runtime -> runtime
+        | None -> Alcotest.fail "missing first candidate"
+      in
+      let remaining_runtimes =
+        List.map
+          (fun runtime_id ->
+             match Runtime.get_runtime_by_id runtime_id with
+             | Some runtime -> runtime
+             | None -> Alcotest.failf "missing lane candidate %s" runtime_id)
+          remaining_candidate_ids
+      in
+      let image_block =
+        Agent_sdk.Types.Image
+          { media_type = "image/png"
+          ; data = Base64.encode_string "image"
+          ; source_type = Agent_sdk.Types.Base64
+          }
+      in
+      match
+        Driver.For_testing.lane_modality_reroute_decision
+          ~checkpoint_messages:[]
+          ~initial_messages:[]
+          ~goal_blocks:[ image_block ]
+          ~first_candidate
+          ~remaining_runtimes
+      with
+      | Runtime_agent.Reroute { to_runtime_id; _ } ->
+        Alcotest.(check string)
+          "reroute uses lane candidate, not global media_failover"
+          "lanevision.vision_model"
+          to_runtime_id
+      | Runtime_agent.No_reroute_needed ->
+        Alcotest.fail "text-only first candidate should require image reroute"
+      | Runtime_agent.No_capable_runtime _ ->
+        Alcotest.fail "lane second candidate should be image-capable")
+
+let test_runtime_dedupe_preserves_first_occurrence () =
+  with_runtime_config runtime_toml_media_lane_with_global_outside (fun () ->
+    let runtime id =
+      match Runtime.get_runtime_by_id id with
+      | Some runtime -> runtime
+      | None -> Alcotest.failf "missing runtime %s" id
+    in
+    let deduped =
+      Driver.For_testing.dedupe_runtimes_preserve_order
+        [
+          runtime "lanevision.vision_model";
+          runtime "lanevision.vision_model";
+          runtime "outsidevision.vision_model";
+          runtime "primary.text_model";
+          runtime "outsidevision.vision_model";
+        ]
+    in
+    Alcotest.(check (list string))
+      "dedupe preserves first occurrence order"
+      [
+        "lanevision.vision_model";
+        "outsidevision.vision_model";
+        "primary.text_model";
+      ]
+      (List.map (fun (runtime : Runtime.t) -> runtime.Runtime.id) deduped))
+
+let test_attempt_loop_stops_on_nonretryable_failure () =
   let attempts = ref [] in
   let events = ref [] in
   let result =
@@ -257,12 +415,68 @@ let test_attempt_loop_tries_fallback_after_failure () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+      ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id candidate ->
+        Alcotest.(check bool)
+          "nonretryable attempt does not receive resume checkpoint"
+          false
+          (Option.is_some resume_checkpoint);
         attempts := !attempts @ [ runtime_id ];
         match candidate with
         | "primary.test_model" ->
-          Error (Agent_sdk.Error.Internal "primary transport failed")
-        | "fallback.test_model" -> Ok runtime_id
+          Error (Agent_sdk.Error.Internal "primary terminal failure"), None
+        | "fallback.test_model" -> Ok runtime_id, None
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "primary.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Ok runtime_id -> Alcotest.failf "unexpected fallback success: %s" runtime_id
+   | Error (Agent_sdk.Error.Internal msg) ->
+     Alcotest.(check string) "primary error preserved" "primary terminal failure" msg
+   | Error e ->
+     Alcotest.failf "expected primary Internal error, got %s" (Agent_sdk.Error.to_string e));
+  Alcotest.(check (list string))
+    "attempted candidates"
+    [ "primary.test_model" ]
+    !attempts;
+  let events = List.rev !events in
+  Alcotest.(check (list string))
+    "manifest events"
+    (List.map event_name
+       [
+         Runtime_manifest.Runtime_routed;
+         Runtime_manifest.Runtime_failed;
+       ])
+    (List.map (fun (event, _, _) -> event_name event) events);
+  Alcotest.(check (list string))
+    "manifest runtime ids"
+    [ "primary.test_model"; "primary.test_model" ]
+    (List.map decision_runtime_id events)
+
+let test_attempt_loop_retries_network_error_with_checkpoint () =
+  let attempts = ref [] in
+  let fallback_resume_session = ref None in
+  let events = ref [] in
+  let checkpoint_after_primary = checkpoint_with_session_id "after-primary" in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "primary.test_model" ->
+          Alcotest.(check bool)
+            "primary starts from initial checkpoint"
+            false
+            (Option.is_some resume_checkpoint);
+          Error (retryable_network_error "primary network failed"), Some checkpoint_after_primary
+        | "fallback.test_model" ->
+          fallback_resume_session :=
+            Option.map
+              (fun (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.session_id)
+              resume_checkpoint;
+          Ok runtime_id, None
         | other -> Alcotest.failf "unexpected candidate %s" other)
       [ "primary.test_model"; "fallback.test_model" ]
   in
@@ -277,6 +491,10 @@ let test_attempt_loop_tries_fallback_after_failure () =
     "attempted candidates"
     [ "primary.test_model"; "fallback.test_model" ]
     !attempts;
+  Alcotest.(check (option string))
+    "fallback receives post-attempt checkpoint"
+    (Some "after-primary")
+    !fallback_resume_session;
   let events = List.rev !events in
   Alcotest.(check (list string))
     "manifest events"
@@ -287,16 +505,7 @@ let test_attempt_loop_tries_fallback_after_failure () =
          Runtime_manifest.Runtime_routed;
          Runtime_manifest.Runtime_completed;
        ])
-    (List.map (fun (event, _, _) -> event_name event) events);
-  Alcotest.(check (list string))
-    "manifest runtime ids"
-    [
-      "primary.test_model";
-      "primary.test_model";
-      "fallback.test_model";
-      "fallback.test_model";
-    ]
-    (List.map decision_runtime_id events)
+    (List.map (fun (event, _, _) -> event_name event) events)
 
 let test_attempt_loop_preserves_last_sdk_error () =
   let events = ref [] in
@@ -305,20 +514,20 @@ let test_attempt_loop_preserves_last_sdk_error () =
       ~runtime_id:"resilient"
       ~runtime_id_of:(fun runtime_id -> runtime_id)
       ~emit_runtime_manifest:(emit_manifest_collector events)
-      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
-        Error (Agent_sdk.Error.Internal (runtime_id ^ " failed")))
+      ~run_attempt:(fun ?resume_checkpoint:_ ~idx:_ ~runtime_id _candidate ->
+        Error (retryable_network_error (runtime_id ^ " failed")), None)
       [ "primary.test_model"; "fallback.test_model" ]
   in
   (match result with
    | Ok _ -> Alcotest.fail "expected final candidate error"
-   | Error (Agent_sdk.Error.Internal msg) ->
+   | Error (Agent_sdk.Error.Api (Agent_sdk.Retry.NetworkError { message; _ })) ->
      Alcotest.(check string)
        "last candidate error preserved"
        "fallback.test_model failed"
-       msg
+       message
    | Error e ->
      Alcotest.failf
-       "expected Internal final error, got %s"
+       "expected final network error, got %s"
        (Agent_sdk.Error.to_string e));
   let events = List.rev !events in
   Alcotest.(check (list string))
@@ -366,9 +575,21 @@ let () =
             `Quick
             test_lane_media_degrade_uses_first_candidate_runtime_id;
           Alcotest.test_case
-            "attempt loop tries fallback after failure"
+            "lane media reroute stays within lane"
             `Quick
-            test_attempt_loop_tries_fallback_after_failure;
+            test_lane_media_reroute_stays_within_lane;
+          Alcotest.test_case
+            "runtime dedupe preserves first occurrence"
+            `Quick
+            test_runtime_dedupe_preserves_first_occurrence;
+          Alcotest.test_case
+            "attempt loop stops on nonretryable failure"
+            `Quick
+            test_attempt_loop_stops_on_nonretryable_failure;
+          Alcotest.test_case
+            "attempt loop retries network error with checkpoint"
+            `Quick
+            test_attempt_loop_retries_network_error_with_checkpoint;
           Alcotest.test_case
             "attempt loop preserves last SDK error"
             `Quick

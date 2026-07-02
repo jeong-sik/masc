@@ -1383,6 +1383,52 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
       | Agent_sdk.Hooks.Edit _ ->
           Alcotest.fail "expected remembered approve, got edit"
 
+let test_callback_remembered_rule_overrides_soft_forbidden () =
+  with_eio_base_path @@ fun base_path ->
+  let keeper_name = "remember-soft-keeper" in
+  let tool_name = "masc_status" in
+  let input = `Assoc [ ("op", `String "git") ] in
+  Alcotest.(check string)
+    "soft-only fixture stays below hard-forbidden risk"
+    "low"
+    (GP.assess_risk ~tool_name ~input |> GP.risk_level_to_string);
+  let id =
+    AQ.submit_pending
+      ~base_path
+      ~keeper_name
+      ~tool_name
+      ~input
+      ~risk_level:AQ.Low
+      ~on_resolution:(fun _ -> ())
+      ()
+  in
+  (match
+     AQ.resolve_with_policy ~base_path ~id
+       ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
+   with
+   | Ok { remembered_rule = Some _ } -> ()
+   | Ok { remembered_rule = None } ->
+     Alcotest.fail "expected soft-forbidden allow-rule to be remembered"
+   | Error err ->
+     Alcotest.fail
+       ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err));
+  let pending_before = AQ.pending_count () in
+  let config = Masc.Workspace.default_config base_path in
+  let cb =
+    GP.to_oas_approval_callback
+      ~governance_level:"production" ~keeper_name ~config ()
+  in
+  let decision = cb ~tool_name ~input in
+  match decision with
+  | Agent_sdk.Hooks.Approve ->
+    Alcotest.(check int) "remembered rule overrides soft forbidden"
+      pending_before (AQ.pending_count ())
+  | Agent_sdk.Hooks.Reject reason ->
+    Alcotest.fail
+      ("expected remembered rule to override soft forbidden, got reject: " ^ reason)
+  | Agent_sdk.Hooks.Edit _ ->
+    Alcotest.fail "expected remembered approve, got edit"
+
 let test_callback_always_approve_bypasses_threshold () =
   with_test_config @@ fun config ->
   let meta =
@@ -1918,6 +1964,8 @@ let () =
         test_callback_production_worktree_prepare_requires_approval;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick
         test_callback_paranoid_medium_risk_uses_remembered_policy;
+      Alcotest.test_case "remembered rule overrides soft forbidden" `Quick
+        test_callback_remembered_rule_overrides_soft_forbidden;
       Alcotest.test_case "always_approve bypasses threshold" `Quick
         test_callback_always_approve_bypasses_threshold;
       Alcotest.test_case "typed last_blocker overrides always_approve" `Quick

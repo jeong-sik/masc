@@ -794,8 +794,39 @@ let test_governance_approval_notifies_gate_observer () =
         (match event.KG.source_line with
          | Some line -> line > 0
          | None -> false)
-    | events ->
+  | events ->
       failf "expected one observer event, got %d" (List.length events)))
+
+let test_governance_approval_hard_forbidden_blocks_without_hitl () =
+  with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+    let meta_ref = make_meta_ref "test_keeper" in
+    let observed = ref [] in
+    let on_gate_decision event = observed := event :: !observed in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let d =
+      invoke hook
+        (pre_tool_use_event ~tool_name:"masc_force_reset"
+           ~input:(`Assoc [ ("target", `String "workspace") ])
+           ())
+    in
+    check string "critical hard-forbidden tool -> Override"
+      "Override" (decision_kind d);
+    check bool "override carries hard-forbidden reason" true
+      (contains_substring (override_text d) "code=hard_forbidden");
+    match !observed with
+    | [ event ] ->
+      check string "stage" "governance_approval" event.KG.stage;
+      check string "decision" "override"
+        (KG.gate_decision_to_string event.KG.decision);
+      check string "reason_code" "hard_forbidden" event.KG.reason_code;
+      check string "tool_name" "masc_force_reset" event.KG.tool_name;
+      check (option string) "source_path"
+        (Some "lib/keeper/keeper_guards.ml")
+        event.KG.source_path
+    | events ->
+      failf "expected one hard-forbidden observer event, got %d"
+        (List.length events)))
 
 let test_timing_guard_sets_time_and_continues () =
   let tool_start_time = ref 0.0 in
@@ -948,6 +979,8 @@ let () = run "Keeper_guards" [
   "governance_approval_guard", [
     test_case "notifies observer on approval required" `Quick
       test_governance_approval_notifies_gate_observer;
+    test_case "hard-forbidden overrides without HITL" `Quick
+      test_governance_approval_hard_forbidden_blocks_without_hitl;
   ];
   "timing_guard", [
     test_case "sets time and continues" `Quick test_timing_guard_sets_time_and_continues;

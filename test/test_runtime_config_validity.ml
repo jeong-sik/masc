@@ -1165,23 +1165,15 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
               capability gate: %s"
              msg
          | Ok () ->
-	       check (option bool) "provider-qualified preserve policy" None
-	         (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
+           check (option bool) "provider-qualified preserve policy" None
+             (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
 
-let test_runtime_catalog_backfill_projects_bare_catalog_row () =
+let test_runtime_capability_gate_reports_missing_catalog_models () =
   let catalog =
     "[[models]]\n\
-     id_prefix = \"sample-family-\"\n\
+     id_prefix = \"other-family\"\n\
      base = \"openai_chat\"\n\
-     max_context_tokens = 2048\n\
-     max_output_tokens = 1024\n\
-     supports_tools = true\n\
-     supports_tool_choice = true\n\
-     supports_reasoning = true\n\
-     supports_extended_thinking = true\n\
-     supports_reasoning_budget = false\n\
-     thinking_control_format = \"chat_template_token\"\n\
-     supports_native_streaming = true\n"
+     max_context_tokens = 1024\n"
   in
   let runtime_toml =
     "[providers.custom]\n\
@@ -1189,10 +1181,8 @@ let test_runtime_catalog_backfill_projects_bare_catalog_row () =
      endpoint = \"https://custom.example/v1\"\n\
      \n\
      [models.sample]\n\
-     api-name = \"sample-family-123\"\n\
+     api-name = \"missing-family-123\"\n\
      max-context = 2048\n\
-     tools-support = true\n\
-     thinking-support = true\n\
      \n\
      [custom.sample]\n\
      \n\
@@ -1200,83 +1190,27 @@ let test_runtime_catalog_backfill_projects_bare_catalog_row () =
      default = \"custom.sample\"\n"
   in
   let snapshot = Runtime.For_testing.snapshot () in
-  let with_backfill_catalog catalog_path f =
-    let oc = open_out catalog_path in
-    output_string oc catalog;
-    close_out oc;
-    Fun.protect
-      ~finally:(fun () ->
-        Llm_provider.Model_catalog.clear_global ();
-        (try Sys.remove catalog_path with
-         | _ -> ()))
-      f
-  in
-  Fun.protect ~finally:(fun () -> Runtime.For_testing.restore snapshot) @@ fun () ->
-  with_model_catalog_content catalog @@ fun () ->
-  with_temp_runtime_toml runtime_toml @@ fun path ->
-  match Runtime.init_default_strict_report ~config_path:path with
-  | Ok () -> fail "provider-qualified catalog row should be required"
-  | Error (Runtime.Runtime_config_error msg) ->
-    failf "expected missing catalog diagnostic, got config error: %s" msg
-  | Error (Runtime.Missing_catalog_models report) ->
-    check int "one missing runtime" 1 (List.length report.missing_models);
-    let missing = List.hd report.missing_models in
-    check string "runtime id" "custom.sample" missing.runtime_id;
-    check string "provider label" "openai_compat" missing.provider_label;
-    check bool "source catalog row found" true
-      (Option.is_some missing.source_catalog_entry);
-    (match Runtime.model_catalog_backfill_entries report.missing_models with
-     | Error msg -> failf "backfill entries should render: %s" msg
-     | Ok [ entry ] ->
-       check string "provider-qualified id_prefix"
-         "openai_compat/sample-family-123"
-         entry.id_prefix;
-       check string "source id_prefix" "sample-family-" entry.source_id_prefix;
-       check bool "toml carries source row" true
-         (String_util.contains_substring entry.toml
-            "Source OAS catalog row: sample-family-");
-       check bool "toml carries provider-qualified id" true
-         (String_util.contains_substring entry.toml
-            "id_prefix = \"openai_compat/sample-family-123\"");
-       check bool "toml preserves thinking control" true
-         (String_util.contains_substring entry.toml
-            "thinking_control_format = \"chat_template_token\"");
-       let catalog_path = Filename.temp_file "oas-backfill" ".toml" in
-       with_backfill_catalog catalog_path @@ fun () ->
-       (match
-          Runtime.append_model_catalog_backfill
-            ~catalog_path
-            report.missing_models
-        with
-        | Error msg -> failf "append backfill should succeed: %s" msg
-        | Ok appended ->
-          check int "one appended row" 1 (List.length appended));
-       (match Llm_provider.Model_catalog.load_file catalog_path with
-        | Error msg -> failf "backfilled catalog should load: %s" msg
-        | Ok catalog -> Llm_provider.Model_catalog.set_global catalog);
-       (match Runtime.init_default_strict_report ~config_path:path with
-        | Error err ->
-          failf
-            "strict init should pass after backfill: %s"
-            (Runtime.strict_init_error_to_string err)
-        | Ok () -> ())
-     | Ok entries ->
-       failf "expected one backfill entry, got %d" (List.length entries))
-
-let test_runtime_catalog_backfill_refuses_missing_source_row () =
-  let missing : Runtime.missing_catalog_model =
-    { runtime_id = "custom.uncatalogued"
-    ; provider_id = "custom"
-    ; provider_label = "openai_compat"
-    ; model_id = "uncatalogued"
-    ; source_catalog_entry = None
-    }
-  in
-  match Runtime.model_catalog_backfill_entries [ missing ] with
-  | Ok _ -> fail "backfill must not invent capabilities without a source row"
-  | Error msg ->
-    check bool "error names runtime" true
-      (String_util.contains_substring msg "custom.uncatalogued")
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_strict_report ~config_path:path with
+       | Ok () -> fail "missing provider-qualified catalog row should fail strict init"
+       | Error (Runtime.Runtime_config_error msg) ->
+         failf "expected missing catalog report, got config error: %s" msg
+       | Error (Runtime.Missing_catalog_models report) ->
+         check int "one missing runtime" 1 (List.length report.missing_models);
+         let missing = List.hd report.missing_models in
+         check string "runtime id" "custom.sample" missing.runtime_id;
+         check string "provider id" "custom" missing.provider_id;
+         check string "provider label" "openai_compat" missing.provider_label;
+         check string "model id" "missing-family-123" missing.model_id;
+         check bool "diagnostic names OAS catalog file" true
+           (String_util.contains_substring
+              (Runtime.strict_init_error_to_string
+                 (Runtime.Missing_catalog_models report))
+              "oas-models.toml"))
 
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_fake_runtime_model_catalog @@ fun () ->
@@ -1653,11 +1587,8 @@ let () =
             "runtime capability gate uses provider-qualified OAS catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;
           test_case
-            "runtime catalog backfill projects bare catalog rows"
-            `Quick test_runtime_catalog_backfill_projects_bare_catalog_row;
-          test_case
-            "runtime catalog backfill refuses missing source rows"
-            `Quick test_runtime_catalog_backfill_refuses_missing_source_row;
+            "runtime capability gate reports missing catalog models"
+            `Quick test_runtime_capability_gate_reports_missing_catalog_models;
           test_case "atomic runtime getters are consistent after init" `Quick
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick

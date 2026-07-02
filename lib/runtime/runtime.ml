@@ -198,10 +198,10 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
       (Printf.sprintf
          "%s: %d runtime model(s) absent from the OAS capability catalog; they \
           would use provider_default and silently drop thinking/sampling control. \
-          Add them to models.toml (OAS catalog): %s"
+          Add them to oas-models.toml (OAS catalog): %s"
          config_path
          (List.length unknown)
-	         (String.concat ", " (List.map fst unknown)))
+         (String.concat ", " (List.map fst unknown)))
 ;;
 
 type missing_catalog_model =
@@ -209,7 +209,6 @@ type missing_catalog_model =
   ; provider_id : string
   ; provider_label : string
   ; model_id : string
-  ; source_catalog_entry : Llm_provider.Model_catalog.model_entry option
   }
 
 type missing_catalog_report =
@@ -229,7 +228,7 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
   Printf.sprintf
     "%s: %d runtime model(s) absent from the OAS capability catalog; they \
      would use provider_default and silently drop thinking/sampling control. \
-     Add them to models.toml (OAS catalog): %s"
+     Add them to oas-models.toml (OAS catalog): %s"
     report.config_path
     (List.length report.missing_models)
     (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
@@ -238,237 +237,6 @@ let missing_catalog_report_to_string (report : missing_catalog_report) =
 let strict_init_error_to_string = function
   | Runtime_config_error msg -> msg
   | Missing_catalog_models report -> missing_catalog_report_to_string report
-;;
-
-type model_catalog_backfill_entry =
-  { runtime_id : string
-  ; id_prefix : string
-  ; source_id_prefix : string
-  ; toml : string
-  }
-
-let toml_quote value =
-  let buffer = Buffer.create (String.length value + 2) in
-  Buffer.add_char buffer '"';
-  String.iter
-    (function
-      | '"' -> Buffer.add_string buffer "\\\""
-      | '\\' -> Buffer.add_string buffer "\\\\"
-      | '\n' -> Buffer.add_string buffer "\\n"
-      | '\r' -> Buffer.add_string buffer "\\r"
-      | '\t' -> Buffer.add_string buffer "\\t"
-      | ch when Char.code ch < 0x20 ->
-        Buffer.add_string buffer (Printf.sprintf "\\u%04X" (Char.code ch))
-      | ch -> Buffer.add_char buffer ch)
-    value;
-  Buffer.add_char buffer '"';
-  Buffer.contents buffer
-;;
-
-let toml_float value =
-  let rendered = Printf.sprintf "%.17g" value in
-  if String.contains rendered '.' || String.contains rendered 'e'
-     || String.contains rendered 'E'
-  then rendered
-  else rendered ^ ".0"
-;;
-
-let add_toml_string buffer key value =
-  Buffer.add_string buffer (Printf.sprintf "%s = %s\n" key (toml_quote value))
-;;
-
-let add_toml_string_opt buffer key = function
-  | None -> ()
-  | Some value -> add_toml_string buffer key value
-;;
-
-let add_toml_int_opt buffer key = function
-  | None -> ()
-  | Some value -> Buffer.add_string buffer (Printf.sprintf "%s = %d\n" key value)
-;;
-
-let add_toml_float_opt buffer key = function
-  | None -> ()
-  | Some value ->
-    Buffer.add_string buffer (Printf.sprintf "%s = %s\n" key (toml_float value))
-;;
-
-let add_toml_bool_opt buffer key = function
-  | None -> ()
-  | Some value ->
-    Buffer.add_string
-      buffer
-      (Printf.sprintf "%s = %s\n" key (if value then "true" else "false"))
-;;
-
-let add_toml_string_list_opt buffer key = function
-  | None -> ()
-  | Some values ->
-    Buffer.add_string
-      buffer
-      (Printf.sprintf
-         "%s = [%s]\n"
-         key
-         (String.concat ", " (List.map toml_quote values)))
-;;
-
-let render_model_catalog_entry ~(source_id_prefix : string)
-    (entry : Llm_provider.Model_catalog.model_entry) =
-  let buffer = Buffer.create 512 in
-  Buffer.add_string buffer "\n";
-  Buffer.add_string buffer "# MASC runtime catalog backfill.\n";
-  Buffer.add_string buffer
-    (Printf.sprintf "# Source OAS catalog row: %s\n" source_id_prefix);
-  Buffer.add_string buffer "[[models]]\n";
-  add_toml_string buffer "id_prefix" entry.id_prefix;
-  add_toml_string_opt buffer "base" entry.base_label;
-  add_toml_string_opt buffer "provider_name" entry.provider_name;
-  add_toml_int_opt buffer "max_context_tokens" entry.max_context_tokens;
-  add_toml_int_opt buffer "max_output_tokens" entry.max_output_tokens;
-  add_toml_bool_opt buffer "supports_tools" entry.supports_tools;
-  add_toml_bool_opt buffer "supports_tool_choice" entry.supports_tool_choice;
-  add_toml_bool_opt buffer "supports_required_tool_choice"
-    entry.supports_required_tool_choice;
-  add_toml_bool_opt buffer "supports_named_tool_choice"
-    entry.supports_named_tool_choice;
-  add_toml_bool_opt buffer "supports_parallel_tool_calls"
-    entry.supports_parallel_tool_calls;
-  add_toml_string_opt buffer "assistant_tool_content_format"
-    entry.assistant_tool_content_format;
-  add_toml_bool_opt buffer "supports_reasoning" entry.supports_reasoning;
-  add_toml_bool_opt buffer "supports_extended_thinking"
-    entry.supports_extended_thinking;
-  add_toml_bool_opt buffer "supports_reasoning_budget"
-    entry.supports_reasoning_budget;
-  add_toml_string_list_opt buffer "accepted_reasoning_efforts"
-    entry.accepted_reasoning_efforts;
-  add_toml_bool_opt buffer "supports_response_format_json"
-    entry.supports_response_format_json;
-  add_toml_bool_opt buffer "supports_structured_output"
-    entry.supports_structured_output;
-  add_toml_bool_opt buffer "supports_multimodal_inputs"
-    entry.supports_multimodal_inputs;
-  add_toml_bool_opt buffer "supports_image_input" entry.supports_image_input;
-  add_toml_bool_opt buffer "supports_audio_input" entry.supports_audio_input;
-  add_toml_bool_opt buffer "supports_video_input" entry.supports_video_input;
-  add_toml_string_opt buffer "modality_priority" entry.modality_priority;
-  add_toml_bool_opt buffer "supports_native_streaming"
-    entry.supports_native_streaming;
-  add_toml_bool_opt buffer "supports_system_prompt" entry.supports_system_prompt;
-  add_toml_bool_opt buffer "supports_caching" entry.supports_caching;
-  add_toml_bool_opt buffer "supports_prompt_caching"
-    entry.supports_prompt_caching;
-  add_toml_bool_opt buffer "supports_top_k" entry.supports_top_k;
-  add_toml_bool_opt buffer "supports_min_p" entry.supports_min_p;
-  add_toml_bool_opt buffer "supports_seed" entry.supports_seed;
-  add_toml_bool_opt buffer "supports_computer_use" entry.supports_computer_use;
-  add_toml_bool_opt buffer "supports_code_execution" entry.supports_code_execution;
-  add_toml_string_opt buffer "thinking_control_format"
-    entry.thinking_control_format;
-  add_toml_string_opt buffer "thinking_control_token"
-    entry.thinking_control_token;
-  add_toml_string_opt buffer "preserve_thinking_control_format"
-    entry.preserve_thinking_control_format;
-  add_toml_string_opt buffer "reasoning_output_format"
-    entry.reasoning_output_format;
-  add_toml_string_opt buffer "reasoning_streaming_format"
-    entry.reasoning_streaming_format;
-  add_toml_string_opt buffer "reasoning_replay" entry.reasoning_replay;
-  add_toml_float_opt buffer "input_per_million" entry.input_per_million;
-  add_toml_float_opt buffer "output_per_million" entry.output_per_million;
-  add_toml_float_opt buffer "cache_write_multiplier"
-    entry.cache_write_multiplier;
-  add_toml_float_opt buffer "cache_read_multiplier" entry.cache_read_multiplier;
-  Buffer.contents buffer
-;;
-
-let provider_qualified_id_prefix (missing : missing_catalog_model) =
-  let provider_label = String.trim missing.provider_label in
-  if String.equal provider_label ""
-  then missing.model_id
-  else provider_label ^ "/" ^ missing.model_id
-;;
-
-let model_catalog_backfill_entries missing_models =
-  let missing_without_source =
-    List.filter
-      (fun (missing : missing_catalog_model) ->
-         Option.is_none missing.source_catalog_entry)
-      missing_models
-  in
-  match missing_without_source with
-  | _ :: _ ->
-    Error
-      (Printf.sprintf
-         "cannot backfill %d runtime model(s) because no source OAS catalog row \
-          matched their bare model id: %s"
-         (List.length missing_without_source)
-         (String.concat
-            ", "
-            (List.map missing_catalog_model_label missing_without_source)))
-  | [] ->
-    Ok
-      (List.filter_map
-         (fun (missing : missing_catalog_model) ->
-            match missing.source_catalog_entry with
-            | None -> None
-            | Some source ->
-              let id_prefix = provider_qualified_id_prefix missing in
-              let source_id_prefix = source.id_prefix in
-              let entry = { source with id_prefix } in
-              Some
-                { runtime_id = missing.runtime_id
-                ; id_prefix
-                ; source_id_prefix
-                ; toml = render_model_catalog_entry ~source_id_prefix entry
-                })
-         missing_models)
-;;
-
-let dedupe_backfill_entries entries =
-  let rec loop seen acc = function
-    | [] -> List.rev acc
-    | (entry : model_catalog_backfill_entry) :: rest ->
-      if List.exists (String.equal entry.id_prefix) seen
-      then loop seen acc rest
-      else loop (entry.id_prefix :: seen) (entry :: acc) rest
-  in
-  loop [] [] entries
-;;
-
-let append_model_catalog_backfill ~catalog_path missing_models =
-  let* entries = model_catalog_backfill_entries missing_models in
-  let entries = dedupe_backfill_entries entries in
-  let* catalog =
-    Llm_provider.Model_catalog.load_file catalog_path
-    |> Result.map_error (fun msg ->
-      Printf.sprintf "cannot load OAS model catalog %s: %s" catalog_path msg)
-  in
-  let entries_to_append =
-    List.filter
-      (fun (entry : model_catalog_backfill_entry) ->
-         Option.is_none (Llm_provider.Model_catalog.lookup catalog entry.id_prefix))
-      entries
-  in
-  match entries_to_append with
-  | [] -> Ok []
-  | _ ->
-    (try
-       let oc =
-         open_out_gen
-           [ Open_wronly; Open_append; Open_creat; Open_text ]
-           0o644
-           catalog_path
-       in
-       Fun.protect
-         ~finally:(fun () -> close_out_noerr oc)
-         (fun () ->
-            List.iter (fun entry -> output_string oc entry.toml) entries_to_append);
-       Llm_provider.Model_catalog.clear_global ();
-       Ok entries_to_append
-     with
-     | Sys_error msg ->
-       Error (Printf.sprintf "cannot append OAS model catalog %s: %s" catalog_path msg))
 ;;
 
 let capabilities_for_runtime (rt : t) =
@@ -489,13 +257,12 @@ let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t li
        (fun (r : t) ->
           ( Printf.sprintf "%s (model=%s)" r.id r.provider_config.model_id
           , Option.is_some (capabilities_for_runtime r) ))
-	       runtimes)
+       runtimes)
 ;;
 
 let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
   : missing_catalog_report option
   =
-  let catalog = Llm_provider.Model_catalog.global () in
   let missing_models =
     List.filter_map
       (fun (r : t) ->
@@ -506,17 +273,11 @@ let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t lis
              Llm_provider.Provider_config.capability_provider_label r.provider_config
            in
            let model_id = r.provider_config.model_id in
-           let source_catalog_entry =
-             match catalog with
-             | None -> None
-             | Some catalog -> Llm_provider.Model_catalog.lookup catalog model_id
-           in
            Some
              { runtime_id = r.id
              ; provider_id = r.provider.id
              ; provider_label
              ; model_id
-             ; source_catalog_entry
              })
       runtimes
   in

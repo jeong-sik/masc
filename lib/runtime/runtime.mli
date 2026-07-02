@@ -34,14 +34,10 @@ type missing_catalog_model =
   ; provider_id : string
   ; provider_label : string
   ; model_id : string
-  ; source_catalog_entry : Llm_provider.Model_catalog.model_entry option
   }
 (** Runtime binding whose concrete provider/model pair is absent from the OAS
     capability catalog. [provider_label] is the exact OAS capability namespace
-    used for lookup, and [source_catalog_entry] is the bare model-family entry
-    found in the active catalog, when one exists. A present source entry means
-    MASC can propose a provider-qualified catalog projection without inventing
-    capabilities. *)
+    used for lookup. *)
 
 type missing_catalog_report =
   { config_path : string
@@ -53,27 +49,6 @@ type strict_init_error =
   | Missing_catalog_models of missing_catalog_report
 
 val strict_init_error_to_string : strict_init_error -> string
-
-type model_catalog_backfill_entry =
-  { runtime_id : string
-  ; id_prefix : string
-  ; source_id_prefix : string
-  ; toml : string
-  }
-
-val model_catalog_backfill_entries :
-  missing_catalog_model list -> (model_catalog_backfill_entry list, string) result
-(** Build provider-qualified OAS model-catalog rows from existing catalog source
-    rows. Returns [Error] when any missing runtime lacks a source catalog row;
-    the caller must not invent capabilities in that case. *)
-
-val append_model_catalog_backfill :
-  catalog_path:string ->
-  missing_catalog_model list ->
-  (model_catalog_backfill_entry list, string) result
-(** Append the generated rows to [catalog_path], skipping rows already present
-    at write time. Clears the OAS global model catalog cache after writing so a
-    subsequent strict init observes the new rows. *)
 
 val load_list :
   config_path:string
@@ -118,9 +93,8 @@ val init_default_strict : config_path:string -> (unit, string) result
 
 val init_default_strict_report :
   config_path:string -> (unit, strict_init_error) result
-(** Typed form of {!init_default_strict}. Server bootstrap uses this to offer an
-    explicit catalog-backfill repair path without string-matching the fatal
-    error message. *)
+(** Typed form of {!init_default_strict}. Server bootstrap uses this to log
+    missing catalog models without string-matching the fatal error message. *)
 
 module For_testing : sig
   type snapshot

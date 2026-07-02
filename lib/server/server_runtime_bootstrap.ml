@@ -45,9 +45,6 @@ let model_catalog_env_source_to_string = function
 
 let models_toml_filename = "models.toml"
 let oas_models_toml_filename = "oas-models.toml"
-let model_catalog_resolution_ref : model_catalog_env_resolution option Atomic.t =
-  Atomic.make None
-;;
 
 let nonempty_env env name =
   match env name with
@@ -142,11 +139,9 @@ let configure_oas_model_catalog_env
   =
   match resolve_oas_model_catalog_path ~env ?cwd ?argv0 () with
   | Some { source = Env_var Oas_model_catalog; path } as resolution ->
-    Atomic.set model_catalog_resolution_ref resolution;
     Log.Misc.info "model_catalog: OAS_MODEL_CATALOG=%s already configured" path;
     resolution
   | Some { source; path } as resolution ->
-    Atomic.set model_catalog_resolution_ref resolution;
     putenv (model_catalog_env_var_name Oas_model_catalog) path;
     Log.Misc.info
       "model_catalog: OAS_MODEL_CATALOG=%s resolved from %s"
@@ -154,7 +149,6 @@ let configure_oas_model_catalog_env
       (model_catalog_env_source_to_string source);
     resolution
   | None ->
-    Atomic.set model_catalog_resolution_ref None;
     preload_agent_sdk_catalog ();
     (match agent_sdk_catalog () with
      | Some _ ->
@@ -255,68 +249,6 @@ let record_runtime_toml_load_failure msg =
          ~labels:[ "reason", reason ]
       ())
     reason
-
-let stdin_is_interactive () =
-  try Unix.isatty Unix.stdin with
-  | Unix.Unix_error _ -> false
-;;
-
-let operator_approved_runtime_catalog_backfill () =
-  Printf.eprintf "Backfill missing OAS model-catalog rows now and retry startup? [y/N] %!";
-  match read_line () with
-  | exception End_of_file -> false
-  | answer ->
-    (match String.lowercase_ascii (String.trim answer) with
-     | "y" | "yes" -> true
-     | _ -> false)
-;;
-
-let maybe_backfill_runtime_catalog (report : Runtime.missing_catalog_report) =
-  match Atomic.get model_catalog_resolution_ref with
-  | None ->
-    Error
-      "no writable OAS model catalog path was resolved; set OAS_MODEL_CATALOG or \
-       start from a directory containing oas-models.toml/models.toml"
-  | Some { path = catalog_path; source } ->
-    (match Runtime.model_catalog_backfill_entries report.missing_models with
-     | Error msg -> Error msg
-     | Ok entries ->
-       if entries = []
-       then Ok []
-       else (
-         Log.Server.warn
-           "Runtime catalog backfill available for %d missing model row(s) in %s \
-            (%s)"
-           (List.length entries)
-           catalog_path
-           (model_catalog_env_source_to_string source);
-         List.iter
-           (fun (entry : Runtime.model_catalog_backfill_entry) ->
-              Log.Server.warn
-                "Runtime catalog backfill candidate: %s from source row %s \
-                 (runtime=%s)"
-                entry.id_prefix
-                entry.source_id_prefix
-                entry.runtime_id)
-           entries;
-         if not (stdin_is_interactive ())
-         then
-           Error
-             "runtime catalog backfill requires an interactive terminal; edit the \
-              catalog row explicitly or restart in the foreground to approve"
-         else if not (operator_approved_runtime_catalog_backfill ())
-         then Error "operator declined runtime catalog backfill"
-         else (
-           match Runtime.append_model_catalog_backfill ~catalog_path report.missing_models with
-           | Error msg -> Error msg
-           | Ok appended ->
-             Log.Server.warn
-               "Runtime catalog backfilled %d model row(s) into %s; retrying \
-                strict runtime init"
-               (List.length appended)
-               catalog_path;
-             Ok appended)))
-;;
 
 let thompson_shutdown_hook_registered = Atomic.make false
 
@@ -727,43 +659,20 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          is fatal — the server cannot route turns without a default Runtime, so
          booting into a half-configured state only defers the failure to the
          first turn (runtime→Runtime vision: no silent fallback). *)
-	      (match Runtime.config_path () with
-	       | Some config_path ->
-	         (match Runtime.init_default_strict_report ~config_path with
-	          | Ok () ->
-	            Log.Server.info "Runtime default initialized: %s"
-	              (Runtime.get_default_runtime_id ())
-	          | Error (Runtime.Missing_catalog_models report as err) ->
-	            Log.Server.error
-	              "Runtime.init_default_strict requires OAS model-catalog \
-	               backfill: %s"
-	              (Runtime.strict_init_error_to_string err);
-	            (match maybe_backfill_runtime_catalog report with
-	             | Ok _ ->
-	               (match Runtime.init_default_strict_report ~config_path with
-	                | Ok () ->
-	                  Log.Server.info "Runtime default initialized after catalog backfill: %s"
-	                    (Runtime.get_default_runtime_id ())
-	                | Error retry_err ->
-	                  Log.Server.error
-	                    "Runtime.init_default_strict failed after catalog \
-	                     backfill (fatal, refusing to boot): %s"
-	                    (Runtime.strict_init_error_to_string retry_err);
-	                  exit 1)
-	             | Error repair_msg ->
-	               Log.Server.error
-	                 "Runtime catalog backfill unavailable or declined (fatal, \
-	                  refusing to boot): %s"
-	                 repair_msg;
-	               exit 1)
-	          | Error err ->
-	            Log.Server.error
-	              "Runtime.init_default_strict failed (fatal, refusing to boot): %s"
-	              (Runtime.strict_init_error_to_string err);
-	            exit 1)
-	       | None ->
-	         Log.Server.error
-	           "No runtime config path; cannot initialize default Runtime \
+      (match Runtime.config_path () with
+       | Some config_path ->
+         (match Runtime.init_default_strict_report ~config_path with
+          | Ok () ->
+            Log.Server.info "Runtime default initialized: %s"
+              (Runtime.get_default_runtime_id ())
+          | Error err ->
+            Log.Server.error
+              "Runtime.init_default_strict failed (fatal, refusing to boot): %s"
+              (Runtime.strict_init_error_to_string err);
+            exit 1)
+       | None ->
+         Log.Server.error
+           "No runtime config path; cannot initialize default Runtime \
             (fatal, refusing to boot)";
          exit 1);
       let t1 = Eio.Time.now clock in

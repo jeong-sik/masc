@@ -638,6 +638,44 @@ let add_routes ~sw ~clock router =
                   ])
          )
        ) request reqd)
+
+  (* Comment vote — mirrors masc_board_vote. Server re-derives [voter] from the
+     agent header so the client cannot forge the voting identity. *)
+  |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_board_comment_vote"
+         (fun _state _req reqd ->
+         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (`Assoc
+                        [ ("ok", `Bool false); ("message", `String msg) ])
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let voter = board_actor_author_for_write agent_name in
+             let* args = json_upsert_string_field "voter" voter args in
+             let result = Board_tool.handle_tool "masc_board_comment_vote" args in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [
+                    ("ok", `Bool false);
+                    ("message", `String (Printexc.to_string exn));
+                  ])
+         )
+       ) request reqd)
   |> Http.Router.get "/api/v1/karma" (fun request reqd ->
        with_public_read (fun _state _req reqd ->
          let karma_list = Board_dispatch.get_all_karma () in

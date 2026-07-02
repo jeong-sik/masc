@@ -359,7 +359,8 @@
   test_event_log
   test_relation_materializer
   test_keeper_behavior_trace
-  test_keeper_wire_capture)
+  test_keeper_wire_capture
+  test_board_rest_routes)
  (modules
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
@@ -700,7 +701,8 @@
   test_event_log
   test_relation_materializer
   test_keeper_behavior_trace
-  test_keeper_wire_capture)
+  test_keeper_wire_capture
+  test_board_rest_routes)
  (libraries masc_test_deps multimodal))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.

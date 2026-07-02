@@ -832,7 +832,36 @@ let submit_and_await
          (* Mirror expire_stale's teardown, but preserve any concurrent
             operator decision that wins the promise resolution race. *)
          timeout_decision reason)
-    | Some _, Critical | None, _ -> Eio.Promise.await promise
+    | Some clock, Critical ->
+      (match
+         Eio.Fiber.first
+           (fun () -> `Decision (Eio.Promise.await promise))
+           (fun () ->
+              Eio.Time.sleep clock 3600.0;
+              `Escalated)
+       with
+       | `Decision d -> d
+       | `Escalated ->
+         let reason = "critical approval escalated — operator must decide" in
+         audit_approval_event
+           ~base_path:entry.audit_base_path
+           ~event_type:"approval_escalated"
+           ~id
+           ~keeper_name
+           ~tool_name
+           ~risk_level
+           ?turn_id
+           ?task_id
+           ?goal_id
+           ~goal_ids
+           ~sandbox_target:entry.sandbox_target
+           ?runtime_contract
+           ?selected_model
+           ~decision:(Approval_expired reason)
+           ();
+         (* Escalated — keep waiting for operator, do not reject *)
+         Eio.Promise.await promise)
+    | None, _ -> Eio.Promise.await promise
   in
   Eio_guard.protect await_with_timeout ~finally:(fun () ->
     Safe_ops.protect ~default:() (fun () ->

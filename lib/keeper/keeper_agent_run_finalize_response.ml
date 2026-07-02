@@ -62,7 +62,12 @@ let replay_suffix_prune_reason
 
 let stop_reason_requests_resume_merge = function
   | Runtime_agent.TurnBudgetExhausted _ -> true
-  | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
+  (* A yield stops at a clean turn boundary (no partial in-flight work to merge),
+     like [MutationBoundaryReached]; the OAS checkpoint already holds the
+     completed turns and the keeper resumes on the next cycle. *)
+  | Runtime_agent.Completed
+  | Runtime_agent.MutationBoundaryReached _
+  | Runtime_agent.Yielded_to_chat_waiting _ -> false
 ;;
 
 let should_resume_merge

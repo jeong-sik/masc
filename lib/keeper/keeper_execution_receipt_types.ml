@@ -331,6 +331,8 @@ let stop_reason_to_string = function
     (match tool_name with
      | Some tool -> Printf.sprintf "mutation_boundary:%s:%d" tool turns_used
      | None -> Printf.sprintf "mutation_boundary:%d" turns_used)
+  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
+    Printf.sprintf "yielded_to_chat_waiting:%d" turns_used
 ;;
 
 let enrich_contract_violation_reason (receipt : t) : string =

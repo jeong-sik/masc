@@ -121,14 +121,19 @@ let raw_trace_turn_counter = Atomic.make 0
    resume-appends to the (tiny, same-millisecond) existing file. *)
 let raw_trace_fresh_name_attempts = 8
 
+(* Shape mirrors OAS [Raw_trace.next_worker_run_id] (ts + pid + counter). *)
 let raw_trace_turn_basename () =
-  (* NDT-OK: the wall-clock prefix only orders turn files chronologically
-     for retention pruning (zero-padded ms sorts lexicographically);
-     keeper control flow never branches on it.  Shape mirrors OAS
-     [Raw_trace.next_worker_run_id] (ts + pid + counter). *)
-  Printf.sprintf "turn-%013Ld-%04x-%06d%s"
-    (Int64.of_float (Unix.gettimeofday () *. 1000.0))
-    (Unix.getpid () land 0xFFFF)
+  let now_ms =
+    (* NDT-OK: file-name prefix only — zero-padded ms sorts retention
+       chronologically; keeper control flow never branches on it. *)
+    Int64.of_float (Unix.gettimeofday () *. 1000.0)
+  in
+  let pid_fragment =
+    (* NDT-OK: pid only disambiguates cross-process same-millisecond
+       file names; no control flow reads it. *)
+    Unix.getpid () land 0xFFFF
+  in
+  Printf.sprintf "turn-%013Ld-%04x-%06d%s" now_ms pid_fragment
     (Atomic.fetch_and_add raw_trace_turn_counter 1)
     raw_trace_file_extension
 

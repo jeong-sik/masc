@@ -120,6 +120,11 @@ let all_flags : flag list = [
     default = true; category = "keeper";
     lifecycle = Active; since = "2.250.0" };
 
+  { env_name = "MASC_KEEPER_WIRE_CAPTURE";
+    description = "Default-off diagnostic MASC-to-OAS request/response wire capture";
+    default = false; category = "keeper";
+    lifecycle = Experimental; since = "2.254.0" };
+
   { env_name = "MASC_CONNECTOR_AMBIENT_WAKE_ENABLED";
     description = "Wake an idle keeper on an ambient connector message via an external-attention edge stimulus (RFC-connector-ambient-attention-wake). Off until the spurious-wake throttle (P4) lands; enabling without it would run a turn on every ambient line.";
     default = false; category = "keeper";

@@ -288,7 +288,7 @@ let prune_to_max_bytes_unlocked t ~max_bytes ~keep_path =
 
 (* ── Public API ───────────────────────────────────────── *)
 
-let append_inner t json =
+let append_unlocked ?max_current_file_bytes t json =
   let mutex = Atomic.get t.mutex in
   (* [use_ro] serializes file appends without poisoning the shared mutex on
      IO failure, so retry paths can keep using the same registry entry.
@@ -300,28 +300,50 @@ let append_inner t json =
      was a pre-emptive duplicate of that guarantee — removed here. *)
   Eio.Mutex.use_ro mutex (fun () ->
     let dated = Jsonl_writer.dated_path_now ~base_dir:t.base_dir in
-    Jsonl_writer.append_jsonl ~path:dated.path json;
-    (match t.retention_days with
-     | None -> ()
-     | Some days ->
-       let today = dated.month_dir ^ "/" ^ dated.day_file in
-       if
-         not
-           (Option.equal String.equal
-              (Atomic.get t.last_prune_day)
-              (Some today))
-       then begin
-         ignore (prune_unlocked t ~days : int);
-         Atomic.set t.last_prune_day (Some today)
-       end);
-    match t.max_bytes with
-    | None -> ()
-    | Some max_bytes ->
-      ignore
-        (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int))
+    let fits_current_file =
+      match max_current_file_bytes with
+      | Some max_bytes when max_bytes > 0 ->
+        let row_bytes = String.length (Yojson.Safe.to_string json) + 1 in
+        file_size dated.path + row_bytes <= max_bytes
+      | _ -> true
+    in
+    if not fits_current_file
+    then false
+    else begin
+      Jsonl_writer.append_jsonl ~path:dated.path json;
+      (match t.retention_days with
+       | None -> ()
+       | Some days ->
+         let today = dated.month_dir ^ "/" ^ dated.day_file in
+         if
+           not
+             (Option.equal String.equal
+                (Atomic.get t.last_prune_day)
+                (Some today))
+         then begin
+           (* See retention pruning is opportunistic after append durability. *)
+           ignore (prune_unlocked t ~days : int);
+           Atomic.set t.last_prune_day (Some today)
+         end);
+      (match t.max_bytes with
+       | None -> ()
+       | Some max_bytes ->
+         (* See byte-budget pruning is best-effort cleanup after append. *)
+         ignore
+           (prune_to_max_bytes_unlocked t ~max_bytes ~keep_path:dated.path : int));
+      true
+    end)
+
+let append_inner t json = ignore (append_unlocked t json : bool)
 
 let append t json =
   (Atomic.get append_guard) (fun () -> append_inner t json)
+
+let append_if_current_file_fits t ~max_current_file_bytes json =
+  let appended = ref false in
+  (Atomic.get append_guard) (fun () ->
+    appended := append_unlocked ~max_current_file_bytes t json);
+  !appended
 
 let set_append_guard guard = Atomic.set append_guard guard
 

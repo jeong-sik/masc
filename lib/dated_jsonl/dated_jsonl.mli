@@ -29,6 +29,14 @@ val append : t -> Yojson.Safe.t -> unit
 (** Append [json] to today's [DD.jsonl] inside [YYYY-MM/].
     Creates directories as needed.  Thread-safe via internal mutex. *)
 
+val append_if_current_file_fits :
+  t -> max_current_file_bytes:int -> Yojson.Safe.t -> bool
+(** Append [json] only when today's current [DD.jsonl] would remain at or
+    below [max_current_file_bytes] after the row is added. Returns [true] when
+    appended and [false] when skipped. The size check and append share the
+    same internal mutex as {!append}. Retention and completed-file byte pruning
+    still run after a successful append. *)
+
 val set_append_guard : ((unit -> unit) -> unit) -> unit
 (** [set_append_guard guard] installs a process-wide wrapper around
     {!append}.  The default guard runs the callback immediately.  Higher-level

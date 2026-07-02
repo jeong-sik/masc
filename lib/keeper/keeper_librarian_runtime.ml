@@ -253,12 +253,12 @@ let select_recent_messages ~max_messages messages =
 ;;
 
 let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
-  let librarian_max_tokens = librarian_max_tokens () in
+  let configured_librarian_max_tokens = librarian_max_tokens () in
   let max_tokens =
     match provider_cfg.max_tokens with
-    | Some n when n > 0 -> Some (min n librarian_max_tokens)
-    | Some _ -> Some librarian_max_tokens
-    | None -> Some librarian_max_tokens
+    | Some n when n > 0 -> Some (min n configured_librarian_max_tokens)
+    | Some _ -> Some configured_librarian_max_tokens
+    | None -> Some configured_librarian_max_tokens
   in
   { provider_cfg with
     max_tokens

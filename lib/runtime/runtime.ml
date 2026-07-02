@@ -198,10 +198,45 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
       (Printf.sprintf
          "%s: %d runtime model(s) absent from the OAS capability catalog; they \
           would use provider_default and silently drop thinking/sampling control. \
-          Add them to models.toml (OAS catalog): %s"
+          Add them to oas-models.toml (OAS catalog): %s"
          config_path
          (List.length unknown)
          (String.concat ", " (List.map fst unknown)))
+;;
+
+type missing_catalog_model =
+  { runtime_id : string
+  ; provider_id : string
+  ; provider_label : string
+  ; model_id : string
+  }
+
+type missing_catalog_report =
+  { config_path : string
+  ; missing_models : missing_catalog_model list
+  }
+
+type strict_init_error =
+  | Runtime_config_error of string
+  | Missing_catalog_models of missing_catalog_report
+
+let missing_catalog_model_label (missing : missing_catalog_model) =
+  Printf.sprintf "%s (model=%s)" missing.runtime_id missing.model_id
+;;
+
+let missing_catalog_report_to_string (report : missing_catalog_report) =
+  Printf.sprintf
+    "%s: %d runtime model(s) absent from the OAS capability catalog; they \
+     would use provider_default and silently drop thinking/sampling control. \
+     Add them to oas-models.toml (OAS catalog): %s"
+    report.config_path
+    (List.length report.missing_models)
+    (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
+;;
+
+let strict_init_error_to_string = function
+  | Runtime_config_error msg -> msg
+  | Missing_catalog_models report -> missing_catalog_report_to_string report
 ;;
 
 let capabilities_for_runtime (rt : t) =
@@ -223,6 +258,32 @@ let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t li
           ( Printf.sprintf "%s (model=%s)" r.id r.provider_config.model_id
           , Option.is_some (capabilities_for_runtime r) ))
        runtimes)
+;;
+
+let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
+  : missing_catalog_report option
+  =
+  let missing_models =
+    List.filter_map
+      (fun (r : t) ->
+         match capabilities_for_runtime r with
+         | Some _ -> None
+         | None ->
+           let provider_label =
+             Llm_provider.Provider_config.capability_provider_label r.provider_config
+           in
+           let model_id = r.provider_config.model_id in
+           Some
+             { runtime_id = r.id
+             ; provider_id = r.provider.id
+             ; provider_label
+             ; model_id
+             })
+      runtimes
+  in
+  match missing_models with
+  | [] -> None
+  | first :: rest -> Some { config_path; missing_models = first :: rest }
 ;;
 
 let materialize_config ~(config_path : string) (cfg : config)
@@ -368,15 +429,19 @@ let init_default ~config_path =
    so an operator runtime.toml whose model is absent from the catalog is rejected
    before boot — the gate that load_list intentionally no longer applies, kept out
    of load_list so unit tests stay catalog-independent. *)
-let init_default_strict ~config_path =
+let init_default_strict_report ~config_path =
   match load_list ~config_path with
-  | Error _ as e -> e
+  | Error msg -> Error (Runtime_config_error msg)
   | Ok ((runtimes, _, _, _, _, _, _) as loaded) ->
-    (match validate_runtime_model_capabilities ~config_path runtimes with
-     | Error _ as e -> e
-     | Ok () ->
+    (match missing_runtime_model_capabilities ~config_path runtimes with
+     | Some report -> Error (Missing_catalog_models report)
+     | None ->
        set_loaded ~config_path loaded;
        Ok ())
+
+let init_default_strict ~config_path =
+  init_default_strict_report ~config_path
+  |> Result.map_error strict_init_error_to_string
 
 let runtime_state () = Atomic.get loaded_state_ref
 

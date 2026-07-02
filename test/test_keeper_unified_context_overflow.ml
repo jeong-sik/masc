@@ -384,9 +384,9 @@ let () =
             `Quick
             test_overflow_pause_contract_is_typed_auto_resume
         ; test_case
-            "preflight overflow uses providerless pause fallback"
+            "preflight overflow does not bypass driver retry"
             `Quick
-            test_preflight_overflow_uses_providerless_pause_fallback
+            test_preflight_overflow_does_not_bypass_driver_retry
         ; test_case
             "summarize_turn_event_bus extracts overflow signal"
             `Quick

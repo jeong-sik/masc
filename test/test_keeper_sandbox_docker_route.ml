@@ -44,6 +44,11 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
+let with_cwd path f =
+  let prior = Sys.getcwd () in
+  Sys.chdir path;
+  Fun.protect ~finally:(fun () -> Sys.chdir prior) f
+
 let with_config_dir config_dir f =
   let prior = Sys.getenv_opt "MASC_CONFIG_DIR" in
   Fun.protect
@@ -339,6 +344,28 @@ let with_fake_docker script f =
   with_env "PATH" path @@ fun () ->
   with_env "MASC_KEEPER_SYSTEM_FD_HEADROOM" "0" @@ fun () ->
   with_env "MASC_KEEPER_HOST_FD_HOTSPOT_HEADROOM" "0" f
+
+let test_docker_command_skips_empty_path_segment () =
+  let cwd = temp_dir () in
+  let path_dir = temp_dir () in
+  let cwd_docker = Filename.concat cwd "docker" in
+  let path_docker = Filename.concat path_dir "docker" in
+  write_file cwd_docker "#!/bin/sh\nexit 66\n";
+  write_file path_docker "#!/bin/sh\nexit 0\n";
+  Unix.chmod cwd_docker 0o755;
+  Unix.chmod path_docker 0o755;
+  Fun.protect
+    ~finally:(fun () ->
+      cleanup_dir cwd;
+      cleanup_dir path_dir)
+  @@ fun () ->
+  with_cwd cwd @@ fun () ->
+  with_env "MASC_TEST_FAKE_DOCKER_PATH" "" @@ fun () ->
+  with_env "PATH" (":" ^ path_dir) @@ fun () ->
+  Alcotest.(check string)
+    "empty PATH segment skipped"
+    path_docker
+    (Masc.Keeper_sandbox_runtime.docker_command ())
 
 let with_tool_policy_config f = f ()
 
@@ -2266,6 +2293,9 @@ let () =
           Alcotest.test_case
             "turn sandbox factory uses refreshed registry meta"
             `Quick test_turn_sandbox_factory_uses_refreshed_registry_meta;
+          Alcotest.test_case
+            "docker command skips empty PATH segment"
+            `Quick test_docker_command_skips_empty_path_segment;
           Alcotest.test_case
             "tool_execute typed pipeline uses local shell ir dispatch"
             `Quick test_execute_typed_pipeline_uses_local_shell_ir_dispatch;

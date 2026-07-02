@@ -143,7 +143,7 @@ let test_shell_command_available_rejects_empty_path_segment_cwd () =
          (Filename.concat dir tool_name)
          "#!/bin/sh\nexit 0\n";
        Sys.chdir dir;
-       with_env "PATH" ":" @@ fun () ->
+       with_env "PATH" (String.make 1 Executable_path.search_path_separator) @@ fun () ->
        Alcotest.(check bool)
          "empty PATH entry not cwd"
          false

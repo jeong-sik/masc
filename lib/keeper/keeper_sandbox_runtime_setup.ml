@@ -16,8 +16,8 @@ let docker_command () =
      | Some path ->
        let rec loop = function
          | [] -> bin
+         | dir :: rest when String.equal dir "" -> loop rest
          | dir :: rest ->
-           let dir = if dir = "" then "." else dir in
            let candidate = Filename.concat dir bin in
            (try
               Unix.access candidate [ Unix.X_OK ];
@@ -25,7 +25,7 @@ let docker_command () =
             with
             | Unix.Unix_error _ -> loop rest)
        in
-       loop (String.split_on_char ':' path))
+       loop (Executable_path.split_search_path path))
 ;;
 
 let docker_command_argv () =

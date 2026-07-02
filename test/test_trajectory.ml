@@ -640,6 +640,175 @@ let test_summary_row_not_counted_as_malformed () =
   Alcotest.(check int) "skipped count counts only malformed" 1 skipped;
   Alcotest.(check int) "total rows processed" 3 total
 
+(* ================================================================ *)
+(* Test: next_round tail-read hydration                              *)
+(* ================================================================ *)
+
+(* A trajectory JSONL row carrying the fields next_round reads. next_round only
+   inspects the "turn" field, but the row mirrors a real tool-call entry. *)
+let next_round_row ~turn ~round : Yojson.Safe.t =
+  `Assoc
+    [
+      ("ts", `Float 1000.0);
+      ("ts_iso", `String "2026-07-01T00:00:00Z");
+      ("turn", `Int turn);
+      ("round", `Int round);
+      ("tool_name", `String "tool_execute");
+      ("args", `Assoc []);
+      ("result", `String "ok");
+      ("duration_ms", `Int 1);
+      ("error", `Null);
+      ("cost_usd", `Float 0.0);
+    ]
+
+(* Append rows to the trajectory JSONL for a keeper/trace. Uses a single append
+   fd so the large-turn fixture stays fast, and appends (not truncates) so the
+   cache-hit test can add rows after hydration. *)
+let append_trajectory_rows ~masc_root ~keeper_name ~trace_id (rows : Yojson.Safe.t list) =
+  let dir = Trajectory.trajectories_dir masc_root keeper_name in
+  Fs_compat.mkdir_p dir;
+  let path = Trajectory.trajectory_path masc_root keeper_name trace_id in
+  let oc = open_out_gen [ Open_append; Open_creat ] 0o644 path in
+  Fun.protect
+    ~finally:(fun () -> close_out oc)
+    (fun () ->
+      List.iter
+        (fun row ->
+          output_string oc (Yojson.Safe.to_string row);
+          output_char oc '\n')
+        rows)
+
+let test_next_round_empty_or_missing_file () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    (* Missing file: first round is 1. *)
+    let r_missing =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"t-missing" ~turn:1
+    in
+    Alcotest.(check int) "missing file -> round 1" 1 r_missing;
+    (* Present but empty (0-byte) file: still round 1. *)
+    let dir2 = Trajectory.trajectories_dir dir "k" in
+    Fs_compat.mkdir_p dir2;
+    let empty_path = Trajectory.trajectory_path dir "k" "t-empty" in
+    close_out (open_out empty_path);
+    let r_empty =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-empty"
+        ~turn:1
+    in
+    Alcotest.(check int) "empty file -> round 1" 1 r_empty)
+
+let test_next_round_past_turns_only () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-past"
+      (List.init 5 (fun i -> next_round_row ~turn:3 ~round:i));
+    (* No entries for turn 4 yet: first round is 1. *)
+    let r =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-past"
+        ~turn:4
+    in
+    Alcotest.(check int) "past turns only -> round 1" 1 r)
+
+let test_next_round_counts_current_turn () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    let rows =
+      List.init 2 (fun i -> next_round_row ~turn:6 ~round:i)
+      @ List.init 3 (fun i -> next_round_row ~turn:7 ~round:i)
+    in
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cur" rows;
+    let r =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cur"
+        ~turn:7
+    in
+    Alcotest.(check int) "3 current-turn entries -> round 4" 4 r)
+
+let test_next_round_widens_past_initial_window () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    (* 600 current-turn rows (> the 512-line initial tail window, < 1024) sit
+       above a 3-row previous-turn boundary. The first tail read misses the
+       boundary; the window must widen once to count exactly. *)
+    let current_count = 600 in
+    let rows =
+      List.init 3 (fun i -> next_round_row ~turn:9 ~round:i)
+      @ List.init current_count (fun i -> next_round_row ~turn:10 ~round:i)
+    in
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-wide" rows;
+    let r =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-wide"
+        ~turn:10
+    in
+    Alcotest.(check int) "600 current-turn entries -> round 601"
+      (current_count + 1) r)
+
+let test_next_round_full_scan_fallback () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    (* Single-turn file larger than the tail cap (currently 8192 lines) with no
+       older-turn boundary anywhere. Forces the doubling loop to the cap and
+       then the full-scan fallback; the count must still be exact. 9000 is
+       chosen to exceed the internal max_hydrate_tail_lines constant. *)
+    let current_count = 9000 in
+    let rows = List.init current_count (fun i -> next_round_row ~turn:1 ~round:i) in
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-huge" rows;
+    let r =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-huge"
+        ~turn:1
+    in
+    Alcotest.(check int) "9000 current-turn entries via full-scan -> round 9001"
+      (current_count + 1) r)
+
+let test_next_round_cache_hit_skips_disk () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cache"
+      [ next_round_row ~turn:2 ~round:0; next_round_row ~turn:2 ~round:1 ];
+    let r1 =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cache"
+        ~turn:2
+    in
+    Alcotest.(check int) "hydrate 2 rows -> round 3" 3 r1;
+    (* Append two more turn-2 rows AFTER hydration; a cache hit must ignore the
+       disk and increment purely in memory. *)
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cache"
+      [ next_round_row ~turn:2 ~round:9; next_round_row ~turn:2 ~round:9 ];
+    let r2 =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-cache"
+        ~turn:2
+    in
+    Alcotest.(check int) "cache hit ignores new disk rows -> round 4" 4 r2)
+
+let test_next_round_evicts_past_turn_keys () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
+      [ next_round_row ~turn:5 ~round:0; next_round_row ~turn:5 ~round:1 ];
+    let r5a =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
+        ~turn:5
+    in
+    Alcotest.(check int) "turn 5 hydrate -> round 3" 3 r5a;
+    let r5b =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
+        ~turn:5
+    in
+    Alcotest.(check int) "turn 5 cache hit -> round 4" 4 r5b;
+    (* Advancing to turn 6 evicts the turn-5 cache key. *)
+    let r6 =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
+        ~turn:6
+    in
+    Alcotest.(check int) "turn 6 first round -> 1" 1 r6;
+    (* The turn-5 key was evicted, so a fresh turn-5 call re-hydrates from disk
+       (2 rows -> 3), not the stale in-memory 4. *)
+    let r5c =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
+        ~turn:5
+    in
+    Alcotest.(check int) "turn 5 re-hydrates after evict -> round 3" 3 r5c)
+
 let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
   Trajectory.Thinking
     {
@@ -808,6 +977,22 @@ let () =
         test_execution_id_roundtrip;
       Alcotest.test_case "runtime contract redacts backend details" `Quick
         test_runtime_contract_projection_redacts_backend_details;
+    ]);
+    ("next_round", [
+      Alcotest.test_case "empty or missing file -> 1" `Quick
+        test_next_round_empty_or_missing_file;
+      Alcotest.test_case "past turns only -> 1" `Quick
+        test_next_round_past_turns_only;
+      Alcotest.test_case "counts current-turn entries" `Quick
+        test_next_round_counts_current_turn;
+      Alcotest.test_case "widens window past initial 512" `Quick
+        test_next_round_widens_past_initial_window;
+      Alcotest.test_case "full-scan fallback past cap" `Quick
+        test_next_round_full_scan_fallback;
+      Alcotest.test_case "cache hit skips disk" `Quick
+        test_next_round_cache_hit_skips_disk;
+      Alcotest.test_case "evicts past-turn keys" `Quick
+        test_next_round_evicts_past_turn_keys;
     ]);
     ("read_entries_since", [
       Alcotest.test_case "filter by timestamp" `Quick test_read_entries_since;

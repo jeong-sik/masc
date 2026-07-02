@@ -259,6 +259,11 @@ let selected_model_of_meta = function
     None
 ;;
 
+let nonempty_trimmed value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
+;;
+
 let input_op_opt input =
   Option.bind (Safe_ops.json_string_opt "op" input) nonempty_trimmed
 ;;

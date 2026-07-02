@@ -147,11 +147,11 @@ let test_overflow_pause_contract_is_typed_auto_resume () =
     (contains_substring ~needle:"paused_meta_override = Some paused_meta" execution_src)
 ;;
 
-let test_preflight_overflow_uses_providerless_pause_fallback () =
+let test_preflight_overflow_does_not_bypass_driver_retry () =
   let agent_run_src = read_file "lib/keeper/keeper_agent_run.ml" in
   check bool "preflight includes context-window overflow" true
     (contains_substring ~needle:"pre_dispatch_context_window_error" agent_run_src);
-  check bool "preflight error returns before provider driver" true
+  check bool "preflight overflow is not a pre-dispatch terminal error" true
     (match
        index_of_substring ~needle:"let pre_dispatch_error =" agent_run_src
      with
@@ -159,7 +159,7 @@ let test_preflight_overflow_uses_providerless_pause_fallback () =
        (match
           ( index_of_substring_from
               ~start:preflight
-              ~needle:"| Some err -> Error err"
+              ~needle:"pre_dispatch_context_window_error"
               agent_run_src
           , index_of_substring_from
               ~start:preflight
@@ -167,8 +167,8 @@ let test_preflight_overflow_uses_providerless_pause_fallback () =
               agent_run_src
           )
         with
-        | Some blocked_return, Some driver ->
-       preflight < blocked_return && blocked_return < driver
+        | Some context_error_use, Some driver -> driver < context_error_use
+        | None, Some _driver -> true
         | _ -> false)
      | None -> false);
   let execution_src = read_file "lib/keeper/keeper_unified_turn_execution.ml" in

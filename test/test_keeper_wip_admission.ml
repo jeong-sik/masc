@@ -363,25 +363,25 @@ let test_goalless_tasks_never_goal_capped () =
 
 let test_task_is_active_wip_inprogress_fresh () =
   let now = Unix.gettimeofday () in
-  let started_at = Masc_domain.format_iso8601 now in
+  let started_at = Masc_domain.iso8601_of_unix_seconds now in
   let t = task ~status:(Masc_domain.InProgress { assignee = "executor"; started_at }) "t1" in
   check bool "fresh InProgress is active" true (Admission.task_is_active_wip t)
 
 let test_task_is_active_wip_inprogress_stale () =
   let long_ago = Unix.gettimeofday () -. 3600.0 in
-  let started_at = Masc_domain.format_iso8601 long_ago in
+  let started_at = Masc_domain.iso8601_of_unix_seconds long_ago in
   let t = task ~status:(Masc_domain.InProgress { assignee = "executor"; started_at }) "t2" in
   check bool "stale InProgress (>30min) is inactive" false (Admission.task_is_active_wip t)
 
 let test_task_is_active_wip_claimed_fresh () =
   let now = Unix.gettimeofday () in
-  let claimed_at = Masc_domain.format_iso8601 now in
+  let claimed_at = Masc_domain.iso8601_of_unix_seconds now in
   let t = task ~status:(Masc_domain.Claimed { assignee = "executor"; claimed_at }) "t3" in
   check bool "fresh Claimed is active" true (Admission.task_is_active_wip t)
 
 let test_task_is_active_wip_claimed_stale () =
   let long_ago = Unix.gettimeofday () -. 3600.0 in
-  let claimed_at = Masc_domain.format_iso8601 long_ago in
+  let claimed_at = Masc_domain.iso8601_of_unix_seconds long_ago in
   let t = task ~status:(Masc_domain.Claimed { assignee = "executor"; claimed_at }) "t4" in
   check bool "stale Claimed (>30min) is inactive" false (Admission.task_is_active_wip t)
 

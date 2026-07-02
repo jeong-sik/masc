@@ -42,7 +42,7 @@ let supervise_keepalive
          _ context ->
          keeper_meta ->
          Keeper_registry.registry_entry ->
-         unit)
+         (unit, Keeper_state_machine.transition_error) result)
       ~proactive_warmup_sec
       (ctx : _ context)
       (meta : keeper_meta)
@@ -111,14 +111,21 @@ let supervise_keepalive
         meta
     in
     Keeper_registry.update_meta ~base_path:ctx.config.base_path meta.name live_meta;
-    launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg;
-    publish_lifecycle
-      ~event:
-        (Keeper_lifecycle_events.Custom_event
-           { verb = Keeper_lifecycle_events.Started
-           ; phase = Some Keeper_state_machine.Running
-           })
-      meta.name
-      "supervised"
-      ())
+    match launch_supervised_fiber ~proactive_warmup_sec ctx live_meta reg with
+    | Error _ ->
+      (* The launch gate aborted fail-closed (no fiber forked; [done_p]
+         resolved through the crash path and Crashed published by the gate).
+         Announcing [Started]/[Running] here would report a keeper that is
+         not running. *)
+      ()
+    | Ok () ->
+      publish_lifecycle
+        ~event:
+          (Keeper_lifecycle_events.Custom_event
+             { verb = Keeper_lifecycle_events.Started
+             ; phase = Some Keeper_state_machine.Running
+             })
+        meta.name
+        "supervised"
+        ())
 ;;

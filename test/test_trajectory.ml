@@ -798,6 +798,28 @@ let test_aggregate_increment_after_seed () =
        | None -> Alcotest.fail "tool_execute missing from aggregate")
     | Error _ -> Alcotest.fail "snapshot should be present after seed+update")
 
+(* Direct append_entry callers (for example runtime MCP tool traces) must
+   update an already-seeded snapshot too; otherwise those calls become
+   invisible to future affinity reads until a full rebuild. *)
+let test_aggregate_direct_append_after_seed () =
+  with_tmpdir (fun dir ->
+    let masc_root = dir and keeper = "agg-direct" in
+    let now = Unix.gettimeofday () in
+    let _ = Trajectory.rebuild_tool_affinity_aggregate ~masc_root ~keeper_name:keeper ~now in
+    Trajectory.append_entry ~masc_root ~keeper_name:keeper ~trace_id:"direct-1"
+      (mk_entry ~ts:now "tool_execute" 100 0.0 "iso-direct");
+    match Trajectory.read_aggregate_snapshot ~masc_root ~keeper_name:keeper with
+    | Ok agg ->
+      let stats = Trajectory.windowed_affinity_tool_stats agg ~since:(now -. 86400.) in
+      (match
+         List.find_opt (fun (s : Trajectory.tool_stat) -> s.Trajectory.name = "tool_execute") stats
+       with
+       | Some s ->
+         Alcotest.(check int) "direct append increments call_count" 1 s.Trajectory.call_count;
+         Alcotest.(check string) "direct append last_used" "iso-direct" s.Trajectory.last_used_at
+       | None -> Alcotest.fail "tool_execute missing after direct append")
+    | Error _ -> Alcotest.fail "snapshot should remain present after direct append")
+
 (* A corrupt or schema-mismatched snapshot surfaces as a typed
    [Aggregate_corrupt], never a silent empty aggregate. *)
 let test_aggregate_corrupt_typed_error () =
@@ -925,6 +947,8 @@ let () =
         test_aggregate_update_noop_when_missing;
       Alcotest.test_case "incremental update folds success/failure and last_used" `Quick
         test_aggregate_increment_after_seed;
+      Alcotest.test_case "direct append increments a seeded aggregate" `Quick
+        test_aggregate_direct_append_after_seed;
       Alcotest.test_case "corrupt/schema-mismatch snapshot is a typed error" `Quick
         test_aggregate_corrupt_typed_error;
       Alcotest.test_case "rebuild reconstructs counts across trace files" `Quick

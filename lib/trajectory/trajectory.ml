@@ -359,15 +359,6 @@ let reset_round_counters_for_testing () =
   Stdlib.Mutex.protect round_counters_mu (fun () ->
     Hashtbl.reset round_counters)
 
-let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
-    ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
-    unit =
-  let dir = trajectories_dir masc_root keeper_name in
-  Fs_compat.mkdir_p dir;
-  let path = trajectory_path masc_root keeper_name trace_id in
-  let json = entry_to_json ?runtime_contract ?action_radius entry in
-  Fs_compat.append_jsonl path json
-
 (** Append a thinking block entry to the JSONL trajectory file. *)
 let append_thinking ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string)
     (entry : thinking_entry) : unit =
@@ -735,6 +726,16 @@ let update_aggregate_from_entries ~(masc_root : string) ~(keeper_name : string)
            Log.Keeper.warn
              "trajectory: failed to persist tool-affinity aggregate for %s: %s"
              keeper_name msg))
+
+let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
+    ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :
+    unit =
+  let dir = trajectories_dir masc_root keeper_name in
+  Fs_compat.mkdir_p dir;
+  let path = trajectory_path masc_root keeper_name trace_id in
+  let json = entry_to_json ?runtime_contract ?action_radius entry in
+  Fs_compat.append_jsonl path json;
+  update_aggregate_from_entries ~masc_root ~keeper_name [ entry ]
 
 (* ================================================================ *)
 (* Trajectory accumulator (mutable, per-session)                    *)

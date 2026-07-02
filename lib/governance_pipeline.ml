@@ -91,15 +91,23 @@ let decide ~governance_level ~tool_name ~input =
   let risk = assess_risk ~tool_name ~input in
   let trace_id = generate_trace_id () in
   let action =
-    match confirm_threshold governance_level with
-    | Some threshold when risk_level_to_int risk >= risk_level_to_int threshold ->
-      `Require_confirm
+    if risk = Critical then
+      `Deny
         (Printf.sprintf
-           "Governance (%s): %s risk tool %S requires confirmation"
+           "Governance (%s): %s risk tool %S unconditionally denied (hard_forbidden)"
            governance_level
            (risk_level_to_string risk)
            tool_name)
-    | _ -> `Allow
+    else
+      match confirm_threshold governance_level with
+      | Some threshold when risk_level_to_int risk >= risk_level_to_int threshold ->
+        `Require_confirm
+          (Printf.sprintf
+             "Governance (%s): %s risk tool %S requires confirmation"
+             governance_level
+             (risk_level_to_string risk)
+             tool_name)
+      | _ -> `Allow
   in
   { tool_name; risk; action; trace_id }
 ;;

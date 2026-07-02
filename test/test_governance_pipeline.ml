@@ -809,6 +809,34 @@ let test_hitl_can_still_be_disabled_by_env () =
       None
       (Option.map Gp.risk_level_to_string (Gp.keeper_confirm_threshold "production")))
 
+let test_hitl_disabled_still_confirms_critical () =
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+    let d =
+      Gp.decide
+        ~governance_level:"production"
+        ~tool_name:"masc_delete_workspace"
+        ~input:`Null
+    in
+    match d.action with
+    | `Require_confirm reason ->
+      Alcotest.(check bool) "reason non-empty" true (String.length reason > 0)
+    | `Allow -> Alcotest.fail "HITL disabled must not auto-approve critical risk"
+    | `Deny _ -> Alcotest.fail "critical risk should require confirm, not deny")
+
+let test_hitl_disabled_allows_noncritical_below_threshold () =
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+    let d =
+      Gp.decide
+        ~governance_level:"production"
+        ~tool_name:"masc_create_workspace"
+        ~input:`Null
+    in
+    match d.action with
+    | `Allow -> ()
+    | `Require_confirm _ ->
+      Alcotest.fail "HITL disabled should keep noncritical below-threshold calls allowed"
+    | `Deny _ -> Alcotest.fail "high risk should not be denied by hard-forbidden gate")
+
 (* ── Case-insensitive tool name matching ────────────────────── *)
 
 let test_case_insensitive_matching () =
@@ -1082,6 +1110,10 @@ let () =
         test_hitl_enabled_by_default;
       Alcotest.test_case "HITL disable env still disables gates" `Quick
         test_hitl_can_still_be_disabled_by_env;
+      Alcotest.test_case "HITL disabled still confirms critical" `Quick
+        test_hitl_disabled_still_confirms_critical;
+      Alcotest.test_case "HITL disabled allows noncritical" `Quick
+        test_hitl_disabled_allows_noncritical_below_threshold;
       Alcotest.test_case "unknown level fail-closed on critical (#7641)" `Quick
         test_unknown_governance_level_fail_closed_on_critical;
     ];

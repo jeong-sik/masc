@@ -28,7 +28,9 @@ val risk_level_to_int : risk_level -> int
 
 val confirm_threshold : string -> risk_level option
 (** Minimum risk level that requires confirmation for the given governance level.
-    Returns [None] for "development" (no confirmation needed). *)
+    Returns [None] for "development" (no threshold-triggered confirmation
+    needed) or when HITL thresholds are disabled. This threshold does not
+    include the hard-forbidden auto-approval override applied by {!decide}. *)
 
 val keeper_confirm_threshold : string -> risk_level option
 (** Keeper-specific confirmation threshold.
@@ -55,10 +57,14 @@ val decide :
   input:Yojson.Safe.t ->
   governance_decision
 (** Evaluate a tool call against governance policy and return a decision.
-    - development: allow all, audit High+Critical
+    - development: allow all while HITL is enabled, audit High+Critical
     - production: confirm Critical, audit Medium+
     - enterprise: confirm High+Critical, audit all
-    - paranoid: confirm Medium+High+Critical, audit all *)
+    - paranoid: confirm Medium+High+Critical, audit all
+
+    Critical hard-forbidden calls still require confirmation when HITL
+    thresholds are disabled, so disabling HITL cannot silently auto-approve
+    destructive operations. *)
 
 val make_pre_hook :
   config:Workspace.config ->

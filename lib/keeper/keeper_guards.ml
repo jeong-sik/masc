@@ -929,7 +929,49 @@ let governance_approval_guard
           >= Governance_pipeline.risk_level_to_int threshold
         | None -> false
       in
-      if needs_approval then begin
+      (* task-1627: unconditional hard_forbidden gate — blocks before HITL *)
+      let hard_forbidden =
+        Governance_pipeline.auto_approval_hard_forbidden ~risk !meta_ref
+      in
+      if hard_forbidden then begin
+        let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+        let source_path = keeper_guards_source_path in
+        let source_line = __LINE__ in
+        report_gate_decision on_gate_decision
+          ~source_path:(Some source_path) ~source_line:(Some source_line)
+          ~stage:"governance_approval" ~decision:Gate_override
+          ~reason_code:"hard_forbidden"
+          ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode"
+          ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+          ~stage_latency_ms:latency_ms;
+        Agent_sdk.Hooks.Override
+          (render_inline_skip_reason_with_source
+             ~source_path ~source_line
+             ~tool_name ~reason_code:"hard_forbidden"
+             ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode")
+      end
+      else (* task-1627: unconditional hard_forbidden gate — blocks before HITL *)
+      let hard_forbidden =
+        Governance_pipeline.auto_approval_hard_forbidden ~risk !meta_ref
+      in
+      if hard_forbidden then begin
+        let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
+        let source_path = keeper_guards_source_path in
+        let source_line = __LINE__ in
+        report_gate_decision on_gate_decision
+          ~source_path:(Some source_path) ~source_line:(Some source_line)
+          ~stage:"governance_approval" ~decision:Gate_override
+          ~reason_code:"hard_forbidden"
+          ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode"
+          ~tool_name ~keeper_name ~input ~turn ~accumulated_cost_usd
+          ~stage_latency_ms:latency_ms;
+        Agent_sdk.Hooks.Override
+          (render_inline_skip_reason_with_source
+             ~source_path ~source_line
+             ~tool_name ~reason_code:"hard_forbidden"
+             ~reason_text:"hard_forbidden: unconditional block regardless of HITL mode")
+      end
+      else if needs_approval then begin
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in
         let source_path = keeper_guards_source_path in
         let source_line = __LINE__ in

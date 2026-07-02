@@ -90,6 +90,20 @@ let test_sink_path_and_session_identity () =
     (Some (Keeper_id.Trace_id.to_string meta.runtime.trace_id))
     (Agent_sdk.Raw_trace.session_id sink)
 
+let test_sink_creates_keeper_runtime_dir () =
+  with_workspace @@ fun config ->
+  let meta = make_test_meta () in
+  let keeper_dir =
+    Filename.concat (Workspace.keepers_runtime_dir config) meta.name
+  in
+  Alcotest.(check bool) "keeper dir starts absent" false
+    (Sys.file_exists keeper_dir);
+  ignore
+    (ok_or_fail "keeper_raw_trace_sink"
+       (Keeper_agent_run.For_testing.keeper_raw_trace_sink ~config ~meta));
+  Alcotest.(check bool) "keeper dir created" true
+    (Sys.file_exists keeper_dir && Sys.is_directory keeper_dir)
+
 (* The sink is re-created once per keeper turn on the same path;
    Raw_trace.create must resume the seq counter from the existing file so
    turn N+1 appends after turn N instead of clobbering it. *)
@@ -189,6 +203,8 @@ let () =
             test_raw_trace_path_layout;
           Alcotest.test_case "sink path + session identity" `Quick
             test_sink_path_and_session_identity;
+          Alcotest.test_case "sink creates keeper runtime dir" `Quick
+            test_sink_creates_keeper_runtime_dir;
           Alcotest.test_case "per-turn re-creation resumes seq" `Quick
             test_sink_recreation_resumes_seq;
           Alcotest.test_case "dispatch passes ~raw_trace" `Quick

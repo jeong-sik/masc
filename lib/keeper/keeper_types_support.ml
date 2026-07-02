@@ -83,13 +83,17 @@ let keeper_turn_record_store config name : Dated_jsonl.t =
   in
   Eio_guard.with_mutex turn_record_store_mu lookup
 
+let keeper_runtime_dir config name =
+  let dir = Filename.concat (keeper_dir_ config) name in
+  ensure_dir_ dir
+
 (* Per-keeper OAS raw-trace sink: [.masc/keepers/<name>/raw-trace.jsonl].
    One file per keeper, appended across turns — [Agent_sdk.Raw_trace.create]
    resumes its seq counter from the existing file, so each turn's run is a
    seq range inside this file (worker precedent:
    [Worker_container.worker_raw_trace_path]). *)
 let keeper_raw_trace_path config name =
-  Filename.concat (Filename.concat (keeper_dir_ config) name) "raw-trace.jsonl"
+  Filename.concat (keeper_runtime_dir config name) "raw-trace.jsonl"
 
 let keeper_memory_bank_path config name =
   Filename.concat (keeper_dir_ config) (name ^ ".memory.jsonl")

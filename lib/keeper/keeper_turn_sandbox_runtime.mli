@@ -44,6 +44,17 @@ val container_cwd_of_host :
 val host_cwd_of_container :
   t -> container_cwd:string -> (string, string) result
 
+val run_argv_with_stdin_and_status_retry_eintr :
+  ?timeout_sec:float ->
+  stdin_content:string ->
+  string list ->
+  Unix.process_status * string
+(** Run a sandbox-management argv with stdin through the owned Docker execution
+    boundary and retry transient EINTR-shaped failures. This is intentionally
+    lower-level than the turn-scoped [t] operations because one-shot sandbox
+    startup paths need the same execution boundary before a reusable container
+    exists. *)
+
 val run_command_with_status :
   ?ok_exit_codes:int list ->
   timeout_sec:float ->

@@ -204,6 +204,10 @@ val default_noncritical_approval_timeout_s : float
     not be shorter than this, otherwise a valid HITL wait is misclassified as
     provider idleness. *)
 
+val default_critical_approval_escalation_after_s : float
+(** Default wait before a [Critical] approval emits an escalation audit event
+    while still waiting for a manual operator decision. *)
+
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside the agent fiber). *)
@@ -226,6 +230,7 @@ val submit_and_await :
   ?disposition_reason:string ->
   ?clock:float Eio.Time.clock_ty Eio.Resource.t ->
   ?timeout_s:float ->
+  ?critical_escalation_after_s:float ->
   unit ->
   Agent_sdk.Hooks.approval_decision
 

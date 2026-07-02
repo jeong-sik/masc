@@ -726,6 +726,8 @@ let sort_entries_by_requested_at entries =
 
 let default_noncritical_approval_timeout_s = 600.0
 
+let default_critical_approval_escalation_after_s = 3600.0
+
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside agent fiber).
@@ -758,6 +760,7 @@ let submit_and_await
       ?disposition_reason
       ?clock
       ?(timeout_s = default_noncritical_approval_timeout_s)
+      ?(critical_escalation_after_s = default_critical_approval_escalation_after_s)
       ()
   : Agent_sdk.Hooks.approval_decision
   =
@@ -837,7 +840,7 @@ let submit_and_await
          Eio.Fiber.first
            (fun () -> `Decision (Eio.Promise.await promise))
            (fun () ->
-              Eio.Time.sleep clock 3600.0;
+              Eio.Time.sleep clock critical_escalation_after_s;
               `Escalated)
        with
        | `Decision d -> d

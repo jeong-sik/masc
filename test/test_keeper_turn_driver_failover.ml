@@ -56,7 +56,7 @@ let checkpoint_with_session_id session_id : Agent_sdk.Checkpoint.t =
   ; response_format = Agent_sdk.Types.Off
   ; thinking_budget = None
   ; cache_system_prompt = false
-  ; context = Agent_sdk.Context.create ~eio:false ()
+  ; context = Agent_sdk.Context.create_sync ()
   ; mcp_sessions = []
   ; working_context = None
   }

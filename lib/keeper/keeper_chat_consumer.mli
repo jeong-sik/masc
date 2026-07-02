@@ -34,3 +34,12 @@ val start :
   base_path:string ->
   handle_turn:(sw:Eio.Switch.t -> keeper_name:string -> queued_message:Keeper_chat_queue.queued_message -> unit) ->
   unit
+
+module For_testing : sig
+  type dispatch_state
+
+  val create_dispatch_state : unit -> dispatch_state
+  val is_dispatching : dispatch_state -> string -> bool
+  val mark_dispatching : dispatch_state -> string -> bool
+  val clear_dispatching : dispatch_state -> string -> unit
+end

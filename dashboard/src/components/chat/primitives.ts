@@ -32,6 +32,7 @@ import { hasMarkdownRenderCue } from './markdown-cue'
 import type { JSX } from 'preact'
 import { navigate } from '../../router'
 import { normalizeFusionPanelReason } from '../../lib/fusion-meta'
+import { STREAMING_THINKING_PREVIEW_CHARS } from '../../config/constants'
 
 /** Keeper identity used by SigilBadge. */
 export interface SigilBadgeKeeper {
@@ -70,7 +71,6 @@ const TRACE_TOOL_STATUS_UI: Record<TraceToolStatus, { className: 'ok' | 'bad' | 
 }
 
 export const CHAT_SUGGESTIONS_LABEL = '추천 후속 질문'
-const STREAMING_THINKING_PREVIEW_CHARS = 6_000
 
 function traceToolStatusUi(status: ChatTraceToolStep['status']): { className: 'ok' | 'bad' | 'pending'; title: string } {
   return TRACE_TOOL_STATUS_UI[status ?? 'pending']

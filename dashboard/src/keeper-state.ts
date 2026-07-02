@@ -863,13 +863,14 @@ export function appendAssistantDelta(name: string, entryId: string, delta: strin
   }))
 }
 
-export function appendAssistantThinkingDelta(
+function writeAssistantThinkingText(
   name: string,
   entryId: string,
-  delta: string,
+  text: string,
   meta: { oasBlockIndex?: number } = {},
+  mode: 'append' | 'snapshot',
 ): void {
-  if (!delta.trim()) return
+  if (!text.trim()) return
   const oasBlockIndex = meta.oasBlockIndex
   updateThreadEntry(name, entryId, entry => {
     const existing = entry.traceSteps ?? []
@@ -883,13 +884,19 @@ export function appendAssistantThinkingDelta(
     // interleave it with tool entries by occurrence order. When consecutive
     // deltas merge into the same step, the first stamp is preserved: the step
     // began at that time, not when the latest fragment arrived.
+    const nextText =
+      sameThinkingBlock
+        ? mode === 'append'
+          ? `${last.text}${text}`
+          : text
+        : text.trimStart()
     const traceSteps: ChatTraceStep[] =
       sameThinkingBlock
         ? [
             ...existing.slice(0, -1),
             withoutUndefined({
               kind: 'think',
-              text: `${last.text}${delta}`,
+              text: nextText,
               ts: last.ts,
               oasBlockIndex: last.oasBlockIndex,
             }),
@@ -898,7 +905,7 @@ export function appendAssistantThinkingDelta(
             ...existing,
             withoutUndefined({
               kind: 'think',
-              text: delta.trimStart(),
+              text: nextText,
               ts: new Date().toISOString(),
               oasBlockIndex,
             }),
@@ -910,6 +917,24 @@ export function appendAssistantThinkingDelta(
       delivery: 'streaming',
     }
   })
+}
+
+export function appendAssistantThinkingDelta(
+  name: string,
+  entryId: string,
+  delta: string,
+  meta: { oasBlockIndex?: number } = {},
+): void {
+  writeAssistantThinkingText(name, entryId, delta, meta, 'append')
+}
+
+export function setAssistantThinkingSnapshot(
+  name: string,
+  entryId: string,
+  text: string,
+  meta: { oasBlockIndex?: number } = {},
+): void {
+  writeAssistantThinkingText(name, entryId, text, meta, 'snapshot')
 }
 
 function warnMissingToolTrace(

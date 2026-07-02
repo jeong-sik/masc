@@ -15,6 +15,21 @@ let remove_if_exists path =
   | Sys_error _ -> ()
 ;;
 
+let contains_substring value needle =
+  let value_len = String.length value in
+  let needle_len = String.length needle in
+  let rec loop index =
+    if needle_len = 0
+    then true
+    else if index + needle_len > value_len
+    then false
+    else if String.sub value index needle_len = needle
+    then true
+    else loop (index + 1)
+  in
+  loop 0
+;;
+
 let fresh_path suffix =
   let path = Filename.temp_file "fusion-runs-" suffix in
   remove_if_exists path;
@@ -89,7 +104,7 @@ let test_persist_failure_detail () =
 ;;
 
 (* (2) Replay prunes completed runs to the newest [max_completed_retained]
-   while preserving all running runs. *)
+   without resurrecting register-only rows as live work after restart. *)
 let test_replay_prunes_completed () =
   let path = fresh_path "-prune.jsonl" in
   let t = R.create ~path () in
@@ -102,14 +117,16 @@ let test_replay_prunes_completed () =
       ~started_at:(float_of_int i);
     R.mark_completed t ~run_id:("r" ^ string_of_int i) ~ok:true ()
   done;
-  (* Leave one run in [Running] state so we can verify running runs are kept. *)
+  (* Leave one run in [Running] state; replay must drop it because the worker
+     fiber died with the old process. *)
   R.register_running t ~run_id:"r-running" ~keeper:"k" ~preset:"p" ~started_at:71.0;
   let t2 = R.replay path in
   let runs = R.list_runs t2 in
-  check int "pruned completed + kept running" (R.max_completed_retained + 1) (List.length runs);
-  (* The running run must still be present. *)
-  check bool "running run preserved" true
-    (Option.is_some (R.get t2 ~run_id:"r-running"));
+  check int "pruned completed only" R.max_completed_retained (List.length runs);
+  check bool "replayed running run dropped" true
+    (Option.is_none (R.get t2 ~run_id:"r-running"));
+  check bool "compacted log omits stale running run" false
+    (contains_substring (Fs_compat.load_file path) "r-running");
   (* Newest completed run (r70) must be present; oldest (r1) pruned. *)
   check bool "newest completed kept" true (Option.is_some (R.get t2 ~run_id:"r70"));
   check bool "oldest completed pruned" true (Option.is_none (R.get t2 ~run_id:"r1"))
@@ -180,9 +197,8 @@ let test_replay_preserves_unterminated_tail () =
     content;
   let t = R.replay path in
   (match R.get t ~run_id:"r-partial" with
-   | Some { R.status = R.Running; _ } -> ()
-   | Some _ -> fail "unterminated completion line must not replay"
-   | None -> fail "completed line before partial tail should replay");
+   | None -> ()
+   | Some _ -> fail "unterminated completion line must not publish stale running work");
   check string "partial tail preserved" content (Fs_compat.load_file path)
 ;;
 
@@ -192,7 +208,10 @@ let () =
     [ ( "rfc-0266-phase-d"
       , [ test_case "register+complete append JSONL" `Quick test_persist_register_complete
         ; test_case "failure detail survives replay" `Quick test_persist_failure_detail
-        ; test_case "replay prunes completed runs" `Quick test_replay_prunes_completed
+        ; test_case
+            "replay prunes completed and drops stale running runs"
+            `Quick
+            test_replay_prunes_completed
         ; test_case "no-path registry is in-memory only" `Quick test_no_path_is_in_memory_only
         ; test_case "replay skips malformed lines" `Quick test_replay_skips_malformed_lines
         ; test_case "replay streams and compacts log" `Quick test_replay_streams_and_compacts

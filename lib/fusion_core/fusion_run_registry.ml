@@ -167,6 +167,18 @@ let apply_event runs = function
       runs
 ;;
 
+let drop_replayed_running runs =
+  let running, completed = List.partition is_running runs in
+  (match running with
+   | [] -> ()
+   | stale ->
+     Log.Misc.warn
+       "fusion_run_registry: dropped %d replayed running run(s); worker fibers do not \
+        survive server restart"
+       (List.length stale));
+  completed
+;;
+
 let parse_event_line ~path ~line_no line =
   match String.trim line with
   | "" -> Ok None
@@ -276,7 +288,11 @@ let replay path : t =
        "fusion_run_registry: skipped %d malformed replay line(s); first=%s"
        (List.length errors)
        first);
-  let runs = List.fold_left apply_event [] events |> prune in
+  let runs =
+    List.fold_left apply_event [] events
+    |> drop_replayed_running
+    |> prune
+  in
   if should_compact then compact_replay_log path runs;
   { runs = Atomic.make runs; path = Some path }
 ;;

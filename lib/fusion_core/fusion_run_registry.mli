@@ -42,8 +42,9 @@ val replay : string -> t
 (** Hydrate a registry from an append-only JSONL file. Missing files yield an
     empty registry. Unreadable files and malformed lines are logged and skipped,
     so persistence problems are visible without blocking in-memory status
-    tracking. Replayed completed runs are pruned to the newest
-    {!max_completed_retained}. *)
+    tracking. Persisted registers without a completed event are dropped during
+    replay because worker fibers do not survive server restart. Replayed
+    completed runs are pruned to the newest {!max_completed_retained}. *)
 
 val register_running :
   t -> run_id:string -> keeper:string -> preset:string -> started_at:float -> unit

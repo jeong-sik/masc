@@ -206,6 +206,49 @@ let decision_runtime_id = function
   | event, _, None ->
     Alcotest.failf "missing decision for event %s" (event_name event)
 
+let test_lane_media_degrade_uses_first_candidate_runtime_id () =
+  with_runtime_config runtime_toml_with_lane (fun () ->
+    match Runtime.resolve_assignment "resilient" with
+    | `Missing | `Single_runtime _ ->
+      Alcotest.fail "expected resilient assignment to resolve to a lane"
+    | `Lane lane ->
+      let first_candidate_id =
+        match Runtime_lane.ordered_candidates lane with
+        | first :: _ -> first
+        | [] -> Alcotest.fail "expected non-empty lane candidates"
+      in
+      let first_candidate =
+        match Runtime.get_runtime_by_id first_candidate_id with
+        | Some runtime -> runtime
+        | None ->
+          Alcotest.failf
+            "expected first candidate runtime %S to be configured"
+            first_candidate_id
+      in
+      let selected_runtime_id, selected_runtime =
+        Driver.For_testing.first_runtime_after_modality_reroute
+          ~keeper_name:"test-keeper" ~assignment_id:"resilient"
+          ~first_candidate_id ~first_candidate
+          (Runtime_agent.No_capable_runtime { required = [ "image" ] })
+      in
+      Alcotest.(check string)
+        "selected runtime id"
+        "primary.test_model"
+        selected_runtime_id;
+      Alcotest.(check string)
+        "selected runtime binding"
+        "primary.test_model"
+        selected_runtime.Runtime.id;
+      let decision =
+        Driver.For_testing.media_degrade_manifest_decision
+          ~runtime_id:selected_runtime_id
+          [ "image", 1 ]
+      in
+      Alcotest.(check string)
+        "degraded runtime id"
+        "primary.test_model"
+        (string_member "degraded_runtime_id" decision))
+
 let test_attempt_loop_tries_fallback_after_failure () =
   let attempts = ref [] in
   let events = ref [] in
@@ -318,6 +361,10 @@ let () =
             "unknown lane candidate rejected at load"
             `Quick
             test_unknown_lane_candidate_rejected_at_load;
+          Alcotest.test_case
+            "lane media degrade uses first candidate runtime id"
+            `Quick
+            test_lane_media_degrade_uses_first_candidate_runtime_id;
           Alcotest.test_case
             "attempt loop tries fallback after failure"
             `Quick

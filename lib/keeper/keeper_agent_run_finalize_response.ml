@@ -25,21 +25,6 @@ let completion_contract_drops_current_turn_replay
     completion_contract_result
 ;;
 
-let direct_assistant_source = "direct_assistant"
-
-let completion_contract_suppresses_visible_response
-      ~history_assistant_source
-      (completion_contract_result :
-         Keeper_execution_receipt.completion_contract_result)
-  =
-  match completion_contract_result with
-  | Keeper_execution_receipt.Contract_passive_only ->
-    not (String.equal history_assistant_source direct_assistant_source)
-  | _ ->
-    Keeper_execution_receipt.completion_contract_result_requires_attention
-      completion_contract_result
-;;
-
 type replay_suffix_prune_reason =
   | Completion_contract_requires_attention
   | Synthetic_empty_state_snapshot
@@ -235,7 +220,7 @@ module For_testing = struct
     completion_contract_drops_current_turn_replay
 
   let completion_contract_suppresses_visible_response =
-    completion_contract_suppresses_visible_response
+    Keeper_agent_run_response_text.completion_contract_suppresses_visible_response
 
   let replay_suffix_prune_reason_to_string =
     replay_suffix_prune_reason_to_string
@@ -278,7 +263,7 @@ let finalize
   in
   let completion_contract_result = acc.receipt_completion_contract_result in
   let contract_suppresses_visible_response =
-    completion_contract_suppresses_visible_response
+    Keeper_agent_run_response_text.completion_contract_suppresses_visible_response
       ~history_assistant_source
       completion_contract_result
   in

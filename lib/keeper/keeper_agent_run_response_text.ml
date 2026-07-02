@@ -20,6 +20,17 @@ let stop_reason_is_turn_budget_exhausted = function
   | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
 ;;
 
+let direct_assistant_source = "direct_assistant"
+
+let completion_contract_suppresses_visible_response
+      ~history_assistant_source
+  = function
+  | Keeper_execution_receipt.Contract_passive_only ->
+    not (String.equal history_assistant_source direct_assistant_source)
+  | result ->
+    Keeper_execution_receipt.completion_contract_result_requires_attention result
+;;
+
 let state_snapshot ~reported_state_snapshot ~keeper_name ~goal ~actual_keeper_tool_names
       ~stop_reason ~raw_response_text
       ()

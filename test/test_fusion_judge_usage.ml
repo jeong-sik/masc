@@ -24,7 +24,6 @@ let sample_synthesis : Fusion_types.judge_synthesis =
   }
 
 let fusion_schema = Keeper_structured_output_schema.fusion_judge_output_schema
-let panel_schema = Keeper_structured_output_schema.fusion_panel_answer_output_schema
 
 let restore_model_catalog previous =
   match previous with
@@ -82,7 +81,11 @@ let test_output_contract_keeps_native_schema_when_supported () =
        | Some schema -> Yojson.Safe.equal fusion_schema schema
        | None -> false)
 
-let test_output_contract_fails_loud_when_schema_is_not_native () =
+(* Prompt tier: native schema 미선언이면 schema를 싣지 않고 base config 그대로
+   통과한다(빌드 실패 아님). 계약은 프롬프트의 expected_json_doc + strict 파싱이
+   나른다. 2026-07-01 사고 이후 #22768의 "native or fail before HTTP"를 뒤집은
+   지점 — 근거는 fusion_judge.ml [apply_fusion_judge_output_contract] 주석. *)
+let test_output_contract_prompt_tier_when_schema_is_not_native () =
   with_repo_oas_model_catalog @@ fun () ->
   let cfg =
     provider_cfg
@@ -91,12 +94,16 @@ let test_output_contract_fails_loud_when_schema_is_not_native () =
       ~base_url:"https://api.deepseek.com"
   in
   match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Ok _ -> fail "expected schema-native fusion judge to fail loud"
-  | Error msg ->
-    check bool "schema validation reason is retained" true
-      (String.length msg > 0)
+  | Error msg -> fail ("prompt tier must not fail the build: " ^ msg)
+  | Ok configured ->
+    check bool "no native schema is attached (prompt tier)" true
+      (match configured.response_format with
+       | Agent_sdk.Types.Off -> true
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+    check bool "output_schema stays empty (prompt tier)" true
+      (Option.is_none configured.output_schema)
 
-let test_output_contract_fails_loud_when_no_output_contract_is_known () =
+let test_output_contract_prompt_tier_when_no_output_contract_is_known () =
   with_empty_oas_model_catalog @@ fun () ->
   let cfg =
     provider_cfg
@@ -105,73 +112,64 @@ let test_output_contract_fails_loud_when_no_output_contract_is_known () =
       ~base_url:"https://api.example.invalid/v1"
   in
   match Fusion_judge.For_testing.apply_output_contract cfg with
-  | Ok _ -> fail "expected unknown provider/model to fail loud"
-  | Error msg ->
-    check bool "schema validation reason is retained" true (String.length msg > 0)
-
-let test_panel_output_contract_keeps_native_schema_when_supported () =
-  let cfg =
-    provider_cfg
-      ~kind:Llm_provider.Provider_config.Anthropic
-      ~model_id:"claude-test"
-      ~base_url:"https://api.anthropic.test"
-  in
-  match Fusion_panel.For_testing.apply_output_contract cfg with
-  | Error msg -> fail ("expected native schema config: " ^ msg)
+  | Error msg -> fail ("prompt tier must not fail the build: " ^ msg)
   | Ok configured ->
-    check bool "response_format uses JsonSchema" true
+    check bool "no native schema is attached (prompt tier)" true
       (match configured.response_format with
-       | Agent_sdk.Types.JsonSchema schema -> Yojson.Safe.equal panel_schema schema
-       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.Off -> false);
-    check bool "output_schema mirrors schema" true
-      (match configured.output_schema with
-       | Some schema -> Yojson.Safe.equal panel_schema schema
-       | None -> false)
+       | Agent_sdk.Types.Off -> true
+       | Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _ -> false);
+    check bool "output_schema stays empty (prompt tier)" true
+      (Option.is_none configured.output_schema)
 
-let test_panel_outcome_parses_structured_answer () =
+(* 패널 계약 = free text (2026-07-01 사고 회귀 가드). prose가 그대로 답변이 된다 —
+   JSON envelope 파싱이 없으므로 "provider가 schema를 무시해 prose를 반환"하는
+   실패 모드 자체가 존재하지 않는다. *)
+let test_panel_outcome_accepts_free_text () =
   match
     Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
       ~model:"provider.model"
-      (Ok (response_with_text {|{"answer":"  hello  "}|}))
+      (Ok (response_with_text "  Eio is production-ready for most new projects.  "))
   with
   | Fusion_types.Answered { model; answer; usage } ->
     check string "panel identity preserved" "panel-a" model;
-    check string "answer is parsed and trimmed" "hello" answer;
+    check string "free text is the answer, trimmed"
+      "Eio is production-ready for most new projects." answer;
     check usage_t "missing provider usage defaults to zero" Fusion_types.zero_usage
       usage
   | Fusion_types.Failed failure ->
-    fail ("expected structured answer, got failure: " ^ Fusion_types.show_panel_error failure)
-
-let test_panel_outcome_rejects_invalid_structured_answer () =
-  match
-    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
-      ~model:"provider.model"
-      (Ok (response_with_text "not-json"))
-  with
-  | Fusion_types.Failed
-      { failed_model = "panel-a"
-      ; reason = Fusion_types.Invalid_structured_response detail
-      } ->
-    check bool "invalid JSON detail is retained" true
-      (String_util.string_contains_substring ~needle:"not valid JSON" detail)
-  | other ->
-    fail
-      ("expected invalid structured response failure, got: "
-       ^ Fusion_types.show_panel_outcome other)
+    fail ("expected free-text answer, got failure: "
+          ^ Fusion_types.show_panel_error failure)
 
 let test_panel_outcome_rejects_empty_answer () =
   match
     Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
       ~model:"provider.model"
-      (Ok (response_with_text {|{"answer":"   "}|}))
+      (Ok (response_with_text "   "))
   with
   | Fusion_types.Failed
       { failed_model = "panel-a"; reason = Fusion_types.Empty_response detail } ->
     check bool "empty response detail is retained" true (String.length detail > 0)
   | other ->
     fail
-      ("expected empty structured answer failure, got: "
+      ("expected empty answer failure, got: "
        ^ Fusion_types.show_panel_outcome other)
+
+(* per-agent HTTP 타임아웃은 typed [Timeout]으로 분류된다 — to_string 직렬화로
+   [Provider_error]에 뭉개지면 외곽 붕괴(전 패널 Timeout)와 개별 타임아웃을 board
+   증거에서 구분할 수 없다. *)
+let test_panel_outcome_types_per_agent_timeout () =
+  let timeout_error =
+    Agent_sdk.Error.Api
+      (Agent_sdk.Retry.Timeout { message = "120s"; phase = None })
+  in
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model" (Error timeout_error)
+  with
+  | Fusion_types.Failed { failed_model = "panel-a"; reason = Fusion_types.Timeout } ->
+    ()
+  | other ->
+    fail ("expected typed Timeout, got: " ^ Fusion_types.show_panel_outcome other)
 
 let test_attach_usage_on_success () =
   match Fusion_judge.attach_usage (Ok sample_synthesis) sample_usage with
@@ -264,25 +262,20 @@ let () =
             `Quick
             test_output_contract_keeps_native_schema_when_supported
         ; test_case
-            "fails loud when native schema is not available"
+            "prompt tier when native schema is not available"
             `Quick
-            test_output_contract_fails_loud_when_schema_is_not_native
+            test_output_contract_prompt_tier_when_schema_is_not_native
         ; test_case
-            "fails loud when no JSON output contract is known"
+            "prompt tier when no JSON output contract is known"
             `Quick
-            test_output_contract_fails_loud_when_no_output_contract_is_known
-        ; test_case
-            "panel keeps native answer schema when supported"
-            `Quick
-            test_panel_output_contract_keeps_native_schema_when_supported
+            test_output_contract_prompt_tier_when_no_output_contract_is_known
         ] )
     ; ( "panel_outcome"
-      , [ test_case "parses structured answer" `Quick
-            test_panel_outcome_parses_structured_answer
-        ; test_case "rejects invalid structured answer" `Quick
-            test_panel_outcome_rejects_invalid_structured_answer
+      , [ test_case "accepts free text" `Quick test_panel_outcome_accepts_free_text
         ; test_case "rejects empty answer" `Quick
             test_panel_outcome_rejects_empty_answer
+        ; test_case "types per-agent timeout" `Quick
+            test_panel_outcome_types_per_agent_timeout
         ] )
     ; ( "attach_usage"
       , [ test_case "success carries usage" `Quick test_attach_usage_on_success

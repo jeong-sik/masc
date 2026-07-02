@@ -332,11 +332,6 @@ let fusion_judge_output_schema =
     fields
 ;;
 
-let fusion_panel_answer_output_schema =
-  let fields = [ "answer", string_schema ] in
-  object_schema ~required:(List.map fst fields) fields
-;;
-
 let apply_to_provider_config schema (provider_cfg : Llm_provider.Provider_config.t) =
   { provider_cfg with
     response_format = Agent_sdk.Types.JsonSchema schema

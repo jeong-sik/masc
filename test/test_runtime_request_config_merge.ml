@@ -104,6 +104,22 @@ let test_request_json_schema_replaces_base_schema () =
      | Some s -> Yojson.Safe.equal s alternate_schema
      | None -> false)
 
+let test_request_output_schema_normalizes_response_format () =
+  let req =
+    { (request_without_opinion ()) with
+      Llm_provider.Provider_config.output_schema = Some alternate_schema
+    }
+  in
+  let merged = merge ~base:(base_with_schema ()) req in
+  check bool "explicit request output_schema sets JsonSchema response_format" true
+    (match merged.Llm_provider.Provider_config.response_format with
+     | Agent_sdk.Types.JsonSchema s -> Yojson.Safe.equal s alternate_schema
+     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonMode -> false);
+  check bool "explicit request output_schema replaces base output_schema" true
+    (match merged.Llm_provider.Provider_config.output_schema with
+     | Some s -> Yojson.Safe.equal s alternate_schema
+     | None -> false)
+
 let test_both_opinionless_stays_off () =
   let base =
     Llm_provider.Provider_config.make
@@ -129,6 +145,8 @@ let () =
             test_request_json_mode_clears_base_schema
         ; test_case "explicit request JsonSchema replaces base schema" `Quick
             test_request_json_schema_replaces_base_schema
+        ; test_case "explicit request output_schema normalizes response_format" `Quick
+            test_request_output_schema_normalizes_response_format
         ; test_case "both opinionless stays Off" `Quick
             test_both_opinionless_stays_off
         ] )

@@ -197,18 +197,18 @@ let request_runtime_fields_on_base_config
     ~(base : Llm_provider.Provider_config.t)
     (req_config : Llm_provider.Provider_config.t)
   =
-  let response_format =
-    match req_config.response_format with
-    | Agent_sdk.Types.Off -> base.response_format
-    | (Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _) as requested ->
-      requested
-  in
-  let output_schema =
+  let response_format, output_schema =
     match req_config.response_format, req_config.output_schema with
-    | Agent_sdk.Types.Off, None -> base.output_schema
-    | _, (Some _ as requested) -> requested
-    | (Agent_sdk.Types.JsonMode | Agent_sdk.Types.JsonSchema _), None ->
-      Llm_provider.Provider_config.output_schema_of_response_format response_format
+    | Agent_sdk.Types.Off, None -> base.response_format, base.output_schema
+    | _, Some schema ->
+      let response_format = Agent_sdk.Types.JsonSchema schema in
+      ( response_format
+      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
+    | Agent_sdk.Types.JsonMode, None -> Agent_sdk.Types.JsonMode, None
+    | Agent_sdk.Types.JsonSchema schema, None ->
+      let response_format = Agent_sdk.Types.JsonSchema schema in
+      ( response_format
+      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
   in
   { base with
     max_tokens = req_config.max_tokens;

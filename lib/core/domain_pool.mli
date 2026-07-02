@@ -4,8 +4,9 @@
     library leaves up to each caller:
 
     {ol
-    {- A default [domain_count] that reserves the main Eio scheduler
-       domain plus one spare domain for HTTP / SSE / keeper dispatch
+    {- A default [domain_count] that always leaves the main Eio scheduler
+       domain outside the worker pool and, when host capacity allows,
+       leaves one additional spare domain for HTTP / SSE / keeper dispatch
        under host pressure.}
     {- Named submit variants for IO-bound vs CPU-bound work, fixing
        the [~weight] argument that [Eio.Executor_pool] requires per
@@ -29,12 +30,12 @@ type t
 val recommended_domain_count : unit -> int
 (** [max 1 (Domain.recommended_domain_count () - 2)].
 
-    The [-2] reserves the original main domain for the Eio scheduler
-    and one additional domain of host scheduling headroom, so HTTP
-    listeners, SSE drains, keeper dispatch, and response finalisation
-    are not competing with a pool that claims every recommended
-    domain.  The floor of [1] preserves a usable executor on small
-    systems. *)
+    The [-2] keeps the original main domain outside the executor pool
+    and, when available, leaves one additional domain of host scheduling
+    headroom, so HTTP listeners, SSE drains, keeper dispatch, and response
+    finalisation are not competing with a pool that claims every recommended
+    domain.  The floor of [1] preserves a usable executor on small systems,
+    where the extra headroom domain may not exist. *)
 
 val create :
   sw:Eio.Switch.t ->

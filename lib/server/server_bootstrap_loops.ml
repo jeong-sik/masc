@@ -783,7 +783,7 @@ let start_keeper_loops
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            Log.Server.warn "approval_janitor: expire sweep failed: %s" (Printexc.to_string exn));
-        (try Keeper_approval_queue.escalate_critical ~after_s:escalation_after_s with
+        (try Keeper_approval_queue.escalate_critical ~now:(Eio.Time.now clock) ~after_s:escalation_after_s with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
            Log.Server.warn "approval_janitor: escalation sweep failed: %s" (Printexc.to_string exn));

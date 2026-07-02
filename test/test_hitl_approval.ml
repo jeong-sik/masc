@@ -521,7 +521,7 @@ let test_escalate_critical_transitions_phase_and_waits () =
     "awaiting_operator"
     (phase_of_pending_id id);
   (* after_s=0.0 triggers escalation for any requested_at. *)
-  AQ.escalate_critical ~after_s:0.0;
+  AQ.escalate_critical ~now:(Unix.gettimeofday ()) ~after_s:0.0;
   Alcotest.(check string)
     "phase transitions to escalated"
     "escalated"
@@ -563,7 +563,7 @@ let test_escalate_critical_transitions_phase_and_waits () =
     "critical approval escalated — operator must decide"
     (escalation_event |> member "disposition_reason" |> to_string);
   (* Escalation is monotone: second sweep is a no-op. *)
-  AQ.escalate_critical ~after_s:0.0;
+  AQ.escalate_critical ~now:(Unix.gettimeofday ()) ~after_s:0.0;
   let audit_count =
     AQ.read_recent_audit ~base_path ~keeper_name ~n:10 ()
     |> List.filter (fun json ->
@@ -601,7 +601,7 @@ let test_escalate_critical_resolved_before_bound_no_event () =
    | Error err ->
       Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
   (* after_s=0.0 would match, but the entry is gone. *)
-  AQ.escalate_critical ~after_s:0.0;
+  AQ.escalate_critical ~now:(Unix.gettimeofday ()) ~after_s:0.0;
   Alcotest.(check bool)
     "no escalation audit after early resolution"
     true

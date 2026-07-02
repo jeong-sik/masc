@@ -539,6 +539,8 @@ let pending_entry_json_fields
   (match entry.phase with
    | Awaiting_operator -> []
    | Escalated { escalated_at } ->
+     (* NDT-OK: wall-clock age rendered for dashboard/SSE observability only;
+        never used for a control decision. *)
      [ "escalated_at", `Float escalated_at
      ; "escalated_at_iso", `String (Masc_domain.iso8601_of_unix_seconds escalated_at)
      ; "escalated_waiting_s", `Float (Unix.gettimeofday () -. escalated_at)
@@ -1268,11 +1270,14 @@ let expire_stale ~max_wait_s =
     [Awaiting_operator] to [Escalated].  The entry stays pending and the
     promise stays unresolved; escalation is visibility only (RFC-0304).
 
+    The caller supplies [now] so that wall-clock sampling stays at the
+    server/bootstrap boundary and this function remains deterministic in
+    its inputs.
+
     The transition is performed under the queue lock and re-checked after
     acquiring the lock, so concurrent operator resolution always wins.  The
     function is idempotent: an already-[Escalated] entry is not re-audited. *)
-let escalate_critical ~after_s =
-  let now = Unix.gettimeofday () in
+let escalate_critical ~now ~after_s =
   let escalated_ref : (string * pending_approval) list ref = ref [] in
   atomic_update pending (fun map ->
     let to_escalate : (string * pending_approval) list ref = ref [] in

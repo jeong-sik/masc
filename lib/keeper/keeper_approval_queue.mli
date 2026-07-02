@@ -318,5 +318,6 @@ val expire_stale : max_wait_s:float -> unit
 (** Transition [Critical] approvals that have been waiting longer than
     [after_s] from [Awaiting_operator] to [Escalated].  The entry stays
     pending; no promise is resolved.  Idempotent and race-safe against
-    concurrent operator resolution. *)
-val escalate_critical : after_s:float -> unit
+    concurrent operator resolution.  [now] is supplied by the caller so
+    wall-clock sampling stays at the bootstrap boundary. *)
+val escalate_critical : now:float -> after_s:float -> unit

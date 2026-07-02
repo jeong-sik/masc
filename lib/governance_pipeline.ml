@@ -117,7 +117,7 @@ let decide ~governance_level ~tool_name ~input =
   let risk = assess_risk ~tool_name ~input in
   let trace_id = generate_trace_id () in
   let action =
-    if Env_config_core.disable_hitl () && auto_approval_hard_forbidden ~risk None then
+    if auto_approval_hard_forbidden ~risk None then
       `Require_confirm
         (Printf.sprintf
            "Governance (%s): %s risk tool %S requires confirmation: auto-approval is \

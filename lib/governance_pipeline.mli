@@ -61,14 +61,15 @@ val decide :
   input:Yojson.Safe.t ->
   governance_decision
 (** Evaluate a tool call against governance policy and return a decision.
-    - development: allow all while HITL is enabled, audit High+Critical
+    - development: allow Low/Medium/High while HITL is enabled, audit High+Critical,
+      but always confirm Critical hard-forbidden calls
     - production: confirm Critical, audit Medium+
     - enterprise: confirm High+Critical, audit all
     - paranoid: confirm Medium+High+Critical, audit all
 
-    Critical hard-forbidden calls still require confirmation when HITL
-    thresholds are disabled, so disabling HITL cannot silently auto-approve
-    destructive operations. *)
+    Critical hard-forbidden calls always require confirmation, regardless of
+    whether HITL thresholds are disabled, so disabling HITL cannot silently
+    auto-approve destructive operations. *)
 
 val make_pre_hook :
   config:Workspace.config ->

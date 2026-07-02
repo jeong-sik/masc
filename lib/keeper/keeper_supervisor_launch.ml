@@ -53,7 +53,7 @@ let restart_launch_noop_enabled_for_test = Keeper_supervisor_restart_noop.enable
 let with_restart_launch_noop_for_test = Keeper_supervisor_restart_noop.with_noop
 let domain_pool_ignored_warning_emitted = Atomic.make false
 
-let launch_supervised_fiber
+let launch_supervised_fiber_body
       ~proactive_warmup_sec
       ctx
       (meta : keeper_meta)
@@ -61,20 +61,6 @@ let launch_supervised_fiber
   =
   let base_path = ctx.config.base_path in
   let keepers_dir = Workspace.keepers_runtime_dir ctx.config in
-  (match Keeper_registry.prepare_fiber_launch ~base_path meta.name with
-   | Ok _ -> ()
-   | Error err ->
-     Log.Keeper.warn
-       "%s: Fiber_started rejected during supervised launch: %s"
-       meta.name
-       (Keeper_state_machine.transition_error_to_string err);
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string SupervisorCleanupFailures)
-       ~labels:
-         [ "keeper", meta.name
-         ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
-         ]
-       ());
   if restart_launch_noop_enabled_for_test ()
   then ()
   else (
@@ -532,6 +518,58 @@ let launch_supervised_fiber
                Fun.Finally_raised): %s"
               meta.name
               (Printexc.to_string exn))))
+;;
+
+(** Launch gate: the registry FSM must accept [Fiber_started] before any
+    fiber is forked. Returns [Error _] when the launch was refused; in that
+    case nothing was forked, no [Started]/[Running] event may be published
+    by the caller, and [done_p] has been resolved through the crash path. *)
+let launch_supervised_fiber
+      ~proactive_warmup_sec
+      ctx
+      (meta : keeper_meta)
+      (reg : Keeper_registry.registry_entry)
+  =
+  let base_path = ctx.config.base_path in
+  match Keeper_registry.prepare_fiber_launch ~base_path meta.name with
+  | Error err ->
+    (* Fail closed: a rejected [Fiber_started] (terminal state, invalid
+       transition, precondition violation) means the registry refuses a
+       new fiber. Forking anyway created a live keepalive loop in a state
+       the sweep and dashboard treat as not running. Resolve [done_p]
+       through the crash path so supervise/restart waiters observe a typed
+       outcome and the next sweep re-queues with the usual backoff/budget. *)
+    let reason =
+      Printf.sprintf
+        "fiber_start_rejected: %s"
+        (Keeper_state_machine.transition_error_to_string err)
+    in
+    Log.Keeper.warn
+      "%s: Fiber_started rejected during supervised launch — launch aborted: %s"
+      meta.name
+      (Keeper_state_machine.transition_error_to_string err);
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string SupervisorCleanupFailures)
+      ~labels:
+        [ "keeper", meta.name
+        ; ("site", Keeper_supervisor_cleanup_failure_site.(to_label Fiber_start_rejected))
+        ]
+      ();
+    Keeper_registry.set_failure_reason
+      ~base_path
+      meta.name
+      (Some (Keeper_registry.Exception reason));
+    Keeper_registry.record_crash ~base_path meta.name (Time_compat.now ()) reason;
+    if
+      Keeper_registry.resolve_done reg ~source:"supervisor_launch_rejected" (`Crashed reason)
+      |> done_signal_of_registry_result
+      |> should_publish_lifecycle_for_done_signal
+    then
+      publish_phase_lifecycle ~phase:Keeper_state_machine.Crashed meta.name reason ();
+    Error err
+  | Ok _ ->
+    launch_supervised_fiber_body ~proactive_warmup_sec ctx meta reg;
+    Ok ()
 ;;
 
 (* #10993: persona drift visibility.

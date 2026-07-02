@@ -305,15 +305,35 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
          (* #10765 Phase 2: policy owns the pause-vs-restart lifecycle
             decision; this branch only applies the stale-storm pause side
             effect and clears the in-memory registry slot so the counter
-            increments once per storm. *)
-         handle_stale_storm_pause ctx entry ~count;
-         { acc with to_unregister = entry :: acc.to_unregister }
+            increments once per storm.
+
+            The slot is only cleared once the pause is durably committed:
+            unregistering after a failed persist would drop the in-memory
+            failure gate and let the reconcile loop relaunch a keeper whose
+            disk meta still says [paused=false] while operators saw Paused. *)
+         (match handle_stale_storm_pause ctx entry ~count with
+          | Ok () -> { acc with to_unregister = entry :: acc.to_unregister }
+          | Error err ->
+            Log.Keeper.warn
+              "%s: stale_storm pause not committed (%s); keeping registry entry \
+               so the pause retries next sweep"
+              entry.name
+              err;
+            acc)
        | Some (Keeper_registry.Provider_timeout_loop { count }) ->
          (* Watchdog-preserved provider-timeout loops include liveness evidence,
             so policy allows keeper pause without treating timeout alone as
-            keeper death. *)
-         handle_provider_timeout_pause ctx entry ~count;
-         { acc with to_unregister = entry :: acc.to_unregister }
+            keeper death. Same fail-closed unregister rule as the stale-storm
+            branch above. *)
+         (match handle_provider_timeout_pause ctx entry ~count with
+          | Ok () -> { acc with to_unregister = entry :: acc.to_unregister }
+          | Error err ->
+            Log.Keeper.warn
+              "%s: provider_timeout_loop pause not committed (%s); keeping \
+               registry entry so the pause retries next sweep"
+              entry.name
+              err;
+            acc)
        | Some Keeper_registry.Turn_overflow_pause
        | Some Keeper_registry.Turn_livelock_pause ->
          { acc with to_unregister = entry :: acc.to_unregister }
@@ -699,25 +719,35 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
               ~restart_count:attempt
               ~last_restart_ts:now
               ~crash_log:(keep_last_n 5 (now, crash_msg) old_crash_log);
-            launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg;
-            publish_lifecycle
-              ~event:
-                (Keeper_lifecycle_events.Custom_event
-                   { verb = Keeper_lifecycle_events.Restarted
-                   ; phase = Some Keeper_state_machine.Running
-                   })
-              old_entry.name
-              (Printf.sprintf "attempt %d" attempt)
-              ();
-            Otel_metric_store.inc_counter
-              Keeper_metrics.(to_string RestartOutcomes)
-              ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
-              ();
-            Log.Keeper.info
-              "%s: restarted (attempt %d, backoff %.0fs)"
-              old_entry.name
-              attempt
-              (backoff_delay (attempt - 1));
+            (match launch_supervised_fiber ~proactive_warmup_sec:0 ctx meta reg with
+             | Error _ ->
+               (* Launch gate aborted fail-closed (no fiber; done resolved and
+                  Crashed published by the gate). Announcing Restarted/Running
+                  here would report a keeper that never started; the resolved
+                  Crashed outcome re-enters the sweep with backoff/budget. *)
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string RestartOutcomes)
+                 ~labels:[ "keeper", old_entry.name; "outcome", "launch_rejected" ]
+                 ()
+             | Ok () ->
+               publish_lifecycle
+                 ~event:
+                   (Keeper_lifecycle_events.Custom_event
+                      { verb = Keeper_lifecycle_events.Restarted
+                      ; phase = Some Keeper_state_machine.Running
+                      })
+                 old_entry.name
+                 (Printf.sprintf "attempt %d" attempt)
+                 ();
+               Otel_metric_store.inc_counter
+                 Keeper_metrics.(to_string RestartOutcomes)
+                 ~labels:[ "keeper", old_entry.name; "outcome", "started" ]
+                 ();
+               Log.Keeper.info
+                 "%s: restarted (attempt %d, backoff %.0fs)"
+                 old_entry.name
+                 attempt
+                 (backoff_delay (attempt - 1)));
             (* Soft pre-warning when this is the FINAL allowed restart: next
                crash will trip the budget and mark Dead. Operator-actionable
                but not yet a fault — investigate root cause now. *)

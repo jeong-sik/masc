@@ -2241,6 +2241,110 @@ let test_provider_timeout_loop_pause_skips_restart () =
       check bool "registry entry unregistered after provider timeout loop pause"
         false (Reg.is_registered ~base_path:config.base_path name))
 
+(* Fail-closed pause commit: when [paused=true] cannot be persisted (here:
+   meta missing on disk), the pause must not commit — no pause counter, no
+   Paused publish, and the registry entry must stay registered so the pause
+   retries on the next sweep. Pre-fix the counter/publish fired
+   unconditionally and the sweep unregistered the entry, after which
+   reconcile relaunched a keeper operators saw as Paused. *)
+let test_stale_storm_pause_persist_failure_keeps_entry_registered () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "stale-storm-persist-failure" in
+      let meta = make_meta name in
+      (* Intentionally NO [write_meta]: [handle_crash_auto_pause] cannot
+         persist [paused=true] without an on-disk meta, so the pause must
+         fail closed. *)
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      resolve_done_for_test reg (`Crashed "synthetic stale storm");
+      Reg.restore_supervisor_state ~base_path:config.base_path name
+        ~restart_count:0 ~last_restart_ts:0.0 ~crash_log:[];
+      Reg.set_failure_reason ~base_path:config.base_path name
+        (Some (Reg.Stale_termination_storm { count = 5 }));
+      let baseline_pause =
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
+      in
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      sweep_and_recover_no_materialize ctx;
+      let after_pause =
+        Masc.Otel_metric_store.metric_total "masc_keeper_stale_storm_paused_total"
+      in
+      check (float 0.001) "pause counter NOT incremented on failed persist"
+        baseline_pause after_pause;
+      check bool "registry entry kept so the pause retries next sweep"
+        true (Reg.is_registered ~base_path:config.base_path name))
+
+(* Fail-closed launch gate: a registry FSM in a terminal state rejects
+   [Fiber_started]; the launch must abort without announcing
+   [Started]/[Running], and the entry's done promise must resolve through
+   the crash path so the sweep observes a typed outcome. Pre-fix the fiber
+   forked and Running was published despite the reject. *)
+let test_launch_rejected_terminal_state_does_not_announce_running () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun sw ->
+  let base_dir = temp_dir () in
+  Fun.protect
+    ~finally:(fun () ->
+      Reg.clear ();
+      Masc.Keeper_runtime.reset_test_state base_dir;
+      cleanup_dir base_dir)
+    (fun () ->
+      let config = Masc.Workspace.default_config base_dir in
+      let _init_msg = Masc.Workspace.init config ~agent_name:(Some supervisor_agent_name) in
+      let name = "launch-reject-terminal" in
+      let meta = make_meta name in
+      (match Keeper_meta_store.write_meta config meta with
+       | Ok () -> ()
+       | Error err -> fail err);
+      let reg = Reg.register ~base_path:config.base_path name meta in
+      Reg.mark_dead ~base_path:config.base_path name ~at:(Unix.gettimeofday ());
+      let ctx : _ Keeper_types_profile.context =
+        {
+          config;
+          agent_name = supervisor_agent_name;
+          sw;
+          clock = Eio.Stdenv.clock env;
+          proc_mgr = Some (Eio.Stdenv.process_mgr env);
+          net = Some (Eio.Stdenv.net env);
+        }
+      in
+      Sup.with_restart_launch_noop_for_test (fun () ->
+        match
+          Masc.Keeper_supervisor_launch.launch_supervised_fiber
+            ~proactive_warmup_sec:0 ctx meta reg
+        with
+        | Ok () -> fail "expected Fiber_started to be rejected in terminal state"
+        | Error _ -> ());
+      (match Reg.get_phase ~base_path:config.base_path name with
+       | Some Keeper_state_machine.Dead -> ()
+       | Some phase ->
+         fail
+           (Printf.sprintf "expected phase to stay Dead, got %s"
+              (Keeper_state_machine.phase_to_string phase))
+       | None -> fail "registry entry disappeared after rejected launch");
+      check bool "done promise resolved through the crash path"
+        true (Option.is_some (Eio.Promise.peek reg.done_p)))
+
 let test_unresolved_watchdog_stopped_budget_loop_is_reaped () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
@@ -3418,6 +3522,10 @@ let () =
         test_legacy_stale_fleet_batch_routes_to_restart_budget;
       test_case "Provider timeout loop skips restart, persists paused, increments counter" `Quick
         test_provider_timeout_loop_pause_skips_restart;
+      test_case "storm pause persist failure keeps entry registered (fail-closed)" `Quick
+        test_stale_storm_pause_persist_failure_keeps_entry_registered;
+      test_case "terminal-state launch reject does not announce Running" `Quick
+        test_launch_rejected_terminal_state_does_not_announce_running;
       test_case "unresolved watchdog-stopped budget loop is reaped" `Quick
         test_unresolved_watchdog_stopped_budget_loop_is_reaped;
       test_case "stale run sweep sets watchdog stop signal" `Quick

@@ -215,33 +215,34 @@ let handle_crash_auto_pause
       ~blocker_class
       ~resume_policy
   =
-  (match read_meta ctx.config entry.name with
-   | Ok (Some meta) ->
-     let auto_resume_after_sec =
-       auto_resume_after_sec_for_policy meta resume_policy
-     in
-     let blocker_text =
-       let existing =
-         match meta.runtime.last_blocker with
-         | Some info -> String.trim info.detail
-         | None -> ""
-       in
-       if existing <> ""
-       then existing
-       else (
-         match blocker_class with
-         | Some cls -> blocker_class_to_string cls
-         | None -> reason_tag)
-     in
-     let blocker_info_opt =
-       match blocker_class with
-       | Some klass -> Some (blocker_info_of_class ~detail:blocker_text klass)
-       | None ->
-         (* No typed class available — preserve pre-existing typed
+  let persisted =
+    match read_meta ctx.config entry.name with
+    | Ok (Some meta) ->
+      let auto_resume_after_sec =
+        auto_resume_after_sec_for_policy meta resume_policy
+      in
+      let blocker_text =
+        let existing =
+          match meta.runtime.last_blocker with
+          | Some info -> String.trim info.detail
+          | None -> ""
+        in
+        if existing <> ""
+        then existing
+        else (
+          match blocker_class with
+          | Some cls -> blocker_class_to_string cls
+          | None -> reason_tag)
+      in
+      let blocker_info_opt =
+        match blocker_class with
+        | Some klass -> Some (blocker_info_of_class ~detail:blocker_text klass)
+        | None ->
+          (* No typed class available — preserve pre-existing typed
               info if any, otherwise drop the slot.  We refuse to
               silently fabricate a klass from [reason_tag]. *)
-         meta.runtime.last_blocker
-     in
+          meta.runtime.last_blocker
+      in
      (* Task-138 §"Max no-task-progress 30min = release claimed":
           when the supervisor pauses a keeper because the same blocker
           class is looping (stale_storm or provider_timeout_loop),
@@ -257,64 +258,80 @@ let handle_crash_auto_pause
           here; [last_blocker] in [runtime] already carries the pause
           reason, and Otel_metric_store [keeper_paused_total] is incremented
           below.  Discovered 2026-05-05 fleet-stuck. *)
-     let paused_meta =
-       { meta with
-         paused = true
-       ; auto_resume_after_sec
-       ; updated_at = now_iso ()
-       ; runtime = { meta.runtime with last_blocker = blocker_info_opt }
-       }
-     in
-     (match
-        write_meta_with_merge
-          ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
-          ctx.config
-          paused_meta
-      with
-      | Ok () ->
-        let release_ok =
-          release_owned_active_tasks_after_pause ~config:ctx.config ~meta ~reason_tag
-        in
-        if release_ok
-        then
-          ignore
-            (clear_current_task_id_after_successful_pause_release
-               ~config:ctx.config
-               ~meta:paused_meta
-               ~reason_tag)
-      | Error err ->
-        Otel_metric_store.inc_counter
-          Keeper_metrics.(to_string WriteMetaFailures)
-          ~labels:[ "keeper", entry.name; "phase", "blocker_pause" ]
-          ();
-        Log.Keeper.warn
-          "%s: %s pause meta write failed (in-memory failure_reason still gates restart, \
-           but persisted state will not survive server restart): %s"
-          entry.name
-          reason_tag
-          err)
-   | Ok None ->
-     Log.Keeper.warn
-       "%s: %s pause: meta missing, cannot persist paused=true"
-       entry.name
-       reason_tag;
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string WriteMetaFailures)
-       ~labels:[ "keeper", entry.name; "phase", "pause_meta_missing" ]
-       ()
-   | Error err ->
-     Log.Keeper.warn "%s: %s pause read_meta failed: %s" entry.name reason_tag err;
-     Otel_metric_store.inc_counter
-       Keeper_metrics.(to_string WriteMetaFailures)
-       ~labels:[ "keeper", entry.name; "phase", "pause_read_meta" ]
-       ());
-  Otel_metric_store.inc_counter metric_name ~labels:[ "keeper", entry.name ] ();
-  publish_phase_lifecycle
-    ~phase:Keeper_state_machine.Paused
-    entry.name
-    lifecycle_detail
-    ();
-  Log.Keeper.error "%s: %s" entry.name log_message
+      let paused_meta =
+        { meta with
+          paused = true
+        ; auto_resume_after_sec
+        ; updated_at = now_iso ()
+        ; runtime = { meta.runtime with last_blocker = blocker_info_opt }
+        }
+      in
+      (match
+         write_meta_with_merge
+           ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+           ctx.config
+           paused_meta
+       with
+       | Ok () ->
+         let release_ok =
+           release_owned_active_tasks_after_pause ~config:ctx.config ~meta ~reason_tag
+         in
+         if release_ok
+         then
+           ignore
+             (clear_current_task_id_after_successful_pause_release
+                ~config:ctx.config
+                ~meta:paused_meta
+                ~reason_tag);
+         Ok ()
+       | Error err ->
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string WriteMetaFailures)
+           ~labels:[ "keeper", entry.name; "phase", "blocker_pause" ]
+           ();
+         Log.Keeper.warn
+           "%s: %s pause meta write failed — pause not committed; Paused is not \
+            published and the sweep keeps the registry entry so the pause retries \
+            next sweep: %s"
+           entry.name
+           reason_tag
+           err;
+         Error err)
+    | Ok None ->
+      Log.Keeper.warn
+        "%s: %s pause: meta missing, cannot persist paused=true — pause not committed"
+        entry.name
+        reason_tag;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string WriteMetaFailures)
+        ~labels:[ "keeper", entry.name; "phase", "pause_meta_missing" ]
+        ();
+      Error "pause meta missing"
+    | Error err ->
+      Log.Keeper.warn "%s: %s pause read_meta failed: %s" entry.name reason_tag err;
+      Otel_metric_store.inc_counter
+        Keeper_metrics.(to_string WriteMetaFailures)
+        ~labels:[ "keeper", entry.name; "phase", "pause_read_meta" ]
+        ();
+      Error err
+  in
+  (* Fail closed (mirrors [handle_auto_pause_from_meta]): the Paused
+     lifecycle event and the pause metric are visible operator state, so
+     they must only be emitted once [paused=true] is durably committed.
+     Publishing on a failed persist made the dashboard show Paused while
+     the reconcile loop — after the sweep unregistered the entry —
+     relaunched the keeper from disk meta with [paused=false]. *)
+  match persisted with
+  | Ok () ->
+    Otel_metric_store.inc_counter metric_name ~labels:[ "keeper", entry.name ] ();
+    publish_phase_lifecycle
+      ~phase:Keeper_state_machine.Paused
+      entry.name
+      lifecycle_detail
+      ();
+    Log.Keeper.error "%s: %s" entry.name log_message;
+    Ok ()
+  | Error _ as err -> err
 ;;
 
 let handle_stale_storm_pause

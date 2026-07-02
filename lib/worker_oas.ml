@@ -539,7 +539,7 @@ let rec run_worker_via_oas
   let heartbeat_cbs = make_heartbeat_callbacks ~sw ~auth_token ~session_id ~worker_name in
   let injector_config = Masc_context_injector.default_config () in
   let context_injector = Masc_context_injector.make ~config:injector_config () in
-  let shared_context = Agent_sdk.Context.create ~eio:true () in
+  let shared_context = Agent_sdk.Context.create () in
   let tool_names_ref, hooks =
     make_tool_tracking_hooks ?gate_config ~context:shared_context ()
   in

@@ -776,12 +776,17 @@ let start_keeper_loops
          operator forgets a request.  Code constant: changes need code
          review (policy), not a runtime knob. *)
       let max_wait_s = 1800.0 in
+      let escalation_after_s = Keeper_approval_queue.default_critical_approval_escalation_after_s in
       let rec loop () =
         Eio.Time.sleep clock interval;
         (try Keeper_approval_queue.expire_stale ~max_wait_s with
          | Eio.Cancel.Cancelled _ as e -> raise e
          | exn ->
-           Log.Server.warn "approval_janitor: sweep failed: %s" (Printexc.to_string exn));
+           Log.Server.warn "approval_janitor: expire sweep failed: %s" (Printexc.to_string exn));
+        (try Keeper_approval_queue.escalate_critical ~after_s:escalation_after_s with
+         | Eio.Cancel.Cancelled _ as e -> raise e
+         | exn ->
+           Log.Server.warn "approval_janitor: escalation sweep failed: %s" (Printexc.to_string exn));
         loop ()
       in
       loop ()));

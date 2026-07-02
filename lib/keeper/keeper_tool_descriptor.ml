@@ -1627,6 +1627,8 @@ let internal_descriptors : t list =
       "Transition a task to a new status." ~readonly:false
   ; masc_task_descriptor "update_priority" "masc_update_priority"
       "Update the priority of a task." ~readonly:false
+  ; masc_task_descriptor "set_goal" "masc_task_set_goal"
+      "Assign an existing, currently goalless task to a goal." ~readonly:false
   (* ── RFC-0182 §3.1 — masc_plan_* + note + deliver (8 entries) ── *)
   ; masc_plan_descriptor "init" "masc_plan_init"
       "Initialise a workspace plan." ~readonly:false

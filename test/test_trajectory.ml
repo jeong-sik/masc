@@ -622,6 +622,24 @@ let test_read_recent_lines_skips_malformed_rows () =
       1
       (List.length all_lines))
 
+(* trajectory_summary rows are intentionally written to the same JSONL file at
+   session end; they must not inflate the "malformed JSON or unrecognized
+   shape" skip counter that the dashboard read paths log. *)
+let test_summary_row_not_counted_as_malformed () =
+  let lines =
+    [
+      {|{"ts":1000.0,"ts_iso":"2026-07-01T00:00:00Z","turn":1,"round":0,"tool_name":"tool_execute","args":{},"result":"ok","duration_ms":10,"error":null,"cost_usd":0.0}|}
+    ; {|{"type":"trajectory_summary","keeper_name":"k","trace_id":"t","generation":0,"total_cost_usd":0.0,"total_turns":0,"total_tool_calls":0,"outcome":{"status":"completed"},"task_id":null,"started_at":0.0,"ended_at":0.0}|}
+    ; "{not valid json"
+    ]
+  in
+  let parsed, skipped, total =
+    Trajectory.trajectory_lines_of_jsonl_lines ~trace_id:"t" lines
+  in
+  Alcotest.(check int) "parsed lines (tool call only)" 1 (List.length parsed);
+  Alcotest.(check int) "skipped count counts only malformed" 1 skipped;
+  Alcotest.(check int) "total rows processed" 3 total
+
 let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
   Trajectory.Thinking
     {
@@ -798,6 +816,8 @@ let () =
       Alcotest.test_case "nonexistent directory" `Quick test_read_entries_since_no_dir;
       Alcotest.test_case "read_recent_lines/read_all_lines skip malformed rows" `Quick
         test_read_recent_lines_skips_malformed_rows;
+      Alcotest.test_case "summary row not counted as malformed" `Quick
+        test_summary_row_not_counted_as_malformed;
     ]);
     ("keeper_trace", [
       Alcotest.test_case "dedupe_thinking_lines uses structural key" `Quick

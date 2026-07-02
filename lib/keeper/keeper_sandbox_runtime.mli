@@ -85,6 +85,11 @@ val docker_image_missing_next_action : string
     daemon/socket access failures as well as missing-image failures. *)
 val docker_image_present : image:string -> timeout_sec:float -> (unit, string) result
 
+(** [true] when a docker run result/status/output looks like daemon back-pressure
+    or a daemon-side timeout, i.e. when a single retry may succeed once the
+    Docker daemon drains. *)
+val docker_run_looks_daemon_pressure : status:Unix.process_status -> output:string -> bool
+
 (** Docker [--label] argv fragment for containers owned by the keeper
     sandbox runtime. *)
 val docker_label_args
@@ -223,6 +228,16 @@ val docker_config_mount_args
   :  base_path:string
   -> container_root:string
   -> string list
+
+(** Host-side gitconfig path resolved from [$HOME]. *)
+val host_gitconfig_path : unit -> string
+
+(** Container-side gitconfig path ([/tmp/.gitconfig]). *)
+val container_gitconfig_path : unit -> string
+
+(** Docker [-v ...] argv fragment that exposes the host gitconfig read-only
+    at {!container_gitconfig_path} when it exists. *)
+val docker_gitconfig_mount_args : unit -> string list
 
 (** Docker [-v ...] specs for the read-only workspace-state subset that keeper
     task worktrees may read through their container-side runtime [.masc]

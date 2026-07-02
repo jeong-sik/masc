@@ -78,6 +78,11 @@ let classify_image_inspect_failure =
 let classify_image_inventory_failure =
   Keeper_sandbox_runtime_classify.classify_image_inventory_failure
 
+let docker_run_looks_daemon_pressure ~status ~output =
+  match classify_docker_runtime_failure ~status ~output with
+  | "docker_daemon_timeout" | "docker_daemon_unavailable" -> true
+  | _ -> false
+
 let docker_info_security_options_with_class ~timeout_sec =
   let argv =
     docker_command_argv () @ [ "info"; "--format"; "{{json .SecurityOptions}}" ]
@@ -345,6 +350,23 @@ let docker_config_mount_args ~base_path ~container_root =
     [ "-v"
     ; host_config_root ^ ":" ^ docker_config_container_root ~container_root ^ ":ro"
     ]
+;;
+
+let host_gitconfig_path () =
+  match Sys.getenv_opt "HOME" with
+  | None -> ""
+  | Some home -> Filename.concat home ".gitconfig"
+;;
+
+let container_gitconfig_path () = "/tmp/.gitconfig"
+
+let docker_gitconfig_mount_args () =
+  let host = host_gitconfig_path () in
+  if host = ""
+  then []
+  else if not (Sys.file_exists host)
+  then []
+  else [ "-v"; host ^ ":" ^ container_gitconfig_path () ^ ":ro" ]
 ;;
 
 type workspace_state_mount_kind =

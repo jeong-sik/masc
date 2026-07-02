@@ -325,6 +325,7 @@ let docker_run_argv
   @ Keeper_sandbox_runtime.docker_workspace_state_mount_args
       ~base_path:config.base_path
       ~container_root
+  @ Keeper_sandbox_runtime.docker_gitconfig_mount_args ()
   @ secret_args
   @ network_args
   @ identity_mounts
@@ -579,12 +580,7 @@ let run_docker_shell_command_with_status_internal
                               ~ttl_sec:(docker_oneshot_ttl_sec ~timeout_sec)
                           in
                           (try
-                             let status, output =
-                               Eio_guard.protect
-                                 ~finally:(fun () ->
-                                   secret_projection.cleanup ();
-                                   cleanup_oneshot_container ~container_name)
-                               @@ fun () ->
+                             let run_once () =
                                Docker_spawn_throttle.with_slot (fun () ->
                                  Masc_exec.Exec_gate.run_argv_with_stdin_and_status
                                    ~actor:`System_sandbox
@@ -598,33 +594,61 @@ let run_docker_shell_command_with_status_internal
                                    ~stdin_content:cmd
                                    argv)
                              in
-                             let semantic_status =
-                               docker_command_semantic_status ~cmd ~status ~output
-                             in
-                             let semantic_ok = semantic_ok_of_status semantic_status in
-                             if not semantic_ok
-                             then
-                               Keeper_sandbox_exec_failure.record_docker_failure
-                                 ~config
-                                 ~meta
-                                 ~image
-                                 ~container_kind:"oneshot"
-                                 ~network_label
-                                 ~status
-                                 ~output
-                             else
-                               Keeper_registry.clear_error
-                                 ~base_path:config.base_path
-                                 meta.name;
-                             Ok
-                               { status
-                               ; output
-                               ; image
-                               ; network_label
-                               ; cwd
-                               ; semantic_status = Some semantic_status
-                               ; semantic_ok
-                               }
+                             Eio_guard.protect
+                               ~finally:(fun () -> secret_projection.cleanup ())
+                               (fun () ->
+                                  let rec attempt ~retries_left =
+                                    let status, output =
+                                      Eio_guard.protect
+                                        ~finally:(fun () ->
+                                          cleanup_oneshot_container ~container_name)
+                                        (fun () -> run_once ())
+                                    in
+                                    let semantic_status =
+                                      docker_command_semantic_status ~cmd ~status ~output
+                                    in
+                                    let semantic_ok =
+                                      semantic_ok_of_status semantic_status
+                                    in
+                                    if (not semantic_ok)
+                                       && retries_left > 0
+                                       && Keeper_sandbox_runtime.docker_run_looks_daemon_pressure
+                                            ~status
+                                            ~output
+                                    then (
+                                      Log.Keeper.info
+                                        "keeper docker command for %s hit daemon pressure \
+                                         (%s), retrying once"
+                                        meta.name
+                                        (Exec_core.string_of_semantic_status semantic_status);
+                                      Eio_guard.yield_if_ready ();
+                                      attempt ~retries_left:(retries_left - 1))
+                                    else (
+                                      if not semantic_ok
+                                      then
+                                        Keeper_sandbox_exec_failure.record_docker_failure
+                                          ~config
+                                          ~meta
+                                          ~image
+                                          ~container_kind:"oneshot"
+                                          ~network_label
+                                          ~status
+                                          ~output
+                                      else
+                                        Keeper_registry.clear_error
+                                          ~base_path:config.base_path
+                                          meta.name;
+                                      Ok
+                                        { status
+                                        ; output
+                                        ; image
+                                        ; network_label
+                                        ; cwd
+                                        ; semantic_status = Some semantic_status
+                                        ; semantic_ok
+                                        })
+                                  in
+                                  attempt ~retries_left:1)
                            with
                            | Eio.Cancel.Cancelled _ as exn -> raise exn
                            | Failure err -> sandbox_error err

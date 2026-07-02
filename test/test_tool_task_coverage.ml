@@ -739,6 +739,11 @@ let () = test "handle_transition_start_on_todo_points_at_claim_first" (fun () ->
   assert (str_contains (Tool_result.message result) "todo");
   assert (str_contains (Tool_result.message result) "Valid actions");
   assert (str_contains (Tool_result.message result) "claim");
+  (* The output must be a structured workflow rejection so the OAS retry
+     ladder treats it as deterministic non-retryable. *)
+  assert (str_contains (Tool_result.message result) "\"failure_class\":\"workflow_rejection\"");
+  assert (str_contains (Tool_result.message result) "\"error_class\":\"deterministic\"");
+  assert (str_contains (Tool_result.message result) "\"recoverable\":false");
   let task_entries =
     Log.Ring.recent ~limit:50 ~module_filter:"Task" ~since_seq:before_seq ()
   in

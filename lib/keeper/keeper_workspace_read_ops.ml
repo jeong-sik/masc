@@ -10,6 +10,38 @@ open Keeper_types_profile
 open Keeper_tool_shared_runtime
 open Keeper_workspace_ops_setup
 
+(* Ripgrep input validation: reject malformed --type values and regex
+   patterns before any Docker spawn or host rg execution. *)
+let rg_type_name_re = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+
+let validate_rg_type file_type =
+  if file_type = "" || Re.execp rg_type_name_re file_type
+  then Ok ()
+  else
+    Error
+      (Printf.sprintf
+         "invalid ripgrep --type value %S. Type names may contain only letters, \
+          digits, hyphens, and underscores."
+         file_type)
+;;
+
+let validate_rg_pattern pattern =
+  try
+    ignore (Re.Pcre.re pattern |> Re.compile);
+    Ok ()
+  with exn ->
+    Error
+      (Printf.sprintf
+         "invalid regex pattern %S: %s"
+         pattern
+         (Printexc.to_string exn))
+;;
+
+let validate_rg_inputs ~pattern ~file_type =
+  match validate_rg_type file_type with
+  | Error _ as e -> e
+  | Ok () -> validate_rg_pattern pattern
+;;
 let try_handle
       ~(turn_sandbox_factory : Keeper_sandbox_factory.t option)
       ~(config : Workspace.config)
@@ -105,40 +137,43 @@ let try_handle
   | "rg" ->
     Some
       (let pattern = Safe_ops.json_string ~default:"" "pattern" args |> String.trim in
+       let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
        if pattern = ""
        then error_json ~fields:[ "op", `String op ] "pattern is required for rg. Good: pattern='handle_request'. Bad: pattern=''."
        else (
-         match read_target () with
-         | Error e -> path_error e
-         | Ok target ->
-           let limit = shell_readonly_limit args in
-           let file_type = Safe_ops.json_string ~default:"" "type" args |> String.trim in
-           let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
-           if Keeper_sandbox_read_runner.should_route_read ~meta then
-             let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
-             let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
-             let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
-             (match
-                run_readonly_in_sandbox ~target
-                  ~command_argv:(fun cpath ->
-                    base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
-                  ~ok_exit_codes:[ 0; 1 ]
-                  ~max_bytes:1_000_000
-                  ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
-                  ()
-              with
-              | Error response -> response
-              | Ok (st, out) ->
-                Yojson.Safe.to_string
-                  (`Assoc
-                      [ "ok", `Bool true
-                      ; "op", `String op
-                      ; "path", `String target
-                      ; "pattern", `String pattern
-                      ; "via", `String Keeper_sandbox_read_runner.backend_via
-                      ; "status", Keeper_alerting_path.process_status_to_json st
-                      ; "matches", lines_to_json ~limit out
-                      ]))
+         match validate_rg_inputs ~pattern ~file_type with
+         | Error msg -> error_json ~fields:[ "op", `String op ] msg
+         | Ok () -> (
+           match read_target () with
+           | Error e -> path_error e
+           | Ok target ->
+             let limit = shell_readonly_limit args in
+             let glob = Safe_ops.json_string ~default:"" "glob" args |> String.trim in
+             if Keeper_sandbox_read_runner.should_route_read ~meta then
+               let base_argv = [ "rg"; "-n"; "-m"; string_of_int limit ] in
+               let type_argv = if file_type <> "" then [ "--type"; file_type ] else [] in
+               let glob_argv = if glob <> "" then [ "--glob"; glob ] else [] in
+               (match
+                  run_readonly_in_sandbox ~target
+                    ~command_argv:(fun cpath ->
+                      base_argv @ type_argv @ glob_argv @ [ pattern; cpath ])
+                    ~ok_exit_codes:[ 0; 1 ]
+                    ~max_bytes:1_000_000
+                    ~timeout_sec:(Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ())
+                    ()
+                with
+                | Error response -> response
+                | Ok (st, out) ->
+                  Yojson.Safe.to_string
+                    (`Assoc
+                        [ "ok", `Bool true
+                        ; "op", `String op
+                        ; "path", `String target
+                        ; "pattern", `String pattern
+                        ; "via", `String Keeper_sandbox_read_runner.backend_via
+                        ; "status", Keeper_alerting_path.process_status_to_json st
+                        ; "matches", lines_to_json ~limit out
+                        ]))
            else
              let rg_available = Keeper_tool_execute_path.shell_command_available "rg" in
              if not rg_available then
@@ -192,6 +227,6 @@ let try_handle
                           ; "status", Keeper_alerting_path.process_status_to_json result.status
                           ; "matches", lines_to_json ~limit result.stdout
                           ]
-                         @ error_detail)))))
+                         @ error_detail))))))
   | _ -> None
 ;;

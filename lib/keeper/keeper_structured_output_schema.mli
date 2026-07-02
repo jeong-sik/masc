@@ -24,6 +24,8 @@ val governance_judge_output_schema : Yojson.Safe.t
 (** JSON object the dashboard governance judge provider must return. *)
 
 val fusion_judge_output_schema : Yojson.Safe.t
+
+val compact_fusion_judge_output_schema : Yojson.Safe.t
 (** JSON object the Fusion judge/refine/meta-judge provider must return. *)
 
 val fusion_panel_answer_output_schema : Yojson.Safe.t

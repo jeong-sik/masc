@@ -173,6 +173,43 @@ type live_turn = {
   last_progress_kind : string option;
       (** Low-cardinality label for the signal that refreshed
           [last_progress_at]. *)
+  selected_model : string option;
+      (** Surface model selected for the live turn, mirrored from
+          [turn_observation.selected_model]. Exposed so the dashboard can
+          show what model a running turn is on, not only the post-turn
+          [last_outcome]. [None] before runtime selection. *)
+  active_tool_count : int;
+      (** Tools issued but not yet completed on the live turn, mirrored
+          from [turn_observation.active_tool_count]. [0] outside any tool
+          call. *)
+}
+
+(** Most recent deliberate skip verdict, mirrored from
+    [registry_entry.last_skip_observation]. Surfaces {i why} an idle keeper
+    is quiet ([cooldown_pending], [no_signal],
+    [scheduled_autonomous_disabled], ...) without reading the aggregate
+    Otel skip counter. [None] until the first skip is observed. *)
+type last_skip = {
+  ls_ts : float;
+  ls_reasons : string list;
+}
+
+(** Turn-livelock retry history, mirrored from
+    [registry_entry.livelock_state]. [Some _] while the turn-livelock guard
+    is tracking retries for the current turn; [None] when no livelock is in
+    progress. *)
+type livelock = {
+  ll_turn_id : int;
+  ll_attempts : int;
+  ll_first_started_at : float;
+}
+
+(** Board consumption cursor, mirrored from
+    [registry_entry.board_cursor_ts] / [board_cursor_post_id]. Lets
+    operators see how far a keeper has consumed the shared board. *)
+type board_cursor = {
+  bc_ts : float;
+  bc_post_id : string option;
 }
 
 type fsm_guard_violation_bucket = {
@@ -228,6 +265,24 @@ type snapshot = {
       (** Most recent completed turn, surfaced separately from live
           state so operators can see "what just finished" without
           confusing it with "what's running now". *)
+  last_skip : last_skip option;
+      (** Most recent deliberate skip verdict from the keepalive cycle.
+          [None] until the first skip is observed. Lets operators diagnose
+          {i why} a quiet keeper is idle instead of only seeing that it is. *)
+  livelock : livelock option;
+      (** Turn-livelock retry state. [None] when no livelock is in
+          progress. *)
+  board_cursor : board_cursor;
+      (** Board consumption cursor (ts + last consumed post id). Always
+          present; [ts = 0.0] / [post_id = None] before the keeper has
+          consumed any board post. *)
+  board_wakeups : int;
+      (** Number of distinct board-wakeup dedup keys currently held.
+          The registry keeps a content-fingerprint debounce ledger
+          ([board_wakeups : float StringMap.t], cleared per turn); this
+          field projects its cardinality so the dashboard can show how many
+          board stimuli woke the keeper in the current window without
+          leaking the high-cardinality fingerprint keys. *)
   fiber_stop_flag : bool;
       (** Snapshot of [registry_entry.fiber_stop] at observation time.
           When [true] without a corresponding stopped/dead phase, the

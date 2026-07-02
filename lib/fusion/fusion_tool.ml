@@ -4,7 +4,7 @@
 let status_json ~ok fields =
   Yojson.Safe.to_string (`Assoc (("ok", `Bool ok) :: fields))
 
-let append_chat_failure ~base_dir ~keeper ~run_id content =
+let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
   (* 실패 알림도 성공 결론(fusion_sink.emit)과 동일하게 키퍼 *메인* conversation에
      남긴다(conversation_id 생략). recent_direct_conversation observation 필터는
      conversation_id를 보지 않고 role/kind만 보므로
@@ -22,7 +22,8 @@ let append_chat_failure ~base_dir ~keeper ~run_id content =
      orchestrator-level Cancelled(handle fork match)
      만 막았고 이 내부 append window는 못 막았다. Denied/Sink_failed/aborted 종료 분기가 모두
      이 함수를 경유하므로 같은 누수의 형제 경로다. *)
-  Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok:false;
+  Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id
+    ~failure:content ~failure_code ~ok:false ();
   (try
      Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
      Keeper_chat_broadcast.chat_appended ~keeper_name:keeper ~source:"fusion"
@@ -107,11 +108,11 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
         with
         | Fusion_orchestrator.Completed _ -> ()
         | Fusion_orchestrator.Denied reason ->
-          append_chat_failure ~base_dir ~keeper ~run_id
+          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"denied"
             (Printf.sprintf "**Fusion run `%s`** _(denied after start: %s)_" run_id
                (Fusion_types.deny_reason_label reason))
         | Fusion_orchestrator.Sink_failed msg ->
-          append_chat_failure ~base_dir ~keeper ~run_id
+          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"sink_failed"
             (Printf.sprintf "**Fusion run `%s`** _(sink failed: %s)_" run_id msg)
         | exception (Eio.Cancel.Cancelled _ as exn) ->
           (* RFC-0266 §7: 취소도 종료 상태다. register_running(위 line 73)으로 [Running]
@@ -125,11 +126,24 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
              취소/셧다운 캐스케이드를 deadlock시킬 위험이 있으므로 이 경로에선 생략한다 —
              registry가 정확해 다음 HTTP fetch / tab-refresh가 패널을 self-heal한다.
              그 뒤 구조적 취소는 흡수하지 않고 재전파한다 (Eio 규약). *)
-          Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok:false;
+          Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id
+            ~failure:"cancelled: structural cancellation (shutdown or sibling switch failure)"
+            ~failure_code:"cancelled" ~ok:false ();
           raise exn
         | exception exn ->
-          append_chat_failure ~base_dir ~keeper ~run_id
+          append_chat_failure ~base_dir ~keeper ~run_id ~failure_code:"aborted"
             (Printf.sprintf "**Fusion run `%s`** _(aborted: %s)_" run_id
                (Printexc.to_string exn)));
+      (* [delivery] 필드는 도구 결과의 async 계약을 명시한다: 완료 시 키퍼는
+         [Fusion_completed] wake로 깨워지고 결론/실패 사유가 chat lane에 durable하게
+         남는다. 2026-07-01 관측: 이 계약이 결과 JSON에 없어서 키퍼들이 3-5초 간격
+         masc_fusion_status 폴링으로 턴을 소모했다(8 run에 35 poll + nudge 8회). *)
       status_json ~ok:true
-        [ ("status", `String "fusion_started"); ("run_id", `String run_id) ]
+        [ ("status", `String "fusion_started")
+        ; ("run_id", `String run_id)
+        ; ( "delivery"
+          , `String
+              "async: you will be woken with the result when deliberation \
+               completes; the conclusion (or failure reason) also lands on \
+               your chat lane. No need to poll masc_fusion_status." )
+        ]

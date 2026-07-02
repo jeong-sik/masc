@@ -175,8 +175,11 @@ val staged_judge_groups
   -> judge_spec list
   -> (judge_spec list list, staged_judge_group_error) result
 
-(** 외곽 run_safe 타임아웃 = 그룹 timeout 중 max. 단일 그룹이면 그 그룹 timeout. *)
-val panel_outer_timeout_of : panel_group list -> float
+(** 외곽 run_safe 타임아웃 = ceil(패널 총원 / max_fibers) 웨이브 × 그룹 timeout 중 max.
+    [max_fibers]는 패널 fan-out에 실제로 쓰는 동시성(= [max_concurrent_panels])과 같은
+    값을 넘겨야 한다 — 웨이브 직렬화를 무시하면 마지막 웨이브가 외곽 데드라인 밖에
+    놓여 완료된 답변까지 폐기된다. 단일 웨이브(N <= max_fibers)면 그룹 timeout 중 max. *)
+val panel_outer_timeout_of : max_fibers:int -> panel_group list -> float
 
 (** 심판 web_tools를 그룹들에서 derive: [req_web_tools] 또는 어느 그룹이든 web_tools.
     단일 그룹이면 [req_web_tools || group.web_tools] (오늘과 byte-identical). *)

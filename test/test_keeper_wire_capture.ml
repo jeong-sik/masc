@@ -55,6 +55,22 @@ let rec find_jsonl dir =
   else if Filename.check_suffix dir ".jsonl" then [ dir ]
   else []
 
+(* Regression guard: verify in [Keeper_agent_run.run_turn] that the response
+   capture happens after normalization and uses the normalized identifier. *)
+let first_line_of path needle =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in ic)
+    (fun () ->
+       let rec loop line_num =
+         match input_line ic with
+         | line ->
+           if contains ~needle line then Some line_num else loop (line_num + 1)
+         | exception End_of_file -> None
+       in
+       loop 1)
+;;
+
 (* Built at runtime so no literal secret appears in the source (the pre-commit
    secret scanner rejects literal [ghp_...] tokens). Secret_redactor detects the
    [ghp_] prefix regardless. *)
@@ -193,6 +209,68 @@ let capture_skips_when_current_file_cap_would_be_exceeded () =
         before
         after))
 
+let response_capture_matches_replayed_history_text () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_history_match" "" in
+    let raw_response = "   " in
+    let tool_names = [ "keeper_web_fetch"; "keeper_file_read" ] in
+    let history_text =
+      match
+        Keeper_tool_response.normalize_response_text
+          ~text:raw_response
+          ~tool_names
+          ()
+      with
+      | Ok t -> t
+      | Error _ ->
+        Alcotest.fail "normalization should synthesize text when tools are present"
+    in
+    Wire.capture_response
+      ~masc_root:base
+      ~keeper_name:"history_keeper"
+      ~turn_id:5
+      ~response_text:history_text;
+    let files = find_jsonl base in
+    Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
+    let content = read_file (List.hd files) in
+    Alcotest.(check bool)
+      "synthetic replayed history text is captured"
+      true
+      (contains ~needle:history_text content);
+    Alcotest.(check bool)
+      "raw whitespace response is not captured as the replayed text"
+      false
+      (contains ~needle:raw_response content))
+
+let capture_response_uses_normalized_text_in_run_turn () =
+  let path = "lib/keeper/keeper_agent_run.ml" in
+  let capture_line =
+    match first_line_of path "Keeper_wire_capture.capture_response" with
+    | Some n -> n
+    | None -> Alcotest.fail "Keeper_wire_capture.capture_response call not found"
+  in
+  let normalize_line =
+    match first_line_of path "normalize_response_text_for_finalization" with
+    | Some n -> n
+    | None ->
+      Alcotest.fail "normalize_response_text_for_finalization call not found"
+  in
+  Alcotest.(check bool)
+    "capture_response occurs after normalize_response_text_for_finalization"
+    true
+    (capture_line > normalize_line);
+  let normalized_binding_line =
+    match first_line_of path "~response_text;" with
+    | Some n -> n
+    | None ->
+      Alcotest.fail
+        "capture_response should pass the normalized response_text binding"
+  in
+  Alcotest.(check bool)
+    "capture_response uses the normalized response_text binding"
+    true
+    (normalized_binding_line > normalize_line)
+
 let () =
   Alcotest.run "keeper_wire_capture"
     [
@@ -219,5 +297,12 @@ let () =
             capture_prunes_old_files;
           Alcotest.test_case "current file cap skips oversized record" `Quick
             capture_skips_when_current_file_cap_would_be_exceeded;
+          Alcotest.test_case "captured response matches replayed history text"
+            `Quick response_capture_matches_replayed_history_text;
+        ] );
+      ( "run_turn_ordering",
+        [
+          Alcotest.test_case "capture_response uses normalized response text"
+            `Quick capture_response_uses_normalized_text_in_run_turn;
         ] );
     ]

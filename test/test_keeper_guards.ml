@@ -774,8 +774,8 @@ let test_governance_approval_notifies_gate_observer () =
     let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
     let d =
       invoke hook
-        (pre_tool_use_event ~tool_name:"tool_edit_file"
-           ~input:(`Assoc [ ("path", `String "/tmp/file"); ("content", `String "x") ])
+        (pre_tool_use_event ~tool_name:"masc_create_task"
+           ~input:(`Assoc [ ("title", `String "follow up") ])
            ())
     in
     check string "high-risk tool -> ApprovalRequired"
@@ -786,7 +786,7 @@ let test_governance_approval_notifies_gate_observer () =
       check string "decision" "approval_required"
         (KG.gate_decision_to_string event.KG.decision);
       check string "reason_code" "governance_approval" event.KG.reason_code;
-      check string "tool_name" "tool_edit_file" event.KG.tool_name;
+      check string "tool_name" "masc_create_task" event.KG.tool_name;
       check (option string) "source_path"
         (Some "lib/keeper/keeper_guards.ml")
         event.KG.source_path;

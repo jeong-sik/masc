@@ -1968,6 +1968,14 @@ let test_list_recent_resolved_json_projects_resolved_history () =
     ~event_type:AQ.approval_audit_resolved_event ~id:"older-resolved"
     ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
     ~decision:(AQ.Approval_resolved (Agent_sdk.Hooks.Reject "operator denied")) ();
+  AQ.audit_approval_event ~base_path
+    ~event_type:AQ.approval_audit_hard_forbidden_event ~id:"hard-forbidden"
+    ~keeper_name ~tool_name:"tool_edit_file" ~risk_level:AQ.Critical
+    ~disposition:"Blocked" ~disposition_reason:"hard_forbidden"
+    ~decision:
+      (AQ.Approval_resolved
+         (Agent_sdk.Hooks.Reject "critical risk tool cannot be auto-approved"))
+    ();
   for i = 1 to 64 do
     AQ.audit_approval_event ~base_path
       ~event_type:AQ.approval_audit_pending_event
@@ -1976,16 +1984,44 @@ let test_list_recent_resolved_json_projects_resolved_history () =
       ~tool_name:"tool_search_files" ~risk_level:AQ.Low ()
   done;
   AQ.audit_approval_event ~base_path
+    ~event_type:AQ.approval_audit_soft_forbidden_event ~id:"soft-forbidden"
+    ~keeper_name ~tool_name:"tool_execute" ~risk_level:AQ.Medium
+    ~disposition:"Blocked" ~disposition_reason:"soft_forbidden"
+    ~decision:
+      (AQ.Approval_resolved
+         (Agent_sdk.Hooks.Reject
+            "destructive tool/op cannot be auto-approved without operator HITL"))
+    ();
+  AQ.audit_approval_event ~base_path
     ~event_type:AQ.approval_audit_resolved_event ~id:"newer-resolved"
     ~keeper_name ~tool_name:"tool_search_files" ~risk_level:AQ.Medium
     ~decision:(AQ.Approval_resolved Agent_sdk.Hooks.Approve) ();
-  match AQ.list_recent_resolved_json ~base_path ~n:2 () with
-  | [ newest; older ] ->
+  match AQ.list_recent_resolved_json ~base_path ~n:4 () with
+  | [ newest; soft; hard; older ] ->
     let open Yojson.Safe.Util in
     Alcotest.(check string) "newest first" "newer-resolved"
       (newest |> member "id" |> to_string);
+    Alcotest.(check string) "soft forbidden included" "soft-forbidden"
+      (soft |> member "id" |> to_string);
+    Alcotest.(check string) "soft forbidden event"
+      AQ.approval_audit_soft_forbidden_event
+      (soft |> member "event" |> to_string);
+    Alcotest.(check string) "soft forbidden disposition reason"
+      "soft_forbidden"
+      (soft |> member "disposition_reason" |> to_string);
+    Alcotest.(check string) "hard forbidden included" "hard-forbidden"
+      (hard |> member "id" |> to_string);
+    Alcotest.(check string) "hard forbidden event"
+      AQ.approval_audit_hard_forbidden_event
+      (hard |> member "event" |> to_string);
+    Alcotest.(check string) "hard forbidden disposition reason"
+      "hard_forbidden"
+      (hard |> member "disposition_reason" |> to_string);
     Alcotest.(check string) "older second" "older-resolved"
       (older |> member "id" |> to_string);
+    Alcotest.(check string) "resolved event"
+      AQ.approval_audit_resolved_event
+      (older |> member "event" |> to_string);
     Alcotest.(check string) "keeper name" keeper_name
       (older |> member "keeper_name" |> to_string);
     Alcotest.(check string) "tool name" "tool_search_files"

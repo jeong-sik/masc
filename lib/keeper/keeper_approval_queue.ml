@@ -82,7 +82,6 @@ let read_recent_audit_raw store limit =
 let approval_audit_pending_event = "pending"
 let approval_audit_resolved_event = "resolved"
 let approval_audit_hard_forbidden_event = "hard_forbidden"
-let approval_audit_soft_forbidden_event = "soft_forbidden"
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
 
@@ -345,7 +344,6 @@ let resolved_history_event json =
   | Some event ->
     String.equal event approval_audit_resolved_event
     || String.equal event approval_audit_hard_forbidden_event
-    || String.equal event approval_audit_soft_forbidden_event
   | None -> false
 ;;
 

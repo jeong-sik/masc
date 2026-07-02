@@ -585,9 +585,6 @@ let approval_state_json ~pending_approval_count ~pending_approvals ~latest_tool_
       | Some event
         when String.equal event Keeper_approval_queue.approval_audit_hard_forbidden_event ->
         "hard_forbidden"
-      | Some event
-        when String.equal event Keeper_approval_queue.approval_audit_soft_forbidden_event ->
-        "soft_forbidden"
       | Some "resolved" -> "resolved"
       | Some "expired" | Some "approval_timeout" -> "expired"
       | Some "cancelled" -> "cancelled"

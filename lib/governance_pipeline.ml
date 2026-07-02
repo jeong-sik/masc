@@ -345,6 +345,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
     let risk =
       combinatorial_risk_escalation ~trifecta_active ~tool_name ~input ~base_risk
     in
+    let hitl_disabled = Env_config_core.disable_hitl () in
     let needs_approval =
       match keeper_confirm_threshold governance_level with
       | Some threshold -> risk_level_to_int risk >= risk_level_to_int threshold
@@ -352,7 +353,9 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
     in
     let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
     let soft_forbidden = auto_approval_soft_forbidden ~tool_name ~input in
-    let auto_approval_forbidden = hard_forbidden || (not (Env_config_core.disable_hitl ()) && soft_forbidden) in
+    let auto_approval_forbidden =
+      hard_forbidden || ((not hitl_disabled) && soft_forbidden)
+    in
     let requires_operator_approval = needs_approval || auto_approval_forbidden in
     if trifecta_active
     then
@@ -416,13 +419,14 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       let selected_model = selected_model_of_meta meta in
       let risk_level = queue_risk_level risk in
       let base_path = (config : Workspace.config).base_path in
-      if needs_approval
+      if not hitl_disabled
       then (
-        (* An operator threshold is engaged, so the request goes through the
-           normal HITL path. A forbidden request is never auto-approved here —
-           [always_approve] is gated by [not auto_approval_forbidden] and rule
-           matching is skipped — so it falls through to [submit_and_await] and
-           waits for an explicit operator decision. *)
+        (* An operator is available, so any threshold-triggered or forbidden
+           request goes through the normal HITL path. A forbidden request is
+           never auto-approved here — [always_approve] is gated by [not
+           auto_approval_forbidden] and rule matching is skipped — so it falls
+           through to [submit_and_await] and waits for an explicit operator
+           decision. *)
         let always_approve =
           match
             Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) ->
@@ -511,23 +515,15 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
               ?clock
               ()))
       else (
-        (* [requires_operator_approval] holds without [needs_approval], so this is
-           an [auto_approval_forbidden] request with no operator threshold engaged
-           (HITL disabled, or the effective risk sits below the confirm threshold).
-           There is no operator to review a queued entry, so the forbidden tool
-           must never be auto-approved or stranded on a queue nobody drains — it is
-           rejected outright. This is the branch that closes the HITL-disabled /
-           always-approve auto-approval bypass. *)
+        (* HITL is disabled, so there is no operator to review a queued entry.
+           A hard-forbidden request must never be auto-approved or stranded on a
+           queue nobody drains — it is rejected outright. This is the branch that
+           closes the HITL-disabled / always-approve auto-approval bypass. *)
         let runtime_blocked = runtime_auto_approval_blocked meta in
         let reason = forbidden_reject_reason ~risk ~runtime_blocked ~hard_forbidden in
         let decision = Agent_sdk.Hooks.Reject reason in
-        let event_type, disposition_reason =
-          if hard_forbidden
-          then
-            Keeper_approval_queue.approval_audit_hard_forbidden_event, "hard_forbidden"
-          else
-            Keeper_approval_queue.approval_audit_soft_forbidden_event, "soft_forbidden"
-        in
+        let event_type = Keeper_approval_queue.approval_audit_hard_forbidden_event in
+        let disposition_reason = "hard_forbidden" in
         Keeper_approval_queue.audit_approval_event
           ~base_path
           ~event_type

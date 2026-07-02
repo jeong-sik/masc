@@ -183,10 +183,6 @@ val approval_audit_hard_forbidden_event : string
 (** Event tag persisted when governance rejects a hard-forbidden approval
     (Critical risk or an active runtime blocker) without queuing it. *)
 
-val approval_audit_soft_forbidden_event : string
-(** Event tag persisted when governance rejects a soft-forbidden approval
-    (destructive shell/git tool or op) without queuing it. *)
-
 val recent_resolved_history_limit : int
 (** Default dashboard history length for resolved HITL approvals. *)
 

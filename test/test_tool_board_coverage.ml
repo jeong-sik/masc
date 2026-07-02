@@ -1515,7 +1515,10 @@ let create_post_with_comments ~count =
   let ok, body =
     dispatch
       "masc_board_post"
-      (make_args [ "content", `String "Get comments"; "author", `String "tester" ])
+      (make_args
+         [ "content", `String (Printf.sprintf "Get comments %d" count)
+         ; "author", `String (Printf.sprintf "tester-%d" count)
+         ])
   in
   Alcotest.(check bool) "create ok" true ok;
   let post_id =

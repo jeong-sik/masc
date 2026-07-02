@@ -1101,6 +1101,55 @@ let test_docker_run_looks_daemon_pressure_not_pressure_on_command_error () =
        ~status:(Unix.WEXITED 1)
        ~output:"No such file or directory")
 
+let test_docker_run_looks_daemon_pressure_not_pressure_on_connection_refused () =
+  Alcotest.(check bool)
+    "generic connection refused output is not Docker daemon pressure"
+    false
+    (Keeper_sandbox_runtime.docker_run_looks_daemon_pressure
+       ~status:(Unix.WEXITED 1)
+       ~output:"connection refused")
+
+let test_docker_failure_class_is_typed_and_serializes_stable_string () =
+  let open Masc.Keeper_sandbox_runtime_classify in
+  Alcotest.(check string)
+    "daemon unavailable class serializes to stable string"
+    "docker_daemon_unavailable"
+    (docker_failure_class_to_string Docker_daemon_unavailable);
+  Alcotest.(check string)
+    "command timeout class serializes to stable string"
+    "docker_command_timeout"
+    (docker_failure_class_to_string Docker_command_timeout);
+  Alcotest.(check bool)
+    "classifier maps daemon unavailable output to the typed variant"
+    true
+    (match
+       classify_docker_run_failure
+         ~status:(Unix.WEXITED 1)
+         ~output:"Cannot connect to the Docker daemon"
+     with
+     | Docker_daemon_unavailable -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "run classifier maps timeout output to Docker_command_timeout, not Docker_daemon_timeout"
+    true
+    (match
+       classify_docker_run_failure
+         ~status:(Unix.WEXITED 124)
+         ~output:"process error: timeout after 5s"
+     with
+     | Docker_command_timeout -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "info classifier maps timeout output to Docker_daemon_timeout"
+    true
+    (match
+       classify_docker_info_failure
+         ~status:(Unix.WEXITED 124)
+         ~output:"process error: timeout after 5s"
+     with
+     | Docker_daemon_timeout -> true
+     | _ -> false)
+
 let test_docker_workspace_state_mount_args_expose_safe_subset () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -2324,6 +2373,10 @@ let run_tests ~clock () =
             test_docker_run_looks_daemon_pressure_classifies_daemon_unavailable;
           Alcotest.test_case "docker run does not classify command error as pressure" `Quick
             test_docker_run_looks_daemon_pressure_not_pressure_on_command_error;
+          Alcotest.test_case "docker run does not classify connection refused as pressure" `Quick
+            test_docker_run_looks_daemon_pressure_not_pressure_on_connection_refused;
+          Alcotest.test_case "docker failure class is typed and serializes stable string" `Quick
+            test_docker_failure_class_is_typed_and_serializes_stable_string;
           Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
             test_docker_workspace_state_mount_args_expose_safe_subset;
           Alcotest.test_case "managed label args include ttl" `Quick

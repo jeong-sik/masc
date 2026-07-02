@@ -17,20 +17,21 @@ let docker_image (meta : keeper_meta) =
   | _ -> Env_config_sandbox.Runtime.docker_image ()
 ;;
 
-let tool_failure_class_of_image_preflight_failure = function
-  | "image_config_missing"
-  | "image_missing" ->
+let tool_failure_class_of_image_preflight_failure failure_class =
+  match failure_class with
+  | Keeper_sandbox_runtime_classify.Image_config_missing
+  | Image_missing ->
     "policy_rejection"
-  | "docker_daemon_unavailable"
-  | "image_inspect_timeout" ->
+  | Docker_daemon_unavailable
+  | Image_inspect_timeout ->
     "transient_error"
   | _ -> "runtime_failure"
 ;;
 
-let image_preflight_failure_fields (failure : Keeper_sandbox_runtime.classified_error)
-  =
+let image_preflight_failure_fields (failure : Keeper_sandbox_runtime.classified_error) =
   [ "requested_sandbox", `String "docker"
-  ; "sandbox_failure_class", `String failure.failure_class
+  ; ( "sandbox_failure_class"
+    , `String (Keeper_sandbox_runtime_classify.docker_failure_class_to_string failure.failure_class) )
   ; ( "failure_class"
     , `String (tool_failure_class_of_image_preflight_failure failure.failure_class) )
   ]

@@ -60,7 +60,7 @@ let run_docker_argv_with_status ~summary ~timeout_sec argv =
 
 type classified_error =
   { message : string
-  ; failure_class : string
+  ; failure_class : Keeper_sandbox_runtime_classify.docker_failure_class
   }
 
 let process_status_is_timeout = Keeper_sandbox_runtime_classify.process_status_is_timeout
@@ -71,16 +71,16 @@ let output_looks_image_missing = Keeper_sandbox_runtime_classify.output_looks_im
 let output_looks_timeout = Keeper_sandbox_runtime_classify.output_looks_timeout
 let docker_output_looks_oci_mount_failure =
   Keeper_sandbox_runtime_classify.docker_output_looks_oci_mount_failure
-let classify_docker_runtime_failure =
-  Keeper_sandbox_runtime_classify.classify_docker_runtime_failure
+let classify_docker_info_failure = Keeper_sandbox_runtime_classify.classify_docker_info_failure
+let classify_docker_run_failure = Keeper_sandbox_runtime_classify.classify_docker_run_failure
 let classify_image_inspect_failure =
   Keeper_sandbox_runtime_classify.classify_image_inspect_failure
 let classify_image_inventory_failure =
   Keeper_sandbox_runtime_classify.classify_image_inventory_failure
 
 let docker_run_looks_daemon_pressure ~status ~output =
-  match classify_docker_runtime_failure ~status ~output with
-  | "docker_daemon_unavailable" -> true
+  match classify_docker_run_failure ~status ~output with
+  | Keeper_sandbox_runtime_classify.Docker_daemon_unavailable -> true
   | _ -> false
 
 let docker_info_security_options_with_class ~timeout_sec =
@@ -100,7 +100,7 @@ let docker_info_security_options_with_class ~timeout_sec =
           Printf.sprintf
             "docker info failed while validating sandbox runtime: %s"
             (Exec_policy.truncate_for_log out)
-      ; failure_class = classify_docker_runtime_failure ~status:st ~output:out
+      ; failure_class = classify_docker_info_failure ~status:st ~output:out
       }
   else (
     try
@@ -115,14 +115,14 @@ let docker_info_security_options_with_class ~timeout_sec =
           { message =
               "docker info returned unexpected SecurityOptions payload while validating \
                sandbox runtime"
-          ; failure_class = "docker_info_format_error"
+          ; failure_class = Docker_info_format_error
           }
     with
     | Yojson.Json_error err ->
       Error
         { message =
             Printf.sprintf "failed to parse docker info SecurityOptions JSON: %s" err
-        ; failure_class = "docker_info_format_error"
+        ; failure_class = Docker_info_format_error
         })
 ;;
 

@@ -941,7 +941,9 @@ let dashboard_execution_http_json ~state ~sw ~clock request =
       try
         let json = compute ~light:true () in
         Server_dashboard_http_cache.mark_cached_surface_success execution_cache json;
-        ignore (refresh_execution_default_light_http_body ~config);
+        let (_ : Yojson.Safe.t) =
+          refresh_execution_default_light_http_body ~config
+        in
         Server_dashboard_http_cache.cached_surface_json execution_cache
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

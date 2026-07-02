@@ -60,7 +60,7 @@ let run_docker_argv_with_status ~summary ~timeout_sec argv =
 
 type classified_error =
   { message : string
-  ; failure_class : string
+  ; failure_class : Keeper_sandbox_runtime_classify.docker_failure_class
   }
 
 let process_status_is_timeout = Keeper_sandbox_runtime_classify.process_status_is_timeout
@@ -80,7 +80,7 @@ let classify_image_inventory_failure =
 
 let docker_run_looks_daemon_pressure ~status ~output =
   match classify_docker_runtime_failure ~status ~output with
-  | "docker_daemon_unavailable" -> true
+  | Keeper_sandbox_runtime_classify.Docker_daemon_unavailable -> true
   | _ -> false
 
 let docker_info_security_options_with_class ~timeout_sec =
@@ -115,14 +115,14 @@ let docker_info_security_options_with_class ~timeout_sec =
           { message =
               "docker info returned unexpected SecurityOptions payload while validating \
                sandbox runtime"
-          ; failure_class = "docker_info_format_error"
+          ; failure_class = Docker_info_format_error
           }
     with
     | Yojson.Json_error err ->
       Error
         { message =
             Printf.sprintf "failed to parse docker info SecurityOptions JSON: %s" err
-        ; failure_class = "docker_info_format_error"
+        ; failure_class = Docker_info_format_error
         })
 ;;
 

@@ -135,10 +135,13 @@ let test_lanes_accessor_returns_declared_lanes () =
   with_runtime_config runtime_toml_with_lane (fun () ->
     let lanes = Runtime.lanes () in
     Alcotest.(check int) "one lane declared" 1 (List.length lanes);
-    Alcotest.(check string)
-      "lane id via lanes ()"
-      "resilient"
-      (Runtime_lane.id (List.hd lanes)))
+    match lanes with
+    | [ lane ] ->
+      Alcotest.(check string)
+        "lane id via lanes ()"
+        "resilient"
+        (Runtime_lane.id lane)
+    | _ -> Alcotest.fail "expected exactly one lane")
 
 let test_resolve_assignment_prefers_lane_over_runtime () =
   with_runtime_config runtime_toml_lane_shadows_runtime (fun () ->

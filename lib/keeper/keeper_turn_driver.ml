@@ -116,6 +116,26 @@ let attempt_runtime_candidates ~runtime_id ~runtime_id_of
   in
   loop 0 candidates
 
+let runtime_candidate_missing_error id =
+  Agent_sdk.Error.Internal
+    (Printf.sprintf
+       "keeper_turn_driver: lane candidate %S disappeared from runtimes"
+       id)
+
+let resolve_runtime_candidate id =
+  match Runtime.get_runtime_by_id id with
+  | Some runtime -> Ok runtime
+  | None -> Error (runtime_candidate_missing_error id)
+
+let resolve_runtime_candidates ids =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | id :: rest ->
+      let* runtime = resolve_runtime_candidate id in
+      loop (runtime :: acc) rest
+  in
+  loop [] ids
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -172,11 +192,8 @@ let run_named
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
-  (* Lane-aware dispatch (PR-A provider failover).  The requested runtime id
-     resolves to either a single runtime or an ordered runtime lane.  Lanes
-     provide sequential failover: each candidate is attempted in order, and a
-     manifest row is emitted per attempt.  A failed turn is the result of
-     exhausting all candidates, never of a single provider hiccup. *)
+  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
+     attempt candidates sequentially with manifest evidence per attempt. *)
   let runtime_id = String.trim runtime_id in
   let runtime_mcp_policy = runtime_mcp_policy_for_tools ~base_path ~keeper_name tools in
   let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
@@ -186,10 +203,8 @@ let run_named
     | None -> enable_thinking
   in
   let preserve_thinking = runtime_seed.preserve_thinking in
-  (* Audit F8: the former [?provider_filter] / [?base_path] /
-     [?wait_timeout_sec] parameters only fed the deleted multi-candidate
-     machinery and were silently ignored here; they are removed from the
-     signature so callers cannot pass dead routing knobs. *)
+  (* Audit F8: removed dead routing knobs from the signature so callers cannot
+     pass values that would be silently ignored. *)
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
   let emit_runtime_manifest ?status ?decision event =
@@ -227,11 +242,8 @@ let run_named
       |> append
     | _ -> ()
   in
-  (* RFC-0207 / RFC-0206: resolve the requested assignment to either a single
-     runtime or an ordered runtime lane. Lanes shadow runtimes: a lane id takes
-     precedence so operators can route through explicit failover groups. A
-     requested id that names neither is a config/validation bug — fail-fast
-     rather than silently substituting the default (RFC-0206 §2.1). *)
+  (* Lanes shadow runtimes: a lane id takes precedence over a runtime id so
+     operators can route through explicit failover groups. *)
   let lane_resolution = Runtime.resolve_assignment runtime_id in
   let lane_candidate_ids =
     match lane_resolution with
@@ -247,16 +259,12 @@ let run_named
             "requested runtime or lane %S not found among configured runtimes"
             runtime_id))
   else
-  (* RFC-0265: proactively reroute a turn whose active input modality exceeds
-     the first candidate's capabilities. The reroute is applied to the first
-     candidate only; subsequent lane candidates are attempted as declared. The
-     active input includes both the current goal and prior [initial_messages]. *)
+  (* RFC-0265: reroute when active input modality exceeds the first candidate's
+     capabilities; later lane candidates remain in declared order. *)
   let current_goal_blocks =
     match goal_blocks with
     | Some blocks -> blocks
     | None ->
-      (* A missing current block payload means the current keeper goal is
-         text-only; [initial_messages] still participate in reroute below. *)
       []
   in
   let checkpoint_messages =
@@ -264,18 +272,12 @@ let run_named
     | None -> []
     | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
   in
-  let first_candidate_id = List.hd lane_candidate_ids in
-  let first_candidate =
-    match Runtime.get_runtime_by_id first_candidate_id with
-    | Some rt -> rt
-    | None ->
-      (* [resolve_assignment] validated ids against loaded runtimes; a missing
-         id here indicates a race with config reload. Fail fast. *)
-      failwith
-        (Printf.sprintf
-           "keeper_turn_driver: resolved candidate %S disappeared from runtimes"
-           first_candidate_id)
+  let first_candidate_id, remaining_candidate_ids =
+    match lane_candidate_ids with
+    | first :: rest -> first, rest
+    | [] -> runtime_id, []
   in
+  let* first_candidate = resolve_runtime_candidate first_candidate_id in
   let reroute_decision =
     Runtime_agent.decide_modality_reroute_for_runtime
       ~assigned:first_candidate
@@ -299,23 +301,8 @@ let run_named
            reason;
          to_runtime_id, rerouted)
   in
-  (* Build ordered attempt list: rerouted first candidate, then remaining lane
-     candidates. This preserves the lane order while honoring the capability
-     override for the first attempt. *)
-  let attempt_runtimes =
-    let resolve_runtime id =
-      match Runtime.get_runtime_by_id id with
-      | Some rt -> rt
-      | None ->
-        failwith
-          (Printf.sprintf
-             "keeper_turn_driver: lane candidate %S disappeared from runtimes"
-             id)
-    in
-    match lane_candidate_ids with
-    | [] -> [ first_runtime ]
-    | _ :: rest -> first_runtime :: List.map resolve_runtime rest
-  in
+  let* remaining_runtimes = resolve_runtime_candidates remaining_candidate_ids in
+  let attempt_runtimes = first_runtime :: remaining_runtimes in
   (* RFC-0265 follow-up — graceful media degrade floor. When no configured
      runtime can accept the turn's input modality ([No_capable_runtime]), strip
      the unsupported media blocks from the goal, prior [initial_messages], and

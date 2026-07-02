@@ -282,8 +282,8 @@ let test_emit_board_failure_is_best_effort () =
     (match Fusion_run_registry.get Fusion_run_registry.global ~run_id with
      | Some run ->
        (match run.Fusion_run_registry.status with
-        | Fusion_run_registry.Completed { ok = true } -> ()
-        | Fusion_run_registry.Completed { ok = false } ->
+        | Fusion_run_registry.Completed { ok = true; _ } -> ()
+        | Fusion_run_registry.Completed { ok = false; _ } ->
           fail "fusion run should complete with ok=true"
         | Fusion_run_registry.Running -> fail "fusion run should not remain running")
      | None -> fail "fusion run should remain visible");

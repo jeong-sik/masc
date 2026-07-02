@@ -34,11 +34,16 @@ val judge_meta : (Fusion_types.judge_synthesis, Fusion_types.judge_failure) resu
     identity는 [First]면 panelist_id. 프론트는 배열 shape만으로 위상 구조를 렌더한다. *)
 val judge_node_meta : Fusion_types.judge_outcome -> Yojson.Safe.t
 
-(** judge 결론을 키퍼 메인 chat lane에 남기고 board에 패널/심판 구조화 증거를 post한다.
+(** judge 결론(성공/실패 모두)을 키퍼 메인 chat lane에 남기고 board에 패널/심판
+    구조화 증거를 post한다.
 
-    chat lane: judge가 [Ok]면 "결론 — resolved_answer" 한 줄을 메인 conversation에
-    append하고 [chat_appended]로 대시보드에 알린다(judge 실패면 메인 흐름 비오염을 위해
-    생략). board: [Board_dispatch.create_post]로 meta_json(source/run_id/question/panel
+    chat lane: judge가 [Ok]면 "결론 — resolved_answer" 한 줄, [Error]면 실패 사유
+    (failure_code + 사유 + 실패 패널별 사유)를 메인 conversation에 append하고
+    [chat_appended]로 대시보드에 알린다. 실패를 durable하게 남기는 이유: wake
+    stimulus는 Running 키퍼에게만 배달되는 일회성 채널이라, chat lane이 비어 있으면
+    비-Running 키퍼는 실패 사유에 도달할 tool-reachable 표면이 없다(2026-07-01 사고 —
+    bare "judge failed"만 보고 keeper들이 원인을 추측·폴링). board headline도 같은
+    실패 요약을 나른다. board: [Board_dispatch.create_post]로 meta_json(source/run_id/question/panel
     답변 전체/judge 종합/observed_usage = panel N + judge 1 합산) 증거를 남긴다. [judge_usage]는
     심판이 소비한 토큰(orchestrator가 [Fusion_judge.run]에서 분리해 주입). [judges]는 실제로
     실행된 심판 노드 관측 배열(RFC-0284)로 board meta_json [judges] 키에 panel과 동형으로

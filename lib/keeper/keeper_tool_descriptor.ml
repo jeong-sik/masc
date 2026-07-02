@@ -1446,11 +1446,15 @@ let internal_descriptors : t list =
          the configured preset answers the prompt independently; a judge model \
          synthesises consensus, contradictions, partial coverage, unique \
          insights, and blind spots. Advisory only: this keeper turn continues \
-         immediately and the synthesis arrives asynchronously on this keeper's \
-         chat lane (also visible in the dashboard). Returns a status with a \
-         run_id. Set web_tools=true to let the panel and judge ground their \
-         answers with web_search / web_fetch. Gated by runtime.toml [fusion] \
-         (disabled by default)."
+         immediately; when the deliberation completes you are WOKEN with the \
+         result, and the conclusion (or the failure reason) is appended to \
+         your chat lane (also visible in the dashboard) — do not poll \
+         masc_fusion_status while waiting. Returns a status with a run_id. \
+         Panels answer from their own knowledge only: they cannot see your \
+         files, tasks, or conversation, so phrase the prompt \
+         self-contained. Set web_tools=true to let the panel and judge ground \
+         their answers with web_search / web_fetch. Gated by runtime.toml \
+         [fusion] (disabled by default)."
       ~input_schema:masc_fusion_schema
       (* RFC-0252 §159/§177: 심의 가치는 키퍼(이미 LLM)가 스스로 판단해
          masc_fusion 을 직접 호출하는 것으로 표현된다. 따라서 키퍼가 LLM 도구
@@ -1468,9 +1472,11 @@ let internal_descriptors : t list =
          masc_fusion. With no argument, lists tracked runs (in-progress and \
          recently completed); with a run_id, returns that single run. Each run \
          reports keeper, preset, started_at (unix seconds), and status \
-         (running | completed | failed). Read-only — does not start a \
-         deliberation. In-memory and server-lifetime: runs do not survive a \
-         restart."
+         (running | completed | failed); failed runs also carry error and \
+         failure_code. Prefer waiting for the completion wake over polling \
+         this tool — the result reaches you without it. Read-only — does not \
+         start a deliberation. In-memory and server-lifetime: runs do not \
+         survive a restart."
       ~input_schema:masc_fusion_status_schema
       (* read-only, but visibility=Default so the keeper LLM can poll its own
          fusion runs (sibling to masc_fusion, which is also Default). Without

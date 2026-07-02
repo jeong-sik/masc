@@ -15,7 +15,14 @@
 
 type run_status =
   | Running
-  | Completed of { ok : bool }
+  | Completed of {
+      ok : bool;
+      (* ok=false일 때의 사람-가독 사유 + 안정 분류 태그. 2026-07-01 사고에서
+         상태 표면(masc_fusion_status/SSE)이 status="failed"만 나르는 바람에
+         키퍼가 원인을 얻을 tool-reachable 경로가 없었다 (mli 참조). *)
+      failure : string option;
+      failure_code : string option;
+    }
 
 type run = {
   run_id : string;
@@ -28,8 +35,10 @@ type run = {
 type t = run list Atomic.t
 
 (* Recent-history retention for [Completed] runs. [Running] runs are never
-   evicted (active state must stay accurate) and are bounded in practice by the
-   per-hour fusion budget (RFC-0252 §10). This is a log-retention bound, not a
+   evicted (active state must stay accurate). NOTE: 이전 주석은 [Running]이
+   "per-hour fusion budget (RFC-0252 §10)으로 bounded"라고 주장했으나 그 budget은
+   PR #22051에서 제거되어 존재하지 않는다 — 현재 fusion 호출률 제한은 없다(설계
+   미결정, 집계만 한다는 운영 원칙과 정합). This is a log-retention bound, not a
    symptom cap — it stops the table from growing without limit over a long
    server lifetime. *)
 let max_completed_retained = 64
@@ -68,11 +77,13 @@ let register_running (t : t) ~run_id ~keeper ~preset ~started_at =
     prune (run :: without_dup))
 ;;
 
-let mark_completed (t : t) ~run_id ~ok =
+let mark_completed (t : t) ~run_id ?failure ?failure_code ~ok () =
   update t (fun runs ->
     runs
     |> List.map (fun r ->
-         if String.equal r.run_id run_id then { r with status = Completed { ok } } else r)
+         if String.equal r.run_id run_id
+         then { r with status = Completed { ok; failure; failure_code } }
+         else r)
     |> prune)
 ;;
 
@@ -91,21 +102,33 @@ let get (t : t) ~run_id : run option =
    never reconstructs run state from the variant, only reads these labels. *)
 let status_label = function
   | Running -> "running"
-  | Completed { ok = true } -> "completed"
-  | Completed { ok = false } -> "failed"
+  | Completed { ok = true; _ } -> "completed"
+  | Completed { ok = false; _ } -> "failed"
 ;;
 
 (* The single per-run JSON object. The HTTP list endpoint, the SSE delta, and the
    keeper status tool all serialize a run through here so the field set and the
    status label never drift between surfaces. *)
 let run_to_yojson (r : run) : Yojson.Safe.t =
-  `Assoc
+  let base =
     [ ("run_id", `String r.run_id)
     ; ("keeper", `String r.keeper)
     ; ("preset", `String r.preset)
     ; ("started_at", `Float r.started_at)
     ; ("status", `String (status_label r.status))
     ]
+  in
+  (* 실패 사유는 additive 필드로만 싣는다 — 기존 소비자(tool/HTTP/SSE/프론트)의
+     필드 집합은 그대로 유지된다. *)
+  let failure_fields =
+    match r.status with
+    | Running | Completed { ok = true; _ } -> []
+    | Completed { ok = false; failure; failure_code } ->
+      List.filter_map
+        (fun (k, v) -> Option.map (fun s -> (k, `String s)) v)
+        [ ("error", failure); ("failure_code", failure_code) ]
+  in
+  `Assoc (base @ failure_fields)
 ;;
 
 (* Process-wide registry the fusion tool/sink write to (server-lifetime). Tests

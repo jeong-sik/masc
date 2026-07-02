@@ -70,6 +70,52 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
+let runtime_attempt_decision ~idx ~runtime_id =
+  `Assoc [ ("idx", `Int idx); ("runtime_id", `String runtime_id) ]
+
+let runtime_failed_decision ~idx ~runtime_id error =
+  `Assoc
+    [
+      ("idx", `Int idx);
+      ("runtime_id", `String runtime_id);
+      ("error_kind", `String (Oas_compat.error_kind error));
+    ]
+
+let attempt_runtime_candidates ~runtime_id ~runtime_id_of
+    ~(emit_runtime_manifest :
+       ?status:string ->
+       ?decision:Yojson.Safe.t ->
+       Keeper_runtime_manifest.event_kind ->
+       unit) ~run_attempt candidates =
+  let rec loop idx = function
+    | [] ->
+      Error
+        (Agent_sdk.Error.Internal
+           (Printf.sprintf "runtime lane %S exhausted all candidates" runtime_id))
+    | candidate :: rest ->
+      let attempt_runtime_id = runtime_id_of candidate in
+      emit_runtime_manifest
+        ~status:"attempt"
+        ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
+        Keeper_runtime_manifest.Runtime_routed;
+      (match run_attempt ~idx ~runtime_id:attempt_runtime_id candidate with
+       | Ok _ as ok ->
+         emit_runtime_manifest
+           ~status:"completed"
+           ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
+           Keeper_runtime_manifest.Runtime_completed;
+         ok
+       | Error error ->
+         emit_runtime_manifest
+           ~status:"failed"
+           ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
+           Keeper_runtime_manifest.Runtime_failed;
+         (match rest with
+          | [] -> Error error
+          | _ :: _ -> loop (idx + 1) rest))
+  in
+  loop 0 candidates
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -339,19 +385,11 @@ let run_named
      dead compatibility knob. *)
   let execution_idle_timeout_s = None in
   (* Sequential candidate attempt loop. On failure we record a manifest row and
-     move to the next candidate; on success we record completion and return.
-     All candidates exhausted yields a typed lane-exhausted error. *)
-  let rec attempt_candidates idx = function
-    | [] ->
-      Error
-        (Agent_sdk.Error.Internal
-           (Printf.sprintf "runtime lane %S exhausted all candidates" runtime_id))
-    | runtime :: rest ->
-      let attempt_runtime_id = runtime.Runtime.id in
-      emit_runtime_manifest
-        ~status:"attempt"
-        ~decision:(`Assoc [ ("idx", `Int idx) ])
-        Keeper_runtime_manifest.Runtime_routed;
+     move to the next candidate; on success we record completion and return. *)
+  attempt_runtime_candidates ~runtime_id
+    ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
+    ~emit_runtime_manifest
+    ~run_attempt:(fun ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
       let error_runtime_id = attempt_runtime_id in
       let* provider_config =
         match provider_config_transform with
@@ -426,25 +464,8 @@ let run_named
         Keeper_turn_driver_try_provider.run_try_provider
           try_provider_ctx ?per_provider_timeout_s candidate
       in
-      (match result with
-       | Ok _ as ok ->
-         emit_runtime_manifest
-           ~status:"completed"
-           ~decision:(`Assoc [ ("idx", `Int idx) ])
-           Keeper_runtime_manifest.Runtime_completed;
-         ok
-       | Error e ->
-         emit_runtime_manifest
-           ~status:"failed"
-           ~decision:
-             (`Assoc
-                [ ("idx", `Int idx)
-                ; ("error_kind", `String (Oas_compat.error_kind e))
-                ])
-           Keeper_runtime_manifest.Runtime_failed;
-         attempt_candidates (idx + 1) rest)
-  in
-  attempt_candidates 0 attempt_runtimes
+      result)
+    attempt_runtimes
 
 
 module For_testing = struct
@@ -464,6 +485,7 @@ module For_testing = struct
     Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
 
   let media_degrade_manifest_decision = media_degrade_manifest_decision
+  let attempt_runtime_candidates = attempt_runtime_candidates
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing.accept_no_progress_should_try_next

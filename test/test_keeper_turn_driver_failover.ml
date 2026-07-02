@@ -1,3 +1,6 @@
+module Runtime_manifest = Masc.Keeper_runtime_manifest
+module Driver = Masc.Keeper_turn_driver
+
 let contains ~needle haystack =
   let needle_len = String.length needle in
   let haystack_len = String.length haystack in
@@ -181,6 +184,107 @@ let test_unknown_lane_candidate_rejected_at_load () =
            true
            (contains ~needle:"missing.test_model" msg))
 
+let assoc_member key = function
+  | `Assoc fields -> List.assoc_opt key fields
+  | _ -> None
+
+let string_member key json =
+  match assoc_member key json with
+  | Some (`String value) -> value
+  | _ -> Alcotest.failf "expected string member %S in %s" key (Yojson.Safe.to_string json)
+
+let emit_manifest_collector events ?status ?decision event =
+  events := (event, status, decision) :: !events
+
+let event_name event = Runtime_manifest.event_kind_to_string event
+
+let decision_runtime_id = function
+  | _, _, Some decision -> string_member "runtime_id" decision
+  | event, _, None ->
+    Alcotest.failf "missing decision for event %s" (event_name event)
+
+let test_attempt_loop_tries_fallback_after_failure () =
+  let attempts = ref [] in
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id candidate ->
+        attempts := !attempts @ [ runtime_id ];
+        match candidate with
+        | "primary.test_model" ->
+          Error (Agent_sdk.Error.Internal "primary transport failed")
+        | "fallback.test_model" -> Ok runtime_id
+        | other -> Alcotest.failf "unexpected candidate %s" other)
+      [ "primary.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Ok runtime_id ->
+     Alcotest.(check string) "fallback selected" "fallback.test_model" runtime_id
+   | Error e ->
+     Alcotest.failf
+       "expected fallback success, got %s"
+       (Agent_sdk.Error.to_string e));
+  Alcotest.(check (list string))
+    "attempted candidates"
+    [ "primary.test_model"; "fallback.test_model" ]
+    !attempts;
+  let events = List.rev !events in
+  Alcotest.(check (list string))
+    "manifest events"
+    (List.map event_name
+       [
+         Runtime_manifest.Runtime_routed;
+         Runtime_manifest.Runtime_failed;
+         Runtime_manifest.Runtime_routed;
+         Runtime_manifest.Runtime_completed;
+       ])
+    (List.map (fun (event, _, _) -> event_name event) events);
+  Alcotest.(check (list string))
+    "manifest runtime ids"
+    [
+      "primary.test_model";
+      "primary.test_model";
+      "fallback.test_model";
+      "fallback.test_model";
+    ]
+    (List.map decision_runtime_id events)
+
+let test_attempt_loop_preserves_last_sdk_error () =
+  let events = ref [] in
+  let result =
+    Driver.For_testing.attempt_runtime_candidates
+      ~runtime_id:"resilient"
+      ~runtime_id_of:(fun runtime_id -> runtime_id)
+      ~emit_runtime_manifest:(emit_manifest_collector events)
+      ~run_attempt:(fun ~idx:_ ~runtime_id _candidate ->
+        Error (Agent_sdk.Error.Internal (runtime_id ^ " failed")))
+      [ "primary.test_model"; "fallback.test_model" ]
+  in
+  (match result with
+   | Ok _ -> Alcotest.fail "expected final candidate error"
+   | Error (Agent_sdk.Error.Internal msg) ->
+     Alcotest.(check string)
+       "last candidate error preserved"
+       "fallback.test_model failed"
+       msg
+   | Error e ->
+     Alcotest.failf
+       "expected Internal final error, got %s"
+       (Agent_sdk.Error.to_string e));
+  let events = List.rev !events in
+  Alcotest.(check (list string))
+    "failed runtime ids"
+    [ "primary.test_model"; "fallback.test_model" ]
+    (events
+     |> List.filter (fun (event, _, _) ->
+       match event with
+       | Runtime_manifest.Runtime_failed -> true
+       | _ -> false)
+     |> List.map decision_runtime_id)
+
 let () =
   Alcotest.run
     "keeper_turn_driver_failover"
@@ -211,5 +315,13 @@ let () =
             "unknown lane candidate rejected at load"
             `Quick
             test_unknown_lane_candidate_rejected_at_load;
+          Alcotest.test_case
+            "attempt loop tries fallback after failure"
+            `Quick
+            test_attempt_loop_tries_fallback_after_failure;
+          Alcotest.test_case
+            "attempt loop preserves last SDK error"
+            `Quick
+            test_attempt_loop_preserves_last_sdk_error;
         ] );
     ]

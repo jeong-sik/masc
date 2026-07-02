@@ -186,6 +186,22 @@ module For_testing : sig
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 
+  val attempt_runtime_candidates :
+    runtime_id:string ->
+    runtime_id_of:('candidate -> string) ->
+    emit_runtime_manifest:
+      (?status:string ->
+      ?decision:Yojson.Safe.t ->
+      Keeper_runtime_manifest.event_kind ->
+      unit) ->
+    run_attempt:
+      (idx:int ->
+      runtime_id:string ->
+      'candidate ->
+      ('result, Agent_sdk.Error.sdk_error) result) ->
+    'candidate list ->
+    ('result, Agent_sdk.Error.sdk_error) result
+
   val accept_no_progress_should_try_next : Agent_sdk.Error.sdk_error -> bool
 
   val accept_no_progress_read_only_should_try_next :

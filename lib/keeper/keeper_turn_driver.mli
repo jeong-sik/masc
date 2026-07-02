@@ -183,6 +183,14 @@ module For_testing : sig
     Llm_provider.Http_client.http_error ->
     Agent_sdk.Error.sdk_error
 
+  val first_runtime_after_modality_reroute :
+    keeper_name:string ->
+    assignment_id:string ->
+    first_candidate_id:string ->
+    first_candidate:Runtime.t ->
+    Runtime_agent.reroute_decision ->
+    string * Runtime.t
+
   val media_degrade_manifest_decision :
     runtime_id:string -> (string * int) list -> Yojson.Safe.t
 

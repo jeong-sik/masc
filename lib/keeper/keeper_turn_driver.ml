@@ -136,6 +136,22 @@ let resolve_runtime_candidates ids =
   in
   loop [] ids
 
+let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
+    ~first_candidate_id ~first_candidate = function
+  | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
+    first_candidate_id, first_candidate
+  | Runtime_agent.Reroute { to_runtime_id; reason } ->
+    (match Runtime.get_runtime_by_id to_runtime_id with
+     | None -> first_candidate_id, first_candidate
+     | Some rerouted ->
+       Log.Keeper.warn
+         "%s: RFC-0265 modality reroute %s -> %s (%s)"
+         keeper_name
+         assignment_id
+         to_runtime_id
+         reason;
+       to_runtime_id, rerouted)
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -286,20 +302,8 @@ let run_named
       current_goal_blocks
   in
   let first_runtime_id, first_runtime =
-    match reroute_decision with
-    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
-      runtime_id, first_candidate
-    | Runtime_agent.Reroute { to_runtime_id; reason } ->
-      (match Runtime.get_runtime_by_id to_runtime_id with
-       | None -> runtime_id, first_candidate
-       | Some rerouted ->
-         Log.Keeper.warn
-           "%s: RFC-0265 modality reroute %s -> %s (%s)"
-           keeper_name
-           runtime_id
-           to_runtime_id
-           reason;
-         to_runtime_id, rerouted)
+    first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
+      ~first_candidate_id ~first_candidate reroute_decision
   in
   let* remaining_runtimes = resolve_runtime_candidates remaining_candidate_ids in
   let attempt_runtimes = first_runtime :: remaining_runtimes in
@@ -470,6 +474,9 @@ module For_testing = struct
 
   let sdk_error_of_nonretryable_attempt_error =
     Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
+
+  let first_runtime_after_modality_reroute =
+    first_runtime_after_modality_reroute
 
   let media_degrade_manifest_decision = media_degrade_manifest_decision
   let attempt_runtime_candidates = attempt_runtime_candidates

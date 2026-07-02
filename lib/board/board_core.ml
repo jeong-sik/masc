@@ -70,7 +70,7 @@ let find_post_by_run_id store ~run_id : post option =
    repeated agent board-read traffic. Coalescing
    keeps the read atomic, removes one [maybe_sweep] dispatch, and
    eliminates the inter-call lock churn. *)
-let get_post_and_comments store ~post_id : (post * comment list, board_error) Result.t =
+let get_post_and_comments store ~post_id ?(comment_offset=0) ?(comment_limit=100) : (post * comment list, board_error) Result.t =
   maybe_sweep store;
   match Post_id.of_string post_id with
   | Error e -> Error e
@@ -92,7 +92,12 @@ let get_post_and_comments store ~post_id : (post * comment list, board_error) Re
                Stdlib.Float.compare a.created_at b.created_at)
             comments
         in
-        Ok (post, sorted))
+        let sliced = match comment_offset, comment_limit with
+  | 0, 100 -> sorted  (* fast path: defaults *)
+  | offset, limit ->
+    List.filteri (fun i _ -> i >= offset && i < offset + limit) sorted
+  in
+        Ok (post, sliced))
 ;;
 
 let reclassify_posts store ?(limit = 5200) ?(dry_run = true) () =

@@ -285,13 +285,10 @@ let state_snapshot_of_lines (lines : string list) : keeper_state_snapshot option
             (match strip_prefix_ci ~prefix:"Progress:" line with
             | Some v -> { acc with progress = String_util.trim_nonempty v }
             | None ->
-                (match strip_prefix_ci ~prefix:"NEXT:" line with
-                | Some v -> { acc with next_summary = String_util.trim_nonempty v;
-                                       next_items = (match acc.next_items with
-                                                     | [] -> split_state_items v
-                                                     | existing -> existing) }
+                (match strip_prefix_ci ~prefix:"NEXT PLAN:" line with
+                | Some v -> { acc with next_summary = String_util.trim_nonempty v }
                 | None ->
-                (match strip_prefix_ci ~prefix:"Next:" line with
+                (match strip_prefix_ci ~prefix:"NEXT:" line with
                 | Some v -> { acc with next_items = split_state_items v }
                 | None ->
                     (match strip_prefix_ci ~prefix:"Decisions:" line with
@@ -312,6 +309,8 @@ let state_snapshot_of_lines (lines : string list) : keeper_state_snapshot option
   if snapshot.priority = None
      && snapshot.goal = None
      && snapshot.progress = None
+     && snapshot.done_summary = None
+     && snapshot.next_summary = None
      && snapshot.next_items = []
      && snapshot.decisions = []
      && snapshot.open_questions = []
@@ -987,46 +986,3 @@ let synthesize_state_from_run_result
     open_questions = [];
     constraints = [];
   }
-
-(** Render a [keeper_state_snapshot] back into a [\[STATE\]...\[/STATE\]] block. *)
-let render_state_block (snapshot : keeper_state_snapshot) : string =
-  let buf = Buffer.create 256 in
-  Buffer.add_string buf "[STATE]\n";
-  (match snapshot.done_summary with
-   | Some d when String.trim d <> "" ->
-     Printf.bprintf buf "DONE: %s\n" d
-   | Some _ | None ->
-     (match snapshot.progress with
-      | Some p when String.trim p <> "" ->
-        Printf.bprintf buf "DONE: %s\n" p
-      | Some _ | None -> ()));
-  (match snapshot.next_summary with
-   | Some n when String.trim n <> "" ->
-     Printf.bprintf buf "NEXT: %s\n" n
-   | Some _ | None -> ());
-  (match snapshot.goal with
-   | Some g when String.trim g <> "" ->
-     Printf.bprintf buf "Goal: %s\n" g
-   | Some _ | None -> ());
-  (match snapshot.next_items with
-   | [] -> ()
-   | items ->
-     Buffer.add_string buf
-       (Printf.sprintf "Next: %s\n" (String.concat "; " items)));
-  (match snapshot.decisions with
-   | [] -> ()
-   | items ->
-     Buffer.add_string buf
-       (Printf.sprintf "Decisions: %s\n" (String.concat "; " items)));
-  (match snapshot.open_questions with
-   | [] -> ()
-   | items ->
-     Buffer.add_string buf
-       (Printf.sprintf "OpenQuestions: %s\n" (String.concat "; " items)));
-  (match snapshot.constraints with
-   | [] -> ()
-   | items ->
-     Buffer.add_string buf
-       (Printf.sprintf "Constraints: %s\n" (String.concat "; " items)));
-  Buffer.add_string buf "[/STATE]";
-  Buffer.contents buf

@@ -20,7 +20,12 @@ type report =
   ; claims_considered : int
   ; promoted : int
   ; dry_run : bool
+  ; status : report_status
   }
+
+and report_status =
+  | Consolidation_ran
+  | Consolidation_disabled
 
 (** Pure core: given [keeper_facts] (each keeper's Tier-1 facts), return
     [(claims_considered, shared_facts)]. [shared_facts] is in normalized-claim
@@ -35,7 +40,9 @@ val promote_facts
 
 (** IO-driven sweep: read each keeper's Tier-1 store (the [shared_store_id] is
     filtered out of [keeper_ids]), consolidate, and unless [dry_run] rewrite the
-    shared store atomically. *)
+    shared store atomically. [status] is [Consolidation_disabled] when the
+    operator gate is off, so callers do not confuse a skipped sweep with a
+    successful empty scan. *)
 val run
   :  ?dry_run:bool
   -> ?min_keepers:int

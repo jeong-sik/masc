@@ -215,19 +215,16 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
         loop ()
       in
       loop ());
-  (* RFC-0244 Tier 2 cross-keeper consolidation: always-on, no
-     MASC_KEEPER_MEMORY_OS_CONSOLIDATION toggle. An env toggle on this fiber was
-     dead-code-with-a-switch -- an unproven fiber should not run, a proven one
-     needs no switch. The noise the #21244 dry-run found (ephemeral boilerplate
-     promoted into shared recall) predates the fixes built to stop it: the typed
-     [Ephemeral] category + [is_promotable] gate (#21241) plus the stricter
-     [is_outcome_positive_for_shared_promotion] shared-tier proxy -- the
-     consolidator now structurally skips non-promotable and not-yet-outcome-positive
-     facts -- and the durability-gate
-     librarian prompt (#21257) that labels coordination boilerplate "ephemeral",
-     both merged after that dry-run. Off the keeper hot path: each [interval]s it
-     reads each keeper's Tier-1 store and rewrites the shared semantic store
-     (keepers/_shared.facts.jsonl) atomically, never touching a keeper's own
+  (* RFC-0244 Tier 2 cross-keeper consolidation. The loop is off the keeper hot
+     path and the consolidator itself is gated by
+     [MASC_KEEPER_MEMORY_OS_CONSOLIDATE] (default false), separate from the
+     per-keeper LLM consolidation gate [MASC_KEEPER_MEMORY_OS_CONSOLIDATION].
+     When enabled, the typed [Ephemeral] category + [is_promotable] gate
+     (#21241), the stricter [is_outcome_positive_for_shared_promotion]
+     shared-tier proxy, and the durability-gate librarian prompt (#21257) keep
+     non-promotable and not-yet-outcome-positive facts out of the shared tier.
+     Each enabled sweep reads each keeper's Tier-1 store and rewrites the shared
+     semantic store (keepers/_shared.facts.jsonl) atomically, never touching a keeper's own
      store, so it cannot race keeper writes. Per-tick failures are caught so a
      corrupt store cannot cancel sibling fibers. Each sweep logs [promoted]: a
      rising count is the regression signal to watch if producer labelling

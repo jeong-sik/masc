@@ -43,6 +43,8 @@ module GC = Masc.Keeper_memory_os_gc
 module Recall = Masc.Keeper_memory_os_recall
 module Consolidator = Masc.Keeper_memory_os_consolidator
 
+external unsetenv : string -> unit = "masc_test_unsetenv"
+
 (* ---------- tiny verdict framework (prints + exit code) ---------- *)
 
 let passed = ref 0
@@ -121,12 +123,22 @@ let with_temp_keepers_dir f =
   Memory_io.For_testing.with_keepers_dir marker (fun () -> f marker)
 ;;
 
+let restore_env name = function
+  | Some value -> Unix.putenv name value
+  | None -> unsetenv name
+;;
+
 let with_env name value f =
   let old = Sys.getenv_opt name in
-  Unix.putenv name value;
-  (* Codebase convention: [Unix.putenv name ""] clears a var (no portable
-     [Unix.unsetenv]); the float env reader treats that as unset -> default. *)
-  Fun.protect ~finally:(fun () -> Unix.putenv name (Option.value old ~default:"")) f
+  Fun.protect
+    ~finally:(fun () -> restore_env name old)
+    (fun () ->
+      Unix.putenv name value;
+      f ())
+;;
+
+let with_shared_consolidator_enabled f =
+  with_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" f
 ;;
 
 let has_memory_os_prompt_root path =
@@ -241,7 +253,15 @@ let scenario_forgetting_composition () =
     Memory_io.append_fact ~keeper_id:"beta" durable;
     check "non-vacuity: the seeded ephemeral IS ttl-expired at now" (GC.ttl_expired ~now expired);
     check "non-vacuity: the durable is NOT ttl-expired (no over-prune bait)" (not (GC.ttl_expired ~now durable));
-    let _r = Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now () in
+    let report =
+      with_shared_consolidator_enabled (fun () ->
+        Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ())
+    in
+    check
+      "consolidator run status is enabled by explicit harness opt-in"
+      (match report.Consolidator.status with
+       | Consolidator.Consolidation_ran -> true
+       | Consolidator.Consolidation_disabled -> false);
     let shared_before = List.length (Memory_io.read_facts_all ~keeper_id:"_shared") in
     check "consolidation promoted the durable to _shared (shared = 1)" (shared_before = 1);
     check

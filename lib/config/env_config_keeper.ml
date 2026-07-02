@@ -239,6 +239,7 @@ module KeeperMemoryOs = struct
   let librarian_runtime_id_default = None
   let librarian_global_slot_default = 1
   let gc_enabled_default = true
+  let shared_consolidator_enabled_default = false
   let consolidation_enabled_default = false
   let consolidation_runtime_id_default = None
 
@@ -255,6 +256,7 @@ module KeeperMemoryOs = struct
   let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
   let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
   let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
+  let shared_consolidator_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATE"
   let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
   let consolidation_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
 
@@ -377,6 +379,18 @@ module KeeperMemoryOs = struct
       ~invalid:Env_config_memory.Fail_closed
       gc_env_key
       ~default:gc_enabled_default
+  ;;
+
+  (** Tier-2 shared Memory OS consolidator kill switch. Default: false; invalid
+      values fail closed to false. This gates the deterministic cross-keeper
+      shared-store sweep, separate from the per-keeper LLM consolidation pass.
+      @category Policies
+      @ops_class operator *)
+  let shared_consolidator_enabled () =
+    get_bool_logged
+      ~invalid:Env_config_memory.Fail_closed
+      shared_consolidator_env_key
+      ~default:shared_consolidator_enabled_default
   ;;
 
   (** Per-keeper Memory OS consolidation maintenance fiber kill switch.

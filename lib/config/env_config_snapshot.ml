@@ -622,6 +622,10 @@ let memory_entries =
       Memory_os_defaults.gc_env_key
       "Per-keeper Memory OS GC maintenance fiber kill switch; invalid values fail closed";
     entry
+      ~default:(string_of_bool Memory_os_defaults.shared_consolidator_enabled_default)
+      Memory_os_defaults.shared_consolidator_env_key
+      "Tier-2 shared Memory OS consolidator kill switch; invalid values fail closed";
+    entry
       ~default:(string_of_bool Memory_os_defaults.consolidation_enabled_default)
       Memory_os_defaults.consolidation_env_key
       "Per-keeper Memory OS consolidation maintenance fiber kill switch; invalid values fail closed";

@@ -841,6 +841,11 @@ let test_memory_os_bool_env_accepts_enabled_disabled () =
       "enabled enables GC"
       true
       (Env_config.KeeperMemoryOs.gc_enabled ()));
+  with_memory_os_env Env_config.KeeperMemoryOs.shared_consolidator_env_key "enabled" (fun () ->
+    Alcotest.(check bool)
+      "enabled enables shared consolidator"
+      true
+      (Env_config.KeeperMemoryOs.shared_consolidator_enabled ()));
   with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "enabled" (fun () ->
     Alcotest.(check bool)
       "enabled enables consolidation"
@@ -878,6 +883,14 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
         false
         (Env_config.KeeperMemoryOs.gc_enabled ()));
     check_log_contains lines Env_config.KeeperMemoryOs.gc_env_key;
+    check_log_contains lines "fail-closed false");
+  with_captured_console_lines (fun lines ->
+    with_memory_os_env Env_config.KeeperMemoryOs.shared_consolidator_env_key "maybe" (fun () ->
+      Alcotest.(check bool)
+        "invalid shared consolidator flag fail-closes"
+        false
+        (Env_config.KeeperMemoryOs.shared_consolidator_enabled ()));
+    check_log_contains lines Env_config.KeeperMemoryOs.shared_consolidator_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
     with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "maybe" (fun () ->
@@ -972,6 +985,8 @@ let memory_os_knob_readers : (string * (unit -> unit)) list =
     , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_global_slot () : int) )
   ; ( Env_config.KeeperMemoryOs.gc_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
+  ; ( Env_config.KeeperMemoryOs.shared_consolidator_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.shared_consolidator_enabled () : bool) )
   ; ( Env_config.KeeperMemoryOs.consolidation_env_key
     , fun () -> ignore (Env_config.KeeperMemoryOs.consolidation_enabled () : bool) )
   ; ( Env_config.KeeperMemoryOs.consolidation_runtime_id_env_key
@@ -3899,14 +3914,59 @@ let test_consolidator_deterministic () =
   Alcotest.(check (list string)) "input order does not change output" (claims a) (claims b)
 ;;
 
+let assert_consolidator_ran label report =
+  match report.Consolidator.status with
+  | Consolidator.Consolidation_ran -> ()
+  | Consolidator.Consolidation_disabled ->
+    Alcotest.failf "%s: expected consolidator to run, got disabled" label
+;;
+
+let assert_consolidator_disabled report =
+  match report.Consolidator.status with
+  | Consolidator.Consolidation_disabled -> ()
+  | Consolidator.Consolidation_ran ->
+    Alcotest.fail "expected consolidator disabled status"
+;;
+
+let test_consolidator_default_disabled_status () =
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "" (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let now = 1_000_000.0 in
+      Memory_io.append_fact
+        ~keeper_id:"alpha"
+        (mk_shared_fixture ~now ~category:"lesson" "default-off shared claim");
+      Memory_io.append_fact
+        ~keeper_id:"beta"
+        (mk_shared_fixture ~now ~category:"lesson" "default-off shared claim");
+      let report = Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now () in
+      assert_consolidator_disabled report;
+      Alcotest.(check int)
+        "disabled scan does not report keepers as scanned"
+        0
+        report.Consolidator.keepers_scanned;
+      Alcotest.(check int)
+        "disabled scan considers no claims"
+        0
+        report.Consolidator.claims_considered;
+      Alcotest.(check int)
+        "disabled scan promotes no claims"
+        0
+        report.Consolidator.promoted;
+      Alcotest.(check int)
+        "disabled scan leaves shared store empty"
+        0
+        (List.length (Memory_io.read_facts_all ~keeper_id:Types.shared_store_id))))
+;;
+
 (* End-to-end: two keepers corroborate a claim on disk, the consolidator writes
    the shared store, and a third keeper's recall surfaces it with provenance —
    while a keeper that already holds the claim privately sees it as its own
    (private precedence, no duplicate "shared via" line). *)
 let test_recall_surfaces_shared_after_consolidation () =
-  with_recall_env "true" (fun () ->
-    with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
+    with_recall_env "true" (fun () ->
+      with_prompt_registry (fun () ->
+        with_temp_keepers_dir (fun _keepers_dir ->
         let now = 1_000_000.0 in
         let shared_claim = "deployment uses blue green rollout" in
         Memory_io.append_fact
@@ -3916,6 +3976,7 @@ let test_recall_surfaces_shared_after_consolidation () =
           ~keeper_id:"beta"
           (mk_shared_fixture ~now ~category:"validated_approach" shared_claim);
         let report = Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now () in
+        assert_consolidator_ran "shared recall setup" report;
         Alcotest.(check int) "one claim promoted to shared store" 1 report.Consolidator.promoted;
         Memory_io.append_fact
           ~keeper_id:"observer"
@@ -3935,7 +3996,7 @@ let test_recall_surfaces_shared_after_consolidation () =
           "private precedence: contributor sees the claim as its own, not shared"
           true
           (contains "deployment uses blue green" alpha_block
-           && not (contains "shared via" alpha_block)))))
+           && not (contains "shared via" alpha_block))))))
 ;;
 
 let test_recall_scans_whole_shared_store () =
@@ -3979,36 +4040,38 @@ let with_env name value f =
 ;;
 
 let test_consolidator_rejects_corrupt_source_store () =
-  with_temp_keepers_dir (fun _keepers_dir ->
-    let now = 1_000_000.0 in
-    Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now "shared fact");
-    let oc =
-      open_out_gen [ Open_append; Open_text ] 0o644 (Memory_io.facts_path ~keeper_id:"alpha")
-    in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc "{not-json}\n");
-    Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now "shared fact");
-    try
-      ignore (Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ());
-      Alcotest.fail "expected corrupt source store to fail loud"
-    with
-    | Invalid_argument msg ->
-      Alcotest.(check bool)
-        "error identifies consolidation input"
-        true
-        (contains "memory os consolidation input invalid" msg);
-      Alcotest.(check bool)
-        "error includes source fact store"
-        true
-        (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
-      Alcotest.(check bool) "error includes line number" true (contains ":2:" msg))
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let now = 1_000_000.0 in
+      Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now "shared fact");
+      let oc =
+        open_out_gen [ Open_append; Open_text ] 0o644 (Memory_io.facts_path ~keeper_id:"alpha")
+      in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc "{not-json}\n");
+      Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now "shared fact");
+      try
+        ignore (Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ());
+        Alcotest.fail "expected corrupt source store to fail loud"
+      with
+      | Invalid_argument msg ->
+        Alcotest.(check bool)
+          "error identifies consolidation input"
+          true
+          (contains "memory os consolidation input invalid" msg);
+        Alcotest.(check bool)
+          "error includes source fact store"
+          true
+          (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
+        Alcotest.(check bool) "error includes line number" true (contains ":2:" msg)))
 ;;
 
 let test_consolidator_waits_for_shared_store_lock () =
-  with_eio (fun ~sw ~net:_ ~clock ->
-    with_eio_guard (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
+    with_eio (fun ~sw ~net:_ ~clock ->
+      with_eio_guard (fun () ->
+        with_temp_keepers_dir (fun _keepers_dir ->
         let now = 1_000_000.0 in
         Memory_io.append_fact
           ~keeper_id:"alpha"
@@ -4033,8 +4096,9 @@ let test_consolidator_waits_for_shared_store_lock () =
         wait_for_ref ~clock "consolidator after shared lock" result;
         match !result with
         | Some report ->
+          assert_consolidator_ran "lock wait" report;
           Alcotest.(check int) "claim promoted after lock release" 1 report.Consolidator.promoted
-        | None -> Alcotest.fail "expected consolidator report")))
+        | None -> Alcotest.fail "expected consolidator report"))))
 ;;
 
 let test_recall_waits_for_shared_fact_lock () =
@@ -5917,6 +5981,10 @@ let () =
             "deterministic regardless of input order"
             `Quick
             test_consolidator_deterministic
+        ; Alcotest.test_case
+            "default-off run reports disabled status"
+            `Quick
+            test_consolidator_default_disabled_status
         ; Alcotest.test_case
             "recall surfaces shared facts with provenance (private precedence)"
             `Quick

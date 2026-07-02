@@ -235,6 +235,48 @@ let max_output_tokens_of_model_spec (spec : Runtime_schema.model_spec) =
   | None -> None
 ;;
 
+(** Project MASC runtime.toml [models.<id>.capabilities] into OAS provider
+    capabilities. Runtime declarations are the SSOT for verified endpoint/model
+    contracts; missing fields keep OAS defaults so the override is partial. *)
+let model_capabilities_override_of_model_spec (spec : Runtime_schema.model_spec)
+  : Llm_provider.Capabilities.capabilities option
+  =
+  match spec.capabilities with
+  | None -> None
+  | Some caps ->
+    let open Llm_provider.Capabilities in
+    let default = default_capabilities in
+    Some
+      { default with
+        max_output_tokens = caps.max_output_tokens
+      ; supports_tool_choice = caps.supports_tool_choice
+      ; supports_extended_thinking = caps.supports_extended_thinking
+      ; supports_reasoning_budget = caps.supports_reasoning_budget
+      ; thinking_control_format = caps.thinking_control_format
+      ; supports_image_input = caps.supports_image_input
+      ; supports_audio_input = caps.supports_audio_input
+      ; supports_video_input = caps.supports_video_input
+      ; supports_multimodal_inputs = caps.supports_multimodal_inputs
+      ; supports_response_format_json = caps.supports_response_format_json
+      ; supports_structured_output = caps.supports_structured_output
+      ; supports_native_streaming = caps.supports_native_streaming
+      ; supports_caching = caps.supports_caching
+      ; supports_prompt_caching = caps.supports_prompt_caching
+      ; prompt_cache_alignment = caps.prompt_cache_alignment
+      ; supports_top_k = caps.supports_top_k
+      ; supports_min_p = caps.supports_min_p
+      ; supports_seed = caps.supports_seed
+      ; emits_usage_tokens = caps.emits_usage_tokens
+      ; supports_computer_use = caps.supports_computer_use
+      }
+;;
+
+let supports_structured_output_override_of_model_spec (spec : Runtime_schema.model_spec) =
+  match spec.capabilities with
+  | Some capabilities -> Some capabilities.supports_structured_output
+  | None -> None
+;;
+
 let effective_max_tokens_for_model spec requested =
   match requested, max_output_tokens_of_model_spec spec with
   | Some configured, Some capability -> Some (min configured capability)
@@ -253,6 +295,10 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
     ~(max_tokens : int option) : Llm_provider.Provider_config.t option =
   let registry_entry = find_registry_entry provider.id in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
+  let model_capabilities_override = model_capabilities_override_of_model_spec spec in
+  let supports_structured_output_override =
+    supports_structured_output_override_of_model_spec spec
+  in
   let max_tokens = effective_max_tokens_for_model spec max_tokens in
   match provider.transport with
   | Http base_url ->
@@ -290,6 +336,8 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~request_path
             ~max_context:spec.max_context
             ?supports_tool_choice_override
+            ?model_capabilities_override
+            ?supports_structured_output_override
             ?max_tokens
             ?keep_alive
             ?num_ctx
@@ -308,6 +356,8 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ~headers:(Option.value ~default:[] provider.headers)
             ~max_context:spec.max_context
             ?supports_tool_choice_override
+            ?model_capabilities_override
+            ?supports_structured_output_override
             ?max_tokens
             ?keep_alive
             ?num_ctx

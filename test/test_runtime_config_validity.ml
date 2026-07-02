@@ -675,6 +675,9 @@ let test_repo_runtime_toml_loads () =
      | Some runtime ->
        check string "MiniMax M3 api name" "minimax-m3" runtime.model.api_name;
        check int "MiniMax M3 context" 524288 runtime.model.max_context;
+       check (option bool) "MiniMax M3 provider config SO override is Some false"
+         (Some false)
+         runtime.provider_config.Llm_provider.Provider_config.supports_structured_output_override;
        (match runtime.model.capabilities with
        | Some caps ->
           check bool "MiniMax M3 response_format json disabled" false
@@ -701,6 +704,9 @@ let test_repo_runtime_toml_loads () =
        check (option (float 0.0)) "native MiniMax M3 connect timeout"
          (Some 600.0)
          runtime.provider_config.connect_timeout_s;
+       check (option bool) "native MiniMax M3 provider config SO override is Some true"
+         (Some true)
+         runtime.provider_config.Llm_provider.Provider_config.supports_structured_output_override;
        (match runtime.model.capabilities with
        | Some caps ->
          check bool "native MiniMax M3 response_format json" true

@@ -11,6 +11,76 @@
    attribution(`Provider '...'` 슬롯)에는 raw [model]만 쓴다 — panelist(예
    "skeptic (claude)")는 실제 provider id가 아니므로 그 슬롯에 새면 provider 집계/로그
    디버깅이 오염된다 (RFC-0278 §2.4, 정체성·routable model 비압축 원칙). *)
+
+(* --- Response normalisation: providers that accept json_schema may still wrap
+   the JSON in markdown fences or leading prose. Strip fences and, if necessary,
+   extract the first well-formed JSON object before applying the panel schema.
+   This keeps the contract strict (still requires { "answer": string }) while
+   avoiding false failures for cosmetic wrapping. *)
+
+let fence_marker = "```"
+let fence_marker_len = String.length fence_marker
+
+let strip_fences (s : string) : string =
+  let s = String.trim s in
+  if String.length s >= fence_marker_len
+     && String.equal (String.sub s 0 fence_marker_len) fence_marker
+  then (
+    match String.index_opt s '\n' with
+    | None -> s
+    | Some nl ->
+      let body = String.trim (String.sub s (nl + 1) (String.length s - nl - 1)) in
+      if String.length body >= fence_marker_len
+         && String.equal
+              (String.sub body (String.length body - fence_marker_len) fence_marker_len)
+              fence_marker
+      then String.trim (String.sub body 0 (String.length body - fence_marker_len))
+      else body)
+  else s
+;;
+
+let rec index_of_json_start (s : string) (i : int) : int option =
+  if i >= String.length s then None
+  else if s.[i] = '{' then Some i
+  else index_of_json_start s (i + 1)
+;;
+
+let extract_first_json_object (s : string) : string option =
+  let len = String.length s in
+  let rec scan_from i =
+    match index_of_json_start s i with
+    | None -> None
+    | Some start ->
+      let rec scan_end j =
+        if j > len
+        then None
+        else (
+          let candidate = String.sub s start (j - start) in
+          match Yojson.Safe.from_string candidate with
+          | `Assoc _ -> Some candidate
+          | _ | exception Yojson.Json_error _ -> scan_end (j + 1))
+      in
+      match scan_end (start + 1) with
+      | Some _ as found -> found
+      | None -> scan_from (start + 1)
+  in
+  scan_from 0
+;;
+
+let parse_json_response raw :
+  (Yojson.Safe.t, string) result =
+  let stripped = strip_fences raw in
+  match Yojson.Safe.from_string stripped with
+  | json -> Ok json
+  | exception Yojson.Json_error first_msg ->
+    (match extract_first_json_object stripped with
+     | Some fragment ->
+       (match Yojson.Safe.from_string fragment with
+        | json -> Ok json
+        | exception Yojson.Json_error _ -> Error first_msg)
+     | None -> Error first_msg)
+;;
+
 let outcome_of_result ~(panelist : string) ~(model : string)
     (res : (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result)
   : Fusion_types.panel_outcome
@@ -24,15 +94,13 @@ let outcome_of_result ~(panelist : string) ~(model : string)
         ; reason = Fusion_types.Empty_response (Fusion_oas.empty_response_detail resp)
         }
     else (
-      match Yojson.Safe.from_string raw with
-      | exception Yojson.Json_error msg ->
+      match parse_json_response raw with
+      | Error msg ->
         Fusion_types.Failed
           { failed_model = panelist
-          ; reason =
-              Fusion_types.Invalid_structured_response
-                ("panel response is not valid JSON: " ^ msg)
+          ; reason = Fusion_types.Invalid_structured_response ("panel response is not valid JSON: " ^ msg)
           }
-      | `Assoc fields ->
+      | Ok (`Assoc fields) ->
         (match List.assoc_opt "answer" fields with
          | Some (`String answer) ->
            let answer = String.trim answer in
@@ -59,7 +127,7 @@ let outcome_of_result ~(panelist : string) ~(model : string)
                  Fusion_types.Invalid_structured_response
                    "panel response missing required field \"answer\""
              })
-      | _ ->
+      | Ok _ ->
         Fusion_types.Failed
           { failed_model = panelist
           ; reason =

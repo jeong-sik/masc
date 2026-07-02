@@ -173,6 +173,47 @@ let test_panel_outcome_rejects_empty_answer () =
       ("expected empty structured answer failure, got: "
        ^ Fusion_types.show_panel_outcome other)
 
+let test_panel_outcome_strips_fenced_json () =
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model"
+      (Ok (response_with_text "```json\n{\"answer\":\"fenced\"}\n```"))
+  with
+  | Fusion_types.Answered { model; answer; _ } ->
+    check string "panel identity preserved" "panel-a" model;
+    check string "fenced JSON answer parsed" "fenced" answer
+  | Fusion_types.Failed failure ->
+    fail ("expected fenced JSON answer, got failure: " ^ Fusion_types.show_panel_error failure)
+
+let test_panel_outcome_extracts_json_from_prose () =
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model"
+      (Ok (response_with_text "Some prose before {\"answer\":\"embedded\"} more prose"))
+  with
+  | Fusion_types.Answered { model; answer; _ } ->
+    check string "panel identity preserved" "panel-a" model;
+    check string "embedded JSON answer parsed" "embedded" answer
+  | Fusion_types.Failed failure ->
+    fail
+      ("expected embedded JSON answer, got failure: " ^ Fusion_types.show_panel_error failure)
+
+let test_panel_outcome_rejects_json_without_answer_field () =
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model"
+      (Ok (response_with_text {|{"not_answer":"x"}|}))
+  with
+  | Fusion_types.Failed
+      { failed_model = "panel-a"
+      ; reason = Fusion_types.Invalid_structured_response detail
+      } ->
+    check bool "missing answer field detail" true
+      (String_util.string_contains_substring ~needle:"missing required field" detail)
+  | other ->
+    fail
+      ("expected missing answer field failure, got: " ^ Fusion_types.show_panel_outcome other)
+
 let test_attach_usage_on_success () =
   match Fusion_judge.attach_usage (Ok sample_synthesis) sample_usage with
   | Ok (_synthesis, usage) ->
@@ -283,6 +324,11 @@ let () =
             test_panel_outcome_rejects_invalid_structured_answer
         ; test_case "rejects empty answer" `Quick
             test_panel_outcome_rejects_empty_answer
+        ; test_case "strips fenced JSON" `Quick test_panel_outcome_strips_fenced_json
+        ; test_case "extracts JSON from prose" `Quick
+            test_panel_outcome_extracts_json_from_prose
+        ; test_case "rejects JSON without answer field" `Quick
+            test_panel_outcome_rejects_json_without_answer_field
         ] )
     ; ( "attach_usage"
       , [ test_case "success carries usage" `Quick test_attach_usage_on_success

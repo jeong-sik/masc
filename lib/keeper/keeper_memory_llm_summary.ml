@@ -24,7 +24,8 @@ let () =
       "Total [summarize_with_provider] attempts classified by label \
        [outcome] (ok_summary | timed_out | http_error | empty_response | \
        invalid_structured_response). \
-       Labels: [outcome], [provider] (model_id), [runtime_id]."
+       Labels: [outcome], [provider] (neutral runtime lane — concrete \
+       model_id is OAS-owned and redacted per RFC-0132 PR-2), [runtime_id]."
     ();
   Otel_metric_store.register_counter
     ~name:Keeper_metrics.(to_string MemoryLlmSummaryChainExhausted)
@@ -35,6 +36,13 @@ let () =
        means consolidation is silently skipping the LLM summary."
     ()
 ;;
+
+(* RFC-0132 PR-2: memory-summary outcome metric label + warn logs are an
+   external boundary; redact concrete provider/model identity via SSOT.
+   Runtime identity stays in-boundary through the separate [runtime_id]
+   label and warn-log argument. *)
+let runtime_lane_label =
+  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
 
 type complete_fn =
   sw:Eio.Switch.t ->
@@ -156,11 +164,6 @@ let summary_text_of_response response =
   | Error _ -> None
 ;;
 
-module For_testing = struct
-  let summary_text_of_response = summary_text_of_response
-  let summary_text_result_of_response = summary_text_result_of_response
-end
-
 let with_timeout ?clock ~timeout_sec f =
   match clock with
   | None -> Some (f ())
@@ -170,16 +173,21 @@ let with_timeout ?clock ~timeout_sec f =
 
 let record_summary_outcome
     ~(runtime_id : string)
-    ~(provider_cfg : Llm_provider.Provider_config.t)
     ~(outcome : Keeper_memory_llm_summary_outcome.t) =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
     ~labels:
       [ ("outcome", Keeper_memory_llm_summary_outcome.to_label outcome)
-      ; ("provider", provider_cfg.Llm_provider.Provider_config.model_id)
+      ; ("provider", runtime_lane_label)
       ; ("runtime_id", runtime_id)
       ]
     ()
+
+module For_testing = struct
+  let summary_text_of_response = summary_text_of_response
+  let summary_text_result_of_response = summary_text_result_of_response
+  let record_summary_outcome = record_summary_outcome
+end
 
 let summarize_with_provider
     ?(complete : complete_fn = default_complete)
@@ -201,8 +209,8 @@ let summarize_with_provider
     with
     | None ->
         Log.Keeper.warn
-          "memory LLM summary timed out trace_id=%s provider=%s timeout_sec=%.1f"
-          trace_id provider_cfg.model_id timeout_sec;
+          "memory LLM summary timed out trace_id=%s runtime=%s timeout_sec=%.1f"
+          trace_id runtime_id timeout_sec;
         None, Keeper_memory_llm_summary_outcome.Timed_out
     | Some (Ok response) ->
         (match summary_text_result_of_response response with
@@ -210,22 +218,22 @@ let summarize_with_provider
              Some summary, Keeper_memory_llm_summary_outcome.Ok_summary
          | Error Empty_summary_response ->
              Log.Keeper.warn
-               "memory LLM summary empty trace_id=%s provider=%s"
-               trace_id provider_cfg.model_id;
+               "memory LLM summary empty trace_id=%s runtime=%s"
+               trace_id runtime_id;
              None, Keeper_memory_llm_summary_outcome.Empty_response
          | Error (Invalid_structured_response detail) ->
              Log.Keeper.warn
                "memory LLM summary invalid structured response trace_id=%s \
-                provider=%s detail=%s"
-               trace_id provider_cfg.model_id detail;
+                runtime=%s detail=%s"
+               trace_id runtime_id detail;
              None, Keeper_memory_llm_summary_outcome.Invalid_structured_response)
     | Some (Error err) ->
         Log.Keeper.warn
-          "memory LLM summary failed trace_id=%s provider=%s: %s"
-          trace_id provider_cfg.model_id (Provider_http_error.to_message err);
+          "memory LLM summary failed trace_id=%s runtime=%s: %s"
+          trace_id runtime_id (Provider_http_error.to_message err);
         None, Keeper_memory_llm_summary_outcome.Http_error
   in
-  record_summary_outcome ~runtime_id ~provider_cfg ~outcome;
+  record_summary_outcome ~runtime_id ~outcome;
   result
 
 let summarize_with_providers

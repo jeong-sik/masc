@@ -260,37 +260,6 @@ let terminal_outcome_to_log_label = function
   | Terminal_checkpoint -> "checkpoint"
   | Terminal_failed_completion_contract _ -> "failed"
 
-module For_testing = struct
-  let budget_exhausted_no_progress_threshold_override =
-    budget_exhausted_no_progress_threshold_override
-
-  type nonrec turn_delivery = turn_delivery =
-    | Peer_only
-    | User_facing
-    | Internal_prose
-    | Task_claim
-
-  type nonrec reply_delivery = reply_delivery =
-    | Internal_only
-    | Externally_delivered
-
-  let classify_delivery = classify_delivery
-  let delivery_requires_evidence = delivery_requires_evidence
-  let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
-  let claim_bound_work = claim_bound_work
-
-  let completion_contract_terminal_failure_reason_code =
-    completion_contract_terminal_failure_reason_code
-
-  type nonrec terminal_outcome = terminal_outcome =
-    | Terminal_done
-    | Terminal_checkpoint
-    | Terminal_failed_completion_contract of { reason_code : string }
-
-  let terminal_outcome_of_result = terminal_outcome_of_result
-  let terminal_outcome_is_completed_turn = terminal_outcome_is_completed_turn
-end
-
 let append_metrics_snapshot
       ~config
       ~meta
@@ -643,6 +612,49 @@ let persist_terminal_turn_meta
     ();
   updated_meta
 ;;
+
+module For_testing = struct
+  let budget_exhausted_no_progress_threshold_override =
+    budget_exhausted_no_progress_threshold_override
+
+  type nonrec turn_delivery = turn_delivery =
+    | Peer_only
+    | User_facing
+    | Internal_prose
+    | Task_claim
+
+  type nonrec reply_delivery = reply_delivery =
+    | Internal_only
+    | Externally_delivered
+
+  let classify_delivery = classify_delivery
+  let delivery_requires_evidence = delivery_requires_evidence
+  let has_substantive_tool_calls_with_outcome = has_substantive_tool_calls_with_outcome
+  let claim_bound_work = claim_bound_work
+
+  let completion_contract_terminal_failure_reason_code =
+    completion_contract_terminal_failure_reason_code
+
+  type nonrec terminal_outcome = terminal_outcome =
+    | Terminal_done
+    | Terminal_checkpoint
+    | Terminal_failed_completion_contract of { reason_code : string }
+
+  let terminal_outcome_of_result = terminal_outcome_of_result
+  let terminal_outcome_is_completed_turn = terminal_outcome_is_completed_turn
+
+  let persist_terminal_turn_meta_for_outcome
+        ~config
+        ~original_meta
+        ~updated_meta
+        ~terminal_outcome
+    =
+    persist_terminal_turn_meta
+      ~config
+      ~original_meta
+      ~clear_auto_resume_after_sec:(terminal_outcome_is_completed_turn terminal_outcome)
+      ~updated_meta
+end
 
 let reset_turn_failures_for_stop_reason ~config ~updated_meta result =
   let reset_failure_state () =

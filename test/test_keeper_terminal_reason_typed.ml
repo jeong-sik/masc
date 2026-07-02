@@ -20,9 +20,47 @@ module R = Masc.Keeper_execution_receipt
 module C = Masc.Keeper_contract_classifier
 module Tr = Keeper_terminal_reason
 module UTS = Masc.Keeper_unified_turn_success.For_testing
+module KMC = Masc.Keeper_meta_contract
+module KMS = Masc.Keeper_meta_store
 
 let failures = ref []
 let check name cond = if not cond then failures := name :: !failures
+
+let rec rm_rf path =
+  if Sys.file_exists path
+  then
+    if Sys.is_directory path
+    then (
+      Sys.readdir path |> Array.iter (fun name -> rm_rf (Filename.concat path name));
+      Unix.rmdir path)
+    else Sys.remove path
+;;
+
+let with_temp_dir prefix f =
+  let dir = Filename.temp_file prefix "" in
+  Sys.remove dir;
+  Unix.mkdir dir 0o755;
+  Fun.protect ~finally:(fun () -> rm_rf dir) (fun () -> f dir)
+;;
+
+let meta_fixture_exn json =
+  match Masc_test_deps.meta_of_json_fixture json with
+  | Ok meta -> meta
+  | Error err -> failwith ("meta fixture parse failed: " ^ err)
+;;
+
+let write_meta_exn config meta =
+  match KMS.write_meta config meta with
+  | Ok () -> ()
+  | Error err -> failwith ("write_meta failed: " ^ err)
+;;
+
+let read_meta_exn config keeper_name =
+  match KMS.read_meta config keeper_name with
+  | Ok (Some meta) -> meta
+  | Ok None -> failwith ("missing persisted meta for " ^ keeper_name)
+  | Error err -> failwith ("read_meta failed: " ^ err)
+;;
 
 (* ------------------------------------------------------------------ *)
 (* 1. Wire round-trip corpus: built from the PRODUCER sites, not from   *)
@@ -749,6 +787,58 @@ let () =
   check
     "completion-contract terminal failure is not a completed activity turn"
     (not (UTS.terminal_outcome_is_completed_turn completion_contract_failure))
+;;
+
+let () =
+  with_temp_dir "keeper-contract-failed-turn-persist" @@ fun workspace_dir ->
+  let keeper_name = "contract-failed-turn-persist" in
+  let config = Masc.Workspace.default_config workspace_dir in
+  let meta : KMC.keeper_meta =
+    meta_fixture_exn
+      (`Assoc
+        [ "name", `String keeper_name
+        ; "agent_name", `String keeper_name
+        ; "trace_id", `String "trace-contract-failed-turn-persist"
+        ; "goal", `String "Persist contract-failed turn usage"
+        ])
+  in
+  write_meta_exn config meta;
+  let original_meta = read_meta_exn config keeper_name in
+  let usage = original_meta.runtime.usage in
+  let updated_meta =
+    { original_meta with
+      auto_resume_after_sec = Some 30.0
+    ; runtime =
+        { original_meta.runtime with
+          usage =
+            { usage with
+              total_turns = usage.total_turns + 1
+            ; last_turn_ts = 12345.0
+            }
+        }
+    }
+  in
+  let terminal_outcome =
+    UTS.Terminal_failed_completion_contract
+      { reason_code = "needs_execution_progress" }
+  in
+  let returned =
+    UTS.persist_terminal_turn_meta_for_outcome
+      ~config
+      ~original_meta
+      ~updated_meta
+      ~terminal_outcome
+  in
+  let persisted = read_meta_exn config keeper_name in
+  check
+    "completion-contract terminal failure keeps auto-resume on returned meta"
+    (returned.auto_resume_after_sec = Some 30.0);
+  check
+    "completion-contract terminal failure persists advanced turn usage"
+    (persisted.runtime.usage.total_turns = updated_meta.runtime.usage.total_turns);
+  check
+    "completion-contract terminal failure does not clear durable auto-resume"
+    (persisted.auto_resume_after_sec = Some 30.0)
 ;;
 
 let () =

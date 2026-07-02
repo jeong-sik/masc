@@ -13,10 +13,9 @@
    디버깅이 오염된다 (RFC-0278 §2.4, 정체성·routable model 비압축 원칙). *)
 
 (* --- Response normalisation: providers that accept json_schema may still wrap
-   the JSON in markdown fences or leading prose. Strip fences and, if necessary,
-   extract the first well-formed JSON object before applying the panel schema.
-   This keeps the contract strict (still requires { "answer": string }) while
-   avoiding false failures for cosmetic wrapping. *)
+   the JSON in one complete markdown fence. Keep recovery deterministic: exact
+   JSON after trim or one full fence only. Arbitrary prose recovery would weaken
+   the schema boundary by letting an example/debug object win over the answer. *)
 
 let fence_marker = "```"
 let fence_marker_len = String.length fence_marker
@@ -35,36 +34,8 @@ let strip_fences (s : string) : string =
               (String.sub body (String.length body - fence_marker_len) fence_marker_len)
               fence_marker
       then String.trim (String.sub body 0 (String.length body - fence_marker_len))
-      else body)
+      else s)
   else s
-;;
-
-let rec index_of_json_start (s : string) (i : int) : int option =
-  if i >= String.length s then None
-  else if s.[i] = '{' then Some i
-  else index_of_json_start s (i + 1)
-;;
-
-let extract_first_json_object (s : string) : string option =
-  let len = String.length s in
-  let rec scan_from i =
-    match index_of_json_start s i with
-    | None -> None
-    | Some start ->
-      let rec scan_end j =
-        if j > len
-        then None
-        else (
-          let candidate = String.sub s start (j - start) in
-          match Yojson.Safe.from_string candidate with
-          | `Assoc _ -> Some candidate
-          | _ | exception Yojson.Json_error _ -> scan_end (j + 1))
-      in
-      match scan_end (start + 1) with
-      | Some _ as found -> found
-      | None -> scan_from (start + 1)
-  in
-  scan_from 0
 ;;
 
 let parse_json_response raw :
@@ -72,13 +43,7 @@ let parse_json_response raw :
   let stripped = strip_fences raw in
   match Yojson.Safe.from_string stripped with
   | json -> Ok json
-  | exception Yojson.Json_error first_msg ->
-    (match extract_first_json_object stripped with
-     | Some fragment ->
-       (match Yojson.Safe.from_string fragment with
-        | json -> Ok json
-        | exception Yojson.Json_error _ -> Error first_msg)
-     | None -> Error first_msg)
+  | exception Yojson.Json_error msg -> Error msg
 ;;
 
 let outcome_of_result ~(panelist : string) ~(model : string)

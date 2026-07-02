@@ -678,6 +678,9 @@ let test_repo_runtime_toml_loads () =
        check (option bool) "MiniMax M3 provider config SO override is Some false"
          (Some false)
          runtime.provider_config.Llm_provider.Provider_config.supports_structured_output_override;
+       check bool "MiniMax M3 keeps OAS capability catalog authoritative" true
+         (Option.is_none
+            runtime.provider_config.Llm_provider.Provider_config.model_capabilities_override);
        (match runtime.model.capabilities with
        | Some caps ->
           check bool "MiniMax M3 response_format json disabled" false
@@ -707,6 +710,9 @@ let test_repo_runtime_toml_loads () =
        check (option bool) "native MiniMax M3 provider config SO override is Some true"
          (Some true)
          runtime.provider_config.Llm_provider.Provider_config.supports_structured_output_override;
+       check bool "native MiniMax M3 keeps OAS capability catalog authoritative" true
+         (Option.is_none
+            runtime.provider_config.Llm_provider.Provider_config.model_capabilities_override);
        (match runtime.model.capabilities with
        | Some caps ->
          check bool "native MiniMax M3 response_format json" true

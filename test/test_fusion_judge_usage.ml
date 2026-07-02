@@ -185,18 +185,53 @@ let test_panel_outcome_strips_fenced_json () =
   | Fusion_types.Failed failure ->
     fail ("expected fenced JSON answer, got failure: " ^ Fusion_types.show_panel_error failure)
 
-let test_panel_outcome_extracts_json_from_prose () =
+let check_panel_invalid_structured_response ~name raw =
   match
     Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
       ~model:"provider.model"
-      (Ok (response_with_text "Some prose before {\"answer\":\"embedded\"} more prose"))
+      (Ok (response_with_text raw))
   with
-  | Fusion_types.Answered { model; answer; _ } ->
-    check string "panel identity preserved" "panel-a" model;
-    check string "embedded JSON answer parsed" "embedded" answer
-  | Fusion_types.Failed failure ->
+  | Fusion_types.Failed
+      { failed_model = "panel-a"
+      ; reason = Fusion_types.Invalid_structured_response detail
+      } ->
+    check bool name true
+      (String_util.string_contains_substring ~needle:"not valid JSON" detail)
+  | other ->
     fail
-      ("expected embedded JSON answer, got failure: " ^ Fusion_types.show_panel_error failure)
+      ("expected invalid structured response failure, got: "
+       ^ Fusion_types.show_panel_outcome other)
+
+let test_panel_outcome_rejects_json_from_prose () =
+  check_panel_invalid_structured_response
+    ~name:"prose-wrapped JSON is rejected"
+    "Some prose before {\"answer\":\"embedded\"} more prose"
+
+let test_panel_outcome_rejects_incomplete_json_fence () =
+  check_panel_invalid_structured_response
+    ~name:"incomplete JSON fence is rejected"
+    "```json\n{\"answer\":\"unterminated fence\"}"
+
+let test_panel_outcome_rejects_example_before_final_json () =
+  check_panel_invalid_structured_response
+    ~name:"example JSON before final JSON is rejected"
+    "example: {\"answer\":\"example\"}\nfinal: {\"answer\":\"real\"}"
+
+let test_panel_outcome_rejects_multiple_json_objects () =
+  check_panel_invalid_structured_response
+    ~name:"multiple JSON objects are rejected"
+    "{\"answer\":\"first\"}\n{\"answer\":\"second\"}"
+
+let test_panel_outcome_rejects_braces_in_prose () =
+  check_panel_invalid_structured_response
+    ~name:"braces in prose are rejected"
+    "The final set is {alpha, beta}; answer follows later."
+
+let test_panel_outcome_rejects_large_malformed_output () =
+  let raw = String.make 8192 '{' ^ "not json" in
+  check_panel_invalid_structured_response
+    ~name:"large malformed output is rejected"
+    raw
 
 let test_panel_outcome_rejects_json_without_answer_field () =
   match
@@ -325,8 +360,18 @@ let () =
         ; test_case "rejects empty answer" `Quick
             test_panel_outcome_rejects_empty_answer
         ; test_case "strips fenced JSON" `Quick test_panel_outcome_strips_fenced_json
-        ; test_case "extracts JSON from prose" `Quick
-            test_panel_outcome_extracts_json_from_prose
+        ; test_case "rejects JSON from prose" `Quick
+            test_panel_outcome_rejects_json_from_prose
+        ; test_case "rejects incomplete JSON fence" `Quick
+            test_panel_outcome_rejects_incomplete_json_fence
+        ; test_case "rejects example before final JSON" `Quick
+            test_panel_outcome_rejects_example_before_final_json
+        ; test_case "rejects multiple JSON objects" `Quick
+            test_panel_outcome_rejects_multiple_json_objects
+        ; test_case "rejects braces in prose" `Quick
+            test_panel_outcome_rejects_braces_in_prose
+        ; test_case "rejects large malformed output" `Quick
+            test_panel_outcome_rejects_large_malformed_output
         ; test_case "rejects JSON without answer field" `Quick
             test_panel_outcome_rejects_json_without_answer_field
         ] )

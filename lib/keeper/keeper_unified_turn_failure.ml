@@ -82,6 +82,9 @@ let record_failure_and_maybe_escalate
     && count >= turn_fail_streak_threshold
     && not updated_meta.paused
   in
+  let read_only_no_progress_auto_paused =
+    completion_contract_auto_paused && EC.is_read_only_no_progress_accept_rejection err
+  in
   let idle_detected_auto_paused =
     is_idle_detected_error err
     && count >= turn_fail_streak_threshold
@@ -115,7 +118,8 @@ let record_failure_and_maybe_escalate
         else updated_meta
       in
       let resume_policy =
-        if completion_contract_auto_paused || idle_detected_auto_paused
+        if idle_detected_auto_paused
+           || (completion_contract_auto_paused && not read_only_no_progress_auto_paused)
         then Keeper_supervisor_pause_policy.Manual_resume_required
         else Keeper_supervisor_pause_policy.Auto_resume_with_backoff
       in
@@ -144,14 +148,25 @@ let record_failure_and_maybe_escalate
         else
           if completion_contract_auto_paused
           then
-            Log.Keeper.warn
-              "%s: auto-paused after %d completion contract no-progress failures \
-               (pause_threshold=%d, crash_threshold=%d, task_release=policy_checked); \
-               operator must inspect provider/model reasoning output before resuming"
-              meta.name
-              count
-              turn_fail_streak_threshold
-              threshold
+            if read_only_no_progress_auto_paused
+            then
+              Log.Keeper.warn
+                "%s: auto-paused with backoff after %d read-only no-progress \
+                 failures (pause_threshold=%d, crash_threshold=%d, \
+                 task_release=policy_checked)"
+                meta.name
+                count
+                turn_fail_streak_threshold
+                threshold
+            else
+              Log.Keeper.warn
+                "%s: auto-paused after %d completion contract no-progress failures \
+                 (pause_threshold=%d, crash_threshold=%d, task_release=policy_checked); \
+                 operator must inspect provider/model reasoning output before resuming"
+                meta.name
+                count
+                turn_fail_streak_threshold
+                threshold
           else
             Log.Keeper.warn
               "%s: auto-paused after %d idle-detected loop failures \

@@ -31,6 +31,7 @@ import {
   loadRuntimeCatalog,
   runtimeCatalogState,
 } from '../lib/runtime-catalog-resource'
+import { refreshKeeperRuntimeStatus } from '../store'
 
 // Pending dropdown selection before save. `null` = no pending change (show the
 // server's current value). Module-level singleton: at most one editor renders at
@@ -218,6 +219,10 @@ export function KeeperRuntimeModelEditor({ keeperName }: { keeperName: string })
     try {
       const updated = await patchKeeperConfig(keeperName, { runtime_id: next })
       applyKeeperConfigUpdate(keeperName, updated)
+      void refreshKeeperRuntimeStatus().catch(err => {
+        const message = err instanceof Error ? err.message : '런타임 상태 새로고침 실패'
+        showToast(message, 'warning')
+      })
       modelDraft.value = null
       showToast('런타임 저장 완료', 'success')
     } catch (err) {

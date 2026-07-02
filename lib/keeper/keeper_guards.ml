@@ -931,7 +931,7 @@ let governance_approval_guard
       in
       (* task-1627: unconditional hard_forbidden gate — blocks before HITL *)
       let hard_forbidden =
-        Governance_pipeline.auto_approval_hard_forbidden ~risk !meta_ref
+        Governance_pipeline.auto_approval_hard_forbidden ~risk (Some !meta_ref)
       in
       if hard_forbidden then begin
         let latency_ms = (Time_compat.now () -. t0) *. 1000.0 in

@@ -174,4 +174,7 @@ val route_evidence_json : t -> Yojson.Safe.t
     to the descriptor that owns the runtime route. The policy [effect_domain] is
     [null] when a descriptor has no static effect domain; no fallback sentinel
     string is emitted. *)
+val discovery_fields : t -> (string * Yojson.Safe.t) list
+
+(** Object wrapper for {!discovery_fields}. *)
 val discovery_json : t -> Yojson.Safe.t

@@ -2293,6 +2293,59 @@ let test_stale_storm_pause_persist_failure_keeps_entry_registered () =
       check bool "registry entry kept so the pause retries next sweep"
         true (Reg.is_registered ~base_path:config.base_path name))
 
+(* Structural guard (precedent: test_keeper_pause_silent_failure_source.ml):
+   in [Keeper_keepalive.start_keepalive], the [dispatch_fiber_started]
+   launch gate must run BEFORE every launch side effect — the gRPC
+   heartbeat starter and the live-meta bootstrap/update. A runtime repro
+   is not reachable through the public surface ([register_offline] only
+   runs when the keeper is unregistered, and a fresh registration accepts
+   [Fiber_started]), so the ordering is pinned at the source level: if the
+   gate moves back below the side effects, a rejected launch would again
+   leave a live gRPC heartbeat behind a keeper the registry says never
+   started. *)
+let test_start_keepalive_gate_precedes_side_effects () =
+  let load_source rel =
+    let source_root =
+      match Sys.getenv_opt "DUNE_SOURCEROOT" with
+      | Some root -> root
+      | None -> Sys.getcwd ()
+    in
+    let path = Filename.concat source_root rel in
+    if not (Sys.file_exists path) then
+      fail (Printf.sprintf "source file not found: %s" path)
+    else
+      In_channel.with_open_text path In_channel.input_all
+  in
+  let substring_index ~needle haystack =
+    let nlen = String.length needle in
+    let hlen = String.length haystack in
+    let rec scan pos =
+      if pos + nlen > hlen then None
+      else if String.sub haystack pos nlen = needle then Some pos
+      else scan (pos + 1)
+    in
+    if nlen = 0 then None else scan 0
+  in
+  let index_of ~what needle slice =
+    match substring_index ~needle slice with
+    | Some pos -> pos
+    | None -> fail (Printf.sprintf "%s not found in start_keepalive body" what)
+  in
+  let source = load_source "lib/keeper/keeper_keepalive.ml" in
+  let body_start =
+    index_of ~what:"start_keepalive definition" "let start_keepalive" source
+  in
+  let body = String.sub source body_start (String.length source - body_start) in
+  let gate = index_of ~what:"launch gate call" "dispatch_fiber_started ~base_path" body in
+  let grpc =
+    index_of ~what:"gRPC heartbeat starter call" "start_keeper_grpc_heartbeat ~ctx" body
+  in
+  let bootstrap =
+    index_of ~what:"live meta bootstrap call" "bootstrap_live_keeper_meta ~ctx" body
+  in
+  check bool "launch gate precedes gRPC heartbeat starter" true (gate < grpc);
+  check bool "launch gate precedes live-meta bootstrap" true (gate < bootstrap)
+
 (* Fail-closed launch gate: a registry FSM in a terminal state rejects
    [Fiber_started]; the launch must abort without announcing
    [Started]/[Running], and the entry's done promise must resolve through
@@ -3526,6 +3579,8 @@ let () =
         test_stale_storm_pause_persist_failure_keeps_entry_registered;
       test_case "terminal-state launch reject does not announce Running" `Quick
         test_launch_rejected_terminal_state_does_not_announce_running;
+      test_case "start_keepalive launch gate precedes side effects (source guard)" `Quick
+        test_start_keepalive_gate_precedes_side_effects;
       test_case "unresolved watchdog-stopped budget loop is reaped" `Quick
         test_unresolved_watchdog_stopped_budget_loop_is_reaped;
       test_case "stale run sweep sets watchdog stop signal" `Quick

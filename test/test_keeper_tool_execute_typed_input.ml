@@ -638,6 +638,65 @@ let test_exec_lowering_autocorrects_duplicate_executable_argv () =
       error
 ;;
 
+let test_exec_lowering_preserves_single_argv_equal_to_executable () =
+  let input =
+    Execute_input.Exec
+      { executable = "echo"
+      ; argv = [ "echo" ]
+      ; cwd = None
+      ; env = []
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
+      }
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    Alcotest.(check (pair string (list string)))
+      "single argv equal to executable remains an argument"
+      ("echo", [ "echo" ])
+      (shell_simple_tuple simple)
+  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+    Alcotest.fail "single Exec must not lower to Pipeline"
+  | Error error ->
+    Alcotest.failf
+      "single argv equal to executable should remain valid, got %a"
+      Execute_input.pp_validation_error
+      error
+;;
+
+let test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable () =
+  let input =
+    Execute_input.Pipeline
+      { stages =
+          [ { executable = "echo"; argv = [ "echo" ] }
+          ; { executable = "wc"; argv = [ "-c" ] }
+          ]
+      ; cwd = None
+      ; env = []
+      }
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok
+      (Masc_exec.Shell_ir.Pipeline
+        [ Masc_exec.Shell_ir.Simple first; Masc_exec.Shell_ir.Simple second ]) ->
+    Alcotest.(check (pair string (list string)))
+      "first stage preserves single argv equal to executable"
+      ("echo", [ "echo" ])
+      (shell_simple_tuple first);
+    Alcotest.(check (pair string (list string)))
+      "second stage unchanged"
+      ("wc", [ "-c" ])
+      (shell_simple_tuple second)
+  | Ok other ->
+    Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
+  | Error error ->
+    Alcotest.failf
+      "pipeline with single argv equal to executable should remain valid, got %a"
+      Execute_input.pp_validation_error
+      error
+;;
+
 let docker_test_sandbox () =
   Masc_exec.Sandbox_target.docker
     ~image:"typed-docker"
@@ -1245,6 +1304,14 @@ let suite =
           "exec_lowering_autocorrects_duplicate_executable_argv"
           `Quick
           test_exec_lowering_autocorrects_duplicate_executable_argv
+      ; Alcotest.test_case
+          "exec_lowering_preserves_single_argv_equal_to_executable"
+          `Quick
+          test_exec_lowering_preserves_single_argv_equal_to_executable
+      ; Alcotest.test_case
+          "pipeline_lowering_preserves_single_stage_argv_equal_to_executable"
+          `Quick
+          test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable
       ; Alcotest.test_case
           "pipeline_lowers_with_injected_docker_sandbox"
           `Quick

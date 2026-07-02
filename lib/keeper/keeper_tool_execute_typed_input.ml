@@ -417,7 +417,7 @@ let check_env env =
    self-correction round-trip. *)
 let drop_duplicate_argv0 ~executable argv =
   match argv with
-  | first :: rest when String.equal first executable -> rest
+  | first :: (_ :: _ as rest) when String.equal first executable -> rest
   | _ -> argv
 ;;
 

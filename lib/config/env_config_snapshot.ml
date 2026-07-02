@@ -578,55 +578,58 @@ let optional_default_to_display = function
   | Some value -> value
 ;;
 
+(* Env-var names come from Env_config_keeper.KeeperMemoryOs (the reader
+   module), never from re-spelled literals: a registry entry whose env var
+   nothing reads is a silent no-op reported as source=env. *)
 let memory_entries =
   [
     entry
       ~default:(string_of_bool Memory_os_defaults.recall_enabled_default)
-      "MASC_KEEPER_MEMORY_OS_RECALL"
+      Memory_os_defaults.recall_env_key
       "Memory OS recall prompt injection enabled; invalid values fail closed";
     entry
       ~default:(string_of_bool Memory_os_defaults.librarian_enabled_default)
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+      Memory_os_defaults.librarian_env_key
       "Memory OS post-turn librarian extraction enabled; invalid values fail closed";
     entry
       ~default:(string_of_int Memory_os_defaults.librarian_cadence_turns_default)
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
+      Memory_os_defaults.librarian_cadence_turns_env_key
       "Turns between librarian extraction attempts per keeper (floor 1)";
     entry
       ~default:(string_of_int Memory_os_defaults.librarian_max_messages_default)
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
+      Memory_os_defaults.librarian_max_messages_env_key
       "Recent-message window for librarian extraction (floor 1)";
     entry
       ~default:
         (Memory_os_defaults.float_default_to_display Memory_os_defaults.librarian_timeout_sec_default)
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
+      Memory_os_defaults.librarian_timeout_sec_env_key
       "Provider timeout for librarian extraction in seconds";
     entry
       ~default:(string_of_int Memory_os_defaults.librarian_max_tokens_default)
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
-      "Output token cap for librarian extraction (applied as min with provider max_tokens)";
+      Memory_os_defaults.librarian_max_tokens_env_key
+      "Output token cap for librarian extraction (applied as min with provider max_tokens, floor 1)";
     entry
       ~default:
         (optional_default_to_display Memory_os_defaults.librarian_runtime_id_default)
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+      Memory_os_defaults.librarian_runtime_id_env_key
       "Optional runtime id override for librarian extraction; (none) displays the empty default";
     entry
       ~default:(string_of_int Memory_os_defaults.librarian_global_slot_default)
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+      Memory_os_defaults.librarian_global_slot_env_key
       "Fleet-wide concurrency gate for librarian provider calls; 0 disables";
     entry
       ~default:(string_of_bool Memory_os_defaults.gc_enabled_default)
-      "MASC_KEEPER_MEMORY_OS_GC"
+      Memory_os_defaults.gc_env_key
       "Per-keeper Memory OS GC maintenance fiber kill switch; invalid values fail closed";
     entry
       ~default:(string_of_bool Memory_os_defaults.consolidation_enabled_default)
-      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+      Memory_os_defaults.consolidation_env_key
       "Per-keeper Memory OS consolidation maintenance fiber kill switch; invalid values fail closed";
     entry
       ~default:
         (optional_default_to_display
            Memory_os_defaults.consolidation_runtime_id_default)
-      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
+      Memory_os_defaults.consolidation_runtime_id_env_key
       "Optional runtime id override for Memory OS consolidation; (none) displays the empty default";
   ]
 

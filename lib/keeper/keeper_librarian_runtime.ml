@@ -1,13 +1,14 @@
 (** Runtime adapter for Memory OS librarian extraction. *)
 
 (* Cap on the librarian extraction output, applied as
-   [min provider_cfg.max_tokens librarian_max_tokens] at the complete call
+   [min provider_cfg.max_tokens (librarian_max_tokens ())] at the complete call
    (see [extract] below). The previous fixed cap of 1024 truncated episode
    JSON mid-object whenever the summary plus facts exceeded ~1024 output
    tokens, surfacing as "invalid_json: Unexpected end of input" every turn.
    4096 covers realistic episode payloads while staying well under the
-   JSON-capable model context budget; tunable via Env_config.KeeperMemoryOs. *)
-let librarian_max_tokens = Env_config.KeeperMemoryOs.librarian_max_tokens_default
+   JSON-capable model context budget; tunable via
+   [MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS] (floor 1). *)
+let librarian_max_tokens () = Env_config.KeeperMemoryOs.librarian_max_tokens ()
 
 (* Memory extraction runs against a JSON-capable model with a long context
    window and is not constrained by the generic inference API budget (30s).
@@ -252,11 +253,12 @@ let select_recent_messages ~max_messages messages =
 ;;
 
 let provider_for_librarian (provider_cfg : Llm_provider.Provider_config.t) =
+  let configured_librarian_max_tokens = librarian_max_tokens () in
   let max_tokens =
     match provider_cfg.max_tokens with
-    | Some n when n > 0 -> Some (min n librarian_max_tokens)
-    | Some _ -> Some librarian_max_tokens
-    | None -> Some librarian_max_tokens
+    | Some n when n > 0 -> Some (min n configured_librarian_max_tokens)
+    | Some _ -> Some configured_librarian_max_tokens
+    | None -> Some configured_librarian_max_tokens
   in
   { provider_cfg with
     max_tokens

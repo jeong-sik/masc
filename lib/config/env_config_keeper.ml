@@ -202,6 +202,22 @@ module KeeperMemoryOs = struct
   let consolidation_enabled_default = false
   let consolidation_runtime_id_default = None
 
+  (* Env-key SSOT: the config-introspection registry
+     (env_config_snapshot.ml memory_entries) and the tests reference these
+     constants instead of re-spelling the literals, so a knob rename breaks
+     compilation instead of silently drifting into a phantom registry entry. *)
+  let recall_env_key = "MASC_KEEPER_MEMORY_OS_RECALL"
+  let librarian_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+  let librarian_cadence_turns_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
+  let librarian_max_messages_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
+  let librarian_timeout_sec_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
+  let librarian_max_tokens_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
+  let librarian_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+  let librarian_global_slot_env_key = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+  let gc_env_key = "MASC_KEEPER_MEMORY_OS_GC"
+  let consolidation_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+  let consolidation_runtime_id_env_key = "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
+
   let optional_string_default value = Option.value value ~default:""
   ;;
 
@@ -227,7 +243,7 @@ module KeeperMemoryOs = struct
   let recall_enabled () =
     get_bool_logged
       ~invalid:Env_config_memory.Fail_closed
-      "MASC_KEEPER_MEMORY_OS_RECALL"
+      recall_env_key
       ~default:recall_enabled_default
   ;;
 
@@ -239,7 +255,7 @@ module KeeperMemoryOs = struct
   let librarian_enabled () =
     get_bool_logged
       ~invalid:Env_config_memory.Fail_closed
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
+      librarian_env_key
       ~default:librarian_enabled_default
   ;;
 
@@ -251,7 +267,7 @@ module KeeperMemoryOs = struct
     max
       1
       (get_int_logged
-         "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
+         librarian_cadence_turns_env_key
          ~default:librarian_cadence_turns_default)
   ;;
 
@@ -263,7 +279,7 @@ module KeeperMemoryOs = struct
     max
       1
       (get_int_logged
-         "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
+         librarian_max_messages_env_key
          ~default:librarian_max_messages_default)
   ;;
 
@@ -273,8 +289,20 @@ module KeeperMemoryOs = struct
       @ops_class operator *)
   let librarian_timeout_sec () =
     get_float_positive_logged
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC"
+      librarian_timeout_sec_env_key
       ~default:librarian_timeout_sec_default
+  ;;
+
+  (** Output token cap for librarian extraction, applied as min with the
+      provider max_tokens. Default: 4096, floored to 1.
+      @category Runtime
+      @ops_class operator *)
+  let librarian_max_tokens () =
+    max
+      1
+      (get_int_logged
+         librarian_max_tokens_env_key
+         ~default:librarian_max_tokens_default)
   ;;
 
   (** Optional runtime id override for librarian extraction.
@@ -283,7 +311,7 @@ module KeeperMemoryOs = struct
   let librarian_runtime_id () =
     get_string
       ~default:(optional_string_default librarian_runtime_id_default)
-      "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+      librarian_runtime_id_env_key
     |> nonempty_string
   ;;
 
@@ -295,7 +323,7 @@ module KeeperMemoryOs = struct
     max
       0
       (get_int_logged
-         "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
+         librarian_global_slot_env_key
          ~default:librarian_global_slot_default)
   ;;
 
@@ -307,7 +335,7 @@ module KeeperMemoryOs = struct
   let gc_enabled () =
     get_bool_logged
       ~invalid:Env_config_memory.Fail_closed
-      "MASC_KEEPER_MEMORY_OS_GC"
+      gc_env_key
       ~default:gc_enabled_default
   ;;
 
@@ -318,7 +346,7 @@ module KeeperMemoryOs = struct
   let consolidation_enabled () =
     get_bool_logged
       ~invalid:Env_config_memory.Fail_closed
-      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
+      consolidation_env_key
       ~default:consolidation_enabled_default
   ;;
 
@@ -328,7 +356,7 @@ module KeeperMemoryOs = struct
   let consolidation_runtime_id () =
     get_string
       ~default:(optional_string_default consolidation_runtime_id_default)
-      "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
+      consolidation_runtime_id_env_key
     |> nonempty_string
   ;;
 end

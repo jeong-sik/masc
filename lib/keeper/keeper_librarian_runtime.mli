@@ -114,6 +114,10 @@ val messages_for_librarian
 val provider_for_librarian
   :  Llm_provider.Provider_config.t
   -> Llm_provider.Provider_config.t
+(** Provider config specialized for episode extraction. Caps [max_tokens] at
+    the librarian output budget (default 4096, overridable with
+    [MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS], floor 1) and requests the
+    structured episode output schema. *)
 
 val librarian_max_parse_retries : int
 (** Additional provider attempts after an initial unparseable response before

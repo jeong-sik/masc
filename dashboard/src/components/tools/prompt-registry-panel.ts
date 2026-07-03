@@ -23,6 +23,7 @@ import {
   type KeeperPromptAssemblyRow,
   type KeeperPromptAssemblyStage,
 } from '../keeper-prompt-assembly-panel'
+import { PromptBookPanel } from './prompt-book-panel'
 
 export type PromptSourceFilter = 'all' | PromptSource
 export type PromptPresetId = 'all' | 'attention' | `stage:${string}`
@@ -220,6 +221,10 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const [draft, setDraft] = useState('')
   const [draftPromptKey, setDraftPromptKey] = useState<string | null>(null)
   const [preset, setPreset] = useState<PromptPresetId>('all')
+  // '레지스트리' = the existing effective/override editor; '주입서' = the read-only
+  // Prompt Book (9-block assembly + full library catalog). Defaults to the editor
+  // so the registry stays the landing view.
+  const [surfaceView, setSurfaceView] = useState<'registry' | 'book'>('registry')
 
   const report = useMemo(() => buildKeeperPromptAssemblyReport(prompts), [prompts])
   const presets = promptPresetOptions(prompts, report)
@@ -555,13 +560,47 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
       </div>
   `
 
+  const viewTabs = html`
+    <div class="mb-4 flex gap-1" role="tablist" data-prompt-view-switcher>
+      <button
+        type="button"
+        role="tab"
+        aria-selected=${surfaceView === 'registry'}
+        class=${`rounded-[var(--r-0)] border px-3 py-1.5 text-xs ${
+          surfaceView === 'registry'
+            ? 'border-[var(--accent-22)] bg-[var(--accent-8)] text-[var(--color-fg-primary)]'
+            : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'
+        }`}
+        onClick=${() => setSurfaceView('registry')}
+      >레지스트리</button>
+      <button
+        type="button"
+        role="tab"
+        aria-selected=${surfaceView === 'book'}
+        class=${`rounded-[var(--r-0)] border px-3 py-1.5 text-xs ${
+          surfaceView === 'book'
+            ? 'border-[var(--accent-22)] bg-[var(--accent-8)] text-[var(--color-fg-primary)]'
+            : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'
+        }`}
+        onClick=${() => setSurfaceView('book')}
+      >주입서</button>
+    </div>
+  `
+
+  const content = html`
+    ${viewTabs}
+    ${surfaceView === 'book'
+      ? html`<div class="set-promptbook-host"><${PromptBookPanel} prompts=${prompts} loading=${loading} /></div>`
+      : body}
+  `
+
   if (embedded) {
-    return html`<div class="prompt-registry-panel prompt-registry-panel-embedded" data-testid="prompt-registry-panel">${body}</div>`
+    return html`<div class="prompt-registry-panel prompt-registry-panel-embedded" data-testid="prompt-registry-panel">${content}</div>`
   }
 
   return html`
     <${SectionCard} label="프롬프트 레지스트리" class="section mb-4">
-      <div data-testid="prompt-registry-panel">${body}</div>
+      <div data-testid="prompt-registry-panel">${content}</div>
     <//>
   `
 }

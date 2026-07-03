@@ -531,28 +531,23 @@ let run_turn
       | Ok () -> None
       | Error err -> Some err
     in
-    let layer_cap divisor = max 1 (max_context / divisor) in
+    let context_layer policy text =
+      Keeper_run_prompt.estimate_context_layer_policy_budget
+        ~max_context
+        ~policy
+        ~text
+    in
     let context_layers =
-      [ Keeper_run_prompt.estimate_context_layer_budget
-          ~layer_name:"world_dynamic_context"
-          ~priority:"high"
-          ~cap_tokens:(layer_cap 4)
-          ~text:dynamic_context
-      ; Keeper_run_prompt.estimate_context_layer_budget
-          ~layer_name:"memory_context"
-          ~priority:"normal"
-          ~cap_tokens:(layer_cap 8)
-          ~text:memory_context
-      ; Keeper_run_prompt.estimate_context_layer_budget
-          ~layer_name:"temporal_context"
-          ~priority:"low"
-          ~cap_tokens:(layer_cap 16)
-          ~text:temporal_context
-      ; Keeper_run_prompt.estimate_context_layer_budget
-          ~layer_name:"user_message"
-          ~priority:"required"
-          ~cap_tokens:max_context
-          ~text:user_message
+      [ context_layer
+          Keeper_run_prompt.world_dynamic_context_layer_policy
+          dynamic_context
+      ; context_layer Keeper_run_prompt.memory_context_layer_policy memory_context
+      ; context_layer
+          Keeper_run_prompt.temporal_context_layer_policy
+          temporal_context
+      ; context_layer
+          Keeper_run_prompt.user_message_context_layer_policy
+          user_message
       ]
     in
     append_manifest ~site:"context_preflight"

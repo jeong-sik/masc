@@ -46,6 +46,18 @@ type context_layer_budget =
   ; context_layer_decision : context_layer_decision
   }
 
+type context_layer_cap =
+  | Full_context_window
+  | Quarter_context_window
+  | Eighth_context_window
+  | Sixteenth_context_window
+
+type context_layer_policy =
+  { context_layer_policy_name : string
+  ; context_layer_policy_priority : string
+  ; context_layer_policy_cap : context_layer_cap
+  }
+
 type extra_system_context_budget =
   { extra_system_context : string option
   ; included_blocks : (Prompt_block_id.t * string) list
@@ -60,6 +72,36 @@ let context_layer_decision_to_string = function
   | Within_cap -> "within_cap"
   | Over_cap_observed -> "over_cap_observed"
   | Empty -> "empty"
+
+let context_layer_cap_tokens ~max_context = function
+  | Full_context_window -> max 1 max_context
+  | Quarter_context_window -> max 1 (max_context / 4)
+  | Eighth_context_window -> max 1 (max_context / 8)
+  | Sixteenth_context_window -> max 1 (max_context / 16)
+
+let world_dynamic_context_layer_policy =
+  { context_layer_policy_name = "world_dynamic_context"
+  ; context_layer_policy_priority = "high"
+  ; context_layer_policy_cap = Quarter_context_window
+  }
+
+let memory_context_layer_policy =
+  { context_layer_policy_name = "memory_context"
+  ; context_layer_policy_priority = "normal"
+  ; context_layer_policy_cap = Eighth_context_window
+  }
+
+let temporal_context_layer_policy =
+  { context_layer_policy_name = "temporal_context"
+  ; context_layer_policy_priority = "low"
+  ; context_layer_policy_cap = Sixteenth_context_window
+  }
+
+let user_message_context_layer_policy =
+  { context_layer_policy_name = "user_message"
+  ; context_layer_policy_priority = "required"
+  ; context_layer_policy_cap = Full_context_window
+  }
 
 let prompt_injection_prefixes =
   [
@@ -360,6 +402,16 @@ let estimate_context_layer_budget
   ; context_layer_budgeted_tokens = budgeted_tokens
   ; context_layer_decision = decision
   }
+
+let estimate_context_layer_policy_budget
+    ~(max_context : int)
+    ~(policy : context_layer_policy)
+    ~(text : string) : context_layer_budget =
+  estimate_context_layer_budget
+    ~layer_name:policy.context_layer_policy_name
+    ~priority:policy.context_layer_policy_priority
+    ~cap_tokens:(context_layer_cap_tokens ~max_context policy.context_layer_policy_cap)
+    ~text
 
 let context_layer_budget_to_json layer =
   `Assoc

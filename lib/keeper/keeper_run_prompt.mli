@@ -46,6 +46,18 @@ type context_layer_budget =
   ; context_layer_decision : context_layer_decision
   }
 
+type context_layer_cap =
+  | Full_context_window
+  | Quarter_context_window
+  | Eighth_context_window
+  | Sixteenth_context_window
+
+type context_layer_policy =
+  { context_layer_policy_name : string
+  ; context_layer_policy_priority : string
+  ; context_layer_policy_cap : context_layer_cap
+  }
+
 type extra_system_context_budget =
   { extra_system_context : string option
   ; included_blocks : (Prompt_block_id.t * string) list
@@ -135,6 +147,31 @@ val estimate_context_layer_budget :
 (** Estimate one prompt/context layer against its deterministic cap for
     manifest/debug accounting. This function does not mutate the layer text;
     over-cap layers are reported as [over_cap_observed], not as truncated. *)
+
+val context_layer_cap_tokens :
+  max_context:int -> context_layer_cap -> int
+(** Resolve a typed context-layer cap against the effective provider context
+    window. *)
+
+val world_dynamic_context_layer_policy : context_layer_policy
+(** Manifest budget policy for the dynamic world/context layer. *)
+
+val memory_context_layer_policy : context_layer_policy
+(** Manifest budget policy for recalled memory context. *)
+
+val temporal_context_layer_policy : context_layer_policy
+(** Manifest budget policy for temporal summary context. *)
+
+val user_message_context_layer_policy : context_layer_policy
+(** Manifest budget policy for the required user message layer. *)
+
+val estimate_context_layer_policy_budget :
+  max_context:int ->
+  policy:context_layer_policy ->
+  text:string ->
+  context_layer_budget
+(** Estimate one layer using a named runtime policy instead of call-site
+    divisors. *)
 
 val context_layer_budget_to_json : context_layer_budget -> Yojson.Safe.t
 (** JSON projection for runtime manifests and dashboard/debug surfaces. *)

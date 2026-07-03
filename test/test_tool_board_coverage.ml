@@ -1641,85 +1641,6 @@ let test_post_get_not_found () =
   Alcotest.(check bool) "body mentions gone" true
     (String_util.contains_substring_ci body "no longer exists")
 
-let create_post_with_comments ~count =
-  let ok, body =
-    dispatch "masc_board_post"
-      (make_args [ ("content", `String "Thread root"); ("author", `String "tester") ])
-  in
-  Alcotest.(check bool) "create root ok" true ok;
-  let post_id =
-    parse_create_response_json body
-    |> Yojson.Safe.Util.member "id"
-    |> Yojson.Safe.Util.to_string
-  in
-  for i = 1 to count do
-    let ok, _ =
-      dispatch
-        "masc_board_comment"
-        (make_args
-           [ "post_id", `String post_id
-           ; "content", `String (Printf.sprintf "comment-%03d" i)
-           ; "author", `String (Printf.sprintf "commenter-%03d" i)
-           ])
-    in
-    Alcotest.(check bool) (Printf.sprintf "comment %d ok" i) true ok
-  done;
-  post_id
-
-let check_get_footer ~label post_id args expected =
-  let ok, body =
-    dispatch "masc_board_post_get" (make_args (("post_id", `String post_id) :: args))
-  in
-  Alcotest.(check bool) (label ^ " get ok") true ok;
-  Alcotest.(check bool) label true (contains_substring body expected)
-
-let test_post_get_comment_pagination_clamps_and_advances () =
-  with_eio @@ fun env ->
-  Fs_compat.set_fs (Eio.Stdenv.fs env);
-  cleanup ();
-  let post_id = create_post_with_comments ~count:105 in
-  check_get_footer
-    ~label:"default limit"
-    post_id
-    []
-    "Showing comments 1-50 of 105. Use comment_offset=50 to see more.";
-  check_get_footer
-    ~label:"over max limit"
-    post_id
-    [ "comment_limit", `Int 999 ]
-    "Showing comments 1-100 of 105. Use comment_offset=100 to see more.";
-  check_get_footer
-    ~label:"zero limit clamps to one"
-    post_id
-    [ "comment_limit", `Int 0 ]
-    "Showing comments 1-1 of 105. Use comment_offset=1 to see more.";
-  check_get_footer
-    ~label:"negative limit clamps to one"
-    post_id
-    [ "comment_limit", `Int (-10) ]
-    "Showing comments 1-1 of 105. Use comment_offset=1 to see more.";
-  check_get_footer
-    ~label:"normal page advances"
-    post_id
-    [ "comment_offset", `Int 2; "comment_limit", `Int 2 ]
-    "Showing comments 3-4 of 105. Use comment_offset=4 to see more.";
-  check_get_footer
-    ~label:"final page names returned range"
-    post_id
-    [ "comment_offset", `Int 100; "comment_limit", `Int 100 ]
-    "Showing comments 101-105 of 105. No more comments.";
-  check_get_footer
-    ~label:"offset at end is empty final page"
-    post_id
-    [ "comment_offset", `Int 105; "comment_limit", `Int 100 ]
-    "Showing comments 0 of 105. No more comments.";
-  let small_post_id = create_post_with_comments ~count:2 in
-  check_get_footer
-    ~label:"all comments only when first page spans whole thread"
-    small_post_id
-    []
-    "Showing all 2 comments."
-
 (** {2 Group 4: Voting} *)
 
 let test_vote_not_found () =
@@ -2250,8 +2171,6 @@ let () =
             `Quick
             test_post_get_comment_pagination_clamps_and_advances;
           Alcotest.test_case "get not found" `Quick test_post_get_not_found;
-          Alcotest.test_case "get comment pagination" `Quick
-            test_post_get_comment_pagination_clamps_and_advances;
         ] );
       ( "voting",
         [

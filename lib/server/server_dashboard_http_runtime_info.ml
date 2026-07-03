@@ -1479,6 +1479,13 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "tools_support", `Bool rt.model.tools_support
     ; "thinking_support", `Bool rt.model.thinking_support
     ; "streaming", `Bool rt.model.streaming
+      (* Per-model sampling temperature override ([models.<id>].temperature).
+         [`Null] when unset (the runtime keeps the fleet fallback). Read-only
+         projection for the dashboard runtime capability card. *)
+    ; ( "temperature"
+      , match rt.model.temperature with
+        | Some t -> `Float t
+        | None -> `Null )
       (* Additive capability projection for the per-keeper runtime capability
          card (dashboard keeper-workspace-rail rtc-card): multimodal input +
          effort adjustability read-only. *)

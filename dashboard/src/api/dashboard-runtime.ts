@@ -35,6 +35,9 @@ export interface DashboardRuntimeProviderSnapshot {
   tools_support?: boolean
   thinking_support?: boolean
   streaming?: boolean
+  /** Per-model sampling temperature override ([models.<id>].temperature);
+   *  null when unset (runtime keeps the fleet fallback). */
+  temperature?: number | null
   capabilities_declared?: boolean
   supports_multimodal_inputs?: boolean
   supports_image_input?: boolean
@@ -225,6 +228,7 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     tools_support: asBoolean(raw.tools_support),
     thinking_support: asBoolean(raw.thinking_support),
     streaming: asBoolean(raw.streaming),
+    temperature: asNumber(raw.temperature) ?? null,
     capabilities_declared: asBoolean(raw.capabilities_declared),
     supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
     supports_image_input: asBoolean(raw.supports_image_input),

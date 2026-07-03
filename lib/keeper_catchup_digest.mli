@@ -62,6 +62,23 @@ type lifecycle =
   ; items : lifecycle_item list
   }
 
+type source_coverage =
+  { lower_bound : bool
+  ; reason : string option
+  }
+
+(** Per-source coverage flags. A [lower_bound = true] means the corresponding
+    count may be incomplete because scanning stopped before the requested
+    [since_unix] (e.g. page cap or look-back window clamp). [reason] is present
+    when the count is a lower bound and absent otherwise. *)
+type coverage =
+  { chat : source_coverage
+  ; turns : source_coverage
+  ; tasks : source_coverage
+  ; board : source_coverage
+  ; lifecycle : source_coverage
+  }
+
 type t =
   { keeper : string
   ; since_unix : float
@@ -71,6 +88,7 @@ type t =
   ; tasks : tasks
   ; board : board
   ; lifecycle : lifecycle
+  ; coverage : coverage
   ; read_errors : string list
   }
 
@@ -103,6 +121,7 @@ val build :
       records, plus [paused_now] from the keeper meta.
 
     Look-back is clamped to the JSONL retention window; beyond it the counts
-    are a lower bound and the echoed [since_unix] lets the client detect it.
-    Failures and bounded scans that stop before [since_unix] append to
-    [read_errors]; a missing store is zero, not a failure. *)
+    are a lower bound. The [coverage] field exposes per-source lower-bound
+    flags and reasons so the client can render truncation warnings without
+    inferring them from [since_unix]. Failures append to [read_errors]; a
+    missing store is zero, not a failure. *)

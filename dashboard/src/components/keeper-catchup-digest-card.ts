@@ -24,16 +24,40 @@ export function keeperCatchupDigestActivityCount(digest: KeeperCatchupDigest): n
   )
 }
 
-// The card renders only when there is genuine new activity, OR when a source
-// read failed (read_errors is fail-visible — the operator must know the counts
-// may be incomplete even if everything else is zero).
+function coverageHasLowerBound(
+  coverage: KeeperCatchupDigest['coverage'],
+): boolean {
+  return Object.values(coverage).some(source => source.lower_bound)
+}
+
+function coverageWarnings(digest: KeeperCatchupDigest): string[] {
+  const warnings: string[] = []
+  const push = (
+    label: string,
+    source: { lower_bound: boolean; reason?: string | null },
+  ) => {
+    if (source.lower_bound) {
+      warnings.push(`${label}: ${source.reason ?? '일부 누락 가능'}`)
+    }
+  }
+  push('채팅', digest.coverage.chat)
+  push('턴', digest.coverage.turns)
+  push('태스크', digest.coverage.tasks)
+  push('보드', digest.coverage.board)
+  push('일시정지/재개', digest.coverage.lifecycle)
+  return warnings
+}
+
+// The card renders when there is genuine new activity, when a source read
+// failed, or when a source count is a lower bound (fail-visible truncation).
 export function shouldShowKeeperCatchupDigest(
   digest: KeeperCatchupDigest | null | undefined,
 ): digest is KeeperCatchupDigest {
   if (!digest) return false
   return (
     keeperCatchupDigestActivityCount(digest) >= KEEPER_DIGEST_MIN_ACTIVITY ||
-    digest.read_errors.length > 0
+    digest.read_errors.length > 0 ||
+    coverageHasLowerBound(digest.coverage)
   )
 }
 
@@ -107,6 +131,13 @@ export function KeeperCatchupDigestCard({ digest }: { digest: KeeperCatchupDiges
         ? html`
             <div class="mt-2 rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-2xs leading-relaxed text-[var(--warn-bright)]">
               읽기 오류 (일부 카운트가 누락됐을 수 있습니다): ${digest.read_errors.join(', ')}
+            </div>
+          `
+        : null}
+      ${coverageWarnings(digest).length > 0
+        ? html`
+            <div class="mt-2 rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-2xs leading-relaxed text-[var(--warn-bright)]">
+              일부 저장소가 생략되어 카운트가 하한값일 수 있습니다: ${coverageWarnings(digest).join('; ')}
             </div>
           `
         : null}

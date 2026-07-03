@@ -72,6 +72,19 @@ const KeeperCatchupDigestLifecycleSchema = object({
   items: array(KeeperCatchupDigestLifecycleItemSchema),
 })
 
+const KeeperCatchupDigestSourceCoverageSchema = object({
+  lower_bound: boolean(),
+  reason: optional(nullable(string())),
+})
+
+const KeeperCatchupDigestCoverageSchema = object({
+  chat: KeeperCatchupDigestSourceCoverageSchema,
+  turns: KeeperCatchupDigestSourceCoverageSchema,
+  tasks: KeeperCatchupDigestSourceCoverageSchema,
+  board: KeeperCatchupDigestSourceCoverageSchema,
+  lifecycle: KeeperCatchupDigestSourceCoverageSchema,
+})
+
 export const KeeperCatchupDigestSchema = object({
   keeper: string(),
   since_unix: number(),
@@ -81,6 +94,7 @@ export const KeeperCatchupDigestSchema = object({
   tasks: KeeperCatchupDigestTasksSchema,
   board: KeeperCatchupDigestBoardSchema,
   lifecycle: KeeperCatchupDigestLifecycleSchema,
+  coverage: KeeperCatchupDigestCoverageSchema,
   read_errors: array(string()),
 })
 

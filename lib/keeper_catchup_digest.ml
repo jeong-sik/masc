@@ -88,6 +88,19 @@ type lifecycle =
   ; items : lifecycle_item list
   }
 
+type source_coverage =
+  { lower_bound : bool
+  ; reason : string option
+  }
+
+type coverage =
+  { chat : source_coverage
+  ; turns : source_coverage
+  ; tasks : source_coverage
+  ; board : source_coverage
+  ; lifecycle : source_coverage
+  }
+
 type t =
   { keeper : string
   ; since_unix : float
@@ -97,6 +110,7 @@ type t =
   ; tasks : tasks
   ; board : board
   ; lifecycle : lifecycle
+  ; coverage : coverage
   ; read_errors : string list
   }
 
@@ -186,7 +200,7 @@ let read_jsonl_file ~errs ~label ~path ~f =
    epoch is UTC midnight. *)
 let fold_day_partitioned ~errs ~label ~dir ~since_unix ~now_unix ~f =
   let day_seconds = 86400. in
-  let start_unix =
+  let clamped_since =
     Float.max since_unix (now_unix -. (float_of_int max_scan_days *. day_seconds))
   in
   let day_index ts = int_of_float (Float.floor (ts /. day_seconds)) in
@@ -201,12 +215,13 @@ let fold_day_partitioned ~errs ~label ~dir ~since_unix ~now_unix ~f =
          (tm.Unix.tm_mon + 1)
          tm.Unix.tm_mday)
   in
-  let start_day = day_index start_unix in
+  let start_day = day_index clamped_since in
   let end_day = day_index now_unix in
   for d = start_day to end_day do
     let path = path_of_day d in
     if Sys.file_exists path then read_jsonl_file ~errs ~label ~path ~f
-  done
+  done;
+  clamped_since > since_unix
 ;;
 
 (* ── Chat (single per-keeper append-ordered file) ────────────────── *)
@@ -231,6 +246,7 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
   let new_messages = ref 0 in
   let transport = ref 0 in
   let first_new = ref None in
+  let truncated = ref false in
   let note_first ts =
     first_new
       := Some (match !first_new with Some f -> Float.min f ts | None -> ts)
@@ -251,10 +267,11 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
   in
   let rec loop before iters =
     if iters >= chat_page_cap
-    then
+    then (
+      truncated := true;
       bounded_add
         errs
-        "keeper-chat: page cap reached before since_unix; chat counts are lower bounds"
+        "keeper-chat: page cap reached before since_unix; chat counts are lower bounds")
     else (
       let { Keeper_chat_store.messages; has_more } =
         Keeper_chat_store.load_page ~base_dir ~keeper_name ?before ()
@@ -274,10 +291,11 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
       | Some _ | None -> ())
   in
   loop None 0;
-  { new_messages = !new_messages
-  ; first_new_ts = !first_new
-  ; transport_failures = !transport
-  }
+  ( { new_messages = !new_messages
+    ; first_new_ts = !first_new
+    ; transport_failures = !transport
+    }
+  , !truncated )
 ;;
 
 (* ── Aggregation ─────────────────────────────────────────────────── *)
@@ -295,62 +313,73 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       (Common.keeper_runtime_store_dirname store)
   in
   (* chat *)
-  let chat = read_chat ~base_dir:base_path ~keeper_name ~since:since_unix ~errs in
+  let chat, chat_truncated =
+    read_chat ~base_dir:base_path ~keeper_name ~since:since_unix ~errs
+  in
   (* turns.completed — keeper-local turn-records *)
   let completed = ref 0 in
-  fold_day_partitioned
-    ~errs
-    ~label:"turn-records"
-    ~dir:(keeper_local Common.Keeper_turn_records)
-    ~since_unix
-    ~now_unix
-    ~f:(fun json ->
-      match json_num_field "ts" json with
-      | Some ts when ts > since_unix -> incr completed
-      | _ -> ());
+  let turns_day_truncated =
+    fold_day_partitioned
+      ~errs
+      ~label:"turn-records"
+      ~dir:(keeper_local Common.Keeper_turn_records)
+      ~since_unix
+      ~now_unix
+      ~f:(fun json ->
+        match json_num_field "ts" json with
+        | Some ts when ts > since_unix -> incr completed
+        | _ -> ())
+  in
   (* turns.crashes — Keeper_crash_persistence exposes the crash-events reader,
      so use it rather than re-spelling that store's path. *)
   let crashes = ref 0 in
-  Keeper_crash_persistence.recent_crashes
-    ~keepers_dir
-    ~name:keeper_name
-    ~max_entries:crash_scan_max
-  |> List.iter (fun json ->
-    match json_num_field "ts" json with
-    | Some ts when ts > since_unix -> incr crashes
-    | _ -> ());
+  let crash_entries =
+    Keeper_crash_persistence.recent_crashes
+      ~keepers_dir
+      ~name:keeper_name
+      ~max_entries:crash_scan_max
+  in
+  let crash_truncated = List.length crash_entries >= crash_scan_max in
+  List.iter
+    (fun json ->
+      match json_num_field "ts" json with
+      | Some ts when ts > since_unix -> incr crashes
+      | _ -> ())
+    crash_entries;
   (* turns.failed + board — one pass over activity-events *)
   let failed = ref 0 in
   let posted = ref 0 in
   let commented = ref 0 in
   let voted = ref 0 in
   let since_ms = since_unix *. 1000. in
-  fold_day_partitioned
-    ~errs
-    ~label:"activity-events"
-    ~dir:(Filename.concat masc_dir activity_events_dirname)
-    ~since_unix
-    ~now_unix
-    ~f:(fun json ->
-      match Activity_graph.event_of_yojson json with
-      | None -> ()
-      | Some ({ kind; ts_ms; actor; payload; _ } : Activity_graph.event) ->
-        let actor_match =
-          match actor with
-          | Some ({ id; _ } : Activity_graph.entity_ref) -> identity_of id
-          | None -> false
-        in
-        if float_of_int ts_ms > since_ms
-           && (actor_match || payload_identity_match ~identity_of payload)
-        then
-          if String.equal kind keeper_turn_failed_kind
-          then incr failed
-          else if String.equal kind Event_kind.Board.(to_string Posted)
-          then incr posted
-          else if String.equal kind Event_kind.Board.(to_string Commented)
-          then incr commented
-          else if String.equal kind Event_kind.Board.(to_string Voted)
-          then incr voted);
+  let activity_truncated =
+    fold_day_partitioned
+      ~errs
+      ~label:"activity-events"
+      ~dir:(Filename.concat masc_dir activity_events_dirname)
+      ~since_unix
+      ~now_unix
+      ~f:(fun json ->
+        match Activity_graph.event_of_yojson json with
+        | None -> ()
+        | Some ({ kind; ts_ms; actor; payload; _ } : Activity_graph.event) ->
+          let actor_match =
+            match actor with
+            | Some ({ id; _ } : Activity_graph.entity_ref) -> identity_of id
+            | None -> false
+          in
+          if float_of_int ts_ms > since_ms
+             && (actor_match || payload_identity_match ~identity_of payload)
+          then
+            if String.equal kind keeper_turn_failed_kind
+            then incr failed
+            else if String.equal kind Event_kind.Board.(to_string Posted)
+            then incr posted
+            else if String.equal kind Event_kind.Board.(to_string Commented)
+            then incr commented
+            else if String.equal kind Event_kind.Board.(to_string Voted)
+            then incr voted)
+  in
   (* tasks — Audit_log owns the .masc/audit schema; parse each row through its
      typed decoder so the transition class comes from the [action] variant,
      not a local string classifier. *)
@@ -359,56 +388,58 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
   let released = ref 0 in
   let cancelled = ref 0 in
   let task_items = ref [] in
-  fold_day_partitioned
-    ~errs
-    ~label:"audit"
-    ~dir:(Filename.concat masc_dir audit_dirname)
-    ~since_unix
-    ~now_unix
-    ~f:(fun json ->
-      match Audit_log.entry_of_json_r json with
-      | Error _ ->
-        (* Valid JSON that is not an audit entry (e.g. a foreign row); the
-           true parse-failure path is handled inside [read_jsonl_file]. *)
-        ()
-      | Ok ({ timestamp; agent_id; action; details; _ } : Audit_log.audit_entry)
-        ->
-        if timestamp > since_unix && identity_of agent_id
-        then (
-          let record transition =
-            match task_id_of_audit_details ~errs details with
-            | Some task_id ->
-              task_items := { task_id; transition; ts = timestamp } :: !task_items
-            | None -> ()
-          in
-          match action with
-          | Audit_log.ClaimTask ->
-            incr claimed;
-            record "claim"
-          | Audit_log.DoneTask ->
-            incr done_;
-            record "done"
-          | Audit_log.ReleaseTask ->
-            incr released;
-            record "release"
-          | Audit_log.CancelTask ->
-            incr cancelled;
-            record "cancel"
-          | Audit_log.StartTask -> record "start"
-          (* Non-task audit actions are not task transitions. Enumerated (no
-             catch-all) so a new task-relevant action fails compile here. *)
-          | Audit_log.Broadcast
-          | Audit_log.Suspend
-          | Audit_log.ToolCall _
-          | Audit_log.AuthSuccess
-          | Audit_log.AuthFailure
-          | Audit_log.CircuitOpen
-          | Audit_log.CircuitClose
-          | Audit_log.SearchRefinement
-          | Audit_log.GovernanceDecision _
-          | Audit_log.RuntimeConfigWrite
-          | Audit_log.Custom _
-          | Audit_log.Unknown _ -> ()));
+  let audit_truncated =
+    fold_day_partitioned
+      ~errs
+      ~label:"audit"
+      ~dir:(Filename.concat masc_dir audit_dirname)
+      ~since_unix
+      ~now_unix
+      ~f:(fun json ->
+        match Audit_log.entry_of_json_r json with
+        | Error _ ->
+          (* Valid JSON that is not an audit entry (e.g. a foreign row); the
+             true parse-failure path is handled inside [read_jsonl_file]. *)
+          ()
+        | Ok ({ timestamp; agent_id; action; details; _ } : Audit_log.audit_entry)
+          ->
+          if timestamp > since_unix && identity_of agent_id
+          then (
+            let record transition =
+              match task_id_of_audit_details ~errs details with
+              | Some task_id ->
+                task_items := { task_id; transition; ts = timestamp } :: !task_items
+              | None -> ()
+            in
+            match action with
+            | Audit_log.ClaimTask ->
+              incr claimed;
+              record "claim"
+            | Audit_log.DoneTask ->
+              incr done_;
+              record "done"
+            | Audit_log.ReleaseTask ->
+              incr released;
+              record "release"
+            | Audit_log.CancelTask ->
+              incr cancelled;
+              record "cancel"
+            | Audit_log.StartTask -> record "start"
+            (* Non-task audit actions are not task transitions. Enumerated (no
+               catch-all) so a new task-relevant action fails compile here. *)
+            | Audit_log.Broadcast
+            | Audit_log.Suspend
+            | Audit_log.ToolCall _
+            | Audit_log.AuthSuccess
+            | Audit_log.AuthFailure
+            | Audit_log.CircuitOpen
+            | Audit_log.CircuitClose
+            | Audit_log.SearchRefinement
+            | Audit_log.GovernanceDecision _
+            | Audit_log.RuntimeConfigWrite
+            | Audit_log.Custom _
+            | Audit_log.Unknown _ -> ()))
+  in
   (* lifecycle — durable transition-audit operator_pause/operator_resume +
      current paused state from meta. The durable store survives a keeper
      restart, which the in-memory ring (the recent_transitions API) does not,
@@ -416,32 +447,34 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
   let pause_events = ref 0 in
   let resume_events = ref 0 in
   let life_items = ref [] in
-  fold_day_partitioned
-    ~errs
-    ~label:"transition-audit"
-    ~dir:(Filename.concat masc_dir transition_audit_dirname)
-    ~since_unix
-    ~now_unix
-    ~f:(fun json ->
-      match
-        Safe_ops.json_string_opt "keeper" json, Safe_ops.json_member_opt "record" json
-      with
-      | Some k, Some record when identity_of k ->
-        (match
-           Safe_ops.json_string_opt "event_type" record
-         , json_num_field "wall_clock_at_decision" record
-         with
-         | Some event_type, Some ts when ts > since_unix ->
-           if String.equal event_type operator_pause_event
-           then (
-             incr pause_events;
-             life_items := { kind = event_type; ts } :: !life_items)
-           else if String.equal event_type operator_resume_event
-           then (
-             incr resume_events;
-             life_items := { kind = event_type; ts } :: !life_items)
-         | _ -> ())
-      | _ -> ());
+  let transition_truncated =
+    fold_day_partitioned
+      ~errs
+      ~label:"transition-audit"
+      ~dir:(Filename.concat masc_dir transition_audit_dirname)
+      ~since_unix
+      ~now_unix
+      ~f:(fun json ->
+        match
+          Safe_ops.json_string_opt "keeper" json, Safe_ops.json_member_opt "record" json
+        with
+        | Some k, Some record when identity_of k ->
+          (match
+             Safe_ops.json_string_opt "event_type" record
+           , json_num_field "wall_clock_at_decision" record
+           with
+           | Some event_type, Some ts when ts > since_unix ->
+             if String.equal event_type operator_pause_event
+             then (
+               incr pause_events;
+               life_items := { kind = event_type; ts } :: !life_items)
+             else if String.equal event_type operator_resume_event
+             then (
+               incr resume_events;
+               life_items := { kind = event_type; ts } :: !life_items)
+           | _ -> ())
+        | _ -> ())
+  in
   let paused_now =
     let meta_path = Filename.concat keepers_dir (keeper_name ^ ".json") in
     match Keeper_meta_store.read_meta_file_path meta_path with
@@ -450,6 +483,37 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
     | Error e ->
       bounded_add errs (Printf.sprintf "keeper-meta: %s: %s" meta_path e);
       false
+  in
+  let coverage =
+    let day_reason = Some "scan window clamped to 40 days" in
+    let chat_reason = Some "chat page cap reached before since_unix" in
+    let crash_reason = Some "crash scan capped at 500 events" in
+    { chat =
+        { lower_bound = chat_truncated
+        ; reason = if chat_truncated then chat_reason else None
+        }
+    ; turns =
+        { lower_bound = turns_day_truncated || crash_truncated
+        ; reason =
+            (match turns_day_truncated, crash_truncated with
+             | true, true -> Some "turn scan window clamped and crash scan capped"
+             | true, false -> day_reason
+             | false, true -> crash_reason
+             | false, false -> None)
+        }
+    ; tasks =
+        { lower_bound = audit_truncated
+        ; reason = if audit_truncated then day_reason else None
+        }
+    ; board =
+        { lower_bound = activity_truncated
+        ; reason = if activity_truncated then day_reason else None
+        }
+    ; lifecycle =
+        { lower_bound = transition_truncated
+        ; reason = if transition_truncated then day_reason else None
+        }
+    }
   in
   { keeper = keeper_name
   ; since_unix
@@ -470,6 +534,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       ; resume_events = !resume_events
       ; items = cap_lifecycle_items !life_items
       }
+  ; coverage
   ; read_errors = List.rev !errs
   }
 ;;
@@ -491,6 +556,23 @@ let task_item_to_json (i : task_item) =
 
 let lifecycle_item_to_json (i : lifecycle_item) =
   `Assoc [ "kind", `String i.kind; "ts", `Float i.ts ]
+;;
+
+let source_coverage_to_json (c : source_coverage) : Yojson.Safe.t =
+  `Assoc
+    [ "lower_bound", `Bool c.lower_bound
+    ; "reason", (match c.reason with Some r -> `String r | None -> `Null)
+    ]
+;;
+
+let coverage_to_json (c : coverage) : Yojson.Safe.t =
+  `Assoc
+    [ "chat", source_coverage_to_json c.chat
+    ; "turns", source_coverage_to_json c.turns
+    ; "tasks", source_coverage_to_json c.tasks
+    ; "board", source_coverage_to_json c.board
+    ; "lifecycle", source_coverage_to_json c.lifecycle
+    ]
 ;;
 
 let to_json (t : t) : Yojson.Safe.t =
@@ -531,6 +613,7 @@ let to_json (t : t) : Yojson.Safe.t =
           ; "resume_events", `Int t.lifecycle.resume_events
           ; "items", `List (List.map lifecycle_item_to_json t.lifecycle.items)
           ] )
+    ; "coverage", coverage_to_json t.coverage
     ; "read_errors", `List (List.map (fun s -> `String s) t.read_errors)
     ]
 ;;

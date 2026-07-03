@@ -231,6 +231,7 @@ let test_counts_and_boundary () =
         ; tasks = { claimed; done_; released; cancelled; items = task_items }
         ; board = { posted; commented; voted }
         ; lifecycle = { paused_now; pause_events; resume_events; items = life_items }
+        ; coverage
         ; read_errors
         ; keeper = keeper_out
         ; since_unix = since_out
@@ -239,6 +240,11 @@ let test_counts_and_boundary () =
       =
       digest
     in
+    Alcotest.(check bool) "coverage.chat lower_bound false" false coverage.D.chat.lower_bound;
+    Alcotest.(check bool) "coverage.turns lower_bound false" false coverage.D.turns.lower_bound;
+    Alcotest.(check bool) "coverage.tasks lower_bound false" false coverage.D.tasks.lower_bound;
+    Alcotest.(check bool) "coverage.board lower_bound false" false coverage.D.board.lower_bound;
+    Alcotest.(check bool) "coverage.lifecycle lower_bound false" false coverage.D.lifecycle.lower_bound;
     Alcotest.(check string) "keeper echoed" keeper keeper_out;
     Alcotest.(check (float 0.0001)) "since echoed" since_unix since_out;
     Alcotest.(check (float 0.0001)) "now echoed" now_unix generated_at_unix;
@@ -344,13 +350,37 @@ let test_chat_page_cap_is_fail_visible () =
            ())
     done;
     let digest = D.build ~base_path:base ~keeper_name:keeper ~since_unix ~now_unix in
-    let { D.chat = { new_messages; _ }; read_errors; _ } = digest in
+    let { D.chat = { new_messages; _ }; coverage; read_errors; _ } = digest in
     Alcotest.(check bool) "chat count is a lower bound" true
       (new_messages > 0 && new_messages < total);
     Alcotest.(check bool)
-      "chat page cap is fail-visible"
+      "chat page cap is fail-visible in read_errors"
       true
-      (List.exists (str_contains ~needle:"keeper-chat: page cap reached") read_errors))
+      (List.exists (str_contains ~needle:"keeper-chat: page cap reached") read_errors);
+    Alcotest.(check bool)
+      "coverage.chat lower_bound true"
+      true
+      coverage.D.chat.lower_bound;
+    Alcotest.(check bool)
+      "coverage.chat reason present"
+      true
+      (Option.is_some coverage.D.chat.reason))
+;;
+
+let test_scan_window_clamp_is_coverage_visible () =
+  with_workspace (fun base ->
+    (* since_unix is beyond max_scan_days, so every day-partitioned source is
+       clamped even though the stores are missing (missing = zero activity). The
+       coverage flags, not read_errors, carry the truncation signal. *)
+    let since_old = now_unix -. (50. *. day) in
+    let digest = D.build ~base_path:base ~keeper_name:keeper ~since_unix:since_old ~now_unix in
+    let { D.coverage; read_errors; _ } = digest in
+    Alcotest.(check bool) "coverage.turns lower_bound true" true coverage.D.turns.lower_bound;
+    Alcotest.(check bool) "coverage.tasks lower_bound true" true coverage.D.tasks.lower_bound;
+    Alcotest.(check bool) "coverage.board lower_bound true" true coverage.D.board.lower_bound;
+    Alcotest.(check bool) "coverage.lifecycle lower_bound true" true coverage.D.lifecycle.lower_bound;
+    Alcotest.(check bool) "chat not scanned, lower_bound false" false coverage.D.chat.lower_bound;
+    Alcotest.(check bool) "no read_errors for missing stores" true (read_errors = []))
 ;;
 
 let test_task_items_are_sound_partial () =
@@ -411,6 +441,7 @@ let test_to_json_shape () =
         ; "tasks"
         ; "board"
         ; "lifecycle"
+        ; "coverage"
         ; "read_errors"
         ]
     | _ -> Alcotest.fail "to_json must be a JSON object")
@@ -424,6 +455,7 @@ let () =
         ; Alcotest.test_case "missing stores are zero, not errors" `Quick test_missing_stores_are_zero
         ; Alcotest.test_case "items cap with full counts" `Quick test_items_cap
         ; Alcotest.test_case "chat page cap is fail-visible" `Quick test_chat_page_cap_is_fail_visible
+        ; Alcotest.test_case "scan window clamp is coverage-visible" `Quick test_scan_window_clamp_is_coverage_visible
         ; Alcotest.test_case "task items are sound-partial" `Quick test_task_items_are_sound_partial
         ; Alcotest.test_case "to_json shape round-trips" `Quick test_to_json_shape
         ] )

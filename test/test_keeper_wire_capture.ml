@@ -4,7 +4,7 @@
     one redacted dated jsonl with the expected fields. *)
 
 module Wire = Masc.Keeper_wire_capture
-module Keeper_metrics = Masc.Keeper_metrics
+module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store
 
 let flag = "MASC_KEEPER_WIRE_CAPTURE"

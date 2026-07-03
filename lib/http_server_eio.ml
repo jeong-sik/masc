@@ -204,6 +204,14 @@ module Response = struct
       (response ~after_headers:headers ~content_type status body)
       body
 
+  let empty ?(status = `No_content) reqd =
+    let response =
+      Httpun.Response.create
+        ~headers:(Httpun.Headers.of_list [ "content-length", "0" ])
+        status
+    in
+    safe_respond_with_string reqd response ""
+
   (** JSON response with optional zstd compression (dictionary-enhanced)
 
       Uses trained multi-format dictionary for small messages (32-2048 bytes)

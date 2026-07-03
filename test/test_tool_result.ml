@@ -202,21 +202,20 @@ let test_message_json_roundtrip () =
 ;;
 
 let test_dispatch_structured () =
-  (* Register a test handler with a tag *and* an input schema. The C-4
-     validation pre-hook ([Tool_input_validation.register_pre_hook], installed
-     at composition-root load) fail-closes on schema-less dispatch, so a real
-     tool must expose a schema. Use [register_module_tag] (tag + schema) rather
-     than [register_name_tag] (tag only); the empty-object schema passes
-     validation for the [`Null] args below. *)
+  (* Register a test handler *)
   Tool_dispatch.register ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
     Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
+  (* Register a schema (not just a tag) so the tool clears the input-schema
+     validation pre-hook that Mcp_server_eio installs at module load. An
+     empty-object schema dispatched with no args passes validation, keeping the
+     test focused on structured dispatch while matching production, where every
+     dispatchable tool carries a schema. *)
   Tool_dispatch.register_module_tag
     ~schemas:
       [ { Masc_domain.name = "__test_tool"
         ; description = "test dispatch tool"
-        ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
-        }
-      ]
+        ; input_schema = `Assoc [ "type", `String "object" ]
+        } ]
     ~tag:Mod_misc;
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with

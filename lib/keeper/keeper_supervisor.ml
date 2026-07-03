@@ -15,16 +15,6 @@ open Keeper_execution
 
 include Keeper_supervisor_launch
 
-module Option = struct
-  include Stdlib.Option
-
-  let value_map o ~default ~f =
-    match o with
-    | None -> default
-    | Some x -> f x
-  ;;
-end
-
 (** RFC-0250: pure stale-run assessment for the no-turn-produced case.
 
     Returns [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] — giving

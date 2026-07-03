@@ -272,6 +272,8 @@ describe('ConnectorStatusPanel', () => {
     expect(fetchGateConnectors).toHaveBeenCalled()
     expect(fetchGateKeepers).toHaveBeenCalled()
     expect(text).toContain('커넥터')
+    expect(text).toContain('혼합 연결')
+    expect(text).toContain('Discord는 서버 내장 gateway')
     expect(text).toContain('connected')
     expect(text).toContain('Discord')
     expect(text).toContain('sangsu')

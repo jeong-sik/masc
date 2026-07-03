@@ -512,8 +512,7 @@ function buildInjectedCtx(record: TurnRecordEntry, ctxPct: number | null, tokIn:
   const ctxLine = ctxPct != null
     ? `${ctxPct.toFixed(1)}%   (${tokIn.toLocaleString()} / ${record.context_window?.toLocaleString() ?? '미상'} tok)`
     : `미상   (${tokIn.toLocaleString()} / 미상 tok, runtime 미구성)`
-  return `# namespace snapshot
-namespace      = n/a
+  return `# world snapshot
 fsm.state      = n/a
 model          = ${record.model ?? 'n/a'}
 finish_reason  = ${record.finish_reason ?? 'n/a'}
@@ -1043,7 +1042,6 @@ function MetaTab({ record, t, source }: { record: TurnRecordEntry; t: TurnDetail
       <div class="kti-kv">
         <span class="k">model</span><span class="v">${record.model ?? 'n/a'}</span>
         <span class="k">runtime</span><span class="v">${record.runtime_profile}</span>
-        <span class="k">namespace</span><span class="v">n/a</span>
         <span class="k">fsm.state</span><span class="v">n/a</span>
         <span class="k">input tokens</span><span class="v">${t.tokIn.toLocaleString()}</span>
         <span class="k">output tokens</span><span class="v">${t.tokOut.toLocaleString()}</span>

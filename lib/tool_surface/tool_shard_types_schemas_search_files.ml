@@ -20,7 +20,7 @@ let tool_search_files_schema : Masc_domain.tool_schema =
                 [ ( "pattern"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Regular expression to search file contents for."
+                      ; "description", `String "Regular expression to search file contents for. Must be a syntactically valid regex."
                       ] )
                 ; ( "path"
                   , `Assoc
@@ -36,7 +36,7 @@ let tool_search_files_schema : Masc_domain.tool_schema =
                 ; ( "type"
                   , `Assoc
                       [ "type", `String "string"
-                      ; "description", `String "Ripgrep file-type filter, e.g. 'ml', 'py'."
+                      ; "description", `String "Ripgrep file-type filter, e.g. 'ml', 'py'. May contain only letters, digits, hyphens, and underscores."
                       ] )
                 ; ( "limit"
                   , `Assoc

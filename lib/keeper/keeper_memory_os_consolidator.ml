@@ -21,6 +21,10 @@ open Keeper_memory_os_types
 
 module Io = Keeper_memory_os_io
 
+(* RFC-0244 §3.6 / task-1612: env-gate. Default OFF -> opt-in. *)
+let consolidation_enabled () =
+  Env_config.KeeperMemoryOs.shared_consolidator_enabled ()
+
 (* Which categories are durable enough to consider, and which are
    outcome-positive enough to cross keepers, are compile-time properties of the
    closed [category] taxonomy. Default-deny is structural: a new arm (e.g. the
@@ -38,7 +42,12 @@ type report =
   ; claims_considered : int (* distinct normalized claims with >= 1 eligible contribution *)
   ; promoted : int
   ; dry_run : bool
+  ; status : report_status
   }
+
+and report_status =
+  | Consolidation_ran
+  | Consolidation_disabled
 
 (* A contribution is one keeper's eligible observation of a claim. *)
 type contribution =
@@ -63,19 +72,25 @@ let eligible fact =
   | Some Self_observation | Some External_state | Some Diagnostic -> false
 
 (* Pick the representative fact for a claim group by a structural total order:
-   earliest first_seen, then lexically smallest claim, then keeper id — so
-   selection is deterministic regardless of input order. The prior tie-breaker on
+   freshest explicit verification first; unverified legacy rows fall back to
+   earliest first_seen, then lexically smallest claim, then keeper id. Selection
+   stays deterministic regardless of input order. The prior tie-breaker on
    highest confidence was removed with the score. *)
 let representative contribs =
   let better a b =
-    match Float.compare a.fact.first_seen b.fact.first_seen with
-    | c when c < 0 -> true
-    | c when c > 0 -> false
-    | _ ->
-      (match String.compare a.fact.claim b.fact.claim with
-       | c when c < 0 -> true
-       | c when c > 0 -> false
-       | _ -> String.compare a.keeper_id b.keeper_id < 0)
+    match a.fact.last_verified_at, b.fact.last_verified_at with
+    | Some ta, Some tb -> ta > tb
+    | Some _, None -> true
+    | None, Some _ -> false
+    | None, None ->
+      match Float.compare a.fact.first_seen b.fact.first_seen with
+      | c when c < 0 -> true
+      | c when c > 0 -> false
+      | _ ->
+        (match String.compare a.fact.claim b.fact.claim with
+         | c when c < 0 -> true
+         | c when c > 0 -> false
+         | _ -> String.compare a.keeper_id b.keeper_id < 0)
   in
   match contribs with
   | [] -> None
@@ -90,10 +105,13 @@ let distinct_keepers contribs =
 ;;
 
 let consolidate_into_shared ~now ~min_keepers contribs =
-  match representative contribs with
+  let current_contribs =
+    List.filter (fun c -> fact_is_current ~now c.fact) contribs
+  in
+  match representative current_contribs with
   | None -> None
   | Some rep ->
-    let keepers = distinct_keepers contribs in
+    let keepers = distinct_keepers current_contribs in
     if List.length keepers < min_keepers
     then None
     else
@@ -107,7 +125,10 @@ let consolidate_into_shared ~now ~min_keepers contribs =
         ; source = rep.fact.source
         ; observed_by = keepers
         ; first_seen =
-            List.fold_left (fun acc c -> Float.min acc c.fact.first_seen) rep.fact.first_seen contribs
+            List.fold_left
+              (fun acc c -> Float.min acc c.fact.first_seen)
+              rep.fact.first_seen
+              current_contribs
           (* Route through [fact_valid_until] so self-observation/category TTL policy
              stays centralized. External refs are context-only and do not affect
              retention. *)
@@ -210,6 +231,16 @@ let log_run_summary ~dry_run ~min_keepers ~source_ids ~keeper_facts ~considered 
    is filtered out of the source list so a prior sweep's output is never folded
    back in as a "keeper". *)
 let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
+  if not (consolidation_enabled ()) then (
+    Log.Keeper.info
+      "memory os consolidator skipped: MASC_KEEPER_MEMORY_OS_CONSOLIDATE=false";
+    { keepers_scanned = 0
+    ; claims_considered = 0
+    ; promoted = 0
+    ; dry_run
+    ; status = Consolidation_disabled
+    }
+  ) else
   let source_ids =
     List.filter (fun id -> not (String.equal id shared_store_id)) keeper_ids
   in
@@ -249,6 +280,7 @@ let run ?(dry_run = false) ?min_keepers ~keeper_ids ~now () =
       ; claims_considered = considered
       ; promoted = List.length promoted
       ; dry_run
+      ; status = Consolidation_ran
       }
   in
   if dry_run

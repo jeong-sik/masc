@@ -56,6 +56,7 @@ let relax_strict_tool_choice_for_keeper = function
 let assemble_hooks
       ~(ctx : ctx)
       ~(session : Keeper_types.session_context)
+      ~(turn_system_prompt : string)
       ~(user_message : string)
       ~(dynamic_context : string)
       ~(history_messages : Agent_sdk.Types.message list)
@@ -513,6 +514,21 @@ let assemble_hooks
                        !recorded_blocks;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
+                (* Phase O observability: capture the effective OAS request
+                   boundary after keeper-owned context injection has finalized
+                   [extra_system_context]. *)
+                Option.iter
+                  (fun turn_id ->
+                     Keeper_wire_capture.capture_request
+                       ~masc_root:(Workspace.masc_root_dir config)
+                       ~keeper_name:meta.name
+                       ~turn_id
+                       ~sdk_turn:turn
+                       ~system_prompt:turn_system_prompt
+                       ~extra_system_context:ctx
+                       ~user_message
+                       ~history_messages:messages)
+                  manifest_keeper_turn_id;
                 Eio.Fiber.yield ();
                 Agent_sdk.Hooks.AdjustParams
                   { current_params with

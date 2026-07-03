@@ -58,7 +58,7 @@ let test_injector_increments_counts () =
 let test_context_populated_after_injection () =
   let config = MCI.default_config () in
   let injector = MCI.make ~config () in
-  let ctx = Agent_sdk.Context.create ~eio:false () in
+  let ctx = Agent_sdk.Context.create_sync () in
   match injector ~tool_name:"bash" ~input:`Null ~output:(ok_output "done") with
   | Some inj ->
     List.iter (fun (k, v) -> Agent_sdk.Context.set ctx k v)
@@ -75,7 +75,7 @@ let test_context_populated_after_injection () =
 let test_context_updates_overwrite_bounded_keys () =
   let config = MCI.default_config () in
   let injector = MCI.make ~config () in
-  let ctx = Agent_sdk.Context.create ~eio:false () in
+  let ctx = Agent_sdk.Context.create_sync () in
   let expected_keys =
     [
       MCI.key_wall_time;
@@ -121,12 +121,12 @@ let test_context_updates_overwrite_bounded_keys () =
 (* ── Temporal summary rendering ─────────────────────── *)
 
 let test_render_temporal_summary_empty () =
-  let ctx = Agent_sdk.Context.create ~eio:false () in
+  let ctx = Agent_sdk.Context.create_sync () in
   check (option string) "no summary before any tool"
     None (MCI.render_temporal_summary ctx)
 
 let test_render_temporal_summary_populated () =
-  let ctx = Agent_sdk.Context.create ~eio:false () in
+  let ctx = Agent_sdk.Context.create_sync () in
   Agent_sdk.Context.set ctx
     MCI.key_wall_time (`String "2026-04-06T12:00:00Z");
   Agent_sdk.Context.set ctx

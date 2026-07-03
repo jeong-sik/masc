@@ -740,15 +740,15 @@ let test_librarian_defaults_missing_optional_lists () =
 
 let test_librarian_runtime_override_env () =
   Fun.protect
-    ~finally:(fun () -> Unix.putenv "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" "")
+    ~finally:(fun () -> Unix.putenv Env_config.KeeperMemoryOs.librarian_runtime_id_env_key "")
     (fun () ->
-       Unix.putenv "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID" "";
+       Unix.putenv Env_config.KeeperMemoryOs.librarian_runtime_id_env_key "";
        Alcotest.(check string)
          "empty override falls back"
          "keeper-runtime"
          (Librarian_runtime.runtime_id_for_librarian ~runtime_id:"keeper-runtime");
        Unix.putenv
-         "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
+         Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
          " runpod_mtp.qwen36-35b-a3b-mtp ";
        Alcotest.(check string)
          "override trims"
@@ -816,32 +816,37 @@ let with_captured_console_lines f =
 ;;
 
 let test_memory_os_bool_env_accepts_enabled_disabled () =
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "disabled" (fun () ->
+  with_memory_os_env Env_config.KeeperMemoryOs.recall_env_key "disabled" (fun () ->
     Alcotest.(check bool)
       "disabled disables recall"
       false
       (Env_config.KeeperMemoryOs.recall_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" " TRUE " (fun () ->
+  with_memory_os_env Env_config.KeeperMemoryOs.recall_env_key " TRUE " (fun () ->
     Alcotest.(check bool)
       "bool parser trims and lowercases true tokens"
       true
       (Env_config.KeeperMemoryOs.recall_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "" (fun () ->
+  with_memory_os_env Env_config.KeeperMemoryOs.recall_env_key "" (fun () ->
     Alcotest.(check bool)
       "blank bool token is treated as unset"
       true
       (Env_config.KeeperMemoryOs.recall_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "disabled" (fun () ->
+  with_memory_os_env Env_config.KeeperMemoryOs.librarian_env_key "disabled" (fun () ->
     Alcotest.(check bool)
       "disabled disables librarian"
       false
       (Env_config.KeeperMemoryOs.librarian_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "enabled" (fun () ->
+  with_memory_os_env Env_config.KeeperMemoryOs.gc_env_key "enabled" (fun () ->
     Alcotest.(check bool)
       "enabled enables GC"
       true
       (Env_config.KeeperMemoryOs.gc_enabled ()));
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" "enabled" (fun () ->
+  with_memory_os_env Env_config.KeeperMemoryOs.shared_consolidator_env_key "enabled" (fun () ->
+    Alcotest.(check bool)
+      "enabled enables shared consolidator"
+      true
+      (Env_config.KeeperMemoryOs.shared_consolidator_enabled ()));
+  with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "enabled" (fun () ->
     Alcotest.(check bool)
       "enabled enables consolidation"
       true
@@ -856,52 +861,60 @@ let test_memory_os_env_invalid_values_fail_closed_or_default () =
       (List.exists (contains substring) !lines)
   in
   with_captured_console_lines (fun lines ->
-    with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "maybe" (fun () ->
+    with_memory_os_env Env_config.KeeperMemoryOs.recall_env_key "maybe" (fun () ->
       Alcotest.(check bool)
         "invalid default-on recall fail-closes to false"
         false
         (Env_config.KeeperMemoryOs.recall_enabled ()));
-    check_log_contains lines "MASC_KEEPER_MEMORY_OS_RECALL";
+    check_log_contains lines Env_config.KeeperMemoryOs.recall_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
-    with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN" "maybe" (fun () ->
+    with_memory_os_env Env_config.KeeperMemoryOs.librarian_env_key "maybe" (fun () ->
       Alcotest.(check bool)
         "invalid default-on librarian fail-closes to false"
         false
         (Env_config.KeeperMemoryOs.librarian_enabled ()));
-    check_log_contains lines "MASC_KEEPER_MEMORY_OS_LIBRARIAN";
+    check_log_contains lines Env_config.KeeperMemoryOs.librarian_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
-    with_memory_os_env "MASC_KEEPER_MEMORY_OS_GC" "maybe" (fun () ->
+    with_memory_os_env Env_config.KeeperMemoryOs.gc_env_key "maybe" (fun () ->
       Alcotest.(check bool)
         "invalid GC flag fail-closes"
         false
         (Env_config.KeeperMemoryOs.gc_enabled ()));
-    check_log_contains lines "MASC_KEEPER_MEMORY_OS_GC";
+    check_log_contains lines Env_config.KeeperMemoryOs.gc_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
-    with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATION" "maybe" (fun () ->
+    with_memory_os_env Env_config.KeeperMemoryOs.shared_consolidator_env_key "maybe" (fun () ->
+      Alcotest.(check bool)
+        "invalid shared consolidator flag fail-closes"
+        false
+        (Env_config.KeeperMemoryOs.shared_consolidator_enabled ()));
+    check_log_contains lines Env_config.KeeperMemoryOs.shared_consolidator_env_key;
+    check_log_contains lines "fail-closed false");
+  with_captured_console_lines (fun lines ->
+    with_memory_os_env Env_config.KeeperMemoryOs.consolidation_env_key "maybe" (fun () ->
       Alcotest.(check bool)
         "invalid consolidation flag fail-closes"
         false
         (Env_config.KeeperMemoryOs.consolidation_enabled ()));
-    check_log_contains lines "MASC_KEEPER_MEMORY_OS_CONSOLIDATION";
+    check_log_contains lines Env_config.KeeperMemoryOs.consolidation_env_key;
     check_log_contains lines "fail-closed false");
   with_captured_console_lines (fun lines ->
-    with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES" "bogus" (fun () ->
+    with_memory_os_env Env_config.KeeperMemoryOs.librarian_max_messages_env_key "bogus" (fun () ->
       Alcotest.(check int)
         "invalid max messages falls back"
         24
         (Env_config.KeeperMemoryOs.librarian_max_messages ()));
-    check_log_contains lines "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES";
+    check_log_contains lines Env_config.KeeperMemoryOs.librarian_max_messages_env_key;
     check_log_contains lines "using default");
   with_captured_console_lines (fun lines ->
-    with_memory_os_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" "nan" (fun () ->
+    with_memory_os_env Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key "nan" (fun () ->
       Alcotest.(check (float 0.001))
         "invalid timeout falls back"
         600.0
         (Env_config.KeeperMemoryOs.librarian_timeout_sec ()));
-    check_log_contains lines "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC";
+    check_log_contains lines Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key;
     check_log_contains lines "using default")
 ;;
 
@@ -946,34 +959,96 @@ let find_config_env env entries =
   | None -> Alcotest.failf "config entry %s missing" env
 ;;
 
+(* Introspection-parity SSOT rows: one row per Memory OS knob pairing the
+   exported env-key constant with a thunk exercising its compiled reader. A
+   snapshot registry entry cannot be added to this list without a reader
+   existing (the phantom MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS
+   regression: registered + tested, zero readers, so setting it was a silent
+   no-op reported as source=env). *)
+let memory_os_knob_readers : (string * (unit -> unit)) list =
+  [ ( Env_config.KeeperMemoryOs.recall_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.recall_enabled () : bool) )
+  ; ( Env_config.KeeperMemoryOs.librarian_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_enabled () : bool) )
+  ; ( Env_config.KeeperMemoryOs.librarian_cadence_turns_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_cadence_turns () : int) )
+  ; ( Env_config.KeeperMemoryOs.librarian_max_messages_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_messages () : int) )
+  ; ( Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_timeout_sec () : float) )
+  ; ( Env_config.KeeperMemoryOs.librarian_max_tokens_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_max_tokens () : int) )
+  ; ( Env_config.KeeperMemoryOs.librarian_runtime_id_env_key
+    , fun () ->
+        ignore (Env_config.KeeperMemoryOs.librarian_runtime_id () : string option) )
+  ; ( Env_config.KeeperMemoryOs.librarian_global_slot_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.librarian_global_slot () : int) )
+  ; ( Env_config.KeeperMemoryOs.gc_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.gc_enabled () : bool) )
+  ; ( Env_config.KeeperMemoryOs.shared_consolidator_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.shared_consolidator_enabled () : bool) )
+  ; ( Env_config.KeeperMemoryOs.consolidation_env_key
+    , fun () -> ignore (Env_config.KeeperMemoryOs.consolidation_enabled () : bool) )
+  ; ( Env_config.KeeperMemoryOs.consolidation_runtime_id_env_key
+    , fun () ->
+        ignore (Env_config.KeeperMemoryOs.consolidation_runtime_id () : string option)
+    )
+  ]
+;;
+
+let memory_os_env_namespace = "MASC_KEEPER_MEMORY_OS_"
+
+let test_memory_os_snapshot_registry_parity () =
+  let reader_names = List.map fst memory_os_knob_readers in
+  (* Guard the namespace literal against renames: every reader key must live
+     under it, otherwise the registry->reader sweep below goes vacuous. *)
+  List.iter
+    (fun name ->
+       Alcotest.(check bool)
+         (name ^ " under Memory OS namespace")
+         true
+         (String.starts_with ~prefix:memory_os_env_namespace name))
+    reader_names;
+  let entries = storage_config_entries () in
+  let names = List.map (string_field "config entry" "env") entries in
+  (* Reader -> registry: every knob with a compiled reader is surfaced. *)
+  List.iter
+    (fun (env_key, exercise_reader) ->
+       exercise_reader ();
+       Alcotest.(check bool)
+         (env_key ^ " registered in snapshot")
+         true
+         (List.mem env_key names))
+    memory_os_knob_readers;
+  (* Registry -> reader: no Memory OS entry without a compiled reader. *)
+  List.iter
+    (fun name ->
+       if String.starts_with ~prefix:memory_os_env_namespace name
+       then
+         Alcotest.(check bool)
+           (name ^ " has a compiled reader")
+           true
+           (List.mem name reader_names))
+    names
+;;
+
 let test_memory_os_config_snapshot_surfaces_effective_envs () =
-  let timeout_env = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
+  let timeout_env = Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key in
   let timeout_default =
     Env_config.KeeperMemoryOs.float_default_to_display
       Env_config.KeeperMemoryOs.librarian_timeout_sec_default
   in
-  with_memory_os_env "MASC_KEEPER_MEMORY_OS_RECALL" "" (fun () ->
+  with_memory_os_env Env_config.KeeperMemoryOs.recall_env_key "" (fun () ->
     with_memory_os_env timeout_env "123.5" (fun () ->
       let entries = storage_config_entries () in
       let names = List.map (string_field "config entry" "env") entries in
       List.iter
-        (fun expected ->
+        (fun (expected, _) ->
            Alcotest.(check bool)
              (expected ^ " surfaced")
              true
              (List.mem expected names))
-        [ "MASC_KEEPER_MEMORY_OS_RECALL"
-        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN"
-        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_CADENCE_TURNS"
-        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_MESSAGES"
-        ; timeout_env
-        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_MAX_TOKENS"
-        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_RUNTIME_ID"
-        ; "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT"
-        ; "MASC_KEEPER_MEMORY_OS_GC"
-        ; "MASC_KEEPER_MEMORY_OS_CONSOLIDATION"
-        ; "MASC_KEEPER_MEMORY_OS_CONSOLIDATION_RUNTIME_ID"
-        ];
+        memory_os_knob_readers;
       let timeout = find_config_env timeout_env entries in
       Alcotest.(check string)
         "timeout snapshot source"
@@ -987,7 +1062,7 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
         "timeout snapshot default"
         timeout_default
         (string_field "timeout entry" "default" timeout);
-      let recall = find_config_env "MASC_KEEPER_MEMORY_OS_RECALL" entries in
+      let recall = find_config_env Env_config.KeeperMemoryOs.recall_env_key entries in
       Alcotest.(check string)
         "blank recall env falls back to default source"
         "default"
@@ -1021,7 +1096,7 @@ let test_memory_os_config_snapshot_surfaces_effective_envs () =
 ;;
 
 let test_librarian_timeout_override_env () =
-  let env = "MASC_KEEPER_MEMORY_OS_LIBRARIAN_TIMEOUT_SEC" in
+  let env = Env_config.KeeperMemoryOs.librarian_timeout_sec_env_key in
   Fun.protect
     ~finally:(fun () -> Unix.putenv env "")
     (fun () ->
@@ -1041,6 +1116,41 @@ let test_librarian_timeout_override_env () =
          "invalid timeout override falls back"
          default
          (Librarian_runtime.default_timeout_sec ()))
+;;
+
+let test_librarian_max_tokens_override_env () =
+  let env = Env_config.KeeperMemoryOs.librarian_max_tokens_env_key in
+  let default = Env_config.KeeperMemoryOs.librarian_max_tokens_default in
+  (* Exercise the cap through [provider_for_librarian] (the consuming site):
+     before the knob was wired to a reader, setting the env var was a silent
+     no-op while the config snapshot reported source=env. *)
+  let effective_cap () =
+    (Librarian_runtime.provider_for_librarian (test_provider_cfg ()))
+      .Llm_provider.Provider_config.max_tokens
+  in
+  Fun.protect
+    ~finally:(fun () -> Unix.putenv env "")
+    (fun () ->
+       Unix.putenv env "";
+       Alcotest.(check (option int))
+         "empty max tokens override falls back"
+         (Some default)
+         (effective_cap ());
+       Unix.putenv env "512";
+       Alcotest.(check (option int))
+         "max tokens override caps the librarian provider config"
+         (Some 512)
+         (effective_cap ());
+       Unix.putenv env "0";
+       Alcotest.(check int)
+         "non-positive max tokens override floors at 1"
+         1
+         (Env_config.KeeperMemoryOs.librarian_max_tokens ());
+       Unix.putenv env "bogus";
+       Alcotest.(check (option int))
+         "invalid max tokens override falls back"
+         (Some default)
+         (effective_cap ()))
 ;;
 
 let test_librarian_preserves_admission_memory_text () =
@@ -2256,7 +2366,7 @@ let test_recall_context_empty_without_memory () =
    keeper_run_tools_hooks. Env reads are live (Env_config_core uses
    Unix.getenv), so putenv steers the flag per test. *)
 let with_recall_env value f =
-  let var = "MASC_KEEPER_MEMORY_OS_RECALL" in
+  let var = Env_config.KeeperMemoryOs.recall_env_key in
   let old = Sys.getenv_opt var in
   Unix.putenv var value;
   Fun.protect ~finally:(fun () -> restore_env var old) f
@@ -3388,6 +3498,169 @@ let test_consolidator_promotes_carries_claim_id () =
   | _ -> Alcotest.fail "expected one shared fact"
 ;;
 
+let promote_one ~now keeper_facts =
+  match Consolidator.promote_facts ~now ~keeper_facts () with
+  | _, [ f ] -> f
+  | _, shared -> Alcotest.failf "expected one shared fact, got %d" (List.length shared)
+;;
+
+let test_consolidator_representative_prefers_verified () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "representative-verified-priority" in
+  let unverified =
+    { (mk_shared_fixture ~now ~category:"lesson" "old unverified wording") with
+      Types.first_seen = now -. 20_000.0
+    ; Types.last_verified_at = None
+    ; Types.claim_id = claim_id
+    }
+  in
+  let verified =
+    { (mk_shared_fixture ~now ~category:"lesson" "verified wording") with
+      Types.first_seen = now -. 10.0
+    ; Types.last_verified_at = Some (now -. 100.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let promoted =
+    promote_one ~now [ "alpha", [ unverified ]; "beta", [ verified ] ]
+  in
+  Alcotest.(check string)
+    "explicit verification beats never-verified legacy row"
+    "verified wording"
+    promoted.Types.claim
+;;
+
+let test_consolidator_representative_prefers_newest_verification () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "representative-newest-verification" in
+  let old_verified =
+    { (mk_shared_fixture ~now ~category:"validated_approach" "older verified wording") with
+      Types.last_verified_at = Some (now -. 500.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let new_verified =
+    { (mk_shared_fixture ~now ~category:"validated_approach" "newer verified wording") with
+      Types.last_verified_at = Some (now -. 5.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let promoted =
+    promote_one ~now [ "alpha", [ old_verified ]; "beta", [ new_verified ] ]
+  in
+  Alcotest.(check string)
+    "newer last_verified_at wins among verified rows"
+    "newer verified wording"
+    promoted.Types.claim
+;;
+
+let test_consolidator_unverified_fallback_order () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "representative-unverified-fallback" in
+  let unverified ?(source = "trace") ~first_seen claim =
+    { (mk_shared_fixture ~now ~category:"lesson" claim) with
+      Types.first_seen
+    ; Types.last_verified_at = None
+    ; Types.claim_id = claim_id
+    ; Types.source =
+        { Types.trace_id = source; Types.turn = 1; Types.tool_call_id = None }
+    }
+  in
+  let by_claim =
+    promote_one
+      ~now
+      [ "gamma", [ unverified ~first_seen:(now -. 1.0) "aaa later wording" ]
+      ; "beta", [ unverified ~first_seen:(now -. 10.0) "z earliest wording" ]
+      ; "alpha", [ unverified ~first_seen:(now -. 10.0) "a earliest wording" ]
+      ]
+  in
+  Alcotest.(check string)
+    "unverified fallback uses first_seen before claim text"
+    "a earliest wording"
+    by_claim.Types.claim;
+  let by_keeper =
+    promote_one
+      ~now
+      [ "beta", [ unverified ~source:"from-beta" ~first_seen:(now -. 10.0) "same wording" ]
+      ; "alpha", [ unverified ~source:"from-alpha" ~first_seen:(now -. 10.0) "same wording" ]
+      ]
+  in
+  Alcotest.(check string)
+    "unverified fallback ties finally by keeper id"
+    "from-alpha"
+    by_keeper.Types.source.Types.trace_id
+;;
+
+let test_consolidator_filters_stale_before_shared_fields () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "fresh-contributors-only" in
+  let stale =
+    { (mk_shared_fixture ~now ~category:"lesson" "stale ancient wording") with
+      Types.first_seen = 1.0
+    ; Types.valid_until = Some (now -. 1.0)
+    ; Types.last_verified_at = Some (now -. 1.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let fresh_old =
+    { (mk_shared_fixture ~now ~category:"lesson" "fresh older wording") with
+      Types.first_seen = 100.0
+    ; Types.last_verified_at = Some (now -. 100.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let fresh_new =
+    { (mk_shared_fixture ~now ~category:"lesson" "fresh newest wording") with
+      Types.first_seen = 200.0
+    ; Types.last_verified_at = Some (now -. 5.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let promoted =
+    promote_one
+      ~now
+      [ "stale", [ stale ]; "fresh-a", [ fresh_old ]; "fresh-b", [ fresh_new ] ]
+  in
+  Alcotest.(check string)
+    "representative comes from current contributors only"
+    "fresh newest wording"
+    promoted.Types.claim;
+  Alcotest.(check (list string))
+    "observed_by excludes stale contributors"
+    [ "fresh-a"; "fresh-b" ]
+    promoted.Types.observed_by;
+  Alcotest.(check (float 1e-9))
+    "first_seen excludes stale contributors"
+    100.0
+    promoted.Types.first_seen
+;;
+
+let test_consolidator_stale_peer_does_not_satisfy_min_keepers () =
+  let now = 1_000_000.0 in
+  let claim_id = Some "stale-peer-no-quorum" in
+  let fresh =
+    { (mk_shared_fixture ~now ~category:"validated_approach" "fresh single keeper") with
+      Types.claim_id = claim_id
+    }
+  in
+  let stale =
+    { (mk_shared_fixture ~now ~category:"validated_approach" "expired peer") with
+      Types.valid_until = Some (now -. 1.0)
+    ; Types.claim_id = claim_id
+    }
+  in
+  let _considered, shared =
+    Consolidator.promote_facts
+      ~now
+      ~keeper_facts:[ "fresh", [ fresh ]; "stale", [ stale ] ]
+      ()
+  in
+  Alcotest.(check int)
+    "one current keeper plus one stale peer is still below min_keepers"
+    0
+    (List.length shared)
+;;
+
 (* A claim held by a single keeper is never shared (below min_keepers). *)
 let test_consolidator_solo_not_promoted () =
   let now = 1_000_000.0 in
@@ -3641,14 +3914,59 @@ let test_consolidator_deterministic () =
   Alcotest.(check (list string)) "input order does not change output" (claims a) (claims b)
 ;;
 
+let assert_consolidator_ran label report =
+  match report.Consolidator.status with
+  | Consolidator.Consolidation_ran -> ()
+  | Consolidator.Consolidation_disabled ->
+    Alcotest.failf "%s: expected consolidator to run, got disabled" label
+;;
+
+let assert_consolidator_disabled report =
+  match report.Consolidator.status with
+  | Consolidator.Consolidation_disabled -> ()
+  | Consolidator.Consolidation_ran ->
+    Alcotest.fail "expected consolidator disabled status"
+;;
+
+let test_consolidator_default_disabled_status () =
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "" (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let now = 1_000_000.0 in
+      Memory_io.append_fact
+        ~keeper_id:"alpha"
+        (mk_shared_fixture ~now ~category:"lesson" "default-off shared claim");
+      Memory_io.append_fact
+        ~keeper_id:"beta"
+        (mk_shared_fixture ~now ~category:"lesson" "default-off shared claim");
+      let report = Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now () in
+      assert_consolidator_disabled report;
+      Alcotest.(check int)
+        "disabled scan does not report keepers as scanned"
+        0
+        report.Consolidator.keepers_scanned;
+      Alcotest.(check int)
+        "disabled scan considers no claims"
+        0
+        report.Consolidator.claims_considered;
+      Alcotest.(check int)
+        "disabled scan promotes no claims"
+        0
+        report.Consolidator.promoted;
+      Alcotest.(check int)
+        "disabled scan leaves shared store empty"
+        0
+        (List.length (Memory_io.read_facts_all ~keeper_id:Types.shared_store_id))))
+;;
+
 (* End-to-end: two keepers corroborate a claim on disk, the consolidator writes
    the shared store, and a third keeper's recall surfaces it with provenance —
    while a keeper that already holds the claim privately sees it as its own
    (private precedence, no duplicate "shared via" line). *)
 let test_recall_surfaces_shared_after_consolidation () =
-  with_recall_env "true" (fun () ->
-    with_prompt_registry (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
+    with_recall_env "true" (fun () ->
+      with_prompt_registry (fun () ->
+        with_temp_keepers_dir (fun _keepers_dir ->
         let now = 1_000_000.0 in
         let shared_claim = "deployment uses blue green rollout" in
         Memory_io.append_fact
@@ -3658,6 +3976,7 @@ let test_recall_surfaces_shared_after_consolidation () =
           ~keeper_id:"beta"
           (mk_shared_fixture ~now ~category:"validated_approach" shared_claim);
         let report = Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now () in
+        assert_consolidator_ran "shared recall setup" report;
         Alcotest.(check int) "one claim promoted to shared store" 1 report.Consolidator.promoted;
         Memory_io.append_fact
           ~keeper_id:"observer"
@@ -3677,7 +3996,7 @@ let test_recall_surfaces_shared_after_consolidation () =
           "private precedence: contributor sees the claim as its own, not shared"
           true
           (contains "deployment uses blue green" alpha_block
-           && not (contains "shared via" alpha_block)))))
+           && not (contains "shared via" alpha_block))))))
 ;;
 
 let test_recall_scans_whole_shared_store () =
@@ -3721,36 +4040,38 @@ let with_env name value f =
 ;;
 
 let test_consolidator_rejects_corrupt_source_store () =
-  with_temp_keepers_dir (fun _keepers_dir ->
-    let now = 1_000_000.0 in
-    Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now "shared fact");
-    let oc =
-      open_out_gen [ Open_append; Open_text ] 0o644 (Memory_io.facts_path ~keeper_id:"alpha")
-    in
-    Fun.protect
-      ~finally:(fun () -> close_out_noerr oc)
-      (fun () -> output_string oc "{not-json}\n");
-    Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now "shared fact");
-    try
-      ignore (Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ());
-      Alcotest.fail "expected corrupt source store to fail loud"
-    with
-    | Invalid_argument msg ->
-      Alcotest.(check bool)
-        "error identifies consolidation input"
-        true
-        (contains "memory os consolidation input invalid" msg);
-      Alcotest.(check bool)
-        "error includes source fact store"
-        true
-        (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
-      Alcotest.(check bool) "error includes line number" true (contains ":2:" msg))
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
+    with_temp_keepers_dir (fun _keepers_dir ->
+      let now = 1_000_000.0 in
+      Memory_io.append_fact ~keeper_id:"alpha" (mk_shared_fixture ~now "shared fact");
+      let oc =
+        open_out_gen [ Open_append; Open_text ] 0o644 (Memory_io.facts_path ~keeper_id:"alpha")
+      in
+      Fun.protect
+        ~finally:(fun () -> close_out_noerr oc)
+        (fun () -> output_string oc "{not-json}\n");
+      Memory_io.append_fact ~keeper_id:"beta" (mk_shared_fixture ~now "shared fact");
+      try
+        ignore (Consolidator.run ~keeper_ids:[ "alpha"; "beta" ] ~now ());
+        Alcotest.fail "expected corrupt source store to fail loud"
+      with
+      | Invalid_argument msg ->
+        Alcotest.(check bool)
+          "error identifies consolidation input"
+          true
+          (contains "memory os consolidation input invalid" msg);
+        Alcotest.(check bool)
+          "error includes source fact store"
+          true
+          (contains (Memory_io.facts_path ~keeper_id:"alpha") msg);
+        Alcotest.(check bool) "error includes line number" true (contains ":2:" msg)))
 ;;
 
 let test_consolidator_waits_for_shared_store_lock () =
-  with_eio (fun ~sw ~net:_ ~clock ->
-    with_eio_guard (fun () ->
-      with_temp_keepers_dir (fun _keepers_dir ->
+  with_memory_os_env "MASC_KEEPER_MEMORY_OS_CONSOLIDATE" "true" (fun () ->
+    with_eio (fun ~sw ~net:_ ~clock ->
+      with_eio_guard (fun () ->
+        with_temp_keepers_dir (fun _keepers_dir ->
         let now = 1_000_000.0 in
         Memory_io.append_fact
           ~keeper_id:"alpha"
@@ -3775,8 +4096,9 @@ let test_consolidator_waits_for_shared_store_lock () =
         wait_for_ref ~clock "consolidator after shared lock" result;
         match !result with
         | Some report ->
+          assert_consolidator_ran "lock wait" report;
           Alcotest.(check int) "claim promoted after lock release" 1 report.Consolidator.promoted
-        | None -> Alcotest.fail "expected consolidator report")))
+        | None -> Alcotest.fail "expected consolidator report"))))
 ;;
 
 let test_recall_waits_for_shared_fact_lock () =
@@ -3816,7 +4138,7 @@ let test_recall_waits_for_shared_fact_lock () =
             | None -> Alcotest.fail "expected recall block")))))
 ;;
 let test_librarian_provider_slot_gate_caps_at_capacity () =
-  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" "1" (fun () ->
+  with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "1" (fun () ->
     with_eio (fun ~sw ~net:_ ~clock ->
       (* Capacity 1: while one entrant holds the slot, a concurrent entrant drops
          ([None]) after [provider_slot_wait_sec] instead of blocking — the #21230
@@ -3851,7 +4173,7 @@ let test_librarian_provider_slot_gate_caps_at_capacity () =
 ;;
 
 let test_librarian_provider_slot_gate_disabled_at_zero () =
-  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" "0" (fun () ->
+  with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "0" (fun () ->
     with_eio (fun ~sw ~net:_ ~clock ->
       (* Capacity 0 disables the gate: a held slot does not cap a concurrent
          entrant — both run ([Some]). *)
@@ -3885,7 +4207,7 @@ let test_librarian_provider_slot_gate_disabled_at_zero () =
 ;;
 
 let test_librarian_provider_slot_gate_is_per_keeper () =
-  with_env "MASC_KEEPER_MEMORY_OS_LIBRARIAN_GLOBAL_SLOT" "1" (fun () ->
+  with_env Env_config.KeeperMemoryOs.librarian_global_slot_env_key "1" (fun () ->
     with_eio (fun ~sw ~net:_ ~clock ->
       (* Capacity 1 is per keeper: a slot held by keeper-a must not block
          keeper-b. This is the P0-4 isolation contract. *)
@@ -5302,9 +5624,17 @@ let () =
             `Quick
             test_memory_os_config_snapshot_surfaces_effective_envs
         ; Alcotest.test_case
+            "memory os snapshot registry parity with compiled readers"
+            `Quick
+            test_memory_os_snapshot_registry_parity
+        ; Alcotest.test_case
             "librarian timeout override env"
             `Quick
             test_librarian_timeout_override_env
+        ; Alcotest.test_case
+            "librarian max tokens override env"
+            `Quick
+            test_librarian_max_tokens_override_env
         ; Alcotest.test_case
             "librarian preserves admission memory text"
             `Quick
@@ -5584,6 +5914,26 @@ let () =
             `Quick
             test_consolidator_promotes_carries_claim_id
         ; Alcotest.test_case
+            "representative prefers verified rows"
+            `Quick
+            test_consolidator_representative_prefers_verified
+        ; Alcotest.test_case
+            "representative prefers newest verification"
+            `Quick
+            test_consolidator_representative_prefers_newest_verification
+        ; Alcotest.test_case
+            "unverified representative fallback is deterministic"
+            `Quick
+            test_consolidator_unverified_fallback_order
+        ; Alcotest.test_case
+            "stale contributors are filtered before shared fields"
+            `Quick
+            test_consolidator_filters_stale_before_shared_fields
+        ; Alcotest.test_case
+            "stale peer does not satisfy min_keepers"
+            `Quick
+            test_consolidator_stale_peer_does_not_satisfy_min_keepers
+        ; Alcotest.test_case
             "solo claim not promoted"
             `Quick
             test_consolidator_solo_not_promoted
@@ -5631,6 +5981,10 @@ let () =
             "deterministic regardless of input order"
             `Quick
             test_consolidator_deterministic
+        ; Alcotest.test_case
+            "default-off run reports disabled status"
+            `Quick
+            test_consolidator_default_disabled_status
         ; Alcotest.test_case
             "recall surfaces shared facts with provenance (private precedence)"
             `Quick

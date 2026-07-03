@@ -181,6 +181,30 @@ let claim_task_exn config ~agent_name ~task_id =
   | Ok _ -> ()
   | Error err -> fail ("claim_task_r failed: " ^ Masc_domain.masc_error_to_string err)
 
+let old_release_timestamp = "2020-01-01T00:00:00Z"
+
+let mark_agent_stale_for_release config ~agent_name =
+  Masc.Workspace.update_local_agent_state config ~agent_name (fun agent ->
+    { agent with status = Masc_domain.Active; last_seen = old_release_timestamp })
+
+let rewrite_task_status config ~task_id ~f =
+  let backlog = Masc.Workspace.read_backlog config in
+  let updated_tasks =
+    List.map
+      (fun (task : Masc_domain.task) ->
+         if String.equal task.id task_id
+         then { task with task_status = f task.task_status }
+         else task)
+      backlog.tasks
+  in
+  Masc.Workspace.write_backlog config { backlog with tasks = updated_tasks }
+
+let age_claimed_task_for_release config ~task_id =
+  rewrite_task_status config ~task_id ~f:(function
+    | Masc_domain.Claimed { assignee; _ } ->
+      Masc_domain.Claimed { assignee; claimed_at = old_release_timestamp }
+    | other -> other)
+
 let meta_with_active_goal goal_id =
   match
     Masc_test_deps.meta_of_json_fixture
@@ -245,9 +269,60 @@ let test_keeper_task_claim_reports_other_keepers_wip_cap () =
        check bool "scope note distinguishes claim cap" true
          (Astring.String.is_infix ~affix:"not a request to create a new repo"
             (rejection |> U.member "scope_note" |> U.to_string));
-       check bool "message tells keeper not to bypass with new work" true
-         (Astring.String.is_infix ~affix:"do not create unrelated repos"
-            (json |> U.member "result" |> U.to_string)))
+         check bool "message tells keeper not to bypass with new work" true
+           (Astring.String.is_infix ~affix:"do not create unrelated repos"
+              (json |> U.member "result" |> U.to_string)))
+
+let test_keeper_task_claim_releases_stale_owner_before_wip_admission () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir () in
+  Fun.protect ~finally:(fun () -> cleanup_dir base_path) (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let goal, _ =
+         match Goal_store.upsert_goal config ~title:"WIP stale release goal" () with
+         | Ok payload -> payload
+         | Error msg -> fail msg
+       in
+       for i = 1 to 4 do
+         add_goal_task config ~goal_id:goal.id
+           ~title:(Printf.sprintf "fix: stale release fixture %d" i)
+       done;
+       let stale_agents =
+         [ "keeper-a-agent"; "keeper-b-agent"; "keeper-c-agent" ]
+       in
+       List.iteri
+         (fun i agent_name ->
+            let task_id = Printf.sprintf "task-%03d" (i + 1) in
+            claim_task_exn config ~agent_name ~task_id;
+            mark_agent_stale_for_release config ~agent_name;
+            age_claimed_task_for_release config ~task_id)
+         stale_agents;
+       let payload =
+         Task_runtime.handle_keeper_task_tool ~config
+           ~meta:(meta_with_active_goal goal.id)
+           ~name:"keeper_task_claim" ~args:(`Assoc [])
+       in
+       let json = Yojson.Safe.from_string payload in
+       check bool "claimed task present" true
+         (json |> U.member "claimed_task" <> `Null);
+       check int "stale release count" 3
+         (json |> U.member "stale_claim_releases" |> U.to_list |> List.length);
+       check string "new claimant took released task" "task-001"
+         (json |> U.member "claimed_task" |> U.member "task_id" |> U.to_string);
+       let backlog = Masc.Workspace.read_backlog config in
+       match
+         List.find_opt
+           (fun (task : Masc_domain.task) -> String.equal task.id "task-002")
+           backlog.tasks
+       with
+       | Some { task_status = Masc_domain.Todo; _ } -> ()
+       | Some task ->
+         fail
+           (Printf.sprintf "expected task-002 to be released, got %s"
+              (Masc_domain.task_status_to_string task.task_status))
+       | None -> fail "task-002 missing from backlog")
 
 let test_keeper_task_claim_no_unclaimed_emits_no_work_outcome () =
   Eio_main.run @@ fun env ->
@@ -283,12 +358,13 @@ let test_keeper_task_claim_no_unclaimed_emits_no_work_outcome () =
          (typed |> U.member "reason" |> U.member "kind" |> U.to_string))
 
 let test_active_items_only_include_claimed_or_in_progress () =
+  let now = Masc_domain.now_iso () in
   let tasks =
     [ task
-        ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = "now" })
+        ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = now })
         "task-001"
     ; task
-        ~status:(Masc_domain.InProgress { assignee = "b"; started_at = "now" })
+        ~status:(Masc_domain.InProgress { assignee = "b"; started_at = now })
         ~title:"docs: update runbook"
         "task-002"
     ; task ~title:"fix: still todo" "task-003"
@@ -303,20 +379,21 @@ let test_active_items_only_include_claimed_or_in_progress () =
        active)
 
 let test_active_items_include_all_active_assignees () =
+  let now = Masc_domain.now_iso () in
   let tasks =
     [ task
-        ~status:(Masc_domain.Claimed { assignee = "keeper-a"; claimed_at = "now" })
+        ~status:(Masc_domain.Claimed { assignee = "keeper-a"; claimed_at = now })
         "task-claimed-a"
     ; task
         ~status:
-          (Masc_domain.InProgress { assignee = "keeper-a"; started_at = "now" })
+          (Masc_domain.InProgress { assignee = "keeper-a"; started_at = now })
         "task-progress-a"
     ; task
-        ~status:(Masc_domain.Claimed { assignee = "keeper-b"; claimed_at = "now" })
+        ~status:(Masc_domain.Claimed { assignee = "keeper-b"; claimed_at = now })
         "task-claimed-b"
     ; task
         ~status:
-          (Masc_domain.InProgress { assignee = "keeper-b"; started_at = "now" })
+          (Masc_domain.InProgress { assignee = "keeper-b"; started_at = now })
         "task-progress-b"
     ]
   in
@@ -324,6 +401,30 @@ let test_active_items_include_all_active_assignees () =
   check (list string) "all active ids"
     [ "task-claimed-a"; "task-progress-a"; "task-claimed-b"; "task-progress-b" ]
     (List.map (fun item -> item.Admission.id) active)
+
+let test_old_claimed_task_stays_active_until_owner_release () =
+  let tasks =
+    [ task
+        ~status:
+          (Masc_domain.Claimed
+             { assignee = "a"; claimed_at = old_release_timestamp })
+        "task-old-but-owned"
+    ]
+  in
+  check (list string) "old claimed task remains active" [ "task-old-but-owned" ]
+    (List.map (fun item -> item.Admission.id)
+       (Admission.active_items_of_tasks tasks))
+
+let test_unparseable_claimed_at_keeps_counting_until_owner_release () =
+  let tasks =
+    [ task
+        ~status:(Masc_domain.Claimed { assignee = "a"; claimed_at = "not-a-timestamp" })
+        "task-malformed"
+    ]
+  in
+  check (list string) "malformed timestamp stays active" [ "task-malformed" ]
+    (List.map (fun item -> item.Admission.id)
+       (Admission.active_items_of_tasks tasks))
 
 let test_goalless_task_exempt_from_goal_cap () =
   (* RFC-0245: a goalless claim must not be rejected by the per-goal cap even
@@ -391,10 +492,13 @@ let () =
             test_scope_of_task_has_no_repo_uses_goal_and_title_category
         ; test_case "repoless tasks exempt from repo cap" `Quick
             test_repoless_tasks_exempt_from_repo_cap
-        ; test_case "keeper_task_claim reports other keepers WIP cap" `Quick
-            test_keeper_task_claim_reports_other_keepers_wip_cap
-        ; test_case "keeper_task_claim no-unclaimed emits no-work outcome" `Quick
-            test_keeper_task_claim_no_unclaimed_emits_no_work_outcome
+          ; test_case "keeper_task_claim reports other keepers WIP cap" `Quick
+              test_keeper_task_claim_reports_other_keepers_wip_cap
+        ; test_case "keeper_task_claim releases stale owners before WIP admission"
+            `Quick
+            test_keeper_task_claim_releases_stale_owner_before_wip_admission
+          ; test_case "keeper_task_claim no-unclaimed emits no-work outcome" `Quick
+              test_keeper_task_claim_no_unclaimed_emits_no_work_outcome
         ; test_case "active items include active WIP only" `Quick
             test_active_items_only_include_claimed_or_in_progress
         ; test_case "active items include all active assignees" `Quick
@@ -405,5 +509,11 @@ let () =
             test_goalless_tasks_never_goal_capped
         ; test_case "goalless still bounded by global cap" `Quick
             test_goalless_still_bounded_by_global_cap
-        ] )
+        ; test_case "old claimed task stays active until owner release" `Quick
+            test_old_claimed_task_stays_active_until_owner_release
+        ; test_case
+            "unparseable claimed_at keeps counting until owner release"
+            `Quick
+            test_unparseable_claimed_at_keeps_counting_until_owner_release
+          ] )
     ]

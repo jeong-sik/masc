@@ -195,6 +195,14 @@ let enrich_sdk_error ~runtime_id ~(provider_cfg : Llm_provider.Provider_config.t
     then Printf.sprintf "%s: %s" hint_marker detail
     else Printf.sprintf "%s (%s: %s)" message hint_marker detail
   in
+  (* RFC-0132 PR-2 boundary-allow exception: this detail intentionally names
+     model_id/base_url/request_path/endpoint. It exists to pinpoint a
+     misconfigured OpenAI-compatible endpoint when the provider returns
+     404/invalid-request, where the neutral runtime lane would hide the exact
+     misconfiguration an operator must fix. The values originate from the
+     masc-owned runtime.toml provider binding, and the string is surfaced only
+     on the error path, not in metric labels or product telemetry. Documented
+     as an exception in docs/OAS-MASC-BOUNDARY.md Open Structural Gaps. *)
   let openai_compat_not_found_detail () =
     Printf.sprintf
       "runtime_id=%s model=%s base_url=%s request_path=%s endpoint=%s"

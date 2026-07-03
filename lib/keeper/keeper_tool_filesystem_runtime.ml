@@ -220,85 +220,100 @@ let handle_read_file
       ~fallback_dir
       ~error
   | Ok target ->
-    let run_read () =
-      (* RFC-0006 Phase B-1: Docker keepers are always contained to their
-         playground bundle on the host before any read-side I/O proceeds.
-         The resolver-level allowed_paths check is augmented by this
-         strict containment so host FS cannot leak through Read
-         while Execute is container-isolated. *)
-      let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
-      (* Multi-repository Phase 2: repository-level access restriction.
-         If the resolved path is under a registered repository, enforce
-         keeper-to-repo mapping.  Paths outside all registered repos are
-         allowed (playground general files). *)
-      let* () =
-        Keeper_repo_mapping.validate_path_access
-          ~keeper_id:meta.name
-          ~base_path:(Keeper_alerting_path.project_root_of_config config)
-          ~path:target
-      in
-      (* RFC-0006 Phase B-2: sandbox-backed keepers route the actual
-         byte read through the backend read runner so the backend mount
-         restrictions are the load-bearing isolation. The host containment
-         check above remains as defense-in-depth. *)
-      if Keeper_sandbox_read_runner.should_route_read ~meta
-      then (
-        let timeout_sec =
-          Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
-        in
-        let+ body =
-          Keeper_sandbox_read_runner.read_file
-            ?turn_sandbox_factory
-            ~config
-            ~meta
-            ~host_path:target
-            ~max_bytes
-            ~timeout_sec
-            ()
-        in
-        let total = String.length body in
-        let truncated = total >= max_bytes in
-        Yojson.Safe.to_string
-          (`Assoc
-              [ "ok", `Bool true
-              ; "path", `String target
-              ; "bytes", `Int total
-              ; "truncated", `Bool truncated
-              ; "content", `String body
-              ; "via", `String Keeper_sandbox_read_runner.backend_via
-              ]))
-      else (
-        match Safe_ops.read_file_safe target with
-        | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
-          Ok
-            (missing_file_error_json
-               ~cwd
-               ~raw_path:(Some path)
+    (* Multi-repository Phase 2: repository-level access restriction.
+       If the resolved path is under a registered repository, enforce
+       keeper-to-repo mapping.  Paths outside all registered repos are
+       allowed (playground general files).  Denials are surfaced as a
+       deterministic policy block so the supervisor does not retry the
+       same failing path. *)
+    (match
+       Keeper_repo_mapping.validate_path_access
+         ~keeper_id:meta.name
+         ~base_path:(Keeper_alerting_path.project_root_of_config config)
+         ~path:target
+     with
+     | Error msg ->
+       Yojson.Safe.to_string
+         (`Assoc
+            [ "ok", `Bool false
+            ; "error", `String msg
+            ; "path", `String target
+            ; ( "deterministic_retry"
+              , `Assoc
+                  [ "reason", `String "policy_blocked"
+                  ; "retry_same_args", `Bool false
+                  ] )
+            ])
+     | Ok () ->
+       let run_read () =
+         (* RFC-0006 Phase B-1: Docker keepers are always contained to their
+            playground bundle on the host before any read-side I/O proceeds.
+            The resolver-level allowed_paths check is augmented by this
+            strict containment so host FS cannot leak through Read
+            while Execute is container-isolated. *)
+         let* () = Keeper_sandbox_containment.check_read_target ~config ~meta ~target in
+         (* RFC-0006 Phase B-2: sandbox-backed keepers route the actual
+            byte read through the backend read runner so the backend mount
+            restrictions are the load-bearing isolation. The host containment
+            check above remains as defense-in-depth. *)
+         if Keeper_sandbox_read_runner.should_route_read ~meta
+         then (
+           let timeout_sec =
+             Env_config_sandbox.Shell_timeout.timeout_sec ~bucket:Read ()
+           in
+           let+ body =
+             Keeper_sandbox_read_runner.read_file
+               ?turn_sandbox_factory
                ~config
                ~meta
-               ~target
-               ~fallback_dir
-               ~error:e)
-        | Error e -> Error e
-        | Ok content ->
-          let total = String.length content in
-          let truncated = total > max_bytes in
-          let body =
-            if truncated then String.sub content 0 max_bytes else content
-          in
-          Ok
-            (Yojson.Safe.to_string
-               (`Assoc
-                    [ "ok", `Bool true
-                    ; "path", `String target
-                    ; "bytes", `Int total
-                    ; "truncated", `Bool truncated
-                    ; "content", `String body
-                    ])))
-    in
-    match run_read () with
-    | Ok json -> json
-    | Error msg -> error_json ~fields:[ "path", `String target ] msg
+               ~host_path:target
+               ~max_bytes
+               ~timeout_sec
+               ()
+           in
+           let total = String.length body in
+           let truncated = total >= max_bytes in
+           Yojson.Safe.to_string
+             (`Assoc
+                 [ "ok", `Bool true
+                 ; "path", `String target
+                 ; "bytes", `Int total
+                 ; "truncated", `Bool truncated
+                 ; "content", `String body
+                 ; "via", `String Keeper_sandbox_read_runner.backend_via
+                 ]))
+         else (
+           match Safe_ops.read_file_safe target with
+           | Error e when String.starts_with ~prefix:file_not_found_prefix e ->
+             Ok
+               (missing_file_error_json
+                  ~cwd
+                  ~raw_path:(Some path)
+                  ~config
+                  ~meta
+                  ~target
+                  ~fallback_dir
+                  ~error:e)
+           | Error e -> Error e
+           | Ok content ->
+             let total = String.length content in
+             let truncated = total > max_bytes in
+             let body =
+               if truncated then String.sub content 0 max_bytes else content
+             in
+             Ok
+               (Yojson.Safe.to_string
+                  (`Assoc
+                       [ "ok", `Bool true
+                       ; "path", `String target
+                       ; "bytes", `Int total
+                       ; "truncated", `Bool truncated
+                       ; "content", `String body
+                       ])))
+       in
+       match run_read () with
+       | Ok json -> json
+       | Error msg -> error_json ~fields:[ "path", `String target ] msg)
 ;;
 
 (* RFC-0006 Phase A.4: replace [old] with [new] in [text]. When

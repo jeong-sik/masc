@@ -97,8 +97,7 @@ type active_item = {
 
 let task_is_active_wip (task : Masc_domain.task) =
   match task.task_status with
-  | Masc_domain.Claimed _
-  | Masc_domain.InProgress _ -> true
+  | Masc_domain.Claimed _ | Masc_domain.InProgress _ -> true
   | Masc_domain.Todo
   | Masc_domain.AwaitingVerification _
   | Masc_domain.Done _

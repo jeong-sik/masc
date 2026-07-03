@@ -227,4 +227,12 @@ module For_testing : sig
     keeper_stream_bridge_state ->
     Agent_sdk.Types.sse_event ->
     translated_keeper_stream_event
+  val keeper_tool_failure_log_details :
+    tool_name:string ->
+    agent_name:string ->
+    duration_ms:int ->
+    streaming:bool ->
+    error_body:string ->
+    failure_class:Tool_result.tool_failure_class ->
+    Yojson.Safe.t
 end

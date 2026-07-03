@@ -78,6 +78,11 @@ let classify_image_inspect_failure =
 let classify_image_inventory_failure =
   Keeper_sandbox_runtime_classify.classify_image_inventory_failure
 
+let docker_run_looks_daemon_pressure ~status ~output =
+  match classify_docker_runtime_failure ~status ~output with
+  | "docker_daemon_unavailable" -> true
+  | _ -> false
+
 let docker_info_security_options_with_class ~timeout_sec =
   let argv =
     docker_command_argv () @ [ "info"; "--format"; "{{json .SecurityOptions}}" ]

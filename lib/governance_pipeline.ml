@@ -79,6 +79,32 @@ let keeper_confirm_threshold governance_level =
     | other -> confirm_threshold other
 ;;
 
+let runtime_auto_approval_blocked = function
+  | None -> false
+  | Some (meta : Keeper_meta_contract.keeper_meta) ->
+    Option.is_some meta.runtime.last_blocker
+;;
+
+(** PR-E (Plan v3 Leak 1): split the legacy [auto_approval_forbidden]
+    into a "hard" component that always wins and a "soft" pattern
+    component that a narrowly-scoped routine allowlist match is
+    permitted to override.
+
+    - Hard forbidden = the request is at Critical risk OR structured
+      [runtime.last_blocker] is set.  Routine matchers must not
+      bypass these — this is where real safety walls live.  The
+      blocker [detail] is free-form UI/debug context, not a policy
+      classifier.
+    - Soft forbidden = the tool name or op string trips
+      [destructive_tool_or_op] (a substring filter on "shell"/"git"
+      plus a small list of bash/git ops).
+
+    The legacy [auto_approval_forbidden] is kept below for any
+    existing caller that wants the combined predicate. *)
+let auto_approval_hard_forbidden ~risk meta =
+  risk = Critical || runtime_auto_approval_blocked meta
+;;
+
 (** Minimum risk level that triggers audit logging. *)
 let audit_threshold = function
   | "paranoid" | "enterprise" -> Some Low
@@ -91,6 +117,15 @@ let decide ~governance_level ~tool_name ~input =
   let risk = assess_risk ~tool_name ~input in
   let trace_id = generate_trace_id () in
   let action =
+    if Env_config_core.disable_hitl () && auto_approval_hard_forbidden ~risk None then
+      `Require_confirm
+        (Printf.sprintf
+           "Governance (%s): %s risk tool %S requires confirmation: auto-approval is \
+            hard-forbidden"
+           governance_level
+           (risk_level_to_string risk)
+           tool_name)
+    else
     match confirm_threshold governance_level with
     | Some threshold when risk_level_to_int risk >= risk_level_to_int threshold ->
       `Require_confirm
@@ -218,15 +253,15 @@ let install ~config ~governance_level =
 
 (* ── OAS Approval Pipeline bridge (#5902) ─────────────────── *)
 
-let nonempty_trimmed value =
-  let trimmed = String.trim value in
-  if trimmed = "" then None else Some trimmed
-;;
-
 let selected_model_of_meta = function
   | None -> None
   | Some (_ : Keeper_meta_contract.keeper_meta) ->
     None
+;;
+
+let nonempty_trimmed value =
+  let trimmed = String.trim value in
+  if trimmed = "" then None else Some trimmed
 ;;
 
 let input_op_opt input =
@@ -256,52 +291,10 @@ let destructive_tool_or_op ~tool_name ~input =
   || List.mem normalized_op destructive_ops
 ;;
 
-let runtime_auto_approval_blocked = function
-  | None -> false
-  | Some (meta : Keeper_meta_contract.keeper_meta) ->
-    (match meta.runtime.last_blocker with
-     | None -> false
-     | Some info ->
-       let continue_gate = Keeper_meta_contract.blocker_class_continue_gate info.klass in
-       let typed_blocked =
-         match info.klass with
-         | Keeper_meta_contract.Completion_contract_violation | Keeper_meta_contract.Runtime_exhausted _
-           -> true
-         | _ -> false
-       in
-       let detail_blocked =
-         match nonempty_trimmed info.detail with
-         | Some summary ->
-           String_util.contains_substring_ci summary "manual block"
-           || String_util.contains_substring_ci summary "sandbox"
-         | None -> false
-       in
-       continue_gate || typed_blocked || detail_blocked)
-;;
-
 let auto_approval_forbidden ~tool_name ~input ~risk meta =
   risk = Critical
   || destructive_tool_or_op ~tool_name ~input
   || runtime_auto_approval_blocked meta
-;;
-
-(** PR-E (Plan v3 Leak 1): split the legacy [auto_approval_forbidden]
-    into a "hard" component that always wins and a "soft" pattern
-    component that a narrowly-scoped routine allowlist match is
-    permitted to override.
-
-    - Hard forbidden = the request is at Critical risk OR a runtime
-      blocker (runtime_exhausted, completion_contract_violation,
-      sandbox/manual block) is set.  Routine matchers must not
-      bypass these — this is where real safety walls live.
-    - Soft forbidden = the tool name or op string trips
-      [destructive_tool_or_op] (a substring filter on "shell"/"git"
-      plus a small list of bash/git ops).
-
-    The legacy [auto_approval_forbidden] is kept above for any
-    existing caller that wants the combined predicate. *)
-let auto_approval_hard_forbidden ~risk meta =
-  risk = Critical || runtime_auto_approval_blocked meta
 ;;
 
 let auto_approval_soft_forbidden ~tool_name ~input =

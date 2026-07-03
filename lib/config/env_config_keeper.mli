@@ -28,6 +28,14 @@ module KeeperMetrics : sig
   val max_rotated_files : int
 end
 
+(** {1 Keeper wire capture} *)
+
+module KeeperWireCapture : sig
+  val enabled : unit -> bool
+  val retention_days : unit -> int
+  val max_bytes : unit -> int
+end
+
 (** {1 Keeper interesting-alert fanout} *)
 
 module KeeperAlert : sig
@@ -83,6 +91,23 @@ end
 (** {1 Keeper Memory OS} *)
 
 module KeeperMemoryOs : sig
+  (** Env-var names (SSOT). The config-introspection registry and tests must
+      reference these constants rather than re-spelling the literals, so a
+      knob rename breaks compilation instead of silently drifting. *)
+
+  val recall_env_key : string
+  val librarian_env_key : string
+  val librarian_cadence_turns_env_key : string
+  val librarian_max_messages_env_key : string
+  val librarian_timeout_sec_env_key : string
+  val librarian_max_tokens_env_key : string
+  val librarian_runtime_id_env_key : string
+  val librarian_global_slot_env_key : string
+  val gc_env_key : string
+  val shared_consolidator_env_key : string
+  val consolidation_env_key : string
+  val consolidation_runtime_id_env_key : string
+
   val recall_enabled_default : bool
   val librarian_enabled_default : bool
   val librarian_cadence_turns_default : int
@@ -92,6 +117,7 @@ module KeeperMemoryOs : sig
   val librarian_runtime_id_default : string option
   val librarian_global_slot_default : int
   val gc_enabled_default : bool
+  val shared_consolidator_enabled_default : bool
   val consolidation_enabled_default : bool
   val consolidation_runtime_id_default : string option
 
@@ -104,9 +130,15 @@ module KeeperMemoryOs : sig
   val librarian_cadence_turns : unit -> int
   val librarian_max_messages : unit -> int
   val librarian_timeout_sec : unit -> float
+
+  val librarian_max_tokens : unit -> int
+  (** Output token cap for librarian extraction, applied as min with the
+      provider max_tokens. Default: 4096, floored to 1. *)
+
   val librarian_runtime_id : unit -> string option
   val librarian_global_slot : unit -> int
   val gc_enabled : unit -> bool
+  val shared_consolidator_enabled : unit -> bool
   val consolidation_enabled : unit -> bool
   val consolidation_runtime_id : unit -> string option
 end

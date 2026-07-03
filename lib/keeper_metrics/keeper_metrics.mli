@@ -237,6 +237,7 @@ type t =
   | KeeperRepoMappingLoadError
   | KeeperRepoMappingRepositoryIdentityMismatch
   | KeeperRepoMappingRepositoryStoreError
+  | RawTraceSinkDegraded
 
 val to_string : t -> string
 

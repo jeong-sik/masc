@@ -18,6 +18,8 @@ val classify_image_inspect_failure :
   status:Unix.process_status -> output:string -> string
 val classify_image_inventory_failure :
   status:Unix.process_status -> output:string -> string
+val docker_run_looks_daemon_pressure :
+  status:Unix.process_status -> output:string -> bool
 val docker_info_security_options_with_class :
   timeout_sec:float -> (string list, classified_error) result
 val docker_info_security_options :

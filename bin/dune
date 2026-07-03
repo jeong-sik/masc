@@ -55,8 +55,8 @@
  (public_name masc-stdio)
  (package masc)
  (libraries
- masc
- masc.server
+  masc
+  masc.server
   masc.config
   masc_core
   cmdliner
@@ -369,6 +369,7 @@
   masc.fusion_core
   masc.runtime
   masc.config_dir_resolver
+  masc.masc_process
   masc_core
   unix
   yojson

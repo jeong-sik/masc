@@ -155,6 +155,7 @@ tools-support = true
 streaming = true
 
 [models.gpt.capabilities]
+supports-response-format-json = true
 supports-structured-output = true
 
 [runpod_mtp.qwen]
@@ -195,6 +196,7 @@ tools-support = true
 streaming = true
 
 [models.gpt.capabilities]
+supports-response-format-json = true
 supports-structured-output = true
 
 [runpod_mtp.qwen]
@@ -204,10 +206,42 @@ max-concurrent = 4
 [openai.gpt]
 is-default = true
 max-concurrent = 1
+  |}
+;;
+
+let runtime_structured_judge_model_catalog =
+  {|
+[[models]]
+id_prefix = "gpt"
+base = "openai_chat"
+max_context_tokens = 64000
+supports_tools = true
+supports_structured_output = true
+|}
+;;
+
+let runtime_route_model_catalog =
+  {|
+[[models]]
+id_prefix = "openai_compat/qwen"
+base = "openai_chat"
+max_context_tokens = 128000
+supports_tools = true
+supports_native_streaming = true
+
+[[models]]
+id_prefix = "openai_compat/gpt"
+base = "openai_chat"
+max_context_tokens = 64000
+supports_tools = true
+supports_response_format_json = true
+supports_structured_output = true
+supports_native_streaming = true
 |}
 ;;
 
 let with_runtime_file f =
+  with_model_catalog_content runtime_route_model_catalog @@ fun () ->
   with_temp_dir "runtime-per-keeper-routing-runtime" @@ fun dir ->
   let path = Filename.concat dir "runtime.toml" in
   write_file path runtime_config;
@@ -432,6 +466,7 @@ let test_runtime_route_writer_updates_media_failover () =
 ;;
 
 let test_runtime_route_writer_clears_optional_structured_judge () =
+  with_model_catalog_content runtime_structured_judge_model_catalog @@ fun () ->
   with_runtime_file (fun path ->
     (match
        Runtime.set_runtime_structured_judge

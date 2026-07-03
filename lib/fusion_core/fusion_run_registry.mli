@@ -9,7 +9,17 @@
 
 type run_status =
   | Running
-  | Completed of { ok : bool }
+  | Completed of {
+      ok : bool;
+      failure : string option;
+          (** [ok=false]일 때 사람-가독 실패 사유([Fusion_types.judge_failure_text]
+              또는 denied/sink_failed/aborted 라벨). 2026-07-01 사고에서
+              [masc_fusion_status]가 status="failed"만 반환해 키퍼가 원인을 추측·
+              폴링했다 — 상태 표면이 사유를 함께 나른다. [ok=true]면 [None]. *)
+      failure_code : string option;
+          (** 안정 분류 태그([Fusion_types.judge_failure_tag] 어휘 +
+              denied/sink_failed/aborted/cancelled). [ok=true]면 [None]. *)
+    }
 
 type run = {
   run_id : string;
@@ -29,9 +39,18 @@ val register_running :
   t -> run_id:string -> keeper:string -> preset:string -> started_at:float -> unit
 (** Record a run as [Running]. A repeated [run_id] replaces its prior entry. *)
 
-val mark_completed : t -> run_id:string -> ok:bool -> unit
+val mark_completed
+  :  t
+  -> run_id:string
+  -> ?failure:string
+  -> ?failure_code:string
+  -> ok:bool
+  -> unit
+  -> unit
 (** Transition a run to [Completed]. No-op if [run_id] is unknown. [ok] is the
-    judge/sink outcome (false for denied/sink_failed/aborted). *)
+    judge/sink outcome (false for denied/sink_failed/aborted). [failure]/
+    [failure_code]는 [ok=false]일 때의 사유·분류 태그 — 상태 표면(tool/HTTP/SSE)이
+    사유 없이 "failed"만 보이는 opaque 실패가 되지 않게 함께 기록한다. *)
 
 val list_runs : t -> run list
 (** All tracked runs, newest [started_at] first ([Running] + recently
@@ -47,9 +66,9 @@ val status_label : run_status -> string
     route, and the [fusion_run_status] SSE event so it never drifts. *)
 
 val run_to_yojson : run -> Yojson.Safe.t
-(** Canonical per-run JSON: [{run_id, keeper, preset, started_at, status}]. The
-    single serializer for every fusion-run surface (tool / HTTP list / SSE
-    delta). *)
+(** Canonical per-run JSON: [{run_id, keeper, preset, started_at, status}] +
+    실패 시 additive [error]/[failure_code] 필드. The single serializer for
+    every fusion-run surface (tool / HTTP list / SSE delta). *)
 
 val global : t
 (** Process-wide registry the fusion tool/sink write to (server-lifetime). *)

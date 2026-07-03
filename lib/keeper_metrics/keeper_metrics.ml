@@ -247,6 +247,7 @@ type t =
   | KeeperRepoMappingLoadError          (* counter: keeper repo mapping load/parse failure *)
   | KeeperRepoMappingRepositoryIdentityMismatch (* counter: repo identity mismatch in policy projection *)
   | KeeperRepoMappingRepositoryStoreError       (* counter: repo catalog load failure in policy projection *)
+  | RawTraceSinkDegraded        (* counter: raw-trace sink create failed; turn dispatched untraced *)
 
 (** String conversion
 
@@ -514,6 +515,7 @@ let to_string = function
     "masc_keeper_repo_mapping_repository_identity_mismatch_total"
   | KeeperRepoMappingRepositoryStoreError ->
     "masc_keeper_repo_mapping_repository_store_error_total"
+  | RawTraceSinkDegraded -> "masc_keeper_raw_trace_sink_degraded_total"
 ;;
 
 (* Every constructor of [t], in declaration order.  Consumed by
@@ -578,7 +580,8 @@ let all : t list =
     VisionAnalyze; VisionCandidateAttempts; VisionIngestEvictions; PromptSegmentBytes; PromptTemplateRenderOutcome; ToolCallParamCompleteness; KeeperTurnInstructionHash;
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal;
   KeeperRepoMappingDeniedMissing; KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
-  KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError
+  KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;
+  RawTraceSinkDegraded
   ]
 ;;
 

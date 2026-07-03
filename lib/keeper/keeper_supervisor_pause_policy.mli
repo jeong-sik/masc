@@ -35,10 +35,13 @@ val auto_resume_after_sec_for_policy
     [metric_name], publishes a [Paused] phase event via the injected
     publisher, and emits [log_message] at ERROR.
 
-    On disk write failure: increments [keeper_write_meta_failures]
-    with the appropriate phase label and falls back to logging — the
-    in-memory failure-reason still gates restart, but the persisted
-    pause will not survive a server restart. *)
+    Fail-closed (mirrors [handle_auto_pause_from_meta]): [metric_name]
+    and the [Paused] phase event are only emitted after the disk write
+    commits. Returns [Error _] when the meta read/write fails or the
+    meta is missing — nothing is published in that case, and the
+    caller must keep the registry entry alive so the pause retries on
+    the next sweep (unregistering it lets the reconcile loop relaunch
+    a keeper whose disk meta still says [paused=false]). *)
 val handle_crash_auto_pause
   :  publish_phase_lifecycle:
        (phase:Keeper_state_machine.phase -> string -> string -> unit -> unit)
@@ -50,32 +53,33 @@ val handle_crash_auto_pause
   -> log_message:string
   -> blocker_class:Keeper_meta_contract.blocker_class option
   -> resume_policy:crash_pause_resume_policy
-  -> unit
+  -> (unit, string) result
 
 (** [handle_stale_storm_pause ~publish_phase_lifecycle ctx entry ~count]
     pauses [entry] because the same keeper terminated [count] times in
     a 6h sliding window with [stale_termination]. Manual resume
     required (operator must investigate the runtime/tool/runtime loop
-    that caused the storm). *)
+    that caused the storm). Fail-closed like [handle_crash_auto_pause]. *)
 val handle_stale_storm_pause
   :  publish_phase_lifecycle:
        (phase:Keeper_state_machine.phase -> string -> string -> unit -> unit)
   -> _ context
   -> Keeper_registry.registry_entry
   -> count:int
-  -> unit
+  -> (unit, string) result
 
 (** [handle_provider_timeout_pause ~publish_phase_lifecycle ctx entry
       ~count] pauses [entry] because the provider call timed out
     [count] times in a budget window. Auto-resume with exponential
-    back-off (see [MASC_KEEPER_AUTO_RESUME_INITIAL_SEC]). *)
+    back-off (see [MASC_KEEPER_AUTO_RESUME_INITIAL_SEC]).
+    Fail-closed like [handle_crash_auto_pause]. *)
 val handle_provider_timeout_pause
   :  publish_phase_lifecycle:
        (phase:Keeper_state_machine.phase -> string -> string -> unit -> unit)
   -> _ context
   -> Keeper_registry.registry_entry
   -> count:int
-  -> unit
+  -> (unit, string) result
 
 (** [handle_auto_pause_from_meta ~config ~meta ~reason_tag
       ?metric_name ~lifecycle_detail ~log_message ~blocker_class

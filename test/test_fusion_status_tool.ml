@@ -61,9 +61,10 @@ let seeded () =
   let t = R.create () in
   R.register_running t ~run_id:"r-run" ~keeper:"k1" ~preset:"balanced" ~started_at:300.0;
   R.register_running t ~run_id:"r-done" ~keeper:"k1" ~preset:"deep" ~started_at:100.0;
-  R.mark_completed t ~run_id:"r-done" ~ok:true;
+  R.mark_completed t ~run_id:"r-done" ~ok:true ();
   R.register_running t ~run_id:"r-fail" ~keeper:"k1" ~preset:"deep" ~started_at:200.0;
-  R.mark_completed t ~run_id:"r-fail" ~ok:false;
+  R.mark_completed t ~run_id:"r-fail"
+    ~failure:"judge failed: timeout" ~failure_code:"timeout" ~ok:false ();
   R.register_running
     t
     ~run_id:"r-foreign"

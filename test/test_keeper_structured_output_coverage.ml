@@ -67,9 +67,17 @@ let expected_structured_dashboard_agent_run_json_judges =
 ;;
 
 let expected_structured_fusion_agent_build_files =
+  List.sort String.compare [ "lib/fusion/fusion_judge.ml" ]
+;;
+
+let expected_freeform_fusion_agent_build_files =
   List.sort
     String.compare
-    [ "lib/fusion/fusion_judge.ml"; "lib/fusion/fusion_panel.ml" ]
+    [ (* 패널 답변 계약은 free text다 (fusion_panel.ml 참조): 단일 문자열에 JSON
+         envelope는 정보 이득 0에, provider가 schema를 무시하면 패널이 전멸하는
+         실패 클래스만 추가했다 (2026-07-01 사고). *)
+      "lib/fusion/fusion_panel.ml"
+    ]
 ;;
 
 let expected_structured_tool_agent_runs =
@@ -120,7 +128,10 @@ let fusion_agent_build_files () =
 ;;
 
 let expected_all_fusion_agent_build_files =
-  expected_structured_fusion_agent_build_files
+  List.sort
+    String.compare
+    (expected_structured_fusion_agent_build_files
+     @ expected_freeform_fusion_agent_build_files)
 ;;
 
 let with_repo_oas_model_catalog f =
@@ -317,7 +328,9 @@ let test_fusion_agent_builds_do_not_degrade_to_json_mode () =
     expected_structured_fusion_agent_build_files
 ;;
 
-let test_repo_fusion_seed_judges_accept_native_schema () =
+(* 2-tier 계약: native schema 미선언 runtime도 prompt tier로 Ok — 계약 적용은
+   total이다. seed 설정의 어떤 judge runtime도 빌드 단계에서 실패하지 않는다. *)
+let test_repo_fusion_seed_judge_contract_is_total () =
   with_repo_oas_model_catalog @@ fun _catalog ->
   let path = Ast_grep.resolve_path "config/runtime.toml" in
   check bool "repo runtime.toml present" true (Sys.file_exists path);
@@ -357,57 +370,11 @@ let test_repo_fusion_seed_judges_accept_native_schema () =
                  | Ok _ -> ()
                  | Error msg ->
                    failf
-                     "fusion preset %s judge runtime %s must accept native schema: %s"
+                     "fusion preset %s judge runtime %s: output contract must be total: %s"
                      preset.Fusion_policy.name
                      runtime_id
                      msg)
               judge_runtime_ids)
-         policy.Fusion_policy.presets)
-;;
-
-let assert_panel_runtime_accepts_native_schema runtimes ~preset runtime_id =
-  let runtime = runtime_by_id_or_fail runtimes runtime_id in
-  match Fusion_panel.For_testing.apply_output_contract runtime.provider_config with
-  | Ok _ -> ()
-  | Error msg ->
-    failf
-      "fusion preset %s panel runtime %s must accept native schema: %s"
-      preset
-      runtime_id
-      msg
-;;
-
-let test_repo_fusion_panel_presets_are_schema_capable () =
-  with_repo_oas_model_catalog @@ fun _catalog ->
-  let path = Ast_grep.resolve_path "config/runtime.toml" in
-  match Runtime.load_list ~config_path:path with
-  | Error msg -> failf "repo runtime.toml should load: %s" msg
-  | Ok
-      ( runtimes
-      , _default
-      , _assignments
-      , _librarian
-      , _structured_judge
-      , _cross
-      , _media ) ->
-    let runtime_cfg = fusion_toml_or_fail path in
-    (match Fusion_config.of_toml runtime_cfg with
-     | Error errs ->
-       failf
-         "repo fusion config should load: %s"
-         (String.concat ", " (List.map Fusion_config.show_config_error errs))
-     | Ok policy ->
-       List.iter
-         (fun validated_preset ->
-            let preset = Fusion_policy.Validated_preset.preset validated_preset in
-            List.iter
-              (fun (group : Fusion_policy.panel_group) ->
-                 List.iter
-                   (assert_panel_runtime_accepts_native_schema
-                      runtimes
-                      ~preset:preset.Fusion_policy.name)
-                   group.Fusion_policy.models)
-              preset.Fusion_policy.panels)
          policy.Fusion_policy.presets)
 ;;
 
@@ -589,13 +556,9 @@ let () =
             `Quick
             test_fusion_agent_builds_do_not_degrade_to_json_mode
         ; test_case
-            "repo Fusion seed judge runtimes accept native schema"
+            "repo Fusion seed judge output contract is total"
             `Quick
-            test_repo_fusion_seed_judges_accept_native_schema
-        ; test_case
-            "repo Fusion panel presets use schema-capable runtimes"
-            `Quick
-            test_repo_fusion_panel_presets_are_schema_capable
+            test_repo_fusion_seed_judge_contract_is_total
         ] )
     ; ( "structured tool Agent.run"
       , [ test_case

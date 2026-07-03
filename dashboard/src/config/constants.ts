@@ -79,6 +79,7 @@ export const CONTEXT_RATIO_COMPACTING = 0.50 // compacting
 export const KEEPER_HISTORY_TAIL_MESSAGES = 200
 export const KEEPER_STREAM_IDLE_TIMEOUT_MS = 120_000
 export const KEEPER_STREAM_IDLE_POLL_MS = 5_000
+export const STREAMING_THINKING_PREVIEW_CHARS = 6_000
 
 // --- Buffer & cache sizes (Vite env overridable) ---
 // Defaults balance memory/render cost against available history. Users who

@@ -617,7 +617,7 @@ let prepare_agent_setup
     }
   in
   Keeper_run_tools_hooks.assemble_hooks
-    ~ctx ~session ~user_message ~dynamic_context
+    ~ctx ~session ~turn_system_prompt ~user_message ~dynamic_context
     ~history_messages ~prompt_metrics ~shared_context
     ~start_turn_count ~generation
     ~runtime_id_string ~is_retry ~turn_affordances

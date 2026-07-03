@@ -76,10 +76,10 @@ let cases : case list =
   ; { name = "duplicate_executable_argv0"
     ; sample_cmd = "cat cat README.md"
     ; typed = mk_exec "cat" [ "cat"; "README.md" ]
-    ; expect_typed = false
+    ; expect_typed = true
     ; rationale =
-        "typed Execute argv excludes argv[0]; repeating executable would \
-         execute the wrong file list"
+        "typed Execute preserves caller-authored argv; a leading token equal \
+         to executable may be intentional payload"
     }
   ; { name = "unknown_executable"
     ; sample_cmd = "unknown_cmd foo"
@@ -217,41 +217,6 @@ let test_empty_executable_with_argv_hints_rewrite () =
       Execute_input.pp_validation_error
       error
   | Ok () -> Alcotest.fail "empty executable should not be accepted"
-;;
-
-let test_duplicate_executable_argv0_rejected () =
-  match
-    Execute_input.validate
-            (mk_exec "cat" [ "cat"; "-n"; "keeper_sandbox.mli" ])
-  with
-  | Error (Execute_input.Executable_repeated_in_argv0 { executable; argv }) ->
-    Alcotest.(check string) "executable" "cat" executable;
-    Alcotest.(check (list string))
-      "argv preserved for rewrite"
-      [ "cat"; "-n"; "keeper_sandbox.mli" ]
-      argv;
-    let msg =
-      Format.asprintf
-        "%a"
-        Execute_input.pp_validation_error
-        (Execute_input.Executable_repeated_in_argv0 { executable; argv })
-    in
-    Alcotest.(check bool)
-      "error points at argv[0]"
-      true
-      (String_util.contains_substring_ci msg "argv[0]");
-    Alcotest.(check bool)
-      "error rewrites without duplicated executable"
-      true
-      (String_util.contains_substring_ci
-         msg
-         "argv=[\"-n\",\"keeper_sandbox.mli\"]")
-  | Error error ->
-    Alcotest.failf
-      "expected Executable_repeated_in_argv0, got %a"
-      Execute_input.pp_validation_error
-      error
-  | Ok () -> Alcotest.fail "duplicated argv[0] should not be accepted"
 ;;
 
 (* Regression: validate-bypass paths (to_shell_ir_unvalidated /
@@ -591,6 +556,27 @@ let to_shell_ir_exn input =
       error
 ;;
 
+let test_duplicate_executable_argv0_preserved () =
+  let input = mk_exec "git" [ "git"; "status"; "--short" ] in
+  Alcotest.(check bool)
+    "validate accepts caller-authored argv"
+    true
+    (typed_ok input);
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    Alcotest.(check (pair string (list string)))
+      "lowered IR preserves duplicated argv[0]"
+      ("git", [ "git"; "status"; "--short" ])
+      (shell_simple_tuple simple)
+  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+    Alcotest.fail "single Exec must not lower to Pipeline"
+  | Error err ->
+    Alcotest.failf
+      "to_shell_ir should preserve duplicate argv[0], got %a"
+      Execute_input.pp_validation_error
+      err
+;;
+
 let test_pipeline_lowers_to_shell_ir_pipeline () =
   let input =
     Execute_input.Pipeline
@@ -625,7 +611,7 @@ let test_pipeline_lowers_to_shell_ir_pipeline () =
     Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
 ;;
 
-let test_exec_lowering_rejects_duplicate_executable_argv () =
+let test_exec_lowering_preserves_duplicate_executable_argv () =
   let input =
     Execute_input.Exec
       { executable = "git"
@@ -637,20 +623,110 @@ let test_exec_lowering_rejects_duplicate_executable_argv () =
       ; stderr = Execute_input.Inherit
       }
   in
-  match Execute_input.to_shell_ir  input with
-  | Error
-      (Execute_input.Executable_repeated_in_argv0
-        { executable = "git"; argv = [ "git"; "status" ] }) -> ()
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    Alcotest.(check (pair string (list string)))
+      "lowered IR preserves caller-authored argv"
+      ("git", [ "git"; "status" ])
+      (shell_simple_tuple simple)
+  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+    Alcotest.fail "single Exec must not lower to Pipeline"
   | Error error ->
     Alcotest.failf
-      "expected Executable_repeated_in_argv0, got %a"
+      "duplicated argv[0] should remain caller-authored, got %a"
       Execute_input.pp_validation_error
       error
-  | Ok ir ->
+;;
+
+let test_exec_lowering_preserves_single_argv_equal_to_executable () =
+  let input =
+    Execute_input.Exec
+      { executable = "echo"
+      ; argv = [ "echo" ]
+      ; cwd = None
+      ; env = []
+      ; stdin = Execute_input.Inherit
+      ; stdout = Execute_input.Inherit
+      ; stderr = Execute_input.Inherit
+      }
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok (Masc_exec.Shell_ir.Simple simple) ->
+    Alcotest.(check (pair string (list string)))
+      "single argv equal to executable remains an argument"
+      ("echo", [ "echo" ])
+      (shell_simple_tuple simple)
+  | Ok (Masc_exec.Shell_ir.Pipeline _) ->
+    Alcotest.fail "single Exec must not lower to Pipeline"
+  | Error error ->
     Alcotest.failf
-      "duplicated argv[0] should not produce Shell IR, got %a"
-      Masc_exec.Shell_ir.pp
-      ir
+      "single argv equal to executable should remain valid, got %a"
+      Execute_input.pp_validation_error
+      error
+;;
+
+let test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable () =
+  let input =
+    Execute_input.Pipeline
+      { stages =
+          [ { executable = "echo"; argv = [ "echo" ] }
+          ; { executable = "wc"; argv = [ "-c" ] }
+          ]
+      ; cwd = None
+      ; env = []
+      }
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok
+      (Masc_exec.Shell_ir.Pipeline
+        [ Masc_exec.Shell_ir.Simple first; Masc_exec.Shell_ir.Simple second ]) ->
+    Alcotest.(check (pair string (list string)))
+      "first stage preserves single argv equal to executable"
+      ("echo", [ "echo" ])
+      (shell_simple_tuple first);
+    Alcotest.(check (pair string (list string)))
+      "second stage unchanged"
+      ("wc", [ "-c" ])
+      (shell_simple_tuple second)
+  | Ok other ->
+    Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
+  | Error error ->
+    Alcotest.failf
+      "pipeline with single argv equal to executable should remain valid, got %a"
+      Execute_input.pp_validation_error
+      error
+;;
+
+let test_pipeline_lowering_preserves_duplicate_stage_argv () =
+  let input =
+    Execute_input.Pipeline
+      { stages =
+          [ { executable = "printf"; argv = [ "printf"; "hello" ] }
+          ; { executable = "wc"; argv = [ "wc"; "-c" ] }
+          ]
+      ; cwd = None
+      ; env = []
+      }
+  in
+  match Execute_input.to_shell_ir input with
+  | Ok
+      (Masc_exec.Shell_ir.Pipeline
+        [ Masc_exec.Shell_ir.Simple first; Masc_exec.Shell_ir.Simple second ]) ->
+    Alcotest.(check (pair string (list string)))
+      "first stage preserves caller-authored argv"
+      ("printf", [ "printf"; "hello" ])
+      (shell_simple_tuple first);
+    Alcotest.(check (pair string (list string)))
+      "second stage preserves caller-authored argv"
+      ("wc", [ "wc"; "-c" ])
+      (shell_simple_tuple second)
+  | Ok other ->
+    Alcotest.failf "expected Shell_ir.Pipeline, got %a" Masc_exec.Shell_ir.pp other
+  | Error error ->
+    Alcotest.failf
+      "pipeline duplicated argv[0] should remain caller-authored, got %a"
+      Execute_input.pp_validation_error
+      error
 ;;
 
 let docker_test_sandbox () =
@@ -1191,9 +1267,9 @@ let suite =
           `Quick
           test_empty_executable_with_argv_hints_rewrite
       ; Alcotest.test_case
-          "duplicate_executable_argv0_rejected"
+          "duplicate_executable_argv0_preserved"
           `Quick
-          test_duplicate_executable_argv0_rejected
+          test_duplicate_executable_argv0_preserved
       ; Alcotest.test_case
           "unvalidated_path_preserves_argv_in_error"
           `Quick
@@ -1257,9 +1333,21 @@ let suite =
           `Quick
           test_pipeline_lowers_to_shell_ir_pipeline
       ; Alcotest.test_case
-          "exec_lowering_rejects_duplicate_executable_argv"
+          "exec_lowering_preserves_duplicate_executable_argv"
           `Quick
-          test_exec_lowering_rejects_duplicate_executable_argv
+          test_exec_lowering_preserves_duplicate_executable_argv
+      ; Alcotest.test_case
+          "exec_lowering_preserves_single_argv_equal_to_executable"
+          `Quick
+          test_exec_lowering_preserves_single_argv_equal_to_executable
+      ; Alcotest.test_case
+          "pipeline_lowering_preserves_single_stage_argv_equal_to_executable"
+          `Quick
+          test_pipeline_lowering_preserves_single_stage_argv_equal_to_executable
+      ; Alcotest.test_case
+          "pipeline_lowering_preserves_duplicate_stage_argv"
+          `Quick
+          test_pipeline_lowering_preserves_duplicate_stage_argv
       ; Alcotest.test_case
           "pipeline_lowers_with_injected_docker_sandbox"
           `Quick

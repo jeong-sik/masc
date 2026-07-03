@@ -659,9 +659,12 @@ let publish_keeper_started ~(live_meta : keeper_meta) : unit =
     ()
 ;;
 
+(** Launch gate: dispatch [Fiber_started] before forking the keepalive
+    fiber. Returns [Error _] when the registry FSM rejects the launch —
+    the caller must not fork and must not announce [Started]/[Running]. *)
 let dispatch_fiber_started ~base_path keeper_name =
   match Keeper_registry.prepare_fiber_launch ~base_path keeper_name with
-  | Ok _ -> ()
+  | Ok _ -> Ok ()
   | Error err ->
     Otel_metric_store.inc_counter
       Keeper_metrics.(to_string DispatchEventFailures)
@@ -676,9 +679,10 @@ let dispatch_fiber_started ~base_path keeper_name =
           ; "error", `String (Keeper_state_machine.transition_error_to_string err)
           ])
       (Printf.sprintf
-         "keeper %s: Fiber_started rejected during launch: %s"
+         "keeper %s: Fiber_started rejected during launch — launch aborted: %s"
          keeper_name
-         (Keeper_state_machine.transition_error_to_string err))
+         (Keeper_state_machine.transition_error_to_string err));
+    Error err
 ;;
 
 (* ── Registry lifecycle helpers ── *)
@@ -824,21 +828,59 @@ let start_keepalive ?(proactive_warmup_sec = 0) (ctx : _ context) (m : keeper_me
       in
       (* Restore persisted tool usage stats from previous session *)
       Keeper_registry_tool_usage_persistence.restore ~base_path:ctx.config.base_path m.name;
-      let stop = reg.fiber_stop in
-      let wakeup = reg.fiber_wakeup in
-      (* Start optional gRPC heartbeat fiber *)
-      let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
-      (match grpc_close with
-       | Some _ ->
-         Keeper_registry.set_grpc_close ~base_path:ctx.config.base_path m.name grpc_close
-       | None -> ());
-      let live_meta = bootstrap_live_keeper_meta ~ctx m in
-      Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
-      (* Telemetry feedback refresh loop removed in #6814:
-       behavioral_stats no longer consumed by build_prompt. *)
-      dispatch_fiber_started ~base_path:ctx.config.base_path live_meta.name;
-      publish_keeper_started ~live_meta;
-      Eio.Fiber.fork ~sw:ctx.sw (fun () ->
+      (* Launch gate FIRST: every launch side effect (gRPC heartbeat fiber,
+         grpc_close registration, live-meta bootstrap/update) must come after
+         the registry FSM accepts [Fiber_started]. Starting the sidecar
+         heartbeat before the gate left a live gRPC resource behind a
+         rejected launch — the same half-commit class this change removes
+         from the fiber-fork path. *)
+      match dispatch_fiber_started ~base_path:ctx.config.base_path m.name with
+      | Error err ->
+        (* Fail closed: the registry FSM refused [Fiber_started], so no
+           keepalive fiber may fork and [Started]/[Running] must not be
+           announced. Resolve the fresh entry through the crash path so the
+           supervisor sweep observes a typed outcome and re-queues with the
+           usual backoff/budget instead of leaving a never-resolved entry. *)
+        let reason =
+          Printf.sprintf
+            "fiber_start_rejected: %s"
+            (Keeper_state_machine.transition_error_to_string err)
+        in
+        Keeper_registry.set_failure_reason
+          ~base_path:ctx.config.base_path
+          m.name
+          (Some (Keeper_registry.Exception reason));
+        Keeper_registry.record_crash
+          ~base_path:ctx.config.base_path
+          m.name
+          (Time_compat.now ())
+          reason;
+        Keeper_registry_error_recording.record
+          ~base_path:ctx.config.base_path
+          m.name
+          reason;
+        if resolve_registry_done reg ~source:"keepalive_launch_rejected" (`Crashed reason)
+        then
+          publish_keeper_phase_lifecycle
+            ~phase:Keeper_state_machine.Crashed
+            ~keeper_name:m.name
+            ~detail:reason
+            ()
+      | Ok () ->
+        let stop = reg.fiber_stop in
+        let wakeup = reg.fiber_wakeup in
+        (* Start optional gRPC heartbeat fiber *)
+        let grpc_close = start_keeper_grpc_heartbeat ~ctx ~m ~stop in
+        (match grpc_close with
+         | Some _ ->
+           Keeper_registry.set_grpc_close ~base_path:ctx.config.base_path m.name grpc_close
+         | None -> ());
+        let live_meta = bootstrap_live_keeper_meta ~ctx m in
+        Keeper_registry.update_meta ~base_path:ctx.config.base_path m.name live_meta;
+        (* Telemetry feedback refresh loop removed in #6814:
+         behavioral_stats no longer consumed by build_prompt. *)
+        publish_keeper_started ~live_meta;
+        Eio.Fiber.fork ~sw:ctx.sw (fun () ->
         let record_crash failure_reason =
           record_keeper_crashed
             reg

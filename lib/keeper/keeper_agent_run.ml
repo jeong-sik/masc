@@ -63,6 +63,79 @@ let normalize_response_text_for_finalization
          ~response:run_result.response)
 ;;
 
+(* OAS raw-trace sink for keeper turns: parsed Run_started / Assistant_block /
+   Tool_execution / Run_finished records written to a fresh per-turn JSONL
+   under [Keeper_types_support.keeper_raw_trace_dir]. Passing the sink into
+   [Keeper_turn_driver.run_named] is what populates
+   [run_result.trace_ref]/[run_validation] for the unified-metrics consumers
+   and the progress-evidence gate.
+
+   Failure isolation: the trace store is observability state and must never
+   gate keeper liveness. A fresh file per turn keeps [Raw_trace.create]
+   (OAS [create -> scan_next_seq -> read_all]) from parsing any previous
+   turn's data, so a corrupt or oversized historical trace cannot wedge
+   dispatch — and if sink creation still fails, the turn dispatches
+   untraced with the typed [Sink_degraded] record emitted as a warn log
+   plus the [Keeper_metrics.RawTraceSinkDegraded] counter. *)
+type raw_trace_sink_outcome =
+  | Sink_ready of Agent_sdk.Raw_trace.t
+  | Sink_degraded of Agent_sdk.Error.sdk_error
+
+let keeper_raw_trace_sink
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+  : raw_trace_sink_outcome
+  =
+  (* Path derivation ensures [.masc/keepers/<name>/raw-traces/]; any
+     filesystem refusal (unwritable parent, blocked path) must land in
+     [Sink_degraded], not escape into the turn. *)
+  let path_result =
+    try Ok (Keeper_types_support.keeper_raw_trace_turn_path config meta.name)
+    with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn -> Error (Agent_sdk.Error.Internal (Printexc.to_string exn))
+  in
+  match path_result with
+  | Error err -> Sink_degraded err
+  | Ok path ->
+    (match
+       Agent_sdk.Raw_trace.create
+         ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+         ~path
+         ()
+     with
+     | Ok sink ->
+       let (_removed : int) =
+         Keeper_types_support.prune_keeper_raw_trace_turn_files
+           config
+           meta.name
+       in
+       Sink_ready sink
+     | Error err -> Sink_degraded err)
+;;
+
+(* Dispatch adapter: a degraded sink means the turn runs untraced
+   ([trace_ref]/[run_validation] stay [None] for that turn), never that
+   the turn fails pre-dispatch. The degrade is typed and observable:
+   warn log + [RawTraceSinkDegraded] counter labelled by keeper. *)
+let raw_trace_for_dispatch
+      ~(config : Workspace.config)
+      ~(meta : Keeper_meta_contract.keeper_meta)
+  : Agent_sdk.Raw_trace.t option
+  =
+  match keeper_raw_trace_sink ~config ~meta with
+  | Sink_ready sink -> Some sink
+  | Sink_degraded err ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string RawTraceSinkDegraded)
+      ~labels:[ "keeper", meta.name ]
+      ();
+    Log.Keeper.warn ~keeper_name:meta.name
+      "raw-trace sink degraded; dispatching turn untraced: %s"
+      (Agent_sdk.Error.to_string err);
+    None
+;;
+
 module For_testing = struct
   let sse_event_progress_kind = Turn_helpers.sse_event_progress_kind
   let sse_event_watchdog_progress_kind =
@@ -74,6 +147,8 @@ module For_testing = struct
     keeper_oas_visibility_neutral_guardrails
   let normalize_response_text_for_finalization =
     normalize_response_text_for_finalization
+  let keeper_raw_trace_sink = keeper_raw_trace_sink
+  let raw_trace_for_dispatch = raw_trace_for_dispatch
 end
 
 (** Run a single keeper turn via OAS Agent.run().
@@ -502,7 +577,7 @@ let run_turn
               let keeper_oas_guardrails =
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
-              let call_run_named ~initial_messages =
+              let call_run_named ?raw_trace ~initial_messages () =
                 (* The keeper turn deadline must own the OAS Agent.run switch.
                    Stream/body idle budgets catch liveness gaps; this hard
                    ceiling is the final guard that releases a stuck turn slot. *)
@@ -514,6 +589,7 @@ let run_turn
                     ?goal_blocks:user_blocks
                     ~priority
                     ~session_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                    ?raw_trace
                     ~system_prompt:turn_system_prompt
                     ~tools
                     ~compact_ratio:meta.compaction.ratio_gate
@@ -572,7 +648,15 @@ let run_turn
                     ?per_provider_timeout_s
                     ()
               in
-              (match call_run_named ~initial_messages:history_messages with
+              (* Trace-store failure isolation: [raw_trace_for_dispatch]
+                 degrades to [None] (turn runs untraced, typed record
+                 emitted) — sink trouble never fails the turn pre-dispatch. *)
+              (match
+                 call_run_named
+                   ?raw_trace:(raw_trace_for_dispatch ~config ~meta)
+                   ~initial_messages:history_messages
+                   ()
+               with
                | Error e -> Error e
                | Ok result ->
                  let post_turn_t0 = Time_compat.now () in
@@ -586,6 +670,15 @@ let run_turn
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
                  let text = Agent_sdk.Types.text_of_content result.response.content in
+                 (* Phase O observability (iter-2): pair this turn's response
+                    with the request captured pre-run under the same turn_id, so
+                    the feedback loop (turn N output -> turn N+1 replayed history)
+                    is directly analyzable. No-op unless MASC_KEEPER_WIRE_CAPTURE. *)
+                 Keeper_wire_capture.capture_response
+                   ~masc_root:(Workspace.masc_root_dir config)
+                   ~keeper_name:meta.name
+                   ~turn_id:manifest_keeper_turn_id
+                   ~response_text:text;
                  (* RFC-0132 PR-2: receipt model surface = external boundary; redact via SSOT. *)
                  let model =
                    Boundary_redaction.to_string

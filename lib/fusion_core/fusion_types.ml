@@ -233,6 +233,7 @@ type judge_failure =
   | Build_error of string
   | Parse_error of string
   | Budget_exceeded of string
+  | Panels_unavailable of skip_reason
   | Internal_error of string
 [@@deriving yojson, show, eq]
 
@@ -250,6 +251,7 @@ let judge_failure_text = function
   | Build_error detail -> detail
   | Parse_error detail -> detail
   | Budget_exceeded detail -> detail
+  | Panels_unavailable reason -> render_skip_reason reason
   | Internal_error detail -> detail
 
 let judge_failure_tag = function
@@ -260,6 +262,7 @@ let judge_failure_tag = function
   | Build_error _ -> "build_error"
   | Parse_error _ -> "parse_error"
   | Budget_exceeded _ -> "budget_exceeded"
+  | Panels_unavailable _ -> "panels_unavailable"
   | Internal_error _ -> "internal_error"
 
 type judge_error_node =

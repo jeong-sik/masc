@@ -98,6 +98,11 @@ let audit_event_names ~base_path ~keeper_name =
   |> List.map (fun json ->
          Yojson.Safe.Util.(json |> member "event" |> to_string))
 
+let find_audit_event ~base_path ~keeper_name ~event_type =
+  AQ.read_recent_audit ~base_path ~keeper_name ~n:10 ()
+  |> List.find_opt (fun json ->
+         Yojson.Safe.Util.(json |> member "event" |> to_string = event_type))
+
 let test_first_cmd_token_uses_shared_words () =
   Alcotest.(check (option string))
     "quoted command basename preserved"
@@ -484,6 +489,91 @@ let test_submit_and_await_clock_timeout_skips_critical () =
       Alcotest.fail
         ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
   | None -> Alcotest.fail "Critical approval did not resume")
+
+let test_submit_and_await_critical_escalates_then_waits () =
+  Eio_main.run @@ fun env ->
+  let clock = Eio.Stdenv.clock env in
+  let base_path = temp_dir () in
+  AQ.For_testing.reset_audit_store ();
+  Fun.protect
+    ~finally:(fun () ->
+      AQ.For_testing.reset_audit_store ();
+      cleanup_dir base_path)
+    (fun () ->
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "critical-escalation-test" in
+  let result = ref None in
+  Eio.Fiber.fork ~sw (fun () ->
+    let decision =
+      AQ.submit_and_await
+        ~keeper_name
+        ~tool_name:"keeper_continue_after_partial_commit"
+        ~input:(`Assoc [ ("kind", `String "critical_gate") ])
+        ~risk_level:AQ.Critical
+        ~base_path
+        ~clock
+        ~critical_escalation_after_s:0.01
+        ()
+    in
+    result := Some decision);
+  yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
+  Eio.Time.sleep clock 0.03;
+  yield_until (fun () ->
+    List.exists
+      (String.equal "approval_escalated")
+      (audit_event_names ~base_path ~keeper_name));
+  Alcotest.(check bool)
+    "Critical escalation audit recorded"
+    true
+    (List.exists
+       (String.equal "approval_escalated")
+       (audit_event_names ~base_path ~keeper_name));
+  let escalation_event =
+    match find_audit_event ~base_path ~keeper_name ~event_type:"approval_escalated" with
+    | Some json -> json
+    | None -> Alcotest.fail "expected Critical escalation audit row"
+  in
+  let open Yojson.Safe.Util in
+  Alcotest.(check string)
+    "Critical escalation is not a terminal decision"
+    ""
+    (escalation_event |> member "decision" |> to_string);
+  Alcotest.(check bool)
+    "Critical escalation has no decision kind"
+    true
+    (escalation_event |> member "decision_kind" = `Null);
+  Alcotest.(check bool)
+    "Critical escalation has no decision reason"
+    true
+    (escalation_event |> member "decision_reason" = `Null);
+  Alcotest.(check string)
+    "Critical escalation disposition"
+    "escalated"
+    (escalation_event |> member "disposition" |> to_string);
+  Alcotest.(check string)
+    "Critical escalation disposition reason"
+    "critical approval escalated — operator must decide"
+    (escalation_event |> member "disposition_reason" |> to_string);
+  Alcotest.(check bool)
+    "Critical escalation does not auto-resolve"
+    true
+    (Option.is_none !result);
+  let id =
+    match pending_id_for_keeper ~keeper_name with
+    | Some id -> id
+    | None -> Alcotest.fail "Critical approval was removed after escalation"
+  in
+  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+   | Ok () -> ()
+   | Error err ->
+      Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+  yield_until (fun () -> Option.is_some !result);
+  match !result with
+  | Some Agent_sdk.Hooks.Approve -> ()
+  | Some decision ->
+      Alcotest.fail
+        ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
+  | None -> Alcotest.fail "Critical approval did not resume after escalation")
 
 let test_submit_and_await_clock_returns_manual_decision () =
   Eio_main.run @@ fun env ->
@@ -1319,6 +1409,76 @@ let test_callback_always_approve_bypasses_threshold () =
     Alcotest.fail ("expected Approve with always_approve, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
+let test_callback_typed_last_blocker_overrides_always_approve () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "typed-blocked-keeper" in
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      let meta =
+        let base =
+          meta_from_json
+            (`Assoc
+              [
+                ("name", `String keeper_name);
+                ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
+                ("trace_id", `String "runtime-blocked-trace");
+                ("sandbox_profile", `String "docker");
+                ("network_mode", `String "inherit");
+                ("always_approve", `Bool true);
+              ])
+        in
+        let blocker =
+          let open Masc.Keeper_meta_contract in
+          blocker_info_of_class ~detail:"previous turn timed out" Turn_timeout
+        in
+        { base with
+          runtime = { base.runtime with last_blocker = Some blocker };
+        }
+      in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cb =
+          GP.to_oas_approval_callback
+            ~config ~governance_level:"production" ~keeper_name ~meta ()
+        in
+        let decision =
+          cb
+            ~tool_name:"masc_create_task"
+            ~input:(`Assoc [ ("title", `String "test") ])
+        in
+        result := Some decision);
+      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
+      Alcotest.(check int)
+        "typed last_blocker prevents always_approve bypass"
+        (initial_pending + 1)
+        (AQ.pending_count ());
+      let id =
+        match pending_id_for_keeper ~keeper_name with
+        | Some id -> id
+        | None -> Alcotest.fail "expected pending approval for runtime blocker"
+      in
+      (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "blocked") with
+       | Ok () -> ()
+       | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+      yield_until (fun () -> Option.is_some !result);
+      match !result with
+      | Some (Agent_sdk.Hooks.Reject "blocked") -> ()
+      | Some Agent_sdk.Hooks.Approve ->
+        Alcotest.fail "typed last_blocker must not auto-approve"
+      | Some (Agent_sdk.Hooks.Reject reason) ->
+        Alcotest.fail ("unexpected reject reason: " ^ reason)
+      | Some (Agent_sdk.Hooks.Edit _) -> Alcotest.fail "unexpected edit"
+      | None -> Alcotest.fail "runtime blocker callback did not suspend")
+
 let test_runtime_trust_classifies_always_approve_flag () =
   with_test_config @@ fun config ->
   AQ.For_testing.reset_audit_store ();
@@ -1457,6 +1617,65 @@ let test_callback_hitl_disabled_forbidden_requires_approval () =
         Alcotest.fail "expected Approve after operator resolution, got edit"
       | None ->
         Alcotest.fail "HITL-disabled forbidden callback did not suspend for approval")
+
+let test_callback_hitl_disabled_soft_forbidden_auto_approved () =
+  with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "hitl-disabled-soft-forbidden-keeper" in
+  let input = `Assoc [ ("op", `String "git") ] in
+  Alcotest.(check string)
+    "soft-only fixture stays below hard-forbidden risk"
+    "low"
+    (GP.assess_risk ~tool_name:"masc_status" ~input |> GP.risk_level_to_string);
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      Eio.Fiber.fork ~sw (fun () ->
+        let cb =
+          GP.to_oas_approval_callback
+            ~config ~governance_level:"production" ~keeper_name ()
+        in
+        let decision = cb ~tool_name:"masc_status" ~input in
+        result := Some decision);
+      yield_until (fun () ->
+        Option.is_some !result
+        || Option.is_some (pending_id_for_keeper ~keeper_name));
+      let queued =
+        match pending_id_for_keeper ~keeper_name with
+        | Some id ->
+          (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+           | Ok () -> ()
+           | Error err ->
+             Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+          true
+        | None -> false
+      in
+      yield_until (fun () -> Option.is_some !result);
+      Alcotest.(check bool)
+        "soft destructive op does not queue when HITL threshold is disabled"
+        false
+        queued;
+      Alcotest.(check int)
+        "pending count unchanged"
+        initial_pending
+        (AQ.pending_count ());
+      match !result with
+      | Some Agent_sdk.Hooks.Approve -> ()
+      | Some Agent_sdk.Hooks.Reject reason ->
+        Alcotest.fail ("expected Approve for HITL-disabled soft match, got reject: " ^ reason)
+      | Some Agent_sdk.Hooks.Edit _ ->
+        Alcotest.fail "expected Approve for HITL-disabled soft match, got edit"
+      | None ->
+        Alcotest.fail "HITL-disabled soft-forbidden callback did not return")
 
 let test_read_recent_audit_filters_after_wide_scan () =
   with_temp_masc_base @@ fun base_path ->
@@ -1608,6 +1827,8 @@ let () =
       Alcotest.test_case "expire skips Critical" `Quick test_approval_queue_expire_skips_critical;
       Alcotest.test_case "submit timeout skips Critical" `Quick
         test_submit_and_await_clock_timeout_skips_critical;
+      Alcotest.test_case "Critical escalation waits for manual decision" `Quick
+        test_submit_and_await_critical_escalates_then_waits;
       Alcotest.test_case "submit timeout returns manual winner" `Quick
         test_submit_and_await_clock_returns_manual_decision;
       Alcotest.test_case "resolve nonexistent" `Quick test_approval_resolve_nonexistent;
@@ -1659,11 +1880,15 @@ let () =
         test_callback_paranoid_medium_risk_uses_remembered_policy;
       Alcotest.test_case "always_approve bypasses threshold" `Quick
         test_callback_always_approve_bypasses_threshold;
+      Alcotest.test_case "typed last_blocker overrides always_approve" `Quick
+        test_callback_typed_last_blocker_overrides_always_approve;
       Alcotest.test_case "runtime trust classifies always_approve flag" `Quick
         test_runtime_trust_classifies_always_approve_flag;
       Alcotest.test_case "always_approve respects forbidden" `Quick
         test_callback_always_approve_respects_forbidden;
       Alcotest.test_case "HITL disabled still gates forbidden tools" `Quick
         test_callback_hitl_disabled_forbidden_requires_approval;
+      Alcotest.test_case "HITL disabled allows soft forbidden tools" `Quick
+        test_callback_hitl_disabled_soft_forbidden_auto_approved;
     ]);
   ]

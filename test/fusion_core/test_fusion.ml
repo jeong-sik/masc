@@ -1012,7 +1012,7 @@ let g_web4 : Fusion_policy.panel_group =
 let test_judge_args_single_group_identity () =
   let groups = [ g_web4 ] in
   Alcotest.(check (float 0.001)) "outer timeout = sole group timeout" 123.0
-    (Fusion_policy.panel_outer_timeout_of groups);
+    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2 groups);
   Alcotest.(check bool) "judge web = req||group, req=false, group=true" true
     (Fusion_policy.judge_web_tools_of ~req_web_tools:false groups);
   Alcotest.(check bool) "judge web = req||group, both false" false
@@ -1027,13 +1027,36 @@ let test_judge_args_single_group_identity () =
 let test_judge_args_multi_group () =
   let g_unlimited = { g_web4 with Fusion_policy.models = [ "x" ]; max_tool_calls = 0 } in
   let g_slow = { g_web4 with Fusion_policy.models = [ "y" ]; timeout_s = 200.0 } in
-  Alcotest.(check (float 0.001)) "outer timeout = max over groups" 200.0
-    (Fusion_policy.panel_outer_timeout_of [ g_web4; g_slow ]);
+  Alcotest.(check (float 0.001)) "outer timeout = max over groups (single wave)" 200.0
+    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2 [ g_web4; g_slow ]);
   Alcotest.(check int) "judge tool budget: 0 (unlimited) absorbs" 0
     (Fusion_policy.judge_tool_budget_of [ g_web4; g_unlimited ]);
   Alcotest.(check int) "judge tool budget: max when none unlimited" 4
     (Fusion_policy.judge_tool_budget_of
        [ { g_web4 with Fusion_policy.models = [ "z" ]; max_tool_calls = 2 }; g_web4 ])
+
+(* --- outer timeout wave math: ceil(총원/max_fibers) 웨이브 × max timeout.
+       2026-07-01 사고 회귀 가드: 라이브 config(3패널, max_concurrent_panels=2,
+       120s)에서 외곽이 120s로 잡혀 마지막 웨이브가 구조적으로 데드라인 밖에
+       놓였고, 완료된 패널 답변까지 폐기됐다(bare timeout 9건 서명). --- *)
+let test_panel_outer_timeout_wave_math () =
+  let g3 = { g_web4 with Fusion_policy.models = [ "a"; "b"; "c" ]; timeout_s = 120.0 } in
+  Alcotest.(check (float 0.001))
+    "3 panelists / max_fibers=2 -> 2 waves x 120s" 240.0
+    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2 [ g3 ]);
+  Alcotest.(check (float 0.001))
+    "3 panelists / max_fibers=3 -> 1 wave (byte-identity with max)" 120.0
+    (Fusion_policy.panel_outer_timeout_of ~max_fibers:3 [ g3 ]);
+  Alcotest.(check (float 0.001))
+    "5 panelists across groups / max_fibers=2 -> 3 waves x max(123,200)" 600.0
+    (Fusion_policy.panel_outer_timeout_of ~max_fibers:2
+       [ { g_web4 with Fusion_policy.models = [ "a"; "b" ] }
+       ; { g_web4 with Fusion_policy.models = [ "c"; "d"; "e" ]; timeout_s = 200.0 }
+       ]);
+  Alcotest.(check (float 0.001))
+    "max_fibers <= 0 clamps to 1 (defensive; config validation forbids it)" 369.0
+    (Fusion_policy.panel_outer_timeout_of ~max_fibers:0
+       [ { g_web4 with Fusion_policy.models = [ "a"; "b"; "c" ] } ])
 
 (* --- judge LLM-facing JSON parse (RFC-0252 §7.2) --- *)
 
@@ -1321,6 +1344,21 @@ let test_judge_skip_reason () =
       "fusion aborted: 1 of 2 panels answered, preset requires at least 2"
       (render_skip_reason reason)
   | None -> Alcotest.fail "expected skip when 1 < min_answered 2"
+
+(* 패널 정족수 미달은 typed [Panels_unavailable]로 propagate된다 — 2026-07-01
+   사고에서 이 사유가 [Internal_error] 문자열로 압축돼 failure_code=internal_error
+   로 오귀속됐던 것의 회귀 가드. tag/text가 패널 실패를 패널 실패로 말해야 한다. *)
+let test_panels_unavailable_failure () =
+  let reason = Quorum_not_met { answered = 0; total = 3; required = 1 } in
+  let failure : judge_failure = Panels_unavailable reason in
+  Alcotest.(check string) "failure_code tag" "panels_unavailable"
+    (judge_failure_tag failure);
+  Alcotest.(check string) "failure text = rendered skip reason"
+    "fusion aborted: 0 of 3 panels answered, preset requires at least 1"
+    (judge_failure_text failure);
+  Alcotest.(check bool) "not a timeout" false (judge_failure_is_timeout failure);
+  Alcotest.(check bool) "not timeout-or-budget (no fallback judge trigger)" false
+    (judge_failure_is_timeout_or_budget failure)
 
 (* min_answered must be in the policy range 1..total panels (inclusive).
    base_group has 3 models, so 0 and 4 are rejected; full-panel quorum (3) is allowed. *)
@@ -1678,6 +1716,8 @@ let () =
       , [ Alcotest.test_case "single_group_identity" `Quick
             test_judge_args_single_group_identity
         ; Alcotest.test_case "multi_group" `Quick test_judge_args_multi_group
+        ; Alcotest.test_case "outer_timeout_wave_math" `Quick
+            test_panel_outer_timeout_wave_math
         ] )
     ; ( "adaptive_timeout"
       , [ Alcotest.test_case "disabled" `Quick test_adjust_judge_timeout_disabled
@@ -1717,5 +1757,7 @@ let () =
       , [ Alcotest.test_case "judge_skip_reason" `Quick test_judge_skip_reason
         ; Alcotest.test_case "min_answered_range" `Quick test_validated_bad_min_answered
         ; Alcotest.test_case "min_answered_constants" `Quick test_min_answered_constants
+        ; Alcotest.test_case "panels_unavailable_failure" `Quick
+            test_panels_unavailable_failure
         ] )
     ]

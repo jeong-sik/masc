@@ -273,26 +273,14 @@ let assemble_hooks
                 let record_block block text =
                   recorded_blocks := (block, text) :: !recorded_blocks
                 in
-                let ctx =
-                  if String.trim dynamic_context = ""
-                  then current_params.extra_system_context
-                  else (
-                    record_block Prompt_block_id.Dynamic_context dynamic_context;
-                    match current_params.extra_system_context with
-                    | None -> Some dynamic_context
-                    | Some existing -> Some (existing ^ "\n\n" ^ dynamic_context))
-                in
-                let ctx =
-                  match Masc_context_injector.render_temporal_summary shared_context with
-                  | None -> ctx
-                  | Some temporal ->
-                    record_block Prompt_block_id.Temporal_summary temporal;
-                    (match ctx with
-                     | None -> Some temporal
-                     | Some existing -> Some (existing ^ "\n\n" ^ temporal))
-                in
-                let ctx =
-                  match acc.meta.current_task_id with
+                (if String.trim dynamic_context <> ""
+                 then
+                   record_block Prompt_block_id.Dynamic_context dynamic_context);
+                (match Masc_context_injector.render_temporal_summary shared_context with
+                 | None -> ()
+                 | Some temporal ->
+                   record_block Prompt_block_id.Temporal_summary temporal);
+                (match acc.meta.current_task_id with
                   | Some task_id ->
                     let last_tool_names =
                       let rev = List.rev messages in
@@ -326,12 +314,8 @@ let assemble_hooks
                           (Keeper_id.Task_id.to_string task_id)
                       in
                       record_block Prompt_block_id.Claimed_task_nudge nudge;
-                      match ctx with
-                      | None -> Some nudge
-                      | Some existing -> Some (existing ^ "\n\n" ^ nudge))
-                    else ctx
-                  | None -> ctx
-                in
+                      ())
+                  | None -> ());
                 let schema_filter, computed_turn_lane =
                   compute_tool_surface
                     ~turn
@@ -340,73 +324,55 @@ let assemble_hooks
                     ~decay_discovered:true
                     ()
                 in
-                let append_ctx ctx text =
-                  Some
-                    (match ctx with
-                     | None -> text
-                     | Some e -> e ^ "\n\n" ^ text)
-                in
-                let ctx =
-                  if is_retry
-                  then (
+                (if is_retry
+                 then (
                     let retry_nudge =
                       "[RETRY] The previous attempt overflowed the model context. \
                        Stay concise, prefer already-loaded context, and only use the \
                        smallest essential tool set if a tool call is strictly \
                        necessary."
                     in
-                    record_block Prompt_block_id.Retry_nudge retry_nudge;
-                    append_ctx ctx retry_nudge)
-                  else ctx
-                in
-                let ctx =
-                  (* Off-main: [render_if_enabled] performs synchronous file I/O
-                     (stat/readdir/open over the persisted memory store). Running
-                     it directly on the main Eio domain blocks the cooperative
-                     scheduler, head-of-line-blocking every sibling keeper fiber
-                     until the syscalls return. Push the I/O onto the shared
-                     domain pool ([submit_io_or_inline] runs inline when no pool
-                     is configured, e.g. tests). The render is read-side only and
-                     keeps no module-level mutable state, so it is domain-safe. *)
-                  match
-                    Domain_pool_ref.submit_io_or_inline (fun () ->
-                      Keeper_user_model.render_if_enabled
-                        ~keeper_id:meta.name
-                        ~now:(Time_compat.now ())
-                        ())
-                  with
-                  | None -> ctx
-                  | Some block ->
-                    record_block Prompt_block_id.User_model block;
-                    append_ctx ctx block
-                in
-                let _ctx =
-                  (* Memory OS recall — bounded advisory block rendered from
-                     persisted facts/episodes (read side; the write side is
-                     the librarian wired in #20897). Opt-in via
-                     MASC_KEEPER_MEMORY_OS_RECALL. RFC-0247 removed the lexical
-                     seed: recall now orders by structural recency, so the
-                     current-turn text no longer reranks the recalled facts. *)
-                  (* Off-main: same rationale as the user-model render above —
-                     the recall reads persisted facts/episodes via synchronous
-                     file I/O, which would starve the main Eio domain and HOL
-                     sibling keepers. Read-side only, no module-level mutable
-                     state, so it is domain-safe on the shared pool. *)
-                  match
-                    Domain_pool_ref.submit_io_or_inline (fun () ->
-                      Keeper_memory_os_recall.render_if_enabled
-                        ~keeper_id:meta.name
-                        ~now:(Time_compat.now ())
-                        ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
-                        ~turn
-                        ~masc_root:(Workspace.masc_root_dir config)
-                        ())
-                  with
-                  | None -> ctx
-                  | Some block ->
-                    record_block Prompt_block_id.Memory_os_recall block;
-                    append_ctx ctx block
-                in
+                    record_block Prompt_block_id.Retry_nudge retry_nudge));
+                (match
+                   (* Off-main: [render_if_enabled] performs synchronous file I/O
+                      (stat/readdir/open over the persisted memory store). Running
+                      it directly on the main Eio domain blocks the cooperative
+                      scheduler, head-of-line-blocking every sibling keeper fiber
+                      until the syscalls return. Push the I/O onto the shared
+                      domain pool ([submit_io_or_inline] runs inline when no pool
+                      is configured, e.g. tests). The render is read-side only and
+                      keeps no module-level mutable state, so it is domain-safe. *)
+                   Domain_pool_ref.submit_io_or_inline (fun () ->
+                     Keeper_user_model.render_if_enabled
+                       ~keeper_id:meta.name
+                       ~now:(Time_compat.now ())
+                       ())
+                 with
+                 | None -> ()
+                 | Some block -> record_block Prompt_block_id.User_model block);
+                (match
+                   (* Memory OS recall — bounded advisory block rendered from
+                      persisted facts/episodes (read side; the write side is
+                      the librarian wired in #20897). Opt-in via
+                      MASC_KEEPER_MEMORY_OS_RECALL. RFC-0247 removed the lexical
+                      seed: recall now orders by structural recency, so the
+                      current-turn text no longer reranks the recalled facts. *)
+                   (* Off-main: same rationale as the user-model render above —
+                      the recall reads persisted facts/episodes via synchronous
+                      file I/O, which would starve the main Eio domain and HOL
+                      sibling keepers. Read-side only, no module-level mutable
+                      state, so it is domain-safe on the shared pool. *)
+                   Domain_pool_ref.submit_io_or_inline (fun () ->
+                     Keeper_memory_os_recall.render_if_enabled
+                       ~keeper_id:meta.name
+                       ~now:(Time_compat.now ())
+                       ~trace_id:(Keeper_id.Trace_id.to_string meta.runtime.trace_id)
+                       ~turn
+                       ~masc_root:(Workspace.masc_root_dir config)
+                       ())
+                 with
+                 | None -> ()
+                 | Some block -> record_block Prompt_block_id.Memory_os_recall block);
                 let extra_system_context_budget =
                   Keeper_run_prompt.budget_extra_system_context
                     ~estimated_input_tokens_with_tools:

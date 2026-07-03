@@ -715,7 +715,7 @@
   test_keeper_behavior_trace
   test_keeper_wire_capture
   test_board_rest_routes)
- (libraries masc_test_deps multimodal))
+ (libraries masc_test_deps multimodal bigstringaf))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
 

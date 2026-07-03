@@ -12,6 +12,7 @@ module For_testing : sig
   val resolve_relative : base:string -> string -> string option
   val workspace_root_for_initialize : base_path:string -> string -> string
   val initialize_result_json : unit -> Yojson.Safe.t
+  val inbound_dispatch_worker_count : int
 
   (** Per-language LSP health (task-1691). [Overlay_only] carries the last
       error that forced the language into overlay-only mode. *)

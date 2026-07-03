@@ -27,4 +27,10 @@ module For_testing : sig
       mutation. Returns the [auth_identity] when [requested] is absent,
       blank, or equal; returns [Error] when [requested] names a
       different keeper (rejected as impersonation). *)
+
+  val parse_annotation_kind :
+    string option -> (Ide_annotation_types.annotation_kind, string) result
+  (** Parses the optional request [kind] field. Missing kind preserves the
+      historical [Comment] default; unknown explicit values are rejected
+      rather than coerced. *)
 end

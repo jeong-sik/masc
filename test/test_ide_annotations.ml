@@ -809,6 +809,19 @@ let test_bind_keeper_id_rejects_impersonation () =
   | Error _ -> ()
 ;;
 
+let test_parse_annotation_kind_defaults_missing () =
+  match Ide_http.parse_annotation_kind None with
+  | Ok Types.Comment -> ()
+  | Ok _ -> fail "missing annotation kind should default to Comment"
+  | Error msg -> failf "expected Ok, got Error %s" msg
+;;
+
+let test_parse_annotation_kind_rejects_unknown () =
+  match Ide_http.parse_annotation_kind (Some "NotARealKind") with
+  | Ok _ -> fail "unknown explicit annotation kind must be rejected"
+  | Error _ -> ()
+;;
+
 let make_alice_annotation base_dir =
   Result.get_ok
     (Store.create
@@ -926,6 +939,14 @@ let () =
             "mismatched keeper_id is rejected as impersonation"
             `Quick
             test_bind_keeper_id_rejects_impersonation
+        ; test_case
+            "missing annotation kind defaults to Comment"
+            `Quick
+            test_parse_annotation_kind_defaults_missing
+        ; test_case
+            "unknown annotation kind is rejected"
+            `Quick
+            test_parse_annotation_kind_rejects_unknown
         ; test_case
             "foreign keeper cannot delete another's annotation"
             `Quick

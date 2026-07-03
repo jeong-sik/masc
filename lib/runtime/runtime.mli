@@ -18,6 +18,16 @@ type t =
 val id_of_binding : binding -> string
 val of_binding : config -> binding -> t option
 
+val of_binding_result : config -> binding -> (t, string) result
+(** Reason-preserving form of {!of_binding}. [Error reason] when the binding's
+    provider/model id is unresolved or the provider transport/protocol cannot be
+    materialized into a {!Llm_provider.Provider_config.t} (e.g. a [messages-http]
+    provider the runtime adapter has no provider_config path for). The binding is
+    still excluded from the runtime list (fail-closed, RFC-0206 §2.1); this
+    surfaces *why*, so [\[runtime\].default] / [\[runtime.assignments\]] / lane
+    validation can report a dropped target's materialize failure instead of a
+    bare "not found among N runtimes" that points at a non-existent typo. *)
+
 val decide_capability_gate :
   config_path:string -> (string * bool) list -> (unit, string) result
 (** Pure capability-gate decision applied at startup by [init_default_strict]

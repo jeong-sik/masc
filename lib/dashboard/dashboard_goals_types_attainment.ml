@@ -355,6 +355,12 @@ let goal_completion_to_json ~effective_policy ~open_request
   let attainment_basis =
     assoc_string_opt "basis" attainment |> Option.value ~default:"unmeasured"
   in
+  let metric_evaluation = metric_evaluation_of_goal goal in
+  let metric_completion_blocked =
+    match metric_evaluation with
+    | Metric_unevaluated -> true
+    | Metric_absent -> false
+  in
   let pct, pct_source =
     match attainment_pct, task_completion_pct with
     | Some pct, _ -> (Some pct, "attainment")
@@ -364,8 +370,9 @@ let goal_completion_to_json ~effective_policy ~open_request
   let ready_to_request_completion =
     match goal.phase with
     | Goal_phase.Executing ->
-        String.equal attainment_state "attained"
-        || (task_count > 0 && task_open_count = 0 && task_done_count > 0)
+        (not metric_completion_blocked)
+        && (String.equal attainment_state "attained"
+            || (task_count > 0 && task_open_count = 0 && task_done_count > 0))
     | Goal_phase.Awaiting_verification | Goal_phase.Awaiting_approval
     | Goal_phase.Blocked | Goal_phase.Paused | Goal_phase.Completed
     | Goal_phase.Dropped ->
@@ -417,8 +424,7 @@ let goal_completion_to_json ~effective_policy ~open_request
       (* task-1743: mirror the attainment metric-evaluation state so a
          consumer reading only the completion summary still learns the
          metric was never evaluated (task-derived pct is not a metric). *)
-      ( "metric_evaluation",
-        `String (metric_evaluation_to_string (metric_evaluation_of_goal goal)) );
+      ("metric_evaluation", `String (metric_evaluation_to_string metric_evaluation));
       ("task_total", `Int task_count);
       ("task_done", `Int task_done_count);
       ("task_open", `Int task_open_count);

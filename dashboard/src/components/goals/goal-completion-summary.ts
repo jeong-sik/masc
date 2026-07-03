@@ -31,7 +31,10 @@ function completionStateForNode(
     case 'awaiting_verification': return 'awaiting_verification'
     case 'awaiting_approval': return 'awaiting_approval'
     default:
-      if (node.attainment.state === 'attained' || (node.task_count > 0 && taskOpen === 0 && taskDone > 0)) {
+      if (
+        node.attainment.metric_evaluation !== 'unevaluated'
+        && (node.attainment.state === 'attained' || (node.task_count > 0 && taskOpen === 0 && taskDone > 0))
+      ) {
         return 'ready_for_completion'
       }
       if (node.task_count === 0 && pct == null) return 'unmeasured'

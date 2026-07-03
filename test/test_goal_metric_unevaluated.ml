@@ -37,8 +37,54 @@ let make_goal ?metric ?target_value id title =
 
 module A = Dashboard_goals_types_attainment
 module Acc = Dashboard_goals_types_accessor
+module MD = Masc_domain
 
 let json_str j key = Yojson.Safe.Util.(j |> member key |> to_string)
+
+let json_bool j key = Yojson.Safe.Util.(j |> member key |> to_bool)
+
+let make_done_task id : MD.task =
+  {
+    id;
+    title = "Task " ^ id;
+    description = "";
+    task_status =
+      MD.Done { assignee = "keeper"; completed_at = iso_now (); notes = None };
+    priority = 3;
+    files = [];
+    created_at = iso_now ();
+    created_by = None;
+    contract = None;
+    handoff_context = None;
+    cycle_count = 0;
+    reclaim_policy = None;
+    do_not_reclaim_reason = None;
+  }
+
+let make_node ?(tasks = []) goal : Acc.tree_node =
+  {
+    goal;
+    children = [];
+    tasks = List.map (fun task -> (task, "explicit")) tasks;
+    convergence = 0.0;
+    health = "ok";
+    badges = [];
+    last_activity_at = iso_now ();
+    stagnation_seconds = 0;
+    linked_keeper_names = [];
+    pending_approval_count = 0;
+    infra_risk_count = 0;
+    linkage_source = "explicit";
+    linkage_warning_count = 0;
+    status_reason = "";
+    blocking_source = "none";
+    blocking_reason = "";
+    latest_keeper_ref = None;
+    latest_turn_ref = None;
+    stalled_since = None;
+    activity_observation = "none";
+    stagnation_status = "fresh";
+  }
 
 (* (a) A goal that declares a metric is exposed as typed "unevaluated". *)
 let test_declared_metric_is_unevaluated () =
@@ -96,6 +142,31 @@ let test_absent_metric_in_json () =
   check string "no metric declared -> absent" "absent"
     (json_str json "metric_evaluation")
 
+let test_unevaluated_metric_does_not_enable_completion_ready () =
+  let g = make_goal ~metric:"coverage %" ~target_value:"80%" "g6" "cov" in
+  let attainment =
+    A.build_attainment_json ~state:"attained" ~basis:"metric_target_percent"
+      ~task_done_count:2 ~task_count:2 ~target_parse_status:"parseable"
+      ~unit:Acc.Percent ~observed_value:(Some 100.0) ~target_numeric:(Some 80.0)
+      ~attainment_pct:(Some 100)
+      ~note:"Derived from linked task completion against a percent target." g
+  in
+  let node =
+    make_node
+      ~tasks:[ make_done_task "t1"; make_done_task "t2" ]
+      g
+  in
+  let json =
+    A.goal_completion_to_json ~effective_policy:None ~open_request:None g node
+      ~attainment
+  in
+  check string "metric stays unevaluated" "unevaluated"
+    (json_str json "metric_evaluation");
+  check bool "unevaluated metric cannot request completion" false
+    (json_bool json "ready_to_request_completion");
+  check string "task-derived attainment is not completion-ready" "in_progress"
+    (json_str json "state")
+
 let () =
   run "goal metric unevaluated"
     [
@@ -109,5 +180,7 @@ let () =
           test_case "zero progress still unevaluated" `Quick
             test_zero_progress_metric_unevaluated;
           test_case "absent metric in json" `Quick test_absent_metric_in_json;
+          test_case "unevaluated metric does not enable completion ready" `Quick
+            test_unevaluated_metric_does_not_enable_completion_ready;
         ] );
     ]

@@ -50,6 +50,7 @@ let qwen_model =
   ; preserve_thinking = Some false
   ; max_thinking_budget = None
   ; streaming = true
+  ; temperature = None
   ; capabilities = None
   ; match_prefixes = []
   }

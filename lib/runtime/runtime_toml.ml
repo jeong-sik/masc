@@ -462,6 +462,46 @@ let parse_model_capabilities ~(path : string) (tbl : Otoml.t)
     thinking_control_format_result
 ;;
 
+(* LLM sampling temperature bounds. OpenAI/Kimi/DeepSeek accept [0.0, 2.0]; a
+   value outside this range is a config error, not something to silently clamp.
+   0.0 (greedy) is valid, so temperature is NOT parsed through the
+   positive-float path. *)
+let temperature_min = 0.0
+let temperature_max = 2.0
+
+(* Read the optional per-model [temperature]. A TOML integer (1) or float (1.0)
+   both read as a float so an operator is not tripped by "1 vs 1.0". Absent →
+   [Ok None] (caller keeps its fallback). Wrong type or out of
+   [temperature_min, temperature_max] → parse error: reject at load rather than
+   send an out-of-range value the provider would reject at request time. *)
+let temperature_opt_field ~(path : string) (tbl : Otoml.t)
+  : (float option, parse_error list) result
+  =
+  match Otoml.find_opt tbl Fun.id [ "temperature" ] with
+  | None -> Ok None
+  | Some value ->
+    let as_float =
+      match value with
+      | Otoml.TomlFloat v -> Some v
+      | Otoml.TomlInteger v -> Some (float_of_int v)
+      | _ -> None
+    in
+    (match as_float with
+     | None ->
+       Error (error (path ^ ".temperature") "temperature must be a number (e.g. 1.0)")
+     | Some t when Float.is_finite t && t >= temperature_min && t <= temperature_max ->
+       Ok (Some t)
+     | Some t ->
+       Error
+         (error
+            (path ^ ".temperature")
+            (Printf.sprintf
+               "temperature must be a finite number in [%g, %g]; got %g"
+               temperature_min
+               temperature_max
+               t)))
+;;
+
 let parse_model (id : string) (tbl : Otoml.t)
   : (Runtime_schema.model_spec, parse_error list) result
   =
@@ -518,20 +558,23 @@ let parse_model (id : string) (tbl : Otoml.t)
            Log.Runtime.warn "runtime_toml: %s.match-prefixes — expected string array, ignoring" path;
            [])
     in
-    Result.map
-      (fun capabilities ->
-        { Runtime_schema.id
-        ; api_name
-        ; tools_support
-        ; max_context
-        ; thinking_support
-        ; preserve_thinking
-        ; max_thinking_budget
-        ; streaming
-        ; capabilities
-        ; match_prefixes
-        })
-      capabilities_result)
+    let temperature_result = temperature_opt_field ~path tbl in
+    let ( let* ) = Result.bind in
+    let* capabilities = capabilities_result in
+    let* temperature = temperature_result in
+    Ok
+      { Runtime_schema.id
+      ; api_name
+      ; tools_support
+      ; max_context
+      ; thinking_support
+      ; preserve_thinking
+      ; max_thinking_budget
+      ; streaming
+      ; temperature
+      ; capabilities
+      ; match_prefixes
+      })
 ;;
 
 let parse_models (toml : Otoml.t)

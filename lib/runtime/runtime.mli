@@ -215,6 +215,14 @@ val thinking_support_of_runtime_id : string -> bool option
     {!Runtime_inference.for_runtime} to gate keeper thinking per model from the
     runtime.toml SSOT. *)
 
+val temperature_of_runtime_id : string -> float option
+(** Per-model [temperature] override ([models.<id>.temperature] in runtime.toml)
+    for the model bound to runtime [id], or [None] when the id is not configured
+    or the model leaves it unset.  Consumed by
+    {!Runtime_inference.resolve_temperature}: a keeper turn uses this value when
+    set and its caller fallback ([MASC_KEEPER_UNIFIED_TEMP]) otherwise.  Required
+    for models that reject the default temperature (Kimi K2.7 accepts only 1.0). *)
+
 val preserve_thinking_of_runtime_id : string -> bool option
 (** Explicit [preserve-thinking] for runtime [id]. [None] means unknown runtime,
     uninitialized cache, or no explicit TOML field.

@@ -56,8 +56,10 @@ let summary_semaphore =
 
 let with_summary_slot f =
   let sem = Lazy.force summary_semaphore in
-  Eio.Semaphore.acquire sem;
-  Fun.protect ~finally:(fun () -> Eio.Semaphore.release sem) f
+  Eio.Switch.run (fun sw ->
+    Eio.Semaphore.acquire sem;
+    Eio.Switch.on_release sw (fun () -> Eio.Semaphore.release sem);
+    f sw)
 ;;
 
 (* ── Context collection ─────────────────────────── *)
@@ -340,7 +342,7 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
   | Some provider_config ->
     Eio.Fiber.fork ~sw (fun () ->
       try
-        with_summary_slot (fun () ->
+        with_summary_slot (fun sw ->
           let context_bundle = build_context_bundle ~entry in
           match Eio_context.get_net_opt () with
           | None ->

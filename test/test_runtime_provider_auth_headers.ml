@@ -385,6 +385,25 @@ streaming = true
 [local.model]
 |}
 
+let incompatible_messages_http_toml =
+  {|
+[runtime]
+default = "openai.model"
+
+[providers.openai]
+display-name = "OpenAI over wrong protocol"
+protocol = "messages-http"
+endpoint = "https://api.openai.example/v1/messages"
+
+[models.model]
+api-name = "model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[openai.model]
+|}
+
 let test_runtime_adapter_rejects_unregistered_messages_http () =
   match Runtime_toml.parse_string unregistered_messages_http_toml with
   | Error errors ->
@@ -406,6 +425,38 @@ let test_runtime_adapter_rejects_unregistered_messages_http () =
             (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
         | Error _ -> ())
      | bindings -> failf "expected one local binding, got %d" (List.length bindings))
+
+let test_runtime_adapter_rejects_incompatible_messages_http_kind () =
+  match Runtime_toml.parse_string incompatible_messages_http_toml with
+  | Error errors ->
+    failf
+      "expected incompatible messages-http runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Ok provider_cfg ->
+          failf
+            "incompatible messages-http provider must fail closed, got kind %s"
+            (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+        | Error msg ->
+          check
+            bool
+            "error names messages compatibility policy"
+            true
+            (String_util.contains_substring msg "messages-compatible");
+          check
+            bool
+            "error names provider"
+            true
+            (String_util.contains_substring msg "openai"))
+     | bindings -> failf "expected one OpenAI binding, got %d" (List.length bindings))
 
 let deepseek_runtime_toml =
   {|
@@ -1272,6 +1323,10 @@ let () =
             "runtime adapter rejects unregistered messages-http provider"
             `Quick
             test_runtime_adapter_rejects_unregistered_messages_http
+        ; test_case
+            "runtime adapter rejects incompatible messages-http registry kind"
+            `Quick
+            test_runtime_adapter_rejects_incompatible_messages_http_kind
         ; test_case
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick

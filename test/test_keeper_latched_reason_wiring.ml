@@ -21,6 +21,7 @@ module Keeper_meta_contract = Masc.Keeper_meta_contract
 module Keeper_meta_json = Masc.Keeper_meta_json
 module Keeper_meta_json_parse = Masc.Keeper_meta_json_parse
 module Keeper_meta_store = Masc.Keeper_meta_store
+module Keeper_meta_merge = Masc.Keeper_meta_merge
 module Keeper_registry = Masc.Keeper_registry
 module Keeper_keepalive = Masc.Keeper_keepalive
 module Keeper_turn_lifecycle = Masc.Keeper_turn_lifecycle
@@ -290,6 +291,88 @@ let test_dead_tombstone_cleanup_overwrites_existing_pause_reason () =
       (Keeper_latched_reason.Operator_paused { operator_actor = "keeper_down" })
     "dead-tombstone-paused-keeper"
 
+(* Reviewer P1 (2026-07-03): the overwrite test above only exercises the
+   no-conflict write, where the merge never runs. On a CAS retry the cleanup
+   re-reads disk; if that snapshot is an operator pause, reusing
+   [heartbeat_fields_from_disk] copied the operator reason back over
+   [Dead_tombstone] and returned [Ok ()], silently persisting the wrong reason.
+   This drives the retry path deterministically without a concurrent writer: the
+   caller carries a stale [meta_version] so its first write loses the CAS race
+   against a seeded operator-pause snapshot, forcing the merge to run. *)
+let test_dead_tombstone_cleanup_cas_retry_preserves_reason () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let base_path = temp_dir "masc-latched-tombstone-cas-" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_registry.clear ();
+      cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "dead-tombstone-cas-keeper" in
+       (* Disk snapshot the retry re-reads: an operator pause with a higher turn
+          count than the caller's stale snapshot. [is_operator_pause] holds
+          (paused, no auto_resume, no last_blocker), so the heartbeat merge would
+          reclaim [latched_reason] from here. *)
+       let disk_meta =
+         let base =
+           { (make_meta keeper_name) with
+             paused = true
+           ; latched_reason =
+               Some
+                 (Keeper_latched_reason.Operator_paused
+                    { operator_actor = "keeper_down" })
+           }
+         in
+         { base with
+           runtime =
+             { base.runtime with
+               usage = { base.runtime.usage with total_turns = 7 }
+             }
+         }
+       in
+       (match Keeper_meta_store.write_meta config disk_meta with
+        | Ok () -> ()
+        | Error err -> failf "seed disk meta: %s" err);
+       (* Caller: the cleanup's stale in-hand snapshot. [meta_version = 0] loses
+          the CAS race against the seeded version, forcing the retry + merge. *)
+       let caller =
+         { disk_meta with
+           meta_version = 0
+         ; paused = true
+         ; latched_reason = Some Keeper_latched_reason.Dead_tombstone
+         ; runtime =
+             { disk_meta.runtime with
+               usage = { disk_meta.runtime.usage with total_turns = 3 }
+             }
+         }
+       in
+       (match
+          Keeper_meta_store.write_meta_with_merge
+            ~merge:Keeper_meta_merge.dead_tombstone_cleanup_from_disk
+            config
+            caller
+        with
+        | Ok () -> ()
+        | Error err -> failf "write_meta_with_merge after CAS retry: %s" err);
+       match Keeper_meta_store.read_meta config keeper_name with
+       | Ok (Some persisted) ->
+         check bool "CAS retry keeps paused=true" true persisted.paused;
+         check
+           (option string)
+           "CAS retry persists Dead_tombstone, not the operator reason"
+           (Some "dead_tombstone")
+           (latched_reason_wire persisted);
+         check
+           int
+           "CAS retry preserves heartbeat-owned turn count monotonically"
+           7
+           persisted.runtime.usage.total_turns
+       | Ok None -> fail "expected meta on disk after CAS retry"
+       | Error err -> failf "read persisted meta: %s" err)
+
 let () =
   run
     "keeper_latched_reason_wiring"
@@ -312,5 +395,7 @@ let () =
             test_dead_tombstone_cleanup_records_reason
         ; test_case "dead-tombstone cleanup overwrites existing pause reason" `Quick
             test_dead_tombstone_cleanup_overwrites_existing_pause_reason
+        ; test_case "dead-tombstone cleanup CAS retry preserves Dead_tombstone" `Quick
+            test_dead_tombstone_cleanup_cas_retry_preserves_reason
         ] )
     ]

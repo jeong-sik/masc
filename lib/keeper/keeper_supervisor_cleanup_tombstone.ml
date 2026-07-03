@@ -36,10 +36,16 @@ let cleanup_dead_tombstone
              the same merged-CAS retry as the resume + overflow-pause
              paths so a parallel heartbeat write doesn't make this
              write fail and leave the keeper unpaused on disk while
-             the supervisor proceeds to unregister it. *)
+             the supervisor proceeds to unregister it.
+
+             The cleanup owns [paused]/[latched_reason] here, so use
+             [dead_tombstone_cleanup_from_disk] rather than the
+             heartbeat merge: on a CAS retry that re-reads an operator
+             pause, the heartbeat merge would copy the operator reason
+             back over [Dead_tombstone] and still return [Ok ()]. *)
         match
           write_meta_with_merge
-            ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+            ~merge:Keeper_meta_merge.dead_tombstone_cleanup_from_disk
             ctx.config
             { meta with
               paused = true

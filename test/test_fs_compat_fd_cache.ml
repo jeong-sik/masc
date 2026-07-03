@@ -188,6 +188,45 @@ let test_lru_evict_preserves_data () =
     paths
 ;;
 
+let test_lru_evict_skips_active_writer () =
+  Fs_compat.reset_fd_cache_for_testing ();
+  let dir = tmpdir "fd_cache_active" in
+  let active_path = Filename.concat dir "active.jsonl" in
+  let ready = Atomic.make false in
+  let release = Atomic.make false in
+  let worker_error = Atomic.make None in
+  let worker =
+    Thread.create
+      (fun () ->
+         try
+           Fd_cache.with_writer active_path (fun oc ->
+             output_string oc "{\"phase\":\"before\"}\n";
+             flush oc;
+             Atomic.set ready true;
+             while not (Atomic.get release) do
+               Thread.yield ()
+             done;
+             output_string oc "{\"phase\":\"after\"}\n";
+             flush oc)
+         with exn -> Atomic.set worker_error (Some (Printexc.to_string exn)))
+      ()
+  in
+  while not (Atomic.get ready) do
+    Thread.yield ()
+  done;
+  for i = 0 to 40 do
+    let path = Filename.concat dir (Printf.sprintf "other_%02d.jsonl" i) in
+    Fs_compat.append_jsonl path (`Assoc [ "i", `Int i ])
+  done;
+  Atomic.set release true;
+  Thread.join worker;
+  (match Atomic.get worker_error with
+   | Some msg -> failf "active writer was closed during LRU eviction: %s" msg
+   | None -> ());
+  let lines = read_lines active_path in
+  check int "active writer kept both records" 2 (List.length lines)
+;;
+
 let () =
   Alcotest.run
     "fs_compat_fd_cache"
@@ -208,6 +247,10 @@ let () =
             "LRU eviction preserves data on every path"
             `Quick
             test_lru_evict_preserves_data
+        ; test_case
+            "LRU eviction does not close active writer"
+            `Quick
+            test_lru_evict_skips_active_writer
         ] )
     ]
 ;;

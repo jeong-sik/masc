@@ -25,7 +25,7 @@ let compact_begin_tag = "begin"
 let compact_end_tag = "end"
 let compact_annotations_key = "annotations"
 
-let compact_mu = Stdlib.Mutex.create ()
+let compact_seq_mu = Stdlib.Mutex.create ()
 let compact_seq = ref 0
 
 (* RFC-0128 §4.2: [_orphan/] and [by-url/<slug>/] live one or two
@@ -42,9 +42,13 @@ let now_ms () =
   Int64.div ns 1_000_000L
 ;;
 
-let next_compaction_id_locked () =
-  incr compact_seq;
-  Printf.sprintf "%Ld-%d" (now_ms ()) !compact_seq
+let next_compaction_id () =
+  let seq =
+    Stdlib.Mutex.protect compact_seq_mu (fun () ->
+      incr compact_seq;
+      !compact_seq)
+  in
+  Printf.sprintf "%Ld-%d-%d" (now_ms ()) (Unix.getpid ()) seq
 ;;
 
 let annotation_kind_of_string = Ide_annotation_types.annotation_kind_of_string
@@ -352,9 +356,9 @@ let list ~base_dir ?(partition = Ide_paths.Orphan) ~filter () =
 
 let compact ~base_dir ?(partition = Ide_paths.Orphan) () =
   ensure_store ~base_dir ~partition ();
-  Stdlib.Mutex.protect compact_mu (fun () ->
-    let id = next_compaction_id_locked () in
-    let path = annotations_file_for ~base_dir partition in
+  let path = annotations_file_for ~base_dir partition in
+  File_lock_eio.with_lock path (fun () ->
+    let id = next_compaction_id () in
     Fs_compat.append_jsonl path (compact_begin_json id);
     let snapshot =
       load_all_partition ~stop_before_compact_begin_id:id ~base_dir partition

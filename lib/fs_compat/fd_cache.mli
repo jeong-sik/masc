@@ -13,15 +13,15 @@
     cache. It is intentionally unaware of mkdir, write
     serialization, or test-isolation guards — those stay with the
     [Fs_compat] append site, which composes them around
-    [get_writer]. *)
+    [with_writer]. *)
 
-(** [get_writer path] returns the cached writer for [path],
+(** [with_writer path f] runs [f] with the cached writer for [path],
     opening one on the first request and bumping its LRU stamp on
-    every request. Evicts the least-recently-used writer when the
-    bound is exceeded. Internal mutex protects cache state only;
-    {b does not} stay held across the caller's subsequent
-    [output_string]/[flush] on the returned channel. *)
-val get_writer : string -> out_channel
+    every request. Evicts the least-recently-used inactive writer when
+    the bound is exceeded. Active writers are leased until [f] returns,
+    so LRU eviction cannot close an [out_channel] while a caller is
+    still writing or flushing it. *)
+val with_writer : string -> (out_channel -> 'a) -> 'a
 
 (** [invalidate path] flushes, closes, and drops the cached writer for
     [path] when present (a no-op otherwise). Call it after the inode at
@@ -33,9 +33,9 @@ val get_writer : string -> out_channel
     [output_string]/[flush]. *)
 val invalidate : string -> unit
 
-(** Flush and close every cached writer. Safe to call concurrently
-    with active appends; a subsequent [get_writer] re-opens fresh.
-    Registered at [Stdlib.at_exit]. *)
+(** Flush and close every cached writer. Active writers are removed from
+    the cache and closed when their current lease returns; a subsequent
+    [with_writer] opens fresh. Registered at [Stdlib.at_exit]. *)
 val close_all : unit -> unit
 
 (** Drop and close every cached writer. Test-only — production

@@ -667,9 +667,9 @@ let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   let line = Yojson.Safe.to_string json ^ "\n" in
   let path_mu = get_append_path_mutex path in
   Stdlib.Mutex.protect path_mu (fun () ->
-    let oc = Fd_cache.get_writer path in
-    Stdlib.output_string oc line;
-    Stdlib.flush oc)
+    Fd_cache.with_writer path (fun oc ->
+      Stdlib.output_string oc line;
+      Stdlib.flush oc))
 
 let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
   if jsons = [] then ()
@@ -685,8 +685,8 @@ let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
     let chunk = Buffer.contents buf in
     let path_mu = get_append_path_mutex path in
     Stdlib.Mutex.protect path_mu (fun () ->
-      let oc = Fd_cache.get_writer path in
-      Stdlib.output_string oc chunk;
-      Stdlib.flush oc)
+      Fd_cache.with_writer path (fun oc ->
+        Stdlib.output_string oc chunk;
+        Stdlib.flush oc))
   end
 ;;

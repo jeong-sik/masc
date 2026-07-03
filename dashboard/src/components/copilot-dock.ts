@@ -508,7 +508,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
                       <${KeeperBadge} id=${k.id} name=${k.kr} variant="sigil" size="lg" beat=${statusLooksRunning(k.status)} />
                       <div class="minfo">
                         <div class="nm">${k.kr} <span class="h">${k.id}</span></div>
-                        <div class="sub"><${StatusDot} status=${k.status} />${k.phase} · ${k.ns}</div>
+                        <div class="sub"><${StatusDot} status=${k.status} />${k.phase}</div>
                       </div>
                     </button>
                   `)}
@@ -516,7 +516,7 @@ export function CopilotDock({ dock }: { dock: CopilotDockApi }) {
               `
             : null}
         </div>
-        <span class="dock-idrow-hint">와 대화 중 · <span class="mono">${keeper.ns}</span></span>
+        <span class="dock-idrow-hint">와 대화 중</span>
       </div>
 
       <div class="dock-coview" data-testid="copilot-dock-coview">

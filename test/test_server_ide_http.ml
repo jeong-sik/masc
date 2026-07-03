@@ -120,7 +120,7 @@ let dispatch router (request, body) =
         (fun iov ->
            Buffer.add_string
              response_buf
-             (Bigstringaf.substring iov.buf ~off:iov.off ~len:iov.len))
+             (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
         iovecs;
       let written = List.fold_left (fun acc iov -> acc + iov.len) 0 iovecs in
       Httpun.Server_connection.report_write_result conn (`Ok written);

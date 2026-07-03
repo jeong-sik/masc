@@ -4,6 +4,11 @@ open Alcotest
 
 module Keeper_types = Keeper_types
 
+(* #20708: read [Masc.Otel_metric_store] directly — the deleted
+   [otel_metric_test_store] shim owned a private store production never wrote
+   to, so [metric_total] read a permanent 0 and the "projection records no
+   decision metrics" assertion below could not observe a real regression. *)
+
 (* [Keeper_sandbox_control] lives inside the wrapped [masc] library.  The
    alias lets call sites keep the existing qualified form, and the open
    brings the status constructors into scope for pattern/expression use. *)
@@ -66,7 +71,7 @@ let json_string_opt key json =
 
 let repo_mapping_decision_metric_total () =
   let metric_total metric =
-    Otel_metric_store.metric_total Keeper_metrics.(to_string metric)
+    Masc.Otel_metric_store.metric_total Keeper_metrics.(to_string metric)
   in
   List.fold_left
     (fun total metric -> total +. metric_total metric)

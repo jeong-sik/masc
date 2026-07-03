@@ -1,4 +1,4 @@
-import { get, post, type GetOptions } from './core'
+import { del, get, post, type GetOptions } from './core'
 
 export type RepoStatus = 'active' | 'paused' | 'error' | 'unknown'
 
@@ -68,4 +68,21 @@ export async function fetchRepositoriesList(opts: GetOptions = {}): Promise<Repo
 export async function discoverRepositories(): Promise<Repository[]> {
   const raw = await post<unknown>('/api/v1/repositories/discover', {})
   return repositoryRows(raw).map(normalizeRepository).filter((r): r is Repository => r !== null)
+}
+
+export interface AddRepositoryPayload {
+  name: string
+  url: string
+  default_branch: string
+  auto_sync: boolean
+  sync_interval: number
+  local_path?: string
+}
+
+export async function addRepository(payload: AddRepositoryPayload): Promise<void> {
+  await post<unknown>('/api/v1/repositories', payload)
+}
+
+export async function removeRepository(id: string): Promise<void> {
+  await del<unknown>(`/api/v1/repositories/${encodeURIComponent(id)}`)
 }

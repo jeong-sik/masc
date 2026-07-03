@@ -49,9 +49,39 @@ val source_header :
 (** [rel_under base safe] returns the path of [safe] relative to [base],
     handling [base = "/"], trailing slashes, and the [safe = base] case
     (returns [""]). Caller must have already enforced the prefix
-    invariant via the internal [safe_path] helper. Exposed for unit
-    testing. *)
+    invariant via {!resolve_workspace_path}. Exposed for unit testing. *)
 val rel_under : string -> string -> string
+
+(** [component_is_confidential name] is [true] when a single path
+    component [name] names a secret or agent-internal store that must not
+    be served by the file read routes nor listed in the file tree
+    ([.git], [.masc]/[.masc-ide], [.env]*, [.ssh], any name containing
+    "credentials"). Single SSOT shared by {!resolve_workspace_path} and
+    {!scan_dir}. Exposed for unit testing. *)
+val component_is_confidential : string -> bool
+
+type path_rejection =
+  | Path_traversal
+      (** [..]/[.] component or a lexical prefix escape. *)
+  | Confidential_component of string
+      (** A path component matched {!component_is_confidential}. *)
+  | Symlink_escape
+      (** A symlink whose real target resolves outside the base. *)
+
+type path_resolution =
+  | Path_ok of string  (** Lexical path contained within the base. *)
+  | Path_rejected of path_rejection
+
+(** [resolve_workspace_path base requested] resolves [requested] (a
+    forward/back-slash path relative to [base]) into an absolute path
+    contained within [base], or a typed rejection. It rejects parent
+    traversal, confidential components (see {!component_is_confidential}),
+    and symlinks whose real target resolves outside [base]. The returned
+    [Path_ok] path is the lexical path under [base]; symlink containment
+    is verified against the realpath-resolved base without rewriting the
+    returned path. Exposed for unit testing; production callers reach it
+    through {!add_routes}. *)
+val resolve_workspace_path : string -> string -> path_resolution
 
 (** [tree_node_limit_of_query value] applies the workspace tree route's
     [limit] query parameter defaulting and [1, max_tree_node_limit] clamp.

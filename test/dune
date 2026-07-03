@@ -350,6 +350,7 @@
   test_keeper_relevance_check
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
+  test_workspace_file_confidentiality
   test_cognitive_gravity
   test_intentional_projection
   test_chronicle_event
@@ -695,6 +696,7 @@
   test_actionable_path_action
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
+  test_workspace_file_confidentiality
   test_cognitive_gravity
   test_intentional_projection
   test_chronicle_event

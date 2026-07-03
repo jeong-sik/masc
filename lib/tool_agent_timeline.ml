@@ -730,9 +730,11 @@ let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
     in
     Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
-(* Dispatch. [load_chat] is threaded to the timeline handler so a
-   keeper-aware caller can supply chat events without this tool module
-   depending on the keeper subsystem. *)
+(* Dispatch routes by tool name and threads [load_chat] to the handler; the
+   timeline read and its telemetry live in the handler / build path, not in
+   this pure router.
+   TEL-OK: pure dispatch router, delegates the significant action (and its
+   telemetry) to [handle_agent_timeline]; no action of its own to instrument. *)
 let dispatch ?load_chat (ctx : context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with

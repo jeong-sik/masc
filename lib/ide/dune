@@ -22,6 +22,7 @@
   yojson
   uuidm
   fs_compat
+  masc.dated_jsonl
   masc.command_descriptor
   masc.agent_observation
   masc.masc_exec))

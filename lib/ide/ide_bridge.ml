@@ -37,18 +37,145 @@ let event_kind_of_event = function
   | Pr_event _ -> Pr
 ;;
 
+(* ── Segment rotation + tail-read (IDE Observation Plane v2 A2/A3) ───────
+   The event store was a single append-only [<kind>_events.jsonl] with no
+   rotation, so it grew without bound (~4.2 MB/day) and every read folded
+   the whole file (a live 143 MB tool_events.jsonl stalled the main Eio
+   domain for ~2 s per read). We keep the flat filename as the live segment
+   and rotate it to numbered archives [<kind>_events.jsonl.<n>] (higher [n]
+   = more recent rotation); reads tail the newest segment(s) only.
+
+   Size-based rotation on the flat layout is chosen over date-sharding
+   because it keeps the live filename stable (existing readers/tests still
+   observe [<kind>_events.jsonl]) and because the pre-existing oversized
+   file is rotated out on its first oversized append and then ages off
+   under retention — no separate migration of legacy data is needed. *)
+
+let default_max_segment_bytes = 32 * 1024 * 1024
+
+(* Retain this many archived segments beyond the live one; older archives
+   are pruned. Segment-count (not byte-budget) retention keeps rotation
+   math trivial and lets a legacy oversized segment age out over N
+   rotations rather than persisting forever. *)
+let default_max_retained_segments = 8
+
+(* Filtered ([keeper_id]) reads scan a bounded tail window instead of the
+   whole store, so a specific keeper's events are surfaced only from the
+   recent window. This is the deliberate A3 bound: an observation panel
+   shows recent activity, not an exhaustive history scan. Unfiltered reads
+   only ever need [offset + limit] rows. *)
+let max_keeper_filter_scan_lines = 1000
+
+let segment_index_of_name ~live_basename name =
+  let prefix = live_basename ^ "." in
+  let plen = String.length prefix in
+  if String.length name > plen && String.sub name 0 plen = prefix
+  then int_of_string_opt (String.sub name plen (String.length name - plen))
+  else None
+;;
+
+let archive_indices ~path =
+  let dir = Filename.dirname path in
+  let live_basename = Filename.basename path in
+  match Sys.readdir dir with
+  | exception Sys_error _ -> []
+  | entries ->
+    Array.to_list entries
+    |> List.filter_map (fun name -> segment_index_of_name ~live_basename name)
+;;
+
+let archive_path ~path index = Printf.sprintf "%s.%d" path index
+
+(* Rotate the live segment out when it is at or above [max_segment_bytes].
+   The new archive index is [max existing + 1], so a concurrent rotation
+   never clobbers an existing archive; [rename_if_exists] means only one of
+   two racing rotations moves the live inode (the loser sees it gone and
+   no-ops). No lock is held — correctness rests on rename atomicity plus a
+   fresh index — so this stays correct outside an Eio context (tests). *)
+let maybe_rotate ~path ~max_segment_bytes =
+  if max_segment_bytes > 0
+  then (
+    match Fs_compat.file_size path with
+    | Some size when size >= max_segment_bytes ->
+      let next = 1 + List.fold_left max 0 (archive_indices ~path) in
+      ignore
+        (Fs_compat.rename_if_exists ~src:path ~dst:(archive_path ~path next) : bool)
+    | Some _ | None -> ())
+;;
+
+(* Delete the oldest archives beyond [max_retained_segments]. Racing prunes
+   converge: [Sys.remove] of an already-removed file raises [Sys_error],
+   which is ignored. *)
+let prune_segments ~path ~max_retained_segments =
+  if max_retained_segments >= 0
+  then (
+    let indices = List.sort compare (archive_indices ~path) in
+    let excess = List.length indices - max_retained_segments in
+    if excess > 0
+    then
+      List.iteri
+        (fun i index ->
+          if i < excess
+          then (try Sys.remove (archive_path ~path index) with Sys_error _ -> ()))
+        indices)
+;;
+
+let append_rotating ~path ~max_segment_bytes ~max_retained_segments json =
+  maybe_rotate ~path ~max_segment_bytes;
+  (* Fresh-fd append (not the fd-cached [Fs_compat.append_jsonl]): a cached
+     writer keyed by the live path would keep writing into a just-renamed
+     archive inode after rotation. [append_file] opens/closes per call and
+     serializes concurrent writers per path, matching the prior append. *)
+  Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
+  prune_segments ~path ~max_retained_segments
+;;
+
+(* Segment files newest-first: live segment, then archives by descending
+   index. Only existing files are returned. *)
+let segment_paths_newest_first ~path =
+  let archives =
+    archive_indices ~path
+    |> List.sort (fun a b -> compare b a)
+    |> List.map (fun index -> archive_path ~path index)
+  in
+  (if Fs_compat.file_exists path then [ path ] else []) @ archives
+;;
+
+(* Collect the newest [budget] raw JSONL lines across segments, tailing the
+   newest segment first and expanding to older segments only until [budget]
+   lines are gathered. [Dated_jsonl.load_tail_lines] reads each segment
+   backwards in chunks, so cost scales with [budget], not with file size. *)
+let tail_read_lines ~path ~budget =
+  if budget <= 0
+  then []
+  else (
+    let rec loop segments acc remaining =
+      if remaining <= 0
+      then acc
+      else (
+        match segments with
+        | [] -> acc
+        | seg :: rest ->
+          let lines =
+            try Dated_jsonl.load_tail_lines seg ~max_lines:remaining with
+            | Sys_error _ -> []
+          in
+          loop rest (acc @ lines) (remaining - List.length lines))
+    in
+    loop (segment_paths_newest_first ~path) [] budget)
+;;
+
 let append_event ~base_dir ~partition ~(event : ide_event) =
   let dir = Ide_paths.partition_store_dir ~base_dir partition in
   Fs_compat.mkdir_p dir;
   let file_name = event_file_name (event_kind_of_event event) in
   let path = Filename.concat dir file_name in
   let json = ide_event_to_json event in
-  (* Use Fs_compat.append_jsonl for per-path mutex protection.
-     Safe for concurrent calls from parallel Eio fibers (Eio.Fiber.List.map)
-     and async agent spawns. Fs_compat uses Stdlib.Mutex.protect per path,
-     so writes to the same file are serialized; writes to different files
-     can proceed concurrently. *)
-  Fs_compat.append_jsonl path json
+  append_rotating
+    ~path
+    ~max_segment_bytes:default_max_segment_bytes
+    ~max_retained_segments:default_max_retained_segments
+    json
 
 let append_cursor ~base_dir ~partition json =
   let dir = Ide_paths.partition_store_dir ~base_dir partition in
@@ -194,16 +321,18 @@ let annotation_kind_to_ide = function
   | Agent_observation.Bookmark -> Ide_annotation_types.Bookmark
 ;;
 
-let list_kind_events ~base_path ~partition ~kind ?keeper_id () =
+(* Tail-read at most [scan_budget] newest rows for one kind, then filter.
+   Replaces the previous whole-file [fold_jsonl_lines] fold (O(file size))
+   with a segment tail-read (O(scan_budget)). Order of the result is not
+   significant — [list_events] sorts by timestamp before paging. *)
+let list_kind_events ~base_path ~partition ~kind ?keeper_id ~scan_budget () =
   let dir = Ide_paths.partition_store_dir ~base_dir:base_path partition in
   let path = Filename.concat dir (event_file_name kind) in
-  Fs_compat.fold_jsonl_lines
-    ~init:[]
-    ~f:(fun acc ~line_no:_ json ->
-      if event_matches_kind kind json && event_matches_keeper keeper_id json
-      then json :: acc
-      else acc)
-    path
+  let lines = tail_read_lines ~path ~budget:scan_budget in
+  let jsons, _malformed = Fs_compat.parse_jsonl_lines ~source:path lines in
+  List.filter
+    (fun json -> event_matches_kind kind json && event_matches_keeper keeper_id json)
+    jsons
 ;;
 
 let latest_cursor_per_keeper cursors =
@@ -260,13 +389,23 @@ let list_events
     | Some k -> [ k ]
     | None -> [ Tool; Turn; Pr ]
   in
+  let limit = normalize_limit limit in
+  let offset = normalize_offset offset in
+  (* A keeper-filtered read scans a bounded tail window so a sparse keeper
+     still surfaces recent events; an unfiltered read only needs the page. *)
+  let scan_budget =
+    let page = offset + limit in
+    match keeper_id with
+    | None -> page
+    | Some _ -> max page max_keeper_filter_scan_lines
+  in
   let events =
     List.concat_map
-      (fun kind -> list_kind_events ~base_path ~partition ~kind ?keeper_id ())
+      (fun kind -> list_kind_events ~base_path ~partition ~kind ?keeper_id ~scan_budget ())
       kinds
     |> List.sort compare_event_json
   in
-  events |> drop (normalize_offset offset) |> take (normalize_limit limit)
+  events |> drop offset |> take limit
 
 let ingest_tool_event
     ~base_path
@@ -913,5 +1052,17 @@ let install_agent_observation_sinks () =
           ; line_end = annotation.line_end
           })
 ;;
+
+(* Expose the rotation/tail-read internals so tests can drive them with
+   small thresholds without writing multi-megabyte segments. Not part of
+   the production surface. *)
+module For_testing = struct
+  let default_max_segment_bytes = default_max_segment_bytes
+  let default_max_retained_segments = default_max_retained_segments
+  let append_rotating = append_rotating
+  let tail_read_lines = tail_read_lines
+  let segment_paths_newest_first = segment_paths_newest_first
+  let archive_indices = archive_indices
+end
 
 let () = install_agent_observation_sinks ()

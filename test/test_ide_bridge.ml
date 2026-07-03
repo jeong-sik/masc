@@ -631,6 +631,128 @@ let test_concurrent_ingest () =
     check int "all events written" n !count)
 ;;
 
+(* ── Segment rotation + tail-read (IDE v2 A2/A3) ──────────────────── *)
+
+let tool_row i =
+  `Assoc
+    [ "type", `String "tool"
+    ; "keeper_id", `String "k1"
+    ; "timestamp_ms", `Int i
+    ; "turn_id", `String (Printf.sprintf "t-%d" i)
+    ]
+;;
+
+let row_timestamp line =
+  Yojson.Safe.from_string line
+  |> Yojson.Safe.Util.member "timestamp_ms"
+  |> Yojson.Safe.Util.to_int
+;;
+
+(* (a) The live segment rotates to a numbered archive once it reaches the
+   size threshold; the live filename stays stable. *)
+let test_segment_rotates_on_threshold () =
+  with_temp_dir (fun base_dir ->
+    let path = Filename.concat base_dir "tool_events.jsonl" in
+    for i = 1 to 6 do
+      Ide_bridge.For_testing.append_rotating
+        ~path
+        ~max_segment_bytes:100
+        ~max_retained_segments:8
+        (tool_row i)
+    done;
+    check bool "live segment exists" true (Sys.file_exists path);
+    check bool "at least one archive created" true
+      (List.length (Ide_bridge.For_testing.archive_indices ~path) >= 1))
+;;
+
+(* (b)+(d) A budget-limited tail-read of a 100-row live segment returns
+   exactly the newest [budget] rows — not the whole file — proving the read
+   cost is bounded by [budget], not by file size. *)
+let test_tail_read_returns_newest_bounded () =
+  with_temp_dir (fun base_dir ->
+    let path = Filename.concat base_dir "tool_events.jsonl" in
+    for i = 1 to 100 do
+      Ide_bridge.For_testing.append_rotating
+        ~path
+        ~max_segment_bytes:max_int (* never rotate: single live segment *)
+        ~max_retained_segments:8
+        (tool_row i)
+    done;
+    let lines = Ide_bridge.For_testing.tail_read_lines ~path ~budget:5 in
+    check int "reads only budget rows, not all 100" 5 (List.length lines);
+    check (list int) "newest five rows, oldest-first"
+      [ 96; 97; 98; 99; 100 ]
+      (List.map row_timestamp lines))
+;;
+
+(* (c) When the budget exceeds the newest segment's rows, the tail-read
+   expands into the previous segment. Rows 1..3 land in archive .1, rows
+   4..6 in the live segment; a budget of 5 returns the newest 5 overall
+   (rows 2..6), drawing from both segments. *)
+let test_tail_read_crosses_boundary () =
+  with_temp_dir (fun base_dir ->
+    let path = Filename.concat base_dir "tool_events.jsonl" in
+    let append ~cap i =
+      Ide_bridge.For_testing.append_rotating
+        ~path ~max_segment_bytes:cap ~max_retained_segments:8 (tool_row i)
+    in
+    List.iter (fun i -> append ~cap:max_int i) [ 1; 2; 3 ];
+    append ~cap:1 4 (* rotates rows 1..3 into an archive, row 4 into fresh live *);
+    List.iter (fun i -> append ~cap:max_int i) [ 5; 6 ];
+    check int "one archive present" 1
+      (List.length (Ide_bridge.For_testing.archive_indices ~path));
+    let lines = Ide_bridge.For_testing.tail_read_lines ~path ~budget:5 in
+    check int "budget rows collected across segments" 5 (List.length lines);
+    let timestamps = List.map row_timestamp lines |> List.sort compare in
+    check (list int) "newest five across both segments" [ 2; 3; 4; 5; 6 ] timestamps)
+;;
+
+(* (e) Retention prunes the oldest archives, keeping at most
+   [max_retained_segments] of them (the most recent by index). *)
+let test_retention_prunes_old_segments () =
+  with_temp_dir (fun base_dir ->
+    let path = Filename.concat base_dir "tool_events.jsonl" in
+    for i = 1 to 10 do
+      Ide_bridge.For_testing.append_rotating
+        ~path ~max_segment_bytes:1 ~max_retained_segments:2 (tool_row i)
+    done;
+    check bool "live segment exists" true (Sys.file_exists path);
+    check (list int) "keeps only the two newest archives"
+      [ 8; 9 ]
+      (List.sort compare (Ide_bridge.For_testing.archive_indices ~path)))
+;;
+
+(* Integration: [list_events] merges live and archived segments through the
+   public API, newest-first. *)
+let test_list_events_reads_across_segments () =
+  with_temp_dir (fun base_dir ->
+    Ide_bridge.ingest_tool_event
+      ~base_path:base_dir
+      ~tool_name:"write_file"
+      ~keeper_id:"k1"
+      ~turn_id:"t-live"
+      ~outcome:"success"
+      ~typed_outcome:"progress"
+      ~latency_ms:10
+      ~summary:"live"
+      ~file_path:None
+      ~timestamp_ms:5000L
+      ();
+    let dir = Ide_paths.partition_store_dir ~base_dir Ide_paths.Orphan in
+    let path = Filename.concat dir "tool_events.jsonl" in
+    let oc = open_out (path ^ ".1") in
+    output_string oc
+      ({|{"type":"tool","keeper_id":"k1","timestamp_ms":1000,"turn_id":"t-arch"}|}
+       ^ "\n");
+    close_out oc;
+    let events =
+      Ide_bridge.list_events ~base_path:base_dir ~kind:Ide_bridge.Tool ~limit:10 ()
+    in
+    check int "reads both live and archived segments" 2 (List.length events);
+    check (list string) "newest-first across segments" [ "t-live"; "t-arch" ]
+      (List.map (json_string "turn_id") events))
+;;
+
 let () =
   run
     "ide_bridge"
@@ -649,6 +771,16 @@ let () =
     ; ( "read"
       , [ test_case "filters keeper and pages" `Quick test_list_events_filters_keeper_and_pages
         ; test_case "merges kinds newest first" `Quick test_list_events_merges_kinds_newest_first
+        ; test_case "reads across segments" `Quick test_list_events_reads_across_segments
+        ] )
+    ; ( "rotation"
+      , [ test_case "rotates on threshold" `Quick test_segment_rotates_on_threshold
+        ; test_case "tail-read returns newest bounded" `Quick
+            test_tail_read_returns_newest_bounded
+        ; test_case "tail-read crosses segment boundary" `Quick
+            test_tail_read_crosses_boundary
+        ; test_case "retention prunes old segments" `Quick
+            test_retention_prunes_old_segments
         ] )
     ; ( "cursor"
       , [ test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line

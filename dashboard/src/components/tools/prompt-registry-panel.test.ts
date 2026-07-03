@@ -258,7 +258,7 @@ describe('PromptRegistryPanel', () => {
     })
   })
 
-  it('toggles from the registry editor to the read-only Prompt Book', async () => {
+  it('toggles from the registry editor to the read-only prompt library', async () => {
     render(html`<${PromptRegistryPanel} />`, container)
     await flush()
     await flush()
@@ -267,15 +267,15 @@ describe('PromptRegistryPanel', () => {
     expect(container.querySelector('textarea')).not.toBeNull()
     expect(container.querySelector('[data-testid="prompt-book-panel"]')).toBeNull()
 
-    const bookTab = Array.from(container.querySelectorAll('[data-prompt-view-switcher] button')).find(button =>
-      button.textContent?.includes('주입서'),
+    const libraryTab = Array.from(container.querySelectorAll('[data-prompt-view-switcher] button')).find(button =>
+      button.textContent?.includes('라이브러리'),
     ) as HTMLButtonElement
-    expect(bookTab).toBeTruthy()
-    await fireEvent.click(bookTab)
+    expect(libraryTab).toBeTruthy()
+    await fireEvent.click(libraryTab)
 
-    // the book replaces the editor; it reuses the already-fetched prompts (no refetch)
+    // the library replaces the editor; it reuses the already-fetched prompts (no refetch)
     expect(container.querySelector('[data-testid="prompt-book-panel"]')).not.toBeNull()
-    expect(container.querySelector('[data-testid="prompt-book-assembly"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="prompt-book-catalog"]')).not.toBeNull()
     expect(container.querySelector('textarea')).toBeNull()
     expect(mocks.fetchDashboardPrompts).toHaveBeenCalledTimes(1)
   })

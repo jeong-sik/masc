@@ -1,11 +1,10 @@
 /* ══════════════════════════════════════════════════════════════
-   MASC v2 — 注入書 (Injection Book) · Paper manuscript surface.
-   Read-only view of the 9 canonical Prompt_block_id assembly blocks +
-   the full prompt library catalog. Scoped to .pb-wrap[data-theme="paper"]
-   so the warm paper palette applies ONLY inside the book, never the dark
-   chrome. Paper/ink/brass tokens come from colors_and_type.css
-   ([data-theme="paper"]). font-size uses --fs-N tokens where one exists;
-   sizes with no matching token (15/26/30 and .5px) stay raw.
+   MASC v2 — Prompt library · Paper catalog surface.
+   Read-only catalog of the registered prompts grouped by family. Scoped to
+   .pb-wrap[data-theme="paper"] so the warm paper palette applies ONLY inside
+   the catalog, never the dark chrome. Paper/ink/brass tokens come from
+   colors_and_type.css ([data-theme="paper"]). font-size uses --fs-N tokens
+   where one exists; sizes with no matching token (26 and .5px) stay raw.
    ══════════════════════════════════════════════════════════════ */
 
 .pb-wrap {
@@ -20,15 +19,7 @@
   box-shadow: inset 0 1px 0 #FFFDF7, 0 1px 2px rgba(0,0,0,0.05);
 }
 
-/* ── view toggle bar (assembled book vs full library) ── */
-.pb-viewbar { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }
-.pb-seg { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--paper-4); border-radius: 5px; background: var(--paper-2); }
-.pb-seg-btn { font-family: var(--font-ui); font-size: var(--fs-12); padding: 5px 12px; border: 0; border-radius: 3px; background: none; color: var(--ink-3); cursor: pointer; transition: all .16s ease; }
-.pb-seg-btn:hover { color: var(--ink); }
-.pb-seg-btn.on { background: color-mix(in oklab, var(--brass) 18%, var(--paper)); color: #6B4E1E; box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--brass) 34%, transparent); }
-.pb-viewbar-note { font-family: var(--font-body); font-style: italic; font-size: 12.5px; color: var(--ink-4); }
-
-/* ── the book ── */
+/* ── the paper sheet ── */
 .pb-book {
   flex: 1; min-height: 0; overflow-y: auto;
   background:
@@ -42,73 +33,12 @@
 .pb-book::-webkit-scrollbar { width: 10px; }
 .pb-book::-webkit-scrollbar-thumb { background: var(--paper-4); border-radius: 6px; border: 2px solid var(--paper); background-clip: padding-box; }
 
-/* frontispiece */
-.pb-frontis { display: flex; gap: 18px; align-items: flex-start; padding-bottom: 20px; margin-bottom: 8px; border-bottom: 1px solid var(--paper-3); }
-.pb-frontis-mark {
-  flex: none; font-size: 30px; font-weight: 700; letter-spacing: .04em;
-  width: 60px; height: 60px; display: grid; place-items: center;
-  border: 1.5px solid currentColor; border-radius: 6px; opacity: 0.85;
-}
-.pb-frontis-t h1 { font-family: var(--font-display); font-size: 30px; letter-spacing: .18em; color: var(--ink); margin: 0 0 6px; font-weight: 500; }
 .pb-frontis-sub { font-family: var(--font-body); font-size: 15px; font-style: italic; color: var(--ink-3); margin-bottom: 6px; }
-.pb-frontis-meta { font-size: var(--fs-11); color: var(--ink-4); letter-spacing: .04em; }
 
-/* chapters */
-.pb-chapters { display: flex; flex-direction: column; }
-.pb-ch { border-bottom: 1px solid var(--paper-3); padding: 16px 0; }
-.pb-ch:last-child { border-bottom: 0; }
-.pb-ch-head {
-  display: flex; align-items: center; gap: 10px; width: 100%;
-  background: none; border: 0; cursor: pointer; text-align: left; padding: 0;
-}
-.pb-ch-num { flex: none; font-size: var(--fs-12); color: var(--ink-5); width: 22px; font-variant-numeric: tabular-nums; }
-.pb-ch-swatch { flex: none; width: 9px; height: 9px; border-radius: 2px; }
-.pb-ch-title { font-family: var(--font-display); font-size: 15px; letter-spacing: .06em; color: var(--ink); font-weight: 500; }
-.pb-ch-cond { flex: none; font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: .08em; text-transform: uppercase; color: var(--ember, #B35A1F); border: 1px solid color-mix(in oklab, var(--ember, #B35A1F) 40%, transparent); border-radius: 3px; padding: 1px 5px; }
-.pb-ch-src { margin-left: auto; font-size: 10.5px; color: var(--ink-5); }
-.pb-ch-bytes { flex: none; font-size: 10.5px; color: var(--ink-4); min-width: 44px; text-align: right; }
-.pb-ch-caret { flex: none; font-size: var(--fs-10); color: var(--ink-5); width: 12px; }
-.pb-ch-gloss { font-family: var(--font-body); font-style: italic; font-size: 13.5px; color: var(--ink-3); margin: 8px 0 0 32px; line-height: 1.5; text-wrap: pretty; }
-
-/* expanded chapter body — the actual manuscript template (verbatim from the
-   live prompt registry). {{var}} tokens render as empty blanks — substitution
-   happens only at server turn time, never in this read-only view. */
-.pb-ch-body {
-  margin: 14px 0 4px 32px; padding: 16px 20px;
-  background: var(--paper-2); border: 1px solid var(--paper-4);
-  border-left: 2px solid var(--paper-4); border-radius: 3px;
-  font-family: var(--font-body); font-size: 14.5px; line-height: 1.7; color: var(--ink-2);
-}
-.pb-ch.open .pb-ch-body { border-left-color: var(--brass); }
-.pb-line { text-wrap: pretty; }
-.pb-br { height: 10px; }
-.pb-h2 { font-family: var(--font-display); font-size: var(--fs-13); letter-spacing: .1em; text-transform: uppercase; color: var(--ink-3); margin: 12px 0 4px; }
-.pb-h3 { font-family: var(--font-ui); font-size: var(--fs-12); font-weight: 600; color: var(--ink-3); margin: 8px 0 2px; }
-.pb-code { font-family: var(--font-mono); font-size: 12.5px; background: var(--paper-3); color: #6B4E1E; padding: 1px 5px; border-radius: 3px; }
-
-/* the {{blank}} chips — always shown empty here (no per-keeper substitution) */
-.pb-blank {
-  font-family: var(--font-mono); font-size: 11.5px; font-style: normal;
-  padding: 1px 7px; border-radius: 3px; white-space: nowrap;
-  background: repeating-linear-gradient(-45deg, var(--paper-3) 0 5px, var(--paper-2) 5px 10px);
-  color: var(--ink-5); border: 1px solid var(--paper-4);
-}
-.pb-blank::before { content: '{{'; opacity: 0.5; }
-.pb-blank::after { content: '}}'; opacity: 0.5; }
-
-/* template_variables + composed-from footer per chapter */
-.pb-ch-vars { display: flex; flex-wrap: wrap; align-items: center; gap: 6px; margin: 10px 0 0 32px; }
-.pb-ch-vars-k { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--ink-5); letter-spacing: .04em; }
-.pb-var-chip { font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: var(--paper-2); color: var(--ink-5); border: 1px solid var(--paper-4); }
-
-/* ── composed-from / source chips ── */
+/* ── source chips ── */
 .pb-src-chip { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: var(--paper-2); color: var(--ink-3); border: 1px solid var(--paper-4); }
 
-/* colophon */
-.pb-colophon { display: flex; flex-wrap: wrap; gap: 6px 16px; margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--paper-3); font-family: var(--font-ui); font-size: var(--fs-11); color: var(--ink-4); }
-.pb-colophon-note { color: var(--ink-5); }
-
-/* ── catalog view ── */
+/* ── catalog ── */
 .pb-catalog { padding-top: 26px; }
 .pb-cat-intro { padding-bottom: 18px; margin-bottom: 14px; border-bottom: 1px solid var(--paper-3); }
 .pb-cat-intro h1 { font-family: var(--font-display); font-size: 26px; letter-spacing: .16em; color: var(--ink); margin: 0 0 6px; font-weight: 500; }
@@ -125,14 +55,11 @@
 .pb-cat-files { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 17px; }
 .pb-cat-fam:not(.feeds) .pb-src-chip { opacity: 0.72; }
 
-/* ── host: break the book out of the settings column + give it height ── */
+/* ── host: break the catalog out of the settings column + give it height ── */
 .set-promptbook-host { display: flex; flex-direction: column; min-height: 0; height: calc(100vh - 210px); min-height: 460px; }
 .set-promptbook-host .pb-wrap { flex: 1; min-height: 0; }
 
 /* narrow */
 @media (max-width: 760px) {
   .pb-book { padding: 24px 18px 22px 26px; background-position: 20px 0; }
-  .pb-ch-src { display: none; }
-  .pb-frontis-mark { width: 48px; height: 48px; font-size: 22px; }
-  .pb-frontis-t h1 { font-size: 24px; }
 }

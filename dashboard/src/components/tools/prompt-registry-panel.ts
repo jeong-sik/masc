@@ -221,9 +221,9 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
   const [draft, setDraft] = useState('')
   const [draftPromptKey, setDraftPromptKey] = useState<string | null>(null)
   const [preset, setPreset] = useState<PromptPresetId>('all')
-  // '레지스트리' = the existing effective/override editor; '주입서' = the read-only
-  // Prompt Book (9-block assembly + full library catalog). Defaults to the editor
-  // so the registry stays the landing view.
+  // '레지스트리' = the existing effective/override editor; '라이브러리' = the
+  // read-only curated prompt-library catalog (PromptBookPanel). Defaults to the
+  // editor so the registry stays the landing view.
   const [surfaceView, setSurfaceView] = useState<'registry' | 'book'>('registry')
 
   const report = useMemo(() => buildKeeperPromptAssemblyReport(prompts), [prompts])
@@ -583,7 +583,7 @@ export function PromptRegistryPanel({ embedded = false }: { embedded?: boolean }
             : 'border-[var(--color-border-default)] text-[var(--color-fg-muted)]'
         }`}
         onClick=${() => setSurfaceView('book')}
-      >주입서</button>
+      >라이브러리</button>
     </div>
   `
 

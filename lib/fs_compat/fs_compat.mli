@@ -212,3 +212,9 @@ val invalidate_cached_writer : string -> unit
 (** Drop and close every cached writer. Test-only — production
     relies on process-lifetime persistence and [at_exit] drain. *)
 val reset_fd_cache_for_testing : unit -> unit
+
+(** Lease the cached writer directly. Test-only — production callers
+    should use {!append_jsonl} / {!append_jsonl_batch} so directory
+    creation, HOME guards, and per-path write serialization stay composed
+    at the public append boundary. *)
+val with_cached_writer_for_testing : string -> (out_channel -> 'a) -> 'a

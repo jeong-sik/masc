@@ -660,6 +660,8 @@ let invalidate_cached_writer path =
 
 let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
+let with_cached_writer_for_testing path f = Fd_cache.with_writer path f
+
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Stdlib.Filename.dirname path in

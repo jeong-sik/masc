@@ -199,7 +199,7 @@ let test_lru_evict_skips_active_writer () =
     Thread.create
       (fun () ->
          try
-           Fd_cache.with_writer active_path (fun oc ->
+           Fs_compat.with_cached_writer_for_testing active_path (fun oc ->
              output_string oc "{\"phase\":\"before\"}\n";
              flush oc;
              Atomic.set ready true;

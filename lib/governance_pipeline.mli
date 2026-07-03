@@ -152,10 +152,8 @@ val to_oas_approval_callback :
     ([server_dashboard_http.ml]), resuming the fiber.
 
     Tools below the threshold are auto-approved unless auto-approval is
-    explicitly forbidden. Soft destructive tool-name/op heuristics are
-    HITL-dependent. Critical risk and runtime safety blockers are
-    hard-forbidden: the callback returns [Agent_sdk.Hooks.Reject] immediately,
-    emits an [approval_rejected] audit event, and never queues the call,
-    even when HITL thresholds are otherwise disabled.
+    explicitly forbidden. Critical risk and runtime safety blockers still enter
+    the operator approval queue even when HITL thresholds are otherwise
+    disabled. Soft destructive tool-name/op heuristics are HITL-dependent.
 
     @since 2.262.0 (#5902, #5907) *)

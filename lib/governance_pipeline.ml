@@ -367,9 +367,9 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         Keeper_runtime_contract.primary_goal_id_opt keeper_meta)
     in
     let goal_ids =
-      Option.map
-        (fun (keeper_meta : Keeper_meta_contract.keeper_meta) -> keeper_meta.active_goal_ids)
-        meta
+      match meta with
+      | Some (keeper_meta : Keeper_meta_contract.keeper_meta) -> keeper_meta.active_goal_ids
+      | None -> []
     in
     let runtime_contract =
       Option.map
@@ -387,33 +387,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
       | None -> None, None, None
     in
     let selected_model = selected_model_of_meta meta in
-    if hard_forbidden
-    then (
-      Keeper_approval_queue.audit_approval_event
-        ~base_path
-        ~event_type:"approval_rejected"
-        ~id:(Printf.sprintf "hard_forbidden_%s_%s" keeper_name tool_name)
-        ~keeper_name
-        ~tool_name
-        ~risk_level
-        ?turn_id
-        ?task_id
-        ?goal_id
-        ~goal_ids:(Option.value ~default:[] goal_ids)
-        ?sandbox_target
-        ?runtime_contract
-        ?selected_model
-        ~disposition:"Rejected"
-        ~disposition_reason:"hard_forbidden"
-        ~auto_approved:false
-        ();
-      Agent_sdk.Hooks.Reject
-        (Printf.sprintf
-           "Governance (%s): %s risk tool %S auto-approval is hard-forbidden"
-           governance_level
-           (risk_level_to_string risk)
-           tool_name))
-    else if requires_operator_approval
+    if requires_operator_approval
     then (
       let always_approve =
         Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
@@ -446,7 +420,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
           ?turn_id
           ?task_id
           ?goal_id
-          ~goal_ids:(Option.value ~default:[] goal_ids)
+          ~goal_ids
           ?sandbox_target
           ?runtime_contract
           ?selected_model
@@ -468,7 +442,7 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
                ?turn_id
                ?task_id
                ?goal_id
-               ~goal_ids:(Option.value ~default:[] goal_ids)
+               ~goal_ids
                ?sandbox_target
                ?runtime_contract
                ?selected_model

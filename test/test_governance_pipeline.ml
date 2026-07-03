@@ -7,6 +7,7 @@ module Tool_result = Tool_result
 module Keeper_meta_contract = Keeper_meta_contract
 module Keeper_types_profile = Keeper_types_profile
 module Keeper_id = Keeper_id
+module AQ = Masc.Keeper_approval_queue
 
 let explicit_claim_tool = "keeper_task_claim"
 let generic_transition_tool = "masc_transition"
@@ -45,6 +46,29 @@ let cleanup_tmpdir dir =
       (try Sys.remove path with Sys_error _ -> ())
   in
   rm_rf dir
+
+let rec yield_until ?(attempts = 50) predicate =
+  if predicate () || attempts <= 0
+  then ()
+  else (
+    Eio.Fiber.yield ();
+    yield_until ~attempts:(attempts - 1) predicate)
+;;
+
+let pending_id_for_keeper ~keeper_name =
+  match AQ.list_pending_json () with
+  | `List entries ->
+    List.find_map
+      (function
+        | `Assoc kvs ->
+          (match List.assoc_opt "keeper_name" kvs, List.assoc_opt "id" kvs with
+           | Some (`String name), Some (`String id) when String.equal name keeper_name ->
+             Some id
+           | _ -> None)
+        | _ -> None)
+      entries
+  | _ -> None
+;;
 
 (* ── Risk Assessment Tests ──────────────────────────────────── *)
 
@@ -983,27 +1007,50 @@ let test_decide_front_door_none_allows_noncritical () =
   | `Deny _ ->
     Alcotest.fail "front-door (meta=None) should allow non-Critical, non-destructive tool"
 
-let test_oas_callback_hard_forbidden_rejects_critical () =
+let test_oas_callback_hard_forbidden_queues_critical () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "hard-forbidden-critical-queue-test" in
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
   let tmpdir = make_tmpdir () in
-  let config = Workspace.default_config tmpdir in
-  let callback =
-    Gp.to_oas_approval_callback
-      ~config
-      ~governance_level:"production"
-      ~keeper_name:"test-keeper"
-      ()
-  in
-  let decision = callback ~tool_name:"masc_delete_workspace" ~input:`Null in
-  (match decision with
-   | Agent_sdk.Hooks.Reject reason ->
-     Alcotest.(check bool) "reason non-empty" true (String.length reason > 0)
-   | Agent_sdk.Hooks.Approve ->
-     Alcotest.fail "Critical tool must be rejected by hard-forbidden gate"
-   | Agent_sdk.Hooks.Edit _ ->
-     Alcotest.fail "Critical tool must be rejected, not edited");
-  cleanup_tmpdir tmpdir
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmpdir tmpdir)
+    (fun () ->
+       let config = Workspace.default_config tmpdir in
+       Eio.Fiber.fork ~sw (fun () ->
+         let callback =
+           Gp.to_oas_approval_callback
+             ~config
+             ~governance_level:"production"
+             ~keeper_name
+             ()
+         in
+         let decision = callback ~tool_name:"masc_delete_workspace" ~input:`Null in
+         result := Some decision);
+       yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
+       Alcotest.(check int)
+         "Critical hard-forbidden call enters operator approval queue"
+         (initial_pending + 1)
+         (AQ.pending_count ());
+       let id =
+         match pending_id_for_keeper ~keeper_name with
+         | Some id -> id
+         | None -> Alcotest.fail "expected pending approval for Critical tool"
+       in
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+       yield_until (fun () -> Option.is_some !result);
+       match !result with
+       | Some Agent_sdk.Hooks.Approve -> ()
+       | Some Agent_sdk.Hooks.Reject reason ->
+         Alcotest.fail ("expected Approve after operator resolution, got reject: " ^ reason)
+       | Some Agent_sdk.Hooks.Edit _ ->
+         Alcotest.fail "expected Approve after operator resolution, got edit"
+       | None -> Alcotest.fail "Critical tool callback did not suspend for approval")
 
 (* ── Case-insensitive tool name matching ────────────────────── *)
 
@@ -1290,8 +1337,8 @@ let () =
         `Quick test_decide_runtime_blocker_requires_confirm;
       Alcotest.test_case "decide: front-door None allows non-Critical" `Quick
         test_decide_front_door_none_allows_noncritical;
-      Alcotest.test_case "OAS callback: hard-forbidden Critical rejects outright" `Quick
-        test_oas_callback_hard_forbidden_rejects_critical;
+      Alcotest.test_case "OAS callback: hard-forbidden Critical enters queue" `Quick
+        test_oas_callback_hard_forbidden_queues_critical;
     ];
     "trace_id", [
       Alcotest.test_case "has gov_ prefix" `Quick test_decision_has_trace_id;

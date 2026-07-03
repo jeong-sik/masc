@@ -427,8 +427,13 @@ let test_submit_populates_criteria_from_completion_contract () =
       | _ -> None) req.criteria in
     (* add_strict_task fixture: completion_contract = ["tests pass"];
        verify_gate_evidence = ["output.json"]. *)
+    let expected_criteria, expected_persisted_refs =
+      match task.contract with
+      | Some c -> c.completion_contract, c.verify_gate_evidence
+      | None -> Alcotest.fail "fixture task has no contract"
+    in
     Alcotest.(check (list string)) "criteria from completion_contract"
-      ["tests pass"] custom_texts;
+      expected_criteria custom_texts;
     let persisted_refs = match req.output with
       | `Assoc fields ->
           (match List.assoc_opt "evidence_refs" fields with
@@ -438,20 +443,28 @@ let test_submit_populates_criteria_from_completion_contract () =
       | _ -> []
     in
     Alcotest.(check (list string)) "evidence_refs from verify_gate_evidence"
-      ["output.json"] persisted_refs)
+      expected_persisted_refs persisted_refs)
 
 let string_list_output_field name output =
   match output with
   | `Assoc fields ->
     (match List.assoc_opt name fields with
      | Some (`List xs) ->
-       List.filter_map
+       List.map
          (function
-           | `String value -> Some value
-           | _ -> None)
+           | `String value -> value
+           | other ->
+             Alcotest.fail
+               (Printf.sprintf "field %s contains non-string element: %s"
+                  name (Yojson.Safe.to_string other)))
          xs
-     | _ -> [])
-  | _ -> []
+     | Some other ->
+       Alcotest.fail
+         (Printf.sprintf "field %s is not a JSON list: %s"
+            name (Yojson.Safe.to_string other))
+     | None ->
+       Alcotest.fail (Printf.sprintf "field %s missing from output" name))
+  | _ -> Alcotest.fail "verification output is not a JSON object"
 
 let test_submit_typed_evidence_split_uses_submitted_refs () =
   with_temp_config ~fsm_enabled:true (fun config ->
@@ -474,13 +487,25 @@ let test_submit_typed_evidence_split_uses_submitted_refs () =
         (fun (r : Verification.verification_request) -> r.task_id = task_id)
         reqs
     in
+    let raw_required_sources =
+      match task.contract with
+      | Some c -> c.verify_gate_evidence @ c.required_evidence
+      | None -> Alcotest.fail "fixture task has no contract"
+    in
+    (* Derive the expected value from the raw contract so the test does not
+       merely mirror the production projection function. *)
+    let expected_required_artifacts = raw_required_sources in
+    Alcotest.(check (list string))
+      "concrete_verification_evidence projection matches raw contract sources"
+      raw_required_sources
+      (Task.Completion_review.concrete_verification_evidence task).required_artifacts;
     Alcotest.(check (list string))
       "legacy evidence_refs preserve submitted refs"
       submitted_refs
       (string_list_output_field "evidence_refs" req.output);
     Alcotest.(check (list string))
       "required_artifacts come from the task contract"
-      [ "output.json" ]
+      expected_required_artifacts
       (string_list_output_field "required_artifacts" req.output);
     Alcotest.(check (list string))
       "submitted_evidence comes from submit-time evidence_refs"

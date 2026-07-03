@@ -512,21 +512,26 @@ let create_entry
 ;;
 
 let update_pending_phase ~id phase =
-  let updated = ref None in
   atomic_update pending (fun map ->
     match SMap.find_opt id map with
     | None -> map
     | Some entry ->
       let entry' = { entry with phase } in
-      updated := Some entry';
       SMap.add id entry' map);
-  match !updated with
+  match SMap.find_opt id (Atomic.get pending) with
+  | Some entry when entry.phase = phase -> Some entry
+  | Some entry ->
+    Log.Keeper.warn
+      "approval_queue: update_pending_phase id=%s phase race current=%s expected=%s"
+      id
+      (pending_phase_to_string entry.phase)
+      (pending_phase_to_string phase);
+    None
   | None ->
     Log.Keeper.warn
       "approval_queue: update_pending_phase id=%s not found"
       id;
     None
-  | Some entry -> Some entry
 ;;
 
 let pending_entry_json_fields

@@ -234,6 +234,9 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
   let required_evidence =
     if base.required_evidence <> []
     then base.required_evidence
+    (* A verify-only task can require verifier input without widening the
+       completion gate. Keep required_evidence empty in that case; the
+       verifier projection combines verify_gate_evidence separately. *)
     else if base.verify_gate_evidence <> []
     then []
     else default_verification_evidence_refs

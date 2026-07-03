@@ -862,6 +862,10 @@ describe('SettingsSurface', () => {
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Librarian')
+      expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
+        .toContain('수동 reroute')
+      expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
+        .toContain('provider 실패 자동 전환이 아니라')
       expect((container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement | null)?.value)
         .toBe('rt-c')
       expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()

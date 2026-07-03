@@ -175,9 +175,10 @@ val make_health_json :
     whether FD pressure is active, and each resource kind's in-flight,
     configured-concurrency, and effective-concurrency counts.
 
-    [keeper_fleet_safety] compares configured autoboot-enabled keepers
-    with the live healthy-running keeper fiber count while separately reporting
-    [bootable_keeper_*] after durable pause filtering.  It distinguishes
+    [keeper_fleet_safety] compares configured, unpaused autoboot-enabled
+    keepers with the live healthy-running keeper fiber count while separately
+    reporting durable paused keepers via [paused_autoboot_enabled_*] and
+    bootable keepers via [bootable_keeper_*].  It distinguishes
     [running_keeper_fiber_count] / [healthy_running_keeper_fiber_count] from
     [failing_keeper_fiber_count] and [executable_keeper_fiber_count] because
     the FSM intentionally allows [Failing] keepers to finish or attempt turns.
@@ -185,8 +186,8 @@ val make_health_json :
     fiber remains, and [degraded] when executable fibers remain but healthy
     running capacity is zero, below the safety margin, or below
     [target_reaction_capacity_count].
-    [paused_autoboot_enabled_keeper_count] makes the intended fleet size
-    visible even when durable pauses suppress every bootable keeper.
+    [paused_autoboot_enabled_keeper_count] keeps operator-paused autoboot
+    keepers visible without counting them as reaction-capacity targets.
 
     [keeper_reaction_ledger] summarizes recent durable stimulus -> reaction
     rows per keeper.  It reports [degraded] when a persisted stimulus has no

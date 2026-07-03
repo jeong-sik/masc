@@ -152,7 +152,7 @@ export const COCKPIT_ENTRYPOINTS: CockpitEntrypoint[] = [
   {
     mode: 'cognition',
     aliases: ['keeper-cognition'],
-    target: { tab: 'monitoring', params: { section: 'agents', view: 'keeper' } },
+    target: { tab: 'monitoring', params: { section: 'agents', view: 'keepers' } },
     coverage: 'covered',
   },
   {

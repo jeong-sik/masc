@@ -75,8 +75,6 @@ import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
 
-type RuntimeCountKey = 'all' | RuntimeBand
-
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
 
@@ -627,10 +625,9 @@ function countAgentsByStatus(
   agentList: Agent[],
   keeperList: Keeper[],
   compositeByKeeperKey: ReadonlyMap<string, KeeperCompositeSnapshot> | null = null,
-): Record<RuntimeCountKey, number> {
+): Record<RuntimeBand, number> {
   const keeperLookup = buildKeeperRuntimeLookup(keeperList)
-  const counts: Record<RuntimeCountKey, number> = {
-    all: agentList.length,
+  const counts: Record<RuntimeBand, number> = {
     active: 0,
     attention: 0,
     paused: 0,
@@ -863,16 +860,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   })
   const resultCountLabel =
     expectedScopedCount > scopedAgents.length
-      ? (
-          filtered.length === scopedAgents.length
-            ? `항목 ${filtered.length}개 표시 · 예상 ${expectedScopedCount}개`
-            : `항목 ${filtered.length} / ${scopedAgents.length}개 표시 · 예상 ${expectedScopedCount}개`
-        )
-      : (
-          filtered.length === scopedAgents.length
-            ? `항목 ${filtered.length}개 표시 중`
-            : `항목 ${filtered.length} / ${scopedAgents.length}개 표시 중`
-        )
+      ? `항목 ${filtered.length}개 표시 · 예상 ${expectedScopedCount}개`
+      : `항목 ${filtered.length}개 표시 중`
   const liveKeepers = runtimeCounts.live.keepers
   const livePausedKeepers = runtimeCounts.live.pausedKeepers
   const liveOfflineKeepers = runtimeCounts.live.offlineKeepers

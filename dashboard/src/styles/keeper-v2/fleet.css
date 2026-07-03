@@ -264,11 +264,15 @@
 
 /* narrow — collapse the row to identity · state · action; ctx/tool move out of the way */
 @media (max-width: 720px) {
-  .fl-shell { --fl-cols: minmax(0, 1fr); --fl-gap: 8px; }
+  .fl-shell {
+    --fl-cols: minmax(0, 1fr);
+    --fl-gap: var(--space-2);
+    --fl-mobile-row-indent: calc(var(--space-5) + var(--space-4));
+  }
   .fl-rhead { display: none; }
   .fl-row { align-items: start; }
   .fl-row .fl-ctx, .fl-row .fl-tool { display: none; }
-  .fl-row .fl-state, .fl-row .fl-actcell { margin-left: 40px; }
+  .fl-row .fl-state, .fl-row .fl-actcell { margin-left: var(--fl-mobile-row-indent); }
   .fl-row .fl-actcell { justify-content: flex-start; flex-wrap: wrap; }
   .fl-top { height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px 14px; }
   .fl-spacer { display: none; }

@@ -130,7 +130,7 @@ describe('cockpit entrypoint registry', () => {
     })
     expect(cockpitTargetForParams({ mode: 'Cognition', tab: 'keeper-cognition' })).toEqual({
       tab: 'monitoring',
-      params: { section: 'agents', view: 'keeper' },
+      params: { section: 'agents', view: 'keepers' },
     })
     expect(cockpitTargetForParams({ mode: 'IDE', tab: 'source' })).toEqual({
       tab: 'code',

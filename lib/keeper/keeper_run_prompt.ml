@@ -40,9 +40,9 @@ type context_layer_decision =
 type context_layer_budget =
   { context_layer_name : string
   ; context_layer_priority : string
-  ; context_layer_estimated_tokens : int
+  ; context_layer_observed_tokens : int
   ; context_layer_cap_tokens : int
-  ; context_layer_budgeted_tokens : int
+  ; context_layer_would_fit_tokens : int
   ; context_layer_decision : context_layer_decision
   }
 
@@ -389,7 +389,7 @@ let estimate_context_layer_budget
     Keeper_context_core_accessors.estimate_char_tokens text
   in
   let cap_tokens = max 0 cap_tokens in
-  let decision, budgeted_tokens =
+  let decision, would_fit_tokens =
     if String.trim text = "" then Empty, 0
     else if cap_tokens = 0 || estimated_tokens > cap_tokens
     then Over_cap_observed, cap_tokens
@@ -397,9 +397,9 @@ let estimate_context_layer_budget
   in
   { context_layer_name = layer_name
   ; context_layer_priority = priority
-  ; context_layer_estimated_tokens = estimated_tokens
+  ; context_layer_observed_tokens = estimated_tokens
   ; context_layer_cap_tokens = cap_tokens
-  ; context_layer_budgeted_tokens = budgeted_tokens
+  ; context_layer_would_fit_tokens = would_fit_tokens
   ; context_layer_decision = decision
   }
 
@@ -417,9 +417,10 @@ let context_layer_budget_to_json layer =
   `Assoc
     [ ("name", `String layer.context_layer_name)
     ; ("priority", `String layer.context_layer_priority)
-    ; ("estimated_tokens", `Int layer.context_layer_estimated_tokens)
+    ; ("semantics", `String "diagnostic_only")
+    ; ("observed_tokens", `Int layer.context_layer_observed_tokens)
     ; ("cap_tokens", `Int layer.context_layer_cap_tokens)
-    ; ("budgeted_tokens", `Int layer.context_layer_budgeted_tokens)
+    ; ("would_fit_tokens", `Int layer.context_layer_would_fit_tokens)
     ; ("decision", `String (context_layer_decision_to_string layer.context_layer_decision))
     ]
 

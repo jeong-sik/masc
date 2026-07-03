@@ -601,8 +601,8 @@ let test_context_layer_budget_records_decisions () =
   in
   Alcotest.(check bool) "over-cap decision" true
     (over_cap.context_layer_decision = Keeper_run_prompt.Over_cap_observed);
-  Alcotest.(check int) "over-cap budgeted tokens equals cap" 1
-    over_cap.context_layer_budgeted_tokens;
+  Alcotest.(check int) "over-cap would-fit tokens equals cap" 1
+    over_cap.context_layer_would_fit_tokens;
   let empty =
     Keeper_run_prompt.estimate_context_layer_budget
       ~layer_name:"continuity_summary"
@@ -619,9 +619,14 @@ let test_context_layer_budget_records_decisions () =
        true
        (List.assoc_opt "decision" fields = Some (`String "over_cap_observed"));
      Alcotest.(check bool)
-       "json carries budgeted tokens, not kept/truncated claim"
+       "json marks diagnostic semantics"
        true
-       (List.assoc_opt "budgeted_tokens" fields = Some (`Int 1)
+       (List.assoc_opt "semantics" fields = Some (`String "diagnostic_only"));
+     Alcotest.(check bool)
+       "json carries would-fit tokens, not kept/truncated claim"
+       true
+       (List.assoc_opt "would_fit_tokens" fields = Some (`Int 1)
+        && List.assoc_opt "budgeted_tokens" fields = None
         && List.assoc_opt "kept_tokens" fields = None)
    | _ -> Alcotest.fail "expected context layer budget JSON object")
 

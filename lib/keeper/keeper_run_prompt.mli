@@ -40,9 +40,9 @@ type context_layer_decision =
 type context_layer_budget =
   { context_layer_name : string
   ; context_layer_priority : string
-  ; context_layer_estimated_tokens : int
+  ; context_layer_observed_tokens : int
   ; context_layer_cap_tokens : int
-  ; context_layer_budgeted_tokens : int
+  ; context_layer_would_fit_tokens : int
   ; context_layer_decision : context_layer_decision
   }
 
@@ -145,8 +145,10 @@ val estimate_context_layer_budget :
   text:string ->
   context_layer_budget
 (** Estimate one prompt/context layer against its deterministic cap for
-    manifest/debug accounting. This function does not mutate the layer text;
-    over-cap layers are reported as [over_cap_observed], not as truncated. *)
+    manifest/debug accounting. This diagnostic-only function does not mutate
+    the layer text; over-cap layers are reported as [over_cap_observed], not as
+    truncated. [context_layer_would_fit_tokens] is the amount that would fit if
+    the cap were applied, not the amount sent to OAS. *)
 
 val context_layer_cap_tokens :
   max_context:int -> context_layer_cap -> int
@@ -174,7 +176,9 @@ val estimate_context_layer_policy_budget :
     divisors. *)
 
 val context_layer_budget_to_json : context_layer_budget -> Yojson.Safe.t
-(** JSON projection for runtime manifests and dashboard/debug surfaces. *)
+(** JSON projection for runtime manifests and dashboard/debug surfaces.
+    Includes ["semantics": "diagnostic_only"] because layer caps are observed,
+    not applied, at pre-dispatch. *)
 
 val preflight_context_window :
   estimated_input_tokens:int ->

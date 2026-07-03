@@ -8,7 +8,9 @@ let system_prompt =
    tool-approval request. Summarize the context, surface the most important \
    uncertainties, and suggest concrete approval options. Each option should \
    include a short label, a rationale, and an optional estimated risk delta \
-   (one of: low, medium, high, critical). If context collection was partial \
+   (one of: low, medium, high, critical). If the current turn/chat is part of \
+   an active task or goal, state the relationship explicitly in the first \
+   sentence of context_summary. If context collection was partial \
    (partial_context=true), raise uncertainty and call out what is missing. \
    Respond only with the requested JSON."
 ;;

@@ -505,3 +505,7 @@ let response_requests_confirmation (text : string) : bool =
       || string_contains_substring_ci ~needle:"let me know" trimmed
       || string_contains_substring_ci ~needle:"어떻게 할까" trimmed
       || string_contains_substring_ci ~needle:"할까" trimmed)
+
+module For_testing = struct
+  let runtime_lane_label = runtime_lane_label
+end

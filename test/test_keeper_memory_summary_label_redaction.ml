@@ -49,7 +49,15 @@ let test_runtime_lane_uses_boundary_redaction_ssot () =
   Alcotest.(check string)
     "keeper agent result uses boundary lane SSOT"
     Boundary.runtime_lane_label
-    Masc.Keeper_agent_result.runtime_lane_label
+    Masc.Keeper_agent_result.runtime_lane_label;
+  Alcotest.(check string)
+    "keeper unified turn success uses boundary lane SSOT"
+    Boundary.runtime_lane_label
+    Masc.Keeper_unified_turn_success.For_testing.runtime_lane_label;
+  Alcotest.(check string)
+    "keeper unified metrics support uses boundary lane SSOT"
+    Boundary.runtime_lane_label
+    Masc.Keeper_unified_metrics_support.For_testing.runtime_lane_label
 
 let test_provider_label_redacted_to_runtime_lane () =
   let before_redacted = Metrics.metric_value_or_zero metric ~labels:redacted_labels () in

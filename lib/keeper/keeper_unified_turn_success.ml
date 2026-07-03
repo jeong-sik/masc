@@ -623,6 +623,8 @@ let persist_terminal_turn_meta
 ;;
 
 module For_testing = struct
+  let runtime_lane_label = runtime_lane_label
+
   let budget_exhausted_no_progress_threshold_override =
     budget_exhausted_no_progress_threshold_override
 

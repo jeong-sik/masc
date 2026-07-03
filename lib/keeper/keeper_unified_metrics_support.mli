@@ -110,6 +110,10 @@ val is_scheduled_autonomous_cycle_of_observation :
 
 val response_requests_confirmation : string -> bool
 
+module For_testing : sig
+  val runtime_lane_label : string
+end
+
 val select_proactive_preview :
   previous:string ->
   has_text:bool ->

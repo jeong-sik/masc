@@ -51,6 +51,12 @@ exception Worker_timeout of float
 let counter = Atomic.make 0
 let max_age_sec = Masc_time_constants.hour
 
+let effective_timeout_sec ?timeout_sec () =
+  match timeout_sec with
+  | Some timeout_sec -> timeout_sec
+  | None -> Keeper_runtime_resolved.turn_timeout_sec ()
+;;
+
 let request_dir ~base_path =
   Filename.concat (Common.masc_dir_from_base_path ~base_path) "keeper_msg_requests"
 ;;
@@ -424,15 +430,18 @@ let submit ?clock ?timeout_sec ~sw ~base_path ~(f : unit -> tool_result)
   persist_entry entry;
   Eio.Fiber.fork_daemon ~sw (fun () ->
     set_status_protected ~preserve_terminal:true request_id Running;
+    let worker_timeout_sec = effective_timeout_sec ?timeout_sec () in
     let run_worker_with_timeout () =
-      match clock, timeout_sec with
-      | Some clock, Some timeout_sec ->
-        (try Eio.Time.with_timeout_exn clock timeout_sec f with
+      match clock with
+      | Some clock ->
+        (try Eio.Time.with_timeout_exn clock worker_timeout_sec f with
          | Eio.Time.Timeout ->
-           let status = timeout_done_status ~request_id ~keeper_name ~timeout_sec in
+           let status =
+             timeout_done_status ~request_id ~keeper_name ~timeout_sec:worker_timeout_sec
+           in
            set_status_protected ~preserve_terminal:true request_id status;
-           raise (Worker_timeout timeout_sec))
-      | None, _ | _, None -> f ()
+           raise (Worker_timeout worker_timeout_sec))
+      | None -> f ()
     in
     let result =
       try
@@ -589,4 +598,6 @@ module For_testing = struct
   let active_switch_count () =
     Eio.Mutex.use_ro mu (fun () -> Hashtbl.length active_switches)
   ;;
+
+  let effective_timeout_sec = effective_timeout_sec
 end

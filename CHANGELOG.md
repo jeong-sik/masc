@@ -2,7 +2,12 @@
 
 ## Unreleased
 
+## [0.19.55] - 2026-07-03
+
 ### Changed
+- Bump OAS agent_sdk pin to v0.208.14 (#23054) and bump masc version to
+  0.19.55, following the v0.208.13 pin (#22950) that carried the 0.208.13
+  release line.
 - Bump OAS agent_sdk pin to v0.208.12 (`2f3d6846`), carrying the
   default-unbounded agent turn budget release so MASC keeper/OAS runs no longer
   inherit the older finite default turn cap.

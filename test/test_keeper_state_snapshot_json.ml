@@ -1086,6 +1086,61 @@ let test_internal_passive_only_finalizer_still_drops_raw_response_text () =
     ""
     finalized.response_text
 
+let test_replay_capture_uses_visible_finalized_response_text () =
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"sangsu"
+      ~goal:"Maintain direct conversation"
+      ~actual_keeper_tool_names:[]
+      ~completion_contract_result:Receipt.Contract_satisfied_completion
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text:"SKILL: routing metadata\nVisible reply"
+      ()
+  in
+  Alcotest.(check string)
+    "internal reply markup stripped before capture decision"
+    "Visible reply"
+    finalized.response_text;
+  Alcotest.(check (option string))
+    "visible finalized response is captured"
+    (Some "Visible reply")
+    (Finalize.replay_response_text_for_capture
+       ~suppress_visible_response:false
+       ~response_text:finalized.response_text)
+
+let test_replay_capture_omits_suppressed_response_text () =
+  let finalized =
+    KRT.finalize
+      ~reported_state_snapshot:None
+      ~keeper_name:"sangsu"
+      ~goal:"Maintain direct conversation"
+      ~actual_keeper_tool_names:["keeper_context_status"]
+      ~completion_contract_result:Receipt.Contract_passive_only
+      ~stop_reason:Runtime_agent.Completed
+      ~raw_response_text:"No actionable signal. Waiting."
+      ~suppress_response_text:true
+      ()
+  in
+  Alcotest.(check string)
+    "suppressed response text is finalized empty"
+    ""
+    finalized.response_text;
+  Alcotest.(check (option string))
+    "suppressed response is not captured"
+    None
+    (Finalize.replay_response_text_for_capture
+       ~suppress_visible_response:true
+       ~response_text:finalized.response_text)
+
+let test_replay_capture_omits_blank_response_text () =
+  Alcotest.(check (option string))
+    "blank replay response is not captured"
+    None
+    (Finalize.replay_response_text_for_capture
+       ~suppress_visible_response:false
+       ~response_text:"   ")
+
 (* ── Continuity NEXT parsing / text round-trip ───────────────────────
    Regression coverage for the parser/renderer asymmetry that let a single
    [STATE] "NEXT:" line populate both next_summary and next_items and then
@@ -1266,6 +1321,18 @@ let () =
             "internal passive-only finalizer still drops raw response text"
             `Quick
             test_internal_passive_only_finalizer_still_drops_raw_response_text;
+          Alcotest.test_case
+            "replay capture uses visible finalized response text"
+            `Quick
+            test_replay_capture_uses_visible_finalized_response_text;
+          Alcotest.test_case
+            "replay capture omits suppressed response text"
+            `Quick
+            test_replay_capture_omits_suppressed_response_text;
+          Alcotest.test_case
+            "replay capture omits blank response text"
+            `Quick
+            test_replay_capture_omits_blank_response_text;
         ] );
       ( "continuity_next",
         [

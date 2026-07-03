@@ -736,17 +736,6 @@ let run_turn
                       with
                       | Error e -> Error e
                       | Ok response_text ->
-                        (* Phase O observability (iter-2): capture the
-                           normalized response after Keeper_tool_response
-                           canonicalization so the wire record matches the text
-                           that is replayed into the next turn's history. The
-                           capture is best-effort and gated by
-                           MASC_KEEPER_WIRE_CAPTURE. *)
-                        Keeper_wire_capture.capture_response
-                          ~masc_root:(Workspace.masc_root_dir config)
-                          ~keeper_name:meta.name
-                          ~turn_id:manifest_keeper_turn_id
-                          ~response_text;
                         Keeper_agent_run_finalize_response.finalize
                           ~config ~meta ~generation ~manifest_keeper_turn_id
                           ~trace_id ~session ~append_manifest ~model
@@ -764,6 +753,19 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
+                          ~capture_replay_response:
+                            (fun ~response_text ->
+                              (* Phase O observability: capture the exact
+                                 assistant text persisted for next-turn replay,
+                                 after response finalization has applied
+                                 suppression and internal-markup stripping. The
+                                 capture is best-effort and gated by
+                                 MASC_KEEPER_WIRE_CAPTURE. *)
+                              Keeper_wire_capture.capture_response
+                                ~masc_root:(Workspace.masc_root_dir config)
+                                ~keeper_name:meta.name
+                                ~turn_id:manifest_keeper_turn_id
+                                ~response_text)
                           ())))
                in
        let receipt_result =

@@ -80,6 +80,23 @@ let first_line_of path needle =
        loop 1)
 ;;
 
+let last_line_of path needle =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in ic)
+    (fun () ->
+       let rec loop line_num last_seen =
+         match input_line ic with
+         | line ->
+           let last_seen =
+             if contains ~needle line then Some line_num else last_seen
+           in
+           loop (line_num + 1) last_seen
+         | exception End_of_file -> last_seen
+       in
+       loop 1 None)
+;;
+
 (* Built at runtime so no literal secret appears in the source (the pre-commit
    secret scanner rejects literal [ghp_...] tokens). Secret_redactor detects the
    [ghp_] prefix regardless. *)
@@ -251,15 +268,15 @@ let response_capture_matches_replayed_history_text () =
       false
       (contains ~needle:raw_response content))
 
-let capture_response_uses_normalized_text_in_run_turn () =
-  let path = Filename.concat (repo_root ()) "lib/keeper/keeper_agent_run.ml" in
+let capture_response_uses_finalized_replay_text () =
+  let run_path = Filename.concat (repo_root ()) "lib/keeper/keeper_agent_run.ml" in
   let capture_line =
-    match first_line_of path "Keeper_wire_capture.capture_response" with
+    match first_line_of run_path "Keeper_wire_capture.capture_response" with
     | Some n -> n
     | None -> Alcotest.fail "Keeper_wire_capture.capture_response call not found"
   in
   let normalize_line =
-    match first_line_of path "normalize_response_text_for_finalization" with
+    match first_line_of run_path "normalize_response_text_for_finalization" with
     | Some n -> n
     | None ->
       Alcotest.fail "normalize_response_text_for_finalization call not found"
@@ -268,17 +285,33 @@ let capture_response_uses_normalized_text_in_run_turn () =
     "capture_response occurs after normalize_response_text_for_finalization"
     true
     (capture_line > normalize_line);
-  let normalized_binding_line =
-    match first_line_of path "~response_text;" with
+  let finalizer_line =
+    match first_line_of run_path "Keeper_agent_run_finalize_response.finalize" with
     | Some n -> n
-    | None ->
-      Alcotest.fail
-        "capture_response should pass the normalized response_text binding"
+    | None -> Alcotest.fail "Keeper_agent_run_finalize_response.finalize call not found"
   in
   Alcotest.(check bool)
-    "capture_response uses the normalized response_text binding"
+    "capture_response is delegated through finalize callback"
     true
-    (normalized_binding_line > normalize_line)
+    (capture_line > finalizer_line);
+  let finalize_path =
+    Filename.concat (repo_root ())
+      "lib/keeper/keeper_agent_run_finalize_response.ml"
+  in
+  let replay_decision_line =
+    match last_line_of finalize_path "replay_response_text_for_capture" with
+    | Some n -> n
+    | None -> Alcotest.fail "replay_response_text_for_capture use not found"
+  in
+  let capture_callback_line =
+    match last_line_of finalize_path "capture_replay_response ~response_text" with
+    | Some n -> n
+    | None -> Alcotest.fail "capture_replay_response invocation not found"
+  in
+  Alcotest.(check bool)
+    "capture callback runs after replay-visible response decision"
+    true
+    (capture_callback_line > replay_decision_line)
 
 let () =
   Alcotest.run "keeper_wire_capture"
@@ -312,6 +345,6 @@ let () =
       ( "run_turn_ordering",
         [
           Alcotest.test_case "capture_response uses normalized response text"
-            `Quick capture_response_uses_normalized_text_in_run_turn;
+            `Quick capture_response_uses_finalized_replay_text;
         ] );
     ]

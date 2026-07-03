@@ -71,6 +71,22 @@ let resolve_partition_for_query ~state ~uri =
 
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
+let keeper_id_mismatch_error = "keeper_id does not match authenticated identity"
+
+let parse_json_body body_str =
+  match Yojson.Safe.from_string body_str with
+  | json -> Ok json
+  | exception Yojson.Json_error msg -> Error (Printf.sprintf "Invalid JSON: %s" msg)
+;;
+
+let log_keeper_id_mismatch ~operation ~auth_identity ~requested =
+  Log.Server.warn
+    "IDE annotation %s rejected keeper_id mismatch: requested_keeper_id=%S \
+     auth_identity=%S"
+    operation
+    requested
+    auth_identity
+;;
 
 (* task-1736 (IDE Observation Plane v2, axis B3) — bind an annotation
    mutation's keeper_id to the authenticated identity.
@@ -101,12 +117,7 @@ let bind_mutation_keeper_id ~auth_identity ~requested :
     let requested = String.trim raw in
     if requested = "" || String.equal requested auth_identity
     then Ok auth_identity
-    else
-      Error
-        (Printf.sprintf
-           "keeper_id %S does not match authenticated identity %S"
-           requested
-           auth_identity)
+    else Error keeper_id_mismatch_error
 ;;
 
 (* task-1736 B3 CI: annotation [kind] parsing is sound-partial. An
@@ -355,8 +366,9 @@ let add_routes router =
   |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
     (* task-1736 B3: annotation creation is a mutation. It requires a
        token-bound write identity ([CanBroadcast], the keeper write
-       tier) instead of [with_public_read], and the acting keeper is the
-       resolved [auth_identity] rather than a caller-chosen field. *)
+       tier; no narrower annotation-write permission exists yet) instead
+       of [with_public_read], and the acting keeper is the resolved
+       [auth_identity] rather than a caller-chosen field. *)
     with_token_permission_auth
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
@@ -370,125 +382,134 @@ let add_routes router =
             path, which writes to [server-base/.masc-ide/]. *)
          let base = base_path_of_state state in
          Http.Request.read_body_async reqd (fun body_str ->
-           let json =
-             try Yojson.Safe.from_string body_str with
-             | _ -> `Assoc []
-           in
-           let find_string key =
-             match json with
-             | `Assoc fields ->
-               (match List.assoc_opt key fields with
-                | Some (`String s) when s <> "" -> Some s
-                | _ -> None)
-             | _ -> None
-           in
-           let find_int key =
-             match json with
-             | `Assoc fields ->
-               (match List.assoc_opt key fields with
-                | Some (`Int i) -> Some i
-                | Some (`Intlit s) -> int_of_string_opt s
-                | _ -> None)
-             | _ -> None
-           in
-           match
-             ( find_string "file_path"
-             , find_int "line_start"
-             , find_int "line_end"
-             , find_string "content" )
-           with
-           | Some file_path, Some line_start, Some line_end, Some content ->
-             (* task-1736 B3: keeper_id is bound to the authenticated
-                identity. A body-supplied keeper_id is advisory and must
-                match, otherwise the create is rejected as impersonation. *)
-             (match
-                bind_mutation_keeper_id
-                  ~auth_identity
-                  ~requested:(find_string "keeper_id")
-              with
-              | Error msg ->
-                Http.Response.json_value
-                  ~status:`Forbidden
-                  ~request
-                  (json_error msg)
-                  reqd
-              | Ok keeper_id ->
-                (match
-                   parse_annotation_kind (find_string "kind")
-                 with
-                 | Error msg ->
-                   Http.Response.json_value
-                     ~status:`Bad_request
-                     ~request
-                     (json_error msg)
-                     reqd
-                 | Ok kind ->
-                   let goal_id = find_string "goal_id" in
-                   let task_id = find_string "task_id" in
-                   let board_post_id = find_string "board_post_id" in
-                   let comment_id = find_string "comment_id" in
-                   let pr_id = find_string "pr_id" in
-                   let git_ref = find_string "git_ref" in
-                   let log_id = find_string "log_id" in
-                   let session_id = find_string "session_id" in
-                   let operation_id = find_string "operation_id" in
-                   let worker_run_id = find_string "worker_run_id" in
-                   let partition = resolve_partition_for_query ~state ~uri in
-                   (match
-                      Ide_annotations.create
-                        ~base_dir:base
-                        ~partition
-                        ~keeper_id
-                        ~file_path
-                        ~line_start
-                        ~line_end
-                        ~kind
-                        ~content
-                        ?goal_id
-                        ?task_id
-                        ?board_post_id
-                        ?comment_id
-                        ?pr_id
-                        ?git_ref
-                        ?log_id
-                        ?session_id
-                        ?operation_id
-                        ?worker_run_id
-                        ()
-                    with
-                    | Ok annotation ->
-                      Http.Response.json_value
-                        ~status:`Created
-                        ~request
-                        (json_ok (Ide_annotation_types.annotation_to_json annotation))
-                        reqd
-                    | Error msg ->
-                      Http.Response.json_value
-                        ~status:`Bad_request
-                        ~request
-                        (json_error msg)
-                        reqd)))
-           | _ ->
+           match parse_json_body body_str with
+           | Error msg ->
              Http.Response.json_value
                ~status:`Bad_request
                ~request
-               (json_error "Missing required fields")
-               reqd))
+               (json_error msg)
+               reqd
+           | Ok json ->
+             let find_string key =
+               match json with
+               | `Assoc fields ->
+                 (match List.assoc_opt key fields with
+                  | Some (`String s) when s <> "" -> Some s
+                  | _ -> None)
+               | _ -> None
+             in
+             let find_int key =
+               match json with
+               | `Assoc fields ->
+                 (match List.assoc_opt key fields with
+                  | Some (`Int i) -> Some i
+                  | Some (`Intlit s) -> int_of_string_opt s
+                  | _ -> None)
+               | _ -> None
+             in
+             match
+               ( find_string "file_path"
+               , find_int "line_start"
+               , find_int "line_end"
+               , find_string "content" )
+             with
+             | Some file_path, Some line_start, Some line_end, Some content ->
+               (* task-1736 B3: keeper_id is bound to the authenticated
+                  identity. A body-supplied keeper_id is advisory and must
+                  match, otherwise the create is rejected as impersonation. *)
+               let requested_keeper_id = find_string "keeper_id" in
+               (match
+                  bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
+                with
+                | Error msg ->
+                  Option.iter
+                    (fun requested ->
+                       log_keeper_id_mismatch
+                         ~operation:"create"
+                         ~auth_identity
+                         ~requested)
+                    requested_keeper_id;
+                  Http.Response.json_value
+                    ~status:`Forbidden
+                    ~request
+                    (json_error msg)
+                    reqd
+                | Ok keeper_id ->
+                  (match
+                     parse_annotation_kind (find_string "kind")
+                   with
+                   | Error msg ->
+                     Http.Response.json_value
+                       ~status:`Bad_request
+                       ~request
+                       (json_error msg)
+                       reqd
+                   | Ok kind ->
+                     let goal_id = find_string "goal_id" in
+                     let task_id = find_string "task_id" in
+                     let board_post_id = find_string "board_post_id" in
+                     let comment_id = find_string "comment_id" in
+                     let pr_id = find_string "pr_id" in
+                     let git_ref = find_string "git_ref" in
+                     let log_id = find_string "log_id" in
+                     let session_id = find_string "session_id" in
+                     let operation_id = find_string "operation_id" in
+                     let worker_run_id = find_string "worker_run_id" in
+                     let partition = resolve_partition_for_query ~state ~uri in
+                     (match
+                        Ide_annotations.create
+                          ~base_dir:base
+                          ~partition
+                          ~keeper_id
+                          ~file_path
+                          ~line_start
+                          ~line_end
+                          ~kind
+                          ~content
+                          ?goal_id
+                          ?task_id
+                          ?board_post_id
+                          ?comment_id
+                          ?pr_id
+                          ?git_ref
+                          ?log_id
+                          ?session_id
+                          ?operation_id
+                          ?worker_run_id
+                          ()
+                      with
+                      | Ok annotation ->
+                        Http.Response.json_value
+                          ~status:`Created
+                          ~request
+                          (json_ok (Ide_annotation_types.annotation_to_json annotation))
+                          reqd
+                      | Error msg ->
+                        Http.Response.json_value
+                          ~status:`Bad_request
+                          ~request
+                          (json_error msg)
+                          reqd)))
+             | _ ->
+               Http.Response.json_value
+                 ~status:`Bad_request
+                 ~request
+                 (json_error "Missing required fields")
+                 reqd))
       request
       reqd)
-  |> Http.Router.any "/api/v1/ide/annotations/:id" (fun request reqd ->
-    match Http.Request.method_ request with
-    | `DELETE ->
-      (* task-1736 B3: deletion is a mutation. It requires a token-bound
-         write identity ([CanBroadcast]) instead of [with_public_read], and
-         ownership is enforced against the resolved [auth_identity] rather
-         than a caller-supplied query param. Because [Ide_annotations.delete]
-         only removes an annotation whose stored keeper_id equals the passed
-         keeper_id, binding keeper_id to auth_identity makes it structurally
-         impossible to delete another keeper's annotation. *)
-      with_token_permission_auth
-        ~permission:Masc_domain.CanBroadcast
-        (fun state auth_identity _req reqd ->
+  |> Http.Router.prefix_delete "/api/v1/ide/annotations/" (fun request reqd ->
+    (* task-1736 B3: deletion is a mutation. It requires a token-bound
+       write identity ([CanBroadcast], the keeper write tier; no narrower
+       annotation-write permission exists yet) instead of [with_public_read],
+       and ownership is enforced against the resolved [auth_identity] rather
+       than a caller-supplied query param. Because [Ide_annotations.delete]
+       only removes an annotation whose stored keeper_id equals the passed
+       keeper_id, binding keeper_id to auth_identity makes it structurally
+       impossible to delete another keeper's annotation. *)
+    with_token_permission_auth
+      ~permission:Masc_domain.CanBroadcast
+      (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
          (* RFC-0128 §4.2 PR-8: partition storage lives under the
             *server* base_path (single .masc-ide/ tree), not the
@@ -519,11 +540,18 @@ let add_routes router =
              ~request
              (json_error "Missing id")
              reqd
-         else (
+         else
            match
              bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
            with
            | Error msg ->
+             Option.iter
+               (fun requested ->
+                  log_keeper_id_mismatch
+                    ~operation:"delete"
+                    ~auth_identity
+                    ~requested)
+               requested_keeper_id;
              Http.Response.json_value
                ~status:`Forbidden
                ~request
@@ -534,16 +562,15 @@ let add_routes router =
              (match
                 Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id ()
               with
-              | Ok () -> Http.Response.json ~status:`No_content ~request "{}" reqd
+              | Ok () -> Http.Response.empty ~status:`No_content reqd
               | Error msg ->
                 Http.Response.json_value
                   ~status:`Forbidden
                   ~request
                   (json_error msg)
-                  reqd)))
-        request
-        reqd
-    | _ -> Http.Response.method_not_allowed reqd)
+                  reqd))
+           request
+           reqd)
   |> Http.Router.get "/api/v1/ide/regions" (fun request reqd ->
     with_public_read
       (fun state _req reqd ->
@@ -655,55 +682,59 @@ let add_routes router =
       (fun state req reqd ->
          let base = base_path_of_state state in
          Http.Request.read_body_async reqd (fun body_str ->
-           let json =
-             try Yojson.Safe.from_string body_str with
-             | _ -> `Assoc []
-           in
-           let find_string key =
-             match json with
-             | `Assoc fields ->
-               (match List.assoc_opt key fields with
-                | Some (`String s) when s <> "" -> Some s
-                | _ -> None)
-             | _ -> None
-           in
-           let find_int key =
-             match json with
-             | `Assoc fields ->
-               (match List.assoc_opt key fields with
-                | Some (`Int i) -> Some i
-                | Some (`Intlit s) -> int_of_string_opt s
-                | _ -> None)
-             | _ -> None
-           in
-           match
-             ( find_string "file_path"
-             , find_int "line"
-             , find_string "keeper_id" )
-           with
-           | Some file_path, Some line, Some keeper_id
-             when line >= 1 ->
-             let column = find_int "column" in
-             let source = Option.value (find_string "source") ~default:"editor" in
-             Ide_bridge.ingest_cursor_event
-               ~base_path:base
-               ~keeper_id
-               ~file_path
-               ~line
-               ?column
-               ~source
-               ();
-             Http.Response.json_value
-               ~status:`Created
-               ~request
-               (json_ok (`Assoc [ "ok", `Bool true ]))
-               reqd
-           | _ ->
+           match parse_json_body body_str with
+           | Error msg ->
              Http.Response.json_value
                ~status:`Bad_request
                ~request
-               (json_error "Missing required fields: file_path, line (>=1), keeper_id")
-               reqd))
+               (json_error msg)
+               reqd
+           | Ok json ->
+             let find_string key =
+               match json with
+               | `Assoc fields ->
+                 (match List.assoc_opt key fields with
+                  | Some (`String s) when s <> "" -> Some s
+                  | _ -> None)
+               | _ -> None
+             in
+             let find_int key =
+               match json with
+               | `Assoc fields ->
+                 (match List.assoc_opt key fields with
+                  | Some (`Int i) -> Some i
+                  | Some (`Intlit s) -> int_of_string_opt s
+                  | _ -> None)
+               | _ -> None
+             in
+             match
+               ( find_string "file_path"
+               , find_int "line"
+               , find_string "keeper_id" )
+             with
+             | Some file_path, Some line, Some keeper_id
+               when line >= 1 ->
+               let column = find_int "column" in
+               let source = Option.value (find_string "source") ~default:"editor" in
+               Ide_bridge.ingest_cursor_event
+                 ~base_path:base
+                 ~keeper_id
+                 ~file_path
+                 ~line
+                 ?column
+                 ~source
+                 ();
+               Http.Response.json_value
+                 ~status:`Created
+                 ~request
+                 (json_ok (`Assoc [ "ok", `Bool true ]))
+                 reqd
+             | _ ->
+               Http.Response.json_value
+                 ~status:`Bad_request
+                 ~request
+                 (json_error "Missing required fields: file_path, line (>=1), keeper_id")
+                 reqd))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->

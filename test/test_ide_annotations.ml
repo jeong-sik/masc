@@ -806,7 +806,22 @@ let test_bind_keeper_id_rejects_impersonation () =
     Ide_http.bind_mutation_keeper_id ~auth_identity:"alice" ~requested:(Some "bob")
   with
   | Ok resolved -> failf "expected impersonation rejection, got Ok %s" resolved
-  | Error _ -> ()
+  | Error msg ->
+    check
+      string
+      "client-visible mismatch error is generic"
+      "keeper_id does not match authenticated identity"
+      msg;
+    check
+      bool
+      "mismatch error does not leak authenticated identity"
+      false
+      (String_util.contains_substring msg "alice");
+    check
+      bool
+      "mismatch error does not leak requested identity"
+      false
+      (String_util.contains_substring msg "bob")
 ;;
 
 let test_parse_annotation_kind_defaults_missing () =

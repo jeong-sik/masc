@@ -132,6 +132,10 @@ module Response : sig
     -> Httpun.Reqd.t
     -> unit
 
+  (** Empty response.  Default status [`No_content].  Sends no
+      content-type / content-length headers. *)
+  val empty : ?status:Httpun.Status.t -> Httpun.Reqd.t -> unit
+
   (** JSON response with optional zstd compression.  Default
       status [`OK].  When [compress = true] (default) AND
       [?request] or the request attached to [reqd] supplies an

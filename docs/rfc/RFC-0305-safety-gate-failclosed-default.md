@@ -150,15 +150,36 @@ opt-out where a fleet-stall risk is real:
 - **I (dashboard approve default)**: a resolve request missing `decision` →
   `Error`, not `~default:"approve"`.
 
-Related policy clarification, to keep already-merged work aligned:
+### 3.1 Hard-forbidden OAS callback disposition
 
-- **Hard-forbidden OAS callback requests**: this RFC treats them as immediate
-  reject, matching `lib/governance_pipeline.ml`'s current hard-forbidden path.
-  Any test or implementation that expects a Critical hard-forbidden request to
-  enter the operator approval queue first is stale and must be reconciled in the
-  `#23044/#23086 follow-up` implementation item above. Queueing is still
-  appropriate for unknown or high-risk requests that are not already classified
-  as hard-forbidden.
+Hard-forbidden OAS callbacks (`lib/governance_pipeline.ml:323`
+`reject_hard_forbidden`, invoked at `:409` whenever
+`auto_approval_hard_forbidden` is true) are **immediately rejected** and never
+enter the HITL operator approval queue. A Critical-risk tool or a
+runtime-contract-blocked tool cannot be rescued by an operator approve action
+or a remembered rule; the callback returns `Agent_sdk.Hooks.Reject` as a
+terminal event.
+
+> **Note (SSOT reconciliation):**
+> `test/test_governance_pipeline.ml:1025`
+> `test_oas_callback_hard_forbidden_queues_critical` currently expects a Critical
+> hard-forbidden callback to be queued and to pass on operator approval. That
+> expectation is stale after the immediate-reject behavior merged in #23086; the
+> test must be updated in the follow-up PR that reconciles #23044 with #23086
+> (see `implementation_prs`).
+
+### 3.2 Fail-closed disposition map
+
+| Gate category | Trigger | Disposition | Reference |
+|---|---|---|---|
+| Hard-forbidden OAS callback | `auto_approval_hard_forbidden` true | Immediate `Reject`; never queued | `lib/governance_pipeline.ml:323`, `:409` |
+| Excuse detection (A) | evaluator unavailable, no gate-2 advisory | `Reject` | `lib/task/anti_rationalization.ml:1046` |
+| FD-pressure admission (B) | `system_fds = None` | `probe_unknown_block` | `lib/keeper_runtime/keeper_fd_pressure.ml:552` |
+| Destructive-command scan (C/D/E) | malformed JSON args / regex error / unexpected payload field | `Reject` | `lib/eval_gate.ml:203,262,348`; `lib/worker_oas.ml:262`; `lib/keeper/keeper_guards.ml:157` |
+| Risk classify unknown (F) | unknown tool/verb | require confirm | `lib/governance_pipeline_risk.ml:129,337` |
+| Tool schema unknown type (G) | unknown JSON-Schema `type` | `Error` | `lib/sdk_tool_contract.ml:245` |
+| Destructive capability metadata (H) | missing `destructive` tag | screen or require explicit tag | `lib/tool_surface/tool_capability.ml:52` |
+| Dashboard approve default (I) | missing `decision` field | `Error` | `lib/server/server_dashboard_http.ml:318-326` |
 
 Out of scope (noted, not mandated here):
 
@@ -217,10 +238,10 @@ convert a config gap into a fleet stall on day one.
 
 ## 7. Open questions
 
-- **H**: should the default `destructive` tag be "screen it" (fail-closed,
-  possibly over-screening) or should registration force an explicit tag
-  (fail-closed via compile/registration error)? The latter is stronger but
-  touches every tool definition.
+- **H** (Open — deferred to implementation PR): should the default
+  `destructive` tag be "screen it" (fail-closed, possibly over-screening) or
+  should registration force an explicit tag (fail-closed via compile/registration
+  error)? The latter is stronger but touches every tool definition.
 - **A opt-out surfacing**: the fail-open opt-out is currently an env var. Should
   an active `=open` override surface in the dashboard governance view (like
   RFC runtime-note-field) so an operator does not forget a temporary outage

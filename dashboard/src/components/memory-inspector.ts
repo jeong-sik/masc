@@ -81,20 +81,24 @@ export function memFmtBytes(n: number): string {
 interface BlockMeta {
   readonly lbl: string
   readonly color: string
+  // Whether this block is the memory-os contribution to the prompt. Mirrors the
+  // prototype MEM_BLOCKS `mem` flag (memory.jsx) — only memory_os_recall and
+  // user_model carry recalled memory; the rest are persona/context/surface.
+  readonly mem: boolean
 }
 const PROMPT_BLOCK_META: Readonly<Record<string, BlockMeta>> = {
-  persona: { lbl: '페르소나', color: 'var(--text-dim)' },
-  continuity: { lbl: '연속성', color: 'var(--info)' },
-  dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)' },
-  temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)' },
-  claimed_task_nudge: { lbl: '태스크 넛지', color: 'var(--status-ok)' },
-  retry_nudge: { lbl: '재시도 넛지', color: 'var(--status-bad)' },
-  memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)' },
-  user_model: { lbl: '사용자 모델', color: 'var(--info)' },
-  connected_surface: { lbl: '연결 표면', color: 'var(--status-warn)' },
+  persona: { lbl: '페르소나', color: 'var(--text-dim)', mem: false },
+  continuity: { lbl: '연속성', color: 'var(--info)', mem: false },
+  dynamic_context: { lbl: '동적 컨텍스트', color: 'var(--volt)', mem: false },
+  temporal_summary: { lbl: '시간 요약', color: 'var(--status-warn)', mem: false },
+  claimed_task_nudge: { lbl: '태스크 넛지', color: 'var(--status-ok)', mem: false },
+  retry_nudge: { lbl: '재시도 넛지', color: 'var(--status-bad)', mem: false },
+  memory_os_recall: { lbl: '메모리 회상', color: 'var(--volt-strong)', mem: true },
+  user_model: { lbl: '사용자 모델', color: 'var(--info)', mem: true },
+  connected_surface: { lbl: '연결 표면', color: 'var(--status-warn)', mem: false },
 }
 export function promptBlockMeta(token: string): BlockMeta {
-  return PROMPT_BLOCK_META[token] ?? { lbl: token, color: 'var(--text-dim)' }
+  return PROMPT_BLOCK_META[token] ?? { lbl: token, color: 'var(--text-dim)', mem: false }
 }
 
 export interface CompositionPart {
@@ -102,6 +106,7 @@ export interface CompositionPart {
   readonly lbl: string
   readonly bytes: number
   readonly color: string
+  readonly mem: boolean
 }
 export interface Composition {
   readonly totalBytes: number
@@ -116,7 +121,7 @@ export function memCompositionFromBlocks(blocks: readonly TurnBlock[]): Composit
     .filter(b => b.bytes > 0)
     .map(b => {
       const meta = promptBlockMeta(b.block)
-      return { key: b.block, lbl: meta.lbl, bytes: b.bytes, color: meta.color }
+      return { key: b.block, lbl: meta.lbl, bytes: b.bytes, color: meta.color, mem: meta.mem }
     })
   const totalBytes = parts.reduce((sum, p) => sum + p.bytes, 0)
   return { totalBytes, parts }
@@ -305,7 +310,7 @@ function MemCompoReal({ row }: { row: TurnRecordRow | null }) {
         ${parts.map(p => html`
           <div key=${p.key} class="mem-leg">
             <span class="mem-leg-sw" style=${{ background: p.color }}></span>
-            <span class="mem-leg-lbl">${p.lbl}</span>
+            <span class="mem-leg-lbl">${p.lbl}${p.mem ? html`<span class="mem-leg-tag">메모리</span>` : null}</span>
             <span class="mem-leg-v mono">${memFmtBytes(p.bytes)}</span>
           </div>`)}
       </div>
@@ -424,7 +429,9 @@ function RecentRecallTimeline({ rows }: { rows: readonly TurnRecordRow[] }) {
   `
 }
 
-function FactRow({ fact }: { fact: MemoryOsFact }) {
+// `srcOverride` replaces the trace#turn provenance in the meta row with a caller
+// label (used by the aggregate "recent facts" list to show the owning keeper).
+function FactRow({ fact, srcOverride }: { fact: MemoryOsFact; srcOverride?: string }) {
   const meta = factCategoryMeta(fact.category)
   const provenance = `${fact.source.trace_id}#${fact.source.turn}`
   return html`
@@ -438,8 +445,8 @@ function FactRow({ fact }: { fact: MemoryOsFact }) {
           ${fact.last_verified_at != null
             ? html`<span class="mono">검증 ${formatFactInstant(fact.last_verified_at, null)}</span>`
             : null}
-          <span class=${`mono ${fact.current ? '' : 'mem-expired'}`}>${factTtlLabel(fact)}</span>
-          <span class="mem-src mono">${provenance}</span>
+          <span class=${`mem-ttl ${fact.current ? 'current' : 'expired'}`}>${factTtlLabel(fact)}</span>
+          <span class="mem-src mono">${srcOverride ?? provenance}</span>
         </div>
         <div class="mem-store-why">${factSelectionReason(fact)}</div>
       </div>
@@ -692,7 +699,12 @@ function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
         ${'◉'} g${episode.generation.toString().padStart(4, '0')}
       </span>
       <div class="mem-store-main">
-        <div class="mem-store-text">${episode.summary}</div>
+        <div class="mem-store-text">
+          ${episode.summary}
+          ${episode.source_turn_range
+            ? html`<span class="mem-tl-range mono">turn ${episode.source_turn_range[0]}–${episode.source_turn_range[1]}</span>`
+            : null}
+        </div>
         <div class="mem-store-meta">
           <span class="mono">${episode.claim_count} claims</span>
           ${episode.terminal_marker
@@ -703,6 +715,20 @@ function EpisodeRow({ episode }: { episode: MemoryOsEpisodeSummary }) {
         </div>
       </div>
     </div>`
+}
+
+// Bound on the recent-facts list each keeper contributes to (and the fleet-wide
+// slice) so the aggregate never carries an unbounded fact tail into the client.
+const AGGREGATE_RECENT_FACTS_LIMIT = 8
+
+interface AggregateCategoryCount {
+  readonly category: MemoryOsFactCategory
+  readonly count: number
+}
+
+interface AggregateRecentFact {
+  readonly keeperId: string
+  readonly fact: MemoryOsFact
 }
 
 interface AggregateMemoryRow {
@@ -718,6 +744,64 @@ interface AggregateMemoryRow {
   readonly recallBlockBytes: number
   readonly latestPrompt: string
   readonly readErrors: number
+  // Category tally over this keeper's projected facts (all rows, current or not),
+  // and its most-recently-verified facts. Empty for error / no-memory keepers.
+  readonly categoryCounts: readonly AggregateCategoryCount[]
+  readonly recentFacts: readonly MemoryOsFact[]
+}
+
+// Tally facts by typed category tag. An `unknown` arm keys on its raw label so
+// two distinct out-of-vocabulary categories stay separate rows, not merged.
+function tallyFactCategories(facts: readonly MemoryOsFact[]): readonly AggregateCategoryCount[] {
+  const byTag = new Map<string, AggregateCategoryCount>()
+  for (const fact of facts) {
+    const tag = factTag(fact)
+    const existing = byTag.get(tag)
+    byTag.set(tag, existing
+      ? { category: existing.category, count: existing.count + 1 }
+      : { category: fact.category, count: 1 })
+  }
+  return [...byTag.values()]
+}
+
+function recentFactsByReferenceTime(
+  facts: readonly MemoryOsFact[],
+  limit: number,
+): readonly MemoryOsFact[] {
+  return [...facts].sort((a, b) => b.reference_time - a.reference_time).slice(0, limit)
+}
+
+// Merge per-keeper category tallies into a fleet distribution, sorted by count
+// descending (ties keep first-seen order). Reuses factTag as the merge key.
+function mergeAggregateCategoryCounts(
+  rows: readonly AggregateMemoryRow[],
+): readonly AggregateCategoryCount[] {
+  const byTag = new Map<string, AggregateCategoryCount>()
+  for (const row of rows) {
+    for (const entry of row.categoryCounts) {
+      const tag = entry.category.tag === 'unknown' ? `unknown:${entry.category.raw}` : entry.category.tag
+      const existing = byTag.get(tag)
+      byTag.set(tag, existing
+        ? { category: existing.category, count: existing.count + entry.count }
+        : { category: entry.category, count: entry.count })
+    }
+  }
+  return [...byTag.values()].sort((a, b) => b.count - a.count)
+}
+
+// Fleet-wide most-recently-verified facts with their owning keeper, newest first
+// (reference_time = last_verified_at else first_seen). NOT a salience sort (RFC-0247).
+function mergeAggregateRecentFacts(
+  rows: readonly AggregateMemoryRow[],
+  limit: number = AGGREGATE_RECENT_FACTS_LIMIT,
+): readonly AggregateRecentFact[] {
+  const flattened: AggregateRecentFact[] = []
+  for (const row of rows) {
+    for (const fact of row.recentFacts) {
+      flattened.push({ keeperId: row.keeper.id, fact })
+    }
+  }
+  return flattened.sort((a, b) => b.fact.reference_time - a.fact.reference_time).slice(0, limit)
 }
 
 function aggregateMemoryRowFromResponse(
@@ -744,6 +828,8 @@ function aggregateMemoryRowFromResponse(
       recallBlockBytes: memoryBlock?.bytes ?? 0,
       latestPrompt,
       readErrors: 0,
+      categoryCounts: [],
+      recentFacts: [],
     }
   }
   const recallableFacts = snapshot.facts.items.filter(isPromptRecallableFact).length
@@ -764,6 +850,8 @@ function aggregateMemoryRowFromResponse(
     recallBlockBytes: memoryBlock?.bytes ?? 0,
     latestPrompt,
     readErrors: snapshot.read_errors.length,
+    categoryCounts: tallyFactCategories(snapshot.facts.items),
+    recentFacts: recentFactsByReferenceTime(snapshot.facts.items, AGGREGATE_RECENT_FACTS_LIMIT),
   }
 }
 
@@ -781,6 +869,8 @@ function aggregateMemoryErrorRow(keeper: MemoryKeeper, error: unknown): Aggregat
     recallBlockBytes: 0,
     latestPrompt: 'none',
     readErrors: 0,
+    categoryCounts: [],
+    recentFacts: [],
   }
 }
 
@@ -821,11 +911,13 @@ function AggregateMemoryReal({
   rows,
   loading,
   error,
+  onPick,
 }: {
   keepers: readonly MemoryKeeper[]
   rows: readonly AggregateMemoryRow[] | null
   loading: boolean
   error: string | null
+  onPick: (id: string) => void
 }) {
   const data = rows ?? []
   const loadedCount = data.length
@@ -838,6 +930,9 @@ function AggregateMemoryReal({
   const fallbackTotal = data.reduce((sum, row) => sum + row.fallbackEpisodes, 0)
   const linkedCount = data.filter(row => row.recallBlockBytes > 0).length
   const recallBytes = data.reduce((sum, row) => sum + row.recallBlockBytes, 0)
+  const categoryTotals = mergeAggregateCategoryCounts(data)
+  const categorizedFacts = categoryTotals.reduce((sum, entry) => sum + entry.count, 0)
+  const recentFacts = mergeAggregateRecentFacts(data)
   return html`
     <${Fragment}>
       <div class="turn-sec">
@@ -862,12 +957,30 @@ function AggregateMemoryReal({
         ${loading ? html`<${DisclosureNote} text="전체 keeper memory-os 집계 불러오는 중." />` : null}
         ${error ? html`<div class="mem-read-error" role="alert">${'⚠'} 전체 집계 실패 — ${error}</div>` : null}
       </div>
+      ${categorizedFacts > 0
+        ? html`
+          <div class="turn-sec">
+            <h4>category별 분포 <span class="mem-hint">실제 fact.category</span></h4>
+            <div class="mem-kinds-dist">
+              ${categoryTotals.map(entry => {
+                const meta = factCategoryMeta(entry.category)
+                const tag = entry.category.tag === 'unknown' ? `unknown:${entry.category.raw}` : entry.category.tag
+                return html`
+                  <div key=${tag} class="mem-kd-row">
+                    <span class="mem-kind" style=${{ color: meta.color, borderColor: meta.color }}>${meta.glyph} ${meta.lbl}</span>
+                    <div class="mem-kd-bar"><span style=${{ width: `${(entry.count / categorizedFacts) * 100}%` }}></span></div>
+                    <span class="mono mem-kd-n">${entry.count}</span>
+                  </div>`
+              })}
+            </div>
+          </div>`
+        : null}
       <div class="turn-sec">
         <h4>keeper별 메모리 · ${keepers.length}</h4>
         <div class="mem-table">
           <div class="mem-tr mem-th"><span>keeper</span><span>회상</span><span>진단</span><span>episode</span><span>prompt link</span></div>
           ${data.map(row => html`
-            <div key=${row.keeper.id} class="mem-tr" title=${row.error ?? row.source}>
+            <button key=${row.keeper.id} type="button" class="mem-tr" title=${row.error ?? row.source} onClick=${() => onPick(row.keeper.id)}>
               <span class="mem-td-id"><span class=${`mem-dot ${memDotState(row.keeper.status)}`}></span><span class="mono">${row.keeper.id}</span></span>
               ${row.error
                 ? html`
@@ -882,13 +995,26 @@ function AggregateMemoryReal({
                   <span class="mono">${row.episodes}${row.fallbackEpisodes > 0 ? html` +${row.fallbackEpisodes} diag` : null}</span>
                   <span class="mono">${row.recallBlockBytes > 0 ? html`${memFmtBytes(row.recallBlockBytes)} · ${row.latestPrompt}` : html`no memory block · ${row.latestPrompt}`}</span>
                 `}
-            </div>`)}
+            </button>`)}
         </div>
         ${!loading && data.length === 0
           ? html`<div class="mem-empty">집계할 keeper memory-os 행 없음.</div>`
           : null}
         <${DisclosureNote} text=${`전체 탭은 keeper별 turn-records를 직접 조회한 읽기 전용 집계 — episodes ${episodeTotal}, librarian fallback 진단 ${fallbackTotal}.`} />
       </div>
+      ${recentFacts.length > 0
+        ? html`
+          <div class="turn-sec">
+            <h4>최근 확인된 사실 · 전체 <span class="mem-hint">salience 정렬 아님 (RFC-0247)</span></h4>
+            <div class="mem-store">
+              ${recentFacts.map(({ keeperId, fact }) => html`<${FactRow}
+                key=${keeperId + factTag(fact) + fact.source.trace_id + fact.source.turn + fact.claim}
+                fact=${fact}
+                srcOverride=${keeperId}
+              />`)}
+            </div>
+          </div>`
+        : null}
     </>`
 }
 
@@ -904,9 +1030,12 @@ export function MemoryInspector({
   keepers = DEFAULT_MEMORY_KEEPERS,
 }: MemoryInspectorProps) {
   const scope = useSignal<'one' | 'all'>('one')
+  // The keeper the one-scope view is bound to. Starts at the opened keeper and can
+  // be re-pointed by clicking an aggregate row (전체 → 개별), mirroring the prototype.
+  const pickId = useSignal(keeper.id)
   const resource = useManagedAsyncResource<TurnRecordsResponse | null>(null)
   const aggregateResource = useManagedAsyncResource<readonly AggregateMemoryRow[]>([])
-  const activeId = keeper.id
+  const activeId = pickId.value
   const keepersKey = keepers.map(k => `${k.id}:${k.status}`).join('|')
 
   useEffect(() => {
@@ -919,6 +1048,15 @@ export function MemoryInspector({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  // Re-bind the one-scope target to the inbound keeper whenever the prop changes.
+  // Without this, reopening/reusing the inspector for a different keeper keeps the
+  // previous pickId and would fetch /keepers/<old>/turn-records — a stale keeper
+  // identity. The aggregate-row onPick still re-points pickId within an open
+  // inspector because that path does not change the keeper prop.
+  useEffect(() => {
+    pickId.value = keeper.id
+  }, [keeper.id, pickId])
 
   useEffect(() => {
     void resource.load(async (signal) => fetchKeeperTurnRecords(activeId, 24, { signal }))
@@ -967,6 +1105,7 @@ export function MemoryInspector({
                 rows=${aggregateState.data}
                 loading=${aggregateState.loading}
                 error=${aggregateState.error}
+                onPick=${(id: string) => { pickId.value = id; scope.value = 'one' }}
               />`
             : state.loading
               ? html`<div class="mem-empty">메모리 불러오는 중…</div>`

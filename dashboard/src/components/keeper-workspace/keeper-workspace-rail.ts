@@ -139,6 +139,17 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
   const catalog = runtimeCatalogState.value.status === 'loaded' ? runtimeCatalogState.value.data : []
   const entry = runtime ? findRuntimeCatalogEntry(catalog, runtime) : null
   const ctxK = formatCtxK(entry?.max_context ?? contextMax(keeper))
+  const capabilitiesDeclared = entry?.capabilities_declared !== false
+  // Read-only capability readout (audit P7-4). multimodal = accepts non-text
+  // input; effort adjustability mirrors the runtime editor's rtCaps derivation
+  // (reasoning-effort mode or a reasoning-budget knob). Both come from the
+  // /api/v1/providers projection — no per-keeper mutation here (deferred).
+  const multimodal = capabilitiesDeclared
+    ? Boolean(entry?.supports_multimodal_inputs || entry?.supports_image_input)
+    : null
+  const effortMode = entry?.thinking_control_format ?? null
+  const effortControlled = effortMode !== null && effortMode !== 'none'
+  const effortAdjustable = effortMode === 'reasoning-effort' || Boolean(entry?.supports_reasoning_budget)
 
   return html`
     <div class="ctx-sec">
@@ -160,12 +171,23 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
                 <span class=${`rtc-flag ${entry.streaming ? 'on' : 'off'}`}>
                   ${entry.streaming ? '✓' : '✕'} streaming
                 </span>
+                <span class=${`rtc-flag ${multimodal === true ? 'on' : 'off'}`}>
+                  ${multimodal === null ? '—' : multimodal ? '✓' : '✕'} multimodal
+                </span>
               </div>
             `
           : html`<div class="rtc-na" data-missing="runtime-capabilities">능력 정보 미수신</div>`}
         <div class="rtc-effort">
           <span class="rtc-effort-k">effort</span>
-          <span class="rtc-eff-na" data-missing="runtime-effort">조정 정보 미수신</span>
+          ${/* Undeclared capabilities mean the effort mode is unknown, not a
+               definitive "no control" — the default-filled thinking_control_format
+               ('none') is not authoritative. Mirror the multimodal flag's unknown
+               handling instead of asserting a value the config never declared. */ ''}
+          ${!entry || !capabilitiesDeclared
+            ? html`<span class="rtc-eff-na" data-missing="runtime-effort">조정 정보 미수신</span>`
+            : effortControlled
+              ? html`<span class="rtc-eff-na" data-effort-mode=${effortMode}>${effortMode} · ${effortAdjustable ? '조정 가능' : '고정'}</span>`
+              : html`<span class="rtc-eff-na" data-effort-mode="none">effort 제어 없음</span>`}
         </div>
       </div>
     </div>

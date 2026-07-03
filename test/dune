@@ -929,6 +929,7 @@
   test_server_timing
   test_server_startup_takeover
   test_keeper_meta_cas_retry
+  test_keeper_write_meta_cycle_failures_counter
   test_judge_diagnostics
   test_board_vote_quarantine
   test_keeper_identity_parse
@@ -1123,6 +1124,7 @@
   test_server_timing
   test_server_startup_takeover
   test_keeper_meta_cas_retry
+  test_keeper_write_meta_cycle_failures_counter
   test_judge_diagnostics
   test_board_vote_quarantine
   test_keeper_identity_parse

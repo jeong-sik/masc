@@ -41,6 +41,10 @@ type turn_budget_exhausted =
   ; limit : int
   }
 
+type operator_actor =
+  | Grpc_directive
+  | Keeper_down
+
 type t =
   | No_progress_loop of
       { consecutive_idle_cycles : int
@@ -56,7 +60,7 @@ type t =
   | Turn_budget_exhausted of turn_budget_exhausted
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
-  | Operator_paused of { operator_actor : string }
+  | Operator_paused of { operator_actor : operator_actor }
   | Dead_tombstone
 
 (* -------------------------------------------------------------------- *)
@@ -134,7 +138,10 @@ let equal a b =
     , Provider_timeout_loop { consecutive_timeouts = c2 } ) ->
     Int.equal c1 c2
   | Operator_paused { operator_actor = a1 }, Operator_paused { operator_actor = a2 } ->
-    String.equal a1 a2
+    (match (a1, a2) with
+     | Grpc_directive, Grpc_directive -> true
+     | Keeper_down, Keeper_down -> true
+     | (Grpc_directive | Keeper_down), _ -> false)
   | Dead_tombstone, Dead_tombstone -> true
   | ( ( No_progress_loop _
       | Completion_contract_violation _
@@ -187,7 +194,12 @@ let hash = function
       , (match detail.source with `Oas_sdk -> 0 | `Keeper_runtime -> 1 | `User_config -> 2) )
   | Stale_storm -> 5
   | Provider_timeout_loop { consecutive_timeouts } -> Hashtbl.hash (6, consecutive_timeouts)
-  | Operator_paused { operator_actor } -> Hashtbl.hash (7, operator_actor)
+  | Operator_paused { operator_actor } ->
+    Hashtbl.hash
+      ( 7
+      , match operator_actor with
+        | Grpc_directive -> 0
+        | Keeper_down -> 1 )
   | Dead_tombstone -> 8
 ;;
 
@@ -232,8 +244,17 @@ let pp_runtime_exhaustion ppf = function
 (* Well-known operator actors                                           *)
 (* -------------------------------------------------------------------- *)
 
-let operator_actor_grpc_directive = "grpc_directive"
-let operator_actor_keeper_down = "keeper_down"
+let operator_actor_grpc_directive = Grpc_directive
+let operator_actor_keeper_down = Keeper_down
+
+let operator_actor_to_wire = function
+  | Grpc_directive -> "grpc_directive"
+  | Keeper_down -> "keeper_down"
+
+let operator_actor_of_wire = function
+  | "grpc_directive" -> Ok Grpc_directive
+  | "keeper_down" -> Ok Keeper_down
+  | other -> Error (Printf.sprintf "Keeper_latched_reason: unknown operator actor %S" other)
 
 (* -------------------------------------------------------------------- *)
 (* pp                                                                    *)
@@ -270,7 +291,7 @@ let pp ppf = function
   | Provider_timeout_loop { consecutive_timeouts } ->
     Format.fprintf ppf "Provider_timeout_loop{count=%d}" consecutive_timeouts
   | Operator_paused { operator_actor } ->
-    Format.fprintf ppf "Operator_paused{actor=%s}" operator_actor
+    Format.fprintf ppf "Operator_paused{actor=%s}" (operator_actor_to_wire operator_actor)
   | Dead_tombstone -> Format.fprintf ppf "Dead_tombstone"
 ;;
 
@@ -328,7 +349,7 @@ let to_wire = function
   | Provider_timeout_loop { consecutive_timeouts } ->
     Printf.sprintf "provider_timeout_loop:count=%d" consecutive_timeouts
   | Operator_paused { operator_actor } ->
-    Printf.sprintf "operator_paused:actor=%s" operator_actor
+    Printf.sprintf "operator_paused:actor=%s" (operator_actor_to_wire operator_actor)
   | Dead_tombstone -> "dead_tombstone"
 ;;
 
@@ -453,7 +474,9 @@ let of_wire wire =
   | "operator_paused" :: _ ->
     let prefix = "operator_paused:actor=" in
     (match chop_prefix ~prefix wire with
-     | Some operator_actor -> Ok (Operator_paused { operator_actor })
+     | Some actor_wire ->
+       let+ operator_actor = operator_actor_of_wire actor_wire in
+       Operator_paused { operator_actor }
      | None -> errorf "Keeper_latched_reason.of_wire: malformed operator pause wire %S" wire)
   | _ ->
     errorf "Keeper_latched_reason.of_wire: unknown wire form %S" wire
@@ -578,7 +601,10 @@ module Stable = struct
         ; "consecutive_timeouts", `Int consecutive_timeouts
         ]
     | Operator_paused { operator_actor } ->
-      `Assoc [ "kind", `String "operator_paused"; "actor", `String operator_actor ]
+      `Assoc
+        [ "kind", `String "operator_paused"
+        ; "actor", `String (operator_actor_to_wire operator_actor)
+        ]
     | Dead_tombstone -> `Assoc [ "kind", `String "dead_tombstone" ]
   ;;
 
@@ -611,7 +637,8 @@ module Stable = struct
     | `Assoc [ "kind", `String "provider_timeout_loop"; "consecutive_timeouts", `Int n ] ->
       Ok (Provider_timeout_loop { consecutive_timeouts = n })
     | `Assoc [ "kind", `String "operator_paused"; "actor", `String actor ] ->
-      Ok (Operator_paused { operator_actor = actor })
+      let+ operator_actor = operator_actor_of_wire actor in
+      Operator_paused { operator_actor }
     | `Assoc [ "kind", `String "dead_tombstone" ] -> Ok Dead_tombstone
     | _ ->
       Error

@@ -241,6 +241,7 @@ let clear_direct_success_no_progress_pause
       { cleared_meta with
         paused = false
       ; auto_resume_after_sec = None
+      ; latched_reason = None
       ; updated_at = now_iso ()
       }
     in

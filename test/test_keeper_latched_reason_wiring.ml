@@ -384,6 +384,47 @@ let test_dead_tombstone_latch_blocks_legacy_auto_resume () =
        ~now:(Unix.time () +. 7200.0)
        meta)
 
+let test_heartbeat_merge_preserves_only_typed_operator_pause () =
+  let caller =
+    { (make_meta "typed-operator-pause-merge-caller") with
+      paused = false
+    ; latched_reason = None
+    }
+  in
+  let operator_latch =
+    Some
+      (Keeper_latched_reason.Operator_paused
+         { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
+  in
+  let latest_operator_pause =
+    { caller with paused = true; latched_reason = operator_latch }
+  in
+  let preserved =
+    Keeper_meta_merge.heartbeat_fields_from_disk
+      ~latest:latest_operator_pause
+      ~caller
+  in
+  check bool "typed operator pause remains paused" true preserved.paused;
+  check
+    (option string)
+    "typed operator pause preserves reason"
+    (Some wire_keeper_down)
+    (latched_reason_wire preserved);
+  let latest_unlabeled_pause =
+    { latest_operator_pause with latched_reason = None }
+  in
+  let not_preserved =
+    Keeper_meta_merge.heartbeat_fields_from_disk
+      ~latest:latest_unlabeled_pause
+      ~caller
+  in
+  check bool "unlabeled pause shape no longer owns the merge" false not_preserved.paused;
+  check
+    (option string)
+    "unlabeled pause does not copy a reason"
+    None
+    (latched_reason_wire not_preserved)
+
 (* Reviewer P1 (2026-07-03): the overwrite test above only exercises the
    no-conflict write, where the merge never runs. On a CAS retry the cleanup
    re-reads disk; if that snapshot is an operator pause, reusing
@@ -406,9 +447,10 @@ let test_dead_tombstone_cleanup_cas_retry_preserves_reason () =
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
        let keeper_name = "dead-tombstone-cas-keeper" in
        (* Disk snapshot the retry re-reads: an operator pause with a higher turn
-          count than the caller's stale snapshot. [is_operator_pause] holds
-          (paused, no auto_resume, no last_blocker), so the heartbeat merge would
-          reclaim [latched_reason] from here. *)
+          count than the caller's stale snapshot. The typed
+          [Operator_paused] latch is what lets the heartbeat merge preserve the
+          disk pause; dead-tombstone cleanup must keep ownership with the
+          caller instead. *)
        let disk_meta =
          let base =
            { (make_meta keeper_name) with
@@ -494,6 +536,8 @@ let () =
             test_dead_tombstone_cleanup_repairs_stale_terminal_state
         ; test_case "dead-tombstone latch blocks legacy auto-resume" `Quick
             test_dead_tombstone_latch_blocks_legacy_auto_resume
+        ; test_case "heartbeat merge uses typed operator latch, not pause shape" `Quick
+            test_heartbeat_merge_preserves_only_typed_operator_pause
         ; test_case "dead-tombstone cleanup CAS retry preserves Dead_tombstone" `Quick
             test_dead_tombstone_cleanup_cas_retry_preserves_reason
         ] )

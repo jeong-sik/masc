@@ -27,17 +27,17 @@ let monotonic_usage_counters ~(latest : Keeper_meta_contract.keeper_meta) ~(call
   ; runtime = { caller.runtime with usage }
   }
 
-let is_operator_pause (meta : Keeper_meta_contract.keeper_meta) =
-  meta.paused
-  && Option.is_none meta.auto_resume_after_sec
-  && Option.is_none meta.runtime.last_blocker
+let has_operator_latched_reason (meta : Keeper_meta_contract.keeper_meta) =
+  match meta.latched_reason with
+  | Some (Keeper_latched_reason.Operator_paused _) -> true
+  | Some _ | None -> false
 
 let preserve_operator_pause_from_disk
       ~(latest : Keeper_meta_contract.keeper_meta)
       ~(caller : Keeper_meta_contract.keeper_meta)
   =
   let merged = monotonic_usage_counters ~latest ~caller in
-  if is_operator_pause latest
+  if latest.paused && has_operator_latched_reason latest
   then
     {
       merged with

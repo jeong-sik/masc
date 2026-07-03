@@ -817,11 +817,13 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
            (* Record why the pruned meta was latched before the on-disk record
               is gone. [meta] was read above (pre-[Sys.remove]), so the reason
               survives in the event even though the file no longer does. *)
-           let latched_reason_wire =
-             Option.value_map
-               meta.latched_reason
-               ~default:"none"
-               ~f:Keeper_latched_reason.to_wire
+           let latched_reason_detail =
+             match meta.latched_reason with
+             | Some reason ->
+               Printf.sprintf
+                 " latched_reason=%s"
+                 (Keeper_latched_reason.to_wire reason)
+             | None -> ""
            in
            publish_lifecycle
              ~event:
@@ -829,9 +831,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
                   { verb = Keeper_lifecycle_events.Paused_pruned; phase = None })
              name
              (Printf.sprintf
-                "last_updated=%s latched_reason=%s"
+                "last_updated=%s%s"
                 meta.updated_at
-                latched_reason_wire)
+                latched_reason_detail)
              ();
            Log.Keeper.info "%s: stale paused meta pruned" name
          with

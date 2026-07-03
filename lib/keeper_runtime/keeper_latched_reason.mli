@@ -33,7 +33,7 @@ type t =
   | Turn_budget_exhausted of turn_budget_exhausted
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
-  | Operator_paused of { operator_actor : string }
+  | Operator_paused of { operator_actor : operator_actor }
   | Dead_tombstone
       (** The supervisor reaped a dead keeper and left [paused = true] on
           disk as a tombstone (see
@@ -77,6 +77,10 @@ and turn_budget_detail =
       ]
   }
 
+and operator_actor =
+  | Grpc_directive
+  | Keeper_down
+
 (** {1 Wire format}
 
     Used for log/dashboard events. Wire is a closed set of names with
@@ -106,12 +110,12 @@ val pp : Format.formatter -> t -> unit
 
 (** {1 Well-known operator actors}
 
-    These are the only operator-actor strings produced by production
-    pause sites. Tests and consumers may match on the typed variant
-    instead of the wire string. *)
+    These are the only operator actors produced by production pause
+    sites. Wire strings are derived only at serialization boundaries. *)
 
-val operator_actor_grpc_directive : string
-val operator_actor_keeper_down : string
+val operator_actor_grpc_directive : operator_actor
+val operator_actor_keeper_down : operator_actor
+val operator_actor_to_wire : operator_actor -> string
 
 module Stable : sig
   val to_yojson : t -> Yojson.Safe.t

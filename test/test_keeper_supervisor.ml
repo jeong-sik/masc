@@ -2747,7 +2747,7 @@ let test_sweep_auto_resumes_after_backoff () =
           latched_reason =
             Some
               (Keeper_latched_reason.Operator_paused
-                 { operator_actor = "stale-auto-resume-test" });
+                 { operator_actor = Keeper_latched_reason.operator_actor_keeper_down });
           auto_resume_after_sec = Some 3600.0;
           updated_at = two_hours_ago;
         }

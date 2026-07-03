@@ -900,7 +900,7 @@ let run_turn
                                 ~trace_id:meta.runtime.trace_id
                                 ~response_text
                                 ())
-                          ())))
+                          ()))
                in
        let receipt_result =
          Keeper_agent_run_receipt.finalize

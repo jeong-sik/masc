@@ -37,6 +37,17 @@ TEST_FILE_SUFFIXES = (
 )
 TEST_FILE_INFIXES = (".test.", ".spec.")
 
+# Non-executable assets under covered paths that no unit test can exercise.
+# Counting their added lines produces false positives — e.g. a dashboard CSS
+# height fix (#23082) was flagged as "covered code with no test". Scope is
+# intentionally narrow: only unambiguous assets. Config/data formats
+# (.toml/.json/.yml) are out of scope here (they have their own validity gates)
+# and stay covered. See #23083.
+NON_CODE_SUFFIXES = (
+    ".css", ".html", ".htm", ".md", ".markdown",
+    ".svg", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".gif",
+)
+
 
 def base_ref():
     return os.environ.get("GITHUB_BASE_REF", "main")
@@ -101,7 +112,7 @@ def get_changed_covered_files():
     stdout = run_diff_or_fail(
         ["git", "diff", "--name-only", pr_diff_range(), "--", *COVERED_CODE_PATHS]
     )
-    return [f for f in stdout.strip().split("\n") if f]
+    return [f for f in stdout.strip().split("\n") if f and is_covered_code_file(f)]
 
 
 def is_test_file(path):
@@ -118,6 +129,18 @@ def is_test_file(path):
         or basename.endswith(TEST_FILE_SUFFIXES)
         or any(infix in basename for infix in TEST_FILE_INFIXES)
     )
+
+
+def is_covered_code_file(path):
+    """Return true for executable code files, filtering out non-code assets.
+
+    Symmetric counterpart to is_test_file: that positively identifies test
+    files; this negatively filters non-executable assets (CSS/HTML/MD/images)
+    that no unit test can exercise, so they do not trigger the "added covered
+    lines with no test" rule. See #23083.
+    """
+    normalized = path.replace("\\", "/").lower()
+    return not normalized.endswith(NON_CODE_SUFFIXES)
 
 
 def get_changed_test_files():

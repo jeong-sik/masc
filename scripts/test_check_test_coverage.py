@@ -54,6 +54,37 @@ class CheckTestCoverageTest(unittest.TestCase):
             ],
         )
 
+    def test_is_covered_code_file_predicate(self):
+        # CSS/HTML/MD/images are non-code assets — excluded from covered paths.
+        # Config/data formats stay covered (out of scope here, see #23083).
+        self.assertFalse(coverage.is_covered_code_file("dashboard/src/styles/app-shell-v2.css"))
+        self.assertFalse(coverage.is_covered_code_file("lib/README.md"))
+        self.assertFalse(coverage.is_covered_code_file("dashboard/public/icon.png"))
+        self.assertFalse(coverage.is_covered_code_file("dashboard/index.html"))
+        self.assertTrue(coverage.is_covered_code_file("lib/app.ml"))
+        self.assertTrue(coverage.is_covered_code_file("dashboard/app.ts"))
+        self.assertTrue(coverage.is_covered_code_file("config/runtime.toml"))
+
+    def test_non_code_assets_excluded_from_covered_files(self):
+        # Regression for #23082: a CSS-only dashboard PR must not be flagged as
+        # "covered code with no test". Non-code assets are filtered out before
+        # the added-line count, so only real code files remain.
+        with mock.patch(
+            "check_test_coverage.run_diff_or_fail",
+            return_value=(
+                "dashboard/src/styles/app-shell-v2.css\n"
+                "dashboard/index.html\n"
+                "lib/README.md\n"
+                "dashboard/public/logo.svg\n"
+                "lib/app.ml\n"
+            ),
+        ):
+            with mock.patch.dict(os.environ, {"GITHUB_BASE_REF": "main"}, clear=False):
+                self.assertEqual(
+                    coverage.get_changed_covered_files(),
+                    ["lib/app.ml"],
+                )
+
     def test_test_file_predicate_does_not_match_production_checks(self):
         self.assertFalse(coverage.is_test_file("lib/exec/capability_check_typed.ml"))
         self.assertFalse(

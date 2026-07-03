@@ -10,6 +10,6 @@
  (name masc_fusion_core)
  (public_name masc.fusion_core)
  (wrapped false)
- (libraries yojson otoml)
+ (libraries fs_compat masc_log yojson otoml)
  (preprocess
   (pps ppx_deriving_yojson ppx_deriving.show ppx_deriving.eq)))

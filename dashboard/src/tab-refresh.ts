@@ -34,6 +34,14 @@ async function refreshSurfaceReadinessSurface(): Promise<void> {
   await refreshSurfaceReadiness()
 }
 
+async function refreshActiveKeeperChatSurface(): Promise<void> {
+  const { refreshActiveKeeperChatHistory } = await import('./keeper-runtime')
+  // Guard-respecting (non-force): a no-op while the open keeper's transcript
+  // is already hydrated, so route visits and the periodic refresh do not poll
+  // the history endpoint. The SSE reconnect path forces its own re-hydration.
+  refreshActiveKeeperChatHistory()
+}
+
 type RefreshTask =
   | 'shell'
   | 'namespaceTruth'
@@ -50,6 +58,7 @@ type RefreshTask =
   | 'operatorSnapshot'
   | 'operatorWorkspaceDigest'
   | 'fusionRuns'
+  | 'activeKeeperChat'
 
 // Monitor data ownership is partitioned by section. Two tiers:
 //   Tier 1 — visible lanes (agents / fleet-health / runtime / observatory)
@@ -67,7 +76,11 @@ export function refreshPlanForRoute(routeState: Pick<RouteState, 'tab' | 'params
     case 'overview':
       return ['shell', 'namespaceTruth', 'missionSnapshot', 'execution']
     case 'keepers':
-      return ['namespaceTruth', 'execution', 'missionSnapshot']
+      // 'activeKeeperChat' re-hydrates the open conversation panel's transcript
+      // (guard-respecting no-op when already loaded). It matters on SSE
+      // reconnect: the route refresh runs after a disconnect and recovers the
+      // open keeper's history when replayed events fell outside the buffer.
+      return ['namespaceTruth', 'execution', 'missionSnapshot', 'activeKeeperChat']
     case 'board':
       return ['board']
     case 'fusion':
@@ -172,6 +185,7 @@ const REFRESHERS: Record<RefreshTask, (routeState: Pick<RouteState, 'tab' | 'par
   operatorSnapshot: () => { void refreshOperatorSnapshot({ force: true }) },
   operatorWorkspaceDigest: () => { void refreshOperatorWorkspaceDigest({ force: true }) },
   fusionRuns: () => { void refreshFusionRuns() },
+  activeKeeperChat: () => { void refreshActiveKeeperChatSurface() },
 }
 
 // --- Tab visit counter (localStorage-persisted) ---

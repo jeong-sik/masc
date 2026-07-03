@@ -239,7 +239,37 @@
 .fl-tick .v.ok { color: var(--status-ok); }
 .fl-tick .v.warn { color: var(--status-warn); }
 
+/* selected-runtime attention list — canonical ATTENTION (sev-coded) */
+.fl-attn-list { display: flex; flex-direction: column; gap: 7px; }
+.fl-attn-item {
+  display: flex; align-items: flex-start; gap: 8px;
+  font-size: 11.5px; line-height: 1.45; color: var(--text-mid); text-wrap: pretty;
+}
+.fl-attn-dot { flex: none; width: 6px; height: 6px; border-radius: 50%; margin-top: 5px; background: var(--text-dim); }
+.fl-attn-item[data-sev="warn"] .fl-attn-dot { background: var(--status-warn); }
+.fl-attn-item[data-sev="bad"]  .fl-attn-dot { background: var(--status-bad); }
+.fl-attn-item[data-sev="bad"] { color: var(--text-bright); }
+
+/* ── responsive: progressively shed columns instead of letting strings collide ── */
+/* mid width — aside still present, but main is tight: drop 최근 도구 first */
+@media (max-width: 1320px) and (min-width: 1101px) {
+  .fl-shell { --fl-cols: minmax(168px, 1.3fr) 168px 132px 120px; }
+  .fl-rhead span:nth-child(4), .fl-row .fl-tool { display: none; }
+}
+
 @media (max-width: 1100px) {
   .fl-body { grid-template-columns: 1fr; }
   .fl-aside { display: none; }
+}
+
+/* narrow — collapse the row to identity · state · action; ctx/tool move out of the way */
+@media (max-width: 720px) {
+  .fl-shell { --fl-cols: minmax(0, 1fr) 150px 96px; --fl-gap: 10px; }
+  .fl-rhead span:nth-child(3), .fl-rhead span:nth-child(4) { display: none; }
+  .fl-row .fl-ctx, .fl-row .fl-tool { display: none; }
+  .fl-top { height: auto; flex-wrap: wrap; padding: 12px 16px; gap: 10px 14px; }
+  .fl-spacer { display: none; }
+  .fl-health { width: 100%; order: 3; }
+  .fl-rhead, .fl-row, .fl-group { padding-left: 16px; padding-right: 16px; }
+  .fl-foot { gap: 14px; overflow-x: auto; }
 }

@@ -5198,6 +5198,8 @@ let expected_compaction_snapshot_event_class = function
   | Runtime_manifest.Turn_started
   | Runtime_manifest.Phase_gate_decided
   | Runtime_manifest.Runtime_routed
+  | Runtime_manifest.Runtime_completed
+  | Runtime_manifest.Runtime_failed
   | Runtime_manifest.Pre_dispatch_blocked
   | Runtime_manifest.Provider_lane_resolved
   | Runtime_manifest.Provider_attempt_started

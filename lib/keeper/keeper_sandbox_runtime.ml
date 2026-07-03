@@ -512,7 +512,7 @@ let docker_image_present_with_class ~image ~timeout_sec =
   then
     Error
       { message = "keeper sandbox docker image is not configured"
-      ; failure_class = "image_config_missing"
+      ; failure_class = Image_config_missing
       }
   else (
     let argv = docker_command_argv () @ [ "image"; "inspect"; image ] in
@@ -563,8 +563,8 @@ let ensure_keeper_sandbox_image_present ~image ~timeout_sec =
 
 let docker_image_preflight_error_code (failure : classified_error) =
   match failure.failure_class with
-  | "image_missing" -> "image_not_found"
-  | failure_class -> failure_class
+  | Image_missing -> "image_not_found"
+  | failure_class -> Keeper_sandbox_runtime_classify.docker_failure_class_to_string failure_class
 ;;
 
 let docker_image_preflight_failure_message ~prefix failure =
@@ -788,10 +788,11 @@ let docker_preflight ~timeout_sec () =
       [ docker_runtime_failure_class
       ; image_failure_class
       ; command_failure_class
-      ; (if hardening_ok then None else Some "docker_hardening_error")
-      ; (if missing_commands = [] then None else Some "image_required_command_missing")
+      ; (if hardening_ok then None else Some Docker_hardening_error)
+      ; (if missing_commands = [] then None else Some Image_required_command_missing)
       ]
       |> List.filter_map (fun item -> item)
+      |> List.map Keeper_sandbox_runtime_classify.docker_failure_class_to_string
       |> List.filter (fun s -> s <> "")
       |> Json_util.dedupe_keep_order
     in

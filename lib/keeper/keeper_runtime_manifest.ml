@@ -211,6 +211,8 @@ let clock_lane_of_event = function
   | Turn_finished ->
     "keeper"
   | Runtime_routed
+  | Runtime_completed
+  | Runtime_failed
   | Provider_lane_resolved ->
     "masc_policy_runtime"
   | Provider_attempt_started

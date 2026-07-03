@@ -17,12 +17,12 @@ let with_env key value f =
       | None -> Unix.putenv key "")
     f
 
-(* [Unix.unsetenv] is not available portably, so the default-unset case
-   is exercised by the matching [quarantine_enabled] branch below via
-   the "empty string treated as disabled" rule. The code path for the
-   [None] arm of [Sys.getenv_opt] is trivially [true] and not tested
-   directly here — [test_quarantine_explicit_*] pins the non-default
-   paths. *)
+(* OCaml 5.5 adds [Unix.unsetenv], but this repo still supports the 5.4
+   floor. The default-unset case is exercised by the matching
+   [quarantine_enabled] branch below via the "empty string treated as disabled"
+   rule. The code path for the [None] arm of [Sys.getenv_opt] is trivially
+   [true] and not tested directly here — [test_quarantine_explicit_*] pins the
+   non-default paths. *)
 let test_quarantine_empty_treated_as_disabled () =
   with_env "MASC_BOARD_VOTE_QUARANTINE" "" (fun () ->
     check bool "empty string disables (explicit operator opt-out)"

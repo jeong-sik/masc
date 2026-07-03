@@ -133,6 +133,13 @@ export function deriveKeeperLiveTruth({
   // FsmHub still renders raw lanes below this panel.
   const fiberLabel = fiberAlive ? 'fiber alive' : 'fiber not proven'
   const liveTurnLabel = projection.activeTurn ? `${projection.turnPhase} live` : 'no live turn'
+  // A-PR-2 G2: surface the running turn's model + in-flight tool count when a
+  // live turn is present. A pinned backend may omit these fields; render that
+  // as unknown rather than inventing an idle-looking zero.
+  const liveTurn = compositeSnapshot?.live_turn ?? null
+  const liveTurnModelDetail = liveTurn
+    ? ` · model ${liveTurn.selected_model ?? '—'} · tools ${liveTurn.active_tool_count ?? '—'}`
+    : ''
   return {
     headline: projection.headline,
     tone: projection.tone,
@@ -155,7 +162,7 @@ export function deriveKeeperLiveTruth({
       {
         label: '현재 턴',
         value: liveTurnLabel,
-        detail: `${compositeSnapshot ? (compositeSnapshot.is_live === true ? 'is_live=true' : 'is_live=false') : 'is_live=unknown'} · ${projection.turnPhase} · ${projection.idleLabel}`,
+        detail: `${compositeSnapshot ? (compositeSnapshot.is_live === true ? 'is_live=true' : 'is_live=false') : 'is_live=unknown'} · ${projection.turnPhase} · ${projection.idleLabel}${liveTurnModelDetail}`,
         tone: projection.activeTurn ? 'ok' : 'neutral',
       },
       {

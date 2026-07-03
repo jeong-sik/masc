@@ -187,6 +187,40 @@ describe('KeeperWorkspaceRail', () => {
     expect(container.textContent).not.toContain('조정 정보 미수신')
   })
 
+  it('renders undeclared runtime capabilities as unknown, not disabled', async () => {
+    vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
+      providers: [
+        {
+          provider: 'runpod.gemma',
+          runtime_id: 'runpod.gemma',
+          model_api_name: 'gemma',
+          tools_support: true,
+          thinking_support: false,
+          streaming: true,
+          capabilities_declared: false,
+          supports_multimodal_inputs: false,
+          supports_image_input: false,
+          supports_reasoning_budget: false,
+          thinking_control_format: 'none',
+          models: ['gemma'],
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof fetchRuntimeProviders>>)
+
+    const k = mkKeeper({ runtime_canonical: 'runpod.gemma' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+
+    await waitFor(() => {
+      expect(container.textContent).toContain('gemma')
+    })
+
+    const multimodalFlag = Array.from(container.querySelectorAll('.rtc-flag')).find(node =>
+      node.textContent?.includes('multimodal'),
+    )
+    expect(multimodalFlag).not.toBeUndefined()
+    expect(multimodalFlag?.textContent).toContain('—')
+  })
+
   it('renders the context-window occupancy percent', () => {
     const { container } = render(html`<${KeeperWorkspaceRail} keeper=${keeper} />`)
     const meter = container.querySelector('.meter') as HTMLElement | null

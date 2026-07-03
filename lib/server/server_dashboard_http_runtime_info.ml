@@ -1450,10 +1450,15 @@ let thinking_control_format_wire : Runtime_schema.thinking_control_format -> str
 let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
   let models = [ rt.model.api_name ] in
-  (* [capabilities] is absent for models without a [\[models.<id>.capabilities\]]
-     table; fall back to the all-false default so the projection is total. *)
-  let caps =
-    Option.value rt.model.capabilities ~default:Runtime_schema.model_capabilities_default
+  let capabilities_declared, caps =
+    match rt.model.capabilities with
+    | Some caps -> true, caps
+    | None ->
+      ( false
+      , Runtime_schema.model_capabilities_default
+        (* DET-OK: absent [models.<id>.capabilities] is exposed below as
+           [capabilities_declared=false]; the all-false record only keeps this
+           read-only dashboard projection total, it is not a policy default. *) )
   in
   `Assoc
     [ "provider", `String rt.id
@@ -1477,6 +1482,7 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
       (* Additive capability projection for the per-keeper runtime capability
          card (dashboard keeper-workspace-rail rtc-card): multimodal input +
          effort adjustability read-only. *)
+    ; "capabilities_declared", `Bool capabilities_declared
     ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
     ; "supports_image_input", `Bool caps.supports_image_input
     ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget

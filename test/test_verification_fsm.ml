@@ -489,15 +489,23 @@ let test_submit_typed_evidence_split_uses_submitted_refs () =
     in
     let raw_required_sources =
       match task.contract with
-      | Some c -> c.verify_gate_evidence @ c.required_evidence
+      | Some c ->
+        Alcotest.(check (list string))
+          "verify-only fixture keeps required_evidence empty"
+          []
+          c.required_evidence;
+        c.verify_gate_evidence @ c.required_evidence
       | None -> Alcotest.fail "fixture task has no contract"
     in
-    (* Derive the expected value from the raw contract so the test does not
-       merely mirror the production projection function. *)
-    let expected_required_artifacts = raw_required_sources in
+    (* The production projection trims and de-duplicates into deterministic
+       order; this fixture has no blanks/placeholders, so sorting the raw
+       contract sources is enough without mirroring the projection helper. *)
+    let expected_required_artifacts =
+      List.sort_uniq String.compare raw_required_sources
+    in
     Alcotest.(check (list string))
-      "concrete_verification_evidence projection matches raw contract sources"
-      raw_required_sources
+      "concrete_verification_evidence projection matches raw contract artifacts"
+      expected_required_artifacts
       (Task.Completion_review.concrete_verification_evidence task).required_artifacts;
     Alcotest.(check (list string))
       "legacy evidence_refs preserve submitted refs"

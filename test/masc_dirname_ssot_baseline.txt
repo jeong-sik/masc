@@ -25,5 +25,6 @@ lib/server/server_routes_http_routes_workspace.ml	".masc"; ".masc-ide"; ".worktr
 lib/tool_agent_timeline.ml	".masc/agents/*.json + .masc/tasks/*.json + \
 lib/tool_agent_timeline.ml	`String ".masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl";
 lib/tool_agent_timeline.ml	`String ".masc/agents/*.json";
+lib/tool_agent_timeline.ml	`String ".masc/keeper_chat/*.jsonl";
 lib/tool_agent_timeline.ml	`String ".masc/messages/*.json";
 lib/tool_agent_timeline.ml	`String ".masc/tasks/*.json";

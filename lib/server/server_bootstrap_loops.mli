@@ -8,7 +8,9 @@
     the work lives in private helpers in the [.ml]. *)
 
 val install_tooling :
-  governance_level:string -> Mcp_server.server_state -> unit
+  governance_level:string ->
+  Mcp_server.server_state ->
+  unit
 (** Register the keeper / governance / cost tools with [server_state]
     according to [governance_level] (e.g. ["restricted"], ["full"]).
     Idempotent; safe to call once per server instance. *)

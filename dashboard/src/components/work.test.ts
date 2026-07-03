@@ -134,6 +134,7 @@ function goalTreeNode(overrides: Partial<GoalTreeNode> = {}): GoalTreeNode {
       state: 'unmeasured',
       basis: 'unmeasured',
       metric: null,
+      metric_evaluation: 'absent',
       target_value: null,
       target_parse_status: 'absent',
       unit: 'unknown',

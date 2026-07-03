@@ -259,17 +259,21 @@ let default_hydrate_tail_lines = 512
    count is never silently truncated. *)
 let max_hydrate_tail_lines = 8192
 
-(** Extract the [turn] field from a trajectory JSONL line.
-    Preserves the historical semantics: a parseable line with a missing or
-    non-int [turn] (e.g. the trajectory_summary row) is read as turn 0.
-    Returns [None] only when the line does not parse as JSON — such lines are
-    warned about and skipped, never counted. *)
+(** Extract the [turn] field from a trajectory JSONL line.  Returns [None] for
+    non-entry rows, malformed [turn] fields, and invalid JSON.  Such lines are
+    skipped rather than counted or treated as turn-boundaries. *)
 let entry_turn_of_line ~(trace_id : string) (line : string) : int option =
   match Yojson.Safe.from_string line with
   | json -> (
       match Json_util.assoc_member_opt "turn" json with
       | Some (`Int n) -> Some n
-      | _ -> Some 0)
+      | None -> None
+      | Some other ->
+          Log.Keeper.warn
+            "Skipping trajectory line with non-int turn during next_round \
+             (trace_id=%s, turn_kind=%s)"
+            trace_id (Yojson.Safe.to_string other);
+          None)
   | exception Yojson.Json_error msg ->
       Log.Keeper.warn
         "Failed to parse trajectory JSON during next_round (trace_id=%s): %s"

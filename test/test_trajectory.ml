@@ -661,6 +661,15 @@ let next_round_row ~turn ~round : Yojson.Safe.t =
       ("cost_usd", `Float 0.0);
     ]
 
+let next_round_summary_row : Yojson.Safe.t =
+  `Assoc
+    [
+      ("type", `String "trajectory_summary");
+      ("keeper_name", `String "k");
+      ("trace_id", `String "t");
+      ("generation", `Int 0);
+    ]
+
 (* Append rows to the trajectory JSONL for a keeper/trace. Uses a single append
    fd so the large-turn fixture stays fast, and appends (not truncates) so the
    cache-hit test can add rows after hydration. *)
@@ -723,6 +732,21 @@ let test_next_round_counts_current_turn () =
         ~turn:7
     in
     Alcotest.(check int) "3 current-turn entries -> round 4" 4 r)
+
+let test_next_round_ignores_summary_rows_without_turn () =
+  with_tmpdir (fun dir ->
+    Trajectory.reset_round_counters_for_testing ();
+    append_trajectory_rows ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-summary"
+      [
+        next_round_row ~turn:7 ~round:0;
+        next_round_row ~turn:7 ~round:1;
+        next_round_summary_row;
+      ];
+    let r =
+      Trajectory.next_round ~masc_root:dir ~keeper_name:"k"
+        ~trace_id:"t-summary" ~turn:7
+    in
+    Alcotest.(check int) "summary row skipped -> round 3" 3 r)
 
 let test_next_round_widens_past_initial_window () =
   with_tmpdir (fun dir ->
@@ -985,6 +1009,8 @@ let () =
         test_next_round_past_turns_only;
       Alcotest.test_case "counts current-turn entries" `Quick
         test_next_round_counts_current_turn;
+      Alcotest.test_case "ignores summary rows without turn" `Quick
+        test_next_round_ignores_summary_rows_without_turn;
       Alcotest.test_case "widens window past initial 512" `Quick
         test_next_round_widens_past_initial_window;
       Alcotest.test_case "full-scan fallback past cap" `Quick

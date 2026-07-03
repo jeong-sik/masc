@@ -21,12 +21,18 @@ let regular_file_is_executable path =
   | Unix.Unix_error _ | Sys_error _ -> false
 ;;
 
+let search_path_separator = if Sys.win32 then ';' else ':'
+
+let split_search_path ?(separator = search_path_separator) raw_path =
+  String.split_on_char separator raw_path
+;;
+
 let path_has_executable ?(getenv = Sys.getenv_opt) name =
   match getenv "PATH" with
   | None -> false
   | Some raw_path ->
     raw_path
-    |> String.split_on_char ':'
+    |> split_search_path
     |> List.exists (fun dir ->
       (not (String.equal dir ""))
       && regular_file_is_executable (Filename.concat dir name))

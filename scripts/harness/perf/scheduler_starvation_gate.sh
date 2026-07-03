@@ -106,6 +106,7 @@ mkdir -p "$RUN_DIR"
 CSV_FILE="$RUN_DIR/levels.csv"
 SUMMARY_FILE="$RUN_DIR/summary.json"
 SERVER_LOG="$RUN_DIR/server.log"
+CURL_ERROR_FILE="$RUN_DIR/curl_errors.log"
 echo "level_hogs,probes,p50_ms,p95_ms,max_ms,timeouts" > "$CSV_FILE"
 
 HOG_PIDS=()
@@ -163,9 +164,12 @@ kill_inproc_load() {
 # One probe -> prints TTFB in seconds (a timeout/failure prints PROBE_MAX_SEC).
 probe_once() {
   local url="$1" t
-  t="$(curl -sS -o /dev/null -w '%{time_starttransfer}' --max-time "$PROBE_MAX_SEC" "$url" 2>/dev/null)" \
+  if ! t="$(curl -sS -o /dev/null -w '%{time_starttransfer}' --max-time "$PROBE_MAX_SEC" "$url" 2>>"$CURL_ERROR_FILE")"; then
+    printf '%s\n' "$PROBE_MAX_SEC"
+    return
+  fi
+  awk -v v="$t" 'BEGIN { exit !(v ~ /^[0-9]+([.][0-9]+)?$/) }' \
     || t="$PROBE_MAX_SEC"
-  [[ "$t" =~ ^[0-9]+([.][0-9]+)?$ ]] || t="$PROBE_MAX_SEC"
   printf '%s\n' "$t"
 }
 

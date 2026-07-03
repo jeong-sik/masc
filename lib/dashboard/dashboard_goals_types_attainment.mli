@@ -11,7 +11,8 @@ val metric_evaluation_to_string : metric_evaluation -> string
 
 (** [metric_evaluation_of_goal goal] is [Metric_unevaluated] when the goal
     declares a metric (no evaluator is wired to measure it) and [Metric_absent]
-    otherwise. Exposed for unit testing. *)
+    otherwise. Used when emitting the attainment JSON and as a fallback when
+    the [metric_evaluation] field is absent from an attainment payload. *)
 val metric_evaluation_of_goal : Goal_store.goal -> metric_evaluation
 
 val contains_ci : string -> string -> bool

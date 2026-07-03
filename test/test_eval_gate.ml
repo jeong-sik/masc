@@ -55,6 +55,27 @@ let test_detect_case_insensitive () =
   | None -> Alcotest.fail "Should detect RM -RF (case insensitive)"
 
 (* ================================================================ *)
+(* Test: extract_all_strings_from_json — RFC-0305 fail-closed parse  *)
+(* ================================================================ *)
+
+let test_extract_valid_json_returns_strings () =
+  match Eval_gate.extract_all_strings_from_json {|{"cmd": "rm -rf /tmp/x"}|} with
+  | Some s ->
+      Alcotest.(check bool) "valid json yields the string leaves" true
+        (let r = String.lowercase_ascii s in
+         try ignore (Str.search_forward (Str.regexp_string "rm -rf") r 0); true
+         with Not_found -> false)
+  | None -> Alcotest.fail "valid json must parse to Some"
+
+let test_extract_malformed_json_is_none () =
+  (* RFC-0305: unparseable args must surface as [None] (fail-closed at the
+     caller), NOT collapse to "" which would skip the destructive scan. *)
+  match Eval_gate.extract_all_strings_from_json {|{"cmd": "rm -rf /" |} with
+  | None -> ()
+  | Some s ->
+      Alcotest.failf "malformed json must be None, got Some %S (fail-open)" s
+
+(* ================================================================ *)
 (* Test: pre_check — deny list                                       *)
 (* ================================================================ *)
 
@@ -411,6 +432,10 @@ let () =
       Alcotest.test_case "safe command" `Quick test_detect_safe_command;
       Alcotest.test_case "detect drop table" `Quick test_detect_drop_table;
       Alcotest.test_case "case insensitive" `Quick test_detect_case_insensitive;
+      Alcotest.test_case "extract valid json → Some" `Quick
+        test_extract_valid_json_returns_strings;
+      Alcotest.test_case "extract malformed json → None (RFC-0305 fail-closed)" `Quick
+        test_extract_malformed_json_is_none;
     ]);
     ("pre_check", [
       Alcotest.test_case "deny list" `Quick test_pre_deny_list;

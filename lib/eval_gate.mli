@@ -69,6 +69,12 @@ val detect_evasion : string -> (string * string) option
     Thin wrapper over {!detect_evasion_typed} that drops the typed
     kind — preserved for callers that consume the string-tuple shape. *)
 
+val extract_all_strings_from_json : string -> string option
+(** Concatenate every string leaf of a JSON args payload for destructive-pattern
+    scanning. [None] when [json_str] is unparseable — RFC-0305: the caller must
+    fail closed rather than scan an empty string, which would let a malformed
+    args payload skip the destructive check. *)
+
 (** {1 Pre-execution gate} *)
 
 val pre_check :

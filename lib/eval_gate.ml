@@ -250,7 +250,13 @@ let detect_destructive (policy : Destructive_ops_policy.t) (command : string)
 
     First rejection wins — remaining checks are skipped. *)
 
-let extract_all_strings_from_json (json_str : string) : string =
+(* RFC-0305: return [None] on unparseable JSON rather than [""].  The caller
+   scans the result for destructive patterns; collapsing a parse failure to an
+   empty string let a malformed args payload skip the destructive check
+   (no match on ""), which is fail-open for a bash-capable tool.  A malformed
+   args_json on a destructive tool is already abnormal, so the caller rejects
+   it fail-closed. *)
+let extract_all_strings_from_json (json_str : string) : string option =
   try
     let rec go = function
       | `String s -> s
@@ -258,8 +264,8 @@ let extract_all_strings_from_json (json_str : string) : string =
       | `Assoc fields -> String.concat " " (List.map (fun (_, v) -> go v) fields)
       | _ -> ""
     in
-    go (Yojson.Safe.from_string json_str)
-  with Yojson.Json_error _ -> ""
+    Some (go (Yojson.Safe.from_string json_str))
+  with Yojson.Json_error _ -> None
 
 let pre_check
     ~(config : gate_config)
@@ -321,14 +327,20 @@ let pre_check
               (* 6. Destructive pattern check (bash tools only) *)
               if config.destructive_check_enabled
                  && Tool_capability.has Tool_capability.Destructive tool_name then
-                let cmd_str = extract_all_strings_from_json args_json
-                in
-                begin match detect_destructive destructive_ops_policy cmd_str with
-                | Some (pattern, desc) ->
-                    Trajectory.Reject (Printf.sprintf
-                      "destructive pattern in %s: '%s' (%s)" tool_name pattern desc)
-                | None -> Trajectory.Pass
-                end
+                (match extract_all_strings_from_json args_json with
+                 | None ->
+                     (* RFC-0305: unparseable args on a destructive tool cannot
+                        be screened — fail closed rather than scan "". *)
+                     Trajectory.Reject (Printf.sprintf
+                       "unparseable args for destructive tool '%s' (fail-closed)"
+                       tool_name)
+                 | Some cmd_str ->
+                     begin match detect_destructive destructive_ops_policy cmd_str with
+                     | Some (pattern, desc) ->
+                         Trajectory.Reject (Printf.sprintf
+                           "destructive pattern in %s: '%s' (%s)" tool_name pattern desc)
+                     | None -> Trajectory.Pass
+                     end)
               else
                 Trajectory.Pass
           end
@@ -336,23 +348,20 @@ let pre_check
         (* No trajectory accumulator — skip entropy and turn-limit checks *)
         if config.destructive_check_enabled
            && Tool_capability.has Tool_capability.Destructive tool_name then
-          let cmd_str =
-            try
-              let rec extract_strings = function
-                | `String s -> s
-                | `List lst -> String.concat " " (List.map extract_strings lst)
-                | `Assoc fields -> String.concat " " (List.map (fun (_, v) -> extract_strings v) fields)
-                | _ -> ""
-              in
-              extract_strings (Yojson.Safe.from_string args_json)
-            with Yojson.Json_error _ -> ""
-          in
-          begin match detect_destructive destructive_ops_policy cmd_str with
-          | Some (pattern, desc) ->
-              Trajectory.Reject (Printf.sprintf
-                "destructive pattern in %s: '%s' (%s)" tool_name pattern desc)
-          | None -> Trajectory.Pass
-          end
+          (* Reuse [extract_all_strings_from_json] (was a duplicated inline
+             extractor); RFC-0305: [None] on unparseable args → fail closed. *)
+          (match extract_all_strings_from_json args_json with
+           | None ->
+               Trajectory.Reject (Printf.sprintf
+                 "unparseable args for destructive tool '%s' (fail-closed)"
+                 tool_name)
+           | Some cmd_str ->
+               begin match detect_destructive destructive_ops_policy cmd_str with
+               | Some (pattern, desc) ->
+                   Trajectory.Reject (Printf.sprintf
+                     "destructive pattern in %s: '%s' (%s)" tool_name pattern desc)
+               | None -> Trajectory.Pass
+               end)
         else
           Trajectory.Pass
   end

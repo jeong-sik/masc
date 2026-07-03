@@ -88,6 +88,36 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (Lsp.resolve_relative ~base "file:///workspace/masc/sub%2F..%2F..%2Fetc/passwd")
 ;;
 
+let test_file_uri_resolution_rejects_symlink_escape () =
+  let base = Filename.temp_dir "masc-lsp-base-" "" in
+  let outside = Filename.temp_dir "masc-lsp-outside-" "" in
+  let outside_file = Filename.concat outside "secret.ml" in
+  let link = Filename.concat base "link.ml" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink link with _ -> ());
+      (try Unix.unlink outside_file with _ -> ());
+      (try Unix.rmdir outside with _ -> ());
+      (try Unix.rmdir base with _ -> ()))
+    (fun () ->
+       let oc = open_out outside_file in
+       close_out oc;
+       Unix.symlink outside_file link;
+       check
+         (option string)
+         "symlink target outside workspace rejected"
+         None
+         (Lsp.resolve_relative ~base ("file://" ^ link)))
+;;
+
+let test_dispatch_workers_are_parallelized () =
+  check
+    bool
+    "more than one worker keeps slow LSP init off the read path"
+    true
+    (Lsp.inbound_dispatch_worker_count > 1)
+;;
+
 (* RFC-0281 Phase 2: [/api/v1/ide/lsp] must be a typed WebSocket-upgrade
    route ([Router.Ws]).  Only a Ws route receives the Gluten [upgrade]
    capability, so a regression to [Router.Plain] would silently
@@ -237,6 +267,12 @@ let test_write_and_unknown_methods_rejected () =
      Alcotest.fail "unknown method must stay diagnostic, not coerce")
 ;;
 
+let test_unknown_language_is_typed () =
+  match Lsp.resolve_lang "README.unknown_extension_for_lsp" with
+  | Lsp.Unknown_lang -> ()
+  | Lsp.Known_lang lang -> Alcotest.fail ("unexpected known lang: " ^ lang)
+;;
+
 let rec json_contains_key key = function
   | `Assoc fields ->
     List.exists (fun (k, v) -> String.equal k key || json_contains_key key v) fields
@@ -284,6 +320,10 @@ let () =
             test_workspace_root_initialize_stays_in_base
         ; test_case "file uri resolution is workspace scoped" `Quick
             test_file_uri_resolution_is_workspace_scoped
+        ; test_case "file uri resolution rejects symlink escape" `Quick
+            test_file_uri_resolution_rejects_symlink_escape
+        ; test_case "dispatch workers are parallelized" `Quick
+            test_dispatch_workers_are_parallelized
         ; test_case "/api/v1/ide/lsp is a Ws upgrade route" `Quick
             test_lsp_route_is_ws
         ] )
@@ -301,6 +341,7 @@ let () =
       , [ test_case "read-only methods forward" `Quick test_read_methods_forward
         ; test_case "write/unknown methods are rejected" `Quick
             test_write_and_unknown_methods_rejected
+        ; test_case "unknown language is typed" `Quick test_unknown_language_is_typed
         ; test_case "overlay code actions carry no write edit" `Quick
             test_code_actions_have_no_workspace_edit
         ] )

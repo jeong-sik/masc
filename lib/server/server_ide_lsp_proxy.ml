@@ -23,7 +23,29 @@ type ws_send_msg =
   | Client_text of string
   | Stop_client_writer
 
-let send_queue_capacity = 128
+type inbound_dispatch_msg =
+  | Dispatch_text of string
+  | Stop_dispatch_worker
+
+module Lsp_proxy_limits = struct
+  (* Per-connection backpressure limits.  These are named here because the
+     ws-direct endpoint owns frame sizing, while this module owns post-frame
+     LSP dispatch and outbound writes. *)
+  let outbound_send_queue_capacity = 128
+  let inbound_dispatch_queue_capacity = outbound_send_queue_capacity
+
+  (* More than one dispatch worker keeps a slow LSP spawn/init from stopping
+     unrelated status/lifecycle messages on the WebSocket reader path. *)
+  let inbound_dispatch_worker_count = 4
+
+  (* LSP initialize is the only request whose timeout is owned by this proxy;
+     downstream request timeouts belong to the language server/client contract. *)
+  let initialize_timeout_sec = 10.0
+end
+
+type resolved_lang =
+  | Known_lang of string
+  | Unknown_lang
 
 (** Per-connection state shared across frame handler and relay fibers.
 
@@ -120,6 +142,7 @@ type conn_state =
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
   ; workspace_root : string ref
   ; send_queue : ws_send_msg Eio.Stream.t
+  ; dispatch_queue : inbound_dispatch_msg Eio.Stream.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; disconnected : bool Atomic.t
         (* RFC-0287: fragment reassembly + size caps now live in the ws-direct
@@ -164,7 +187,24 @@ let spawn_lock_for cs lang_id =
 
 let stop_send_writer cs =
   try Eio.Fiber.fork ~sw:cs.sw (fun () -> Eio.Stream.add cs.send_queue Stop_client_writer)
-  with _ -> ()
+  with
+  | exn ->
+    Log.Server.warn
+      "LSP WebSocket writer stop signal failed: %s"
+      (Printexc.to_string exn)
+;;
+
+let stop_dispatch_workers cs =
+  try
+    Eio.Fiber.fork ~sw:cs.sw (fun () ->
+      for _ = 1 to Lsp_proxy_limits.inbound_dispatch_worker_count do
+        Eio.Stream.add cs.dispatch_queue Stop_dispatch_worker
+      done)
+  with
+  | exn ->
+    Log.Server.warn
+      "LSP dispatch worker stop signal failed: %s"
+      (Printexc.to_string exn)
 ;;
 
 (** Signal connection end.  Idempotent (guarded by [disconnected]).
@@ -191,6 +231,7 @@ let disconnect cs =
         processes)
     in
     List.iter Lsp_process_manager.shutdown processes;
+    stop_dispatch_workers cs;
     stop_send_writer cs)
 ;;
 
@@ -215,6 +256,11 @@ let start_send_writer cs =
       Log.Server.warn "LSP WebSocket writer stopped: %s" (Printexc.to_string exn);
       disconnect cs;
       `Stop_daemon)
+;;
+
+let enqueue_dispatch cs msg =
+  if not (Atomic.get cs.disconnected)
+  then Eio.Stream.add cs.dispatch_queue (Dispatch_text msg)
 ;;
 
 (** JSON-RPC request ID — LSP spec allows integer or string. *)
@@ -400,6 +446,31 @@ let fpath_within ~base path =
   | _ -> None
 ;;
 
+let relative_to_string rel =
+  let s = Fpath.to_string rel in
+  if String.equal s "." then "" else s
+;;
+
+let realpath_scoped_relative ~base relative =
+  let lexical =
+    if String.equal relative ""
+    then Fpath.v base
+    else Fpath.append (Fpath.v base) (Fpath.v relative)
+  in
+  try
+    let resolved = Fs_compat.realpath (Fpath.to_string lexical) in
+    match fpath_within ~base resolved with
+    | Some rel -> Some (relative_to_string rel)
+    | None -> None
+  with
+  | Eio.Cancel.Cancelled _ as exn -> raise exn
+  | _ ->
+    (* Unsaved IDE buffers often have no filesystem target yet.  Lexical
+       containment is still enough in that case; the realpath guard applies
+       when a target exists and can resolve symlinks. *)
+    Some relative
+;;
+
 let workspace_root_for_initialize ~base_path root_uri =
   let candidate = root_uri |> path_of_file_uri in
   match
@@ -427,10 +498,15 @@ let resolve_relative ~base uri =
     | Ok full when Fpath.is_abs full ->
       (match fpath_within ~base (Fpath.to_string full) with
        | Some rel ->
-         let s = Fpath.to_string rel in
-         if String.equal s "." then Some "" else Some s
+         realpath_scoped_relative ~base (relative_to_string rel)
        | None -> None)
     | _ -> None)
+;;
+
+let resolve_lang relative =
+  match Lsp_process_manager.lang_of_path relative with
+  | "unknown" -> Unknown_lang
+  | lang_id -> Known_lang lang_id
 ;;
 
 let initialize_capabilities_json () =
@@ -525,10 +601,17 @@ let ensure_lsp_process cs lang_id =
          in
          let init_result =
            try
-             Ok (Eio.Time.with_timeout_exn cs.clock 10.0 (fun () ->
-               Eio.Promise.await promise))
+             Ok
+               (Eio.Time.with_timeout_exn
+                  cs.clock
+                  Lsp_proxy_limits.initialize_timeout_sec
+                  (fun () -> Eio.Promise.await promise))
            with Eio.Time.Timeout ->
-             Error (Printf.sprintf "LSP initialize timeout for %s (10s)" lang_id)
+             Error
+               (Printf.sprintf
+                  "LSP initialize timeout for %s (%.0fs)"
+                  lang_id
+                  Lsp_proxy_limits.initialize_timeout_sec)
          in
          (match init_result with
           | Ok (Ok _) ->
@@ -628,6 +711,10 @@ let classify_forwarded_method method_ =
   | "textDocument/willSaveWaitUntil"
   | "workspace/executeCommand"
   | "workspace/applyEdit" -> Reject_write_adjacent
+  (* workspace/symbol and the LSP */resolve methods intentionally stay out of
+     the forward set: their payloads do not carry a [textDocument.uri], and this
+     multi-language proxy has no SSOT for selecting one server process. They are
+     rejected below as [Unknown_forwarded_method] with the original method name. *)
   | unknown -> Unknown_forwarded_method unknown
 ;;
 
@@ -639,10 +726,9 @@ let handle_codelens cs params id =
     let base = cs.base_path in
     let relative = resolve_relative ~base uri |> Option.value ~default:"" in
     let masc = Lsp_overlay_provider.codelenses ~base_dir:base ~file_path:relative in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -670,10 +756,9 @@ let handle_inlay_hint cs params id =
     let base = cs.base_path in
     let relative = resolve_relative ~base uri |> Option.value ~default:"" in
     let masc = Lsp_overlay_provider.inlay_hints ~base_dir:base ~file_path:relative in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -700,17 +785,16 @@ let handle_diagnostic cs params id =
   | Some uri ->
     let base = cs.base_path in
     let relative = resolve_relative ~base uri |> Option.value ~default:"" in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then (
+    (match resolve_lang relative with
+     | Unknown_lang ->
       let diags =
         Lsp_overlay_provider.diagnostics
           ~base_dir:base
           ~file_path:relative
           ~lsp_diagnostics:[]
       in
-      send_response cs id (`Assoc [ "items", `List diags ]))
-    else (
+      send_response cs id (`Assoc [ "items", `List diags ])
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -756,9 +840,8 @@ let handle_hover cs params id =
     let base = cs.base_path in
     let relative = resolve_relative ~base uri |> Option.value ~default:"" in
     let line = extract_line params |> Option.value ~default:(-1) in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then (
+    (match resolve_lang relative with
+     | Unknown_lang ->
       if line >= 0 && Lsp_overlay_provider.has_annotations_at_line ~base_dir:base ~file_path:relative ~line
       then (
         let enriched =
@@ -769,8 +852,8 @@ let handle_hover cs params id =
             (`Assoc [ ("contents", `Assoc [ ("kind", `String "markdown"); ("value", `String "") ]) ])
         in
         send_response cs id enriched)
-      else send_response cs id `Null)
-    else (
+      else send_response cs id `Null
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         (* Unified with the other handlers (task-1691): fall back to the MASC
@@ -827,10 +910,9 @@ let handle_definition cs params id =
         Lsp_overlay_provider.definition_links ~base_dir:base ~file_path:relative ~line
       else []
     in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -862,10 +944,9 @@ let handle_references cs params id =
           ~base_dir:base ~file_path:relative ~line ~include_declaration:true
       else []
     in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -896,10 +977,9 @@ let handle_completion cs params id =
         Lsp_overlay_provider.completion_items ~base_dir:base ~file_path:relative ~line
       else []
     in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -931,10 +1011,9 @@ let handle_code_action cs params id =
           ~base_dir:base ~file_path:relative ~line ~diagnostics:[]
       else []
     in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -960,10 +1039,9 @@ let handle_document_symbol cs params id =
     let base = cs.base_path in
     let relative = resolve_relative ~base uri |> Option.value ~default:"" in
     let masc = Lsp_overlay_provider.document_symbols ~base_dir:base ~file_path:relative in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -989,10 +1067,9 @@ let handle_folding_range cs params id =
     let base = cs.base_path in
     let relative = resolve_relative ~base uri |> Option.value ~default:"" in
     let masc = Lsp_overlay_provider.folding_ranges ~base_dir:base ~file_path:relative in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -1023,10 +1100,9 @@ let handle_document_highlight cs params id =
         Lsp_overlay_provider.document_highlights ~base_dir:base ~file_path:relative ~line
       else []
     in
-    let lang_id = Lsp_process_manager.lang_of_path relative in
-    if lang_id = "unknown"
-    then send_response cs id (`List masc)
-    else (
+    (match resolve_lang relative with
+     | Unknown_lang -> send_response cs id (`List masc)
+     | Known_lang lang_id ->
       match ensure_lsp_process cs lang_id with
       | Error msg ->
         note_overlay_only cs ~lang_id ~error:msg;
@@ -1109,8 +1185,9 @@ let dispatch_message cs msg =
                       Lsp_overlay_provider.invalidate_cache
                         ~base_dir:cs.base_path
                         ~file_path:relative;
-                    let lang_id = Lsp_process_manager.lang_of_path relative in
-                    if lang_id <> "unknown" then forward_notification cs lang_id method_str params)
+                    (match resolve_lang relative with
+                     | Unknown_lang -> ()
+                     | Known_lang lang_id -> forward_notification cs lang_id method_str params))
                | None -> ())
             else
               (match id_opt with
@@ -1141,12 +1218,20 @@ let dispatch_message cs msg =
                           in-workspace file. *)
                        (match resolve_relative ~base:cs.base_path uri with
                         | None ->
-                          send_error cs n (-32801) "Path is outside the workspace"
+                          send_error
+                            cs
+                            n
+                            Mcp_error_code.(to_wire_code Invalid_params)
+                            "Path is outside the workspace"
                         | Some relative ->
-                          let lang_id = Lsp_process_manager.lang_of_path relative in
-                          if lang_id <> "unknown"
-                          then forward_request cs lang_id method_str params n
-                          else send_error cs n (-32801) ("No LSP server for: " ^ relative))))
+                          (match resolve_lang relative with
+                           | Known_lang lang_id -> forward_request cs lang_id method_str params n
+                           | Unknown_lang ->
+                             send_error
+                               cs
+                               n
+                               Mcp_error_code.(to_wire_code Invalid_params)
+                               ("No LSP server for: " ^ relative)))))
                | None ->
                  (* Server-initiated notification broadcast *)
                  if not (Atomic.get cs.disconnected)
@@ -1169,6 +1254,24 @@ let dispatch_message cs msg =
        | None -> ())
   with
   | exn -> Log.Server.error "LSP dispatch error: %s" (Printexc.to_string exn)
+;;
+
+let start_dispatch_workers cs =
+  for _ = 1 to Lsp_proxy_limits.inbound_dispatch_worker_count do
+    Eio.Fiber.fork_daemon ~sw:cs.sw (fun () ->
+      let rec loop () =
+        match Eio.Stream.take cs.dispatch_queue with
+        | Stop_dispatch_worker -> `Stop_daemon
+        | Dispatch_text msg ->
+          if not (Atomic.get cs.disconnected) then dispatch_message cs msg;
+          loop ()
+      in
+      try loop () with
+      | Eio.Cancel.Cancelled _ as exn -> raise exn
+      | exn ->
+        Log.Server.warn "LSP dispatch worker stopped: %s" (Printexc.to_string exn);
+        `Stop_daemon)
+  done
 ;;
 
 (** Register the /api/v1/ide/lsp WebSocket endpoint. *)
@@ -1220,15 +1323,21 @@ let add_routes ~sw ~clock router =
                           ; base_path = base_path_of_state state
                           ; proc_mgr
                           ; workspace_root = ref (base_path_of_state state)
-                          ; send_queue = Eio.Stream.create send_queue_capacity
+                          ; send_queue =
+                              Eio.Stream.create
+                                Lsp_proxy_limits.outbound_send_queue_capacity
+                          ; dispatch_queue =
+                              Eio.Stream.create
+                                Lsp_proxy_limits.inbound_dispatch_queue_capacity
                           ; clock
                           ; disconnected = Atomic.make false
                           }
                         in
                         start_send_writer cs;
+                        start_dispatch_workers cs;
                         Ws_endpoint.handlers
                           ~on_message:(fun (m : Ws_msg.t) ->
-                            dispatch_message cs (Bigstringaf.to_string m.Ws_msg.payload))
+                            enqueue_dispatch cs (Bigstringaf.to_string m.Ws_msg.payload))
                           ~on_close:(fun ~code:_ ~reason:_ ->
                             Log.Server.info "LSP WebSocket disconnecting";
                             disconnect cs)
@@ -1254,6 +1363,7 @@ module For_testing = struct
   let resolve_relative = resolve_relative
   let workspace_root_for_initialize = workspace_root_for_initialize
   let initialize_result_json = initialize_result_json
+  let inbound_dispatch_worker_count = Lsp_proxy_limits.inbound_dispatch_worker_count
 
   (* task-1691: the LSP health type + its pure wire projection. *)
   type health = lang_health =
@@ -1270,4 +1380,10 @@ module For_testing = struct
     | Unknown_forwarded_method of string
 
   let classify_forwarded_method = classify_forwarded_method
+
+  type lang = resolved_lang =
+    | Known_lang of string
+    | Unknown_lang
+
+  let resolve_lang = resolve_lang
 end

@@ -475,7 +475,9 @@ let board_signal_wake_paused_keeper
       ~(stimulus : Keeper_event_queue.stimulus)
       (meta : keeper_meta)
   =
-  let resumed_meta = { meta with paused = false; updated_at = now_iso () } in
+  let resumed_meta =
+    { meta with paused = false; latched_reason = None; updated_at = now_iso () }
+  in
   match
     write_meta_with_merge
       ~merge:Keeper_meta_merge.heartbeat_fields_from_disk

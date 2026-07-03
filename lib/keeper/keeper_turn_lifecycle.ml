@@ -71,6 +71,14 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
              m with
              updated_at = now_iso ();
              paused = true;
+             (* keeper_down (remove_meta=false) is an operator-initiated
+                retain-paused shutdown; record it as an operator pause so the
+                status bridge can name it. Observability only — the
+                Operator_pause dispatch below is unchanged. *)
+             latched_reason =
+               Some
+                 (Keeper_latched_reason.Operator_paused
+                    { operator_actor = Keeper_latched_reason.operator_actor_keeper_down });
            }
          in
          ((match

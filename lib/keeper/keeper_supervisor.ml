@@ -804,12 +804,26 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
         let path = Keeper_types_profile.keeper_meta_path ctx.config name in
         (try
            Sys.remove path;
+           (* Record why the pruned meta was latched before the on-disk record
+              is gone. [meta] was read above (pre-[Sys.remove]), so the reason
+              survives in the event even though the file no longer does. *)
+           let latched_reason_detail =
+             match meta.latched_reason with
+             | Some reason ->
+               Printf.sprintf
+                 " latched_reason=%s"
+                 (Keeper_latched_reason.to_wire reason)
+             | None -> ""
+           in
            publish_lifecycle
              ~event:
                (Keeper_lifecycle_events.Custom_event
                   { verb = Keeper_lifecycle_events.Paused_pruned; phase = None })
              name
-             (Printf.sprintf "last_updated=%s" meta.updated_at)
+             (Printf.sprintf
+                "last_updated=%s%s"
+                meta.updated_at
+                latched_reason_detail)
              ();
            Log.Keeper.info "%s: stale paused meta pruned" name
          with
@@ -864,6 +878,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
             let resumed_meta =
               { meta with
                 paused = false
+              ; latched_reason = None
               ; auto_resume_after_sec = Some resume_after_sec
               ; updated_at = now_iso ()
               ; runtime = { meta.runtime with last_blocker = None }

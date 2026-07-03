@@ -4,7 +4,7 @@
     subsystem-spawning functions into a focused module. *)
 
 let install_tooling ~governance_level (state : Mcp_server.server_state) =
-  Governance_pipeline.install ~config:(Mcp_server.workspace_config state) ~governance_level
+  Governance_pipeline.install ~config:(Mcp_server.workspace_config state) ~governance_level ()
 ;;
 
 (* Stable djb2-style hash for the autoboot warmup jitter.

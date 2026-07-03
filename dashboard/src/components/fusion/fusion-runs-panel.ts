@@ -100,6 +100,14 @@ function FusionRunStatusCard({ run }: { run: FusionRunRecord }) {
           <${TimeAgo} timestamp=${run.startedAt} />
         </span>
       </div>
+      ${run.status === 'failed' && (run.failureCode || run.error)
+        ? html`<div class="fus-runs-reason" data-testid="fusion-run-reason">
+            ${run.failureCode
+              ? html`<span class="fus-runs-code mono" title=${run.error ?? run.failureCode}>${run.failureCode}</span>`
+              : null}
+            ${run.error ? html`<span class="fus-runs-reason-text" title=${run.error}>${run.error}</span>` : null}
+          </div>`
+        : null}
       <${FusionRunPipeline} status=${run.status} />
     </li>
   `

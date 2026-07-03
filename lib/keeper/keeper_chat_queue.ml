@@ -340,6 +340,124 @@ let merge_batch batch =
           source = first.source;
         }
 
+let rec list_equal equal xs ys =
+  match xs, ys with
+  | [], [] -> true
+  | x :: xs, y :: ys -> equal x y && list_equal equal xs ys
+  | [], _ :: _ | _ :: _, [] -> false
+
+let option_equal equal a b =
+  match a, b with
+  | None, None -> true
+  | Some a, Some b -> equal a b
+  | None, Some _ | Some _, None -> false
+
+let user_media_block_equal
+      (a : Keeper_multimodal_input.user_media_block)
+      (b : Keeper_multimodal_input.user_media_block)
+  =
+  String.equal a.attachment_id b.attachment_id
+  && String.equal a.name b.name
+  && String.equal a.mime_type b.mime_type
+  && option_equal Int.equal a.size b.size
+
+let user_input_block_equal a b =
+  match a, b with
+  | Keeper_multimodal_input.User_text a, Keeper_multimodal_input.User_text b ->
+      String.equal a b
+  | Keeper_multimodal_input.User_image a, Keeper_multimodal_input.User_image b ->
+      user_media_block_equal a b
+  | Keeper_multimodal_input.User_document a, Keeper_multimodal_input.User_document b ->
+      user_media_block_equal a b
+  | Keeper_multimodal_input.User_audio a, Keeper_multimodal_input.User_audio b ->
+      user_media_block_equal a b
+  | ( Keeper_multimodal_input.User_text _,
+      ( Keeper_multimodal_input.User_image _
+      | Keeper_multimodal_input.User_document _
+      | Keeper_multimodal_input.User_audio _ ) )
+  | ( Keeper_multimodal_input.User_image _,
+      ( Keeper_multimodal_input.User_text _
+      | Keeper_multimodal_input.User_document _
+      | Keeper_multimodal_input.User_audio _ ) )
+  | ( Keeper_multimodal_input.User_document _,
+      ( Keeper_multimodal_input.User_text _
+      | Keeper_multimodal_input.User_image _
+      | Keeper_multimodal_input.User_audio _ ) )
+  | ( Keeper_multimodal_input.User_audio _,
+      ( Keeper_multimodal_input.User_text _
+      | Keeper_multimodal_input.User_image _
+      | Keeper_multimodal_input.User_document _ ) ) ->
+      false
+
+let attachment_equal (a : Keeper_chat_store.attachment) (b : Keeper_chat_store.attachment) =
+  String.equal a.id b.id
+  && String.equal a.att_type b.att_type
+  && String.equal a.name b.name
+  && Int.equal a.size b.size
+  && String.equal a.mime_type b.mime_type
+  && String.equal a.data b.data
+
+let message_source_equal a b =
+  match a, b with
+  | Dashboard, Dashboard -> true
+  | Discord { channel_id = c1; user_id = u1 }, Discord { channel_id = c2; user_id = u2 } ->
+      String.equal c1 c2 && String.equal u1 u2
+  | Slack { channel = c1; user_id = u1 }, Slack { channel = c2; user_id = u2 } ->
+      String.equal c1 c2 && String.equal u1 u2
+  | Dashboard, (Discord _ | Slack _)
+  | Discord _, (Dashboard | Slack _)
+  | Slack _, (Dashboard | Discord _) ->
+      false
+
+let queued_message_equal (a : queued_message) (b : queued_message) =
+  String.equal a.content b.content
+  && list_equal user_input_block_equal a.user_blocks b.user_blocks
+  && list_equal attachment_equal a.attachments b.attachments
+  && Float.equal a.timestamp b.timestamp
+  && message_source_equal a.source b.source
+
+(* Remove the first message structurally equal to [target] from the head run —
+   the leading messages sharing the head message's source, i.e. the exact set
+   [dequeue_batch] coalesces into one turn. Returns the item list with that one
+   message dropped, or [None] when no head-run message matches. Confining the
+   search to the head run keeps [remove_matching] and [dequeue_batch] acting on
+   the same region under the shared per-keeper mutex, so a queued message is
+   answered by at most one of them. *)
+let remove_first_in_head_run items target =
+  match items with
+  | [] -> None
+  | head :: _ ->
+      let rec loop acc = function
+        | [] -> None
+        | msg :: rest ->
+            if not (same_source head.source msg.source)
+            then None
+            else if queued_message_equal msg target
+            then Some (List.rev_append acc rest)
+            else loop (msg :: acc) rest
+      in
+      loop [] items
+
+let remove_matching ~keeper_name target =
+  match find_entry keeper_name with
+  | None -> `Not_found
+  | Some entry ->
+      with_entry_lock entry (fun () ->
+          let before = queue_to_list entry.q in
+          match remove_first_in_head_run before target with
+          | None -> `Not_found
+          | Some remaining ->
+              replace_queue entry.q remaining;
+              (* Reuse the persist-abort idiom: on snapshot rewrite failure
+                 [persist_or_rollback] restores [before] and re-raises, so the
+                 removal is aborted (queue unchanged) before it is reported.
+                 Only [Persistence_failed] becomes a typed result; [Cancelled]
+                 and any other exception still propagate. *)
+              (try
+                 persist_or_rollback ~keeper_name entry.q ~before;
+                 `Removed
+               with Persistence_failed msg -> `Persist_failed msg))
+
 let length ~keeper_name =
   match find_entry keeper_name with
   | None -> 0

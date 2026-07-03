@@ -114,6 +114,9 @@
 .fus-conf .mono { font-size: 9.5px; color: var(--text-dim); }
 .fus-ptok { font-size: 9.5px; color: var(--text-dim); }
 .fus-pcard-h .fus-conf + .fus-ptok { margin-left: 0; }
+/* Panel failure category chip (reason_code). Sits next to the model id; the
+   human reason detail stays in the .fus-pstate/.fus-pans body. */
+.fus-pcode { font-size: 9.5px; padding: 1px 6px; border-radius: var(--radius-xs); font-family: var(--font-mono); color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 40%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); white-space: nowrap; }
 
 .fus-pans { font-size: var(--fs-12); color: var(--text-mid); line-height: 1.55; cursor: pointer; display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; position: relative; }
 .fus-pans.open { -webkit-line-clamp: unset; }
@@ -173,6 +176,11 @@
 .fus-judge-node.failed .fus-jn-role { border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); color: var(--status-bad); }
 .fus-jn-id { color: var(--text-mid); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1 1 auto; min-width: 0; }
 .fus-jn-tok { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+/* Failed judge-node attribution: failure_code category chip + elapsed wall-clock.
+   Only rendered on failed nodes; .timeout marks a node that hit the budget. */
+.fus-jn-code { font-family: var(--font-mono); font-size: var(--fs-10); padding: 1px 6px; border-radius: var(--radius-xs); color: var(--status-bad); border: 1px solid color-mix(in oklab, var(--status-bad) 40%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); white-space: nowrap; }
+.fus-jn-time { font-family: var(--font-mono); font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.fus-jn-time.timeout { color: var(--status-bad); }
 .fus-jn-status { font-size: var(--fs-11); white-space: nowrap; }
 .fus-jn-status.done { color: var(--status-ok); }
 .fus-jn-status.deny { color: var(--status-bad); }

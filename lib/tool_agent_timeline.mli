@@ -45,7 +45,20 @@ type context = {
 
 (** {1 Timeline construction} *)
 
+type chat_line = {
+  cl_role : string;
+  cl_content : string;
+  cl_ts : float;
+  cl_connector : string option;
+  cl_conversation_id : string option;
+}
+(** Neutral projection of one keeper chat line (user or assistant) for the
+    timeline. Constructed by a keeper-aware caller that reads the keeper
+    chat store — this module must not reference that store directly
+    (RFC-0194 §3 tool -> keeper boundary). *)
+
 val build_timeline :
+  ?load_chat:(agent_name:string -> chat_line list) ->
   Workspace.config ->
   agent_name:string ->
   since_hours:float ->
@@ -85,6 +98,7 @@ val build_timeline :
 (** {1 Dispatch + schemas} *)
 
 val dispatch :
+  ?load_chat:(agent_name:string -> chat_line list) ->
   context ->
   name:string ->
   args:Yojson.Safe.t ->

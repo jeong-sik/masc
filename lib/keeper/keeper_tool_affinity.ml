@@ -122,6 +122,23 @@ let compute_affinity ~(tool_stats : Trajectory.tool_stat list)
 (* Main entry point                                                  *)
 (* ================================================================ *)
 
+(** Resolve the per-keeper affinity aggregate: the persisted snapshot when
+    present, else a one-time full-scan rebuild. Parameterized over
+    [read_snapshot] / [rebuild] so tests can inject counting doubles and
+    assert the scan runs only when the snapshot is absent or corrupt. *)
+let resolve_affinity_aggregate
+    ~(read_snapshot :
+        masc_root:string -> keeper_name:string ->
+        (Trajectory.tool_affinity_aggregate, Trajectory.aggregate_load_error) result)
+    ~(rebuild :
+        masc_root:string -> keeper_name:string -> now:float ->
+        Trajectory.tool_affinity_aggregate)
+    ~(masc_root : string) ~(keeper_name : string) ~(now : float) :
+    Trajectory.tool_affinity_aggregate =
+  match read_snapshot ~masc_root ~keeper_name with
+  | Ok aggregate -> aggregate
+  | Error _ -> rebuild ~masc_root ~keeper_name ~now
+
 let pre_populate_from_history
     ~(masc_root : string) ~(keeper_name : string)
     ~(allowed_tool_names : string list) ~(core_tool_names : string list)
@@ -132,13 +149,24 @@ let pre_populate_from_history
     let now = Unix.gettimeofday () in
     let lookback_days = configured_lookback_days () in
     let since = now -. Masc_time_constants.days_to_seconds lookback_days in
-    let entries =
-      Trajectory.read_entries_since ~masc_root ~keeper_name ~since
+    (* Read the append-time aggregate snapshot instead of rescanning every
+       trace file on every turn (the P0 freeze). On a missing/corrupt
+       snapshot, rebuild once from a full scan offloaded off the main Eio
+       domain, then persist so subsequent turns read O(snapshot). Mirrors
+       the dashboard tool-stats offload (server_dashboard_http_keeper_api.ml,
+       #19088 / #19097). *)
+    let aggregate =
+      resolve_affinity_aggregate
+        ~read_snapshot:Trajectory.read_aggregate_snapshot
+        ~rebuild:(fun ~masc_root ~keeper_name ~now ->
+          Domain_pool_ref.submit_io_or_inline (fun () ->
+            Trajectory.rebuild_tool_affinity_aggregate ~masc_root ~keeper_name ~now))
+        ~masc_root ~keeper_name ~now
     in
-    match entries with
+    let tool_stats = Trajectory.windowed_affinity_tool_stats aggregate ~since in
+    match tool_stats with
     | [] -> []
     | _ ->
-      let tool_stats = Trajectory.aggregate_tool_stats entries in
       let allowed_set = Hashtbl.create (List.length allowed_tool_names) in
       List.iter (fun n -> Hashtbl.replace allowed_set n ()) allowed_tool_names;
       let core_set = Hashtbl.create (List.length core_tool_names) in

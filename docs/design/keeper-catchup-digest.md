@@ -30,13 +30,21 @@ GET /api/v1/keepers/:name/digest?since_unix=<float>
     "pause_events": 1, "resume_events": 0,
     "items": [ { "kind": "operator_pause", "ts": 1782990000.0 } ]
   },
+  "coverage": {
+    "chat": { "lower_bound": false, "causes": [] },
+    "turns": { "lower_bound": false, "causes": [] },
+    "tasks": { "lower_bound": false, "causes": [] },
+    "board": { "lower_bound": false, "causes": [] },
+    "lifecycle": { "lower_bound": false, "causes": [] }
+  },
   "read_errors": []
 }
 ```
 
 - 모든 timestamp는 unix seconds float로 정규화한다 (소스는 ISO/unix 혼재 — digest 계층에서 통일).
 - `items` 배열은 상수 cap (`digest_items_cap`, 최신순)로 제한하고, 카운트 필드는 cap과 무관한 전체 수를 담는다.
-- `read_errors`: 소스 저장소별 읽기 실패와 bounded scan 조기 중단을 문자열 목록으로 노출한다 (silent skip 금지, fail-visible).
+- `coverage`: 소스별로 카운트가 하한값(lower bound)인지 명시한다. `lower_bound=true`이면 `causes`에 왜 그 소스를 모두 스캔하지 못했는지 machine tag를 담는다: `chat_page_cap`, `chat_retention_window`, `jsonl_retention_window`, `crash_scan_cap`. 클라이언트는 이 tag를 로컬라이즈해서 경고 UI에 노출한다.
+- `read_errors`: 소스 저장소별 읽기/파싱 실패를 문자열 목록으로 노출한다 (silent skip 금지, fail-visible). bounded scan 조기 중단은 주로 `coverage`가 담당하며, chat page cap 같은 운영자가 바로 알아야 할 경우에는 `read_errors`에도 중복 노출될 수 있다.
 
 ## Source mapping (전부 기존 저장소)
 
@@ -74,7 +82,7 @@ keeper identity 매칭은 `Tool_agent_timeline.identity_matches`의 3-형태 규
 ## 유의
 
 - H2 게이트웨이(`MASC_USE_H2`)가 라우트를 수동 미러링하므로 신규 경로의 이중 등록 필요 여부를 확인한다.
-- 모든 저장소는 `MASC_JSONL_RETENTION_DAYS`(30d) 프루닝 대상 — since가 보존 창보다 오래되면 카운트는 하한값이며, 응답의 `since_unix` 에코가 그 사실 판정을 클라이언트에 위임한다.
+- 모든 저장소는 `MASC_JSONL_RETENTION_DAYS`(기본 30d) 보존 창 기준으로 집계한다 — since가 보존 창보다 오래되면 카운트는 하한값이며, `coverage` 필드가 소스별로 그 사실을 명시한다.
 
 ## 구현 노트 (server v1)
 

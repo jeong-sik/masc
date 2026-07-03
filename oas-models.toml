@@ -1001,6 +1001,18 @@ supports_multimodal_inputs = false
 supports_image_input = false
 supports_native_streaming = true
 
+# kimi-for-coding is the Kimi Code *coding plan* alias (api.kimi.com/coding),
+# not the pay-per-token platform API: the key comes from the Kimi Code console,
+# the two credentials are not interchangeable, and the gateway picks the served
+# version (Thinking on = K2.7 Code, off = K2.6). Pricing 0.0 means
+# subscription-included, not free-tier.
+[[models]]
+id_prefix = "kimi-for-coding"
+base = "kimi"
+max_context_tokens = 256000
+input_per_million = 0.0
+output_per_million = 0.0
+
 [[models]]
 id_prefix = "kimi-k2"
 base = "kimi"

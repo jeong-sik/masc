@@ -333,6 +333,27 @@
   animation: v2-surface-enter 160ms var(--ease) both;
 }
 
+/* ── v2-surface height: code/IDE tab ───────────────────────────────
+   .v2-surface is height:auto by default (only `animation` above sets anything).
+   The code/IDE tab wraps DashboardMain in `h-full overflow-hidden`, hiding the
+   outer scroll container. This is the same class of layout as keeper-detail
+   mode, which already owns explicit height patches in keeper-workspace.css.
+   Without an explicit height here, every downstream height:100% / flex:1 in the
+   IDE chain (.v2-shell-surface -> .ide-v2-surface -> .ide-v2-body 1fr ->
+   .ide-v2-rail-scroll) resolves against an indefinite containing block and
+   collapses to content height, starving the IDE scroll ports of the definite
+   height that overflow:auto needs to engage. data-surface is emitted by
+   app.ts, so the hook already exists in the markup. Mirrors the keeper-detail
+   precedent selector-for-selector. */
+.v2-app[data-surface="code"] .v2-body,
+.v2-app[data-surface="code"] .v2-body > .h-full,
+.v2-app[data-surface="code"] .v2-surface,
+.v2-app[data-surface="code"] .v2-shell-surface,
+.v2-app[data-surface="code"] .ide-v2-surface {
+  height: 100%;
+  min-height: 0;
+}
+
 /* Respect the v2 motion tweak. */
 .v2-app[data-motion="off"] .v2-surface {
   animation: none;

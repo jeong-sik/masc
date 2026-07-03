@@ -75,6 +75,7 @@ import { deriveKeeperOperationalState } from '../lib/keeper-operational-state'
 import { isKeeperPaused } from '../lib/keeper-predicates'
 import { FL_TONE_LABEL, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
+import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
 
 type StatusFilter = 'all' | RuntimeBand
@@ -702,17 +703,6 @@ function countAgentsByStatus(
   }
 
   return counts
-}
-
-function compositeSnapshotForKeeper(
-  keeper: Keeper | null | undefined,
-  compositeByKeeperKey: ReadonlyMap<string, KeeperCompositeSnapshot> | null,
-): KeeperCompositeSnapshot | null {
-  if (!keeper || !compositeByKeeperKey) return null
-  return compositeByKeeperKey.get(keeper.name)
-    ?? (typeof keeper.keeper_id === 'string'
-      ? compositeByKeeperKey.get(keeper.keeper_id) ?? null
-      : null)
 }
 
 export function countRuntimeKinds(

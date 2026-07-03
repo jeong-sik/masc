@@ -66,6 +66,11 @@ let rec yield_until ?(attempts = 50) predicate =
     Eio.Fiber.yield ();
     yield_until ~attempts:(attempts - 1) predicate)
 
+let approval_decision_is_reject = function
+  | Agent_sdk.Hooks.Reject _ -> true
+  | Agent_sdk.Hooks.Approve | Agent_sdk.Hooks.Edit _ -> false
+;;
+
 let pending_id_for_keeper ~keeper_name =
   match AQ.list_pending_json () with
   | `List entries ->
@@ -1193,54 +1198,45 @@ let test_callback_approves_low_risk () =
     Alcotest.fail ("expected Approve for low-risk tool, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
-let test_callback_production_tool_edit_file_requires_approval () =
+let test_callback_production_tool_edit_file_rejects_hard_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let initial_pending = AQ.pending_count () in
-  let result = ref None in
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
-  let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
-  let config = (Mcp_server.workspace_config state) in
-  Eio.Fiber.fork ~sw (fun () ->
-    let cb =
-      GP.to_oas_approval_callback
-        ~config ~governance_level:"production" ~keeper_name:"test" () in
-    let decision =
-      cb
-        ~tool_name:"tool_edit_file"
-        ~input:(`Assoc [
-          ("path", `String "lib/example.ml");
-          ("content", `String "let x = 1\n");
-        ])
-    in
-    result := Some decision
-  );
-  yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
-  Alcotest.(check int) "one pending approval"
-    (initial_pending + 1) (AQ.pending_count ());
-  let pending_json = AQ.list_pending_json () in
-  let id =
-    match pending_json with
-    | `List (`Assoc kvs :: _) ->
-      (match List.assoc_opt "id" kvs with
-       | Some (`String id) -> id
-       | _ -> Alcotest.fail "missing approval id")
-    | _ -> Alcotest.fail "expected pending approval entry"
-  in
-  (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-   | Ok () -> ()
-   | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-  yield_until (fun () -> Option.is_some !result);
-  match !result with
-  | Some Agent_sdk.Hooks.Approve -> ()
-  | Some _ -> Alcotest.fail "expected Approve after operator resolution"
-  | None -> Alcotest.fail "keeper write callback did not suspend for approval")
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = (Mcp_server.workspace_config state) in
+      let decision_promise =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          let cb =
+            GP.to_oas_approval_callback
+              ~config ~governance_level:"production" ~keeper_name:"test" ()
+          in
+          cb
+            ~tool_name:"tool_edit_file"
+            ~input:(`Assoc [
+              ("path", `String "lib/example.ml");
+              ("content", `String "let x = 1\n");
+            ]))
+      in
+      let decision =
+        match Eio.Promise.await decision_promise with
+        | Ok decision -> decision
+        | Error exn -> Alcotest.failf "approval callback raised: %s" (Printexc.to_string exn)
+      in
+      Alcotest.(check bool)
+        "tool_edit_file is hard-forbidden and rejects outright"
+        true
+        (approval_decision_is_reject decision);
+      Alcotest.(check int)
+        "hard-forbidden tool never enters the approval queue"
+        initial_pending
+        (AQ.pending_count ()))
 
 let test_callback_production_claimed_worktree_write_auto_approved () =
   with_test_config @@ fun config ->
@@ -1291,54 +1287,44 @@ let test_callback_production_claimed_worktree_write_auto_approved () =
       ("expected Approve for claimed sandbox worktree write, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
-let test_callback_production_worktree_prepare_requires_approval () =
+let test_callback_production_tool_execute_rejects_hard_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let initial_pending = AQ.pending_count () in
-  let result = ref None in
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let config = (Mcp_server.workspace_config state) in
-      Eio.Fiber.fork ~sw (fun () ->
-        let cb =
-          GP.to_oas_approval_callback
-            ~config ~governance_level:"production" ~keeper_name:"test" ()
-        in
-        let decision =
+      let decision_promise =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          let cb =
+            GP.to_oas_approval_callback
+              ~config ~governance_level:"production" ~keeper_name:"test" ()
+          in
           cb
             ~tool_name:"tool_execute"
             ~input:
               (`Assoc
-                [ ("task_id", `String "task-187"); ("repo_name", `String "masc") ])
-        in
-        result := Some decision);
-      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
-      Alcotest.(check int)
-        "worktree preparation requires approval"
-        (initial_pending + 1)
-        (AQ.pending_count ());
-      let id =
-        match AQ.list_pending_json () with
-        | `List (`Assoc kvs :: _) ->
-          (match List.assoc_opt "id" kvs with
-           | Some (`String id) -> id
-           | _ -> Alcotest.fail "missing approval id")
-        | _ -> Alcotest.fail "expected pending approval entry"
+                [ ("task_id", `String "task-187"); ("repo_name", `String "masc") ]))
       in
-      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-       | Ok () -> ()
-       | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-      yield_until (fun () -> Option.is_some !result);
-      match !result with
-      | Some Agent_sdk.Hooks.Approve -> ()
-      | Some _ -> Alcotest.fail "expected Approve after operator resolution"
-      | None -> Alcotest.fail "worktree preparation callback did not suspend for approval")
+      let decision =
+        match Eio.Promise.await decision_promise with
+        | Ok decision -> decision
+        | Error exn -> Alcotest.failf "approval callback raised: %s" (Printexc.to_string exn)
+      in
+      Alcotest.(check bool)
+        "tool_execute is hard-forbidden and rejects outright"
+        true
+        (approval_decision_is_reject decision);
+      Alcotest.(check int)
+        "hard-forbidden tool never enters the approval queue"
+        initial_pending
+        (AQ.pending_count ()))
 
 let test_callback_paranoid_medium_risk_uses_remembered_policy () =
   with_eio_base_path @@ fun base_path ->
@@ -1383,6 +1369,52 @@ let test_callback_paranoid_medium_risk_uses_remembered_policy () =
       | Agent_sdk.Hooks.Edit _ ->
           Alcotest.fail "expected remembered approve, got edit"
 
+let test_callback_remembered_rule_overrides_soft_forbidden () =
+  with_eio_base_path @@ fun base_path ->
+  let keeper_name = "remember-soft-keeper" in
+  let tool_name = "masc_status" in
+  let input = `Assoc [ ("op", `String "git") ] in
+  Alcotest.(check string)
+    "soft-only fixture stays below hard-forbidden risk"
+    "low"
+    (GP.assess_risk ~tool_name ~input |> GP.risk_level_to_string);
+  let id =
+    AQ.submit_pending
+      ~base_path
+      ~keeper_name
+      ~tool_name
+      ~input
+      ~risk_level:AQ.Low
+      ~on_resolution:(fun _ -> ())
+      ()
+  in
+  (match
+     AQ.resolve_with_policy ~base_path ~id
+       ~decision:Agent_sdk.Hooks.Approve ~remember_rule:true ()
+   with
+   | Ok { remembered_rule = Some _ } -> ()
+   | Ok { remembered_rule = None } ->
+     Alcotest.fail "expected soft-forbidden allow-rule to be remembered"
+   | Error err ->
+     Alcotest.fail
+       ("resolve_with_policy failed: " ^ AQ.resolve_error_to_string err));
+  let pending_before = AQ.pending_count () in
+  let config = Masc.Workspace.default_config base_path in
+  let cb =
+    GP.to_oas_approval_callback
+      ~governance_level:"production" ~keeper_name ~config ()
+  in
+  let decision = cb ~tool_name ~input in
+  match decision with
+  | Agent_sdk.Hooks.Approve ->
+    Alcotest.(check int) "remembered rule overrides soft forbidden"
+      pending_before (AQ.pending_count ())
+  | Agent_sdk.Hooks.Reject reason ->
+    Alcotest.fail
+      ("expected remembered rule to override soft forbidden, got reject: " ^ reason)
+  | Agent_sdk.Hooks.Edit _ ->
+    Alcotest.fail "expected remembered approve, got edit"
+
 let test_callback_always_approve_bypasses_threshold () =
   with_test_config @@ fun config ->
   let meta =
@@ -1409,7 +1441,7 @@ let test_callback_always_approve_bypasses_threshold () =
     Alcotest.fail ("expected Approve with always_approve, got Reject: " ^ r)
   | _ -> Alcotest.fail "unexpected decision"
 
-let test_callback_typed_last_blocker_overrides_always_approve () =
+let test_callback_typed_last_blocker_rejects_hard_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
@@ -1417,7 +1449,6 @@ let test_callback_typed_last_blocker_overrides_always_approve () =
   Eio.Switch.run @@ fun sw ->
   let keeper_name = "typed-blocked-keeper" in
   let initial_pending = AQ.pending_count () in
-  let result = ref None in
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -1439,45 +1470,75 @@ let test_callback_typed_last_blocker_overrides_always_approve () =
         in
         let blocker =
           let open Masc.Keeper_meta_contract in
-          blocker_info_of_class ~detail:"previous turn timed out" Turn_timeout
+          blocker_info_of_class
+            ~detail:"completion contract violated"
+            Completion_contract_violation
         in
         { base with
           runtime = { base.runtime with last_blocker = Some blocker };
         }
       in
-      Eio.Fiber.fork ~sw (fun () ->
-        let cb =
-          GP.to_oas_approval_callback
-            ~config ~governance_level:"production" ~keeper_name ~meta ()
-        in
-        let decision =
+      let decision_promise =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          let cb =
+            GP.to_oas_approval_callback
+              ~config ~governance_level:"production" ~keeper_name ~meta ()
+          in
           cb
             ~tool_name:"masc_create_task"
-            ~input:(`Assoc [ ("title", `String "test") ])
-        in
-        result := Some decision);
-      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
-      Alcotest.(check int)
-        "typed last_blocker prevents always_approve bypass"
-        (initial_pending + 1)
-        (AQ.pending_count ());
-      let id =
-        match pending_id_for_keeper ~keeper_name with
-        | Some id -> id
-        | None -> Alcotest.fail "expected pending approval for runtime blocker"
+            ~input:(`Assoc [ ("title", `String "test") ]))
       in
-      (match AQ.resolve ~id ~decision:(Agent_sdk.Hooks.Reject "blocked") with
-       | Ok () -> ()
-       | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-      yield_until (fun () -> Option.is_some !result);
-      match !result with
-      | Some (Agent_sdk.Hooks.Reject "blocked") -> ()
-      | Some Agent_sdk.Hooks.Approve ->
-        Alcotest.fail "typed last_blocker must not auto-approve"
-      | Some (Agent_sdk.Hooks.Reject reason) ->
-        Alcotest.fail ("unexpected reject reason: " ^ reason)
-      | Some (Agent_sdk.Hooks.Edit _) -> Alcotest.fail "unexpected edit"
-      | None -> Alcotest.fail "runtime blocker callback did not suspend")
+      let decision =
+        match Eio.Promise.await decision_promise with
+        | Ok decision -> decision
+        | Error exn -> Alcotest.failf "approval callback raised: %s" (Printexc.to_string exn)
+      in
+      Alcotest.(check bool)
+        "typed last_blocker makes request hard-forbidden and rejects outright"
+        true
+        (approval_decision_is_reject decision);
+      Alcotest.(check int)
+        "hard-forbidden request never enters the approval queue"
+        initial_pending
+        (AQ.pending_count ()))
+
+let test_callback_transient_last_blocker_allows_always_approve () =
+  with_test_config @@ fun config ->
+  let keeper_name = "transient-blocked-keeper" in
+  let meta =
+    let base =
+      meta_from_json
+        (`Assoc
+          [
+            ("name", `String keeper_name);
+            ("agent_name", `String ("keeper-" ^ keeper_name ^ "-agent"));
+            ("trace_id", `String "transient-blocked-trace");
+            ("sandbox_profile", `String "docker");
+            ("network_mode", `String "inherit");
+            ("always_approve", `Bool true);
+          ])
+    in
+    let blocker =
+      let open Masc.Keeper_meta_contract in
+      blocker_info_of_class ~detail:"previous turn timed out" Turn_timeout
+    in
+    { base with
+      runtime = { base.runtime with last_blocker = Some blocker };
+    }
+  in
+  let cb =
+    GP.to_oas_approval_callback
+      ~config ~governance_level:"production" ~keeper_name ~meta ()
+  in
+  let decision =
+    cb ~tool_name:"masc_create_task" ~input:(`Assoc [ ("title", `String "test") ])
+  in
+  match decision with
+  | Agent_sdk.Hooks.Approve -> ()
+  | Agent_sdk.Hooks.Reject r ->
+    Alcotest.fail
+      ("transient last_blocker must not block always_approve, got Reject: " ^ r)
+  | Agent_sdk.Hooks.Edit _ -> Alcotest.fail "unexpected edit"
 
 let test_runtime_trust_classifies_always_approve_flag () =
   with_test_config @@ fun config ->
@@ -1511,14 +1572,13 @@ let test_runtime_trust_classifies_always_approve_flag () =
         "auto_approved_always"
         (approval |> member "latest_event_kind" |> to_string))
 
-let test_callback_always_approve_respects_forbidden () =
+let test_callback_always_approve_respects_hard_forbidden () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let initial_pending = AQ.pending_count () in
-  let result = ref None in
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
@@ -1535,88 +1595,132 @@ let test_callback_always_approve_respects_forbidden () =
             ("always_approve", `Bool true);
           ])
       in
-      Eio.Fiber.fork ~sw (fun () ->
-        let cb =
-          GP.to_oas_approval_callback
-            ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
-        in
-        let decision =
+      let decision_promise =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          let cb =
+            GP.to_oas_approval_callback
+              ~config ~governance_level:"production" ~keeper_name:"test-keeper" ~meta ()
+          in
           cb ~tool_name:"tool_edit_file"
-            ~input:(`Assoc [("path", `String "/dangerous")])
-        in
-        result := Some decision
-      );
-      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
-      Alcotest.(check int) "destructive tool still requires approval"
-        (initial_pending + 1) (AQ.pending_count ());
-      let pending_json = AQ.list_pending_json () in
-      let id =
-        match pending_json with
-        | `List (`Assoc kvs :: _) ->
-          (match List.assoc_opt "id" kvs with
-           | Some (`String id) -> id
-           | _ -> Alcotest.fail "missing approval id")
-        | _ -> Alcotest.fail "expected pending approval entry"
+            ~input:(`Assoc [("path", `String "/dangerous")]))
       in
-      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-       | Ok () -> ()
-       | Error err -> Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-      yield_until (fun () -> Option.is_some !result);
-      match !result with
-      | Some Agent_sdk.Hooks.Approve -> ()
-      | Some _ -> Alcotest.fail "expected Approve after operator resolution"
-      | None -> Alcotest.fail "destructive tool callback did not suspend for approval")
+      let decision =
+        match Eio.Promise.await decision_promise with
+        | Ok decision -> decision
+        | Error exn -> Alcotest.failf "approval callback raised: %s" (Printexc.to_string exn)
+      in
+      Alcotest.(check bool)
+        "always_approve does not bypass hard-forbidden"
+        true
+        (approval_decision_is_reject decision);
+      Alcotest.(check int)
+        "hard-forbidden tool never enters the approval queue"
+        initial_pending
+        (AQ.pending_count ()))
 
-let test_callback_hitl_disabled_forbidden_requires_approval () =
-  with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
+(* Hard-forbidden requests must be rejected outright in all HITL modes.
+   Queuing them would let an operator or remembered rule approve a request
+   that the safety wall already decided cannot run. *)
+let test_callback_hitl_disabled_hard_forbidden_rejects_without_queuing () =
+  with_env Env_config_core.disable_hitl_env_key "true" @@ fun () ->
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Mcp_eio.set_net (Eio.Stdenv.net env);
   Mcp_eio.set_clock (Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
-  let keeper_name = "hitl-disabled-forbidden-keeper" in
+  let keeper_name = "hitl-disabled-hard-forbidden-keeper" in
   let initial_pending = AQ.pending_count () in
-  let result = ref None in
   let base_path = temp_dir () in
   Fun.protect
     ~finally:(fun () -> cleanup_dir base_path)
     (fun () ->
       let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
       let config = Mcp_server.workspace_config state in
-      Eio.Fiber.fork ~sw (fun () ->
-        let cb =
-          GP.to_oas_approval_callback
-            ~config ~governance_level:"production" ~keeper_name ()
-        in
-        let decision =
+      let decision_promise =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          let cb =
+            GP.to_oas_approval_callback
+              ~config ~governance_level:"production" ~keeper_name ()
+          in
           cb
             ~tool_name:"tool_edit_file"
-            ~input:(`Assoc [ ("path", `String "/dangerous") ])
-        in
-        result := Some decision);
-      yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
-      Alcotest.(check int)
-        "forbidden tool still requires approval when HITL threshold is disabled"
-        (initial_pending + 1)
-        (AQ.pending_count ());
-      let id =
-        match pending_id_for_keeper ~keeper_name with
-        | Some id -> id
-        | None -> Alcotest.fail "expected pending approval for HITL-disabled forbidden tool"
+            ~input:(`Assoc [ ("path", `String "/dangerous") ]))
       in
-      (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
-       | Ok () -> ()
-       | Error err ->
-         Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
-      yield_until (fun () -> Option.is_some !result);
-      match !result with
-      | Some Agent_sdk.Hooks.Approve -> ()
-      | Some Agent_sdk.Hooks.Reject reason ->
-        Alcotest.fail ("expected Approve after operator resolution, got reject: " ^ reason)
-      | Some Agent_sdk.Hooks.Edit _ ->
-        Alcotest.fail "expected Approve after operator resolution, got edit"
-      | None ->
-        Alcotest.fail "HITL-disabled forbidden callback did not suspend for approval")
+      let decision =
+        match Eio.Promise.await decision_promise with
+        | Ok decision -> decision
+        | Error exn -> Alcotest.failf "approval callback raised: %s" (Printexc.to_string exn)
+      in
+      Alcotest.(check bool)
+        "hard-forbidden tool rejects immediately when HITL is disabled"
+        true
+        (approval_decision_is_reject decision);
+      Alcotest.(check int)
+        "hard-forbidden rejection never enters the approval queue"
+        initial_pending
+        (AQ.pending_count ());
+      yield_until (fun () ->
+        match
+          find_audit_event
+            ~base_path
+            ~keeper_name
+            ~event_type:AQ.approval_audit_hard_forbidden_event
+        with
+        | Some _ -> true
+        | None -> false);
+      match
+        find_audit_event
+          ~base_path
+          ~keeper_name
+          ~event_type:AQ.approval_audit_hard_forbidden_event
+      with
+      | Some json ->
+        Alcotest.(check string)
+          "audit disposition"
+          "Blocked"
+          (Yojson.Safe.Util.(json |> member "disposition" |> to_string));
+        Alcotest.(check string)
+          "audit disposition_reason"
+          "hard_forbidden"
+          (Yojson.Safe.Util.(json |> member "disposition_reason" |> to_string))
+      | None -> Alcotest.fail "expected hard_forbidden audit event")
+
+let test_callback_hitl_enabled_hard_forbidden_rejects_without_queuing () =
+  with_env Env_config_core.disable_hitl_env_key "" @@ fun () ->
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Mcp_eio.set_net (Eio.Stdenv.net env);
+  Mcp_eio.set_clock (Eio.Stdenv.clock env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "hitl-enabled-hard-forbidden-keeper" in
+  let initial_pending = AQ.pending_count () in
+  let base_path = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+      let state = Mcp_eio.create_state ~test_mode:true ~base_path () in
+      let config = Mcp_server.workspace_config state in
+      let decision_promise =
+        Eio.Fiber.fork_promise ~sw (fun () ->
+          let cb =
+            GP.to_oas_approval_callback
+              ~config ~governance_level:"production" ~keeper_name ()
+          in
+          cb ~tool_name:"masc_delete_workspace" ~input:`Null)
+      in
+      let decision =
+        match Eio.Promise.await decision_promise with
+        | Ok decision -> decision
+        | Error exn -> Alcotest.failf "approval callback raised: %s" (Printexc.to_string exn)
+      in
+      Alcotest.(check bool)
+        "hard-forbidden Critical tool rejects immediately when HITL is enabled"
+        true
+        (approval_decision_is_reject decision);
+      Alcotest.(check int)
+        "hard-forbidden Critical tool never enters the approval queue"
+        initial_pending
+        (AQ.pending_count ()))
 
 let test_callback_hitl_disabled_soft_forbidden_auto_approved () =
   with_env "MASC_DISABLE_HITL" "true" @@ fun () ->
@@ -1870,24 +1974,30 @@ let () =
     ]);
     ("callback_integration", [
       Alcotest.test_case "low risk auto-approved" `Quick test_callback_approves_low_risk;
-      Alcotest.test_case "production keeper write requires approval" `Quick
-        test_callback_production_tool_edit_file_requires_approval;
+      Alcotest.test_case "production keeper write rejects hard-forbidden" `Quick
+        test_callback_production_tool_edit_file_rejects_hard_forbidden;
       Alcotest.test_case "production claimed worktree write auto-approved" `Quick
         test_callback_production_claimed_worktree_write_auto_approved;
-      Alcotest.test_case "production worktree preparation requires approval" `Quick
-        test_callback_production_worktree_prepare_requires_approval;
+      Alcotest.test_case "production tool execute rejects hard-forbidden" `Quick
+        test_callback_production_tool_execute_rejects_hard_forbidden;
       Alcotest.test_case "paranoid medium risk uses remembered policy" `Quick
         test_callback_paranoid_medium_risk_uses_remembered_policy;
+      Alcotest.test_case "remembered rule overrides soft forbidden" `Quick
+        test_callback_remembered_rule_overrides_soft_forbidden;
       Alcotest.test_case "always_approve bypasses threshold" `Quick
         test_callback_always_approve_bypasses_threshold;
-      Alcotest.test_case "typed last_blocker overrides always_approve" `Quick
-        test_callback_typed_last_blocker_overrides_always_approve;
+      Alcotest.test_case "typed last_blocker rejects hard-forbidden" `Quick
+        test_callback_typed_last_blocker_rejects_hard_forbidden;
+      Alcotest.test_case "transient last_blocker allows always_approve" `Quick
+        test_callback_transient_last_blocker_allows_always_approve;
       Alcotest.test_case "runtime trust classifies always_approve flag" `Quick
         test_runtime_trust_classifies_always_approve_flag;
-      Alcotest.test_case "always_approve respects forbidden" `Quick
-        test_callback_always_approve_respects_forbidden;
-      Alcotest.test_case "HITL disabled still gates forbidden tools" `Quick
-        test_callback_hitl_disabled_forbidden_requires_approval;
+      Alcotest.test_case "always_approve respects hard forbidden" `Quick
+        test_callback_always_approve_respects_hard_forbidden;
+      Alcotest.test_case "HITL disabled hard-forbidden rejects without queuing" `Quick
+        test_callback_hitl_disabled_hard_forbidden_rejects_without_queuing;
+      Alcotest.test_case "HITL enabled hard-forbidden rejects without queuing" `Quick
+        test_callback_hitl_enabled_hard_forbidden_rejects_without_queuing;
       Alcotest.test_case "HITL disabled allows soft forbidden tools" `Quick
         test_callback_hitl_disabled_soft_forbidden_auto_approved;
     ]);

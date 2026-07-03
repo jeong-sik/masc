@@ -17,6 +17,12 @@ type stop_reason =
       { turns_used : int
       ; tool_name : string option
       }
+  | Yielded_to_chat_waiting of { turns_used : int }
+    (* The autonomous lane's OAS run stopped at a turn boundary because a
+       dashboard/connector chat request was parked on the keeper's turn slot.
+       Progress is checkpointed and the keeper resumes on the next cycle — the
+       same disposition as [MutationBoundaryReached], but a distinct reason so
+       receipts do not conflate an on-demand yield with a budget/mutation stop. *)
 
 type config =
   { name : string
@@ -399,6 +405,15 @@ let prepare_resume ~(config : config) ~(checkpoint : Agent_sdk.Checkpoint.t)
     ; preserve_thinking = config.preserve_thinking
     ; thinking_budget = config.thinking_budget
     ; cache_system_prompt = config.cache_system_prompt
+    ; response_format = config.provider_cfg.response_format
+      (* MASC owns the structured-output contract via [config.provider_cfg].
+         A checkpoint may carry a stale [response_format] from a previous run
+         (e.g., prompt-tier fallback or an older native schema).  If we resumed
+         with [JsonMode] while the current base config carries a native schema,
+         [Runtime_agent.request_runtime_fields_on_base_config] would treat the
+         stale request as an explicit opinion and clear the contract.  Patch the
+         checkpoint so the resume path observes the same contract as a fresh
+         build. *)
     }
   in
   let agent_config : Agent_sdk.Types.agent_config =

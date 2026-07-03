@@ -1482,6 +1482,43 @@ let test_dispatch_post_update_rejects_non_owner () =
      Alcotest.(check string) "original preserved on rejected edit" "owned tool body"
        post.content)
 
+let test_dispatch_post_update_transfers_author () =
+  with_eio @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  cleanup ();
+  let _ok, body =
+    dispatch "masc_board_post"
+      (make_args
+         [ ("content", `String "transfer tool body")
+         ; ("author", `String "tool-transfer-owner")
+         ])
+  in
+  let post_id =
+    parse_create_response_json body
+    |> Yojson.Safe.Util.member "id"
+    |> Yojson.Safe.Util.to_string
+  in
+  let ok_edit, msg_edit =
+    dispatch "masc_board_post_update"
+      (make_args
+         [ ("post_id", `String post_id)
+         ; ("author", `String "tool-transfer-owner")
+         ; ("content", `String "transferred tool body")
+         ; ("new_author", `String "tool-transfer-next")
+         ])
+  in
+  Alcotest.(check bool) "transfer edit ok" true ok_edit;
+  Alcotest.(check bool) "edit msg contains new author" true
+    (contains_substring msg_edit "tool-transfer-next");
+  match Board_dispatch.get_post ~post_id with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      Alcotest.(check string) "tool transfer author persisted"
+        "tool-transfer-next"
+        (Board.Agent_id.to_string post.author);
+      Alcotest.(check string) "tool transfer content persisted"
+        "transferred tool body" post.content
+
 let test_dispatch_post_update_missing_id () =
   with_eio @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -1778,6 +1815,19 @@ let test_curation_schema_omits_health_score () =
   check_absent "keeper curation submit"
     (find_tool "keeper_board_curation_submit" Tool_shard.shard_board.tools)
 
+let test_post_update_schema_exposes_new_author () =
+  let update_properties =
+    curation_schema_properties
+      (find_tool "masc_board_post_update" Board_tool.tools)
+  in
+  let create_properties =
+    curation_schema_properties (find_tool "masc_board_post" Board_tool.tools)
+  in
+  Alcotest.(check bool) "update exposes new_author" true
+    (Option.is_some (List.assoc_opt "new_author" update_properties));
+  Alcotest.(check bool) "create omits new_author" true
+    (Option.is_none (List.assoc_opt "new_author" create_properties))
+
 (** {1 Comment Rate Limiting Tests} *)
 
 (** Helper: create a post and return its id. *)
@@ -2073,6 +2123,8 @@ let () =
             test_dispatch_post_update_success;
           Alcotest.test_case "post update rejects non-owner" `Quick
             test_dispatch_post_update_rejects_non_owner;
+          Alcotest.test_case "post update transfers author" `Quick
+            test_dispatch_post_update_transfers_author;
           Alcotest.test_case "post update missing id" `Quick
             test_dispatch_post_update_missing_id;
         ] );
@@ -2083,6 +2135,8 @@ let () =
           Alcotest.test_case "all have descriptions" `Quick test_tools_all_have_descriptions;
           Alcotest.test_case "curation schema omits health score" `Quick
             test_curation_schema_omits_health_score;
+          Alcotest.test_case "post update schema exposes new_author" `Quick
+            test_post_update_schema_exposes_new_author;
         ] );
       ( "post_kind_registry",
         [

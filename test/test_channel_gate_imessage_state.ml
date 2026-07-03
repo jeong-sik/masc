@@ -5,8 +5,9 @@ module U = Yojson.Safe.Util
 
 let with_env name value f =
   let previous = Sys.getenv_opt name in
-  (* OCaml stdlib lacks Unix.unsetenv; this test only exercises config paths
-     that route through Env_config_core.trim_opt, where "" behaves like unset. *)
+  (* On the current supported 5.4 floor there is no Unix.unsetenv; this test
+     only exercises config paths that route through Env_config_core.trim_opt,
+     where "" behaves like unset. *)
   (match value with
    | Some v -> Unix.putenv name v
    | None -> Unix.putenv name "");

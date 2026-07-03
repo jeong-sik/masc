@@ -238,7 +238,8 @@ let handle_post_edit ~tool_name ~start_time args : Tool_result.result =
              (String.length content)
              Board.Limits.max_content_length)
       else (
-        match Board_dispatch.update_post ~post_id ~editor ~content ?title ?body () with
+        let new_author = get_string_opt args "new_author" in
+        match Board_dispatch.update_post ~post_id ~editor ~content ?title ?body ?new_author () with
         | Ok post ->
           let json = Board.post_to_yojson post in
           (* Structured result via [Tool_result.ok]; see "Post created" note above. *)

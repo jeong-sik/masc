@@ -13,6 +13,20 @@ module For_testing : sig
   val workspace_root_for_initialize : base_path:string -> string -> string
   val initialize_result_json : unit -> Yojson.Safe.t
 
+  (** Fixed size of the inbound LSP dispatch worker pool
+      ([Lsp_proxy_limits.inbound_dispatch_worker_count]); >1 keeps slow LSP
+      init off the socket read path. *)
+  val inbound_dispatch_worker_count : int
+
+  type resolved_lang =
+    | Known_lang of string
+    | Unknown_lang
+
+  (** [resolve_lang relative] classifies a workspace-relative path into a typed
+      language verdict; unknown extensions are [Unknown_lang] rather than a
+      permissive default. *)
+  val resolve_lang : string -> resolved_lang
+
   (** Per-language LSP health (task-1691). [Overlay_only] carries the last
       error that forced the language into overlay-only mode. *)
   type health =

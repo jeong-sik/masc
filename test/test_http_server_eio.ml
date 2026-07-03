@@ -612,7 +612,8 @@ let test_response_empty_includes_content_length_zero () =
       String.concat
         ""
         (List.map
-           (fun iov -> Bigstringaf.substring iov.buf ~off:iov.off ~len:iov.len)
+           (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
+             Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len)
            iovecs)
     | `Yield | `Close _ -> ""
   in

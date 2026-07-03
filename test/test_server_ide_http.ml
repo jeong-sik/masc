@@ -117,12 +117,17 @@ let dispatch router (request, body) =
     match Httpun.Server_connection.next_write_operation conn with
     | `Write iovecs ->
       List.iter
-        (fun iov ->
+        (fun (iov : Bigstringaf.t Httpun.IOVec.t) ->
            Buffer.add_string
              response_buf
-             (Bigstringaf.substring iov.buf ~off:iov.off ~len:iov.len))
+             (Bigstringaf.substring iov.buffer ~off:iov.off ~len:iov.len))
         iovecs;
-      let written = List.fold_left (fun acc iov -> acc + iov.len) 0 iovecs in
+      let written =
+        List.fold_left
+          (fun acc (iov : Bigstringaf.t Httpun.IOVec.t) -> acc + iov.len)
+          0
+          iovecs
+      in
       Httpun.Server_connection.report_write_result conn (`Ok written);
       flush ()
     | `Yield | `Close _ -> ()
@@ -139,7 +144,7 @@ let status_of_response response =
 
 let setup_state base_path =
   save_auth_config base_path;
-  let state = Mcp_server.create_state ~base_path in
+  let state = Masc.Mcp_server.create_state ~base_path in
   Server_auth.server_state := Some state;
   state
 ;;

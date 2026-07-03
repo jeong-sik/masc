@@ -49,6 +49,9 @@
 
 include Keeper_approval_queue_rules_types
 
+let default_noncritical_approval_timeout_s = 600.0
+let default_critical_approval_escalation_after_s = 1800.0
+
 let record_queue_failure ~keeper_name ~site ?(id = "-") ?(event_type = "-") exn =
   Otel_metric_store.inc_counter
     Keeper_metrics.(to_string ApprovalQueueFailures)

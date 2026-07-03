@@ -312,9 +312,23 @@ let execute_tool_eio
                      ~args:coerced_args
                  | Mod_agent_timeline ->
                    Tool_agent_timeline.dispatch
-                     ~load_chat:(fun ~agent_name ->
-                       Keeper_chat_timeline_source.lines_for
-                         ~base_dir:config.base_path ~keeper_name:agent_name)
+                     ~load_chat:(fun ~agent_name:requested_agent_name ->
+                       if
+                         Keeper_identity.is_keeper_principal_agent_name agent_name
+                         || Option.is_some
+                              (Keeper_registry_lookup.find_by_name agent_name)
+                         || Option.is_some
+                              (Keeper_registry_lookup.find_by_agent_name
+                                 agent_name)
+                       then
+                         Keeper_chat_timeline_source.lines_for_self
+                           ~base_dir:config.base_path
+                           ~caller_keeper_name:agent_name
+                           ~agent_name:requested_agent_name
+                       else
+                         Keeper_chat_timeline_source.lines_for
+                           ~base_dir:config.base_path
+                           ~keeper_name:requested_agent_name)
                      { Tool_agent_timeline.config; agent_name }
                      ~name
                      ~args:coerced_args

@@ -103,6 +103,10 @@ let append_chat dir ~user ~assistant =
   Lib.Keeper_chat_store.append_turn ~base_dir:dir ~keeper_name:"testkeeper"
     ~user_content:user ~user_attachments:[] ~assistant_content:assistant ()
 
+let append_chat_for dir ~keeper_name ~user ~assistant =
+  Lib.Keeper_chat_store.append_turn ~base_dir:dir ~keeper_name ~user_content:user
+    ~user_attachments:[] ~assistant_content:assistant ()
+
 (* Build the timeline with the keeper-aware chat reader wired, the way the
    production dispatch sites do. Exercises the tool -> keeper boundary
    inversion end to end: [build_timeline] takes only neutral chat lines,
@@ -177,6 +181,33 @@ let test_no_chat_no_regression () =
       check int "turn_completed still surfaces" 1
         (summary_int json "turns_completed"))
 
+(* Keeper-runtime dispatch must not let a keeper read another keeper's
+   direct chat by passing a different [agent_name] to masc_agent_timeline.
+   The dashboard/operator paths still use [lines_for] when they deliberately
+   inspect arbitrary keeper history; the scoped reader is for keeper callers. *)
+let test_self_scoped_chat_reader_blocks_cross_keeper () =
+  with_dir_config (fun dir config ->
+      append_chat_for dir ~keeper_name:"testkeeper" ~user:"own-q"
+        ~assistant:"own-a";
+      append_chat_for dir ~keeper_name:"otherkeeper" ~user:"other-q"
+        ~assistant:"other-a";
+      let build_for requested =
+        Lib.Tool_agent_timeline.build_timeline
+          ~load_chat:(fun ~agent_name ->
+            Lib.Keeper_chat_timeline_source.lines_for_self ~base_dir:dir
+              ~caller_keeper_name:"testkeeper" ~agent_name)
+          config ~agent_name:requested ~since_hours:24.0 ~limit:50
+          ~include_tasks:true ~include_board:false ~include_tool_calls:true
+      in
+      check (list string) "own chat remains visible"
+        [ "own-q"; "own-a" ]
+        (chat_field "content" (build_for "testkeeper"));
+      check (list string) "own chat remains visible through agent alias"
+        [ "own-q"; "own-a" ]
+        (chat_field "content" (build_for "keeper-testkeeper-agent"));
+      check (list string) "other keeper chat is hidden" []
+        (chat_field "content" (build_for "otherkeeper")))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -197,5 +228,7 @@ let () =
             test_chat_interleaves_with_autonomous;
           test_case "no chat store no regression" `Quick
             test_no_chat_no_regression;
+          test_case "self-scoped reader blocks cross-keeper chat" `Quick
+            test_self_scoped_chat_reader_blocks_cross_keeper;
         ] );
     ]

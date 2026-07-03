@@ -128,6 +128,11 @@ type max_context_resolution =
   ; effective_budget : int
   }
 
+type context_budget_source =
+  | Runtime_provider_cap
+  | Requested_override
+  | Requested_override_clamped_to_provider
+
 type overflow_retry_recovery =
   { checkpoint : Agent_sdk.Checkpoint.t
   ; compaction : compaction_event
@@ -285,6 +290,12 @@ val resolve_max_context_resolution
   -> max_context_resolution
 
 val resolve_max_context_resolution_of_meta : keeper_meta -> max_context_resolution
+
+val context_budget_source_of_resolution
+  :  max_context_resolution
+  -> context_budget_source
+
+val context_budget_source_to_string : context_budget_source -> string
 (** {1 Mention Detection} *)
 (** {1 Mention Detection} *)
 

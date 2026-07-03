@@ -723,14 +723,9 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
           in
           let primary_max_context = max_context_resolution.effective_budget in
           let context_budget_source =
-            match max_context_resolution.requested_override with
-            | Some requested
-              when requested > 0
-                   && max_context_resolution.effective_budget
-                      < max_context_resolution.turn_budget ->
-              "requested_override_clamped_to_provider"
-            | Some requested when requested > 0 -> "requested_override"
-            | Some _ | None -> "runtime_provider_cap"
+            max_context_resolution
+            |> Keeper_context_runtime.context_budget_source_of_resolution
+            |> Keeper_context_runtime.context_budget_source_to_string
           in
           let context_budget =
             `Assoc

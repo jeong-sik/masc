@@ -307,14 +307,9 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
         Keeper_context_runtime.resolve_max_context_resolution_of_meta m
       in
       let context_budget_source =
-        match max_context_resolution.requested_override with
-        | Some requested
-          when requested > 0
-               && max_context_resolution.effective_budget
-                  < max_context_resolution.turn_budget ->
-          "requested_override_clamped_to_provider"
-        | Some requested when requested > 0 -> "requested_override"
-        | Some _ | None -> "runtime_provider_cap"
+        max_context_resolution
+        |> Keeper_context_runtime.context_budget_source_of_resolution
+        |> Keeper_context_runtime.context_budget_source_to_string
       in
       let primary_max_context = max_context_resolution.effective_budget in
       let base_dir = session_base_dir config in

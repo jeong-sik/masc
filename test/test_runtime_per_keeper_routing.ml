@@ -743,6 +743,29 @@ let test_context_budget_uses_selected_runtime () =
       selected_budget.Keeper_context_runtime.effective_budget)
 ;;
 
+let test_context_budget_source_is_shared_ssot () =
+  with_runtime_initialized (fun () ->
+    let source requested_override =
+      Keeper_context_runtime.resolve_max_context_resolution
+        ~requested_override
+        [ "openai.gpt" ]
+      |> Keeper_context_runtime.context_budget_source_of_resolution
+      |> Keeper_context_runtime.context_budget_source_to_string
+    in
+    Alcotest.(check string)
+      "runtime cap source"
+      "runtime_provider_cap"
+      (source None);
+    Alcotest.(check string)
+      "requested override source"
+      "requested_override"
+      (source (Some 32_000));
+    Alcotest.(check string)
+      "provider-clamped requested override source"
+      "requested_override_clamped_to_provider"
+      (source (Some 1_000_000)))
+;;
+
 (* Production path: [resolve_max_context_resolution_of_meta] must budget against
    the keeper's routed runtime (openai.gpt = 64000), NOT [runtime].default
    (runpod_mtp.qwen = 128000).  Without prepending [runtime_id_of_meta], the
@@ -1372,6 +1395,10 @@ let () =
             "context budget uses selected runtime max-context"
             `Quick
             test_context_budget_uses_selected_runtime
+        ; Alcotest.test_case
+            "context budget source uses shared SSOT"
+            `Quick
+            test_context_budget_source_is_shared_ssot
         ; Alcotest.test_case
             "of_meta budgets against the routed runtime (production path)"
             `Quick

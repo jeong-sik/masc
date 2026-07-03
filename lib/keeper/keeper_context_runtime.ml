@@ -151,6 +151,25 @@ type max_context_resolution = {
   effective_budget : int;
 }
 
+type context_budget_source =
+  | Runtime_provider_cap
+  | Requested_override
+  | Requested_override_clamped_to_provider
+
+let context_budget_source_of_resolution (resolution : max_context_resolution) =
+  match resolution.requested_override with
+  | Some requested
+    when requested > 0 && resolution.effective_budget < resolution.turn_budget ->
+    Requested_override_clamped_to_provider
+  | Some requested when requested > 0 -> Requested_override
+  | Some _ | None -> Runtime_provider_cap
+
+let context_budget_source_to_string = function
+  | Runtime_provider_cap -> "runtime_provider_cap"
+  | Requested_override -> "requested_override"
+  | Requested_override_clamped_to_provider ->
+    "requested_override_clamped_to_provider"
+
 let apply_post_turn_lifecycle_with_resilience_handles =
   Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles
 let recover_latest_checkpoint_for_overflow_retry =

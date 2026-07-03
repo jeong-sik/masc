@@ -197,34 +197,45 @@ let provider_kind_of_cli_provider (provider : Runtime_schema.provider)
        provider.protocol)
 ;;
 
+let registry_provider_kind = function
+  | Some entry -> Some entry.Llm_provider.Provider_registry.defaults.kind
+  | None -> None
+;;
+
+let messages_api_compatible_provider_kind = function
+  | Llm_provider.Provider_config.Anthropic | Llm_provider.Provider_config.Kimi -> true
+  | Llm_provider.Provider_config.OpenAI_compat
+  | Llm_provider.Provider_config.Ollama
+  | Llm_provider.Provider_config.Gemini
+  | Llm_provider.Provider_config.Glm
+  | Llm_provider.Provider_config.DashScope -> false
+;;
+
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
     : (Llm_provider.Provider_config.provider_kind, string) result =
   match provider.api_format with
   | Ollama_api -> Ok Llm_provider.Provider_config.Ollama
   | Chat_completions_api ->
+    (* Chat-completions keeps the historical OpenAI-compatible fallback when
+       registry metadata is absent. Messages API deliberately fails closed
+       below because there is no safe Anthropic-style default. *)
     Ok
-      (match registry_entry with
-       | Some entry ->
-         let kind = entry.Llm_provider.Provider_registry.defaults.kind in
-         if kind = Llm_provider.Provider_config.Ollama
-         then Llm_provider.Provider_config.OpenAI_compat
-         else kind
+      (match registry_provider_kind registry_entry with
+       | Some Llm_provider.Provider_config.Ollama ->
+         Llm_provider.Provider_config.OpenAI_compat
+       | Some kind -> kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api ->
-    (match registry_entry with
-     | Some entry ->
-       let kind = entry.Llm_provider.Provider_registry.defaults.kind in
-       if kind = Llm_provider.Provider_config.OpenAI_compat
-          || kind = Llm_provider.Provider_config.Ollama
-       then
-         Error
-           (Printf.sprintf
-              "provider %S uses protocol %s, but registry kind %s is not \
-               messages-compatible"
-              provider.id
-              provider.protocol
-              (Llm_provider.Provider_config.string_of_provider_kind kind))
-       else Ok kind
+    (match registry_provider_kind registry_entry with
+     | Some kind when messages_api_compatible_provider_kind kind -> Ok kind
+     | Some kind ->
+       Error
+         (Printf.sprintf
+            "provider %S uses protocol %s, but registry kind %s is not \
+             messages-compatible"
+            provider.id
+            provider.protocol
+            (Llm_provider.Provider_config.string_of_provider_kind kind))
      | None ->
        Error
          (Printf.sprintf

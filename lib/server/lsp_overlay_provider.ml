@@ -291,21 +291,20 @@ let completion_items ~base_dir ~file_path ~line:_ : Yojson.Safe.t list =
     Used by textDocument/codeAction. *)
 let code_actions ~base_dir ~file_path ~line ~diagnostics:_ : Yojson.Safe.t list =
   let matching = annotations_at_line ~base_dir ~file_path ~line in
+  (* task-1692: the observation plane is read-only, so "Create MASC
+     Annotation" must not return a WorkspaceEdit that inserts text into the
+     source file (the old [edit]/[newText]). Annotations live in the MASC
+     store, not the buffer, so this offers a MASC command (a separate write
+     lane the client routes to the annotation API) instead of an LSP edit. *)
   let create_action =
     `Assoc [
       ("title", `String "Create MASC Annotation");
       ("kind", `String "quickfix.createAnnotation");
-      ("edit", `Assoc [
-        ("changes", `Assoc [
-          ("file://" ^ base_dir ^ "/" ^ file_path, `List [
-            `Assoc [
-              ("range", `Assoc [
-                ("start", `Assoc [("line", `Int line); ("character", `Int 0)]);
-                ("end", `Assoc [("line", `Int line); ("character", `Int 0)]);
-              ]);
-              ("newText", `String "/* [Comment]  */\n");
-            ];
-          ]);
+      ("command", `Assoc [
+        ("title", `String "Create MASC Annotation");
+        ("command", `String "masc.createAnnotation");
+        ("arguments", `List [
+          `Assoc [("file_path", `String file_path); ("line", `Int line)];
         ]);
       ]);
     ]

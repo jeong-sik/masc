@@ -205,7 +205,18 @@ let test_dispatch_structured () =
   (* Register a test handler *)
   Tool_dispatch.register ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
     Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
-  Tool_dispatch.register_name_tag ~tool_name:"__test_tool" ~tag:Mod_misc;
+  (* Register a schema (not just a tag) so the tool clears the input-schema
+     validation pre-hook that Mcp_server_eio installs at module load. An
+     empty-object schema dispatched with no args passes validation, keeping the
+     test focused on structured dispatch while matching production, where every
+     dispatchable tool carries a schema. *)
+  Tool_dispatch.register_module_tag
+    ~schemas:
+      [ { Masc_domain.name = "__test_tool"
+        ; description = "test dispatch tool"
+        ; input_schema = `Assoc [ "type", `String "object" ]
+        } ]
+    ~tag:Mod_misc;
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with
     | Ok t -> t

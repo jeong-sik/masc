@@ -279,6 +279,32 @@ describe('normalizeFusionJudgeNodes', () => {
     expect(nodes[0].role).toBe('judge')
     expect(nodes[0].identity).toBe('judge-3')
   })
+
+  it('carries per-node decision + resolved-answer summary for a synthesized node, none for a failed node', () => {
+    const nodes = normalizeFusionJudgeNodes([
+      {
+        role: 'first',
+        identity: 'skeptic',
+        decision: 'recommend — patch first',
+        resolved_answer: 'Patch the compact isolation first.',
+        input_tokens: 100,
+        output_tokens: 10,
+      },
+      { role: 'first', identity: 'domain', status: 'failed', error: 'timeout' },
+    ])
+    expect(nodes[0].decision).toBe('recommend — patch first')
+    expect(nodes[0].summary).toBe('Patch the compact isolation first.')
+    // a failed node carries neither verdict nor summary (Judge_failed emits neither)
+    expect(nodes[1].decision).toBeUndefined()
+    expect(nodes[1].summary).toBeUndefined()
+  })
+
+  it('falls back to synthesis when a synthesized node has no resolved_answer', () => {
+    const [node] = normalizeFusionJudgeNodes([
+      { role: 'first', identity: 'lit', decision: 'insufficient — missing: data', synthesis: '**Decision**: insufficient' },
+    ])
+    expect(node.summary).toBe('**Decision**: insufficient')
+  })
 })
 
 describe('classifyFusionJudgeShape', () => {

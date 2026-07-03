@@ -20,7 +20,15 @@ export interface RuntimeTomlModel {
   maxContext: number | null
   toolsSupport: boolean
   thinkingSupport: boolean
+  // Capability fields below mirror [models.<id>.capabilities] (SSOT:
+  // lib/runtime/runtime_toml.ml). `null` means the key is absent (unknown),
+  // kept distinct from a declared `false` so the UI never claims support that
+  // the config did not state.
   jsonSupport: boolean | null
+  toolChoice: boolean | null
+  structuredOutput: boolean | null
+  multimodal: boolean | null
+  thinkingControlFormat: string | null
   streaming: boolean
 }
 
@@ -32,6 +40,10 @@ export interface RuntimeTomlBinding {
   maxConcurrent: number | null
   keepAlive: string
   numCtx: number | null
+  // per-M token prices from the binding table (runtime_toml.ml:600-601); `null`
+  // when the binding omits them (most bindings do).
+  priceInput: number | null
+  priceOutput: number | null
 }
 
 export interface RuntimeTomlEnvironment {
@@ -283,15 +295,35 @@ function providerFromDocument(document: TomlDocument, id: string): RuntimeTomlPr
   }
 }
 
+function capBoolean(value: TomlScalar | undefined): boolean | null {
+  return typeof value === 'boolean' ? value : null
+}
+
 function modelFromDocument(document: TomlDocument, id: string): RuntimeTomlModel {
   const values = sectionValues(document, `models.${id}`)
+  // Model capabilities live in the nested [models.<id>.capabilities] section,
+  // parsed server-side by lib/runtime/runtime_toml.ml:435-451. The earlier
+  // reader looked for a `json-support` key on the top-level model table, which
+  // never exists in the SSOT config, so JSON-lane validation never fired.
+  const caps = sectionValues(document, `models.${id}.capabilities`)
+  const multimodalCap = caps['supports-multimodal-inputs']
+  const imageCap = caps['supports-image-input']
+  const multimodal =
+    typeof multimodalCap === 'boolean' || typeof imageCap === 'boolean'
+      ? multimodalCap === true || imageCap === true
+      : null
   return {
     id,
     apiName: asString(values['api-name'], asString(values['model-name'], id)),
     maxContext: asNumber(values['max-context']),
     toolsSupport: asBoolean(values['tools-support']),
     thinkingSupport: asBoolean(values['thinking-support']),
-    jsonSupport: typeof values['json-support'] === 'boolean' ? values['json-support'] : null,
+    jsonSupport: capBoolean(caps['supports-response-format-json']),
+    toolChoice: capBoolean(caps['supports-tool-choice']),
+    structuredOutput: capBoolean(caps['supports-structured-output']),
+    multimodal,
+    thinkingControlFormat:
+      typeof caps['thinking-control-format'] === 'string' ? caps['thinking-control-format'] : null,
     streaming: asBoolean(values.streaming, true),
   }
 }
@@ -309,6 +341,8 @@ function bindingFromDocument(
     maxConcurrent: asNumber(values['max-concurrent']),
     keepAlive: asString(values['keep-alive']),
     numCtx: asNumber(values['num-ctx']),
+    priceInput: asNumber(values['price-input']),
+    priceOutput: asNumber(values['price-output']),
   }
 }
 
@@ -585,6 +619,17 @@ export function setRuntimeTomlModelField(
   field: 'api-name' | 'max-context' | 'tools-support' | 'thinking-support' | 'json-support' | 'streaming',
   value: string | number | boolean | null,
 ): string {
+  // The JSON capability is stored in the nested [models.<id>.capabilities]
+  // section under the SSOT key the server reads (runtime_toml.ml). Route the
+  // legacy `json-support` field there so dashboard-authored models write the
+  // key runtime config actually consumes instead of an ignored top-level key.
+  if (field === 'json-support') {
+    const capabilities = `models.${modelId}.capabilities`
+    if (value === null) {
+      return deleteRuntimeTomlKey(sourceText, capabilities, 'supports-response-format-json')
+    }
+    return setRuntimeTomlKey(sourceText, capabilities, 'supports-response-format-json', value)
+  }
   if (value === null) return deleteRuntimeTomlKey(sourceText, `models.${modelId}`, field)
   return setRuntimeTomlKey(sourceText, `models.${modelId}`, field, value)
 }

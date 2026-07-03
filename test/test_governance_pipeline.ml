@@ -687,7 +687,9 @@ let test_hook_development_blocks_critical () =
   (match result with
    | Tool_dispatch.Reject _ -> ()
    | Tool_dispatch.Pass ->
-     Alcotest.fail "development should block hard-forbidden critical");
+     Alcotest.fail "development should block hard-forbidden critical"
+   | Tool_dispatch.Proceed _ ->
+     Alcotest.fail "development should block hard-forbidden critical, not proceed");
   cleanup_tmpdir tmpdir
 
 let test_hook_production_blocks_critical () =

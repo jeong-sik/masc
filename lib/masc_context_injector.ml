@@ -85,6 +85,29 @@ let get_int ctx key =
   | Some (`Int i) -> Some i
   | _ -> None
 
+let legacy_elapsed_seconds ctx =
+  match get_float ctx key_elapsed_seconds with
+  | Some elapsed -> Some elapsed
+  | None ->
+    Log.Keeper.warn
+      "Temporal summary skipped: missing %s and legacy %s"
+      key_session_start key_elapsed_seconds;
+    None
+
+let tool_summary_fields ctx =
+  match
+    ( get_int ctx key_tool_call_count,
+      get_string ctx key_last_tool_name,
+      get_string ctx key_last_tool_outcome )
+  with
+  | Some tool_count, Some last_tool, Some outcome ->
+    Some (tool_count, last_tool, outcome)
+  | _ ->
+    Log.Keeper.warn
+      "Temporal summary skipped: missing tool summary keys (%s/%s/%s)"
+      key_tool_call_count key_last_tool_name key_last_tool_outcome;
+    None
+
 let render_temporal_summary ?now (ctx : Agent_sdk.Context.t) : string option =
   (* [key_wall_time] presence is the "at least one tool has executed"
      sentinel (turn 0 renders no block). We do NOT display its stored
@@ -99,18 +122,15 @@ let render_temporal_summary ?now (ctx : Agent_sdk.Context.t) : string option =
     let wall_time = iso8601_of_float now in
     let elapsed =
       match get_float ctx key_session_start with
-      | Some session_start -> now -. session_start
+      | Some session_start -> Some (now -. session_start)
       | None ->
         (* Backward compat: contexts written before [key_session_start]
            existed fall back to the stored (possibly stale) elapsed. *)
-        get_float ctx key_elapsed_seconds |> Option.value ~default:0.0
+        legacy_elapsed_seconds ctx
     in
-    let tool_count =
-      get_int ctx key_tool_call_count |> Option.value ~default:0 in
-    let last_tool =
-      get_string ctx key_last_tool_name |> Option.value ~default:"none" in
-    let outcome =
-      get_string ctx key_last_tool_outcome |> Option.value ~default:"unknown" in
-    Some (Printf.sprintf
-      "[Temporal] time=%s elapsed=%.0fs tools=%d last=%s(%s)"
-      wall_time elapsed tool_count last_tool outcome)
+    match elapsed, tool_summary_fields ctx with
+    | Some elapsed, Some (tool_count, last_tool, outcome) ->
+      Some (Printf.sprintf
+        "[Temporal] time=%s elapsed=%.0fs tools=%d last=%s(%s)"
+        wall_time elapsed tool_count last_tool outcome)
+    | _ -> None

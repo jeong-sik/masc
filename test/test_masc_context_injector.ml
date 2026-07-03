@@ -192,6 +192,12 @@ let test_render_elapsed_fallback_without_session_start () =
     MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
   Agent_sdk.Context.set ctx
     MCI.key_elapsed_seconds (`Float 55.0);
+  Agent_sdk.Context.set ctx
+    MCI.key_tool_call_count (`Int 1);
+  Agent_sdk.Context.set ctx
+    MCI.key_last_tool_name (`String "legacy_tool");
+  Agent_sdk.Context.set ctx
+    MCI.key_last_tool_outcome (`String "ok");
   match MCI.render_temporal_summary ~now:1_800_000_000.0 ctx with
   | Some summary ->
     check bool "time= is fresh" true
@@ -200,6 +206,13 @@ let test_render_elapsed_fallback_without_session_start () =
     check bool "elapsed falls back to stored value" true
       (Astring.String.is_infix ~affix:"elapsed=55s" summary)
   | None -> fail "expected Some summary"
+
+let test_render_omits_malformed_elapsed_context () =
+  let ctx = Agent_sdk.Context.create_sync () in
+  Agent_sdk.Context.set ctx
+    MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
+  check (option string) "missing elapsed anchor omits summary"
+    None (MCI.render_temporal_summary ~now:1_800_000_000.0 ctx)
 
 (* ── ISO 8601 formatting ────────────────────────────── *)
 
@@ -238,6 +251,8 @@ let () =
         test_render_uses_fresh_now_not_stale;
       test_case "elapsed fallback without session_start" `Quick
         test_render_elapsed_fallback_without_session_start;
+      test_case "malformed elapsed context omitted" `Quick
+        test_render_omits_malformed_elapsed_context;
     ];
     "iso8601", [
       test_case "format" `Quick test_iso8601_format;

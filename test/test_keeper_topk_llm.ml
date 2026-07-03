@@ -37,7 +37,7 @@ let mock_rerank_failing ~context:_ ~candidates:_ =
 
 let test_tools = [
   make_tool "keeper_board_post" "Post a message to the board";
-  make_tool "keeper_board_get" "Read a board post by ID";
+  make_tool "keeper_board_post_get" "Read a board post by ID";
   make_tool "keeper_board_list" "List recent board posts";
   make_tool "tool_read_file" "Read a file from the filesystem";
   make_tool "tool_edit_file" "Edit a file on the filesystem";
@@ -186,7 +186,7 @@ let test_topk_llm_empty_tools () =
 
 let test_topk_llm_explicit_name_rerank () =
   let allowed_names =
-    [ "keeper_board_post"; "keeper_board_get"; "keeper_board_list" ]
+    [ "keeper_board_post"; "keeper_board_post_get"; "keeper_board_list" ]
   in
   let strategy = Agent_sdk.Tool_selector.TopK_llm {
     k = 5;
@@ -545,7 +545,7 @@ let test_tool_surface_selection_preserves_order () =
     [
       "keeper_context_status";
       "keeper_task_done";
-      "keeper_board_get";
+      "keeper_board_post_get";
       "keeper_task_done";
       "tool_search_files";
       "tool_read_file";

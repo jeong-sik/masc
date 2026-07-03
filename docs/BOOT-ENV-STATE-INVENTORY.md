@@ -82,7 +82,6 @@ The checked-in versioned seed config tree currently contains:
 | Path | Purpose |
 | --- | --- |
 | `config/runtime.toml` | Provider/model runtime and routing defaults. |
-| `config/tool_policy.toml` | Tool group policy and allow/deny rules. |
 | `config/keepers/*.toml` | Keeper defaults and policy-overridable profiles. |
 | `config/personas/*` | Persona definitions and persona-specific profile data. |
 | `config/prompts/*.md` | Versioned system prompt fragments and governance/keeper prompt templates. |
@@ -449,7 +448,6 @@ Current log sink observed today:
    - `<runtime_root>/playground/<keeper>/repos/`
    - `<runtime_root>/keepers/<name>/`
    - `<runtime_root>/traces/`
-   - `<active config root>/tool_policy.toml`
    - `<active config root>/runtime.toml`
 
 ## Appendix A. Centralized Environment Inventory

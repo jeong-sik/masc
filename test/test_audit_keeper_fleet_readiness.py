@@ -585,7 +585,7 @@ class AuditKeeperFleetReadinessTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             write_ready_keeper(root, "alpha")
-            write_persistent_work_evidence(root, "alpha", tool="keeper_board_get")
+            write_persistent_work_evidence(root, "alpha", tool="keeper_board_post_get")
             args = audit_args(root, expected_keepers=1)
             args.require_persistent_work_evidence = True
 

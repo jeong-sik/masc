@@ -15,7 +15,7 @@
 ; -m plain mode produces:
 ;   val read : string -> string option
 ;   val file_list : string list
-; The path under config/ becomes the lookup key (e.g. "tool_policy.toml",
+; The path under config/ becomes the lookup key (e.g. "runtime.toml",
 ; "keepers/sangsu.toml"). This makes the release binary self-seeding for
 ; first-run, removing the network dependency from scripts/install.sh.
 

@@ -64,13 +64,13 @@ let test_config_seed_skips_each_existing_file_without_force () =
     script
     {|if [ -e "$dest" ] && [ "$FORCE" -eq 0 ]; then|};
   assert_contains
-    "tool policy uses per-file seed"
-    script
-    {|seed_config_if_missing "tool_policy.toml" "$CONFIG_FILE"|};
-  assert_contains
     "runtime uses per-file seed"
     script
     {|seed_config_if_missing "runtime.toml" "$RUNTIME_FILE"|};
+  assert_not_contains
+    "tool policy is not seeded"
+    script
+    {|seed_config_if_missing "tool_policy.toml"|};
   assert_not_contains
     "no all-or-nothing seed calls"
     script

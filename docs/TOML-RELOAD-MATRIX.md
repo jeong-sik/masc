@@ -56,7 +56,7 @@ Operational meaning:
 
 - **Deleted**: `keeper_tool_policy_config.ml` and its TOML loader were removed.
   Tool access is now descriptor/registry-driven with denylist filtering only.
-- The `config/tool_policy.toml` file is no longer read at boot.
+- The `config/tool_policy.toml` seed file is no longer checked in or read at boot.
 
 ### `keepers/*.toml`
 

@@ -83,7 +83,7 @@ check_rule "R2-loopback-literal" 1 \
 # SSOT-R4 — config filename literal.
 # Tracked: #8414. Helper to be added (Config_filenames) in the fix.
 # No exclusion — every site should eventually route through the helper.
-check_rule "R4-config-filename" 2 \
+check_rule "R4-config-filename" 0 \
   "Config_filenames.<name> (add helper per #8414)" \
   '"(runtime\.json|keeper_runtime\.toml|tool_policy\.toml)"' \
   '' \

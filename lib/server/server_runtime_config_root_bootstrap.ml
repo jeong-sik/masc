@@ -24,10 +24,10 @@ let project_root_from_executable () =
 let config_root_from_ancestor start_dir =
   let rec walk_up dir =
     let config_root = Filename.concat dir "config" in
-    let tool_policy =
-      Filename.concat config_root Config_dir_resolver.tool_policy_toml_filename
+    let runtime_toml =
+      Filename.concat config_root Config_dir_resolver.runtime_toml_filename
     in
-    if Sys.file_exists tool_policy
+    if Sys.file_exists runtime_toml
     then Some config_root
     else (
       let parent = Filename.dirname dir in
@@ -134,10 +134,7 @@ let copy_missing_config_root_seed ~src ~dst =
   Fs_compat.mkdir_p dst;
   Sys.readdir src
   |> Array.iter (fun name ->
-    if
-      String.equal name "keepers"
-      || String.equal name Config_dir_resolver.tool_policy_toml_filename
-    then ()
+    if String.equal name "keepers" then ()
     else
       copy_missing_tree
         ~src:(Filename.concat src name)

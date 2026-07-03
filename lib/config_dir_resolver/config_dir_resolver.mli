@@ -47,7 +47,6 @@ type inputs = {
 (** {1 SSOT filenames}
 
     Documented in [docs/TOML-RELOAD-MATRIX.md]. *)
-val tool_policy_toml_filename : string
 val runtime_toml_filename : string
 
 val inputs_from_env : unit -> inputs
@@ -168,8 +167,8 @@ val keeper_repo_mappings_toml_path : base_path:string -> string
 
 val config_signature_exists : string -> bool
 (** [config_signature_exists dir] checks whether [dir] looks like a valid
-    MASC config directory (has runtime.toml, tool_policy.toml, prompts/,
-    keepers/, or personas/). *)
+    MASC config directory (has runtime.toml, prompts/, keepers/, or
+    personas/). *)
 
 (** {1 Env introspection}
 

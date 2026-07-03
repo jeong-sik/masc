@@ -22,6 +22,12 @@ let check_not_contains label needle text =
   Alcotest.(check bool) label false (contains text needle)
 ;;
 
+let markdown_code text = "`" ^ text ^ "`"
+
+let markdown_list values =
+  values |> List.map markdown_code |> String.concat ", "
+;;
+
 let schema_description name schemas =
   match List.find_opt (fun (schema : Types.tool_schema) -> String.equal schema.name name) schemas with
   | Some schema -> schema.description
@@ -34,6 +40,73 @@ let get_json_assoc key = function
       | Some (`Assoc assoc) -> Some assoc
       | _ -> None)
   | _ -> None
+
+let shard_tool_names (shard : Tool_shard.shard) =
+  shard.tools |> List.map (fun (tool : Masc_domain.tool_schema) -> tool.name)
+;;
+
+let keeper_tool_shard_snapshot () =
+  let defaults = Tool_shard.default_shard_names in
+  let all_names =
+    Tool_shard.list_all_shards () |> List.map (fun (name, _, _) -> name)
+  in
+  let ordered_names =
+    defaults @ List.filter (fun name -> not (List.mem name defaults)) all_names
+  in
+  let row name =
+    match Tool_shard.get_shard name with
+    | None -> Alcotest.failf "missing shard in snapshot: %s" name
+    | Some shard ->
+      let tools = shard_tool_names shard in
+      Printf.sprintf
+        "| **%s** | %s | %d | %s | %s |"
+        name
+        (markdown_list tools)
+        (List.length tools)
+        (if List.mem name defaults then "Yes" else "No")
+        (if shard.removable then "Yes" else "No")
+  in
+  String.concat
+    "\n"
+    ([ Printf.sprintf "Default shard order: %s" (markdown_list defaults)
+     ; ""
+     ; Printf.sprintf
+         "Unsharded default tools: %s"
+         (markdown_list
+            (Tool_shard_types.typed_execute_tools
+             |> List.map (fun (tool : Masc_domain.tool_schema) -> tool.name)))
+     ; ""
+     ; "| Shard | Tools | Count | Default | Removable |"
+     ; "|-------|-------|-------|---------|-----------|"
+     ]
+     @ List.map row ordered_names)
+;;
+
+let extract_marked_block ~begin_marker ~end_marker text =
+  let rec seek = function
+    | [] -> Alcotest.failf "missing marker: %s" begin_marker
+    | line :: rest when String.equal line begin_marker -> collect [] rest
+    | _ :: rest -> seek rest
+  and collect acc = function
+    | [] -> Alcotest.failf "missing marker: %s" end_marker
+    | line :: _ when String.equal line end_marker -> String.concat "\n" (List.rev acc)
+    | line :: rest -> collect (line :: acc) rest
+  in
+  seek (String.split_on_char '\n' text)
+;;
+
+let test_keeper_capability_matrix_snapshot () =
+  let actual =
+    Masc_test_deps.read_source_file "docs/KEEPER-CAPABILITY-MATRIX.md"
+    |> extract_marked_block
+         ~begin_marker:"<!-- BEGIN:keeper-tool-shard-snapshot -->"
+         ~end_marker:"<!-- END:keeper-tool-shard-snapshot -->"
+  in
+  Alcotest.(check string)
+    "keeper shard snapshot"
+    (keeper_tool_shard_snapshot ())
+    actual
+;;
 
 (* ============================================================
    Predefined shard tests
@@ -569,6 +642,10 @@ let () =
     ]);
     ("keeper_dispatch_coverage", [
       Alcotest.test_case "all shard tools reachable" `Quick test_keeper_dispatch_coverage;
+    ]);
+    ("docs", [
+      Alcotest.test_case "capability matrix snapshot" `Quick
+        test_keeper_capability_matrix_snapshot;
     ]);
     ("persona_shard_config", [
       Alcotest.test_case "empty defaults shards None" `Quick test_empty_defaults_shards_none;

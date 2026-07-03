@@ -372,12 +372,6 @@ let seed_server_config ~base_path =
   List.iter
     (fun name -> ensure_dir (Filename.concat config_dir name))
     [ "keepers"; "personas"; "prompts" ];
-  let tool_policy_dst = Filename.concat config_dir "tool_policy.toml" in
-  if not (Sys.file_exists tool_policy_dst) then begin
-    match find_repo_file "config/tool_policy.toml" with
-    | Some src -> copy_file ~src ~dst:tool_policy_dst
-    | None -> fail "config/tool_policy.toml fixture not found"
-  end;
   let runtime_dst = Filename.concat config_dir "runtime.toml" in
   if not (Sys.file_exists runtime_dst) then
     let oc = open_out runtime_dst in

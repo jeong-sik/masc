@@ -1,9 +1,12 @@
 ---
 status: reference
-last_verified: 2026-04-17
+last_verified: 2026-07-03
 code_refs:
-  - lib/keeper/
-  - lib/tool/tool_dispatch.ml
+  - lib/tool_shard.ml
+  - lib/tool_surface/tool_shard_types_core.ml
+  - lib/tool_surface/tool_shard_types_schemas_*.ml
+  - lib/keeper/keeper_tool_policy.ml
+  - test/test_tool_shard_coverage.ml
 ---
 
 # Keeper Capability Matrix
@@ -18,15 +21,25 @@ Triage and trigger detection run on each heartbeat using the proactive idle/cool
 
 ## Tool Shards
 
-| Shard | Tools | Count | Removable |
-|-------|-------|-------|-----------|
-| **base** | `keeper_time_now`, `keeper_context_status`, `keeper_memory_search`, `keeper_tools_list` | 4 | No |
-| **board** | `keeper_board_{get,post,list,comment,vote,stats,search}` | 7 | Yes |
-| **filesystem** | `tool_read_file`, `tool_edit_file`, `tool_write_file` | 3 | Yes |
-| **search_files** | `tool_search_files` | 1 | Yes |
-| **library** | `keeper_library_{search,read}` | 2 | Yes |
-| **taskboard** | `keeper_tasks_{list,audit}`, `keeper_task_{force_release,force_done,claim,done,create}`, `keeper_broadcast` | 8 | Yes |
-| **voice** | `keeper_voice_{speak,listen,agent,sessions,session_start,session_end}` | 6 | Yes |
+`Tool_shard` is the runtime SSOT. The block below is locked by
+`test_tool_shard_coverage`.
+
+<!-- BEGIN:keeper-tool-shard-snapshot -->
+Default shard order: `base`, `board`, `filesystem`, `search_files`, `library`, `surface`, `taskboard`
+
+Unsharded default tools: `tool_execute`
+
+| Shard | Tools | Count | Default | Removable |
+|-------|-------|-------|---------|-----------|
+| **base** | `keeper_time_now`, `keeper_context_status`, `keeper_memory_search`, `keeper_memory_write`, `keeper_tools_list` | 5 | Yes | No |
+| **board** | `keeper_board_post_get`, `keeper_board_post`, `keeper_board_list`, `keeper_board_comment`, `keeper_board_vote`, `keeper_board_stats`, `keeper_board_search`, `keeper_board_curation_read`, `keeper_board_curation_submit` | 9 | Yes | Yes |
+| **filesystem** | `tool_read_file`, `tool_edit_file`, `tool_write_file`, `keeper_ide_annotate` | 4 | Yes | Yes |
+| **search_files** | `tool_search_files` | 1 | Yes | Yes |
+| **library** | `keeper_library_search`, `keeper_library_read` | 2 | Yes | Yes |
+| **surface** | `keeper_surface_read`, `keeper_surface_post`, `keeper_person_note_set` | 3 | Yes | Yes |
+| **taskboard** | `keeper_tasks_list`, `keeper_tasks_audit`, `keeper_broadcast`, `keeper_task_claim`, `keeper_task_done`, `keeper_task_create` | 6 | Yes | Yes |
+| **voice** | `keeper_voice_speak`, `keeper_voice_listen`, `keeper_voice_agent`, `keeper_voice_sessions`, `keeper_voice_session_start`, `keeper_voice_session_end` | 6 | No | Yes |
+<!-- END:keeper-tool-shard-snapshot -->
 
 Notes:
 - The `voice` shard still exists, but it is no longer part of the default keeper surface. The historical weather shard is retired from `Tool_shard`.
@@ -36,7 +49,8 @@ Notes:
 
 ## Tool Surface
 
-All keepers receive: base + board + fs + search_files + library + taskboard shards plus unsharded default `tool_execute`.
+All keepers receive the default shards listed in the locked snapshot plus
+unsharded default `tool_execute`.
 Voice tools are added when `policy_voice_enabled = true`.
 `write_done = true` returns empty tool list (session terminated).
 
@@ -94,10 +108,11 @@ BoardActivity, IdleTimeout, MetricsAnomaly, StrategicReview.
 | 테스트 실행 | `Execute` with typed argv from the worktree `cwd` |
 | GitHub PR / 이슈 작업 | `Execute` with `executable="gh"` and typed `argv` from a bound repo context for PR reads and reversible PR mutations such as `pr create` / `pr edit`. |
 
-The goal lifecycle surface is configured as the `masc.goal` policy group and
-can enter a keeper's configured `tool_access` candidate profile. Social and
-messaging keepers keep board/task workspace collaboration without goal mutation
-execution surface.
+Goal lifecycle tools are descriptor/registry-driven like the rest of the keeper
+surface; there is no `tool_policy.toml` `masc.goal` group. Social and messaging
+keepers keep board/task workspace collaboration without goal mutation execution
+surface when descriptor availability, profile selection, or denylist filtering
+exclude those tools.
 
 ## Research Profile Additions
 
@@ -114,4 +129,5 @@ surfaces.
 | Destructive | Pattern-match on bash/edit commands | 19 patterns, substring match |
 | Allowlist/Denylist | Explicit tool filtering | `allowed_tools`, `denied_tools` |
 
-Source: `lib/eval_gate.ml`, `lib/keeper/agent_tool_dispatch_runtime.ml`, `lib/tool_shard.ml`
+Source: `lib/eval_gate.ml`, `lib/keeper/keeper_tool_dispatch_runtime.ml`,
+`lib/keeper/keeper_tool_policy.ml`, `lib/tool_shard.ml`

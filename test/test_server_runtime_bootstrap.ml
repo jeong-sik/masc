@@ -118,8 +118,6 @@ let make_config_root root =
   mkdir_p (Filename.concat config "keepers");
   mkdir_p (Filename.concat config "personas");
   write_file (Filename.concat config "runtime.toml") repo_runtime_toml;
-  write_file (Filename.concat config "tool_policy.toml")
-    "[groups.base]\ntools = [\"keeper_time_now\"]\n";
   write_file (Filename.concat config "prompts/keeper.unified.system.md") "prompt";
   write_file (Filename.concat config "keepers/example.toml") "[keeper]\ngoal = \"example\"\n";
   write_file (Filename.concat config "personas/example.txt") "persona";
@@ -809,8 +807,6 @@ let test_startup_config_resolution_defaults_to_bootstrapped_root () =
       mkdir_p (Filename.concat config_root "keepers");
       mkdir_p (Filename.concat config_root "personas");
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       let resolution =
         Server_runtime_bootstrap.startup_config_resolution ~base_path
@@ -3362,8 +3358,6 @@ let test_prompt_markdown_dir_ignores_repo_seed_prompts () =
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();
@@ -3385,8 +3379,6 @@ let test_prompt_markdown_dir_does_not_use_repo_seed () =
       Fs_compat.mkdir_p repo_prompts;
       Fs_compat.mkdir_p expected;
       write_file (Filename.concat config_root "runtime.toml") "";
-      write_file (Filename.concat config_root "tool_policy.toml")
-        "[groups.base]\ntools = [\"keeper_time_now\"]\n";
       with_env "MASC_CONFIG_DIR" None @@ fun () ->
       with_cwd dir @@ fun () ->
       Config_dir_resolver.reset ();

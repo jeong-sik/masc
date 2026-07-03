@@ -34,7 +34,7 @@ let bootstrapped_signature : (string * string) option ref = ref None
    (prompt_overrides.json, replayed after directory load), so prompt
    markdown that differs from the embedded asset is stale, not customized
    — overwriting is the correct convergence.  Only the prompts/ subtree
-   syncs: the rest of .masc/config (tool_policy.toml, runtime.toml, …) is
+   syncs: the rest of .masc/config (runtime.toml, keepers/, personas/, …) is
    operator-edited in place and must never be auto-overwritten. *)
 
 let prompts_asset_prefix = "prompts/"

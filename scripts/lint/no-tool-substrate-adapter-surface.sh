@@ -55,7 +55,6 @@ SURFACE_SCAN_FILES=(
   "lib/tool_catalog.mli"
   "lib/tool_catalog_surfaces.ml"
   "lib/tool_catalog_surfaces.mli"
-  "config/tool_policy.toml"
   "docs/KEEPER-CAPABILITY-MATRIX.md"
   "docs/KEEPER-FILE-MODEL.md"
   "docs/KEEPER-USER-MANUAL.md"

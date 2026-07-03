@@ -670,7 +670,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
         KET.execute_keeper_tool_call_with_outcome
           ~config ~meta ~ctx_work ~exec_cache:None
           ~name:"Read"
-          ~input:(`Assoc [ ("file_path", `String "config/tool_policy.toml") ])
+          ~input:(`Assoc [ ("file_path", `String "config/runtime.toml") ])
           ()
       in
       check string "missing file outcome" "failure"
@@ -694,7 +694,7 @@ let test_execute_with_outcome_missing_file_is_failure () =
           member "recovery_examples" path_resolution
           |> member "parent_path_hint"
           |> to_string);
-      check string "recovery basename hint" "tool_policy.toml"
+      check string "recovery basename hint" "runtime.toml"
         Yojson.Safe.Util.(
           member "recovery_examples" path_resolution
           |> member "basename_hint"

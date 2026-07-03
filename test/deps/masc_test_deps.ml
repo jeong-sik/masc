@@ -77,11 +77,11 @@ let meta_of_json_fixture (json : Yojson.Safe.t) =
   Masc.Keeper_meta_json_parse.meta_of_json json'
 
 (** Walk up the directory tree from [Sys.getcwd()] until
-    [config/tool_policy.toml] is found, then return that directory.
+    [config/runtime.toml] is found, then return that directory.
     Raises [Failure] with a descriptive message if the marker file
     cannot be found by the time the filesystem root is reached. *)
 let find_project_root () =
-  let marker = "config/tool_policy.toml" in
+  let marker = "config/runtime.toml" in
   let start_dir = Sys.getcwd () in
   match Sys.getenv_opt "DUNE_SOURCEROOT" with
   | Some root when Sys.file_exists (Filename.concat root marker) -> root

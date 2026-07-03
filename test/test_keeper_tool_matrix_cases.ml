@@ -103,7 +103,7 @@ let init_keeper_bridge =
       Masc_test_deps.init_keeper_tool_registry ();
       ignore (Masc.Mcp_server_eio.get_clock_opt ());
       (* Use find_project_root — the test cwd is _build/default/test/ which
-         does not contain config/tool_policy.toml, so Sys.getcwd fails the
+         does not contain config/runtime.toml, so Sys.getcwd fails the
          direct shortcut and falls into the exe-relative walk that picks up
          the partial _build/default/config/runtime.json. *)
       let base_path = Masc_test_deps.find_project_root () in

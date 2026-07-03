@@ -28,7 +28,7 @@ BOARD_TOOLS = {
     "keeper_board_post",
     "keeper_board_comment",
     "keeper_board_vote",
-    "keeper_board_get",
+    "keeper_board_post_get",
     "keeper_board_list",
     "keeper_board_search",
 }

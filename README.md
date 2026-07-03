@@ -137,11 +137,11 @@ For disposable local installs, the convenience path is:
 curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
 ```
 
-This installs the binary to `$HOME/.local/bin/masc` and seeds default settings (`tool_policy.toml`, `runtime.toml`) into `<base-path>/.masc/config/`. Binaries are provided for **macOS arm64** and **Linux x86_64**. Other platforms build from source.
+This installs the binary to `$HOME/.local/bin/masc` and seeds the required `runtime.toml` into `<base-path>/.masc/config/`. Binaries are provided for **macOS arm64** and **Linux x86_64**. Other platforms build from source.
 
 Installer requirements: `curl` and standard Unix tools (`uname`, `chmod`, `mkdir`, `mktemp`). `jq` is required only when `--version` / `MASC_VERSION` is omitted and the script queries GitHub for the latest release. Use `--version <release-tag>` when you need a reproducible install.
 
-Release assets are downloaded from GitHub releases. When the selected release publishes `SHA256SUMS`, the installer verifies the downloaded binary plus seeded `tool_policy.toml` / `runtime.toml`; every expected entry must exist and match. Some existing releases do not publish `SHA256SUMS`; for those releases, the verified binary install path is unavailable. If the checksum file cannot be fetched, the installer fails closed by default. Use the source build path below, or bypass verification only for a disposable or air-gapped install by passing `--allow-unverified` or setting `MASC_ALLOW_UNVERIFIED=1`; the script prints a warning before continuing.
+Release assets are downloaded from GitHub releases. When the selected release publishes `SHA256SUMS`, the installer verifies the downloaded binary plus seeded `runtime.toml`; every expected entry must exist and match. Some existing releases do not publish `SHA256SUMS`; for those releases, the verified binary install path is unavailable. If the checksum file cannot be fetched, the installer fails closed by default. Use the source build path below, or bypass verification only for a disposable or air-gapped install by passing `--allow-unverified` or setting `MASC_ALLOW_UNVERIFIED=1`; the script prints a warning before continuing.
 
 > If `runtime.toml` is missing (or its `[runtime].default` is absent), the server logs `refusing to boot` and exits with status 1 — there is no environment-default fallback. Because the file is required to start, the install script seeds [`config/runtime.toml`](config/runtime.toml). To write it manually, define `[runtime].default = "<provider>.<model>"` and a matching `[provider.model]` runtime binding table; `[runtime.assignments]` is optional and only overrides individual Keepers.
 
@@ -210,9 +210,8 @@ Runtime settings and state live under `.masc/` below `--base-path`. Config files
 | File | Role |
 |------|------|
 | `runtime.toml` | Provider/model catalog + `[runtime].default`. Required to start: if it (or `[runtime].default`) is missing, the server logs `refusing to boot` and exits 1 — no environment-default fallback |
-| `tool_policy.toml` | Config-root marker seeded by the install script (legacy). Tool access is now registry/descriptor-based, so the contents are not consumed at runtime |
 
-⚠️ **Legacy / unused keys**: `tool_policy.toml` is only a config-root marker; its contents are not read at runtime. If your `runtime.toml` contains `[autonomous] concurrency`, it is also dead code — fleet size is controlled by `[bootstrap] autoboot_max` / `max_active_keepers`.
+⚠️ **Legacy / unused keys**: `tool_policy.toml` is retired and is not seeded, read at boot, or used as a config-root marker. If your `runtime.toml` contains `[autonomous] concurrency`, it is also dead code — fleet size is controlled by `[bootstrap] autoboot_max` / `max_active_keepers`.
 
 **When creating agents**
 

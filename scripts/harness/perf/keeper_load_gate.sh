@@ -216,8 +216,6 @@ if [[ -d "$PERSONA_SOURCE_ROOT/config/personas/$PERSONA" ]]; then
 else
   echo "ERROR: persona dir not found: $PERSONA_SOURCE_ROOT/config/personas/$PERSONA" >&2; exit 1
 fi
-cp "$REPO_ROOT/config/tool_policy.toml" "$BASE_PATH/.masc/config/tool_policy.toml" 2>/dev/null || true
-
 MOCK_PORT="$(harness_pick_free_port)"
 cat > "$BASE_PATH/.masc/config/runtime.toml" <<EOF
 # Mock runtime: borrow a catalog-valid model id ($BORROW_MODEL is an

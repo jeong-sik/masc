@@ -174,7 +174,7 @@ let test_tool_dispatch_fallback_uses_original_meta () =
                 ~ctx_work
                 ~exec_cache:None
                 ~name:"Read"
-                ~input:(`Assoc [ ("file_path", `String "config/tool_policy.toml") ])
+                ~input:(`Assoc [ ("file_path", `String "config/runtime.toml") ])
                 ()
             in
             check

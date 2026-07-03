@@ -152,7 +152,7 @@ jobs:
           find . -maxdepth 1 -type f ! -name SHA256SUMS -printf '%P\0' \
             | sort -z \
             | xargs -0 sha256sum > SHA256SUMS
-          (cd ../config && sha256sum tool_policy.toml runtime.toml) >> SHA256SUMS
+          (cd ../config && sha256sum runtime.toml) >> SHA256SUMS
           cat SHA256SUMS
 
       - name: Create Release

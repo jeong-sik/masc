@@ -204,8 +204,9 @@ val close_all_cached_writers : unit -> unit
     writer for [path] (a no-op if none is cached). Call it after
     replacing the inode at [path] with [save_file_atomic]: the cached
     [O_APPEND] channel still points at the pre-rename inode, so without
-    this a later [append_jsonl] would write to the orphaned file. The
-    caller must hold off concurrent appends on [path] while doing so. *)
+    this a later [append_jsonl] would write to the orphaned file.
+    Serialization with concurrent [append_jsonl] calls is handled by the
+    same per-path append mutex used by the append path. *)
 val invalidate_cached_writer : string -> unit
 
 (** Drop and close every cached writer. Test-only — production

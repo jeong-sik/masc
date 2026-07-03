@@ -1,8 +1,8 @@
 (** IDE annotation storage — CRUD backed by [annotations.jsonl] in the
     selected {!Ide_paths.partition} directory.
 
-    In-memory compaction rewrites the store when tombstones exceed
-    [COMPACT_THRESHOLD]. *)
+    The log is append-only. Explicit compaction writes begin/end snapshot
+    markers; readers replay rows appended during the compaction window. *)
 
 open Ide_annotation_types
 module String_set = Set.Make (String)
@@ -17,151 +17,221 @@ let annotations_file_for ~base_dir partition =
   Filename.concat (partition_dir ~base_dir partition) "annotations.jsonl"
 ;;
 
-let annotations_file ~base_dir =
-  annotations_file_for ~base_dir Ide_paths.Orphan
-;;
+let annotations_file ~base_dir = annotations_file_for ~base_dir Ide_paths.Orphan
 
-(* task-1738: per-partition write serialization.
+let tombstone_key = "__tombstone"
+let compact_key = "__compact"
+let compact_begin_tag = "begin"
+let compact_end_tag = "end"
+let compact_annotations_key = "annotations"
 
-   Individual appends are atomic, but [compact]'s read-all + atomic-rename
-   rewrite ([write_all_partition]) can drop an append that lands between
-   the read and the rename. Every writer of a partition takes the
-   partition's mutex so a rewrite never overlaps an append.
-
-   [Stdlib.Mutex], not [Eio.Mutex]: this storage layer is deliberately
-   Eio-free (it reaches the filesystem only through [Fs_compat], which
-   isolates Eio) and its callers include unit tests that run outside any
-   Eio scheduler. [Eio.Mutex] performs a cancellation-context effect even
-   on the uncontended path and raises [Effect.Unhandled] outside an Eio
-   run, so it is not usable here. This mirrors [Fs_compat]'s own
-   [append_path_mutex_registry], which serializes appends with a
-   [Stdlib.Mutex] in the same Eio-capable-but-Eio-free layer. The
-   registry is guarded by its own [Stdlib.Mutex]; its critical section is
-   a pure in-memory [Hashtbl] lookup. *)
-let write_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t = Hashtbl.create 16
-let write_mutex_registry_mu = Stdlib.Mutex.create ()
-
-let write_mutex_for ~base_dir partition =
-  let key = annotations_file_for ~base_dir partition in
-  Stdlib.Mutex.lock write_mutex_registry_mu;
-  Fun.protect
-    ~finally:(fun () -> Stdlib.Mutex.unlock write_mutex_registry_mu)
-    (fun () ->
-       match Hashtbl.find_opt write_mutex_registry key with
-       | Some m -> m
-       | None ->
-         let m = Stdlib.Mutex.create () in
-         Hashtbl.replace write_mutex_registry key m;
-         m)
-;;
-
-let with_partition_write_lock ~base_dir partition f =
-  let m = write_mutex_for ~base_dir partition in
-  Stdlib.Mutex.lock m;
-  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock m) f
-;;
+let compact_mu = Stdlib.Mutex.create ()
+let compact_seq = ref 0
 
 (* RFC-0128 §4.2: [_orphan/] and [by-url/<slug>/] live one or two
-   levels deeper than the flat store. Recursive mkdir avoids
-   ENOENT when the parent chain has never been created. *)
-let rec ensure_dir path =
-  if path = "" || path = "/" || (Sys.file_exists path && Sys.is_directory path)
-  then ()
-  else (
-    ensure_dir (Filename.dirname path);
-    try Unix.mkdir path 0o755 with
-    | Unix.Unix_error (Unix.EEXIST, _, _) -> ())
-;;
+   levels deeper than the flat store. Delegate parent creation to the
+   filesystem SSOT instead of carrying a local recursive mkdir copy. *)
+let ensure_dir = Fs_compat.mkdir_p
 
 let ensure_store ~base_dir ?(partition = Ide_paths.Orphan) () =
   ensure_dir (partition_dir ~base_dir partition)
 ;;
-
-let compact_threshold = 0.2
 
 let now_ms () =
   let ns = Mtime.to_uint64_ns (Mtime_clock.now ()) in
   Int64.div ns 1_000_000L
 ;;
 
+let next_compaction_id_locked () =
+  incr compact_seq;
+  Printf.sprintf "%Ld-%d" (now_ms ()) !compact_seq
+;;
+
 let annotation_kind_of_string = Ide_annotation_types.annotation_kind_of_string
 
 let tombstone_json id keeper_id ts =
   `Assoc
-    [ "__tombstone", `Bool true
+    [ tombstone_key, `Bool true
     ; "id", `String id
     ; "keeper_id", `String keeper_id
     ; "deleted_at_ms", `Intlit (Int64.to_string ts)
     ]
 ;;
 
-let is_tombstone json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt "__tombstone" fields with
-     | Some (`Bool true) -> true
-     | _ -> false)
-  | _ -> false
+let compact_begin_json id =
+  `Assoc [ compact_key, `String compact_begin_tag; "id", `String id ]
 ;;
 
-let annotation_id json =
-  match json with
-  | `Assoc fields ->
-    (match List.assoc_opt "id" fields with
-     | Some (`String s) -> Some s
-     | _ -> None)
+let compact_end_json id annotations =
+  `Assoc
+    [ compact_key, `String compact_end_tag
+    ; "id", `String id
+    ; compact_annotations_key, `List (List.map annotation_to_json annotations)
+    ]
+;;
+
+let string_field fields key =
+  match List.assoc_opt key fields with
+  | Some (`String s) -> Some s
   | _ -> None
 ;;
 
-let load_all_partition ~base_dir partition =
+let warn_malformed_record ~path ~line_no msg =
+  Printf.eprintf
+    "[Ide_annotations] skip malformed annotation row %s:%d: %s\n%!"
+    path
+    line_no
+    msg
+;;
+
+let parse_compact_annotations ~path ~line_no = function
+  | `List jsons ->
+    let parsed, _ =
+      List.fold_left
+        (fun (acc, index) json ->
+           match annotation_of_json json with
+           | Ok annotation -> annotation :: acc, index + 1
+           | Error msg ->
+             warn_malformed_record
+               ~path
+               ~line_no
+               (Printf.sprintf
+                  "compact annotation %d malformed: %s"
+                  index
+                  msg);
+             acc, index + 1)
+        ([], 0)
+        jsons
+    in
+    Some (List.rev parsed)
+  | _ ->
+    warn_malformed_record
+      ~path
+      ~line_no
+      "compact end marker has non-array annotations payload";
+    None
+;;
+
+type annotation_log_record =
+  | Annotation of annotation
+  | Tombstone of string
+  | Compact_begin of string
+  | Compact_end of string * annotation list
+  | Ignored
+
+let record_of_json ~path ~line_no json =
+  match json with
+  | `Assoc fields ->
+    (match List.assoc_opt compact_key fields with
+     | Some (`String tag) when String.equal tag compact_begin_tag ->
+       (match string_field fields "id" with
+        | Some id -> Compact_begin id
+        | None ->
+          warn_malformed_record ~path ~line_no "compact begin marker missing string id";
+          Ignored)
+     | Some (`String tag) when String.equal tag compact_end_tag ->
+       (match string_field fields "id", List.assoc_opt compact_annotations_key fields with
+        | Some id, Some annotations_json ->
+          (match parse_compact_annotations ~path ~line_no annotations_json with
+           | Some annotations -> Compact_end (id, annotations)
+           | None -> Ignored)
+        | _ ->
+          warn_malformed_record
+            ~path
+            ~line_no
+            "compact end marker missing id or annotations";
+          Ignored)
+     | Some _ ->
+       warn_malformed_record ~path ~line_no "compact marker has unknown tag";
+       Ignored
+     | None ->
+       (match List.assoc_opt tombstone_key fields with
+        | Some (`Bool true) ->
+          (match string_field fields "id" with
+           | Some id -> Tombstone id
+           | None ->
+             warn_malformed_record ~path ~line_no "tombstone marker missing string id";
+             Ignored)
+        | _ ->
+          (match annotation_of_json json with
+           | Ok annotation -> Annotation annotation
+           | Error msg ->
+             warn_malformed_record ~path ~line_no msg;
+             Ignored)))
+  | _ ->
+    (match annotation_of_json json with
+     | Ok annotation -> Annotation annotation
+     | Error msg ->
+       warn_malformed_record ~path ~line_no msg;
+       Ignored)
+;;
+
+let rec apply_log_record ?(capture = true) annotations tombstoned active = function
+  | Annotation annotation as record ->
+    annotations := annotation :: !annotations;
+    if capture
+    then (
+      match !active with
+      | Some (id, buffered) -> active := Some (id, record :: buffered)
+      | None -> ())
+  | Tombstone id as record ->
+    tombstoned := String_set.add id !tombstoned;
+    if capture
+    then (
+      match !active with
+      | Some (active_id, buffered) -> active := Some (active_id, record :: buffered)
+      | None -> ())
+  | Compact_begin id ->
+    (match !active with
+     | Some _ -> ()
+     | None -> active := Some (id, []))
+  | Compact_end (id, snapshot) ->
+    (match !active with
+     | Some (active_id, buffered) when String.equal active_id id ->
+       annotations := List.rev snapshot;
+       tombstoned := String_set.empty;
+       active := None;
+       List.iter
+         (apply_log_record ~capture:false annotations tombstoned active)
+         (List.rev buffered)
+     | _ -> ())
+  | Ignored -> ()
+;;
+
+let load_all_partition ?stop_before_compact_begin_id ~base_dir partition =
   let path = annotations_file_for ~base_dir partition in
   if not (Sys.file_exists path)
   then []
   else (
-    (* task-1744: a tombstone must suppress the earlier annotation line
-       that shares its id. That decision cannot be made mid-fold, since
-       the tombstone may appear after its target in the append-only log,
-       so one pass collects both the live annotations and the set of
-       tombstoned ids and the suppression is applied afterwards. This
-       makes [list]/[compact] honour the "tombstoned entries are
-       excluded" contract instead of only dropping the marker lines. The
-       annotations file is small (live store on the order of KB), so a
-       single O(n) read plus an O(n log n) filter is adequate; no
-       tail-read optimisation is needed here. *)
-    let annotations, tombstoned =
+    (* task-1744/task-1738: the log is append-only. Tombstones suppress
+       earlier annotation rows by id, and compaction is represented by
+       begin/end markers rather than an atomic-rename rewrite. Rows
+       appended between a compact begin and compact end are buffered and
+       replayed after the compact snapshot, so creates/deletes do not
+       block on a full-file rewrite and are not lost. *)
+    let annotations = ref [] in
+    let tombstoned = ref String_set.empty in
+    let active_compaction = ref None in
+    let stopped = ref false in
       Fs_compat.fold_jsonl_lines
-        ~init:([], String_set.empty)
-        ~f:(fun (acc, tombstoned) ~line_no:_ j ->
-          if is_tombstone j
-          then (
-            match annotation_id j with
-            | Some id -> acc, String_set.add id tombstoned
-            | None -> acc, tombstoned)
+        ~init:()
+        ~f:(fun () ~line_no json ->
+          if !stopped
+          then ()
           else (
-            match annotation_of_json j with
-            | Ok a -> a :: acc, tombstoned
-            | Error _ -> acc, tombstoned))
-        path
-    in
-    List.rev annotations
-    |> List.filter (fun (a : annotation) -> not (String_set.mem a.id tombstoned)))
-;;
-
-let write_all_partition ~base_dir partition annotations =
-  let path = annotations_file_for ~base_dir partition in
-  let jsons = List.map annotation_to_json annotations in
-  let lines = List.map Yojson.Safe.to_string jsons in
-  let content = String.concat "" (List.map (fun line -> line ^ "\n") lines) in
-  match Fs_compat.save_file_atomic path content with
-  | Ok () ->
-    (* task-1738: the atomic save renamed a fresh inode over [path], so
-       [append_jsonl]'s cached O_APPEND channel now points at the
-       orphaned pre-rename inode. Drop it here — under the partition
-       write lock, so no append is in flight — and the next [create]
-       reopens the compacted file. Without this, every append after the
-       first compaction is written to the orphaned inode and lost. *)
-    Fs_compat.invalidate_cached_writer path
-  | Error msg -> raise (Sys_error msg)
+            let record = record_of_json ~path ~line_no json in
+            match stop_before_compact_begin_id, record with
+            | Some stop_id, Compact_begin id when String.equal stop_id id ->
+              stopped := true
+            | _ ->
+              apply_log_record
+                annotations
+                tombstoned
+                active_compaction
+                record))
+        path;
+    List.rev !annotations
+    |> List.filter (fun (a : annotation) -> not (String_set.mem a.id !tombstoned)))
 ;;
 
 let create
@@ -223,10 +293,9 @@ let create
       ; updated_at_ms = ts
       }
     in
-    with_partition_write_lock ~base_dir partition (fun () ->
-      Fs_compat.append_jsonl
-        (annotations_file_for ~base_dir partition)
-        (annotation_to_json annotation));
+    Fs_compat.append_jsonl
+      (annotations_file_for ~base_dir partition)
+      (annotation_to_json annotation);
     Ok annotation)
 ;;
 
@@ -268,56 +337,41 @@ let list ~base_dir ?(partition = Ide_paths.Orphan) ~filter () =
   List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_task
 ;;
 
-(* Compaction body without locking; the caller must already hold the
-   partition write lock (e.g. [delete] compacting inline). *)
-let compact_unlocked ~base_dir partition =
-  let all = load_all_partition ~base_dir partition in
-  write_all_partition ~base_dir partition all
-;;
-
 let compact ~base_dir ?(partition = Ide_paths.Orphan) () =
-  with_partition_write_lock ~base_dir partition (fun () ->
-    compact_unlocked ~base_dir partition)
+  ensure_store ~base_dir ~partition ();
+  Stdlib.Mutex.protect compact_mu (fun () ->
+    let id = next_compaction_id_locked () in
+    let path = annotations_file_for ~base_dir partition in
+    Fs_compat.append_jsonl path (compact_begin_json id);
+    let snapshot =
+      load_all_partition ~stop_before_compact_begin_id:id ~base_dir partition
+    in
+    Fs_compat.append_jsonl path (compact_end_json id snapshot))
 ;;
 
 let delete ~base_dir ?(partition = Ide_paths.Orphan) ~id ~keeper_id ?expected_version () =
   ensure_store ~base_dir ~partition ();
-  (* The read (existence + ownership + version check) and the write
-     (tombstone append + optional compaction) run under one partition lock
-     so a concurrent writer cannot slip between the check and the write. *)
-  with_partition_write_lock ~base_dir partition (fun () ->
-    let all = load_all_partition ~base_dir partition in
-    match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with
-    | None -> Error "annotation not found or keeper mismatch"
-    | Some found ->
-      (* task-1738: optimistic-concurrency CAS. [updated_at_ms] is the
-         opaque version token (already exposed in [annotation_to_json]);
-         a caller that read the annotation earlier passes it back as
-         [expected_version], and a mismatch means the annotation changed
-         under it, so the delete is refused. Absent [expected_version]
-         preserves the pre-CAS contract (delete by id alone). *)
-      (match expected_version with
-       | Some v when not (Int64.equal found.updated_at_ms v) ->
-         Error
-           (Printf.sprintf
-              "version mismatch: expected %Ld, found %Ld"
-              v
-              found.updated_at_ms)
-       | _ ->
-         let ts = now_ms () in
-         Fs_compat.append_jsonl
-           (annotations_file_for ~base_dir partition)
-           (tombstone_json id keeper_id ts);
-         let tombstone_count =
-           Fs_compat.fold_jsonl_lines
-             ~init:0
-             ~f:(fun acc ~line_no:_ j -> if is_tombstone j then acc + 1 else acc)
-             (annotations_file_for ~base_dir partition)
-         in
-         let total = List.length all + tombstone_count in
-         if
-           total > 0
-           && float_of_int tombstone_count /. float_of_int total >= compact_threshold
-         then compact_unlocked ~base_dir partition;
-         Ok ()))
+  let all = load_all_partition ~base_dir partition in
+  match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with
+  | None -> Error "annotation not found or keeper mismatch"
+  | Some found ->
+    (* task-1738: optimistic-concurrency CAS. [updated_at_ms] is the
+       opaque version token (already exposed in [annotation_to_json]);
+       a caller that read the annotation earlier passes it back as
+       [expected_version], and a mismatch means the annotation changed
+       under it, so the delete is refused. Absent [expected_version]
+       preserves the pre-CAS contract (delete by id alone). *)
+    (match expected_version with
+     | Some v when not (Int64.equal found.updated_at_ms v) ->
+       Error
+         (Printf.sprintf
+            "version mismatch: expected %Ld, found %Ld"
+            v
+            found.updated_at_ms)
+     | _ ->
+       let ts = now_ms () in
+       Fs_compat.append_jsonl
+         (annotations_file_for ~base_dir partition)
+         (tombstone_json id keeper_id ts);
+       Ok ())
 ;;

@@ -27,9 +27,10 @@ val get_writer : string -> out_channel
     [path] when present (a no-op otherwise). Call it after the inode at
     [path] is replaced (e.g. an atomic-rename save) so a later
     [get_writer] reopens the new file rather than appending to the
-    orphaned pre-replacement inode. The caller must ensure no concurrent
-    append is in flight on [path] (the cached channel is closed), which
-    the JSONL store guarantees by holding its per-partition write lock. *)
+    orphaned pre-replacement inode. This module only guards cache state;
+    callers that compose [invalidate] with append operations must hold
+    the same per-path append mutex used around [get_writer] and
+    [output_string]/[flush]. *)
 val invalidate : string -> unit
 
 (** Flush and close every cached writer. Safe to call concurrently

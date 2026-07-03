@@ -719,10 +719,8 @@ let test_document_highlights_related () =
          check int "two highlights" 2 (List.length highlights))))
 ;;
 
-(* Round-trip through [compact], which calls the internal
-   [write_all_partition].  Guards the [Fs_compat.save_file_atomic] rewrite:
-   the happy path must still write every annotation back so a later [list] sees
-   them all. *)
+(* Round-trip through [compact]. Guards the append-only snapshot marker:
+   the happy path must still expose every live annotation to a later [list]. *)
 let test_compact_preserves_annotations () =
   with_temp_dir (fun base_dir ->
     let mk content =
@@ -774,9 +772,9 @@ let test_compact_preserves_annotations () =
    Before the fix, [load_all_partition] only skipped the tombstone marker
    line, leaving the earlier annotation with the same id visible in
    [list], contradicting the mli contract "Tombstoned entries are
-   excluded". These cases exercise both the load path (below the
-   compaction threshold, so the tombstone stays in the file and [list]
-   must apply the exclusion itself) and the compaction path. *)
+   excluded". These cases exercise both the plain tombstone path, where
+   [list] must apply the exclusion itself, and the explicit compaction
+   marker path. *)
 
 let create_note ~base_dir ~keeper_id ~content () =
   Result.get_ok
@@ -793,9 +791,8 @@ let create_note ~base_dir ~keeper_id ~content () =
 
 let test_list_excludes_soft_deleted_without_compaction () =
   with_temp_dir (fun base_dir ->
-    (* 1 tombstone / (6 + 1) ≈ 0.14 stays below COMPACT_THRESHOLD (0.2),
-       so no auto-compaction runs and [list] must exclude the tombstoned
-       id on read. *)
+    (* No explicit compaction runs here; [list] must exclude the tombstoned
+       id on read while the marker remains physically present. *)
     let notes =
       List.init 6 (fun i ->
         create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
@@ -852,14 +849,23 @@ let test_compact_drops_tombstoned () =
      | Ok () -> ()
      | Error msg -> failf "delete failed: %s" msg);
     Store.compact ~base_dir ();
-    (* After compaction the file holds only the five live annotations:
-       no tombstone marker line and no tombstoned original remain. *)
     let path =
       Filename.concat
         (Ide_paths.partition_store_dir ~base_dir Ide_paths.Orphan)
         "annotations.jsonl"
     in
-    check int "compacted file has only live lines" 5 (count_lines path);
+    let compact_end_markers =
+      Fs_compat.fold_jsonl_lines
+        ~init:0
+        ~f:(fun acc ~line_no:_ -> function
+          | `Assoc fields ->
+            (match List.assoc_opt "__compact" fields with
+             | Some (`String "end") -> acc + 1
+             | _ -> acc)
+          | _ -> acc)
+        path
+    in
+    check int "compact writes one end marker" 1 compact_end_markers;
     let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
     check int "list count after compact" 5 (List.length listed);
     check
@@ -885,10 +891,9 @@ let make_cas_annotation base_dir =
 ;;
 
 (* Real parallelism (Domain, not systhreads) maximises the chance of a
-   compaction rewrite overlapping an append. Without per-partition write
-   serialization, [compact]'s read-all + atomic-rename drops appends that
-   land between the read and the rename, so the final count would be
-   below the number created. With the lock the count is exact. *)
+   compaction window overlapping appends. The append-only begin/end
+   markers must replay records written during the window, so the final
+   count stays exact without a partition-wide writer lock. *)
 let test_concurrent_create_compact_no_loss () =
   with_temp_dir (fun base_dir ->
     Store.ensure_store ~base_dir ();
@@ -977,7 +982,7 @@ let () =
     "ide_annotations"
     [ ( "compact"
       , [ test_case
-            "compact preserves annotations (atomic write)"
+            "compact preserves annotations"
             `Quick
             test_compact_preserves_annotations
         ] )
@@ -1054,10 +1059,10 @@ let () =
             `Quick
             test_compact_drops_tombstoned
         ] )
-    ; ( "write lock + CAS (task-1738)"
+    ; ( "append-only compaction + CAS (task-1738)"
       , [ test_case
             "concurrent create + compaction loses nothing"
-            `Slow
+            `Quick
             test_concurrent_create_compact_no_loss
         ; test_case
             "CAS rejects stale expected_version, accepts current"

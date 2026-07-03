@@ -27,7 +27,7 @@ let cleanup_dir dir =
   | _ -> ()
 ;;
 
-let yield_until ?(attempts = 50) predicate =
+let rec yield_until ?(attempts = 50) predicate =
   if predicate () || attempts <= 0
   then ()
   else (
@@ -63,15 +63,18 @@ let test_fresh_critical_entry_phase_is_awaiting_operator () =
     (fun () ->
        Eio.Switch.run @@ fun sw ->
        let keeper_name = "fresh-critical-phase-test" in
+       let result = ref None in
        Eio.Fiber.fork ~sw (fun () ->
-         ignore
-           (AQ.submit_and_await
-              ~keeper_name
-              ~tool_name:"keeper_continue_after_reconcile"
-              ~input:(`Assoc [ ("kind", `String "critical_gate") ])
-              ~risk_level:AQ.Critical
-              ~base_path
-              ()));
+         let decision =
+           AQ.submit_and_await
+             ~keeper_name
+             ~tool_name:"keeper_continue_after_reconcile"
+             ~input:(`Assoc [ ("kind", `String "critical_gate") ])
+             ~risk_level:AQ.Critical
+             ~base_path
+             ()
+         in
+         result := Some decision);
        yield_until (fun () -> Option.is_some (pending_id_for_keeper ~keeper_name));
        let id =
          match pending_id_for_keeper ~keeper_name with
@@ -95,7 +98,18 @@ let test_fresh_critical_entry_phase_is_awaiting_operator () =
        Alcotest.(check string)
          "fresh Critical entry is awaiting_operator in JSON"
          "awaiting_operator"
-         (phase_in_json detail))
+         (phase_in_json detail);
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+       yield_until (fun () -> Option.is_some !result);
+       match !result with
+       | Some Agent_sdk.Hooks.Approve -> ()
+       | Some decision ->
+         Alcotest.fail
+           ("expected Approve, got " ^ AQ.approval_decision_to_string decision)
+       | None -> Alcotest.fail "Critical approval did not resume after resolve")
 ;;
 
 let test_critical_entry_phase_becomes_escalated_after_timer () =

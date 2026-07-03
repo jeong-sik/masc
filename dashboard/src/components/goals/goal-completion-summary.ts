@@ -19,7 +19,6 @@ type GoalCompletionSummaryNode = Pick<
 
 function completionStateForNode(
   node: GoalCompletionSummaryNode,
-  taskOpen: number,
   taskDone: number,
   pct: number | null,
 ): string {
@@ -31,12 +30,6 @@ function completionStateForNode(
     case 'awaiting_verification': return 'awaiting_verification'
     case 'awaiting_approval': return 'awaiting_approval'
     default:
-      if (
-        node.attainment.metric_evaluation !== 'unevaluated'
-        && (node.attainment.state === 'attained' || (node.task_count > 0 && taskOpen === 0 && taskDone > 0))
-      ) {
-        return 'ready_for_completion'
-      }
       if (node.task_count === 0 && pct == null) return 'unmeasured'
       if (taskDone === 0) return 'not_started'
       return 'in_progress'
@@ -54,7 +47,7 @@ export function goalCompletionSummaryForNode(node: GoalCompletionSummaryNode): G
     node.phase === 'awaiting_verification' || openRequest ? 'verification'
     : node.phase === 'awaiting_approval' ? 'approval'
     : 'none'
-  const state = completionStateForNode(node, taskSummary.open, taskSummary.done, pct)
+  const state = completionStateForNode(node, taskSummary.done, pct)
 
   return {
     state,
@@ -68,7 +61,7 @@ export function goalCompletionSummaryForNode(node: GoalCompletionSummaryNode): G
     task_open: taskSummary.open,
     is_complete: node.phase === 'completed',
     is_terminal: node.phase === 'completed' || node.phase === 'dropped',
-    ready_to_request_completion: state === 'ready_for_completion',
+    ready_to_request_completion: false,
     gate,
     requires_verifier: node.verification_summary.effective_policy != null,
     requires_completion_approval: node.require_completion_approval,

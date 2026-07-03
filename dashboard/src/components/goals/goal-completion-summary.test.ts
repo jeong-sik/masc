@@ -85,7 +85,7 @@ describe('goalCompletionSummaryForNode', () => {
     expect(goalCompletionGateLabel(summary)).toBe('verification gate')
   })
 
-  it('falls back to scattered goal fields for older payloads', () => {
+  it('falls back to scattered goal fields without creating completion readiness', () => {
     const summary = goalCompletionSummaryForNode({
       phase: 'executing',
       require_completion_approval: true,
@@ -105,10 +105,10 @@ describe('goalCompletionSummaryForNode', () => {
       blocking_reason: '',
     })
 
-    expect(summary.state).toBe('ready_for_completion')
+    expect(summary.state).toBe('in_progress')
     expect(summary.pct).toBe(100)
-    expect(summary.ready_to_request_completion).toBe(true)
-    expect(goalCompletionTone(summary)).toBe('warn')
+    expect(summary.ready_to_request_completion).toBe(false)
+    expect(goalCompletionTone(summary)).toBe('default')
     expect(goalCompletionGateLabel(summary)).toBe('approval required')
   })
 

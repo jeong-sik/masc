@@ -114,6 +114,13 @@ type model_spec =
   ; preserve_thinking : bool option
   ; max_thinking_budget : int option
   ; streaming : bool
+  ; temperature : float option
+    (** [temperature] — per-model sampling temperature for keeper turns. [None]
+        keeps the caller fallback ([MASC_KEEPER_UNIFIED_TEMP], then the OAS
+        [agent_default] profile). [Some t] overrides it for every turn on this
+        model. Required for models that reject the default value. Resolved via
+        {!Runtime.temperature_of_runtime_id} →
+        {!Runtime_inference.resolve_temperature}. *)
   ; capabilities : model_capabilities option
   ; match_prefixes : string list
   }

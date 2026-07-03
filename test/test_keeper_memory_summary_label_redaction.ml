@@ -45,7 +45,7 @@ let test_runtime_lane_uses_boundary_redaction_ssot () =
   Alcotest.(check string)
     "keeper hooks OAS types use boundary lane SSOT"
     Boundary.runtime_lane_label
-    Masc.Keeper_hooks_oas_types.runtime_lane_label;
+    Keeper_hooks_oas_types.runtime_lane_label;
   Alcotest.(check string)
     "keeper agent result uses boundary lane SSOT"
     Boundary.runtime_lane_label

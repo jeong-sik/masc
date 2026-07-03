@@ -285,9 +285,10 @@ val pause_keeper_for_overflow :
   reason:string ->
   keeper_meta
 (** Pause a keeper after unresolved context overflow. Writes meta with merge-CAS
-    using [Auto_resume_with_backoff], records [Sdk_token_budget_exceeded] typed
-    blocker metadata, latches [Turn_overflow_pause], and dispatches
-    [Compact_retry_exhausted] then [Operator_pause]. Returns the paused meta. *)
+    using the [Turn_overflow_pause] failure-policy resume decision, records
+    [Sdk_token_budget_exceeded] typed blocker metadata, latches
+    [Turn_overflow_pause], and dispatches [Compact_retry_exhausted] then
+    [Operator_pause]. Returns the paused meta. *)
 
 val sync_keeper_paused_state :
   config:Workspace.config ->

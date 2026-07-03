@@ -161,6 +161,16 @@ let test_workflow_rejection_skips_keeper_circuit () =
   check bool "keeper death not allowed" false (Policy.should_kill_keeper decision)
 ;;
 
+let test_turn_overflow_pause_is_operator_breaker () =
+  let decision = Policy.decide Policy.Turn_overflow_pause in
+  check_scope "scope" "turn" decision.failure_scope;
+  check_lifecycle "lifecycle" "pause_keeper" decision.lifecycle_effect;
+  check_circuit "circuit" "operator_breaker" decision.circuit_effect;
+  check_action "action" "inspect_keeper_liveness" decision.operator_action;
+  check bool "keeper death not allowed" false (Policy.should_kill_keeper decision);
+  check string "reason" "turn_overflow_pause" decision.reason
+;;
+
 let test_only_liveness_failures_allow_keeper_death () =
   let non_liveness_failures =
     [
@@ -213,6 +223,8 @@ let () =
             test_provider_timeout_loop_with_lost_liveness_pauses_keeper_without_death;
           test_case "workflow rejection skips keeper circuit" `Quick
             test_workflow_rejection_skips_keeper_circuit;
+          test_case "turn overflow pause is an operator breaker" `Quick
+            test_turn_overflow_pause_is_operator_breaker;
           test_case "keeper death is liveness-only" `Quick
             test_only_liveness_failures_allow_keeper_death;
         ] );

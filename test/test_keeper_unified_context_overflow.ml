@@ -109,8 +109,8 @@ let test_is_context_overflow_only_for_overflow_errors () =
    Keeper_fiber_crash after keeper_max_turn_failures). Now that the retry
    loop (keeper_unified_turn_execution.ml) drives
    Keeper_turn_runtime_budget.pause_keeper_for_overflow at the point of
-   detection — the Overflowed/Compacting FSM's retry-exhausted path,
-   auto-resume-with-backoff — this error must be classified as
+   detection — the Overflowed/Compacting FSM's retry-exhausted path — this
+   error must be classified as
    auto-recoverable so [record_failure_and_maybe_escalate] does not also
    count it toward that same crash threshold. *)
 let test_context_overflow_is_auto_recoverable () =
@@ -123,12 +123,16 @@ let test_context_overflow_is_auto_recoverable () =
        (Agent_sdk.Error.Api (ContextOverflow { message = "exceeded"; limit = Some 32768 })))
 ;;
 
-let test_overflow_pause_contract_is_typed_auto_resume () =
+let test_overflow_pause_contract_uses_policy_breaker () =
   let budget_src = read_file "lib/keeper/keeper_turn_runtime_budget.ml" in
-  check bool "overflow pause uses auto-resume backoff" true
+  check bool "overflow pause reads the failure-policy decision" true
     (contains_substring
        ~needle:
-         "~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff"
+         "Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause"
+       budget_src);
+  check bool "operator-breaker overflow pause requires manual resume" true
+    (contains_substring
+       ~needle:"Keeper_supervisor_pause_policy.Manual_resume_required"
        budget_src);
   check bool "overflow pause records typed token-budget blocker" true
     (contains_substring
@@ -380,9 +384,9 @@ let () =
             `Quick
             test_context_overflow_is_auto_recoverable
         ; test_case
-            "overflow pause is typed auto-resume"
+            "overflow pause uses policy breaker"
             `Quick
-            test_overflow_pause_contract_is_typed_auto_resume
+            test_overflow_pause_contract_uses_policy_breaker
         ; test_case
             "preflight overflow does not bypass driver retry"
             `Quick

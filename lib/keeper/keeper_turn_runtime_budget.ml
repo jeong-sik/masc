@@ -636,10 +636,27 @@ let context_overflow_event_of_error
               limit_tokens = None;
             }
 
+let overflow_pause_resume_policy () =
+  match
+    (Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause)
+      .circuit_effect
+  with
+  | Keeper_failure_policy.Operator_breaker ->
+    Keeper_supervisor_pause_policy.Manual_resume_required
+  (* Unresolved context overflow is deterministic for the same checkpoint and
+     runtime budget, so fail closed to manual review if the policy shape drifts
+     instead of silently reintroducing an auto-resume loop. *)
+  | Keeper_failure_policy.Skip_circuit
+  | Keeper_failure_policy.Count_for_circuit
+  | Keeper_failure_policy.Provider_cooldown ->
+    Keeper_supervisor_pause_policy.Manual_resume_required
+;;
+
 let pause_keeper_for_overflow
     ~(config : Workspace.config)
     ~(meta : keeper_meta)
     ~(reason : string) : keeper_meta =
+  let resume_policy = overflow_pause_resume_policy () in
   match
     Keeper_supervisor_pause_policy.handle_auto_pause_from_meta
       ~config
@@ -648,7 +665,7 @@ let pause_keeper_for_overflow
       ~lifecycle_detail:(Printf.sprintf "context_overflow %s" reason)
       ~log_message:(Printf.sprintf "keeper paused after unresolved context overflow (%s)" reason)
       ~blocker_class:(Some Sdk_token_budget_exceeded)
-      ~resume_policy:Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+      ~resume_policy
       ()
   with
   | Ok paused_meta ->
@@ -677,7 +694,7 @@ let pause_keeper_for_overflow
         auto_resume_after_sec =
           Keeper_supervisor_pause_policy.auto_resume_after_sec_for_policy
             meta
-            Keeper_supervisor_pause_policy.Auto_resume_with_backoff;
+            resume_policy;
         updated_at = now_iso ();
       }
     in

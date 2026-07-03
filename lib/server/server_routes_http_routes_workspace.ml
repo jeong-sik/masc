@@ -282,7 +282,7 @@ let tree_node_limit_of_query = function
    [Eval_calibration]; kept local to avoid a server -> eval_calibration
    dependency. *)
 let rec resolve_existing_prefix path =
-  try Unix.realpath path with
+  try Fs_compat.realpath path with
   | Unix.Unix_error _ | Invalid_argument _ | Sys_error _ ->
     let parent = Filename.dirname path in
     if String.equal parent path then path
@@ -321,40 +321,113 @@ type path_resolution =
   | Path_ok of string
   | Path_rejected of path_rejection
 
+type workspace_file = {
+  lexical_path : string;
+  resolved_base : string;
+  resolved_path : string;
+}
+
+type workspace_file_read_error =
+  | File_not_found
+  | File_not_regular
+  | File_changed_during_open
+  | File_too_large of int
+  | File_read_failed of string
+
+let workspace_file_read_max_bytes = Env_config_runtime.Workspace_file.max_read_bytes
+
 (* Resolve [requested] (a slash-separated path relative to [base]) into
    an absolute path guaranteed to stay within [base], or a typed
    rejection. Guards, in order:
    1. parent traversal ([..]/[.]) or a lexical prefix escape,
    2. a confidential component (secret denylist SSOT), and
    3. a symlink whose real target resolves outside [base] (B2).
-   [Path_ok] carries the *lexical* path under [base] (not the realpath)
-   so callers can still derive git-relative paths against the lexical
-     [base]; symlink safety is enforced by the resolved-path containment
-     check, not by rewriting the returned path. *)
-let resolve_workspace_path base requested =
+   [resolve_workspace_file] carries both paths: the lexical path under
+   [base] for Git pathspecs, and the realpath-resolved target for file
+   I/O.  The compatibility wrapper [resolve_workspace_path] preserves
+   the older lexical [Path_ok] contract used by tests and callers that
+   only need admission control. *)
+let resolve_workspace_file base requested =
   let requested = String.map (fun c -> if c = '\\' then '/' else c) requested in
   let parts = String.split_on_char '/' requested in
   let is_traversal p = String.equal p ".." || String.equal p "." in
-  if List.exists is_traversal parts then Path_rejected Path_traversal
+  if List.exists is_traversal parts then Error Path_traversal
   else
     match List.find_opt component_is_confidential parts with
-    | Some c -> Path_rejected (Confidential_component c)
+    | Some c -> Error (Confidential_component c)
     | None ->
       let full = List.fold_left (fun acc p -> Filename.concat acc p) base parts in
       if not (path_within ~base full) then
-        Path_rejected Path_traversal
+        Error Path_traversal
       else
         let resolved_base = resolve_existing_prefix base in
         let resolved_full = resolve_existing_prefix full in
         if not (path_within ~base:resolved_base resolved_full) then
-          Path_rejected Symlink_escape
+          Error Symlink_escape
         else
           match
             components_under ~base:resolved_base resolved_full
             |> List.find_opt component_is_confidential
           with
-          | Some c -> Path_rejected (Confidential_component c)
-          | None -> Path_ok full
+          | Some c -> Error (Confidential_component c)
+          | None ->
+            Ok
+              {
+                lexical_path = full;
+                resolved_base;
+                resolved_path = resolved_full;
+              }
+
+let resolve_workspace_path base requested =
+  match resolve_workspace_file base requested with
+  | Ok file -> Path_ok file.lexical_path
+  | Error rejection -> Path_rejected rejection
+
+let run_blocking_file_io f =
+  try Eio_unix.run_in_systhread ~label:"workspace-file-read" f with
+  | Stdlib.Effect.Unhandled _ -> f ()
+
+let same_file_identity a b =
+  a.Unix.st_dev = b.Unix.st_dev
+  && a.Unix.st_ino = b.Unix.st_ino
+
+let read_fd_to_string fd len =
+  let buf = Bytes.create len in
+  let rec loop offset =
+    if offset >= len then Bytes.unsafe_to_string buf
+    else
+      let n = Unix.read fd buf offset (len - offset) in
+      if n = 0 then Bytes.sub_string buf 0 offset
+      else loop (offset + n)
+  in
+  loop 0
+
+let load_workspace_file_content ?(max_bytes = workspace_file_read_max_bytes) file =
+  run_blocking_file_io (fun () ->
+    try
+      let before_open = Unix.lstat file.resolved_path in
+      match before_open.Unix.st_kind with
+      | Unix.S_REG ->
+        let fd =
+          Unix.openfile file.resolved_path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0
+        in
+        Fun.protect
+          ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+          (fun () ->
+            let after_open = Unix.fstat fd in
+            if
+              (not (same_file_identity before_open after_open))
+              || after_open.Unix.st_kind <> Unix.S_REG
+            then Error File_changed_during_open
+            else if after_open.Unix.st_size > max_bytes then
+              Error (File_too_large after_open.Unix.st_size)
+            else Ok (read_fd_to_string fd after_open.Unix.st_size))
+      | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK | Unix.S_LNK ->
+        Error File_not_regular
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error File_not_found
+    | Unix.Unix_error _ as exn -> Error (File_read_failed (Printexc.to_string exn))
+    | Sys_error msg -> Error (File_read_failed msg))
 
 (* Strip [base] (and the following separator) from [safe]. Handles
    [base = "/"], trailing slash on [base], and [safe = base] (returns "").
@@ -536,6 +609,9 @@ module For_testing = struct
   let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
   let parse_git_numstat_line = parse_git_numstat_line
+  type safe_workspace_file = workspace_file
+  let resolve_workspace_file = resolve_workspace_file
+  let load_workspace_file_content = load_workspace_file_content
 end
 
 (* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
@@ -745,28 +821,29 @@ let add_routes router =
            match Uri.get_query_param uri "path" with
            | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            | Some p ->
-             (match resolve_workspace_path base p with
-              | Path_rejected _ ->
+             (match resolve_workspace_file base p with
+              | Error _ ->
                 (* Uniform [Invalid path] for traversal, confidential, and
                    symlink-escape rejections: a distinct message would let
                    a caller probe which paths are secret or exist. *)
                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-              | Path_ok path ->
-                if Sys.file_exists path && not (Sys.is_directory path) then
-                  try
-                    let content = Fs_compat.load_file path in
-                    let json = `Assoc [("ok", `Bool true); ("content", `String content)] in
-                    json_response_with_source ~status:`OK ~source request reqd json
-                  with
-                  | Eio.Cancel.Cancelled _ as e -> raise e
-                  | exn ->
-                    observe_workspace_route_failure
-                      ~site:"file_read"
-                      ~path
-                      exn;
-                    json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file")
-                else
-                  json_response ~status:`Not_found request reqd (json_error "File not found")))
+              | Ok file ->
+                (match load_workspace_file_content file with
+                 | Ok content ->
+                   let json = `Assoc [("ok", `Bool true); ("content", `String content)] in
+                   json_response_with_source ~status:`OK ~source request reqd json
+                 | Error File_not_found | Error File_not_regular ->
+                   json_response ~status:`Not_found request reqd (json_error "File not found")
+                 | Error File_changed_during_open ->
+                   json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+                 | Error (File_too_large _) ->
+                   json_response ~status:`Payload_too_large request reqd (json_error "File too large")
+                 | Error (File_read_failed msg) ->
+                   observe_workspace_route_failure
+                     ~site:"file_read"
+                     ~path:file.lexical_path
+                     (Failure msg);
+                   json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file"))))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/blame" (fun request reqd ->
@@ -782,14 +859,14 @@ let add_routes router =
            if file_path = "" then
              json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            else
-             (match resolve_workspace_path base file_path with
-              | Path_rejected _ ->
+             (match resolve_workspace_file base file_path with
+              | Error _ ->
                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-              | Path_ok safe ->
-                if not (Sys.file_exists safe) then
+              | Ok safe ->
+                if not (Sys.file_exists safe.resolved_path) then
                   json_response ~status:`Not_found request reqd (json_error "File not found")
                 else
-                  let rel = rel_under base safe in
+                  let rel = rel_under base safe.lexical_path in
                   (* Blame keeps the original silent-empty contract: a file
                      that exists in the working tree but is not yet tracked
                      in HEAD (newly added, .gitignore'd, etc.) is a valid
@@ -829,11 +906,11 @@ let add_routes router =
                json_response ~status:`Bad_request request reqd
                  (json_error "Invalid base_ref")
              else
-             (match resolve_workspace_path base file_path with
-              | Path_rejected _ ->
+             (match resolve_workspace_file base file_path with
+              | Error _ ->
                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-              | Path_ok safe ->
-                let rel = rel_under base safe in
+              | Ok safe ->
+                let rel = rel_under base safe.lexical_path in
                 (match git_run_lines_or_error ~cwd:base
                          ["diff"; base_ref; "--"; rel]
                  with

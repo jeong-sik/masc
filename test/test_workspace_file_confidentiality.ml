@@ -53,6 +53,14 @@ let touch path =
   close_out oc
 ;;
 
+let write_file path content =
+  mkdir_p (Filename.dirname path);
+  let oc = open_out path in
+  Fun.protect
+    ~finally:(fun () -> close_out_noerr oc)
+    (fun () -> output_string oc content)
+;;
+
 let path_of_node = function
   | `Assoc fields ->
     (match List.assoc_opt "path" fields with
@@ -215,6 +223,55 @@ let test_internal_symlink_allowed () =
       "ok" (resolution_tag got))
 ;;
 
+let resolve_for_read base requested =
+  match W.For_testing.resolve_workspace_file base requested with
+  | Ok file -> file
+  | Error W.Path_traversal -> failwith "unexpected traversal rejection"
+  | Error (W.Confidential_component c) ->
+    failwith ("unexpected confidential rejection: " ^ c)
+  | Error W.Symlink_escape -> failwith "unexpected symlink escape rejection"
+;;
+
+let test_read_internal_symlink_uses_resolved_target () =
+  with_temp_dir (fun base ->
+    let real = Filename.concat base "real.ml" in
+    write_file real "let safe = true\n";
+    Unix.symlink real (Filename.concat base "link.ml");
+    let file = resolve_for_read base "link.ml" in
+    match W.For_testing.load_workspace_file_content file with
+    | Ok content -> check string "reads resolved in-workspace target" "let safe = true\n" content
+    | Error _ -> fail "expected internal symlink read to succeed")
+;;
+
+let test_read_rejects_post_resolution_symlink_swap () =
+  with_temp_dir (fun base ->
+    let victim = Filename.concat base "victim.txt" in
+    write_file victim "safe";
+    let file = resolve_for_read base "victim.txt" in
+    let outside = Filename.temp_file "ide-file-conf-post-resolve" ".txt" in
+    Fun.protect
+      ~finally:(fun () -> try Sys.remove outside with _ -> ())
+      (fun () ->
+        write_file outside "TOP SECRET";
+        Sys.remove victim;
+        Unix.symlink outside victim;
+        match W.For_testing.load_workspace_file_content file with
+        | Error W.File_not_regular -> ()
+        | Ok content -> fail ("unexpectedly read swapped symlink: " ^ content)
+        | Error _ -> fail "expected swapped symlink to be rejected as non-regular"))
+;;
+
+let test_read_size_cap_rejects_large_file () =
+  with_temp_dir (fun base ->
+    let path = Filename.concat base "large.txt" in
+    write_file path "1234";
+    let file = resolve_for_read base "large.txt" in
+    match W.For_testing.load_workspace_file_content ~max_bytes:3 file with
+    | Error (W.File_too_large 4) -> ()
+    | Ok content -> fail ("unexpectedly read oversized file: " ^ content)
+    | Error _ -> fail "expected typed File_too_large error")
+;;
+
 (* --- (e) denylist SSOT is consistent with the tree listing --- *)
 
 let test_denylist_matches_tree_hidden () =
@@ -299,6 +356,18 @@ let () =
             `Quick
             test_symlink_to_confidential_target_rejected
         ; test_case "internal symlink allowed" `Quick test_internal_symlink_allowed
+        ; test_case
+            "file read uses resolved internal symlink target"
+            `Quick
+            test_read_internal_symlink_uses_resolved_target
+        ; test_case
+            "file read rejects post-resolution symlink swap"
+            `Quick
+            test_read_rejects_post_resolution_symlink_swap
+        ; test_case
+            "file read enforces size cap"
+            `Quick
+            test_read_size_cap_rejects_large_file
         ] )
     ; ( "SSOT consistency"
       , [ test_case "denylist matches tree hidden" `Quick test_denylist_matches_tree_hidden

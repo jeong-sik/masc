@@ -72,6 +72,16 @@ type path_resolution =
   | Path_ok of string  (** Lexical path contained within the base. *)
   | Path_rejected of path_rejection
 
+type workspace_file_read_error =
+  | File_not_found
+  | File_not_regular
+  | File_changed_during_open
+  | File_too_large of int
+  | File_read_failed of string
+(** Typed result from the workspace file endpoint's validated read path.
+    [File_changed_during_open] means the lstat/open/fstat identity check
+    did not match, so the route rejects the path without reading it. *)
+
 (** [resolve_workspace_path base requested] resolves [requested] (a
     forward/back-slash path relative to [base]) into an absolute path
     contained within [base], or a typed rejection. It rejects parent
@@ -121,4 +131,19 @@ module For_testing : sig
     ?warn_on_failure:bool -> site:string -> path:string -> exn -> unit
 
   val parse_git_numstat_line : string -> (string * string) option
+
+  type safe_workspace_file
+
+  (** Resolve to both the lexical path used for Git pathspecs and the
+      realpath-resolved target used for file I/O. The concrete fields
+      stay abstract so tests exercise the same read helper as routes. *)
+  val resolve_workspace_file :
+    string -> string -> (safe_workspace_file, path_rejection) result
+
+  (** Read a resolved workspace file through lstat/open/fstat identity
+      checks and a caller-supplied byte ceiling. *)
+  val load_workspace_file_content :
+    ?max_bytes:int ->
+    safe_workspace_file ->
+    (string, workspace_file_read_error) result
 end

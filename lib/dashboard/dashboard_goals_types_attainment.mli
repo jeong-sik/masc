@@ -7,6 +7,13 @@ val pct_of_float : float -> int
 
 val attainment_unit_to_string : attainment_unit -> string
 
+val metric_evaluation_to_string : metric_evaluation -> string
+
+(** [metric_evaluation_of_goal goal] is [Metric_unevaluated] when the goal
+    declares a metric (no evaluator is wired to measure it) and [Metric_absent]
+    otherwise. Exposed for unit testing. *)
+val metric_evaluation_of_goal : Goal_store.goal -> metric_evaluation
+
 val contains_ci : string -> string -> bool
 
 val metric_word_tokens : string -> string list

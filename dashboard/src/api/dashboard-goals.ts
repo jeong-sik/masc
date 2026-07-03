@@ -263,6 +263,7 @@ function decodeGoalAttainmentProjection(
       state: 'unmeasured',
       basis: 'unmeasured',
       metric: fallback.metric,
+      metric_evaluation: fallback.metric != null ? 'unevaluated' : 'absent',
       target_value: fallback.targetValue,
       target_parse_status: fallback.targetValue ? 'unparseable' : 'absent',
       unit: 'unknown',
@@ -274,10 +275,14 @@ function decodeGoalAttainmentProjection(
       note: 'Attainment projection missing from payload.',
     }
   }
+  const metric = asNullableString(raw.metric) ?? fallback.metric
   return {
     state: asString(raw.state, 'unmeasured'),
     basis: asString(raw.basis, 'unmeasured'),
-    metric: asNullableString(raw.metric) ?? fallback.metric,
+    metric,
+    // Fall back to deriving from metric presence when the server field is
+    // absent (old payloads), matching the server's own rule.
+    metric_evaluation: asString(raw.metric_evaluation, metric != null ? 'unevaluated' : 'absent'),
     target_value: asNullableString(raw.target_value) ?? fallback.targetValue,
     target_parse_status: asString(raw.target_parse_status, 'absent'),
     unit: asString(raw.unit, 'unknown'),
@@ -328,6 +333,7 @@ function decodeGoalCompletionSummary(raw: unknown): GoalCompletionSummary | unde
     pct_source: asString(raw.pct_source, 'none'),
     attainment_state: asString(raw.attainment_state, 'unmeasured'),
     attainment_basis: asString(raw.attainment_basis, 'unmeasured'),
+    metric_evaluation: asString(raw.metric_evaluation, 'absent'),
     task_total: asInt(raw.task_total) ?? 0,
     task_done: asInt(raw.task_done) ?? 0,
     task_open: asInt(raw.task_open) ?? 0,

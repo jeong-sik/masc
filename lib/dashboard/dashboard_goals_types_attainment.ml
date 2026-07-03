@@ -24,6 +24,19 @@ let attainment_unit_to_string = function
   | Count -> "count"
   | Unknown -> "unknown"
 
+let metric_evaluation_to_string = function
+  | Metric_unevaluated -> "unevaluated"
+  | Metric_absent -> "absent"
+
+(* A goal with a declared metric is always [Metric_unevaluated]: no evaluator
+   is wired (Convergence.check_convergence has no caller), so [goal.metric] is
+   never turned into an observed value. See the type comment in
+   Dashboard_goals_types_accessor. *)
+let metric_evaluation_of_goal (goal : Goal_store.goal) =
+  match goal.metric with
+  | Some _ -> Metric_unevaluated
+  | None -> Metric_absent
+
 
 
 (* Token-split that respects camelCase AND acronym boundaries.
@@ -182,6 +195,11 @@ let build_attainment_json ~state ~basis ~task_done_count ~task_count
       ("state", `String state);
       ("basis", `String basis);
       ("metric", Json_util.string_opt_to_json goal.metric);
+      (* Typed metric-evaluation state (task-1743): even when [state] /
+         [attainment_pct] look like progress, they are task-derived, so this
+         field reports whether the metric itself was evaluated. *)
+      ( "metric_evaluation",
+        `String (metric_evaluation_to_string (metric_evaluation_of_goal goal)) );
       ("target_value", Json_util.string_opt_to_json goal.target_value);
       ("target_parse_status", `String target_parse_status);
       ("unit", `String (attainment_unit_to_string unit));
@@ -396,6 +414,11 @@ let goal_completion_to_json ~effective_policy ~open_request
       ("pct_source", `String pct_source);
       ("attainment_state", `String attainment_state);
       ("attainment_basis", `String attainment_basis);
+      (* task-1743: mirror the attainment metric-evaluation state so a
+         consumer reading only the completion summary still learns the
+         metric was never evaluated (task-derived pct is not a metric). *)
+      ( "metric_evaluation",
+        `String (metric_evaluation_to_string (metric_evaluation_of_goal goal)) );
       ("task_total", `Int task_count);
       ("task_done", `Int task_done_count);
       ("task_open", `Int task_open_count);

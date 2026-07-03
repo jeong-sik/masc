@@ -787,6 +787,8 @@ export interface GoalCompletionSummary {
   pct_source: string
   attainment_state: string
   attainment_basis: string
+  /** Mirror of {@link GoalAttainmentProjection.metric_evaluation} (task-1743). */
+  metric_evaluation?: 'unevaluated' | 'absent' | string
   task_total: number
   task_done: number
   task_open: number
@@ -997,6 +999,16 @@ export interface GoalAttainmentProjection {
   state: 'attained' | 'in_progress' | 'not_started' | 'unmeasured' | string
   basis: 'goal_phase' | 'linked_tasks' | 'metric_target_percent' | 'metric_target_count' | 'unmeasured' | string
   metric: string | null
+  /**
+   * Whether the declared metric was actually evaluated (task-1743).
+   * 'unevaluated': a metric is declared but no evaluator produced a value —
+   * attainment_pct is task-derived, not a metric measurement.
+   * 'absent': no metric is declared. Distinguishes an unmeasured metric from
+   * a genuine measured zero. Optional only so existing fixtures need not set
+   * it; the decoder always populates it (deriving from metric presence when
+   * the server field is missing).
+   */
+  metric_evaluation?: 'unevaluated' | 'absent' | string
   target_value: string | null
   target_parse_status: 'absent' | 'parseable' | 'unparseable' | 'invalid_target' | 'unsupported_metric' | 'no_linked_tasks' | string
   unit: 'percent' | 'count' | 'unknown' | string

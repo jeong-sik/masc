@@ -59,6 +59,7 @@ export function goalCompletionSummaryForNode(node: GoalCompletionSummaryNode): G
     pct_source: attainmentPct != null ? 'attainment' : taskSummary.completion_pct != null ? 'task_summary' : 'none',
     attainment_state: node.attainment.state,
     attainment_basis: node.attainment.basis,
+    metric_evaluation: node.attainment.metric_evaluation,
     task_total: taskSummary.total,
     task_done: taskSummary.done,
     task_open: taskSummary.open,

@@ -35,6 +35,16 @@ type attainment_unit =
   | Count
   | Unknown
 
+(** Whether a goal's declared metric has actually been evaluated (task-1743).
+    [Metric_unevaluated] means [goal.metric] is set but no evaluator produced
+    a value (the convergence evaluator has no caller); attainment percentages
+    are task-derived, not metric-derived. [Metric_absent] means the goal
+    declares no metric. Lets consumers distinguish an unmeasured metric from
+    a genuine measured zero. *)
+type metric_evaluation =
+  | Metric_unevaluated
+  | Metric_absent
+
 val task_is_linked_to_goal :
   ?goal_task_index:(string, string list) Hashtbl.t -> Masc_domain.task -> string -> bool
 val task_linkage_source_opt :

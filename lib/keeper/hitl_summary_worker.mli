@@ -26,4 +26,9 @@ module For_testing : sig
     :  generated_at:float
     -> Agent_sdk.Types.api_response
     -> (Keeper_approval_queue_rules_types.hitl_context_summary, string) result
+
+  val provider_config_for_summary
+    : Llm_provider.Provider_config.t -> Llm_provider.Provider_config.t
+
+  val summary_version : int
 end

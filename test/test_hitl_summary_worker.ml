@@ -10,14 +10,20 @@ open Alcotest
 
 module Q = Keeper_approval_queue_rules_types
 module H = Masc.Hitl_summary_worker
+module Workspace = Masc.Workspace
+module Goal_store = Goal_store
+module Keeper_chat_store = Masc.Keeper_chat_store
+module Keeper_config = Masc.Keeper_config
+(* Ids is a top-level module from masc_types. *)
 
 let yojson_t = testable (Yojson.Safe.pretty_print ~std:false) ( = )
 let with_eio f () = Eio_main.run (fun _env -> f ())
+let () = Mirage_crypto_rng_unix.use_default ()
 
 (* ── Sample data ──────────────────────────────── *)
 
 let sample_summary : Q.hitl_context_summary =
-  { summary_version = 1
+  { summary_version = H.For_testing.summary_version
   ; generated_at = 1780587600.0
   ; model_run_id = "run-abc"
   ; context_summary = "A keeper tool approval is pending."
@@ -52,6 +58,7 @@ let dummy_pending_approval
     ?(task_id = "task-1")
     ?(goal_id = "goal-1")
     ?(turn_id = 42)
+    ?(audit_base_path = "")
     ()
     : Q.pending_approval
   =
@@ -75,7 +82,7 @@ let dummy_pending_approval
   ; disposition = None
   ; disposition_reason = None
   ; phase = Q.Awaiting_operator
-  ; audit_base_path = ""
+  ; audit_base_path
   ; resolver = None
   ; on_resolution = None
   ; context_summary = None
@@ -176,6 +183,110 @@ let test_build_context_bundle_includes_ids_and_partial_context () =
   check yojson_t "partial_context" (`Bool true) (member "partial_context" bundle)
 ;;
 
+(* ── Real workspace context collection tests ────── *)
+
+let temp_dir prefix =
+  let dir = Filename.concat (Filename.get_temp_dir_name ())
+    (Printf.sprintf "%s%d_%d" prefix (Unix.getpid ())
+       (int_of_float (Unix.gettimeofday () *. 1000.)))
+  in
+  Unix.mkdir dir 0o755;
+  dir
+;;
+
+let rm_rf path =
+  let rec loop p =
+    if Sys.is_directory p then begin
+      Array.iter (fun name -> loop (Filename.concat p name)) (Sys.readdir p);
+      Unix.rmdir p
+    end else
+      Sys.remove p
+  in
+  loop path
+;;
+
+let workspace_config base_path =
+  Unix.putenv "MASC_BASE_PATH" base_path;
+  Workspace.default_config base_path
+;;
+
+let test_build_context_bundle_with_real_workspace () =
+  let base = temp_dir "hitl_summary_ctx_" in
+  Fun.protect ~finally:(fun () -> rm_rf base) (fun () ->
+    let config = workspace_config base in
+    ignore (Workspace.init config ~agent_name:(Some "test-keeper"));
+    ignore (Workspace.add_task config ~title:"HITL context task" ~priority:1 ~description:"");
+    let goal, _ =
+      match
+        Goal_store.upsert_goal config ~id:"goal-ctx-1" ~title:"HITL context goal"
+          ~priority:1 ~status:Goal_store.Active ~phase:Goal_phase.Executing ()
+      with
+      | Ok g -> g
+      | Error msg -> Alcotest.failf "upsert_goal failed: %s" msg
+    in
+    let turn_ref = Ids.Turn_ref.make ~trace_id:"trace-1" ~absolute_turn:7 in
+    Keeper_chat_store.append_turn
+      ~base_dir:base
+      ~keeper_name:"test-keeper"
+      ~user_content:"hello"
+      ~user_attachments:[]
+      ~turn_ref
+      ~assistant_content:"hi"
+      ();
+    let entry =
+      dummy_pending_approval
+        ~task_id:"task-001"
+        ~goal_id:goal.id
+        ~turn_id:7
+        ~audit_base_path:base
+        ()
+    in
+    let bundle = H.For_testing.build_context_bundle ~entry in
+    let member = Yojson.Safe.Util.member in
+    check yojson_t "task_id" (`String "task-001") (member "task_id" bundle);
+    check yojson_t "goal_id" (`String "goal-ctx-1") (member "goal_id" bundle);
+    check yojson_t "turn_id" (`Int 7) (member "turn_id" bundle);
+    check yojson_t "partial_context" (`Bool false) (member "partial_context" bundle);
+    let task = member "task" bundle in
+    check bool "task found" true (Yojson.Safe.Util.to_bool (member "found" task));
+    let goals = member "goals" bundle in
+    (match goals with
+     | `List [ g ] -> check bool "goal found" true (Yojson.Safe.Util.to_bool (member "found" g))
+     | _ -> Alcotest.failf "expected exactly one goal, got %s" (Yojson.Safe.to_string goals));
+    let chat = member "chat_messages" bundle in
+    check bool "chat has messages" true
+      (match chat with
+       | `List (_ :: _) -> true
+       | _ -> false))
+;;
+
+(* ── Provider cost/token guard tests ────────────── *)
+
+let test_provider_config_for_summary_caps_tokens_and_temperature () =
+  let provider_cfg : Llm_provider.Provider_config.t =
+    Llm_provider.Provider_config.make
+      ~kind:Llm_provider.Provider_config.OpenAI_compat
+      ~model_id:"test-model"
+      ~base_url:"http://localhost"
+      ~api_key:"sk-test"
+      ~max_tokens:8192
+      ~temperature:0.7
+      ~tool_choice:Llm_provider.Types.Auto
+      ~response_format:Llm_provider.Types.JsonMode
+      ()
+  in
+  let cfg = H.For_testing.provider_config_for_summary provider_cfg in
+  check bool "max_tokens capped to policy" true
+    (match cfg.max_tokens with
+     | Some n -> n <= Keeper_config.hitl_summary_max_tokens ()
+     | None -> false);
+  check (option (float 0.0001)) "temperature set to policy"
+    (Some (Keeper_config.hitl_summary_temperature ())) cfg.temperature;
+  check bool "tool_choice cleared" true (Option.is_none cfg.tool_choice);
+  check bool "disable_parallel_tool_use true" true cfg.disable_parallel_tool_use;
+  check bool "output_schema set" true (Option.is_some cfg.output_schema)
+;;
+
 (* ── Runner ───────────────────────────────────── *)
 
 let () =
@@ -194,6 +305,10 @@ let () =
             (with_eio test_spawn_no_provider_config_calls_on_failure)
         ; test_case "build_context_bundle includes IDs and partial_context" `Quick
             test_build_context_bundle_includes_ids_and_partial_context
+        ; test_case "build_context_bundle with real workspace is not partial" `Quick
+            test_build_context_bundle_with_real_workspace
+        ; test_case "provider_config_for_summary caps tokens and temperature" `Quick
+            test_provider_config_for_summary_caps_tokens_and_temperature
         ] )
     ]
 ;;

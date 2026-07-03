@@ -652,18 +652,33 @@ let record_pending (entry : pending_approval) =
   broadcast_pending entry
 ;;
 
+let summary_audit_extras (entry : pending_approval) : (string * Yojson.Safe.t) list =
+  match entry.context_summary with
+  | Some summary -> [ "model_run_id", `String summary.model_run_id ]
+  | None ->
+    (match entry.summary_status with
+     | Summary_failed { reason; _ } -> [ "failure_reason", `String reason ]
+     | _ -> [])
+;;
+
 let record_summary_updated ~now (entry : pending_approval) =
+  let event_ts =
+    match entry.context_summary with
+    | Some summary -> summary.generated_at
+    | None -> now
+  in
   (try
      match get_audit_store ~base_path:entry.audit_base_path () with
      | None -> ()
      | Some store ->
        let json =
          `Assoc
-           [ "ts", `Float now
-           ; "event", `String approval_audit_summary_event
-           ; "id", `String entry.id
-           ; "summary_status", summary_status_to_yojson entry.summary_status
-           ]
+           ([ "ts", `Float event_ts
+            ; "event", `String approval_audit_summary_event
+            ; "id", `String entry.id
+            ; "summary_status", summary_status_to_yojson entry.summary_status
+            ]
+            @ summary_audit_extras entry)
        in
        mutex_protect_allow_reentrant audit_io_mu (fun () ->
          Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
@@ -713,8 +728,12 @@ let update_pending_entry ~id f =
     | Some entry -> SMap.add id (f entry) map)
 ;;
 
-let provider_config_for_summary () =
-  let runtime_id = Keeper_config.default_runtime_id () in
+let provider_config_for_summary ~keeper_name =
+  let runtime_id =
+    match Runtime.runtime_id_for_keeper keeper_name with
+    | Some id when String.trim id <> "" -> id
+    | Some _ | None -> Keeper_config.default_runtime_id ()
+  in
   match Runtime.get_runtime_by_id runtime_id with
   | Some rt -> Some rt.Runtime.provider_config
   | None -> None
@@ -744,7 +763,7 @@ let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
       | Some updated -> record_summary_updated ~now updated
       | None -> ()
     in
-    match provider_config_for_summary () with
+    match provider_config_for_summary ~keeper_name:entry.keeper_name with
     | None ->
       on_failure ~reason:"HITL summary: no runtime provider config available" ~retryable:false
     | Some config ->

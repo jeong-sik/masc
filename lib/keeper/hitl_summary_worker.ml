@@ -1,8 +1,14 @@
 open Keeper_approval_queue_rules_types
 
-let summary_timeout_s = 30.0
-let chat_context_message_limit = 20
+(** Version of the [hitl_context_summary] schema/record. Bumping this is the
+    signal for downstream consumers (dashboard, audit) that the shape or prompt
+    contract changed. *)
+let summary_version = 1
 
+(** The HITL summary system prompt is intentionally a single module-level
+    string. It is short and stable; versioning is carried by [summary_version]
+    and the structured-output schema, so prompt tweaks are reflected in the
+    output record version rather than by a separate prompt registry ID. *)
 let system_prompt =
   "You are a neutral forensic analyst helping a human operator review a keeper \
    tool-approval request. Summarize the context, surface the most important \
@@ -14,6 +20,47 @@ let system_prompt =
    (partial_context=true), raise uncertainty and call out what is missing. \
    Respond only with the requested JSON."
 ;;
+
+(* ── Metrics ────────────────────────────────────── *)
+
+let () =
+  Otel_metric_store.register_counter
+    ~name:Keeper_metrics.(to_string HitlSummaryOutcomes)
+    ~help:
+      "Total HITL context-summary worker outcomes classified by [outcome]. \
+       Labels: [outcome] (ok_summary | parse_error | provider_error | timeout | \
+       no_provider_config | no_net | slot_unavailable | crashed), [risk_level]."
+    ()
+;;
+
+let record_outcome ~risk_level outcome =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string HitlSummaryOutcomes)
+    ~labels:
+      [ "outcome", outcome
+      ; "risk_level", risk_level_to_string risk_level
+      ]
+    ()
+;;
+
+(* ── Bounded concurrency ────────────────────────── *)
+
+(** Global semaphore cap for in-flight HITL summary LLM calls. Created lazily
+    so [Runtime_params] is initialized before the limit is read. The cap is
+    sampled at creation time; a runtime-param change takes effect only after
+    process restart, which matches other capacity-sensitive gates in the
+    codebase. *)
+let summary_semaphore =
+  lazy (Eio.Semaphore.make (Keeper_config.hitl_summary_concurrency_limit ()))
+;;
+
+let with_summary_slot f =
+  let sem = Lazy.force summary_semaphore in
+  Eio.Semaphore.acquire sem;
+  Fun.protect ~finally:(fun () -> Eio.Semaphore.release sem) f
+;;
+
+(* ── Context collection ─────────────────────────── *)
 
 type context_acc =
   { partial : bool
@@ -59,7 +106,15 @@ let goal_context config ~goal_id acc =
       let status_label =
         match Goal_store.goal_status_to_yojson goal.status with
         | `String s -> s
-        | _ -> "unknown"
+        | other ->
+          (* Schema change guard: fail loud instead of silently degrading to
+             "unknown". The caller catches and records the exception. *)
+          raise
+            (Failure
+               (Printf.sprintf
+                  "goal_status_to_yojson returned non-string for goal %s: %s"
+                  goal_id
+                  (Yojson.Safe.to_string other)))
       in
       `Assoc
         [ "goal_id", `String goal_id
@@ -91,7 +146,9 @@ let chat_context ~base_dir ~keeper_name ~turn_id acc =
       | _ when n <= 0 -> List.rev acc
       | x :: xs -> take (n - 1) (x :: acc) xs
     in
-    Keeper_chat_store.to_json_array (take chat_context_message_limit [] filtered), acc
+    Keeper_chat_store.to_json_array
+      (take (Keeper_config.hitl_summary_chat_message_limit ()) [] filtered),
+    acc
   with
   | exn ->
     let acc = note acc (Printf.sprintf "chat lookup failed: %s" (Printexc.to_string exn)) in
@@ -146,7 +203,9 @@ let collect_context_parts entry =
       chat_context ~base_dir:entry.audit_base_path ~keeper_name:entry.keeper_name ~turn_id acc
     | None -> `Null, acc
   in
-  let acc = note acc "board signals skipped (not easily accessible)" in
+  (* Board signals are not collected yet; we intentionally do NOT mark the
+     context partial just because this optional dimension is absent. partial
+     is reserved for lookup failures. *)
   task_json, goals_json, chat_json, acc.partial, acc.notes
 ;;
 
@@ -174,6 +233,8 @@ let build_context_bundle ~(entry : pending_approval) : Yojson.Safe.t =
     ]
 ;;
 
+(* ── LLM call ───────────────────────────────────── *)
+
 let message role text = Agent_sdk.Types.text_message role text
 
 let messages_for_summary ~context_bundle =
@@ -182,19 +243,40 @@ let messages_for_summary ~context_bundle =
   ]
 ;;
 
-let call_summary_llm ~sw ~net ~provider_config ~context_bundle () =
-  let config =
-    provider_config
-    |> Keeper_structured_output_schema.apply_hitl_summary_schema_to_config
+(** Cap cost and sampling for the summary LLM call. Mirrors the guard in
+    [keeper_memory_llm_summary.provider_for_summary]. *)
+let provider_config_for_summary (provider_cfg : Llm_provider.Provider_config.t) =
+  let summary_max_tokens = Keeper_config.hitl_summary_max_tokens () in
+  let max_tokens =
+    match provider_cfg.max_tokens with
+    | Some n when n > 0 -> Some (min n summary_max_tokens)
+    | Some _ ->
+      (* DET-OK: an invalid (non-positive) upstream token budget is treated as
+         unset; we clamp to the policy cap at this boundary. *)
+      Some summary_max_tokens
+    | None -> Some summary_max_tokens
   in
+  { provider_cfg with
+    max_tokens
+  ; temperature = Some (Keeper_config.hitl_summary_temperature ())
+  ; tool_choice = None
+  ; disable_parallel_tool_use = true
+  }
+  |> Keeper_structured_output_schema.apply_hitl_summary_schema_to_config
+;;
+
+let call_summary_llm ~sw ~net ~provider_config ~context_bundle () =
+  let config = provider_config_for_summary provider_config in
   let messages = messages_for_summary ~context_bundle in
   Keeper_llm_bridge.run_with_timeout_and_fallback
-    ~timeout_s:summary_timeout_s
+    ~timeout_s:(Keeper_config.hitl_summary_timeout_sec ())
     (fun () ->
        Llm_provider.Complete.complete ~sw ~net ~config ~messages ()
        |> Result.map_error (fun http_err ->
             Agent_sdk.Error.Internal (Provider_http_error.to_message http_err)))
 ;;
+
+(* ── Parsing ────────────────────────────────────── *)
 
 let parse_suggested_option json =
   let open Yojson.Safe.Util in
@@ -203,15 +285,26 @@ let parse_suggested_option json =
   let estimated_risk_delta =
     match json |> member "estimated_risk_delta" with
     | `Null -> None
-    | `String s -> risk_level_of_string s
-    | _ -> None
+    | `String s ->
+      (match risk_level_of_string s with
+       | Some lvl -> Some lvl
+       | None ->
+         Log.Keeper.warn
+           "HITL summary parsed unknown estimated_risk_delta=%s; treating as null"
+           s;
+         None)
+    | other ->
+      Log.Keeper.warn
+        "HITL summary estimated_risk_delta has unexpected JSON type: %s; treating as null"
+        (Yojson.Safe.to_string other);
+      None
   in
   { label; rationale; estimated_risk_delta }
 ;;
 
 let parse_summary ~generated_at ~model_run_id json =
   let open Yojson.Safe.Util in
-  { summary_version = 1
+  { summary_version
   ; generated_at
   ; model_run_id
   ; context_summary = json |> member "context_summary" |> to_string
@@ -236,27 +329,43 @@ let summary_of_response ~generated_at (response : Agent_sdk.Types.api_response) 
     Error (Printf.sprintf "HITL summary structured response parse failed: %s" detail)
 ;;
 
+(* ── Spawn ──────────────────────────────────────── *)
+
 let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failure () =
   let generated_at = Time_compat.now () in
   match provider_config with
-  | None -> on_failure ~reason:"HITL summary: no provider config available" ~retryable:false
+  | None ->
+    record_outcome ~risk_level:entry.risk_level "no_provider_config";
+    on_failure ~reason:"HITL summary: no provider config available" ~retryable:false
   | Some provider_config ->
     Eio.Fiber.fork ~sw (fun () ->
       try
-        let context_bundle = build_context_bundle ~entry in
-        match Eio_context.get_net_opt () with
-        | None -> on_failure ~reason:"HITL summary worker: Eio net unavailable" ~retryable:true
-        | Some net ->
-          (match call_summary_llm ~sw ~net ~provider_config ~context_bundle () with
-           | Ok response ->
-             (match summary_of_response ~generated_at response with
-              | Ok summary -> on_summary summary
-              | Error reason -> on_failure ~reason ~retryable:true)
-           | Error err ->
-             on_failure ~reason:(Agent_sdk.Error.to_string err) ~retryable:true)
+        with_summary_slot (fun () ->
+          let context_bundle = build_context_bundle ~entry in
+          match Eio_context.get_net_opt () with
+          | None ->
+            record_outcome ~risk_level:entry.risk_level "no_net";
+            on_failure ~reason:"HITL summary worker: Eio net unavailable" ~retryable:true
+          | Some net ->
+            (match call_summary_llm ~sw ~net ~provider_config ~context_bundle () with
+             | Ok response ->
+               (match summary_of_response ~generated_at response with
+                | Ok summary ->
+                  record_outcome ~risk_level:entry.risk_level "ok_summary";
+                  on_summary summary
+                | Error reason ->
+                  record_outcome ~risk_level:entry.risk_level "parse_error";
+                  on_failure ~reason ~retryable:true)
+             | Error (Agent_sdk.Error.Api (Timeout _)) ->
+               record_outcome ~risk_level:entry.risk_level "timeout";
+               on_failure ~reason:"HITL summary LLM call timed out" ~retryable:true
+             | Error err ->
+               record_outcome ~risk_level:entry.risk_level "provider_error";
+               on_failure ~reason:(Agent_sdk.Error.to_string err) ~retryable:true))
       with
       | Eio.Cancel.Cancelled _ as e -> raise e
       | exn ->
+        record_outcome ~risk_level:entry.risk_level "crashed";
         Log.Keeper.warn
           "HITL summary worker crashed approval_id=%s err=%s"
           entry.id
@@ -268,5 +377,7 @@ module For_testing = struct
   let build_context_bundle = build_context_bundle
   let parse_summary = parse_summary
   let summary_of_response = summary_of_response
+  let provider_config_for_summary = provider_config_for_summary
+  let summary_version = summary_version
 end
 ;;

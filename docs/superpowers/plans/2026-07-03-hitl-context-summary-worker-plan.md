@@ -453,7 +453,7 @@ git commit -m "test(keeper): add HITL summary worker tests"
 
 ```bash
 ocamlformat --check lib/keeper_contract/keeper_approval_queue_rules_types.ml lib/keeper/hitl_summary_worker.ml lib/keeper/keeper_approval_queue.ml
-cd /Users/dancer/me/workspace/yousleepwhen/masc && bash scripts/hardening-ratchet.sh --check
+bash scripts/hardening-ratchet.sh --check
 ```
 
 - [ ] **Step 2: Push branch**
@@ -466,7 +466,7 @@ git push -u origin feat/hitl-context-summary-worker
 
 ```bash
 gh pr create --draft --title "feat(keeper): HITL context-aware LLM judgment summary worker" \
-  --body-file /Users/dancer/me/memory/design-hitl-context-llm-judgment.html
+  --body-file "${BODY_FILE:-memory/design-hitl-context-llm-judgment.html}"
 ```
 
 - [ ] **Step 4: Start CI watcher**

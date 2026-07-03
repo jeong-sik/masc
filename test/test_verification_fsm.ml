@@ -440,6 +440,53 @@ let test_submit_populates_criteria_from_completion_contract () =
     Alcotest.(check (list string)) "evidence_refs from verify_gate_evidence"
       ["output.json"] persisted_refs)
 
+let string_list_output_field name output =
+  match output with
+  | `Assoc fields ->
+    (match List.assoc_opt name fields with
+     | Some (`List xs) ->
+       List.filter_map
+         (function
+           | `String value -> Some value
+           | _ -> None)
+         xs
+     | _ -> [])
+  | _ -> []
+
+let test_submit_typed_evidence_split_uses_submitted_refs () =
+  with_temp_config ~fsm_enabled:true (fun config ->
+    let task_id = add_strict_task config in
+    let task =
+      match get_task config task_id with
+      | Some t -> t
+      | None -> Alcotest.fail "fixture task not retrievable"
+    in
+    let submitted_refs = [ "https://example.invalid/pr/23057" ] in
+    submit_protocol_or_fail
+      config
+      task
+      ~assignee:"verifier-agent"
+      ~verification_id:"vrf-typed-evidence"
+      ~evidence_refs:submitted_refs;
+    let reqs = Verification.list_requests config.Workspace.base_path in
+    let req =
+      List.find
+        (fun (r : Verification.verification_request) -> r.task_id = task_id)
+        reqs
+    in
+    Alcotest.(check (list string))
+      "legacy evidence_refs preserve submitted refs"
+      submitted_refs
+      (string_list_output_field "evidence_refs" req.output);
+    Alcotest.(check (list string))
+      "required_artifacts come from the task contract"
+      [ "output.json" ]
+      (string_list_output_field "required_artifacts" req.output);
+    Alcotest.(check (list string))
+      "submitted_evidence comes from submit-time evidence_refs"
+      submitted_refs
+      (string_list_output_field "submitted_evidence" req.output))
+
 let test_submit_uses_required_evidence_when_verify_refs_empty () =
   with_temp_config ~fsm_enabled:true (fun config ->
     let task_id = add_required_evidence_only_task config in
@@ -943,6 +990,8 @@ let () =
         test_submit_retry_records_request_created_backlog_orphan_policy;
       Alcotest.test_case "submit splits criteria/evidence by contract field"
         `Quick test_submit_populates_criteria_from_completion_contract;
+      Alcotest.test_case "submit keeps typed required/submitted evidence split"
+        `Quick test_submit_typed_evidence_split_uses_submitted_refs;
       Alcotest.test_case "submit carries required_evidence into verifier refs"
         `Quick test_submit_uses_required_evidence_when_verify_refs_empty;
       Alcotest.test_case "submit marks conflict triage from completed deliverable"

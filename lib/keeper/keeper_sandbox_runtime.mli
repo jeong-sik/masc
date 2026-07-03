@@ -37,7 +37,7 @@ type cleanup_result =
 
 type classified_error =
   { message : string
-  ; failure_class : string
+  ; failure_class : Keeper_sandbox_runtime_classify.docker_failure_class
   }
 
 type live_container =

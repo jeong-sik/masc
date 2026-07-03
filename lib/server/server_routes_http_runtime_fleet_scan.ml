@@ -104,7 +104,8 @@ let running_keeper_names ?base_path () =
   Keeper_registry.all ?base_path ()
   |> List.filter_map (fun (e : Keeper_registry.registry_entry) ->
        match e.phase with
-       | Keeper_state_machine.Running -> Some e.name
+       | Keeper_state_machine.Running ->
+         if e.meta.paused then None else Some e.name
        | Keeper_state_machine.Offline
        | Keeper_state_machine.Overflowed
        | Keeper_state_machine.Failing
@@ -272,7 +273,10 @@ let keeper_fleet_meta_scan ?(include_paused_details = true) config =
            | Ok (Some meta) ->
              let autoboot_enabled = effective_autoboot_enabled config name meta in
              let acc =
-               if autoboot_enabled && should_count_autoboot_target meta.name
+               if
+                 (not meta.paused)
+                 && autoboot_enabled
+                 && should_count_autoboot_target meta.name
                then add_autoboot acc meta.name
                else acc
              in
@@ -376,7 +380,7 @@ let autoboot_enabled_keeper_scan config =
        (fun acc name ->
          match Keeper_meta_store.read_meta config name with
          | Ok (Some meta) ->
-             if effective_autoboot_enabled config name meta then
+             if (not meta.paused) && effective_autoboot_enabled config name meta then
                { acc with autoboot_names = meta.name :: acc.autoboot_names }
              else acc
          | Ok None ->
@@ -454,7 +458,10 @@ let keeper_phase_snapshot ?base_path () =
             }
           in
           let counts = acc.counts in
-          let can_execute = Keeper_state_machine.can_execute_turn entry.phase in
+          let capacity_eligible = not entry.meta.paused in
+          let can_execute =
+            capacity_eligible && Keeper_state_machine.can_execute_turn entry.phase
+          in
           let executable = if can_execute then counts.executable + 1 else counts.executable in
           let executable_names =
             if can_execute then entry.name :: acc.executable_names
@@ -467,7 +474,8 @@ let keeper_phase_snapshot ?base_path () =
           let is_recovering =
             match entry.phase with
             | Keeper_state_machine.Failing
-              when entry.conditions.restart_budget_remaining -> true
+              when capacity_eligible && entry.conditions.restart_budget_remaining ->
+              true
             | _ -> false
           in
           let recovering =
@@ -478,7 +486,7 @@ let keeper_phase_snapshot ?base_path () =
             else acc.recovering_names
           in
           match entry.phase with
-          | Keeper_state_machine.Running ->
+          | Keeper_state_machine.Running when capacity_eligible ->
             {
               acc with
               counts = { counts with running = counts.running + 1; executable };
@@ -486,7 +494,9 @@ let keeper_phase_snapshot ?base_path () =
               recovering_names;
               executable_names;
             }
-          | Keeper_state_machine.Failing ->
+          | Keeper_state_machine.Running ->
+            { acc with counts = { counts with executable }; executable_names }
+          | Keeper_state_machine.Failing when capacity_eligible ->
             {
               acc with
               counts =
@@ -494,6 +504,8 @@ let keeper_phase_snapshot ?base_path () =
               recovering_names;
               executable_names;
             }
+          | Keeper_state_machine.Failing ->
+            { acc with counts = { counts with executable }; executable_names }
           | Keeper_state_machine.Offline
           | Keeper_state_machine.Overflowed
           | Keeper_state_machine.Compacting

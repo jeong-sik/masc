@@ -119,10 +119,12 @@ val create_post_with_outcome :
 
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
-    missing id, and [Validation_error] for empty/oversized content.  The body is
-    normalized exactly as on create: a [STATE] block in the edited content is
-    lifted into [meta_json] (merged onto the existing meta), so editing cannot
-    silently drop state.  [post_kind]/[visibility]/[hearth] are preserved. *)
+    missing id, and [Validation_error] for empty/oversized content or invalid
+    [new_author].  When provided, [new_author] transfers persisted ownership and
+    must parse through [Agent_id.of_string].  The body is normalized exactly as on
+    create: a [STATE] block in the edited content is lifted into [meta_json]
+    (merged onto the existing meta), so editing cannot silently drop state.
+    [post_kind]/[visibility]/[hearth] are preserved. *)
 val update_post_with_outcome :
   store ->
   post_id:string ->
@@ -130,6 +132,7 @@ val update_post_with_outcome :
   content:string ->
   ?title:string ->
   ?body:string ->
+  ?new_author:string ->
   unit ->
   (post, board_error) result
 

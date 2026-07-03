@@ -816,6 +816,42 @@ describe('RuntimeLensSection', () => {
     expect(summary.rows.find(row => row.label === '차단')?.value).toBe('none')
   })
 
+  it('does not display omitted live-turn tool count as zero', () => {
+    const summary = deriveKeeperLiveTruth({
+      keeper: {
+        name: 'sangsu',
+        status: 'active',
+        keepalive_running: true,
+      },
+      compositeSnapshot: compositeFixture({
+        is_live: true,
+        turn_phase: 'executing',
+        live_turn: {
+          turn_id: 8,
+          started_at: 1_778_688_690,
+          last_progress_at: 1_778_688_699,
+          last_progress_kind: 'provider_attempt_started',
+        },
+        runtime_attention: {
+          state: 'ok',
+          needs_attention: false,
+          blocked: false,
+          fiber_stop_requested: false,
+          reason: null,
+          raw_phase: 'running',
+          is_live: true,
+          source: 'live_turn',
+        },
+      }),
+      runtimeTrace: runtimeTraceFixture(),
+      runtimeResolution: null,
+    })
+
+    const detail = summary.rows.find(row => row.label === '현재 턴')?.detail
+    expect(detail).toContain('model — · tools —')
+    expect(detail).not.toContain('tools 0')
+  })
+
   it('surfaces runtime resolution warnings in the live-truth summary', () => {
     const summary = deriveKeeperLiveTruth({
       keeper: {

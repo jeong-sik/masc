@@ -470,17 +470,17 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
           "failed"가 되지 않게 한다. *)
        (match judge with
         | Ok j ->
-          Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id
+          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
             ~ok:true ();
-          broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
+          broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
             ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
         | Error e ->
-          Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id
+          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
             ~failure:(Fusion_types.judge_failure_text e)
             ~failure_code:(Fusion_types.judge_failure_tag e)
             ~ok:false ();
-          broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
+          broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
           wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
             ~resolved_answer:
               (Printf.sprintf "fusion run failed — %s" (render_failure e))

@@ -5,28 +5,15 @@
 ## [0.19.55] - 2026-07-03
 
 ### Changed
-- Bump package version to 0.19.55 and align version truth across
-  `dune-project`, `ROADMAP.md`, `docs/PRODUCT-OPERATING-PLAN.md`, and
-  `docs/spec/SPEC-INDEX.md`.
+- Bump OAS agent_sdk pin to v0.208.14 (#23054) and bump masc version to
+  0.19.55, following the v0.208.13 pin (#22950) that carried the 0.208.13
+  release line.
+- Align version truth across `dune-project`, `ROADMAP.md`,
+  `docs/PRODUCT-OPERATING-PLAN.md`, and `docs/spec/SPEC-INDEX.md`.
 - HITL governance: enforce hard-forbidden tool gate unconditionally before
   `disable_hitl`, rejecting Critical/blocker tools in development mode and
   queueing hard-forbidden approvals for human review.
-
-### Fixed
-- Close unerasable optional arguments in `Governance_pipeline` public API
-  (`decide`, `make_pre_hook`, `install`) to restore call-site compatibility.
-- Export `Keeper_meta_contract` alias and use Masc-qualified keeper profile
-  types in governance pipeline tests.
-- Align development-mode governance tests with the hard-forbidden
-  critical-tool behavior and exhaustively handle `Tool_dispatch.Proceed` in
-  hook assertions.
-
-## [0.19.54] - 2026-06-29
-
-### Changed
-- Bump OAS agent_sdk pin to 0.207.16 and bump masc version to 0.19.54.
-
-## [0.19.52] - 2026-06-29
+- Bump OAS agent_sdk pin to v0.208.12 (`2f3d6846`), carrying the
   default-unbounded agent turn budget release so MASC keeper/OAS runs no longer
   inherit the older finite default turn cap.
 - Bump OAS agent_sdk pin to the 0.207.22 main follow-up (`c741324`),
@@ -37,6 +24,13 @@
   stale inline-test fix from OAS #2265.
 
 ### Fixed
+- Close unerasable optional arguments in `Governance_pipeline` public API
+  (`decide`, `make_pre_hook`, `install`) to restore call-site compatibility.
+- Export `Keeper_meta_contract` alias and use Masc-qualified keeper profile
+  types in governance pipeline tests.
+- Align development-mode governance tests with the hard-forbidden
+  critical-tool behavior and exhaustively handle `Tool_dispatch.Proceed` in
+  hook assertions.
 - Resolve runtime capability validation and default preserve-thinking decisions
   through OAS provider-qualified provider/model capabilities instead of bare
   model ids, so overlapping ids such as Ollama Cloud Kimi do not need

@@ -654,9 +654,21 @@ export async function resumePendingKeeperChatRequests(name: string): Promise<voi
 
 /** React to a server `keeper_chat_appended` push: re-merge the
  *  persisted transcript so messages arriving through other connectors
- *  (Discord, Slack, agent MCP) appear without a page reload. Keepers
- *  whose transcript was never hydrated are skipped — the mount
- *  hydration fetches the full window when the panel first opens.
+ *  (Discord, Slack, agent MCP) appear without a page reload.
+ *
+ *  A keeper that is not in `hydratedChatKeepers` reaches the guard below
+ *  for one of two reasons: (a) its panel was never opened — mount
+ *  hydration fetches the full window on first open, so skipping is
+ *  correct; (b) an earlier hydration FAILED and rolled the keeper back
+ *  out of the set (see the catch in `hydrateKeeperChatHistory`). Case (b)
+ *  leaves an OPEN panel blank and, before this branch, dropped every
+ *  subsequent append until the panel remounted. When the un-hydrated
+ *  keeper is the one the operator is viewing (`activeKeeperName`), we
+ *  re-trigger hydration so a recovered server transcript converges into
+ *  the panel instead of being dropped. `hydrateKeeperChatHistory` adds
+ *  the keeper to `hydratedChatKeepers` before its fetch await, so a burst
+ *  of appends collapses into the single in-flight fetch rather than
+ *  fanning out one fetch per event.
  *
  *  If the event carries an RFC-0235 audio clip, we first try to attach
  *  it to the matching assistant bubble that is already streaming. A
@@ -670,7 +682,12 @@ export async function resumePendingKeeperChatRequests(name: string): Promise<voi
 export function noteKeeperChatAppended(name: string, audio?: unknown, _blocks?: unknown): void {
   const keeperName = name.trim()
   if (!keeperName) return
-  if (!hydratedChatKeepers.has(keeperName)) return
+  if (!hydratedChatKeepers.has(keeperName)) {
+    if (keeperName === activeKeeperName.value.trim()) {
+      void hydrateKeeperChatHistory(keeperName, { force: true })
+    }
+    return
+  }
   // Try to attach an RFC-0235 audio clip to the streaming assistant bubble,
   // but always fall through to the history re-merge so the transcript stays
   // current even if the clip had no matching text or no content text was
@@ -684,6 +701,25 @@ export function noteKeeperChatAppended(name: string, audio?: unknown, _blocks?: 
     chatRefreshTimers.delete(keeperName)
     void hydrateKeeperChatHistory(keeperName, { force: true })
   }, CHAT_APPENDED_REFRESH_DELAY_MS))
+}
+
+/** Re-hydrate the chat transcript for the keeper whose conversation panel
+ *  is currently open (`activeKeeperName`). No-op when no panel is open.
+ *
+ *  Two callers:
+ *   - The `keepers` route refresh plan calls this WITHOUT `force`, so the
+ *     once-per-page `hydratedChatKeepers` guard makes it a no-op while the
+ *     transcript is already loaded (route visits and the periodic refresh
+ *     must not poll the history endpoint). It only fetches when a prior
+ *     hydration failed and left the keeper un-hydrated.
+ *   - The SSE reconnect path calls this WITH `force` to recover
+ *     `keeper_chat_appended` events that fell outside the server replay
+ *     buffer while the connection was down — those are unrecoverable
+ *     through the live stream, so the open panel must re-fetch the window. */
+export function refreshActiveKeeperChatHistory(options: { force?: boolean } = {}): void {
+  const keeperName = activeKeeperName.value.trim()
+  if (!keeperName) return
+  void hydrateKeeperChatHistory(keeperName, options)
 }
 
 export async function loadFullKeeperHistory(name: string): Promise<void> {

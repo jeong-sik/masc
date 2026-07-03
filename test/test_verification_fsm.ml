@@ -489,7 +489,12 @@ let test_submit_typed_evidence_split_uses_submitted_refs () =
     in
     let raw_required_sources =
       match task.contract with
-      | Some c -> c.verify_gate_evidence @ c.required_evidence
+      | Some c ->
+        Alcotest.(check (list string))
+          "verify-only fixture keeps required_evidence empty"
+          []
+          c.required_evidence;
+        c.verify_gate_evidence @ c.required_evidence
       | None -> Alcotest.fail "fixture task has no contract"
     in
     (* The production projection trims and de-duplicates into deterministic

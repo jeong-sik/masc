@@ -541,7 +541,7 @@ let test_risk_payload_beats_low_override () =
 
 let test_development_allows_all () =
   let d = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | `Require_confirm _ -> Alcotest.fail "development should allow critical"
@@ -550,35 +550,35 @@ let test_development_allows_all () =
 
 let test_development_allows_low () =
   let d = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "development should allow low")
 
 let test_production_allows_low () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow low")
 
 let test_production_allows_medium () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_bind" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow medium")
 
 let test_production_allows_high () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_create_workspace" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow high")
 
 let test_production_confirms_critical () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm reason ->
        Alcotest.(check bool) "reason non-empty"
@@ -588,21 +588,21 @@ let test_production_confirms_critical () =
 
 let test_enterprise_allows_low () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "enterprise should allow low")
 
 let test_enterprise_allows_medium () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_bind" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "enterprise should allow medium")
 
 let test_enterprise_confirms_high () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_create_workspace" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "enterprise should require confirm for high"
@@ -610,7 +610,7 @@ let test_enterprise_confirms_high () =
 
 let test_enterprise_confirms_critical () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "enterprise should require confirm for critical"
@@ -618,14 +618,14 @@ let test_enterprise_confirms_critical () =
 
 let test_paranoid_allows_low () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "paranoid should allow low")
 
 let test_paranoid_confirms_medium () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_bind" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for medium"
@@ -633,7 +633,7 @@ let test_paranoid_confirms_medium () =
 
 let test_paranoid_confirms_high () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_create_workspace" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for high"
@@ -641,7 +641,7 @@ let test_paranoid_confirms_high () =
 
 let test_paranoid_confirms_critical () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for critical"
@@ -651,16 +651,16 @@ let test_paranoid_confirms_critical () =
 
 let test_decision_has_trace_id () =
   let d = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   Alcotest.(check bool) "trace_id starts with gov_"
     true (String.length d.trace_id > 4
           && String.sub d.trace_id 0 4 = "gov_")
 
 let test_trace_ids_unique () =
   let d1 = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   let d2 = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   Alcotest.(check bool) "trace_ids differ"
     true (d1.trace_id <> d2.trace_id)
 
@@ -681,7 +681,7 @@ let test_hook_development_allows () =
     ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "ok"));
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"development" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"development" () in
   let result = hook ~name:"__gov_test_delete" ~args:`Null in
   (match result with
    | Tool_dispatch.Pass -> ()
@@ -697,7 +697,7 @@ let test_hook_production_blocks_critical () =
     ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "should not reach"));
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"production" () in
   let result = hook ~name:"__gov_test_delete2" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -715,7 +715,7 @@ let test_hook_production_allows_low () =
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"production" () in
   let result = hook ~name:"masc_status" ~args:`Null in
   (match result with
    | Tool_dispatch.Pass -> ()
@@ -728,7 +728,7 @@ let test_hook_enterprise_blocks_high () =
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"enterprise" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"enterprise" () in
   let result = hook ~name:"masc_create_workspace" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -744,7 +744,7 @@ let test_hook_paranoid_blocks_medium () =
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" () in
   let result = hook ~name:"masc_bind" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -761,7 +761,7 @@ let test_blocked_response_structure () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" () in
   let result = hook ~name:generic_transition_tool ~args:transition_claim_input in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -784,7 +784,7 @@ let test_blocked_response_structure_claim_next () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" () in
   let result = hook ~name:explicit_claim_tool ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -803,7 +803,7 @@ let test_unknown_governance_level_fail_closed_on_critical () =
   (* Security gate: typo / unknown level no longer silently allows every tool.
      Mirrors fail-closed posture of audit_threshold. See #7641. *)
   let d = Gp.decide ~governance_level:"nonexistent"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | _ -> Alcotest.fail "unknown governance level should require confirm on critical risk")
@@ -843,6 +843,7 @@ let test_hitl_disabled_still_confirms_critical () =
         ~governance_level:"production"
         ~tool_name:"masc_delete_workspace"
         ~input:`Null
+        ()
     in
     match d.action with
     | `Require_confirm reason ->
@@ -857,6 +858,7 @@ let test_hitl_disabled_allows_noncritical_below_threshold () =
         ~governance_level:"production"
         ~tool_name:"masc_create_workspace"
         ~input:`Null
+        ()
     in
     match d.action with
     | `Allow -> ()
@@ -983,6 +985,7 @@ let test_decide_runtime_blocker_requires_confirm () =
       ~governance_level:"production"
       ~tool_name:"masc_status"
       ~input:`Null
+      ()
   in
   match d.action with
   | `Require_confirm reason ->
@@ -999,6 +1002,7 @@ let test_decide_front_door_none_allows_noncritical () =
       ~governance_level:"production"
       ~tool_name:"masc_status"
       ~input:`Null
+      ()
   in
   match d.action with
   | `Allow -> ()

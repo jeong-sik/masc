@@ -60,6 +60,7 @@ val decide :
   governance_level:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
+  unit ->
   governance_decision
 (** Evaluate a tool call against governance policy and return a decision.
     - development: allow all while HITL is enabled, audit High+Critical
@@ -83,6 +84,7 @@ val make_pre_hook :
   ?meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   governance_level:string ->
+  unit ->
   Tool_dispatch.pre_hook
 (** Create a Tool_dispatch pre_hook closure for the given governance level.
     Returns [Pass] (proceed) for allowed calls,
@@ -94,6 +96,7 @@ val install :
   ?meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   governance_level:string ->
+  unit ->
   unit
 (** Register the governance pipeline as a Tool_dispatch pre_hook.
     Reads governance level from the [governance_level] argument.

@@ -11,6 +11,29 @@ type risk_level =
   | High
   | Critical
 
+type suggested_option =
+  { label : string
+  ; rationale : string
+  ; estimated_risk_delta : risk_level option
+  }
+
+type hitl_context_summary =
+  { summary_version : int
+  ; generated_at : float
+  ; model_run_id : string
+  ; context_summary : string
+  ; key_questions : string list
+  ; suggested_options : suggested_option list
+  ; risk_rationale : string option
+  ; uncertainty : float
+  }
+
+and summary_status =
+  | Summary_not_requested
+  | Summary_pending
+  | Summary_available of hitl_context_summary
+  | Summary_failed of { reason : string; retryable : bool }
+
 type pending_phase =
   | Awaiting_operator
   | Escalated
@@ -39,6 +62,8 @@ type pending_approval =
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
+  ; context_summary : hitl_context_summary option
+  ; summary_status : summary_status
   }
 
 type decision = Agent_sdk.Hooks.approval_decision
@@ -170,6 +195,47 @@ let approval_rule_to_yojson (rule : approval_rule) =
     ; "match_count", `Int rule.match_count
     ; "source_approval_id", Json_util.string_opt_to_json rule.source_approval_id
     ]
+;;
+
+let rec suggested_option_to_yojson (option : suggested_option) =
+  `Assoc
+    [ "label", `String option.label
+    ; "rationale", `String option.rationale
+    ; ( "estimated_risk_delta"
+      , Json_util.option_to_yojson
+          (fun risk -> `String (risk_level_to_string risk))
+          option.estimated_risk_delta )
+    ]
+
+and hitl_context_summary_to_yojson (summary : hitl_context_summary) =
+  `Assoc
+    [ "summary_version", `Int summary.summary_version
+    ; "generated_at", `Float summary.generated_at
+    ; ( "generated_at_iso"
+      , `String (Masc_domain.iso8601_of_unix_seconds summary.generated_at) )
+    ; "model_run_id", `String summary.model_run_id
+    ; "context_summary", `String summary.context_summary
+    ; "key_questions", Json_util.json_string_list summary.key_questions
+    ; ( "suggested_options"
+      , `List (List.map suggested_option_to_yojson summary.suggested_options) )
+    ; "risk_rationale", Json_util.string_opt_to_json summary.risk_rationale
+    ; "uncertainty", `Float summary.uncertainty
+    ]
+
+and summary_status_to_yojson = function
+  | Summary_not_requested -> `String "not_requested"
+  | Summary_pending -> `String "pending"
+  | Summary_available summary ->
+    `Assoc
+      [ "status", `String "available"
+      ; "summary", hitl_context_summary_to_yojson summary
+      ]
+  | Summary_failed { reason; retryable } ->
+    `Assoc
+      [ "status", `String "failed"
+      ; "reason", `String reason
+      ; "retryable", `Bool retryable
+      ]
 ;;
 
 let approval_rule_of_yojson_with_error json =

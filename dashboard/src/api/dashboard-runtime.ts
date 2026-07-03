@@ -35,6 +35,10 @@ export interface DashboardRuntimeProviderSnapshot {
   tools_support?: boolean
   thinking_support?: boolean
   streaming?: boolean
+  supports_multimodal_inputs?: boolean
+  supports_image_input?: boolean
+  supports_reasoning_budget?: boolean
+  thinking_control_format?: string | null
   model_count?: number | null
   models: string[]
   source?: string | null
@@ -220,6 +224,10 @@ function decodeRuntimeProviderSnapshot(raw: unknown): DashboardRuntimeProviderSn
     tools_support: asBoolean(raw.tools_support),
     thinking_support: asBoolean(raw.thinking_support),
     streaming: asBoolean(raw.streaming),
+    supports_multimodal_inputs: asBoolean(raw.supports_multimodal_inputs),
+    supports_image_input: asBoolean(raw.supports_image_input),
+    supports_reasoning_budget: asBoolean(raw.supports_reasoning_budget),
+    thinking_control_format: asNullableString(raw.thinking_control_format),
     model_count: asNumber(raw.model_count) ?? null,
     models: asStringArray(raw.models),
     source: asNullableString(raw.source),

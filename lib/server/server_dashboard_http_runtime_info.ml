@@ -1431,9 +1431,30 @@ let runtime_default_runtime_id () =
   Runtime.get_default_runtime () |> Option.map (fun (rt : Runtime.t) -> rt.id)
 ;;
 
+(* Canonical wire strings for the thinking-control-format capability, matching
+   the forms lib/runtime/runtime_toml.ml's parser accepts so the projection
+   round-trips. Exhaustive by construction — a new variant fails to compile
+   here rather than silently emitting a stale label. *)
+let thinking_control_format_wire : Runtime_schema.thinking_control_format -> string = function
+  | Runtime_schema.No_thinking_control -> "none"
+  | Runtime_schema.Thinking_object -> "thinking-object"
+  | Runtime_schema.Thinking_object_adaptive -> "thinking-object-adaptive"
+  | Runtime_schema.Thinking_object_only -> "thinking-object-only"
+  | Runtime_schema.Chat_template_kwargs -> "chat-template-kwargs"
+  | Runtime_schema.Chat_template_token -> "chat-template-token"
+  | Runtime_schema.Ollama_think -> "ollama-think"
+  | Runtime_schema.Reasoning_effort -> "reasoning-effort"
+  | Runtime_schema.Enable_thinking -> "enable-thinking"
+;;
+
 let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
   let runtime_kind = runtime_kind_of_transport rt.provider.transport in
   let models = [ rt.model.api_name ] in
+  (* [capabilities] is absent for models without a [\[models.<id>.capabilities\]]
+     table; fall back to the all-false default so the projection is total. *)
+  let caps =
+    Option.value rt.model.capabilities ~default:Runtime_schema.model_capabilities_default
+  in
   `Assoc
     [ "provider", `String rt.id
     ; "runtime_id", `String rt.id
@@ -1453,6 +1474,13 @@ let runtime_inventory_entry_json ~default_id (rt : Runtime.t) =
     ; "tools_support", `Bool rt.model.tools_support
     ; "thinking_support", `Bool rt.model.thinking_support
     ; "streaming", `Bool rt.model.streaming
+      (* Additive capability projection for the per-keeper runtime capability
+         card (dashboard keeper-workspace-rail rtc-card): multimodal input +
+         effort adjustability read-only. *)
+    ; "supports_multimodal_inputs", `Bool caps.supports_multimodal_inputs
+    ; "supports_image_input", `Bool caps.supports_image_input
+    ; "supports_reasoning_budget", `Bool caps.supports_reasoning_budget
+    ; "thinking_control_format", `String (thinking_control_format_wire caps.thinking_control_format)
     ; "model_count", `Int (List.length models)
     ; "models", Json_util.json_string_list models
     ; "source", `String runtime_inventory_source

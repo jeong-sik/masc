@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { shellAuthSummary, tasks } from '../../store'
 import { navigate } from '../../router'
 import { callMcpTool } from '../../api/mcp'
-import { fetchKeeperCompactionSnapshots } from '../../api/dashboard'
+import { fetchKeeperCompactionSnapshots, fetchRuntimeProviders } from '../../api/dashboard'
 import { requestConfirm } from '../common/confirm-dialog'
 import { KeeperWorkspaceRail } from './keeper-workspace-rail'
 import type { Keeper, Task } from '../../types'
@@ -145,6 +145,46 @@ describe('KeeperWorkspaceRail', () => {
     // to an em-dash rather than omitting the line.
     expect(container.querySelector('.rtc-model')).not.toBeNull()
     expect(container.querySelector('.rtc-model')?.textContent).toContain('—')
+  })
+
+  it('renders multimodal and effort adjustability from the runtime catalog capabilities', async () => {
+    vi.mocked(fetchRuntimeProviders).mockResolvedValueOnce({
+      providers: [
+        {
+          provider: 'ollama_cloud.minimax-m3',
+          runtime_id: 'ollama_cloud.minimax-m3',
+          model_api_name: 'minimax-m3',
+          max_context: 524288,
+          tools_support: true,
+          thinking_support: true,
+          streaming: true,
+          supports_multimodal_inputs: true,
+          supports_image_input: false,
+          supports_reasoning_budget: true,
+          thinking_control_format: 'reasoning-effort',
+          models: ['minimax-m3'],
+        },
+      ],
+    } as unknown as Awaited<ReturnType<typeof fetchRuntimeProviders>>)
+
+    const k = mkKeeper({ runtime_canonical: 'ollama_cloud.minimax-m3' })
+    const { container } = render(html`<${KeeperWorkspaceRail} keeper=${k} />`)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-effort-mode="reasoning-effort"]')).not.toBeNull()
+    })
+
+    const multimodalFlag = Array.from(container.querySelectorAll('.rtc-flag')).find(node =>
+      node.textContent?.includes('multimodal'),
+    )
+    expect(multimodalFlag).not.toBeUndefined()
+    expect(multimodalFlag?.className).toContain('on')
+
+    const effort = container.querySelector('[data-effort-mode="reasoning-effort"]')
+    expect(effort?.textContent).toContain('reasoning-effort')
+    expect(effort?.textContent).toContain('조정 가능')
+    // the "no source" stub is replaced once the catalog reports capabilities
+    expect(container.textContent).not.toContain('조정 정보 미수신')
   })
 
   it('renders the context-window occupancy percent', () => {

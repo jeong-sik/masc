@@ -763,10 +763,10 @@ export function RuntimeEnvironmentEditor({
         </div>
       </div>
 
-      <!-- models — runtime-editor.jsx:167-191. search + read-only chips. Live
-           model parse exposes tools/thinking/streaming/maxContext only; the
-           prototype's json/structured/multimodal/tool-choice/effort chips have
-           no live source. -->
+      <!-- models — runtime-editor.jsx:167-191. search + read-only chips. The
+           model parse now reads [models.<id>.capabilities], so tool-choice /
+           json / structured / multimodal chips and the effort (thinking-control
+           -format) label render from the live config when the key is present. -->
       <div class=${section === 'models' ? '' : 'hidden'} data-testid="runtime-section-models">
         <input
           class="rt-search mono"
@@ -788,12 +788,15 @@ export function RuntimeEnvironmentEditor({
                 ${capChip(model.toolsSupport, 'tools')}
                 ${capChip(model.thinkingSupport, 'thinking')}
                 ${capChip(model.streaming, 'streaming')}
-                ${/* json/structured/multimodal chips had no live source yet rendered
-                     styled identically to the real tools/thinking/streaming capChips,
-                     implying support. Removed until a model-capability source exists
-                     (PR #22081 review P1: no stub). effort stays — it states "미수집"
-                     honestly rather than faking a value. */ ''}
-                <span class="rt-cap tcf mono" data-stub="no-effort-source">effort: 미수집</span>
+                ${/* Capability chips now read the live [models.<id>.capabilities]
+                     projection (runtime-toml-config.ts). A chip renders only when
+                     the config declared the key; a `null` (absent) capability stays
+                     hidden so the card never implies support the config never stated. */ ''}
+                ${model.toolChoice !== null ? capChip(model.toolChoice, 'tool-choice') : null}
+                ${model.jsonSupport !== null ? capChip(model.jsonSupport, 'json') : null}
+                ${model.structuredOutput !== null ? capChip(model.structuredOutput, 'structured') : null}
+                ${model.multimodal !== null ? capChip(model.multimodal, 'multimodal') : null}
+                <span class="rt-cap tcf mono">effort: ${model.thinkingControlFormat ?? '없음'}</span>
               </div>
               <div class="rt-field" style=${{ marginTop: '9px' }}>
                 <span class="sub-k">max-ctx</span>
@@ -924,8 +927,9 @@ export function RuntimeEnvironmentEditor({
 
       <!-- bindings — runtime-editor.jsx:193-214. radio sets the default runtime;
            max-conc / keep-alive / num-ctx edit the draft runtime.toml and are
-           applied through the existing validated Save path. price / effort
-           sub-line has no live source. -->
+           applied through the existing validated Save path. The sub-line shows
+           context, the model effort mode, and per-M price when the binding
+           declares price-input/price-output (runtime_toml.ml:600-601). -->
       <div class=${section === 'bindings' ? '' : 'hidden'} data-testid="runtime-section-bindings">
         <div class="rt-binds">
           <div class="rt-note">
@@ -985,8 +989,12 @@ export function RuntimeEnvironmentEditor({
                   <div class="rt-bind-key mono">
                     ${binding.id}${isDefault ? html`<span class="rt-default-tag">default</span>` : null}
                   </div>
-                  <div class="rt-bind-sub mono" data-stub="no-price-or-effort-source">
-                    ${protoContext(model?.maxContext ?? null)} · 가격/effort 미수집
+                  <div class="rt-bind-sub mono">
+                    ${protoContext(model?.maxContext ?? null)}${model?.thinkingControlFormat
+                      ? html` · effort ${model.thinkingControlFormat}`
+                      : null}${binding.priceInput != null
+                      ? html` · $${binding.priceInput}/$${binding.priceOutput ?? '—'} per M`
+                      : null}
                   </div>
                 </div>
                 <div class="rt-bind-fields">

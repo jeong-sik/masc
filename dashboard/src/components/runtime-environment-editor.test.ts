@@ -156,3 +156,97 @@ describe('RuntimeEnvironmentEditor assignments section', () => {
     render(null, container)
   })
 })
+
+const sourceWithCapabilities = `[runtime]
+default = "ollama_cloud.minimax-m3"
+librarian = "ollama_cloud.flash-nojson"
+
+[providers.ollama_cloud]
+display-name = "Ollama Cloud"
+protocol = "openai-compatible-http"
+endpoint = "https://ollama.example/v1"
+
+[models.minimax-m3]
+api-name = "minimax-m3"
+max-context = 524288
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.minimax-m3.capabilities]
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = true
+supports-multimodal-inputs = true
+thinking-control-format = "reasoning-effort"
+
+[models.flash-nojson]
+api-name = "deepseek-v4-flash"
+max-context = 1048576
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.flash-nojson.capabilities]
+supports-response-format-json = false
+thinking-control-format = "reasoning-effort"
+
+[ollama_cloud.minimax-m3]
+price-input = 0.14
+price-output = 0.28
+
+[ollama_cloud.flash-nojson]
+`
+
+function mountSection(container: HTMLElement, section: 'models' | 'routing' | 'bindings') {
+  render(
+    html`<${RuntimeEnvironmentEditor}
+      sourceText=${sourceWithCapabilities}
+      section=${section}
+      onRoutingChange=${() => {}}
+      onAssignmentChange=${() => {}}
+      onBindingFieldChange=${() => {}}
+    />`,
+    container,
+  )
+}
+
+describe('RuntimeEnvironmentEditor capability projection', () => {
+  it('renders model capability chips from the [models.<id>.capabilities] section', () => {
+    const container = document.createElement('div')
+    mountSection(container, 'models')
+
+    const text = container.querySelector('[data-testid="runtime-section-models"]')?.textContent ?? ''
+    expect(text).toContain('tool-choice')
+    expect(text).toContain('json')
+    expect(text).toContain('structured')
+    expect(text).toContain('multimodal')
+    expect(text).toContain('effort: reasoning-effort')
+    // the honest "no source" stub is gone now that a live source exists
+    expect(text).not.toContain('effort: 미수집')
+
+    render(null, container)
+  })
+
+  it('warns when a JSON-required lane targets a model without response-format-json', () => {
+    const container = document.createElement('div')
+    mountSection(container, 'routing')
+
+    const warnings = Array.from(container.querySelectorAll('.rt-warn')).map(node => node.textContent ?? '')
+    expect(warnings.some(w => w.includes('JSON 모드 필요') && w.includes('deepseek-v4-flash 미지원'))).toBe(true)
+
+    render(null, container)
+  })
+
+  it('shows per-M binding price and the model effort mode in the binding sub-line', () => {
+    const container = document.createElement('div')
+    mountSection(container, 'bindings')
+
+    const text = container.querySelector('[data-testid="runtime-section-bindings"]')?.textContent ?? ''
+    expect(text).toContain('$0.14/$0.28 per M')
+    expect(text).toContain('effort reasoning-effort')
+    expect(text).not.toContain('가격/effort 미수집')
+
+    render(null, container)
+  })
+})

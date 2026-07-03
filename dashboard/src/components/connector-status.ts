@@ -28,6 +28,7 @@ import { lastEvent } from '../sse'
 import { KpiStripIsland, type KpiStripIslandData } from './kpi-strip-island'
 import { ActionButton } from './common/button'
 import { TextInput } from './common/input'
+import { StatusChip } from './common/status-chip'
 import { showToast } from './common/toast'
 import { CopyableCode } from './common/copyable-code'
 import { SetupGuideCard } from './setup-guide-card'
@@ -1669,6 +1670,10 @@ function ConnectorsSurfaceHeader({
         <div class="cn-surf-sub surf-sub">
           외부 게이트 ${connectorCount}개 · <b>${activeCount} active</b> ·
           <span class="mono">GET /api/v1/gate/connectors</span>
+        </div>
+        <div class="mt-2 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="connector-reality-notice">
+          <${StatusChip} tone="info" uppercase=${false}>혼합 연결<//>
+          <span>Discord는 서버 내장 gateway, iMessage/Slack/Telegram은 sidecar 관측 기반입니다.</span>
         </div>
       </div>
       <div class="cn-surf-actions" style=${{ display: 'flex', gap: 8 }}>

@@ -136,6 +136,69 @@ let test_both_opinionless_stays_off () =
   check bool "no output_schema anywhere stays None" true
     (Option.is_none merged.Llm_provider.Provider_config.output_schema)
 
+(* Mismatched request-side response_format/output_schema pairs must be
+   normalized by the merge rather than propagated to the wire.  A request can
+   only express a schema opinion through [output_schema] or an explicit
+   [response_format]; when the two fields disagree, [output_schema] wins because
+   that is the field provider request builders inspect. *)
+
+let pair_is_consistent cfg =
+  Option.equal
+    Yojson.Safe.equal
+    cfg.Llm_provider.Provider_config.output_schema
+    (Llm_provider.Provider_config.output_schema_of_response_format cfg.response_format)
+
+let test_request_off_with_output_schema_normalizes () =
+  let req =
+    { (request_without_opinion ()) with
+      Llm_provider.Provider_config.output_schema = Some schema
+    }
+  in
+  let merged = merge ~base:(base_with_schema ()) req in
+  check bool "Off + Some schema normalizes to consistent pair" true
+    (pair_is_consistent merged);
+  check bool "Off + Some schema becomes JsonSchema schema" true
+    (match merged.response_format with
+     | Agent_sdk.Types.JsonSchema s -> Yojson.Safe.equal s schema
+     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonMode -> false);
+  check bool "Off + Some schema keeps output_schema" true
+    (Option.equal Yojson.Safe.equal merged.output_schema (Some schema))
+
+let test_request_json_mode_with_output_schema_normalizes () =
+  let req =
+    { (request_without_opinion ()) with
+      Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonMode
+    ; output_schema = Some schema
+    }
+  in
+  let merged = merge ~base:(base_with_schema ()) req in
+  check bool "JsonMode + Some schema normalizes to consistent pair" true
+    (pair_is_consistent merged);
+  check bool "JsonMode + Some schema becomes JsonSchema schema" true
+    (match merged.response_format with
+     | Agent_sdk.Types.JsonSchema s -> Yojson.Safe.equal s schema
+     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonMode -> false);
+  check bool "JsonMode + Some schema keeps output_schema" true
+    (Option.equal Yojson.Safe.equal merged.output_schema (Some schema))
+
+let test_request_json_schema_with_different_output_schema_uses_output_schema () =
+  let req =
+    { (request_without_opinion ()) with
+      Llm_provider.Provider_config.response_format =
+        Agent_sdk.Types.JsonSchema alternate_schema
+    ; output_schema = Some schema
+    }
+  in
+  let merged = merge ~base:(base_with_schema ()) req in
+  check bool "JsonSchema + different schema normalizes to consistent pair" true
+    (pair_is_consistent merged);
+  check bool "JsonSchema + different schema uses output_schema" true
+    (match merged.response_format with
+     | Agent_sdk.Types.JsonSchema s -> Yojson.Safe.equal s schema
+     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonMode -> false);
+  check bool "JsonSchema + different schema keeps output_schema" true
+    (Option.equal Yojson.Safe.equal merged.output_schema (Some schema))
+
 let () =
   run "runtime_request_config_merge"
     [ ( "structured output merge"
@@ -149,5 +212,13 @@ let () =
             test_request_output_schema_normalizes_response_format
         ; test_case "both opinionless stays Off" `Quick
             test_both_opinionless_stays_off
+        ] )
+    ; ( "response_format/output_schema mismatch normalization"
+      , [ test_case "Off + Some schema" `Quick
+            test_request_off_with_output_schema_normalizes
+        ; test_case "JsonMode + Some schema" `Quick
+            test_request_json_mode_with_output_schema_normalizes
+        ; test_case "JsonSchema + different schema" `Quick
+            test_request_json_schema_with_different_output_schema_uses_output_schema
         ] )
     ]

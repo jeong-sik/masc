@@ -20,11 +20,11 @@ let default_lookback_days = 7
 let min_success_rate = 0.3
 let recency_lambda = 0.01
 
-(* Empty/whitespace-only env values count as unset: OCaml stdlib has no
-   portable [Unix.unsetenv] before 4.12, and the codebase convention is
-   [Unix.putenv name ""] to clear a var. Without the trim guard,
-   [Some ""] would be distinguishable from [None] at the reader level
-   even though the intent is identical. *)
+(* Empty/whitespace-only env values count as unset: OCaml 5.5 adds
+   [Unix.unsetenv], but the supported 5.4 floor does not expose it, and the
+   codebase convention is [Unix.putenv name ""] to clear a var. Without the trim
+   guard, [Some ""] would be distinguishable from [None] at the reader level even
+   though the intent is identical. *)
 let clamped_env_int ?(getenv = Sys.getenv_opt) ~name ~min_val ~max_val ~default () =
   match getenv name with
   | Some s when String.trim s <> "" ->

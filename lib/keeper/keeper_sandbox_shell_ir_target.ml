@@ -29,9 +29,11 @@ let tool_failure_class_of_image_preflight_failure failure_class =
 ;;
 
 let image_preflight_failure_fields (failure : Keeper_sandbox_runtime.classified_error) =
+  let sandbox_failure_class =
+    Keeper_sandbox_runtime_classify.docker_failure_class_to_string failure.failure_class
+  in
   [ "requested_sandbox", `String "docker"
-  ; ( "sandbox_failure_class"
-    , `String (Keeper_sandbox_runtime_classify.docker_failure_class_to_string failure.failure_class) )
+  ; "sandbox_failure_class", `String sandbox_failure_class
   ; ( "failure_class"
     , `String (tool_failure_class_of_image_preflight_failure failure.failure_class) )
   ]

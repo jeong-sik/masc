@@ -91,6 +91,8 @@ let event_started_at row =
   | Keeper_runtime_manifest.Event_bus_correlated
   | Keeper_runtime_manifest.Checkpoint_loaded ->
     Some row.Keeper_runtime_manifest.ts
+  | Keeper_runtime_manifest.Runtime_completed
+  | Keeper_runtime_manifest.Runtime_failed
   | Keeper_runtime_manifest.Provider_attempt_finished
   | Keeper_runtime_manifest.State_snapshot_sidecar_saved
   | Keeper_runtime_manifest.Working_state_sidecar_saved
@@ -102,6 +104,8 @@ let event_started_at row =
 
 let event_finished_at row =
   match row.Keeper_runtime_manifest.event with
+  | Keeper_runtime_manifest.Runtime_completed
+  | Keeper_runtime_manifest.Runtime_failed
   | Keeper_runtime_manifest.Provider_attempt_finished
   | Keeper_runtime_manifest.State_snapshot_sidecar_saved
   | Keeper_runtime_manifest.Working_state_sidecar_saved

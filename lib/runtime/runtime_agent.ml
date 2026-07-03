@@ -776,6 +776,23 @@ let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
          ~goal_blocks:blocks)
     ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
 
+let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
+    ~(candidates : Runtime.t list)
+    ?(checkpoint_messages = [])
+    ?(initial_messages = [])
+    (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
+  decide_modality_reroute
+    ~assigned_caps:(input_capabilities_of_runtime assigned)
+    ~required_modalities:
+      (required_modalities_for_run_with_checkpoint ~checkpoint_messages
+         ~initial_messages ~goal_blocks:blocks)
+    ~candidates:
+      (candidates
+       |> List.filter (fun (runtime : Runtime.t) ->
+         not (String.equal runtime.Runtime.id assigned.Runtime.id))
+       |> List.map (fun (runtime : Runtime.t) ->
+         runtime.Runtime.id, input_capabilities_of_runtime runtime))
+
 module For_testing = struct
   let request_runtime_fields_on_base_config =
     request_runtime_fields_on_base_config

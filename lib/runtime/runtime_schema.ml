@@ -200,6 +200,22 @@ let pause_threshold_default =
   }
 ;;
 
+(** {1 Lanes}
+
+    Lanes are ordered failover candidate lists declared in [runtime.lanes.<id>].
+    The declaration carries opaque runtime ids; resolution to materialized
+    runtimes happens in [Runtime] so this module stays dependency-free. *)
+
+type lane_strategy = Ordered
+[@@deriving show, eq]
+
+type lane_decl =
+  { id : string
+  ; strategy : lane_strategy
+  ; candidate_ids : string list
+  }
+[@@deriving show, eq]
+
 (** {1 Top-level config}
 
     Routes/aliases/profiles/system_targets/strategy from the deleted
@@ -253,6 +269,10 @@ type config =
         [Pause_threshold.default]. Wrong-type value → load-time warn + fallback
         to default (fail-soft: wrong value is not catastrophic at boot).
         Operational callers read this through [Runtime.pause_threshold]. *)
+  ; lane_decls : lane_decl list
+    (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
+        Declarations are resolved against materialized runtimes at load time;
+        an unknown candidate id is rejected like [\[runtime\].default]. *)
   }
 [@@deriving show, eq]
 

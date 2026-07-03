@@ -241,14 +241,18 @@ supports_native_streaming = true
 ;;
 
 let with_runtime_file f =
-  with_model_catalog_content runtime_route_model_catalog @@ fun () ->
-  with_temp_dir "runtime-per-keeper-routing-runtime" @@ fun dir ->
-  let path = Filename.concat dir "runtime.toml" in
-  write_file path runtime_config;
-  (match Runtime.init_default ~config_path:path with
-   | Ok () -> ()
-   | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
-  f path
+  let runtime_snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore runtime_snapshot)
+    (fun () ->
+       with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+       with_temp_dir "runtime-per-keeper-routing-runtime" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path runtime_config;
+       (match Runtime.init_default ~config_path:path with
+        | Ok () -> ()
+        | Error msg -> Alcotest.failf "runtime init_default failed: %s" msg);
+       f path)
 ;;
 
 let with_runtime_initialized f =

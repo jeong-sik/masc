@@ -127,6 +127,33 @@ const KeeperLiveTurnSchema = object({
   started_at: number(),
   last_progress_at: number(),
   last_progress_kind: nullable(string()),
+  // Surface model + in-flight tool count for the *running* turn (A-PR-2 G2).
+  // `optional` so a pinned backend that predates these fields still parses;
+  // the live turn object shape is otherwise unchanged.
+  selected_model: optional(nullable(string())),
+  active_tool_count: optional(number()),
+})
+
+// Most recent deliberate skip verdict from the keepalive cycle (A-PR-2 G5).
+// Lets operators see *why* an idle keeper is quiet, not just that it is.
+const KeeperLastSkipSchema = object({
+  ts: number(),
+  reasons: array(string()),
+})
+
+// Turn-livelock retry history (A-PR-2 G10). Present only while the
+// turn-livelock guard is tracking retries for the current turn.
+const KeeperLivelockSchema = object({
+  turn_id: number(),
+  attempts: number(),
+  first_started_at: number(),
+})
+
+// Board consumption cursor (A-PR-2 G10): how far the keeper has consumed
+// the shared board. Always emitted; `ts=0` / `post_id=null` before any post.
+const KeeperBoardCursorSchema = object({
+  ts: number(),
+  post_id: nullable(string()),
 })
 
 const KeeperCompositeExecutionSchema = object({
@@ -249,6 +276,13 @@ export const KeeperCompositeSnapshotSchema = object({
   is_live: boolean(),
   live_turn: optional(nullable(KeeperLiveTurnSchema)),
   last_outcome: nullable(KeeperLastOutcomeSchema),
+  // A-PR-2 additive observability fields. All `optional` for rollout
+  // tolerance: a pinned backend that predates PR A-PR-2 omits them and the
+  // dashboard must keep rendering rather than raising CompositeSchemaDriftError.
+  last_skip: optional(nullable(KeeperLastSkipSchema)),
+  livelock: optional(nullable(KeeperLivelockSchema)),
+  board_cursor: optional(KeeperBoardCursorSchema),
+  board_wakeups: optional(number()),
   idle_seconds: optional(number()),
   last_turn_ts: optional(number()),
   execution: optional(KeeperCompositeExecutionSchema),
@@ -265,6 +299,10 @@ export type KeeperCompositeMeasurement = InferOutput<typeof KeeperCompositeMeasu
 export type KeeperPhaseDiagnosis = InferOutput<typeof KeeperPhaseDiagnosisSchema>
 export type KeeperPhaseDiagnosisRow = InferOutput<typeof KeeperPhaseDiagnosisRowSchema>
 export type KeeperLastOutcome = InferOutput<typeof KeeperLastOutcomeSchema>
+export type KeeperLiveTurn = InferOutput<typeof KeeperLiveTurnSchema>
+export type KeeperLastSkip = InferOutput<typeof KeeperLastSkipSchema>
+export type KeeperLivelock = InferOutput<typeof KeeperLivelockSchema>
+export type KeeperBoardCursor = InferOutput<typeof KeeperBoardCursorSchema>
 export type KeeperCompositeExecution = InferOutput<typeof KeeperCompositeExecutionSchema>
 export type KeeperRuntimeAttention = InferOutput<typeof KeeperRuntimeAttentionSchema>
 export type KeeperSecretProjection = InferOutput<typeof KeeperSecretProjectionSchema>

@@ -23,6 +23,7 @@ export {
   hydrateKeeperChatHistory,
   loadFullKeeperHistory,
   noteKeeperChatAppended,
+  refreshActiveKeeperChatHistory,
   resumePendingKeeperChatRequests,
   sendKeeperThreadMessage,
   isKeeperThreadMessageSendInFlight,

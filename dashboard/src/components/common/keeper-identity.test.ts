@@ -5,7 +5,6 @@ import {
   canonicalKeeperNameFromAgentName,
   keeperIdentityKeys,
   keeperPrincipalKey,
-  keeperIdentitySearchTerms,
   keeperPrimaryName,
   runtimeAgentName,
 } from './keeper-identity'
@@ -17,13 +16,6 @@ describe('keeper identity helpers', () => {
 
   it('keeps runtime name as secondary identity when it differs', () => {
     expect(runtimeAgentName('sangsu', 'keeper-sangsu-agent')).toBe('keeper-sangsu-agent')
-  })
-
-  it('returns both keeper and runtime names for search matching', () => {
-    expect(keeperIdentitySearchTerms('sangsu', 'keeper-sangsu-agent')).toEqual([
-      'sangsu',
-      'keeper-sangsu-agent',
-    ])
   })
 
   it('canonicalizes generated keeper-owned sub-op aliases to the stable keeper name', () => {

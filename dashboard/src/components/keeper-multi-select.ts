@@ -1,17 +1,8 @@
 // MASC Dashboard — I0-B · Cross-zone keeper filter (chip multi-select)
 //
-// Phase 2 spec (`design-system/preview/cb-group-i.jsx:KeeperMultiSelect`)
-// renders a horizontal chip group for selecting a keeper subset that
-// downstream zones (token stats, board, telemetry, etc.) honor as a
-// filter. The cross-cutting nature is the point — this is the IDE
-// backbone's filter affordance.
-//
-// State lives in `selectedKeeperFilter` (store.ts) so other zones can
-// read it without prop-drilling. Empty set = "all keepers" (default
-// unconstrained view).
-//
-// Mount: any zone that benefits from a per-keeper scope. First
-// use-site: cross-keeper TokenStats panel (#11532).
+// Design-system-only atom retained for `design-system/preview/cb-group-i.jsx`.
+// Not mounted in production routes after the fleet-board control cleanup.
+// Mount intentionally deferred; current consumer is the design-system preview.
 
 import { html } from 'htm/preact'
 import { computed } from '@preact/signals'

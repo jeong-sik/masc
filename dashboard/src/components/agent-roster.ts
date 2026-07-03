@@ -16,15 +16,12 @@ import {
   shellCounts,
   shellRuntimeResolution,
 } from '../store'
-import { FilterChips } from './common/filter-chips'
-import { TextInput } from './common/input'
 import { EmptyState } from './common/feedback-state'
 import { ringFocusClasses } from './common/ring'
 import { RouteLink } from './common/route-link'
 import { TimeAgo } from './common/time-ago'
 import {
   keeperIdentityKeys,
-  keeperIdentitySearchTerms,
   keeperPrincipalKey,
   keeperPrimaryName,
 } from './common/keeper-identity'
@@ -77,8 +74,6 @@ import { FL_TONE_LABEL, type FleetTone } from '../lib/fleet-tone'
 import type { KeeperCompositeSnapshot } from '../api/schemas/keeper-composite'
 import { compositeSnapshotForKeeper } from '../lib/keeper-composite-lookup'
 import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../composite-signals'
-
-type StatusFilter = 'all' | RuntimeBand
 
 type RosterStateNote = { label: string; text: string; kind?: string }
 type RosterPresenceDisplay = { status: string | null; detail: string | null }
@@ -492,55 +487,6 @@ function expectedCountForKeeperFilter(
   return useDetailRows ? expectedRuntimeDetailRows(counts) : counts.configured.totalRuntimes
 }
 
-const FILTER_META: Record<StatusFilter, { label: string; description: string }> = {
-  all: {
-    label: '전체 상세',
-    description: '모든 키퍼와 에이전트를 표시합니다.',
-  },
-  active: { label: runtimeBandMeta('active').label, description: runtimeBandMeta('active').description },
-  attention: { label: runtimeBandMeta('attention').label, description: runtimeBandMeta('attention').description },
-  paused: { label: runtimeBandMeta('paused').label, description: runtimeBandMeta('paused').description },
-  offline: { label: runtimeBandMeta('offline').label, description: runtimeBandMeta('offline').description },
-  // RFC-0295: `transient` joins the filter facets so the operator can drill
-  // into mid-compaction / mid-handoff keepers without losing the busy rail.
-  transient: { label: runtimeBandMeta('transient').label, description: runtimeBandMeta('transient').description },
-}
-
-const STATUS_CHIP_KEYS = [
-  'all',
-  'attention',
-  'transient',
-  'active',
-  'paused',
-  'offline',
-] as const satisfies readonly StatusFilter[]
-
-/**
- * Pure filter for agent roster rows.
- *
- * Case-insensitive substring match on `row.name`, `row.current_task`, and
- * `row.koreanName` so operators can locate an agent/keeper by display name,
- * current task text, or the Korean alias shown on the card.
- *
- * Empty/whitespace query returns the input reference unchanged (no new
- * array allocation, preserves referential equality for memoisation).
- *
- * Input is never mutated; `Agent` is treated as readonly.
- */
-function filterAgentRoster(
-  rows: readonly Agent[],
-  query: string,
-): readonly Agent[] {
-  const needle = query.trim().toLowerCase()
-  if (needle === '') return rows
-  return rows.filter(row => {
-    if (row.name.toLowerCase().includes(needle)) return true
-    if (row.current_task && row.current_task.toLowerCase().includes(needle)) return true
-    if (row.koreanName && row.koreanName.toLowerCase().includes(needle)) return true
-    return false
-  })
-}
-
 function uniqueToolNames(...groups: Array<string[] | null | undefined>): string[] {
   const seen = new Set<string>()
   const names: string[] = []
@@ -679,10 +625,9 @@ function countAgentsByStatus(
   agentList: Agent[],
   keeperList: Keeper[],
   compositeByKeeperKey: ReadonlyMap<string, KeeperCompositeSnapshot> | null = null,
-): Record<StatusFilter, number> {
+): Record<RuntimeBand, number> {
   const keeperLookup = buildKeeperRuntimeLookup(keeperList)
-  const counts: Record<StatusFilter, number> = {
-    all: agentList.length,
+  const counts: Record<RuntimeBand, number> = {
     active: 0,
     attention: 0,
     paused: 0,
@@ -778,8 +723,6 @@ export function countRuntimeKinds(
 }
 
 export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFilterMode } = {}) {
-  const [filter, setFilter] = useState<StatusFilter>('all')
-  const [search, setSearch] = useState('')
   const [selectedKey, setSelectedKey] = useState<string | null>(null)
 
   const agentList = agents.value
@@ -812,7 +755,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   // Derive runtime kind counts from memoized roster (avoids duplicate buildAgentRoster call)
   const liveRuntimeCounts = useMemo(() => {
     const allKeepers = scopeAgentsByKeeperFilter(rosterAgents, runtimeKeeperList, 'keeper-only', keeperRuntimeLookup)
-    // Count via the same `band` SSOT that the rail paint and filter chip
+    // Count via the same `band` SSOT that the rail paint and health pills
     // use. RFC-0295 §5.3 + iter-6 reconciliation: `Draining` phase
     // contributes to `pausedCount` because `keeperBand()` routes it to
     // the `paused` band. The duplicated count block in `countRuntimeKinds`
@@ -885,47 +828,14 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     ),
     [scopedAgents, keeperRuntimeLookup, runtimeKeeperList, compositeByKeeperKey],
   )
-  const normalizedSearch = search.trim().toLowerCase()
-  const searchTermsByAgent = useMemo(
-    () => new Map(
-      scopedAgents.map(agent => {
-        const keeper =
-          keeperRuntimeLookup.get(agent.name)
-          ?? findKeeperRuntimeForAgent(agent, keeperRuntimeLookup)
-          ?? findKeeperRuntime(agent.name, runtimeKeeperList)
-        return [
-          agent.name,
-          keeperIdentitySearchTerms(
-            keeper?.name ?? null,
-            keeper?.agent_name ?? agent.name,
-          ).map(term => term.toLowerCase()),
-        ] as const
-      }),
-    ),
-    [scopedAgents, keeperRuntimeLookup, runtimeKeeperList],
-  )
-  const filtered = useMemo(() => scopedAgents
-    .filter((a: Agent) => {
-      if (filter !== 'all' && bandByAgent.get(a.name)?.key !== filter) return false
-      if (normalizedSearch) {
-        const terms = searchTermsByAgent.get(a.name) ?? [a.name.toLowerCase()]
-        const identityMatch = terms.some(term => term.includes(normalizedSearch))
-        if (!identityMatch) {
-          // Fall back to the pure roster filter (current_task / koreanName).
-          const fieldMatch = filterAgentRoster([a], search).length === 1
-          if (!fieldMatch) return false
-        }
-      }
-      return true
-    })
+  const filtered = useMemo(() => scopedAgents.slice()
     .sort((a: Agent, b: Agent) => {
       // RFC-0295: transient sits between active and paused on the sort
       // axis — the prototype groups "what is currently moving" above the
       // healthy steady-state rows so the operator's first scan reads as
       // "attention → transient → active → paused → offline" instead of
       // burying a mid-compaction keeper under the active rows.
-      const order: Record<StatusFilter, number> = {
-        all: 0,
+      const order: Record<RuntimeBand, number> = {
         attention: 0,
         transient: 1,
         active: 2,
@@ -937,7 +847,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       if (aOrder !== bOrder) return aOrder - bOrder
       return a.name.localeCompare(b.name)
     }),
-    [scopedAgents, filter, bandByAgent, normalizedSearch, searchTermsByAgent, search],
+    [scopedAgents, bandByAgent],
   )
 
   const counts = countAgentsByStatus(scopedAgents, runtimeKeeperList, compositeByKeeperKey)
@@ -950,22 +860,8 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   })
   const resultCountLabel =
     expectedScopedCount > scopedAgents.length
-      ? (
-          filtered.length === scopedAgents.length
-            ? `항목 ${filtered.length}개 표시 · 예상 ${expectedScopedCount}개`
-            : `항목 ${filtered.length} / ${scopedAgents.length}개 표시 · 예상 ${expectedScopedCount}개`
-        )
-      : (
-          filtered.length === scopedAgents.length
-            ? `항목 ${filtered.length}개 표시 중`
-            : `항목 ${filtered.length} / ${scopedAgents.length}개 표시 중`
-        )
-  const statusChips = STATUS_CHIP_KEYS.map(key => ({
-    key,
-    label: FILTER_META[key].label,
-    count: executionLoaded.value || scopedAgents.length > 0 ? counts[key] : null,
-    title: FILTER_META[key].description,
-  }))
+      ? `항목 ${filtered.length}개 표시 · 예상 ${expectedScopedCount}개`
+      : `항목 ${filtered.length}개 표시 중`
   const liveKeepers = runtimeCounts.live.keepers
   const livePausedKeepers = runtimeCounts.live.pausedKeepers
   const liveOfflineKeepers = runtimeCounts.live.offlineKeepers
@@ -1123,9 +1019,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
   const transientRows = rosterRows.filter(row => row.band.key === 'transient')
   const steadyRows = rosterRows.filter(row => row.band.key !== 'attention' && row.band.key !== 'transient')
 
-  // Health pills (fl-hpill) read from the same band counts the status filter
-  // chips already compute. No title here — the shell's SurfaceLead owns the
-  // "Keeper Fleet" header for this surface (dashboard-shell SURFACE_OWN_LEAD).
+  // Health pills (fl-hpill) read from the same band counts as the rows. No title
+  // here — the shell's SurfaceLead owns the "Keeper Fleet" header for this
+  // surface (dashboard-shell SURFACE_OWN_LEAD).
   const healthRun = counts.active
   const healthTransient = counts.transient
   const healthPaused = counts.paused
@@ -1199,7 +1095,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         onKeyDown=${handleRowKey}
         class="fl-row v2-monitoring-roster-row ${selected ? 'sel' : ''} ${ringFocusClasses({ tone: 'accent-fg', width: 2 })}"
       >
-        <div class="fl-id">
+        <div class="fl-id" aria-label=${`Keeper ${row.displayName}`}>
           <span class="shrink-0">
             <${AgentAvatar}
               name=${row.agent.name}
@@ -1224,7 +1120,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </div>
         </div>
 
-        <div class="fl-state">
+        <div class="fl-state" aria-label=${`운영판정 · 차단 · 단계 ${chipLabel} ${glossText} ${row.bandActionHint}`}>
           <span class="fl-chip" data-tone=${tone} title=${row.band.description}>
             <span class="inline-block h-1.5 w-1.5 rounded-full" style="background:currentColor" aria-hidden="true"></span>
             ${chipLabel}
@@ -1236,7 +1132,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             : null}
         </div>
 
-        <div class="fl-ctx">
+        <div class="fl-ctx" aria-label=${`컨텍스트 ${ctxPct != null ? `${ctxPct}%` : '없음'}`}>
           ${ctxPct != null
             ? html`
                 <div class="fl-ctx-bar"><span class=${ctxHot ? 'hot' : ''} style="width:${ctxPct}%"></span></div>
@@ -1245,9 +1141,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             : html`<span class="fl-ctx-val zero" data-stub="no context_ratio">—</span>`}
         </div>
 
-        <div class="fl-tool ${row.recentTools.length || (row.toolCallCount ?? 0) > 0 ? '' : 'none'}" title=${latestTool}>${latestTool}</div>
+        <div
+          class="fl-tool ${row.recentTools.length || (row.toolCallCount ?? 0) > 0 ? '' : 'none'}"
+          title=${latestTool}
+          aria-label=${`최근 도구 ${latestTool}`}
+        >${latestTool}</div>
 
-        <div class="fl-actcell" onClick=${(e: Event) => e.stopPropagation()}>
+        <div class="fl-actcell" aria-label="액션" onClick=${(e: Event) => e.stopPropagation()}>
           ${row.keeperRuntime
             ? html`<${KeeperActionButtons}
                 keeper=${row.keeperRuntime}
@@ -1265,48 +1165,20 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
     <div class="v2-monitoring-surface fl-shell agent-page">
       <section class="monitor-surface-card monitor-surface-card-strong v2-monitoring-card p-5" aria-label="runtime surface directory">
         <div class="flex flex-col gap-5">
-          <div class="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px] xl:items-end">
-            <div class="flex min-w-0 flex-col gap-2.5">
-              <div class="fl-health">
-                <span class="fl-hpill ok">실행 rows <b>${healthRun}</b></span>
+          <div class="flex min-w-0 flex-col gap-2.5">
+            <div class="fl-health">
+              <span class="fl-hpill ok">실행 rows <b>${healthRun}</b></span>
                 ${healthTransient > 0 ? html`<span class="fl-hpill busy">전이 rows <b>${healthTransient}</b></span>` : null}
-                <span class="fl-hpill warn">일시정지 rows <b>${healthPaused}</b></span>
-                <span class="fl-hpill">오프라인 rows <b>${healthOffline}</b></span>
-                ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
-              </div>
-              <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
-                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">workspace agents ≠ keeper fibers</span>
-                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">configured keeper ≠ running fiber</span>
-                <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">task owner ≠ live agent</span>
-              </div>
-              <span class="inline-flex w-fit items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
+              <span class="fl-hpill warn">일시정지 rows <b>${healthPaused}</b></span>
+              <span class="fl-hpill">오프라인 rows <b>${healthOffline}</b></span>
+              ${healthAttention > 0 ? html`<span class="fl-hpill bad">주의 <b>${healthAttention}</b></span>` : null}
             </div>
-
-            <label class="flex w-full flex-col gap-2 text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-muted)] uppercase">
-              <span>이름 / 작업</span>
-              <${TextInput}
-                class="rounded-[var(--r-1)] bg-[var(--color-bg-surface)] px-4 py-3 text-base text-[var(--color-fg-primary)] shadow-[inset_0_1px_0_var(--color-border-default)] focus:border-[var(--color-accent-fg)] focus:shadow-[0_0_0_2px_var(--color-accent-soft)]"
-                name="agent_search"
-                ariaLabel="runtime row 이름 · task owner 검색"
-                autoComplete="off"
-                placeholder="이름 · task owner로 찾기"
-                value=${search}
-                onInput=${(e: Event) => setSearch((e.target as HTMLInputElement).value)}
-              />
-            </label>
-          </div>
-
-          <div class="monitor-muted-panel v2-monitoring-panel p-3.5 md:p-4">
-            <div class="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
-              <div class="text-2xs font-semibold tracking-[var(--track-caps)] text-[var(--color-fg-secondary)] uppercase">상세 상태</div>
-              <${FilterChips}
-                chips=${statusChips}
-                value=${filter}
-                onChange=${(key: StatusFilter) => setFilter(key)}
-                size="md"
-                tone="accent"
-              />
+            <div class="flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]">
+              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">workspace agents ≠ keeper fibers</span>
+              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">configured keeper ≠ running fiber</span>
+              <span class="rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-bg-surface)] px-2 py-0.5">task owner ≠ live agent</span>
             </div>
+            <span class="inline-flex w-fit items-center rounded-[var(--r-0)] border border-[var(--color-border-default)] bg-[var(--color-accent-soft)] px-2.5 py-1 text-2xs font-medium text-[var(--color-fg-secondary)]">${resultCountLabel}</span>
           </div>
 
           ${showExecutionFallbackState
@@ -1336,7 +1208,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             rows + attention/steady group dividers. The shell's SurfaceLead
             owns the "Keeper Fleet" title for this surface, so this body
             renders NO top-level page header (avoids the prior duplicate-header
-            regression). Live wiring (selection, filters, actions, presence) is
+            regression). Live wiring (selection, actions, presence) is
             unchanged — only the markup/class tree is reskinned.
 
             Column header labels keep 운영판정 / 차단 · 단계 / 액션 so existing
@@ -1362,9 +1234,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             ${rosterRows.length === 0 ? html`
               <div class="px-6 py-10">
                 <${EmptyState}
-                  message=${normalizedSearch && scopedAgents.length > 0
-                      ? `필터 결과 없음 (${scopedAgents.length} items)`
-                    : showExecutionFallbackState && expectedScopedCount > 0
+                  message=${showExecutionFallbackState && expectedScopedCount > 0
                       ? `${fallbackStateTitle}: ${scopeLabel}가 있지만, 현재 조건에 맞는 항목은 아직 없습니다.`
                       : '조건에 맞는 runtime row가 없습니다.'}
                   compact

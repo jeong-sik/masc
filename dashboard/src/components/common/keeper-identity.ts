@@ -149,15 +149,6 @@ export function keeperIdentityKeys(
   return Array.from(new Set(values.filter((value): value is string => Boolean(value))))
 }
 
-export function keeperIdentitySearchTerms(
-  keeperName: string | null | undefined,
-  agentName: string | null | undefined,
-): string[] {
-  const primary = keeperPrimaryName(keeperName, agentName)
-  const runtime = runtimeAgentName(keeperName, agentName)
-  return [primary, runtime].filter((value): value is string => Boolean(value))
-}
-
 export function keeperIdentityHint(
   keeperName: string | null | undefined,
   agentName: string | null | undefined,

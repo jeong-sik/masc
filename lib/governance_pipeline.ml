@@ -322,10 +322,8 @@ let forbidden_reject_reason ~risk ~runtime_blocked =
   | true, false -> "critical risk tool cannot be auto-approved"
   | false, true -> "runtime contract blocks auto-approval"
   | false, false ->
-    (* [auto_approval_hard_forbidden] is [risk = Critical || runtime_blocked],
-       so this branch is unreachable when the predicate is true. Kept total
-       to avoid a silent misreport if the invariant ever breaks. *)
-    "auto-approval forbidden by runtime governance"
+    invalid_arg
+      "forbidden_reject_reason: expected Critical risk or runtime auto-approval blocker"
 ;;
 
 (* Reject a hard-forbidden request outright, auditing the decision as a
@@ -361,7 +359,7 @@ let reject_hard_forbidden ~config ~keeper_name ~tool_name ~input ~risk ~meta () 
   Keeper_approval_queue.audit_approval_event
     ~base_path
     ~event_type:Keeper_approval_queue.approval_audit_hard_forbidden_event
-    ~id:(Printf.sprintf "hard_forbidden_%s_%s" keeper_name tool_name)
+    ~id:(Keeper_approval_queue.generate_id ())
     ~keeper_name
     ~tool_name
     ~risk_level

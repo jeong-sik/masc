@@ -191,6 +191,9 @@ val approval_audit_hard_forbidden_event : string
 (** Event tag persisted when governance rejects a hard-forbidden approval
     (Critical risk or an active runtime blocker) without queuing it. *)
 
+val generate_id : unit -> string
+(** Generate a unique approval/audit id. *)
+
 val recent_resolved_history_limit : int
 (** Default dashboard history length for resolved HITL approvals. *)
 

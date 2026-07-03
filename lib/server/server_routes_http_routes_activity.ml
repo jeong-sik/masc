@@ -90,6 +90,24 @@ let json_ensure_meta_string_field name value = function
   | _non_object ->
       Error "json_ensure_meta_string_field: expected JSON object"
 
+let board_tool_agent_name_from_request request =
+  let hdr name =
+    Option.bind
+      (Httpun.Headers.get request.Httpun.Request.headers name)
+      (fun value ->
+        let trimmed = String.trim value in
+        if String.equal trimmed "" then None else Some trimmed)
+  in
+  match hdr "x-gate-agent" with
+  | Some value -> value
+  | None -> (
+      match hdr "x-masc-agent" with
+      | Some value -> value
+      | None ->
+          (* NDT-OK: same-origin dashboard tool calls may omit agent headers;
+             the sibling board REST bridges already use this dashboard actor fallback. *)
+          "dashboard")
+
 let governance_surface_for_param_key param_key =
   Governance_registry.surfaces
   |> List.find_opt (fun (surface : Governance_registry.surface) ->
@@ -644,7 +662,7 @@ let add_routes ~sw ~clock router =
   |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
        with_tool_auth ~tool_name:"masc_board_comment_vote"
          (fun _state _req reqd ->
-         let agent_name = (let hdr k = Option.bind (Httpun.Headers.get request.Httpun.Request.headers k) (fun s -> if s = "" then None else Some s) in match hdr "x-gate-agent" with Some _ as v -> v | None -> hdr "x-masc-agent") |> Option.value ~default:"dashboard" in
+         let agent_name = board_tool_agent_name_from_request request in
          Http.Request.read_body_async reqd (fun body_str ->
            try
              let ( let* ) r f =

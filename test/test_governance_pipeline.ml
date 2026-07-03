@@ -4,6 +4,9 @@ module Gp = Masc.Governance_pipeline
 module Workspace = Masc.Workspace
 module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
+module Keeper_meta_contract = Keeper_meta_contract
+module Keeper_types_profile = Keeper_types_profile
+module Keeper_id = Keeper_id
 
 let explicit_claim_tool = "keeper_task_claim"
 let generic_transition_tool = "masc_transition"
@@ -837,6 +840,171 @@ let test_hitl_disabled_allows_noncritical_below_threshold () =
       Alcotest.fail "HITL disabled should keep noncritical below-threshold calls allowed"
     | `Deny _ -> Alcotest.fail "high risk should not be denied by hard-forbidden gate")
 
+(* ── HITL governance blocker tests ──────────────────────────── *)
+(* Adversarial review blockers for hard-forbidden front-door / keeper
+   governance scope. *)
+
+let make_test_meta ?(last_blocker = None) () =
+  let open Keeper_meta_contract in
+  let usage =
+    { total_turns = 0
+    ; total_input_tokens = 0
+    ; total_output_tokens = 0
+    ; total_tokens = 0
+    ; total_cost_usd = 0.0
+    ; last_turn_ts = 0.0
+    ; last_input_tokens = 0
+    ; last_output_tokens = 0
+    ; last_total_tokens = 0
+    ; last_latency_ms = 0
+    }
+  in
+  let compaction_rt =
+    { count = 0
+    ; last_ts = 0.0
+    ; last_before_tokens = 0
+    ; last_after_tokens = 0
+    ; last_check_ts = 0.0
+    ; last_decision = Compaction_runtime_decision ""
+    }
+  in
+  let proactive_rt =
+    { count_total = 0
+    ; last_ts = 0.0
+    ; visible_count_total = 0
+    ; last_visible_ts = 0.0
+    ; last_outcome = Proactive_unknown
+    ; last_reason = ""
+    ; last_preview = ""
+    ; consecutive_noop_count = 0
+    }
+  in
+  let runtime =
+    { usage
+    ; compaction_rt
+    ; proactive_rt
+    ; generation = 0
+    ; trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-test"
+    ; trace_history = []
+    ; last_handoff_ts = 0.0
+    ; last_continuity_update_ts = 0.0
+    ; last_autonomous_action_at = ""
+    ; autonomous_action_count = 0
+    ; autonomous_turn_count = 0
+    ; autonomous_text_turn_count = 0
+    ; autonomous_tool_turn_count = 0
+    ; board_reactive_turn_count = 0
+    ; mention_reactive_turn_count = 0
+    ; noop_turn_count = 0
+    ; last_blocker
+    ; last_runtime_attempt = None
+    ; last_turn_tool_calls = []
+    ; last_seen_message_seq = 0
+    }
+  in
+  { id = None
+  ; name = "test-keeper"
+  ; agent_name = "test-keeper-agent"
+  ; persona = None
+  ; goal = ""
+  ; instructions = ""
+  ; sandbox_profile = Keeper_types_profile.Local
+  ; sandbox_image = None
+  ; network_mode = Keeper_types_profile.Network_none
+  ; allowed_paths = []
+  ; tool_access = []
+  ; tool_denylist = []
+  ; mention_targets = []
+  ; proactive = { enabled = false; idle_sec = 0; cooldown_sec = 0 }
+  ; compaction =
+      { profile = ""
+      ; ratio_gate = 0.0
+      ; message_gate = 0
+      ; token_gate = 0
+      ; cooldown_sec = 0
+      ; max_checkpoint_messages = 0
+      ; keep_recent_tool_results = 0
+      }
+  ; multimodal_policy = Keeper_types_profile.Mm_inherit
+  ; auto_handoff = false
+  ; handoff_threshold = 0.0
+  ; handoff_cooldown_sec = 0
+  ; created_at = ""
+  ; updated_at = ""
+  ; max_context_override = None
+  ; continuity_summary = ""
+  ; active_goal_ids = []
+  ; paused = false
+  ; auto_resume_after_sec = None
+  ; autoboot_enabled = false
+  ; current_task_id = None
+  ; telemetry_feedback_enabled = None
+  ; telemetry_feedback_window_hours = None
+  ; always_approve = Some false
+  ; runtime
+  ; keeper_id = None
+  ; oas_env = []
+  ; meta_version = 0
+  }
+
+let test_decide_runtime_blocker_requires_confirm () =
+  let blocker =
+    Keeper_meta_contract.blocker_info_of_class
+      Keeper_meta_contract.No_progress_loop
+  in
+  let meta = make_test_meta ~last_blocker:(Some blocker) () in
+  let d =
+    Gp.decide
+      ~meta
+      ~governance_level:"production"
+      ~tool_name:"masc_status"
+      ~input:`Null
+  in
+  match d.action with
+  | `Require_confirm reason ->
+    Alcotest.(check bool) "reason mentions hard-forbidden" true
+      (String.length reason > 0)
+  | `Allow ->
+    Alcotest.fail "runtime blocker should require confirmation for non-Critical tool"
+  | `Deny _ ->
+    Alcotest.fail "runtime blocker should require confirmation, not deny"
+
+let test_decide_front_door_none_allows_noncritical () =
+  let d =
+    Gp.decide
+      ~governance_level:"production"
+      ~tool_name:"masc_status"
+      ~input:`Null
+  in
+  match d.action with
+  | `Allow -> ()
+  | `Require_confirm _ ->
+    Alcotest.fail "front-door (meta=None) should allow non-Critical, non-destructive tool"
+  | `Deny _ ->
+    Alcotest.fail "front-door (meta=None) should allow non-Critical, non-destructive tool"
+
+let test_oas_callback_hard_forbidden_rejects_critical () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  let tmpdir = make_tmpdir () in
+  let config = Workspace.default_config tmpdir in
+  let callback =
+    Gp.to_oas_approval_callback
+      ~config
+      ~governance_level:"production"
+      ~keeper_name:"test-keeper"
+      ()
+  in
+  let decision = callback ~tool_name:"masc_delete_workspace" ~input:`Null in
+  (match decision with
+   | Agent_sdk.Hooks.Reject reason ->
+     Alcotest.(check bool) "reason non-empty" true (String.length reason > 0)
+   | Agent_sdk.Hooks.Approve ->
+     Alcotest.fail "Critical tool must be rejected by hard-forbidden gate"
+   | Agent_sdk.Hooks.Edit _ ->
+     Alcotest.fail "Critical tool must be rejected, not edited");
+  cleanup_tmpdir tmpdir
+
 (* ── Case-insensitive tool name matching ────────────────────── *)
 
 let test_case_insensitive_matching () =
@@ -1116,6 +1284,14 @@ let () =
         test_hitl_disabled_allows_noncritical_below_threshold;
       Alcotest.test_case "unknown level fail-closed on critical (#7641)" `Quick
         test_unknown_governance_level_fail_closed_on_critical;
+    ];
+    "hitl_governance_blockers", [
+      Alcotest.test_case "decide: runtime blocker requires confirm for non-Critical"
+        `Quick test_decide_runtime_blocker_requires_confirm;
+      Alcotest.test_case "decide: front-door None allows non-Critical" `Quick
+        test_decide_front_door_none_allows_noncritical;
+      Alcotest.test_case "OAS callback: hard-forbidden Critical rejects outright" `Quick
+        test_oas_callback_hard_forbidden_rejects_critical;
     ];
     "trace_id", [
       Alcotest.test_case "has gov_ prefix" `Quick test_decision_has_trace_id;

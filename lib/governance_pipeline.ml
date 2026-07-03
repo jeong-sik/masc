@@ -113,11 +113,11 @@ let audit_threshold = function
   | _ -> Some High
 ;;
 
-let decide ~governance_level ~tool_name ~input =
+let decide ?meta ~governance_level ~tool_name ~input =
   let risk = assess_risk ~tool_name ~input in
   let trace_id = generate_trace_id () in
   let action =
-    if Env_config_core.disable_hitl () && auto_approval_hard_forbidden ~risk None then
+    if auto_approval_hard_forbidden ~risk meta then
       `Require_confirm
         (Printf.sprintf
            "Governance (%s): %s risk tool %S requires confirmation: auto-approval is \
@@ -176,9 +176,9 @@ let maybe_create_petition ~config:_ ~(decision : governance_decision) =
 
 (* ── Pre-Hook Construction ──────────────────────────────────── *)
 
-let make_pre_hook ~config ~governance_level =
+let make_pre_hook ?meta ~config ~governance_level =
   fun ~name ~args ->
-  let decision = decide ~governance_level ~tool_name:name ~input:args in
+  let decision = decide ?meta ~governance_level ~tool_name:name ~input:args in
   if should_audit ~governance_level decision.risk then audit_decision config decision;
   match decision.action with
   | `Allow -> Tool_dispatch.Pass
@@ -245,8 +245,8 @@ let make_pre_hook ~config ~governance_level =
 
 (* ── Installation ───────────────────────────────────────────── *)
 
-let install ~config ~governance_level =
-  let hook = make_pre_hook ~config ~governance_level in
+let install ?meta ~config ~governance_level =
+  let hook = make_pre_hook ?meta ~config ~governance_level in
   Tool_dispatch.register_pre_hook hook;
   Log.Governance.info "pipeline installed: level=%s" governance_level
 ;;
@@ -335,13 +335,14 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
     then
       Log.Governance.debug
         "[%s] trifecta_active tool=%s base=%s effective=%s needs_approval=%b \
-         requires_operator_approval=%b"
+         requires_operator_approval=%b hard_forbidden=%b"
         keeper_name
         tool_name
         (risk_level_to_string base_risk)
         (risk_level_to_string risk)
         needs_approval
-        requires_operator_approval;
+        requires_operator_approval
+        hard_forbidden;
     if trifecta_active && risk_level_to_int risk > risk_level_to_int base_risk
     then
       Log.Governance.warn
@@ -350,44 +351,70 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         tool_name
         (risk_level_to_string base_risk)
         (risk_level_to_string risk);
-    if requires_operator_approval
+    let risk_level = queue_risk_level risk in
+    let base_path = (config : Workspace.config).base_path in
+    let turn_id =
+      Option.map
+        (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.runtime.usage.total_turns + 1)
+        meta
+    in
+    let task_id =
+      Option.bind meta (fun keeper_meta ->
+        Keeper_runtime_contract.current_task_id_opt keeper_meta)
+    in
+    let goal_id =
+      Option.bind meta (fun keeper_meta ->
+        Keeper_runtime_contract.primary_goal_id_opt keeper_meta)
+    in
+    let goal_ids =
+      Option.map
+        (fun (keeper_meta : Keeper_meta_contract.keeper_meta) -> keeper_meta.active_goal_ids)
+        meta
+    in
+    let runtime_contract =
+      Option.map
+        (fun keeper_meta ->
+           Keeper_runtime_contract.runtime_contract_json ~config keeper_meta)
+        meta
+    in
+    let sandbox_profile, backend, sandbox_target =
+      match meta with
+      | Some keeper_meta ->
+        let backend = Keeper_runtime_contract.backend_of_meta keeper_meta in
+        ( Some (Keeper_types_profile.sandbox_profile_to_string keeper_meta.sandbox_profile)
+        , Some backend
+        , Some backend )
+      | None -> None, None, None
+    in
+    let selected_model = selected_model_of_meta meta in
+    if hard_forbidden
     then (
-      let turn_id =
-        Option.map
-          (fun (meta : Keeper_meta_contract.keeper_meta) -> meta.runtime.usage.total_turns + 1)
-          meta
-      in
-      let task_id =
-        Option.bind meta (fun keeper_meta ->
-          Keeper_runtime_contract.current_task_id_opt keeper_meta)
-      in
-      let goal_id =
-        Option.bind meta (fun keeper_meta ->
-          Keeper_runtime_contract.primary_goal_id_opt keeper_meta)
-      in
-      let goal_ids =
-        Option.map
-          (fun (keeper_meta : Keeper_meta_contract.keeper_meta) -> keeper_meta.active_goal_ids)
-          meta
-      in
-      let runtime_contract =
-        Option.map
-          (fun keeper_meta ->
-             Keeper_runtime_contract.runtime_contract_json ~config keeper_meta)
-          meta
-      in
-      let sandbox_profile, backend, sandbox_target =
-        match meta with
-        | Some keeper_meta ->
-          let backend = Keeper_runtime_contract.backend_of_meta keeper_meta in
-          ( Some (Keeper_types_profile.sandbox_profile_to_string keeper_meta.sandbox_profile)
-          , Some backend
-          , Some backend )
-        | None -> None, None, None
-      in
-      let selected_model = selected_model_of_meta meta in
-      let risk_level = queue_risk_level risk in
-      let base_path = (config : Workspace.config).base_path in
+      Keeper_approval_queue.audit_approval_event
+        ~base_path
+        ~event_type:"approval_rejected"
+        ~id:(Printf.sprintf "hard_forbidden_%s_%s" keeper_name tool_name)
+        ~keeper_name
+        ~tool_name
+        ~risk_level
+        ?turn_id
+        ?task_id
+        ?goal_id
+        ~goal_ids:(Option.value ~default:[] goal_ids)
+        ?sandbox_target
+        ?runtime_contract
+        ?selected_model
+        ~disposition:"Rejected"
+        ~disposition_reason:"hard_forbidden"
+        ~auto_approved:false
+        ();
+      Agent_sdk.Hooks.Reject
+        (Printf.sprintf
+           "Governance (%s): %s risk tool %S auto-approval is hard-forbidden"
+           governance_level
+           (risk_level_to_string risk)
+           tool_name))
+    else if requires_operator_approval
+    then (
       let always_approve =
         Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
         |> Option.value ~default:false

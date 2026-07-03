@@ -45,6 +45,8 @@ type approval_resolve_http_error =
 val approval_resolve_http_error_to_string :
   approval_resolve_http_error -> string
 
+val approval_resolve_decision_required_message : string
+
 (** {1 Board / memory / governance HTTP entries} *)
 
 val dashboard_board_json :

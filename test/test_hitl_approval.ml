@@ -1165,9 +1165,10 @@ let test_approval_resolve_missing_decision_is_rejected () =
            ~base_path:workspace_base ~args
        with
        | Error (SDH.Bad_request msg) ->
-         Alcotest.(check bool)
-           "missing decision surfaces a decision-required bad request" true
-           (Astring.String.is_infix ~affix:"decision" msg)
+         Alcotest.(check string)
+           "missing decision surfaces exact bad request"
+           SDH.approval_resolve_decision_required_message
+           msg
        | Error (SDH.Gone _) ->
          Alcotest.fail "expected Bad_request, got Gone"
        | Ok _ ->

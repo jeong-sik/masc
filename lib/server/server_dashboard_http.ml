@@ -301,6 +301,44 @@ type approval_resolve_http_error =
   | Bad_request of string
   | Gone of Keeper_approval_queue.resolve_error
 
+let approval_resolve_decision_field = "decision"
+let approval_resolve_reason_field = "reason"
+let approval_resolve_approve_name = "approve"
+let approval_resolve_reject_name = "reject"
+let approval_resolve_decision_required_message = "decision is required"
+let approval_resolve_decision_invalid_message = "decision must be 'approve' or 'reject'"
+let approval_resolve_default_reject_reason = "dashboard rejected approval"
+
+type approval_resolve_decision =
+  | Approval_resolve_approve
+  | Approval_resolve_reject of string
+
+let approval_resolve_decision_name = function
+  | Approval_resolve_approve -> approval_resolve_approve_name
+  | Approval_resolve_reject _ -> approval_resolve_reject_name
+;;
+
+let approval_resolve_decision_to_hook = function
+  | Approval_resolve_approve -> Agent_sdk.Hooks.Approve
+  | Approval_resolve_reject reason -> Agent_sdk.Hooks.Reject reason
+;;
+
+let approval_resolve_decision_of_json args =
+  match Safe_ops.json_string_opt approval_resolve_decision_field args with
+  | None -> Error (Bad_request approval_resolve_decision_required_message)
+  | Some raw ->
+    (match raw |> String.trim |> String.lowercase_ascii with
+     | name when String.equal name approval_resolve_approve_name ->
+       Ok Approval_resolve_approve
+     | name when String.equal name approval_resolve_reject_name ->
+       let reason =
+         Safe_ops.json_string_opt approval_resolve_reason_field args
+         |> Option.value ~default:approval_resolve_default_reject_reason
+       in
+       Ok (Approval_resolve_reject reason)
+     | _ -> Error (Bad_request approval_resolve_decision_invalid_message))
+;;
+
 let approval_resolve_http_error_to_string = function
   | Bad_request msg -> msg
   | Gone err -> Keeper_approval_queue.resolve_error_to_string err
@@ -321,23 +359,11 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
     (* Carry the canonical name alongside the decision so the success response
        echoes what was applied without re-matching [approval_decision] (whose
        [Edit] arm is never produced here). *)
-    let decision =
-      match Safe_ops.json_string_opt "decision" args with
-      | None -> Error (Bad_request "decision is required")
-      | Some raw ->
-        (match raw |> String.trim |> String.lowercase_ascii with
-         | "approve" -> Ok (Agent_sdk.Hooks.Approve, "approve")
-         | "reject" ->
-           let reason =
-             Safe_ops.json_string_opt "reason" args
-             |> Option.value ~default:"dashboard rejected approval"
-           in
-           Ok (Agent_sdk.Hooks.Reject reason, "reject")
-         | _ -> Error (Bad_request "decision must be 'approve' or 'reject'"))
-    in
-    (match decision with
+    (match approval_resolve_decision_of_json args with
      | Error _ as err -> err
-     | Ok (decision, decision_name) ->
+     | Ok decision ->
+       let decision_name = approval_resolve_decision_name decision in
+       let decision = approval_resolve_decision_to_hook decision in
        (match
           Keeper_approval_queue.resolve_with_policy
             ~id

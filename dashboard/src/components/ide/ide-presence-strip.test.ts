@@ -4,6 +4,7 @@ import {
   presenceContextAnchor,
   presenceContextSummary,
   prLabel,
+  unwrapEnvelope,
   type ApiAgent,
   type ApiStatus,
 } from './ide-presence-strip'
@@ -58,6 +59,34 @@ describe('agentsToPresence', () => {
       expect(snap.entries).toHaveLength(1)
       expect(snap.entries[0]?.workspace_label).toBe('nick0cave')
     }
+  })
+})
+
+describe('unwrapEnvelope', () => {
+  it('unwraps the {ok,data} envelope returned by /api/v1/status', () => {
+    const raw = { ok: true, data: { cluster: 'default', project: 'me' } }
+    expect(unwrapEnvelope<ApiStatus>(raw)).toEqual({ cluster: 'default', project: 'me' })
+  })
+
+  it('returns an already-unwrapped payload unchanged when no data key is present', () => {
+    const raw = { cluster: 'default' }
+    expect(unwrapEnvelope<ApiStatus>(raw)).toEqual({ cluster: 'default' })
+  })
+
+  it('returns undefined for null / non-object input', () => {
+    expect(unwrapEnvelope<ApiStatus>(null)).toBeUndefined()
+  })
+
+  // Regression: the strip read status.cluster off the raw {ok,data} envelope,
+  // so cluster was always undefined -> permanent runtime_unknown even while the
+  // server reported a live cluster. Unwrapping first must yield a live snapshot.
+  it('feeds an enveloped status into agentsToPresence as a live runtime', () => {
+    const envelope = { ok: true, data: { cluster: 'default', project: 'me' } }
+    const status = unwrapEnvelope<ApiStatus>(envelope) ?? {}
+    const agent: ApiAgent = { name: 'nick0cave', status: 'active', current_task: null, model: null }
+    const snap = agentsToPresence([agent], status)
+    expect(snap.kind).toBe('live')
+    if (snap.kind === 'live') expect(snap.runtime_id).toBe('default')
   })
 })
 

@@ -19,3 +19,9 @@ val runtime_provider_label : public_label
 val runtime_model_label : public_label
 
 val to_string : public_label -> string
+
+(** Redacted lane label ["runtime"] for external observability metric labels
+    ([model] / [model_used]). SSOT consolidating the previously-duplicated
+    [to_string runtime_model_label] expression at five keeper emit sites
+    (RFC-0132 §3). *)
+val runtime_lane_label : string

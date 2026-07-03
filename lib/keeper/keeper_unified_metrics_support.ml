@@ -55,8 +55,7 @@ type usage_trust = Keeper_usage_trust.t =
   | Usage_untrusted of string list
 
 (* RFC-0132 PR-2: Otel_metric_store metric label = external boundary; redact via SSOT. *)
-let runtime_lane_label =
-  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+let runtime_lane_label = Boundary_redaction.runtime_lane_label
 
 let classify_usage_trust ~(usage_reported : bool)
     ~(usage : Agent_sdk.Types.api_usage)

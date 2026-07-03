@@ -44,8 +44,7 @@ let keeper_denied_tools = []
 (** Keeper-facing telemetry uses a neutral runtime lane.  Concrete
     provider/model identity belongs to OAS and lower-level runtime adapters.
     RFC-0132 PR-2: telemetry lane label = external boundary; redact via SSOT. *)
-let runtime_lane_label =
-  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+let runtime_lane_label = Boundary_redaction.runtime_lane_label
 
 let runtime_lane_of_model (_model : string) : string = runtime_lane_label
 

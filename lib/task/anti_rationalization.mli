@@ -81,11 +81,17 @@ type review_result = {
       Default: the profile selected by [routes.cross_verifier]. Use a
       different runtime name to force a specific evaluator profile.
     @param generator_runtime Optional name of the generator's runtime.
-      Logged for auditing; not used in verification logic. *)
+      Logged for auditing; not used in verification logic.
+    @param required_evidence Contract [required_evidence] artifacts. Surfaced
+      to the LLM prompt as a per-item checklist (task-1664).
+    @param verify_gate_evidence Contract [verify_gate_evidence] artifacts,
+      surfaced alongside [required_evidence] in the same checklist. *)
 val review :
   ?evaluator_runtime:string ->
   ?generator_runtime:string ->
   ?completion_contract:string list ->
+  ?required_evidence:string list ->
+  ?verify_gate_evidence:string list ->
   ?on_verdict:(review_result -> unit) ->
   ?few_shot_block:string ->
   ?sw:Eio.Switch.t ->
@@ -127,12 +133,17 @@ val find_excuse_pattern : string -> (string * string) option
     avoidance phrase to the LLM as a heuristic signal rather than
     a verdict — see #10113. [completion_contract], when supplied,
     injects a [<verification_contract>] section that the LLM must
-    judge against completion notes. Exposed so tests can pin the prompt
-    contract without standing up an OAS runtime. *)
+    judge against completion notes. [required_evidence] /
+    [verify_gate_evidence], when supplied, inject a [<required_evidence>]
+    section listing the contract-required artifacts the notes must supply,
+    with a per-item judgement instruction (task-1664). Exposed so tests can
+    pin the prompt contract without standing up an OAS runtime. *)
 val build_prompt :
   ?few_shot_block:string ->
   ?excuse_advisory:string * string ->
   ?completion_contract:string list ->
+  ?required_evidence:string list ->
+  ?verify_gate_evidence:string list ->
   review_request -> string
 
 (** Parse LLM text output into a verdict (lenient fallback path).

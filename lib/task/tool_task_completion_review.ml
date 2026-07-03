@@ -67,17 +67,18 @@ let non_empty_trimmed_strings values =
          if String.equal value "" then None else Some value)
   |> List.sort_uniq String.compare
 
-(* Typed concat for the verifier request output (observability only).
-   Phase E (RFC-0109 closeout) replaced the substring-classifier filter
-   with placeholder-only filtering. Gating decisions belong to
-   [Cdal_evidence_gate]. *)
-let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
+(* Raw (uncleaned) evidence sources, shared by the flat [evidence_refs]
+   projection and the typed [verification_evidence] split (task-1664) so a new
+   source is declared in exactly one place. [required_*] are what the contract
+   demands; [submitted_*] are what the agent actually referenced. *)
+let required_evidence_sources (task : Masc_domain.task) =
+  match task.contract with
+  | Some contract -> contract.verify_gate_evidence @ contract.required_evidence
+  | None -> []
+
+let submitted_evidence_sources ?(notes = "") ?handoff_context
+    ?(submitted_evidence_refs = [])
     (task : Masc_domain.task) =
-  let contract_refs =
-    match task.contract with
-    | Some contract -> contract.verify_gate_evidence @ contract.required_evidence
-    | None -> []
-  in
   let resolved_handoff_context =
     match handoff_context with
     | Some _ -> handoff_context
@@ -103,9 +104,58 @@ let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
     then []
     else [ trimmed ]
   in
-  contract_refs @ handoff_refs @ summary_refs @ notes_refs
+  submitted_evidence_refs @ handoff_refs @ summary_refs @ notes_refs
+
+let clean_evidence_refs refs =
+  refs
   |> non_empty_trimmed_strings
   |> List.filter (fun s -> not (is_placeholder_evidence_ref s))
 
+(* Typed concat for the verifier request output (observability only).
+   Phase E (RFC-0109 closeout) replaced the substring-classifier filter
+   with placeholder-only filtering. Gating decisions belong to
+   [Cdal_evidence_gate]. *)
+let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
+    ?submitted_evidence_refs
+    (task : Masc_domain.task) =
+  required_evidence_sources task
+  @ submitted_evidence_sources ~notes ?handoff_context ?submitted_evidence_refs task
+  |> clean_evidence_refs
+
 let verification_evidence_refs_for_task (task : Masc_domain.task) =
   concrete_verification_evidence_refs task
+
+(* task-1664: the flat [evidence_refs] list above concatenates the
+   contract-required artifacts with the agent-submitted references, so a
+   verifier reading it cannot tell "the contract asked for a PR link" from
+   "here is the submitted PR link". The typed split keeps the two roles
+   distinct in the verification request; the flat projection above stays
+   byte-compatible for existing consumers. *)
+type verification_evidence =
+  { required_artifacts : string list
+  ; submitted_evidence : string list
+  }
+[@@deriving yojson]
+
+let concrete_verification_evidence ?(notes = "") ?handoff_context
+    ?submitted_evidence_refs
+    (task : Masc_domain.task) : verification_evidence =
+  { required_artifacts = clean_evidence_refs (required_evidence_sources task)
+  ; submitted_evidence =
+      clean_evidence_refs
+        (submitted_evidence_sources
+           ~notes
+           ?handoff_context
+           ?submitted_evidence_refs
+           task)
+  }
+
+(* JSON object fields for the typed split, spliced into the verification
+   request output / board meta / SSE alongside the unchanged [evidence_refs]
+   field. Shares the derived [verification_evidence_to_yojson] so the
+   serialization tested by the roundtrip is the one production emits. *)
+let verification_evidence_fields (evidence : verification_evidence)
+  : (string * Yojson.Safe.t) list =
+  match verification_evidence_to_yojson evidence with
+  | `Assoc fields -> fields
+  | _ -> []

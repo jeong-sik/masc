@@ -15,7 +15,7 @@ module Ctx = Agent_sdk.Context
 
 (* ── Helpers ─────────────────────────────────────── *)
 
-let create_ctx () = Ctx.create () ~eio:false
+let create_ctx () = Ctx.create_sync ()
 
 let ctx_has_key ctx k =
   match Ctx.get ctx k with Some _ -> true | None -> false

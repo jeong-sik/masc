@@ -150,8 +150,11 @@ let context_ratio (ctx : working_context) : float =
   if max_tokens = 0 then 0.0
   else float_of_int (token_count ctx) /. float_of_int max_tokens
 
+let create_oas_context ~eio =
+  if eio then Agent_sdk.Context.create () else Agent_sdk.Context.create_sync ()
+
 let create ~eio ~system_prompt ~max_tokens =
-  let context = Agent_sdk.Context.create ~eio () in
+  let context = create_oas_context ~eio in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages:[] ~max_tokens ~context
   in
@@ -558,7 +561,7 @@ let deserialize_context ~eio (s : string) ~max_tokens : working_context =
     |> repair_broken_tool_call_pairs
   in
   let _legacy_token_count = Json_util.get_int json "token_count" in
-  let context = Agent_sdk.Context.create ~eio () in
+  let context = create_oas_context ~eio in
   let checkpoint =
     empty_runtime_checkpoint ~system_prompt ~messages ~max_tokens ~context
   in

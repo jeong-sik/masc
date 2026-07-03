@@ -82,7 +82,10 @@ let keeper_confirm_threshold governance_level =
 let runtime_auto_approval_blocked = function
   | None -> false
   | Some (meta : Keeper_meta_contract.keeper_meta) ->
-    Option.is_some meta.runtime.last_blocker
+    match meta.runtime.last_blocker with
+    | None -> false
+    | Some blocker ->
+      Keeper_meta_contract.blocker_class_auto_approval_blocked blocker.klass
 ;;
 
 (** PR-E (Plan v3 Leak 1): split the legacy [auto_approval_forbidden]
@@ -397,7 +400,10 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         |> Option.value ~default:false
       in
       let rule_match =
-        if auto_approval_forbidden
+        (* Hard forbidden cannot be overridden by routine allow-rules.
+           Soft forbidden is HITL-dependent and *is* permitted to be
+           overridden by a narrowly-scoped remembered rule. *)
+        if hard_forbidden
         then None
         else
           Keeper_approval_queue.find_matching_rule

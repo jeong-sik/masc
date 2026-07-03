@@ -71,7 +71,9 @@ let resolve_partition_for_query ~state ~uri =
 
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
-let keeper_id_mismatch_error = "keeper_id does not match authenticated identity"
+let keeper_id_not_accepted_error =
+  "keeper_id is not accepted; identity is derived from the authentication token"
+
 let annotation_delete_rejected_error = "annotation delete rejected"
 
 let parse_json_body body_str =
@@ -97,9 +99,9 @@ let json_int_field key = function
   | _ -> None
 ;;
 
-let log_keeper_id_mismatch ~operation ~auth_identity ~requested =
+let log_keeper_id_not_accepted ~operation ~auth_identity ~requested =
   Log.Server.warn
-    "IDE annotation %s rejected keeper_id mismatch: requested_keeper_id=%S \
+    "IDE annotation %s rejected client-supplied keeper_id: requested_keeper_id=%S \
      auth_identity=%S"
     operation
     requested
@@ -128,22 +130,17 @@ let log_annotation_delete_rejected ~auth_identity ~id ~reason =
    [Server_auth.with_token_permission_auth].
 
    [requested] is the caller-supplied keeper_id (body field or query
-   param). It is advisory only:
-     - absent / blank  -> use the authenticated identity
-     - equal           -> use the authenticated identity (explicit, allowed)
-     - differs         -> reject as an impersonation attempt
+   param). It is no longer accepted in any form:
+     - absent          -> use the authenticated identity
+     - present / blank -> reject with a generic error
 
-   Rejecting (rather than silently overriding) a mismatch keeps a buggy
-   or malicious client from believing it wrote as some other keeper. *)
-let bind_mutation_keeper_id ~auth_identity ~requested :
-  (string, string) result =
+   Rejecting the field entirely (rather than treating it as advisory)
+   closes the impersonation bypass permanently and makes the security
+   contract obvious: the token is the only source of identity. *)
+let bind_mutation_keeper_id ~auth_identity ~requested : (string, string) result =
   match requested with
   | None -> Ok auth_identity
-  | Some raw ->
-    let requested = String.trim raw in
-    if requested = "" || String.equal requested auth_identity
-    then Ok auth_identity
-    else Error keeper_id_mismatch_error
+  | Some _ -> Error keeper_id_not_accepted_error
 ;;
 
 (* task-1736 B3 CI: annotation [kind] parsing is sound-partial. An
@@ -392,9 +389,19 @@ let add_routes router =
   |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
     (* task-1736 B3: annotation creation is a mutation. It requires a
        token-bound write identity ([CanBroadcast], the keeper write
-       tier; no narrower annotation-write permission exists yet) instead
-       of [with_public_read], and the acting keeper is the resolved
-       [auth_identity] rather than a caller-chosen field. *)
+       tier; no narrower annotation-write permission exists yet in
+       [Masc_domain.permission]) instead of [with_public_read], and the
+       acting keeper is the resolved [auth_identity] rather than a
+       caller-chosen field.
+
+       ASYNC-AUTH NOTE: [with_token_permission_auth] is synchronous and
+       reads the workspace auth config / credential store from disk. The
+       IDE annotation plane shares this combinator with dashboard and
+       tool routes. If Keeper auth latency or disk I/O ever becomes a
+       head-of-line blocker here, the correct fix is to make the shared
+       auth combinator async with an explicit deadline / circuit breaker
+       rather than ad-hoc workarounds in this handler. For the current
+       local-file credential store this is not a measured blocker. *)
     with_token_permission_auth
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
@@ -426,8 +433,8 @@ let add_routes router =
              with
              | Some file_path, Some line_start, Some line_end, Some content ->
                (* task-1736 B3: keeper_id is bound to the authenticated
-                  identity. A body-supplied keeper_id is advisory and must
-                  match, otherwise the create is rejected as impersonation. *)
+                  identity. A body-supplied keeper_id is rejected outright;
+                  the token is the only source of identity. *)
                let requested_keeper_id = find_string "keeper_id" in
                (match
                   bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
@@ -435,7 +442,7 @@ let add_routes router =
                 | Error msg ->
                   Option.iter
                     (fun requested ->
-                       log_keeper_id_mismatch
+                       log_keeper_id_not_accepted
                          ~operation:"create"
                          ~auth_identity
                          ~requested)
@@ -512,13 +519,16 @@ let add_routes router =
   |> Http.Router.prefix_delete "/api/v1/ide/annotations/" (fun request reqd ->
     (* task-1736 B3: deletion is a mutation. It requires a token-bound
        write identity ([CanBroadcast], the keeper write tier; no narrower
-       annotation-write permission exists yet) instead of [with_public_read],
-       and ownership is enforced against the resolved [auth_identity] rather
-       than a caller-supplied query param. Because [Ide_annotations.delete]
-       only removes an annotation whose stored keeper_id equals the passed
-       keeper_id, binding keeper_id to auth_identity prevents a caller
-       from successfully deleting another keeper's annotation through this
-       route. *)
+       annotation-write permission exists yet in [Masc_domain.permission])
+       instead of [with_public_read], and ownership is enforced against the
+       resolved [auth_identity] rather than a caller-supplied query param.
+       Because [Ide_annotations.delete] only removes an annotation whose
+       stored keeper_id equals the passed keeper_id, binding keeper_id to
+       auth_identity prevents a caller from successfully deleting another
+       keeper's annotation through this route.
+
+       ASYNC-AUTH NOTE: see the POST handler for the synchronous auth
+       discussion; the same caveat applies here. *)
     with_token_permission_auth
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
@@ -559,7 +569,7 @@ let add_routes router =
            | Error msg ->
              Option.iter
                (fun requested ->
-                  log_keeper_id_mismatch
+                  log_keeper_id_not_accepted
                     ~operation:"delete"
                     ~auth_identity
                     ~requested)
@@ -692,8 +702,9 @@ let add_routes router =
       reqd)
   |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
     (* Cursor writes mutate the same observation plane as annotations.
-       Bind the written keeper_id to the token identity so a public reader
-       cannot inject presence for an arbitrary keeper. *)
+       They use the same write tier ([CanBroadcast]) and the same
+       identity rule: the token-bound [auth_identity] is the only source
+       of keeper_id; a body-supplied keeper_id is rejected outright. *)
     with_token_permission_auth
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
@@ -726,7 +737,7 @@ let add_routes router =
                 | Error msg ->
                   Option.iter
                     (fun requested ->
-                       log_keeper_id_mismatch
+                       log_keeper_id_not_accepted
                          ~operation:"cursor"
                          ~auth_identity
                          ~requested)
@@ -909,8 +920,3 @@ let add_routes router =
       request
       reqd)
 ;;
-
-module For_testing = struct
-  let bind_mutation_keeper_id = bind_mutation_keeper_id
-  let parse_annotation_kind = parse_annotation_kind
-end

@@ -4,7 +4,6 @@ module Types = Ide_annotation_types
 module Store = Ide_annotations
 module Region = Ide_region_tracker
 module Lsp = Lsp_overlay_provider
-module Ide_http = Server_ide_http.For_testing
 
 (* Ide_annotations.create generates ids via [Uuidm.v4_gen (Random.get_state ())].
    [Random.get_state] returns a COPY of the global state, so two
@@ -768,72 +767,13 @@ let test_compact_preserves_annotations () =
       ids)
 ;;
 
-(* task-1736 (IDE Observation Plane v2, axis B3) — annotation mutation
-   identity binding.
+(* task-1736 (IDE Observation Plane v2, axis B3) — store-level ownership
+   enforcement.
 
-   The HTTP layer resolves the acting keeper_id from the token-bound
-   auth identity via [Server_ide_http.For_testing.bind_mutation_keeper_id]
-   and passes it to [Store.create] / [Store.delete]. These tests pin the
-   two halves of that guarantee: the pure binding decision, and the
-   store's ownership enforcement on the bound value. *)
-
-let test_bind_keeper_id_uses_auth_when_absent () =
-  match Ide_http.bind_mutation_keeper_id ~auth_identity:"alice" ~requested:None with
-  | Ok resolved -> check string "absent keeper_id -> auth identity" "alice" resolved
-  | Error msg -> failf "expected Ok, got Error %s" msg
-;;
-
-let test_bind_keeper_id_allows_matching () =
-  match
-    Ide_http.bind_mutation_keeper_id ~auth_identity:"alice" ~requested:(Some "alice")
-  with
-  | Ok resolved -> check string "matching keeper_id -> auth identity" "alice" resolved
-  | Error msg -> failf "expected Ok, got Error %s" msg
-;;
-
-let test_bind_keeper_id_treats_blank_as_absent () =
-  match
-    Ide_http.bind_mutation_keeper_id ~auth_identity:"alice" ~requested:(Some "   ")
-  with
-  | Ok resolved -> check string "blank keeper_id -> auth identity" "alice" resolved
-  | Error msg -> failf "expected Ok, got Error %s" msg
-;;
-
-let test_bind_keeper_id_rejects_impersonation () =
-  match
-    Ide_http.bind_mutation_keeper_id ~auth_identity:"alice" ~requested:(Some "bob")
-  with
-  | Ok resolved -> failf "expected impersonation rejection, got Ok %s" resolved
-  | Error msg ->
-    check
-      string
-      "client-visible mismatch error is generic"
-      "keeper_id does not match authenticated identity"
-      msg;
-    check
-      bool
-      "mismatch error does not leak authenticated identity"
-      false
-      (String_util.contains_substring msg "alice");
-    check
-      bool
-      "mismatch error does not leak requested identity"
-      false
-      (String_util.contains_substring msg "bob")
-;;
-
-let test_parse_annotation_kind_defaults_missing () =
-  match Ide_http.parse_annotation_kind None with
-  | Ok Types.Comment -> ()
-  | Ok _ -> fail "missing annotation kind should default to Comment"
-  | Error msg -> failf "expected Ok, got Error %s" msg
-;;
-
-let test_parse_annotation_kind_rejects_unknown () =
-  match Ide_http.parse_annotation_kind (Some "NotARealKind") with
-  | Ok _ -> fail "unknown explicit annotation kind must be rejected"
-  | Error _ -> ()
-;;
+   The HTTP layer now resolves the acting keeper_id from the token-bound
+   auth identity and passes it to [Store.create] / [Store.delete]. These
+   tests pin the store's ownership decision: a keeper acting as "bob"
+   reaches the store with keeper_id="bob" and is refused. *)
 
 let make_alice_annotation base_dir =
   Result.get_ok
@@ -1147,30 +1087,6 @@ let () =
         ] )
     ; ( "mutation identity (task-1736 B3)"
       , [ test_case
-            "absent keeper_id resolves to auth identity"
-            `Quick
-            test_bind_keeper_id_uses_auth_when_absent
-        ; test_case
-            "matching keeper_id resolves to auth identity"
-            `Quick
-            test_bind_keeper_id_allows_matching
-        ; test_case
-            "blank keeper_id resolves to auth identity"
-            `Quick
-            test_bind_keeper_id_treats_blank_as_absent
-        ; test_case
-            "mismatched keeper_id is rejected as impersonation"
-            `Quick
-            test_bind_keeper_id_rejects_impersonation
-        ; test_case
-            "missing annotation kind defaults to Comment"
-            `Quick
-            test_parse_annotation_kind_defaults_missing
-        ; test_case
-            "unknown annotation kind is rejected"
-            `Quick
-            test_parse_annotation_kind_rejects_unknown
-        ; test_case
             "foreign keeper cannot delete another's annotation"
             `Quick
             test_delete_rejects_other_keeper

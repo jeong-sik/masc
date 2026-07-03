@@ -581,10 +581,54 @@ let request_tests =
   ]
 ;;
 
+(* RFC 7230 §3.3.2: a 204 response with no payload should still carry
+   an explicit [Content-Length: 0] so keep-alive clients and proxies
+   know the body is empty. *)
+let contains_substring haystack needle =
+  let hlen = String.length haystack in
+  let nlen = String.length needle in
+  let rec scan i =
+    if i + nlen > hlen then false
+    else if String.equal (String.sub haystack i nlen) needle then true
+    else scan (i + 1)
+  in
+  nlen = 0 || scan 0
+;;
+
+let test_response_empty_includes_content_length_zero () =
+  let reqd_ref = ref None in
+  let conn =
+    Httpun.Server_connection.create (fun reqd -> reqd_ref := Some reqd)
+  in
+  let request = "GET / HTTP/1.1\r\nHost: localhost\r\n\r\n" in
+  let len = String.length request in
+  let bs = Bigstringaf.of_string request ~off:0 ~len in
+  ignore (Httpun.Server_connection.read conn bs ~off:0 ~len);
+  let reqd = Option.get !reqd_ref in
+  Response.empty reqd;
+  let response =
+    match Httpun.Server_connection.next_write_operation conn with
+    | `Write iovecs ->
+      String.concat
+        ""
+        (List.map
+           (fun iov -> Bigstringaf.substring iov.buf ~off:iov.off ~len:iov.len)
+           iovecs)
+    | `Yield | `Close _ -> ""
+  in
+  Alcotest.(check bool)
+    "204 Response.empty includes Content-Length: 0"
+    true
+    (contains_substring response "content-length: 0")
+;;
+
 let response_tests =
   [ ( "content_headers preserve all header segments"
     , `Quick
     , test_response_content_headers_preserve_all_segments )
+  ; ( "empty response includes Content-Length: 0"
+    , `Quick
+    , test_response_empty_includes_content_length_zero )
   ]
 ;;
 

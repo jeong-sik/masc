@@ -949,7 +949,7 @@ let test_runtime_agent_context_uses_configured_turn_budget () =
     ; response_format = Agent_sdk.Types.default_config.response_format
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create ~eio:false ()
+    ; context = Agent_sdk.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -989,7 +989,7 @@ let test_runtime_agent_context_preserves_unbounded_resume_budget () =
     ; response_format = Agent_sdk.Types.default_config.response_format
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create ~eio:false ()
+    ; context = Agent_sdk.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }

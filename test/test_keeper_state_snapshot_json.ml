@@ -352,7 +352,7 @@ let make_test_checkpoint ?(working_context = None) ~response_text () =
     thinking_budget = None;
     cache_system_prompt = false;
 
-    context = Agent_sdk.Context.create ~eio:false ();
+    context = Agent_sdk.Context.create_sync ();
     mcp_sessions = [];
     working_context;
   }

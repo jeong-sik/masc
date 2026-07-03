@@ -163,17 +163,17 @@ let test_workspace_schemas_have_tool_spec_metadata () =
 
 let test_retired_tools_are_absent () =
   init ();
+  (* Only fully retired tools — no live dispatch handler and no keeper
+     descriptor — belong here. masc_operator_* and masc_surface_audit were
+     removed from this list because they are live tools: lib/operator/
+     operator_tool.ml carries dispatch handlers for them, and masc_surface_audit
+     additionally projects to the keeper descriptor tool_masc_surface_audit
+     (see test_keeper_tool_descriptor_registry_integrity). register_all()
+     therefore legitimately registers them; they only appeared absent before
+     when the Mcp_server_eio module-load bootstrap did not run in this
+     executable. *)
   let retired_front_door_tools =
-    [ "masc_operator_snapshot"
-    ; "masc_operator_digest"
-    ; "masc_operator_action"
-    ; "masc_operator_confirm"
-    ; "masc_operator_judgment_write"
-    ; "masc_surface_audit"
-    ; "masc_operation_start"
-    ; "masc_dispatch_tick"
-    ; "masc_goal_review"
-    ]
+    [ "masc_operation_start"; "masc_dispatch_tick"; "masc_goal_review" ]
   in
   let retired_tool_admin_surface =
     [ "masc_tool_admin_snapshot"

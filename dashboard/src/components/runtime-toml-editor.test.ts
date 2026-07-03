@@ -26,6 +26,7 @@ vi.mock('../lib/runtime-config-refresh', () => ({
 }))
 
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { keepers } from '../store'
 
 const MOCK_RUNTIME_PATH = '/tmp/.masc/config/runtime.toml'
 
@@ -148,6 +149,7 @@ describe('RuntimeTomlEditor', () => {
     setClipboard(realClipboard as unknown as { writeText: (t: string) => Promise<void> } | undefined)
     setConfirm(realConfirm)
     vi.restoreAllMocks()
+    keepers.value = []
   })
 
   it('loads and displays the full runtime.toml source', async () => {
@@ -382,6 +384,58 @@ describe('RuntimeTomlEditor', () => {
     })
     expect(apiMocks.saveRuntimeTomlConfig).not.toHaveBeenCalled()
     expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
+  })
+
+  it('updates the assignment select after patching a keeper runtime', async () => {
+    keepers.value = [{ name: 'sangsu', status: 'idle' }]
+    apiMocks.fetchRuntimeTomlConfig.mockResolvedValueOnce(richConfig)
+    render(html`<${RuntimeTomlEditor} />`, container)
+
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="runtime-toml-nav-assignments"]')).not.toBeNull()
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-nav-assignments"]') as HTMLButtonElement)
+
+    const select = container.querySelector('[aria-label="sangsu 런타임 배정"]') as HTMLSelectElement
+    expect(select.value).toBe('runpod_mtp.qwen')
+
+    fireEvent.change(select, { target: { value: 'openai.gpt' } })
+
+    await waitFor(() => {
+      expect(apiMocks.patchRuntimeAssignment).toHaveBeenCalledWith('sangsu', 'openai.gpt')
+    })
+
+    await waitFor(() => {
+      expect((container.querySelector('[aria-label="sangsu 런타임 배정"]') as HTMLSelectElement).value)
+        .toBe('openai.gpt')
+    })
+    expect(container.querySelector('[data-testid="runtime-assignments-group-pinned"]')?.textContent)
+      .toContain('sangsu')
+    expect(container.querySelector('[data-testid="runtime-toml-status"]')?.textContent).toContain('saved')
+  })
+
+  it('notifies onSaved after a successful save so parent surfaces can refresh', async () => {
+    const onSaved = vi.fn()
+    render(html`<${RuntimeTomlEditor} onSaved=${onSaved} />`, container)
+
+    await waitFor(() => {
+      expect((container.querySelector('textarea') as HTMLTextAreaElement | null)?.value).toBe(baseConfig.source_text)
+    })
+
+    const textarea = container.querySelector('textarea') as HTMLTextAreaElement
+    fireEvent.input(textarea, { target: { value: `${baseConfig.source_text}\n[runtime.assignments]\nsangsu = "runpod_mtp.qwen"\n` } })
+
+    await waitFor(() => {
+      expect((container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement).disabled).toBe(false)
+    })
+
+    fireEvent.click(container.querySelector('[data-testid="runtime-toml-save"]') as HTMLButtonElement)
+
+    await waitFor(() => {
+      expect(apiMocks.saveRuntimeTomlConfig).toHaveBeenCalled()
+      expect(onSaved).toHaveBeenCalledTimes(1)
+    })
   })
 
   it('saves from the editor keyboard shortcut', async () => {

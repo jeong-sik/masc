@@ -112,6 +112,50 @@ let test_variant_count () =
   check int "blocker_class variant count" expected_variant_count count
 ;;
 
+(* ── Auto-approval blocking classification ─────────────────────── *)
+
+let test_auto_approval_blocked_is_exhaustive () =
+  (* Every variant must be classified without raising.  The function is
+     exhaustive, so a new variant is a compile error until this test and
+     the classifier are updated. *)
+  List.iter
+    (fun variant ->
+       let _blocked = blocker_class_auto_approval_blocked variant in
+       ())
+    all_variants
+;;
+
+let test_auto_approval_blocked_known_cases () =
+  let blocks klass =
+    check bool
+      (Printf.sprintf "%s blocks auto-approval" (blocker_class_to_string klass))
+      true
+      (blocker_class_auto_approval_blocked klass)
+  in
+  let allows klass =
+    check bool
+      (Printf.sprintf "%s allows auto-approval" (blocker_class_to_string klass))
+      false
+      (blocker_class_auto_approval_blocked klass)
+  in
+  (* Safety / uncertainty blockers *)
+  blocks Completion_contract_violation;
+  blocks (Runtime_exhausted No_providers_available);
+  blocks Fiber_unresolved;
+  blocks Stale_turn_timeout;
+  blocks Turn_livelock_blocked;
+  blocks No_progress_loop;
+  blocks Sdk_guardrail_violation;
+  blocks Sdk_tripwire_violation;
+  (* Transient liveness / budget / input signals do not block *)
+  allows Turn_timeout;
+  allows Capacity_backpressure;
+  allows Admission_queue_wait_timeout;
+  allows Sdk_idle_detected;
+  allows Sdk_input_required;
+  allows Sdk_max_turns_exceeded
+;;
+
 (* ── SDK error → blocker_class mapping exhaustiveness ────────────── *)
 
 module SdkE = Agent_sdk.Error
@@ -385,6 +429,11 @@ let () =
         ; test_case "string uniqueness" `Quick test_string_uniqueness
         ; test_case "unknown string returns None" `Quick test_unknown_string
         ; test_case "variant count pin" `Quick test_variant_count
+        ] )
+    ; ( "auto_approval_classification"
+      , [ test_case "exhaustive over all variants" `Quick
+            test_auto_approval_blocked_is_exhaustive
+        ; test_case "known cases" `Quick test_auto_approval_blocked_known_cases
         ] )
     ; ( "sdk_error_mapping"
       , [ test_case "all Agent variants are intentionally classified" `Quick

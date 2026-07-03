@@ -71,6 +71,22 @@ val dequeue_batch : keeper_name:string -> queued_message list
     is returned unchanged. *)
 val merge_batch : queued_message list -> queued_message option
 
+(** [remove_matching keeper_name msg] removes exactly one message structurally
+    equal to [msg] from the head run of [keeper_name]'s queue — the leading
+    same-source messages [dequeue_batch] coalesces into one turn. Duplicates in
+    the head run leave all but the first match in place, and a match past the
+    head-run boundary is not removed. Returns [`Not_found] when the queue is
+    empty or absent, or when no head-run message matches. On a match the durable
+    snapshot is rewritten before the removal is reported [`Removed]; a snapshot
+    rewrite failure aborts the removal (queue unchanged) and returns
+    [`Persist_failed msg], mirroring the persist-abort contract of
+    {!dequeue_batch}. Serialized on the same per-keeper mutex as
+    {!dequeue_batch}, so a queued message is answered by at most one of them. *)
+val remove_matching :
+  keeper_name:string ->
+  queued_message ->
+  [ `Removed | `Not_found | `Persist_failed of string ]
+
 (** [length keeper_name] returns the number of queued messages. *)
 val length : keeper_name:string -> int
 

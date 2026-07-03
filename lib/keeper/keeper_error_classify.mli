@@ -114,6 +114,11 @@ type degraded_retry_reason =
 
 val degraded_retry_reason_to_string : degraded_retry_reason -> string
 
+val is_read_only_no_progress_accept_rejection : Agent_sdk.Error.sdk_error -> bool
+(** [true] for typed accept rejections whose only progress was read-only tool
+    observation. These can remain terminal for direct retry while still using a
+    bounded auto-resume pause policy after repeated failures. *)
+
 val normalized_runtime_id : catalog_names:string list -> string -> string
 (** Normalize a runtime name for rotation matching.
     All runtime names are plain provider:model strings. *)

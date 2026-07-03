@@ -13,11 +13,14 @@ let stop_reason_label = function
     (match tool_name with
      | Some tool -> Printf.sprintf "mutation_boundary(%s)" tool
      | None -> "mutation_boundary")
+  | Runtime_agent.Yielded_to_chat_waiting _ -> "yielded_to_chat_waiting"
 ;;
 
 let stop_reason_is_turn_budget_exhausted = function
   | Runtime_agent.TurnBudgetExhausted _ -> true
-  | Runtime_agent.Completed | Runtime_agent.MutationBoundaryReached _ -> false
+  | Runtime_agent.Completed
+  | Runtime_agent.MutationBoundaryReached _
+  | Runtime_agent.Yielded_to_chat_waiting _ -> false
 ;;
 
 let direct_assistant_source = "direct_assistant"

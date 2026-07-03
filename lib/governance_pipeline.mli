@@ -56,32 +56,56 @@ val auto_approval_hard_forbidden :
 (** True when auto-approval must be blocked regardless of HITL threshold. *)
 
 val decide :
+  ?meta:Keeper_meta_contract.keeper_meta ->
   governance_level:string ->
   tool_name:string ->
   input:Yojson.Safe.t ->
+  unit ->
   governance_decision
 (** Evaluate a tool call against governance policy and return a decision.
-    - development: allow all while HITL is enabled, audit High+Critical
+    - development: allow Low/Medium/High while HITL is enabled, audit High+Critical,
+      but always confirm hard-forbidden calls
     - production: confirm Critical, audit Medium+
     - enterprise: confirm High+Critical, audit all
     - paranoid: confirm Medium+High+Critical, audit all
 
-    Critical hard-forbidden calls still require confirmation when HITL
-    thresholds are disabled, so disabling HITL cannot silently auto-approve
-    destructive operations. *)
+    [meta] is optional because front-door governance is server-scoped:
+    it classifies the tool call itself and does not need keeper runtime
+    state. The [runtime_auto_approval_blocked] component of
+    [auto_approval_hard_forbidden] is keeper-scoped (it inspects
+    [meta.runtime.last_blocker]), so passing [None] from the front door
+    is intentional and correct.
+
+    Hard-forbidden calls (Critical risk or keeper runtime blocker) always
+    require confirmation, even if they would otherwise fall below the
+    governance threshold, and even when HITL thresholds are disabled, so
+    disabling HITL cannot silently auto-approve destructive operations. *)
 
 val make_pre_hook :
+  ?meta:Keeper_meta_contract.keeper_meta ->
   config:Workspace.config ->
   governance_level:string ->
+  unit ->
   Tool_dispatch.pre_hook
 (** Create a Tool_dispatch pre_hook closure for the given governance level.
     Returns [Pass] (proceed) for allowed calls,
-    [Reject result] (short-circuit) for confirm-required or denied calls. *)
+    [Reject result] (short-circuit) for confirm-required or denied calls.
 
-val install : config:Workspace.config -> governance_level:string -> unit
+    [meta] is forwarded to {!decide}; see {!decide} for the scope note. *)
+
+val install :
+  ?meta:Keeper_meta_contract.keeper_meta ->
+  config:Workspace.config ->
+  governance_level:string ->
+  unit ->
+  unit
 (** Register the governance pipeline as a Tool_dispatch pre_hook.
     Reads governance level from the [governance_level] argument.
-    Called once at server startup. *)
+    Called once at server startup.
+
+    [meta] is forwarded to {!make_pre_hook}; see {!decide} for the scope
+    note. The server bootstrap caller passes [None] because front-door
+    governance is server-scoped. *)
 
 (** {1 Combinatorial Risk — Lethal Trifecta}
 

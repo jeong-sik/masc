@@ -15,7 +15,9 @@ val output_looks_docker_daemon_unavailable : string -> bool
 val output_looks_image_missing : string -> bool
 val output_looks_timeout : string -> bool
 val docker_output_looks_oci_mount_failure : string -> bool
-val classify_docker_runtime_failure :
+val classify_docker_info_failure :
+  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
+val classify_docker_run_failure :
   status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
 val classify_image_inspect_failure :
   status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class

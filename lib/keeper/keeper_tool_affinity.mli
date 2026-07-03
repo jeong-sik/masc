@@ -54,3 +54,19 @@ val configured_lookback_days : ?getenv:(string -> string option) -> unit -> int
     clamped to [1, 30].  Default: 7.  Empty or whitespace-only values are
     treated as unset.
     Optional [?getenv] parameter allows mock/test-specific environment lookup. *)
+
+val resolve_affinity_aggregate :
+  read_snapshot:(masc_root:string -> keeper_name:string ->
+    (Trajectory.tool_affinity_aggregate, Trajectory.aggregate_load_error) result) ->
+  rebuild:(masc_root:string -> keeper_name:string -> now:float ->
+    Trajectory.tool_affinity_aggregate) ->
+  masc_root:string ->
+  keeper_name:string ->
+  now:float ->
+  Trajectory.tool_affinity_aggregate
+(** Return the persisted aggregate when [read_snapshot] yields [Ok], else the
+    result of [rebuild]. [pre_populate_from_history] wires [read_snapshot] to
+    {!Trajectory.read_aggregate_snapshot} and [rebuild] to a
+    domain-pool-offloaded {!Trajectory.rebuild_tool_affinity_aggregate}.
+    Exposed with injectable dependencies so tests can assert [rebuild] runs
+    only on a missing/corrupt snapshot (no rescan when it is present). *)

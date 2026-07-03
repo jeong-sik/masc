@@ -249,6 +249,17 @@ function decodeGoalKeeperTrustSummary(raw: unknown): GoalKeeperTrustSummary | nu
   }
 }
 
+function decodeMetricEvaluation(raw: unknown): 'unevaluated' | 'absent' | undefined {
+  const s = asString(raw)
+  if (s === 'unevaluated') return 'unevaluated'
+  if (s === 'absent') return 'absent'
+  return undefined
+}
+
+function metricEvaluationForMetric(metric: string | null): 'unevaluated' | 'absent' {
+  return metric != null ? 'unevaluated' : 'absent'
+}
+
 function decodeGoalAttainmentProjection(
   raw: unknown,
   fallback: {
@@ -263,6 +274,7 @@ function decodeGoalAttainmentProjection(
       state: 'unmeasured',
       basis: 'unmeasured',
       metric: fallback.metric,
+      metric_evaluation: metricEvaluationForMetric(fallback.metric),
       target_value: fallback.targetValue,
       target_parse_status: fallback.targetValue ? 'unparseable' : 'absent',
       unit: 'unknown',
@@ -274,10 +286,13 @@ function decodeGoalAttainmentProjection(
       note: 'Attainment projection missing from payload.',
     }
   }
+  const metric = asNullableString(raw.metric) ?? fallback.metric
   return {
     state: asString(raw.state, 'unmeasured'),
     basis: asString(raw.basis, 'unmeasured'),
-    metric: asNullableString(raw.metric) ?? fallback.metric,
+    metric,
+    metric_evaluation:
+      decodeMetricEvaluation(raw.metric_evaluation) ?? metricEvaluationForMetric(metric),
     target_value: asNullableString(raw.target_value) ?? fallback.targetValue,
     target_parse_status: asString(raw.target_parse_status, 'absent'),
     unit: asString(raw.unit, 'unknown'),
@@ -328,6 +343,7 @@ function decodeGoalCompletionSummary(raw: unknown): GoalCompletionSummary | unde
     pct_source: asString(raw.pct_source, 'none'),
     attainment_state: asString(raw.attainment_state, 'unmeasured'),
     attainment_basis: asString(raw.attainment_basis, 'unmeasured'),
+    metric_evaluation: decodeMetricEvaluation(raw.metric_evaluation) ?? 'absent',
     task_total: asInt(raw.task_total) ?? 0,
     task_done: asInt(raw.task_done) ?? 0,
     task_open: asInt(raw.task_open) ?? 0,

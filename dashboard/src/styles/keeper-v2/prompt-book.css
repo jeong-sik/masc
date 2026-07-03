@@ -1,0 +1,65 @@
+/* ══════════════════════════════════════════════════════════════
+   MASC v2 — Prompt library · Paper catalog surface.
+   Read-only catalog of the registered prompts grouped by family. Scoped to
+   .pb-wrap[data-theme="paper"] so the warm paper palette applies ONLY inside
+   the catalog, never the dark chrome. Paper/ink/brass tokens come from
+   colors_and_type.css ([data-theme="paper"]). font-size uses --fs-N tokens
+   where one exists; sizes with no matching token (26 and .5px) stay raw.
+   ══════════════════════════════════════════════════════════════ */
+
+.pb-wrap {
+  display: flex; flex-direction: column; min-height: 0; gap: 14px;
+  background:
+    radial-gradient(120% 80% at 50% -10%, #FBF8F0 0%, transparent 60%),
+    var(--paper-2);
+  color: var(--ink-2);
+  border: 1px solid var(--paper-4);
+  border-radius: var(--radius-sm, 4px);
+  padding: 14px;
+  box-shadow: inset 0 1px 0 #FFFDF7, 0 1px 2px rgba(0,0,0,0.05);
+}
+
+/* ── the paper sheet ── */
+.pb-book {
+  flex: 1; min-height: 0; overflow-y: auto;
+  background:
+    linear-gradient(90deg, rgba(21,21,21,0.05) 0 1px, transparent 1px) 42px 0 / 100% 100% no-repeat,
+    var(--paper);
+  border: 1px solid var(--paper-4);
+  border-radius: var(--radius-sm, 4px);
+  padding: 34px 40px 28px 56px;
+  box-shadow: inset 0 0 0 1px #FFFDF7, inset 0 2px 14px rgba(120,110,80,0.06);
+}
+.pb-book::-webkit-scrollbar { width: 10px; }
+.pb-book::-webkit-scrollbar-thumb { background: var(--paper-4); border-radius: 6px; border: 2px solid var(--paper); background-clip: padding-box; }
+
+.pb-frontis-sub { font-family: var(--font-body); font-size: 15px; font-style: italic; color: var(--ink-3); margin-bottom: 6px; }
+
+/* ── source chips ── */
+.pb-src-chip { font-family: var(--font-mono); font-size: 10.5px; padding: 1px 6px; border-radius: 3px; background: var(--paper-2); color: var(--ink-3); border: 1px solid var(--paper-4); }
+
+/* ── catalog ── */
+.pb-catalog { padding-top: 26px; }
+.pb-cat-intro { padding-bottom: 18px; margin-bottom: 14px; border-bottom: 1px solid var(--paper-3); }
+.pb-cat-intro h1 { font-family: var(--font-display); font-size: 26px; letter-spacing: .16em; color: var(--ink); margin: 0 0 6px; font-weight: 500; }
+.pb-cat-fam { padding: 14px 0; border-bottom: 1px solid var(--paper-3); }
+.pb-cat-fam:last-child { border-bottom: 0; }
+.pb-cat-fam-head { display: flex; align-items: center; gap: 9px; }
+.pb-cat-dot { flex: none; width: 8px; height: 8px; border-radius: 2px; background: var(--ink-5); }
+.pb-cat-fam.feeds .pb-cat-dot { background: var(--brass); }
+.pb-cat-fam-name { font-family: var(--font-display); font-size: var(--fs-14); letter-spacing: .06em; color: var(--ink); font-weight: 500; }
+.pb-cat-fam-count { font-size: var(--fs-11); color: var(--ink-5); }
+.pb-cat-tag { margin-left: auto; font-family: var(--font-ui); font-size: var(--fs-9); letter-spacing: .08em; text-transform: uppercase; padding: 1px 7px; border-radius: 3px; color: var(--ink-5); border: 1px solid var(--paper-4); }
+.pb-cat-tag.feeds { color: #6B4E1E; border-color: color-mix(in oklab, var(--brass) 40%, transparent); background: color-mix(in oklab, var(--brass) 10%, var(--paper)); }
+.pb-cat-fam-note { font-family: var(--font-body); font-style: italic; font-size: 12.5px; color: var(--ink-4); margin: 5px 0 9px 17px; }
+.pb-cat-files { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 17px; }
+.pb-cat-fam:not(.feeds) .pb-src-chip { opacity: 0.72; }
+
+/* ── host: break the catalog out of the settings column + give it height ── */
+.set-promptbook-host { display: flex; flex-direction: column; min-height: 0; height: calc(100vh - 210px); min-height: 460px; }
+.set-promptbook-host .pb-wrap { flex: 1; min-height: 0; }
+
+/* narrow */
+@media (max-width: 760px) {
+  .pb-book { padding: 24px 18px 22px 26px; background-position: 20px 0; }
+}

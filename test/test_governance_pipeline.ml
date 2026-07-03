@@ -4,6 +4,10 @@ module Gp = Masc.Governance_pipeline
 module Workspace = Masc.Workspace
 module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
+module Keeper_meta_contract = Masc.Keeper_meta_contract
+module Keeper_types_profile = Masc.Keeper_types_profile
+module Keeper_id = Keeper_id
+module AQ = Masc.Keeper_approval_queue
 
 let explicit_claim_tool = "keeper_task_claim"
 let generic_transition_tool = "masc_transition"
@@ -42,6 +46,29 @@ let cleanup_tmpdir dir =
       (try Sys.remove path with Sys_error _ -> ())
   in
   rm_rf dir
+
+let rec yield_until ?(attempts = 50) predicate =
+  if predicate () || attempts <= 0
+  then ()
+  else (
+    Eio.Fiber.yield ();
+    yield_until ~attempts:(attempts - 1) predicate)
+;;
+
+let pending_id_for_keeper ~keeper_name =
+  match AQ.list_pending_json () with
+  | `List entries ->
+    List.find_map
+      (function
+        | `Assoc kvs ->
+          (match List.assoc_opt "keeper_name" kvs, List.assoc_opt "id" kvs with
+           | Some (`String name), Some (`String id) when String.equal name keeper_name ->
+             Some id
+           | _ -> None)
+        | _ -> None)
+      entries
+  | _ -> None
+;;
 
 (* ── Risk Assessment Tests ──────────────────────────────────── *)
 
@@ -512,46 +539,49 @@ let test_risk_payload_beats_low_override () =
 
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
-let test_development_allows_all () =
+let test_development_confirms_critical () =
+  (* Hard-forbidden gate is unconditional: even development must confirm
+     Critical-risk tools rather than allowing silent auto-approval. *)
   let d = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
-   | `Allow -> ()
-   | `Require_confirm _ -> Alcotest.fail "development should allow critical"
-   | `Deny _ -> Alcotest.fail "development should allow critical");
+   | `Require_confirm reason ->
+     Alcotest.(check bool) "reason non-empty" true (String.length reason > 0)
+   | `Allow -> Alcotest.fail "development should confirm hard-forbidden critical"
+   | `Deny _ -> Alcotest.fail "development should confirm critical, not deny");
   Alcotest.(check string) "risk" "critical" (Gp.risk_level_to_string d.risk)
 
 let test_development_allows_low () =
   let d = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "development should allow low")
 
 let test_production_allows_low () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow low")
 
 let test_production_allows_medium () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_bind" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow medium")
 
 let test_production_allows_high () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_create_workspace" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "production should allow high")
 
 let test_production_confirms_critical () =
   let d = Gp.decide ~governance_level:"production"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm reason ->
        Alcotest.(check bool) "reason non-empty"
@@ -561,21 +591,21 @@ let test_production_confirms_critical () =
 
 let test_enterprise_allows_low () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "enterprise should allow low")
 
 let test_enterprise_allows_medium () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_bind" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "enterprise should allow medium")
 
 let test_enterprise_confirms_high () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_create_workspace" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "enterprise should require confirm for high"
@@ -583,7 +613,7 @@ let test_enterprise_confirms_high () =
 
 let test_enterprise_confirms_critical () =
   let d = Gp.decide ~governance_level:"enterprise"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "enterprise should require confirm for critical"
@@ -591,14 +621,14 @@ let test_enterprise_confirms_critical () =
 
 let test_paranoid_allows_low () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   (match d.action with
    | `Allow -> ()
    | _ -> Alcotest.fail "paranoid should allow low")
 
 let test_paranoid_confirms_medium () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_bind" ~input:`Null in
+    ~tool_name:"masc_bind" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for medium"
@@ -606,7 +636,7 @@ let test_paranoid_confirms_medium () =
 
 let test_paranoid_confirms_high () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_create_workspace" ~input:`Null in
+    ~tool_name:"masc_create_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for high"
@@ -614,7 +644,7 @@ let test_paranoid_confirms_high () =
 
 let test_paranoid_confirms_critical () =
   let d = Gp.decide ~governance_level:"paranoid"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | `Allow -> Alcotest.fail "paranoid should require confirm for critical"
@@ -624,16 +654,16 @@ let test_paranoid_confirms_critical () =
 
 let test_decision_has_trace_id () =
   let d = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   Alcotest.(check bool) "trace_id starts with gov_"
     true (String.length d.trace_id > 4
           && String.sub d.trace_id 0 4 = "gov_")
 
 let test_trace_ids_unique () =
   let d1 = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   let d2 = Gp.decide ~governance_level:"development"
-    ~tool_name:"masc_status" ~input:`Null in
+    ~tool_name:"masc_status" ~input:`Null () in
   Alcotest.(check bool) "trace_ids differ"
     true (d1.trace_id <> d2.trace_id)
 
@@ -645,7 +675,9 @@ let test_trace_ids_unique () =
 let setup () =
   Tool_dispatch.clear_hooks ()
 
-let test_hook_development_allows () =
+let test_hook_development_blocks_critical () =
+  (* The front-door pre_hook uses decide without keeper meta, but the
+     unconditional hard-forbidden gate still blocks Critical risk. *)
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
@@ -654,11 +686,17 @@ let test_hook_development_allows () =
     ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "ok"));
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"development" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"development" () in
   let result = hook ~name:"__gov_test_delete" ~args:`Null in
   (match result with
-   | Tool_dispatch.Pass -> ()
-   | _ -> Alcotest.fail "development should allow critical");
+   | Tool_dispatch.Reject r ->
+     Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
+     let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
+     Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
+   | Tool_dispatch.Pass ->
+     Alcotest.fail "development should block hard-forbidden critical"
+   | Tool_dispatch.Proceed _ ->
+     Alcotest.fail "development should block hard-forbidden critical, not proceed");
   cleanup_tmpdir tmpdir
 
 let test_hook_production_blocks_critical () =
@@ -670,7 +708,7 @@ let test_hook_production_blocks_critical () =
     ~handler:(fun ~name:_ ~args:_ -> Some (tool_ok "should not reach"));
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"production" () in
   let result = hook ~name:"__gov_test_delete2" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -688,7 +726,7 @@ let test_hook_production_allows_low () =
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"production" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"production" () in
   let result = hook ~name:"masc_status" ~args:`Null in
   (match result with
    | Tool_dispatch.Pass -> ()
@@ -701,7 +739,7 @@ let test_hook_enterprise_blocks_high () =
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"enterprise" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"enterprise" () in
   let result = hook ~name:"masc_create_workspace" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -717,7 +755,7 @@ let test_hook_paranoid_blocks_medium () =
   setup ();
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" () in
   let result = hook ~name:"masc_bind" ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -734,7 +772,7 @@ let test_blocked_response_structure () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" () in
   let result = hook ~name:generic_transition_tool ~args:transition_claim_input in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -757,7 +795,7 @@ let test_blocked_response_structure_claim_next () =
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   let tmpdir = make_tmpdir () in
   let config = Workspace.default_config tmpdir in
-  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" in
+  let hook = Gp.make_pre_hook ~config ~governance_level:"paranoid" () in
   let result = hook ~name:explicit_claim_tool ~args:`Null in
   (match result with
    | Tool_dispatch.Reject r ->
@@ -776,7 +814,7 @@ let test_unknown_governance_level_fail_closed_on_critical () =
   (* Security gate: typo / unknown level no longer silently allows every tool.
      Mirrors fail-closed posture of audit_threshold. See #7641. *)
   let d = Gp.decide ~governance_level:"nonexistent"
-    ~tool_name:"masc_delete_workspace" ~input:`Null in
+    ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
    | `Require_confirm _ -> ()
    | _ -> Alcotest.fail "unknown governance level should require confirm on critical risk")
@@ -816,6 +854,7 @@ let test_hitl_disabled_still_confirms_critical () =
         ~governance_level:"production"
         ~tool_name:"masc_delete_workspace"
         ~input:`Null
+        ()
     in
     match d.action with
     | `Require_confirm reason ->
@@ -830,12 +869,203 @@ let test_hitl_disabled_allows_noncritical_below_threshold () =
         ~governance_level:"production"
         ~tool_name:"masc_create_workspace"
         ~input:`Null
+        ()
     in
     match d.action with
     | `Allow -> ()
     | `Require_confirm _ ->
       Alcotest.fail "HITL disabled should keep noncritical below-threshold calls allowed"
     | `Deny _ -> Alcotest.fail "high risk should not be denied by hard-forbidden gate")
+
+(* ── HITL governance blocker tests ──────────────────────────── *)
+(* Adversarial review blockers for hard-forbidden front-door / keeper
+   governance scope. *)
+
+let make_test_meta ?(last_blocker = None) () =
+  let open Keeper_meta_contract in
+  let usage =
+    { total_turns = 0
+    ; total_input_tokens = 0
+    ; total_output_tokens = 0
+    ; total_tokens = 0
+    ; total_cost_usd = 0.0
+    ; last_turn_ts = 0.0
+    ; last_input_tokens = 0
+    ; last_output_tokens = 0
+    ; last_total_tokens = 0
+    ; last_latency_ms = 0
+    }
+  in
+  let compaction_rt =
+    { count = 0
+    ; last_ts = 0.0
+    ; last_before_tokens = 0
+    ; last_after_tokens = 0
+    ; last_check_ts = 0.0
+    ; last_decision = Compaction_runtime_decision ""
+    }
+  in
+  let proactive_rt =
+    { count_total = 0
+    ; last_ts = 0.0
+    ; visible_count_total = 0
+    ; last_visible_ts = 0.0
+    ; last_outcome = Proactive_unknown
+    ; last_reason = ""
+    ; last_preview = ""
+    ; consecutive_noop_count = 0
+    }
+  in
+  let runtime =
+    { usage
+    ; compaction_rt
+    ; proactive_rt
+    ; generation = 0
+    ; trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-test"
+    ; trace_history = []
+    ; last_handoff_ts = 0.0
+    ; last_continuity_update_ts = 0.0
+    ; last_autonomous_action_at = ""
+    ; autonomous_action_count = 0
+    ; autonomous_turn_count = 0
+    ; autonomous_text_turn_count = 0
+    ; autonomous_tool_turn_count = 0
+    ; board_reactive_turn_count = 0
+    ; mention_reactive_turn_count = 0
+    ; noop_turn_count = 0
+    ; last_blocker
+    ; last_runtime_attempt = None
+    ; last_turn_tool_calls = []
+    ; last_seen_message_seq = 0
+    }
+  in
+  { id = None
+  ; name = "test-keeper"
+  ; agent_name = "test-keeper-agent"
+  ; persona = None
+  ; goal = ""
+  ; instructions = ""
+  ; sandbox_profile = Keeper_types_profile.Local
+  ; sandbox_image = None
+  ; network_mode = Keeper_types_profile.Network_none
+  ; allowed_paths = []
+  ; tool_access = []
+  ; tool_denylist = []
+  ; mention_targets = []
+  ; proactive = { enabled = false; idle_sec = 0; cooldown_sec = 0 }
+  ; compaction =
+      { profile = ""
+      ; ratio_gate = 0.0
+      ; message_gate = 0
+      ; token_gate = 0
+      ; cooldown_sec = 0
+      ; max_checkpoint_messages = 0
+      ; keep_recent_tool_results = 0
+      }
+  ; multimodal_policy = Keeper_types_profile.Mm_inherit
+  ; auto_handoff = false
+  ; handoff_threshold = 0.0
+  ; handoff_cooldown_sec = 0
+  ; created_at = ""
+  ; updated_at = ""
+  ; max_context_override = None
+  ; continuity_summary = ""
+  ; active_goal_ids = []
+  ; paused = false
+  ; auto_resume_after_sec = None
+  ; autoboot_enabled = false
+  ; current_task_id = None
+  ; telemetry_feedback_enabled = None
+  ; telemetry_feedback_window_hours = None
+  ; always_approve = Some false
+  ; runtime
+  ; keeper_id = None
+  ; oas_env = []
+  ; meta_version = 0
+  }
+
+let test_decide_runtime_blocker_requires_confirm () =
+  let blocker =
+    Keeper_meta_contract.blocker_info_of_class
+      Keeper_meta_contract.No_progress_loop
+  in
+  let meta = make_test_meta ~last_blocker:(Some blocker) () in
+  let d =
+    Gp.decide
+      ~meta
+      ~governance_level:"production"
+      ~tool_name:"masc_status"
+      ~input:`Null
+      ()
+  in
+  match d.action with
+  | `Require_confirm reason ->
+    Alcotest.(check bool) "reason mentions hard-forbidden" true
+      (String.length reason > 0)
+  | `Allow ->
+    Alcotest.fail "runtime blocker should require confirmation for non-Critical tool"
+  | `Deny _ ->
+    Alcotest.fail "runtime blocker should require confirmation, not deny"
+
+let test_decide_front_door_none_allows_noncritical () =
+  let d =
+    Gp.decide
+      ~governance_level:"production"
+      ~tool_name:"masc_status"
+      ~input:`Null
+      ()
+  in
+  match d.action with
+  | `Allow -> ()
+  | `Require_confirm _ ->
+    Alcotest.fail "front-door (meta=None) should allow non-Critical, non-destructive tool"
+  | `Deny _ ->
+    Alcotest.fail "front-door (meta=None) should allow non-Critical, non-destructive tool"
+
+let test_oas_callback_hard_forbidden_queues_critical () =
+  Eio_main.run @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  Eio.Switch.run @@ fun sw ->
+  let keeper_name = "hard-forbidden-critical-queue-test" in
+  let initial_pending = AQ.pending_count () in
+  let result = ref None in
+  let tmpdir = make_tmpdir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_tmpdir tmpdir)
+    (fun () ->
+       let config = Workspace.default_config tmpdir in
+       Eio.Fiber.fork ~sw (fun () ->
+         let callback =
+           Gp.to_oas_approval_callback
+             ~config
+             ~governance_level:"production"
+             ~keeper_name
+             ()
+         in
+         let decision = callback ~tool_name:"masc_delete_workspace" ~input:`Null in
+         result := Some decision);
+       yield_until (fun () -> AQ.pending_count () = initial_pending + 1);
+       Alcotest.(check int)
+         "Critical hard-forbidden call enters operator approval queue"
+         (initial_pending + 1)
+         (AQ.pending_count ());
+       let id =
+         match pending_id_for_keeper ~keeper_name with
+         | Some id -> id
+         | None -> Alcotest.fail "expected pending approval for Critical tool"
+       in
+       (match AQ.resolve ~id ~decision:Agent_sdk.Hooks.Approve with
+        | Ok () -> ()
+        | Error err ->
+          Alcotest.fail ("resolve failed: " ^ AQ.resolve_error_to_string err));
+       yield_until (fun () -> Option.is_some !result);
+       match !result with
+       | Some Agent_sdk.Hooks.Approve -> ()
+       | Some Agent_sdk.Hooks.Reject reason ->
+         Alcotest.fail ("expected Approve after operator resolution, got reject: " ^ reason)
+       | Some Agent_sdk.Hooks.Edit _ ->
+         Alcotest.fail "expected Approve after operator resolution, got edit"
+       | None -> Alcotest.fail "Critical tool callback did not suspend for approval")
 
 (* ── Case-insensitive tool name matching ────────────────────── *)
 
@@ -1078,8 +1308,8 @@ let () =
         test_tool_capabilities_unknown;
     ];
     "governance_levels", [
-      Alcotest.test_case "development allows all" `Quick
-        test_development_allows_all;
+      Alcotest.test_case "development confirms critical" `Quick
+        test_development_confirms_critical;
       Alcotest.test_case "development allows low" `Quick
         test_development_allows_low;
       Alcotest.test_case "production allows low" `Quick
@@ -1117,13 +1347,21 @@ let () =
       Alcotest.test_case "unknown level fail-closed on critical (#7641)" `Quick
         test_unknown_governance_level_fail_closed_on_critical;
     ];
+    "hitl_governance_blockers", [
+      Alcotest.test_case "decide: runtime blocker requires confirm for non-Critical"
+        `Quick test_decide_runtime_blocker_requires_confirm;
+      Alcotest.test_case "decide: front-door None allows non-Critical" `Quick
+        test_decide_front_door_none_allows_noncritical;
+      Alcotest.test_case "OAS callback: hard-forbidden Critical enters queue" `Quick
+        test_oas_callback_hard_forbidden_queues_critical;
+    ];
     "trace_id", [
       Alcotest.test_case "has gov_ prefix" `Quick test_decision_has_trace_id;
       Alcotest.test_case "unique per call" `Quick test_trace_ids_unique;
     ];
     "pre_hook_integration", [
-      Alcotest.test_case "development allows delete" `Quick
-        test_hook_development_allows;
+      Alcotest.test_case "development blocks critical" `Quick
+        test_hook_development_blocks_critical;
       Alcotest.test_case "production blocks critical" `Quick
         test_hook_production_blocks_critical;
       Alcotest.test_case "production allows low" `Quick

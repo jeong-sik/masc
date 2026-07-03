@@ -103,3 +103,50 @@ describe('FusionBoardEvidence judge topology strip (RFC-0284 PR 2)', () => {
     expect(container.querySelector('[data-testid="fusion-board-evidence"]')).toBeNull()
   })
 })
+
+describe('FusionBoardEvidence failure attribution', () => {
+  it('surfaces failure_code and elapsed timing on a failed judge node', () => {
+    render(
+      h(FusionBoardEvidence, {
+        post: fusionPost([
+          {
+            role: 'meta',
+            identity: 'o1',
+            status: 'failed',
+            error: 'judge timed out',
+            failure_code: 'timeout',
+            elapsed_s: 30.2,
+            timed_out: true,
+          },
+        ]),
+      }),
+    )
+    const failedRow = screen.getByTestId('fusion-board-judges').querySelector('[data-failed="true"]')
+    expect(failedRow?.querySelector('[data-fusion-judge-code]')?.textContent).toBe('timeout')
+    expect(failedRow?.textContent).toContain('30.2s')
+  })
+
+  it('renders the panel reason_code chip on a failed panel', () => {
+    const post = {
+      meta: {
+        source: 'fusion',
+        run_id: 'fus-1',
+        question: 'q?',
+        panel: [
+          { model: 'gpt-5', status: 'answered', answer: 'panel answer' },
+          {
+            model: 'claude',
+            status: 'failed',
+            reason_code: 'provider_error',
+            reason_detail: 'quota exceeded',
+          },
+        ],
+        judge: { status: 'synthesized', synthesis: '최종 종합' },
+      },
+    } as Parameters<typeof FusionBoardEvidence>[0]['post']
+    render(h(FusionBoardEvidence, { post }))
+    const codes = screen.getAllByText('provider_error', { selector: '[data-fusion-panel-code]' })
+    expect(codes).toHaveLength(1)
+    expect(codes[0]?.getAttribute('title')).toBe('quota exceeded')
+  })
+})

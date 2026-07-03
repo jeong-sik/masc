@@ -3,7 +3,7 @@ open Masc
 let expected_invalid_timeout timeout_s =
   Invalid_argument
     (Printf.sprintf
-       "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
+       "Masc_oas_bridge.run_safe: timeout_s must be positive and finite \
         (got %.6g)"
        timeout_s)
 ;;
@@ -27,6 +27,11 @@ let test_rejects_non_positive_timeout () =
 
 let test_rejects_nan_timeout () =
   check_rejects_timeout ~name:"nan timeout rejected" Float.nan
+;;
+
+let test_rejects_infinite_timeout () =
+  check_rejects_timeout ~name:"infinite timeout rejected" Float.infinity;
+  check_rejects_timeout ~name:"negative infinite timeout rejected" Float.neg_infinity
 ;;
 
 let test_missing_eio_env_fails_closed_without_calling_fn () =
@@ -71,22 +76,6 @@ let test_clocked_env_times_out_sleep () =
     | Ok other -> failwith ("unexpected success: " ^ other))
 ;;
 
-let test_accepts_infinite_timeout_with_clock () =
-  with_eio_env (fun _clock ->
-    let called = ref false in
-    match
-      Masc_oas_bridge.run_safe
-        ~caller:"test_timeout_guard"
-        ~timeout_s:Float.infinity
-        (fun () ->
-           called := true;
-           Ok "ok")
-    with
-    | Ok "ok" -> Alcotest.(check bool) "fn was called" true !called
-    | Ok other -> failwith ("unexpected result: " ^ other)
-    | Error err -> failwith (Agent_sdk.Error.to_string err))
-;;
-
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   Unix.putenv name value;
@@ -119,7 +108,7 @@ let test_run_with_caller_resolves_env_timeouts_at_boundary () =
   check_run_with_caller_uses_resolved_env_timeout ~name:"negative env fallback" "-1";
   check_run_with_caller_uses_resolved_env_timeout ~name:"nan env fallback" "nan";
   check_run_with_caller_uses_resolved_env_timeout
-    ~name:"infinite env no-wrapper"
+    ~name:"infinite env fallback"
     "infinity"
 ;;
 
@@ -136,6 +125,10 @@ let () =
             `Quick
             test_rejects_nan_timeout
         ; Alcotest.test_case
+            "rejects infinite timeout"
+            `Quick
+            test_rejects_infinite_timeout
+        ; Alcotest.test_case
             "missing eio env fails closed"
             `Quick
             test_missing_eio_env_fails_closed_without_calling_fn
@@ -143,10 +136,6 @@ let () =
             "clocked env times out sleep"
             `Quick
             test_clocked_env_times_out_sleep
-        ; Alcotest.test_case
-            "infinite timeout is explicit no-wrapper"
-            `Quick
-            test_accepts_infinite_timeout_with_clock
         ; Alcotest.test_case
             "run_with_caller resolves env timeouts"
             `Quick

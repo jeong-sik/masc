@@ -179,4 +179,105 @@ describe('FusionSettingsPanel', () => {
     await vi.waitFor(() => expect(q('[data-testid="fusion-settings-error"]')?.textContent).toContain('정수'))
     expect(saveMock).not.toHaveBeenCalled()
   })
+
+  it('renders the read-only preset composition parsed from the loaded config', async () => {
+    fetchMock.mockResolvedValue(cfg({ source_text: SAMPLE }))
+    await mount()
+
+    expect(q('[data-testid="fusion-preset-view"]')).not.toBeNull()
+    const models = Array.from(container.querySelectorAll('[data-testid="fusion-preset-panel-model"]')).map(m => m.textContent)
+    expect(models).toEqual(['a', 'b', 'c'])
+    expect(q('[data-testid="fusion-preset-judge"]')?.textContent).toBe('j')
+    // SAMPLE's trio declares no timeouts/max_tool_calls → shown as '—', never fabricated.
+    const timing = q('[data-testid="fusion-preset-timing"]')?.textContent ?? ''
+    expect(timing).toContain('panel_timeout —')
+    expect(timing).toContain('judge_timeout —')
+    expect(timing).toContain('max_tool_calls_per_panel —')
+    expect(timing).toContain('(0 = 무제한)')
+  })
+
+  it('omits the preset card when the default preset has no backing section', async () => {
+    // enabled=false keeps the editor valid even though default_preset is unknown;
+    // the read-only card is data-driven, so it must not appear.
+    const noSection = `[fusion]
+enabled = false
+default_preset = "ghost"
+max_concurrent_panels = 2
+`
+    fetchMock.mockResolvedValue(cfg({ source_text: noSection }))
+    await mount()
+
+    expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull()
+    expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
+  })
+
+  it('omits the preset card when the preset declares no panel models', async () => {
+    // A preset with only min_answered has no composition to display; the card is
+    // gated on panel models so the live writer stays lane-free for such configs.
+    const noPanel = `[fusion]
+enabled = true
+default_preset = "trio"
+max_concurrent_panels = 2
+
+[fusion.presets.trio]
+min_answered = 2
+`
+    fetchMock.mockResolvedValue(cfg({ source_text: noPanel }))
+    await mount()
+
+    expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull()
+    expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
+    expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
+  })
+
+  it('shows a fail-visible note (not a partial panel) for grouped presets', async () => {
+    const grouped = `[fusion]
+enabled = true
+default_preset = "mixed"
+max_concurrent_panels = 2
+
+[fusion.presets.mixed]
+judge = "j"
+[[fusion.presets.mixed.panels]]
+panel = ["fast1", "fast2"]
+[[fusion.presets.mixed.panels]]
+panel = ["careful1"]
+`
+    fetchMock.mockResolvedValue(cfg({ source_text: grouped }))
+    await mount()
+
+    expect(q('[data-testid="fusion-settings-editor"]')).not.toBeNull()
+    // Grouped note shown; the flat lane card is NOT rendered.
+    expect(q('[data-testid="fusion-preset-grouped"]')?.textContent).toContain('2개 그룹')
+    expect(q('[data-testid="fusion-preset-view"]')).toBeNull()
+    expect(container.querySelectorAll('.set-fus-lane').length).toBe(0)
+    // Must never leak the first group's model as the preset panel (the P1 bug).
+    expect(container.textContent).not.toContain('fast1')
+  })
+
+  it('renders a flat-panel preset with a judge-of-judges note when first-pass judges exist', async () => {
+    const quorumLike = `[fusion]
+enabled = true
+default_preset = "quorum"
+max_concurrent_panels = 2
+
+[fusion.presets.quorum]
+panel = ["p1", "p2"]
+judge = "meta_model"
+[[fusion.presets.quorum.judges]]
+model = "evidence_model"
+[[fusion.presets.quorum.judges]]
+model = "coverage_model"
+`
+    fetchMock.mockResolvedValue(cfg({ source_text: quorumLike }))
+    await mount()
+
+    // Flat panels are shown normally.
+    expect(q('[data-testid="fusion-preset-view"]')).not.toBeNull()
+    const models = Array.from(container.querySelectorAll('[data-testid="fusion-preset-panel-model"]')).map(m => m.textContent)
+    expect(models).toEqual(['p1', 'p2'])
+    expect(q('[data-testid="fusion-preset-judge"]')?.textContent).toBe('meta_model')
+    // The judge lane honestly notes the first-pass judges rather than implying one.
+    expect(q('[data-testid="fusion-preset-judge-lane-h"]')?.textContent).toContain('1차 심판 2')
+  })
 })

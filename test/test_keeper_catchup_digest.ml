@@ -74,8 +74,8 @@ let meta_file base = Filename.concat (keepers base) (keeper ^ ".json")
 
 let json_line j = Yojson.Safe.to_string j
 
-let chat_row ?id ?kind ~role ~ts () =
-  let base = [ "role", `String role; "content", `String "x"; "ts", `Float ts ] in
+let chat_row ?id ?kind ?(content = "x") ~role ~ts () =
+  let base = [ "role", `String role; "content", `String content; "ts", `Float ts ] in
   let base = match id with Some i -> ("id", `String i) :: base | None -> base in
   let base = match kind with Some k -> ("kind", `String k) :: base | None -> base in
   json_line (`Assoc base)
@@ -339,6 +339,9 @@ let test_items_cap () =
 let test_chat_page_cap_is_fail_visible () =
   with_workspace (fun base ->
     let total = 20_001 in
+    (* Pad each row so the chat file exceeds the store's tail-read window;
+       otherwise a small file may return has_more=false before the page cap. *)
+    let padding = String.make 400 'x' in
     let cf = chat_file base in
     for i = 1 to total do
       append_line
@@ -346,6 +349,7 @@ let test_chat_page_cap_is_fail_visible () =
         (chat_row
            ~id:(Printf.sprintf "chat-%05d" i)
            ~role:"user"
+           ~content:padding
            ~ts:(since_unix +. float_of_int i)
            ())
     done;

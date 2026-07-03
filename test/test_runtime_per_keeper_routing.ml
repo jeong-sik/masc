@@ -1010,19 +1010,20 @@ let test_max_output_tokens_accessor_projects_catalog () =
 
 (* ---- materialize-failure diagnostics ----
 
-   Regression guard for the kimi.kimi-for-coding boot-fatal (2026-07-03): a
-   [messages-http] provider binding cannot be materialized into a
-   provider_config (the runtime adapter only builds openai-compatible / ollama
-   configs), so it is dropped from the runtime list. An assignment targeting it
-   used to report the misleading "[runtime.assignments].ramarama = ... not found
-   among N runtimes" — pointing the operator at a typo that does not exist — when
-   the real cause is that the binding was defined but failed to materialize.
-   Behavior is unchanged (the binding is still excluded, fail-closed); only the
-   diagnostic must name the materialize failure. A genuine typo (an id that is
-   not a defined binding at all) must still report "not found among N runtimes". *)
+   Regression guard for messages-http boot diagnostics (2026-07-03): an
+   unregistered [messages-http] provider binding cannot be materialized into a
+   provider_config, so it is dropped from the runtime list. An assignment
+   targeting it used to report the misleading "[runtime.assignments].ramarama =
+   ... not found among N runtimes" — pointing the operator at a typo that does
+   not exist — when the real cause is that the binding was defined but failed to
+   materialize. Behavior is unchanged (the binding is still excluded,
+   fail-closed); only the diagnostic must name the materialize failure. A
+   genuine typo (an id that is not a defined binding at all) must still report
+   "not found among N runtimes". Registered providers such as Kimi keep using
+   the provider registry SSOT to materialize their messages-compatible kind. *)
 
-(* [ramarama] is assigned [kimi.kimi-for-coding], a defined binding whose
-   provider uses protocol messages-http (no adapter provider_config path). The
+(* [ramarama] is assigned [local.kimi-for-coding], a defined binding whose
+   provider uses protocol messages-http but has no provider-registry entry. The
    default [openai.gpt] materializes so validation reaches the assignment. *)
 let runtime_config_messages_http_assignment =
   {|
@@ -1030,15 +1031,15 @@ let runtime_config_messages_http_assignment =
 default = "openai.gpt"
 
 [runtime.assignments]
-ramarama = "kimi.kimi-for-coding"
+ramarama = "local.kimi-for-coding"
 
 [providers.openai]
 display-name = "OpenAI"
 protocol = "openai-compatible-http"
 endpoint = "https://api.openai.example/v1"
 
-[providers.kimi]
-display-name = "Kimi"
+[providers.local]
+display-name = "Local Messages API"
 protocol = "messages-http"
 endpoint = "https://api.moonshot.example/anthropic"
 
@@ -1058,7 +1059,7 @@ streaming = true
 is-default = true
 max-concurrent = 1
 
-[kimi.kimi-for-coding]
+[local.kimi-for-coding]
 max-concurrent = 1
 |}
 ;;
@@ -1106,7 +1107,7 @@ let test_assignment_materialize_failure_surfaces_reason () =
   Alcotest.(check bool)
     "error names the assignment target binding"
     true
-    (string_contains msg "kimi.kimi-for-coding");
+    (string_contains msg "local.kimi-for-coding");
   Alcotest.(check bool)
     "error states the binding was defined but not materialized"
     true
@@ -1116,9 +1117,9 @@ let test_assignment_materialize_failure_surfaces_reason () =
     true
     (string_contains msg "messages-http");
   Alcotest.(check bool)
-    "error explains the adapter cannot build a provider_config"
+    "error explains the missing provider-registry SSOT entry"
     true
-    (string_contains msg "cannot build a provider_config");
+    (string_contains msg "no OAS provider registry entry");
   Alcotest.(check bool)
     "error does NOT fall back to the misleading bare not-found wording"
     false

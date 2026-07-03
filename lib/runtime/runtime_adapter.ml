@@ -211,17 +211,27 @@ let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.p
          else kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
   | Messages_api ->
-    (* [Messages_api] (protocol messages-cli / messages-http) has no OAS
-       provider_config path in the runtime adapter — only OpenAI-compatible and
-       Ollama HTTP formats materialize. Return the concrete reason instead of
-       [None] so the dropped binding is diagnosable at the assignment/default/
-       lane validation site (Unknown->silent-drop anti-pattern). *)
-    Error
-      (Printf.sprintf
-         "provider %S uses protocol %s, which the runtime adapter cannot build a \
-          provider_config for (only openai-compatible/ollama are materializable)"
-         provider.id
-         provider.protocol)
+    (match registry_entry with
+     | Some entry ->
+       let kind = entry.Llm_provider.Provider_registry.defaults.kind in
+       if kind = Llm_provider.Provider_config.OpenAI_compat
+          || kind = Llm_provider.Provider_config.Ollama
+       then
+         Error
+           (Printf.sprintf
+              "provider %S uses protocol %s, but registry kind %s is not \
+               messages-compatible"
+              provider.id
+              provider.protocol
+              (Llm_provider.Provider_config.string_of_provider_kind kind))
+       else Ok kind
+     | None ->
+       Error
+         (Printf.sprintf
+            "provider %S uses protocol %s, but no OAS provider registry entry exists; \
+             messages-http requires registry kind SSOT"
+            provider.id
+            provider.protocol))
 ;;
 
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind

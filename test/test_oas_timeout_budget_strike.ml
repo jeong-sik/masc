@@ -470,6 +470,42 @@ let test_hook_context_estimate_skips_base_prompt_layers () =
        ; Prompt_block_id.User_model, user_model
        ])
 
+let test_extra_system_context_budget_skips_over_window_hook_blocks () =
+  let budget =
+    Keeper_run_prompt.budget_extra_system_context
+      ~estimated_input_tokens_with_tools:90
+      ~max_context:100
+      ~existing_extra_system_context:None
+      ~blocks:
+        [ Prompt_block_id.Dynamic_context, String.make 400 'd'
+        ; Prompt_block_id.Retry_nudge, String.make 400 'r'
+        ; Prompt_block_id.User_model, "short user model"
+        ]
+  in
+  Alcotest.(check bool)
+    "dynamic context remains because preflight already accounted it"
+    true
+    (List.exists
+       (fun (block, _) ->
+          Prompt_block_id.equal block Prompt_block_id.Dynamic_context)
+       budget.included_blocks);
+  Alcotest.(check bool)
+    "oversized hook-only retry nudge is skipped"
+    true
+    (List.exists
+       (Prompt_block_id.equal Prompt_block_id.Retry_nudge)
+       budget.skipped_blocks);
+  Alcotest.(check bool)
+    "later hook-only block can still fit"
+    true
+    (List.exists
+       (fun (block, _) -> Prompt_block_id.equal block Prompt_block_id.User_model)
+       budget.included_blocks);
+  Alcotest.(check bool)
+    "post-hook estimate stays within context window"
+    true
+    (budget.post_hook_estimated_input_tokens <= 100)
+
 let test_keeper_preflight_wires_tool_inclusive_estimate () =
   let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
   let setup_source = read_file "lib/keeper/keeper_run_tools_setup.ml" in
@@ -603,16 +639,21 @@ let test_context_injection_hook_records_post_tool_ledger () =
     true
     (contains_substring hook_source "post_hook_estimated_input_tokens");
   Alcotest.(check bool)
-    "hook over-window estimate is observational, not terminal"
+    "hook budgets extra context before params are adjusted"
     true
-    (contains_substring hook_source "post_hook_over_context_window"
+    (contains_substring hook_source "budget_extra_system_context"
      && contains_substring hook_source "Agent_sdk.Hooks.AdjustParams");
   Alcotest.(check bool)
-    "hook does not bypass provider driver on post-hook overflow estimate"
+    "hook records skipped context blocks instead of silently dropping them"
+    true
+    (contains_substring hook_source "skipped_extra_system_context_blocks"
+     && contains_substring hook_source
+          "skipped_extra_system_context_estimated_tokens");
+  Alcotest.(check bool)
+    "hook does not use an out-of-band overflow ref"
     false
     (contains_substring hook_source "post_hook_context_window_error_ref"
-     || contains_substring agent_run_source "post_hook_context_window_error_ref"
-     || contains_substring hook_source "post-hook extra_system_context estimate")
+     || contains_substring agent_run_source "post_hook_context_window_error_ref")
 
 let test_keeper_preflight_reuses_setup_tool_estimate () =
   let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
@@ -854,6 +895,8 @@ let () =
           "hook context estimate skips base prompt layers"
           `Quick
           test_hook_context_estimate_skips_base_prompt_layers;
+        Alcotest.test_case "extra system context budget skips overflow blocks" `Quick
+          test_extra_system_context_budget_skips_over_window_hook_blocks;
         Alcotest.test_case "keeper preflight wires tool-inclusive estimate" `Quick
           test_keeper_preflight_wires_tool_inclusive_estimate;
         Alcotest.test_case "context window budget reports remaining and overage" `Quick

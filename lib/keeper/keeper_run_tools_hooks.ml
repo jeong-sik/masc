@@ -407,6 +407,19 @@ let assemble_hooks
                     record_block Prompt_block_id.Memory_os_recall block;
                     append_ctx ctx block
                 in
+                let extra_system_context_budget =
+                  Keeper_run_prompt.budget_extra_system_context
+                    ~estimated_input_tokens_with_tools:
+                      tool_context_estimate.estimated_input_tokens_with_tools
+                    ~max_context
+                    ~existing_extra_system_context:
+                      current_params.extra_system_context
+                    ~blocks:(List.rev !recorded_blocks)
+                in
+                let ctx = extra_system_context_budget.extra_system_context in
+                let recorded_blocks_for_receipt =
+                  extra_system_context_budget.included_blocks
+                in
                 let tool_filter =
                   Agent_sdk.Guardrails.AllowList schema_filter
                 in
@@ -510,30 +523,27 @@ let assemble_hooks
                 in
                 acc.prompt_blocks
                 <- persona_blocks
-                   @ List.rev_map
+                   @ List.map
                        (fun (block, text) ->
                           { Turn_record.block
                           ; bytes = String.length text
                           ; digest = sha256_hex text
                           })
-                       !recorded_blocks;
+                       recorded_blocks_for_receipt;
                 acc.extra_system_context_digest <- Option.map sha256_hex ctx;
                 acc.extra_system_context_size <- Option.map String.length ctx;
                 let extra_system_context_estimated_tokens =
                   Option.map Keeper_context_core_accessors.estimate_char_tokens ctx
                 in
                 let hook_extra_system_context_estimated_tokens =
-                  Keeper_run_prompt.estimate_unaccounted_extra_system_context_tokens
-                    !recorded_blocks
+                  extra_system_context_budget
+                    .hook_extra_system_context_estimated_tokens
                 in
                 let post_hook_estimated_input_tokens =
-                  tool_context_estimate.estimated_input_tokens_with_tools
-                  + hook_extra_system_context_estimated_tokens
+                  extra_system_context_budget.post_hook_estimated_input_tokens
                 in
                 let post_hook_context_window_budget =
-                  Keeper_run_prompt.context_window_budget
-                    ~estimated_input_tokens:post_hook_estimated_input_tokens
-                    ~max_context
+                  extra_system_context_budget.post_hook_context_window_budget
                 in
                 let post_hook_context_window_error =
                   Keeper_run_prompt.preflight_context_window
@@ -616,6 +626,18 @@ let assemble_hooks
                                        .context_usage_ratio )
                                ; ( "post_hook_over_context_window",
                                    `Bool post_hook_over_context_window )
+                               ; ( "skipped_extra_system_context_blocks",
+                                   `List
+                                     (List.map
+                                        (fun block ->
+                                           `String
+                                             (Prompt_block_id.to_string block))
+                                        extra_system_context_budget
+                                          .skipped_blocks) )
+                               ; ( "skipped_extra_system_context_estimated_tokens",
+                                   `Int
+                                     extra_system_context_budget
+                                       .skipped_estimated_tokens )
                                ]))
                         ())
                  | _ -> ());

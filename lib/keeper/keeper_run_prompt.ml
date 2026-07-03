@@ -46,6 +46,16 @@ type context_layer_budget =
   ; context_layer_decision : context_layer_decision
   }
 
+type extra_system_context_budget =
+  { extra_system_context : string option
+  ; included_blocks : (Prompt_block_id.t * string) list
+  ; skipped_blocks : Prompt_block_id.t list
+  ; skipped_estimated_tokens : int
+  ; hook_extra_system_context_estimated_tokens : int
+  ; post_hook_estimated_input_tokens : int
+  ; post_hook_context_window_budget : context_window_budget
+  }
+
 let context_layer_decision_to_string = function
   | Within_cap -> "within_cap"
   | Over_cap_observed -> "over_cap_observed"
@@ -216,6 +226,11 @@ let estimate_unaccounted_extra_system_context_tokens blocks =
     0
     blocks
 
+let append_extra_system_context ctx text =
+  match ctx with
+  | None -> Some text
+  | Some existing -> Some (existing ^ "\n\n" ^ text)
+
 let context_window_budget ~(estimated_input_tokens : int) ~(max_context : int)
   : context_window_budget =
   let remaining_context_tokens = max 0 (max_context - estimated_input_tokens) in
@@ -230,6 +245,68 @@ let context_window_budget ~(estimated_input_tokens : int) ~(max_context : int)
   ; remaining_context_tokens
   ; over_context_tokens
   ; context_usage_ratio
+  }
+
+let budget_extra_system_context
+      ~(estimated_input_tokens_with_tools : int)
+      ~(max_context : int)
+      ~(existing_extra_system_context : string option)
+      ~(blocks : (Prompt_block_id.t * string) list)
+  : extra_system_context_budget =
+  let existing_tokens =
+    match existing_extra_system_context with
+    | None -> 0
+    | Some text -> Keeper_context_core_accessors.estimate_char_tokens text
+  in
+  let initial_estimate = estimated_input_tokens_with_tools + existing_tokens in
+  let _, included_rev, skipped_rev, skipped_estimated_tokens, _ =
+    List.fold_left
+      (fun (ctx, included, skipped, skipped_tokens, total_tokens) (block, text) ->
+         let block_tokens =
+           if hook_block_already_accounted_in_preflight block
+           then 0
+           else Keeper_context_core_accessors.estimate_char_tokens text
+         in
+         if block_tokens = 0 || total_tokens + block_tokens <= max_context
+         then
+           ( append_extra_system_context ctx text,
+             (block, text) :: included,
+             skipped,
+             skipped_tokens,
+             total_tokens + block_tokens )
+         else
+           ( ctx,
+             included,
+             block :: skipped,
+             skipped_tokens + block_tokens,
+             total_tokens ))
+      (existing_extra_system_context, [], [], 0, initial_estimate)
+      blocks
+  in
+  let included_blocks = List.rev included_rev in
+  let skipped_blocks = List.rev skipped_rev in
+  let hook_extra_system_context_estimated_tokens =
+    estimate_unaccounted_extra_system_context_tokens included_blocks
+  in
+  let post_hook_estimated_input_tokens =
+    estimated_input_tokens_with_tools
+    + existing_tokens
+    + hook_extra_system_context_estimated_tokens
+  in
+  { extra_system_context =
+      List.fold_left
+        (fun ctx (_, text) -> append_extra_system_context ctx text)
+        existing_extra_system_context
+        included_blocks
+  ; included_blocks
+  ; skipped_blocks
+  ; skipped_estimated_tokens
+  ; hook_extra_system_context_estimated_tokens
+  ; post_hook_estimated_input_tokens
+  ; post_hook_context_window_budget =
+      context_window_budget
+        ~estimated_input_tokens:post_hook_estimated_input_tokens
+        ~max_context
   }
 
 let estimate_context_layer_budget

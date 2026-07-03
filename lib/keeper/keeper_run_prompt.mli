@@ -46,6 +46,16 @@ type context_layer_budget =
   ; context_layer_decision : context_layer_decision
   }
 
+type extra_system_context_budget =
+  { extra_system_context : string option
+  ; included_blocks : (Prompt_block_id.t * string) list
+  ; skipped_blocks : Prompt_block_id.t list
+  ; skipped_estimated_tokens : int
+  ; hook_extra_system_context_estimated_tokens : int
+  ; post_hook_estimated_input_tokens : int
+  ; post_hook_context_window_budget : context_window_budget
+  }
+
 val sanitize_user_message : string -> string
 (** Remove role/jailbreak prefixes from a turn user message before it is
     appended to the OAS context. *)
@@ -91,6 +101,18 @@ val estimate_unaccounted_extra_system_context_tokens :
   (Prompt_block_id.t * string) list -> int
 (** Estimate the hook-injected [extra_system_context] blocks that were not
     already included in the pre-dispatch prompt estimate. *)
+
+val budget_extra_system_context :
+  estimated_input_tokens_with_tools:int ->
+  max_context:int ->
+  existing_extra_system_context:string option ->
+  blocks:(Prompt_block_id.t * string) list ->
+  extra_system_context_budget
+(** Rebuild [extra_system_context] from typed prompt blocks while keeping
+    hook-only additions inside the effective context window. Blocks already
+    represented in the pre-dispatch prompt estimate are retained without
+    double-counting; hook-only blocks that would exceed the remaining window
+    are omitted and reported in [skipped_blocks]. *)
 
 val context_window_budget :
   estimated_input_tokens:int -> max_context:int -> context_window_budget

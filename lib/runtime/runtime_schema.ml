@@ -155,6 +155,15 @@ type model_spec =
   ; preserve_thinking : bool option
   ; max_thinking_budget : int option
   ; streaming : bool
+  ; temperature : float option
+    (** [temperature] — per-model sampling temperature for keeper turns. [None]
+        keeps the caller fallback ([MASC_KEEPER_UNIFIED_TEMP], then the OAS
+        [agent_default] profile). [Some t] overrides it for every turn on this
+        model. Required for models that reject the default value: e.g. Kimi K2.7
+        (kimi-for-coding) accepts only temperature = 1.0 and rejects any other
+        value at request time ("only 1 is allowed for this model"). Resolved via
+        {!Runtime.temperature_of_runtime_id} → {!Runtime_inference.resolve_temperature},
+        symmetric to the [max-output-tokens]/[max_tokens] path. *)
   ; capabilities : model_capabilities option
   ; match_prefixes : string list
   }

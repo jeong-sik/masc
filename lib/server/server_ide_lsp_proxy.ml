@@ -129,7 +129,7 @@ let send_client_notification cs method_ params =
 
 (* Pure projection of one language's health into the [masc/lspStatus] wire
    shape: [connected] / [overlay_only] / [command] (the configured LSP
-   executable, [null] when none is mapped) / [last_error] / [last_method]. *)
+   executable, [null] when none is mapped) / [last_error]. *)
 let lang_status_json ~lang_id (health : lang_health) : Yojson.Safe.t =
   let command =
     match Lsp_process_manager.command_for_lang lang_id with

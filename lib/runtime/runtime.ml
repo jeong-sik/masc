@@ -173,6 +173,49 @@ let validate_media_failover ~(config_path : string) (runtimes : t list)
          (List.length runtimes))
 ;;
 
+(* [runtime.lanes.<id>] candidate ids must resolve to configured runtimes.
+   Empty candidate lists are rejected at parse time; here we reject unknown ids
+   as operator typos (mirrors [runtime].default validation). *)
+let validate_lanes ~(config_path : string) (runtimes : t list)
+    (lane_decls : Runtime_schema.lane_decl list)
+  : (unit, string) result
+  =
+  let runtime_exists id =
+    List.exists (fun (r : t) -> String.equal r.id id) runtimes
+  in
+  let rec first_unknown = function
+    | [] -> None
+    | { Runtime_schema.id = lane_id; candidate_ids; _ } :: rest ->
+      (match List.find_opt (fun id -> not (runtime_exists id)) candidate_ids with
+       | Some id -> Some (lane_id, id)
+       | None -> first_unknown rest)
+  in
+  match first_unknown lane_decls with
+  | None -> Ok ()
+  | Some (lane_id, id) ->
+    Error
+      (Printf.sprintf
+         "%s: [runtime.lanes.%s] candidate %S not found among %d runtimes"
+         config_path
+         lane_id
+         id
+         (List.length runtimes))
+;;
+
+let lanes_of_decls ~(config_path : string) (runtimes : t list)
+    (lane_decls : Runtime_schema.lane_decl list)
+  : (Runtime_lane.t list, string) result
+  =
+  let* () = validate_lanes ~config_path runtimes lane_decls in
+  Ok
+    (List.map
+       (fun ({ Runtime_schema.id; strategy; candidate_ids } : Runtime_schema.lane_decl) ->
+          match strategy with
+          | Runtime_schema.Ordered ->
+            Runtime_lane.make ~id ~strategy:Runtime_lane.Ordered candidate_ids)
+       lane_decls)
+;;
+
 (* Pure decision for the capability gate, separated from the global OAS catalog
    lookup so it is unit-testable. [entries] is [(label, known_to_oas)] per runtime.
 
@@ -294,6 +337,7 @@ let materialize_config ~(config_path : string) (cfg : config)
       * string option
       * string option
       * string list
+      * Runtime_lane.t list
     , string )
     result
   =
@@ -333,6 +377,7 @@ let materialize_config ~(config_path : string) (cfg : config)
   let* () =
     validate_media_failover ~config_path runtimes cfg.media_failover
   in
+  let* lanes = lanes_of_decls ~config_path runtimes cfg.lane_decls in
   (* The OAS catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
      Production startup applies the stricter gate via [init_default_strict]. *)
@@ -343,7 +388,8 @@ let materialize_config ~(config_path : string) (cfg : config)
     , cfg.librarian_runtime_id
     , cfg.structured_judge_runtime_id
     , cfg.cross_verifier_runtime_id
-    , cfg.media_failover )
+    , cfg.media_failover
+    , lanes )
 ;;
 
 let load_list ~(config_path : string)
@@ -354,6 +400,7 @@ let load_list ~(config_path : string)
        * string option
        * string option
        * string list
+       * Runtime_lane.t list
     , string )
     result
   =
@@ -381,6 +428,7 @@ type loaded_state =
   ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
+  ; lanes : Runtime_lane.t list
   ; config_path : string option
   }
 
@@ -392,6 +440,7 @@ let empty_loaded_state =
   ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
+  ; lanes = []
   ; config_path = None
   }
 
@@ -407,7 +456,8 @@ let set_loaded
     , librarian_id
     , structured_judge_id
     , cross_verifier_id
-    , media_failover ) =
+    , media_failover
+    , lanes ) =
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
@@ -416,6 +466,7 @@ let set_loaded
     ; structured_judge_runtime_id = structured_judge_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
+    ; lanes
     ; config_path = Some config_path
     }
 
@@ -432,7 +483,7 @@ let init_default ~config_path =
 let init_default_strict_report ~config_path =
   match load_list ~config_path with
   | Error msg -> Error (Runtime_config_error msg)
-  | Ok ((runtimes, _, _, _, _, _, _) as loaded) ->
+  | Ok ((runtimes, _, _, _, _, _, _, _) as loaded) ->
     (match missing_runtime_model_capabilities ~config_path runtimes with
      | Some report -> Error (Missing_catalog_models report)
      | None ->
@@ -509,6 +560,15 @@ let cross_verifier_runtime_id () = (runtime_state ()).cross_verifier_runtime_id
    Atomic ref set by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 
+(* [runtime.lanes.<id>] ordered failover candidate lists. Reads the Atomic ref
+   set by [init_default]. *)
+let lanes () = (runtime_state ()).lanes
+
+let get_lane_by_id (id : string) : Runtime_lane.t option =
+  List.find_opt (fun (lane : Runtime_lane.t) -> String.equal lane.id id)
+    (runtime_state ()).lanes
+;;
+
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the *requested* runtime (a keeper's persona
    [model] selection or the default) instead of unconditionally the default; an
@@ -516,6 +576,19 @@ let media_failover () = (runtime_state ()).media_failover
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
+;;
+
+(* Resolve a keeper assignment to either a lane or a single runtime. Lanes are
+   preferred so a lane id can shadow a runtime id (lanes are explicit operator
+   routing constructs). [Missing] means the assignment does not name a known
+   lane or runtime. *)
+let resolve_assignment (assigned_id : string) =
+  match get_lane_by_id assigned_id with
+  | Some lane -> `Lane lane
+  | None ->
+    (match get_runtime_by_id assigned_id with
+     | Some runtime -> `Single_runtime runtime
+     | None -> `Missing)
 ;;
 
 let max_context_of_runtime_id (id : string) : int option =
@@ -1007,7 +1080,8 @@ let validate_runtime_config_text ~config_path content =
            * string option
            * string option
            * string option
-           * string list) =
+           * string list
+           * Runtime_lane.t list) =
     materialize_config ~config_path cfg
   in
   Ok ()

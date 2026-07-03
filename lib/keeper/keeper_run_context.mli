@@ -36,6 +36,19 @@ val build_base_system_prompt :
 (** Build the keeper base system prompt from the same persisted meta/profile
     inputs used by {!prepare_run_context}. *)
 
+val resolve_max_tokens_for_runtime :
+     keeper_name:string
+  -> runtime_id:string
+  -> ?max_tokens:int
+  -> unit
+  -> int
+(** Resolve the keeper turn max-token budget for a concrete runtime id.
+
+    [max_tokens] is an explicit caller override and is capped through
+    {!Runtime_inference.cap_max_tokens_to_runtime_ceiling}. When absent, the
+    keeper profile/env fallback is passed through
+    {!Runtime_inference.resolve_max_tokens} for the supplied runtime. *)
+
 val prepare_run_context :
      config:Workspace.config
   -> meta:keeper_meta

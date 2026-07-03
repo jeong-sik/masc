@@ -28,6 +28,11 @@ let metric_evaluation_to_string = function
   | Metric_unevaluated -> "unevaluated"
   | Metric_absent -> "absent"
 
+let metric_evaluation_of_string = function
+  | "unevaluated" -> Some Metric_unevaluated
+  | "absent" -> Some Metric_absent
+  | _ -> None
+
 (* A goal with a declared metric is always [Metric_unevaluated]: no evaluator
    is wired (Convergence.check_convergence has no caller), so [goal.metric] is
    never turned into an observed value. See the type comment in
@@ -355,7 +360,14 @@ let goal_completion_to_json ~effective_policy ~open_request
   let attainment_basis =
     assoc_string_opt "basis" attainment |> Option.value ~default:"unmeasured"
   in
-  let metric_evaluation = metric_evaluation_of_goal goal in
+  let metric_evaluation =
+    match assoc_string_opt "metric_evaluation" attainment with
+    | Some s -> (
+        match metric_evaluation_of_string s with
+        | Some m -> m
+        | None -> metric_evaluation_of_goal goal )
+    | None -> metric_evaluation_of_goal goal
+  in
   let metric_completion_blocked =
     match metric_evaluation with
     | Metric_unevaluated -> true

@@ -12,6 +12,7 @@ const base: GoalAttainmentProjection = {
   state: 'attained',
   basis: 'metric_target_percent',
   metric: 'test coverage %',
+  metric_evaluation: 'unevaluated',
   target_value: '80%',
   target_parse_status: 'parseable',
   unit: 'percent',

@@ -1015,6 +1015,29 @@ describe('Work', () => {
         expect(colFor('done')?.querySelector('[data-kanban-task-id="T-done"]')).toBeTruthy()
       })
 
+      it('renders an owning-goal jump button on kanban cards that returns to the list view', () => {
+        goals.value = [
+          { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },
+        ]
+        tasks.value = [
+          { id: 'J-1', title: 'Todo task', goal_id: 'G-1', status: 'todo' },
+        ]
+
+        render(html`<${Work} />`)
+        fireEvent.click(screen.getByTestId('work-view-kanban'))
+
+        const board = screen.getByTestId('work-kanban')
+        const jump = board.querySelector('[data-kanban-goal-jump="G-1"]')
+        expect(jump).toBeTruthy()
+        expect(jump?.textContent).toContain('Goal One')
+
+        // Goal cards only exist in the list view, so the jump switches back to it.
+        fireEvent.click(jump as Element)
+        expect(screen.queryByTestId('work-kanban')).toBeNull()
+        expect(screen.getByTestId('work-goal-list')).toBeTruthy()
+        expect(screen.getByTestId('work-view-list').classList.contains('on')).toBe(true)
+      })
+
       it('includes recursive goal tree tasks in KPIs and kanban, normalizing completed to done', () => {
         goals.value = [
           { id: 'G-1', title: 'Goal One', priority: 1, status: 'active', phase: 'executing', created_at: '2026-01-01', updated_at: '2026-01-01' },

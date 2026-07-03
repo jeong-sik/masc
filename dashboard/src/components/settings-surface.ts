@@ -29,9 +29,11 @@ import { callMcpTool } from '../api/mcp'
 import { shellConfigResolution, shellRuntimeResolution } from '../store'
 import type { DashboardConfigResolutionItem } from '../types'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
+import { StatusChip } from './common/status-chip'
 import { logDisplayKind } from './log-classification'
 import { tweaksDensity, type Density } from './tweaks-panel'
 import type { ComponentChildren } from 'preact'
@@ -51,9 +53,11 @@ const DEFAULT_SETTINGS_SECTION: SectionId = 'runtime'
 
 const SET_SECTIONS: [SectionId, string, string][] = [
   ['runtime', 'Runtime', '런타임'],
+  ['routing', 'Routing', '모델 라우팅'],
   ['runtimes', 'Runtimes', '런타임 관리'],
   ['paths', 'Paths', '경로 · Path'],
   ['mcp', 'MCP', 'MCP 서버'],
+  ['repositories', 'Repositories', '저장소'],
   ['notify', 'Notify', '알림'],
   ['prompts', 'Prompts', '기본 프롬프트'],
   ['fusion', 'Fusion', '패널·심판 심의'],
@@ -61,11 +65,15 @@ const SET_SECTIONS: [SectionId, string, string][] = [
   ['display', 'Display', '표시'],
 ]
 
+// keeper-v2 design settings.jsx SET_GROUPS의 부분 채택: account/lifecycle/
+// sandbox/gate 섹션은 백엔드 계약 부재로 미구현이라 그룹에서 빠져 있고,
+// 디자인이 nav에서 뺀 mcp/display는 live-backed 동작 섹션이라 유지한다
+// (docs/design/keeper-v2-design-delta-audit-2026-07-03.md).
 const SET_GROUPS: [string, SectionId[]][] = [
-  ['런타임', ['runtime', 'runtimes']],
-  ['경로 · 연결', ['paths', 'mcp']],
-  ['운영 알림', ['notify', 'logs']],
-  ['고급 설정', ['prompts', 'fusion', 'display']],
+  ['Keeper 운영', ['runtime', 'routing', 'prompts', 'fusion']],
+  ['인프라 · 실행', ['runtimes', 'paths']],
+  ['연결 · 통합', ['mcp', 'repositories']],
+  ['관측 · 알림', ['logs', 'notify', 'display']],
 ]
 
 // Tools exposed over the public MCP server, derived from the live capability
@@ -311,15 +319,19 @@ function RuntimeRoutingSelect({
   disabled,
   testId,
   onChange,
+  required = false,
 }: {
   label: string
   hint: string
   value: string | null
-  fallbackLabel: string
+  fallbackLabel?: string
   options: readonly RuntimeSelectOption[]
   disabled: boolean
   testId: string
   onChange: (runtimeId: string | null) => void
+  // The server rejects clearing the default lane (400 "default runtime_id
+  // required"), so required lanes must not offer an empty option.
+  required?: boolean
 }) {
   return html`
     <${SetRow} label=${label} hint=${hint}>
@@ -330,10 +342,11 @@ function RuntimeRoutingSelect({
         disabled=${disabled || options.length === 0}
         onInput=${(event: Event) => {
           const next = (event.currentTarget as HTMLSelectElement).value.trim()
+          if (required && next === '') return
           onChange(next === '' ? null : next)
         }}
       >
-        <option value="">${fallbackLabel}</option>
+        ${required ? null : html`<option value="">${fallbackLabel ?? ''}</option>`}
         ${options.map(option => html`
           <option key=${option.id} value=${option.id}>${option.label}</option>
         `)}
@@ -402,6 +415,10 @@ function RuntimeMediaFailoverEditor({
                 >×</button>
               </span>
             `)}
+        </div>
+        <div class="set-hint flex flex-wrap items-center gap-2" data-testid="runtime-media-failover-reality">
+          <${StatusChip} tone="warn" uppercase=${false}>수동 reroute<//>
+          <span>provider 실패 자동 전환이 아니라 <span class="mono">runtime.toml</span>의 media lane 후보 목록입니다.</span>
         </div>
         <div class="set-runtime-media-actions">
           <select
@@ -560,6 +577,7 @@ function settingsSectionState(
   pathResolutionAvailability: PathResolutionAvailability = 'ready',
 ): { mode: SettingsSectionMode; label: string } {
   if (section === 'runtime') return { mode: 'live', label: 'runtime.toml + provider catalog' }
+  if (section === 'routing') return { mode: 'live', label: 'runtime.toml live-backed' }
   if (section === 'runtimes') return { mode: 'live', label: 'runtime.toml live-backed' }
   if (section === 'prompts') return { mode: 'live', label: 'prompt registry live-backed' }
   if (section === 'fusion') return { mode: 'live', label: 'runtime.toml live-backed' }
@@ -570,6 +588,7 @@ function settingsSectionState(
     return { mode: 'local', label: 'path resolution unavailable' }
   }
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
+  if (section === 'repositories') return { mode: 'live', label: 'repositories API live-backed' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
   if (section === 'notify') return { mode: 'live', label: 'live thresholds read-only' }
   if (section === 'display') return { mode: 'live', label: 'theme/density live' }
@@ -1016,7 +1035,7 @@ export function SettingsSurface() {
           </header>
 
           <div
-            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'runtimes' || sec === 'paths' || sec === 'mcp' || sec === 'notify' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
+            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'routing' || sec === 'runtimes' || sec === 'paths' || sec === 'mcp' || sec === 'repositories' || sec === 'notify' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
             data-preview-locked="false"
             data-settings-mode=${sectionState.mode}
           >
@@ -1097,11 +1116,28 @@ export function SettingsSurface() {
                       <span class="k">keeper assignments</span>
                     </div>
                   </div>
-                  <${SetRow} label="Default runtime" hint="[runtime].default">
-                    ${defaultRuntimeId
-                      ? html`<span class="mono" data-testid="runtime-default-runtime">${defaultRuntimeId}</span>`
-                      : html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`}
-                  <//>
+                  ${runtimeSelectOptions.length > 0
+                    ? html`
+                      <${RuntimeRoutingSelect}
+                        label="Default runtime"
+                        hint="[runtime].default · 새 keeper 가 시작될 런타임 id (provider.model)"
+                        value=${defaultRuntimeId}
+                        options=${runtimeSelectOptions}
+                        disabled=${runtimeRoutingSaving}
+                        testId="runtime-default-runtime"
+                        required=${true}
+                        onChange=${(runtimeId: string | null) => {
+                          if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
+                        }}
+                      />
+                    `
+                    : html`
+                      <${SetRow} label="Default runtime" hint="[runtime].default">
+                        ${defaultRuntimeId
+                          ? html`<span class="mono" data-testid="runtime-default-readonly">${defaultRuntimeId}</span>`
+                          : html`<span class="set-hint" data-testid="runtime-default-empty">런타임 설정을 불러오지 못했습니다.</span>`}
+                      <//>
+                    `}
                   <${SetRow} label="Default model" hint="Resolved model API name">
                     <span class="mono" data-testid="runtime-default-model">${runtimeDefaults?.default_model ?? defaultCatalogEntry?.model_api_name ?? '—'}</span>
                   <//>
@@ -1138,12 +1174,38 @@ export function SettingsSurface() {
                         `}
                 </div>
 
+                ${runtimeRoutingStatus === 'saving'
+                  ? html`<div class="set-hint" data-testid="runtime-routing-saving">runtime.toml 저장 중...</div>`
+                  : runtimeRoutingMessage
+                    ? html`<div class=${runtimeRoutingStatus === 'error' ? 'set-err' : 'set-ok'} data-testid="runtime-routing-message">${runtimeRoutingMessage}</div>`
+                    : null}
+              </div>
+            `}
+
+            ${sec === 'routing' && html`
+              <div class="settings-runtime-live" data-testid="routing-settings-live">
+                <div class="set-hint" style=${{ marginBottom: '12px' }}>
+                  <span class="mono">[runtime]</span> 라우팅 레인. keeper 채팅은 <b>default</b> 를 쓰고, 특정 작업만 전용 런타임으로 분기됩니다.
+                </div>
+
                 <div class="settings-runtime-section" data-runtime-section="routing" data-testid="runtime-routing-section">
                   <div class="set-sub-h">Model routing</div>
                   <div class="settings-runtime-routing-editor" data-testid="runtime-routing-summary">
                     <${RuntimeRoutingSelect}
+                      label="Default"
+                      hint="[runtime].default · 기본 — keeper 채팅, 미할당 keeper 가 상속"
+                      value=${defaultRuntimeId}
+                      options=${runtimeSelectOptions}
+                      disabled=${runtimeRoutingSaving}
+                      testId="runtime-routing-default"
+                      required=${true}
+                      onChange=${(runtimeId: string | null) => {
+                        if (runtimeId && runtimeId !== defaultRuntimeId) void applyRuntimeRoutingPatch('default', runtimeId)
+                      }}
+                    />
+                    <${RuntimeRoutingSelect}
                       label="Librarian"
-                      hint="[runtime].librarian"
+                      hint="[runtime].librarian · 턴 후 에피소드 추출"
                       value=${librarianRuntime}
                       fallbackLabel="default runtime"
                       options=${runtimeSelectOptions}
@@ -1163,7 +1225,7 @@ export function SettingsSurface() {
                     />
                     <${RuntimeRoutingSelect}
                       label="Cross verifier"
-                      hint="[runtime].cross_verifier"
+                      hint="[runtime].cross_verifier · 반-합리화 평가자"
                       value=${crossVerifierRuntime}
                       fallbackLabel="default runtime"
                       options=${runtimeSelectOptions}
@@ -1198,6 +1260,9 @@ export function SettingsSurface() {
                         </div>
                       `)}
                     </div>`}
+                  <div class="set-hint" style=${{ marginTop: '8px' }}>
+                    키퍼별 고정 배정(<span class="mono">[runtime.assignments]</span>) 편집은 런타임 관리에서.
+                  </div>
                 </div>
               </div>
             `}
@@ -1273,6 +1338,10 @@ export function SettingsSurface() {
                     `
                     : null}
                 `}
+            `}
+
+            ${sec === 'repositories' && html`
+              <${SettingsRepositoriesSection} />
             `}
 
             ${sec === 'logs' && html`

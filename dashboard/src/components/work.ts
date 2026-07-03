@@ -686,9 +686,11 @@ const KANBAN_MUTED_PRIORITY_BUCKET = 4
 function KanbanCard({
   task,
   onClaim,
+  onJumpGoal,
 }: {
   task: KanbanTask
   onClaim: (id: string) => void
+  onJumpGoal: (goalId: string) => void
 }) {
   const state = jobStateForTask(task)
   const keeper = keeperByName(task.assignee)
@@ -724,6 +726,17 @@ function KanbanCard({
       <div class="wk-kcard-title">${task.title}</div>
       ${blocker ? html`<div class="wk-kcard-block">⚠ ${blocker}</div>` : null}
       ${hasDescription ? html`<p class="wk-kcard-desc">${description}</p>` : null}
+      ${task._goalId
+        ? html`
+          <button
+            type="button"
+            class="wk-kcard-goal"
+            data-kanban-goal-jump=${task._goalId}
+            title=${`소속 목표로 이동 · ${task._goalTitle}`}
+            onClick=${(e: Event) => { e.stopPropagation(); onJumpGoal(task._goalId) }}
+          >↳ ${task._goalTitle}</button>
+        `
+        : null}
       <div class="wk-kcard-foot">
         ${task.assignee
           ? html`
@@ -754,9 +767,11 @@ function KanbanCard({
 function KanbanView({
   kanbanTasks,
   onClaim,
+  onJumpGoal,
 }: {
   kanbanTasks: ReadonlyArray<KanbanTask>
   onClaim: (id: string) => void
+  onJumpGoal: (goalId: string) => void
 }) {
   return html`
     <div class="wk-kanban" data-testid="work-kanban">
@@ -776,6 +791,7 @@ function KanbanView({
                     key=${t.id}
                     task=${t}
                     onClaim=${onClaim}
+                    onJumpGoal=${onJumpGoal}
                   />
                 `)}
             </div>
@@ -1283,6 +1299,31 @@ function WorkSurfaceV2() {
     writeStoredWorkView(next)
   }, [])
 
+  // Kanban card → owning goal. Goal cards only render in the list view, so the
+  // jump switches to list first, expands the goal, then scrolls once the list
+  // has painted (double rAF: view switch + expansion both flush before scroll).
+  const jumpToGoalFromKanban = useCallback((id: string) => {
+    if (!id) return
+    setView('list')
+    writeStoredWorkView('list')
+    setOpenSet(prev => {
+      const next = new Set(prev)
+      next.add(id)
+      return next
+    })
+    requestAnimationFrame(() => requestAnimationFrame(() => {
+      const scroll = document.querySelector('.ov-2col .ov-scroll')
+      const card = document.querySelector(`[data-goal-id="${id}"]`)
+      if (scroll && card) {
+        const r = card.getBoundingClientRect()
+        const sr = scroll.getBoundingClientRect()
+        scroll.scrollTo({ top: (scroll as HTMLElement).scrollTop + r.top - sr.top - 80, behavior: 'smooth' })
+      } else if (card) {
+        card.scrollIntoView({ block: 'center', behavior: 'smooth' })
+      }
+    }))
+  }, [])
+
   return html`
     <main class=${`ov ov-2col ${goalCreateOpen ? 'ov-with-panel' : ''}`}>
       <div class="ov-scroll">
@@ -1393,6 +1434,7 @@ function WorkSurfaceV2() {
               <${KanbanView}
                 kanbanTasks=${kanbanTasks}
                 onClaim=${claimTask}
+                onJumpGoal=${jumpToGoalFromKanban}
               />
             `}
 

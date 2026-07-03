@@ -14,6 +14,11 @@ type risk_level =
   | High
   | Critical
 
+(** Lifecycle phase of a pending approval. *)
+type pending_phase =
+  | Awaiting_operator
+  | Escalated
+
 (** [Agent_sdk.Hooks.approval_decision] alias used as the resolver type. *)
 type decision = Agent_sdk.Hooks.approval_decision
 
@@ -47,6 +52,7 @@ type pending_approval =
   ; selected_model : string option
   ; disposition : string option
   ; disposition_reason : string option
+  ; phase : pending_phase
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
@@ -92,6 +98,8 @@ val resolve_error_to_string : resolve_error -> string
 val risk_level_to_string : risk_level -> string
 val risk_level_to_int : risk_level -> int
 val risk_level_of_string : string -> risk_level option
+val pending_phase_to_string : pending_phase -> string
+val pending_phase_of_string : string -> pending_phase option
 val approval_decision_to_string : decision -> string
 val approval_audit_decision_to_string : approval_audit_decision -> string
 
@@ -198,6 +206,7 @@ val list_recent_resolved_json :
 module For_testing : sig
   val reset_audit_store : unit -> unit
   val first_cmd_token : string -> string option
+  val get_pending_entry : id:string -> pending_approval option
 end
 
 (** {1 Submit & await} *)

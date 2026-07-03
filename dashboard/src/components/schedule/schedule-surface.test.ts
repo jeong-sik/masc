@@ -111,6 +111,10 @@ describe('ScheduleSurface', () => {
 
     expect(mocks.loadTools).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="schedule-surface"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
+      .toContain('관측 전용')
+    expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
+      .toContain('keeper turn을 자동 구동하지 않습니다')
     expect(container.textContent).toContain('예약 자동화')
     expect(container.textContent).toContain('예약 자동화 projection 없음')
   })
@@ -149,6 +153,26 @@ describe('ScheduleSurface', () => {
     // on the v2 surface — neither the card nor the SchDetail overlay use
     // KeeperActionCell — so this coverage is dropped (genuinely gone from v2).
     expect(container.querySelector('[data-schedule-id="sched-1"]')).not.toBeNull()
+    expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
+  })
+
+  it('renders the read-only operations aside in a two-column shell', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    // Two-column shell so the aside sits as a right rail beside the scroll column.
+    expect(container.querySelector('main.ov-2col')).not.toBeNull()
+    const aside = container.querySelector('[data-testid="schedule-aside"]')
+    expect(aside).not.toBeNull()
+    expect(aside?.querySelector('.wka-pulse')).not.toBeNull()
+    // The aside is derived read-only: no mutation controls anywhere on the surface.
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
 

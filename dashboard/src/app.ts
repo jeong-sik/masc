@@ -63,6 +63,8 @@ import {
 } from './components/tweaks-panel'
 import { TopBarV2 } from './components/v2/top-bar-v2'
 import { NavRailV2 } from './components/v2/nav-rail-v2'
+import { loadTools, toolsData, toolsLoading } from './components/tools/tool-state'
+import { scheduledPendingApprovalCount } from './components/tools/scheduled-automation-panel'
 
 // Sidebar collapsed state persists across reloads (kept for compatibility with
 // downstream consumers / tests). The v2 rail is a fixed 58px icon rail, so this
@@ -202,6 +204,14 @@ export function App() {
     registerGovernanceRefresh(refreshGovernanceLazy)
     refreshGovernanceLazy()
 
+    // The scheduled-automation projection backs the always-visible nav-rail
+    // schedule badge + topbar chip (schedule.jsx: chip/badge stay in sync). Like
+    // the governance approvals badge, the count must be available before the
+    // operator visits the schedule surface, so load the projection once at boot.
+    if (!toolsData.value && !toolsLoading.value) {
+      void loadTools()
+    }
+
     const unsubSSE = setupSSEReaction()
     startPeriodicRefresh()
     startErrorCleanup()
@@ -266,6 +276,7 @@ export function App() {
   }, [tweaksVolt.value, tweaksTheme.value])
 
   const approvalsBadge = governanceData.value?.approval_queue?.length ?? 0
+  const scheduleBadge = scheduledPendingApprovalCount(toolsData.value?.scheduled_automation ?? null)
 
   // Body grid columns. Desktop: nav rail (58px) + single content column. Mobile:
   // a single 1fr column — the nav becomes a fixed bottom tab bar (.v2-nav.is-mnav),
@@ -309,7 +320,7 @@ export function App() {
 
       <div class="v2-stage">
         <div class="v2-body" style=${{ gridTemplateColumns: cols }}>
-          ${compactChromeMode ? null : html`<${NavRailV2} badges=${{ approvals: approvalsBadge }} mobile=${isMobile} />`}
+          ${compactChromeMode ? null : html`<${NavRailV2} badges=${{ approvals: approvalsBadge, schedule: scheduleBadge }} mobile=${isMobile} />`}
           <main
             id="main-content"
             tabindex=${-1}

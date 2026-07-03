@@ -20,7 +20,7 @@ vi.mock('../common/toast', () => ({
   showToast: mocks.showToast,
 }))
 
-import { ScheduledAutomationPanel, selectWakeSignals, filterMatches } from './scheduled-automation-panel'
+import { ScheduleAside, ScheduledAutomationPanel, scheduledPendingApprovalCount, selectWakeSignals, filterMatches } from './scheduled-automation-panel'
 
 function request(
   overrides: Partial<DashboardScheduledAutomationRequest> & { schedule_id: string },
@@ -569,5 +569,88 @@ describe('filterMatches', () => {
     // switch case: the assertNever default must surface the gap (Error) rather
     // than fall through to `return true`. `as never` stands in for that bypass.
     expect(() => filterMatches('archived' as never, request({ schedule_id: 'x' }))).toThrow()
+  })
+})
+
+describe('scheduledPendingApprovalCount', () => {
+  it('returns 0 for a missing projection', () => {
+    expect(scheduledPendingApprovalCount(null)).toBe(0)
+    expect(scheduledPendingApprovalCount(undefined)).toBe(0)
+  })
+
+  it('counts pending-family requests when sparse counts are absent', () => {
+    const auto = automation([
+      request({ schedule_id: 'a', status: 'pending_approval' }),
+      request({ schedule_id: 'b', status: 'awaiting_approval' }),
+      request({ schedule_id: 'c', status: 'scheduled' }),
+    ])
+    expect(scheduledPendingApprovalCount(auto)).toBe(2)
+  })
+
+  it('takes the larger of sparse counts vs materialized requests', () => {
+    const auto = automation([request({ schedule_id: 'a', status: 'pending_approval' })])
+    auto.counts = { pending: 3 }
+    expect(scheduledPendingApprovalCount(auto)).toBe(3)
+  })
+
+  it('prefers effective_status over raw status', () => {
+    const auto = automation([
+      request({ schedule_id: 'a', status: 'scheduled', effective_status: 'pending_approval' }),
+    ])
+    expect(scheduledPendingApprovalCount(auto)).toBe(1)
+  })
+})
+
+describe('ScheduleAside', () => {
+  let container: HTMLDivElement
+
+  beforeEach(() => {
+    container = document.createElement('div')
+    document.body.appendChild(container)
+  })
+
+  afterEach(() => {
+    render(null, container)
+    container.remove()
+  })
+
+  it('renders read-only pulse + triage buckets and opens details on click', () => {
+    const onOpen = vi.fn()
+    const requests: DashboardScheduledAutomationRequest[] = [
+      request({ schedule_id: 'pending-1', status: 'pending_approval', payload_summary: 'approve me', risk_class: 'workspace_write' }),
+      request({ schedule_id: 'due-1', status: 'due', payload_summary: 'due soon' }),
+      request({
+        schedule_id: 'failed-1',
+        status: 'failed',
+        payload_summary: 'it broke',
+        last_execution: { execution_id: 'exec-1', schedule_id: 'failed-1', status: 'execution_failed', error: 'runtime refused' },
+      }),
+      request({ schedule_id: 'done-1', status: 'succeeded', payload_summary: 'all good' }),
+    ]
+
+    render(
+      html`<${ScheduleAside}
+        requests=${requests}
+        sum=${{ scheduled: 2, dueRunning: 1, pending: 1, total: 4 }}
+        onOpen=${onOpen}
+      />`,
+      container,
+    )
+
+    const aside = container.querySelector('[data-testid="schedule-aside"]')
+    expect(aside).not.toBeNull()
+    expect(aside?.querySelector('.wka-pulse')?.textContent).toContain('예약됨')
+    // Triage buckets derived from request statuses.
+    expect(aside?.textContent).toContain('approve me') // pending → 해야 할 일
+    expect(aside?.textContent).toContain('due soon') // due → 해야 할 일
+    expect(aside?.textContent).toContain('it broke') // failed → 지금 상황
+    expect(aside?.textContent).toContain('runtime refused') // failed execution error
+    expect(aside?.textContent).toContain('all good') // terminal → 최근 실행
+    // Read-only: the aside never renders mutation controls.
+    expect(aside?.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
+
+    const pendingButton = aside?.querySelector('[data-schedule-aside-open="pending-1"]') as HTMLElement
+    pendingButton.click()
+    expect(onOpen).toHaveBeenCalledWith('pending-1')
   })
 })

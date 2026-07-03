@@ -181,27 +181,68 @@ let api_key_of_credential ?registry_entry (credential : Runtime_schema.credentia
 (* --- Provider kind resolution --- *)
 
 (* CLI subprocess provider kinds were removed in the agent_sdk pin bump
-   (oas service-name migration). No provider kind is a subprocess CLI, so
-   CLI-schema providers no longer resolve to a provider kind. *)
-let provider_kind_of_cli_provider (_provider : Runtime_schema.provider)
-    : Llm_provider.Provider_config.provider_kind option =
-  None
+   (oas service-name migration). No provider kind is a subprocess CLI, so a
+   CLI-transport provider can never resolve to a provider kind. The reason is
+   surfaced as [Error] (not [None]) so a binding dropped for this cause explains
+   itself at load instead of vanishing silently (Unknown->silent-drop
+   anti-pattern). *)
+let provider_kind_of_cli_provider (provider : Runtime_schema.provider)
+    : (Llm_provider.Provider_config.provider_kind, string) result =
+  Error
+    (Printf.sprintf
+       "provider %S uses protocol %s over a CLI transport, which the runtime \
+        adapter no longer materializes (CLI subprocess provider kinds were \
+        removed in the agent_sdk pin bump)"
+       provider.id
+       provider.protocol)
+;;
+
+let registry_provider_kind = function
+  | Some entry -> Some entry.Llm_provider.Provider_registry.defaults.kind
+  | None -> None
+;;
+
+let messages_api_compatible_provider_kind = function
+  | Llm_provider.Provider_config.Anthropic | Llm_provider.Provider_config.Kimi -> true
+  | Llm_provider.Provider_config.OpenAI_compat
+  | Llm_provider.Provider_config.Ollama
+  | Llm_provider.Provider_config.Gemini
+  | Llm_provider.Provider_config.Glm
+  | Llm_provider.Provider_config.DashScope -> false
 ;;
 
 let provider_kind_for_http_provider ?registry_entry (provider : Runtime_schema.provider)
-    : Llm_provider.Provider_config.provider_kind option =
+    : (Llm_provider.Provider_config.provider_kind, string) result =
   match provider.api_format with
-  | Ollama_api -> Some Llm_provider.Provider_config.Ollama
+  | Ollama_api -> Ok Llm_provider.Provider_config.Ollama
   | Chat_completions_api ->
-    Some
-      (match registry_entry with
-       | Some entry ->
-         let kind = entry.Llm_provider.Provider_registry.defaults.kind in
-         if kind = Llm_provider.Provider_config.Ollama
-         then Llm_provider.Provider_config.OpenAI_compat
-         else kind
+    (* Chat-completions keeps the historical OpenAI-compatible fallback when
+       registry metadata is absent. Messages API deliberately fails closed
+       below because there is no safe Anthropic-style default. *)
+    Ok
+      (match registry_provider_kind registry_entry with
+       | Some Llm_provider.Provider_config.Ollama ->
+         Llm_provider.Provider_config.OpenAI_compat
+       | Some kind -> kind
        | None -> Llm_provider.Provider_config.OpenAI_compat)
-  | Messages_api -> None
+  | Messages_api ->
+    (match registry_provider_kind registry_entry with
+     | Some kind when messages_api_compatible_provider_kind kind -> Ok kind
+     | Some kind ->
+       Error
+         (Printf.sprintf
+            "provider %S uses protocol %s, but registry kind %s is not \
+             messages-compatible"
+            provider.id
+            provider.protocol
+            (Llm_provider.Provider_config.string_of_provider_kind kind))
+     | None ->
+       Error
+         (Printf.sprintf
+            "provider %S uses protocol %s, but no OAS provider registry entry exists; \
+             messages-http requires registry kind SSOT"
+            provider.id
+            provider.protocol))
 ;;
 
 let request_path_for_http_provider ~(provider : Runtime_schema.provider) ~registry_entry ~kind
@@ -250,7 +291,7 @@ let effective_max_tokens_for_model spec requested =
    now-removed alias layer); [binding_to_provider_config] never consumed it. *)
 let provider_config_from_declared_provider ?keep_alive ?num_ctx
     (provider : Runtime_schema.provider) (spec : Runtime_schema.model_spec)
-    ~(max_tokens : int option) : Llm_provider.Provider_config.t option =
+    ~(max_tokens : int option) : (Llm_provider.Provider_config.t, string) result =
   let registry_entry = find_registry_entry provider.id in
   let supports_tool_choice_override = supports_tool_choice_override_of_model_spec spec in
   let max_tokens = effective_max_tokens_for_model spec max_tokens in
@@ -258,7 +299,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
   | Http base_url ->
     let base_url = Masc_network_defaults.normalize_loopback_base_url base_url in
     (match provider_kind_for_http_provider ?registry_entry provider with
-     | Some kind ->
+     | Ok kind ->
        let request_path =
          request_path_for_http_provider ~provider ~registry_entry ~kind ~base_url
        in
@@ -280,7 +321,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
              (fun (key, _) -> not (List.mem (normalize_header_key key) custom_keys))
              default_headers
        in
-       Some
+       Ok
          (Llm_provider.Provider_config.make
             ~kind
             ~model_id:spec.api_name
@@ -295,11 +336,11 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ?num_ctx
             ?connect_timeout_s:provider.connect_timeout_s
             ())
-     | None -> None)
+     | Error reason -> Error reason)
   | Cli _ ->
     (match provider_kind_of_cli_provider provider with
-     | Some kind ->
-       Some
+     | Ok kind ->
+       Ok
          (Llm_provider.Provider_config.make
             ~kind
             ~model_id:spec.api_name
@@ -313,7 +354,7 @@ let provider_config_from_declared_provider ?keep_alive ?num_ctx
             ?num_ctx
             ?connect_timeout_s:provider.connect_timeout_s
             ())
-     | None -> None)
+     | Error reason -> Error reason)
 ;;
 
 (* --- binding → Provider_config.t ---
@@ -334,19 +375,15 @@ let binding_to_provider_config (cfg : Runtime_schema.config) (binding : Runtime_
     (match Runtime_schema.provider_of_id cfg binding.provider_id with
      | None -> Error (Printf.sprintf "provider not found: %s" binding.provider_id)
      | Some provider ->
-       (match
-          provider_config_from_declared_provider
-            ?keep_alive:binding.keep_alive
-            ?num_ctx:binding.num_ctx
-            provider
-            spec
-            ~max_tokens
-        with
-        | None ->
-          Error
-            (Printf.sprintf
-               "%s.%s: binding resolution failed (provider transport/kind unmapped)"
-               binding.provider_id
-               binding.model_id)
-        | Some config -> Ok config))
+       (* [provider_config_from_declared_provider] already returns the concrete
+          reason (e.g. "provider ... uses protocol messages-http, which the
+          runtime adapter cannot build a provider_config for ..."); propagate it
+          verbatim instead of collapsing to a generic "resolution failed" that
+          hid which provider/protocol was unmapped. *)
+       provider_config_from_declared_provider
+         ?keep_alive:binding.keep_alive
+         ?num_ctx:binding.num_ctx
+         provider
+         spec
+         ~max_tokens)
 ;;

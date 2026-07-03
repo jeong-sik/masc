@@ -3,8 +3,8 @@
     Each remaining caller is named so:
 
       1. anti-rationalization keeps its compute-heavy default (180s);
-      2. dashboard judge daemons keep their no-wrapper default until the
-         dedicated advisory no-wrapper path lands;
+      2. dashboard judge daemons use a bounded advisory default so stale
+         dashboard work cannot pin the bridge indefinitely;
       3. the operator can override any single caller's budget via
          [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC];
       4. the operator can set a fallback for unknown / future callers
@@ -26,10 +26,10 @@ type caller =
 (** Hardcoded default seconds for each known caller. *)
 let global_default_sec = 300.0
 
-(** Default for advisory dashboard judge callers. This intentionally preserves
-    the pre-#22402 no-wrapper behavior while the dedicated advisory no-wrapper
-    path is split into its own PR. Per-caller env overrides still win. *)
-let dashboard_judge_default_sec = Float.infinity
+(** Default for advisory dashboard judge callers. This stays above the old
+    30/60s warning-prone path, but remains finite so dashboard work cannot
+    pin the bridge indefinitely. Per-caller env overrides still win. *)
+let dashboard_judge_default_sec = 180.0
 
 let caller_key = function
   | Anti_rationalization -> "anti_rationalization"
@@ -79,16 +79,29 @@ let trimmed_value_opt name =
   | None -> None
 ;;
 
-(** Accept positive floats including [Float.infinity]. The OAS bridge treats
-    [infinity] as no-fire, so the helper name intentionally does not claim
-    finiteness. *)
-let positive_or_default ~default value =
-  if Float.compare value 0.0 > 0 then value else default
-;;
-
-let timeout_env_value ~default raw =
-  Safe_ops.float_of_string_with_default ~default raw
-  |> positive_or_default ~default
+(** Accept only positive finite floats. [infinity] would bypass the bridge
+    timeout wrapper, so it is treated like any other invalid env value. *)
+let timeout_env_value_opt ~name raw =
+  let reject () =
+    let type_name = "positive finite float" in
+    Log.Misc.warn
+      "malformed env %s=%S (expected %s); falling back"
+      name
+      raw
+      type_name;
+    if Env_config_core.parse_warn_enabled ()
+    then
+      raise
+        (Env_config_core.Config_error
+           (Printf.sprintf "malformed env %s=%S (expected %s)" name raw type_name));
+    None
+  in
+  match Safe_ops.float_of_string_safe raw with
+  | None -> reject ()
+  | Some value ->
+    if Float.is_finite value && Float.compare value 0.0 > 0
+    then Some value
+    else reject ()
 ;;
 
 (** [timeout_sec ~caller ()] resolves the OAS bridge timeout for
@@ -96,13 +109,13 @@ let timeout_env_value ~default raw =
 
       1. Per-caller env [MASC_OAS_BRIDGE_TIMEOUT_<CALLER>_SEC]
          — wins unconditionally.  Lets the operator tune one
-         caller without touching others. Positive [Float.infinity] passes
-         through as a no-wrapper override.
+         caller without touching others. Invalid values, including
+         [Float.infinity], are treated as an invalid override and
+         fall through to the next lookup step.
       2. Per-caller checked-in default ([known_default_sec]).
          Preserves intentional 180s budgets for compute-heavy callers;
-         dashboard judge callers temporarily resolve to
-         [dashboard_judge_default_sec] ([Float.infinity]) until they move
-         to a dedicated advisory no-wrapper path.
+         dashboard judge callers resolve to a finite
+         [dashboard_judge_default_sec].
       3. Global env [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — only
          consulted for UNKNOWN callers (typo, future caller
          without a default entry).  Treating it as an override
@@ -111,14 +124,22 @@ let timeout_env_value ~default raw =
       4. [global_default_sec] (300s) hardcoded final fallback. *)
 let timeout_sec ~caller () =
   let per_caller_env = per_caller_env_var ~caller in
+  let fallback () =
+    match known_default_sec caller with
+    | Some d -> d
+    | None ->
+      (* Unknown caller: fall to global env, then global default. *)
+      (match trimmed_value_opt global_env_var with
+       | Some v ->
+         (match timeout_env_value_opt ~name:global_env_var v with
+          | Some value -> value
+          | None -> global_default_sec)
+       | None -> global_default_sec)
+  in
   match trimmed_value_opt per_caller_env with
-  | Some v -> timeout_env_value ~default:global_default_sec v
-  | None ->
-    (match known_default_sec caller with
-     | Some d -> d
-     | None ->
-       (* Unknown caller: fall to global env, then global default. *)
-       (match trimmed_value_opt global_env_var with
-        | Some v -> timeout_env_value ~default:global_default_sec v
-        | None -> global_default_sec))
+  | Some v ->
+    (match timeout_env_value_opt ~name:per_caller_env v with
+     | Some value -> value
+     | None -> fallback ())
+  | None -> fallback ()
 ;;

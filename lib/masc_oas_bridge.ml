@@ -17,10 +17,14 @@
 let timeout_overshoot_warn_ratio = 2.0
 
 let run_safe ~caller ~timeout_s fn =
-  if Float.classify_float timeout_s = FP_nan || Float.compare timeout_s 0.0 <= 0 then
+  if
+    Float.classify_float timeout_s = FP_nan
+    || Float.classify_float timeout_s = FP_infinite
+    || Float.compare timeout_s 0.0 <= 0
+  then
     invalid_arg
       (Printf.sprintf
-         "Masc_oas_bridge.run_safe: timeout_s must be positive or infinite \
+         "Masc_oas_bridge.run_safe: timeout_s must be positive and finite \
           (got %.6g)"
          timeout_s);
   match Masc_eio_env.get_opt () with
@@ -39,13 +43,8 @@ let run_safe ~caller ~timeout_s fn =
   | Some { Masc_eio_env.clock; _ } ->
     let t0 = Eio.Time.now clock in
     let elapsed () = Eio.Time.now clock -. t0 in
-    let do_timeout fn =
-      match Float.classify_float timeout_s with
-      | FP_infinite -> fn ()
-      | _ -> Eio.Time.with_timeout_exn clock timeout_s fn
-    in
     try
-      do_timeout fn
+      Eio.Time.with_timeout_exn clock timeout_s fn
     with
   | Eio.Time.Timeout ->
     (* #10094: per-caller timeout counter so the operator can see

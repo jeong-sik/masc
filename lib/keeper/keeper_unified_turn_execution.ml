@@ -189,6 +189,18 @@ let run (ctx : ctx)
                  ?shared_context
                  ?event_bus
                  ?trace_link:(trace_link ())
+                   (* This module is the autonomous lane's turn runner
+                      ([Keeper_unified_turn.run_keeper_cycle] → here, only ever
+                      reached via [Keeper_turn_admission.run_if_free]); the chat
+                      lane runs [run_keeper_msg_turn_admitted] on a separate
+                      path. So passing the yield hook here is inherently
+                      lane-gated: an idle-filler turn stops at the next boundary
+                      when a dashboard/connector chat is parked, but a chat turn
+                      never yields to a later-queued chat. *)
+                 ~yield_to_chat_waiting:(fun () ->
+                   Keeper_turn_admission.chat_waiting
+                     ~base_path:config.base_path
+                     ~keeper_name:meta.name)
                  ()))
     in
     result, turn_state

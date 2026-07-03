@@ -21,6 +21,9 @@ import {
   type IdeContextRouteLink,
 } from './ide-context-lens'
 import { cursorOverlaySignal, getKeeperColor, type KeeperCursor } from './keeper-cursor-overlay'
+import { buildCompositeByKeeperKey, fleetCompositeSnapshot } from '../../composite-signals'
+import { compositeSnapshotForKeeper } from '../../lib/keeper-composite-lookup'
+import type { KeeperCompositeSnapshot } from '../../api/schemas/keeper-composite'
 
 interface IdeKeeperWorkPanelProps {
   readonly keeperName: string
@@ -76,6 +79,17 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
 
   const cursor = resolveKeeperCursor(keeperName, overlay.cursors)
 
+  // task-1740 C3: the live-turn fields (model / in-flight tools / last
+  // skip / livelock / board cursor) are read from the composite snapshot
+  // SSOT (`/api/v1/keepers/:name/composite` via `fleetCompositeSnapshot`),
+  // not re-derived from the global keepers/tasks store. `.value` access
+  // auto-subscribes this component to composite freshness, mirroring the
+  // `keepers.value` / `tasks.value` reads above.
+  const composite = compositeSnapshotForKeeper(
+    keeper,
+    buildCompositeByKeeperKey(fleetCompositeSnapshot.value),
+  )
+
   return html`
     <section
       class="ide-keeper-work"
@@ -98,6 +112,7 @@ export function IdeKeeperWorkPanel({ keeperName }: IdeKeeperWorkPanelProps) {
           ${WorkMetric('goal', summary.currentGoalId ?? 'none')}
           ${WorkMetric('active', String(summary.activeTaskCount))}
         </div>
+        ${LiveTurnStrip(composite)}
         ${currentTask
           ? html`
             <div class="ide-keeper-work-card v2-ide-card">
@@ -296,6 +311,31 @@ function WorkMetric(label: string, value: string) {
       <span>${label}</span>
       <strong title=${value}>${value}</strong>
     </span>
+  `
+}
+
+// task-1740 C3: render the keeper's live-turn state from the composite
+// snapshot SSOT. Every value below is read from `KeeperCompositeSnapshot`
+// (the drift-guarded schema), never re-derived from the global store.
+// When no snapshot resolves (pinned backend that predates these fields,
+// or fleet composite not yet hydrated) the strip is omitted rather than
+// falling back to a store-derived guess, keeping the source singular.
+function LiveTurnStrip(composite: KeeperCompositeSnapshot | null) {
+  if (!composite) return null
+  const liveTurn = composite.live_turn ?? null
+  const lastSkip = composite.last_skip ?? null
+  const livelock = composite.livelock ?? null
+  const boardCursor = composite.board_cursor ?? null
+  const toolCount = liveTurn?.active_tool_count
+  const firstSkipReason = lastSkip?.reasons[0] ?? null
+  return html`
+    <div class="ide-keeper-work-strip" aria-label="Keeper live turn">
+      ${WorkMetric('model', liveTurn?.selected_model ?? '—')}
+      ${WorkMetric('tools', toolCount != null ? String(toolCount) : '—')}
+      ${WorkMetric('skip', firstSkipReason ?? 'none')}
+      ${WorkMetric('livelock', livelock ? String(livelock.attempts) : 'none')}
+      ${WorkMetric('board', boardCursor?.post_id ?? 'none')}
+    </div>
   `
 }
 

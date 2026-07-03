@@ -78,8 +78,12 @@ let add_agent_api_routes router =
              | None -> 20
            in
            let json =
+             let config = Mcp_server.workspace_config state in
              Tool_agent_timeline.build_timeline
-               (Mcp_server.workspace_config state)
+               ~load_chat:(fun ~agent_name ->
+                 Keeper_chat_timeline_source.lines_for
+                   ~base_dir:config.base_path ~keeper_name:agent_name)
+               config
                ~agent_name ~since_hours ~limit
                ~include_tasks:true ~include_board:false
                ~include_tool_calls:true

@@ -705,6 +705,40 @@ describe('FusionSurface', () => {
     expect(cards[1]?.classList.contains('failed')).toBe(true)
   })
 
+  it('renders the panel reason_code as a category chip on a failed panel card', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-reason-code',
+        title: 'Fusion deliberation (run fus-reason-code): mixed',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-reason-code',
+          question: 'Reason code?',
+          panel: [
+            { model: 'gpt-5', status: 'answered', answer: 'ok' },
+            {
+              model: 'claude',
+              status: 'failed',
+              reason_code: 'provider_error',
+              reason_detail: 'quota exceeded',
+            },
+          ],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'done' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const failedCard = container.querySelector('.fus-panel-card.failed')
+    const code = failedCard?.querySelector('.fus-pcode')
+    expect(code?.textContent).toBe('provider_error')
+    // the human detail still shows in the state chip; the answered card has no code
+    expect(failedCard?.textContent).toContain('quota exceeded')
+    const answeredCard = container.querySelector('.fus-panel-card.answered')
+    expect(answeredCard?.querySelector('.fus-pcode')).toBeNull()
+  })
+
   it('renders generation parameters when present in board meta', () => {
     fusionBoardPosts.value = [
       boardPost({
@@ -918,5 +952,47 @@ describe('FusionJudgesStrip', () => {
   it('renders nothing for a board post that predates the judges array', () => {
     render(html`<${FusionJudgesStrip} nodes=${[]} />`, container)
     expect(container.querySelector('[data-testid="fusion-judges"]')).toBeNull()
+  })
+
+  it('surfaces failure_code and elapsed timing on a failed node, marking a timeout', () => {
+    const failing: FusionJudgeNode[] = [
+      {
+        role: 'meta',
+        identity: 'o1',
+        failed: true,
+        error: 'judge timed out',
+        failureCode: 'timeout',
+        elapsedS: 30.2,
+        timedOut: true,
+        inputTokens: 800,
+        outputTokens: 0,
+      },
+    ]
+    render(html`<${FusionJudgesStrip} nodes=${failing} />`, container)
+    const row = container.querySelector('[data-failed="true"]')
+    expect(row?.querySelector('.fus-jn-code')?.textContent).toBe('timeout')
+    const time = row?.querySelector('.fus-jn-time')
+    expect(time?.textContent).toBe('30.2s')
+    // timed_out is consumed, not just the code — the elapsed chip is marked
+    expect(time?.classList.contains('timeout')).toBe(true)
+  })
+
+  it('shows elapsed without the timeout mark for a non-timeout failure', () => {
+    const failing: FusionJudgeNode[] = [
+      {
+        role: 'single',
+        identity: 'single',
+        failed: true,
+        error: 'could not parse structured output',
+        failureCode: 'parse_error',
+        elapsedS: 2.4,
+        timedOut: false,
+      },
+    ]
+    render(html`<${FusionJudgesStrip} nodes=${failing} />`, container)
+    const time = container.querySelector('[data-failed="true"] .fus-jn-time')
+    expect(time?.textContent).toBe('2.4s')
+    expect(time?.classList.contains('timeout')).toBe(false)
+    expect(container.querySelector('.fus-jn-code')?.textContent).toBe('parse_error')
   })
 })

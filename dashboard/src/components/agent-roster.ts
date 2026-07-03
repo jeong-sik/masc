@@ -1095,7 +1095,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
         onKeyDown=${handleRowKey}
         class="fl-row v2-monitoring-roster-row ${selected ? 'sel' : ''} ${ringFocusClasses({ tone: 'accent-fg', width: 2 })}"
       >
-        <div class="fl-id">
+        <div class="fl-id" aria-label=${`Keeper ${row.displayName}`}>
           <span class="shrink-0">
             <${AgentAvatar}
               name=${row.agent.name}
@@ -1120,7 +1120,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
           </div>
         </div>
 
-        <div class="fl-state">
+        <div class="fl-state" aria-label=${`운영판정 · 차단 · 단계 ${chipLabel} ${glossText} ${row.bandActionHint}`}>
           <span class="fl-chip" data-tone=${tone} title=${row.band.description}>
             <span class="inline-block h-1.5 w-1.5 rounded-full" style="background:currentColor" aria-hidden="true"></span>
             ${chipLabel}
@@ -1132,7 +1132,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             : null}
         </div>
 
-        <div class="fl-ctx">
+        <div class="fl-ctx" aria-label=${`컨텍스트 ${ctxPct != null ? `${ctxPct}%` : '없음'}`}>
           ${ctxPct != null
             ? html`
                 <div class="fl-ctx-bar"><span class=${ctxHot ? 'hot' : ''} style="width:${ctxPct}%"></span></div>
@@ -1141,9 +1141,13 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             : html`<span class="fl-ctx-val zero" data-stub="no context_ratio">—</span>`}
         </div>
 
-        <div class="fl-tool ${row.recentTools.length || (row.toolCallCount ?? 0) > 0 ? '' : 'none'}" title=${latestTool}>${latestTool}</div>
+        <div
+          class="fl-tool ${row.recentTools.length || (row.toolCallCount ?? 0) > 0 ? '' : 'none'}"
+          title=${latestTool}
+          aria-label=${`최근 도구 ${latestTool}`}
+        >${latestTool}</div>
 
-        <div class="fl-actcell" onClick=${(e: Event) => e.stopPropagation()}>
+        <div class="fl-actcell" aria-label="액션" onClick=${(e: Event) => e.stopPropagation()}>
           ${row.keeperRuntime
             ? html`<${KeeperActionButtons}
                 keeper=${row.keeperRuntime}

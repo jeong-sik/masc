@@ -93,7 +93,7 @@ led to the current route table.
 | overview.ts:712 | command/inspector | | |
 | lab-inspector.ts:27,34,41 | monitoring/agents, command/intervene, workspace/board | | |
 | memory.ts:392, memory-post-detail.ts:218 | workspace/board | | |
-| agents-unified.ts:17 | monitoring/agents | view | activeView deep-link narrowing |
+| agents-unified.ts:21 | monitoring/agents | view | activeView deep-link narrowing |
 | agent-detail-state.ts:133 | monitoring/agents | | back navigation |
 | agent-profile.ts:320,362 | monitoring/agents | agent (line 362) | |
 | board-utils.ts:24 | monitoring/agents | agent | |

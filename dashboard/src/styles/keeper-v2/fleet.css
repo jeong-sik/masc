@@ -269,7 +269,17 @@
     --fl-gap: var(--space-2);
     --fl-mobile-row-indent: calc(var(--space-5) + var(--space-4));
   }
-  .fl-rhead { display: none; }
+  .fl-rhead {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    padding: 0;
+    margin: -1px;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+  }
   .fl-row { align-items: start; }
   .fl-row .fl-ctx, .fl-row .fl-tool { display: none; }
   .fl-row .fl-state, .fl-row .fl-actcell { margin-left: var(--fl-mobile-row-indent); }

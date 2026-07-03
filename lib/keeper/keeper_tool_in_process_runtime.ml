@@ -393,7 +393,12 @@ let handle_masc_control ~(config : Workspace.config) ~(meta : keeper_meta) ~name
 
 let handle_masc_agent_timeline ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =
   let ctx : Tool_agent_timeline.context = { config; agent_name = meta.name } in
-  Tool_agent_timeline.dispatch ctx ~name ~args |> dispatch_option_to_string ~name
+  Tool_agent_timeline.dispatch
+    ~load_chat:(fun ~agent_name ->
+      Keeper_chat_timeline_source.lines_for_self
+        ~base_dir:config.base_path ~caller_keeper_name:meta.name ~agent_name)
+    ctx ~name ~args
+  |> dispatch_option_to_string ~name
 ;;
 
 let handle_masc_schedule ~(config : Workspace.config) ~(meta : keeper_meta) ~name ~args =

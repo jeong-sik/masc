@@ -122,6 +122,17 @@ let directive_paused_meta (meta : keeper_meta) paused =
   {
     meta with
     paused;
+    (* A gRPC pause directive is an operator/control-plane pause; record it
+       so the status bridge can name it. Resume/wakeup (paused=false) clears
+       the reason together with the pause bit. Observability only — the
+       pause/resume decision is carried by [paused] as before. *)
+    latched_reason =
+      (if paused
+       then
+         Some
+           (Keeper_latched_reason.Operator_paused
+              { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
+       else None);
     auto_resume_after_sec = None;
     runtime = { meta.runtime with last_blocker = None };
     updated_at = now_iso ();

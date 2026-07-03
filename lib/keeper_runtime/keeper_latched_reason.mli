@@ -8,7 +8,7 @@
     answers the operator-facing question: "why did the supervisor latch
     this keeper and refuse to advance the FSM until an external signal?"
 
-    See docs/superpowers/specs/2026-06-28-masc-oas-p0-infra-hardening-design.md
+    See docs/superpowers/specs/2026-06-26-masc-oas-p0-infra-hardening-design.md
     §3 (Keeper_latched_reason.t) for the design rationale.
 
     {1 Construction}
@@ -33,7 +33,14 @@ type t =
   | Turn_budget_exhausted of turn_budget_exhausted
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
-  | Operator_paused of { operator_actor : string }
+  | Operator_paused of { operator_actor : operator_actor }
+  | Dead_tombstone
+      (** The supervisor reaped a dead keeper and left [paused = true] on
+          disk as a tombstone (see
+          [Keeper_supervisor_cleanup_tombstone]). Carries no payload:
+          the fact that the paused meta is a dead-keeper tombstone — not
+          an operator pause or a runtime latch — is the whole
+          observability signal. *)
 
 and contract_violation_detail =
   { reason_code :
@@ -70,6 +77,10 @@ and turn_budget_detail =
       ]
   }
 
+and operator_actor =
+  | Grpc_directive
+  | Keeper_down
+
 (** {1 Wire format}
 
     Used for log/dashboard events. Wire is a closed set of names with
@@ -96,6 +107,15 @@ val hash : t -> int
 (** {1 Display} *)
 
 val pp : Format.formatter -> t -> unit
+
+(** {1 Well-known operator actors}
+
+    These are the only operator actors produced by production pause
+    sites. Wire strings are derived only at serialization boundaries. *)
+
+val operator_actor_grpc_directive : operator_actor
+val operator_actor_keeper_down : operator_actor
+val operator_actor_to_wire : operator_actor -> string
 
 module Stable : sig
   val to_yojson : t -> Yojson.Safe.t

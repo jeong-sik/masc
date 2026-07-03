@@ -49,6 +49,7 @@
   (re_export masc.telemetry_coverage_gap)
   (re_export masc.telemetry_unified)
   (re_export masc.telemetry_unified_source)
+  (re_export masc.types_boundary)
   (re_export masc.voice_bridge_core)
   (re_export masc.voice_config)
   (re_export masc.voice_runtime_overlay)

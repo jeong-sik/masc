@@ -44,8 +44,10 @@ val render_temporal_summary : ?now:float -> Agent_sdk.Context.t -> string option
     read from the stored [key_wall_time]/[key_elapsed_seconds], which
     reflect the last tool call and go stale across idle turns. A keeper
     waking after an idle gap therefore sees the current wall clock, not a
-    past tool-call timestamp. [elapsed] is [now - key_session_start]
-    (seconds since the injector/session started).
+    past tool-call timestamp. For current contexts, [elapsed] is
+    [now - key_session_start] (seconds since the injector/session
+    started). Legacy contexts written before [key_session_start] render
+    only when a stored [key_elapsed_seconds] value is available.
 
     [now] is a Unix timestamp in seconds; pass it to inject a fixed clock
     in tests.

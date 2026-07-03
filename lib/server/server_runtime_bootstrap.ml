@@ -270,6 +270,14 @@ let create_server_state ~sw ~base_path ~clock ~mono_clock ~net ~proc_mgr ~fs
   let base_path = Env_config_core.normalize_masc_base_path_input base_path in
   Runtime_params.initialize ~base_path;
   Fs_compat.set_fs fs;
+  (* RFC-0266 §7 Phase D: replay persisted fusion run history into the
+     process-wide registry so in-progress + recently-completed runs survive
+     server restart. Missing files yield an empty registry; malformed replay
+     lines are logged and skipped. *)
+  let registry_path =
+    Filename.concat (Common.masc_dir_from_base_path ~base_path) "fusion-runs.jsonl"
+  in
+  Fusion_run_registry.set_global (Fusion_run_registry.replay registry_path);
   Mcp_eio.set_net net;
   Mcp_eio.set_clock clock;
   Eio_context.set_switch sw;
@@ -661,14 +669,14 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          first turn (runtime→Runtime vision: no silent fallback). *)
       (match Runtime.config_path () with
        | Some config_path ->
-         (match Runtime.init_default_strict ~config_path with
+         (match Runtime.init_default_strict_report ~config_path with
           | Ok () ->
             Log.Server.info "Runtime default initialized: %s"
               (Runtime.get_default_runtime_id ())
-          | Error msg ->
+          | Error err ->
             Log.Server.error
               "Runtime.init_default_strict failed (fatal, refusing to boot): %s"
-              msg;
+              (Runtime.strict_init_error_to_string err);
             exit 1)
        | None ->
          Log.Server.error

@@ -685,8 +685,12 @@ let make_request_handler ~sw ~clock ~server_start_time:_ =
 
       | `GET, "/api/v1/dashboard/execution" ->
           with_h2_public_read h2_reqd (fun state ->
-            let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
-            h2_respond_json_value h2_reqd json ~extra_headers:cors)
+            match dashboard_execution_cached_http_body ~state httpun_request with
+            | Some body ->
+              h2_respond_json h2_reqd body ~compress:false ~extra_headers:cors
+            | None ->
+              let json = dashboard_execution_http_json ~state ~sw ~clock httpun_request in
+              h2_respond_json_value h2_reqd json ~compress:false ~extra_headers:cors)
 
       | `GET, "/api/v1/dashboard/execution-trust" ->
           with_h2_public_read h2_reqd (fun state ->

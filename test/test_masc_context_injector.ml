@@ -79,6 +79,7 @@ let test_context_updates_overwrite_bounded_keys () =
   let expected_keys =
     [
       MCI.key_wall_time;
+      MCI.key_session_start;
       MCI.key_elapsed_seconds;
       MCI.key_tool_call_count;
       MCI.key_last_tool_name;
@@ -147,6 +148,72 @@ let test_render_temporal_summary_populated () =
       (Astring.String.is_infix ~affix:"elapsed=42s" summary)
   | None -> fail "expected Some summary"
 
+(* Regression: turn N+1 must render the *fresh* current time, not the
+   last tool call's timestamp frozen in [key_wall_time]/[key_elapsed_seconds]
+   from turn N (the idle-wake bug). Uses a fixed [~now] far in the future
+   relative to the stored (stale) values. *)
+let test_render_uses_fresh_now_not_stale () =
+  let ctx = Agent_sdk.Context.create_sync () in
+  let stale_now = 1_700_000_000.0 in
+  (* 2023-11-14T22:13:20Z *)
+  let session_start = stale_now -. 100.0 in
+  Agent_sdk.Context.set ctx
+    MCI.key_wall_time (`String (MCI.iso8601_of_float stale_now));
+  Agent_sdk.Context.set ctx
+    MCI.key_session_start (`Float session_start);
+  Agent_sdk.Context.set ctx
+    MCI.key_elapsed_seconds (`Float 100.0);
+  Agent_sdk.Context.set ctx
+    MCI.key_tool_call_count (`Int 2);
+  Agent_sdk.Context.set ctx
+    MCI.key_last_tool_name (`String "bash");
+  Agent_sdk.Context.set ctx
+    MCI.key_last_tool_outcome (`String "ok");
+  let fresh_now = 1_800_000_000.0 in
+  (* 2027-01-15T08:00:00Z — 100_000_000s after the stale snapshot *)
+  match MCI.render_temporal_summary ~now:fresh_now ctx with
+  | Some summary ->
+    let fresh_iso = MCI.iso8601_of_float fresh_now in
+    let stale_iso = MCI.iso8601_of_float stale_now in
+    check bool "time= is the fresh render-time clock" true
+      (Astring.String.is_infix ~affix:("time=" ^ fresh_iso) summary);
+    check bool "time= is NOT the stale stored wall_time" false
+      (Astring.String.is_infix ~affix:stale_iso summary);
+    (* elapsed = fresh_now - session_start = 100_000_000 + 100 *)
+    check bool "elapsed recomputed against session_start at render time" true
+      (Astring.String.is_infix ~affix:"elapsed=100000100s" summary)
+  | None -> fail "expected Some summary"
+
+(* When [key_session_start] is absent (context written before the key
+   existed), elapsed falls back to the stored value; time= is still fresh. *)
+let test_render_elapsed_fallback_without_session_start () =
+  let ctx = Agent_sdk.Context.create_sync () in
+  Agent_sdk.Context.set ctx
+    MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
+  Agent_sdk.Context.set ctx
+    MCI.key_elapsed_seconds (`Float 55.0);
+  Agent_sdk.Context.set ctx
+    MCI.key_tool_call_count (`Int 1);
+  Agent_sdk.Context.set ctx
+    MCI.key_last_tool_name (`String "legacy_tool");
+  Agent_sdk.Context.set ctx
+    MCI.key_last_tool_outcome (`String "ok");
+  match MCI.render_temporal_summary ~now:1_800_000_000.0 ctx with
+  | Some summary ->
+    check bool "time= is fresh" true
+      (Astring.String.is_infix
+         ~affix:("time=" ^ MCI.iso8601_of_float 1_800_000_000.0) summary);
+    check bool "elapsed falls back to stored value" true
+      (Astring.String.is_infix ~affix:"elapsed=55s" summary)
+  | None -> fail "expected Some summary"
+
+let test_render_omits_malformed_elapsed_context () =
+  let ctx = Agent_sdk.Context.create_sync () in
+  Agent_sdk.Context.set ctx
+    MCI.key_wall_time (`String "2023-11-14T22:13:20Z");
+  check (option string) "missing elapsed anchor omits summary"
+    None (MCI.render_temporal_summary ~now:1_800_000_000.0 ctx)
+
 (* ── ISO 8601 formatting ────────────────────────────── *)
 
 let test_iso8601_format () =
@@ -180,6 +247,12 @@ let () =
         test_render_temporal_summary_empty;
       test_case "populated context" `Quick
         test_render_temporal_summary_populated;
+      test_case "fresh now, not stale wall_time" `Quick
+        test_render_uses_fresh_now_not_stale;
+      test_case "elapsed fallback without session_start" `Quick
+        test_render_elapsed_fallback_without_session_start;
+      test_case "malformed elapsed context omitted" `Quick
+        test_render_omits_malformed_elapsed_context;
     ];
     "iso8601", [
       test_case "format" `Quick test_iso8601_format;

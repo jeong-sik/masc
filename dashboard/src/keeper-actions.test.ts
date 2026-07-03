@@ -77,6 +77,7 @@ import {
   noteKeeperChatAppended,
   probeKeeperRuntime,
   recoverKeeperRuntime,
+  refreshActiveKeeperChatHistory,
   resumePendingKeeperChatRequests,
   selectKeeper,
   sendKeeperThreadMessage,
@@ -109,19 +110,45 @@ describe('noteKeeperChatAppended', () => {
   beforeEach(() => {
     keeperThreads.value = {}
     keeperActionErrors.value = {}
+    activeKeeperName.value = ''
     _resetChatHydrationForTests()
     fetchKeeperChatHistory.mockReset()
     vi.useFakeTimers()
   })
 
   afterEach(() => {
+    activeKeeperName.value = ''
     vi.useRealTimers()
   })
 
-  it('skips keepers whose transcript was never hydrated', async () => {
+  it('skips an un-hydrated keeper that is not the open panel', async () => {
+    activeKeeperName.value = 'other'
     noteKeeperChatAppended('echo')
     await vi.runAllTimersAsync()
     expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+  })
+
+  it('re-hydrates the open keeper after a failed hydration when an append arrives', async () => {
+    activeKeeperName.value = 'echo'
+    // First hydration fails and rolls 'echo' back out of the hydrated set.
+    fetchKeeperChatHistory.mockRejectedValueOnce(new Error('HTTP 502'))
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+    expect(keeperActionErrors.value.echo).toContain('이전 대화 불러오기 실패')
+
+    // A subsequent append for the open panel must converge (drop -> re-fetch)
+    // rather than be skipped until the panel remounts.
+    fetchKeeperChatHistory.mockResolvedValueOnce([
+      { role: 'user', content: 'hi', ts: 1_780_000_000 },
+      { role: 'assistant', content: 'recovered', ts: 1_780_000_000 },
+    ])
+    noteKeeperChatAppended('echo')
+    await vi.runAllTimersAsync()
+
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+    const thread = keeperThreads.value.echo ?? []
+    expect(thread).toHaveLength(2)
+    expect(thread[1]?.text).toBe('recovered')
   })
 
   it('debounces a burst of appends into one forced refetch', async () => {
@@ -245,6 +272,52 @@ describe('hydrateKeeperChatHistory', () => {
     await hydrateKeeperChatHistory('echo')
     expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
     expect(keeperThreads.value.echo).toHaveLength(1)
+  })
+})
+
+describe('refreshActiveKeeperChatHistory', () => {
+  beforeEach(() => {
+    keeperThreads.value = {}
+    keeperActionErrors.value = {}
+    activeKeeperName.value = ''
+    _resetChatHydrationForTests()
+    fetchKeeperChatHistory.mockReset()
+    fetchKeeperChatHistory.mockResolvedValue([])
+  })
+
+  afterEach(() => {
+    activeKeeperName.value = ''
+  })
+
+  it('does nothing when no keeper panel is open', () => {
+    refreshActiveKeeperChatHistory({ force: true })
+    expect(fetchKeeperChatHistory).not.toHaveBeenCalled()
+  })
+
+  it('force re-fetches the open keeper transcript on reconnect recovery', async () => {
+    activeKeeperName.value = 'echo'
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+
+    refreshActiveKeeperChatHistory({ force: true })
+    await Promise.resolve()
+    await Promise.resolve()
+
+    // Force bypasses the once-per-page guard so the missed replay-buffer gap
+    // is re-fetched even though 'echo' is already hydrated.
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(2)
+  })
+
+  it('respects the hydration guard without force (route/periodic no-op)', async () => {
+    activeKeeperName.value = 'echo'
+    await hydrateKeeperChatHistory('echo')
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
+
+    refreshActiveKeeperChatHistory()
+    await Promise.resolve()
+    await Promise.resolve()
+
+    expect(fetchKeeperChatHistory).toHaveBeenCalledTimes(1)
   })
 })
 

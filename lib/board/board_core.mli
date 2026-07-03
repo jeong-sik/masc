@@ -313,10 +313,15 @@ val find_post_by_run_id : store -> run_id:string -> post option
     {!with_lock} block to avoid the two-call lock churn
     that previously surfaced as
     [Mutex.lock: Resource deadlock avoided] under contended
-    repeated agent polling. *)
+    repeated agent polling.  Omitted pagination arguments preserve
+    the full-thread read; supplied pagination arguments are clamped
+    to the board comment page limits. *)
 val get_post_and_comments
   :  store
   -> post_id:string
+  -> ?comment_offset:int
+  -> ?comment_limit:int
+  -> unit
   -> (post * comment list, board_error) Result.t
 
 (** Re-runs {!legacy_migrate_post_kind} against persisted

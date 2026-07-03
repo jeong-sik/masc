@@ -652,18 +652,26 @@ let fold_jsonl_lines ~init ~f path =
      ([fd_cache_mu]) so two appends to *different* paths never
      contend on a global fd-cache lock. *)
 let close_all_cached_writers () = Fd_cache.close_all ()
+
+let invalidate_cached_writer path =
+  let path_mu = get_append_path_mutex path in
+  Stdlib.Mutex.protect path_mu (fun () -> Fd_cache.invalidate path)
+;;
+
 let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
+
+let with_cached_writer_for_testing path f = Fd_cache.with_writer path f
 
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =
   test_exec_home_guard ~op:"append_jsonl" path;
   let dir = Stdlib.Filename.dirname path in
   mkdir_p_memoized dir;
   let line = Yojson.Safe.to_string json ^ "\n" in
-  let oc = Fd_cache.get_writer path in
   let path_mu = get_append_path_mutex path in
   Stdlib.Mutex.protect path_mu (fun () ->
-    Stdlib.output_string oc line;
-    Stdlib.flush oc)
+    Fd_cache.with_writer path (fun oc ->
+      Stdlib.output_string oc line;
+      Stdlib.flush oc))
 
 let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
   if jsons = [] then ()
@@ -677,10 +685,10 @@ let append_jsonl_batch (path : string) (jsons : Yojson.Safe.t list) : unit =
       Buffer.add_char buf '\n'
     ) jsons;
     let chunk = Buffer.contents buf in
-    let oc = Fd_cache.get_writer path in
     let path_mu = get_append_path_mutex path in
     Stdlib.Mutex.protect path_mu (fun () ->
-      Stdlib.output_string oc chunk;
-      Stdlib.flush oc)
+      Fd_cache.with_writer path (fun oc ->
+        Stdlib.output_string oc chunk;
+        Stdlib.flush oc))
   end
 ;;

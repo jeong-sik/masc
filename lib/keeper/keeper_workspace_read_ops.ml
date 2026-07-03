@@ -14,10 +14,13 @@ open Keeper_workspace_ops_setup
    crossing the execution boundary. Regex/glob semantics stay with the
    actual rg invocation so sandboxed keepers do not depend on a host rg
    preflight. *)
-let rg_type_name_re = Re.Pcre.re {|^[a-zA-Z0-9_-]+$|} |> Re.compile
+let rg_type_name_char = function
+  | 'a' .. 'z' | 'A' .. 'Z' | '0' .. '9' | '-' | '_' -> true
+  | _ -> false
+;;
 
 let validate_rg_type file_type =
-  if file_type = "" || Re.execp rg_type_name_re file_type
+  if file_type = "" || String.for_all rg_type_name_char file_type
   then Ok ()
   else
     Error

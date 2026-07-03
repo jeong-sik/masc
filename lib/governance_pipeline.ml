@@ -117,7 +117,7 @@ let decide ~governance_level ~tool_name ~input =
   let risk = assess_risk ~tool_name ~input in
   let trace_id = generate_trace_id () in
   let action =
-    if Env_config_core.disable_hitl () && auto_approval_hard_forbidden ~risk None then
+    if auto_approval_hard_forbidden ~risk None then
       `Require_confirm
         (Printf.sprintf
            "Governance (%s): %s risk tool %S requires confirmation: auto-approval is \
@@ -329,7 +329,11 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
     in
     let hard_forbidden = auto_approval_hard_forbidden ~risk meta in
     let soft_forbidden = auto_approval_soft_forbidden ~tool_name ~input in
-    let auto_approval_forbidden = hard_forbidden || (not (Env_config_core.disable_hitl ()) && soft_forbidden) in
+    let hitl_disabled = Env_config_core.disable_hitl () in
+    let auto_approval_forbidden = hard_forbidden || (not hitl_disabled && soft_forbidden) in
+    if hitl_disabled && soft_forbidden then
+      Log.Governance.warn "[%s] HITL bypass: soft_forbidden tool=%s allowed via disable_hitl"
+        keeper_name tool_name;
     let requires_operator_approval = needs_approval || auto_approval_forbidden in
     if trifecta_active
     then

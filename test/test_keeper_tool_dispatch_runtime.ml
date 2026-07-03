@@ -500,6 +500,17 @@ let test_keeper_tools_list_json_uses_typed_groups () =
     | descriptor :: _ -> descriptor
     | [] -> fail ("missing registered descriptor for " ^ internal_name)
   in
+  let execute_descriptor = descriptor_for_internal "tool_execute" in
+  let execute_fields = KTD.discovery_fields execute_descriptor in
+  check string "discovery_fields internal name" "tool_execute"
+    (match List.assoc_opt "internal_name" execute_fields with
+     | Some (`String internal_name) -> internal_name
+     | _ -> fail "discovery_fields missing internal_name");
+  check bool "discovery_fields leaves active_names to shared runtime" true
+    (Option.is_none (List.assoc_opt "active_names" execute_fields));
+  check string "discovery_json wraps discovery_fields"
+    (Yojson.Safe.to_string (`Assoc execute_fields))
+    (Yojson.Safe.to_string (KTD.discovery_json execute_descriptor));
   let execute = find_descriptor "tool_execute" in
   check string "Execute public alias" "Execute"
     (string_member "public_name" execute);

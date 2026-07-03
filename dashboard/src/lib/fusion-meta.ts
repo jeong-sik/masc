@@ -177,15 +177,19 @@ export function normalizeFusionJudge(value: unknown): FusionJudgeView | null {
 
 // One judge execution node from `fusion_sink.ml judge_node_meta`. `role` is the
 // closed backend enum (single | refine | first | meta) but kept as a string so
-// an unanticipated role degrades to a raw badge instead of being dropped. Only
-// structural fields are retained — the dashboard renders topology from the
-// shape of the array, and the per-node synthesis text is carried by the
-// canonical singular `judge`.
+// an unanticipated role degrades to a raw badge instead of being dropped.
+// `decision`/`summary` are the per-node verdict + resolved answer that a
+// Synthesized node carries (judge_node_meta → judge_synthesis_fields:
+// decision/resolved_answer); a Judge_failed node carries neither, so both stay
+// undefined there. They power the judge-of-judges 1차 심판 cards; the compact
+// topology strip ignores them and reads only the array shape.
 export type FusionJudgeNode = {
   role: string
   identity: string
   failed: boolean
   error?: string | null
+  decision?: string | null
+  summary?: string | null
   inputTokens?: number | null
   outputTokens?: number | null
 }
@@ -215,6 +219,10 @@ export function normalizeFusionJudgeNodes(value: unknown): FusionJudgeNode[] {
         identity: firstString(node, ['identity', 'model', 'name']) ?? `judge-${index + 1}`,
         failed,
         error: failed ? firstString(node, ['error', 'reason', 'error_text']) ?? undefined : undefined,
+        decision: failed ? undefined : firstString(node, ['decision', 'verdict']) ?? undefined,
+        summary: failed
+          ? undefined
+          : firstString(node, ['resolved_answer', 'resolvedAnswer', 'synthesis']) ?? undefined,
         inputTokens: firstNumber(node, ['input_tokens', 'inputTokens']) ?? undefined,
         outputTokens: firstNumber(node, ['output_tokens', 'outputTokens']) ?? undefined,
       },

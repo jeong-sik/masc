@@ -4,6 +4,7 @@ type docker_failure_class =
   | Docker_daemon_timeout
   | Docker_daemon_unavailable
   | Docker_runtime_error
+  | Docker_command_timeout
   | Image_inspect_timeout
   | Image_missing
   | Image_inspect_error
@@ -23,7 +24,10 @@ val output_looks_image_missing : string -> bool
 val output_looks_timeout : string -> bool
 val docker_output_looks_oci_mount_failure : string -> bool
 
-val classify_docker_runtime_failure :
+val classify_docker_info_failure :
+  status:Unix.process_status -> output:string -> docker_failure_class
+
+val classify_docker_run_failure :
   status:Unix.process_status -> output:string -> docker_failure_class
 
 val classify_image_inspect_failure :

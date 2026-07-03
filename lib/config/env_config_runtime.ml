@@ -861,7 +861,9 @@ end
 module Workspace_file = struct
   (** Maximum bytes served by the IDE workspace file endpoint in one
       response. The route rejects larger files instead of materializing
-      them in memory on a server fiber. *)
+      them in memory on a server fiber.
+      @category Policies
+      @ops_class operator *)
   let max_read_bytes =
     max 1 (get_int_nonneg ~default:1_048_576 "MASC_WORKSPACE_FILE_MAX_READ_BYTES")
 end

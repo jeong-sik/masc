@@ -218,6 +218,7 @@ let run_turn
       ?shared_context
       ?event_bus
       ?trace_link
+      ?yield_to_chat_waiting
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
@@ -585,6 +586,32 @@ let run_turn
                   ?max_tokens:requested_max_tokens
                   ()
               in
+              (* Autonomous chat-yield: when the caller supplies
+                 [yield_to_chat_waiting], evaluate it at each OAS agent-loop turn
+                 boundary (the [check_loop_guard] point, beside [max_idle_turns],
+                 before the next model dispatch — never mid tool execution). A
+                 [true] result stops the loop; [runtime_agent] converts that stop
+                 into a graceful [Ok] result *only* when [exit_condition_result]
+                 is also present, so both are wired together — otherwise the SDK
+                 [ExitConditionMet] surfaces as an error and the yield would be
+                 recorded as a turn failure/blocker. The rendered stop reason is
+                 [Yielded_to_chat_waiting], whose disposition is a
+                 [Continuation_checkpoint] (like [MutationBoundaryReached]):
+                 "stopped early, checkpoint saved, resume next cycle". *)
+              let chat_yield_exit_condition, chat_yield_exit_condition_result =
+                match yield_to_chat_waiting with
+                | None -> None, None
+                | Some pred ->
+                  ( Some (fun (_turn : int) -> pred ())
+                  , Some
+                      (fun (turn : int) ->
+                        ( Runtime_agent.Yielded_to_chat_waiting { turns_used = turn }
+                        , Some
+                            (Printf.sprintf
+                               "[yielded turn slot at turn %d to a waiting chat \
+                                request; keeper resumes on the next cycle]"
+                               turn) )) )
+              in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* The keeper turn deadline must own the OAS Agent.run switch.
                    Stream/body idle budgets catch liveness gaps; this hard
@@ -646,8 +673,13 @@ let run_turn
                          ?clock:(Eio_context.get_clock_opt ())
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-                      (* exit_condition removed with mutation_boundary — OAS runs to
-             natural completion (model end_turn). *)
+                      (* Mutation-boundary is native to OAS now; [exit_condition]
+                         is re-wired here solely for the autonomous chat-yield
+                         (see [chat_yield_exit_condition] above). Both are [None]
+                         on the chat lane, so a chat turn runs to natural
+                         completion (model end_turn) unchanged. *)
+                    ?exit_condition:chat_yield_exit_condition
+                    ?exit_condition_result:chat_yield_exit_condition_result
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
                     ?trace_link

@@ -34,12 +34,14 @@ let of_stop_reason = function
   | Runtime_agent.Completed -> Visible_reply
   | Runtime_agent.TurnBudgetExhausted _ -> Continuation_checkpoint
   | Runtime_agent.MutationBoundaryReached _ -> Continuation_checkpoint
+  | Runtime_agent.Yielded_to_chat_waiting _ -> Continuation_checkpoint
 
 let of_result_surface ~response_text = function
   | Runtime_agent.Completed ->
       if String.trim response_text = "" then No_visible_reply else Visible_reply
   | Runtime_agent.TurnBudgetExhausted _ -> Continuation_checkpoint
   | Runtime_agent.MutationBoundaryReached _ -> Continuation_checkpoint
+  | Runtime_agent.Yielded_to_chat_waiting _ -> Continuation_checkpoint
 
 let of_reply_payload payload =
   match payload with

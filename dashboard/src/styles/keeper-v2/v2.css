@@ -1553,14 +1553,14 @@ textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; bo
 .wka-done-mark.warn { color: var(--status-warn); }
 .wka-done-mark.dim { color: var(--text-dim); }
 .wka-done-mark.info { color: var(--info); }
-.wka-done-ns { margin-left: auto; flex: none; font-size: 10px; color: var(--text-dim); }
+.wka-done-ns { margin-left: auto; flex: none; font-size: var(--fs-10); color: var(--text-dim); }
 
 /* task activity lineage rail */
 .wk-lineage { border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); background: var(--bg-sunken); padding: 10px 12px; margin-bottom: 8px; }
 .wk-lin-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 9px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
-.wk-lin-h-lbl { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-mid); }
+.wk-lin-h-lbl { font-family: var(--font-display); font-size: var(--fs-10); letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-mid); }
 .wk-lin-chain { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
-.wk-lin-chain-arr { color: var(--volt-strong); font-size: 12px; }
+.wk-lin-chain-arr { color: var(--volt-strong); font-size: var(--fs-12); }
 .wk-lin-actor { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-primary); background: none; border: 0; border-bottom: 1px dashed var(--border-highlight); padding: 0 1px 1px; cursor: pointer; transition: color 0.14s ease, border-color 0.14s ease; }
 .wk-lin-actor:hover { color: var(--volt-strong); border-color: var(--volt-strong); }
 .wk-lin-actor.none { color: var(--text-dim); border-bottom-style: dotted; cursor: default; }
@@ -1569,7 +1569,7 @@ textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; bo
 
 .wk-lin-track { display: flex; flex-direction: column; }
 .wk-lin-row { display: grid; grid-template-columns: 38px 16px 1fr; align-items: start; gap: 0 9px; }
-.wk-lin-at { text-align: right; font-size: 10px; color: var(--text-dim); padding-top: 1px; font-variant-numeric: tabular-nums; }
+.wk-lin-at { text-align: right; font-size: var(--fs-10); color: var(--text-dim); padding-top: 1px; font-variant-numeric: tabular-nums; }
 .wk-lin-rail { position: relative; align-self: stretch; display: flex; justify-content: center; }
 .wk-lin-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-main); }
 .wk-lin-row:first-child .wk-lin-rail::before { top: 6px; }
@@ -1590,8 +1590,8 @@ textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; bo
 .wk-lin-ev.verify { color: var(--info); }
 .wk-lin-ev.done { color: var(--status-ok); }
 .wk-lin-ev.bad { color: var(--status-bad); }
-.wk-lin-arr { color: var(--volt-strong); font-size: 12px; }
-.wk-lin-note { display: block; font-size: 11px; color: var(--text-dim); line-height: 1.5; margin-top: 3px; }
+.wk-lin-arr { color: var(--volt-strong); font-size: var(--fs-12); }
+.wk-lin-note { display: block; font-size: var(--fs-11); color: var(--text-dim); line-height: 1.5; margin-top: 3px; }
 
 /* kanban card — owning goal jump */
 .wk-kcard-goal { display: block; width: 100%; box-sizing: border-box; text-align: left; font-size: 10.5px; color: var(--text-dim); background: none; border: 0; padding: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.14s ease; }

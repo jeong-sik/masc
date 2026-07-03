@@ -759,7 +759,7 @@ let test_get_post_and_comments_atomic () =
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok _ -> ());
-      match Board_dispatch.get_post_and_comments ~post_id:pid with
+      match Board_dispatch.get_post_and_comments ~post_id:pid () with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok (fetched, comments) ->
           Alcotest.(check string) "post content matches"
@@ -767,7 +767,7 @@ let test_get_post_and_comments_atomic () =
           Alcotest.(check int) "comment count" 2 (List.length comments)
 
 let test_get_post_and_comments_missing_post () =
-  match Board_dispatch.get_post_and_comments ~post_id:"never-existed" with
+  match Board_dispatch.get_post_and_comments ~post_id:"never-existed" () with
   | Ok _ -> Alcotest.fail "expected Post_not_found"
   | Error (Board.Post_not_found _) -> ()
   | Error e ->

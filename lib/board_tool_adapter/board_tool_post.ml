@@ -390,7 +390,7 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
   let comment_offset = get_int_opt args "comment_offset" in
   let comment_limit = get_int_opt args "comment_limit" in
-  match Board_dispatch.get_post_and_comments ~post_id ?comment_offset ?comment_limit with
+  match Board_dispatch.get_post_and_comments ~post_id ?comment_offset ?comment_limit () with
   | Error (Board.Post_not_found _) ->
     (* Idempotent: post no longer exists (deleted/expired/TTL).
        Return success so agent tool metrics don't count this as failure.

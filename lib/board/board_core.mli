@@ -319,6 +319,7 @@ val get_post_and_comments
   -> post_id:string
   -> ?comment_offset:int
   -> ?comment_limit:int
+  -> unit
   -> (post * comment list, board_error) Result.t
 
 (** Re-runs {!legacy_migrate_post_kind} against persisted

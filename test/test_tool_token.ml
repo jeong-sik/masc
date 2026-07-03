@@ -100,7 +100,20 @@ let test_dispatch_with_token () =
   let tool = "__test_token_dispatch" in
   Tool_dispatch.register ~tool_name:tool
     ~handler:(fun ~name ~args:_ -> Some (tool_ok ~tool_name:name ("dispatched:" ^ name)));
-  Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
+  (* Register a tag *and* an input schema. The C-4 validation pre-hook
+     ([Tool_input_validation.register_pre_hook], installed at composition-root
+     load) fail-closes on schema-less dispatch, so a real tool must expose a
+     schema. Use [register_module_tag] (tag + schema) instead of
+     [register_name_tag] (tag only). An empty-object schema passes validation
+     for the [`Null] args below. *)
+  Tool_dispatch.register_module_tag
+    ~schemas:
+      [ { Masc_domain.name = tool
+        ; description = "test dispatch tool"
+        ; input_schema = `Assoc [ "type", `String "object"; "properties", `Assoc [] ]
+        }
+      ]
+    ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Error e -> fail e
   | Ok token ->

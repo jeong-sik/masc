@@ -1001,9 +1001,13 @@ let test_effective_core_tools_is_subset_of_discovery () =
 ;;
 
 let test_effective_core_tools_without_universe_has_no_descriptor_publics () =
-  (* Before set_masc_schemas, injected_masc_tool_names () returns [].
-     Descriptor public names should NOT appear in effective_core_tools
-     when their internal_name is absent from the universe. *)
+  (* Descriptor public names should NOT appear in effective_core_tools when
+     their internal_name is absent from the universe. The composition-root
+     module-load init ([Mcp_server_eio]) injects Config.raw_all_tool_schemas
+     (which includes masc_web_search) into the universe, so this test must
+     explicitly reset the universe to empty to assert the no-universe case
+     rather than depending on init order. *)
+  Registry.set_masc_schemas [];
   let effective = Registry.effective_core_tools () in
   let descriptor_publics = Descriptor.public_names () in
   List.iter

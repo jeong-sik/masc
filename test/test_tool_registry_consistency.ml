@@ -163,14 +163,16 @@ let test_workspace_schemas_have_tool_spec_metadata () =
 
 let test_retired_tools_are_absent () =
   init ();
+  (* masc_operator_* and masc_surface_audit are NOT retired. [operator_tool.ml]
+     registers them at composition-root load as [Mod_operator] (some Hidden),
+     and they are live operator-surface tools (routed via transport +
+     dashboard). Keeper isolation is enforced by [keeper_tool_policy]
+     (Mod_operator is default-denied from keeper exposure — RFC-0042 closed-sum),
+     not by registry absence. Their real invariant is asserted below
+     ([live_operator_surface_tools]). Only genuinely removed front-door tools
+     stay here. *)
   let retired_front_door_tools =
-    [ "masc_operator_snapshot"
-    ; "masc_operator_digest"
-    ; "masc_operator_action"
-    ; "masc_operator_confirm"
-    ; "masc_operator_judgment_write"
-    ; "masc_surface_audit"
-    ; "masc_operation_start"
+    [ "masc_operation_start"
     ; "masc_dispatch_tick"
     ; "masc_goal_review"
     ]
@@ -203,7 +205,32 @@ let test_retired_tools_are_absent () =
   in
   Alcotest.(check (list string)) "retired tools absent from tag registry" [] leaked_tag;
   Alcotest.(check (list string)) "retired tools absent from schema registry" [] leaked_schema;
-  Alcotest.(check (list string)) "retired tools absent from handler registry" [] leaked_handler
+  Alcotest.(check (list string)) "retired tools absent from handler registry" [] leaked_handler;
+  (* Live operator-surface tools may be registered (composition-root load), but
+     must never carry a keeper-visible tag. The security boundary is the tag,
+     not registry absence: [keeper_tool_policy] default-denies [Mod_operator].
+     Assert that whenever present, they are tagged [Mod_operator] — a
+     keeper-visible tag here would be the real leak. *)
+  let live_operator_surface_tools =
+    [ "masc_operator_snapshot"
+    ; "masc_operator_digest"
+    ; "masc_operator_action"
+    ; "masc_operator_confirm"
+    ; "masc_operator_judgment_write"
+    ; "masc_surface_audit"
+    ]
+  in
+  let misclassified_operator_tags =
+    List.filter
+      (fun name ->
+        match Tool_dispatch.lookup_tag name with
+        | None | Some Tool_dispatch.Mod_operator -> false
+        | Some _ -> true)
+      live_operator_surface_tools
+  in
+  Alcotest.(check (list string))
+    "operator-surface tools carry the privileged Mod_operator tag when registered"
+    [] misclassified_operator_tags
 ;;
 
 let () =

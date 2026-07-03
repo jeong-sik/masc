@@ -8,7 +8,7 @@
     answers the operator-facing question: "why did the supervisor latch
     this keeper and refuse to advance the FSM until an external signal?"
 
-    See docs/superpowers/specs/2026-06-28-masc-oas-p0-infra-hardening-design.md
+    See docs/superpowers/specs/2026-06-26-masc-oas-p0-infra-hardening-design.md
     §3 (Keeper_latched_reason.t) for the design rationale.
 
     {1 Construction}
@@ -103,6 +103,15 @@ val hash : t -> int
 (** {1 Display} *)
 
 val pp : Format.formatter -> t -> unit
+
+(** {1 Well-known operator actors}
+
+    These are the only operator-actor strings produced by production
+    pause sites. Tests and consumers may match on the typed variant
+    instead of the wire string. *)
+
+val operator_actor_grpc_directive : string
+val operator_actor_keeper_down : string
 
 module Stable : sig
   val to_yojson : t -> Yojson.Safe.t

@@ -30,22 +30,6 @@ module Keeper_supervisor_cleanup_tombstone = Masc.Keeper_supervisor_cleanup_tomb
 module Keeper_supervisor_types = Masc.Keeper_supervisor_types
 module Keeper_types_profile = Masc.Keeper_types_profile
 
-let temp_dir prefix =
-  let dir = Filename.temp_file prefix "" in
-  Sys.remove dir;
-  Unix.mkdir dir 0o755;
-  dir
-
-let cleanup_dir dir =
-  let rec rm path =
-    if Sys.is_directory path
-    then (
-      Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
-      Unix.rmdir path)
-    else Unix.unlink path
-  in
-  try rm dir with _ -> ()
-
 let base_json name =
   `Assoc
     [ "name", `String name
@@ -74,6 +58,18 @@ let bridge_latched_reason config (meta : Keeper_meta_contract.keeper_meta) =
   | Some _ -> failf "latched_reason surfaced as a non-string, non-null JSON value"
   | None -> failf "attention_fields_json did not surface a latched_reason field"
 
+let wire_grpc_directive =
+  Keeper_latched_reason.to_wire
+    (Keeper_latched_reason.Operator_paused
+       { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
+
+let wire_keeper_down =
+  Keeper_latched_reason.to_wire
+    (Keeper_latched_reason.Operator_paused
+       { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
+
+let wire_dead_tombstone = Keeper_latched_reason.to_wire Keeper_latched_reason.Dead_tombstone
+
 (* ── Serialization + merge durability ───────────────────────── *)
 
 let test_latched_reason_survives_serialization () =
@@ -98,7 +94,8 @@ let test_latched_reason_survives_serialization () =
          (latched_reason_wire reparsed))
     [ "dead tombstone", Keeper_latched_reason.Dead_tombstone
     ; ( "operator paused"
-      , Keeper_latched_reason.Operator_paused { operator_actor = "keeper_down" } )
+      , Keeper_latched_reason.Operator_paused
+          { operator_actor = Keeper_latched_reason.operator_actor_keeper_down } )
     ]
 
 let test_no_latched_reason_serializes_as_null () =
@@ -123,9 +120,9 @@ let test_no_latched_reason_serializes_as_null () =
 (* ── Status bridge surfacing ────────────────────────────────── *)
 
 let test_status_bridge_surfaces_latched_reason () =
-  let config = Masc.Workspace.default_config (temp_dir "masc-latched-bridge-") in
+  let config = Masc.Workspace.default_config (Masc_test_deps.setup_test_workspace ()) in
   Fun.protect
-    ~finally:(fun () -> cleanup_dir config.base_path)
+    ~finally:(fun () -> Masc_test_deps.cleanup_test_workspace config.base_path)
     (fun () ->
        let paused_meta =
          { (make_meta "bridge-keeper") with
@@ -133,13 +130,13 @@ let test_status_bridge_surfaces_latched_reason () =
          ; latched_reason =
              Some
                (Keeper_latched_reason.Operator_paused
-                  { operator_actor = "keeper_down" })
+                  { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
          }
        in
        check
          (option string)
          "bridge surfaces the typed pause reason as its wire form"
-         (Some "operator_paused:actor=keeper_down")
+         (Some wire_keeper_down)
          (bridge_latched_reason config paused_meta);
        let unset_meta = { (make_meta "bridge-keeper-unset") with paused = true } in
        check
@@ -154,11 +151,11 @@ let test_grpc_pause_directive_records_reason () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = temp_dir "masc-latched-grpc-directive-" in
+  let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
     ~finally:(fun () ->
       Keeper_registry.clear ();
-      cleanup_dir base_path)
+      Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
@@ -173,7 +170,7 @@ let test_grpc_pause_directive_records_reason () =
           check
             (option string)
             "pause directive records grpc_directive operator pause"
-            (Some "operator_paused:actor=grpc_directive")
+            (Some wire_grpc_directive)
             (latched_reason_wire entry.meta)
         | None -> fail "expected registered keeper after pause directive");
        Keeper_keepalive.process_directive ~agent_name:keeper_name "resume";
@@ -193,11 +190,11 @@ let test_keeper_down_retain_records_reason () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = temp_dir "masc-latched-keeper-down-" in
+  let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
     ~finally:(fun () ->
       Keeper_registry.clear ();
-      cleanup_dir base_path)
+      Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
@@ -224,7 +221,7 @@ let test_keeper_down_retain_records_reason () =
          check
            (option string)
            "keeper_down retain records keeper_down operator pause"
-           (Some "operator_paused:actor=keeper_down")
+           (Some wire_keeper_down)
            (latched_reason_wire persisted)
        | Ok None -> fail "expected retained keeper meta on disk"
        | Error err -> failf "read persisted meta: %s" err)
@@ -244,11 +241,11 @@ let run_dead_tombstone_cleanup_records_reason
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   Eio.Switch.run
   @@ fun sw ->
-  let base_path = temp_dir "masc-latched-tombstone-" in
+  let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
     ~finally:(fun () ->
       Keeper_registry.clear ();
-      cleanup_dir base_path)
+      Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
@@ -298,7 +295,7 @@ let run_dead_tombstone_cleanup_records_reason
          check
            (option string)
            "dead tombstone records the Dead_tombstone reason"
-           (Some "dead_tombstone")
+           (Some wire_dead_tombstone)
            (latched_reason_wire persisted);
          check
            bool
@@ -327,7 +324,8 @@ let test_dead_tombstone_cleanup_overwrites_existing_pause_reason () =
   run_dead_tombstone_cleanup_records_reason
     ~paused:true
     ~latched_reason:
-      (Keeper_latched_reason.Operator_paused { operator_actor = "keeper_down" })
+      (Keeper_latched_reason.Operator_paused
+         { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
     "dead-tombstone-paused-keeper"
 
 let test_dead_tombstone_cleanup_clears_auto_resume_state () =
@@ -339,7 +337,8 @@ let test_dead_tombstone_cleanup_clears_auto_resume_state () =
   run_dead_tombstone_cleanup_records_reason
     ~paused:true
     ~latched_reason:
-      (Keeper_latched_reason.Operator_paused { operator_actor = "keeper_down" })
+      (Keeper_latched_reason.Operator_paused
+         { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
     ~auto_resume_after_sec:1.0
     ~last_blocker:timeout_blocker
     ~updated_at:"1970-01-01T00:00:00Z"
@@ -397,11 +396,11 @@ let test_dead_tombstone_cleanup_cas_retry_preserves_reason () =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
-  let base_path = temp_dir "masc-latched-tombstone-cas-" in
+  let base_path = Masc_test_deps.setup_test_workspace () in
   Fun.protect
     ~finally:(fun () ->
       Keeper_registry.clear ();
-      cleanup_dir base_path)
+      Masc_test_deps.cleanup_test_workspace base_path)
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
@@ -417,7 +416,7 @@ let test_dead_tombstone_cleanup_cas_retry_preserves_reason () =
            ; latched_reason =
                Some
                  (Keeper_latched_reason.Operator_paused
-                    { operator_actor = "keeper_down" })
+                    { operator_actor = Keeper_latched_reason.operator_actor_keeper_down })
            }
          in
          { base with
@@ -457,7 +456,7 @@ let test_dead_tombstone_cleanup_cas_retry_preserves_reason () =
          check
            (option string)
            "CAS retry persists Dead_tombstone, not the operator reason"
-           (Some "dead_tombstone")
+           (Some wire_dead_tombstone)
            (latched_reason_wire persisted);
          check
            int

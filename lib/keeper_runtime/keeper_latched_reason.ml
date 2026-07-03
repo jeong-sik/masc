@@ -228,6 +228,17 @@ let pp_runtime_exhaustion ppf = function
   | Unspecified_runtime -> Format.fprintf ppf "unspecified_runtime"
 ;;
 
+(* -------------------------------------------------------------------- *)
+(* Well-known operator actors                                           *)
+(* -------------------------------------------------------------------- *)
+
+let operator_actor_grpc_directive = "grpc_directive"
+let operator_actor_keeper_down = "keeper_down"
+
+(* -------------------------------------------------------------------- *)
+(* pp                                                                    *)
+(* -------------------------------------------------------------------- *)
+
 let pp ppf = function
   | No_progress_loop { consecutive_idle_cycles; detector_kind } ->
     Format.fprintf

@@ -78,7 +78,7 @@ let handle_keeper_down_config ~(config : Workspace.config) args : tool_result =
              latched_reason =
                Some
                  (Keeper_latched_reason.Operator_paused
-                    { operator_actor = "keeper_down" });
+                    { operator_actor = Keeper_latched_reason.operator_actor_keeper_down });
            }
          in
          ((match

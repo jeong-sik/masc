@@ -131,7 +131,7 @@ let directive_paused_meta (meta : keeper_meta) paused =
        then
          Some
            (Keeper_latched_reason.Operator_paused
-              { operator_actor = "grpc_directive" })
+              { operator_actor = Keeper_latched_reason.operator_actor_grpc_directive })
        else None);
     auto_resume_after_sec = None;
     runtime = { meta.runtime with last_blocker = None };

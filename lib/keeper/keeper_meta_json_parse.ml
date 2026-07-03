@@ -312,6 +312,7 @@ let parse_keeper_state
       (json : Yojson.Safe.t)
       ~(trace_id : Keeper_id.Trace_id.t)
       ~(trace_history : string list)
+      ~(keeper_name : string)
   : parsed_keeper_state
   =
   let generation = Safe_ops.json_int ~default:0 "generation" json in
@@ -382,14 +383,24 @@ let parse_keeper_state
      authoritative control bit ([paused] is). A malformed/unknown persisted
      value degrades to [None] rather than failing the whole meta parse —
      mirroring the lenient [last_blocker] read above. Losing the annotation
-     costs observability, never control. *)
+     costs observability, never control. Degradation is logged and counted
+     so observability loss is visible. *)
   let ps_latched_reason =
     match Json_util.assoc_member_opt "latched_reason" json with
     | None | Some `Null -> None
     | Some reason_json ->
       (match Keeper_latched_reason.Stable.of_yojson reason_json with
        | Ok reason -> Some reason
-       | Error _ -> None)
+       | Error err ->
+         Log.Keeper.warn
+           "%s: malformed latched_reason JSON dropped: %s"
+           keeper_name
+           err;
+         Otel_metric_store.inc_counter
+           Keeper_metrics.(to_string MetaReadFailures)
+           ~labels:[ "keeper", keeper_name; "site", "latched_reason_parse" ]
+           ();
+         None)
   in
   let ps_auto_resume_after_sec = Safe_ops.json_float_opt "auto_resume_after_sec" json in
   let ps_autoboot_enabled = Safe_ops.json_bool ~default:true "autoboot_enabled" json in
@@ -502,6 +513,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    json
                    ~trace_id:identity.pk_trace_id
                    ~trace_history:identity.pk_trace_history
+                   ~keeper_name:identity.pk_name
                in
                if not (validate_name identity.pk_name)
                then Error "invalid keeper meta (bad name)"

@@ -197,6 +197,15 @@ val get_runtime_by_id : string -> t option
     keeper's persona [model] selection or the default); [None] makes the driver
     fail fast rather than silently substituting the default (RFC-0207). *)
 
+val is_local_runtime : t -> bool
+(** [is_local_runtime rt] classifies runtime locality from the materialized
+    provider schema: CLI transports are local; HTTP transports are local only
+    when their endpoint is loopback and the provider declares no credential. *)
+
+val is_local_runtime_id : string -> bool option
+(** Locality classification for a configured runtime id, or [None] when the
+    runtime id is not currently materialized. *)
+
 val max_context_of_runtime_id : string -> int option
 (** Effective input context window for the materialized runtime [id], or [None]
     when the id is not configured.  Budgeting callers use this to size a

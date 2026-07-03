@@ -1141,6 +1141,51 @@ let with_model_catalog_content content f =
          Llm_provider.Model_catalog.set_global catalog;
          f ())
 
+let test_runtime_locality_uses_provider_schema () =
+  let content =
+    "[providers.local]\n\
+     display-name = \"Local Ollama\"\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [providers.remote]\n\
+     display-name = \"Remote API\"\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://api.example.com/v1\"\n\
+     \n\
+     [providers.remote.credentials]\n\
+     key = \"REMOTE_API_KEY\"\n\
+     \n\
+     [models.chat]\n\
+     api-name = \"chat\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.remote]\n\
+     api-name = \"remote\"\n\
+     max-context = 1024\n\
+     \n\
+     [local.chat]\n\
+     \n\
+     [remote.remote]\n\
+     \n\
+     [runtime]\n\
+     default = \"local.chat\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_temp_runtime_toml content @@ fun path ->
+       match Runtime.init_default ~config_path:path with
+       | Error msg -> failf "runtime init_default should load: %s" msg
+       | Ok () ->
+         check (option bool) "loopback no-auth runtime is local" (Some true)
+           (Runtime.is_local_runtime_id "local.chat");
+         check (option bool) "remote credentialed runtime is not local" (Some false)
+           (Runtime.is_local_runtime_id "remote.remote");
+         check (option bool) "unknown runtime locality is unknown" None
+           (Runtime.is_local_runtime_id "missing.runtime"))
+
 let test_runtime_capability_gate_uses_provider_qualified_catalog () =
   let catalog =
     "[[models]]\n\
@@ -1683,6 +1728,8 @@ let () =
           test_case
             "runtime capability gate uses provider-qualified OAS catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;
+          test_case "runtime locality uses provider schema" `Quick
+            test_runtime_locality_uses_provider_schema;
           test_case
             "runtime capability gate reports missing catalog models"
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;

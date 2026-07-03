@@ -49,6 +49,16 @@ let of_binding (cfg : config) (b : binding) : t option =
   Result.to_option (of_binding_result cfg b)
 ;;
 
+let is_local_provider (provider : provider) =
+  match provider.transport, provider.credentials with
+  | Cli _, _ -> true
+  | Http endpoint, None ->
+    Uri.of_string endpoint |> Uri.host |> Masc_network_defaults.is_loopback_host_opt
+  | Http _, Some _ -> false
+;;
+
+let is_local_runtime (runtime : t) = is_local_provider runtime.provider
+
 (* Split configured bindings into successfully materialized runtimes and the
    ones that were defined but could not be materialized, each paired with the
    reason it was dropped. The drop set ([id -> reason]) lets assignment /
@@ -647,6 +657,10 @@ let get_lane_by_id (id : string) : Runtime_lane.t option =
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
+;;
+
+let is_local_runtime_id (id : string) : bool option =
+  get_runtime_by_id id |> Option.map is_local_runtime
 ;;
 
 let max_context_of_runtime (rt : t) : int =

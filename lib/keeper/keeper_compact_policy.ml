@@ -286,6 +286,11 @@ let compact_if_needed_typed
       tok_count
       trigger_human;
     let pre_compact_context_window = max_tokens_of_context ctx in
+    let pre_compact_is_local_model =
+      Keeper_meta_contract.runtime_id_of_meta meta
+      |> Runtime.is_local_runtime_id
+      |> Option.value ~default:false
+    in
     (* record_pre_compact's JSONL append is wrapped by
        append_store_json_fail_open in Dashboard_harness_health, so this call
        does not propagate non-Cancel exceptions today.  Keep the call
@@ -300,7 +305,7 @@ let compact_if_needed_typed
           ~token_count:tok_count
           ~strategies:strategy_names
           ~context_window:pre_compact_context_window
-          ~is_local_model:false
+          ~is_local_model:pre_compact_is_local_model
           ~trigger
       with
       | Eio.Cancel.Cancelled _ as e -> raise e

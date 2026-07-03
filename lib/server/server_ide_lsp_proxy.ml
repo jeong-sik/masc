@@ -437,8 +437,11 @@ let path_of_file_uri uri =
 let fpath_within ~base path =
   match Fpath.of_string base, Fpath.of_string path with
   | Ok base, Ok path when Fpath.is_abs base && Fpath.is_abs path ->
-    let base = Fpath.(rem_empty_seg (normalize base)) in
-    let path = Fpath.(rem_empty_seg (normalize path)) in
+    (* Qualify explicitly instead of [Fpath.(...)]: inside the local open the
+       identifier [base] resolves to [Fpath.base] (t -> t) and shadows the local
+       [base] value, which fails to type-check under fpath 0.7.3. *)
+    let base = Fpath.rem_empty_seg (Fpath.normalize base) in
+    let path = Fpath.rem_empty_seg (Fpath.normalize path) in
     (match Fpath.relativize ~root:base path with
      | Some rel ->
        if List.exists (String.equal "..") (Fpath.segs rel) then None else Some rel

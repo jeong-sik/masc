@@ -23,6 +23,15 @@
     [output_string]/[flush] on the returned channel. *)
 val get_writer : string -> out_channel
 
+(** [invalidate path] flushes, closes, and drops the cached writer for
+    [path] when present (a no-op otherwise). Call it after the inode at
+    [path] is replaced (e.g. an atomic-rename save) so a later
+    [get_writer] reopens the new file rather than appending to the
+    orphaned pre-replacement inode. The caller must ensure no concurrent
+    append is in flight on [path] (the cached channel is closed), which
+    the JSONL store guarantees by holding its per-partition write lock. *)
+val invalidate : string -> unit
+
 (** Flush and close every cached writer. Safe to call concurrently
     with active appends; a subsequent [get_writer] re-opens fresh.
     Registered at [Stdlib.at_exit]. *)

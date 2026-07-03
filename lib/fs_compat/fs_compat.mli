@@ -200,6 +200,14 @@ val append_jsonl_batch : string -> Yojson.Safe.t list -> unit
     RFC-0162 §3.4. *)
 val close_all_cached_writers : unit -> unit
 
+(** [invalidate_cached_writer path] drops the cached [append_jsonl]
+    writer for [path] (a no-op if none is cached). Call it after
+    replacing the inode at [path] with [save_file_atomic]: the cached
+    [O_APPEND] channel still points at the pre-rename inode, so without
+    this a later [append_jsonl] would write to the orphaned file. The
+    caller must hold off concurrent appends on [path] while doing so. *)
+val invalidate_cached_writer : string -> unit
+
 (** Drop and close every cached writer. Test-only — production
     relies on process-lifetime persistence and [at_exit] drain. *)
 val reset_fd_cache_for_testing : unit -> unit

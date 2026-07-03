@@ -652,6 +652,7 @@ let fold_jsonl_lines ~init ~f path =
      ([fd_cache_mu]) so two appends to *different* paths never
      contend on a global fd-cache lock. *)
 let close_all_cached_writers () = Fd_cache.close_all ()
+let invalidate_cached_writer path = Fd_cache.invalidate path
 let reset_fd_cache_for_testing () = Fd_cache.reset_for_testing ()
 
 let append_jsonl (path : string) (json : Yojson.Safe.t) : unit =

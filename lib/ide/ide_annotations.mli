@@ -60,12 +60,23 @@ val delete
   -> ?partition:Ide_paths.partition
   -> id:string
   -> keeper_id:string
+  -> ?expected_version:int64
   -> unit
   -> (unit, string) result
 (** Soft-delete: append a tombstone record. Only the original
     [keeper_id] may delete its own annotation. The [?partition] must
     match the one the annotation was created under. Default
-    [partition] is {!Ide_paths.Orphan}. *)
+    [partition] is {!Ide_paths.Orphan}.
+
+    task-1738: the existence/ownership check and the tombstone write run
+    under a per-partition write lock, so a concurrent [create]/[delete]
+    on the same partition cannot be lost to an interleaved compaction.
+
+    [?expected_version] enables optimistic concurrency: pass the
+    annotation's [updated_at_ms] (its version token, exposed in
+    {!Ide_annotation_types.annotation_to_json}) and the delete is refused
+    with a ["version mismatch"] error when the stored value differs.
+    Omitting it keeps the legacy delete-by-id contract. *)
 
 val compact : base_dir:string -> ?partition:Ide_paths.partition -> unit -> unit
 (** Rewrite the annotation file excluding tombstones. Called

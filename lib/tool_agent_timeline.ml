@@ -79,7 +79,8 @@ let dashboard_retention_json =
         `String
           ".masc/agents/*.json + .masc/tasks/*.json + \
            .masc/messages/*.json + \
-           .masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl" );
+           .masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl + \
+           .masc/keeper_chat/*.jsonl" );
       ( "durable_stores",
         `List
           [
@@ -87,6 +88,7 @@ let dashboard_retention_json =
             `String ".masc/tasks/*.json";
             `String ".masc/messages/*.json";
             `String ".masc/activity-events/YYYY-MM/YYYY-MM-DD.jsonl";
+            `String ".masc/keeper_chat/*.jsonl";
           ] );
       ( "activity_event_kinds",
         `List
@@ -438,6 +440,58 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
          })
   |> take limit
 
+(* Collect keeper chat turns from the durable chat store
+   (.masc/keeper_chat/<keeper>.jsonl). That store is the sole record of
+   keeper<->operator conversation turns: the activity-event log the other
+   sources read carries autonomous turns (keeper.turn_completed) but no
+   chat, so before this source a keeper's chat time and actions were
+   absent from the timeline entirely (task-1647). The chat store is keyed
+   directly by the keeper handle, so unlike the activity sources — which
+   persist the full actor id and need [identity_matches] — no fan-out
+   over identity forms is required here.
+
+   Granularity mirrors [message_events]: one event per user/assistant
+   line. Tool lines are skipped — tool activity is already surfaced by
+   [tool_call_events] from the activity log, and re-emitting the chat
+   store's tool rows would double-count. Rows without a timestamp (legacy
+   pre-ts lines) are skipped because they cannot be placed chronologically,
+   matching [message_events]'s unparsed-ts drop. Ordering within a turn
+   (user before assistant, both sharing one ts) is preserved by the
+   stable sort in [build_timeline]; no timestamp is fabricated. *)
+let chat_events (config : Workspace.config) ~agent_name ~limit :
+    timeline_event list =
+  let rec take n xs =
+    match (n, xs) with
+    | n, _ when n <= 0 -> []
+    | _, [] -> []
+    | n, x :: rest -> x :: take (n - 1) rest
+  in
+  let messages =
+    Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:agent_name
+  in
+  messages
+  |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
+       match (m.role, m.ts) with
+       | Keeper_chat_store.Role.Tool, _ -> None
+       | _, None -> None
+       | role, Some ts ->
+           Some
+             {
+               ts;
+               ts_iso = Masc_domain.iso8601_of_unix_seconds ts;
+               event_type = "chat";
+               detail =
+                 `Assoc
+                   [
+                     ("role", `String (Keeper_chat_store.Role.to_label role));
+                     ("content", `String m.content);
+                     ("source", Json_util.string_opt_to_json m.source);
+                     ( "conversation_id",
+                       Json_util.string_opt_to_json m.conversation_id );
+                   ];
+             })
+  |> take limit
+
 (* Build the full timeline *)
 let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ ~include_tool_calls =
@@ -461,13 +515,20 @@ let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
     let turn_evts =
       turn_completed_events config ~agent_name ~limit:200
     in
+    let chat_evts = chat_events config ~agent_name ~limit:200 in
     agent_evts @ task_evts @ msg_evts @ tool_evts @ cdal_evts @ turn_evts
+    @ chat_evts
   in
-  (* Filter by time cutoff and sort chronologically *)
+  (* Filter by time cutoff and sort chronologically. [stable_sort] (not
+     [sort]) so events sharing a timestamp keep their source order — a
+     chat turn's user and assistant lines share one ts (Keeper_chat_store
+     writes them together), and structural trace order must survive the
+     merge rather than being scrambled by an unstable sort. No timestamp
+     is rewritten to force order. *)
   let filtered =
     all_events
     |> List.filter (fun e -> Stdlib.Float.compare e.ts cutoff >= 0)
-    |> List.sort (fun a b -> Stdlib.Float.compare a.ts b.ts)
+    |> List.stable_sort (fun a b -> Stdlib.Float.compare a.ts b.ts)
   in
   (* Truncate to limit — keep the most recent events (tail of sorted list) *)
   let events =
@@ -502,6 +563,10 @@ let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
   let tool_calls =
     List.length
       (List.filter (fun e -> String.equal e.event_type "tool_call") events)
+  in
+  let chat_messages =
+    List.length
+      (List.filter (fun e -> String.equal e.event_type "chat") events)
   in
   let turn_events =
     List.filter (fun e -> String.equal e.event_type "turn_completed") events
@@ -567,6 +632,7 @@ let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
             ("tasks_claimed", `Int tasks_claimed);
             ("messages_sent", `Int messages_sent);
             ("tool_calls", `Int tool_calls);
+            ("chat_messages", `Int chat_messages);
             ("turns_completed", `Int turns_completed);
             ("total_input_tokens", `Int total_input_tokens);
             ("total_output_tokens", `Int total_output_tokens);

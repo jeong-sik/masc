@@ -80,6 +80,91 @@ let test_excludes_other_keeper () =
       check int "no events for the queried handle" 0
         (summary_int json "total_events"))
 
+(* Exposes [dir] as well as [config] so a test can drive the chat store,
+   which is keyed by [base_dir] (= dir) rather than by the config. *)
+let with_dir_config f =
+  let dir = test_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir dir)
+    (fun () -> f dir (Lib.Workspace.default_config dir))
+
+let events_list json = Yojson.Safe.Util.(json |> member "events" |> to_list)
+let ev_type e = Yojson.Safe.Util.(e |> member "type" |> to_string)
+
+let ev_detail_str e key =
+  Yojson.Safe.Util.(e |> member "detail" |> member key |> to_string)
+
+let chat_field key json =
+  events_list json
+  |> List.filter (fun e -> String.equal (ev_type e) "chat")
+  |> List.map (fun e -> ev_detail_str e key)
+
+let append_chat dir ~user ~assistant =
+  Lib.Keeper_chat_store.append_turn ~base_dir:dir ~keeper_name:"testkeeper"
+    ~user_content:user ~user_attachments:[] ~assistant_content:assistant ()
+
+(* A chat turn persisted to .masc/keeper_chat/ must surface as timeline
+   "chat" events — the gap task-1647 identified. One event per user /
+   assistant line, in structural order (user before assistant) even though
+   both share one persisted timestamp. *)
+let test_chat_turn_surfaces () =
+  with_dir_config (fun dir config ->
+      append_chat dir ~user:"ping" ~assistant:"pong";
+      let json = build config ~agent_name:"testkeeper" in
+      check (list string) "user then assistant, structural order preserved"
+        [ "user"; "assistant" ]
+        (chat_field "role" json);
+      check (list string) "chat contents preserved"
+        [ "ping"; "pong" ]
+        (chat_field "content" json);
+      check int "summary counts both chat lines" 2
+        (summary_int json "chat_messages"))
+
+(* Two turns keep their append order and their intra-turn order; nothing is
+   re-sorted by timestamp in a way that scrambles the trace. *)
+let test_chat_ordering_across_turns () =
+  with_dir_config (fun dir config ->
+      append_chat dir ~user:"Q1" ~assistant:"A1";
+      append_chat dir ~user:"Q2" ~assistant:"A2";
+      let json = build config ~agent_name:"testkeeper" in
+      check (list string) "turns stay in structural trace order"
+        [ "Q1"; "A1"; "Q2"; "A2" ]
+        (chat_field "content" json))
+
+(* Chat turns merge into the same chronological stream as autonomous
+   keeper.turn_completed turns, and the existing turn source is unaffected. *)
+let test_chat_interleaves_with_autonomous () =
+  with_dir_config (fun dir config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"agent" "keeper-testkeeper-agent")
+           ~payload:(`Assoc [ ("model_used", `String "test-model") ])
+           ());
+      append_chat dir ~user:"hi" ~assistant:"hello";
+      let json = build config ~agent_name:"testkeeper" in
+      let types =
+        events_list json |> List.map ev_type |> List.sort_uniq String.compare
+      in
+      check bool "chat and autonomous turn both present" true
+        (List.mem "chat" types && List.mem "turn_completed" types);
+      check int "existing turn_completed source intact" 1
+        (summary_int json "turns_completed"))
+
+(* A keeper with no chat store yields zero chat events and leaves the six
+   existing sources unchanged — the new source is purely additive. *)
+let test_no_chat_no_regression () =
+  with_dir_config (fun _dir config ->
+      ignore
+        (Activity_graph.emit config ~kind:"keeper.turn_completed"
+           ~actor:(Activity_graph.entity ~kind:"agent" "keeper-testkeeper-agent")
+           ~payload:(`Assoc [ ("model_used", `String "test-model") ])
+           ());
+      let json = build config ~agent_name:"testkeeper" in
+      check int "no chat store -> zero chat messages" 0
+        (summary_int json "chat_messages");
+      check int "turn_completed still surfaces" 1
+        (summary_int json "turns_completed"))
+
 let () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -90,5 +175,15 @@ let () =
           test_case "turn_completed surfaces for short handle" `Quick
             test_surfaces_turn_completed_for_short_handle;
           test_case "other keeper excluded" `Quick test_excludes_other_keeper;
+        ] );
+      ( "keeper-chat-source",
+        [
+          test_case "chat turn surfaces" `Quick test_chat_turn_surfaces;
+          test_case "chat ordering across turns" `Quick
+            test_chat_ordering_across_turns;
+          test_case "chat interleaves with autonomous" `Quick
+            test_chat_interleaves_with_autonomous;
+          test_case "no chat store no regression" `Quick
+            test_no_chat_no_regression;
         ] );
     ]

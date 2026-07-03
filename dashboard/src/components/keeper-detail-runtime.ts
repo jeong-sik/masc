@@ -134,10 +134,11 @@ export function deriveKeeperLiveTruth({
   const fiberLabel = fiberAlive ? 'fiber alive' : 'fiber not proven'
   const liveTurnLabel = projection.activeTurn ? `${projection.turnPhase} live` : 'no live turn'
   // A-PR-2 G2: surface the running turn's model + in-flight tool count when a
-  // live turn is present. `??` guards a pinned backend that omits these fields.
+  // live turn is present. A pinned backend may omit these fields; render that
+  // as unknown rather than inventing an idle-looking zero.
   const liveTurn = compositeSnapshot?.live_turn ?? null
   const liveTurnModelDetail = liveTurn
-    ? ` · model ${liveTurn.selected_model ?? '—'} · tools ${liveTurn.active_tool_count ?? 0}`
+    ? ` · model ${liveTurn.selected_model ?? '—'} · tools ${liveTurn.active_tool_count ?? '—'}`
     : ''
   return {
     headline: projection.headline,

@@ -56,7 +56,16 @@ let rec find_jsonl dir =
   else []
 
 (* Regression guard: verify in [Keeper_agent_run.run_turn] that the response
-   capture happens after normalization and uses the normalized identifier. *)
+   capture happens after normalization and uses the normalized identifier.
+
+   Dune test actions run in a sandbox, so we locate the source tree via
+   [DUNE_SOURCEROOT] (set by Dune for all actions). *)
+let repo_root () =
+  match Sys.getenv_opt "DUNE_SOURCEROOT" with
+  | Some root -> root
+  | None ->
+    Alcotest.fail "DUNE_SOURCEROOT is not set; cannot locate source file"
+
 let first_line_of path needle =
   let ic = open_in path in
   Fun.protect
@@ -243,7 +252,7 @@ let response_capture_matches_replayed_history_text () =
       (contains ~needle:raw_response content))
 
 let capture_response_uses_normalized_text_in_run_turn () =
-  let path = "lib/keeper/keeper_agent_run.ml" in
+  let path = Filename.concat (repo_root ()) "lib/keeper/keeper_agent_run.ml" in
   let capture_line =
     match first_line_of path "Keeper_wire_capture.capture_response" with
     | Some n -> n

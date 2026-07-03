@@ -90,6 +90,41 @@ let replay_response_text_for_capture ~suppress_visible_response ~response_text =
   else Some response_text
 ;;
 
+type wire_capture_response_suppression_reason =
+  | Budget_exhausted
+  | Completion_contract
+
+let wire_capture_response_suppression_reasons
+      ~budget_exhausted
+      ~contract_suppresses_visible_response
+  =
+  let reasons =
+    if contract_suppresses_visible_response then [ Completion_contract ] else []
+  in
+  if budget_exhausted then Budget_exhausted :: reasons else reasons
+;;
+
+let wire_capture_response_suppression_reason_label = function
+  | Budget_exhausted -> "budget_exhausted"
+  | Completion_contract -> "completion_contract"
+;;
+
+let emit_wire_capture_response_suppressed_metric ~keeper_name reason =
+  Otel_metric_store.inc_counter
+    Keeper_metrics.(to_string WireCaptureResponseSuppressed)
+    ~labels:
+      [ ("keeper", keeper_name)
+      ; ("reason", wire_capture_response_suppression_reason_label reason)
+      ]
+    ()
+;;
+
+let emit_wire_capture_response_suppressed_metrics ~keeper_name reasons =
+  List.iter
+    (emit_wire_capture_response_suppressed_metric ~keeper_name)
+    reasons
+;;
+
 let rec messages_prefix_equal expected actual =
   match expected, actual with
   | [], _ -> true
@@ -239,6 +274,15 @@ module For_testing = struct
   let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
   let should_resume_merge = should_resume_merge
   let replay_response_text_for_capture = replay_response_text_for_capture
+
+  let wire_capture_response_suppression_reasons =
+    wire_capture_response_suppression_reasons
+
+  let wire_capture_response_suppression_reason_label =
+    wire_capture_response_suppression_reason_label
+
+  let emit_wire_capture_response_suppressed_metrics =
+    emit_wire_capture_response_suppressed_metrics
 end
 
 let finalize
@@ -280,9 +324,12 @@ let finalize
       ~history_assistant_source
       completion_contract_result
   in
-  let suppress_visible_response =
-    budget_exhausted || contract_suppresses_visible_response
+  let suppression_reasons =
+    wire_capture_response_suppression_reasons
+      ~budget_exhausted
+      ~contract_suppresses_visible_response
   in
+  let suppress_visible_response = suppression_reasons <> [] in
   let raw_response_text_present =
     (not budget_exhausted) && String.trim raw_response_text <> ""
   in
@@ -292,6 +339,9 @@ let finalize
       "suppressing keeper-visible response for completion_contract_result=%s"
       (Keeper_execution_receipt.completion_contract_result_to_string
          completion_contract_result);
+  emit_wire_capture_response_suppressed_metrics
+    ~keeper_name:meta.name
+    suppression_reasons;
   let reported_state_snapshot =
     reported_state_snapshot_from_checkpoint result.checkpoint
   in

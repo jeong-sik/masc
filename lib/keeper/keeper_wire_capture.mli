@@ -54,13 +54,15 @@ val capture_response :
   masc_root:string ->
   keeper_name:string ->
   turn_id:int ->
+  sdk_turn:int ->
   response_text:string ->
   ?trace_id:Keeper_id.Trace_id.t ->
   unit ->
   unit
-(** [capture_response ~masc_root ~keeper_name ~turn_id ~response_text ~trace_id
-    ()] appends one redacted response record ([kind:"response"]) paired with
-    the request of the same [turn_id]. [trace_id] is the keeper runtime trace id
-    passed to OAS as [session_id] for raw-trace correlation. This closes the
-    loop for analysis: turn N's response is turn N+1's replayed history input.
-    No-op unless {!enabled}. *)
+(** [capture_response ~masc_root ~keeper_name ~turn_id ~sdk_turn ~response_text
+    ~trace_id ()] appends one redacted response record ([kind:"response"])
+    paired with the request of the same [turn_id]. [sdk_turn] is the 1-based
+    OAS/provider turn index inside the keeper turn, matching the request record.
+    [trace_id] is the keeper runtime trace id passed to OAS as [session_id] for
+    raw-trace correlation. This closes the loop for analysis: turn N's response
+    is turn N+1's replayed history input. No-op unless {!enabled}. *)

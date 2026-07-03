@@ -248,6 +248,9 @@ type t =
   | KeeperRepoMappingRepositoryIdentityMismatch (* counter: repo identity mismatch in policy projection *)
   | KeeperRepoMappingRepositoryStoreError       (* counter: repo catalog load failure in policy projection *)
   | RawTraceSinkDegraded        (* counter: raw-trace sink create failed; turn dispatched untraced *)
+  | WireCaptureResponseSuppressed (* counter: keeper-visible response suppressed before wire capture *)
+  | WireCaptureWriteFailures    (* counter: wire-capture write raised an exception *)
+  | WireCaptureRecordSkipped    (* counter: wire-capture record dropped by current-file byte cap *)
 
 (** String conversion
 
@@ -516,6 +519,10 @@ let to_string = function
   | KeeperRepoMappingRepositoryStoreError ->
     "masc_keeper_repo_mapping_repository_store_error_total"
   | RawTraceSinkDegraded -> "masc_keeper_raw_trace_sink_degraded_total"
+  | WireCaptureResponseSuppressed ->
+    "masc_keeper_wire_capture_response_suppressed_total"
+  | WireCaptureWriteFailures -> "masc_keeper_wire_capture_write_failures_total"
+  | WireCaptureRecordSkipped -> "masc_keeper_wire_capture_record_skipped_total"
 ;;
 
 (* Every constructor of [t], in declaration order.  Consumed by
@@ -581,7 +588,8 @@ let all : t list =
     KeeperToolCallRetryLoop; AttemptWatchdogFired; ShellIrEffectTotal;
   KeeperRepoMappingDeniedMissing; KeeperRepoMappingDeniedNotInMapping; KeeperRepoMappingLoadError;
   KeeperRepoMappingRepositoryIdentityMismatch; KeeperRepoMappingRepositoryStoreError;
-  RawTraceSinkDegraded
+  RawTraceSinkDegraded; WireCaptureResponseSuppressed; WireCaptureWriteFailures;
+  WireCaptureRecordSkipped
   ]
 ;;
 

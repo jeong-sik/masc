@@ -307,7 +307,8 @@ val read_aggregate_snapshot :
   (tool_affinity_aggregate, aggregate_load_error) result
 (** Load the snapshot. [Error Aggregate_missing] when absent;
     [Error (Aggregate_corrupt _)] on invalid JSON or schema (a malformed
-    bucket fails the whole snapshot rather than dropping rows). *)
+    bucket fails the whole snapshot rather than dropping rows), or when the
+    payload [keeper_name] does not match the keeper path being read. *)
 
 val update_aggregate_from_entries :
   masc_root:string -> keeper_name:string -> tool_call_entry list -> unit

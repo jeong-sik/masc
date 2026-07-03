@@ -599,7 +599,13 @@ let read_aggregate_snapshot ~(masc_root : string) ~(keeper_name : string) :
       | None -> Error (Aggregate_corrupt "invalid json")
       | Some json -> (
           match tool_affinity_aggregate_of_json json with
-          | Some agg -> Ok agg
+          | Some agg when String.equal agg.aggregate_keeper_name keeper_name -> Ok agg
+          | Some agg ->
+            Error
+              (Aggregate_corrupt
+                 (Printf.sprintf
+                    "keeper_name mismatch: snapshot=%S requested=%S"
+                    agg.aggregate_keeper_name keeper_name))
           | None -> Error (Aggregate_corrupt "schema mismatch")))
 
 let persist_aggregate_snapshot ~(masc_root : string) ~(keeper_name : string)
@@ -690,9 +696,29 @@ let build_tool_affinity_aggregate ~(keeper_name : string) ~(now : float)
     (entries : tool_call_entry list) : tool_affinity_aggregate =
   merge_entries_into_aggregate ~now (empty_tool_affinity_aggregate keeper_name) entries
 
-(* Serializes snapshot read-modify-write across domains. Snapshot files are
-   small; same-keeper JSONL/rebuild races are guarded separately below. *)
-let aggregate_persist_mu = Stdlib.Mutex.create ()
+(* Serializes snapshot read-modify-write for one keeper. Snapshot files are
+   per-keeper derived caches; a slow file operation for one keeper must not
+   block aggregate updates for unrelated keepers. *)
+let aggregate_snapshot_guards :
+    (string * string, Stdlib.Mutex.t) Hashtbl.t =
+  Hashtbl.create 32
+
+let aggregate_snapshot_guards_mu = Stdlib.Mutex.create ()
+
+let aggregate_snapshot_guard ~(masc_root : string) ~(keeper_name : string) :
+    Stdlib.Mutex.t =
+  Stdlib.Mutex.protect aggregate_snapshot_guards_mu (fun () ->
+    let key = (masc_root, keeper_name) in
+    match Hashtbl.find_opt aggregate_snapshot_guards key with
+    | Some mu -> mu
+    | None ->
+      let mu = Stdlib.Mutex.create () in
+      Hashtbl.add aggregate_snapshot_guards key mu;
+      mu)
+
+let with_aggregate_snapshot_guard ~(masc_root : string) ~(keeper_name : string)
+    (f : unit -> 'a) : 'a =
+  Stdlib.Mutex.protect (aggregate_snapshot_guard ~masc_root ~keeper_name) f
 
 (* A cold/corrupt snapshot rebuild scans JSONL and then seeds the aggregate.
    Same-keeper JSONL writes must not interleave with that scan: otherwise a
@@ -725,7 +751,7 @@ let update_aggregate_from_entries ~(masc_root : string) ~(keeper_name : string)
   match entries with
   | [] -> ()
   | _ ->
-    Stdlib.Mutex.protect aggregate_persist_mu (fun () ->
+    with_aggregate_snapshot_guard ~masc_root ~keeper_name (fun () ->
       match read_aggregate_snapshot ~masc_root ~keeper_name with
       | Error Aggregate_missing ->
         (* No seeded snapshot yet. Seeding is done by the affinity read
@@ -1194,7 +1220,7 @@ let rebuild_tool_affinity_aggregate ~(masc_root : string)
       in
       let entries = read_entries_since ~masc_root ~keeper_name ~since in
       let scanned = build_tool_affinity_aggregate ~keeper_name ~now entries in
-      Stdlib.Mutex.protect aggregate_persist_mu (fun () ->
+      with_aggregate_snapshot_guard ~masc_root ~keeper_name (fun () ->
         match read_aggregate_snapshot ~masc_root ~keeper_name with
         | Ok existing -> existing
         | Error (Aggregate_missing | Aggregate_unreadable _ | Aggregate_corrupt _) ->

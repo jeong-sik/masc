@@ -838,6 +838,23 @@ let test_aggregate_corrupt_typed_error () =
     | Error (Trajectory.Aggregate_corrupt _) -> ()
     | _ -> Alcotest.fail "wrong schema version must be Aggregate_corrupt")
 
+(* Snapshot payload identity must match the keeper path being read. A copied
+   or stale aggregate from another keeper is corrupt, not a valid cache. *)
+let test_aggregate_rejects_keeper_name_mismatch () =
+  with_tmpdir (fun dir ->
+    let masc_root = dir and keeper = "agg-keeper" in
+    let path = Trajectory.aggregate_snapshot_path masc_root keeper in
+    Fs_compat.mkdir_p (Filename.dirname path);
+    Fs_compat.save_file path
+      {|{"version":1,"keeper_name":"other-keeper","updated_at":1.0,"tools":[]}|};
+    match Trajectory.read_aggregate_snapshot ~masc_root ~keeper_name:keeper with
+    | Error (Trajectory.Aggregate_corrupt reason) ->
+      Alcotest.(check string) "reports keeper mismatch"
+        "keeper_name mismatch: snapshot=\"other-keeper\" requested=\"agg-keeper\""
+        reason
+    | Ok _ -> Alcotest.fail "wrong keeper_name snapshot must be corrupt"
+    | Error _ -> Alcotest.fail "wrong keeper_name should be Aggregate_corrupt")
+
 (* Rebuild reconstructs per-tool counts across all trace files and persists
    the snapshot. *)
 let test_aggregate_rebuild_from_jsonl () =
@@ -951,6 +968,8 @@ let () =
         test_aggregate_direct_append_after_seed;
       Alcotest.test_case "corrupt/schema-mismatch snapshot is a typed error" `Quick
         test_aggregate_corrupt_typed_error;
+      Alcotest.test_case "wrong keeper_name snapshot is corrupt" `Quick
+        test_aggregate_rejects_keeper_name_mismatch;
       Alcotest.test_case "rebuild reconstructs counts across trace files" `Quick
         test_aggregate_rebuild_from_jsonl;
     ]);

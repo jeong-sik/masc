@@ -715,6 +715,8 @@ let add_routes router =
              | Some file_path, Some line, Some keeper_id
                when line >= 1 ->
                let column = find_int "column" in
+               (* DET-OK: absent cursor source preserves the legacy editor
+                  value; source is cursor telemetry, not auth or routing input. *)
                let source = Option.value (find_string "source") ~default:"editor" in
                Ide_bridge.ingest_cursor_event
                  ~base_path:base

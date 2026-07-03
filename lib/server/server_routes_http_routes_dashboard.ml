@@ -461,7 +461,7 @@ let add_routes ~sw ~clock router =
      Fusion_run_registry.run_to_yojson so the shape matches the SSE delta. *)
   |> Http.Router.get "/api/v1/dashboard/fusion-runs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let runs = Fusion_run_registry.list_runs Fusion_run_registry.global in
+         let runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
          let json =
            `Assoc
              [ ("generated_at", `String (Masc_domain.now_iso ()))

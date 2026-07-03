@@ -252,6 +252,7 @@
   test_keeper_secret_projection
   test_keeper_secret_redaction
   test_keeper_toml
+  test_runtime_missing_catalog_report
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
@@ -588,6 +589,7 @@
   test_keeper_secret_projection
   test_keeper_secret_redaction
   test_keeper_toml
+  test_runtime_missing_catalog_report
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
@@ -803,6 +805,13 @@
  (name test_fusion_adaptive_timeout)
  (modules test_fusion_adaptive_timeout)
  (libraries masc_test_deps masc.fusion_core))
+
+; RFC-0266 §7 Phase D — fusion run registry persistence: JSONL append + replay.
+
+(test
+ (name test_fusion_run_registry_persist)
+ (modules test_fusion_run_registry_persist)
+ (libraries alcotest fs_compat yojson masc.fusion_core))
 
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 

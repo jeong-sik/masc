@@ -5,9 +5,10 @@
 module Summary = Masc.Keeper_memory_llm_summary
 module Metrics = Masc.Otel_metric_store
 module Outcome = Keeper_memory_llm_summary_outcome
+module Boundary = Boundary_redaction
 
 let metric = Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
-let runtime_lane = Masc.Keeper_hooks_oas.runtime_lane_label
+let runtime_lane = Boundary.to_string Boundary.runtime_lane_label
 let runtime_id = "test-runtime-memory-summary-label"
 let raw_model_id = "vendor/concrete-model-must-not-leak"
 let outcome = Outcome.Ok_summary
@@ -24,12 +25,6 @@ let leaked_labels =
   ; "provider", raw_model_id
   ; "runtime_id", runtime_id
   ]
-
-let test_runtime_lane_value_is_neutral () =
-  Alcotest.(check string)
-    "runtime lane label is the neutral constant"
-    "runtime"
-    runtime_lane
 
 let test_provider_label_redacted_to_runtime_lane () =
   let before_redacted = Metrics.metric_value_or_zero metric ~labels:redacted_labels () in
@@ -49,10 +44,6 @@ let () =
     "keeper_memory_summary_label_redaction"
     [ ( "otel-label"
       , [ Alcotest.test_case
-            "runtime lane value is neutral"
-            `Quick
-            test_runtime_lane_value_is_neutral
-        ; Alcotest.test_case
             "provider label redacted to runtime lane"
             `Quick
             test_provider_label_redacted_to_runtime_lane

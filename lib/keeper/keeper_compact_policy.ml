@@ -287,9 +287,18 @@ let compact_if_needed_typed
       trigger_human;
     let pre_compact_context_window = max_tokens_of_context ctx in
     let pre_compact_is_local_model =
-      Keeper_meta_contract.runtime_id_of_meta meta
-      |> Runtime.is_local_runtime_id
-      |> Option.value ~default:false
+      let runtime_id = Keeper_meta_contract.runtime_id_of_meta meta in
+      match Runtime.is_local_runtime_id runtime_id with
+      | Some is_local -> is_local
+      | None ->
+        (* DET-OK: pre-compact locality is observability only. Runtime
+           dispatch has already resolved/fail-fast validated the selected
+           runtime; an unmaterialized id here must not alter compaction. *)
+        Log.Harness.warn
+          "[pre_compact] runtime locality unavailable for runtime_id=%s; \
+           recording is_local_model=false"
+          runtime_id;
+        false
     in
     (* record_pre_compact's JSONL append is wrapped by
        append_store_json_fail_open in Dashboard_harness_health, so this call

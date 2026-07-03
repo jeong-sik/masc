@@ -475,6 +475,58 @@ let test_goalless_still_bounded_by_global_cap () =
     check string "reason" "global_cap"
       (Admission.reject_reason_to_string rejection.reason)
 
+(* --- env-configurable default_caps (MASC_KEEPER_WIP_*) --- *)
+
+let with_env name value f =
+  let prev = Sys.getenv_opt name in
+  Unix.putenv name value;
+  Fun.protect
+    ~finally:(fun () ->
+      match prev with
+      | Some v -> Unix.putenv name v
+      | None -> Unix.putenv name "" (* "" reads back as the historical default *))
+    f
+
+let wip_env_keys =
+  [ "MASC_KEEPER_WIP_MAX_GLOBAL"
+  ; "MASC_KEEPER_WIP_MAX_PER_REPO"
+  ; "MASC_KEEPER_WIP_MAX_PER_GOAL"
+  ; "MASC_KEEPER_WIP_MAX_PER_CATEGORY"
+  ]
+
+let test_default_caps_unset_uses_historical_defaults () =
+  (* An unset (or "" — the restore sentinel) knob must reproduce the exact prior
+     hardcoded caps. Skip only if the ambient env pins a real override. *)
+  if List.exists
+       (fun k -> match Sys.getenv_opt k with None | Some "" -> false | Some _ -> true)
+       wip_env_keys
+  then skip ()
+  else (
+    let c = Admission.default_caps () in
+    check (option int) "max_global default" (Some 16) c.Admission.max_global;
+    check (option int) "max_per_repo default" (Some 12) c.max_per_repo;
+    check (option int) "max_per_goal default" (Some 3) c.max_per_goal;
+    check (option int) "max_per_category default" (Some 4) c.max_per_category)
+
+let test_default_caps_positive_env_override () =
+  with_env "MASC_KEEPER_WIP_MAX_GLOBAL" "8" @@ fun () ->
+  let c = Admission.default_caps () in
+  check (option int) "max_global overridden" (Some 8) c.Admission.max_global;
+  check (option int) "other axes untouched" (Some 3) c.max_per_goal
+
+let test_default_caps_disable_via_none_and_zero () =
+  with_env "MASC_KEEPER_WIP_MAX_PER_REPO" "none" @@ fun () ->
+  with_env "MASC_KEEPER_WIP_MAX_PER_GOAL" "0" @@ fun () ->
+  let c = Admission.default_caps () in
+  check (option int) "per_repo disabled by \"none\"" None c.Admission.max_per_repo;
+  check (option int) "per_goal disabled by 0" None c.max_per_goal
+
+let test_default_caps_unparseable_keeps_default () =
+  with_env "MASC_KEEPER_WIP_MAX_PER_CATEGORY" "banana" @@ fun () ->
+  let c = Admission.default_caps () in
+  check (option int) "per_category keeps default on garbage" (Some 4)
+    c.Admission.max_per_category
+
 let () =
   run "Keeper_wip_admission"
     [ ( "caps"
@@ -516,4 +568,14 @@ let () =
             `Quick
             test_unparseable_claimed_at_keeps_counting_until_owner_release
           ] )
+    ; ( "env-configurable caps"
+      , [ test_case "unset knobs reproduce historical defaults" `Quick
+            test_default_caps_unset_uses_historical_defaults
+        ; test_case "positive env value overrides a cap" `Quick
+            test_default_caps_positive_env_override
+        ; test_case "\"none\"/0 disable a cap axis" `Quick
+            test_default_caps_disable_via_none_and_zero
+        ; test_case "unparseable value keeps the default" `Quick
+            test_default_caps_unparseable_keeps_default
+        ] )
     ]

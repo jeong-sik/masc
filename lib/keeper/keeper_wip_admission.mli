@@ -30,7 +30,13 @@ type caps = {
   max_per_category : int option;
 }
 
-val default_caps : caps
+val default_caps : unit -> caps
+(** WIP admission caps, resolved at call time from the environment
+    ([MASC_KEEPER_WIP_MAX_GLOBAL] / [_MAX_PER_REPO] / [_MAX_PER_GOAL] /
+    [_MAX_PER_CATEGORY]). An unset knob keeps the historical default
+    (16 / 12 / 3 / 4); a positive integer overrides it; ["none"], ["off"], or a
+    non-positive integer disables that axis ([None]). Read lazily so a
+    runtime.toml boot override applies after boot. *)
 
 type active_item = {
   id : string;

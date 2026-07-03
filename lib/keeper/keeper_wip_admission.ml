@@ -83,11 +83,46 @@ type caps = {
   max_per_category : int option;
 }
 
-let default_caps =
-  { max_global = Some 16
-  ; max_per_repo = Some 12
-  ; max_per_goal = Some 3
-  ; max_per_category = Some 4
+(* Historical hardcoded WIP admission caps. Kept as the env fallback so an
+   unset environment reproduces the exact prior behaviour. *)
+let default_max_global = 16
+let default_max_per_repo = 12
+let default_max_per_goal = 3
+let default_max_per_category = 4
+
+(* Startup env override for one WIP cap. Unset keeps the historical default; a
+   positive integer sets the cap; "none"/"off"/a non-positive integer disables
+   it ([None] = unbounded on that axis, so the remaining caps still apply); an
+   unparseable value keeps the default. Read lazily per [decide] call (via
+   [default_caps ()]) so a runtime.toml boot override resolves after boot, matching
+   the other MASC_KEEPER_* knobs (e.g. [Keeper_turn_liveness]). These caps never
+   reject a task that resolves to [repo = None] (see [task_repo]); the knobs exist
+   for operators to tune fleet concurrency without a rebuild, not to gate repo
+   access. *)
+let wip_cap_from_env ~(env : string) ~(default : int) : int option =
+  match Env_config_core.raw_value_opt env with
+  | None -> Some default
+  | Some raw ->
+    let raw = String.lowercase_ascii (String.trim raw) in
+    if String.equal raw "none" || String.equal raw "off"
+    then None
+    else (
+      match int_of_string_opt raw with
+      | Some n when n > 0 -> Some n
+      | Some _ -> None
+      | None -> Some default)
+
+let default_caps () =
+  { max_global =
+      wip_cap_from_env ~env:"MASC_KEEPER_WIP_MAX_GLOBAL" ~default:default_max_global
+  ; max_per_repo =
+      wip_cap_from_env ~env:"MASC_KEEPER_WIP_MAX_PER_REPO" ~default:default_max_per_repo
+  ; max_per_goal =
+      wip_cap_from_env ~env:"MASC_KEEPER_WIP_MAX_PER_GOAL" ~default:default_max_per_goal
+  ; max_per_category =
+      wip_cap_from_env
+        ~env:"MASC_KEEPER_WIP_MAX_PER_CATEGORY"
+        ~default:default_max_per_category
   }
 
 type active_item = {
@@ -196,7 +231,7 @@ let reject_if_at_cap reason scope_key current = function
 let first_rejection checks =
   List.find_map Fun.id checks
 
-let decide ?(caps = default_caps) active ~scope =
+let decide ?(caps = default_caps ()) active ~scope =
   let global_count = List.length active in
   let repo_count =
     count_matching (fun item -> same_repo item.scope.repo scope.repo) active

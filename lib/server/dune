@@ -110,6 +110,7 @@
   masc.tool_catalog_surfaces
   masc.config_dir_resolver
   uri
+  fpath
   tls
   tls-eio
   domain-name

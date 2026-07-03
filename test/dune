@@ -162,6 +162,7 @@
   test_keeper_idle_metric
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
+  test_boundary_redaction_runtime_lane
   test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
@@ -502,6 +503,7 @@
   test_keeper_idle_metric
   test_keeper_tool_duration_buckets
   test_keeper_catchup_digest
+  test_boundary_redaction_runtime_lane
   test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
@@ -929,6 +931,7 @@
   test_server_timing
   test_server_startup_takeover
   test_keeper_meta_cas_retry
+  test_keeper_write_meta_cycle_failures_counter
   test_judge_diagnostics
   test_board_vote_quarantine
   test_keeper_identity_parse
@@ -1124,6 +1127,7 @@
   test_server_timing
   test_server_startup_takeover
   test_keeper_meta_cas_retry
+  test_keeper_write_meta_cycle_failures_counter
   test_judge_diagnostics
   test_board_vote_quarantine
   test_keeper_identity_parse

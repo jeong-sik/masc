@@ -6,8 +6,7 @@ module KUM = Keeper_unified_metrics
 open Keeper_meta_contract
 
 (* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
-let runtime_lane_label =
-  Boundary_redaction.to_string Boundary_redaction.runtime_model_label
+let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 
 (* cost_usd is accounted independently of token-count trust (token⊥cost), so the
    turn cost no longer needs a usage-trust classification. *)
@@ -610,16 +609,22 @@ let persist_terminal_turn_meta
              else "keeper_cycle" )
          ]
        ();
+     (* #22043: emit inside the [Error] arm so
+        [write_meta_cycle_failures_total] stays a failure counter. It is
+        summed into the dashboard failure panel (Dashboard.ml), and the
+        sibling emit site (Keeper_unified_turn.ml, site=Turn_failure) only
+        fires on the failure path. Previously this inc sat after the match
+        and fired on every successful persist cycle, inflating the series. *)
+     Otel_metric_store.inc_counter
+       Keeper_metrics.(to_string WriteMetaCycleFailures)
+       ~labels:
+         [ "keeper", original_meta.name
+         ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
+         ]
+       ();
      if Keeper_meta_store.is_version_conflict_error msg
      then Log.Keeper.warn "write_meta lost CAS race after retries (keeper cycle): %s" msg
      else Log.Keeper.error "write_meta failed after keeper cycle: %s" msg);
-  Otel_metric_store.inc_counter
-    Keeper_metrics.(to_string WriteMetaCycleFailures)
-    ~labels:
-      [ "keeper", original_meta.name
-      ; "site", Keeper_write_meta_cycle_failure_site.(to_label Keeper_cycle)
-      ]
-    ();
   updated_meta
 ;;
 

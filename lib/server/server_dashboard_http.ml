@@ -315,26 +315,29 @@ let dashboard_governance_approval_resolve_http_json ~base_path ~(args : Yojson.S
     let remember_rule =
       Safe_ops.json_bool_opt "remember_rule" args |> Option.value ~default:false
     in
-    let decision_name =
-      Safe_ops.json_string_opt "decision" args
-      |> Option.value ~default:"approve"
-      |> String.trim
-      |> String.lowercase_ascii
-    in
+    (* RFC-0305: a missing [decision] field must not default to approve — this
+       resolves a pending HITL approval, so an omitted/malformed decision is a
+       bad request, not a silent grant. Mirrors the [id]-required check above. *)
+    (* Carry the canonical name alongside the decision so the success response
+       echoes what was applied without re-matching [approval_decision] (whose
+       [Edit] arm is never produced here). *)
     let decision =
-      match decision_name with
-      | "approve" -> Ok Agent_sdk.Hooks.Approve
-      | "reject" ->
-        let reason =
-          Safe_ops.json_string_opt "reason" args
-          |> Option.value ~default:"dashboard rejected approval"
-        in
-        Ok (Agent_sdk.Hooks.Reject reason)
-      | _ -> Error (Bad_request "decision must be 'approve' or 'reject'")
+      match Safe_ops.json_string_opt "decision" args with
+      | None -> Error (Bad_request "decision is required")
+      | Some raw ->
+        (match raw |> String.trim |> String.lowercase_ascii with
+         | "approve" -> Ok (Agent_sdk.Hooks.Approve, "approve")
+         | "reject" ->
+           let reason =
+             Safe_ops.json_string_opt "reason" args
+             |> Option.value ~default:"dashboard rejected approval"
+           in
+           Ok (Agent_sdk.Hooks.Reject reason, "reject")
+         | _ -> Error (Bad_request "decision must be 'approve' or 'reject'"))
     in
     (match decision with
      | Error _ as err -> err
-     | Ok decision ->
+     | Ok (decision, decision_name) ->
        (match
           Keeper_approval_queue.resolve_with_policy
             ~id

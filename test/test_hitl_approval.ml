@@ -1139,6 +1139,44 @@ let test_dashboard_resolve_and_delete_rules_use_workspace_base_path () =
       Alcotest.(check int) "env fallback still empty" 0
         (List.length (AQ.list_rules ~base_path:env_base ())))
 
+(* RFC-0305 (fail-closed default): a resolve request that omits the [decision]
+   field must be rejected as a bad request, NOT silently defaulted to approve.
+   Pre-fix this returned [Ok Approve] and granted the pending action. *)
+let test_approval_resolve_missing_decision_is_rejected () =
+  let workspace_base = temp_dir () in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir workspace_base)
+    (fun () ->
+      let resolved = ref None in
+      let id =
+        AQ.submit_pending
+          ~keeper_name:"failclosed-keeper"
+          ~tool_name:"masc_transition"
+          ~input:(`Assoc [ ("action", `String "claim") ])
+          ~risk_level:AQ.Medium
+          ~base_path:workspace_base
+          ~on_resolution:(fun d -> resolved := Some d)
+          ()
+      in
+      (* [decision] intentionally omitted. *)
+      let args = `Assoc [ ("id", `String id) ] in
+      (match
+         SDH.dashboard_governance_approval_resolve_http_json
+           ~base_path:workspace_base ~args
+       with
+       | Error (SDH.Bad_request msg) ->
+         Alcotest.(check bool)
+           "missing decision surfaces a decision-required bad request" true
+           (Astring.String.is_infix ~affix:"decision" msg)
+       | Error (SDH.Gone _) ->
+         Alcotest.fail "expected Bad_request, got Gone"
+       | Ok _ ->
+         Alcotest.fail
+           "missing decision must NOT resolve the approval (fail-closed, RFC-0305)");
+      (* The pending approval must remain unresolved. *)
+      Alcotest.(check bool) "pending approval not resolved" true
+        (!resolved = None))
+
 let test_submit_pending_audit_uses_workspace_base_path () =
   let env_base = temp_dir () in
   let workspace_base = temp_dir () in
@@ -1961,6 +1999,8 @@ let () =
         test_runtime_contract_policy_uses_workspace_base_path;
       Alcotest.test_case "dashboard approve-always rules use workspace base_path" `Quick
         test_dashboard_resolve_and_delete_rules_use_workspace_base_path;
+      Alcotest.test_case "resolve without decision is rejected (RFC-0305 fail-closed)" `Quick
+        test_approval_resolve_missing_decision_is_rejected;
       Alcotest.test_case "submit_pending audit uses workspace base_path" `Quick
         test_submit_pending_audit_uses_workspace_base_path;
       Alcotest.test_case "read_recent_audit scans before keeper filter" `Quick

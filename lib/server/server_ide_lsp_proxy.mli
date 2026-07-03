@@ -14,6 +14,15 @@ module For_testing : sig
   val initialize_result_json : unit -> Yojson.Safe.t
   val inbound_dispatch_worker_count : int
 
+  (** [resolve_lang relative] classifies a workspace-relative path's language
+      (task-1691): [Known_lang lang_id] when a language server is mapped, else
+      [Unknown_lang]. *)
+  type lang =
+    | Known_lang of string
+    | Unknown_lang
+
+  val resolve_lang : string -> lang
+
   (** Per-language LSP health (task-1691). [Overlay_only] carries the last
       error that forced the language into overlay-only mode. *)
   type health =

@@ -506,6 +506,35 @@ let test_extra_system_context_budget_skips_over_window_hook_blocks () =
     true
     (budget.post_hook_estimated_input_tokens <= 100)
 
+let test_extra_system_context_budget_accounts_assembled_overhead () =
+  let dynamic = String.make 40 'd' in
+  let hook_only = String.make 40 'u' in
+  let budget =
+    Keeper_run_prompt.budget_extra_system_context
+      ~estimated_input_tokens_with_tools:10
+      ~max_context:1_000
+      ~existing_extra_system_context:None
+      ~blocks:
+        [ Prompt_block_id.Dynamic_context, dynamic
+        ; Prompt_block_id.User_model, hook_only
+        ]
+  in
+  let assembled =
+    match budget.extra_system_context with
+    | Some text -> text
+    | None -> Alcotest.fail "expected assembled extra_system_context"
+  in
+  let assembled_tokens =
+    Agent_sdk.Context_reducer.estimate_char_tokens assembled
+  in
+  let preflight_accounted_tokens =
+    Agent_sdk.Context_reducer.estimate_char_tokens dynamic
+  in
+  Alcotest.(check int)
+    "post-hook estimate accounts assembled context minus preflight-accounted blocks"
+    (10 + max 0 (assembled_tokens - preflight_accounted_tokens))
+    budget.post_hook_estimated_input_tokens
+
 let test_keeper_preflight_wires_tool_inclusive_estimate () =
   let agent_run_source = read_file "lib/keeper/keeper_agent_run.ml" in
   let setup_source = read_file "lib/keeper/keeper_run_tools_setup.ml" in
@@ -897,6 +926,10 @@ let () =
           test_hook_context_estimate_skips_base_prompt_layers;
         Alcotest.test_case "extra system context budget skips overflow blocks" `Quick
           test_extra_system_context_budget_skips_over_window_hook_blocks;
+        Alcotest.test_case
+          "extra system context budget accounts assembled overhead"
+          `Quick
+          test_extra_system_context_budget_accounts_assembled_overhead;
         Alcotest.test_case "keeper preflight wires tool-inclusive estimate" `Quick
           test_keeper_preflight_wires_tool_inclusive_estimate;
         Alcotest.test_case "context window budget reports remaining and overage" `Quick

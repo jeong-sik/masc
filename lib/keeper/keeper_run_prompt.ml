@@ -231,6 +231,39 @@ let append_extra_system_context ctx text =
   | None -> Some text
   | Some existing -> Some (existing ^ "\n\n" ^ text)
 
+let estimate_extra_system_context_tokens = function
+  | None -> 0
+  | Some text -> Keeper_context_core_accessors.estimate_char_tokens text
+
+let estimate_preflight_accounted_extra_system_context_tokens blocks =
+  List.fold_left
+    (fun acc (block, text) ->
+       if hook_block_already_accounted_in_preflight block
+       then acc + Keeper_context_core_accessors.estimate_char_tokens text
+       else acc)
+    0
+    blocks
+
+let assembled_extra_system_context
+      ~(existing_extra_system_context : string option)
+      ~(included_blocks : (Prompt_block_id.t * string) list) =
+  List.fold_left
+    (fun ctx (_, text) -> append_extra_system_context ctx text)
+    existing_extra_system_context
+    included_blocks
+
+let estimate_unaccounted_assembled_extra_context_tokens
+      ~(existing_extra_system_context : string option)
+      ~(included_blocks : (Prompt_block_id.t * string) list) =
+  let assembled_tokens =
+    assembled_extra_system_context ~existing_extra_system_context ~included_blocks
+    |> estimate_extra_system_context_tokens
+  in
+  let preflight_accounted_tokens =
+    estimate_preflight_accounted_extra_system_context_tokens included_blocks
+  in
+  max 0 (assembled_tokens - preflight_accounted_tokens)
+
 let context_window_budget ~(estimated_input_tokens : int) ~(max_context : int)
   : context_window_budget =
   let remaining_context_tokens = max 0 (max_context - estimated_input_tokens) in
@@ -253,33 +286,32 @@ let budget_extra_system_context
       ~(existing_extra_system_context : string option)
       ~(blocks : (Prompt_block_id.t * string) list)
   : extra_system_context_budget =
-  let existing_tokens =
-    match existing_extra_system_context with
-    | None -> 0
-    | Some text -> Keeper_context_core_accessors.estimate_char_tokens text
+  let post_hook_estimate included_blocks =
+    estimated_input_tokens_with_tools
+    + estimate_unaccounted_assembled_extra_context_tokens
+        ~existing_extra_system_context
+        ~included_blocks
   in
-  let initial_estimate = estimated_input_tokens_with_tools + existing_tokens in
+  let initial_estimate = post_hook_estimate [] in
   let _, included_rev, skipped_rev, skipped_estimated_tokens, _ =
     List.fold_left
-      (fun (ctx, included, skipped, skipped_tokens, total_tokens) (block, text) ->
-         let block_tokens =
-           if hook_block_already_accounted_in_preflight block
-           then 0
-           else Keeper_context_core_accessors.estimate_char_tokens text
-         in
-         if block_tokens = 0 || total_tokens + block_tokens <= max_context
+      (fun (ctx, included, skipped, skipped_tokens, _total_tokens) (block, text) ->
+         let candidate_included = List.rev ((block, text) :: included) in
+         let candidate_estimate = post_hook_estimate candidate_included in
+         let block_tokens = Keeper_context_core_accessors.estimate_char_tokens text in
+         if candidate_estimate <= max_context
          then
            ( append_extra_system_context ctx text,
              (block, text) :: included,
              skipped,
              skipped_tokens,
-             total_tokens + block_tokens )
+             candidate_estimate )
          else
            ( ctx,
              included,
              block :: skipped,
              skipped_tokens + block_tokens,
-             total_tokens ))
+             _total_tokens ))
       (existing_extra_system_context, [], [], 0, initial_estimate)
       blocks
   in
@@ -289,15 +321,10 @@ let budget_extra_system_context
     estimate_unaccounted_extra_system_context_tokens included_blocks
   in
   let post_hook_estimated_input_tokens =
-    estimated_input_tokens_with_tools
-    + existing_tokens
-    + hook_extra_system_context_estimated_tokens
+    post_hook_estimate included_blocks
   in
   { extra_system_context =
-      List.fold_left
-        (fun ctx (_, text) -> append_extra_system_context ctx text)
-        existing_extra_system_context
-        included_blocks
+      assembled_extra_system_context ~existing_extra_system_context ~included_blocks
   ; included_blocks
   ; skipped_blocks
   ; skipped_estimated_tokens

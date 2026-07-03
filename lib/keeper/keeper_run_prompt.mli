@@ -109,10 +109,12 @@ val budget_extra_system_context :
   blocks:(Prompt_block_id.t * string) list ->
   extra_system_context_budget
 (** Rebuild [extra_system_context] from typed prompt blocks while keeping
-    hook-only additions inside the effective context window. Blocks already
-    represented in the pre-dispatch prompt estimate are retained without
-    double-counting; hook-only blocks that would exceed the remaining window
-    are omitted and reported in [skipped_blocks]. *)
+    hook-only additions inside the effective context window. The post-hook
+    estimate is derived from the assembled [extra_system_context] string so
+    separators and existing hook context are accounted. Blocks already
+    represented in the pre-dispatch prompt estimate are subtracted from that
+    assembled estimate to avoid double-counting; blocks that would exceed the
+    remaining window are omitted and reported in [skipped_blocks]. *)
 
 val context_window_budget :
   estimated_input_tokens:int -> max_context:int -> context_window_budget

@@ -511,6 +511,14 @@ let assemble_hooks
                 let post_hook_context_window_budget =
                   extra_system_context_budget.post_hook_context_window_budget
                 in
+                (* [budget_extra_system_context] computes the post-hook ledger
+                   from the assembled [extra_system_context] string, subtracting
+                   only blocks already represented in the pre-dispatch estimate.
+                   When the base tool-inclusive estimate fits the window, hook
+                   additions that would push the request over are skipped before
+                   this check. Any remaining overflow is therefore the base
+                   request overflow that must reach OAS' typed ContextOverflow
+                   retry path, not a silent hook-induced overrun. *)
                 let post_hook_context_window_error =
                   Keeper_run_prompt.preflight_context_window
                     ~estimated_input_tokens:post_hook_estimated_input_tokens

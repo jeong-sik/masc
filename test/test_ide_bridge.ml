@@ -797,6 +797,71 @@ let test_list_events_reads_across_segments () =
       (List.map (json_string "turn_id") events))
 ;;
 
+(* ── Bounded ingestion queue (IDE v2 A1) ─────────────────────────── *)
+
+(* (e) With no writer installed, submit runs the job inline (works outside an
+   Eio context), preserving the previous synchronous behavior. *)
+let test_queue_inline_when_no_writer () =
+  Ide_ingest_queue.For_testing.reset ();
+  let ran = ref 0 in
+  Ide_ingest_queue.submit (fun () -> incr ran);
+  check int "job runs inline when inactive" 1 !ran
+;;
+
+(* (a)+(b) When active, submit only enqueues — the job (which is where the
+   Yojson parse + append live) does not run on the calling fiber. It runs on
+   drain. This is what keeps the hot path free of parse/I/O. *)
+let test_queue_defers_when_active () =
+  Eio_main.run (fun _env ->
+    Ide_ingest_queue.For_testing.reset ();
+    Ide_ingest_queue.For_testing.set_active true;
+    let ran = ref 0 in
+    Ide_ingest_queue.submit (fun () -> incr ran);
+    check int "job not run on the calling fiber" 0 !ran;
+    check int "job is queued" 1 (Ide_ingest_queue.depth ());
+    Ide_ingest_queue.drain_pending ();
+    check int "job runs on drain" 1 !ran)
+;;
+
+(* (c) At capacity, the oldest queued job is dropped (counted) so the newest
+   survive and enqueue never blocks. *)
+let test_queue_drop_oldest () =
+  Eio_main.run (fun _env ->
+    Ide_ingest_queue.For_testing.reset ~capacity_override:4 ();
+    Ide_ingest_queue.For_testing.set_active true;
+    let tags = ref [] in
+    for i = 1 to 10 do
+      Ide_ingest_queue.submit (fun () -> tags := i :: !tags)
+    done;
+    check int "depth capped at capacity" 4 (Ide_ingest_queue.depth ());
+    check int "dropped the six oldest" 6 (Ide_ingest_queue.dropped_count ());
+    Ide_ingest_queue.drain_pending ();
+    check (list int) "newest four survive, oldest dropped" [ 7; 8; 9; 10 ]
+      (List.rev !tags))
+;;
+
+(* (d) A running writer fiber drains every submitted job. [Eio.Fiber.first]
+   runs the writer alongside the producer and cancels it once the producer has
+   observed all jobs executed. *)
+let test_queue_writer_drains () =
+  Eio_main.run (fun _env ->
+    Ide_ingest_queue.For_testing.reset ();
+    let n = 20 in
+    let ran = Atomic.make 0 in
+    Eio.Fiber.first
+      (fun () -> Ide_ingest_queue.run_writer ())
+      (fun () ->
+        for _ = 1 to n do
+          Ide_ingest_queue.submit (fun () -> Atomic.incr ran)
+        done;
+        let tries = ref 0 in
+        while Atomic.get ran < n && !tries < 100_000 do
+          Eio.Fiber.yield ();
+          incr tries
+        done);
+    check int "writer drained all jobs" n (Atomic.get ran))
+;;
+
 let () =
   run
     "ide_bridge"
@@ -827,6 +892,12 @@ let () =
             test_retention_prunes_old_segments
         ; test_case "concurrent rotations preserve rows" `Quick
             test_concurrent_rotation_preserves_rows
+        ] )
+    ; ( "ingest_queue"
+      , [ test_case "inline when no writer" `Quick test_queue_inline_when_no_writer
+        ; test_case "defers job when active" `Quick test_queue_defers_when_active
+        ; test_case "drops oldest at capacity" `Quick test_queue_drop_oldest
+        ; test_case "writer drains queue" `Quick test_queue_writer_drains
         ] )
     ; ( "cursor"
       , [ test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line

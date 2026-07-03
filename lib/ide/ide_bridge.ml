@@ -984,39 +984,50 @@ let ingest_pr_event_from_hook
     ~success:(explicit_tool_success_from_output output_text)
 
 let install_agent_observation_sinks () =
+  (* tool/pr/turn sinks fire on the keeper turn fiber (main Eio domain). Their
+     bodies parse tool output (Yojson) and append JSONL — synchronous I/O that
+     stalls the fleet under load. Defer that work to the ingestion writer fiber
+     via [Ide_ingest_queue.submit]: the hot path only allocates a closure and
+     enqueues; the parse+append run off-domain. When no writer is installed
+     (tests, pre-bootstrap) [submit] runs inline, preserving prior behavior.
+     write_region and annotation sinks stay synchronous — annotation returns a
+     Result the caller consumes, so it cannot be deferred. *)
   Agent_observation.register_tool_event_sink
     (fun (event : Agent_observation.tool_event) ->
-      ingest_tool_event_from_hook
-        ~base_path:event.base_path
-        ~tool_name:event.tool_name
-        ~keeper_id:event.keeper_id
-        ~turn_id:event.turn_id
-        ~outcome:event.outcome
-        ~typed_outcome_str:event.typed_outcome
-        ~duration_ms:event.duration_ms
-        ~output_text:event.output_text
-        ~input:event.input);
+      Ide_ingest_queue.submit (fun () ->
+        ingest_tool_event_from_hook
+          ~base_path:event.base_path
+          ~tool_name:event.tool_name
+          ~keeper_id:event.keeper_id
+          ~turn_id:event.turn_id
+          ~outcome:event.outcome
+          ~typed_outcome_str:event.typed_outcome
+          ~duration_ms:event.duration_ms
+          ~output_text:event.output_text
+          ~input:event.input));
   Agent_observation.register_pr_event_sink
     (fun (event : Agent_observation.pr_event) ->
-      ingest_pr_event_from_descriptor
-        ~base_path:event.base_path
-        ~keeper_id:event.keeper_id
-        ~turn_id:event.turn_id
-        ~output_text:event.output_text
-        ~tool_name:event.tool_name
-        ~success:event.success);
+      Ide_ingest_queue.submit (fun () ->
+        ingest_pr_event_from_descriptor
+          ~base_path:event.base_path
+          ~keeper_id:event.keeper_id
+          ~turn_id:event.turn_id
+          ~output_text:event.output_text
+          ~tool_name:event.tool_name
+          ~success:event.success));
   Agent_observation.register_turn_event_sink
     (fun (event : Agent_observation.turn_event) ->
-      ingest_turn_event
-        ~base_path:event.base_path
-        ~turn_id:event.turn_id
-        ~keeper_id:event.keeper_id
-        ~phase:event.phase
-        ~model_used:event.model_used
-        ~tools_used:event.tools_used
-        ~stop_reason:event.stop_reason
-        ~duration_ms:event.duration_ms
-        ~timestamp_ms:event.timestamp_ms);
+      Ide_ingest_queue.submit (fun () ->
+        ingest_turn_event
+          ~base_path:event.base_path
+          ~turn_id:event.turn_id
+          ~keeper_id:event.keeper_id
+          ~phase:event.phase
+          ~model_used:event.model_used
+          ~tools_used:event.tools_used
+          ~stop_reason:event.stop_reason
+          ~duration_ms:event.duration_ms
+          ~timestamp_ms:event.timestamp_ms));
   Agent_observation.register_write_region_sink
     (fun (event : Agent_observation.write_region_event) ->
       Ide_region_tracker.ingest_tool_call

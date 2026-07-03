@@ -475,12 +475,14 @@ let realpath_scoped_relative ~base relative =
 ;;
 
 let workspace_root_for_initialize ~base_path root_uri =
+  (* [path_of_file_uri] returns a [string] (not [string option]); the previous
+     [Option.bind candidate] did not type-check and left main uncompilable
+     after #23070. Match the string directly. *)
   let candidate = root_uri |> path_of_file_uri in
   match
-    Option.bind candidate (fun s ->
-      match Fpath.of_string s with
-      | Ok p when Fpath.is_abs p -> Some Fpath.(rem_empty_seg (normalize p))
-      | _ -> None)
+    (match Fpath.of_string candidate with
+     | Ok p when Fpath.is_abs p -> Some (Fpath.rem_empty_seg (Fpath.normalize p))
+     | _ -> None)
   with
   | Some candidate ->
     (match fpath_within ~base:base_path (Fpath.to_string candidate) with

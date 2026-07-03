@@ -36,7 +36,7 @@ GET /api/v1/keepers/:name/digest?since_unix=<float>
 
 - 모든 timestamp는 unix seconds float로 정규화한다 (소스는 ISO/unix 혼재 — digest 계층에서 통일).
 - `items` 배열은 상수 cap (`digest_items_cap`, 최신순)로 제한하고, 카운트 필드는 cap과 무관한 전체 수를 담는다.
-- `read_errors`: 소스 저장소별 읽기 실패를 문자열 목록으로 노출한다 (silent skip 금지, fail-visible).
+- `read_errors`: 소스 저장소별 읽기 실패와 bounded scan 조기 중단을 문자열 목록으로 노출한다 (silent skip 금지, fail-visible).
 
 ## Source mapping (전부 기존 저장소)
 
@@ -82,7 +82,7 @@ keeper identity 매칭은 `Tool_agent_timeline.identity_matches`의 3-형태 규
 
 - **lifecycle는 durable JSONL을 직접 읽는다.** `Keeper_transition_audit`의 노출된 read API(`recent_transitions`)는 in-memory ring(50, 재시작 시 유실)만 읽고 "keeper X의 since 이후" 질의를 하지 못한다. digest의 핵심 전제가 재시작 straddle이므로 durable `.masc/transition-audit` dated store를 직접 파싱한다(`{keeper, record:{event_type, wall_clock_at_decision}}`). 즉 lifecycle는 그 모듈의 함수가 아니라 on-disk 포맷에 결합한다.
 - **fail-visible read는 라이브러리를 우회한다.** `Dated_jsonl.read_range`는 malformed 행을 조용히 건너뛰므로, "read 실패는 silent skip 금지" 계약을 지키려고 day-file(`YYYY-MM/DD.jsonl`, since→now 창)을 직접 열어 줄 단위로 파싱하고 파싱 실패를 `read_errors`에 노출한다(`turn-records`/`audit`/`activity-events`/`transition-audit`). 파일 부재는 0(무활동), 실패 아님.
-- **chat 파싱 실패는 digest read_errors에 오지 않는다.** chat은 `Keeper_chat_store.load_page`(tail에서 backward paging, `chat_page_cap`로 상한)로 읽고, 그 스토어가 자체 read-drop 메트릭으로 파싱 실패를 소유한다.
+- **chat 파싱 실패는 digest read_errors에 오지 않는다.** chat은 `Keeper_chat_store.load_page`(tail에서 backward paging, `chat_page_cap`로 상한)로 읽고, 그 스토어가 자체 read-drop 메트릭으로 파싱 실패를 소유한다. 단, page cap에 도달했는데 아직 since 커서에 닿지 못한 경우는 digest count가 하한값이므로 `read_errors`에 노출한다.
 - **crash는 count-limited.** `Keeper_crash_persistence.recent_crashes`(SSOT reader) 최신 `crash_scan_max=500`행을 읽고 `ts > since` 필터. crash는 희소하므로 이 상한을 넘으면 하한값.
 - **task transition은 typed로 분류.** 문자열 매칭 대신 `Audit_log.entry_of_json_r` + typed `action` 변형으로 claim/done/release/cancel/start를 구분(워크어라운드 시그니처 2 회피). 비-task action은 catch-all 없이 전부 열거.
 - **경로는 default-cluster 가정.** keeper-local/워크스페이스 스토어 경로를 `base_path`에서 `Common.*_of_base`로 유도한다(`<base_path>/.masc/...`). 비-default `MASC_CLUSTER_NAME`이 keeper 데이터를 재배치하면 이 v1은 default 경로를 읽는다.

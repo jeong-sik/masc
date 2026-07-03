@@ -330,6 +330,29 @@ let test_items_cap () =
     | [] -> Alcotest.fail "expected capped items")
 ;;
 
+let test_chat_page_cap_is_fail_visible () =
+  with_workspace (fun base ->
+    let total = 20_001 in
+    let cf = chat_file base in
+    for i = 1 to total do
+      append_line
+        cf
+        (chat_row
+           ~id:(Printf.sprintf "chat-%05d" i)
+           ~role:"user"
+           ~ts:(since_unix +. float_of_int i)
+           ())
+    done;
+    let digest = D.build ~base_path:base ~keeper_name:keeper ~since_unix ~now_unix in
+    let { D.chat = { new_messages; _ }; read_errors; _ } = digest in
+    Alcotest.(check bool) "chat count is a lower bound" true
+      (new_messages > 0 && new_messages < total);
+    Alcotest.(check bool)
+      "chat page cap is fail-visible"
+      true
+      (List.exists (str_contains ~needle:"keeper-chat: page cap reached") read_errors))
+;;
+
 let test_task_items_are_sound_partial () =
   with_workspace (fun base ->
     let ad = audit_dir base in
@@ -400,6 +423,7 @@ let () =
       , [ Alcotest.test_case "counts + since boundary + identity + read_errors" `Quick test_counts_and_boundary
         ; Alcotest.test_case "missing stores are zero, not errors" `Quick test_missing_stores_are_zero
         ; Alcotest.test_case "items cap with full counts" `Quick test_items_cap
+        ; Alcotest.test_case "chat page cap is fail-visible" `Quick test_chat_page_cap_is_fail_visible
         ; Alcotest.test_case "task items are sound-partial" `Quick test_task_items_are_sound_partial
         ; Alcotest.test_case "to_json shape round-trips" `Quick test_to_json_shape
         ] )

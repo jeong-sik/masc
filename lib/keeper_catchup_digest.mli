@@ -104,5 +104,5 @@ val build :
 
     Look-back is clamped to the JSONL retention window; beyond it the counts
     are a lower bound and the echoed [since_unix] lets the client detect it.
-    Failures append to [read_errors]; a missing store is zero, not a
-    failure. *)
+    Failures and bounded scans that stop before [since_unix] append to
+    [read_errors]; a missing store is zero, not a failure. *)

@@ -226,7 +226,7 @@ let payload_identity_match ~identity_of payload =
    The store's own parser owns chat read-drop accounting, so chat parse
    failures do not enter [read_errors]. Rows are de-duped by their stable
    [id] across page overlaps. *)
-let read_chat ~base_dir ~keeper_name ~since =
+let read_chat ~base_dir ~keeper_name ~since ~errs =
   let seen : (string, unit) Hashtbl.t = Hashtbl.create 64 in
   let new_messages = ref 0 in
   let transport = ref 0 in
@@ -251,7 +251,10 @@ let read_chat ~base_dir ~keeper_name ~since =
   in
   let rec loop before iters =
     if iters >= chat_page_cap
-    then ()
+    then
+      bounded_add
+        errs
+        "keeper-chat: page cap reached before since_unix; chat counts are lower bounds"
     else (
       let { Keeper_chat_store.messages; has_more } =
         Keeper_chat_store.load_page ~base_dir ~keeper_name ?before ()
@@ -292,7 +295,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       (Common.keeper_runtime_store_dirname store)
   in
   (* chat *)
-  let chat = read_chat ~base_dir:base_path ~keeper_name ~since:since_unix in
+  let chat = read_chat ~base_dir:base_path ~keeper_name ~since:since_unix ~errs in
   (* turns.completed — keeper-local turn-records *)
   let completed = ref 0 in
   fold_day_partitioned

@@ -84,6 +84,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   let evidence_fields =
     Masc_task_handlers.Tool_task_completion_review.verification_evidence_fields
       (Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
+         ~submitted_evidence_refs:evidence_refs
          task)
   in
   let output =

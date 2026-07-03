@@ -77,6 +77,7 @@ let required_evidence_sources (task : Masc_domain.task) =
   | None -> []
 
 let submitted_evidence_sources ?(notes = "") ?handoff_context
+    ?(submitted_evidence_refs = [])
     (task : Masc_domain.task) =
   let resolved_handoff_context =
     match handoff_context with
@@ -103,7 +104,7 @@ let submitted_evidence_sources ?(notes = "") ?handoff_context
     then []
     else [ trimmed ]
   in
-  handoff_refs @ summary_refs @ notes_refs
+  submitted_evidence_refs @ handoff_refs @ summary_refs @ notes_refs
 
 let clean_evidence_refs refs =
   refs
@@ -115,9 +116,10 @@ let clean_evidence_refs refs =
    with placeholder-only filtering. Gating decisions belong to
    [Cdal_evidence_gate]. *)
 let concrete_verification_evidence_refs ?(notes = "") ?handoff_context
+    ?submitted_evidence_refs
     (task : Masc_domain.task) =
   required_evidence_sources task
-  @ submitted_evidence_sources ~notes ?handoff_context task
+  @ submitted_evidence_sources ~notes ?handoff_context ?submitted_evidence_refs task
   |> clean_evidence_refs
 
 let verification_evidence_refs_for_task (task : Masc_domain.task) =
@@ -136,10 +138,16 @@ type verification_evidence =
 [@@deriving yojson]
 
 let concrete_verification_evidence ?(notes = "") ?handoff_context
+    ?submitted_evidence_refs
     (task : Masc_domain.task) : verification_evidence =
   { required_artifacts = clean_evidence_refs (required_evidence_sources task)
   ; submitted_evidence =
-      clean_evidence_refs (submitted_evidence_sources ~notes ?handoff_context task)
+      clean_evidence_refs
+        (submitted_evidence_sources
+           ~notes
+           ?handoff_context
+           ?submitted_evidence_refs
+           task)
   }
 
 (* JSON object fields for the typed split, spliced into the verification

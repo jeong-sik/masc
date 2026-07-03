@@ -19,6 +19,7 @@ val non_empty_trimmed_strings : string list -> string list
 val concrete_verification_evidence_refs :
   ?notes:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
+  ?submitted_evidence_refs:string list ->
   Masc_domain.task ->
   string list
 
@@ -42,6 +43,7 @@ val verification_evidence_of_yojson :
 val concrete_verification_evidence :
   ?notes:string ->
   ?handoff_context:Masc_domain.task_handoff_context ->
+  ?submitted_evidence_refs:string list ->
   Masc_domain.task ->
   verification_evidence
 

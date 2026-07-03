@@ -432,8 +432,11 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
            cannot be auto-approved; soft-forbidden requests may only bypass the
            queue through a narrowly-scoped remembered rule. *)
         let always_approve =
-          Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
-          |> Option.value ~default:false
+          match meta with
+          | Some { Keeper_meta_contract.always_approve = Some true; _ } -> true
+          | Some { Keeper_meta_contract.always_approve = Some false; _ } -> false
+          | Some { Keeper_meta_contract.always_approve = None; _ } -> false
+          | None -> false
         in
         let rule_match =
           if hard_forbidden

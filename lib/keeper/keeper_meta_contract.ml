@@ -288,6 +288,44 @@ let blocker_class_continue_gate = function
   | Sdk_input_required -> false
 ;;
 
+(** [blocker_class_auto_approval_blocked b] is [true] iff the presence of
+    this blocker should prevent auto-approval (including [always_approve]
+    and remembered allow-rules) for the keeper's next tool call.
+
+    Only blockers that signal genuine safety/uncertainty conditions are
+    hard-forbidden.  Transient liveness signals — capacity backpressure,
+    queue timeouts, turn timeouts, SDK budget/idle/input conditions — do
+    NOT block auto-approval, so automated recovery flows are not stalled
+    by a momentary runtime hiccup.
+
+    This classifier is exhaustive so adding a new [blocker_class] variant
+    forces an explicit auto-approval policy decision. *)
+let blocker_class_auto_approval_blocked = function
+  | Ambiguous_post_commit_timeout
+  | Ambiguous_post_commit_failure
+  | Completion_contract_violation
+  | Runtime_exhausted _
+  | Fiber_unresolved
+  | Stale_turn_timeout
+  | Stale_fleet_batch
+  | Turn_livelock_blocked
+  | No_progress_loop
+  | Oas_agent_execution_timeout
+  | Sdk_guardrail_violation
+  | Sdk_tripwire_violation
+  | Sdk_exit_condition_met -> true
+  | Capacity_backpressure
+  | Admission_queue_wait_timeout
+  | Turn_timeout_after_queue_wait
+  | Turn_timeout
+  | Sdk_max_turns_exceeded
+  | Sdk_token_budget_exceeded
+  | Sdk_cost_budget_exceeded
+  | Sdk_unrecognized_stop_reason
+  | Sdk_idle_detected
+  | Sdk_input_required -> false
+;;
+
 let runtime_exhaustion_reason_to_json reason =
   Keeper_internal_error.runtime_exhaustion_reason_to_json reason
 

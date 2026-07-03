@@ -4,7 +4,7 @@
 // is the single source of truth for that normalization.
 
 import { isRecord } from './type-guards'
-import { asRecord, asString } from './json-coerce'
+import { asRecord, asString, asBoolean } from './json-coerce'
 
 function decodeOcamlStringLiteral(value: string): string {
   return value
@@ -178,11 +178,9 @@ export function normalizeFusionJudge(value: unknown): FusionJudgeView | null {
 // One judge execution node from `fusion_sink.ml judge_node_meta`. `role` is the
 // closed backend enum (single | refine | first | meta) but kept as a string so
 // an unanticipated role degrades to a raw badge instead of being dropped.
-// `decision`/`summary` are the per-node verdict + resolved answer that a
-// Synthesized node carries (judge_node_meta → judge_synthesis_fields:
-// decision/resolved_answer); a Judge_failed node carries neither, so both stay
-// undefined there. They power the judge-of-judges 1차 심판 cards; the compact
-// topology strip ignores them and reads only the array shape.
+// Successful Synthesized nodes carry per-node decision/summary, while failed
+// nodes carry failure attribution. The compact topology strip still reads only
+// the observed array shape.
 export type FusionJudgeNode = {
   role: string
   identity: string
@@ -190,6 +188,9 @@ export type FusionJudgeNode = {
   error?: string | null
   decision?: string | null
   summary?: string | null
+  failureCode?: string | null
+  elapsedS?: number | null
+  timedOut?: boolean
   inputTokens?: number | null
   outputTokens?: number | null
 }
@@ -223,6 +224,9 @@ export function normalizeFusionJudgeNodes(value: unknown): FusionJudgeNode[] {
         summary: failed
           ? undefined
           : firstString(node, ['resolved_answer', 'resolvedAnswer', 'synthesis']) ?? undefined,
+        failureCode: failed ? firstString(node, ['failure_code']) ?? undefined : undefined,
+        elapsedS: failed ? firstNumber(node, ['elapsed_s', 'elapsedS']) ?? undefined : undefined,
+        timedOut: failed ? asBoolean(node.timed_out) : undefined,
         inputTokens: firstNumber(node, ['input_tokens', 'inputTokens']) ?? undefined,
         outputTokens: firstNumber(node, ['output_tokens', 'outputTokens']) ?? undefined,
       },

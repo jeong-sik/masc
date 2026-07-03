@@ -190,6 +190,16 @@ val blocker_class_continue_gate : blocker_class -> bool
     other blocker terminates the keeper.  Pinned at the
     contract seam — drift changes keeper recovery semantics. *)
 
+val blocker_class_auto_approval_blocked : blocker_class -> bool
+(** [blocker_class_auto_approval_blocked b] is [true] iff this blocker
+    class should prevent auto-approval of the keeper's next tool call
+    (including [always_approve] and remembered allow-rules).  Only
+    safety/uncertainty classes are hard-forbidden; transient liveness
+    signals such as [Capacity_backpressure], [Turn_timeout], and SDK
+    budget/idle/input conditions are intentionally excluded so
+    automated recovery flows are not stalled.  Exhaustive — adding a
+    variant forces an explicit auto-approval policy decision. *)
+
 val runtime_exhaustion_reason_to_json :
   runtime_exhaustion_reason -> Yojson.Safe.t
 

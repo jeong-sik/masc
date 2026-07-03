@@ -1008,6 +1008,140 @@ let test_max_output_tokens_accessor_projects_catalog () =
       (Runtime.max_output_tokens_of_runtime_id "bogus.binding"))
 ;;
 
+(* ---- materialize-failure diagnostics ----
+
+   Regression guard for messages-http boot diagnostics (2026-07-03): an
+   unregistered [messages-http] provider binding cannot be materialized into a
+   provider_config, so it is dropped from the runtime list. An assignment
+   targeting it used to report the misleading "[runtime.assignments].ramarama =
+   ... not found among N runtimes" — pointing the operator at a typo that does
+   not exist — when the real cause is that the binding was defined but failed to
+   materialize. Behavior is unchanged (the binding is still excluded,
+   fail-closed); only the diagnostic must name the materialize failure. A
+   genuine typo (an id that is not a defined binding at all) must still report
+   "not found among N runtimes". Registered providers such as Kimi keep using
+   the provider registry SSOT to materialize their messages-compatible kind. *)
+
+(* [ramarama] is assigned [local.kimi-for-coding], a defined binding whose
+   provider uses protocol messages-http but has no provider-registry entry. The
+   default [openai.gpt] materializes so validation reaches the assignment. *)
+let runtime_config_messages_http_assignment =
+  {|
+[runtime]
+default = "openai.gpt"
+
+[runtime.assignments]
+ramarama = "local.kimi-for-coding"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+
+[providers.local]
+display-name = "Local Messages API"
+protocol = "messages-http"
+endpoint = "https://api.moonshot.example/anthropic"
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 128000
+tools-support = true
+streaming = true
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+
+[local.kimi-for-coding]
+max-concurrent = 1
+|}
+;;
+
+(* [ramarama] is assigned [bogus.binding], which names no declared binding at
+   all — the genuine operator-typo case whose "not found among N runtimes"
+   message must be preserved. *)
+let runtime_config_typo_assignment =
+  {|
+[runtime]
+default = "openai.gpt"
+
+[runtime.assignments]
+ramarama = "bogus.binding"
+
+[providers.openai]
+display-name = "OpenAI"
+protocol = "openai-compatible-http"
+endpoint = "https://api.openai.example/v1"
+
+[models.gpt]
+api-name = "gpt"
+max-context = 64000
+tools-support = true
+streaming = true
+
+[openai.gpt]
+is-default = true
+max-concurrent = 1
+|}
+;;
+
+let load_list_error content =
+  with_temp_dir "runtime-materialize-diag" @@ fun dir ->
+  let path = Filename.concat dir "runtime.toml" in
+  write_file path content;
+  match Runtime.load_list ~config_path:path with
+  | Ok _ ->
+    Alcotest.fail "expected load_list to reject the assignment; got Ok"
+  | Error msg -> msg
+;;
+
+let test_assignment_materialize_failure_surfaces_reason () =
+  let msg = load_list_error runtime_config_messages_http_assignment in
+  Alcotest.(check bool)
+    "error names the assignment target binding"
+    true
+    (string_contains msg "local.kimi-for-coding");
+  Alcotest.(check bool)
+    "error states the binding was defined but not materialized"
+    true
+    (string_contains msg "could not be materialized as a runtime");
+  Alcotest.(check bool)
+    "error names the unmapped protocol (messages-http)"
+    true
+    (string_contains msg "messages-http");
+  Alcotest.(check bool)
+    "error explains the missing provider-registry SSOT entry"
+    true
+    (string_contains msg "no OAS provider registry entry");
+  Alcotest.(check bool)
+    "error does NOT fall back to the misleading bare not-found wording"
+    false
+    (string_contains msg "not found among")
+;;
+
+let test_assignment_typo_keeps_not_found () =
+  let msg = load_list_error runtime_config_typo_assignment in
+  Alcotest.(check bool)
+    "genuine typo names the unresolved id"
+    true
+    (string_contains msg "bogus.binding");
+  Alcotest.(check bool)
+    "genuine typo keeps the original not-found-among-runtimes wording"
+    true
+    (string_contains msg "not found among");
+  Alcotest.(check bool)
+    "genuine typo is not mislabeled as a materialize failure"
+    false
+    (string_contains msg "could not be materialized")
+;;
+
 let () =
   Alcotest.run
     "runtime_per_keeper_routing"
@@ -1154,6 +1288,16 @@ let () =
             "max_output_tokens_of_runtime_id projects catalog ceiling"
             `Quick
             test_max_output_tokens_accessor_projects_catalog
+        ] )
+    ; ( "materialize-failure diagnostics"
+      , [ Alcotest.test_case
+            "assignment to an unmaterializable binding surfaces the reason"
+            `Quick
+            test_assignment_materialize_failure_surfaces_reason
+        ; Alcotest.test_case
+            "assignment typo keeps the not-found-among-runtimes message"
+            `Quick
+            test_assignment_typo_keeps_not_found
         ] )
     ]
 ;;

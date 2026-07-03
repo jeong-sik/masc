@@ -20,6 +20,7 @@ import {
   number,
   object,
   optional,
+  picklist,
   safeParse,
   string,
   type InferOutput,
@@ -72,6 +73,26 @@ const KeeperCatchupDigestLifecycleSchema = object({
   items: array(KeeperCatchupDigestLifecycleItemSchema),
 })
 
+const KeeperCatchupDigestCoverageCauseSchema = picklist([
+  'chat_page_cap',
+  'chat_retention_window',
+  'jsonl_retention_window',
+  'crash_scan_cap',
+])
+
+const KeeperCatchupDigestSourceCoverageSchema = object({
+  lower_bound: boolean(),
+  causes: optional(array(KeeperCatchupDigestCoverageCauseSchema)),
+})
+
+const KeeperCatchupDigestCoverageSchema = object({
+  chat: KeeperCatchupDigestSourceCoverageSchema,
+  turns: KeeperCatchupDigestSourceCoverageSchema,
+  tasks: KeeperCatchupDigestSourceCoverageSchema,
+  board: KeeperCatchupDigestSourceCoverageSchema,
+  lifecycle: KeeperCatchupDigestSourceCoverageSchema,
+})
+
 export const KeeperCatchupDigestSchema = object({
   keeper: string(),
   since_unix: number(),
@@ -81,10 +102,12 @@ export const KeeperCatchupDigestSchema = object({
   tasks: KeeperCatchupDigestTasksSchema,
   board: KeeperCatchupDigestBoardSchema,
   lifecycle: KeeperCatchupDigestLifecycleSchema,
+  coverage: KeeperCatchupDigestCoverageSchema,
   read_errors: array(string()),
 })
 
 export type KeeperCatchupDigest = InferOutput<typeof KeeperCatchupDigestSchema>
+export type KeeperCatchupDigestCoverageCause = InferOutput<typeof KeeperCatchupDigestCoverageCauseSchema>
 export type KeeperCatchupDigestTaskItem = InferOutput<typeof KeeperCatchupDigestTaskItemSchema>
 export type KeeperCatchupDigestLifecycleItem = InferOutput<typeof KeeperCatchupDigestLifecycleItemSchema>
 

@@ -34,6 +34,7 @@ import {
   judgeRoleLabel,
   judgeNodeTokenLabel,
   judgeNodeIdentity,
+  judgeNodeElapsedLabel,
 } from './fusion-judge-format'
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
@@ -476,6 +477,15 @@ export function FusionJudgesStrip({ nodes }: { nodes: readonly FusionJudgeNode[]
               <span class="fus-jn-id mono" title=${judgeNodeIdentity(node) ?? ''}>
                 ${judgeNodeIdentity(node) ?? ''}
               </span>
+              ${node.failed && node.failureCode
+                ? html`<span class="fus-jn-code mono" title=${node.error ?? node.failureCode}>${node.failureCode}</span>`
+                : null}
+              ${node.failed && judgeNodeElapsedLabel(node)
+                ? html`<span
+                    class=${`fus-jn-time ${node.timedOut ? 'timeout' : ''}`}
+                    title=${node.timedOut ? '타임아웃 초과' : '경과 시간'}
+                  >${judgeNodeElapsedLabel(node)}</span>`
+                : null}
               <span class="fus-jn-tok">${judgeNodeTokenLabel(node)}</span>
               ${node.failed
                 ? html`<span class="fus-jn-status deny" title=${node.error ?? 'failed'}>✗ 실패</span>`
@@ -666,6 +676,9 @@ function FusionPanelCard({ entry }: { entry: FusionPanelEntry }) {
     <article class=${`fus-pcard fus-panel-card ${failed ? 'failed' : 'answered'}`}>
       <div class="fus-pcard-h">
         <span class="fus-pmodel mono">${entry.model}</span>
+        ${failed && entry.reasonCode
+          ? html`<span class="fus-pcode mono" title=${entry.reason ?? entry.reasonCode}>${entry.reasonCode}</span>`
+          : null}
         ${failed
           ? html`<span class="fus-pstate fail">${entry.reason ?? entry.status}</span>`
           : tokenLabel

@@ -20,6 +20,12 @@ export interface FusionRunRecord {
   preset: string
   startedAt: number // unix seconds
   status: FusionRunStatusLabel
+  // Failure attribution, present only on `failed` rows. The backend emits both
+  // as additive fields (Fusion_run_registry.run_to_yojson): `error` is the human
+  // failure text, `failure_code` the closed machine tag (timeout / provider_error
+  // / …). Absent on running/completed rows.
+  error?: string
+  failureCode?: string
 }
 
 export interface DashboardFusionRunsResponse {
@@ -45,6 +51,8 @@ export function parseFusionRunsResponse(raw: unknown): DashboardFusionRunsRespon
       preset: asString(row.preset) ?? '',
       startedAt: asNumber(row.started_at) ?? 0,
       status: asFusionRunStatus(row.status),
+      error: asString(row.error),
+      failureCode: asString(row.failure_code),
     }))
     .filter(run => run.runId.length > 0)
   return {

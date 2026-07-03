@@ -598,6 +598,30 @@ jobs:
     #     repair guidance instead of masking the error.
     # See: https://github.com/jeong-sik/masc/issues/2957
     steps:
+      - name: Free disk space
+        # ubuntu-latest starts with roughly 14 GB free but preinstalls the
+        # Android SDK (~9 GB), .NET (~1.6 GB), GHC/Haskell (~1 GB) and the
+        # CodeQL bundle (~5 GB) that this OCaml build never uses. Removing them
+        # reclaims about 15 GB and prevents the recurring "No space left on
+        # device" failures in this job (heavy dune build, _build artifacts and
+        # test runners exceed the default free space; runs 28638901622 /
+        # 28644587505 / 28652695346 all died this way on 2026-07-03). This is a
+        # preventive measure that complements the non-retryable repair guidance
+        # emitted by scripts/ci-run-tests.sh. Alternative considered and
+        # rejected for cost: a paid larger runner.
+        # See: https://github.com/jeong-sik/masc/issues/22954
+        run: |
+          set -euo pipefail
+          echo "Disk before cleanup:"
+          df -h /
+          sudo rm -rf /usr/local/lib/android || true
+          sudo rm -rf /usr/share/dotnet || true
+          sudo rm -rf /opt/ghc /usr/local/.ghcup || true
+          sudo rm -rf /opt/hostedtoolcache/CodeQL || true
+          sudo docker image prune --all --force || true
+          echo "Disk after cleanup:"
+          df -h /
+
       - name: Checkout
         uses: actions/checkout@v7
 

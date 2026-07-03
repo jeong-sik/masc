@@ -125,7 +125,7 @@ let disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_off" "" in
     Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
-      ~sdk_turn:0 ~system_prompt:"sys" ~extra_system_context:None
+      ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"u" ~history_messages:[] ();
     Alcotest.(check (list string))
       "no jsonl written when disabled" [] (find_jsonl base))
@@ -177,7 +177,7 @@ let request_trace_id_emitted () =
     let base = Filename.temp_dir "wirecap_req_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-req-abc" in
     Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
-      ~trace_id ~sdk_turn:0 ~system_prompt:"sys" ~extra_system_context:None
+      ~trace_id ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ();
     let content = read_file (List.hd (find_jsonl base)) in
     Alcotest.(check bool) "request trace_id string recorded" true
@@ -187,7 +187,7 @@ let request_capture_failure_is_best_effort () =
   with_flag "1" (fun () ->
     let root_file = Filename.temp_file "wirecap_root_file" "" in
     Wire.capture_request ~masc_root:root_file ~keeper_name:"sangsu" ~turn_id:1
-      ~sdk_turn:0 ~system_prompt:"sys" ~extra_system_context:None
+      ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ())
 
 let response_disabled_is_noop () =
@@ -222,7 +222,7 @@ let response_trace_id_emitted () =
     let base = Filename.temp_dir "wirecap_resp_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-resp-xyz" in
     Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:2
-      ~sdk_turn:0 ~trace_id ~response_text:"ok" ();
+      ~sdk_turn:1 ~trace_id ~response_text:"ok" ();
     let content = read_file (List.hd (find_jsonl base)) in
     Alcotest.(check bool) "response trace_id string recorded" true
       (contains ~needle:"\"trace_id\":\"trace-resp-xyz\"" content))

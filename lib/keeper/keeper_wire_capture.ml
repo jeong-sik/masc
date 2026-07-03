@@ -29,7 +29,7 @@ let store_for ~masc_root =
     match Hashtbl.find_opt store_cache masc_root with
     | Some entry
       when entry.retention_days = retention_days && entry.max_bytes = max_bytes ->
-      entry.store
+      entry
     | _ ->
       let store =
         Dated_jsonl.create
@@ -38,13 +38,28 @@ let store_for ~masc_root =
           ~max_bytes
           ()
       in
-      Hashtbl.replace store_cache masc_root { store; retention_days; max_bytes };
-      store)
+      let entry = { store; retention_days; max_bytes } in
+      Hashtbl.replace store_cache masc_root entry;
+      entry)
+;;
+
+type record_skip_reason = Current_file_byte_cap
+
+let record_skip_reason_label = function
+  | Current_file_byte_cap -> "current_file_byte_cap"
+;;
+
+type write_failure_site =
+  | Request_capture
+  | Response_capture
+
+let write_failure_site_label = function
+  | Request_capture -> "request"
+  | Response_capture -> "response"
 ;;
 
 let write_payload ~masc_root ~keeper_name ~turn_id (payload : Yojson.Safe.t) =
-  let max_bytes = Env_config_keeper.KeeperWireCapture.max_bytes () in
-  let store = store_for ~masc_root in
+  let { store; max_bytes; _ } = store_for ~masc_root in
   if
     not
       (Dated_jsonl.append_if_current_file_fits
@@ -57,7 +72,7 @@ let write_payload ~masc_root ~keeper_name ~turn_id (payload : Yojson.Safe.t) =
       ~labels:
         [ ("keeper", keeper_name)
         ; ("turn_id", string_of_int turn_id)
-        ; ("reason", "cap")
+        ; ("reason", record_skip_reason_label Current_file_byte_cap)
         ]
       ();
     Log.Keeper.warn
@@ -66,7 +81,7 @@ let write_payload ~masc_root ~keeper_name ~turn_id (payload : Yojson.Safe.t) =
       max_bytes
       (Dated_jsonl.base_dir store))
 
-let best_effort ~masc_root ~keeper_name ~turn_id f =
+let best_effort ~site ~masc_root ~keeper_name ~turn_id f =
   let base_dir = wire_capture_dir masc_root in
   try f () with
   | Eio.Cancel.Cancelled _ as e -> raise e
@@ -76,7 +91,7 @@ let best_effort ~masc_root ~keeper_name ~turn_id f =
       ~labels:
         [ ("keeper", keeper_name)
         ; ("turn_id", string_of_int turn_id)
-        ; ("site", "write_payload")
+        ; ("site", write_failure_site_label site)
         ]
       ();
     Log.Keeper.error "keeper_wire_capture: write failed to %s: %s" base_dir
@@ -90,7 +105,7 @@ let capture_request ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
     ~extra_system_context ~user_message ~history_messages ?trace_id () =
   if not (enabled ()) then ()
   else
-    best_effort ~masc_root ~keeper_name ~turn_id (fun () ->
+    best_effort ~site:Request_capture ~masc_root ~keeper_name ~turn_id (fun () ->
       let history =
         List.map
           (fun (m : Agent_sdk.Types.message) ->
@@ -126,7 +141,7 @@ let capture_response ~masc_root ~keeper_name ~turn_id ~sdk_turn ~response_text
     ?trace_id () =
   if not (enabled ()) then ()
   else
-    best_effort ~masc_root ~keeper_name ~turn_id (fun () ->
+    best_effort ~site:Response_capture ~masc_root ~keeper_name ~turn_id (fun () ->
       let payload : Yojson.Safe.t =
         `Assoc
           [ ("ts", `String (Masc_domain.now_iso ()))

@@ -1141,6 +1141,39 @@ let test_replay_capture_omits_blank_response_text () =
        ~suppress_visible_response:false
        ~response_text:"   ")
 
+let test_wire_capture_suppression_reason_preserves_combined_causes () =
+  let reason ~budget_exhausted ~contract_suppresses_visible_response =
+    Option.map
+      Finalize.wire_capture_response_suppression_reason_label
+      (Finalize.wire_capture_response_suppression_reason
+         ~budget_exhausted
+         ~contract_suppresses_visible_response)
+  in
+  Alcotest.(check (option string))
+    "no suppression"
+    None
+    (reason
+       ~budget_exhausted:false
+       ~contract_suppresses_visible_response:false);
+  Alcotest.(check (option string))
+    "budget exhausted"
+    (Some "budget_exhausted")
+    (reason
+       ~budget_exhausted:true
+       ~contract_suppresses_visible_response:false);
+  Alcotest.(check (option string))
+    "completion contract"
+    (Some "completion_contract")
+    (reason
+       ~budget_exhausted:false
+       ~contract_suppresses_visible_response:true);
+  Alcotest.(check (option string))
+    "both causes preserved"
+    (Some "budget_exhausted_and_completion_contract")
+    (reason
+       ~budget_exhausted:true
+       ~contract_suppresses_visible_response:true)
+
 (* ── Continuity NEXT parsing / text round-trip ───────────────────────
    Regression coverage for the parser/renderer asymmetry that let a single
    [STATE] "NEXT:" line populate both next_summary and next_items and then
@@ -1333,6 +1366,10 @@ let () =
             "replay capture omits blank response text"
             `Quick
             test_replay_capture_omits_blank_response_text;
+          Alcotest.test_case
+            "wire capture suppression reason preserves combined causes"
+            `Quick
+            test_wire_capture_suppression_reason_preserves_combined_causes;
         ] );
       ( "continuity_next",
         [

@@ -220,7 +220,7 @@ ramarama = "kimi.kimi-for-coding"
 [providers.kimi]
 display-name = "Kimi Code Plan"
 protocol = "messages-http"
-endpoint = "https://api.kimi.com/coding"
+endpoint = "https://example.invalid/kimi"
 
 [providers.kimi.credentials]
 type = "inline"

@@ -1,0 +1,23 @@
+# Suffixes for non-executable assets under covered paths.
+# Keep config/data formats covered unless their validation policy moves here.
+.css
+.gif
+.htm
+.html
+.ico
+.jpeg
+.jpg
+.markdown
+.md
+.mov
+.mp4
+.otf
+.pdf
+.png
+.svg
+.ttf
+.txt
+.webm
+.webp
+.woff
+.woff2

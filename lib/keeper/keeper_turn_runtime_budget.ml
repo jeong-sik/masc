@@ -636,20 +636,19 @@ let context_overflow_event_of_error
               limit_tokens = None;
             }
 
-let overflow_pause_resume_policy () =
-  match
-    (Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause)
-      .circuit_effect
-  with
+let pause_resume_policy_of_circuit_effect = function
   | Keeper_failure_policy.Operator_breaker ->
     Keeper_supervisor_pause_policy.Manual_resume_required
-  (* Unresolved context overflow is deterministic for the same checkpoint and
-     runtime budget, so fail closed to manual review if the policy shape drifts
-     instead of silently reintroducing an auto-resume loop. *)
   | Keeper_failure_policy.Skip_circuit
   | Keeper_failure_policy.Count_for_circuit
   | Keeper_failure_policy.Provider_cooldown ->
-    Keeper_supervisor_pause_policy.Manual_resume_required
+    Keeper_supervisor_pause_policy.Auto_resume_with_backoff
+;;
+
+let overflow_pause_resume_policy () =
+  (Keeper_failure_policy.decide Keeper_failure_policy.Turn_overflow_pause)
+    .circuit_effect
+  |> pause_resume_policy_of_circuit_effect
 ;;
 
 let pause_keeper_for_overflow

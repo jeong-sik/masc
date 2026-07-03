@@ -828,6 +828,50 @@ let test_governance_approval_hard_forbidden_blocks_without_hitl () =
       failf "expected one hard-forbidden observer event, got %d"
         (List.length events)))
 
+let meta_with_blocker klass meta =
+  let open Masc.Keeper_meta_contract in
+  let blocker = blocker_info_of_class ~detail:"test blocker" klass in
+  { meta with runtime = { meta.runtime with last_blocker = Some blocker } }
+;;
+
+let test_governance_approval_serious_blocker_overrides () =
+  with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+    let meta_ref = make_meta_ref "test_keeper" in
+    meta_ref := meta_with_blocker Masc.Keeper_meta_contract.Completion_contract_violation !meta_ref;
+    let observed = ref [] in
+    let on_gate_decision event = observed := event :: !observed in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let d =
+      invoke hook
+        (pre_tool_use_event ~tool_name:"masc_create_task"
+           ~input:(`Assoc [ ("title", `String "follow up") ])
+           ())
+    in
+    check string "serious last_blocker -> Override"
+      "Override" (decision_kind d);
+    check bool "override carries hard-forbidden reason" true
+      (contains_substring (override_text d) "code=hard_forbidden")))
+
+let test_governance_approval_transient_blocker_allows () =
+  with_env "MASC_GOVERNANCE_LEVEL" "development" (fun () ->
+  with_env "MASC_DISABLE_HITL" "true" (fun () ->
+    let meta_ref = make_meta_ref "test_keeper" in
+    meta_ref := meta_with_blocker Masc.Keeper_meta_contract.Turn_timeout !meta_ref;
+    let observed = ref [] in
+    let on_gate_decision event = observed := event :: !observed in
+    let hook = KG.governance_approval_guard ~meta_ref ~on_gate_decision in
+    let d =
+      invoke hook
+        (pre_tool_use_event ~tool_name:"masc_create_task"
+           ~input:(`Assoc [ ("title", `String "follow up") ])
+           ())
+    in
+    check string "transient last_blocker -> Continue"
+      "Continue" (decision_kind d);
+    check bool "no gate event for transient blocker" true
+      (List.length !observed = 0)))
+
 let test_timing_guard_sets_time_and_continues () =
   let tool_start_time = ref 0.0 in
   let hook = KG.timing_guard ~tool_start_time in
@@ -981,6 +1025,10 @@ let () = run "Keeper_guards" [
       test_governance_approval_notifies_gate_observer;
     test_case "hard-forbidden overrides without HITL" `Quick
       test_governance_approval_hard_forbidden_blocks_without_hitl;
+    test_case "serious last_blocker overrides without HITL" `Quick
+      test_governance_approval_serious_blocker_overrides;
+    test_case "transient last_blocker allows without HITL" `Quick
+      test_governance_approval_transient_blocker_allows;
   ];
   "timing_guard", [
     test_case "sets time and continues" `Quick test_timing_guard_sets_time_and_continues;

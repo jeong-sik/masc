@@ -13,15 +13,19 @@
   ide_command_descriptor
   ide_bridge
   ide_event_types
+  ide_ingest_queue
   ide_paths
   ide_region_tracker)
  (libraries
   unix
+  eio
   mtime
   mtime.clock.os
   yojson
   uuidm
   fs_compat
+  masc.dated_jsonl
+  masc.masc_process
   masc.command_descriptor
   masc.agent_observation
   masc.masc_exec))

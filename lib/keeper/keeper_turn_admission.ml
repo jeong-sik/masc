@@ -82,9 +82,18 @@ let run_locked slot ~lane f =
     raise exn
 ;;
 
+let waiting_count slot = Stdlib.Mutex.protect slot.state_mu (fun () -> slot.waiting)
+
 let run_if_free ~base_path ~keeper_name f =
   let slot = slot_for ~base_path ~keeper_name in
-  if Eio.Mutex.try_lock slot.turn_mu
+  (* Yield to a parked chat before touching the lock. [waiting > 0] implies
+     the slot is held (a waiter only parks because a turn is in flight), so
+     [try_lock] would fail here anyway; the explicit check keeps the
+     autonomous lane from competing for a slot a dashboard/connector message
+     is already queued on and documents the intent at the entry point. *)
+  if waiting_count slot > 0
+  then `Busy (peek_info slot)
+  else if Eio.Mutex.try_lock slot.turn_mu
   then run_locked slot ~lane:Autonomous f
   else `Busy (peek_info slot)
 ;;
@@ -121,6 +130,13 @@ let in_flight ~base_path ~keeper_name =
   match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
   | None -> None
   | Some slot -> peek_info slot
+;;
+
+let chat_waiting ~base_path ~keeper_name =
+  let key = Keeper_registry_types.registry_key ~base_path keeper_name in
+  match Stdlib.Mutex.protect slots_mu (fun () -> Hashtbl.find_opt slots key) with
+  | None -> false (* no slot yet ⇒ no turn ran ⇒ no chat can be waiting *)
+  | Some slot -> waiting_count slot > 0
 ;;
 
 module For_testing = struct

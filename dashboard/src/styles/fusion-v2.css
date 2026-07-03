@@ -894,6 +894,34 @@ button.fus-reconcile-row:hover {
   flex: 0 0 auto;
 }
 
+/* Failure attribution on a failed registry card: machine code chip + human
+   detail. Only rendered for `failed` runs (fusion-runs-panel FusionRunStatusCard). */
+.v2-fusion-surface .fus-runs-reason {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--fs-11);
+}
+
+.v2-fusion-surface .fus-runs-code {
+  flex: 0 0 auto;
+  border: 1px solid var(--bad-30);
+  border-radius: var(--r-0);
+  background: var(--bad-10);
+  color: var(--bad-light);
+  font-size: var(--fs-10);
+  padding: 1px 6px;
+}
+
+.v2-fusion-surface .fus-runs-reason-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fus-muted);
+}
+
 .v2-fusion-surface .fus-runs-pipe {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

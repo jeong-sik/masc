@@ -7,11 +7,12 @@ import { useEffect, useState } from 'preact/hooks'
 import { signal } from '@preact/signals'
 import {
   fetchDashboardGoalsTree,
+  fetchDashboardTools,
   patchKeeperConfig,
   setKeeperToolPolicy,
 } from '../api/dashboard'
 import { pauseKeeper, resumeKeeper, wakeKeeper } from '../api/keeper'
-import type { KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
+import type { DashboardToolInventoryItem, KeeperConfigUpdatePayload, SandboxProfile, SandboxNetworkMode } from '../api/dashboard'
 import type { GoalTreeNode, KeeperConfig, KeeperHookSlot } from '../types'
 import { formatTokens, formatPct, formatCost } from '../lib/format-number'
 import { isVerifierRoleKeeper } from '../lib/keeper-utils'
@@ -78,6 +79,14 @@ const kcfTab = signal<KcfTabId>('identity')
 
 const goalOptionsResource = createAsyncResource<GoalTreeNode[]>()
 const goalOptionsState = goalOptionsResource.state
+// Client-only search over the goal catalogue (title/id substring). The catalogue
+// runs 70+ entries, so the goals tab filters the rendered list without a fetch.
+const goalSearchQuery = signal('')
+// Live tool registry (GET /api/v1/dashboard/tools) — the per-tool policy grid is
+// derived from this, never a hardcoded catalogue, so a tool added to the runtime
+// surfaces here on the next load.
+const toolInventoryResource = createAsyncResource<DashboardToolInventoryItem[]>()
+const toolInventoryState = toolInventoryResource.state
 const editMode = signal(false)
 const saving = signal(false)
 const saveError = signal<string | null>(null)
@@ -224,6 +233,8 @@ const denylistSaving = signal(false)
 
 function resetKeeperConfigPanelDrafts(): void {
   goalOptionsResource.reset()
+  goalSearchQuery.value = ''
+  toolInventoryResource.reset()
   editMode.value = false
   editDraft.value = null
   saveError.value = null
@@ -432,6 +443,29 @@ async function loadGoalOptions(options?: { force?: boolean }): Promise<void> {
   })
 }
 
+async function loadToolInventory(options?: { force?: boolean }): Promise<void> {
+  const force = options?.force === true
+  if (!force && toolInventoryState.value.status === 'loaded') return
+  if (force) toolInventoryResource.reset()
+  await toolInventoryResource.load(async () => {
+    const response = await fetchDashboardTools()
+    return response.tool_inventory?.tools ?? []
+  })
+}
+
+// Case-insensitive title/id substring filter for the goals catalogue.
+export function filterGoalOptions(
+  goals: readonly GoalTreeNode[],
+  query: string,
+): readonly GoalTreeNode[] {
+  const needle = query.trim().toLowerCase()
+  if (needle === '') return goals
+  return goals.filter(
+    (goal) =>
+      goal.title.toLowerCase().includes(needle) || goal.id.toLowerCase().includes(needle),
+  )
+}
+
 // ── Helpers ──────────────────────────────────────────────
 
 // .kcf-* widgets — keeper-v2/keeper-config.jsx contract, styled by the vendored
@@ -488,6 +522,116 @@ function KcfReadonlyText({ label, hint, text }: { label: string; hint?: string; 
     <div class="kcf-textfield">
       <div class="kcf-tf-h"><label>${label}</label>${hint ? html`<span class="kcf-tf-hint">${hint}</span>` : null}</div>
       <div class="kcf-text mono" style="white-space:pre-wrap; max-height:9rem; overflow-y:auto;">${value}</div>
+    </div>
+  `
+}
+
+// ── prompt assembly trace (조립 추적) ──
+// Keeper-scoped layered lineage built from the keeper's OWN config provenance:
+// system_prompt_blocks (shared base), prompt.goal/instructions (manifest, or a
+// live override when sources.override_fields lists the field), and active_goals.
+// This is deliberately NOT the workspace-global KeeperPromptAssemblyPanel — that
+// component fetches dashboard-wide prompt-registry overrides (fetchDashboardPrompts)
+// and cannot render one keeper's assembled layers. Read-only; every segment is
+// real config text with real provenance, no fabricated base prose.
+type KcfAssemblySource = 'base' | 'manifest' | 'override' | 'goals'
+
+interface KcfAssemblySegment {
+  readonly src: KcfAssemblySource
+  readonly field: string
+  readonly path: string
+  readonly text: string
+  readonly win: boolean
+}
+
+const KCF_ASSEMBLY_SRC_META: Readonly<Record<KcfAssemblySource, { lbl: string; cls: string }>> = {
+  base: { lbl: '공유 베이스', cls: 'src-base' },
+  manifest: { lbl: '매니페스트', cls: 'src-manifest' },
+  override: { lbl: 'live override', cls: 'src-override' },
+  goals: { lbl: '배정 목표', cls: 'src-goals' },
+}
+
+// Server override_fields are dot-namespaced (keeper_status_bridge.ml
+// live_override_details): 'prompt.goal', 'prompt.instructions', etc. A field is
+// marked as winning over the manifest only when its exact key is present.
+export function buildKcfAssemblySegments(c: KeeperConfig): KcfAssemblySegment[] {
+  const overrideFields = new Set(c.sources.override_fields)
+  const manifestPath =
+    c.sources.default_manifest_path && c.sources.default_manifest_path.trim() !== ''
+      ? c.sources.default_manifest_path
+      : '매니페스트'
+  const livePath =
+    c.sources.live_meta_path && c.sources.live_meta_path.trim() !== ''
+      ? c.sources.live_meta_path
+      : 'live override'
+  const segments: KcfAssemblySegment[] = []
+  const blocks = c.prompt.system_prompt_blocks
+  const baseBlocks: readonly (readonly [string, { key: string; source: string; text: string }])[] = [
+    ['헌법', blocks.constitution],
+    ['세계관', blocks.world],
+    ['능력', blocks.capabilities],
+  ]
+  for (const [label, block] of baseBlocks) {
+    if (block.text.trim() !== '') {
+      segments.push({ src: 'base', field: label, path: block.source, text: block.text, win: false })
+    }
+  }
+  const pushPromptField = (overrideKey: string, label: string, text: string) => {
+    if (text.trim() === '') return
+    const overridden = overrideFields.has(overrideKey)
+    segments.push({
+      src: overridden ? 'override' : 'manifest',
+      field: label,
+      path: overridden ? livePath : manifestPath,
+      text,
+      win: overridden,
+    })
+  }
+  pushPromptField('prompt.goal', '목표 (objective)', c.prompt.goal)
+  pushPromptField('prompt.instructions', '지시사항 (instructions)', c.prompt.instructions)
+  const goals = c.workspace.active_goals
+  if (goals.length > 0) {
+    segments.push({
+      src: 'goals',
+      field: `배정 goal ${goals.length}개`,
+      path: 'goal store',
+      text: goals.map((g) => `· ${g.title}`).join('\n'),
+      win: false,
+    })
+  }
+  return segments
+}
+
+function KcfAssemblyTrace({ config }: { config: KeeperConfig }) {
+  const segments = buildKcfAssemblySegments(config)
+  if (segments.length === 0) {
+    return html`<div class="kcf-goals-empty">조립할 프롬프트 레이어가 없습니다.</div>`
+  }
+  const presentSources = [...new Set(segments.map((s) => s.src))]
+  return html`
+    <div class="kasm">
+      <div class="kasm-legend">
+        ${presentSources.map((src) => {
+          const meta = KCF_ASSEMBLY_SRC_META[src]
+          return html`<span key=${src} class=${`kasm-leg ${meta.cls}`}><i></i>${meta.lbl}</span>`
+        })}
+      </div>
+      <div class="kasm-stack">
+        ${segments.map((seg, i) => {
+          const meta = KCF_ASSEMBLY_SRC_META[seg.src]
+          return html`
+            <div key=${i} class=${`kasm-seg ${meta.cls} ${seg.win ? 'win' : ''}`}>
+              <div class="kasm-seg-h">
+                <span class="kasm-seg-src">${meta.lbl}</span>
+                <span class="kasm-seg-field mono">${seg.field}</span>
+                ${seg.win ? html`<span class="kasm-seg-win">매니페스트 덮어씀</span>` : null}
+                <span class="kasm-seg-path mono">${seg.path}</span>
+              </div>
+              <div class="kasm-seg-text">${seg.text}</div>
+            </div>
+          `
+        })}
+      </div>
     </div>
   `
 }
@@ -867,6 +1011,9 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   if (goalOptionsState.value.status === 'idle') {
     void loadGoalOptions()
   }
+  if (toolInventoryState.value.status === 'idle') {
+    void loadToolInventory()
+  }
 
   // Loading / error states render inside the same .kcf-overlay frame so the
   // modal does not pop in only after the config resolves (the panel is mounted
@@ -1164,6 +1311,11 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   const promptTab = html`
     ${toolbar}
     ${promptSection}
+    <${KcfSec}
+      title="조립 추적"
+      desc="이 keeper의 시스템 프롬프트가 어느 레이어에서 조립됐는지 — 공유 베이스 위에 매니페스트/live override가 쌓이고, override_fields에 오른 필드가 매니페스트를 덮어씁니다.">
+      <${KcfAssemblyTrace} config=${c} />
+    </${KcfSec}>
   `
 
   // runtime ◷ — runtime selection + execution profile (read-only introspection + runtime_id picker)
@@ -1299,11 +1451,65 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       const changed =
         JSON.stringify(accessDeduped) !== JSON.stringify(c.tools.tool_access)
         || JSON.stringify(denyDeduped) !== JSON.stringify(c.tools.tool_denylist)
+      // Per-tool grid edits the SAME tool_access draft the textarea below shows —
+      // one draft, two views. Toggling only rewrites tool_access membership; the
+      // server (set_policy) still validates every name (RFC-0273 fail-closed) and
+      // the denylist keeps its own control, so no execution-gating claim is implied.
+      //
+      // Empty tool_access is NOT "every tool off": keeper_tool_policy.ml expands an
+      // empty allowlist to the full candidate universe (runtime gates on
+      // candidate-minus-denylist). So in that mode the grid shows every tool as ON
+      // and read-only — an enabled toggle would silently narrow [] (all candidates)
+      // to a single explicit candidate. The operator opts into an explicit allowlist
+      // via the textarea below, at which point the grid becomes interactive.
+      const allCandidatesMode = accessDeduped.length === 0
+      const accessSet = new Set(accessDeduped)
+      const toggleToolAccess = (name: string) => {
+        if (allCandidatesMode) return
+        const next = new Set(accessDeduped)
+        if (next.has(name)) next.delete(name)
+        else next.add(name)
+        toolAccessDraftText.value = [...next].join('\n')
+      }
+      const toolState = toolInventoryState.value
       return html`
         <${SectionHeader} title="도구 정책" />
         <p class="text-3xs text-text-muted mb-2 px-1 leading-relaxed">
           저장 시 set_policy 로 tool_access 와 tool_denylist 를 함께 적용합니다. tool_access 는 후보 프로필이고 실행 차단은 denylist가 담당합니다.
         </p>
+        ${toolState.status === 'loading' ? html`
+          <div class="text-2xs text-[var(--color-fg-muted)] mb-2 px-1" role="status">도구 목록 로딩 중...</div>
+        ` : toolState.status === 'error' ? html`
+          <div class="text-2xs text-[var(--color-status-err)] mb-2 px-1">도구 목록 로드 실패: ${toolState.message}</div>
+        ` : toolState.status === 'loaded' && toolState.data.length > 0 ? html`
+          ${allCandidatesMode ? html`
+            <div class="text-2xs text-[var(--color-fg-muted)] mb-2 px-1" role="note" data-testid="tool-all-candidates-note">
+              빈 tool_access — 전체 후보 도구 허용 (실행 차단은 denylist). 개별 도구를 제한하려면 아래 tool_access 목록에 이름을 입력해 명시적 허용목록으로 전환하세요.
+            </div>
+          ` : null}
+          <div class="kcf-tools mb-3" role="group" aria-label="tool_access 후보 도구">
+            ${toolState.data.map((tool) => {
+              const on = allCandidatesMode || accessSet.has(tool.name)
+              return html`
+                <div key=${tool.name} class=${`kcf-tool ${on ? 'on' : ''}`}>
+                  <button
+                    type="button"
+                    class="kcf-tool-toggle"
+                    role="switch"
+                    aria-checked=${on ? 'true' : 'false'}
+                    aria-disabled=${allCandidatesMode ? 'true' : 'false'}
+                    disabled=${allCandidatesMode}
+                    aria-label=${`${tool.name} ${on ? '켜짐' : '꺼짐'}`}
+                    onClick=${() => { toggleToolAccess(tool.name) }}
+                  >${on ? '✓' : ''}</button>
+                  <span class="kcf-tool-id mono">${tool.name}</span>
+                  <span class="kcf-tool-risk" title="tool_inventory.category">${tool.category}</span>
+                  <span class="kcf-tool-desc">${tool.description}</span>
+                </div>
+              `
+            })}
+          </div>
+        ` : null}
         <div class="py-2.5 px-4 rounded-[var(--r-1)] bg-[var(--color-bg-surface)] mb-2 ${changed ? 'border-l-4 border-l-[var(--color-accent-fg)]' : ''} v2-monitoring-panel">
           <div class="flex items-center justify-between mb-2">
             <span class="text-sm text-[var(--color-fg-secondary)]">tool_access</span>
@@ -1437,6 +1643,7 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
   `
 
   // goals ◎ — assigned goal-store bindings (active_goal_ids picker)
+  const filteredGoalOptions = filterGoalOptions(goalOptions, goalSearchQuery.value)
   const goalsTab = html`
     <${KcfSec}
       title="배정 목표"
@@ -1444,13 +1651,29 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       right=${html`<span class="kcf-goals-count mono">active_goal_ids · ${selectedActiveGoalIds.length} 배정</span>`}
     >
       <div class="kcf-goals">
+        ${goalOptions.length > 0 && rd ? html`
+          <div class="kcf-goals-bar">
+            <div class="kcf-search">
+              <span class="kcf-search-ic" aria-hidden="true">◌</span>
+              <input
+                type="search"
+                aria-label="goal 검색"
+                value=${goalSearchQuery.value}
+                placeholder="goal 제목·id 검색…"
+                onInput=${(e: Event) => { goalSearchQuery.value = (e.target as HTMLInputElement).value }}
+              />
+            </div>
+            <span class="kcf-goals-count mono">${selectedActiveGoalIds.length} 배정 · ${filteredGoalOptions.length} 표시</span>
+          </div>
+        ` : null}
         ${goalState.status === 'loading' ? html`
           <div class="text-2xs text-[var(--color-fg-muted)]" role="status">목표 목록 로딩 중...</div>
         ` : goalState.status === 'error' ? html`
           <div class="text-2xs text-[var(--color-status-err)]">${goalState.message}</div>
-        ` : goalOptions.length > 0 && rd ? html`
+        ` : goalOptions.length > 0 && rd ? (
+          filteredGoalOptions.length > 0 ? html`
           <div class="kcf-goals-list">
-            ${goalOptions.map((goal) => {
+            ${filteredGoalOptions.map((goal) => {
               const checked = rd.active_goal_ids.includes(goal.id)
               return html`
                 <button
@@ -1469,7 +1692,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
               `
             })}
           </div>
-        ` : selectedActiveGoalIds.length > 0 ? html`
+          ` : html`
+          <div class="kcf-goals-empty">검색 결과 없음</div>
+          `
+        ) : selectedActiveGoalIds.length > 0 ? html`
           <${ModelList} models=${selectedActiveGoalIds} />
         ` : html`
           <div class="kcf-goals-empty">활성 목표가 연결되어 있지 않습니다.</div>

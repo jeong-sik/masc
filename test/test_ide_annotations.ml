@@ -720,10 +720,8 @@ let test_document_highlights_related () =
          check int "two highlights" 2 (List.length highlights))))
 ;;
 
-(* Round-trip through [compact], which calls the internal
-   [write_all_partition].  Guards the [Fs_compat.save_file_atomic] rewrite:
-   the happy path must still write every annotation back so a later [list] sees
-   them all. *)
+(* Round-trip through [compact]. Guards the append-only snapshot marker:
+   the happy path must still expose every live annotation to a later [list]. *)
 let test_compact_preserves_annotations () =
   with_temp_dir (fun base_dir ->
     let mk content =
@@ -873,12 +871,222 @@ let test_delete_allows_owner () =
     | Error msg -> failf "owner delete failed: %s" msg)
 ;;
 
+(* task-1744: tombstoned annotations must be excluded from load/list.
+
+   Before the fix, [load_all_partition] only skipped the tombstone marker
+   line, leaving the earlier annotation with the same id visible in
+   [list], contradicting the mli contract "Tombstoned entries are
+   excluded". These cases exercise both the plain tombstone path, where
+   [list] must apply the exclusion itself, and the explicit compaction
+   marker path. *)
+
+let create_note ~base_dir ~keeper_id ~content () =
+  Result.get_ok
+    (Store.create
+       ~base_dir
+       ~keeper_id
+       ~file_path:"lib/a.ml"
+       ~line_start:1
+       ~line_end:1
+       ~kind:Types.Comment
+       ~content
+       ())
+;;
+
+let test_list_excludes_soft_deleted_without_compaction () =
+  with_temp_dir (fun base_dir ->
+    (* No explicit compaction runs here; [list] must exclude the tombstoned
+       id on read while the marker remains physically present. *)
+    let notes =
+      List.init 6 (fun i ->
+        create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
+    in
+    let victim = List.hd notes in
+    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+     | Ok () -> ()
+     | Error msg -> failf "delete failed: %s" msg);
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check int "list excludes the tombstoned annotation" 5 (List.length listed);
+    check
+      bool
+      "tombstoned id absent from list"
+      false
+      (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
+;;
+
+let test_list_keeps_sibling_after_delete () =
+  with_temp_dir (fun base_dir ->
+    let victim = create_note ~base_dir ~keeper_id:"alice" ~content:"to delete" () in
+    let survivor = create_note ~base_dir ~keeper_id:"alice" ~content:"to keep" () in
+    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+     | Ok () -> ()
+     | Error msg -> failf "delete failed: %s" msg);
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check
+      bool
+      "deleted sibling absent"
+      false
+      (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed);
+    check
+      bool
+      "undeleted sibling present"
+      true
+      (List.exists (fun (a : Types.annotation) -> a.id = survivor.id) listed))
+;;
+
+let test_list_returns_live_annotation () =
+  with_temp_dir (fun base_dir ->
+    let note = create_note ~base_dir ~keeper_id:"alice" ~content:"live" () in
+    match Store.list ~base_dir ~filter:(make_filter ()) () with
+    | [ only ] -> check string "live annotation returned unchanged" note.id only.id
+    | rows -> failf "expected one live annotation, got %d" (List.length rows))
+;;
+
+let test_compact_drops_tombstoned () =
+  with_temp_dir (fun base_dir ->
+    let notes =
+      List.init 6 (fun i ->
+        create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
+    in
+    let victim = List.hd notes in
+    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+     | Ok () -> ()
+     | Error msg -> failf "delete failed: %s" msg);
+    Store.compact ~base_dir ();
+    let path =
+      Filename.concat
+        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Orphan)
+        "annotations.jsonl"
+    in
+    let compact_end_markers =
+      Fs_compat.fold_jsonl_lines
+        ~init:0
+        ~f:(fun acc ~line_no:_ -> function
+          | `Assoc fields ->
+            (match List.assoc_opt "__compact" fields with
+             | Some (`String "end") -> acc + 1
+             | _ -> acc)
+          | _ -> acc)
+        path
+    in
+    check int "compact writes one end marker" 1 compact_end_markers;
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check int "list count after compact" 5 (List.length listed);
+    check
+      bool
+      "tombstoned id absent after compact"
+      false
+      (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
+;;
+
+(* task-1738: per-partition write serialization + version CAS. *)
+
+let make_cas_annotation base_dir =
+  Result.get_ok
+    (Store.create
+       ~base_dir
+       ~keeper_id:"alice"
+       ~file_path:"lib/a.ml"
+       ~line_start:1
+       ~line_end:1
+       ~kind:Types.Comment
+       ~content:"cas note"
+       ())
+;;
+
+(* Real parallelism (Domain, not systhreads) maximises the chance of a
+   compaction window overlapping appends. The append-only begin/end
+   markers must replay records written during the window, so the final
+   count stays exact without a partition-wide writer lock. *)
+let test_concurrent_create_compact_no_loss () =
+  with_temp_dir (fun base_dir ->
+    Store.ensure_store ~base_dir ();
+    let n_writers = 4 in
+    let per_writer = 25 in
+    let writers =
+      List.init n_writers (fun w ->
+        Domain.spawn (fun () ->
+          for i = 0 to per_writer - 1 do
+            match
+              Store.create
+                ~base_dir
+                ~keeper_id:"alice"
+                ~file_path:"lib/a.ml"
+                ~line_start:1
+                ~line_end:1
+                ~kind:Types.Comment
+                ~content:(Printf.sprintf "w%d-%d" w i)
+                ()
+            with
+            | Ok _ -> ()
+            | Error msg -> failf "create failed: %s" msg
+          done))
+    in
+    let compactor =
+      Domain.spawn (fun () ->
+        for _ = 1 to 50 do
+          Store.compact ~base_dir ()
+        done)
+    in
+    List.iter Domain.join writers;
+    Domain.join compactor;
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check
+      int
+      "no annotation lost to concurrent compaction"
+      (n_writers * per_writer)
+      (List.length listed))
+;;
+
+let test_cas_rejects_version_mismatch () =
+  with_temp_dir (fun base_dir ->
+    let created = make_cas_annotation base_dir in
+    let wrong_version = Int64.add created.updated_at_ms 1L in
+    (match
+       Store.delete
+         ~base_dir
+         ~id:created.id
+         ~keeper_id:"alice"
+         ~expected_version:wrong_version
+         ()
+     with
+     | Ok () -> fail "stale expected_version must be rejected"
+     | Error _ -> ());
+    (* The annotation is untouched after a rejected CAS delete. *)
+    let still_there =
+      List.exists
+        (fun (a : Types.annotation) -> a.id = created.id)
+        (Store.list ~base_dir ~filter:(make_filter ()) ())
+    in
+    check bool "annotation survives rejected CAS delete" true still_there;
+    (* The correct version deletes. *)
+    match
+      Store.delete
+        ~base_dir
+        ~id:created.id
+        ~keeper_id:"alice"
+        ~expected_version:created.updated_at_ms
+        ()
+    with
+    | Ok () -> ()
+    | Error msg -> failf "matching expected_version must delete: %s" msg)
+;;
+
+let test_cas_absent_version_is_legacy () =
+  with_temp_dir (fun base_dir ->
+    let created = make_cas_annotation base_dir in
+    (* No expected_version → legacy delete-by-id contract. *)
+    match Store.delete ~base_dir ~id:created.id ~keeper_id:"alice" () with
+    | Ok () -> ()
+    | Error msg -> failf "legacy delete without version must succeed: %s" msg)
+;;
+
 let () =
   run
     "ide_annotations"
     [ ( "compact"
       , [ test_case
-            "compact preserves annotations (atomic write)"
+            "compact preserves annotations"
             `Quick
             test_compact_preserves_annotations
         ] )
@@ -967,6 +1175,38 @@ let () =
             `Quick
             test_delete_rejects_other_keeper
         ; test_case "owner can delete own annotation" `Quick test_delete_allows_owner
+        ] )
+    ; ( "tombstone read (task-1744)"
+      , [ test_case
+            "list excludes soft-deleted annotation (no compaction)"
+            `Quick
+            test_list_excludes_soft_deleted_without_compaction
+        ; test_case
+            "delete keeps undeleted sibling"
+            `Quick
+            test_list_keeps_sibling_after_delete
+        ; test_case
+            "live annotation still returned"
+            `Quick
+            test_list_returns_live_annotation
+        ; test_case
+            "compaction drops tombstoned annotation"
+            `Quick
+            test_compact_drops_tombstoned
+        ] )
+    ; ( "append-only compaction + CAS (task-1738)"
+      , [ test_case
+            "concurrent create + compaction loses nothing"
+            `Quick
+            test_concurrent_create_compact_no_loss
+        ; test_case
+            "CAS rejects stale expected_version, accepts current"
+            `Quick
+            test_cas_rejects_version_mismatch
+        ; test_case
+            "absent expected_version keeps legacy delete"
+            `Quick
+            test_cas_absent_version_is_legacy
         ] )
     ]
 ;;

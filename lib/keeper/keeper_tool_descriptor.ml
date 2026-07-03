@@ -1918,24 +1918,27 @@ let discovery_policy_json policy =
      @ [ "effect_domain", effect_domain_json policy.effect_domain ])
 ;;
 
-let discovery_json d =
+let discovery_fields d =
   let examples_field =
     match d.examples with
     | [] -> []
     | examples -> [ "examples", `List examples ]
   in
-  `Assoc
-    ([ "id", `String d.id
-     ; "public_name", `String d.public_name
-     ; "public_aliases", Json_util.json_string_list d.public_aliases
-     ; "internal_name", `String d.internal_name
-     ; "description", `String d.description
-     ; "executor", `String (executor_to_string d.executor)
-     ; "backend", `String (backend_to_string d.backend)
-     ; "sandbox", `String (sandbox_to_string d.sandbox)
-     ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
-     ; "policy", discovery_policy_json d.policy
-     ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
-     ]
-     @ examples_field)
+  [ "id", `String d.id
+  ; "public_name", `String d.public_name
+  ; "public_aliases", Json_util.json_string_list d.public_aliases
+  ; "internal_name", `String d.internal_name
+  ; "description", `String d.description
+  ; "executor", `String (executor_to_string d.executor)
+  ; "backend", `String (backend_to_string d.backend)
+  ; "sandbox", `String (sandbox_to_string d.sandbox)
+  ; "runtime_handler", `String (runtime_handler_to_string d.runtime_handler)
+  ; "policy", discovery_policy_json d.policy
+  ; "schema_shape", Tool_input_validation.schema_shape_json d.input_schema
+  ]
+  @ examples_field
+;;
+
+let discovery_json d =
+  `Assoc (discovery_fields d)
 ;;

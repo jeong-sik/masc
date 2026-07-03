@@ -56,6 +56,23 @@ function normalized(value: string | null | undefined): string {
   return normalizedScheduleStatus(value)
 }
 
+// Pending-approval count for the always-visible nav badge + topbar schedule chip
+// (schedule.jsx: onSchedule lift keeps the chip/badge in sync). Same derivation
+// as the surface's '승인 대기' KPI: sparse backend counts vs materialized request
+// statuses, whichever is larger, so a projection that ships only one is honored.
+const SCHEDULE_PENDING_STATUSES = ['pending', 'pending_approval', 'awaiting_approval']
+export function scheduledPendingApprovalCount(
+  automation: DashboardScheduledAutomation | null | undefined,
+): number {
+  if (!automation) return 0
+  const statuses = SCHEDULE_PENDING_STATUSES.map(normalizedScheduleStatus)
+  const fromCounts = statuses.reduce((sum, status) => sum + (automation.counts?.[status] ?? 0), 0)
+  const fromRequests = (automation.requests ?? [])
+    .filter(request => statuses.includes(normalizedScheduleStatus(request.effective_status ?? request.status)))
+    .length
+  return Math.max(fromCounts, fromRequests)
+}
+
 function automationTone(status: string | null | undefined): StatusChipTone {
   switch (normalized(status)) {
     case 'running':
@@ -1168,12 +1185,20 @@ function SchDetailActions({
 function SchedulePrototypeSurface({
   automation,
   onResolved,
+  selectedScheduleId: controlledSelectedId,
+  onSelectSchedule,
 }: {
   automation: DashboardScheduledAutomation
   onResolved?: () => Promise<void> | void
+  // Optional controlled selection so a sibling (the operations aside) can drive
+  // the same detail overlay. Uncontrolled (internal state) when omitted.
+  selectedScheduleId?: string | null
+  onSelectSchedule?: (scheduleId: string | null) => void
 }) {
   const [tab, setTab] = useState<SchTabKey>('pending')
-  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
+  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(null)
+  const selectedScheduleId = controlledSelectedId !== undefined ? controlledSelectedId : internalSelectedId
+  const setSelectedScheduleId = onSelectSchedule ?? setInternalSelectedId
 
   const rows = automation.requests ?? []
   const tabDef = SCH_TABS.find(definition => definition.key === tab) ?? SCH_TABS[0]!
@@ -1251,14 +1276,147 @@ function SchedulePrototypeSurface({
   `
 }
 
+// Aside triage buckets. Approval-needed statuses (pending family) surface under
+// '해야 할 일 → 승인'; imminent due statuses under 'due'; terminal statuses feed
+// the '최근 실행' recency list. Derived only from the projection — read-only.
+const SCHEDULE_ASIDE_PENDING: ReadonlySet<string> = new Set([
+  'pending', 'pending_approval', 'awaiting_approval', 'blocked_approval',
+])
+const SCHEDULE_ASIDE_DUE: ReadonlySet<string> = new Set(['due', 'due_pending_refresh'])
+const SCHEDULE_ASIDE_TERMINAL: ReadonlySet<string> = new Set([
+  'succeeded', 'failed', 'rejected', 'cancelled', 'canceled', 'expired',
+])
+const SCHEDULE_ASIDE_RECENT_MAX = 6
+
+function scheduleAsideSummary(request: DashboardScheduledAutomationRequest): string {
+  return request.payload_summary?.trim() || `${schedPayloadSpec(request.payload_kind).lbl} · 상세`
+}
+
+/** Right-column operations aside for the schedule surface (schedule.jsx SchAside):
+ *  a read-only pulse (예약됨/due·실행/승인대기) + failed/pending/due/recent triage
+ *  derived from the same scheduled-automation projection. A row click opens the
+ *  shared detail overlay via `onOpen`; there are no mutation controls, so the
+ *  surface stays read-only. */
+export function ScheduleAside({
+  requests,
+  sum,
+  onOpen,
+}: {
+  requests: readonly DashboardScheduledAutomationRequest[]
+  sum: { readonly scheduled: number; readonly dueRunning: number; readonly pending: number; readonly total: number }
+  onOpen: (scheduleId: string) => void
+}) {
+  const asideStatus = (request: DashboardScheduledAutomationRequest): string =>
+    normalized(effectiveStatus(request))
+  const failed = requests.filter(request => asideStatus(request) === 'failed')
+  const pending = requests.filter(request => SCHEDULE_ASIDE_PENDING.has(asideStatus(request)))
+  const due = requests.filter(request => SCHEDULE_ASIDE_DUE.has(asideStatus(request)))
+  const recent = requests
+    .filter(request => SCHEDULE_ASIDE_TERMINAL.has(asideStatus(request)))
+    .slice(0, SCHEDULE_ASIDE_RECENT_MAX)
+  const needTotal = pending.length + due.length
+
+  return html`
+    <aside class="ov-aside" aria-label="예약 운영 상태" data-testid="schedule-aside">
+      <section class="wka-sec">
+        <div class="wka-h">지금 상황 <span class="n mono">${sum.total.toLocaleString()} 예약</span></div>
+        <div class="wka-pulse">
+          <span class="wka-pulse-i"><b class="mono">${sum.scheduled}</b> 예약됨</span>
+          <span class="wka-pulse-i"><b class=${`mono ${sum.dueRunning > 0 ? 'volt' : ''}`}>${sum.dueRunning}</b> due·실행</span>
+          <span class="wka-pulse-i"><b class=${`mono ${sum.pending > 0 ? 'warn' : ''}`}>${sum.pending}</b> 승인대기</span>
+        </div>
+        ${failed.length === 0
+          ? html`<div class="wka-calm mono">실패한 실행 없음</div>`
+          : html`
+              <div class="wka-list">
+                ${failed.map(request => html`
+                  <button
+                    type="button"
+                    class="wka-flag st-bad"
+                    data-schedule-aside-open=${request.schedule_id}
+                    onClick=${() => { onOpen(request.schedule_id) }}
+                  >
+                    <span class="wka-flag-tag bad">실패</span>
+                    <span class="wka-flag-title">${scheduleAsideSummary(request)}</span>
+                    ${request.last_execution?.error
+                      ? html`<span class="wka-flag-reason">${request.last_execution.error}</span>`
+                      : null}
+                  </button>
+                `)}
+              </div>
+            `}
+      </section>
+
+      <section class="wka-sec">
+        <div class="wka-h">해야 할 일 <span class="n mono">${needTotal}</span></div>
+        <div class="wka-list">
+          ${pending.map(request => html`
+            <button
+              type="button"
+              class="wka-todo approve"
+              data-schedule-aside-open=${request.schedule_id}
+              onClick=${() => { onOpen(request.schedule_id) }}
+            >
+              <span class="wka-todo-k">승인</span>
+              <span class="wka-todo-t">${scheduleAsideSummary(request)}</span>
+              <span class="wka-todo-m mono">${riskSpecForLive(request.risk_class).lbl} · ${formatDateTimeKo(request.next_due_at_iso ?? request.due_at_iso ?? null)}</span>
+            </button>
+          `)}
+          ${due.map(request => html`
+            <button
+              type="button"
+              class="wka-todo verify"
+              data-schedule-aside-open=${request.schedule_id}
+              onClick=${() => { onOpen(request.schedule_id) }}
+            >
+              <span class="wka-todo-k">due</span>
+              <span class="wka-todo-t">${scheduleAsideSummary(request)}</span>
+              <span class="wka-todo-m mono">${recurrenceText(request)} · 실행 대기</span>
+            </button>
+          `)}
+          ${needTotal === 0 ? html`<div class="wka-calm mono">승인·실행 대기 없음</div>` : null}
+        </div>
+      </section>
+
+      <section class="wka-sec">
+        <div class="wka-h">최근 실행 <span class="n mono">${recent.length}</span></div>
+        <div class="wka-list">
+          ${recent.length === 0
+            ? html`<div class="wka-calm mono">종료된 예약 없음</div>`
+            : recent.map(request => {
+                const spec = statusSpecForLive(effectiveStatus(request))
+                return html`
+                  <button
+                    type="button"
+                    class="wka-done"
+                    data-schedule-aside-open=${request.schedule_id}
+                    onClick=${() => { onOpen(request.schedule_id) }}
+                  >
+                    <span class=${`wka-done-mark ${spec.cls}`}>${spec.glyph}</span>
+                    <span class="wka-done-t">${scheduleAsideSummary(request)}</span>
+                    <span class="wka-done-ns mono">${spec.lbl}</span>
+                  </button>
+                `
+              })}
+        </div>
+      </section>
+    </aside>
+  `
+}
+
 export function ScheduledAutomationPanel({
   automation,
   onResolved,
   variant = 'diagnostics',
+  selectedScheduleId: controlledSelectedId,
+  onSelectSchedule,
 }: {
   automation?: DashboardScheduledAutomation | null
   onResolved?: () => Promise<void> | void
   variant?: 'diagnostics' | 'v2'
+  // Forwarded to the v2 surface so the schedule aside can control the overlay.
+  selectedScheduleId?: string | null
+  onSelectSchedule?: (scheduleId: string | null) => void
 }) {
   const [activeFilter, setActiveFilter] = useState<ScheduleFilterKey>('all')
   const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
@@ -1272,7 +1430,12 @@ export function ScheduledAutomationPanel({
   }
 
   if (variant === 'v2') {
-    return html`<${SchedulePrototypeSurface} automation=${automation} onResolved=${onResolved} />`
+    return html`<${SchedulePrototypeSurface}
+      automation=${automation}
+      onResolved=${onResolved}
+      selectedScheduleId=${controlledSelectedId}
+      onSelectSchedule=${onSelectSchedule}
+    />`
   }
 
   const nonzeroCounts = Object.entries(automation.counts ?? {})

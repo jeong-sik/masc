@@ -978,6 +978,11 @@ export function IdeShell() {
           data-testid="ide-statusbar"
         >
           <span class="ide-plane-statusbar-title">MASC IDE</span>
+          <span
+            class="chip sm is-warn"
+            data-testid="ide-readiness-notice"
+            title="IDE shell is observational; LSP, overlay, and shell flows are not a verified execution boundary."
+          >experimental</span>
           <span>·</span>
           <span
             class="chip sm is-brass"

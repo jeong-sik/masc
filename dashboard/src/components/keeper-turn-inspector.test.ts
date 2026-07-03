@@ -118,6 +118,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
             current: true,
             terminal_marker: null,
             claim_count: 2,
+            source_turn_range: [1, 6],
             summary: 'Active recall source used by the prompt.',
           },
           {
@@ -130,6 +131,7 @@ function turnRecordsWithMemoryOs(): TurnRecordsResponse {
             current: false,
             terminal_marker: 'handoff_complete',
             claim_count: 1,
+            source_turn_range: null,
             summary: 'Terminal memory should stay visible as expired source evidence.',
           },
         ],
@@ -577,8 +579,10 @@ describe('KeeperTurnInspector v2 drawer', () => {
     expect(meta).toContain('completed')
     // finish_reason is no longer the fabricated hardcoded 'stop'
     expect(meta).not.toContain('stop')
-    // namespace / fsm.state are not captured in MASC — honest absence, not a guess
-    expect(meta).toContain('namespace')
+    // fsm.state is not captured in MASC — honest absence, rendered as n/a. namespace
+    // was removed entirely: the concept is absent from the turn record, so it is no
+    // longer shown as a fabricated n/a field (keeper-v2 turn-inspector delta).
+    expect(meta).not.toContain('namespace')
     expect(meta).toContain('fsm.state')
     expect(meta).toContain('n/a')
   })

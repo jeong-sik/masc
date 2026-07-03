@@ -299,7 +299,7 @@ let keeper_schemas : tool_schema list = [
         ]);
         ("timeout_sec", `Assoc [
           ("type", `String "number");
-          ("description", `String "Optional: overall timeout (sec) for this async keeper message request and its runtime turn");
+          ("description", `String "Optional override: overall timeout (sec) for this async keeper message request and its runtime turn. Defaults to the runtime-resolved keeper turn timeout.");
         ]);
         ("direct_reply", `Assoc [
           ("type", `String "boolean");

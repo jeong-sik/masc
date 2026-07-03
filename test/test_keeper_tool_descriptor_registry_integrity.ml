@@ -1051,7 +1051,10 @@ let test_effective_core_tools_without_universe_has_no_descriptor_publics () =
      names must NOT appear in effective_core_tools when their internal_name is
      absent from the universe. Mcp_server_eio's module-load bootstrap injects
      the full schema universe when it is linked into this executable, so the
-     universe cannot be assumed to start empty. *)
+     universe cannot be assumed to start empty.
+
+     Earlier tests may also mutate the schema universe, so bracket this
+     assertion with a save/reset to keep following tests isolated. *)
   with_masc_schemas [] (fun () ->
     let effective = Registry.effective_core_tools () in
     let descriptor_publics = Descriptor.public_names () in

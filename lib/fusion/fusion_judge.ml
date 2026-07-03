@@ -126,9 +126,13 @@ let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
   | Agent_sdk.Error.Orchestration _ | Agent_sdk.Error.Internal _ ->
     Agent_sdk.Error.to_string e
 
-(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. [Api (Retry.Timeout _)]
-   를 잡아 [Timeout]으로 propagate하고, 그 외는 [Provider_error]에 사람-가독 detail을
-   보존한다. Non-timeout detail은 표시용이며 재분류에 쓰지 않는다; provider 오류는
+(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
+   모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Retry.Timeout _)]와
+   provider-level [Provider (Llm_provider.Error.Timeout _)](비스트리밍 sync 경로의
+   connect_timeout이 본문 전체를 바운드해 발생, detail "timeout phase=http_operation").
+   후자는 [Fusion_panel.outcome_of_result]와 대칭으로, 이전에는 [_] catch-all에서
+   [Provider_error]로 오귀속됐다. 그 외는 [Provider_error]에 사람-가독 detail을 보존한다.
+   Non-timeout detail은 표시용이며 재분류에 쓰지 않는다; provider 오류는
    [Llm_provider.Error.to_string] 경로로 렌더해 provider/status/retry/phase metadata를
    유지한다. 이 match가 "to_string 직렬화 → substring 역분류" round-trip 안티패턴의 근본
    해소다: timeout 분류가 컴파일 타입에 묶인다. [prefix]는 호출 context(run 실패 vs
@@ -136,7 +140,8 @@ let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
 let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
     Fusion_types.judge_failure =
   match e with
-  | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _) -> Timeout
+  | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
   | _ ->
     Provider_error
       (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
@@ -251,4 +256,5 @@ let run_meta ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~
 
 module For_testing = struct
   let apply_output_contract = apply_fusion_judge_output_contract
+  let failure_of_sdk_error = failure_of_sdk_error
 end

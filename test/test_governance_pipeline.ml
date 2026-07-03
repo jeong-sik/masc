@@ -539,13 +539,14 @@ let test_risk_payload_beats_low_override () =
 
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
-let test_development_allows_all () =
+let test_development_confirms_critical () =
   let d = Gp.decide ~governance_level:"development"
     ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
-   | `Allow -> ()
-   | `Require_confirm _ -> Alcotest.fail "development should allow critical"
-   | `Deny _ -> Alcotest.fail "development should allow critical");
+   | `Require_confirm reason ->
+     Alcotest.(check bool) "reason non-empty" true (String.length reason > 0)
+   | `Allow -> Alcotest.fail "development should confirm hard-forbidden critical"
+   | `Deny _ -> Alcotest.fail "development should confirm critical, not deny");
   Alcotest.(check string) "risk" "critical" (Gp.risk_level_to_string d.risk)
 
 let test_development_allows_low () =
@@ -672,7 +673,7 @@ let test_trace_ids_unique () =
 let setup () =
   Tool_dispatch.clear_hooks ()
 
-let test_hook_development_allows () =
+let test_hook_development_blocks_critical () =
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
@@ -684,8 +685,9 @@ let test_hook_development_allows () =
   let hook = Gp.make_pre_hook ~config ~governance_level:"development" () in
   let result = hook ~name:"__gov_test_delete" ~args:`Null in
   (match result with
-   | Tool_dispatch.Pass -> ()
-   | _ -> Alcotest.fail "development should allow critical");
+   | Tool_dispatch.Reject _ -> ()
+   | Tool_dispatch.Pass ->
+     Alcotest.fail "development should block hard-forbidden critical");
   cleanup_tmpdir tmpdir
 
 let test_hook_production_blocks_critical () =
@@ -1297,8 +1299,8 @@ let () =
         test_tool_capabilities_unknown;
     ];
     "governance_levels", [
-      Alcotest.test_case "development allows all" `Quick
-        test_development_allows_all;
+      Alcotest.test_case "development confirms critical" `Quick
+        test_development_confirms_critical;
       Alcotest.test_case "development allows low" `Quick
         test_development_allows_low;
       Alcotest.test_case "production allows low" `Quick
@@ -1349,8 +1351,8 @@ let () =
       Alcotest.test_case "unique per call" `Quick test_trace_ids_unique;
     ];
     "pre_hook_integration", [
-      Alcotest.test_case "development allows delete" `Quick
-        test_hook_development_allows;
+      Alcotest.test_case "development blocks critical" `Quick
+        test_hook_development_blocks_critical;
       Alcotest.test_case "production blocks critical" `Quick
         test_hook_production_blocks_critical;
       Alcotest.test_case "production allows low" `Quick

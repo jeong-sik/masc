@@ -14,6 +14,7 @@ Opt-out mechanisms (checked in order):
 """
 
 import os
+from pathlib import Path, PurePosixPath
 import subprocess
 import sys
 
@@ -37,16 +38,27 @@ TEST_FILE_SUFFIXES = (
 )
 TEST_FILE_INFIXES = (".test.", ".spec.")
 
-# Non-executable assets under covered paths that no unit test can exercise.
-# Counting their added lines produces false positives — e.g. a dashboard CSS
-# height fix (#23082) was flagged as "covered code with no test". Scope is
-# intentionally narrow: only unambiguous assets. Config/data formats
-# (.toml/.json/.yml) are out of scope here (they have their own validity gates)
-# and stay covered. See #23083.
-NON_CODE_SUFFIXES = (
-    ".css", ".html", ".htm", ".md", ".markdown",
-    ".svg", ".png", ".jpg", ".jpeg", ".webp", ".ico", ".gif",
+NON_CODE_SUFFIXES_PATH = (
+    Path(__file__).resolve().parents[1] / ".ci/test-coverage-non-code-suffixes.txt"
 )
+
+
+def load_non_code_suffixes(path=NON_CODE_SUFFIXES_PATH):
+    """Load repo policy for assets that should not trigger the coverage gate."""
+    suffixes = []
+    for line_no, raw_line in enumerate(
+        path.read_text(encoding="utf-8").splitlines(), 1
+    ):
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if not line.startswith(".") or "/" in line or "\\" in line:
+            raise ValueError(f"{path}:{line_no}: invalid non-code suffix {line!r}")
+        suffixes.append(line.lower())
+    return frozenset(suffixes)
+
+
+NON_CODE_SUFFIXES = load_non_code_suffixes()
 
 
 def base_ref():
@@ -102,8 +114,12 @@ def run_diff_or_fail(args):
             check=True,
         ).stdout
     except subprocess.CalledProcessError as e:
-        print(f"::error::Test coverage check cannot diff against the base ref: {e.stderr.strip()}")
-        print("::error::Refusing to report a pass without seeing the diff (checkout needs fetch-depth: 0).")
+        print(
+            f"::error::Test coverage check cannot diff against the base ref: {e.stderr.strip()}"
+        )
+        print(
+            "::error::Refusing to report a pass without seeing the diff (checkout needs fetch-depth: 0)."
+        )
         sys.exit(2)
 
 
@@ -139,8 +155,8 @@ def is_covered_code_file(path):
     that no unit test can exercise, so they do not trigger the "added covered
     lines with no test" rule. See #23083.
     """
-    normalized = path.replace("\\", "/").lower()
-    return not normalized.endswith(NON_CODE_SUFFIXES)
+    suffix = PurePosixPath(path).suffix.lower()
+    return suffix not in NON_CODE_SUFFIXES
 
 
 def get_changed_test_files():
@@ -149,9 +165,7 @@ def get_changed_test_files():
     Uses a path predicate so production modules such as capability checks
     or validators cannot self-satisfy the coverage requirement.
     """
-    stdout = run_diff_or_fail(
-        ["git", "diff", "--name-only", pr_diff_range()]
-    )
+    stdout = run_diff_or_fail(["git", "diff", "--name-only", pr_diff_range()])
     return [f for f in stdout.strip().split("\n") if f and is_test_file(f)]
 
 

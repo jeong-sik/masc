@@ -57,13 +57,26 @@ class CheckTestCoverageTest(unittest.TestCase):
     def test_is_covered_code_file_predicate(self):
         # CSS/HTML/MD/images are non-code assets — excluded from covered paths.
         # Config/data formats stay covered (out of scope here, see #23083).
-        self.assertFalse(coverage.is_covered_code_file("dashboard/src/styles/app-shell-v2.css"))
+        self.assertFalse(
+            coverage.is_covered_code_file("dashboard/src/styles/app-shell-v2.css")
+        )
         self.assertFalse(coverage.is_covered_code_file("lib/README.md"))
+        self.assertFalse(coverage.is_covered_code_file("lib/notes.txt"))
         self.assertFalse(coverage.is_covered_code_file("dashboard/public/icon.png"))
         self.assertFalse(coverage.is_covered_code_file("dashboard/index.html"))
+        self.assertFalse(coverage.is_covered_code_file("dashboard/public/font.woff2"))
         self.assertTrue(coverage.is_covered_code_file("lib/app.ml"))
         self.assertTrue(coverage.is_covered_code_file("dashboard/app.ts"))
         self.assertTrue(coverage.is_covered_code_file("config/runtime.toml"))
+        self.assertTrue(coverage.is_covered_code_file("dashboard/package-lock.json"))
+
+    def test_non_code_suffixes_come_from_repo_policy_file(self):
+        self.assertEqual(
+            coverage.load_non_code_suffixes(),
+            coverage.NON_CODE_SUFFIXES,
+        )
+        self.assertIn(".css", coverage.NON_CODE_SUFFIXES)
+        self.assertIn(".woff2", coverage.NON_CODE_SUFFIXES)
 
     def test_non_code_assets_excluded_from_covered_files(self):
         # Regression for #23082: a CSS-only dashboard PR must not be flagged as
@@ -113,7 +126,9 @@ class CheckTestCoverageTest(unittest.TestCase):
 
     def test_dashboard_changes_without_tests_trigger_coverage_violation(self):
         with mock.patch.dict(os.environ, {"PR_BODY": ""}, clear=False):
-            with mock.patch("check_test_coverage.is_opt_out_commit", return_value=False):
+            with mock.patch(
+                "check_test_coverage.is_opt_out_commit", return_value=False
+            ):
                 with mock.patch(
                     "check_test_coverage.get_changed_covered_files",
                     return_value=["dashboard/app.ts"],
@@ -134,7 +149,9 @@ class CheckTestCoverageTest(unittest.TestCase):
         code_files = ["lib/a.ml", "lib/b.ml", "lib/c.ml", "lib/d.ml"]
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"PR_BODY": ""}, clear=False):
-            with mock.patch("check_test_coverage.is_opt_out_commit", return_value=False):
+            with mock.patch(
+                "check_test_coverage.is_opt_out_commit", return_value=False
+            ):
                 with mock.patch(
                     "check_test_coverage.get_changed_covered_files",
                     return_value=code_files,
@@ -156,7 +173,9 @@ class CheckTestCoverageTest(unittest.TestCase):
         code_files = ["lib/a.ml", "lib/b.ml", "lib/c.ml", "lib/d.ml"]
         out = io.StringIO()
         with mock.patch.dict(os.environ, {"PR_BODY": ""}, clear=False):
-            with mock.patch("check_test_coverage.is_opt_out_commit", return_value=False):
+            with mock.patch(
+                "check_test_coverage.is_opt_out_commit", return_value=False
+            ):
                 with mock.patch(
                     "check_test_coverage.get_changed_covered_files",
                     return_value=code_files,

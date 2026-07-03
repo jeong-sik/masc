@@ -27,6 +27,7 @@ import {
   classifyFusionJudgeShape,
   type FusionPanelEntry,
   type FusionJudgeNode,
+  type FusionJudgeShape,
 } from '../../lib/fusion-meta'
 import {
   judgeShapeLabel,
@@ -487,11 +488,146 @@ export function FusionJudgesStrip({ nodes }: { nodes: readonly FusionJudgeNode[]
   `
 }
 
+// Structural JoJ facts derived from the observed judges array (single source of
+// truth: the array shape + per-node role/failed). Shared by the pipeline strip,
+// the first-judge card grid, the meta-drop isolation banner, and the topology
+// chip so those four surfaces never diverge. `isolatedFirst` are the failed 1차
+// 심판 nodes that meta reconcile excludes (RFC-0283 §2.3).
+interface FusionShapeInfo {
+  shape: FusionJudgeShape
+  isJoj: boolean
+  isRefine: boolean
+  firstNodes: FusionJudgeNode[]
+  isolatedFirst: FusionJudgeNode[]
+  okFirstCount: number
+}
+
+function fusionShapeInfo(judges: readonly FusionJudgeNode[]): FusionShapeInfo {
+  const shape = classifyFusionJudgeShape(judges)
+  const firstNodes = judges.filter(node => node.role === 'first')
+  const isolatedFirst = firstNodes.filter(node => node.failed)
+  return {
+    shape,
+    isJoj: shape === 'judge-of-judges',
+    isRefine: shape === 'refine',
+    firstNodes,
+    isolatedFirst,
+    okFirstCount: firstNodes.length - isolatedFirst.length,
+  }
+}
+
+// `identity (error), identity2 (error2)` for the meta-drop banner. identity is
+// the panelist_id the backend carries on `first` nodes; error is the recorded
+// failure reason (both from fusion_sink.ml Judge_failed). Falls back to the raw
+// identity when no error string is present.
+function metaDropLabel(isolated: readonly FusionJudgeNode[]): string {
+  return isolated
+    .map(node => {
+      const id = judgeNodeIdentity(node) ?? node.identity
+      return node.error ? `${id} (${node.error})` : id
+    })
+    .join(', ')
+}
+
+// A first-tier judge's 합의/상충 counts are derived from the meta judge's
+// consensus[]/contradictions[] matched on the node identity — the single source
+// of truth (the counts are never stored per node). meta.consensus.models and
+// contradiction positions reference the first-judge identities (= panelist_ids),
+// so a node's identity is the match key.
+function firstJudgeConsensusCount(judge: FusionJudge, identity: string): number {
+  return judge.consensus.filter(claim => claim.models.includes(identity)).length
+}
+
+function firstJudgeContradictionCount(judge: FusionJudge, identity: string): number {
+  return judge.contradictions.filter(row => row.positions.some(position => position.model === identity)).length
+}
+
+// One 1차 심판 card (design FirstJudges). A failed node renders an isolation card
+// (excluded from meta reconcile, RFC-0283 §2.3); a synthesized node shows its
+// decision badge, resolved-answer gist, derived 합의/상충 counts, and token spend.
+// No lens/model split — the backend carries only `identity` (= panelist_id) for a
+// first node, so inventing a persona/model split would fabricate data.
+function FusionFirstJudgeCard({ node, judge }: { node: FusionJudgeNode; judge: FusionJudge }) {
+  if (node.failed) {
+    return html`
+      <article class="fus-jnode failed">
+        <div class="fus-jnode-h">
+          <span class="fus-jnode-id">${node.identity}</span>
+          <span class="fus-jnode-fail">✗ ${node.error ?? '실패'}</span>
+        </div>
+        <p class="fus-jnode-isolated">격리됨 — meta reconcile에서 제외. 나머지 종합으로 진행(§2.3 격리).</p>
+      </article>
+    `
+  }
+  const dec = decisionSpecFor(node.decision ?? null)
+  const consensusN = firstJudgeConsensusCount(judge, node.identity)
+  const contraN = firstJudgeContradictionCount(judge, node.identity)
+  return html`
+    <article class="fus-jnode">
+      <div class="fus-jnode-h">
+        <span class="fus-jnode-id">${node.identity}</span>
+        ${dec ? html`<span class=${`fus-dec-badge sm ${dec.cls}`}>${dec.glyph} ${dec.lbl}</span>` : null}
+      </div>
+      ${node.summary ? html`<p class="fus-jnode-sum">${compactText(node.summary, 240)}</p>` : null}
+      <div class="fus-jnode-f">
+        <span class="fus-jnode-stat">합의 ${consensusN}</span>
+        <span class="fus-jnode-stat">상충 ${contraN}</span>
+        <span class="fus-jnode-tok mono">${judgeNodeTokenLabel(node)}</span>
+      </div>
+    </article>
+  `
+}
+
+// 1차 심판 card grid for a judge-of-judges run (N independent syntheses before
+// meta reconcile). Renders nothing for a non-JoJ shape so simple/refine runs are
+// unaffected.
+function FusionFirstJudges({ shape, judge }: { shape: FusionShapeInfo; judge: FusionJudge }) {
+  if (!shape.isJoj || shape.firstNodes.length === 0) return null
+  return html`
+    <div class="fus-block">
+      <div class="fus-block-lbl">
+        1차 심판 · ${shape.firstNodes.length}개 병렬
+        <span class="fus-sub-note">패널과 독립 구성(judge_spec list)${
+          shape.isolatedFirst.length > 0 ? ` · ${shape.isolatedFirst.length}개 격리` : ''
+        }</span>
+      </div>
+      <div class="fus-jnodes" data-testid="fusion-first-judges">
+        ${shape.firstNodes.map(
+          (node, index) => html`<${FusionFirstJudgeCard} key=${`${node.identity}-${index}`} node=${node} judge=${judge} />`,
+        )}
+      </div>
+    </div>
+  `
+}
+
 function FusionPipelineStrip({ run }: { run: FusionRunView }) {
   const panelFailures = run.panel.filter(entry => isPanelFailure(entry.status)).length
   const gateClass = run.status === 'failed' && run.panel.length === 0 ? 'deny' : 'gate'
   const panelLabel = run.panel.length > 0 ? `panel ×${run.panel.length}` : 'panel pending'
-  const judgeLabel = run.judge.decision ?? run.judge.status ?? (run.status === 'running' ? 'judge pending' : 'judge')
+  const off = run.status === 'failed' || run.status === 'running'
+  const shape = fusionShapeInfo(run.judges)
+
+  // Judge segment is shape-derived (no hardcoded topology branch): a JoJ run
+  // renders `1차 심판 ×N (k 격리)` → `meta`; a refine run renders `심판` → `재검토`;
+  // a single/custom shape keeps the one judge node labelled by its decision or
+  // status (unchanged from the pre-RFC-0284 strip).
+  const judgeSegment = shape.isJoj
+    ? html`
+        <span class=${`fus-pipe-node judge ${off ? 'off' : ''}`}>
+          1차 심판 ×${shape.firstNodes.length}${shape.isolatedFirst.length > 0
+            ? html`<em class="fus-pipe-iso"> ${shape.isolatedFirst.length} 격리</em>`
+            : null}
+        </span>
+        <span class="fus-pipe-arr" aria-hidden="true">→</span>
+        <span class=${`fus-pipe-node meta ${off ? 'off' : ''}`}>meta</span>
+      `
+    : shape.isRefine
+      ? html`
+          <span class=${`fus-pipe-node judge ${off ? 'off' : ''}`}>심판</span>
+          <span class="fus-pipe-arr" aria-hidden="true">→</span>
+          <span class=${`fus-pipe-node meta ${off ? 'off' : ''}`}>재검토</span>
+        `
+      : html`<span class=${`fus-pipe-node judge ${off ? 'off' : ''}`}>${run.judge.decision ?? run.judge.status ?? (run.status === 'running' ? 'judge pending' : 'judge')}</span>`
 
   return html`
     <section class="fus-pipe" data-testid="fusion-pipe" aria-label="Fusion run pipeline">
@@ -506,7 +642,7 @@ function FusionPipelineStrip({ run }: { run: FusionRunView }) {
         ${panelLabel}${panelFailures > 0 ? ` · fail ${panelFailures}` : ''}
       </span>
       <span class="fus-pipe-arr" aria-hidden="true">→</span>
-      <span class=${`fus-pipe-node judge ${run.status === 'failed' || run.status === 'running' ? 'off' : ''}`}>${judgeLabel}</span>
+      ${judgeSegment}
       <span class="fus-pipe-arr" aria-hidden="true">→</span>
       <span class=${`fus-pipe-node sink ${run.status === 'complete' ? '' : 'off'}`}>board evidence</span>
     </section>
@@ -724,6 +860,41 @@ function hasParams(params: FusionRunParams): boolean {
     || params.maxTokens !== null
 }
 
+// Presentation-only thresholds for clamping a long resolved_answer. These are a
+// display heuristic, not a semantic model of the rendered markdown — RichContent
+// owns markdown parsing, so this deliberately avoids counting markdown blocks and
+// instead uses the raw character length plus a blank-line paragraph count (the
+// cheap signal available before RichContent runs). Tuning them changes only when
+// the reveal toggle appears, never the content.
+const RESOLVED_CLAMP_CHAR_THRESHOLD = 540
+const RESOLVED_CLAMP_PARAGRAPH_THRESHOLD = 5
+
+// Count blank-line-separated text paragraphs (a display signal, not markdown blocks).
+function countTextParagraphs(text: string): number {
+  return text.split(/\n{2,}/).filter(paragraph => paragraph.trim().length > 0).length
+}
+
+function FusionResolvedBody({ text }: { text: string }) {
+  const [open, setOpen] = useState(false)
+  const long =
+    text.length > RESOLVED_CLAMP_CHAR_THRESHOLD
+    || countTextParagraphs(text) > RESOLVED_CLAMP_PARAGRAPH_THRESHOLD
+  return html`
+    <div class="fus-resolved-body">
+      <div class=${`fus-rich ${long && !open ? 'clamp' : ''}`}>
+        <${RichContent} text=${text} previewLimit=${0} />
+      </div>
+      ${long
+        ? html`<button
+            type="button"
+            class=${`fus-rich-more ${ringFocusClasses()}`}
+            onClick=${() => setOpen(prev => !prev)}
+          >${open ? '접기 ▴' : '전문 펼치기 ▾'}</button>`
+        : null}
+    </div>
+  `
+}
+
 function FusionRunDetail({ run }: { run: FusionRunView }) {
   const answered = run.panel.filter(entry => !isPanelFailure(entry.status)).length
   const failed = run.panel.length - answered
@@ -732,6 +903,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
   const decClass = dec && dec.cls ? `dec-${dec.cls}` : ''
   const tokenLabel = combinedTokenLabel(run.usage)
   const preset = run.preset ?? findPreset(run.runId)
+  const shape = fusionShapeInfo(run.judges)
 
   return html`
     <div class="fus-run-scroll" data-testid="fusion-detail">
@@ -808,6 +980,8 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
 
       <${FusionJudgesStrip} nodes=${run.judges} />
 
+      <${FusionFirstJudges} shape=${shape} judge=${run.judge} />
+
       ${run.status === 'running'
         ? html`
             <div class="fus-block">
@@ -820,10 +994,15 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
         : html`
             <div class="fus-block">
               <div class="fus-block-lbl">
-                심판 종합
+                ${shape.isJoj ? 'meta 심판 · reconcile' : '심판 종합'}
                 <span class="fus-judge-model mono">${run.judge.decision ?? run.judge.status ?? 'n/a'}</span>
-                <span class="fus-sub-note">Structured.extract · 닫힌 타입 schema</span>
+                <span class="fus-sub-note">${shape.isJoj
+                  ? `1차 종합 ${shape.okFirstCount}개 reconcile`
+                  : 'Structured.extract · 닫힌 타입 schema'}</span>
               </div>
+              ${shape.isolatedFirst.length > 0
+                ? html`<div class="fus-meta-drop">⚠ 격리됨: ${metaDropLabel(shape.isolatedFirst)} — meta는 살아남은 종합만으로 reconcile</div>`
+                : null}
               ${hasStructuredJudgeEvidence(run.judge)
                 ? html`<${FusionJudgeEvidence} judge=${run.judge} />`
                 : html`<div class="fus-judge-wait">구조화된 심판 근거가 기록되지 않았습니다.</div>`}
@@ -840,7 +1019,7 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
             : null}
         </div>
         <div class="fus-resolved-lbl">resolved_answer</div>
-        <p class="fus-resolved-body"><${RichContent} text=${resolved} previewLimit=${0} /></p>
+        <${FusionResolvedBody} text=${resolved} />
         ${run.judge.recommendation?.rationale
           ? html`<p class="fus-rec-rationale"><span class="k">근거</span><${RichContent} text=${run.judge.recommendation.rationale} previewLimit=${0} /></p>`
           : null}

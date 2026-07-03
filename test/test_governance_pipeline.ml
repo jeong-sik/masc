@@ -1027,7 +1027,7 @@ let test_oas_callback_hard_forbidden_rejects_critical () =
           Alcotest.(check bool)
             "reject reason mentions critical risk"
             true
-            (contains_substring ~needle:"critical risk" reason)
+            (String_util.string_contains_substring ~needle:"critical risk" reason)
         | Agent_sdk.Hooks.Approve ->
           Alcotest.fail "Critical hard-forbidden call must not be approved"
         | Agent_sdk.Hooks.Edit _ ->

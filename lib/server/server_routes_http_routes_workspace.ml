@@ -182,7 +182,7 @@ type confidential_rule =
 
 let confidential_rules =
   [ Name_equals ".git"
-  ; Name_prefix ".masc"
+  ; Name_prefix Common.masc_dirname (* ".masc" — SSOT #9571; subsumes .masc-ide *)
   ; Name_prefix ".env"
   ; Name_equals ".ssh"
     (* [Name_contains] over-blocks names such as [credentials_guide.md];

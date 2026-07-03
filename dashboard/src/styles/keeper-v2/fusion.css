@@ -242,11 +242,7 @@
 .msg-fusion-link { margin-left: auto; background: none; border: 0; padding: 0; cursor: pointer; font-family: var(--font-ui); font-size: var(--fs-11); color: var(--volt-strong); }
 .msg-fusion-link:hover { text-decoration: underline; }
 
-/* ════ TOPOLOGY · JOJ (RFC-0283/0284 + design 2026-06-24) ════ */
-/* topology chip in run header */
-.fus-topo { font-family: var(--font-mono); font-size: var(--fs-10); color: var(--volt-strong); border: 1px solid var(--volt-dim); background: var(--volt-wash); border-radius: var(--radius-sm); padding: 2px 8px; letter-spacing: 0.02em; }
-/* JoJ tag in list row */
-.fus-row-topo { font-family: var(--font-mono); font-size: 8.5px; font-weight: 600; letter-spacing: 0.06em; color: var(--volt-strong); border: 1px solid var(--volt-dim); border-radius: var(--radius-xs); padding: 1px 5px; }
+/* ════ JOJ pipeline (RFC-0283/0284 + design 2026-06-24) ════ */
 /* meta node in pipeline strip */
 .fus-pipe-node.meta { color: var(--accent-bone, var(--text-bright)); border-color: color-mix(in oklab, var(--volt) 32%, var(--border-main)); }
 /* isolation count in the pipeline strip judge node */

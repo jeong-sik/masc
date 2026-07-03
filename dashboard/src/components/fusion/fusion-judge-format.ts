@@ -51,26 +51,3 @@ export function judgeNodeTokenLabel(node: FusionJudgeNode): string {
 export function judgeNodeIdentity(node: FusionJudgeNode): string | null {
   return node.identity && node.identity !== node.role ? node.identity : null
 }
-
-// Topology chip (label + tooltip) for the run header, derived from the judges
-// array shape alone (RFC-0284 §line 27: the frontend must not hardcode a
-// topology-name vocabulary keyed off a wire field). `conditional` cannot be told
-// apart from `refine` in the observation record — `run.topology` is not recorded
-// on the wire (audit-area-4), so a refine shape is labelled `refine` without the
-// conditional split. A `custom`/unanticipated shape returns null so the header
-// omits the chip rather than inventing a name.
-export interface FusionTopologySpec {
-  readonly lbl: string
-  readonly desc: string
-}
-
-const JUDGE_SHAPE_TOPOLOGY: Record<FusionJudgeShape, FusionTopologySpec | null> = {
-  single: { lbl: 'simple', desc: 'panel → judge → sink' },
-  refine: { lbl: 'refine', desc: 'panel → judge → judge′ 재검토' },
-  'judge-of-judges': { lbl: 'judge-of-judges', desc: 'panel → 1차 심판 ×N → meta reconcile' },
-  custom: null,
-}
-
-export function judgeShapeTopology(shape: FusionJudgeShape): FusionTopologySpec | null {
-  return JUDGE_SHAPE_TOPOLOGY[shape]
-}

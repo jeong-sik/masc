@@ -193,9 +193,9 @@ describe('FusionSurface', () => {
 
   it('branches the pipeline strip and meta block for a judge-of-judges run with an isolated 1차 심판', () => {
     // A JoJ run with 3 first judges (one failed) + a meta node: the pipeline
-    // shows `1차 심판 ×3 (1 격리) → meta`, the header carries the topology chip,
-    // the list row a JoJ tag, and the meta block a reconcile label + isolation
-    // banner. All shape-derived from the judges array (no topology wire field).
+    // shows `1차 심판 ×3 (1 격리) → meta` and the meta block a reconcile label +
+    // isolation banner. All shape-derived from the judges array (no topology wire
+    // field, and no locally-invented topology vocabulary).
     fusionBoardPosts.value = [
       boardPost({
         id: 'post-joj-iso',
@@ -224,10 +224,11 @@ describe('FusionSurface', () => {
     expect(pipe?.querySelector('.fus-pipe-iso')?.textContent).toContain('1 격리')
     expect(pipe?.querySelector('.fus-pipe-node.meta')?.textContent).toContain('meta')
 
-    // header topology chip + list-row JoJ tag
+    // no locally-pinned topology vocabulary chip/tag (removed per review #23049 —
+    // shape stays surfaced via the SSOT judge-node strip + pipeline branch)
     const detail = container.querySelector('[data-testid="fusion-detail"]')
-    expect(detail?.querySelector('.fus-topo')?.textContent).toContain('judge-of-judges')
-    expect(container.querySelector('.fus-row-topo')?.textContent).toContain('JoJ')
+    expect(container.querySelector('.fus-topo')).toBeNull()
+    expect(container.querySelector('.fus-row-topo')).toBeNull()
 
     // meta block reconcile label (okFirstCount = 2) + isolation banner
     expect(detail?.textContent).toContain('meta 심판 · reconcile')
@@ -338,7 +339,7 @@ describe('FusionSurface', () => {
     expect(container.querySelector('[data-testid="fusion-first-judges"]')).toBeNull()
   })
 
-  it('branches the pipeline strip and topology chip for a refine run', () => {
+  it('branches the pipeline strip for a refine run', () => {
     fusionBoardPosts.value = [
       boardPost({
         id: 'post-refine',
@@ -362,13 +363,12 @@ describe('FusionSurface', () => {
     const pipe = container.querySelector('[data-testid="fusion-pipe"]')
     expect(pipe?.textContent).toContain('심판')
     expect(pipe?.querySelector('.fus-pipe-node.meta')?.textContent).toContain('재검토')
-    const detail = container.querySelector('[data-testid="fusion-detail"]')
-    expect(detail?.querySelector('.fus-topo')?.textContent).toContain('refine')
-    // refine is not judge-of-judges: no JoJ list tag
+    // no locally-pinned topology chip/tag vocabulary
+    expect(container.querySelector('.fus-topo')).toBeNull()
     expect(container.querySelector('.fus-row-topo')).toBeNull()
   })
 
-  it('omits the topology chip and JoJ tag for a board post that predates the judges array', () => {
+  it('renders a legacy (pre-judges) post as a single judge node with no meta or topology vocabulary', () => {
     fusionBoardPosts.value = [
       boardPost({
         id: 'post-legacy',
@@ -385,11 +385,11 @@ describe('FusionSurface', () => {
 
     render(html`<${FusionSurface} />`, container)
 
-    // custom/empty shape → no invented topology name
+    // no invented topology vocabulary anywhere, and no meta reconcile surface
     expect(container.querySelector('.fus-topo')).toBeNull()
     expect(container.querySelector('.fus-row-topo')).toBeNull()
     expect(container.querySelector('.fus-meta-drop')).toBeNull()
-    // single judge node keeps its decision label
+    // single judge node keeps its decision label (no meta node)
     const pipe = container.querySelector('[data-testid="fusion-pipe"]')
     expect(pipe?.querySelector('.fus-pipe-node.meta')).toBeNull()
   })

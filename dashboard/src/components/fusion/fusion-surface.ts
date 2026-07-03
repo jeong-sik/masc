@@ -33,7 +33,6 @@ import {
   judgeRoleLabel,
   judgeNodeTokenLabel,
   judgeNodeIdentity,
-  judgeShapeTopology,
 } from './fusion-judge-format'
 
 type FusionRunStatus = 'complete' | 'failed' | 'running'
@@ -823,9 +822,6 @@ function FusionRunRow({ run, active }: { run: FusionRunView; active: boolean }) 
       <span class="fus-row-h">
         <${FusionStatusGlyph} status=${run.status} />
         <span class="fus-run-id mono">${run.runId}</span>
-        ${fusionShapeInfo(run.judges).isJoj
-          ? html`<span class="fus-row-topo" title="judge-of-judges">JoJ</span>`
-          : null}
         <span class="fus-row-ts"><${TimeAgo} timestamp=${run.updatedAt} /></span>
       </span>
       <span class="fus-row-prompt">${compactText(run.question, 110)}</span>
@@ -863,18 +859,25 @@ function hasParams(params: FusionRunParams): boolean {
     || params.maxTokens !== null
 }
 
-// resolved_answer as clamped rich text (design 2026-06-24 §FusResolved). A long
-// answer (>540 chars or >5 markdown blocks) is mask-clamped with a `전문 펼치기`
-// toggle; a short one renders in full with no toggle. The block estimate splits
-// on blank lines — a proxy for the prototype's `mdToBlocks(text).length`, which
-// is not reachable here because RichContent renders the markdown internally.
-function estimateResolvedBlocks(text: string): number {
-  return text.split(/\n{2,}/).filter(block => block.trim().length > 0).length
+// Presentation-only thresholds for clamping a long resolved_answer. These are a
+// display heuristic, not a semantic model of the rendered markdown — RichContent
+// owns markdown parsing, so this deliberately avoids counting markdown blocks and
+// instead uses the raw character length plus a blank-line paragraph count (the
+// cheap signal available before RichContent runs). Tuning them changes only when
+// the reveal toggle appears, never the content.
+const RESOLVED_CLAMP_CHAR_THRESHOLD = 540
+const RESOLVED_CLAMP_PARAGRAPH_THRESHOLD = 5
+
+// Count blank-line-separated text paragraphs (a display signal, not markdown blocks).
+function countTextParagraphs(text: string): number {
+  return text.split(/\n{2,}/).filter(paragraph => paragraph.trim().length > 0).length
 }
 
 function FusionResolvedBody({ text }: { text: string }) {
   const [open, setOpen] = useState(false)
-  const long = text.length > 540 || estimateResolvedBlocks(text) > 5
+  const long =
+    text.length > RESOLVED_CLAMP_CHAR_THRESHOLD
+    || countTextParagraphs(text) > RESOLVED_CLAMP_PARAGRAPH_THRESHOLD
   return html`
     <div class="fus-resolved-body">
       <div class=${`fus-rich ${long && !open ? 'clamp' : ''}`}>
@@ -900,7 +903,6 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
   const tokenLabel = combinedTokenLabel(run.usage)
   const preset = run.preset ?? findPreset(run.runId)
   const shape = fusionShapeInfo(run.judges)
-  const topology = judgeShapeTopology(shape.shape)
 
   return html`
     <div class="fus-run-scroll" data-testid="fusion-detail">
@@ -909,7 +911,6 @@ function FusionRunDetail({ run }: { run: FusionRunView }) {
           <${FusionStatusGlyph} status=${run.status} />
           <h1 class="mono">${run.runId}</h1>
           ${preset ? html`<span class="fus-preset" title="runtime.toml [fusion.presets.*]">preset · ${preset}</span>` : null}
-          ${topology ? html`<span class="fus-topo" title=${topology.desc}>${topology.lbl}</span>` : null}
           <span class=${`fus-status tone-${run.tone}`}>${statusLabel(run.status)}</span>
         </div>
         <div class="fus-run-by">

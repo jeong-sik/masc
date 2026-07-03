@@ -691,7 +691,7 @@ let test_direct_success_clears_no_progress_pause () =
            paused = true
          ; latched_reason =
              Some
-               (Masc.Keeper_latched_reason.No_progress_loop
+               (Keeper_latched_reason.No_progress_loop
                   { consecutive_idle_cycles = 3
                   ; detector_kind = `Consecutive_no_progress
                   })

@@ -972,6 +972,7 @@ let make_test_meta ?(last_blocker = None) () =
   ; continuity_summary = ""
   ; active_goal_ids = []
   ; paused = false
+  ; latched_reason = None
   ; auto_resume_after_sec = None
   ; autoboot_enabled = false
   ; current_task_id = None

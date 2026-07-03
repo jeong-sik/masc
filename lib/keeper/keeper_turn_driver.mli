@@ -222,7 +222,7 @@ module For_testing : sig
   val resolve_context_window_tokens_after_runtime_selection :
     requested_context_window:int option ->
     final_runtime_context_window:int ->
-    context_window_rebudget
+    (context_window_rebudget, Agent_sdk.Error.sdk_error) result
 
   val attempt_inference_policy :
     ?max_tokens_for_runtime:(runtime_id:string -> int) ->

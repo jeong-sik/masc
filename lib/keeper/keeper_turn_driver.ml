@@ -79,23 +79,38 @@ type context_window_rebudget =
 
 let resolve_context_window_tokens_after_runtime_selection
     ~(requested_context_window : int option)
-    ~(final_runtime_context_window : int) : context_window_rebudget =
-  let requested =
-    match requested_context_window with
-    | Some value when value > 0 -> value
-    | Some _ | None -> final_runtime_context_window
+    ~(final_runtime_context_window : int)
+    : (context_window_rebudget, Agent_sdk.Error.sdk_error) result =
+  let invalid_requested_context_window value =
+    Agent_sdk.Error.Config
+      (Agent_sdk.Error.InvalidConfig
+         { field = "context_window_tokens"
+         ; detail =
+             Printf.sprintf
+               "requested_context_window must be positive when provided (got %d)"
+               value
+         })
   in
-  let resolved_context_window =
-    min requested final_runtime_context_window
-  in
-  { requested_context_window
-  ; final_runtime_context_window
-  ; resolved_context_window
-  ; context_window_rebudgeted =
-      (match requested_context_window with
-       | Some value when value > 0 -> value <> resolved_context_window
-       | Some _ | None -> false)
-  }
+  match requested_context_window with
+  | Some value when value <= 0 -> Error (invalid_requested_context_window value)
+  | Some requested ->
+    let resolved_context_window = min requested final_runtime_context_window in
+    Ok
+      { requested_context_window
+      ; final_runtime_context_window
+      ; resolved_context_window
+      ; context_window_rebudgeted =
+          (match requested_context_window with
+           | Some value when value > 0 -> value <> resolved_context_window
+           | Some _ | None -> false)
+      }
+  | None ->
+    Ok
+      { requested_context_window
+      ; final_runtime_context_window
+      ; resolved_context_window = final_runtime_context_window
+      ; context_window_rebudgeted = false
+      }
 
 let runtime_attempt_decision ~idx ~runtime_id =
   `Assoc [ ("idx", `Int idx); ("runtime_id", `String runtime_id) ]
@@ -417,7 +432,7 @@ let run_named
     | Some value -> value
     | None -> first_runtime.Runtime.model.max_context
   in
-  let first_context_window_rebudget =
+  let* first_context_window_rebudget =
     resolve_context_window_tokens_after_runtime_selection
       ~requested_context_window:context_window_tokens
       ~final_runtime_context_window:first_runtime_context_window
@@ -543,19 +558,20 @@ let run_named
         | Some value -> value
         | None -> runtime.Runtime.model.max_context
       in
-      let context_window_rebudget =
+      let context_window_rebudget_res =
         resolve_context_window_tokens_after_runtime_selection
           ~requested_context_window:context_window_tokens
           ~final_runtime_context_window
       in
-      let context_window_tokens =
-        Some context_window_rebudget.resolved_context_window
-      in
-      match
-        match provider_config_transform with
-        | None -> Ok runtime.Runtime.provider_config
-        | Some transform -> transform runtime.Runtime.provider_config
-      with
+      match context_window_rebudget_res with
+      | Error err -> Error err, None
+      | Ok context_window_rebudget ->
+      let context_window_tokens = Some context_window_rebudget.resolved_context_window in
+      (match
+         match provider_config_transform with
+         | None -> Ok runtime.Runtime.provider_config
+         | Some transform -> transform runtime.Runtime.provider_config
+       with
       | Error err -> Error err, None
       | Ok provider_config ->
         let candidate =
@@ -627,7 +643,7 @@ let run_named
           Keeper_turn_driver_try_provider.run_try_provider
             try_provider_ctx ?resume_checkpoint ?per_provider_timeout_s candidate
         in
-        result, checkpoint_after)
+        result, checkpoint_after))
     attempt_runtimes
 
 

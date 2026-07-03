@@ -5,6 +5,7 @@
 module Summary = Masc.Keeper_memory_llm_summary
 module Metrics = Masc.Otel_metric_store
 module Outcome = Keeper_memory_llm_summary_outcome
+module Boundary = Masc.Boundary_redaction
 
 let metric = Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
 let runtime_lane = Masc.Keeper_hooks_oas.runtime_lane_label
@@ -31,6 +32,25 @@ let test_runtime_lane_value_is_neutral () =
     "runtime"
     runtime_lane
 
+let test_runtime_lane_uses_boundary_redaction_ssot () =
+  let expected = Boundary.to_string Boundary.runtime_model_label in
+  Alcotest.(check string)
+    "boundary SSOT derives from runtime_model_label"
+    expected
+    Boundary.runtime_lane_label;
+  Alcotest.(check string)
+    "keeper hooks use boundary lane SSOT"
+    Boundary.runtime_lane_label
+    Masc.Keeper_hooks_oas.runtime_lane_label;
+  Alcotest.(check string)
+    "keeper hooks OAS types use boundary lane SSOT"
+    Boundary.runtime_lane_label
+    Masc.Keeper_hooks_oas_types.runtime_lane_label;
+  Alcotest.(check string)
+    "keeper agent result uses boundary lane SSOT"
+    Boundary.runtime_lane_label
+    Masc.Keeper_agent_result.runtime_lane_label
+
 let test_provider_label_redacted_to_runtime_lane () =
   let before_redacted = Metrics.metric_value_or_zero metric ~labels:redacted_labels () in
   let before_leaked = Metrics.metric_value_or_zero metric ~labels:leaked_labels () in
@@ -56,5 +76,9 @@ let () =
             "provider label redacted to runtime lane"
             `Quick
             test_provider_label_redacted_to_runtime_lane
+        ; Alcotest.test_case
+            "runtime lane uses boundary redaction SSOT"
+            `Quick
+            test_runtime_lane_uses_boundary_redaction_ssot
         ] )
     ]

@@ -29,6 +29,27 @@ val decide_capability_gate :
     (corrupted the memory-os librarian for minimax-m3, 2026-06-19). Empty entries
     are allowed for focused config probes. *)
 
+type missing_catalog_model =
+  { runtime_id : string
+  ; provider_id : string
+  ; provider_label : string
+  ; model_id : string
+  }
+(** Runtime binding whose concrete provider/model pair is absent from the OAS
+    capability catalog. [provider_label] is the exact OAS capability namespace
+    used for lookup. *)
+
+type missing_catalog_report =
+  { config_path : string
+  ; missing_models : missing_catalog_model list
+  }
+
+type strict_init_error =
+  | Runtime_config_error of string
+  | Missing_catalog_models of missing_catalog_report
+
+val strict_init_error_to_string : strict_init_error -> string
+
 val load_list :
   config_path:string
   -> ( t list
@@ -38,19 +59,21 @@ val load_list :
        * string option
        * string option
        * string list
+       * Runtime_lane.t list
      , string )
      result
 (** [load_list ~config_path] parses runtime.toml into [(runtimes, default,
     keeper_assignments, librarian_runtime_id, structured_judge_runtime_id,
-    cross_verifier_runtime_id, media_failover)]. Fails ([Error]) if
+    cross_verifier_runtime_id, media_failover, lanes)]. Fails ([Error]) if
     [\[runtime\].default] is missing / unresolved, if any
     [\[runtime.assignments\]] target does not resolve to a configured runtime, if
     [\[runtime\].librarian] / [\[runtime\].structured_judge] /
-    [\[runtime\].cross_verifier] is set to an unresolved id, or if any
-    [\[runtime\].media_failover] entry does not resolve (mirrors default
+    [\[runtime\].cross_verifier] is set to an unresolved id, if any
+    [\[runtime\].media_failover] entry does not resolve, or if any
+    [\[runtime.lanes.<id>\]] candidate does not resolve (mirrors default
     validation — no silent fallback for a typo'd id). [keeper_assignments] is the
     keeper→runtime-id list; [media_failover] is the RFC-0265 ordered reroute
-    list. *)
+    list; [lanes] is the ordered failover candidate lists. *)
 
 val runtime_ids : t list -> string list
 
@@ -69,6 +92,11 @@ val init_default_strict : config_path:string -> (unit, string) result
 (** Production startup entry point: {!init_default} PLUS the OAS capability-catalog
     gate ({!decide_capability_gate}). Rejects ([Error]) a runtime whose model is
     absent from the catalog before boot. Used by server boot and fusion run. *)
+
+val init_default_strict_report :
+  config_path:string -> (unit, strict_init_error) result
+(** Typed form of {!init_default_strict}. Server bootstrap uses this to log
+    missing catalog models without string-matching the fatal error message. *)
 
 module For_testing : sig
   type snapshot
@@ -132,6 +160,19 @@ val media_failover : unit -> string list
     the turn reroutes to the first that admits it. [[]] = derive capable runtimes
     from declared [\[models.*.capabilities\]] in declaration order. Every entry is
     validated at load so each resolves to a configured runtime. *)
+
+val lanes : unit -> Runtime_lane.t list
+(** [\[runtime.lanes.<id>\]] ordered failover candidate lists. Each lane carries
+    an ordered list of runtime ids validated at load. *)
+
+val get_lane_by_id : string -> Runtime_lane.t option
+(** Lane with the given id, or [None] if no such lane is configured. *)
+
+val resolve_assignment :
+  string -> [ `Lane of Runtime_lane.t | `Single_runtime of t | `Missing ]
+(** Resolve a keeper assignment id to either a lane or a single runtime. Lanes
+    shadow runtimes. [Missing] means the id does not name a known lane or
+    runtime. *)
 
 val pause_threshold : unit -> pause_threshold
 (** [\[pause\]] threshold knobs from runtime.toml, or

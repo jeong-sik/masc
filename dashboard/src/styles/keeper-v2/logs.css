@@ -116,3 +116,27 @@
 }
 .lg-jump:hover { background: color-mix(in oklab, var(--volt) 12%, transparent); border-color: var(--volt); }
 .lg-empty { padding: 48px; text-align: center; color: var(--text-dim); font-size: var(--fs-13); }
+
+/* ── phones: the 5-col grid (≈426px min) overflows — switch to a stacked card ── */
+@media (max-width: 640px) {
+  .lg-head { flex-wrap: wrap; gap: 12px 18px; padding: 16px 16px 12px; }
+  .lg-stats { margin-left: 0; flex-wrap: wrap; }
+  .lg-stat { min-width: 0; flex: 1 1 auto; }
+  .lg-toolbar { flex-wrap: wrap; gap: 8px; padding: 0 16px 12px; }
+  .lg-tb-spacer { display: none; }
+  .lg-colhd { display: none; }
+
+  .lg-line {
+    grid-template-columns: auto auto 1fr auto;
+    grid-template-areas:
+      "time kind who caret"
+      "msg  msg  msg msg";
+    gap: 6px 10px; padding: 11px 16px; align-items: center;
+  }
+  .lg-time  { grid-area: time; }
+  .lg-kind  { grid-area: kind; }
+  .lg-who   { grid-area: who; justify-self: end; max-width: 46vw; }
+  .lg-caret { grid-area: caret; }
+  .lg-msg   { grid-area: msg; white-space: normal; }
+  .lg-detail { padding: 4px 16px 16px; }
+}

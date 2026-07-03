@@ -1101,6 +1101,40 @@ let test_docker_run_looks_daemon_pressure_not_pressure_on_command_error () =
        ~status:(Unix.WEXITED 1)
        ~output:"No such file or directory")
 
+(* The retry predicate must consume the typed classifier result, not a
+   string-token protocol. These tests pin the variant-to-retry mapping so
+   adding or renaming a failure class cannot silently change retry policy. *)
+let test_docker_failure_class_is_typed_and_serializes_stable_string () =
+  let open Masc.Keeper_sandbox_runtime_classify in
+  Alcotest.(check string)
+    "daemon unavailable class serializes to stable string"
+    "docker_daemon_unavailable"
+    (docker_failure_class_to_string Docker_daemon_unavailable);
+  Alcotest.(check string)
+    "timeout class serializes to stable string"
+    "docker_daemon_timeout"
+    (docker_failure_class_to_string Docker_daemon_timeout);
+  Alcotest.(check bool)
+    "classifier maps daemon unavailable output to the typed variant"
+    true
+    (match
+       classify_docker_runtime_failure
+         ~status:(Unix.WEXITED 1)
+         ~output:"Cannot connect to the Docker daemon"
+     with
+     | Docker_daemon_unavailable -> true
+     | _ -> false);
+  Alcotest.(check bool)
+    "classifier maps timeout output to the typed variant"
+    true
+    (match
+       classify_docker_runtime_failure
+         ~status:(Unix.WEXITED 124)
+         ~output:"process error: timeout after 5s"
+     with
+     | Docker_daemon_timeout -> true
+     | _ -> false)
+
 let test_docker_workspace_state_mount_args_expose_safe_subset () =
   let base = temp_dir () in
   Fun.protect ~finally:(fun () -> cleanup_dir base) @@ fun () ->
@@ -2324,6 +2358,8 @@ let run_tests ~clock () =
             test_docker_run_looks_daemon_pressure_classifies_daemon_unavailable;
           Alcotest.test_case "docker run does not classify command error as pressure" `Quick
             test_docker_run_looks_daemon_pressure_not_pressure_on_command_error;
+          Alcotest.test_case "docker failure class is typed and serializes stable string" `Quick
+            test_docker_failure_class_is_typed_and_serializes_stable_string;
           Alcotest.test_case "docker workspace state mount exposes safe subset" `Quick
             test_docker_workspace_state_mount_args_expose_safe_subset;
           Alcotest.test_case "managed label args include ttl" `Quick

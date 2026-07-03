@@ -523,11 +523,13 @@ let assemble_hooks
                        ~masc_root:(Workspace.masc_root_dir config)
                        ~keeper_name:meta.name
                        ~turn_id
+                       ~trace_id:meta.runtime.trace_id
                        ~sdk_turn:turn
                        ~system_prompt:turn_system_prompt
                        ~extra_system_context:ctx
                        ~user_message
-                       ~history_messages:messages)
+                       ~history_messages:messages
+                       ())
                   manifest_keeper_turn_id;
                 Eio.Fiber.yield ();
                 Agent_sdk.Hooks.AdjustParams

@@ -147,6 +147,74 @@ describe('parseKeeperCompositeSnapshot', () => {
     expect(result.last_outcome!.selected_model).toBe('claude-sonnet')
   })
 
+  it('parses live_turn model and active tool count (A-PR-2 G2)', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      live_turn: {
+        turn_id: 7,
+        started_at: 1713398400,
+        last_progress_at: 1713398450,
+        last_progress_kind: 'tool_result',
+        selected_model: 'claude-sonnet',
+        active_tool_count: 3,
+      },
+    })
+    expect(result.live_turn).not.toBeNull()
+    expect(result.live_turn!.selected_model).toBe('claude-sonnet')
+    expect(result.live_turn!.active_tool_count).toBe(3)
+  })
+
+  it('tolerates a pinned backend live_turn without the new fields', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      live_turn: {
+        turn_id: 7,
+        started_at: 1713398400,
+        last_progress_at: 1713398450,
+        last_progress_kind: null,
+      },
+    })
+    expect(result.live_turn).not.toBeNull()
+    expect(result.live_turn!.selected_model).toBeUndefined()
+    expect(result.live_turn!.active_tool_count).toBeUndefined()
+  })
+
+  it('parses the last_skip verdict (A-PR-2 G5)', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      last_skip: { ts: 1713398400, reasons: ['cooldown_pending', 'no_signal'] },
+    })
+    expect(result.last_skip).not.toBeNull()
+    expect(result.last_skip!.reasons).toEqual(['cooldown_pending', 'no_signal'])
+  })
+
+  it('parses board_cursor and board_wakeups (A-PR-2 G10)', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      board_cursor: { ts: 1234.5, post_id: 'post-42' },
+      board_wakeups: 2,
+    })
+    expect(result.board_cursor).toEqual({ ts: 1234.5, post_id: 'post-42' })
+    expect(result.board_wakeups).toBe(2)
+  })
+
+  it('parses a livelock retry state (A-PR-2 G10)', () => {
+    const result = parseKeeperCompositeSnapshot({
+      ...VALID_SNAPSHOT,
+      livelock: { turn_id: 4, attempts: 3, first_started_at: 1713398000 },
+    })
+    expect(result.livelock).not.toBeNull()
+    expect(result.livelock!.attempts).toBe(3)
+  })
+
+  it('leaves A-PR-2 fields undefined for old payloads that omit them', () => {
+    const result = parseKeeperCompositeSnapshot(VALID_SNAPSHOT)
+    expect(result.last_skip).toBeUndefined()
+    expect(result.livelock).toBeUndefined()
+    expect(result.board_cursor).toBeUndefined()
+    expect(result.board_wakeups).toBeUndefined()
+  })
+
   it('parses optional execution receipt summary', () => {
     const result = parseKeeperCompositeSnapshot({
       ...VALID_SNAPSHOT,

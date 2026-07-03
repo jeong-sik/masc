@@ -42,8 +42,13 @@ vi.mock('./components/observatory/observatory', () => ({
   refreshObservatorySurface: vi.fn(),
 }))
 
+vi.mock('./keeper-runtime', () => ({
+  refreshActiveKeeperChatHistory: vi.fn(),
+}))
+
 import { refreshFeatureHealth } from './components/feature-health'
 import { refreshObservatorySurface } from './components/observatory/observatory'
+import { refreshActiveKeeperChatHistory } from './keeper-runtime'
 import { refreshServerConfig } from './components/server-config'
 import { refreshSurfaceReadiness } from './components/surface-readiness-panel'
 import { refreshForRoute, refreshPlanForRoute } from './tab-refresh'
@@ -65,7 +70,7 @@ describe('refreshPlanForRoute', () => {
     expect(refreshPlanForRoute({
       tab: 'keepers',
       params: { keeper: 'sangsu' },
-    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot'])
+    })).toEqual(['namespaceTruth', 'execution', 'missionSnapshot', 'activeKeeperChat'])
   })
 
   it('hydrates the top-level board surface from the board store', () => {
@@ -267,6 +272,19 @@ describe('refreshPlanForRoute', () => {
     })
 
     expect(refreshExecution).toHaveBeenCalledWith()
+  })
+
+  it('re-hydrates the open keeper chat on Keepers navigation', async () => {
+    refreshForRoute({
+      tab: 'keepers',
+      params: { keeper: 'sangsu' },
+    })
+
+    await waitFor(() => {
+      expect(refreshActiveKeeperChatHistory).toHaveBeenCalledTimes(1)
+    })
+    // Route/periodic refresh must not force (guard-respecting no-op).
+    expect(refreshActiveKeeperChatHistory).toHaveBeenCalledWith()
   })
 
   it('refreshes Fusion without inheriting Board route filters', async () => {

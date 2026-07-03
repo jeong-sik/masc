@@ -12,7 +12,7 @@
     [test/test_types.ml] for the
     lifecycle-event patcher family.
 
-    External surface (21 entries):
+    External surface (22 entries):
     - {b cache cells} ({!execution_cache},
       {!broadcast_namespace_truth_ref}) reached by
       [server_dashboard_http_namespace_truth] for
@@ -34,7 +34,8 @@
       ({!dashboard_execution_snapshot_json},
       {!dashboard_transport_health_snapshot_json}).
     - {b HTTP route entries}
-      ({!dashboard_execution_http_json},
+      ({!dashboard_execution_cached_http_body},
+      {!dashboard_execution_http_json},
       {!dashboard_execution_trust_http_json},
       {!dashboard_transport_health_http_json}).
     - {b lifecycle-event patchers}
@@ -177,6 +178,14 @@ val dashboard_transport_health_snapshot_json :
 (** Returns the most recent transport-health snapshot. *)
 
 (** {1 HTTP route entries} *)
+
+val dashboard_execution_cached_http_body :
+  state:Mcp_server.server_state -> Httpun.Request.t -> string option
+(** Returns a pre-serialized response body for the default light
+    [/api/v1/dashboard/execution] request when the proactive execution
+    cache has a fresh successful snapshot.  Returns [None] for actor,
+    fixture, full, force, initializing, or stale/error requests so callers
+    fall back to {!dashboard_execution_http_json}. *)
 
 val dashboard_execution_http_json :
   state:Mcp_server.server_state ->

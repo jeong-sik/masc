@@ -44,7 +44,7 @@ let json_string_opt = function
   | None -> `Null
 
 let capture_request ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
-    ~extra_system_context ~user_message ~history_messages =
+    ~extra_system_context ~user_message ~history_messages ?trace_id () =
   if not (enabled ()) then ()
   else
     best_effort ~masc_root (fun () ->
@@ -63,6 +63,10 @@ let capture_request ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
           ; ("kind", `String "request")
           ; ("keeper", `String keeper_name)
           ; ("turn_id", `Int turn_id)
+          ; ( "trace_id"
+            , match trace_id with
+              | Some t -> `String (Keeper_id.Trace_id.to_string t)
+              | None -> `Null )
           ; ("sdk_turn", `Int sdk_turn)
           ; ("system_prompt", `String (redact system_prompt))
           ; ("extra_system_context", json_string_opt extra_system_context)
@@ -75,7 +79,7 @@ let capture_request ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
       in
       write_payload ~masc_root payload)
 
-let capture_response ~masc_root ~keeper_name ~turn_id ~response_text =
+let capture_response ~masc_root ~keeper_name ~turn_id ~response_text ?trace_id () =
   if not (enabled ()) then ()
   else
     best_effort ~masc_root (fun () ->
@@ -85,6 +89,10 @@ let capture_response ~masc_root ~keeper_name ~turn_id ~response_text =
           ; ("kind", `String "response")
           ; ("keeper", `String keeper_name)
           ; ("turn_id", `Int turn_id)
+          ; ( "trace_id"
+            , match trace_id with
+              | Some t -> `String (Keeper_id.Trace_id.to_string t)
+              | None -> `Null )
           ; ("response_text", `String (redact response_text))
           ]
       in

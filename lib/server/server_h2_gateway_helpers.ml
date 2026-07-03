@@ -22,20 +22,20 @@ let h2_respond_body
   H2.Body.Writer.write_string writer final_body;
   H2.Body.Writer.close writer
 
-let h2_respond_json_string ?status ?extra_headers h2_reqd body =
+let h2_respond_json_string ?status ?extra_headers ?(compress = true) h2_reqd body =
   h2_respond_body
     ?status
     ?extra_headers
-    ~compress:true
+    ~compress
     ~content_type:"application/json; charset=utf-8"
     h2_reqd
     body
 
-let h2_respond_json ?status ?extra_headers h2_reqd body =
-  h2_respond_json_string ?status ?extra_headers h2_reqd body
+let h2_respond_json ?status ?extra_headers ?compress h2_reqd body =
+  h2_respond_json_string ?status ?extra_headers ?compress h2_reqd body
 
-let h2_respond_json_value ?status ?extra_headers h2_reqd json =
-  h2_respond_json_string ?status ?extra_headers h2_reqd
+let h2_respond_json_value ?status ?extra_headers ?compress h2_reqd json =
+  h2_respond_json_string ?status ?extra_headers ?compress h2_reqd
     (Yojson.Safe.to_string json)
 
 let h2_respond_text ?(status = `OK) ?(extra_headers = []) h2_reqd body =

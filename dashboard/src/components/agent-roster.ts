@@ -333,9 +333,10 @@ function fleetRuntimeVitals(
   if (!keeper) return []
   const vitals: FleetVital[] = []
 
+  // Full model id, no prefix truncation: in a multi-provider fleet a stripped
+  // `claude-` prefix collides with other providers' model names (audit P1-5).
   const model = (keeper.active_model ?? keeper.model ?? keeper.last_model_used ?? '')
     .trim()
-    .replace('claude-', '')
   if (model) vitals.push({ k: 'model', v: model })
 
   const runtime = (keeper.runtime_canonical ?? keeper.selected_runtime_canonical ?? '').trim()
@@ -361,6 +362,30 @@ function fleetRuntimeVitals(
   if (contextDetail) vitals.push({ k: 'context', v: contextDetail })
 
   return vitals
+}
+
+type FleetAttentionItem = { sev: 'warn' | 'bad'; text: string }
+
+// Collapse the operator-severity wire string (operator_digest_types emits
+// "critical" | "bad" | "warn") to the two-level dot the aside attention list
+// paints. Unknown/critical fold to the nearest defined tone rather than
+// inventing a third dot color.
+function fleetAttentionSev(severity: string): 'warn' | 'bad' {
+  return severity === 'bad' || severity === 'critical' ? 'bad' : 'warn'
+}
+
+// Selected-keeper attention reasons, read from the same live composite that
+// drives the row's attention band. Each keeper-targeted `recommended_actions`
+// entry (backend-gated on `runtime_attention.needs_attention`) contributes one
+// reason — no fixture text, so an item exists only when the backend actually
+// recommends an action for this keeper.
+function fleetAttentionItems(
+  composite: KeeperCompositeSnapshot | null,
+): FleetAttentionItem[] {
+  if (!composite) return []
+  return composite.recommended_actions
+    .filter(action => action.target_type === 'keeper')
+    .map(action => ({ sev: fleetAttentionSev(action.severity), text: action.reason }))
 }
 
 function registerKeeperLookup<T extends Pick<Keeper, 'keeper_id' | 'name' | 'agent_name'>>(
@@ -1010,6 +1035,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       compositeSnapshotForKeeper(keeperRuntime, compositeByKeeperKey)
     const keeperMonitoring = keeperRuntime ? summarizeKeeperMonitoring(keeperRuntime, compositeForMonitoring) : null
     const monitoringEvidence = keeperMonitoring ? summarizeMonitoringEvidence(keeperMonitoring) : null
+    const attentionItems = fleetAttentionItems(compositeForMonitoring)
     const fsmPhase = keeperRuntime ? keeperPhaseForDisplay(keeperRuntime, compositeForMonitoring) : null
     const isKeeper = keeperRuntime != null
     // Shared precedence (incl. last_proactive_preview); fall back to the agent
@@ -1088,6 +1114,7 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
       fsmStageKey,
       fsmStageText,
       monitoringEvidence,
+      attentionItems,
       detailLabel,
       openDetail,
     }
@@ -1201,7 +1228,9 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
             <div class="mt-0.5 flex flex-wrap items-center gap-1.5 text-2xs text-[var(--color-fg-secondary)]">
               <${AgentPresence} status=${row.presenceDisplay.status} detail=${row.presenceDisplay.detail} size="sm" />
             </div>
-            ${namespaceLine ? html`<div class="fl-ns">${namespaceLine}</div>` : null}
+            ${row.keeperRuntime?.sandbox_profile === 'local'
+              ? html`<div class="fl-ns"><span class="fl-sandbox" title="git worktree 격리 · localhost-trust (OS sandbox 없음)">⬡</span> worktree 격리</div>`
+              : namespaceLine ? html`<div class="fl-ns">${namespaceLine}</div>` : null}
           </div>
         </div>
 
@@ -1439,6 +1468,17 @@ export function AgentRoster({ keeperFilter = 'all' }: { keeperFilter?: KeeperFil
                       : null}
                   </div>
                   <p class="m-0 mt-1 text-xs leading-relaxed text-[var(--color-fg-primary)]">${selectedBlockerDisplay?.detail}</p>
+                </div>
+              </div>
+            ` : null}
+
+            ${selectedRow.attentionItems.length > 0 ? html`
+              <div class="fl-as-sec">
+                <h4>주의 · ${selectedRow.attentionItems.length}</h4>
+                <div class="fl-attn-list">
+                  ${selectedRow.attentionItems.map(item => html`
+                    <div class="fl-attn-item" data-sev=${item.sev}><span class="fl-attn-dot"></span>${item.text}</div>
+                  `)}
                 </div>
               </div>
             ` : null}

@@ -46,6 +46,7 @@ let submit (job : job) : unit =
          performs I/O or suspends. *)
       if Queue.length queue.items >= queue.capacity
       then (
+        (* See [dropped]: eviction is intentional for the bounded newest-job queue. *)
         ignore (Queue.take_opt queue.items : job option);
         Atomic.incr dropped);
       Queue.add job queue.items);

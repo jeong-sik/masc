@@ -825,13 +825,13 @@ let test_next_round_evicts_past_turn_keys () =
         ~turn:6
     in
     Alcotest.(check int) "turn 6 first round -> 1" 1 r6;
-    (* The turn-5 key was evicted, so a fresh turn-5 call re-hydrates from disk
-       (2 rows -> 3), not the stale in-memory 4. *)
+    (* The active turn-5 key was evicted, but the issued high-water mark is
+       retained so an out-of-order caller cannot receive a duplicate round. *)
     let r5c =
       Trajectory.next_round ~masc_root:dir ~keeper_name:"k" ~trace_id:"t-evict"
         ~turn:5
     in
-    Alcotest.(check int) "turn 5 re-hydrates after evict -> round 3" 3 r5c)
+    Alcotest.(check int) "turn 5 after eviction stays monotonic" 5 r5c)
 
 let thinking_line ?(ts = 1000.0) ?(redacted = false) content =
   Trajectory.Thinking

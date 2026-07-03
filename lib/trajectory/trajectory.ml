@@ -245,6 +245,7 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
    Hydrated lazily on first access per key. *)
 
 let round_counters : (string * string * int, int) Hashtbl.t = Hashtbl.create 64
+let round_high_water : (string * string * int, int) Hashtbl.t = Hashtbl.create 64
 let round_counters_mu = Stdlib.Mutex.create ()
 
 (* Initial tail window (in lines) read to hydrate a turn's round count from
@@ -374,9 +375,12 @@ let hydrate_round_count ~(masc_root : string) ~(keeper_name : string)
 
 (** Evict cache entries for turns older than [turn] under the same
     (keeper_name, trace_id). Round counts for a past turn are never queried
-    again (turn is monotonic), so retaining them would grow the table without
-    bound over a long session. Iteration cost is small: live keys number at
-    most (keepers × in-flight turns). Caller must hold [round_counters_mu]. *)
+    again in the normal monotonic path, so retaining the active hydrated
+    counter would grow the table without bound over a long session. Issued
+    high-water marks are intentionally retained separately; if a late
+    out-of-order caller asks for an older turn, [next_round] must not hand out
+    a duplicate round number already returned by this process. Caller must
+    hold [round_counters_mu]. *)
 let evict_past_turn_keys ~(keeper_name : string) ~(trace_id : string)
     ~(turn : int) : unit =
   let stale =
@@ -398,17 +402,28 @@ let next_round ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string
     let current =
       match Hashtbl.find_opt round_counters key with
       | Some n -> n
-      | None -> hydrate_round_count ~masc_root ~keeper_name ~trace_id ~turn
+      | None ->
+        let hydrated =
+          hydrate_round_count ~masc_root ~keeper_name ~trace_id ~turn
+        in
+        let issued =
+          match Hashtbl.find_opt round_high_water key with
+          | Some n -> n
+          | None -> 0
+        in
+        max hydrated issued
     in
     let next = current + 1 in
     Hashtbl.replace round_counters key next;
+    Hashtbl.replace round_high_water key next;
     evict_past_turn_keys ~keeper_name ~trace_id ~turn;
     next)
 
 (** Reset round counters for testing. *)
 let reset_round_counters_for_testing () =
   Stdlib.Mutex.protect round_counters_mu (fun () ->
-    Hashtbl.reset round_counters)
+    Hashtbl.reset round_counters;
+    Hashtbl.reset round_high_water)
 
 let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :

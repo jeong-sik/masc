@@ -461,7 +461,7 @@ let add_routes ~sw ~clock router =
      Fusion_run_registry.run_to_yojson so the shape matches the SSE delta. *)
   |> Http.Router.get "/api/v1/dashboard/fusion-runs" (fun request reqd ->
        with_public_read (fun _state req reqd ->
-         let runs = Fusion_run_registry.list_runs Fusion_run_registry.global in
+         let runs = Fusion_run_registry.list_runs (Fusion_run_registry.global ()) in
          let json =
            `Assoc
              [ ("generated_at", `String (Masc_domain.now_iso ()))
@@ -904,8 +904,16 @@ let add_routes ~sw ~clock router =
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution" (fun request reqd ->
        with_public_read (fun state req reqd ->
-         let json = dashboard_execution_http_json ~state ~sw ~clock request in
-         Http.Response.json_value ~compress:true ~request:req json reqd
+         (* The default execution surface is a large proactive cached snapshot.
+            Re-compressing it on every dashboard poll burns the same serving
+            domain that accepts health/chat/keeper requests; serve identity JSON
+            here and keep the compute/cache policy in
+            [dashboard_execution_http_json]. *)
+         match dashboard_execution_cached_http_body ~state request with
+         | Some body -> Http.Response.json ~compress:false ~request:req body reqd
+         | None ->
+           let json = dashboard_execution_http_json ~state ~sw ~clock request in
+           Http.Response.json_value ~compress:false ~request:req json reqd
        ) request reqd)
   |> Http.Router.get "/api/v1/dashboard/execution-trust" (fun request reqd ->
        with_public_read (fun state req reqd ->

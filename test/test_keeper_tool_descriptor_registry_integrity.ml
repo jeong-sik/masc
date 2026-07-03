@@ -262,6 +262,11 @@ let schema_property_description schema name =
   |> to_string_option
 ;;
 
+let schema_property_int schema name field =
+  let open Yojson.Safe.Util in
+  schema |> member "properties" |> member name |> member field |> to_int_option
+;;
+
 let schema_required_fields schema =
   match schema with
   | `Assoc fields ->
@@ -500,9 +505,21 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     schema_property_description get_schema.input_schema "post_id"
     |> Option.value ~default:""
   in
+  let comment_offset_description =
+    schema_property_description get_schema.input_schema "comment_offset"
+    |> Option.value ~default:""
+  in
+  let comment_limit_description =
+    schema_property_description get_schema.input_schema "comment_limit"
+    |> Option.value ~default:""
+  in
   check_contains
     "masc_board_post_get schema points to list/search first"
     ~sub:"masc_board_list or masc_board_search first"
+    get_schema.description;
+  check_contains
+    "masc_board_post_get schema advertises pagination"
+    ~sub:"Comments are paginated by default"
     get_schema.description;
   check_contains
     "masc_board_post_get schema forbids empty args"
@@ -512,6 +529,26 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     "masc_board_post_get post_id field says exact ID is required"
     ~sub:"Required exact board post ID"
     get_post_id_description;
+  check_contains
+    "masc_board_post_get offset description mentions default"
+    ~sub:"default: 0"
+    comment_offset_description;
+  check_contains
+    "masc_board_post_get limit description mentions bounds"
+    ~sub:"default: 50, max: 100"
+    comment_limit_description;
+  Alcotest.(check (option int))
+    "masc_board_post_get offset minimum"
+    (Some 0)
+    (schema_property_int get_schema.input_schema "comment_offset" "minimum");
+  Alcotest.(check (option int))
+    "masc_board_post_get limit minimum"
+    (Some 1)
+    (schema_property_int get_schema.input_schema "comment_limit" "minimum");
+  Alcotest.(check (option int))
+    "masc_board_post_get limit maximum"
+    (Some 100)
+    (schema_property_int get_schema.input_schema "comment_limit" "maximum");
   check_contains
     "masc_board_list schema says it returns post_id"
     ~sub:"return post_id values"

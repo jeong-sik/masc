@@ -245,7 +245,153 @@ let trajectory_path (masc_root : string) (keeper_name : string) (trace_id : stri
    Hydrated lazily on first access per key. *)
 
 let round_counters : (string * string * int, int) Hashtbl.t = Hashtbl.create 64
+let round_high_water : (string * string * int, int) Hashtbl.t = Hashtbl.create 64
 let round_counters_mu = Stdlib.Mutex.create ()
+
+(* Initial tail window (in lines) read to hydrate a turn's round count from
+   disk. A single turn's tool-call count is far below this bound, so one
+   tail read normally captures the whole turn plus the previous-turn boundary.
+   Chosen well above realistic per-turn tool-call counts to avoid widening. *)
+let default_hydrate_tail_lines = 512
+
+(* Upper bound on the tail window before falling back to a full-file scan.
+   Doubling from [default_hydrate_tail_lines] yields 512→1024→2048→4096→8192.
+   Beyond this a turn is assumed pathological and a full scan is used so the
+   count is never silently truncated. *)
+let max_hydrate_tail_lines = 8192
+
+(** Extract the [turn] field from a trajectory JSONL line.  Returns [None] for
+    non-entry rows, malformed [turn] fields, and invalid JSON.  Such lines are
+    skipped rather than counted or treated as turn-boundaries. *)
+let entry_turn_of_line ~(trace_id : string) (line : string) : int option =
+  match Yojson.Safe.from_string line with
+  | json -> (
+      match Json_util.assoc_member_opt "turn" json with
+      | Some (`Int n) -> Some n
+      | None -> None
+      | Some other ->
+          Log.Keeper.warn
+            "Skipping trajectory line with non-int turn during next_round \
+             (trace_id=%s, turn_kind=%s)"
+            trace_id (Yojson.Safe.to_string other);
+          None)
+  | exception Yojson.Json_error msg ->
+      Log.Keeper.warn
+        "Failed to parse trajectory JSON during next_round (trace_id=%s): %s"
+        trace_id msg;
+      None
+  | exception exn ->
+      Log.Keeper.warn
+        "Unexpected error reading trajectory line (trace_id=%s): %s" trace_id
+        (Printexc.to_string exn);
+      None
+
+(** Count entries whose [turn = target_turn] within a tail [window] by scanning
+    newest→oldest, stopping at the first line strictly older than [target_turn].
+    turn is monotonically non-decreasing in append-only file order, so once a
+    line with [entry_turn < target_turn] is seen every earlier line is a past
+    turn and the scan stops.
+
+    Returns [(count, boundary_found)]. [boundary_found] is true only when a
+    strictly-older line was seen, i.e. the window definitely contained the turn
+    boundary and [count] is complete. When false, the window may have been
+    truncated before the boundary and the caller must widen it or fall back. *)
+let count_current_turn_backward ~(trace_id : string) ~(target_turn : int)
+    (window : string list) : int * bool =
+  (* [window] is oldest-first (load_tail_lines order); reverse to scan the
+     newest line first so we can stop as soon as the boundary appears. *)
+  let rec scan count = function
+    | [] -> (count, false)
+    | line :: older -> (
+        match entry_turn_of_line ~trace_id line with
+        | None -> scan count older (* unparseable: warn+skip, not a boundary *)
+        | Some entry_turn ->
+            if entry_turn = target_turn then scan (count + 1) older
+            else if entry_turn < target_turn then (count, true) (* boundary *)
+            else (
+              (* entry_turn > target_turn cannot occur under monotonic turn:
+                 future turns are appended after, not before, the current turn.
+                 Exclude it from the count but keep scanning (do not treat it as
+                 a boundary) so an upstream anomaly cannot silently truncate. *)
+              Log.Keeper.warn
+                "next_round saw future turn %d > %d in trajectory tail \
+                 (trace_id=%s); excluding from round count"
+                entry_turn target_turn trace_id;
+              scan count older))
+  in
+  scan 0 (List.rev window)
+
+(** Full-file scan fallback: count entries whose [turn = target_turn] across the
+    whole trajectory file. Restores the pre-tail-read O(file) cost, used only
+    when a turn exceeds [max_hydrate_tail_lines] tool calls. *)
+let full_scan_round_count ~(path : string) ~(trace_id : string)
+    ~(target_turn : int) : int =
+  Fs_compat.load_file path
+  |> String.split_on_char '\n'
+  |> List.filter (fun line -> String.trim line <> "")
+  |> List.fold_left
+       (fun acc line ->
+         match entry_turn_of_line ~trace_id line with
+         | Some n when n = target_turn -> acc + 1
+         | _ -> acc)
+       0
+
+(** Count existing entries for [turn] by reading a bounded tail of the file
+    instead of the whole file. Widens the window (doubling) if the boundary is
+    not reached, and only falls back to a full scan past [max_hydrate_tail_lines]
+    so the count is exact for every turn size. *)
+let hydrate_round_count ~(masc_root : string) ~(keeper_name : string)
+    ~(trace_id : string) ~(turn : int) : int =
+  let path = trajectory_path masc_root keeper_name trace_id in
+  if not (Sys.file_exists path) then 0
+  else
+    let rec attempt max_lines =
+      let window = Dated_jsonl.load_tail_lines path ~max_lines in
+      let n = List.length window in
+      let count, boundary_found =
+        count_current_turn_backward ~trace_id ~target_turn:turn window
+      in
+      if boundary_found || n < max_lines then
+        (* boundary_found: the previous-turn marker was inside the window.
+           n < max_lines: load_tail_lines returned fewer lines than requested,
+           so the window already spans the whole file — trajectory JSONL is
+           append-only with one record per line and no interior blank lines —
+           and [count] is complete even without an explicit boundary (e.g. the
+           first turn, whose entries reach the top of the file). *)
+        count
+      else if max_lines >= max_hydrate_tail_lines then (
+        (* Window filled to the cap without reaching the boundary. Fall back to
+           a full scan rather than risk under-counting a pathologically large
+           turn. This restores the pre-optimization cost for that rare case
+           only, and never silently truncates. *)
+        Log.Keeper.warn
+          "next_round tail window exhausted at %d lines without turn boundary \
+           (trace_id=%s, turn=%d); falling back to full scan"
+          max_lines trace_id turn;
+        full_scan_round_count ~path ~trace_id ~target_turn:turn)
+      else attempt (max_lines * 2)
+    in
+    attempt default_hydrate_tail_lines
+
+(** Evict cache entries for turns older than [turn] under the same
+    (keeper_name, trace_id). Round counts for a past turn are never queried
+    again in the normal monotonic path, so retaining the active hydrated
+    counter would grow the table without bound over a long session. Issued
+    high-water marks are intentionally retained separately; if a late
+    out-of-order caller asks for an older turn, [next_round] must not hand out
+    a duplicate round number already returned by this process. Caller must
+    hold [round_counters_mu]. *)
+let evict_past_turn_keys ~(keeper_name : string) ~(trace_id : string)
+    ~(turn : int) : unit =
+  let stale =
+    Hashtbl.fold
+      (fun ((k, t, kt) as key) _ acc ->
+        if String.equal k keeper_name && String.equal t trace_id && kt < turn
+        then key :: acc
+        else acc)
+      round_counters []
+  in
+  List.iter (Hashtbl.remove round_counters) stale
 
 (** Get the next round number for a given (keeper_name, trace_id, turn).
     Lazily hydrates from disk on first access, then increments in-memory.
@@ -257,35 +403,27 @@ let next_round ~(masc_root : string) ~(keeper_name : string) ~(trace_id : string
       match Hashtbl.find_opt round_counters key with
       | Some n -> n
       | None ->
-          (* Hydrate from disk: count existing entries for this turn *)
-          let path = trajectory_path masc_root keeper_name trace_id in
-          if not (Sys.file_exists path) then 0
-          else
-            let content = Fs_compat.load_file path in
-            String.split_on_char '\n' content
-            |> List.filter (fun line -> String.trim line <> "")
-            |> List.fold_left (fun acc line ->
-                try
-                  let json = Yojson.Safe.from_string line in
-                  let entry_turn = (match Json_util.assoc_member_opt "turn" json with Some (`Int n) -> n | _ -> 0) in
-                  if entry_turn = turn then acc + 1 else acc
-                with
-                | Yojson.Json_error msg ->
-                    Log.Keeper.warn "Failed to parse trajectory JSON during next_round (trace_id=%s): %s" trace_id msg;
-                    acc
-                | exn ->
-                    Log.Keeper.warn "Unexpected error reading trajectory line (trace_id=%s): %s" trace_id (Printexc.to_string exn);
-                    acc
-              ) 0
+        let hydrated =
+          hydrate_round_count ~masc_root ~keeper_name ~trace_id ~turn
+        in
+        let issued =
+          match Hashtbl.find_opt round_high_water key with
+          | Some n -> n
+          | None -> 0
+        in
+        max hydrated issued
     in
     let next = current + 1 in
     Hashtbl.replace round_counters key next;
+    Hashtbl.replace round_high_water key next;
+    evict_past_turn_keys ~keeper_name ~trace_id ~turn;
     next)
 
 (** Reset round counters for testing. *)
 let reset_round_counters_for_testing () =
   Stdlib.Mutex.protect round_counters_mu (fun () ->
-    Hashtbl.reset round_counters)
+    Hashtbl.reset round_counters;
+    Hashtbl.reset round_high_water)
 
 let append_entry ?runtime_contract ?action_radius ~(masc_root : string)
     ~(keeper_name : string) ~(trace_id : string) (entry : tool_call_entry) :

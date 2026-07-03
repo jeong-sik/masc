@@ -12,6 +12,7 @@ open Alcotest
 
 let target_file = "lib/dashboard/dashboard_http_keeper.ml"
 let status_detail_file = "lib/keeper/keeper_status_detail.ml"
+let context_runtime_file = "lib/keeper/keeper_context_runtime.ml"
 let heartbeat_snapshot_file = "lib/keeper/keeper_heartbeat_snapshot.ml"
 
 let load_source rel =
@@ -117,19 +118,11 @@ let test_dashboard_row_context_budget_reports_runtime_source () =
   check_contains
     "dashboard row context_budget includes runtime id"
     src
-    "(\"runtime_id\", `String (Keeper_meta_contract.runtime_id_of_meta m))";
+    "~runtime_id:(Keeper_meta_contract.runtime_id_of_meta m)";
   check_contains
-    "dashboard row context_budget includes provider window"
+    "dashboard row context_budget uses shared JSON SSOT"
     src
-    "\"provider_context_window\"";
-  check_contains
-    "dashboard row context_budget includes budget source"
-    src
-    "(\"budget_source\", `String context_budget_source)";
-  check_contains
-    "dashboard row context_budget includes effective budget"
-    src
-    "(\"effective_budget\", `Int max_context_resolution.effective_budget)"
+    "Keeper_context_runtime.context_budget_json_of_resolution"
 
 let test_status_detail_context_budget_reports_runtime_source () =
   let src = load_source status_detail_file in
@@ -140,19 +133,32 @@ let test_status_detail_context_budget_reports_runtime_source () =
   check_contains
     "status detail context budget includes runtime id"
     src
-    "(\"runtime_id\", `String (runtime_id_of_meta m))";
+    "~runtime_id:(runtime_id_of_meta m)";
   check_contains
-    "status detail context budget includes provider window"
+    "status detail context_budget uses shared JSON SSOT"
     src
-    "(\"provider_context_window\", `Int max_context_resolution.primary_budget)";
+    "Keeper_context_runtime.context_budget_json_of_resolution"
+
+let test_context_budget_json_schema_lives_in_context_runtime () =
+  let src = load_source context_runtime_file in
   check_contains
-    "status detail context budget includes budget source"
+    "shared context budget JSON helper exists"
     src
-    "(\"budget_source\", `String context_budget_source)";
+    "let context_budget_json_of_resolution";
+  check_contains "shared helper emits runtime id" src "\"runtime_id\"";
   check_contains
-    "status detail exposes effective budget"
+    "shared helper emits provider context window"
     src
-    "(\"effective_budget\", `Int max_context_resolution.effective_budget)"
+    "\"provider_context_window\"";
+  check_contains "shared helper emits budget source" src "\"budget_source\"";
+  check_contains
+    "shared helper emits requested override"
+    src
+    "\"requested_override\"";
+  check_contains "shared helper emits primary budget" src "\"primary_budget\"";
+  check_contains "shared helper emits runtime budget" src "\"runtime_budget\"";
+  check_contains "shared helper emits turn budget" src "\"turn_budget\"";
+  check_contains "shared helper emits effective budget" src "\"effective_budget\""
 
 let test_heartbeat_snapshot_uses_runtime_effective_budget () =
   let src = load_source heartbeat_snapshot_file in
@@ -195,6 +201,10 @@ let () =
             "status detail context budget reports runtime source"
             `Quick
             test_status_detail_context_budget_reports_runtime_source
+        ; test_case
+            "context budget JSON schema lives in context runtime"
+            `Quick
+            test_context_budget_json_schema_lives_in_context_runtime
         ; test_case
             "heartbeat snapshot uses runtime effective budget"
             `Quick

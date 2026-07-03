@@ -722,25 +722,10 @@ let keepers_dashboard_json ?(compact = false) (config : Workspace.config) : Yojs
             Keeper_context_runtime.resolve_max_context_resolution_of_meta m
           in
           let primary_max_context = max_context_resolution.effective_budget in
-          let context_budget_source =
-            max_context_resolution
-            |> Keeper_context_runtime.context_budget_source_of_resolution
-            |> Keeper_context_runtime.context_budget_source_to_string
-          in
           let context_budget =
-            `Assoc
-              [ ("runtime_id", `String (Keeper_meta_contract.runtime_id_of_meta m))
-              ; ( "provider_context_window"
-                , `Int max_context_resolution.primary_budget )
-              ; ("budget_source", `String context_budget_source)
-              ; ( "requested_override"
-                , Json_util.int_opt_to_json
-                    max_context_resolution.requested_override )
-              ; ("primary_budget", `Int max_context_resolution.primary_budget)
-              ; ("runtime_budget", `Int max_context_resolution.runtime_budget)
-              ; ("turn_budget", `Int max_context_resolution.turn_budget)
-              ; ("effective_budget", `Int max_context_resolution.effective_budget)
-              ]
+            Keeper_context_runtime.context_budget_json_of_resolution
+              ~runtime_id:(Keeper_meta_contract.runtime_id_of_meta m)
+              max_context_resolution
           in
           let context =
             match last_metrics with

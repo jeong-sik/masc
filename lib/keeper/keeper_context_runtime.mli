@@ -296,6 +296,12 @@ val context_budget_source_of_resolution
   -> context_budget_source
 
 val context_budget_source_to_string : context_budget_source -> string
+
+val context_budget_json_of_resolution
+  :  runtime_id:string
+  -> max_context_resolution
+  -> Yojson.Safe.t
+
 (** {1 Mention Detection} *)
 (** {1 Mention Detection} *)
 

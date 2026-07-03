@@ -306,12 +306,12 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
       let max_context_resolution =
         Keeper_context_runtime.resolve_max_context_resolution_of_meta m
       in
-      let context_budget_source =
-        max_context_resolution
-        |> Keeper_context_runtime.context_budget_source_of_resolution
-        |> Keeper_context_runtime.context_budget_source_to_string
-      in
       let primary_max_context = max_context_resolution.effective_budget in
+      let context_budget =
+        Keeper_context_runtime.context_budget_json_of_resolution
+          ~runtime_id:(runtime_id_of_meta m)
+          max_context_resolution
+      in
       let base_dir = session_base_dir config in
          let ctx_opt =
            if include_context then
@@ -910,16 +910,7 @@ let handle_keeper_status_config ~(config : Workspace.config) ~(agent_name : stri
              ("include_compaction_history", `Bool include_compaction_history);
              ("tail_order", `String (tail_order_to_string tail_order));
            ]);
-           ("context_budget", `Assoc [
-             ("runtime_id", `String (runtime_id_of_meta m));
-             ("provider_context_window", `Int max_context_resolution.primary_budget);
-             ("budget_source", `String context_budget_source);
-             ("requested_override", Json_util.int_opt_to_json max_context_resolution.requested_override);
-             ("primary_budget", `Int max_context_resolution.primary_budget);
-             ("runtime_budget", `Int max_context_resolution.runtime_budget);
-             ("turn_budget", `Int max_context_resolution.turn_budget);
-             ("effective_budget", `Int max_context_resolution.effective_budget);
-           ]);
+           ("context_budget", context_budget);
            ("model_observability", model_observability);
            ("runtime_trust", runtime_trust);
            ("chat_queue", chat_queue);

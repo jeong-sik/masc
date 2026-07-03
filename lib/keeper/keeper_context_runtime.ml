@@ -170,6 +170,26 @@ let context_budget_source_to_string = function
   | Requested_override_clamped_to_provider ->
     "requested_override_clamped_to_provider"
 
+let context_budget_json_of_resolution
+    ~(runtime_id : string)
+    (resolution : max_context_resolution) : Yojson.Safe.t =
+  let context_budget_source =
+    resolution
+    |> context_budget_source_of_resolution
+    |> context_budget_source_to_string
+  in
+  `Assoc
+    [ ("runtime_id", `String runtime_id)
+    ; ("provider_context_window", `Int resolution.primary_budget)
+    ; ("budget_source", `String context_budget_source)
+    ; ("requested_override", Json_util.int_opt_to_json resolution.requested_override)
+    ; ("primary_budget", `Int resolution.primary_budget)
+    ; ("runtime_budget", `Int resolution.runtime_budget)
+    ; ("turn_budget", `Int resolution.turn_budget)
+    ; ("effective_budget", `Int resolution.effective_budget)
+    ]
+;;
+
 let apply_post_turn_lifecycle_with_resilience_handles =
   Keeper_post_turn.apply_post_turn_lifecycle_with_resilience_handles
 let recover_latest_checkpoint_for_overflow_retry =

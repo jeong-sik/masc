@@ -158,6 +158,7 @@ let fallback_canonical_keeper_meta_key_names =
   ; "last_runtime_attempt"
   ; "last_turn_tool_calls"
   ; "paused"
+  ; "latched_reason"
   ; "auto_resume_after_sec"
   ; "current_task_id"
   ; "keeper_id"

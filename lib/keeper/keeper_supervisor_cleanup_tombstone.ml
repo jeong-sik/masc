@@ -20,8 +20,14 @@ let cleanup_dead_tombstone
   =
   match read_meta ctx.config entry.name with
   | Ok (Some meta) ->
+    let dead_tombstone_reason_persisted =
+      match meta.latched_reason with
+      | Some Keeper_latched_reason.Dead_tombstone -> true
+      | Some _
+      | None -> false
+    in
     let persisted_paused =
-      if meta.paused
+      if meta.paused && dead_tombstone_reason_persisted
       then true
       else (
         (* #9733: dead tombstone cleanup writes [paused = true] —
@@ -51,7 +57,7 @@ let cleanup_dead_tombstone
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup_cas_race" ]
             ();
           Log.Keeper.warn
-            "%s: dead tombstone cleanup paused write lost CAS race after retries: %s"
+            "%s: dead tombstone cleanup paused/reason write lost CAS race after retries: %s"
             entry.name
             err;
           false
@@ -61,7 +67,7 @@ let cleanup_dead_tombstone
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup" ]
             ();
           Log.Keeper.warn
-            "%s: dead tombstone cleanup paused write failed: %s"
+            "%s: dead tombstone cleanup paused/reason write failed: %s"
             entry.name
             err;
           false)

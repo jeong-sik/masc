@@ -229,7 +229,7 @@ let test_keeper_down_retain_records_reason () =
 
 (* ── Site 1: dead-tombstone cleanup ─────────────────────────── *)
 
-let test_dead_tombstone_cleanup_records_reason () =
+let run_dead_tombstone_cleanup_records_reason ?(paused = false) ?latched_reason keeper_name =
   Eio_main.run
   @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
@@ -243,8 +243,7 @@ let test_dead_tombstone_cleanup_records_reason () =
     (fun () ->
        let config = Masc.Workspace.default_config base_path in
        ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
-       let keeper_name = "dead-tombstone-keeper" in
-       let meta = make_meta keeper_name in
+       let meta = { (make_meta keeper_name) with paused; latched_reason } in
        Keeper_registry.clear ();
        (match Keeper_meta_store.write_meta config meta with
         | Ok () -> ()
@@ -281,6 +280,16 @@ let test_dead_tombstone_cleanup_records_reason () =
        | Ok None -> fail "expected tombstone meta to remain on disk after cleanup"
        | Error err -> failf "read persisted meta: %s" err)
 
+let test_dead_tombstone_cleanup_records_reason () =
+  run_dead_tombstone_cleanup_records_reason "dead-tombstone-keeper"
+
+let test_dead_tombstone_cleanup_overwrites_existing_pause_reason () =
+  run_dead_tombstone_cleanup_records_reason
+    ~paused:true
+    ~latched_reason:
+      (Keeper_latched_reason.Operator_paused { operator_actor = "keeper_down" })
+    "dead-tombstone-paused-keeper"
+
 let () =
   run
     "keeper_latched_reason_wiring"
@@ -301,5 +310,7 @@ let () =
             test_keeper_down_retain_records_reason
         ; test_case "dead-tombstone cleanup records Dead_tombstone reason" `Quick
             test_dead_tombstone_cleanup_records_reason
+        ; test_case "dead-tombstone cleanup overwrites existing pause reason" `Quick
+            test_dead_tombstone_cleanup_overwrites_existing_pause_reason
         ] )
     ]

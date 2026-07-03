@@ -875,6 +875,7 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
             let resumed_meta =
               { meta with
                 paused = false
+              ; latched_reason = None
               ; auto_resume_after_sec = Some resume_after_sec
               ; updated_at = now_iso ()
               ; runtime = { meta.runtime with last_blocker = None }

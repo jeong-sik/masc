@@ -58,6 +58,15 @@ let get_writer path =
   Stdlib.Mutex.protect mu (fun () -> get_or_open_locked path)
 ;;
 
+let invalidate path =
+  Stdlib.Mutex.protect mu (fun () ->
+    match Hashtbl.find_opt cached path with
+    | Some w ->
+      close_silently w;
+      Hashtbl.remove cached path
+    | None -> ())
+;;
+
 let close_all () =
   Stdlib.Mutex.protect mu (fun () ->
     Hashtbl.iter (fun _ w -> close_silently w) cached;

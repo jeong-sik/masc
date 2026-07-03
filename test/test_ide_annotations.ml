@@ -869,6 +869,109 @@ let test_compact_drops_tombstoned () =
       (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
 ;;
 
+(* task-1738: per-partition write serialization + version CAS. *)
+
+let make_cas_annotation base_dir =
+  Result.get_ok
+    (Store.create
+       ~base_dir
+       ~keeper_id:"alice"
+       ~file_path:"lib/a.ml"
+       ~line_start:1
+       ~line_end:1
+       ~kind:Types.Comment
+       ~content:"cas note"
+       ())
+;;
+
+(* Real parallelism (Domain, not systhreads) maximises the chance of a
+   compaction rewrite overlapping an append. Without per-partition write
+   serialization, [compact]'s read-all + atomic-rename drops appends that
+   land between the read and the rename, so the final count would be
+   below the number created. With the lock the count is exact. *)
+let test_concurrent_create_compact_no_loss () =
+  with_temp_dir (fun base_dir ->
+    Store.ensure_store ~base_dir ();
+    let n_writers = 4 in
+    let per_writer = 25 in
+    let writers =
+      List.init n_writers (fun w ->
+        Domain.spawn (fun () ->
+          for i = 0 to per_writer - 1 do
+            match
+              Store.create
+                ~base_dir
+                ~keeper_id:"alice"
+                ~file_path:"lib/a.ml"
+                ~line_start:1
+                ~line_end:1
+                ~kind:Types.Comment
+                ~content:(Printf.sprintf "w%d-%d" w i)
+                ()
+            with
+            | Ok _ -> ()
+            | Error msg -> failf "create failed: %s" msg
+          done))
+    in
+    let compactor =
+      Domain.spawn (fun () ->
+        for _ = 1 to 50 do
+          Store.compact ~base_dir ()
+        done)
+    in
+    List.iter Domain.join writers;
+    Domain.join compactor;
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check
+      int
+      "no annotation lost to concurrent compaction"
+      (n_writers * per_writer)
+      (List.length listed))
+;;
+
+let test_cas_rejects_version_mismatch () =
+  with_temp_dir (fun base_dir ->
+    let created = make_cas_annotation base_dir in
+    let wrong_version = Int64.add created.updated_at_ms 1L in
+    (match
+       Store.delete
+         ~base_dir
+         ~id:created.id
+         ~keeper_id:"alice"
+         ~expected_version:wrong_version
+         ()
+     with
+     | Ok () -> fail "stale expected_version must be rejected"
+     | Error _ -> ());
+    (* The annotation is untouched after a rejected CAS delete. *)
+    let still_there =
+      List.exists
+        (fun (a : Types.annotation) -> a.id = created.id)
+        (Store.list ~base_dir ~filter:(make_filter ()) ())
+    in
+    check bool "annotation survives rejected CAS delete" true still_there;
+    (* The correct version deletes. *)
+    match
+      Store.delete
+        ~base_dir
+        ~id:created.id
+        ~keeper_id:"alice"
+        ~expected_version:created.updated_at_ms
+        ()
+    with
+    | Ok () -> ()
+    | Error msg -> failf "matching expected_version must delete: %s" msg)
+;;
+
+let test_cas_absent_version_is_legacy () =
+  with_temp_dir (fun base_dir ->
+    let created = make_cas_annotation base_dir in
+    (* No expected_version → legacy delete-by-id contract. *)
+    match Store.delete ~base_dir ~id:created.id ~keeper_id:"alice" () with
+    | Ok () -> ()
+    | Error msg -> failf "legacy delete without version must succeed: %s" msg)
+;;
+
 let () =
   run
     "ide_annotations"
@@ -950,6 +1053,20 @@ let () =
             "compaction drops tombstoned annotation"
             `Quick
             test_compact_drops_tombstoned
+        ] )
+    ; ( "write lock + CAS (task-1738)"
+      , [ test_case
+            "concurrent create + compaction loses nothing"
+            `Slow
+            test_concurrent_create_compact_no_loss
+        ; test_case
+            "CAS rejects stale expected_version, accepts current"
+            `Quick
+            test_cas_rejects_version_mismatch
+        ; test_case
+            "absent expected_version keeps legacy delete"
+            `Quick
+            test_cas_absent_version_is_legacy
         ] )
     ]
 ;;

@@ -53,13 +53,18 @@ let test_reject_settings_account_section () =
     (Astring.String.is_infix ~affix:"unknown section" msg)
 ;;
 
-let test_reject_retired_settings_routing_section () =
-  let msg = parse_err {|{"surface":"settings","section":"routing"}|} in
-  check
-    bool
-    "mentions section"
-    true
-    (Astring.String.is_infix ~affix:"unknown section" msg)
+(* routing was once retired but is a live Settings section again
+   (dashboard #settings?section=routing); repositories is new alongside it. *)
+let test_parse_settings_routing_section () =
+  let event = parse_ok {|{"surface":"settings","section":"routing"}|} in
+  check string "surface" "settings" event.surface;
+  check (option string) "section" (Some "routing") event.section
+;;
+
+let test_parse_settings_repositories_section () =
+  let event = parse_ok {|{"surface":"settings","section":"repositories"}|} in
+  check string "surface" "settings" event.surface;
+  check (option string) "section" (Some "repositories") event.section
 ;;
 
 let test_parse_full_event () =
@@ -216,9 +221,13 @@ let () =
             `Quick
             test_reject_settings_account_section
         ; test_case
-            "rejects retired settings routing section"
+            "settings routing section"
             `Quick
-            test_reject_retired_settings_routing_section
+            test_parse_settings_routing_section
+        ; test_case
+            "settings repositories section"
+            `Quick
+            test_parse_settings_repositories_section
         ; test_case "full event" `Quick test_parse_full_event
         ; test_case "redirected_from accepted" `Quick test_parse_redirected
         ; test_case "rejects unknown surface" `Quick test_reject_unknown_surface

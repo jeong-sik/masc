@@ -3,10 +3,11 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { del, post } from '../api/core'
+import { post } from '../api/core'
 import {
   discoverRepositories,
   fetchRepositoriesList,
+  removeRepository,
   type Repository,
   type RepoStatus,
 } from '../api/repositories'
@@ -52,7 +53,7 @@ export async function syncRepository(id: string): Promise<void> {
 
 export async function deleteRepository(id: string): Promise<void> {
   try {
-    await del(`/api/v1/repositories/${encodeURIComponent(id)}`)
+    await removeRepository(id)
     showToast('저장소 삭제 완료', 'success')
     await fetchRepositories()
     if (selectedRepoId.value === id) {

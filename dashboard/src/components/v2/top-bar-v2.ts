@@ -10,6 +10,8 @@ import { navigate, route } from '../../router'
 import { executionLoaded, keepers, shellCounts, shellRuntimeResolution, staleKeepers } from '../../store'
 import { activeKeeperName } from '../../keeper-state'
 import { governanceData } from '../governance-signals'
+import { toolsData } from '../tools/tool-state'
+import { scheduledPendingApprovalCount } from '../tools/scheduled-automation-panel'
 import { CopilotDockTopBarButton, type CopilotDockApi } from '../copilot-dock'
 import { TweaksPanelToggle } from '../tweaks-panel'
 import { StatusDot } from './primitives-v2'
@@ -132,12 +134,23 @@ export function TopBarV2({ dock }: { dock: CopilotDockApi }) {
         <${StatusDot} status="run" pulse=${true} />${running} 실행 중
       </span>
       <${AttentionIndicatorV2} />
-      ${/* 예약(schedule): no live cron/schedule signal yet. Rendered as a plain
-          navigation affordance only — no fabricated status (PR #22081 review:
-          no stub). Wire to a live schedule signal when the backend exposes one. */ ''}
-      <button class="v2-statchip" onClick=${() => navigate('schedule')} title="예약 자동화 큐">
-        ${'◷'} 예약
-      </button>
+      ${/* 예약(schedule): pending-approval count from the scheduled-automation
+          projection (loaded app-wide at boot). No count when the projection has
+          not resolved — the chip stays a plain nav affordance rather than
+          fabricating a status. */ ''}
+      ${(() => {
+        const pending = scheduledPendingApprovalCount(toolsData.value?.scheduled_automation ?? null)
+        return html`
+          <button
+            class=${`v2-statchip${pending > 0 ? ' warn' : ''}`}
+            data-schedule-pending=${pending}
+            onClick=${() => navigate('schedule')}
+            title=${pending > 0 ? `예약 자동화 큐 · 승인 대기 ${pending}건` : '예약 자동화 큐'}
+          >
+            ${'◷'} 예약${pending > 0 ? html` <b>${pending}</b>` : null}
+          </button>
+        `
+      })()}
       ${/* Operational/safety status cluster (review P1: keep operator chrome). */ ''}
       <div class="v2-top-ops">
         <${ConnectionStatus} />

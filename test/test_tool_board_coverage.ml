@@ -2171,8 +2171,6 @@ let () =
             `Quick
             test_post_get_comment_pagination_clamps_and_advances;
           Alcotest.test_case "get not found" `Quick test_post_get_not_found;
-          Alcotest.test_case "get comment pagination" `Quick
-            test_post_get_comment_pagination_clamps_and_advances;
         ] );
       ( "voting",
         [

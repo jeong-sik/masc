@@ -265,13 +265,17 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
           | Keeper_chat_store.Role.Tool -> ()))
     | Some _ | None -> ()
   in
-  let rec loop before iters =
-    if iters >= chat_page_cap
+  let mark_truncated () =
+    if not !truncated
     then (
       truncated := true;
       bounded_add
         errs
         "keeper-chat: page cap reached before since_unix; chat counts are lower bounds")
+  in
+  let rec loop before iters =
+    if iters >= chat_page_cap
+    then mark_truncated ()
     else (
       let { Keeper_chat_store.messages; has_more } =
         Keeper_chat_store.load_page ~base_dir ~keeper_name ?before ()
@@ -287,6 +291,7 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
           messages
       in
       match oldest with
+      | Some o when o > since && iters + 1 >= chat_page_cap -> mark_truncated ()
       | Some o when o > since && has_more -> loop (Some o) (iters + 1)
       | Some _ | None -> ())
   in
@@ -485,9 +490,15 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       false
   in
   let coverage =
-    let day_reason = Some "scan window clamped to 40 days" in
-    let chat_reason = Some "chat page cap reached before since_unix" in
-    let crash_reason = Some "crash scan capped at 500 events" in
+    let day_reason =
+      Some (Printf.sprintf "scan window clamped to %d days" max_scan_days)
+    in
+    let chat_reason =
+      Some (Printf.sprintf "chat page cap (%d pages) reached before since_unix" chat_page_cap)
+    in
+    let crash_reason =
+      Some (Printf.sprintf "crash scan capped at %d events" crash_scan_max)
+    in
     { chat =
         { lower_bound = chat_truncated
         ; reason = if chat_truncated then chat_reason else None
@@ -496,7 +507,12 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
         { lower_bound = turns_day_truncated || crash_truncated
         ; reason =
             (match turns_day_truncated, crash_truncated with
-             | true, true -> Some "turn scan window clamped and crash scan capped"
+             | true, true ->
+               Some
+                 (Printf.sprintf
+                    "turn scan window clamped to %d days and crash scan capped at %d events"
+                    max_scan_days
+                    crash_scan_max)
              | true, false -> day_reason
              | false, true -> crash_reason
              | false, false -> None)

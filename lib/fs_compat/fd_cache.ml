@@ -65,6 +65,8 @@ let get_or_open_locked path now =
 let with_writer path f =
   let w =
     Stdlib.Mutex.protect mu (fun () ->
+      (* NDT-OK: fd-cache recency is runtime resource metadata only; append
+         ordering and file contents are determined by caller writes. *)
       let now = Unix.gettimeofday () in
       let w = get_or_open_locked path now in
       w.last_used <- now;
@@ -75,6 +77,8 @@ let with_writer path f =
     ~finally:(fun () ->
       Stdlib.Mutex.protect mu (fun () ->
         w.active <- max 0 (w.active - 1);
+        (* NDT-OK: update LRU recency after use; it only influences future
+           inactive fd eviction, never persisted annotation semantics. *)
         w.last_used <- Unix.gettimeofday ();
         if w.active = 0 && w.close_on_release then close_silently w))
     (fun () -> f w.oc)

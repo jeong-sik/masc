@@ -48,6 +48,8 @@ let next_compaction_id () =
       incr compact_seq;
       !compact_seq)
   in
+  (* NDT-OK: compaction IDs are append-log marker identities; readers match the
+     paired begin/end id, while annotation ordering comes from log position. *)
   Printf.sprintf "%Ld-%d-%d" (now_ms ()) (Unix.getpid ()) seq
 ;;
 

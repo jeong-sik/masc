@@ -27,10 +27,24 @@ let send_text wsd s = Ws_wsd.send_text wsd s
     Gluten upgrade model ({!Server_mcp_transport_ws.respond_and_drive_upgrade})
     the upgrade handler cannot block to hold a per-connection switch
     open.  RFC-0281 Phase 2. *)
+(** Per-language LSP health (task-1691). A language is [Connected] once its
+    LSP process is spawned and initialized; it is [Overlay_only] (carrying the
+    last error) when the process could not be started/initialized, so only
+    MASC observational overlays are served for that language. Degradation is
+    per-language — the whole LSP process is unavailable, not one method — so a
+    single state covers every handler. Every degraded handler records this
+    instead of either failing the request (old hover) or silently returning
+    overlays as if the LSP answered (old 9 handlers + diagnostic), so the
+    [masc/lspStatus] notification can report the degradation to the dashboard. *)
+type lang_health =
+  | Connected
+  | Overlay_only of string
+
 type conn_state =
   { sw : Eio.Switch.t
   ; router : Lsp_message_router.t
   ; processes : (string, Lsp_process_manager.lsp_process) Hashtbl.t
+  ; health : (string, lang_health) Hashtbl.t
   ; wsd : Ws_wsd.t
   ; base_path : string
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
@@ -109,6 +123,69 @@ let send_client_notification cs method_ params =
     `Assoc [ "jsonrpc", `String "2.0"; "method", `String method_; "params", params ]
   in
   send cs (Yojson.Safe.to_string notif)
+;;
+
+(* --- LSP health status (task-1691) --- *)
+
+(* Pure projection of one language's health into the [masc/lspStatus] wire
+   shape: [connected] / [overlay_only] / [command] (the configured LSP
+   executable, [null] when none is mapped) / [last_error] / [last_method]. *)
+let lang_status_json ~lang_id (health : lang_health) : Yojson.Safe.t =
+  let command =
+    match Lsp_process_manager.command_for_lang lang_id with
+    | Some (exe, _argv) -> `String exe
+    | None -> `Null
+  in
+  let connected, overlay_only, last_error =
+    match health with
+    | Connected -> (true, false, `Null)
+    | Overlay_only err -> (false, true, `String err)
+  in
+  `Assoc
+    [ "lang", `String lang_id
+    ; "connected", `Bool connected
+    ; "overlay_only", `Bool overlay_only
+    ; "command", command
+    ; "last_error", last_error
+    ]
+;;
+
+(* Pure snapshot of all tracked languages, sorted by lang id for a stable
+   wire order. *)
+let status_snapshot_json (healths : (string * lang_health) list) : Yojson.Safe.t =
+  let sorted = List.sort (fun (a, _) (b, _) -> String.compare a b) healths in
+  `Assoc
+    [ "langs", `List (List.map (fun (l, h) -> lang_status_json ~lang_id:l h) sorted) ]
+;;
+
+let current_status_json cs =
+  status_snapshot_json (Hashtbl.fold (fun l h acc -> (l, h) :: acc) cs.health [])
+;;
+
+(* Push the current status to the client as a [masc/lspStatus] notification,
+   so the dashboard reacts to a health transition without polling. *)
+let push_lsp_status cs = send_client_notification cs "masc/lspStatus" (current_status_json cs)
+
+(* Record [lang_id]'s health, notifying the client only when it actually
+   changed (so a stream of requests while degraded does not spam
+   notifications). *)
+let set_health cs ~lang_id health =
+  let changed =
+    match Hashtbl.find_opt cs.health lang_id with
+    | Some prev -> prev <> health
+    | None -> true
+  in
+  Hashtbl.replace cs.health lang_id health;
+  if changed then push_lsp_status cs
+;;
+
+(* Unified degraded path shared by every overlay handler (task-1691): mark
+   the language overlay-only, log a typed WARN, and notify the client. The
+   caller then serves its MASC overlay, so the request never fails and the
+   keeper cycle is never blocked by an unavailable LSP. *)
+let note_overlay_only cs ~lang_id ~error =
+  Log.Server.warn "LSP overlay-only for %s: %s" lang_id error;
+  set_health cs ~lang_id (Overlay_only error)
 ;;
 
 (** Extract textDocument URI from LSP params. *)
@@ -297,6 +374,7 @@ let ensure_lsp_process cs lang_id =
               ~method_:"initialized"
               ~params:(`Assoc []);
             Hashtbl.add cs.processes lang_id proc;
+            set_health cs ~lang_id Connected;
             Log.Server.info "LSP server ready: %s" lang_id;
             Ok proc
           | Ok (Error msg) ->
@@ -312,7 +390,12 @@ let ensure_lsp_process cs lang_id =
 (** Forward a request to LSP process, await response, relay to client. *)
 let forward_request cs lang_id method_ params id =
   match ensure_lsp_process cs lang_id with
-  | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg
+  | Error msg ->
+    (* No MASC overlay exists for a passthrough method, so this stays a
+       JSON-RPC error — but still record the per-language degradation so
+       [masc/lspStatus] reflects it (task-1691). *)
+    note_overlay_only cs ~lang_id ~error:msg;
+    send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg
   | Ok proc ->
     let promise =
       Lsp_message_router.send_request cs.router proc ~method_ ~params ~client_id:(req_id_to_int id)
@@ -342,7 +425,9 @@ let handle_codelens cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -371,7 +456,9 @@ let handle_inlay_hint cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -406,7 +493,8 @@ let handle_diagnostic cs params id =
       send_response cs id (`Assoc [ "items", `List diags ]))
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ ->
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
         let diags =
           Lsp_overlay_provider.diagnostics
             ~base_dir:base
@@ -465,7 +553,25 @@ let handle_hover cs params id =
       else send_response cs id `Null)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error msg -> send_error cs id Mcp_error_code.(to_wire_code Internal_error) msg
+      | Error msg ->
+        (* Unified with the other handlers (task-1691): fall back to the MASC
+           overlay hover instead of the old JSON-RPC Internal_error, which
+           broke the client on an unavailable LSP. Mirrors the unknown-lang
+           branch above. *)
+        note_overlay_only cs ~lang_id ~error:msg;
+        if line >= 0
+           && Lsp_overlay_provider.has_annotations_at_line ~base_dir:base
+                ~file_path:relative ~line
+        then
+          send_response cs id
+            (Lsp_overlay_provider.enrich_hover ~base_dir:base ~file_path:relative
+               ~line
+               (`Assoc
+                  [ ( "contents"
+                    , `Assoc
+                        [ ("kind", `String "markdown"); ("value", `String "") ] )
+                  ]))
+        else send_response cs id `Null
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -507,7 +613,9 @@ let handle_definition cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -540,7 +648,9 @@ let handle_references cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -572,7 +682,9 @@ let handle_completion cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -605,7 +717,9 @@ let handle_code_action cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -632,7 +746,9 @@ let handle_document_symbol cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -659,7 +775,9 @@ let handle_folding_range cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -691,7 +809,9 @@ let handle_document_highlight cs params id =
     then send_response cs id (`List masc)
     else (
       match ensure_lsp_process cs lang_id with
-      | Error _ -> send_response cs id (`List masc)
+      | Error msg ->
+        note_overlay_only cs ~lang_id ~error:msg;
+        send_response cs id (`List masc)
       | Ok proc ->
         let promise =
           Lsp_message_router.send_request
@@ -738,6 +858,9 @@ let dispatch_message cs msg =
        | Some "initialized", _ -> ()
        | Some "shutdown", Some n -> send_response cs n `Null
        | Some "exit", _ -> disconnect cs
+       (* Typed LSP health for the dashboard (task-1691): per-language
+          connected / overlay_only / command / last_error. *)
+       | Some "masc/lspStatus", Some n -> send_response cs n (current_status_json cs)
        (* MASC-overlay-aware handlers *)
        | Some "textDocument/hover", Some n -> handle_hover cs params n
        | Some "textDocument/codeLens", Some n -> handle_codelens cs params n
@@ -841,6 +964,7 @@ let add_routes ~sw ~clock router =
                           { sw
                           ; router = Lsp_message_router.create ()
                           ; processes = Hashtbl.create 4
+                          ; health = Hashtbl.create 4
                           ; wsd
                           ; base_path = base_path_of_state state
                           ; proc_mgr
@@ -879,4 +1003,12 @@ module For_testing = struct
   let resolve_relative = resolve_relative
   let workspace_root_for_initialize = workspace_root_for_initialize
   let initialize_result_json = initialize_result_json
+
+  (* task-1691: the LSP health type + its pure wire projection. *)
+  type health = lang_health =
+    | Connected
+    | Overlay_only of string
+
+  let lang_status_json = lang_status_json
+  let status_snapshot_json = status_snapshot_json
 end

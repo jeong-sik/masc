@@ -16,6 +16,17 @@
    where the prototype specifies a literal that the 2px-base --sp-* scale
    would shrink; each literal originates from the prototype source cited
    inline.
+
+   SYNC CONTRACT — this is the working stylesheet the component depends on
+   (loaded via the *-v2.css glob at main.ts:67, before the vendored mirror).
+   It is a SUPERSET: the shared .mem-* selectors are duplicated 1:1 with the
+   vendored design mirror styles/keeper-v2/memory.css, and this file also
+   owns the real-data extension classes (.mem-trust / .mem-policy /
+   .mem-prompt-* / .mem-store-why / .mem-more / .mem-dot / .mem-disclosure /
+   .mem-expired) that the mirror does not carry. Any change to a shared
+   .mem-* selector MUST be mirrored in styles/keeper-v2/memory.css (and vice
+   versa). Consolidating the two into one SSOT is tracked separately from
+   this design-delta work.
    ══════════════════════════════════════════════════════════════ */
 
 /* ── drawer shell (ported from keeper-v2/styles/v2.css) ── */

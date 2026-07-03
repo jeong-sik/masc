@@ -391,13 +391,17 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
 }
 
 // Decode the { lo, hi } object memory_os_episode_json emits for a present range,
-// or null (server sends `Null`, or the field is malformed/absent). Never guesses
-// a span — an incomplete pair collapses to null rather than a fabricated bound.
+// or null (server sends `Null`, or the field is malformed/absent). The UI renders
+// this as an inclusive absolute-turn span, so a range that cannot exist — a
+// non-integer bound, a negative turn, or hi < lo — fails closed to null rather
+// than displaying an impossible span. An incomplete pair also collapses to null.
 function decodeSourceTurnRange(raw: unknown): readonly [number, number] | null {
   if (!isRecord(raw)) return null
   const lo = asNumber(raw.lo)
   const hi = asNumber(raw.hi)
   if (lo == null || hi == null) return null
+  if (!Number.isInteger(lo) || !Number.isInteger(hi)) return null
+  if (lo < 0 || hi < lo) return null
   return [lo, hi]
 }
 

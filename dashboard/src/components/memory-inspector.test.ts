@@ -418,6 +418,37 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     expect(fallbackRow?.querySelector('.mem-tl-range')).toBeFalsy()
   })
 
+  it('fails closed on an impossible turn range (hi < lo) rather than rendering a fabricated span', async () => {
+    const payload = turnRecordsPayload()
+    // hi < lo cannot be an inclusive absolute-turn span → decode drops it to null.
+    payload.memory_os.episodes.items[0]!.source_turn_range = { lo: 5, hi: 2 }
+    stubFetch(payload)
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.textContent).toContain('리텐션 코호트 정의'))
+    // the episode still renders; only the impossible range subtitle is omitted.
+    expect(container.querySelector('.mem-tl-range')).toBeFalsy()
+    expect(container.textContent).not.toContain('turn 5')
+  })
+
+  it('re-binds the one-scope target when the keeper prop changes (no stale keeper identity)', async () => {
+    const fetchMock = stubFetch()
+    const onClose = vi.fn()
+    const keeperA: MemoryKeeper = { id: 'masc-improver', ctx: 0.5, status: 'run' }
+    const keeperB: MemoryKeeper = { id: 'sangsu', ctx: 0.4, status: 'run' }
+    const { container, rerender } = render(html`<${MemoryInspector} keeper=${keeperA} onClose=${onClose} />`)
+    await waitFor(() =>
+      expect(fetchMock.mock.calls.some(c =>
+        String(c[0]).includes('/api/v1/keepers/masc-improver/turn-records?limit=24'))).toBe(true))
+    expect(container.querySelector('.tid')?.textContent).toBe('masc-improver')
+
+    // Reuse the same inspector instance for a different keeper (prop change).
+    rerender(html`<${MemoryInspector} keeper=${keeperB} onClose=${onClose} />`)
+    await waitFor(() => expect(container.querySelector('.tid')?.textContent).toBe('sangsu'))
+    // the next one-scope fetch targets the new keeper, not the stale picked one.
+    expect(fetchMock.mock.calls.some(c =>
+      String(c[0]).includes('/api/v1/keepers/sangsu/turn-records?limit=24'))).toBe(true)
+  })
+
   it('marks memory-os prompt blocks with a legend tag and renders a current TTL pill', async () => {
     stubFetch()
     const { container } = renderInspector()

@@ -2,6 +2,16 @@
    MASC v2 — Keeper memory inspector. Reuses the .turn-overlay /
    .turn-drawer / .turn-sec / .cmp-diff shell; everything new is .mem-*.
    v2 tokens only.
+
+   SYNC CONTRACT — this is the vendored design mirror (imported at
+   main.ts:89). The component (memory-inspector.ts) is actually styled by
+   ../memory-inspector-v2.css, a superset that additionally owns the
+   real-data extension classes (.mem-trust / .mem-policy / .mem-prompt-* /
+   .mem-store-why / .mem-more / .mem-dot / .mem-disclosure / .mem-expired).
+   The shared .mem-* selectors are intentionally duplicated across both
+   files; any change to a shared selector here MUST be mirrored in
+   ../memory-inspector-v2.css (and vice versa). Consolidating the two into
+   one SSOT is tracked separately from this design-delta work.
    ══════════════════════════════════════════════════════════════ */
 .v2-app .mem-drawer { width: min(680px, 96vw); }
 

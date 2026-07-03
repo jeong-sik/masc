@@ -1049,6 +1049,15 @@ export function MemoryInspector({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
+  // Re-bind the one-scope target to the inbound keeper whenever the prop changes.
+  // Without this, reopening/reusing the inspector for a different keeper keeps the
+  // previous pickId and would fetch /keepers/<old>/turn-records — a stale keeper
+  // identity. The aggregate-row onPick still re-points pickId within an open
+  // inspector because that path does not change the keeper prop.
+  useEffect(() => {
+    pickId.value = keeper.id
+  }, [keeper.id, pickId])
+
   useEffect(() => {
     void resource.load(async (signal) => fetchKeeperTurnRecords(activeId, 24, { signal }))
     return () => {

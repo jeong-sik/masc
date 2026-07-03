@@ -982,6 +982,7 @@ let make_test_meta ?(last_blocker = None) () =
   ; keeper_id = None
   ; oas_env = []
   ; meta_version = 0
+  ; latched_reason = None
   }
 
 let test_decide_runtime_blocker_requires_confirm () =

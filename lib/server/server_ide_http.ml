@@ -72,11 +72,29 @@ let resolve_partition_for_query ~state ~uri =
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 let keeper_id_mismatch_error = "keeper_id does not match authenticated identity"
+let annotation_delete_rejected_error = "annotation delete rejected"
 
 let parse_json_body body_str =
   match Yojson.Safe.from_string body_str with
   | json -> Ok json
   | exception Yojson.Json_error msg -> Error (Printf.sprintf "Invalid JSON: %s" msg)
+;;
+
+let json_string_field key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`String s) when s <> "" -> Some s
+     | _ -> None)
+  | _ -> None
+;;
+
+let json_int_field key = function
+  | `Assoc fields ->
+    (match List.assoc_opt key fields with
+     | Some (`Int i) -> Some i
+     | Some (`Intlit s) -> int_of_string_opt s
+     | _ -> None)
+  | _ -> None
 ;;
 
 let log_keeper_id_mismatch ~operation ~auth_identity ~requested =
@@ -86,6 +104,14 @@ let log_keeper_id_mismatch ~operation ~auth_identity ~requested =
     operation
     requested
     auth_identity
+;;
+
+let log_annotation_delete_rejected ~auth_identity ~id ~reason =
+  Log.Server.warn
+    "IDE annotation delete rejected: id=%S auth_identity=%S reason=%S"
+    id
+    auth_identity
+    reason
 ;;
 
 (* task-1736 (IDE Observation Plane v2, axis B3) — bind an annotation
@@ -390,23 +416,8 @@ let add_routes router =
                (json_error msg)
                reqd
            | Ok json ->
-             let find_string key =
-               match json with
-               | `Assoc fields ->
-                 (match List.assoc_opt key fields with
-                  | Some (`String s) when s <> "" -> Some s
-                  | _ -> None)
-               | _ -> None
-             in
-             let find_int key =
-               match json with
-               | `Assoc fields ->
-                 (match List.assoc_opt key fields with
-                  | Some (`Int i) -> Some i
-                  | Some (`Intlit s) -> int_of_string_opt s
-                  | _ -> None)
-               | _ -> None
-             in
+             let find_string key = json_string_field key json in
+             let find_int key = json_int_field key json in
              match
                ( find_string "file_path"
                , find_int "line_start"
@@ -505,8 +516,9 @@ let add_routes router =
        and ownership is enforced against the resolved [auth_identity] rather
        than a caller-supplied query param. Because [Ide_annotations.delete]
        only removes an annotation whose stored keeper_id equals the passed
-       keeper_id, binding keeper_id to auth_identity makes it structurally
-       impossible to delete another keeper's annotation. *)
+       keeper_id, binding keeper_id to auth_identity prevents a caller
+       from successfully deleting another keeper's annotation through this
+       route. *)
     with_token_permission_auth
       ~permission:Masc_domain.CanBroadcast
       (fun state auth_identity _req reqd ->
@@ -564,10 +576,11 @@ let add_routes router =
               with
               | Ok () -> Http.Response.empty ~status:`No_content reqd
               | Error msg ->
+                log_annotation_delete_rejected ~auth_identity ~id ~reason:msg;
                 Http.Response.json_value
                   ~status:`Forbidden
                   ~request
-                  (json_error msg)
+                  (json_error annotation_delete_rejected_error)
                   reqd))
            request
            reqd)
@@ -678,8 +691,12 @@ let add_routes router =
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/cursors" (fun request reqd ->
-    with_public_read
-      (fun state req reqd ->
+    (* Cursor writes mutate the same observation plane as annotations.
+       Bind the written keeper_id to the token identity so a public reader
+       cannot inject presence for an arbitrary keeper. *)
+    with_token_permission_auth
+      ~permission:Masc_domain.CanBroadcast
+      (fun state auth_identity _req reqd ->
          let base = base_path_of_state state in
          Http.Request.read_body_async reqd (fun body_str ->
            match parse_json_body body_str with
@@ -690,53 +707,55 @@ let add_routes router =
                (json_error msg)
                reqd
            | Ok json ->
-             let find_string key =
-               match json with
-               | `Assoc fields ->
-                 (match List.assoc_opt key fields with
-                  | Some (`String s) when s <> "" -> Some s
-                  | _ -> None)
-               | _ -> None
-             in
-             let find_int key =
-               match json with
-               | `Assoc fields ->
-                 (match List.assoc_opt key fields with
-                  | Some (`Int i) -> Some i
-                  | Some (`Intlit s) -> int_of_string_opt s
-                  | _ -> None)
-               | _ -> None
-             in
-             match
-               ( find_string "file_path"
-               , find_int "line"
-               , find_string "keeper_id" )
-             with
-             | Some file_path, Some line, Some keeper_id
-               when line >= 1 ->
+             let find_string key = json_string_field key json in
+             let find_int key = json_int_field key json in
+             (match find_string "file_path", find_int "line" with
+              | Some file_path, Some line when line >= 1 ->
                let column = find_int "column" in
-               (* DET-OK: absent cursor source preserves the legacy editor
-                  value; source is cursor telemetry, not auth or routing input. *)
-               let source = Option.value (find_string "source") ~default:"editor" in
-               Ide_bridge.ingest_cursor_event
-                 ~base_path:base
-                 ~keeper_id
-                 ~file_path
-                 ~line
-                 ?column
-                 ~source
-                 ();
-               Http.Response.json_value
-                 ~status:`Created
-                 ~request
-                 (json_ok (`Assoc [ "ok", `Bool true ]))
-                 reqd
-             | _ ->
+               let source =
+                 match find_string "source" with
+                 | Some source -> source
+                 | None ->
+                   (* DET-OK: absent source preserves legacy cursor telemetry. *)
+                   "editor"
+               in
+               let requested_keeper_id = find_string "keeper_id" in
+               (match
+                  bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
+                with
+                | Error msg ->
+                  Option.iter
+                    (fun requested ->
+                       log_keeper_id_mismatch
+                         ~operation:"cursor"
+                         ~auth_identity
+                         ~requested)
+                    requested_keeper_id;
+                  Http.Response.json_value
+                    ~status:`Forbidden
+                    ~request
+                    (json_error msg)
+                    reqd
+                | Ok keeper_id ->
+                  Ide_bridge.ingest_cursor_event
+                    ~base_path:base
+                    ~keeper_id
+                    ~file_path
+                    ~line
+                    ?column
+                    ~source
+                    ();
+                  Http.Response.json_value
+                    ~status:`Created
+                    ~request
+                    (json_ok (`Assoc [ "ok", `Bool true ]))
+                    reqd)
+              | _ ->
                Http.Response.json_value
                  ~status:`Bad_request
                  ~request
-                 (json_error "Missing required fields: file_path, line (>=1), keeper_id")
-                 reqd))
+                 (json_error "Missing required fields: file_path, line (>=1)")
+                 reqd)))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/presence/stream" (fun request reqd ->

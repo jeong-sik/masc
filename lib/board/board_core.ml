@@ -75,12 +75,16 @@ let normalize_comment_page ?comment_offset ?comment_limit total_comments =
   | None, None -> None
   | Some _, _ | _, Some _ ->
     let offset =
-      Option.value comment_offset ~default:0
+      (match comment_offset with
+       | None -> 0
+       | Some value -> value)
       |> max 0
       |> fun value -> min value total_comments
     in
     let limit =
-      Option.value comment_limit ~default:Limits.default_comment_page_limit
+      (match comment_limit with
+       | None -> Limits.default_comment_page_limit
+       | Some value -> value)
       |> max 1
       |> min Limits.max_comment_page_limit
     in

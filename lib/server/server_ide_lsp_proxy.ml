@@ -1372,6 +1372,12 @@ module For_testing = struct
   let initialize_result_json = initialize_result_json
   let inbound_dispatch_worker_count = Lsp_proxy_limits.inbound_dispatch_worker_count
 
+  type nonrec resolved_lang = resolved_lang =
+    | Known_lang of string
+    | Unknown_lang
+
+  let resolve_lang = resolve_lang
+
   (* task-1691: the LSP health type + its pure wire projection. *)
   type health = lang_health =
     | Connected

@@ -483,36 +483,15 @@ let scan_dir ?diff_by_path ~base ~depth ~max_depth ~max_nodes acc dir =
 
 (* --- Git helpers --- *)
 
-let git_run ~cwd args =
-  let argv = "git" :: "-C" :: cwd :: "--no-optional-locks" :: args in
-  let raw_source = String.concat " " (List.map Filename.quote argv) in
-  try
-    let (status, out) =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:(Masc_exec.Agent_id.of_string "system/workspace_api")
-        ~raw_source
-        ~summary:"workspace api git command"
-
-        argv
-    in
-    match status with
-    | Unix.WEXITED 0 -> Some (String.trim out)
-    | _ -> None
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+let git_run_lines ~cwd args =
+  match Repo_git.run_git ~cwd ("--no-optional-locks" :: args) with
+  | Ok lines -> lines
+  | Error msg ->
       observe_workspace_route_failure
         ~site:"git_run"
         ~path:cwd
-        exn;
-      None
-
-let git_run_lines ~cwd args =
-  match git_run ~cwd args with
-  | None -> []
-  | Some out ->
-    String.split_on_char '\n' out
-    |> List.filter (fun l -> l <> "")
+        (Failure msg);
+      []
 
 let diff_badge_of_numstat ~added ~deleted =
   match int_of_string_opt added, int_of_string_opt deleted with
@@ -551,11 +530,7 @@ let git_diff_badges ~base =
    route handlers distinguish "command errored / invalid ref" from
    "command succeeded with no output". *)
 let git_run_lines_or_error ~cwd args =
-  match git_run ~cwd args with
-  | None -> Error "git command failed"
-  | Some out ->
-    Ok (String.split_on_char '\n' out
-        |> List.filter (fun l -> l <> ""))
+  Repo_git.run_git ~cwd ("--no-optional-locks" :: args)
 
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value

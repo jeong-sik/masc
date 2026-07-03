@@ -44,6 +44,19 @@ type attainment_unit =
   | Count
   | Unknown
 
+(* Whether a goal's declared metric has actually been evaluated (task-1743).
+   The convergence evaluator that would turn [goal.metric] into an observed
+   value (Convergence.check_convergence) has no caller, so a metric is only
+   ever declared, never measured. Attainment percentages are derived from
+   linked task completion, not from the metric, so this typed field keeps
+   the two apart: it lets the IDE goal panel show "metric unevaluated"
+   instead of presenting task progress as a metric result, and distinguishes
+   an unmeasured metric from a genuine measured zero. Replaced with a real
+   evaluation state once Wave-D wires a metric evaluator. *)
+type metric_evaluation =
+  | Metric_unevaluated  (* [goal.metric] is set but no evaluator produced a value *)
+  | Metric_absent       (* [goal.metric] is [None]; there is no metric to evaluate *)
+
 let task_is_linked_to_goal ?(goal_task_index = Hashtbl.create 0) (task : Masc_domain.task) goal_id =
   let task_goal_ids =
     try Hashtbl.find goal_task_index task.id with Not_found -> []

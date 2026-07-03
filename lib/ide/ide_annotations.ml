@@ -213,6 +213,7 @@ let load_all_partition ?stop_before_compact_begin_id ~base_dir partition =
     let tombstoned = ref String_set.empty in
     let active_compaction = ref None in
     let stopped = ref false in
+    let () =
       Fs_compat.fold_jsonl_lines
         ~init:()
         ~f:(fun () ~line_no json ->
@@ -220,16 +221,28 @@ let load_all_partition ?stop_before_compact_begin_id ~base_dir partition =
           then ()
           else (
             let record = record_of_json ~path ~line_no json in
-            match stop_before_compact_begin_id, record with
-            | Some stop_id, Compact_begin id when String.equal stop_id id ->
+            let should_stop =
+              match stop_before_compact_begin_id with
+              | Some stop_id ->
+                (match record with
+                 | Compact_begin id -> String.equal stop_id id
+                 | Annotation _
+                 | Tombstone _
+                 | Compact_end _
+                 | Ignored -> false)
+              | None -> false
+            in
+            if should_stop
+            then
               stopped := true
-            | _ ->
+            else
               apply_log_record
                 annotations
                 tombstoned
                 active_compaction
                 record))
-        path;
+        path
+    in
     List.rev !annotations
     |> List.filter (fun (a : annotation) -> not (String_set.mem a.id !tombstoned)))
 ;;

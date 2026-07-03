@@ -100,10 +100,7 @@ let runtime_auto_approval_blocked = function
       classifier.
     - Soft forbidden = the tool name or op string trips
       [destructive_tool_or_op] (a substring filter on "shell"/"git"
-      plus a small list of bash/git ops).
-
-    The legacy [auto_approval_forbidden] is kept below for any
-    existing caller that wants the combined predicate. *)
+      plus a small list of bash/git ops). *)
 let auto_approval_hard_forbidden ~risk meta =
   risk = Critical || runtime_auto_approval_blocked meta
 ;;
@@ -116,11 +113,11 @@ let audit_threshold = function
   | _ -> Some High
 ;;
 
-let decide ~governance_level ~tool_name ~input =
+let decide ?meta ~governance_level ~tool_name ~input () =
   let risk = assess_risk ~tool_name ~input in
   let trace_id = generate_trace_id () in
   let action =
-    if auto_approval_hard_forbidden ~risk None then
+    if auto_approval_hard_forbidden ~risk meta then
       `Require_confirm
         (Printf.sprintf
            "Governance (%s): %s risk tool %S requires confirmation: auto-approval is \
@@ -179,9 +176,9 @@ let maybe_create_petition ~config:_ ~(decision : governance_decision) =
 
 (* ── Pre-Hook Construction ──────────────────────────────────── *)
 
-let make_pre_hook ~config ~governance_level =
+let make_pre_hook ?meta ~config ~governance_level () =
   fun ~name ~args ->
-  let decision = decide ~governance_level ~tool_name:name ~input:args in
+  let decision = decide ?meta ~governance_level ~tool_name:name ~input:args () in
   if should_audit ~governance_level decision.risk then audit_decision config decision;
   match decision.action with
   | `Allow -> Tool_dispatch.Pass
@@ -248,8 +245,8 @@ let make_pre_hook ~config ~governance_level =
 
 (* ── Installation ───────────────────────────────────────────── *)
 
-let install ~config ~governance_level =
-  let hook = make_pre_hook ~config ~governance_level in
+let install ?meta ~config ~governance_level () =
+  let hook = make_pre_hook ?meta ~config ~governance_level () in
   Tool_dispatch.register_pre_hook hook;
   Log.Governance.info "pipeline installed: level=%s" governance_level
 ;;
@@ -292,12 +289,6 @@ let destructive_tool_or_op ~tool_name ~input =
   String_util.contains_substring_ci normalized_tool "shell"
   || String_util.contains_substring_ci normalized_tool "git"
   || List.mem normalized_op destructive_ops
-;;
-
-let auto_approval_forbidden ~tool_name ~input ~risk meta =
-  risk = Critical
-  || destructive_tool_or_op ~tool_name ~input
-  || runtime_auto_approval_blocked meta
 ;;
 
 let auto_approval_soft_forbidden ~tool_name ~input =

@@ -19,6 +19,12 @@ module Ws_msg = Ws_direct_core.Connection.Message
 let send_text wsd s = Ws_wsd.send_text wsd s
 ;;
 
+type ws_send_msg =
+  | Client_text of string
+  | Stop_client_writer
+
+let send_queue_capacity = 128
+
 (** Per-connection state shared across frame handler and relay fibers.
 
     [sw] is the server-lifetime switch (LSP processes + their reader
@@ -44,13 +50,15 @@ type conn_state =
   { sw : Eio.Switch.t
   ; router : Lsp_message_router.t
   ; processes : (string, Lsp_process_manager.lsp_process) Hashtbl.t
+  ; process_mutex : Eio.Mutex.t
+  ; spawn_locks : (string, Eio.Mutex.t) Hashtbl.t
   ; health : (string, lang_health) Hashtbl.t
+  ; health_mutex : Eio.Mutex.t
   ; wsd : Ws_wsd.t
   ; base_path : string
   ; proc_mgr : Eio_unix.Process.mgr_ty Eio.Resource.t
   ; workspace_root : string ref
-  ; send_mutex : Eio.Mutex.t
-  ; spawn_mutex : Eio.Mutex.t
+  ; send_queue : ws_send_msg Eio.Stream.t
   ; clock : float Eio.Time.clock_ty Eio.Resource.t
   ; disconnected : bool Atomic.t
         (* RFC-0287: fragment reassembly + size caps now live in the ws-direct
@@ -60,6 +68,44 @@ type conn_state =
 
 let base_path_of_state state = (Mcp_server.workspace_config state).base_path
 
+let process_snapshot cs =
+  Eio.Mutex.use_ro cs.process_mutex (fun () ->
+    Hashtbl.fold (fun lang_id proc acc -> (lang_id, proc) :: acc) cs.processes [])
+;;
+
+let find_process cs lang_id =
+  Eio.Mutex.use_ro cs.process_mutex (fun () -> Hashtbl.find_opt cs.processes lang_id)
+;;
+
+let add_process cs lang_id proc =
+  Eio.Mutex.use_rw ~protect:true cs.process_mutex (fun () ->
+    Hashtbl.replace cs.processes lang_id proc)
+;;
+
+let remove_process_if_current cs lang_id proc =
+  Eio.Mutex.use_rw ~protect:true cs.process_mutex (fun () ->
+    match Hashtbl.find_opt cs.processes lang_id with
+    | Some current when current == proc ->
+      Hashtbl.remove cs.processes lang_id;
+      true
+    | Some _ | None -> false)
+;;
+
+let spawn_lock_for cs lang_id =
+  Eio.Mutex.use_rw ~protect:true cs.process_mutex (fun () ->
+    match Hashtbl.find_opt cs.spawn_locks lang_id with
+    | Some mutex -> mutex
+    | None ->
+      let mutex = Eio.Mutex.create () in
+      Hashtbl.add cs.spawn_locks lang_id mutex;
+      mutex)
+;;
+
+let stop_send_writer cs =
+  try Eio.Fiber.fork ~sw:cs.sw (fun () -> Eio.Stream.add cs.send_queue Stop_client_writer)
+  with _ -> ()
+;;
+
 (** Signal connection end.  Idempotent (guarded by [disconnected]).
 
     Explicitly shuts down every spawned LSP process.
@@ -68,23 +114,46 @@ let base_path_of_state state = (Mcp_server.workspace_config state).base_path
     raise so those fibers exit — so this reclaims the processes AND their
     fibers without a switch teardown.  Required because [cs.sw] is the
     server switch: without explicit shutdown the processes would leak
-    until server shutdown (RFC-0261).  Taken under [spawn_mutex] so it
-    cannot race a concurrent {!ensure_lsp_process}.  RFC-0281 Phase 2. *)
+    until server shutdown (RFC-0261).  The process table is drained under
+    [process_mutex]; concurrent spawns re-check [disconnected] before they can
+    publish a process.  RFC-0281 Phase 2. *)
 let disconnect cs =
   if Atomic.compare_and_set cs.disconnected false true
-  then
-    Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
-      Hashtbl.iter (fun _ proc -> Lsp_process_manager.shutdown proc) cs.processes;
-      Hashtbl.clear cs.processes)
+  then (
+    let processes =
+      Eio.Mutex.use_rw ~protect:true cs.process_mutex (fun () ->
+        let processes =
+          Hashtbl.fold (fun _ proc acc -> proc :: acc) cs.processes []
+        in
+        Hashtbl.clear cs.processes;
+        Hashtbl.clear cs.spawn_locks;
+        processes)
+    in
+    List.iter Lsp_process_manager.shutdown processes;
+    stop_send_writer cs)
 ;;
 
-(** Thread-safe send: serializes WebSocket writes across fibers. *)
+(** Queue outbound frames behind a single writer fiber.  Callers backpressure on
+    the bounded stream instead of contending on the WebSocket write itself. *)
 let send cs msg =
-  if Atomic.get cs.disconnected
-  then ()
-  else
-    Eio.Mutex.use_rw ~protect:true cs.send_mutex (fun () ->
-      if not (Atomic.get cs.disconnected) then send_text cs.wsd msg)
+  if not (Atomic.get cs.disconnected) then Eio.Stream.add cs.send_queue (Client_text msg)
+;;
+
+let start_send_writer cs =
+  Eio.Fiber.fork_daemon ~sw:cs.sw (fun () ->
+    let rec loop () =
+      match Eio.Stream.take cs.send_queue with
+      | Stop_client_writer -> `Stop_daemon
+      | Client_text msg ->
+        if not (Atomic.get cs.disconnected) then send_text cs.wsd msg;
+        loop ()
+    in
+    try loop () with
+    | Eio.Cancel.Cancelled _ as exn -> raise exn
+    | exn ->
+      Log.Server.warn "LSP WebSocket writer stopped: %s" (Printexc.to_string exn);
+      disconnect cs;
+      `Stop_daemon)
 ;;
 
 (** JSON-RPC request ID — LSP spec allows integer or string. *)
@@ -159,24 +228,38 @@ let status_snapshot_json (healths : (string * lang_health) list) : Yojson.Safe.t
 ;;
 
 let current_status_json cs =
-  status_snapshot_json (Hashtbl.fold (fun l h acc -> (l, h) :: acc) cs.health [])
+  Eio.Mutex.use_ro cs.health_mutex (fun () ->
+    status_snapshot_json (Hashtbl.fold (fun l h acc -> (l, h) :: acc) cs.health []))
 ;;
 
 (* Push the current status to the client as a [masc/lspStatus] notification,
    so the dashboard reacts to a health transition without polling. *)
-let push_lsp_status cs = send_client_notification cs "masc/lspStatus" (current_status_json cs)
+let push_lsp_status cs status =
+  send_client_notification cs "masc/lspStatus" status
+;;
 
 (* Record [lang_id]'s health, notifying the client only when it actually
    changed (so a stream of requests while degraded does not spam
    notifications). *)
 let set_health cs ~lang_id health =
-  let changed =
-    match Hashtbl.find_opt cs.health lang_id with
-    | Some prev -> prev <> health
-    | None -> true
+  let status =
+    Eio.Mutex.use_rw ~protect:true cs.health_mutex (fun () ->
+      let changed =
+        match Hashtbl.find_opt cs.health lang_id with
+        | Some prev -> prev <> health
+        | None -> true
+      in
+      Hashtbl.replace cs.health lang_id health;
+      if changed
+      then
+        Some
+          (status_snapshot_json
+             (Hashtbl.fold (fun l h acc -> (l, h) :: acc) cs.health []))
+      else None)
   in
-  Hashtbl.replace cs.health lang_id health;
-  if changed then push_lsp_status cs
+  match status with
+  | Some status -> push_lsp_status cs status
+  | None -> ()
 ;;
 
 (* Unified degraded path shared by every overlay handler (task-1691): mark
@@ -186,6 +269,15 @@ let set_health cs ~lang_id health =
 let note_overlay_only cs ~lang_id ~error =
   Log.Server.warn "LSP overlay-only for %s: %s" lang_id error;
   set_health cs ~lang_id (Overlay_only error)
+;;
+
+let note_process_exit cs (proc : Lsp_process_manager.lsp_process) ~reason =
+  if remove_process_if_current cs proc.lang_id proc
+  then
+    note_overlay_only
+      cs
+      ~lang_id:proc.lang_id
+      ~error:("LSP process exited: " ^ reason)
 ;;
 
 (** Extract textDocument URI from LSP params. *)
@@ -238,37 +330,63 @@ let path_of_file_uri uri =
   else uri
 ;;
 
-let path_within ~base path =
+let normalize_absolute_path path =
+  if Filename.is_relative path
+  then None
+  else (
+    let parts = String.split_on_char '/' path in
+    let rec loop acc = function
+      | [] -> Some ("/" ^ String.concat "/" (List.rev acc))
+      | "" :: rest | "." :: rest -> loop acc rest
+      | ".." :: rest ->
+        (match acc with
+         | [] -> None
+         | _ :: acc -> loop acc rest)
+      | part :: rest -> loop (part :: acc) rest
+    in
+    loop [] parts)
+;;
+
+let path_within_normalized ~base path =
   let base = strip_trailing_slash base in
   let path = strip_trailing_slash path in
   let base_len = String.length base in
-  String.equal path base
-  || (String.starts_with ~prefix:base path
-      && String.length path > base_len
-      && Char.equal (String.get path base_len) '/')
+  if String.equal base "/"
+  then String.starts_with ~prefix:"/" path
+  else
+    String.equal path base
+    || (String.starts_with ~prefix:base path
+        && String.length path > base_len
+        && Char.equal (String.get path base_len) '/')
 ;;
 
 let workspace_root_for_initialize ~base_path root_uri =
   let candidate = root_uri |> path_of_file_uri |> strip_trailing_slash in
-  let base = strip_trailing_slash base_path in
-  if path_within ~base candidate then candidate else base
+  match normalize_absolute_path base_path, normalize_absolute_path candidate with
+  | Some base, Some candidate when path_within_normalized ~base candidate -> candidate
+  | Some base, _ -> base
+  | None, _ -> strip_trailing_slash base_path
 ;;
 
 (** Resolve file:// URI to relative path from base.
-    Strips trailing slash from base and checks directory boundary. *)
+    Normalizes lexical path segments and checks directory boundary. *)
 let resolve_relative ~base uri =
   if not (String.starts_with ~prefix:"file://" uri)
   then Some uri
   else (
     let full = path_of_file_uri uri |> strip_trailing_slash in
-    let base = strip_trailing_slash base in
-    let base_len = String.length base in
-    let full_len = String.length full in
-    if not (path_within ~base full)
-    then None
-    else if base_len = full_len
-    then Some ""
-    else Some (String.sub full (base_len + 1) (full_len - base_len - 1)))
+    match normalize_absolute_path base, normalize_absolute_path full with
+    | Some base, Some full when path_within_normalized ~base full ->
+      let base = strip_trailing_slash base in
+      let full = strip_trailing_slash full in
+      let base_len = String.length base in
+      let full_len = String.length full in
+      if base_len = full_len
+      then Some ""
+      else if String.equal base "/"
+      then Some (String.sub full 1 (full_len - 1))
+      else Some (String.sub full (base_len + 1) (full_len - base_len - 1))
+    | Some _, Some _ | Some _, None | None, _ -> None)
 ;;
 
 let initialize_capabilities_json () =
@@ -323,11 +441,12 @@ let ensure_lsp_process cs lang_id =
   if Atomic.get cs.disconnected
   then Error "connection closed"
   else
-    Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
+    let spawn_mutex = spawn_lock_for cs lang_id in
+    Eio.Mutex.use_rw ~protect:true spawn_mutex (fun () ->
       if Atomic.get cs.disconnected
       then Error "connection closed"
       else
-    match Hashtbl.find_opt cs.processes lang_id with
+    match find_process cs lang_id with
     | Some proc -> Ok proc
     | None ->
       let workspace_root = !(cs.workspace_root) in
@@ -341,6 +460,7 @@ let ensure_lsp_process cs lang_id =
            ~sw:cs.sw
            cs.router
            proc
+           ~on_exit:(fun ~reason -> note_process_exit cs proc ~reason)
            ~on_notification:(fun ~client_id:_ ~method_ params ->
              send_client_notification cs method_ params);
          let init_params =
@@ -373,10 +493,15 @@ let ensure_lsp_process cs lang_id =
               proc
               ~method_:"initialized"
               ~params:(`Assoc []);
-            Hashtbl.add cs.processes lang_id proc;
-            set_health cs ~lang_id Connected;
-            Log.Server.info "LSP server ready: %s" lang_id;
-            Ok proc
+            if Atomic.get cs.disconnected
+            then (
+              Lsp_process_manager.shutdown proc;
+              Error "connection closed")
+            else (
+              add_process cs lang_id proc;
+              set_health cs ~lang_id Connected;
+              Log.Server.info "LSP server ready: %s" lang_id;
+              Ok proc)
           | Ok (Error msg) ->
             Log.Server.warn "LSP initialize failed for %s: %s" lang_id msg;
             Lsp_process_manager.shutdown proc;
@@ -408,7 +533,9 @@ let forward_request cs lang_id method_ params id =
 (** Forward a notification to LSP process. *)
 let forward_notification cs lang_id method_ params =
   match ensure_lsp_process cs lang_id with
-  | Error msg -> Log.Server.warn "Cannot forward %s: %s" method_ msg
+  | Error msg ->
+    note_overlay_only cs ~lang_id ~error:msg;
+    Log.Server.warn "Cannot forward %s: %s" method_ msg
   | Ok proc -> Lsp_message_router.send_notification cs.router proc ~method_ ~params
 ;;
 
@@ -909,6 +1036,7 @@ let dispatch_message cs msg =
        (* Typed LSP health for the dashboard (task-1691): per-language
           connected / overlay_only / command / last_error. *)
        | Some "masc/lspStatus", Some n -> send_response cs n (current_status_json cs)
+       | Some "masc/lspStatus", None -> ()
        (* MASC-overlay-aware handlers *)
        | Some "textDocument/hover", Some n -> handle_hover cs params n
        | Some "textDocument/codeLens", Some n -> handle_codelens cs params n
@@ -925,15 +1053,15 @@ let dispatch_message cs msg =
        | Some m, _ when String.starts_with ~prefix:"textDocument/did" m ->
          (match extract_uri params with
           | Some uri ->
-            let relative =
-              resolve_relative ~base:cs.base_path uri |> Option.value ~default:""
-            in
-            if String.equal m "textDocument/didSave" then
-              Lsp_overlay_provider.invalidate_cache
-                ~base_dir:cs.base_path
-                ~file_path:relative;
-            let lang_id = Lsp_process_manager.lang_of_path relative in
-            if lang_id <> "unknown" then forward_notification cs lang_id m params
+            (match resolve_relative ~base:cs.base_path uri with
+             | None -> ()
+             | Some relative ->
+               if String.equal m "textDocument/didSave" then
+                 Lsp_overlay_provider.invalidate_cache
+                   ~base_dir:cs.base_path
+                   ~file_path:relative;
+               let lang_id = Lsp_process_manager.lang_of_path relative in
+               if lang_id <> "unknown" then forward_notification cs lang_id m params)
           | None -> ())
        (* Other read-only requests with a textDocument URI → forward to LSP.
           Write-adjacent / unrecognized methods are rejected here (task-1692)
@@ -970,12 +1098,12 @@ let dispatch_message cs msg =
                   else send_error cs n (-32801) ("No LSP server for: " ^ relative))))
        (* Server-initiated notification broadcast *)
        | Some m, None ->
-         Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
-           if not (Atomic.get cs.disconnected) then
-             Hashtbl.iter
-               (fun _lang_id proc ->
-                  Lsp_message_router.send_notification cs.router proc ~method_:m ~params)
-               cs.processes)
+         if not (Atomic.get cs.disconnected)
+         then
+           List.iter
+             (fun (_lang_id, proc) ->
+                Lsp_message_router.send_notification cs.router proc ~method_:m ~params)
+             (process_snapshot cs)
        (* No method field *)
        | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
        | None, None -> ())
@@ -1033,17 +1161,20 @@ let add_routes ~sw ~clock router =
                           { sw
                           ; router = Lsp_message_router.create ()
                           ; processes = Hashtbl.create 4
+                          ; process_mutex = Eio.Mutex.create ()
+                          ; spawn_locks = Hashtbl.create 4
                           ; health = Hashtbl.create 4
+                          ; health_mutex = Eio.Mutex.create ()
                           ; wsd
                           ; base_path = base_path_of_state state
                           ; proc_mgr
                           ; workspace_root = ref (base_path_of_state state)
-                          ; send_mutex = Eio.Mutex.create ()
-                          ; spawn_mutex = Eio.Mutex.create ()
+                          ; send_queue = Eio.Stream.create send_queue_capacity
                           ; clock
                           ; disconnected = Atomic.make false
                           }
                         in
+                        start_send_writer cs;
                         Ws_endpoint.handlers
                           ~on_message:(fun (m : Ws_msg.t) ->
                             dispatch_message cs (Bigstringaf.to_string m.Ws_msg.payload))

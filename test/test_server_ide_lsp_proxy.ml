@@ -68,6 +68,11 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (Lsp.resolve_relative ~base "file:///workspace/masc/docs/with%20space.md");
   check
     (option string)
+    "lexical parent segment stays scoped"
+    (Some "server.ml")
+    (Lsp.resolve_relative ~base "file:///workspace/masc/lib/../server.ml");
+  check
+    (option string)
     "sibling prefix is rejected"
     None
     (Lsp.resolve_relative ~base "file:///workspace/masc-other/lib/server.ml");
@@ -75,7 +80,12 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (option string)
     "outside file is rejected"
     None
-    (Lsp.resolve_relative ~base "file:///tmp/outside.ml")
+    (Lsp.resolve_relative ~base "file:///tmp/outside.ml");
+  check
+    (option string)
+    "encoded traversal is rejected after decode"
+    None
+    (Lsp.resolve_relative ~base "file:///workspace/masc/sub%2F..%2F..%2Fetc/passwd")
 ;;
 
 (* RFC-0281 Phase 2: [/api/v1/ide/lsp] must be a typed WebSocket-upgrade
@@ -239,25 +249,29 @@ let rec json_contains_key key = function
    instead (a separate write lane). *)
 let test_code_actions_have_no_workspace_edit () =
   (* code_actions reads the annotation cache, which takes an Eio mutex, so it
-     must run inside an Eio context. A non-existent base yields no annotations
-     but still exercises the create action that used to carry the edit. *)
+     must run inside an Eio context. A fresh temp dir yields no annotations but
+     still exercises the create action that used to carry the edit. *)
   Eio_main.run (fun env ->
     Fs_compat.set_fs (Eio.Stdenv.fs env);
-    let actions =
-      Lsp_overlay_provider.code_actions
-        ~base_dir:"/tmp/x"
-        ~file_path:"a.ml"
-        ~line:0
-        ~diagnostics:[]
-    in
-    let j = `List actions in
-    check bool "no WorkspaceEdit in code actions" false (json_contains_key "edit" j);
-    check bool "no newText in code actions" false (json_contains_key "newText" j);
-    check
-      bool
-      "create action offered via a command lane"
-      true
-      (json_contains_key "command" j))
+    let base_dir = Filename.temp_dir "masc-lsp-proxy-" "" in
+    Fun.protect
+      ~finally:(fun () -> try Unix.rmdir base_dir with _ -> ())
+      (fun () ->
+         let actions =
+           Lsp_overlay_provider.code_actions
+             ~base_dir
+             ~file_path:"a.ml"
+             ~line:0
+             ~diagnostics:[]
+         in
+         let j = `List actions in
+         check bool "no WorkspaceEdit in code actions" false (json_contains_key "edit" j);
+         check bool "no newText in code actions" false (json_contains_key "newText" j);
+         check
+           bool
+           "create action offered via a command lane"
+           true
+           (json_contains_key "command" j)))
 ;;
 
 let () =

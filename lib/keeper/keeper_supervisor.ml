@@ -808,10 +808,9 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
               is gone. [meta] was read above (pre-[Sys.remove]), so the reason
               survives in the event even though the file no longer does. *)
            let latched_reason_wire =
-             Option.value_map
-               meta.latched_reason
+             Option.value
                ~default:"none"
-               ~f:Keeper_latched_reason.to_wire
+               (Option.map Keeper_latched_reason.to_wire meta.latched_reason)
            in
            publish_lifecycle
              ~event:

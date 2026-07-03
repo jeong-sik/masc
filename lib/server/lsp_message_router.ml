@@ -173,7 +173,7 @@ let start_response_reader
       ~sw
       (router : t)
       (proc : Lsp_process_manager.lsp_process)
-      ?on_exit
+      ~on_exit
       ~(on_notification : client_id:int -> method_:string -> Yojson.Safe.t -> unit)
   =
   let fiber_promise =

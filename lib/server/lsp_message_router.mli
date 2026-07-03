@@ -33,6 +33,6 @@ val start_response_reader :
   sw:Eio.Switch.t ->
   t ->
   Lsp_process_manager.lsp_process ->
-  ?on_exit:(reason:string -> unit) ->
+  on_exit:(reason:string -> unit) option ->
   on_notification:(client_id:int -> method_:string -> Yojson.Safe.t -> unit) ->
   unit

@@ -46,6 +46,67 @@ type lang_health =
   | Connected
   | Overlay_only of string
 
+(** Typed LSP method variant for the methods handled explicitly by the proxy
+    (lifecycle, MASC status, and overlay-aware textDocument methods).  Using a
+    variant removes duplicated wire strings from dispatch and handler sites and
+    makes adding a new handled method a compile-time decision. *)
+type lsp_method =
+  | Initialize
+  | Initialized
+  | Shutdown
+  | Exit
+  | Masc_lsp_status
+  | Hover
+  | CodeLens
+  | InlayHint
+  | Diagnostic
+  | Definition
+  | References
+  | Completion
+  | CodeAction
+  | Document_symbol
+  | Folding_range
+  | Document_highlight
+
+let lsp_method_of_string = function
+  | "initialize" -> Some Initialize
+  | "initialized" -> Some Initialized
+  | "shutdown" -> Some Shutdown
+  | "exit" -> Some Exit
+  | "masc/lspStatus" -> Some Masc_lsp_status
+  | "textDocument/hover" -> Some Hover
+  | "textDocument/codeLens" -> Some CodeLens
+  | "textDocument/inlayHint" -> Some InlayHint
+  | "textDocument/diagnostic" -> Some Diagnostic
+  | "textDocument/definition" -> Some Definition
+  | "textDocument/references" -> Some References
+  | "textDocument/completion" -> Some Completion
+  | "textDocument/codeAction" -> Some CodeAction
+  | "textDocument/documentSymbol" -> Some Document_symbol
+  | "textDocument/foldingRange" -> Some Folding_range
+  | "textDocument/documentHighlight" -> Some Document_highlight
+  | _ -> None
+;;
+
+let lsp_method_to_string = function
+  | Initialize -> "initialize"
+  | Initialized -> "initialized"
+  | Shutdown -> "shutdown"
+  | Exit -> "exit"
+  | Masc_lsp_status -> "masc/lspStatus"
+  | Hover -> "textDocument/hover"
+  | CodeLens -> "textDocument/codeLens"
+  | InlayHint -> "textDocument/inlayHint"
+  | Diagnostic -> "textDocument/diagnostic"
+  | Definition -> "textDocument/definition"
+  | References -> "textDocument/references"
+  | Completion -> "textDocument/completion"
+  | CodeAction -> "textDocument/codeAction"
+  | Document_symbol -> "textDocument/documentSymbol"
+  | Folding_range -> "textDocument/foldingRange"
+  | Document_highlight -> "textDocument/documentHighlight"
+;;
+
 type conn_state =
   { sw : Eio.Switch.t
   ; router : Lsp_message_router.t
@@ -235,7 +296,7 @@ let current_status_json cs =
 (* Push the current status to the client as a [masc/lspStatus] notification,
    so the dashboard reacts to a health transition without polling. *)
 let push_lsp_status cs status =
-  send_client_notification cs "masc/lspStatus" status
+  send_client_notification cs (lsp_method_to_string Masc_lsp_status) status
 ;;
 
 (* Record [lang_id]'s health, notifying the client only when it actually
@@ -312,13 +373,6 @@ let pct_decode s =
   done;
   Buffer.contents buf
 
-let strip_trailing_slash path =
-  let len = String.length path in
-  if len > 1 && String.get path (len - 1) = '/'
-  then String.sub path 0 (len - 1)
-  else path
-;;
-
 let path_of_file_uri uri =
   let prefix = "file://" in
   if String.starts_with ~prefix uri
@@ -330,63 +384,53 @@ let path_of_file_uri uri =
   else uri
 ;;
 
-let normalize_absolute_path path =
-  if Filename.is_relative path
-  then None
-  else (
-    let parts = String.split_on_char '/' path in
-    let rec loop acc = function
-      | [] -> Some ("/" ^ String.concat "/" (List.rev acc))
-      | "" :: rest | "." :: rest -> loop acc rest
-      | ".." :: rest ->
-        (match acc with
-         | [] -> None
-         | _ :: acc -> loop acc rest)
-      | part :: rest -> loop (part :: acc) rest
-    in
-    loop [] parts)
-;;
-
-let path_within_normalized ~base path =
-  let base = strip_trailing_slash base in
-  let path = strip_trailing_slash path in
-  let base_len = String.length base in
-  if String.equal base "/"
-  then String.starts_with ~prefix:"/" path
-  else
-    String.equal path base
-    || (String.starts_with ~prefix:base path
-        && String.length path > base_len
-        && Char.equal (String.get path base_len) '/')
+(** [fpath_within ~base path] is [Some rel] when the normalized absolute
+    [path] sits inside normalized absolute [base].  The returned relative path
+    contains no [..] segments, so percent-decoded traversal such as
+    [%2F..%2F..] is rejected after normalization. *)
+let fpath_within ~base path =
+  match Fpath.of_string base, Fpath.of_string path with
+  | Ok base, Ok path when Fpath.is_abs base && Fpath.is_abs path ->
+    let base = Fpath.(rem_empty_seg (normalize base)) in
+    let path = Fpath.(rem_empty_seg (normalize path)) in
+    (match Fpath.relativize ~root:base path with
+     | Some rel ->
+       if List.exists (String.equal "..") (Fpath.segs rel) then None else Some rel
+     | None -> None)
+  | _ -> None
 ;;
 
 let workspace_root_for_initialize ~base_path root_uri =
-  let candidate = root_uri |> path_of_file_uri |> strip_trailing_slash in
-  match normalize_absolute_path base_path, normalize_absolute_path candidate with
-  | Some base, Some candidate when path_within_normalized ~base candidate -> candidate
-  | Some base, _ -> base
-  | None, _ -> strip_trailing_slash base_path
+  let candidate = root_uri |> path_of_file_uri in
+  match
+    Option.bind candidate (fun s ->
+      match Fpath.of_string s with
+      | Ok p when Fpath.is_abs p -> Some Fpath.(rem_empty_seg (normalize p))
+      | _ -> None)
+  with
+  | Some candidate ->
+    (match fpath_within ~base:base_path (Fpath.to_string candidate) with
+     | Some _ -> Fpath.to_string candidate
+     | None -> base_path)
+  | None -> base_path
 ;;
 
 (** Resolve file:// URI to relative path from base.
-    Normalizes lexical path segments and checks directory boundary. *)
+    Uses Fpath normalization and [Fpath.relativize], and rejects traversal
+    introduced by percent-decoded separators such as [%2F..]. *)
 let resolve_relative ~base uri =
   if not (String.starts_with ~prefix:"file://" uri)
   then Some uri
   else (
-    let full = path_of_file_uri uri |> strip_trailing_slash in
-    match normalize_absolute_path base, normalize_absolute_path full with
-    | Some base, Some full when path_within_normalized ~base full ->
-      let base = strip_trailing_slash base in
-      let full = strip_trailing_slash full in
-      let base_len = String.length base in
-      let full_len = String.length full in
-      if base_len = full_len
-      then Some ""
-      else if String.equal base "/"
-      then Some (String.sub full 1 (full_len - 1))
-      else Some (String.sub full (base_len + 1) (full_len - base_len - 1))
-    | Some _, Some _ | Some _, None | None, _ -> None)
+    let decoded = path_of_file_uri uri in
+    match Fpath.of_string decoded with
+    | Ok full when Fpath.is_abs full ->
+      (match fpath_within ~base (Fpath.to_string full) with
+       | Some rel ->
+         let s = Fpath.to_string rel in
+         if String.equal s "." then Some "" else Some s
+       | None -> None)
+    | _ -> None)
 ;;
 
 let initialize_capabilities_json () =
@@ -460,7 +504,7 @@ let ensure_lsp_process cs lang_id =
            ~sw:cs.sw
            cs.router
            proc
-           ~on_exit:(fun ~reason -> note_process_exit cs proc ~reason)
+           ~on_exit:(Some (fun ~reason -> note_process_exit cs proc ~reason))
            ~on_notification:(fun ~client_id:_ ~method_ params ->
              send_client_notification cs method_ params);
          let init_params =
@@ -475,7 +519,7 @@ let ensure_lsp_process cs lang_id =
            Lsp_message_router.send_request
              cs.router
              proc
-             ~method_:"initialize"
+             ~method_:(lsp_method_to_string Initialize)
              ~params:init_params
              ~client_id:(-1)
          in
@@ -491,7 +535,7 @@ let ensure_lsp_process cs lang_id =
             Lsp_message_router.send_notification
               cs.router
               proc
-              ~method_:"initialized"
+              ~method_:(lsp_method_to_string Initialized)
               ~params:(`Assoc []);
             if Atomic.get cs.disconnected
             then (
@@ -608,7 +652,7 @@ let handle_codelens cs params id =
           Lsp_message_router.send_request
             cs.router
             proc
-            ~method_:"textDocument/codeLens"
+            ~method_:(lsp_method_to_string CodeLens)
             ~params
             ~client_id:(req_id_to_int id)
         in
@@ -639,7 +683,7 @@ let handle_inlay_hint cs params id =
           Lsp_message_router.send_request
             cs.router
             proc
-            ~method_:"textDocument/inlayHint"
+            ~method_:(lsp_method_to_string InlayHint)
             ~params
             ~client_id:(req_id_to_int id)
         in
@@ -682,7 +726,7 @@ let handle_diagnostic cs params id =
           Lsp_message_router.send_request
             cs.router
             proc
-            ~method_:"textDocument/diagnostic"
+            ~method_:(lsp_method_to_string Diagnostic)
             ~params
             ~client_id:(req_id_to_int id)
         in
@@ -752,7 +796,7 @@ let handle_hover cs params id =
           Lsp_message_router.send_request
             cs.router
             proc
-            ~method_:"textDocument/hover"
+            ~method_:(lsp_method_to_string Hover)
             ~params
             ~client_id:(req_id_to_int id)
         in
@@ -795,7 +839,7 @@ let handle_definition cs params id =
         let promise =
           Lsp_message_router.send_request
             cs.router proc
-            ~method_:"textDocument/definition"
+            ~method_:(lsp_method_to_string Definition)
             ~params ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
@@ -830,7 +874,7 @@ let handle_references cs params id =
         let promise =
           Lsp_message_router.send_request
             cs.router proc
-            ~method_:"textDocument/references"
+            ~method_:(lsp_method_to_string References)
             ~params ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
@@ -864,7 +908,7 @@ let handle_completion cs params id =
         let promise =
           Lsp_message_router.send_request
             cs.router proc
-            ~method_:"textDocument/completion"
+            ~method_:(lsp_method_to_string Completion)
             ~params ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
@@ -899,7 +943,7 @@ let handle_code_action cs params id =
         let promise =
           Lsp_message_router.send_request
             cs.router proc
-            ~method_:"textDocument/codeAction"
+            ~method_:(lsp_method_to_string CodeAction)
             ~params ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
@@ -928,7 +972,7 @@ let handle_document_symbol cs params id =
         let promise =
           Lsp_message_router.send_request
             cs.router proc
-            ~method_:"textDocument/documentSymbol"
+            ~method_:(lsp_method_to_string Document_symbol)
             ~params ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
@@ -957,7 +1001,7 @@ let handle_folding_range cs params id =
         let promise =
           Lsp_message_router.send_request
             cs.router proc
-            ~method_:"textDocument/foldingRange"
+            ~method_:(lsp_method_to_string Folding_range)
             ~params ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with
@@ -991,7 +1035,7 @@ let handle_document_highlight cs params id =
         let promise =
           Lsp_message_router.send_request
             cs.router proc
-            ~method_:"textDocument/documentHighlight"
+            ~method_:(lsp_method_to_string Document_highlight)
             ~params ~client_id:(req_id_to_int id)
         in
         (match Eio.Promise.await promise with

@@ -10,7 +10,13 @@ module Cache = struct
   let tbl : (string, annotation list) Hashtbl.t = Hashtbl.create 32
   let mutex = Eio.Mutex.create ()
 
-  let key ~base_dir ~file_path = base_dir ^ "/" ^ file_path
+  let key ~base_dir ~file_path =
+    let p =
+      if String.equal file_path ""
+      then Fpath.v base_dir
+      else Fpath.append (Fpath.v base_dir) (Fpath.v file_path)
+    in
+    Fpath.to_string (Fpath.rem_empty_seg (Fpath.normalize p))
 
   let get ~base_dir ~file_path =
     Eio.Mutex.use_rw ~protect:true mutex (fun () ->
@@ -33,6 +39,16 @@ module Cache = struct
     Eio.Mutex.use_rw ~protect:true mutex (fun () ->
       Hashtbl.clear tbl)
 end
+
+(** Centralized [file://] URI helper using Fpath normalization. *)
+let file_uri_of_relative ~base_dir ~file_path =
+  let p =
+    if String.equal file_path ""
+    then Fpath.v base_dir
+    else Fpath.append (Fpath.v base_dir) (Fpath.v file_path)
+  in
+  "file://" ^ Fpath.to_string (Fpath.rem_empty_seg (Fpath.normalize p))
+;;
 
 (** LSP CodeLens entry as JSON. *)
 let tag_opt label value =
@@ -229,7 +245,7 @@ let definition_links ~base_dir ~file_path ~line : Yojson.Safe.t list =
   let matching = annotations_at_line ~base_dir ~file_path ~line in
   List.map (fun (a : annotation) ->
     `Assoc [
-      ("uri", `String ("file://" ^ base_dir ^ "/" ^ a.file_path));
+      ("uri", `String (file_uri_of_relative ~base_dir ~file_path:a.file_path));
       ("range", `Assoc [
         ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
         ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);
@@ -258,7 +274,7 @@ let reference_locations ~base_dir ~file_path ~line ~include_declaration:_ :
   ) (matching @ related) in
   List.map (fun (a : annotation) ->
     `Assoc [
-      ("uri", `String ("file://" ^ base_dir ^ "/" ^ a.file_path));
+      ("uri", `String (file_uri_of_relative ~base_dir ~file_path:a.file_path));
       ("range", `Assoc [
         ("start", `Assoc [("line", `Int (a.line_start - 1)); ("character", `Int 0)]);
         ("end", `Assoc [("line", `Int (a.line_end - 1)); ("character", `Int 0)]);

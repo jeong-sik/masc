@@ -260,3 +260,10 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
           (Printexc.to_string exn);
         on_failure ~reason:(Printexc.to_string exn) ~retryable:true)
 ;;
+
+module For_testing = struct
+  let build_context_bundle = build_context_bundle
+  let parse_summary = parse_summary
+  let summary_of_response = summary_of_response
+end
+;;

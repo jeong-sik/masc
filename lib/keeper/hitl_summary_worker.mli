@@ -11,3 +11,15 @@ val spawn
   -> on_failure:(reason:string -> retryable:bool -> unit)
   -> unit
   -> unit
+
+module For_testing : sig
+  val build_context_bundle
+    : entry:Keeper_approval_queue_rules_types.pending_approval -> Yojson.Safe.t
+
+  val parse_summary
+    : model_run_id:string -> Yojson.Safe.t -> Keeper_approval_queue_rules_types.hitl_context_summary
+
+  val summary_of_response
+    : Agent_sdk.Types.api_response
+    -> (Keeper_approval_queue_rules_types.hitl_context_summary, string) result
+end

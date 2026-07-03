@@ -179,7 +179,11 @@ function RuntimeSection({ keeper }: { keeper: Keeper }): VNode {
           : html`<div class="rtc-na" data-missing="runtime-capabilities">능력 정보 미수신</div>`}
         <div class="rtc-effort">
           <span class="rtc-effort-k">effort</span>
-          ${!entry
+          ${/* Undeclared capabilities mean the effort mode is unknown, not a
+               definitive "no control" — the default-filled thinking_control_format
+               ('none') is not authoritative. Mirror the multimodal flag's unknown
+               handling instead of asserting a value the config never declared. */ ''}
+          ${!entry || !capabilitiesDeclared
             ? html`<span class="rtc-eff-na" data-missing="runtime-effort">조정 정보 미수신</span>`
             : effortControlled
               ? html`<span class="rtc-eff-na" data-effort-mode=${effortMode}>${effortMode} · ${effortAdjustable ? '조정 가능' : '고정'}</span>`

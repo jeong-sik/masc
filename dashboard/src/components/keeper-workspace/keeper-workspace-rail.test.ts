@@ -219,6 +219,10 @@ describe('KeeperWorkspaceRail', () => {
     )
     expect(multimodalFlag).not.toBeUndefined()
     expect(multimodalFlag?.textContent).toContain('—')
+    // effort is likewise unknown, not the definitive "effort 제어 없음" claim that
+    // the default-filled thinking_control_format ('none') would otherwise imply.
+    expect(container.textContent).toContain('조정 정보 미수신')
+    expect(container.textContent).not.toContain('effort 제어 없음')
   })
 
   it('renders the context-window occupancy percent', () => {

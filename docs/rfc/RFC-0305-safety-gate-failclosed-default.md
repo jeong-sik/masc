@@ -8,7 +8,9 @@ author: vincent
 supersedes: []
 superseded_by: null
 related: ["0304"]
-implementation_prs: []
+implementation_prs:
+  - "#23092" # Site I — dashboard approval-resolve fail-closed default
+  - "#23044/#23086 follow-up" # reconcile stale `test_oas_callback_hard_forbidden_queues_critical` with immediate-reject behavior
 ---
 
 # RFC-0305 — Safety and governance gates fail closed by default
@@ -22,12 +24,12 @@ is malformed, or a capability measurement is missing.
 
 The motivating case, grounded on a live config snapshot and 2026-07-03 logs:
 
-- `task/anti_rationalization.ml` is the excuse-detection gate. When its LLM
+- `lib/task/anti_rationalization.ml` is the excuse-detection gate. When its LLM
   evaluator is unavailable it consults `Env_config.AntiRationalization.fail_mode`,
-  whose default is **`Open`** (`config/env_config_governance.ml:180` `| _ -> Open`,
+  whose default is **`Open`** (`lib/config/env_config_governance.ml:180` `| _ -> Open`,
   `:188` `get_string ~default:"open" "MASC_ANTI_RATIONALIZATION_FAIL_MODE"`).
 - With `fail_mode = Open` and no active gate-2 substring advisory, an unavailable
-  evaluator emits `verdict = Approve` (`anti_rationalization.ml:1032-1043`,
+  evaluator emits `verdict = Approve` (`lib/task/anti_rationalization.ml:1032-1043`,
   `"approving by default; mode=open"`).
 - The default runtime (`[runtime].default = glm-coding.glm-5-turbo`) is a `Glm`
   provider kind, which OAS `validate_output_schema_request` rejects for native
@@ -52,36 +54,36 @@ Deviations found (fail-open where a safety decision cannot complete):
 
 | # | Site | Gate | Fail-open mechanism | Active? |
 |---|------|------|---------------------|---------|
-| A | `config/env_config_governance.ml:180,188` + `task/anti_rationalization.ml:1032` | excuse detection | `fail_mode` default `open` → `Approve` | **yes** |
-| B | `keeper_runtime/keeper_fd_pressure.ml:552` | fleet turn admission | `system_fds = None -> Admit` (siblings :535/:561 block) | yes |
-| C | `eval_gate.ml:262,348` | destructive-command scan | malformed JSON args → `""` → no match → `Pass` | yes |
-| D | `eval_gate.ml:203` | destructive evasion detect | regex evaluator error → `false` → passes | yes |
-| E | `worker_oas.ml:262`, `keeper/keeper_guards.ml:157` | command extraction | payload under unexpected field → `""` → not screened | yes |
-| F | `governance_pipeline_risk.ml:129,337` | approval risk classify | unknown tool/verb → `Low` → below HITL threshold | yes |
-| G | `sdk_tool_contract.ml:245` | tool input schema | unknown JSON-Schema `type` → `Ok ()` (accepted) | yes |
-| H | `tool_surface/tool_capability.ml:52` | destructive capability filter | no `destructive` metadata → treated non-destructive → scan skipped | yes |
-| I | `server/server_dashboard_http.ml:318-326` | HITL approval-resolve endpoint | missing `decision` field → `~default:"approve"` | yes |
-| J | `verifier_oas.ml:229-232` | PreToolUse LLM verify | verifier backend error → `Continue` (allow) | dormant (no callers) |
-| K | `verification.ml:315-333` | criterion evaluator | empty criteria / schema-only → `Pass` | dormant (no callers) |
+| A | `lib/config/env_config_governance.ml:180,188` + `lib/task/anti_rationalization.ml:1032` | excuse detection | `fail_mode` default `open` → `Approve` | **yes** |
+| B | `lib/keeper_runtime/keeper_fd_pressure.ml:552` | fleet turn admission | `system_fds = None -> Admit` (siblings :535/:561 block) | yes |
+| C | `lib/eval_gate.ml:262,348` | destructive-command scan | malformed JSON args → `""` → no match → `Pass` | yes |
+| D | `lib/eval_gate.ml:203` | destructive evasion detect | regex evaluator error → `false` → passes | yes |
+| E | `lib/worker_oas.ml:262`, `lib/keeper/keeper_guards.ml:157` | command extraction | payload under unexpected field → `""` → not screened | yes |
+| F | `lib/governance_pipeline_risk.ml:129,337` | approval risk classify | unknown tool/verb → `Low` → below HITL threshold | yes |
+| G | `lib/sdk_tool_contract.ml:245` | tool input schema | unknown JSON-Schema `type` → `Ok ()` (accepted) | yes |
+| H | `lib/tool_surface/tool_capability.ml:52` | destructive capability filter | no `destructive` metadata → treated non-destructive → scan skipped | yes |
+| I | `lib/server/server_dashboard_http.ml:318-326` | HITL approval-resolve endpoint | missing `decision` field → `~default:"approve"` | yes |
+| J | `lib/verifier_oas.ml:229-232` | PreToolUse LLM verify | verifier backend error → `Continue` (allow) | dormant (no callers) |
+| K | `lib/verification.ml:315-333` | criterion evaluator | empty criteria / schema-only → `Pass` | dormant (no callers) |
 
 Counter-examples — sites that already fail closed, establishing the norm:
 
-- `approval_callbacks.ml:14-31` — MASC's default approval callback returns
+- `lib/approval_callbacks.ml:14-31` — MASC's default approval callback returns
   `Reject`, **explicitly overriding OAS's fail-open default** (#7883). This is a
   direct in-tree precedent for the principle.
-- `keeper_runtime/keeper_disk_pressure.ml:268` — unmeasurable disk → `Block`.
-- `keeper_runtime/keeper_fd_pressure.ml:535,561` — unknown fd probe →
+- `lib/keeper_runtime/keeper_disk_pressure.ml:268` — unmeasurable disk → `Block`.
+- `lib/keeper_runtime/keeper_fd_pressure.ml:535,561` — unknown fd probe →
   `probe_unknown_block`. (This makes site B, in the same module, the outlier.)
-- `governance_pipeline.ml:54-68,545-564` — unknown `governance_level` → require
+- `lib/governance_pipeline.ml:54-68,545-564` — unknown `governance_level` → require
   confirm; no matching approval rule → block via HITL.
-- `keeper/keeper_approval_queue.ml:97` + rules types — HITL approval
+- `lib/keeper/keeper_approval_queue.ml:97` + rules types — HITL approval
   timeout/expiry → `reject` (fails closed on operator non-response).
-- `server/server_dashboard_http_link_preview.ml:131-135` — unparseable IP →
+- `lib/server/server_dashboard_http_link_preview.ml:131-135` — unparseable IP →
   treated private/reserved → blocked (SSRF guard).
-- `mcp_server_eio_protocol.ml:963-973` — exhaustive `tool_profile` match
+- `lib/mcp_server_eio_protocol.ml:963-973` — exhaustive `tool_profile` match
   deliberately avoids `_ -> Full` to prevent silently elevating a future
   restricted profile to full tool access.
-- `tool_input_validation.ml:29` — tool with no registered schema → rejected.
+- `lib/tool_input_validation.ml:29` — tool with no registered schema → rejected.
 
 ## 2. Principle
 
@@ -114,7 +116,7 @@ So the principle must be paired with a bounded escape, not applied blindly:
    outage. The choice is visible and emits the existing fallback counter.
 3. **Prefer degrade-in-place over hard block where a cheaper safe path exists.**
    The excuse-detection gate already has one: the gate-2 substring advisory
-   (`anti_rationalization.ml:944-967`) rejects on a detected excuse phrase even
+   (`lib/task/anti_rationalization.ml:944-967`) rejects on a detected excuse phrase even
    when the LLM is down. Fail-closed should reuse such advisories, reserving a
    hard reject for the residual case. This narrows the fleet-stall blast radius.
 4. **Block only after recovery is exhausted** (the `#22925` rule): a gate that
@@ -129,16 +131,16 @@ opt-out where a fleet-stall risk is real:
 - **A (anti-rationalization `fail_mode`)**: flip the default from `Open` to
   `Closed`. Operators who need liveness during an outage set
   `MASC_ANTI_RATIONALIZATION_FAIL_MODE=open` explicitly. The `Closed` branch
-  (`anti_rationalization.ml:1046`, `Reject "verifier unavailable (fail-closed)"`)
+  (`lib/task/anti_rationalization.ml:1046`, `Reject "verifier unavailable (fail-closed)"`)
   and the gate-2 advisory already exist; only the default changes.
 - **B (fd-pressure admission)**: `system_fds = None -> probe_unknown_block`,
   matching the two sibling branches in the same function.
 - **C/D/E (destructive-command path)**: a shared `Reject` (or `Trajectory` fail)
   when command extraction or args-JSON parsing fails, instead of scanning an
-  empty string. One helper closes all three (they share `eval_gate` +
-  `worker_oas`/`keeper_guards`).
+  empty string. One helper closes all three (they share `lib/eval_gate` +
+  `lib/worker_oas`/`lib/keeper/keeper_guards`).
 - **F (risk classify unknown → Low)**: unknown tool/verb → a risk floor that
-  still requires confirm, not `Low`. Mirror `governance_pipeline.ml`'s
+  still requires confirm, not `Low`. Mirror `lib/governance_pipeline.ml`'s
   unknown-level → require-confirm.
 - **G (tool schema unknown type)**: unknown JSON-Schema `type` → `Error`, mirror
   the fail-closed sibling `param_type_of_schema_opt` (#8832).
@@ -148,22 +150,32 @@ opt-out where a fleet-stall risk is real:
 - **I (dashboard approve default)**: a resolve request missing `decision` →
   `Error`, not `~default:"approve"`.
 
+Related policy clarification, to keep already-merged work aligned:
+
+- **Hard-forbidden OAS callback requests**: this RFC treats them as immediate
+  reject, matching `lib/governance_pipeline.ml`'s current hard-forbidden path.
+  Any test or implementation that expects a Critical hard-forbidden request to
+  enter the operator approval queue first is stale and must be reconciled in the
+  `#23044/#23086 follow-up` implementation item above. Queueing is still
+  appropriate for unknown or high-risk requests that are not already classified
+  as hard-forbidden.
+
 Out of scope (noted, not mandated here):
 
 - **J/K (dormant verifier/verification facilities)**: no callers today. Fix when
   wired, or delete if dead. Recorded so they are not wired as-is.
-- **Trust-ledger `~default:true` inputs** (`reputation_ledger_v2.ml:151-152`,
-  `tool_agent_timeline.ml:313`, `keeper_runtime_trust_timeline.ml:112`): these
+- **Trust-ledger `~default:true` inputs** (`lib/reputation_ledger_v2.ml:151-152`,
+  `lib/tool_agent_timeline.ml:313`, `lib/keeper/keeper_runtime_trust_timeline.ml:112`): these
   feed scoring, not hard gates. A separate decision on whether absent trust
   signals should read as good-vs-unknown; deliberately not bundled.
-- **`exec/approval_config.ml:47-52` autonomous overlay**: `Observe`-everything
+- **`lib/exec/approval_config.ml:47-52` autonomous overlay**: `Observe`-everything
   by design, backstopped by a trust-independent catastrophic floor in
   `Approval_policy.decide`. In scope only if that floor is found insufficient.
 
 ## 4. Non-goals
 
 - Not a blanket "reject on any error." Advisory/telemetry-only gates that are
-  documented as non-enforcing (e.g. `keeper_guards.ml:842` `cost_guard`) stay
+  documented as non-enforcing (e.g. `lib/keeper/keeper_guards.ml:842` `cost_guard`) stay
   advisory.
 - Not removing operator opt-out. The opt-out is the mechanism that makes
   fail-closed operationally viable during outages.

@@ -34,16 +34,22 @@ val orphan_path : base_dir:string -> string
 type partition =
   Agent_observation.codebase_partition =
   | By_url of string
-  | Orphan
-(** RFC-0128 §4.2 store partition selector.
+  | No_canonical_url
+  | Unmatched
+  | Base_unresolved
+  | Legacy_default
+(** RFC-0128 §4.2 store partition selector (IDE Observation Plane v2 §7
+    typed reasons).
 
     [By_url slug] selects [base_dir/.masc-ide/by-url/<slug>/]. The
     caller must obtain [slug] from {!canonical_url_of_remote}.
 
-    [Orphan] selects [base_dir/.masc-ide/_orphan/]. Used when the
-    caller knows a record cannot be assigned to a canonical URL
-    (reverse lookup failed). Silent loss is avoided by routing
-    failures here instead of dropping them. *)
+    The four non-By_url variants ([No_canonical_url], [Unmatched],
+    [Base_unresolved], [Legacy_default]) all map to
+    [base_dir/.masc-ide/_orphan/] on disk (layout unchanged) but carry
+    distinct typed reasons. Silent loss is avoided by routing failures
+    here instead of dropping them; the reason distinguishes {v2 §7}
+    empty-repo / unmatched-repo_id / base-loss / structural-default. *)
 
 val partition_store_dir : base_dir:string -> partition -> string
 (** [partition_store_dir ~base_dir partition] returns the directory

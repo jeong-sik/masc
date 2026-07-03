@@ -115,11 +115,17 @@ let test_sandbox_write_joins_with_worktree_read () =
        failf
          "expected By_url _ on both sides, got %s / %s"
          (match sandbox_partition with
-          | Ide_paths.Orphan -> "Orphan"
-          | Ide_paths.By_url s -> "By_url " ^ s)
+          | Ide_paths.By_url s -> "By_url " ^ s
+          | Ide_paths.No_canonical_url -> "No_canonical_url"
+          | Ide_paths.Unmatched -> "Unmatched"
+          | Ide_paths.Base_unresolved -> "Base_unresolved"
+          | Ide_paths.Legacy_default -> "Legacy_default")
          (match worktree_partition with
-          | Ide_paths.Orphan -> "Orphan"
-          | Ide_paths.By_url s -> "By_url " ^ s));
+          | Ide_paths.By_url s -> "By_url " ^ s
+          | Ide_paths.No_canonical_url -> "No_canonical_url"
+          | Ide_paths.Unmatched -> "Unmatched"
+          | Ide_paths.Base_unresolved -> "Base_unresolved"
+          | Ide_paths.Legacy_default -> "Legacy_default"));
     (* 5. rel_path is the repo-relative remainder in both cases. *)
     check string "sandbox rel_path stripped" "lib/foo.ml" sandbox_rel;
     check string "worktree rel_path stripped" "lib/foo.ml" worktree_rel)
@@ -135,7 +141,7 @@ let test_unregistered_path_lands_in_orphan () =
         ~file_path:elsewhere
     in
     (match partition with
-     | Ide_paths.Orphan -> ()
+     | Ide_paths.Legacy_default -> ()
      | _ -> fail "expected Orphan for unregistered path");
     check string "rel_path passes through unchanged" elsewhere original)
 ;;
@@ -170,7 +176,7 @@ let test_blank_url_lands_in_orphan () =
         ~file_path:file
     in
     match partition with
-    | Ide_paths.Orphan -> ()
+    | Ide_paths.Legacy_default -> ()
     | _ -> fail "expected Orphan for blank-URL repo")
 ;;
 
@@ -230,11 +236,17 @@ let test_sandbox_playground_path_joins_with_worktree () =
        failf
          "expected By_url _ on both sides, got %s / %s"
          (match sandbox_partition with
-          | Ide_paths.Orphan -> "Orphan"
-          | Ide_paths.By_url s -> "By_url " ^ s)
+          | Ide_paths.By_url s -> "By_url " ^ s
+          | Ide_paths.No_canonical_url -> "No_canonical_url"
+          | Ide_paths.Unmatched -> "Unmatched"
+          | Ide_paths.Base_unresolved -> "Base_unresolved"
+          | Ide_paths.Legacy_default -> "Legacy_default")
          (match worktree_partition with
-          | Ide_paths.Orphan -> "Orphan"
-          | Ide_paths.By_url s -> "By_url " ^ s));
+          | Ide_paths.By_url s -> "By_url " ^ s
+          | Ide_paths.No_canonical_url -> "No_canonical_url"
+          | Ide_paths.Unmatched -> "Unmatched"
+          | Ide_paths.Base_unresolved -> "Base_unresolved"
+          | Ide_paths.Legacy_default -> "Legacy_default"));
     check string "sandbox rel stripped to repo-relative" "lib/foo.ml" sandbox_rel;
     check string "worktree rel stripped" "lib/foo.ml" worktree_rel)
 ;;

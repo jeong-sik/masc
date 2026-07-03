@@ -17,7 +17,7 @@ let annotations_file_for ~base_dir partition =
   Filename.concat (partition_dir ~base_dir partition) "annotations.jsonl"
 ;;
 
-let annotations_file ~base_dir = annotations_file_for ~base_dir Ide_paths.Orphan
+let annotations_file ~base_dir = annotations_file_for ~base_dir Ide_paths.Legacy_default
 
 let tombstone_key = "__tombstone"
 let compact_key = "__compact"
@@ -33,7 +33,7 @@ let compact_seq = ref 0
    filesystem SSOT instead of carrying a local recursive mkdir copy. *)
 let ensure_dir = Fs_compat.mkdir_p
 
-let ensure_store ~base_dir ?(partition = Ide_paths.Orphan) () =
+let ensure_store ~base_dir ?(partition = Ide_paths.Legacy_default) () =
   ensure_dir (partition_dir ~base_dir partition)
 ;;
 
@@ -255,7 +255,7 @@ let load_all_partition ?stop_before_compact_begin_id ~base_dir partition =
 
 let create
       ~base_dir
-      ?(partition = Ide_paths.Orphan)
+      ?(partition = Ide_paths.Legacy_default)
       ~keeper_id
       ~file_path
       ~line_start
@@ -318,7 +318,7 @@ let create
     Ok annotation)
 ;;
 
-let list ~base_dir ?(partition = Ide_paths.Orphan) ~filter () =
+let list ~base_dir ?(partition = Ide_paths.Legacy_default) ~filter () =
   ensure_store ~base_dir ~partition ();
   let all : annotation list = load_all_partition ~base_dir partition in
   let by_file =
@@ -356,7 +356,7 @@ let list ~base_dir ?(partition = Ide_paths.Orphan) ~filter () =
   List.sort (fun a b -> Int64.compare b.created_at_ms a.created_at_ms) by_task
 ;;
 
-let compact ~base_dir ?(partition = Ide_paths.Orphan) () =
+let compact ~base_dir ?(partition = Ide_paths.Legacy_default) () =
   ensure_store ~base_dir ~partition ();
   let path = annotations_file_for ~base_dir partition in
   File_lock_eio.with_lock path (fun () ->
@@ -368,7 +368,7 @@ let compact ~base_dir ?(partition = Ide_paths.Orphan) () =
     Fs_compat.append_jsonl path (compact_end_json id snapshot))
 ;;
 
-let delete ~base_dir ?(partition = Ide_paths.Orphan) ~id ~keeper_id ?expected_version () =
+let delete ~base_dir ?(partition = Ide_paths.Legacy_default) ~id ~keeper_id ?expected_version () =
   ensure_store ~base_dir ~partition ();
   let all = load_all_partition ~base_dir partition in
   match List.find_opt (fun a -> a.id = id && a.keeper_id = keeper_id) all with

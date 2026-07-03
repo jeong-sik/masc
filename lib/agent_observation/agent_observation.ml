@@ -33,7 +33,22 @@ type turn_event =
 
 type codebase_partition =
   | By_url of string
-  | Orphan
+      (** canonical URL 정상 resolved: host_path slug. *)
+  | No_canonical_url
+      (** [canonical_url_of_remote] returned None: blank [repo.url] or malformed
+          remote. IDE Observation Plane v2 §7 "(1) 빈 repo/remote 없음". *)
+  | Unmatched
+      (** Caller passed [repo_id] but the repository store could not resolve it
+          (not-found / empty-url / load-error). v2 §7 "(2) repo_id unmatched". *)
+  | Base_unresolved
+      (** [file_path] falls under no registered repo [local_path] (unregistered
+          worktree, outside [.masc/playground]). v2 §7 "(4) base 경로 소실" —
+          the write-path [unregistered_repo] producer is the live instance. *)
+  | Legacy_default
+      (** Neither [canonical_url] nor [repo_id] was supplied, or the record
+          carries no [partition] field at all (tool/turn/pr_event,
+          annotation_request). Structural ceiling, NOT a soft fallback.
+          v2 §7 "(3) default 미갱신". *)
 
 (* RFC-0128 §4.1 neutral codebase slug derivation.
 

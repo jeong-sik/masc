@@ -488,7 +488,7 @@ let fusion_status_json ~(registry : Fusion_run_registry.t) ~keeper ~run_id : str
 
 let handle_masc_fusion_status ~(meta : keeper_meta) ~args () =
   let run_id = Safe_ops.json_string ~default:"" "run_id" args |> String.trim in
-  fusion_status_json ~registry:Fusion_run_registry.global ~keeper:meta.name ~run_id
+  fusion_status_json ~registry:(Fusion_run_registry.global ()) ~keeper:meta.name ~run_id
 ;;
 
 (* RFC-keeper-vision-delegation-tool §2.6 — analyze_image. Thin delegate to the

@@ -20,14 +20,18 @@ let cleanup_dead_tombstone
   =
   match read_meta ctx.config entry.name with
   | Ok (Some meta) ->
-    let dead_tombstone_reason_persisted =
+    let dead_tombstone_terminal_persisted =
+      meta.paused
+      &&
       match meta.latched_reason with
-      | Some Keeper_latched_reason.Dead_tombstone -> true
+      | Some Keeper_latched_reason.Dead_tombstone ->
+        Option.is_none meta.auto_resume_after_sec
+        && Option.is_none meta.runtime.last_blocker
       | Some _
       | None -> false
     in
     let persisted_paused =
-      if meta.paused && dead_tombstone_reason_persisted
+      if dead_tombstone_terminal_persisted
       then true
       else (
         (* #9733: dead tombstone cleanup writes [paused = true] —
@@ -54,6 +58,9 @@ let cleanup_dead_tombstone
                  Observability only — the unregister/pause behavior below is
                  unchanged. *)
               latched_reason = Some Keeper_latched_reason.Dead_tombstone
+            ; auto_resume_after_sec = None
+            ; updated_at = now_iso ()
+            ; runtime = { meta.runtime with last_blocker = None }
             }
         with
         | Ok () -> true

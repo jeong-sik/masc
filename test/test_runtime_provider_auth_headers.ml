@@ -366,6 +366,52 @@ let test_runtime_adapter_materializes_kimi_messages_http () =
             (Llm_provider.Provider_config.string_of_provider_kind other)))
   | bindings -> failf "expected one Kimi binding, got %d" (List.length bindings)
 
+let unregistered_messages_http_toml =
+  {|
+[runtime]
+default = "local.model"
+
+[providers.local]
+display-name = "Local Messages API"
+protocol = "messages-http"
+endpoint = "https://example.invalid/messages"
+
+[models.model]
+api-name = "model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[local.model]
+|}
+
+let test_runtime_adapter_rejects_unregistered_messages_http () =
+  match Runtime_toml.parse_string unregistered_messages_http_toml with
+  | Error errors ->
+    failf
+      "expected unregistered messages-http runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Ok provider_cfg ->
+          failf
+            "unregistered messages-http provider must fail closed, got kind %s"
+            (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+        | Error msg ->
+          check
+            string
+            "adapter reports unmapped provider kind"
+            "local.model: binding resolution failed (provider transport/kind unmapped)"
+            msg)
+     | bindings -> failf "expected one local binding, got %d" (List.length bindings))
+
 let deepseek_runtime_toml =
   {|
 [runtime]
@@ -1227,6 +1273,10 @@ let () =
             "runtime adapter materializes Kimi messages-http provider"
             `Quick
             test_runtime_adapter_materializes_kimi_messages_http
+        ; test_case
+            "runtime adapter rejects unregistered messages-http provider"
+            `Quick
+            test_runtime_adapter_rejects_unregistered_messages_http
         ; test_case
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick

@@ -82,7 +82,7 @@ let test_fresh_critical_entry_phase_is_awaiting_operator () =
          | None -> Alcotest.fail "Critical approval was not queued"
        in
        let entry =
-         match AQ.For_testing.get_pending_entry ~id with
+         match AQ.get_pending_entry ~id with
          | Some entry -> entry
          | None -> Alcotest.fail "in-memory entry not found"
        in
@@ -146,11 +146,11 @@ let test_critical_entry_phase_becomes_escalated_after_timer () =
        in
        Eio.Time.sleep clock 0.03;
        yield_until (fun () ->
-         match AQ.For_testing.get_pending_entry ~id with
+         match AQ.get_pending_entry ~id with
          | Some entry -> entry.phase = AQ.Escalated
          | None -> false);
        let entry =
-         match AQ.For_testing.get_pending_entry ~id with
+         match AQ.get_pending_entry ~id with
          | Some entry -> entry
          | None -> Alcotest.fail "in-memory entry missing after escalation"
        in

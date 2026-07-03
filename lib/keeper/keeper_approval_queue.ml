@@ -82,8 +82,10 @@ let read_recent_audit_raw store limit =
 let approval_audit_pending_event = "pending"
 let approval_audit_resolved_event = "resolved"
 let approval_audit_hard_forbidden_event = "hard_forbidden"
+let approval_audit_summary_event = "summary_updated"
 let approval_sse_pending_event = "approval:pending"
 let approval_sse_resolved_event = "approval:resolved"
+let approval_sse_summary_event = "approval:summary_updated"
 
 let non_empty_reason reason =
   let reason = String.trim reason in
@@ -516,6 +518,8 @@ let create_entry
   ; audit_base_path
   ; resolver
   ; on_resolution
+  ; context_summary = None
+  ; summary_status = Summary_not_requested
   }
 ;;
 
@@ -589,6 +593,13 @@ let pending_entry_json_fields
   then
     [ "input", entry.input; "input_preview", `String (input_preview_of_json entry.input) ]
   else []
+  @
+  [ "summary_status", summary_status_to_yojson entry.summary_status
+  ; ( "context_summary"
+    , match entry.context_summary with
+      | Some summary -> hitl_context_summary_to_yojson summary
+      | None -> `Null )
+  ]
 ;;
 
 let broadcast_pending entry =
@@ -639,6 +650,104 @@ let record_pending (entry : pending_approval) =
     ?disposition_reason:entry.disposition_reason
     ();
   broadcast_pending entry
+;;
+
+let record_summary_updated (entry : pending_approval) =
+  (try
+     match get_audit_store ~base_path:entry.audit_base_path () with
+     | None -> ()
+     | Some store ->
+       let json =
+         `Assoc
+           [ "ts", `Float (Unix.gettimeofday ())
+           ; "event", `String approval_audit_summary_event
+           ; "id", `String entry.id
+           ; "summary_status", summary_status_to_yojson entry.summary_status
+           ]
+       in
+       mutex_protect_allow_reentrant audit_io_mu (fun () ->
+         Fs_compat.append_jsonl (audit_today_path (Dated_jsonl.base_dir store)) json;
+         invalidate_recent_audit_cache_for_store store)
+   with
+   | Eio.Cancel.Cancelled _ as e -> raise e
+   | exn ->
+     record_queue_failure
+       ~keeper_name:entry.keeper_name
+       ~site:"audit_summary"
+       ~id:entry.id
+       ~event_type:approval_audit_summary_event
+       exn);
+  try
+    Sse.broadcast
+      (`Assoc
+         [ "type", `String approval_sse_summary_event
+         ; ( "payload"
+           , `Assoc
+               (pending_entry_json_fields
+                  ~include_runtime_contract:true
+                  ~include_input:false
+                  entry) )
+         ])
+  with
+  | Eio.Cancel.Cancelled _ as e -> raise e
+  | exn ->
+    record_queue_failure
+      ~keeper_name:entry.keeper_name
+      ~site:"broadcast_summary"
+      ~id:entry.id
+      ~event_type:approval_sse_summary_event
+      exn
+;;
+
+(* ── In-place entry updates (copy-on-write) ──────────────── *)
+
+(** Read a pending entry by id. Returns [None] if already resolved. *)
+let get_pending_entry ~id : pending_approval option = SMap.find_opt id (Atomic.get pending)
+
+(** Apply [f] to the pending entry with [id] if it still exists.
+    Used by the HITL context-summary worker for non-blocking updates. *)
+let update_pending_entry ~id f =
+  atomic_update pending (fun map ->
+    match SMap.find_opt id map with
+    | None -> map
+    | Some entry -> SMap.add id (f entry) map)
+;;
+
+let provider_config_for_summary () =
+  let runtime_id = Keeper_config.default_runtime_id () in
+  match Runtime.get_runtime_by_id runtime_id with
+  | Some rt -> Some rt.Runtime.provider_config
+  | None -> None
+;;
+
+let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
+  match entry.risk_level with
+  | Low -> ()
+  | Medium | High | Critical ->
+    update_pending_entry ~id:entry.id (fun e ->
+      { e with summary_status = Summary_pending });
+    let on_summary summary =
+      update_pending_entry ~id:entry.id (fun e ->
+        { e with
+          context_summary = Some summary
+        ; summary_status = Summary_available summary
+        });
+      match get_pending_entry ~id:entry.id with
+      | Some updated -> record_summary_updated updated
+      | None -> ()
+    in
+    let on_failure ~reason ~retryable =
+      update_pending_entry ~id:entry.id (fun e ->
+        { e with summary_status = Summary_failed { reason; retryable } });
+      match get_pending_entry ~id:entry.id with
+      | Some updated -> record_summary_updated updated
+      | None -> ()
+    in
+    match provider_config_for_summary () with
+    | None ->
+      on_failure ~reason:"HITL summary: no runtime provider config available" ~retryable:false
+    | Some config ->
+      Hitl_summary_worker.spawn ~sw ~entry ~provider_config:config ~on_summary ~on_failure ()
 ;;
 
 let resolve_entry ~base_path (entry : pending_approval) (decision : decision) =
@@ -774,10 +883,6 @@ let sort_entries_by_requested_at entries =
 
 (* ── Submit & await ───────────────────────────────────────── *)
 
-let default_noncritical_approval_timeout_s = 600.0
-
-let default_critical_approval_escalation_after_s = 1800.0
-
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
     Called from the OAS approval_callback (inside agent fiber).
@@ -841,6 +946,11 @@ let submit_and_await
   in
   atomic_update pending (fun map -> SMap.add id entry map);
   record_pending entry;
+  let () =
+    match Eio_context.get_switch_opt () with
+    | Some sw -> spawn_hitl_summary_worker ~sw ~entry
+    | None -> ()
+  in
   let timeout_decision reason =
     let decision = Agent_sdk.Hooks.Reject reason in
     match Eio.Promise.peek promise with
@@ -1017,6 +1127,11 @@ let submit_pending
       if Atomic.compare_and_set pending map updated
       then (
         record_pending entry;
+        let () =
+          match Eio_context.get_switch_opt () with
+          | Some sw -> spawn_hitl_summary_worker ~sw ~entry
+          | None -> ()
+        in
         id)
       else submit ()
   in

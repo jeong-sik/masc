@@ -94,6 +94,7 @@ type rule_match =
 type resolution_result = { remembered_rule : approval_rule option }
 
 val risk_level_to_string : risk_level -> string
+val allowed_risk_level_values : string list
 val allowed_risk_level_values_label : string
 val risk_level_to_int : risk_level -> int
 val risk_level_of_string : string -> risk_level option

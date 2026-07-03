@@ -547,7 +547,7 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     (schema_property_int get_schema.input_schema "comment_limit" "minimum");
   Alcotest.(check (option int))
     "masc_board_post_get limit maximum"
-    (Some Board_types.Limits.max_comment_page_limit)
+    (Some Board.Limits.max_comment_page_limit)
     (schema_property_int get_schema.input_schema "comment_limit" "maximum");
   check_contains
     "masc_board_list schema says it returns post_id"

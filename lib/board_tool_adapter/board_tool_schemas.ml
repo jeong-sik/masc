@@ -185,6 +185,14 @@ let tool_post_edit : Masc_domain.tool_schema =
                           "Editor identity; must match the post's author. Auto-filled \
                            from caller's agent_name when omitted." )
                     ] )
+              ; ( "new_author"
+                , `Assoc
+                    [ "type", `String "string"
+                    ; ( "description"
+                      , `String
+                          "Transfer ownership to a new author. Only the current post \
+                           owner can set this field." )
+                    ] )
               ] )
         ; "required", `List [ `String "post_id" ]
         ]

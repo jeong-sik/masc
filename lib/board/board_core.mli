@@ -254,7 +254,9 @@ val create_post_with_outcome
     replaces the stored post under {!with_lock} and persists a full JSONL
     snapshot.  Returns [Unauthorized] when [editor] does not own the post,
     [Post_not_found] for a missing id, and [Validation_error] for
-    empty/oversized content.  [post_kind]/[visibility]/[hearth] are preserved. *)
+    empty/oversized content or invalid [new_author].  When provided by the
+    current owner, [new_author] transfers persisted ownership.
+    [post_kind]/[visibility]/[hearth] are preserved. *)
 val update_post_with_outcome
   :  store
   -> post_id:string
@@ -262,6 +264,7 @@ val update_post_with_outcome
   -> content:string
   -> ?title:string
   -> ?body:string
+  -> ?new_author:string
   -> unit
   -> (post, board_error) Result.t
 

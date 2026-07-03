@@ -143,6 +143,82 @@ let test_update_post_rejects_non_owner () =
       | Error e ->
           Alcotest.fail ("expected Unauthorized, got " ^ Board.show_board_error e))
 
+let test_update_post_transfers_author_by_owner () =
+  match
+    Board_dispatch.create_post ~author:"transfer-owner"
+      ~content:"transfer original body" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"transfer-owner"
+          ~content:"transfer updated body" ~new_author:"transfer-next" ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok updated -> (
+          Alcotest.(check string) "author transferred" "transfer-next"
+            (Board.Agent_id.to_string updated.author);
+          Alcotest.(check string) "content updated during transfer"
+            "transfer updated body" updated.content;
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "transferred author persisted"
+                "transfer-next"
+                (Board.Agent_id.to_string fetched.author)))
+
+let test_update_post_rejects_non_owner_transfer () =
+  match
+    Board_dispatch.create_post ~author:"transfer-owner"
+      ~content:"non-owner transfer original" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"transfer-intruder"
+          ~content:"hijacked transfer body" ~new_author:"transfer-intruder" ()
+      with
+      | Ok _ -> Alcotest.fail "non-owner transfer must be rejected"
+      | Error (Board.Unauthorized _) -> (
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "original author preserved"
+                "transfer-owner"
+                (Board.Agent_id.to_string fetched.author);
+              Alcotest.(check string) "original content preserved"
+                "non-owner transfer original" fetched.content)
+      | Error e ->
+          Alcotest.fail ("expected Unauthorized, got " ^ Board.show_board_error e))
+
+let test_update_post_rejects_invalid_new_author () =
+  match
+    Board_dispatch.create_post ~author:"transfer-owner"
+      ~content:"invalid transfer original" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"transfer-owner"
+          ~content:"invalid transfer body" ~new_author:"not a valid author" ()
+      with
+      | Ok _ -> Alcotest.fail "invalid new_author must be rejected"
+      | Error (Board.Validation_error _) -> (
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "author preserved after invalid transfer"
+                "transfer-owner"
+                (Board.Agent_id.to_string fetched.author);
+              Alcotest.(check string) "content preserved after invalid transfer"
+                "invalid transfer original" fetched.content)
+      | Error e ->
+          Alcotest.fail
+            ("expected Validation_error, got " ^ Board.show_board_error e))
+
 let test_update_post_missing_id () =
   match
     Board_dispatch.update_post ~post_id:"missing-post-id-zzz" ~editor:"any-agent"
@@ -1577,6 +1653,12 @@ let () =
         (with_eio test_update_post_by_owner);
       Alcotest.test_case "update rejects non-owner" `Quick
         (with_eio test_update_post_rejects_non_owner);
+      Alcotest.test_case "update transfers author by owner" `Quick
+        (with_eio test_update_post_transfers_author_by_owner);
+      Alcotest.test_case "update rejects non-owner transfer" `Quick
+        (with_eio test_update_post_rejects_non_owner_transfer);
+      Alcotest.test_case "update rejects invalid new_author" `Quick
+        (with_eio test_update_post_rejects_invalid_new_author);
       Alcotest.test_case "update missing id" `Quick
         (with_eio test_update_post_missing_id);
       Alcotest.test_case "update rejects empty content" `Quick

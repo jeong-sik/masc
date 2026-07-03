@@ -1347,10 +1347,13 @@ let test_load_redacts_legacy_raw_blocks_and_audio () =
          | Some audio ->
            Alcotest.(check bool) "legacy audio message_text redacted on load" false
              (contains_substring audio.message_text secret);
+           let audio_url_contains_secret =
+             match audio.audio_url with
+             | Some url -> contains_substring url secret
+             | None -> false
+           in
            Alcotest.(check bool) "legacy audio audio_url redacted on load" false
-             (match audio.audio_url with
-              | Some url -> contains_substring url secret
-              | None -> false))
+             audio_url_contains_secret
          | None -> Alcotest.fail "legacy audio missing");
         Alcotest.(check bool) "legacy blocks redacted on load" false
           (match msg.K.blocks with
@@ -1409,10 +1412,13 @@ let test_append_assistant_message_redacts_audio () =
          | Some audio ->
            Alcotest.(check bool) "loaded audio message_text redacted" false
              (contains_substring audio.message_text secret);
+           let audio_url_contains_secret =
+             match audio.audio_url with
+             | Some url -> contains_substring url secret
+             | None -> false
+           in
            Alcotest.(check bool) "loaded audio audio_url redacted" false
-             (match audio.audio_url with
-              | Some url -> contains_substring url secret
-              | None -> false))
+             audio_url_contains_secret
          | None -> Alcotest.fail "loaded audio missing")
       | messages ->
         Alcotest.failf "expected 1 message, got %d" (List.length messages))

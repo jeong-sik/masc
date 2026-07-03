@@ -155,5 +155,14 @@ val run_turn
   -> ?shared_context:Agent_sdk.Context.t
   -> ?event_bus:Agent_sdk.Event_bus.t
   -> ?trace_link:string * string
+  -> ?yield_to_chat_waiting:(unit -> bool)
+       (* Autonomous-lane hook: evaluated at each OAS agent-loop turn boundary
+          (the same guard point as [max_idle_turns], before the next model
+          dispatch — never mid tool execution). When it returns [true] the run
+          stops gracefully at that boundary, releasing the turn slot so a
+          dashboard/connector chat request parked behind this turn admits via
+          direct handoff before its shorter budget expires. Only the
+          heartbeat-scheduled path passes it; a chat turn must not yield to a
+          later-queued chat. *)
   -> unit
   -> (run_result, Agent_sdk.Error.sdk_error) result

@@ -48,6 +48,32 @@ describe('parseFusionRunsResponse', () => {
     expect(parsed.count).toBe(0)
     expect(parsed.generatedAt).toBeNull()
   })
+
+  it('carries the additive error / failure_code fields on a failed row', () => {
+    const parsed = parseFusionRunsResponse({
+      runs: [
+        {
+          run_id: 'r-fail',
+          keeper: 'k',
+          preset: 'deep',
+          started_at: 1,
+          status: 'failed',
+          error: 'judge timed out after 30s',
+          failure_code: 'timeout',
+        },
+        { run_id: 'r-run', keeper: 'k', preset: 'p', started_at: 2, status: 'running' },
+      ],
+    })
+    expect(parsed.runs[0]).toMatchObject({
+      runId: 'r-fail',
+      status: 'failed',
+      error: 'judge timed out after 30s',
+      failureCode: 'timeout',
+    })
+    // running rows carry no failure attribution
+    expect(parsed.runs[1]?.error).toBeUndefined()
+    expect(parsed.runs[1]?.failureCode).toBeUndefined()
+  })
 })
 
 describe('fusion run status helpers', () => {
@@ -149,5 +175,32 @@ describe('FusionRunsPanel', () => {
     ]
     render(html`<${FusionRunsPanel} />`, container)
     expect(container.querySelector('.fus-runs-live')).toBeNull()
+  })
+
+  it('surfaces the failure code and error on a failed run card', () => {
+    fusionRuns.value = [
+      {
+        runId: 'r-fail',
+        keeper: 'k3',
+        preset: 'deep',
+        startedAt: 200,
+        status: 'failed',
+        error: 'judge timed out after 30s',
+        failureCode: 'timeout',
+      },
+    ]
+    render(html`<${FusionRunsPanel} />`, container)
+    const reason = container.querySelector('[data-testid="fusion-run-reason"]')
+    expect(reason).not.toBeNull()
+    expect(reason?.querySelector('.fus-runs-code')?.textContent).toBe('timeout')
+    expect(reason?.textContent).toContain('judge timed out after 30s')
+  })
+
+  it('omits the reason line for a completed run', () => {
+    fusionRuns.value = [
+      { runId: 'r-done', keeper: 'k2', preset: 'deep', startedAt: 100, status: 'completed' },
+    ]
+    render(html`<${FusionRunsPanel} />`, container)
+    expect(container.querySelector('[data-testid="fusion-run-reason"]')).toBeNull()
   })
 })

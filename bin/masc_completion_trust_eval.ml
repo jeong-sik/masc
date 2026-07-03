@@ -244,6 +244,8 @@ let outcome_of_stop (sr : Runtime_agent.stop_reason) : Trajectory.trajectory_out
     let t = match tool_name with Some s -> s | None -> "none" in
     Trajectory.Gated
       (Printf.sprintf "mutation_boundary:turns=%d,tool=%s" turns_used t)
+  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
+    Trajectory.Gated (Printf.sprintf "yielded_to_chat_waiting:turns=%d" turns_used)
 ;;
 
 let build_eval_run (scenario : EH.scenario) ~run_index

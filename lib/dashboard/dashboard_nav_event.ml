@@ -51,9 +51,11 @@ let valid_sections =
   ; "code", [ "ide-shell" ]
   ; ( "settings"
     , [ "runtime"
+      ; "routing"
       ; "runtimes"
       ; "paths"
       ; "mcp"
+      ; "repositories"
       ; "notify"
       ; "prompts"
       ; "fusion"

@@ -565,19 +565,19 @@ button.cn-bind-row:hover .cn-bind-go { color: var(--volt-strong); transform: tra
 .set-repo-list { display: flex; flex-direction: column; gap: 8px; margin-bottom: 12px; }
 .set-repo { display: flex; align-items: center; gap: 12px; padding: 11px 13px; border: 1px solid var(--border-main); border-radius: var(--radius-xs); background: var(--bg-well); }
 .set-repo-main { flex: 1; min-width: 0; }
-.set-repo-name { font-size: 13px; color: var(--text-bright); display: flex; align-items: center; gap: 8px; }
-.set-repo-branch { font-family: var(--font-ui); font-size: 10px; letter-spacing: .04em; color: var(--text-mid); padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: var(--bg-panel); }
-.set-repo-url { font-size: 11px; color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
+.set-repo-name { font-size: var(--fs-13); color: var(--text-bright); display: flex; align-items: center; gap: 8px; }
+.set-repo-branch { font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: .04em; color: var(--text-mid); padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); background: var(--bg-panel); }
+.set-repo-url { font-size: var(--fs-11); color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; margin-top: 3px; }
 .set-repo-meta { flex: none; display: flex; align-items: center; gap: 10px; }
 .set-repo-sync { font-family: var(--font-ui); font-size: 10.5px; letter-spacing: .03em; color: var(--text-dim); padding: 2px 9px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
 .set-repo-sync.on { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 40%, transparent); }
-.set-repo-del { flex: none; width: 24px; height: 24px; border-radius: var(--radius-xs); border: 1px solid transparent; background: none; color: var(--text-dim); cursor: pointer; font-size: 12px; transition: all .16s ease; }
+.set-repo-del { flex: none; width: 24px; height: 24px; border-radius: var(--radius-xs); border: 1px solid transparent; background: none; color: var(--text-dim); cursor: pointer; font-size: var(--fs-12); transition: all .16s ease; }
 .set-repo-del:hover { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); background: color-mix(in oklab, var(--status-bad) 8%, transparent); }
 .set-repo-form { margin-top: 10px; padding: 14px; border: 1px solid var(--border-main); border-radius: var(--radius-xs); background: var(--bg-well); }
 .set-repo-form-act { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
-.set-btn-ghost { font-family: var(--font-ui); font-size: 12px; padding: 6px 14px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); background: var(--bg-panel); color: var(--text-mid); cursor: pointer; }
+.set-btn-ghost { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 14px; border-radius: var(--radius-xs); border: 1px solid var(--border-main); background: var(--bg-panel); color: var(--text-mid); cursor: pointer; }
 .set-btn-ghost:hover { color: var(--text-bright); border-color: var(--brass); }
-.set-btn-primary { font-family: var(--font-ui); font-size: 12px; padding: 6px 14px; border-radius: var(--radius-xs); border: 1px solid var(--brass); background: color-mix(in oklab, var(--brass) 16%, var(--bg-panel)); color: var(--brass); cursor: pointer; }
+.set-btn-primary { font-family: var(--font-ui); font-size: var(--fs-12); padding: 6px 14px; border-radius: var(--radius-xs); border: 1px solid var(--brass); background: color-mix(in oklab, var(--brass) 16%, var(--bg-panel)); color: var(--brass); cursor: pointer; }
 .set-btn-primary:hover:not(:disabled) { background: color-mix(in oklab, var(--brass) 26%, var(--bg-panel)); }
 .set-btn-primary:disabled { opacity: 0.4; cursor: not-allowed; }
 

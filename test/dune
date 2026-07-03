@@ -1901,6 +1901,8 @@
 
 (include stanzas/test_keeper_auto_pause_blocker_persist_12683.inc)
 
+(include stanzas/test_keeper_latched_reason_wiring.inc)
+
 (include stanzas/test_keeper_agent_run_sandbox_source.inc)
 
 (include stanzas/test_keeper_agent_runtime_status.inc)

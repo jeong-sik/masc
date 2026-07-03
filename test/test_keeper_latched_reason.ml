@@ -41,6 +41,7 @@ let round_trippable =
   ; "stale storm", R.Stale_storm
   ; "provider timeout loop", R.Provider_timeout_loop { consecutive_timeouts = 2 }
   ; "operator paused", R.Operator_paused { operator_actor = "dashboard:play" }
+  ; "dead tombstone", R.Dead_tombstone
   ]
 ;;
 

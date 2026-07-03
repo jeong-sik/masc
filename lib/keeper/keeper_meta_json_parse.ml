@@ -40,6 +40,7 @@ type parsed_keeper_state =
   ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
+  ; ps_latched_reason : Keeper_latched_reason.t option
   ; ps_auto_resume_after_sec : float option
   ; ps_autoboot_enabled : bool
   ; ps_current_task_id : Keeper_id.Task_id.t option
@@ -377,6 +378,19 @@ let parse_keeper_state
 	    | _ -> None
 	  in
 	  let ps_paused = Safe_ops.json_bool ~default:false "paused" json in
+  (* [latched_reason] is a display-only annotation on the pause, not the
+     authoritative control bit ([paused] is). A malformed/unknown persisted
+     value degrades to [None] rather than failing the whole meta parse —
+     mirroring the lenient [last_blocker] read above. Losing the annotation
+     costs observability, never control. *)
+  let ps_latched_reason =
+    match Json_util.assoc_member_opt "latched_reason" json with
+    | None | Some `Null -> None
+    | Some reason_json ->
+      (match Keeper_latched_reason.Stable.of_yojson reason_json with
+       | Ok reason -> Some reason
+       | Error _ -> None)
+  in
   let ps_auto_resume_after_sec = Safe_ops.json_float_opt "auto_resume_after_sec" json in
   let ps_autoboot_enabled = Safe_ops.json_bool ~default:true "autoboot_enabled" json in
   let ps_current_task_id =
@@ -393,6 +407,7 @@ let parse_keeper_state
   ; ps_continuity_summary
   ; ps_active_goal_ids
   ; ps_paused
+  ; ps_latched_reason
   ; ps_auto_resume_after_sec
   ; ps_autoboot_enabled
   ; ps_current_task_id
@@ -540,6 +555,7 @@ let meta_of_json (json : Yojson.Safe.t) : (keeper_meta, string) result =
                    ; continuity_summary = state.ps_continuity_summary
                    ; active_goal_ids = state.ps_active_goal_ids
                    ; paused = state.ps_paused
+                   ; latched_reason = state.ps_latched_reason
                    ; auto_resume_after_sec = state.ps_auto_resume_after_sec
                    ; autoboot_enabled = state.ps_autoboot_enabled
                    ; current_task_id = state.ps_current_task_id

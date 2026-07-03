@@ -34,6 +34,13 @@ type t =
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
   | Operator_paused of { operator_actor : string }
+  | Dead_tombstone
+      (** The supervisor reaped a dead keeper and left [paused = true] on
+          disk as a tombstone (see
+          [Keeper_supervisor_cleanup_tombstone]). Carries no payload:
+          the fact that the paused meta is a dead-keeper tombstone — not
+          an operator pause or a runtime latch — is the whole
+          observability signal. *)
 
 and contract_violation_detail =
   { reason_code :

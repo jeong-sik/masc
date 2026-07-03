@@ -35,7 +35,14 @@ let cleanup_dead_tombstone
           write_meta_with_merge
             ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
             ctx.config
-            { meta with paused = true }
+            { meta with
+              paused = true
+            ; (* Record {i why} this meta is paused on disk: a dead-keeper
+                 tombstone, distinct from an operator pause or runtime latch.
+                 Observability only — the unregister/pause behavior below is
+                 unchanged. *)
+              latched_reason = Some Keeper_latched_reason.Dead_tombstone
+            }
         with
         | Ok () -> true
         | Error err when is_version_conflict_error err ->

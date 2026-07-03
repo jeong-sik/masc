@@ -593,6 +593,13 @@ type keeper_meta =
     continuity_summary : string
   ; active_goal_ids : string list
   ; paused : bool
+  ; latched_reason : Keeper_latched_reason.t option
+    (** Typed companion to [paused]: {i why} this keeper is latched.
+        Producers set it alongside [paused = true] (bool-only pause sites
+        record their [Keeper_latched_reason.t]); consumers surface it via
+        the status bridge. Display/observability only — the control
+        decision is still carried by [paused]. [None] means paused was
+        set by a site that has not yet been wired to a reason. *)
   ; auto_resume_after_sec : float option
     (** Self-healing circuit breaker: when [Some sec] the supervisor will
         auto-resume this keeper after [sec] seconds following the last

@@ -359,6 +359,7 @@ let create_keeper (ctx : _ context) (p : parsed_args) : tool_result =
         active_goal_ids =
           active_goal_ids;
         paused = false;
+        latched_reason = None;
         auto_resume_after_sec = None;
         autoboot_enabled;
         current_task_id = None;

@@ -84,6 +84,10 @@ let meta_to_json (m : keeper_meta) : Yojson.Safe.t =
                 `Assoc [ ("tool_name", `String s.tool_name); ("outcome", `String s.outcome) ])
              rt.last_turn_tool_calls) )
     ; "paused", `Bool m.paused
+    ; ( "latched_reason"
+      , match m.latched_reason with
+        | Some reason -> Keeper_latched_reason.Stable.to_yojson reason
+        | None -> `Null )
     ; "auto_resume_after_sec", Json_util.float_opt_to_json m.auto_resume_after_sec
     ; ( "current_task_id"
       , Json_util.string_opt_to_json

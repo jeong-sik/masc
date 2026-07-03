@@ -42,6 +42,11 @@ let preserve_operator_pause_from_disk
     {
       merged with
       paused = true;
+      (* [latched_reason] is the typed companion to [paused]; preserve it
+         from disk for the same reason [paused = true] is preserved. A
+         heartbeat writer that raced in with a stale [latched_reason = None]
+         must not erase the reason a pause site recorded on disk. *)
+      latched_reason = latest.latched_reason;
       auto_resume_after_sec = None;
       runtime = { merged.runtime with last_blocker = None };
     }

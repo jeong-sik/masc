@@ -57,6 +57,7 @@ type t =
   | Stale_storm
   | Provider_timeout_loop of { consecutive_timeouts : int }
   | Operator_paused of { operator_actor : string }
+  | Dead_tombstone
 
 (* -------------------------------------------------------------------- *)
 (* Polymorphic-variant equality helpers (closed set; new variants are a  *)
@@ -134,6 +135,7 @@ let equal a b =
     Int.equal c1 c2
   | Operator_paused { operator_actor = a1 }, Operator_paused { operator_actor = a2 } ->
     String.equal a1 a2
+  | Dead_tombstone, Dead_tombstone -> true
   | ( ( No_progress_loop _
       | Completion_contract_violation _
       | Idle_detected _
@@ -141,7 +143,8 @@ let equal a b =
       | Turn_budget_exhausted _
       | Stale_storm
       | Provider_timeout_loop _
-      | Operator_paused _ )
+      | Operator_paused _
+      | Dead_tombstone )
     , _ ) ->
     false
 ;;
@@ -185,6 +188,7 @@ let hash = function
   | Stale_storm -> 5
   | Provider_timeout_loop { consecutive_timeouts } -> Hashtbl.hash (6, consecutive_timeouts)
   | Operator_paused { operator_actor } -> Hashtbl.hash (7, operator_actor)
+  | Dead_tombstone -> 8
 ;;
 
 (* -------------------------------------------------------------------- *)
@@ -256,6 +260,7 @@ let pp ppf = function
     Format.fprintf ppf "Provider_timeout_loop{count=%d}" consecutive_timeouts
   | Operator_paused { operator_actor } ->
     Format.fprintf ppf "Operator_paused{actor=%s}" operator_actor
+  | Dead_tombstone -> Format.fprintf ppf "Dead_tombstone"
 ;;
 
 (* -------------------------------------------------------------------- *)
@@ -313,6 +318,7 @@ let to_wire = function
     Printf.sprintf "provider_timeout_loop:count=%d" consecutive_timeouts
   | Operator_paused { operator_actor } ->
     Printf.sprintf "operator_paused:actor=%s" operator_actor
+  | Dead_tombstone -> "dead_tombstone"
 ;;
 
 (* Fail-closed parser. The wire form is append-only information; any
@@ -428,6 +434,7 @@ let of_wire wire =
     let+ source = parse_source source_str in
     Turn_budget_exhausted { detail = { dimension; source }; used; limit }
   | [ "stale_storm" ] -> Ok Stale_storm
+  | [ "dead_tombstone" ] -> Ok Dead_tombstone
   | [ "provider_timeout_loop"; count_field ] ->
     let* count_str = parse_field "count" count_field in
     let+ consecutive_timeouts = int_of_string_exn count_str in
@@ -561,6 +568,7 @@ module Stable = struct
         ]
     | Operator_paused { operator_actor } ->
       `Assoc [ "kind", `String "operator_paused"; "actor", `String operator_actor ]
+    | Dead_tombstone -> `Assoc [ "kind", `String "dead_tombstone" ]
   ;;
 
   let of_yojson (j : Yojson.Safe.t) =
@@ -593,6 +601,7 @@ module Stable = struct
       Ok (Provider_timeout_loop { consecutive_timeouts = n })
     | `Assoc [ "kind", `String "operator_paused"; "actor", `String actor ] ->
       Ok (Operator_paused { operator_actor = actor })
+    | `Assoc [ "kind", `String "dead_tombstone" ] -> Ok Dead_tombstone
     | _ ->
       Error
         (Printf.sprintf

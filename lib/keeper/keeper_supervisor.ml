@@ -15,6 +15,16 @@ open Keeper_execution
 
 include Keeper_supervisor_launch
 
+module Option = struct
+  include Stdlib.Option
+
+  let value_map o ~default ~f =
+    match o with
+    | None -> default
+    | Some x -> f x
+  ;;
+end
+
 (** RFC-0250: pure stale-run assessment for the no-turn-produced case.
 
     Returns [Some (Stale_turn_timeout (Idle_turn { stall_seconds }))] — giving
@@ -808,9 +818,10 @@ let sweep_and_recover ~load_or_materialize_keeper_meta (ctx : _ context) =
               is gone. [meta] was read above (pre-[Sys.remove]), so the reason
               survives in the event even though the file no longer does. *)
            let latched_reason_wire =
-             Option.value
+             Option.value_map
+               meta.latched_reason
                ~default:"none"
-               (Option.map Keeper_latched_reason.to_wire meta.latched_reason)
+               ~f:Keeper_latched_reason.to_wire
            in
            publish_lifecycle
              ~event:

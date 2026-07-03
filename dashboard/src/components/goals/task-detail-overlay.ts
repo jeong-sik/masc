@@ -30,6 +30,7 @@ import {
   activityError,
   hasActivityTab,
   isKeeperAssignee,
+  buildTaskLineage,
   type NormalizedTaskEvent,
   type TaskDetailTab,
 } from './task-detail-state'
@@ -119,6 +120,73 @@ function TaskEventsSection() {
       })}
       </div>
         `}
+    </div>
+  `
+}
+
+// -- Activity lineage (ownership chain + lifecycle rail) --------------
+
+// Compact clock label (HH:MM) for the narrow rail time column — the rail's
+// fixed 38px column cannot hold a relative "N분 전" string. Local time, matching
+// the keeper-v2 prototype's clock format.
+function clockLabel(iso: string | null): string {
+  if (!iso) return ''
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) return ''
+  return `${String(date.getHours()).padStart(2, '0')}:${String(date.getMinutes()).padStart(2, '0')}`
+}
+
+function LineageActor({ id, current = false }: { id: string | null; current?: boolean }) {
+  if (!id) return html`<span class="wk-lin-actor none">미배정</span>`
+  const isKeeper = findKeeper(id) !== null
+  return html`<span class=${`wk-lin-actor${isKeeper ? '' : ' none'}${current ? ' cur' : ''}`}>${id}</span>`
+}
+
+function TaskLineageSection({ task }: { task: Task }) {
+  const loading = taskEventsLoading.value
+  const events = taskEvents.value
+  // Defer to the events section's own loading affordance while the first fetch
+  // is in flight, so the synthesized fallback does not flash then get replaced.
+  if (loading && events.length === 0) return null
+
+  const lineage = buildTaskLineage(events, task)
+  if (lineage.rows.length === 0) return null
+  const assignee = task.assignee ?? null
+
+  return html`
+    <div>
+      <${SectionTitle}>활동 흐름</${SectionTitle}>
+      <div class="wk-lineage">
+        <div class="wk-lin-h">
+          <span class="wk-lin-h-lbl">소유권 체인</span>
+          <span class="wk-lin-chain">
+            ${lineage.chain.length === 0
+              ? html`<${LineageActor} id=${null} />`
+              : lineage.chain.map((id, i) => html`
+                  ${i > 0 ? html`<span class="wk-lin-chain-arr">→</span>` : null}
+                  <${LineageActor} id=${id} current=${id === assignee} />
+                `)}
+          </span>
+          ${lineage.synthesized
+            ? html`<span class="text-3xs text-text-dim">상태 기반 추정 · 기록된 이벤트 없음</span>`
+            : null}
+        </div>
+        <div class="wk-lin-track">
+          ${lineage.rows.map((row, i) => html`
+            <div key=${`${row.stage.key}-${i}`} class=${`wk-lin-row ${row.stage.cls}`}>
+              <span class="wk-lin-at">${clockLabel(row.ts)}</span>
+              <span class="wk-lin-rail"><span class=${`wk-lin-dot ${row.stage.cls}`}></span></span>
+              <span class="wk-lin-body">
+                <span class="wk-lin-line">
+                  <span class=${`wk-lin-ev ${row.stage.cls}`}>${row.stage.glyph} ${row.stage.lbl}</span>
+                  ${row.actor ? html`<${LineageActor} id=${row.actor} />` : null}
+                </span>
+                ${row.notes ? html`<span class="wk-lin-note"><${RichContent} text=${row.notes} previewLimit=${1} /></span>` : null}
+              </span>
+            </div>
+          `)}
+        </div>
+      </div>
     </div>
   `
 }
@@ -474,6 +542,7 @@ export function TaskDetailOverlay() {
             </div>
           ` : null}
 
+          <${TaskLineageSection} task=${task} />
           <${ContractSection} task=${task} />
           <${VerdictLineageSection} />
           <${ExecutionLinksSection} task=${task} />

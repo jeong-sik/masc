@@ -6,10 +6,10 @@
 // `.ov.sch-surf` → `.ov-head` (eyebrow + title + sub) → `.ov-kpis` (4 KPIs).
 
 import { html } from 'htm/preact'
-import { useEffect } from 'preact/hooks'
+import { useEffect, useState } from 'preact/hooks'
 import type { DashboardScheduledAutomation } from '../../api'
 import { ErrorState, LoadingState } from '../common/feedback-state'
-import { ScheduledAutomationPanel, normalizedScheduleStatus } from '../tools/scheduled-automation-panel'
+import { ScheduleAside, ScheduledAutomationPanel, normalizedScheduleStatus, scheduledPendingApprovalCount } from '../tools/scheduled-automation-panel'
 import {
   loadTools,
   toolsData,
@@ -40,11 +40,16 @@ export function ScheduleSurface() {
   const loading = toolsLoading.value
   const error = toolsError.value
   const dueEffective = automation?.derived_counts?.due_effective ?? 0
-  const pendingCount = countByStatus(automation, ['pending', 'pending_approval', 'awaiting_approval'])
+  // Shared with the nav badge + topbar chip so '승인 대기' has one derivation.
+  const pendingCount = scheduledPendingApprovalCount(automation)
   const scheduledCount = countByStatus(automation, ['scheduled'])
   const runningCount = countByStatus(automation, ['running'])
   const dueRunning = dueEffective + runningCount
   const totalCount = automation?.requests?.length ?? 0
+
+  // Detail-overlay selection is lifted here so the read-only operations aside
+  // (right column) and the panel's cards/feed drive the same overlay.
+  const [selectedScheduleId, setSelectedScheduleId] = useState<string | null>(null)
 
   useEffect(() => {
     if (!toolsData.value && !toolsLoading.value) {
@@ -53,7 +58,7 @@ export function ScheduleSurface() {
   }, [])
 
   return html`
-    <main class="ov sch-surf" data-screen-label="예약" data-testid="schedule-surface">
+    <main class="ov ov-2col sch-surf" data-screen-label="예약" data-testid="schedule-surface">
       <div class="ov-scroll">
         <header class="ov-head">
           <div>
@@ -88,8 +93,20 @@ export function ScheduleSurface() {
 
         ${loading && !automation
           ? html`<${LoadingState}>예약 자동화 projection 불러오는 중...<//>`
-          : html`<${ScheduledAutomationPanel} automation=${automation} variant="v2" />`}
+          : html`<${ScheduledAutomationPanel}
+              automation=${automation}
+              variant="v2"
+              selectedScheduleId=${selectedScheduleId}
+              onSelectSchedule=${setSelectedScheduleId}
+            />`}
       </div>
+      ${automation
+        ? html`<${ScheduleAside}
+            requests=${automation.requests ?? []}
+            sum=${{ scheduled: scheduledCount, dueRunning, pending: pendingCount, total: totalCount }}
+            onOpen=${setSelectedScheduleId}
+          />`
+        : null}
     </main>
   `
 }

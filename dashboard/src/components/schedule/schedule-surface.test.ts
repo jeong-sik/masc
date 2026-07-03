@@ -152,6 +152,26 @@ describe('ScheduleSurface', () => {
     expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
   })
 
+  it('renders the read-only operations aside in a two-column shell', async () => {
+    mocks.toolsData.value = {
+      generated_at: '2026-06-21T00:00:00Z',
+      tool_inventory: { tools: [] },
+      tool_usage: {},
+      scheduled_automation: sampleAutomation(),
+    }
+
+    render(html`<${ScheduleSurface} />`, container)
+    await flush()
+
+    // Two-column shell so the aside sits as a right rail beside the scroll column.
+    expect(container.querySelector('main.ov-2col')).not.toBeNull()
+    const aside = container.querySelector('[data-testid="schedule-aside"]')
+    expect(aside).not.toBeNull()
+    expect(aside?.querySelector('.wka-pulse')).not.toBeNull()
+    // The aside is derived read-only: no mutation controls anywhere on the surface.
+    expect(container.querySelectorAll('[data-schedule-mutation]')).toHaveLength(0)
+  })
+
   it('merges sparse backend counts with materialized request statuses', async () => {
     const automation = sampleAutomation()
     automation.counts = { pending: 1, scheduled: 3, running: 1 }

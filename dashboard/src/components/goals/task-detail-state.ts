@@ -54,6 +54,129 @@ function normalizeTaskHistory(raw: TaskHistoryRow[]): NormalizedTaskEvent[] {
   }))
 }
 
+// -- Activity lineage (ownership chain + lifecycle rail) ------------
+//
+// The keeper-v2 prototype (work.jsx TaskLineage) renders task history as an
+// ownership chain (first actor + every handoff target, de-duplicated) plus a
+// vertical rail of lifecycle events. masc_task_history carries the per-event
+// actor (`agent`) but no explicit handoff *target*, so the chain is derived
+// from the actor sequence rather than fabricated per-event `→ target` arrows.
+
+export interface TaskLineageStage {
+  readonly key: string
+  readonly glyph: string
+  readonly cls: string
+  readonly lbl: string
+}
+
+const TASK_LINEAGE_STAGES: Readonly<Record<string, TaskLineageStage>> = {
+  created: { key: 'created', glyph: '○', cls: 'dim', lbl: '생성' },
+  claimed: { key: 'claimed', glyph: '◉', cls: 'claimed', lbl: '클레임' },
+  started: { key: 'started', glyph: '▶', cls: 'wip', lbl: '착수' },
+  handoff: { key: 'handoff', glyph: '⇄', cls: 'volt', lbl: '핸드오프' },
+  submitted: { key: 'submitted', glyph: '◪', cls: 'verify', lbl: '검증 제출' },
+  approved: { key: 'approved', glyph: '✓', cls: 'done', lbl: '검증 승인' },
+  rejected: { key: 'rejected', glyph: '✕', cls: 'bad', lbl: '반려' },
+  blocked: { key: 'blocked', glyph: '⚠', cls: 'bad', lbl: '차단' },
+  done: { key: 'done', glyph: '✓', cls: 'done', lbl: '완료' },
+  cancelled: { key: 'cancelled', glyph: '◌', cls: 'dim', lbl: '취소' },
+  transition: { key: 'transition', glyph: '·', cls: 'dim', lbl: '전이' },
+}
+
+/** Map a raw masc_task_history label to a lifecycle stage spec. */
+export function taskLineageStage(label: string): TaskLineageStage {
+  switch (label.trim().toLowerCase()) {
+    case 'created':
+    case 'create': return TASK_LINEAGE_STAGES.created!
+    case 'claimed':
+    case 'claim': return TASK_LINEAGE_STAGES.claimed!
+    case 'started':
+    case 'start':
+    case 'in_progress': return TASK_LINEAGE_STAGES.started!
+    case 'handoff':
+    case 'hand_off':
+    case 'handed_off': return TASK_LINEAGE_STAGES.handoff!
+    case 'submitted':
+    case 'submit':
+    case 'submit_for_verification':
+    case 'awaiting_verification': return TASK_LINEAGE_STAGES.submitted!
+    case 'approved':
+    case 'approve': return TASK_LINEAGE_STAGES.approved!
+    case 'rejected':
+    case 'reject': return TASK_LINEAGE_STAGES.rejected!
+    case 'blocked':
+    case 'block': return TASK_LINEAGE_STAGES.blocked!
+    case 'done':
+    case 'completed':
+    case 'complete': return TASK_LINEAGE_STAGES.done!
+    case 'cancelled':
+    case 'canceled':
+    case 'cancel': return TASK_LINEAGE_STAGES.cancelled!
+    default: return TASK_LINEAGE_STAGES.transition!
+  }
+}
+
+export interface TaskLineageRow {
+  readonly stage: TaskLineageStage
+  readonly actor: string | null
+  readonly ts: string | null
+  readonly notes: string | null
+}
+
+export interface TaskLineage {
+  readonly chain: readonly string[]
+  readonly rows: readonly TaskLineageRow[]
+  readonly synthesized: boolean
+}
+
+// Minimal flow synthesized from the current status when no history exists yet
+// (mirrors work.jsx taskLineage fallback). Keyed by the live 6-state lifecycle.
+const SYNTHESIZED_STAGE_KEYS: Readonly<Record<string, readonly string[]>> = {
+  todo: ['created'],
+  claimed: ['created', 'claimed'],
+  in_progress: ['created', 'claimed', 'started'],
+  awaiting_verification: ['created', 'started', 'submitted'],
+  done: ['created', 'done'],
+  cancelled: ['created', 'cancelled'],
+}
+
+/**
+ * Build the ownership chain + lifecycle rail for a task.
+ *
+ * - With history: each event becomes a rail row (stage/actor/ts/notes); the
+ *   chain is the de-duplicated actor sequence in event order.
+ * - Without history: a minimal flow is synthesized from `status` + `assignee`
+ *   so the rail is never empty for an assigned/active task.
+ */
+export function buildTaskLineage(
+  events: readonly NormalizedTaskEvent[],
+  task: Pick<Task, 'status' | 'assignee'>,
+): TaskLineage {
+  if (events.length > 0) {
+    const rows: TaskLineageRow[] = events.map(event => ({
+      stage: taskLineageStage(event.label),
+      actor: event.agent,
+      ts: event.ts,
+      notes: event.notes,
+    }))
+    const chain: string[] = []
+    for (const row of rows) {
+      if (row.actor && !chain.includes(row.actor)) chain.push(row.actor)
+    }
+    return { chain, rows, synthesized: false }
+  }
+
+  const assignee = task.assignee ?? null
+  const stageKeys = SYNTHESIZED_STAGE_KEYS[task.status ?? 'todo'] ?? SYNTHESIZED_STAGE_KEYS.todo!
+  const rows: TaskLineageRow[] = stageKeys.map(key => ({
+    stage: TASK_LINEAGE_STAGES[key]!,
+    actor: assignee,
+    ts: null,
+    notes: null,
+  }))
+  return { chain: assignee ? [assignee] : [], rows, synthesized: true }
+}
+
 function describeTaskEventsError(err: unknown): string {
   const api = extractApiError(err, '태스크 이벤트를 불러오지 못했습니다')
   if (api.timeout) {

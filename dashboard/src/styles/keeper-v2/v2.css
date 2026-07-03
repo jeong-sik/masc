@@ -1531,3 +1531,68 @@ a:focus-visible,
 input:focus-visible,
 textarea:focus-visible { outline: 2px solid var(--volt); outline-offset: 2px; border-radius: var(--radius-xs); }
 .v2-app :focus:not(:focus-visible) { outline: none; }
+
+/* ══════════════════════════════════════════════════════════════
+   Work/Schedule deltas — vendored verbatim from the keeper-v2
+   prototype v2.css (design tokens are native here). Backs:
+   · schedule aside pulse + terminal marks (schedule-surface.ts SchAside)
+   · task activity lineage rail (goals/task-detail-overlay.ts)
+   · kanban card → owning goal jump (work.ts KanbanCard)
+   ══════════════════════════════════════════════════════════════ */
+
+/* schedule aside — pulse summary */
+.wka-pulse { display: flex; gap: 8px; margin-bottom: 12px; }
+.wka-pulse-i { flex: 1; display: flex; flex-direction: column; gap: 3px; padding: 9px 10px; border: 1px solid var(--border-soft); border-radius: var(--radius-sm); background: var(--bg-card); font-size: 9.5px; letter-spacing: 0.06em; color: var(--text-dim); text-transform: uppercase; }
+.wka-pulse-i b { font-size: 19px; font-weight: 400; color: var(--text-bright); font-variant-numeric: tabular-nums; }
+.wka-pulse-i b.volt { color: var(--volt-strong); }
+.wka-pulse-i b.warn { color: var(--status-warn); }
+
+/* schedule aside — terminal recency marks + status suffix */
+.wka-done-mark.ok { color: var(--status-ok); }
+.wka-done-mark.bad { color: var(--status-bad); }
+.wka-done-mark.warn { color: var(--status-warn); }
+.wka-done-mark.dim { color: var(--text-dim); }
+.wka-done-mark.info { color: var(--info); }
+.wka-done-ns { margin-left: auto; flex: none; font-size: 10px; color: var(--text-dim); }
+
+/* task activity lineage rail */
+.wk-lineage { border: 1px solid var(--border-soft); border-left: 2px solid var(--volt-dim); border-radius: var(--radius-sm); background: var(--bg-sunken); padding: 10px 12px; margin-bottom: 8px; }
+.wk-lin-h { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; margin-bottom: 9px; padding-bottom: 8px; border-bottom: 1px solid var(--border-soft); }
+.wk-lin-h-lbl { font-family: var(--font-display); font-size: 10px; letter-spacing: 0.16em; text-transform: uppercase; color: var(--text-mid); }
+.wk-lin-chain { display: inline-flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.wk-lin-chain-arr { color: var(--volt-strong); font-size: 12px; }
+.wk-lin-actor { font-family: var(--font-mono); font-size: 11.5px; color: var(--text-primary); background: none; border: 0; border-bottom: 1px dashed var(--border-highlight); padding: 0 1px 1px; cursor: pointer; transition: color 0.14s ease, border-color 0.14s ease; }
+.wk-lin-actor:hover { color: var(--volt-strong); border-color: var(--volt-strong); }
+.wk-lin-actor.none { color: var(--text-dim); border-bottom-style: dotted; cursor: default; }
+.wk-lin-actor.cur { color: var(--text-bright); border-bottom-color: var(--volt-strong); }
+.wk-lin-actor.to { color: var(--volt-strong); }
+
+.wk-lin-track { display: flex; flex-direction: column; }
+.wk-lin-row { display: grid; grid-template-columns: 38px 16px 1fr; align-items: start; gap: 0 9px; }
+.wk-lin-at { text-align: right; font-size: 10px; color: var(--text-dim); padding-top: 1px; font-variant-numeric: tabular-nums; }
+.wk-lin-rail { position: relative; align-self: stretch; display: flex; justify-content: center; }
+.wk-lin-rail::before { content: ""; position: absolute; top: 0; bottom: 0; width: 1px; background: var(--border-main); }
+.wk-lin-row:first-child .wk-lin-rail::before { top: 6px; }
+.wk-lin-row:last-child .wk-lin-rail::before { bottom: calc(100% - 10px); }
+.wk-lin-dot { position: relative; z-index: 1; width: 7px; height: 7px; border-radius: 50%; margin-top: 4px; background: var(--text-dim); box-shadow: 0 0 0 3px var(--bg-sunken); }
+.wk-lin-dot.dim { background: var(--text-dim); }
+.wk-lin-dot.claimed { background: var(--text-mid); }
+.wk-lin-dot.wip { background: var(--volt-strong); }
+.wk-lin-dot.volt { background: var(--volt-strong); box-shadow: 0 0 0 3px var(--bg-sunken), 0 0 7px var(--volt-dim); }
+.wk-lin-dot.verify { background: var(--info); }
+.wk-lin-dot.done { background: var(--status-ok); }
+.wk-lin-dot.bad { background: var(--status-bad); }
+.wk-lin-body { padding: 0 0 11px; min-width: 0; }
+.wk-lin-row:last-child .wk-lin-body { padding-bottom: 0; }
+.wk-lin-line { display: flex; align-items: center; gap: 7px; flex-wrap: wrap; }
+.wk-lin-ev { font-size: 11.5px; color: var(--text-mid); white-space: nowrap; }
+.wk-lin-ev.wip, .wk-lin-ev.volt { color: var(--volt-strong); }
+.wk-lin-ev.verify { color: var(--info); }
+.wk-lin-ev.done { color: var(--status-ok); }
+.wk-lin-ev.bad { color: var(--status-bad); }
+.wk-lin-arr { color: var(--volt-strong); font-size: 12px; }
+.wk-lin-note { display: block; font-size: 11px; color: var(--text-dim); line-height: 1.5; margin-top: 3px; }
+
+/* kanban card — owning goal jump */
+.wk-kcard-goal { display: block; width: 100%; box-sizing: border-box; text-align: left; font-size: 10.5px; color: var(--text-dim); background: none; border: 0; padding: 0; cursor: pointer; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; transition: color 0.14s ease; }
+.wk-kcard-goal:hover { color: var(--volt-strong); }

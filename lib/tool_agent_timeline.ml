@@ -269,15 +269,28 @@ let message_events (config : Workspace.config) ~agent_name ~limit :
                }
          | None -> None)
 
+(* Keep the newest [n] events. [Activity_graph.list_events ~after_seq:0]
+   returns the source's newest window in seq-ascending order (oldest first),
+   so this agent's newest matches sit at the tail; a front-take would discard
+   exactly the recent events the tool contracts to surface (period.to = now)
+   whenever a keeper exceeds the per-source cap. Mirrors [build_timeline]'s
+   tail-keep on the merged list, and preserves the source's ascending order. *)
+let take_last n xs =
+  if n <= 0 then []
+  else
+    let len = List.length xs in
+    if len <= n then xs
+    else
+      let rec skip k = function
+        | [] -> []
+        | _ :: rest when k > 0 -> skip (k - 1) rest
+        | remaining -> remaining
+      in
+      skip (len - n) xs
+
 (* Collect tool call events from Activity Graph *)
 let tool_call_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
-  let rec take n xs =
-    match (n, xs) with
-    | n, _ when n <= 0 -> []
-    | _, [] -> []
-    | n, x :: rest -> x :: take (n - 1) rest
-  in
   (* `list_events` limits globally before we filter by actor, so fetch a
      wider bounded window to reduce the chance that busy-workspace activity from
      other agents crowds out this agent's tool events. *)
@@ -317,16 +330,10 @@ let tool_call_events (config : Workspace.config) ~agent_name ~limit :
                  ("error", Json_util.string_opt_to_json error_str);
                ];
          })
-  |> take limit
+  |> take_last limit
 
 let keeper_cdal_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
-  let rec take n xs =
-    match (n, xs) with
-    | n, _ when n <= 0 -> []
-    | _, [] -> []
-    | n, x :: rest -> x :: take (n - 1) rest
-  in
   let scan_limit =
     let expanded = if limit <= 0 then 0 else limit * 10 in
     min 1000 (max limit expanded)
@@ -345,17 +352,11 @@ let keeper_cdal_events (config : Workspace.config) ~agent_name ~limit :
          event_type = e.kind;
          detail = e.payload;
        })
-  |> take limit
+  |> take_last limit
 
 (* Collect turn-completed events from Activity Graph *)
 let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
     timeline_event list =
-  let rec take n xs =
-    match (n, xs) with
-    | n, _ when n <= 0 -> []
-    | _, [] -> []
-    | n, x :: rest -> x :: take (n - 1) rest
-  in
   let scan_limit =
     let expanded = if limit <= 0 then 0 else limit * 10 in
     min 1000 (max limit expanded)
@@ -436,7 +437,7 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
                  ("tools_used", `List (List.map (fun s -> `String s) tools_used));
                ] @ optional_fields);
          })
-  |> take limit
+  |> take_last limit
 
 (* Build the full timeline *)
 let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit

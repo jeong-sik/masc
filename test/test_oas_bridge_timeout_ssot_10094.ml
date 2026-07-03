@@ -16,6 +16,7 @@ let () =
 module Cfg = Env_config_oas_bridge
 
 let clear_envs () =
+  Unix.putenv Env_config_core.parse_warn_env_key "";
   Unix.putenv Cfg.global_env_var "";
   List.iter
     (fun caller -> Unix.putenv (Cfg.per_caller_env_var ~caller) "")
@@ -64,6 +65,30 @@ let test_per_caller_env_override () =
     "governance_judge unaffected by anti_rationalization env"
     Cfg.dashboard_judge_default_sec
     (Cfg.timeout_sec ~caller:Cfg.Governance_judge ());
+  clear_envs ()
+;;
+
+let test_invalid_known_per_caller_env_falls_back_to_known_default () =
+  [ "not-a-float"; "nan"; "infinity"; "0"; "-1.0" ]
+  |> List.iter (fun raw ->
+    clear_envs ();
+    Unix.putenv (Cfg.per_caller_env_var ~caller:Cfg.Anti_rationalization) raw;
+    Alcotest.(check (float 0.0001))
+      (Printf.sprintf "invalid per-caller env %S falls back to known default" raw)
+      180.0
+      (Cfg.timeout_sec ~caller:Cfg.Anti_rationalization ()));
+  clear_envs ()
+;;
+
+let test_invalid_global_env_falls_back_to_global_default () =
+  [ "not-a-float"; "nan"; "infinity"; "0"; "-1.0" ]
+  |> List.iter (fun raw ->
+    clear_envs ();
+    Unix.putenv Cfg.global_env_var raw;
+    Alcotest.(check (float 0.0001))
+      (Printf.sprintf "invalid global env %S falls back to global default" raw)
+      Cfg.global_default_sec
+      (Cfg.timeout_sec ~caller:(Cfg.Unknown "unknown_caller_test_10094") ()));
   clear_envs ()
 ;;
 
@@ -128,6 +153,14 @@ let () =
             "per-caller env wins over global env"
             `Quick
             test_per_caller_env_beats_global_env
+        ; Alcotest.test_case
+            "invalid known per-caller env falls back to known default"
+            `Quick
+            test_invalid_known_per_caller_env_falls_back_to_known_default
+        ; Alcotest.test_case
+            "invalid global env falls back to global default"
+            `Quick
+            test_invalid_global_env_falls_back_to_global_default
         ] )
     ; ( "naming_contract"
       , [ Alcotest.test_case

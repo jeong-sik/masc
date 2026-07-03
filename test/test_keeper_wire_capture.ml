@@ -243,6 +243,35 @@ let capture_prunes_old_files () =
         Alcotest.(check int) "only current capture remains" 1
           (List.length (find_jsonl base)))))
 
+let capture_cache_reloads_when_retention_changes () =
+  with_flag "1" (fun () ->
+    with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "4096" (fun () ->
+      let base = Filename.temp_dir "wirecap_cache_retention" "" in
+      let capture_dir = Filename.concat base "wire-capture" in
+      let old_ts = Unix.gettimeofday () -. (2. *. 24. *. 60. *. 60.) in
+      let old_tm = Unix.gmtime old_ts in
+      let old_month_name =
+        Printf.sprintf "%04d-%02d"
+          (old_tm.Unix.tm_year + 1900)
+          (old_tm.Unix.tm_mon + 1)
+      in
+      let old_day_name = Printf.sprintf "%02d.jsonl" old_tm.Unix.tm_mday in
+      let old_month = Filename.concat capture_dir old_month_name in
+      ensure_dir capture_dir;
+      ensure_dir old_month;
+      let old_file = Filename.concat old_month old_day_name in
+      write_file old_file (String.make 1024 'x');
+      with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "30" (fun () ->
+        Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:20
+          ~response_text:"cache warmup" ());
+      Alcotest.(check bool) "old capture retained by warm cache" true
+        (Sys.file_exists old_file);
+      with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
+        Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:21
+          ~response_text:"cache reload" ());
+      Alcotest.(check bool) "old capture pruned after retention change" false
+        (Sys.file_exists old_file)))
+
 let capture_skips_when_current_file_cap_would_be_exceeded () =
   with_flag "1" (fun () ->
     with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "512" (fun () ->
@@ -365,6 +394,8 @@ let () =
             response_capture_writes_redacted;
           Alcotest.test_case "capture store prunes old files" `Quick
             capture_prunes_old_files;
+          Alcotest.test_case "capture store reloads on retention change" `Quick
+            capture_cache_reloads_when_retention_changes;
           Alcotest.test_case "current file cap skips oversized record" `Quick
             capture_skips_when_current_file_cap_would_be_exceeded;
           Alcotest.test_case "trace_id is emitted when provided" `Quick

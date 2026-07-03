@@ -12,12 +12,8 @@
     Catches [Eio.Time.Timeout] and [Eio.Cancel.Cancelled] to perform functional rollback.
     [caller] (#10094) labels the Otel_metric_store timeout counter so the
     operator can attribute timeouts to specific call sites.
-    Raises [Invalid_argument] when [timeout_s] is not positive or is [NaN].
-    [Float.infinity] is accepted only as an explicit no-wrapper timeout
-    budget for advisory callers whose protection lives at the provider
-    boundary; checked-in production defaults in {!Env_config_oas_bridge}
-    should stay finite. A missing Eio environment fails closed without
-    running [fn]. *)
+    Raises [Invalid_argument] when [timeout_s] is [NaN], infinite, or not
+    positive. A missing Eio environment fails closed without running [fn]. *)
 val run_safe
   :  caller:string
   -> timeout_s:float
@@ -31,10 +27,9 @@ val run_safe
     env-overridable per-caller budget.  See [Env_config_oas_bridge]
     for the per-caller default table, env-var layout, and invalid-env fallback.
 
-    Inherits the [Invalid_argument] contract from [run_safe]. The env
-    parser accepts positive finite values and [Float.infinity], while
-    invalid values such as ["0"], ["-1"], or ["nan"] fall back before this
-    boundary. *)
+    Inherits the [Invalid_argument] contract from [run_safe]. The env parser
+    accepts only positive finite values; invalid values such as ["0"], ["-1"],
+    ["nan"], or ["infinity"] fall back before this boundary. *)
 val run_with_caller
   :  caller:Env_config_oas_bridge.caller
   -> (unit -> ('a, Agent_sdk.Error.sdk_error) result)

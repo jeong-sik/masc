@@ -3,7 +3,12 @@ import { h, render } from 'preact'
 import { fireEvent } from '@testing-library/preact'
 import { IdeKeeperWorkPanel, keeperWorkSummary } from './ide-keeper-work-panel'
 import { goals, keepers, tasks } from '../../store'
+import { fleetCompositeSnapshot } from '../../composite-signals'
 import type { Goal, Keeper, Task } from '../../types'
+import type {
+  FleetCompositeSnapshot,
+  KeeperCompositeSnapshot,
+} from '../../api/schemas/keeper-composite'
 
 describe('IdeKeeperWorkPanel', () => {
   let container: HTMLDivElement
@@ -17,6 +22,7 @@ describe('IdeKeeperWorkPanel', () => {
     goals.value = []
     keepers.value = []
     tasks.value = []
+    fleetCompositeSnapshot.value = null
     window.location.hash = ''
   })
 
@@ -32,6 +38,45 @@ describe('IdeKeeperWorkPanel', () => {
     expect(container.textContent).toContain('tool_route_recoverable_failure')
     expect(container.textContent).toContain('inspect_provider_tool_contract')
     expect(container.textContent).toContain('masc_claim_next')
+  })
+
+  it('renders live-turn fields from the composite snapshot SSOT', () => {
+    keepers.value = [keeperFixture()]
+    fleetCompositeSnapshot.value = fleetFixture([
+      compositeFixture({
+        keeper: 'sangsu',
+        live_turn: {
+          turn_id: 7,
+          started_at: 1,
+          last_progress_at: 2,
+          last_progress_kind: 'tool',
+          selected_model: 'claude-live-model',
+          active_tool_count: 3,
+        },
+        last_skip: { ts: 9, reasons: ['idle_budget'] },
+        livelock: { turn_id: 7, attempts: 2, first_started_at: 1 },
+        board_cursor: { ts: 5, post_id: 'post-42' },
+      }),
+    ])
+
+    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
+
+    // The store Keeper type carries none of these fields, so their
+    // presence proves the panel sources the live-turn state from the
+    // composite snapshot rather than re-deriving it from the store.
+    expect(container.textContent).toContain('claude-live-model')
+    expect(container.textContent).toContain('idle_budget')
+    expect(container.textContent).toContain('post-42')
+  })
+
+  it('omits the live-turn strip when no composite snapshot resolves', () => {
+    keepers.value = [keeperFixture()]
+    fleetCompositeSnapshot.value = null
+
+    render(h(IdeKeeperWorkPanel, { keeperName: 'sangsu' }), container)
+
+    expect(container.querySelector('[aria-label="Keeper live turn"]')).toBeNull()
+    expect(container.textContent).not.toContain('claude-live-model')
   })
 
   it('matches keeper-agent task assignees to the canonical keeper name', () => {
@@ -196,6 +241,39 @@ function buttonByText(container: HTMLElement, text: string): HTMLButtonElement {
     throw new Error(`missing button: ${text}`)
   }
   return button
+}
+
+function compositeFixture(
+  overrides: Partial<KeeperCompositeSnapshot> = {},
+): KeeperCompositeSnapshot {
+  return {
+    correlation_id: 'corr-sangsu',
+    run_id: 'run-1',
+    ts: 1_000_000,
+    phase: 'running',
+    turn_phase: 'executing',
+    decision: { stage: 'undecided' },
+    runtime: { state: 'active' },
+    compaction: { stage: 'accumulating' },
+    measurement: { captured: false },
+    invariants: {
+      phase_turn_alignment: true,
+      no_runtime_before_measurement: true,
+      compaction_atomicity: true,
+      event_priority_monotone: true,
+      phase_derivation_agreement: true,
+    },
+    fsm_guard_violations: 0,
+    fsm_guard_violation_breakdown: [],
+    is_live: true,
+    last_outcome: null,
+    recommended_actions: [],
+    ...overrides,
+  }
+}
+
+function fleetFixture(snapshots: KeeperCompositeSnapshot[]): FleetCompositeSnapshot {
+  return { generated_at: 1_000_000, count: snapshots.length, snapshots }
 }
 
 function keeperFixture(): Keeper {

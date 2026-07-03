@@ -326,6 +326,20 @@ let make_meta name =
   | Ok meta -> meta
   | Error err -> fail ("parse base: " ^ err)
 
+let accept_no_progress_error ?last_tool_effect ?any_mutating_tool
+      ?(tool_effects_seen = []) () =
+  Masc.Keeper_turn_driver.sdk_error_of_masc_internal_error
+    (Masc.Keeper_turn_driver.Accept_rejected
+       { scope = "runtime.test"
+       ; model = Some "runtime"
+       ; reason_kind = Some Masc.Keeper_turn_driver.Accept_no_usable_progress
+       ; response_shape = Some Masc.Keeper_turn_driver.Accept_response_thinking_only
+       ; last_tool_effect
+       ; any_mutating_tool
+       ; tool_effects_seen
+       ; reason = "shape=thinking_only"
+       })
+
 let task_id_of_created_task (created : Masc.Workspace.add_task_success) =
   match Keeper_id.Task_id.of_string created.task_id with
   | Ok task_id -> task_id
@@ -1154,6 +1168,93 @@ let test_idle_detected_repeated_failure_pauses_keeper () =
        | None -> fail "expected idle-detected blocker")
        | None -> fail "expected registered keeper")
 
+let test_read_only_no_progress_pause_uses_backoff_auto_resume () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_runtime_config (runtime_toml_with_pause_threshold 2) @@ fun () ->
+  let base_path = temp_dir "masc-read-only-no-progress-pause-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "read-only-no-progress-paused" in
+       let meta = make_meta keeper_name in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let err =
+         accept_no_progress_error
+           ~last_tool_effect:Masc.Keeper_turn_driver.Tool_effect_read_only
+           ~any_mutating_tool:false
+           ~tool_effects_seen:[ Masc.Keeper_turn_driver.Tool_effect_read_only ]
+           ()
+       in
+       for _ = 1 to 2 do
+         Masc.Keeper_unified_turn_failure.record_failure_and_maybe_escalate
+           ~config
+           ~meta
+           ~updated_meta:meta
+           ~is_auto_recoverable:false
+           ~err
+           ~error_text:(Agent_sdk.Error.to_string err)
+       done;
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         let paused_meta = entry.Masc.Keeper_registry.meta in
+         check bool "registry meta paused" true paused_meta.paused;
+         check bool
+           "read-only no-progress pause has auto-resume backoff"
+           true
+           (Option.is_some paused_meta.auto_resume_after_sec);
+         (match paused_meta.runtime.last_blocker with
+          | Some { Keeper_meta_contract.klass = Completion_contract_violation; _ } -> ()
+          | Some _ -> fail "expected Completion_contract_violation blocker"
+          | None -> fail "expected completion-contract blocker")
+       | None -> fail "expected registered keeper")
+
+let test_mutating_no_progress_pause_stays_manual_resume () =
+  Eio_main.run
+  @@ fun env ->
+  Fs_compat.set_fs (Eio.Stdenv.fs env);
+  with_runtime_config (runtime_toml_with_pause_threshold 2) @@ fun () ->
+  let base_path = temp_dir "masc-mutating-no-progress-pause-" in
+  Fun.protect
+    ~finally:(fun () -> cleanup_dir base_path)
+    (fun () ->
+       let config = Masc.Workspace.default_config base_path in
+       ignore (Masc.Workspace.init config ~agent_name:(Some "operator"));
+       let keeper_name = "mutating-no-progress-paused" in
+       let meta = make_meta keeper_name in
+       Masc.Keeper_registry.clear ();
+       ignore (Masc.Keeper_registry.register ~base_path:config.base_path keeper_name meta);
+       let err =
+         accept_no_progress_error
+           ~last_tool_effect:Masc.Keeper_turn_driver.Tool_effect_mutating
+           ~any_mutating_tool:true
+           ~tool_effects_seen:[ Masc.Keeper_turn_driver.Tool_effect_mutating ]
+           ()
+       in
+       for _ = 1 to 2 do
+         Masc.Keeper_unified_turn_failure.record_failure_and_maybe_escalate
+           ~config
+           ~meta
+           ~updated_meta:meta
+           ~is_auto_recoverable:false
+           ~err
+           ~error_text:(Agent_sdk.Error.to_string err)
+       done;
+       match Masc.Keeper_registry.get ~base_path:config.base_path keeper_name with
+       | Some entry ->
+         let paused_meta = entry.Masc.Keeper_registry.meta in
+         check bool "registry meta paused" true paused_meta.paused;
+         check
+           (option (float 0.001))
+           "mutating no-progress pause remains manual"
+           None
+           paused_meta.auto_resume_after_sec
+       | None -> fail "expected registered keeper")
+
 let test_runtime_pause_threshold_override_controls_idle_auto_pause () =
   Eio_main.run
   @@ fun env ->
@@ -1302,6 +1403,12 @@ let () =
             test_direct_success_persist_failure_keeps_no_progress_pause;
           test_case "direct success leaves unrelated pause intact" `Quick
             test_direct_success_leaves_unrelated_pause_intact;
+          test_case
+            "read-only no-progress pause uses auto-resume backoff"
+            `Quick
+            test_read_only_no_progress_pause_uses_backoff_auto_resume;
+          test_case "mutating no-progress pause stays manual resume" `Quick
+            test_mutating_no_progress_pause_stays_manual_resume;
         ] );
       ( "completion_contract pause",
         [

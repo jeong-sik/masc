@@ -29,6 +29,7 @@ import { callMcpTool } from '../api/mcp'
 import { shellConfigResolution, shellRuntimeResolution } from '../store'
 import type { DashboardConfigResolutionItem } from '../types'
 import { RuntimeTomlEditor } from './runtime-toml-editor'
+import { SettingsRepositoriesSection } from './settings-repositories'
 import { FusionSettingsPanel } from './fusion-settings-panel'
 import { PromptRegistryPanel } from './tools/prompt-registry-panel'
 import { ThemeSwitch } from './theme-switch'
@@ -54,6 +55,7 @@ const SET_SECTIONS: [SectionId, string, string][] = [
   ['runtimes', 'Runtimes', '런타임 관리'],
   ['paths', 'Paths', '경로 · Path'],
   ['mcp', 'MCP', 'MCP 서버'],
+  ['repositories', 'Repositories', '저장소'],
   ['notify', 'Notify', '알림'],
   ['prompts', 'Prompts', '기본 프롬프트'],
   ['fusion', 'Fusion', '패널·심판 심의'],
@@ -63,7 +65,7 @@ const SET_SECTIONS: [SectionId, string, string][] = [
 
 const SET_GROUPS: [string, SectionId[]][] = [
   ['런타임', ['runtime', 'runtimes']],
-  ['경로 · 연결', ['paths', 'mcp']],
+  ['경로 · 연결', ['paths', 'mcp', 'repositories']],
   ['운영 알림', ['notify', 'logs']],
   ['고급 설정', ['prompts', 'fusion', 'display']],
 ]
@@ -570,6 +572,7 @@ function settingsSectionState(
     return { mode: 'local', label: 'path resolution unavailable' }
   }
   if (section === 'mcp') return { mode: 'mixed', label: 'live MCP check + inventory' }
+  if (section === 'repositories') return { mode: 'live', label: 'repositories API live-backed' }
   if (section === 'logs') return { mode: 'mixed', label: 'live logs + local filters' }
   if (section === 'notify') return { mode: 'live', label: 'live thresholds read-only' }
   if (section === 'display') return { mode: 'live', label: 'theme/density live' }
@@ -1016,7 +1019,7 @@ export function SettingsSurface() {
           </header>
 
           <div
-            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'runtimes' || sec === 'paths' || sec === 'mcp' || sec === 'notify' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
+            class=${`set-card-b mx-6 my-6 ${sec === 'runtime' || sec === 'runtimes' || sec === 'paths' || sec === 'mcp' || sec === 'repositories' || sec === 'notify' || sec === 'prompts' ? 'set-card-b-wide' : 'ss-card'}`}
             data-preview-locked="false"
             data-settings-mode=${sectionState.mode}
           >
@@ -1273,6 +1276,10 @@ export function SettingsSurface() {
                     `
                     : null}
                 `}
+            `}
+
+            ${sec === 'repositories' && html`
+              <${SettingsRepositoriesSection} />
             `}
 
             ${sec === 'logs' && html`

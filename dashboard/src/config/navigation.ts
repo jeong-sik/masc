@@ -6,6 +6,7 @@ export const SETTINGS_ROUTE_SECTION_IDS = [
   'runtimes',
   'paths',
   'mcp',
+  'repositories',
   'notify',
   'prompts',
   'fusion',

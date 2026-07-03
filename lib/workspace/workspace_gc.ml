@@ -303,12 +303,13 @@ let gc config ?(days=7) () =
     List.filter (fun (t : task) -> not (List.mem t.id live_ids)) orphaned
   in
   let restore_count = List.length restored in
+  let live_tasks_after_gc = kept_tasks @ restored in
 
   (* Backlog first: on a crash before the archive is rewritten below, the
      restored task survives in both stores and the next GC pass dedups it. *)
   if !stale_count > 0 || restore_count > 0 then begin
     let new_backlog = {
-      tasks = kept_tasks @ restored;
+      tasks = live_tasks_after_gc;
       last_updated = now_iso ();
       version = backlog.version + 1;
     } in
@@ -358,7 +359,7 @@ let gc config ?(days=7) () =
     List.filter_map (fun task ->
       if Masc_domain.task_status_is_terminal task.task_status then None
       else Some task.id
-    ) backlog.tasks
+    ) live_tasks_after_gc
   in
 
   (* Substring check against any open task ID.

@@ -1910,6 +1910,42 @@ let gc_backlog_has config task_id =
     (Workspace.read_backlog config).tasks
 ;;
 
+let gc_message_path_with_content config content =
+  let messages_dir = Workspace.messages_dir config in
+  let matching_paths =
+    Sys.readdir messages_dir
+    |> Array.to_list
+    |> List.filter_map (fun name ->
+      let path = Filename.concat messages_dir name in
+      match Workspace.read_json config path with
+      | `Assoc fields ->
+        (match List.assoc_opt "content" fields with
+         | Some (`String actual) when String.equal actual content -> Some path
+         | _ -> None)
+      | _ -> None)
+  in
+  match matching_paths with
+  | [ path ] -> path
+  | paths ->
+    Alcotest.failf
+      "expected one message with content %S, got %d"
+      content
+      (List.length paths)
+;;
+
+let gc_backdate_message config ~content =
+  let path = gc_message_path_with_content config content in
+  let json = Workspace.read_json config path in
+  let updated =
+    match json with
+    | `Assoc fields ->
+      `Assoc (("timestamp", `String gc_ancient_ts) :: List.remove_assoc "timestamp" fields)
+    | _ -> Alcotest.fail "expected message object"
+  in
+  Workspace.write_json config path updated;
+  path
+;;
+
 (* RFC-0220: an old AwaitingVerification obligation must survive GC in the live
    backlog — masc_transition and dashboard verification read the live backlog
    only, so archiving strands its approve/reject path (task-1537 incident). *)
@@ -1971,6 +2007,43 @@ let test_gc_restores_orphaned_nonterminal_from_archive () =
       "restored obligation removed from archive"
       false
       (List.mem 901 (Workspace.read_archive_task_ids config)))
+;;
+
+(* The same GC pass that restores an archive-only non-terminal task must use the
+   restored live task set when pruning old messages.  Otherwise the restored
+   task survives but its old task-reference message is deleted immediately. *)
+let test_gc_restored_task_preserves_old_messages_same_pass () =
+  with_test_env (fun config ->
+    let orphan =
+      gc_make_task
+        ~id:"task-904"
+        ~created_at:gc_ancient_ts
+        ~status:
+          (Masc_domain.AwaitingVerification
+             { assignee = "claude"
+             ; submitted_at = gc_ancient_ts
+             ; verification_id = "verif-904"
+             ; phase = Masc_domain.Awaiting_verifier
+             })
+    in
+    Workspace.append_archive_tasks config [ orphan ];
+    let content = "verification context for task-904" in
+    let _ =
+      Workspace.broadcast
+        config
+        ~from_agent:"claude"
+        ~content
+    in
+    let message_path = gc_backdate_message config ~content in
+    let _ = Workspace.gc config ~days:1 () in
+    Alcotest.(check bool)
+      "orphaned obligation restored to live backlog"
+      true
+      (gc_backlog_has config "task-904");
+    Alcotest.(check bool)
+      "old message referencing restored task preserved"
+      true
+      (Sys.file_exists message_path))
 ;;
 
 (* Regression guard: terminal (Done/Cancelled) tasks past the cutoff are still
@@ -2288,6 +2361,10 @@ let () =
             "restores orphaned non-terminal from archive"
             `Quick
             test_gc_restores_orphaned_nonterminal_from_archive
+        ; Alcotest.test_case
+            "restored task preserves old messages same pass"
+            `Quick
+            test_gc_restored_task_preserves_old_messages_same_pass
         ; Alcotest.test_case
             "archives terminal tasks"
             `Quick

@@ -147,6 +147,15 @@ let start_background_maintenance ~sw ~clock ~env (state : Mcp_server.server_stat
     ~on_error:(log_server_fiber_crash "metrics_flush")
     (fun () -> Metrics_store_eio.start_flush_fiber ~clock);
   Shutdown.register ~name:"metrics_flush" ~priority:30 Metrics_store_eio.flush_pending;
+  (* IDE observation ingestion writer: drains the bounded ring buffer that the
+     tool/pr/turn sinks enqueue into, running Yojson parse + JSONL append off
+     the keeper turn fiber (main Eio domain). Shutdown drains any queued jobs
+     before exit. *)
+  fork_logged_fiber
+    ~sw
+    ~on_error:(log_server_fiber_crash "ide_ingest_writer")
+    (fun () -> Ide_ingest_queue.run_writer ());
+  Shutdown.register ~name:"ide_ingest_drain" ~priority:26 Ide_ingest_queue.drain_pending;
   (* RFC-0137 PR-2: host FD pressure poller. Watches sysmon's configured
      pressure state file every 1s; bridges WARN/CRIT into
      [Keeper_fd_pressure.engage_external] so the keeper scheduling gates pause

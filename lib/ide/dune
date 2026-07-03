@@ -13,10 +13,12 @@
   ide_command_descriptor
   ide_bridge
   ide_event_types
+  ide_ingest_queue
   ide_paths
   ide_region_tracker)
  (libraries
   unix
+  eio
   mtime
   mtime.clock.os
   yojson

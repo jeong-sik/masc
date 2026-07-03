@@ -26,17 +26,68 @@ type t =
    인덱싱하는 모든 호출자와 동일한 ["provider.model"] 규칙을 공유한다. *)
 let id_of_binding (b : binding) : string = binding_key b
 
-(** binding 을 Runtime 으로 변환. provider/model resolve 또는 provider_config
-    materialize 가 실패하면 [None] (fail-closed — partial-boot 없음, 해당
-    binding 은 가용 Runtime 목록에서 제외). *)
-let of_binding (cfg : config) (b : binding) : t option =
+(** binding 을 Runtime 으로 변환하되 실패 이유를 보존한다. provider/model
+    resolve 또는 provider_config materialize 가 실패하면 [Error reason] —
+    동작은 fail-closed 그대로(partial-boot 없음, 해당 binding 은 Runtime 목록에서
+    제외)이되 왜 제외되는지 이유를 잃지 않는다. 이 이유는 assignment / default /
+    librarian / lane 검증이 "not found" 대신 근본 원인을 표면화하는 데 쓰인다
+    (Unknown→silent-drop 안티패턴 차단). *)
+let of_binding_result (cfg : config) (b : binding) : (t, string) result =
   match provider_of_id cfg b.provider_id, model_of_id cfg b.model_id with
   | Some provider, Some model ->
     (match Runtime_adapter.binding_to_provider_config cfg b with
      | Ok provider_config ->
-       Some { id = id_of_binding b; provider; model; binding = b; provider_config }
-     | Error _ -> None)
-  | _ -> None
+       Ok { id = id_of_binding b; provider; model; binding = b; provider_config }
+     | Error reason -> Error reason)
+  | None, _ -> Error (Printf.sprintf "provider not found: %s" b.provider_id)
+  | Some _, None -> Error (Printf.sprintf "model not found: %s" b.model_id)
+;;
+
+(** {!of_binding_result} 의 option 투영. materialize 실패 이유가 필요 없는
+    호출자(단일 binding 성공 여부만 확인)를 위한 유지 API. *)
+let of_binding (cfg : config) (b : binding) : t option =
+  Result.to_option (of_binding_result cfg b)
+;;
+
+(* Split configured bindings into successfully materialized runtimes and the
+   ones that were defined but could not be materialized, each paired with the
+   reason it was dropped. The drop set ([id -> reason]) lets assignment /
+   default / librarian / lane validation surface *why* a target binding is
+   absent from the runtime list (e.g. "provider ... uses protocol messages-http,
+   which the runtime adapter cannot build a provider_config for ...") instead of
+   the misleading "not found among N runtimes", which points the operator at a
+   typo that does not exist. Materialize failure stays fail-closed: the binding
+   is still excluded from [runtimes] (RFC-0206 §2.1). *)
+let partition_bindings (cfg : config) (bindings : binding list)
+  : t list * (string * string) list
+  =
+  let runtimes, dropped =
+    List.fold_left
+      (fun (runtimes, dropped) (b : binding) ->
+         match of_binding_result cfg b with
+         | Ok rt -> rt :: runtimes, dropped
+         | Error reason -> runtimes, (id_of_binding b, reason) :: dropped)
+      ([], [])
+      bindings
+  in
+  List.rev runtimes, List.rev dropped
+;;
+
+(* Explain why a validation target [id] is absent from the materialized
+   [runtimes]. An [id] present in [dropped_bindings] was defined but failed to
+   materialize — surface that reason (the actionable cause). An [id] absent from
+   both is a genuine operator typo and keeps the original "not found among N
+   runtimes" wording. The result is the suffix that follows the quoted id in
+   each caller's message, so the existing prefix ("[runtime.assignments].<k> =
+   <id>") is preserved and the typo case stays byte-for-byte unchanged. *)
+let unresolved_runtime_suffix ~(dropped_bindings : (string * string) list)
+    ~(runtime_count : int) (id : string) : string =
+  match List.assoc_opt id dropped_bindings with
+  | Some reason ->
+    Printf.sprintf
+      ": binding is defined but could not be materialized as a runtime — %s"
+      reason
+  | None -> Printf.sprintf " not found among %d runtimes" runtime_count
 ;;
 
 (** TOML 에서 Runtime 목록과 default Runtime 을 로드한다.
@@ -51,7 +102,8 @@ let of_binding (cfg : config) (b : binding) : t option =
    (Unknown→Permissive anti-pattern). A keeper *absent* from the table is the
    intended designed fallback to the default and is handled at lookup time, not
    here. *)
-let validate_keeper_assignments ~(config_path : string) (runtimes : t list)
+let validate_keeper_assignments ~(config_path : string)
+    ~(dropped_bindings : (string * string) list) (runtimes : t list)
     (assignments : (string * string) list) : (unit, string) result =
   let runtime_exists id =
     List.exists (fun (r : t) -> String.equal r.id id) runtimes
@@ -63,18 +115,20 @@ let validate_keeper_assignments ~(config_path : string) (runtimes : t list)
   | Some (keeper_name, runtime_id) ->
     Error
       (Printf.sprintf
-         "%s: [runtime.assignments].%s = %S not found among %d runtimes"
+         "%s: [runtime.assignments].%s = %S%s"
          config_path
          keeper_name
          runtime_id
-         (List.length runtimes))
+         (unresolved_runtime_suffix ~dropped_bindings
+            ~runtime_count:(List.length runtimes) runtime_id))
 ;;
 
 (* [runtime].librarian must resolve to a configured runtime when set, mirroring
    [runtime].default / [runtime.assignments] validation: an unknown id is an
    operator typo rejected at load, not a silent fallback (Unknown→Permissive
    anti-pattern). [None] is the designed "inherit the keeper's runtime" case. *)
-let validate_librarian_runtime ~(config_path : string) (runtimes : t list)
+let validate_librarian_runtime ~(config_path : string)
+    ~(dropped_bindings : (string * string) list) (runtimes : t list)
     (librarian_id : string option) : (unit, string) result =
   match librarian_id with
   | None -> Ok ()
@@ -84,17 +138,19 @@ let validate_librarian_runtime ~(config_path : string) (runtimes : t list)
     else
       Error
         (Printf.sprintf
-           "%s: [runtime].librarian = %S not found among %d runtimes"
+           "%s: [runtime].librarian = %S%s"
            config_path
            id
-           (List.length runtimes))
+           (unresolved_runtime_suffix ~dropped_bindings
+              ~runtime_count:(List.length runtimes) id))
 ;;
 
 (* [runtime].cross_verifier mirrors [runtime].librarian validation: an unknown
    id is an operator typo rejected at load, not a silent fallback
    (Unknown→Permissive anti-pattern). [None] is the designed "inherit
    [runtime].default" case. *)
-let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
+let validate_cross_verifier_runtime ~(config_path : string)
+    ~(dropped_bindings : (string * string) list) (runtimes : t list)
     (cross_verifier_id : string option) : (unit, string) result =
   match cross_verifier_id with
   | None -> Ok ()
@@ -103,10 +159,11 @@ let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
      | None ->
       Error
         (Printf.sprintf
-           "%s: [runtime].cross_verifier = %S not found among %d runtimes"
+           "%s: [runtime].cross_verifier = %S%s"
            config_path
            id
-           (List.length runtimes))
+           (unresolved_runtime_suffix ~dropped_bindings
+              ~runtime_count:(List.length runtimes) id))
      | Some runtime ->
        (match runtime.model.capabilities with
         | Some caps when caps.supports_response_format_json -> Ok ()
@@ -125,7 +182,8 @@ let validate_cross_verifier_runtime ~(config_path : string) (runtimes : t list)
    not just JSON mode. [None] remains a migration fallback for existing configs;
    unsupported resolved runtimes are rejected by each caller's OAS schema
    validation instead of silently dropping the schema. *)
-let validate_structured_judge_runtime ~(config_path : string) (runtimes : t list)
+let validate_structured_judge_runtime ~(config_path : string)
+    ~(dropped_bindings : (string * string) list) (runtimes : t list)
     (structured_judge_id : string option) : (unit, string) result =
   match structured_judge_id with
   | None -> Ok ()
@@ -134,10 +192,11 @@ let validate_structured_judge_runtime ~(config_path : string) (runtimes : t list
      | None ->
        Error
          (Printf.sprintf
-            "%s: [runtime].structured_judge = %S not found among %d runtimes"
+            "%s: [runtime].structured_judge = %S%s"
             config_path
             id
-            (List.length runtimes))
+            (unresolved_runtime_suffix ~dropped_bindings
+               ~runtime_count:(List.length runtimes) id))
      | Some runtime ->
        (match runtime.model.capabilities with
         | Some caps when caps.supports_structured_output -> Ok ()
@@ -155,7 +214,8 @@ let validate_structured_judge_runtime ~(config_path : string) (runtimes : t list
    each id in the ordered list: an unknown id is an operator typo rejected at
    load, not a silent drop (Unknown→Permissive anti-pattern). [[]] is the designed
    "derive capable runtimes from declared capabilities" case. *)
-let validate_media_failover ~(config_path : string) (runtimes : t list)
+let validate_media_failover ~(config_path : string)
+    ~(dropped_bindings : (string * string) list) (runtimes : t list)
     (media_failover : string list) : (unit, string) result =
   match
     List.find_opt
@@ -167,10 +227,57 @@ let validate_media_failover ~(config_path : string) (runtimes : t list)
   | Some id ->
     Error
       (Printf.sprintf
-         "%s: [runtime].media_failover entry %S not found among %d runtimes"
+         "%s: [runtime].media_failover entry %S%s"
          config_path
          id
-         (List.length runtimes))
+         (unresolved_runtime_suffix ~dropped_bindings
+            ~runtime_count:(List.length runtimes) id))
+;;
+
+(* [runtime.lanes.<id>] candidate ids must resolve to configured runtimes.
+   Empty candidate lists are rejected at parse time; here we reject unknown ids
+   as operator typos (mirrors [runtime].default validation). *)
+let validate_lanes ~(config_path : string)
+    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    (lane_decls : Runtime_schema.lane_decl list)
+  : (unit, string) result
+  =
+  let runtime_exists id =
+    List.exists (fun (r : t) -> String.equal r.id id) runtimes
+  in
+  let rec first_unknown = function
+    | [] -> None
+    | { Runtime_schema.id = lane_id; candidate_ids; _ } :: rest ->
+      (match List.find_opt (fun id -> not (runtime_exists id)) candidate_ids with
+       | Some id -> Some (lane_id, id)
+       | None -> first_unknown rest)
+  in
+  match first_unknown lane_decls with
+  | None -> Ok ()
+  | Some (lane_id, id) ->
+    Error
+      (Printf.sprintf
+         "%s: [runtime.lanes.%s] candidate %S%s"
+         config_path
+         lane_id
+         id
+         (unresolved_runtime_suffix ~dropped_bindings
+            ~runtime_count:(List.length runtimes) id))
+;;
+
+let lanes_of_decls ~(config_path : string)
+    ~(dropped_bindings : (string * string) list) (runtimes : t list)
+    (lane_decls : Runtime_schema.lane_decl list)
+  : (Runtime_lane.t list, string) result
+  =
+  let* () = validate_lanes ~config_path ~dropped_bindings runtimes lane_decls in
+  Ok
+    (List.map
+       (fun ({ Runtime_schema.id; strategy; candidate_ids } : Runtime_schema.lane_decl) ->
+          match strategy with
+          | Runtime_schema.Ordered ->
+            Runtime_lane.make ~id ~strategy:Runtime_lane.Ordered candidate_ids)
+       lane_decls)
 ;;
 
 (* Pure decision for the capability gate, separated from the global OAS catalog
@@ -198,10 +305,45 @@ let decide_capability_gate ~(config_path : string) (entries : (string * bool) li
       (Printf.sprintf
          "%s: %d runtime model(s) absent from the OAS capability catalog; they \
           would use provider_default and silently drop thinking/sampling control. \
-          Add them to models.toml (OAS catalog): %s"
+          Add them to oas-models.toml (OAS catalog): %s"
          config_path
          (List.length unknown)
          (String.concat ", " (List.map fst unknown)))
+;;
+
+type missing_catalog_model =
+  { runtime_id : string
+  ; provider_id : string
+  ; provider_label : string
+  ; model_id : string
+  }
+
+type missing_catalog_report =
+  { config_path : string
+  ; missing_models : missing_catalog_model list
+  }
+
+type strict_init_error =
+  | Runtime_config_error of string
+  | Missing_catalog_models of missing_catalog_report
+
+let missing_catalog_model_label (missing : missing_catalog_model) =
+  Printf.sprintf "%s (model=%s)" missing.runtime_id missing.model_id
+;;
+
+let missing_catalog_report_to_string (report : missing_catalog_report) =
+  Printf.sprintf
+    "%s: %d runtime model(s) absent from the OAS capability catalog; they \
+     would use provider_default and silently drop thinking/sampling control. \
+     Add them to oas-models.toml (OAS catalog): %s"
+    report.config_path
+    (List.length report.missing_models)
+    (String.concat ", " (List.map missing_catalog_model_label report.missing_models))
+;;
+
+let strict_init_error_to_string = function
+  | Runtime_config_error msg -> msg
+  | Missing_catalog_models report -> missing_catalog_report_to_string report
 ;;
 
 let capabilities_for_runtime (rt : t) =
@@ -225,6 +367,32 @@ let validate_runtime_model_capabilities ~(config_path : string) (runtimes : t li
        runtimes)
 ;;
 
+let missing_runtime_model_capabilities ~(config_path : string) (runtimes : t list)
+  : missing_catalog_report option
+  =
+  let missing_models =
+    List.filter_map
+      (fun (r : t) ->
+         match capabilities_for_runtime r with
+         | Some _ -> None
+         | None ->
+           let provider_label =
+             Llm_provider.Provider_config.capability_provider_label r.provider_config
+           in
+           let model_id = r.provider_config.model_id in
+           Some
+             { runtime_id = r.id
+             ; provider_id = r.provider.id
+             ; provider_label
+             ; model_id
+             })
+      runtimes
+  in
+  match missing_models with
+  | [] -> None
+  | first :: rest -> Some { config_path; missing_models = first :: rest }
+;;
+
 let materialize_config ~(config_path : string) (cfg : config)
   : ( t list
       * t
@@ -233,10 +401,11 @@ let materialize_config ~(config_path : string) (cfg : config)
       * string option
       * string option
       * string list
+      * Runtime_lane.t list
     , string )
     result
   =
-  let runtimes = List.filter_map (of_binding cfg) cfg.bindings in
+  let runtimes, dropped_bindings = partition_bindings cfg cfg.bindings in
   let assignments = cfg.keeper_assignments in
   let* rt =
     match cfg.default_runtime_id with
@@ -251,26 +420,34 @@ let materialize_config ~(config_path : string) (cfg : config)
        | None ->
          Error
            (Printf.sprintf
-              "%s: [runtime].default = %S not found among %d runtimes"
+              "%s: [runtime].default = %S%s"
               config_path
               did
-              (List.length runtimes))
+              (unresolved_runtime_suffix ~dropped_bindings
+                 ~runtime_count:(List.length runtimes) did))
        | Some rt -> Ok rt)
   in
-  let* () = validate_keeper_assignments ~config_path runtimes assignments in
   let* () =
-    validate_librarian_runtime ~config_path runtimes cfg.librarian_runtime_id
+    validate_keeper_assignments ~config_path ~dropped_bindings runtimes assignments
   in
   let* () =
-    validate_structured_judge_runtime ~config_path runtimes
+    validate_librarian_runtime ~config_path ~dropped_bindings runtimes
+      cfg.librarian_runtime_id
+  in
+  let* () =
+    validate_structured_judge_runtime ~config_path ~dropped_bindings runtimes
       cfg.structured_judge_runtime_id
   in
   let* () =
-    validate_cross_verifier_runtime ~config_path runtimes
+    validate_cross_verifier_runtime ~config_path ~dropped_bindings runtimes
       cfg.cross_verifier_runtime_id
   in
   let* () =
-    validate_media_failover ~config_path runtimes cfg.media_failover
+    validate_media_failover ~config_path ~dropped_bindings runtimes
+      cfg.media_failover
+  in
+  let* lanes =
+    lanes_of_decls ~config_path ~dropped_bindings runtimes cfg.lane_decls
   in
   (* The OAS catalog membership gate is intentionally not called here:
      [load_list] stays a routing-validity parser for tests and config probes.
@@ -282,7 +459,8 @@ let materialize_config ~(config_path : string) (cfg : config)
     , cfg.librarian_runtime_id
     , cfg.structured_judge_runtime_id
     , cfg.cross_verifier_runtime_id
-    , cfg.media_failover )
+    , cfg.media_failover
+    , lanes )
 ;;
 
 let load_list ~(config_path : string)
@@ -293,6 +471,7 @@ let load_list ~(config_path : string)
        * string option
        * string option
        * string list
+       * Runtime_lane.t list
     , string )
     result
   =
@@ -320,6 +499,7 @@ type loaded_state =
   ; structured_judge_runtime_id : string option
   ; cross_verifier_runtime_id : string option
   ; media_failover : string list
+  ; lanes : Runtime_lane.t list
   ; config_path : string option
   }
 
@@ -331,6 +511,7 @@ let empty_loaded_state =
   ; structured_judge_runtime_id = None
   ; cross_verifier_runtime_id = None
   ; media_failover = []
+  ; lanes = []
   ; config_path = None
   }
 
@@ -346,7 +527,8 @@ let set_loaded
     , librarian_id
     , structured_judge_id
     , cross_verifier_id
-    , media_failover ) =
+    , media_failover
+    , lanes ) =
   Atomic.set loaded_state_ref
     { default_runtime = Some rt
     ; runtimes
@@ -355,6 +537,7 @@ let set_loaded
     ; structured_judge_runtime_id = structured_judge_id
     ; cross_verifier_runtime_id = cross_verifier_id
     ; media_failover
+    ; lanes
     ; config_path = Some config_path
     }
 
@@ -368,15 +551,19 @@ let init_default ~config_path =
    so an operator runtime.toml whose model is absent from the catalog is rejected
    before boot — the gate that load_list intentionally no longer applies, kept out
    of load_list so unit tests stay catalog-independent. *)
-let init_default_strict ~config_path =
+let init_default_strict_report ~config_path =
   match load_list ~config_path with
-  | Error _ as e -> e
-  | Ok ((runtimes, _, _, _, _, _, _) as loaded) ->
-    (match validate_runtime_model_capabilities ~config_path runtimes with
-     | Error _ as e -> e
-     | Ok () ->
+  | Error msg -> Error (Runtime_config_error msg)
+  | Ok ((runtimes, _, _, _, _, _, _, _) as loaded) ->
+    (match missing_runtime_model_capabilities ~config_path runtimes with
+     | Some report -> Error (Missing_catalog_models report)
+     | None ->
        set_loaded ~config_path loaded;
        Ok ())
+
+let init_default_strict ~config_path =
+  init_default_strict_report ~config_path
+  |> Result.map_error strict_init_error_to_string
 
 let runtime_state () = Atomic.get loaded_state_ref
 
@@ -444,6 +631,15 @@ let cross_verifier_runtime_id () = (runtime_state ()).cross_verifier_runtime_id
    Atomic ref set by [init_default]. *)
 let media_failover () = (runtime_state ()).media_failover
 
+(* [runtime.lanes.<id>] ordered failover candidate lists. Reads the Atomic ref
+   set by [init_default]. *)
+let lanes () = (runtime_state ()).lanes
+
+let get_lane_by_id (id : string) : Runtime_lane.t option =
+  List.find_opt (fun (lane : Runtime_lane.t) -> String.equal lane.id id)
+    (runtime_state ()).lanes
+;;
+
 (* RFC-0207: resolve a runtime by its binding-key id ["provider.model"].  The
    keeper turn driver dispatches to the *requested* runtime (a keeper's persona
    [model] selection or the default) instead of unconditionally the default; an
@@ -451,6 +647,19 @@ let media_failover () = (runtime_state ()).media_failover
    RFC-0206 §2.1).  Reads [runtimes_ref], never a module-level eager binding. *)
 let get_runtime_by_id (id : string) : t option =
   List.find_opt (fun (rt : t) -> String.equal rt.id id) (runtime_state ()).runtimes
+;;
+
+(* Resolve a keeper assignment to either a lane or a single runtime. Lanes are
+   preferred so a lane id can shadow a runtime id (lanes are explicit operator
+   routing constructs). [Missing] means the assignment does not name a known
+   lane or runtime. *)
+let resolve_assignment (assigned_id : string) =
+  match get_lane_by_id assigned_id with
+  | Some lane -> `Lane lane
+  | None ->
+    (match get_runtime_by_id assigned_id with
+     | Some runtime -> `Single_runtime runtime
+     | None -> `Missing)
 ;;
 
 let max_context_of_runtime_id (id : string) : int option =
@@ -942,7 +1151,8 @@ let validate_runtime_config_text ~config_path content =
            * string option
            * string option
            * string option
-           * string list) =
+           * string list
+           * Runtime_lane.t list) =
     materialize_config ~config_path cfg
   in
   Ok ()

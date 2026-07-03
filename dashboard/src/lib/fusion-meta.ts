@@ -4,7 +4,7 @@
 // is the single source of truth for that normalization.
 
 import { isRecord } from './type-guards'
-import { asRecord, asString } from './json-coerce'
+import { asRecord, asString, asBoolean } from './json-coerce'
 
 function decodeOcamlStringLiteral(value: string): string {
   return value
@@ -177,15 +177,20 @@ export function normalizeFusionJudge(value: unknown): FusionJudgeView | null {
 
 // One judge execution node from `fusion_sink.ml judge_node_meta`. `role` is the
 // closed backend enum (single | refine | first | meta) but kept as a string so
-// an unanticipated role degrades to a raw badge instead of being dropped. Only
-// structural fields are retained — the dashboard renders topology from the
-// shape of the array, and the per-node synthesis text is carried by the
-// canonical singular `judge`.
+// an unanticipated role degrades to a raw badge instead of being dropped.
+// Successful Synthesized nodes carry per-node decision/summary, while failed
+// nodes carry failure attribution. The compact topology strip still reads only
+// the observed array shape.
 export type FusionJudgeNode = {
   role: string
   identity: string
   failed: boolean
   error?: string | null
+  decision?: string | null
+  summary?: string | null
+  failureCode?: string | null
+  elapsedS?: number | null
+  timedOut?: boolean
   inputTokens?: number | null
   outputTokens?: number | null
 }
@@ -215,6 +220,13 @@ export function normalizeFusionJudgeNodes(value: unknown): FusionJudgeNode[] {
         identity: firstString(node, ['identity', 'model', 'name']) ?? `judge-${index + 1}`,
         failed,
         error: failed ? firstString(node, ['error', 'reason', 'error_text']) ?? undefined : undefined,
+        decision: failed ? undefined : firstString(node, ['decision', 'verdict']) ?? undefined,
+        summary: failed
+          ? undefined
+          : firstString(node, ['resolved_answer', 'resolvedAnswer', 'synthesis']) ?? undefined,
+        failureCode: failed ? firstString(node, ['failure_code']) ?? undefined : undefined,
+        elapsedS: failed ? firstNumber(node, ['elapsed_s', 'elapsedS']) ?? undefined : undefined,
+        timedOut: failed ? asBoolean(node.timed_out) : undefined,
         inputTokens: firstNumber(node, ['input_tokens', 'inputTokens']) ?? undefined,
         outputTokens: firstNumber(node, ['output_tokens', 'outputTokens']) ?? undefined,
       },

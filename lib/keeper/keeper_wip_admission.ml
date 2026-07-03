@@ -85,7 +85,7 @@ type caps = {
 
 let default_caps =
   { max_global = Some 16
-  ; max_per_repo = Some 6
+  ; max_per_repo = Some 12
   ; max_per_goal = Some 3
   ; max_per_category = Some 4
   }

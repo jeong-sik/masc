@@ -30,8 +30,10 @@ val caller_key : caller -> string
 
 (** Resolve the OAS bridge timeout (seconds) for [caller] using the
     four-step lookup order documented above. Invalid env values, including
-    non-positive floats and [nan], fall back to [global_default_sec].
-    Positive [Float.infinity] is accepted as a no-wrapper timeout value. *)
+    non-positive floats, [nan], and [infinity], fall back to
+    the next lookup step; known callers therefore keep their checked-in
+    defaults, while unknown callers fall through to the global/default
+    fallback. *)
 val timeout_sec : caller:caller -> unit -> float
 
 (** [MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC] — env var consulted in
@@ -50,8 +52,6 @@ val known_callers : unit -> caller list
     fallback without hardcoding the literal. *)
 val global_default_sec : float
 
-(** Current checked-in default for advisory dashboard judge callers
-    ({!Governance_judge} / {!Operator_judge}). This preserves the
-    pre-#22402 no-wrapper behavior until those callers move to a dedicated
-    advisory no-wrapper path. *)
+(** Current checked-in finite default for advisory dashboard judge callers
+    ({!Governance_judge} / {!Operator_judge}). *)
 val dashboard_judge_default_sec : float

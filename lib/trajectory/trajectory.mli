@@ -133,10 +133,16 @@ val read_entries :
 
 (** Get the next round number for a (keeper_name, trace_id, turn) without
     reading the entire trajectory file. Lazily hydrates from disk on first
-    access per key, then increments in-memory. *)
+    access per key, then increments in-memory. Round numbers already issued by
+    this process remain monotonic for the key even if an active counter is
+    evicted and later rehydrated. *)
 val next_round :
   masc_root:string -> keeper_name:string -> trace_id:string -> turn:int ->
   int
+
+val reset_round_counters_for_testing : unit -> unit
+(** Clear the in-memory round-counter cache. Test-only: lets tests start from a
+    known state and force re-hydration from disk. *)
 
 val trajectory_lines_of_jsonl_lines :
   trace_id:string -> string list -> trajectory_line list * int * int

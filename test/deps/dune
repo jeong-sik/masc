@@ -45,7 +45,7 @@
   (re_export masc.otel_genai)
   (re_export masc.otel_metrics)
   (re_export masc.otel_spans)
-  (re_export otel_metric_test_store)
+  (re_export masc.otel_metric_store)
   (re_export masc.telemetry_coverage_gap)
   (re_export masc.telemetry_unified)
   (re_export masc.telemetry_unified_source)
@@ -57,6 +57,7 @@
   (re_export masc.activity_graph)
   ;; Board handler shim removal — tests need direct access to
   ;; Masc_board_handlers for modules no longer re-exported via masc.
+  (re_export masc.masc_board)
   (re_export masc.board_handlers)
   (re_export masc.board_tool_adapter)
   ;; PR #14267 atomic flip moved Cdal_proof / Proof_store / Risk_class /
@@ -200,9 +201,3 @@
   (re_export otoml)
   (re_export yojson)
   (re_export zstd)))
-
-(library
- (name otel_metric_test_store)
- (wrapped false)
- (modules otel_metric_store)
- (libraries masc.otel_metric_store))

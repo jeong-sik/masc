@@ -262,6 +262,11 @@ let schema_property_description schema name =
   |> to_string_option
 ;;
 
+let schema_property_int schema name field =
+  let open Yojson.Safe.Util in
+  schema |> member "properties" |> member name |> member field |> to_int_option
+;;
+
 let schema_required_fields schema =
   match schema with
   | `Assoc fields ->
@@ -500,9 +505,21 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     schema_property_description get_schema.input_schema "post_id"
     |> Option.value ~default:""
   in
+  let comment_offset_description =
+    schema_property_description get_schema.input_schema "comment_offset"
+    |> Option.value ~default:""
+  in
+  let comment_limit_description =
+    schema_property_description get_schema.input_schema "comment_limit"
+    |> Option.value ~default:""
+  in
   check_contains
     "masc_board_post_get schema points to list/search first"
     ~sub:"masc_board_list or masc_board_search first"
+    get_schema.description;
+  check_contains
+    "masc_board_post_get schema advertises pagination"
+    ~sub:"Comments are paginated by default"
     get_schema.description;
   check_contains
     "masc_board_post_get schema forbids empty args"
@@ -512,6 +529,26 @@ let test_masc_board_descriptions_disambiguate_post_id_flow () =
     "masc_board_post_get post_id field says exact ID is required"
     ~sub:"Required exact board post ID"
     get_post_id_description;
+  check_contains
+    "masc_board_post_get offset description mentions default"
+    ~sub:"default: 0"
+    comment_offset_description;
+  check_contains
+    "masc_board_post_get limit description mentions bounds"
+    ~sub:"default: 50, max: 100"
+    comment_limit_description;
+  Alcotest.(check (option int))
+    "masc_board_post_get offset minimum"
+    (Some 0)
+    (schema_property_int get_schema.input_schema "comment_offset" "minimum");
+  Alcotest.(check (option int))
+    "masc_board_post_get limit minimum"
+    (Some 1)
+    (schema_property_int get_schema.input_schema "comment_limit" "minimum");
+  Alcotest.(check (option int))
+    "masc_board_post_get limit maximum"
+    (Some Board_types.Limits.max_comment_page_limit)
+    (schema_property_int get_schema.input_schema "comment_limit" "maximum");
   check_contains
     "masc_board_list schema says it returns post_id"
     ~sub:"return post_id values"
@@ -987,6 +1024,15 @@ let test_rfc_0190_allowlist_has_no_descriptor () =
 
 (* ── effective_core_tools universe-aware behaviour ─────────────── *)
 
+let with_masc_schemas schemas f =
+  let prior = Registry.masc_schemas_snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Registry.set_masc_schemas prior)
+    (fun () ->
+       Registry.set_masc_schemas schemas;
+       f ())
+;;
+
 let test_effective_core_tools_is_subset_of_discovery () =
   let effective = Registry.effective_core_tools () in
   let discovery = Registry.core_discovery_tools in
@@ -1005,18 +1051,21 @@ let test_effective_core_tools_without_universe_has_no_descriptor_publics () =
      names must NOT appear in effective_core_tools when their internal_name is
      absent from the universe. Mcp_server_eio's module-load bootstrap injects
      the full schema universe when it is linked into this executable, so the
-     universe cannot be assumed to start empty. *)
-  Registry.set_masc_schemas [];
-  let effective = Registry.effective_core_tools () in
-  let descriptor_publics = Descriptor.public_names () in
-  List.iter
-    (fun name ->
-       if List.mem name effective
-       then
-         Alcotest.failf
-           "effective_core_tools contains descriptor public %S when universe is empty"
-           name)
-    descriptor_publics
+     universe cannot be assumed to start empty.
+
+     Earlier tests may also mutate the schema universe, so bracket this
+     assertion with a save/reset to keep following tests isolated. *)
+  with_masc_schemas [] (fun () ->
+    let effective = Registry.effective_core_tools () in
+    let descriptor_publics = Descriptor.public_names () in
+    List.iter
+      (fun name ->
+         if List.mem name effective
+         then
+           Alcotest.failf
+             "effective_core_tools contains descriptor public %S when universe is empty"
+             name)
+      descriptor_publics)
 ;;
 
 let test_effective_core_tools_with_full_universe_matches_discovery () =
@@ -1029,13 +1078,13 @@ let test_effective_core_tools_with_full_universe_matches_discovery () =
          })
       (all_descriptors ())
   in
-  Registry.set_masc_schemas all_schemas;
-  let effective = Registry.effective_core_tools () in
-  let discovery = Registry.core_discovery_tools in
-  Alcotest.(check (list string))
-    "effective_core_tools with full universe matches core_discovery_tools"
-    (List.sort String.compare discovery)
-    (List.sort String.compare effective)
+  with_masc_schemas all_schemas (fun () ->
+    let effective = Registry.effective_core_tools () in
+    let discovery = Registry.core_discovery_tools in
+    Alcotest.(check (list string))
+      "effective_core_tools with full universe matches core_discovery_tools"
+      (List.sort String.compare discovery)
+      (List.sort String.compare effective))
 ;;
 
 let () =

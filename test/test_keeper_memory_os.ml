@@ -325,6 +325,22 @@ let with_eio_guard f =
     f
 ;;
 
+let restore_domain_pool = function
+  | Some pool -> Domain_pool_ref.set pool
+  | None -> Domain_pool_ref.clear_for_tests ()
+;;
+
+let with_installed_domain_pool f =
+  Eio_main.run
+  @@ fun env ->
+  Eio.Switch.run
+  @@ fun sw ->
+  let prior = Domain_pool_ref.get () in
+  let pool = Domain_pool.create ~sw ~domain_count:1 (Eio.Stdenv.domain_mgr env) in
+  Domain_pool_ref.set pool;
+  Fun.protect ~finally:(fun () -> restore_domain_pool prior) f
+;;
+
 let episode_fixture ~now ~trace_id ~generation ~summary =
   let fact =
     { (fact_fixture ~now ()) with
@@ -3125,7 +3141,12 @@ let test_trim_target_hysteresis () =
 ;;
 
 (* RFC-0272 (defect D): cap_events keeps the newest [keep] raw lines once the log
-   passes [trigger], and is a no-op once back under it. *)
+   passes [trigger], and is a no-op once back under it.
+   RFC-0302 (#22823): cap_events now offloads its blocking full read via
+   Domain_pool_ref.submit_io_or_inline, which runs INLINE with no pool installed
+   (as here) — so this case also asserts the offload is behavior-transparent (the
+   trim result is identical to the pre-offload synchronous read). Same for
+   cap_episode_files below. *)
 let test_cap_events_drops_oldest_over_trigger () =
   with_temp_keepers_dir (fun _ ->
     let keeper_id = "virtual-memory-keeper" in
@@ -3182,6 +3203,72 @@ let test_cap_episode_files_keeps_recent () =
       (json_episode_file_count ~keeper_id);
     let dropped2 = Memory_io.cap_episode_files ~keeper_id ~keep:3 ~trigger:5 in
     Alcotest.(check int) "idempotent: no-op below trigger" 0 dropped2)
+;;
+
+let test_memory_io_caps_run_with_installed_domain_pool () =
+  with_installed_domain_pool (fun () ->
+    let main_domain = (Domain.self () :> int) in
+    let worker_domain =
+      Domain_pool_ref.submit_io_or_inline (fun () -> (Domain.self () :> int))
+    in
+    Alcotest.(check bool)
+      "installed pool runs submitted IO on a worker domain"
+      true
+      (worker_domain <> main_domain);
+    with_temp_keepers_dir (fun _ ->
+      let keeper_id = "domain-pool-memory-keeper" in
+      let now = 1_000_000.0 in
+      let base = fact_fixture ~now () in
+      for i = 1 to 6 do
+        let fact =
+          { base with
+            Types.claim = Printf.sprintf "fact-%02d" i
+          ; Types.source = { base.source with turn = i }
+          }
+        in
+        Memory_io.append_fact ~keeper_id fact;
+        let episode =
+          episode_fixture
+            ~now:(now +. float_of_int i)
+            ~trace_id:"trace-domain-pool"
+            ~generation:i
+            ~summary:(Printf.sprintf "ev-%d" i)
+        in
+        Memory_io.append_event ~keeper_id episode;
+        Memory_io.append_episode ~keeper_id episode
+      done;
+      let dropped_facts =
+        Memory_io.cap_facts ~now ~keeper_id ~keep:3 ~trigger:5 ~rank:(fun f ->
+          float_of_int f.Types.source.turn)
+      in
+      Alcotest.(check int) "fact cap drops oldest three" 3 dropped_facts;
+      let remaining_facts =
+        Memory_io.read_all_facts ~keeper_id
+        |> List.map (fun f -> f.Types.claim)
+        |> List.sort String.compare
+      in
+      Alcotest.(check (list string))
+        "fact cap keeps top-ranked facts"
+        [ "fact-04"; "fact-05"; "fact-06" ]
+        remaining_facts;
+      let dropped_events = Memory_io.cap_events ~keeper_id ~keep:3 ~trigger:5 in
+      Alcotest.(check int) "event cap drops oldest three" 3 dropped_events;
+      let event_summaries =
+        Memory_io.read_events_tail ~keeper_id ~n:10
+        |> List.map (fun e -> e.Types.episode_summary)
+      in
+      Alcotest.(check (list string))
+        "event cap keeps newest events"
+        [ "ev-4"; "ev-5"; "ev-6" ]
+        event_summaries;
+      let dropped_episodes =
+        Memory_io.cap_episode_files ~keeper_id ~keep:3 ~trigger:5
+      in
+      Alcotest.(check int) "episode cap drops oldest three" 3 dropped_episodes;
+      Alcotest.(check int)
+        "episode cap keeps three files"
+        3
+        (json_episode_file_count ~keeper_id)))
 ;;
 
 let test_recall_context_renders_sanitized_memory () =
@@ -5198,6 +5285,8 @@ let expected_compaction_snapshot_event_class = function
   | Runtime_manifest.Turn_started
   | Runtime_manifest.Phase_gate_decided
   | Runtime_manifest.Runtime_routed
+  | Runtime_manifest.Runtime_completed
+  | Runtime_manifest.Runtime_failed
   | Runtime_manifest.Pre_dispatch_blocked
   | Runtime_manifest.Provider_lane_resolved
   | Runtime_manifest.Provider_attempt_started
@@ -5895,6 +5984,10 @@ let () =
             "cap_episode_files keeps recent (RFC-0272)"
             `Quick
             test_cap_episode_files_keeps_recent
+        ; Alcotest.test_case
+            "cap paths run with installed domain pool (RFC-0302)"
+            `Quick
+            test_memory_io_caps_run_with_installed_domain_pool
         ; Alcotest.test_case
             "merge_and_cap upserts re-observed claim (RFC-0243)"
             `Quick

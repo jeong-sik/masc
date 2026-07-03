@@ -9,6 +9,8 @@ type event_kind =
   | Turn_started
   | Phase_gate_decided
   | Runtime_routed
+  | Runtime_completed
+  | Runtime_failed
   | Pre_dispatch_blocked
   | Provider_lane_resolved
   | Provider_attempt_started
@@ -28,6 +30,8 @@ let all_event_kinds =
     Turn_started;
     Phase_gate_decided;
     Runtime_routed;
+    Runtime_completed;
+    Runtime_failed;
     Pre_dispatch_blocked;
     Provider_lane_resolved;
     Provider_attempt_started;
@@ -47,6 +51,8 @@ let event_kind_to_string = function
   | Turn_started -> "turn_started"
   | Phase_gate_decided -> "phase_gate_decided"
   | Runtime_routed -> "runtime_routed"
+  | Runtime_completed -> "runtime_completed"
+  | Runtime_failed -> "runtime_failed"
   | Pre_dispatch_blocked -> "pre_dispatch_blocked"
   | Provider_lane_resolved -> "provider_lane_resolved"
   | Provider_attempt_started -> "provider_attempt_started"
@@ -65,6 +71,8 @@ let event_kind_of_string = function
   | "turn_started" -> Some Turn_started
   | "phase_gate_decided" -> Some Phase_gate_decided
   | "runtime_routed" -> Some Runtime_routed
+  | "runtime_completed" -> Some Runtime_completed
+  | "runtime_failed" -> Some Runtime_failed
   | "pre_dispatch_blocked" -> Some Pre_dispatch_blocked
   | "provider_lane_resolved" -> Some Provider_lane_resolved
   | "provider_attempt_started" -> Some Provider_attempt_started
@@ -105,6 +113,8 @@ let classify_compaction_snapshot_typed_event = function
   | Turn_started
   | Phase_gate_decided
   | Runtime_routed
+  | Runtime_completed
+  | Runtime_failed
   | Pre_dispatch_blocked
   | Provider_lane_resolved
   | Provider_attempt_started

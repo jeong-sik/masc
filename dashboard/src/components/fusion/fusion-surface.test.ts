@@ -126,6 +126,10 @@ describe('FusionSurface', () => {
     render(html`<${FusionSurface} />`, container)
 
     expect(container.querySelector('[data-testid="fusion-surface"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="fusion-reality-notice"]')?.textContent)
+      .toContain('부분 지원')
+    expect(container.querySelector('[data-testid="fusion-reality-notice"]')?.textContent)
+      .toContain('fail-closed')
     expect(container.textContent).toContain('fus-1')
     expect(container.textContent).toContain('Which deploy path should we take?')
     expect(container.textContent).toContain('gpt-5')
@@ -189,6 +193,261 @@ describe('FusionSurface', () => {
     ).not.toBeNull()
     // the canonical synthesis below the strip is unchanged
     expect(container.textContent).toContain('reconciled answer')
+  })
+
+  it('branches the pipeline strip and meta block for a judge-of-judges run with an isolated 1차 심판', () => {
+    // A JoJ run with 3 first judges (one failed) + a meta node: the pipeline
+    // shows `1차 심판 ×3 (1 격리) → meta` and the meta block a reconcile label +
+    // isolation banner. All shape-derived from the judges array (no topology wire
+    // field, and no locally-invented topology vocabulary).
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-joj-iso',
+        title: 'Fusion deliberation (run joj-iso): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'joj-iso',
+          question: 'Which redesign?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'reconciled answer' },
+          judges: [
+            { role: 'first', identity: 'deepseek-v4-pro', input_tokens: 100, output_tokens: 10 },
+            { role: 'first', identity: 'glm-5', input_tokens: 90, output_tokens: 8 },
+            { role: 'first', identity: 'minimax-m3', status: 'failed', error: 'Timeout' },
+            { role: 'meta', identity: 'meta', input_tokens: 2000, output_tokens: 418 },
+          ],
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    // pipeline: shape-derived JoJ segment with the isolation count and meta node
+    const pipe = container.querySelector('[data-testid="fusion-pipe"]')
+    expect(pipe?.textContent).toContain('1차 심판 ×3')
+    expect(pipe?.querySelector('.fus-pipe-iso')?.textContent).toContain('1 격리')
+    expect(pipe?.querySelector('.fus-pipe-node.meta')?.textContent).toContain('meta')
+
+    // no locally-pinned topology vocabulary chip/tag (removed per review #23049 —
+    // shape stays surfaced via the SSOT judge-node strip + pipeline branch)
+    const detail = container.querySelector('[data-testid="fusion-detail"]')
+    expect(container.querySelector('.fus-topo')).toBeNull()
+    expect(container.querySelector('.fus-row-topo')).toBeNull()
+
+    // meta block reconcile label (okFirstCount = 2) + isolation banner
+    expect(detail?.textContent).toContain('meta 심판 · reconcile')
+    expect(detail?.textContent).toContain('1차 종합 2개 reconcile')
+    const drop = detail?.querySelector('.fus-meta-drop')
+    expect(drop?.textContent).toContain('격리됨')
+    expect(drop?.textContent).toContain('minimax-m3')
+    expect(drop?.textContent).toContain('Timeout')
+    expect(drop?.textContent).toContain('meta는 살아남은 종합만으로 reconcile')
+  })
+
+  it('expands judge-of-judges 1차 심판 into per-node cards with decision, summary, derived counts, and isolation', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-joj-cards',
+        title: 'Fusion deliberation (run joj-cards): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'joj-cards',
+          question: 'round.ml redesign?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
+          judge: {
+            status: 'synthesized',
+            decision: 'answer',
+            resolved_answer: 'reconciled answer',
+            // meta consensus/contradictions reference the 1차 심판 identities —
+            // the single source of truth the cards derive 합의/상충 counts from.
+            consensus: [{ text: 'patch first', models: ['skeptic', 'pragmatist'] }],
+            contradictions: [
+              { topic: 'roadmap', positions: [['pragmatist', 'adopt'], ['literalist', 'defer']] },
+            ],
+          },
+          judges: [
+            {
+              role: 'first',
+              identity: 'skeptic',
+              decision: 'recommend — patch first',
+              resolved_answer: 'Skeptic: patch the isolation first, rewrite is unjustified.',
+              input_tokens: 3010,
+              output_tokens: 980,
+            },
+            {
+              role: 'first',
+              identity: 'literalist',
+              decision: 'insufficient — missing: benchmarks',
+              resolved_answer: 'Literalist: no quantitative basis, benchmark first.',
+              input_tokens: 3010,
+              output_tokens: 720,
+            },
+            { role: 'first', identity: 'domain', status: 'failed', error: 'Timeout' },
+            { role: 'meta', identity: 'meta', input_tokens: 4120, output_tokens: 1510 },
+          ],
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const grid = container.querySelector('[data-testid="fusion-first-judges"]')
+    expect(grid).not.toBeNull()
+    // 3 first-tier nodes become cards (meta is not a card); the failed one is isolated
+    expect(grid?.querySelectorAll('.fus-jnode')).toHaveLength(3)
+
+    // decision badges are mapped from the free-form wire decision via the shared spec
+    expect(grid?.textContent).toContain('권고') // skeptic -> Recommend
+    expect(grid?.textContent).toContain('심의 무효') // literalist -> Insufficient
+    // resolved-answer gist as the card summary
+    expect(grid?.textContent).toContain('Skeptic: patch the isolation first')
+
+    // derived counts: skeptic is cited in 1 consensus claim, 0 contradictions;
+    // literalist in 0 consensus, 1 contradiction (matched on identity).
+    const skepticCard = Array.from(grid?.querySelectorAll('.fus-jnode') ?? []).find(card =>
+      card.textContent?.includes('skeptic'),
+    )
+    expect(skepticCard?.textContent).toContain('합의 1')
+    expect(skepticCard?.textContent).toContain('상충 0')
+    const literalistCard = Array.from(grid?.querySelectorAll('.fus-jnode') ?? []).find(card =>
+      card.textContent?.includes('literalist'),
+    )
+    expect(literalistCard?.textContent).toContain('합의 0')
+    expect(literalistCard?.textContent).toContain('상충 1')
+
+    // the failed 1차 심판 is an isolation card, not dropped
+    const isolated = grid?.querySelector('.fus-jnode.failed')
+    expect(isolated?.textContent).toContain('domain')
+    expect(isolated?.textContent).toContain('Timeout')
+    expect(isolated?.textContent).toContain('격리됨')
+  })
+
+  it('renders no 1차 심판 card grid for a non-JoJ run', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-simple-nocards',
+        title: 'Fusion deliberation (run simple-1): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'simple-1',
+          question: 'simple?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'simple answer' },
+          judges: [{ role: 'single', identity: 'single', input_tokens: 100, output_tokens: 10 }],
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelector('[data-testid="fusion-first-judges"]')).toBeNull()
+  })
+
+  it('branches the pipeline strip for a refine run', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-refine',
+        title: 'Fusion deliberation (run refine-1): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'refine-1',
+          question: 'Refine path?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'refined answer' },
+          judges: [
+            { role: 'single', identity: 'single', input_tokens: 100, output_tokens: 10 },
+            { role: 'refine', identity: 'refine', input_tokens: 120, output_tokens: 20 },
+          ],
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const pipe = container.querySelector('[data-testid="fusion-pipe"]')
+    expect(pipe?.textContent).toContain('심판')
+    expect(pipe?.querySelector('.fus-pipe-node.meta')?.textContent).toContain('재검토')
+    // no locally-pinned topology chip/tag vocabulary
+    expect(container.querySelector('.fus-topo')).toBeNull()
+    expect(container.querySelector('.fus-row-topo')).toBeNull()
+  })
+
+  it('renders a legacy (pre-judges) post as a single judge node with no meta or topology vocabulary', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-legacy',
+        title: 'Fusion deliberation (run legacy-1): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'legacy-1',
+          question: 'Legacy?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'legacy answer' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    // no invented topology vocabulary anywhere, and no meta reconcile surface
+    expect(container.querySelector('.fus-topo')).toBeNull()
+    expect(container.querySelector('.fus-row-topo')).toBeNull()
+    expect(container.querySelector('.fus-meta-drop')).toBeNull()
+    // single judge node keeps its decision label (no meta node)
+    const pipe = container.querySelector('[data-testid="fusion-pipe"]')
+    expect(pipe?.querySelector('.fus-pipe-node.meta')).toBeNull()
+  })
+
+  it('clamps a long resolved_answer with a reveal toggle', async () => {
+    const longAnswer = `${'결론은 카나리 우선 배포입니다. '.repeat(31)}`
+    expect(longAnswer.length).toBeGreaterThan(540)
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-long',
+        title: 'Fusion deliberation (run long-1): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'long-1',
+          question: 'Which path?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: longAnswer },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const rich = container.querySelector('.fus-resolved-body .fus-rich')
+    expect(rich?.classList.contains('clamp')).toBe(true)
+    const more = container.querySelector<HTMLButtonElement>('.fus-rich-more')
+    expect(more).not.toBeNull()
+    expect(more?.textContent).toContain('전문 펼치기')
+    more?.click()
+    // preact schedules the useState re-render on a microtask; flush it before asserting.
+    await new Promise(resolve => setTimeout(resolve, 0))
+    expect(container.querySelector('.fus-resolved-body .fus-rich')?.classList.contains('clamp')).toBe(false)
+    expect(container.querySelector('.fus-rich-more')?.textContent).toContain('접기')
+  })
+
+  it('does not clamp a short resolved_answer', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-short',
+        title: 'Fusion deliberation (run short-1): answer',
+        meta: {
+          source: 'fusion',
+          run_id: 'short-1',
+          question: 'Which path?',
+          panel: [{ model: 'gpt-5', status: 'answered', answer: 'a' }],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'Ship canary first.' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    expect(container.querySelector('.fus-resolved-body .fus-rich')?.classList.contains('clamp')).toBe(false)
+    expect(container.querySelector('.fus-rich-more')).toBeNull()
   })
 
   it('renders structured judge evidence from board metadata without local prototype state', () => {
@@ -446,6 +705,40 @@ describe('FusionSurface', () => {
     expect(cards[1]?.classList.contains('failed')).toBe(true)
   })
 
+  it('renders the panel reason_code as a category chip on a failed panel card', () => {
+    fusionBoardPosts.value = [
+      boardPost({
+        id: 'post-fus-reason-code',
+        title: 'Fusion deliberation (run fus-reason-code): mixed',
+        meta: {
+          source: 'fusion',
+          run_id: 'fus-reason-code',
+          question: 'Reason code?',
+          panel: [
+            { model: 'gpt-5', status: 'answered', answer: 'ok' },
+            {
+              model: 'claude',
+              status: 'failed',
+              reason_code: 'provider_error',
+              reason_detail: 'quota exceeded',
+            },
+          ],
+          judge: { status: 'synthesized', decision: 'answer', resolved_answer: 'done' },
+        },
+      }),
+    ]
+
+    render(html`<${FusionSurface} />`, container)
+
+    const failedCard = container.querySelector('.fus-panel-card.failed')
+    const code = failedCard?.querySelector('.fus-pcode')
+    expect(code?.textContent).toBe('provider_error')
+    // the human detail still shows in the state chip; the answered card has no code
+    expect(failedCard?.textContent).toContain('quota exceeded')
+    const answeredCard = container.querySelector('.fus-panel-card.answered')
+    expect(answeredCard?.querySelector('.fus-pcode')).toBeNull()
+  })
+
   it('renders generation parameters when present in board meta', () => {
     fusionBoardPosts.value = [
       boardPost({
@@ -659,5 +952,47 @@ describe('FusionJudgesStrip', () => {
   it('renders nothing for a board post that predates the judges array', () => {
     render(html`<${FusionJudgesStrip} nodes=${[]} />`, container)
     expect(container.querySelector('[data-testid="fusion-judges"]')).toBeNull()
+  })
+
+  it('surfaces failure_code and elapsed timing on a failed node, marking a timeout', () => {
+    const failing: FusionJudgeNode[] = [
+      {
+        role: 'meta',
+        identity: 'o1',
+        failed: true,
+        error: 'judge timed out',
+        failureCode: 'timeout',
+        elapsedS: 30.2,
+        timedOut: true,
+        inputTokens: 800,
+        outputTokens: 0,
+      },
+    ]
+    render(html`<${FusionJudgesStrip} nodes=${failing} />`, container)
+    const row = container.querySelector('[data-failed="true"]')
+    expect(row?.querySelector('.fus-jn-code')?.textContent).toBe('timeout')
+    const time = row?.querySelector('.fus-jn-time')
+    expect(time?.textContent).toBe('30.2s')
+    // timed_out is consumed, not just the code — the elapsed chip is marked
+    expect(time?.classList.contains('timeout')).toBe(true)
+  })
+
+  it('shows elapsed without the timeout mark for a non-timeout failure', () => {
+    const failing: FusionJudgeNode[] = [
+      {
+        role: 'single',
+        identity: 'single',
+        failed: true,
+        error: 'could not parse structured output',
+        failureCode: 'parse_error',
+        elapsedS: 2.4,
+        timedOut: false,
+      },
+    ]
+    render(html`<${FusionJudgesStrip} nodes=${failing} />`, container)
+    const time = container.querySelector('[data-failed="true"] .fus-jn-time')
+    expect(time?.textContent).toBe('2.4s')
+    expect(time?.classList.contains('timeout')).toBe(false)
+    expect(container.querySelector('.fus-jn-code')?.textContent).toBe('parse_error')
   })
 })

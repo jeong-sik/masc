@@ -29,6 +29,26 @@ let touch path =
   close_out oc
 ;;
 
+let test_executable_path_split_search_path () =
+  check
+    (list string)
+    "preserves empty entries (explicit separator)"
+    [ ""; "/opt/bin"; "/usr/bin" ]
+    (Executable_path.split_search_path
+       ~separator:';'
+       ";/opt/bin;/usr/bin");
+  (* Also exercise the default: build the input from the SSOT
+     [search_path_separator] so this asserts the platform-default split (a
+     regression setting the wrong default would fail here) while staying
+     platform-independent. *)
+  let sep = String.make 1 Executable_path.search_path_separator in
+  check
+    (list string)
+    "preserves empty entries (default separator)"
+    [ ""; "/opt/bin"; "/usr/bin" ]
+    (Executable_path.split_search_path (sep ^ "/opt/bin" ^ sep ^ "/usr/bin"))
+;;
+
 let test_executable_path_lookup_requires_executable_file () =
   let dir = temp_dir "executable-path-bits-" in
   let executable = Filename.concat dir "masc-test-tool" in
@@ -76,7 +96,8 @@ let test_executable_path_ignores_empty_path_entries () =
           | _ -> None
         in
         let explicit_path = function
-          | "PATH" -> Some (":" ^ dir)
+          | "PATH" ->
+            Some (String.make 1 Executable_path.search_path_separator ^ dir)
           | _ -> None
         in
         check
@@ -216,6 +237,10 @@ let () =
     "lsp_process_manager"
     [ ( "executable-path"
       , [ test_case
+            "splits PATH with SSOT separator"
+            `Quick
+            test_executable_path_split_search_path
+        ; test_case
             "requires executable files"
             `Quick
             test_executable_path_lookup_requires_executable_file

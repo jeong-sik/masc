@@ -218,6 +218,7 @@ let run_turn
       ?shared_context
       ?event_bus
       ?trace_link
+      ?yield_to_chat_waiting
       ()
   : (run_result, Agent_sdk.Error.sdk_error) result
   =
@@ -315,6 +316,7 @@ let run_turn
       ~generation
       ()
   in
+  let requested_max_tokens = max_tokens in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
   let max_output_ceiling =
@@ -577,6 +579,39 @@ let run_turn
               let keeper_oas_guardrails =
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
+              let max_tokens_for_runtime ~runtime_id =
+                Keeper_run_context.resolve_max_tokens_for_runtime
+                  ~keeper_name:meta.name
+                  ~runtime_id
+                  ?max_tokens:requested_max_tokens
+                  ()
+              in
+              (* Autonomous chat-yield: when the caller supplies
+                 [yield_to_chat_waiting], evaluate it at each OAS agent-loop turn
+                 boundary (the [check_loop_guard] point, beside [max_idle_turns],
+                 before the next model dispatch — never mid tool execution). A
+                 [true] result stops the loop; [runtime_agent] converts that stop
+                 into a graceful [Ok] result *only* when [exit_condition_result]
+                 is also present, so both are wired together — otherwise the SDK
+                 [ExitConditionMet] surfaces as an error and the yield would be
+                 recorded as a turn failure/blocker. The rendered stop reason is
+                 [Yielded_to_chat_waiting], whose disposition is a
+                 [Continuation_checkpoint] (like [MutationBoundaryReached]):
+                 "stopped early, checkpoint saved, resume next cycle". *)
+              let chat_yield_exit_condition, chat_yield_exit_condition_result =
+                match yield_to_chat_waiting with
+                | None -> None, None
+                | Some pred ->
+                  ( Some (fun (_turn : int) -> pred ())
+                  , Some
+                      (fun (turn : int) ->
+                        ( Runtime_agent.Yielded_to_chat_waiting { turns_used = turn }
+                        , Some
+                            (Printf.sprintf
+                               "[yielded turn slot at turn %d to a waiting chat \
+                                request; keeper resumes on the next cycle]"
+                               turn) )) )
+              in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* The keeper turn deadline must own the OAS Agent.run switch.
                    Stream/body idle budgets catch liveness gaps; this hard
@@ -616,6 +651,7 @@ let run_turn
                     ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
+                    ~max_tokens_for_runtime
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ~guardrails:keeper_oas_guardrails
@@ -637,8 +673,13 @@ let run_turn
                          ?clock:(Eio_context.get_clock_opt ())
                          ())
                     ~enable_thinking:(Keeper_config.keeper_enable_thinking ())
-                      (* exit_condition removed with mutation_boundary — OAS runs to
-             natural completion (model end_turn). *)
+                      (* Mutation-boundary is native to OAS now; [exit_condition]
+                         is re-wired here solely for the autonomous chat-yield
+                         (see [chat_yield_exit_condition] above). Both are [None]
+                         on the chat lane, so a chat turn runs to natural
+                         completion (model end_turn) unchanged. *)
+                    ?exit_condition:chat_yield_exit_condition
+                    ?exit_condition_result:chat_yield_exit_condition_result
                     ?oas_checkpoint:resume_oas_checkpoint
                     ?event_bus
                     ?trace_link
@@ -670,15 +711,6 @@ let run_turn
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
                  let text = Agent_sdk.Types.text_of_content result.response.content in
-                 (* Phase O observability (iter-2): pair this turn's response
-                    with the request captured pre-run under the same turn_id, so
-                    the feedback loop (turn N output -> turn N+1 replayed history)
-                    is directly analyzable. No-op unless MASC_KEEPER_WIRE_CAPTURE. *)
-                 Keeper_wire_capture.capture_response
-                   ~masc_root:(Workspace.masc_root_dir config)
-                   ~keeper_name:meta.name
-                   ~turn_id:manifest_keeper_turn_id
-                   ~response_text:text;
                  (* RFC-0132 PR-2: receipt model surface = external boundary; redact via SSOT. *)
                  let model =
                    Boundary_redaction.to_string
@@ -762,6 +794,21 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
+                          ~capture_replay_response:
+                            (fun ~response_text ->
+                              (* Phase O observability: capture the exact
+                                 assistant text persisted for next-turn replay,
+                                 after response finalization has applied
+                                 suppression and internal-markup stripping. The
+                                 capture is best-effort and gated by
+                                 MASC_KEEPER_WIRE_CAPTURE. *)
+                              Keeper_wire_capture.capture_response
+                                ~masc_root:(Workspace.masc_root_dir config)
+                                ~keeper_name:meta.name
+                                ~turn_id:manifest_keeper_turn_id
+                                ~trace_id:meta.runtime.trace_id
+                                ~response_text
+                                ())
                           ())))
                in
        let receipt_result =

@@ -209,6 +209,16 @@ let review_completion_notes
         agent_name = ctx.agent_name;
         task_id = task.id;
       } in
+      (* task-1664: the persisted contract's evidence obligations must reach
+         the LLM prompt too, not only [completion_contract]. Read them from
+         the task's own contract so a task requiring e.g. a PR link is judged
+         against that requirement rather than approved on narrative notes. *)
+      let required_evidence, verify_gate_evidence =
+        match task.contract with
+        | Some (c : Masc_domain.task_contract) ->
+            c.required_evidence, c.verify_gate_evidence
+        | None -> [], []
+      in
       let on_verdict result =
         (Atomic.get record_verdict_fn)
           ~task_id ~req:ar_req ~result ();
@@ -229,6 +239,8 @@ let review_completion_notes
          ?sw:ctx.sw
          ?evaluator_runtime
          ?completion_contract
+         ~required_evidence
+         ~verify_gate_evidence
          ~on_verdict ~few_shot_block ar_req).verdict with
       | Anti_rationalization.Reject reason -> Some reason
       | Anti_rationalization.Approve -> None

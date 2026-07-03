@@ -1,9 +1,9 @@
 (** IDE annotation storage — CRUD backed by [annotations.jsonl] inside
     one of the {!Ide_paths.partition} directories.
 
-    The JSONL format is append-only with in-memory compaction on read:
-    deleted annotations are filtered out and the file is rewritten
-    when the tombstone ratio exceeds a threshold.
+    The JSONL format is append-only. Deleted annotations are filtered
+    out on read, and explicit compaction appends begin/end snapshot
+    markers instead of rewriting the active file.
 
     RFC-0128 §4.2: callers may select a {!Ide_paths.partition}
     ([By_url _] / [Orphan]) via the optional [?partition]
@@ -60,17 +60,24 @@ val delete
   -> ?partition:Ide_paths.partition
   -> id:string
   -> keeper_id:string
+  -> ?expected_version:int64
   -> unit
   -> (unit, string) result
 (** Soft-delete: append a tombstone record. Only the original
     [keeper_id] may delete its own annotation. The [?partition] must
     match the one the annotation was created under. Default
-    [partition] is {!Ide_paths.Orphan}. *)
+    [partition] is {!Ide_paths.Orphan}.
+
+    [?expected_version] enables optimistic concurrency: pass the
+    annotation's [updated_at_ms] (its version token, exposed in
+    {!Ide_annotation_types.annotation_to_json}) and the delete is refused
+    with a ["version mismatch"] error when the stored value differs.
+    Omitting it keeps the legacy delete-by-id contract. *)
 
 val compact : base_dir:string -> ?partition:Ide_paths.partition -> unit -> unit
-(** Rewrite the annotation file excluding tombstones. Called
-    automatically when the tombstone ratio exceeds [COMPACT_THRESHOLD].
-    Default [partition] is {!Ide_paths.Orphan}. *)
+(** Append a compaction snapshot marker that lets readers ignore earlier
+    tombstoned state while replaying records written during the compaction
+    window. Default [partition] is {!Ide_paths.Orphan}. *)
 
 val annotation_kind_of_string : string -> annotation_kind option
 (** Parse kind string, returning [None] for unknown values. *)

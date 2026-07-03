@@ -33,6 +33,7 @@ type stop_reason = Runtime_agent_context.stop_reason =
       turns_used : int;
       tool_name : string option;
     }
+  | Yielded_to_chat_waiting of { turns_used : int }
 (** Why this single OAS call yielded control. [Completed] is the
     model's success path; [TurnBudgetExhausted] means the per-call
     turn budget checkpoint was reached. It is not a completed
@@ -40,7 +41,11 @@ type stop_reason = Runtime_agent_context.stop_reason =
     durable-progress evidence before deciding whether to continue from
     the persisted checkpoint. [MutationBoundaryReached] fires when the
     keeper hit a mutation tool while in read-only mode (the [tool_name]
-    surfaces which tool triggered the gate). *)
+    surfaces which tool triggered the gate). [Yielded_to_chat_waiting]
+    fires when an autonomous-lane run stopped at a turn boundary to hand
+    the keeper's turn slot to a parked dashboard/connector chat request;
+    like [MutationBoundaryReached] it is a continuation checkpoint, not a
+    completed deliverable, and the keeper resumes on the next cycle. *)
 
 (** {1 Config} *)
 
@@ -260,6 +265,17 @@ val decide_modality_reroute_for_runtime :
     [initial_messages], checkpoint resume messages, plus the current turn's
     content blocks. Composes [input_capabilities_of_runtime] /
     [media_reroute_candidates] / [decide_modality_reroute]. *)
+
+val decide_modality_reroute_for_runtime_candidates :
+  assigned:Runtime.t ->
+  candidates:Runtime.t list ->
+  ?checkpoint_messages:Agent_sdk.Types.message list ->
+  ?initial_messages:Agent_sdk.Types.message list ->
+  Agent_sdk.Types.content_block list ->
+  reroute_decision
+(** Keeper-dispatch variant for scoped candidate sets such as explicit runtime
+    lanes. It preserves the caller-provided candidate order and does not consult
+    global [runtime.media_failover]. *)
 
 val strip_unsupported_modality_blocks :
   Llm_provider.Capabilities.capabilities ->

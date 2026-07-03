@@ -293,6 +293,8 @@ let append_decision_record
                            Printf.sprintf "mutation_boundary(%d:%s)" turns_used tool
                        | None ->
                            Printf.sprintf "mutation_boundary(%d)" turns_used)
+                  | Runtime_agent.Yielded_to_chat_waiting { turns_used } ->
+                      Printf.sprintf "yielded_to_chat_waiting(%d)" turns_used
                 in
               let inference_fields =
                 match r.inference_telemetry with

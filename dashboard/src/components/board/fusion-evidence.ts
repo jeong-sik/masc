@@ -13,6 +13,7 @@ import {
   judgeRoleLabel,
   judgeNodeTokenLabel,
   judgeNodeIdentity,
+  judgeNodeElapsedLabel,
 } from '../fusion/fusion-judge-format'
 
 function formatTokens(value: number | null | undefined): string | null {
@@ -44,6 +45,9 @@ function PanelCard({ panel }: { panel: FusionPanelEntry }) {
       <div class="mb-2 flex flex-wrap items-center gap-2">
         <span class="min-w-0 break-all font-mono text-2xs text-[var(--color-fg-secondary)]">${panel.model}</span>
         <span class=${`inline-flex rounded-[var(--r-0)] border px-1.5 py-0.5 text-3xs font-semibold uppercase tracking-wide ${statusClass(panel.status)}`}>${panel.status}</span>
+        ${panel.reasonCode
+          ? html`<span class="inline-flex rounded-[var(--r-0)] border border-[var(--bad-30)] bg-[var(--bad-15)] px-1.5 py-0.5 font-mono text-3xs text-[var(--bad-light)]" title=${panel.reason ?? panel.reasonCode} data-fusion-panel-code>${panel.reasonCode}</span>`
+          : null}
         ${tokenLabel ? html`<span class="font-mono text-2xs text-[var(--color-fg-muted)]">${tokenLabel}</span>` : null}
       </div>
       ${panel.answer
@@ -89,6 +93,12 @@ function JudgeNodeRow({ node }: { node: FusionJudgeNode }) {
       ${identity
         ? html`<span class="min-w-0 flex-1 break-all font-mono text-2xs text-[var(--color-fg-muted)]" title=${identity}>${identity}</span>`
         : html`<span class="flex-1"></span>`}
+      ${node.failed && node.failureCode
+        ? html`<span class="inline-flex rounded-[var(--r-0)] border border-[var(--bad-30)] bg-[var(--bad-15)] px-1.5 py-0.5 font-mono text-3xs text-[var(--bad-light)]" title=${node.error ?? node.failureCode} data-fusion-judge-code>${node.failureCode}</span>`
+        : null}
+      ${node.failed && judgeNodeElapsedLabel(node)
+        ? html`<span class="font-mono text-2xs text-[var(--color-fg-muted)]" title=${node.timedOut ? '타임아웃 초과' : '경과 시간'}>${judgeNodeElapsedLabel(node)}</span>`
+        : null}
       <span class="font-mono text-2xs text-[var(--color-fg-muted)]">${judgeNodeTokenLabel(node)}</span>
       ${node.failed
         ? html`<span class="text-2xs font-semibold text-[var(--bad-light)]" title=${node.error ?? 'failed'}>✗ 실패</span>`

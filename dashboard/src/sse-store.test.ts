@@ -45,6 +45,7 @@ const hydrateFleetCompositeSnapshot = vi.fn<(payload: unknown) => void>()
 const hydrateGoalTreeSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const hydrateGoalLoopSnapshot = vi.fn<(payload: unknown) => boolean>(() => true)
 const noteKeeperChatAppended = vi.fn<(name: string, audio?: unknown, blocks?: unknown) => void>()
+const refreshActiveKeeperChatHistory = vi.fn<(opts?: { force?: boolean }) => void>()
 
 async function flushAsyncWork(): Promise<void> {
   await vi.dynamicImportSettled()
@@ -101,6 +102,7 @@ async function loadSseStore() {
   }))
   vi.doMock('./keeper-runtime', () => ({
     noteKeeperChatAppended,
+    refreshActiveKeeperChatHistory,
   }))
   vi.doMock('./router', () => ({ route }))
   const sseStore = await import('./sse-store')
@@ -131,6 +133,7 @@ describe('setupSSEReaction reconnect hydration', () => {
     showToast.mockClear()
     replayOasRuntimeTelemetry.mockClear()
     replayOasRuntimeTelemetry.mockResolvedValue(undefined)
+    refreshActiveKeeperChatHistory.mockClear()
     hydrateFleetCompositeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockClear()
     hydrateGoalTreeSnapshot.mockReturnValue(true)
@@ -195,6 +198,23 @@ describe('setupSSEReaction reconnect hydration', () => {
     // Approvals can arrive/resolve during a disconnect; the always-visible
     // badge must recover them on reconnect, not only on the governance surface.
     expect(refreshGovernance).toHaveBeenCalled()
+
+    vi.clearAllTimers()
+    cleanup()
+  })
+
+  it('force re-hydrates the open keeper chat on reconnect (replay-buffer gap recovery)', async () => {
+    const { sseStore, sse } = await loadSseStore()
+    const cleanup = sseStore.setupSSEReaction()
+
+    sse.connected.value = true
+    sse.lastDisconnectedAt.value = Date.now() - 1_000
+    sse.reconnectCount.value += 1
+    await flushAsyncWork()
+
+    // keeper_chat_appended events dropped outside the server replay buffer are
+    // unrecoverable through the live stream, so the open panel must re-fetch.
+    expect(refreshActiveKeeperChatHistory).toHaveBeenCalledWith({ force: true })
 
     vi.clearAllTimers()
     cleanup()

@@ -31,6 +31,7 @@ type stop_reason =
   | Completed
   | TurnBudgetExhausted of { turns_used : int; limit : int }
   | MutationBoundaryReached of { turns_used : int; tool_name : string option }
+  | Yielded_to_chat_waiting of { turns_used : int }
 
 type config =
   Runtime_agent_context.config = {
@@ -776,6 +777,23 @@ let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
          ~goal_blocks:blocks)
     ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
 
+let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
+    ~(candidates : Runtime.t list)
+    ?(checkpoint_messages = [])
+    ?(initial_messages = [])
+    (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
+  decide_modality_reroute
+    ~assigned_caps:(input_capabilities_of_runtime assigned)
+    ~required_modalities:
+      (required_modalities_for_run_with_checkpoint ~checkpoint_messages
+         ~initial_messages ~goal_blocks:blocks)
+    ~candidates:
+      (candidates
+       |> List.filter (fun (runtime : Runtime.t) ->
+         not (String.equal runtime.Runtime.id assigned.Runtime.id))
+       |> List.map (fun (runtime : Runtime.t) ->
+         runtime.Runtime.id, input_capabilities_of_runtime runtime))
+
 module For_testing = struct
   let request_runtime_fields_on_base_config =
     request_runtime_fields_on_base_config
@@ -908,6 +926,8 @@ let dashboard_status_of_stop_reason = function
   | TurnBudgetExhausted _ -> Dashboard_oas_bridge.Error { transient = false }
   | MutationBoundaryReached _ ->
       Dashboard_oas_bridge.Cancelled { reason = "mutation_boundary_reached" }
+  | Yielded_to_chat_waiting _ ->
+      Dashboard_oas_bridge.Cancelled { reason = "yielded_to_chat_waiting" }
 
 let record_dashboard_oas_response ~config ~total_duration_ms ?serialization_ms
     ~status (response : Agent_sdk.Types.api_response) =

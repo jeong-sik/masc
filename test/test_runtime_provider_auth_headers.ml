@@ -308,6 +308,156 @@ max-concurrent = 2
         | None -> fail "expected provider capabilities")
      | _ -> fail "expected one provider")
 
+let kimi_runtime_toml =
+  {|
+[runtime]
+default = "kimi.kimi-for-coding"
+
+[providers.kimi]
+display-name = "Kimi Code Plan"
+protocol = "messages-http"
+endpoint = "https://example.invalid/kimi"
+
+[providers.kimi.credentials]
+type = "inline"
+value = "test-kimi-key"
+
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 256000
+tools-support = true
+streaming = true
+
+[kimi.kimi-for-coding]
+|}
+
+let kimi_runtime_config_or_fail () =
+  match Runtime_toml.parse_string kimi_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected Kimi runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let test_runtime_adapter_materializes_kimi_messages_http () =
+  let cfg = kimi_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Error msg -> failf "unexpected Kimi messages-http adapter error: %s" msg
+     | Ok provider_cfg ->
+       check string "base url" "https://example.invalid/kimi" provider_cfg.base_url;
+       check string "request path" "/v1/messages" provider_cfg.request_path;
+       check
+         string
+         "api key"
+         "test-kimi-key"
+         (Llm_provider.Secret.header_value provider_cfg.api_key);
+       (match provider_cfg.kind with
+        | Llm_provider.Provider_config.Kimi -> ()
+        | other ->
+          failf
+            "expected Kimi provider kind, got %s"
+            (Llm_provider.Provider_config.string_of_provider_kind other)))
+  | bindings -> failf "expected one Kimi binding, got %d" (List.length bindings)
+
+let unregistered_messages_http_toml =
+  {|
+[runtime]
+default = "local.model"
+
+[providers.local]
+display-name = "Local Messages API"
+protocol = "messages-http"
+endpoint = "https://example.invalid/messages"
+
+[models.model]
+api-name = "model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[local.model]
+|}
+
+let incompatible_messages_http_toml =
+  {|
+[runtime]
+default = "openai.model"
+
+[providers.openai]
+display-name = "OpenAI over wrong protocol"
+protocol = "messages-http"
+endpoint = "https://api.openai.example/v1/messages"
+
+[models.model]
+api-name = "model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[openai.model]
+|}
+
+let test_runtime_adapter_rejects_unregistered_messages_http () =
+  match Runtime_toml.parse_string unregistered_messages_http_toml with
+  | Error errors ->
+    failf
+      "expected unregistered messages-http runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Ok provider_cfg ->
+          failf
+            "unregistered messages-http provider must fail closed, got kind %s"
+            (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+        | Error _ -> ())
+     | bindings -> failf "expected one local binding, got %d" (List.length bindings))
+
+let test_runtime_adapter_rejects_incompatible_messages_http_kind () =
+  match Runtime_toml.parse_string incompatible_messages_http_toml with
+  | Error errors ->
+    failf
+      "expected incompatible messages-http runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Ok provider_cfg ->
+          failf
+            "incompatible messages-http provider must fail closed, got kind %s"
+            (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+        | Error msg ->
+          check
+            bool
+            "error names messages compatibility policy"
+            true
+            (String_util.contains_substring msg "messages-compatible");
+          check
+            bool
+            "error names provider"
+            true
+            (String_util.contains_substring msg "openai"))
+     | bindings -> failf "expected one OpenAI binding, got %d" (List.length bindings))
+
 let deepseek_runtime_toml =
   {|
 [runtime]
@@ -541,6 +691,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -575,6 +726,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -610,6 +762,7 @@ let provider_cfg () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -690,6 +843,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; lane_decls = []
     }
   in
   match Runtime.of_binding cfg runpod_binding with
@@ -1161,6 +1315,18 @@ let () =
             "runtime TOML reads uses-messages-caching capability"
             `Quick
             test_runtime_toml_accepts_messages_caching_capability
+        ; test_case
+            "runtime adapter materializes Kimi messages-http provider"
+            `Quick
+            test_runtime_adapter_materializes_kimi_messages_http
+        ; test_case
+            "runtime adapter rejects unregistered messages-http provider"
+            `Quick
+            test_runtime_adapter_rejects_unregistered_messages_http
+        ; test_case
+            "runtime adapter rejects incompatible messages-http registry kind"
+            `Quick
+            test_runtime_adapter_rejects_incompatible_messages_http_kind
         ; test_case
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick

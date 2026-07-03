@@ -70,6 +70,163 @@ let media_degrade_manifest_decision ~(runtime_id : string)
         ("media_dropped_counts", `String summary);
       ])
 
+let runtime_attempt_decision ~idx ~runtime_id =
+  `Assoc [ ("idx", `Int idx); ("runtime_id", `String runtime_id) ]
+
+let runtime_failed_decision ~idx ~runtime_id error =
+  `Assoc
+    [
+      ("idx", `Int idx);
+      ("runtime_id", `String runtime_id);
+      ("error_kind", `String (Oas_compat.error_kind error));
+    ]
+
+let lane_retry_checkpoint ~is_last ~resume_checkpoint ~checkpoint_after error =
+  if is_last then
+    None
+  else if Keeper_turn_driver_try_runtime.accept_no_progress_should_try_next error
+  then
+    Some
+      (Keeper_turn_driver_try_runtime.checkpoint_for_accept_rejected_retry
+         ~resume_checkpoint
+         ~checkpoint_after
+         error)
+  else
+    match Keeper_turn_driver_try_runtime.sdk_error_to_http_error error with
+    | Some http_err when Runtime_attempt_fsm.should_try_next http_err ->
+      Some checkpoint_after
+    | _ -> None
+
+let attempt_runtime_candidates ~runtime_id ~runtime_id_of
+    ~(emit_runtime_manifest :
+       ?status:string ->
+       ?decision:Yojson.Safe.t ->
+       Keeper_runtime_manifest.event_kind ->
+       unit) ~run_attempt candidates =
+  let rec loop idx resume_checkpoint = function
+    | [] ->
+      Error
+        (Agent_sdk.Error.Internal
+           (Printf.sprintf "runtime lane %S exhausted all candidates" runtime_id))
+    | candidate :: rest ->
+      let is_last = rest = [] in
+      let attempt_runtime_id = runtime_id_of candidate in
+      emit_runtime_manifest
+        ~status:"attempt"
+        ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
+        Keeper_runtime_manifest.Runtime_routed;
+      (match
+         run_attempt ?resume_checkpoint ~idx ~runtime_id:attempt_runtime_id candidate
+       with
+       | Ok value, _checkpoint_after ->
+         emit_runtime_manifest
+           ~status:"completed"
+           ~decision:(runtime_attempt_decision ~idx ~runtime_id:attempt_runtime_id)
+           Keeper_runtime_manifest.Runtime_completed;
+         Ok value
+       | Error error, checkpoint_after ->
+         emit_runtime_manifest
+           ~status:"failed"
+           ~decision:(runtime_failed_decision ~idx ~runtime_id:attempt_runtime_id error)
+           Keeper_runtime_manifest.Runtime_failed;
+         (match
+            lane_retry_checkpoint
+              ~is_last
+              ~resume_checkpoint
+              ~checkpoint_after
+              error
+          with
+          | Some retry_checkpoint -> loop (idx + 1) retry_checkpoint rest
+          | None -> Error error))
+  in
+  loop 0 None candidates
+
+let runtime_candidate_missing_error id =
+  Agent_sdk.Error.Internal
+    (Printf.sprintf
+       "keeper_turn_driver: lane candidate %S disappeared from runtimes"
+       id)
+
+let resolve_runtime_candidate id =
+  match Runtime.get_runtime_by_id id with
+  | Some runtime -> Ok runtime
+  | None -> Error (runtime_candidate_missing_error id)
+
+let resolve_runtime_candidates ids =
+  let rec loop acc = function
+    | [] -> Ok (List.rev acc)
+    | id :: rest ->
+      let* runtime = resolve_runtime_candidate id in
+      loop (runtime :: acc) rest
+  in
+  loop [] ids
+
+let dedupe_runtimes_preserve_order runtimes =
+  let rec loop seen acc = function
+    | [] -> List.rev acc
+    | runtime :: rest ->
+      let runtime_id = runtime.Runtime.id in
+      if List.exists (String.equal runtime_id) seen then
+        loop seen acc rest
+      else
+        loop (runtime_id :: seen) (runtime :: acc) rest
+  in
+  loop [] [] runtimes
+
+let lane_modality_reroute_decision ~checkpoint_messages ~initial_messages
+    ~goal_blocks ~first_candidate ~remaining_runtimes =
+  Runtime_agent.decide_modality_reroute_for_runtime_candidates
+    ~assigned:first_candidate
+    ~candidates:remaining_runtimes
+    ~checkpoint_messages
+    ~initial_messages
+    goal_blocks
+
+let first_runtime_after_modality_reroute ~keeper_name ~assignment_id
+    ~first_candidate_id ~first_candidate = function
+  | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
+    first_candidate_id, first_candidate
+  | Runtime_agent.Reroute { to_runtime_id; reason } ->
+    (match Runtime.get_runtime_by_id to_runtime_id with
+     | None -> first_candidate_id, first_candidate
+     | Some rerouted ->
+       Log.Keeper.warn
+         "%s: RFC-0265 modality reroute %s -> %s (%s)"
+         keeper_name
+         assignment_id
+         to_runtime_id
+         reason;
+       to_runtime_id, rerouted)
+
+type attempt_inference_policy =
+  { attempt_enable_thinking : bool option
+  ; attempt_preserve_thinking : bool option
+  ; attempt_max_tokens : int
+  }
+
+let attempt_inference_policy
+    ?max_tokens_for_runtime
+    ~runtime_id
+    ~fallback_enable_thinking
+    ~fallback_max_tokens
+    ()
+  =
+  let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
+  let attempt_enable_thinking =
+    match runtime_seed.thinking_enabled with
+    | Some _ as enabled -> enabled
+    | None -> fallback_enable_thinking
+  in
+  let attempt_max_tokens =
+    match max_tokens_for_runtime with
+    | Some resolver -> resolver ~runtime_id
+    | None -> fallback_max_tokens
+  in
+  { attempt_enable_thinking
+  ; attempt_preserve_thinking = runtime_seed.preserve_thinking
+  ; attempt_max_tokens
+  }
+
 let run_named
     ~runtime_id
     ?(keeper_name = "")
@@ -87,6 +244,7 @@ let run_named
     ?body_timeout_s
     ?(temperature = Runtime_provider_defaults.agent_default_temperature)
     ?(max_tokens = Runtime_provider_defaults.agent_default_max_tokens)
+    ?max_tokens_for_runtime
     ?(accept = fun (_ : Agent_sdk_response.api_response) -> true)
     ?guardrails
     ?hooks
@@ -126,25 +284,12 @@ let run_named
   match require_eio ?sw ?net () with
   | Error e -> Error (eio_context_error_to_sdk_error e)
   | Ok (sw, net) ->
-  (* Single-runtime dispatch (RFC-0206 runtime purge).  The former named-runtime
-     resolution + multi-candidate selection / health / capacity / strategy /
-     cycle / admission-rotation machinery is deleted.  There is exactly one
-     default Runtime: resolve its provider config, build one execution
-     candidate, and run a single provider attempt.  A failed runtime surfaces
-     its [sdk_error] directly — there is nothing left to "exhaust". *)
-  let runtime_id = String.trim runtime_id in
-  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~base_path ~keeper_name tools in
-  let runtime_seed = Runtime_inference.for_runtime ~name:runtime_id in
-  let enable_thinking =
-    match runtime_seed.thinking_enabled with
-    | Some enabled -> Some enabled
-    | None -> enable_thinking
-  in
-  let preserve_thinking = runtime_seed.preserve_thinking in
-  (* Audit F8: the former [?provider_filter] / [?base_path] /
-     [?wait_timeout_sec] parameters only fed the deleted multi-candidate
-     machinery and were silently ignored here; they are removed from the
-     signature so callers cannot pass dead routing knobs. *)
+	  (* Lane-aware dispatch: resolve a runtime id or ordered failover lane, then
+	     attempt candidates sequentially with manifest evidence per attempt. *)
+	  let runtime_id = String.trim runtime_id in
+	  let runtime_mcp_policy = runtime_mcp_policy_for_tools ~base_path ~keeper_name tools in
+	  (* Audit F8: removed dead routing knobs from the signature so callers cannot
+	     pass values that would be silently ignored. *)
   let turn_start = Mtime_clock.now () in
   let seq_ref = ref 0 in
   let emit_runtime_manifest ?status ?decision event =
@@ -182,35 +327,29 @@ let run_named
       |> append
     | _ -> ()
   in
-  (* RFC-0207: dispatch to the *requested* runtime (a keeper's persona [model]
-     selection or the global default, both produced by [runtime_id_of_meta])
-     instead of unconditionally the default.  A requested id that does not
-     resolve is a config/validation bug — fail-fast rather than silently
-     substituting the default (RFC-0206 §2.1: no Unknown→Permissive fallback). *)
-  match Runtime.get_runtime_by_id runtime_id with
-  | None ->
+  (* Lanes shadow runtimes: a lane id takes precedence over a runtime id so
+     operators can route through explicit failover groups. *)
+  let lane_resolution = Runtime.resolve_assignment runtime_id in
+  let lane_candidate_ids =
+    match lane_resolution with
+    | `Missing -> []
+    | `Single_runtime runtime -> [ runtime.Runtime.id ]
+    | `Lane lane -> Runtime_lane.ordered_candidates lane
+  in
+  if lane_candidate_ids = []
+  then
     Error
       (Agent_sdk.Error.Internal
          (Printf.sprintf
-            "requested runtime %S not found among configured runtimes \
-             (no silent fallback to default — RFC-0207/RFC-0206 §2.1)"
+            "requested runtime or lane %S not found among configured runtimes"
             runtime_id))
-  | Some assigned_runtime ->
-  (* RFC-0265: proactively reroute a turn whose active input modality
-     (image/audio/document) the assigned runtime cannot accept to a capable
-     configured runtime ([\[runtime\].media_failover] order, else declaration
-     order). The active input includes both the current goal and prior
-     [initial_messages]; otherwise an image in history can poison the next
-     text-only follow-up and leak as a provider 400. Modality-satisfied turns are
-     untouched; when no runtime qualifies the assigned runtime stands and the
-     loud capability gate in [Runtime_agent.run_blocks] rejects (the floor). The
-     reroute is visible via a WARN log (non-silent — RFC-0126/0145). *)
+  else
+  (* RFC-0265: reroute when active input modality exceeds the first candidate's
+     capabilities; later lane candidates remain in declared order. *)
   let current_goal_blocks =
     match goal_blocks with
     | Some blocks -> blocks
     | None ->
-      (* A missing current block payload means the current keeper goal is
-         text-only; [initial_messages] still participate in reroute below. *)
       []
   in
   let checkpoint_messages =
@@ -218,28 +357,27 @@ let run_named
     | None -> []
     | Some (checkpoint : Agent_sdk.Checkpoint.t) -> checkpoint.messages
   in
+  let first_candidate_id, remaining_candidate_ids =
+    match lane_candidate_ids with
+    | first :: rest -> first, rest
+    | [] -> runtime_id, []
+  in
+  let* first_candidate = resolve_runtime_candidate first_candidate_id in
+  let* remaining_runtimes = resolve_runtime_candidates remaining_candidate_ids in
   let reroute_decision =
-    Runtime_agent.decide_modality_reroute_for_runtime
-      ~assigned:assigned_runtime
+    lane_modality_reroute_decision
       ~checkpoint_messages
       ~initial_messages
-      current_goal_blocks
+      ~goal_blocks:current_goal_blocks
+      ~first_candidate
+      ~remaining_runtimes
   in
-  let runtime_id, runtime =
-    match reroute_decision with
-    | Runtime_agent.No_reroute_needed | Runtime_agent.No_capable_runtime _ ->
-      runtime_id, assigned_runtime
-    | Runtime_agent.Reroute { to_runtime_id; reason } ->
-      (match Runtime.get_runtime_by_id to_runtime_id with
-       | None -> runtime_id, assigned_runtime
-       | Some rerouted ->
-         Log.Keeper.warn
-           "%s: RFC-0265 modality reroute %s -> %s (%s)"
-           keeper_name
-           runtime_id
-           to_runtime_id
-           reason;
-         to_runtime_id, rerouted)
+  let first_runtime_id, first_runtime =
+    first_runtime_after_modality_reroute ~keeper_name ~assignment_id:runtime_id
+      ~first_candidate_id ~first_candidate reroute_decision
+  in
+  let attempt_runtimes =
+    dedupe_runtimes_preserve_order (first_runtime :: remaining_runtimes)
   in
   (* RFC-0265 follow-up — graceful media degrade floor. When no configured
      runtime can accept the turn's input modality ([No_capable_runtime]), strip
@@ -254,7 +392,7 @@ let run_named
   let goal_blocks, initial_messages, oas_checkpoint =
     match reroute_decision with
     | Runtime_agent.No_capable_runtime _ ->
-      let caps = Runtime_agent.input_capabilities_of_runtime runtime in
+      let caps = Runtime_agent.input_capabilities_of_runtime first_runtime in
       let stripped_goal, goal_dropped =
         Runtime_agent.strip_unsupported_modality_blocks caps current_goal_blocks
       in
@@ -277,7 +415,7 @@ let run_named
           (Runtime_agent.merge_modality_counts goal_dropped initial_dropped)
           checkpoint_dropped
       in
-      (match Runtime_agent.media_degrade_note ~runtime_id dropped with
+      (match Runtime_agent.media_degrade_note ~runtime_id:first_runtime_id dropped with
        | None ->
          (* Nothing strippable (e.g. only ToolResult-nested media): keep the
             inputs unchanged so the loud capability floor still applies. *)
@@ -286,11 +424,11 @@ let run_named
          Log.Keeper.warn
            "%s: RFC-0265 media degrade on %s — dropped %s, continuing text-only"
            keeper_name
-           runtime_id
+           first_runtime_id
            (modality_counts_summary dropped);
          emit_runtime_manifest
            ~status:"degraded"
-           ~decision:(media_degrade_manifest_decision ~runtime_id dropped)
+           ~decision:(media_degrade_manifest_decision ~runtime_id:first_runtime_id dropped)
            Keeper_runtime_manifest.Runtime_routed;
          let goal_with_note =
            stripped_goal @ [ Agent_sdk.Types.text_block note ]
@@ -299,18 +437,6 @@ let run_named
     | Runtime_agent.No_reroute_needed | Runtime_agent.Reroute _ ->
       goal_blocks, initial_messages, oas_checkpoint
   in
-  let error_runtime_id = runtime_id in
-  let* provider_config =
-    match provider_config_transform with
-    | None -> Ok runtime.Runtime.provider_config
-    | Some transform -> transform runtime.Runtime.provider_config
-  in
-  let candidate =
-    Runtime_candidate.of_provider_config
-      ~max_concurrent:runtime.Runtime.binding.max_concurrent
-      provider_config
-  in
-  let name = Printf.sprintf "oas-%s" runtime_id in
   let transport_resolved =
     match transport with
     | Some t -> t
@@ -321,68 +447,98 @@ let run_named
      accounting. Passing [None] keeps the previous behavior without exposing a
      dead compatibility knob. *)
   let execution_idle_timeout_s = None in
-	  let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx = {
-	    runtime_id;
-	    error_runtime_id;
-	    base_path;
-	    keeper_name;
-    name;
-    goal;
-    goal_blocks;
-    priority;
-    session_id;
-    system_prompt;
-    tools;
-    initial_messages;
-    max_turns;
-    max_idle_turns;
-    stream_idle_timeout_s;
-    execution_idle_timeout_s;
-    body_timeout_s;
-    temperature;
-    max_tokens;
-    accept;
-    guardrails;
-    hooks;
-    context_reducer;
-    raw_trace;
-    transport_resolved;
-    runtime_mcp_policy;
-    allowed_paths;
-    checkpoint_sidecar;
-    cache_system_prompt;
-    yield_on_tool;
-    compact_ratio;
-    oas_auto_context_overflow_retry;
-    checkpoint_dir;
-    context_injector;
-    context;
-    enable_thinking;
-    preserve_thinking;
-    approval;
-    exit_condition;
-    exit_condition_result;
-    summarizer;
-    oas_checkpoint;
-    trace_link;
-    sw;
-    net;
-    on_event;
-    on_yield;
-    on_resume;
-    agent_ref;
-    on_runtime_observation;
-    event_bus;
-    runtime_manifest_context;
-    runtime_manifest_append;
-    turn_start;
-    seq_ref;
-  } in
-  let result, _checkpoint, _success_sample =
-    Keeper_turn_driver_try_provider.run_try_provider
-      try_provider_ctx ?per_provider_timeout_s candidate
-  in
-  result
+  (* Sequential candidate attempt loop. On failure we record a manifest row and
+     move to the next candidate; on success we record completion and return. *)
+	  attempt_runtime_candidates ~runtime_id
+	    ~runtime_id_of:(fun (runtime : Runtime.t) -> runtime.Runtime.id)
+	    ~emit_runtime_manifest
+	    ~run_attempt:(fun ?resume_checkpoint ~idx:_ ~runtime_id:attempt_runtime_id runtime ->
+	      let error_runtime_id = attempt_runtime_id in
+      let inference_policy =
+        attempt_inference_policy
+          ?max_tokens_for_runtime
+          ~runtime_id:attempt_runtime_id
+          ~fallback_enable_thinking:enable_thinking
+          ~fallback_max_tokens:max_tokens
+          ()
+      in
+	      match
+	        match provider_config_transform with
+	        | None -> Ok runtime.Runtime.provider_config
+        | Some transform -> transform runtime.Runtime.provider_config
+      with
+      | Error err -> Error err, None
+      | Ok provider_config ->
+        let candidate =
+          Runtime_candidate.of_provider_config
+            ~max_concurrent:runtime.Runtime.binding.max_concurrent
+            provider_config
+        in
+        let name = Printf.sprintf "oas-%s" attempt_runtime_id in
+        let try_provider_ctx : Keeper_turn_driver_try_provider.try_provider_ctx =
+          { runtime_id = attempt_runtime_id
+          ; error_runtime_id
+          ; base_path
+          ; keeper_name
+          ; name
+          ; goal
+          ; goal_blocks
+          ; priority
+          ; session_id
+          ; system_prompt
+          ; tools
+          ; initial_messages
+          ; max_turns
+          ; max_idle_turns
+	          ; stream_idle_timeout_s
+	          ; execution_idle_timeout_s
+	          ; body_timeout_s
+	          ; temperature
+	          ; max_tokens = inference_policy.attempt_max_tokens
+          ; accept
+          ; guardrails
+          ; hooks
+          ; context_reducer
+          ; raw_trace
+          ; transport_resolved
+          ; runtime_mcp_policy
+          ; allowed_paths
+          ; checkpoint_sidecar
+          ; cache_system_prompt
+          ; yield_on_tool
+          ; compact_ratio
+          ; oas_auto_context_overflow_retry
+	          ; checkpoint_dir
+	          ; context_injector
+	          ; context
+	          ; enable_thinking = inference_policy.attempt_enable_thinking
+	          ; preserve_thinking = inference_policy.attempt_preserve_thinking
+          ; approval
+          ; exit_condition
+          ; exit_condition_result
+          ; summarizer
+          ; oas_checkpoint
+          ; trace_link
+          ; sw
+          ; net
+          ; on_event
+          ; on_yield
+          ; on_resume
+          ; agent_ref
+          ; on_runtime_observation
+          ; event_bus
+          ; runtime_manifest_context
+          ; runtime_manifest_append
+          ; turn_start
+          ; seq_ref
+          }
+        in
+        let result, checkpoint_after, _success_sample =
+          Keeper_turn_driver_try_provider.run_try_provider
+            try_provider_ctx ?resume_checkpoint ?per_provider_timeout_s candidate
+        in
+        result, checkpoint_after)
+    attempt_runtimes
 
 
 module For_testing = struct
@@ -401,7 +557,14 @@ module For_testing = struct
   let sdk_error_of_nonretryable_attempt_error =
     Keeper_turn_driver_try_runtime.sdk_error_of_nonretryable_attempt_error
 
-  let media_degrade_manifest_decision = media_degrade_manifest_decision
+  let first_runtime_after_modality_reroute =
+    first_runtime_after_modality_reroute
+
+  let lane_modality_reroute_decision = lane_modality_reroute_decision
+  let dedupe_runtimes_preserve_order = dedupe_runtimes_preserve_order
+	  let media_degrade_manifest_decision = media_degrade_manifest_decision
+	  let attempt_inference_policy = attempt_inference_policy
+	  let attempt_runtime_candidates = attempt_runtime_candidates
 
   let accept_no_progress_should_try_next =
     Keeper_turn_driver_try_runtime.For_testing.accept_no_progress_should_try_next

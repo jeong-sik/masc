@@ -46,7 +46,26 @@ val run_if_free
     a busy slot skips the cycle and the next heartbeat retries naturally.
     [`Busy None] means the slot is held but the holder has not yet published
     its info (admission in progress on another fiber). Exceptions from [f]
-    (including [Eio.Cancel.Cancelled]) release the slot and re-raise. *)
+    (including [Eio.Cancel.Cancelled]) release the slot and re-raise.
+
+    Also returns [`Busy] without attempting the lock when a chat request is
+    already parked on this slot ([chat_waiting] is true). Eio.Mutex hands a
+    released slot directly to the next parked waiter, so a new autonomous
+    cycle would not overtake a queued chat regardless; this pre-check makes
+    the yield explicit and keeps a heartbeat-scheduled cycle from competing
+    for a slot a dashboard/connector message is already waiting on. *)
+
+val chat_waiting : base_path:string -> keeper_name:string -> bool
+(** [true] when at least one chat request is parked on this keeper's slot
+    (waiting in [run_serialized] for an in-flight turn to release). Read
+    under the slot's state mutex; [false] for an unknown keeper (no slot,
+    hence no waiters). The autonomous lane feeds this into the OAS agent
+    loop's exit condition: an idle-filler turn that observes a parked chat
+    stops at the next turn boundary so the slot releases and the chat admits
+    via direct handoff, instead of the chat starving behind the autonomous
+    turn's longer budget. Only counts *parked* waiters, never an already
+    admitted (in-flight) turn — an admitted chat holds the slot and is no
+    longer waiting. *)
 
 val run_serialized
   :  base_path:string

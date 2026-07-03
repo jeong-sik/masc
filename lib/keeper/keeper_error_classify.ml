@@ -315,6 +315,12 @@ let is_recoverable_no_progress_accept_rejection
     true
   | Some _ | None -> false
 
+let is_read_only_no_progress_accept_rejection
+    (err : Agent_sdk.Error.sdk_error) : bool =
+  match accept_rejection_degraded_retry_reason err with
+  | Some Read_only_no_progress -> true
+  | Some _ | None -> false
+
 type degraded_retry =
   { next_runtime : string
   ; fallback_reason : degraded_retry_reason

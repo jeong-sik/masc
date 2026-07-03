@@ -19,9 +19,11 @@ export function judgeShapeLabel(shape: FusionJudgeShape): string {
   return JUDGE_SHAPE_LABEL[shape]
 }
 
-// Korean badge for a backend judge role. Unknown roles fall through to the raw
-// string so a new backend role still renders (the enum is closed on the backend,
-// so this is defensive rather than expected).
+// Korean badge for a backend judge role. Covers the closed six-role enum
+// (fusion_types.ml judge_role: Single | Refine_pass | First | Meta | Stage_meta |
+// Final_meta); the staged-JoJ reducers (`stage_meta` / `final_meta`) share the
+// "심판" wording of the others. Unknown roles fall through to the raw string so a
+// new backend role still renders (defensive rather than expected).
 export function judgeRoleLabel(role: string): string {
   switch (role) {
     case 'first':
@@ -32,9 +34,20 @@ export function judgeRoleLabel(role: string): string {
       return '재검토'
     case 'single':
       return '단일'
+    case 'stage_meta':
+      return '단계 심판'
+    case 'final_meta':
+      return '최종 심판'
     default:
       return role
   }
+}
+
+// Elapsed wall-clock of a failed judge node (`Ns`, one decimal), or null when the
+// node carries no timing (successful nodes, or older payloads). Shared by both
+// render surfaces so a slow failure reads the same way in each.
+export function judgeNodeElapsedLabel(node: FusionJudgeNode): string | null {
+  return node.elapsedS != null ? `${node.elapsedS.toFixed(1)}s` : null
 }
 
 // Per-node combined token figure (`Nk tok` / `N tok`), em-dash when no usage.

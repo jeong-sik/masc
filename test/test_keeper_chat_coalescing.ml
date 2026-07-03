@@ -287,6 +287,153 @@ let test_configure_persistence_prepends_snapshot_to_live_queue () =
          = [ "snapshot-before-restart"; "live-during-bootstrap" ]))
 ;;
 
+let test_remove_matching_single_from_head_run () =
+  Printf.printf "Test 8: remove_matching drops exactly one head-run match\n%!";
+  let keeper_name = "remove-matching-single" in
+  Keeper_chat_queue.clear ~keeper_name;
+  let dash content ts = msg ~content ~ts Keeper_chat_queue.Dashboard in
+  (* Two structurally identical dashboard messages plus a same-source tail, all
+     inside one head run. Removing the duplicate target drops exactly one copy. *)
+  let dup = dash "dup" 1.0 in
+  List.iter (Keeper_chat_queue.enqueue ~keeper_name) [ dup; dup; dash "tail" 3.0 ];
+  (match Keeper_chat_queue.remove_matching ~keeper_name dup with
+   | `Removed -> check "duplicate head-run message reports Removed" true
+   | `Not_found | `Persist_failed _ ->
+     check "duplicate head-run message reports Removed" false);
+  check "exactly one duplicate is removed" (Keeper_chat_queue.length ~keeper_name = 2);
+  check
+    "the other duplicate and tail survive in FIFO order"
+    (contents (Keeper_chat_queue.dequeue_batch ~keeper_name) = [ "dup"; "tail" ]);
+  (* A match in the middle of the head run is removed without touching the
+     messages before it. *)
+  Keeper_chat_queue.clear ~keeper_name;
+  let mid = dash "mid" 2.0 in
+  List.iter
+    (Keeper_chat_queue.enqueue ~keeper_name)
+    [ dash "head" 1.0; mid; dash "after" 3.0 ];
+  (match Keeper_chat_queue.remove_matching ~keeper_name mid with
+   | `Removed -> check "mid-run match reports Removed" true
+   | `Not_found | `Persist_failed _ -> check "mid-run match reports Removed" false);
+  check
+    "mid-run removal keeps the surrounding messages"
+    (contents (Keeper_chat_queue.dequeue_batch ~keeper_name) = [ "head"; "after" ])
+;;
+
+let test_remove_matching_not_found () =
+  Printf.printf "Test 9: remove_matching reports Not_found off the head run\n%!";
+  let absent = msg ~content:"anything" ~ts:1.0 Keeper_chat_queue.Dashboard in
+  check
+    "absent keeper reports Not_found"
+    (Keeper_chat_queue.remove_matching ~keeper_name:"remove-matching-absent" absent
+     = `Not_found);
+  let keeper_name = "remove-matching-notfound" in
+  Keeper_chat_queue.clear ~keeper_name;
+  check
+    "empty queue reports Not_found"
+    (Keeper_chat_queue.remove_matching ~keeper_name absent = `Not_found);
+  (* A dashboard head run followed by a Discord message: the Discord target is
+     past the head-run boundary, so it is not removed and the queue is intact. *)
+  let discord = Keeper_chat_queue.Discord { channel_id = "c"; user_id = "u" } in
+  let beyond = msg ~content:"x1" ~ts:2.0 discord in
+  List.iter
+    (Keeper_chat_queue.enqueue ~keeper_name)
+    [ msg ~content:"d1" ~ts:1.0 Keeper_chat_queue.Dashboard; beyond ];
+  check
+    "match beyond the head-run boundary reports Not_found"
+    (Keeper_chat_queue.remove_matching ~keeper_name beyond = `Not_found);
+  check "queue is unchanged after Not_found" (Keeper_chat_queue.length ~keeper_name = 2);
+  check
+    "an unqueued target reports Not_found"
+    (Keeper_chat_queue.remove_matching ~keeper_name
+       (msg ~content:"nope" ~ts:9.0 Keeper_chat_queue.Dashboard)
+     = `Not_found);
+  Keeper_chat_queue.clear ~keeper_name;
+  let with_block =
+    { (msg ~content:"same-text" ~ts:3.0 Keeper_chat_queue.Dashboard) with
+      Keeper_chat_queue.user_blocks = [ image_block ~attachment_id:"img-1" ] }
+  in
+  let without_block = msg ~content:"same-text" ~ts:3.0 Keeper_chat_queue.Dashboard in
+  Keeper_chat_queue.enqueue ~keeper_name with_block;
+  check
+    "same text/source/timestamp but different user_blocks reports Not_found"
+    (Keeper_chat_queue.remove_matching ~keeper_name without_block = `Not_found);
+  check
+    "near-match payload stays queued"
+    (match Keeper_chat_queue.dequeue_batch ~keeper_name with
+     | [ msg ] ->
+       Keeper_multimodal_input.modalities msg.Keeper_chat_queue.user_blocks = [ "image" ]
+     | _ -> false)
+;;
+
+let test_remove_matching_persist_failure_aborts () =
+  Printf.printf "Test 10: failed remove_matching persist leaves the queue intact\n%!";
+  let base_path = temp_dir "keeper-chat-queue-remove-persist-failure" in
+  Fun.protect
+    ~finally:(fun () ->
+      Keeper_chat_queue.For_testing.reset ();
+      rm_rf base_path)
+    (fun () ->
+      let keeper_name = "chat-queue-remove-persist-failure" in
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      let target = msg ~content:"keep-me" ~ts:1.0 Keeper_chat_queue.Dashboard in
+      List.iter
+        (Keeper_chat_queue.enqueue ~keeper_name)
+        [ target; msg ~content:"keep-me-too" ~ts:2.0 Keeper_chat_queue.Dashboard ];
+      Keeper_chat_queue.For_testing.fail_next_persist ();
+      (match Keeper_chat_queue.remove_matching ~keeper_name target with
+       | `Persist_failed _ ->
+         check "snapshot rewrite failure reports Persist_failed" true
+       | `Removed | `Not_found ->
+         check "snapshot rewrite failure reports Persist_failed" false);
+      check
+        "in-memory queue rolls back after failed remove persist"
+        (Keeper_chat_queue.length ~keeper_name = 2);
+      Keeper_chat_queue.For_testing.reset ();
+      Keeper_chat_queue.configure_persistence ~base_path;
+      check
+        "stale snapshot still replays both messages exactly once"
+        (contents (Keeper_chat_queue.dequeue_batch ~keeper_name)
+         = [ "keep-me"; "keep-me-too" ]))
+;;
+
+let test_remove_matching_dequeue_batch_exactly_once () =
+  Printf.printf
+    "Test 11: dequeue_batch and remove_matching answer each message once\n%!";
+  (* Single-domain Eio serializes remove_matching and dequeue_batch through the
+     shared per-keeper mutex; the two argument orders below enumerate the two
+     possible linearizations. In each, the target must be answered by exactly
+     one path — removed XOR present in the dequeued batch, never both, never
+     neither — and the queue must drain fully. *)
+  let discord = Keeper_chat_queue.Discord { channel_id = "c"; user_id = "u" } in
+  let m1 = msg ~content:"m1" ~ts:1.0 discord in
+  let m2 = msg ~content:"m2" ~ts:2.0 discord in
+  let in_batch content batch =
+    List.exists (fun m -> String.equal m.Keeper_chat_queue.content content) batch
+  in
+  let run_race label ~remove_first =
+    let keeper_name = "remove-race-" ^ label in
+    Keeper_chat_queue.clear ~keeper_name;
+    List.iter (Keeper_chat_queue.enqueue ~keeper_name) [ m1; m2 ];
+    let removed = ref `Not_found in
+    let batch = ref [] in
+    let do_remove () =
+      removed := Keeper_chat_queue.remove_matching ~keeper_name m1
+    in
+    let do_dequeue () = batch := Keeper_chat_queue.dequeue_batch ~keeper_name in
+    if remove_first
+    then Eio.Fiber.both do_remove do_dequeue
+    else Eio.Fiber.both do_dequeue do_remove;
+    let m1_removed = !removed = `Removed in
+    let m1_dequeued = in_batch "m1" !batch in
+    check (label ^ ": m1 is answered by exactly one path") (m1_removed <> m1_dequeued);
+    check (label ^ ": m2 ends up in the dequeued batch") (in_batch "m2" !batch);
+    check (label ^ ": queue is fully drained") (Keeper_chat_queue.length ~keeper_name = 0)
+  in
+  run_race "remove-first" ~remove_first:true;
+  run_race "dequeue-first" ~remove_first:false
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_same_source ();
@@ -296,6 +443,10 @@ let () =
   test_persistence_replay ();
   test_persist_failure_does_not_acknowledge_dequeue ();
   test_configure_persistence_prepends_snapshot_to_live_queue ();
+  test_remove_matching_single_from_head_run ();
+  test_remove_matching_not_found ();
+  test_remove_matching_persist_failure_aborts ();
+  test_remove_matching_dequeue_batch_exactly_once ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

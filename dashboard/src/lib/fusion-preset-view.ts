@@ -16,6 +16,15 @@ import { getRuntimeTomlKey } from './runtime-toml-config'
 
 export interface FusionPresetView {
   readonly preset: string
+  // Grouped presets ([[fusion.presets.NAME.panels]] array-of-tables) cannot be
+  // represented by a single flat panel array; `grouped` flags them so the UI
+  // shows a "preview unsupported" note instead of one group's models. When
+  // grouped is true the flat fields below are empty/null (not parsed).
+  readonly grouped: boolean
+  readonly groupCount: number
+  // Number of [[...judges]] first-pass judge tables (judge-of-judges). >0 means
+  // `judge` is the meta judge and there are additional first-pass judges.
+  readonly judgeGroupCount: number
   readonly panel: readonly string[]
   readonly judge: string | null
   readonly panelTimeoutS: number | null
@@ -37,11 +46,15 @@ function escapeForRegExp(value: string): string {
 }
 
 // Body lines of a `[section]`: everything between its header and the next
-// section header (or EOF). Used only to locate the multi-line `panel` array.
+// header (or EOF). Used only to locate a flat, single-group `panel` array.
+// The boundary matches both single `[section]` and array-of-tables `[[a.b]]`
+// headers, so a grouped preset's child `[[...panels]]` tables do NOT bleed into
+// the parent preset body (which previously let the first group's panel be read
+// as the whole preset — silent partial).
 function sectionBodyLines(sourceText: string, sectionName: string): string[] | null {
   const lines = sourceText.split('\n')
   const headerRe = new RegExp(`^\\s*\\[${escapeForRegExp(sectionName)}\\]\\s*(?:#.*)?$`)
-  const anyHeaderRe = /^\s*\[[^\]]+\]\s*(?:#.*)?$/
+  const anyHeaderRe = /^\s*\[\[?[^\]]+\]\]?\s*(?:#.*)?$/
   let start = -1
   for (let index = 0; index < lines.length; index += 1) {
     if (headerRe.test(lines[index] ?? '')) {
@@ -57,6 +70,28 @@ function sectionBodyLines(sourceText: string, sectionName: string): string[] | n
     body.push(line)
   }
   return body
+}
+
+// Count `[[<section>.panels]]` array-of-tables headers — the grouped-panels
+// grammar (fusion_config.ml parse_preset). >0 means the preset defines panel
+// groups rather than a single flat `panel = [...]`.
+function countGroupedPanelTables(sourceText: string, sectionName: string): number {
+  return countArrayOfTables(sourceText, sectionName, 'panels')
+}
+
+// Count `[[<section>.judges]]` first-pass judge tables (RFC-0283 judge-of-judges).
+// A flat preset can still carry these alongside a flat meta `judge`; the count
+// lets the UI honestly note the first-pass judges rather than imply a single one.
+function countGroupedJudgeTables(sourceText: string, sectionName: string): number {
+  return countArrayOfTables(sourceText, sectionName, 'judges')
+}
+
+function countArrayOfTables(sourceText: string, sectionName: string, child: string): number {
+  const headerRe = new RegExp(
+    `^\\s*\\[\\[${escapeForRegExp(sectionName)}\\.${child}\\]\\]\\s*(?:#.*)?$`,
+    'gm',
+  )
+  return (sourceText.match(headerRe) ?? []).length
 }
 
 // Strip a surrounding TOML basic/literal quote. Preset panel/judge ids are plain
@@ -122,10 +157,35 @@ export function readFusionPresetView(sourceText: string, preset: string): Fusion
   const trimmed = preset.trim()
   if (trimmed === '') return null
   const section = presetSection(trimmed)
+
+  // Grouped grammar first: if the preset declares [[...panels]] tables, do not
+  // parse a single flat panel (a partial group would misrepresent the preset).
+  // Report the grouped shape so the UI can show a "preview unsupported" note.
+  // This also covers the backend's Conflicting_panel_grammar case (both grouped
+  // and flat present) — treated as grouped so the flat panel is never trusted.
+  const judgeGroupCount = countGroupedJudgeTables(sourceText, section)
+  const groupCount = countGroupedPanelTables(sourceText, section)
+  if (groupCount > 0) {
+    return {
+      preset: trimmed,
+      grouped: true,
+      groupCount,
+      judgeGroupCount,
+      panel: [],
+      judge: null,
+      panelTimeoutS: null,
+      judgeTimeoutS: null,
+      maxToolCallsPerPanel: null,
+    }
+  }
+
   const body = sectionBodyLines(sourceText, section)
   if (body === null) return null
   return {
     preset: trimmed,
+    grouped: false,
+    groupCount: 0,
+    judgeGroupCount,
     panel: parseStringArray(body, 'panel'),
     judge: parseScalarString(sourceText, section, KEY_JUDGE),
     panelTimeoutS: parseScalarNumber(sourceText, section, KEY_PANEL_TIMEOUT_S),

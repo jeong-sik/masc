@@ -638,6 +638,16 @@ const mocks = vi.hoisted(() => {
     patchKeeperConfig: vi.fn(),
     updateKeeperRuntime: vi.fn(async () => ({ ok: true })),
     setKeeperToolPolicy: vi.fn(async () => makeKeeperConfig()),
+    fetchDashboardTools: vi.fn(async () => ({
+      tool_inventory: {
+        count: 3,
+        tools: [
+          { name: 'tool_read_file', description: 'Read a file', category: 'read', enabled_in_current_mode: true, direct_call_allowed: true, doc_refs: [], prompt_hints: [], surfaces: [], visibility: 'public', lifecycle: 'stable', implementationStatus: 'implemented', tier: 'core' },
+          { name: 'masc_status', description: 'Read workspace status', category: 'coordination', enabled_in_current_mode: true, direct_call_allowed: true, doc_refs: [], prompt_hints: [], surfaces: [], visibility: 'public', lifecycle: 'stable', implementationStatus: 'implemented', tier: 'core' },
+          { name: 'Execute', description: 'Run a shell command', category: 'write', enabled_in_current_mode: true, direct_call_allowed: true, doc_refs: [], prompt_hints: [], surfaces: [], visibility: 'public', lifecycle: 'stable', implementationStatus: 'implemented', tier: 'core' },
+        ],
+      },
+    })),
     pauseKeeper: vi.fn(async () => ({ ok: true, action: 'pause', name: 'keeper-sangsu' })),
     resumeKeeper: vi.fn(async () => ({ ok: true, action: 'resume', name: 'keeper-sangsu' })),
     wakeKeeper: vi.fn(async () => ({ ok: true, action: 'wakeup', name: 'keeper-sangsu' })),
@@ -651,6 +661,7 @@ vi.mock('../api/dashboard', () => ({
   patchKeeperConfig: mocks.patchKeeperConfig,
   updateKeeperRuntime: mocks.updateKeeperRuntime,
   setKeeperToolPolicy: mocks.setKeeperToolPolicy,
+  fetchDashboardTools: mocks.fetchDashboardTools,
 }))
 
 vi.mock('../api/keeper', () => ({
@@ -661,10 +672,13 @@ vi.mock('../api/keeper', () => ({
 
 import {
   KeeperConfigPanel,
+  buildKcfAssemblySegments,
+  filterGoalOptions,
   keeperConfigSubscriptionCountsForTests,
   loadKeeperConfig,
   resetKeeperConfig,
 } from './keeper-config-panel'
+import type { GoalTreeNode } from '../types'
 
 async function flush() {
   await new Promise(resolve => setTimeout(resolve, 0))
@@ -694,6 +708,7 @@ describe('KeeperConfigPanel', () => {
     mocks.patchKeeperConfig.mockClear()
     mocks.updateKeeperRuntime.mockClear()
     mocks.setKeeperToolPolicy.mockClear()
+    mocks.fetchDashboardTools.mockClear()
     mocks.pauseKeeper.mockClear()
     mocks.resumeKeeper.mockClear()
     mocks.wakeKeeper.mockClear()
@@ -1231,5 +1246,144 @@ describe('KeeperConfigPanel', () => {
     await loadKeeperConfig('keeper-sangsu', { force: true })
 
     expect(mocks.fetchKeeperConfig).toHaveBeenCalledTimes(2)
+  })
+
+  it('filters the goals catalogue by the search input and shows an empty state', async () => {
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '목표')
+    await flush()
+
+    const search = container.querySelector('input[aria-label="goal 검색"]') as HTMLInputElement | null
+    expect(search).not.toBeNull()
+    // default fixture goal (goal-runtime · Ship runtime clarity) is shown
+    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
+
+    // non-matching query → empty state + "0 표시"
+    search!.value = 'zzz-no-match'
+    search!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    expect(container.querySelectorAll('.kcf-goal').length).toBe(0)
+    expect(container.textContent).toContain('검색 결과 없음')
+    expect(container.textContent).toContain('0 표시')
+
+    // matching id substring → goal reappears, counter updates
+    search!.value = 'goal-runtime'
+    search!.dispatchEvent(new Event('input', { bubbles: true }))
+    await flush()
+    expect(container.querySelectorAll('.kcf-goal').length).toBe(1)
+    expect(container.textContent).toContain('1 표시')
+  })
+
+  it('renders the keeper-scoped prompt assembly trace with an override win badge', async () => {
+    // Real server override_fields are dot-namespaced (prompt.goal); mark only goal.
+    const base = makeKeeperConfig()
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({
+        sources: { ...base.sources, override_fields: ['prompt.goal'], has_live_override: true },
+      }),
+    )
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '프롬프트')
+    await flush()
+
+    expect(container.textContent).toContain('조립 추적')
+    expect(container.querySelector('.kasm')).not.toBeNull()
+    // 3 base blocks + goal + instructions + goals = 6 segments
+    expect(container.querySelectorAll('.kasm-seg').length).toBe(6)
+    // only prompt.goal is overridden → exactly one win badge
+    const winBadges = container.querySelectorAll('.kasm-seg-win')
+    expect(winBadges.length).toBe(1)
+    expect(winBadges[0]!.textContent).toContain('매니페스트 덮어씀')
+  })
+
+  it('renders the per-tool grid from the live registry and toggles tool_access via set_policy', async () => {
+    mocks.setKeeperToolPolicy.mockClear()
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    await flush() // tool inventory resolves
+
+    // grid derived from the 3 live-registry tools, with the real category badge
+    expect(container.querySelectorAll('.kcf-tool').length).toBe(3)
+    expect(container.textContent).toContain('coordination')
+
+    // tool_read_file is in tool_access → its switch is on; masc_status is off
+    const readToggle = container.querySelector('button[aria-label^="tool_read_file"]') as HTMLButtonElement
+    expect(readToggle.getAttribute('aria-checked')).toBe('true')
+    const statusToggle = container.querySelector('button[aria-label^="masc_status"]') as HTMLButtonElement
+    expect(statusToggle.getAttribute('aria-checked')).toBe('false')
+
+    // toggling masc_status ON rewrites the shared tool_access draft (textarea view)
+    statusToggle.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    const accessTa = container.querySelector('textarea[aria-label="tool_access"]') as HTMLTextAreaElement
+    expect(accessTa.value.split('\n')).toEqual(['tool_read_file', 'masc_status'])
+
+    // save routes through the existing set_policy path with the updated allowlist
+    const saveButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('정책 저장'),
+    )
+    saveButton!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    await flush()
+    expect(mocks.setKeeperToolPolicy).toHaveBeenCalledWith('keeper-sangsu', {
+      tool_access: ['tool_read_file', 'masc_status'],
+      deny: ['Execute'],
+    })
+  })
+})
+
+describe('filterGoalOptions', () => {
+  const goals = [
+    { id: 'goal-alpha', title: 'Stabilize runtime' },
+    { id: 'goal-beta', title: 'Improve dashboard' },
+  ] as unknown as GoalTreeNode[]
+
+  it('returns all goals for an empty or whitespace query', () => {
+    expect(filterGoalOptions(goals, '')).toHaveLength(2)
+    expect(filterGoalOptions(goals, '   ')).toHaveLength(2)
+  })
+
+  it('matches title or id case-insensitively', () => {
+    expect(filterGoalOptions(goals, 'RUNTIME').map((g) => g.id)).toEqual(['goal-alpha'])
+    expect(filterGoalOptions(goals, 'beta').map((g) => g.id)).toEqual(['goal-beta'])
+    expect(filterGoalOptions(goals, 'dashboard').map((g) => g.id)).toEqual(['goal-beta'])
+    expect(filterGoalOptions(goals, 'zzz')).toHaveLength(0)
+  })
+})
+
+describe('buildKcfAssemblySegments', () => {
+  it('builds base + manifest/override + goals segments from real config provenance', () => {
+    const base = makeKeeperConfig()
+    const c = makeKeeperConfig({
+      sources: { ...base.sources, override_fields: ['prompt.instructions'] },
+    })
+    const segs = buildKcfAssemblySegments(c)
+    expect(segs.map((s) => s.src)).toEqual(['base', 'base', 'base', 'manifest', 'override', 'goals'])
+    const goalSeg = segs.find((s) => s.field.includes('objective'))
+    const instrSeg = segs.find((s) => s.field.includes('instructions'))
+    expect(goalSeg?.win).toBe(false)
+    expect(instrSeg?.win).toBe(true)
+    expect(instrSeg?.src).toBe('override')
+  })
+
+  it('omits empty prompt fields and the goals segment when there are no active goals', () => {
+    const base = makeKeeperConfig()
+    const c = makeKeeperConfig({
+      prompt: { ...base.prompt, goal: '', instructions: '' },
+      workspace: { ...base.workspace, active_goals: [] },
+    })
+    const segs = buildKcfAssemblySegments(c)
+    expect(segs.map((s) => s.field)).toEqual(['헌법', '세계관', '능력'])
+    expect(segs.every((s) => s.src === 'base')).toBe(true)
   })
 })

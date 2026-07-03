@@ -128,7 +128,7 @@ let prepare_run_context
   let shared_context =
     match shared_context with
     | Some ctx -> ctx
-    | None -> Agent_sdk.Context.create ~eio:true ()
+    | None -> Agent_sdk.Context.create ()
   in
   (* 1. Ensure session directory tree exists *)
   let session_dir =

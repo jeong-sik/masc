@@ -22,6 +22,7 @@ import { BTN_FILLED_BASE } from './common/button-filled-base'
 import { ExpandableTextarea } from './common/expandable-textarea'
 import { KeeperToolAccessSummary } from './keeper-tool-access'
 import { createAsyncResource } from '../lib/async-state'
+import { refreshKeeperRuntimeStatus } from '../store'
 import { SetupGuideCard } from './setup-guide-card'
 import { SectionHeader } from './common/section-header'
 import { StatusDot } from './common/status-dot'
@@ -932,6 +933,10 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
     try {
       const updated = await patchKeeperConfig(keeperName, payload)
       applyKeeperConfigUpdate(keeperName, updated)
+      void refreshKeeperRuntimeStatus().catch(err => {
+        const message = err instanceof Error ? err.message : '런타임 상태 새로고침 실패'
+        showToast(message, 'warning')
+      })
       showToast('런타임 설정 저장 완료', 'success')
     } catch (err) {
       const msg = err instanceof Error ? err.message : '저장 실패'

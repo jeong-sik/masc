@@ -383,6 +383,15 @@ let () =
   Eio_main.run @@ fun env ->
   Mirage_crypto_rng_unix.use_default ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
+  (* Register the ambient Eio clock the agent runtime resolves via
+     [Process_eio.get_clock]. Without this, any runtime config that sets
+     [stream_idle_timeout_s] fails closed at agent build time ("no clock
+     resolvable ... refusing to run with a silently disarmed stream idle
+     timeout") and every panel/judge call aborts before the first request. *)
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
   (* Capture the Eio handles the OAS/fusion call path reads via

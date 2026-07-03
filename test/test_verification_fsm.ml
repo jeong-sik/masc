@@ -474,13 +474,16 @@ let test_submit_typed_evidence_split_uses_submitted_refs () =
         (fun (r : Verification.verification_request) -> r.task_id = task_id)
         reqs
     in
+    let expected_required_artifacts =
+      (Task.Completion_review.concrete_verification_evidence task).required_artifacts
+    in
     Alcotest.(check (list string))
       "legacy evidence_refs preserve submitted refs"
       submitted_refs
       (string_list_output_field "evidence_refs" req.output);
     Alcotest.(check (list string))
       "required_artifacts come from the task contract"
-      [ "output.json" ]
+      expected_required_artifacts
       (string_list_output_field "required_artifacts" req.output);
     Alcotest.(check (list string))
       "submitted_evidence comes from submit-time evidence_refs"

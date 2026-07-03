@@ -769,6 +769,106 @@ let test_compact_preserves_annotations () =
       ids)
 ;;
 
+(* task-1744: tombstoned annotations must be excluded from load/list.
+
+   Before the fix, [load_all_partition] only skipped the tombstone marker
+   line, leaving the earlier annotation with the same id visible in
+   [list], contradicting the mli contract "Tombstoned entries are
+   excluded". These cases exercise both the load path (below the
+   compaction threshold, so the tombstone stays in the file and [list]
+   must apply the exclusion itself) and the compaction path. *)
+
+let create_note ~base_dir ~keeper_id ~content () =
+  Result.get_ok
+    (Store.create
+       ~base_dir
+       ~keeper_id
+       ~file_path:"lib/a.ml"
+       ~line_start:1
+       ~line_end:1
+       ~kind:Types.Comment
+       ~content
+       ())
+;;
+
+let test_list_excludes_soft_deleted_without_compaction () =
+  with_temp_dir (fun base_dir ->
+    (* 1 tombstone / (6 + 1) ≈ 0.14 stays below COMPACT_THRESHOLD (0.2),
+       so no auto-compaction runs and [list] must exclude the tombstoned
+       id on read. *)
+    let notes =
+      List.init 6 (fun i ->
+        create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
+    in
+    let victim = List.hd notes in
+    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+     | Ok () -> ()
+     | Error msg -> failf "delete failed: %s" msg);
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check int "list excludes the tombstoned annotation" 5 (List.length listed);
+    check
+      bool
+      "tombstoned id absent from list"
+      false
+      (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
+;;
+
+let test_list_keeps_sibling_after_delete () =
+  with_temp_dir (fun base_dir ->
+    let victim = create_note ~base_dir ~keeper_id:"alice" ~content:"to delete" () in
+    let survivor = create_note ~base_dir ~keeper_id:"alice" ~content:"to keep" () in
+    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+     | Ok () -> ()
+     | Error msg -> failf "delete failed: %s" msg);
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check
+      bool
+      "deleted sibling absent"
+      false
+      (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed);
+    check
+      bool
+      "undeleted sibling present"
+      true
+      (List.exists (fun (a : Types.annotation) -> a.id = survivor.id) listed))
+;;
+
+let test_list_returns_live_annotation () =
+  with_temp_dir (fun base_dir ->
+    let note = create_note ~base_dir ~keeper_id:"alice" ~content:"live" () in
+    match Store.list ~base_dir ~filter:(make_filter ()) () with
+    | [ only ] -> check string "live annotation returned unchanged" note.id only.id
+    | rows -> failf "expected one live annotation, got %d" (List.length rows))
+;;
+
+let test_compact_drops_tombstoned () =
+  with_temp_dir (fun base_dir ->
+    let notes =
+      List.init 6 (fun i ->
+        create_note ~base_dir ~keeper_id:"alice" ~content:(Printf.sprintf "note-%d" i) ())
+    in
+    let victim = List.hd notes in
+    (match Store.delete ~base_dir ~id:victim.id ~keeper_id:"alice" () with
+     | Ok () -> ()
+     | Error msg -> failf "delete failed: %s" msg);
+    Store.compact ~base_dir ();
+    (* After compaction the file holds only the five live annotations:
+       no tombstone marker line and no tombstoned original remain. *)
+    let path =
+      Filename.concat
+        (Ide_paths.partition_store_dir ~base_dir Ide_paths.Orphan)
+        "annotations.jsonl"
+    in
+    check int "compacted file has only live lines" 5 (count_lines path);
+    let listed = Store.list ~base_dir ~filter:(make_filter ()) () in
+    check int "list count after compact" 5 (List.length listed);
+    check
+      bool
+      "tombstoned id absent after compact"
+      false
+      (List.exists (fun (a : Types.annotation) -> a.id = victim.id) listed))
+;;
+
 let () =
   run
     "ide_annotations"
@@ -832,6 +932,24 @@ let () =
         ; test_case "document_symbols lists annotations" `Quick test_document_symbols_lists
         ; test_case "folding_ranges groups consecutive" `Quick test_folding_ranges_groups
         ; test_case "document_highlights finds related" `Quick test_document_highlights_related
+        ] )
+    ; ( "tombstone read (task-1744)"
+      , [ test_case
+            "list excludes soft-deleted annotation (no compaction)"
+            `Quick
+            test_list_excludes_soft_deleted_without_compaction
+        ; test_case
+            "delete keeps undeleted sibling"
+            `Quick
+            test_list_keeps_sibling_after_delete
+        ; test_case
+            "live annotation still returned"
+            `Quick
+            test_list_returns_live_annotation
+        ; test_case
+            "compaction drops tombstoned annotation"
+            `Quick
+            test_compact_drops_tombstoned
         ] )
     ]
 ;;

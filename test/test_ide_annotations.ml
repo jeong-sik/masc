@@ -767,6 +767,50 @@ let test_compact_preserves_annotations () =
       ids)
 ;;
 
+(* task-1736 (IDE Observation Plane v2, axis B3) — store-level ownership
+   enforcement.
+
+   The HTTP layer now resolves the acting keeper_id from the token-bound
+   auth identity and passes it to [Store.create] / [Store.delete]. These
+   tests pin the store's ownership decision: a keeper acting as "bob"
+   reaches the store with keeper_id="bob" and is refused. *)
+
+let make_alice_annotation base_dir =
+  Result.get_ok
+    (Store.create
+       ~base_dir
+       ~keeper_id:"alice"
+       ~file_path:"lib/a.ml"
+       ~line_start:1
+       ~line_end:1
+       ~kind:Types.Comment
+       ~content:"alice's note"
+       ())
+;;
+
+(* B3 ownership gate: [Store.delete] only removes an annotation whose
+   stored keeper_id equals the passed keeper_id. Because the HTTP layer
+   now passes the authenticated identity as keeper_id, a keeper acting as
+   "bob" reaches the store with keeper_id="bob" and is refused. These
+   assert on the delete authorization decision (Ok/Error), which is the
+   security-relevant contract; post-delete read visibility is governed by
+   the separate soft-delete/compaction path. *)
+let test_delete_rejects_other_keeper () =
+  with_temp_dir (fun base_dir ->
+    let created = make_alice_annotation base_dir in
+    match Store.delete ~base_dir ~id:created.id ~keeper_id:"bob" () with
+    | Ok () -> fail "bob must not delete alice's annotation"
+    | Error _ -> ())
+;;
+
+let test_delete_allows_owner () =
+  with_temp_dir (fun base_dir ->
+    let created = make_alice_annotation base_dir in
+    match Store.delete ~base_dir ~id:created.id ~keeper_id:"alice" () with
+    | Ok () -> ()
+    | Error msg -> failf "owner delete failed: %s" msg)
+;;
+
 (* task-1744: tombstoned annotations must be excluded from load/list.
 
    Before the fix, [load_all_partition] only skipped the tombstone marker
@@ -1040,6 +1084,13 @@ let () =
         ; test_case "document_symbols lists annotations" `Quick test_document_symbols_lists
         ; test_case "folding_ranges groups consecutive" `Quick test_folding_ranges_groups
         ; test_case "document_highlights finds related" `Quick test_document_highlights_related
+        ] )
+    ; ( "mutation identity (task-1736 B3)"
+      , [ test_case
+            "foreign keeper cannot delete another's annotation"
+            `Quick
+            test_delete_rejects_other_keeper
+        ; test_case "owner can delete own annotation" `Quick test_delete_allows_owner
         ] )
     ; ( "tombstone read (task-1744)"
       , [ test_case

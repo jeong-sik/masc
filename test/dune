@@ -199,6 +199,7 @@
   test_ide_bridge
   test_command_descriptor
   test_server_ide_lsp_proxy
+  test_server_ide_http
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
@@ -351,6 +352,7 @@
   test_keeper_relevance_check
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
+  test_workspace_file_confidentiality
   test_cognitive_gravity
   test_intentional_projection
   test_chronicle_event
@@ -540,6 +542,7 @@
   test_ide_bridge
   test_command_descriptor
   test_server_ide_lsp_proxy
+  test_server_ide_http
   test_server_activity_http
   test_ide_paths
   test_ide_canonical_url_join
@@ -697,6 +700,7 @@
   test_actionable_path_action
   test_workspace_routes_keeper
   test_workspace_tree_exclusions
+  test_workspace_file_confidentiality
   test_cognitive_gravity
   test_intentional_projection
   test_chronicle_event

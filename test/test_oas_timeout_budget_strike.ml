@@ -374,13 +374,13 @@ let test_preflight_context_window_allows_exact_budget () =
       ("expected exact-budget context preflight to pass, got "
        ^ Agent_sdk.Error.to_string err)
 
-let test_preflight_context_window_blocks_before_provider () =
+let test_preflight_context_window_reports_overflow_signal () =
   match
     Keeper_run_prompt.preflight_context_window
       ~estimated_input_tokens:131_073
       ~max_context:131_072
   with
-  | Ok () -> Alcotest.fail "expected oversized context preflight to fail"
+  | Ok () -> Alcotest.fail "expected oversized context preflight to report overflow"
   | Error
       (Agent_sdk.Error.Api
          (Llm_provider.Retry.ContextOverflow { message; limit })) ->
@@ -394,6 +394,25 @@ let test_preflight_context_window_blocks_before_provider () =
   | Error err ->
     Alcotest.fail
       ("expected pre-dispatch ContextOverflow, got "
+       ^ Agent_sdk.Error.to_string err)
+
+let test_preflight_context_window_rejects_nonpositive_max_context () =
+  match
+    Keeper_run_prompt.preflight_context_window
+      ~estimated_input_tokens:1
+      ~max_context:0
+  with
+  | Ok () -> Alcotest.fail "expected non-positive max_context to fail closed"
+  | Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig { field = "max_context"; detail })) ->
+    Alcotest.(check bool)
+      "invalid config detail names non-positive context window"
+      true
+      (contains_substring detail "must be positive")
+  | Error err ->
+    Alcotest.fail
+      ("expected invalid max_context config error, got "
        ^ Agent_sdk.Error.to_string err)
 
 let make_tool name description : Agent_sdk.Tool.t =
@@ -502,33 +521,39 @@ let test_context_layer_budget_records_decisions () =
   Alcotest.(check string) "kept layer name" "pending_mentions"
     kept.context_layer_name;
   Alcotest.(check string) "kept priority" "high" kept.context_layer_priority;
-  Alcotest.(check string) "kept decision" "kept" kept.context_layer_decision;
-  let truncated =
+  Alcotest.(check bool) "kept decision" true
+    (kept.context_layer_decision = Keeper_run_prompt.Within_cap);
+  let over_cap =
     Keeper_run_prompt.estimate_context_layer_budget
       ~layer_name:"board_activity"
       ~priority:"normal"
       ~cap_tokens:1
       ~text:(String.make 200 'b')
   in
-  Alcotest.(check string) "truncated decision" "truncated"
-    truncated.context_layer_decision;
-  Alcotest.(check int) "truncated kept tokens equals cap" 1
-    truncated.context_layer_kept_tokens;
-  let dropped =
+  Alcotest.(check bool) "over-cap decision" true
+    (over_cap.context_layer_decision = Keeper_run_prompt.Over_cap_observed);
+  Alcotest.(check int) "over-cap budgeted tokens equals cap" 1
+    over_cap.context_layer_budgeted_tokens;
+  let empty =
     Keeper_run_prompt.estimate_context_layer_budget
       ~layer_name:"continuity_summary"
       ~priority:"required"
       ~cap_tokens:64
       ~text:""
   in
-  Alcotest.(check string) "empty layer decision" "dropped"
-    dropped.context_layer_decision;
-  (match Keeper_run_prompt.context_layer_budget_to_json truncated with
+  Alcotest.(check bool) "empty layer decision" true
+    (empty.context_layer_decision = Keeper_run_prompt.Empty);
+  (match Keeper_run_prompt.context_layer_budget_to_json over_cap with
    | `Assoc fields ->
      Alcotest.(check bool)
        "json carries decision"
        true
-       (List.assoc_opt "decision" fields = Some (`String "truncated"))
+       (List.assoc_opt "decision" fields = Some (`String "over_cap_observed"));
+     Alcotest.(check bool)
+       "json carries budgeted tokens, not kept/truncated claim"
+       true
+       (List.assoc_opt "budgeted_tokens" fields = Some (`Int 1)
+        && List.assoc_opt "kept_tokens" fields = None)
    | _ -> Alcotest.fail "expected context layer budget JSON object")
 
 let test_context_preflight_manifest_records_budget_delta () =
@@ -819,8 +844,10 @@ let () =
           test_runtime_provider_path_does_not_forward_execution_idle_timeout;
         Alcotest.test_case "preflight context window allows exact budget" `Quick
           test_preflight_context_window_allows_exact_budget;
-        Alcotest.test_case "preflight context window blocks before provider" `Quick
-          test_preflight_context_window_blocks_before_provider;
+        Alcotest.test_case "preflight context window reports overflow signal" `Quick
+          test_preflight_context_window_reports_overflow_signal;
+        Alcotest.test_case "preflight context window rejects invalid max" `Quick
+          test_preflight_context_window_rejects_nonpositive_max_context;
         Alcotest.test_case "tool schema estimate adds provider payload" `Quick
           test_tool_schema_estimate_adds_provider_payload;
         Alcotest.test_case

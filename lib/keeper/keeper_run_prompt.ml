@@ -32,14 +32,24 @@ type context_window_budget =
   ; context_usage_ratio : float
   }
 
+type context_layer_decision =
+  | Within_cap
+  | Over_cap_observed
+  | Empty
+
 type context_layer_budget =
   { context_layer_name : string
   ; context_layer_priority : string
   ; context_layer_estimated_tokens : int
   ; context_layer_cap_tokens : int
-  ; context_layer_kept_tokens : int
-  ; context_layer_decision : string
+  ; context_layer_budgeted_tokens : int
+  ; context_layer_decision : context_layer_decision
   }
+
+let context_layer_decision_to_string = function
+  | Within_cap -> "within_cap"
+  | Over_cap_observed -> "over_cap_observed"
+  | Empty -> "empty"
 
 let prompt_injection_prefixes =
   [
@@ -231,16 +241,17 @@ let estimate_context_layer_budget
     Keeper_context_core_accessors.estimate_char_tokens text
   in
   let cap_tokens = max 0 cap_tokens in
-  let decision, kept_tokens =
-    if String.trim text = "" || cap_tokens = 0 then "dropped", 0
-    else if estimated_tokens > cap_tokens then "truncated", cap_tokens
-    else "kept", estimated_tokens
+  let decision, budgeted_tokens =
+    if String.trim text = "" then Empty, 0
+    else if cap_tokens = 0 || estimated_tokens > cap_tokens
+    then Over_cap_observed, cap_tokens
+    else Within_cap, estimated_tokens
   in
   { context_layer_name = layer_name
   ; context_layer_priority = priority
   ; context_layer_estimated_tokens = estimated_tokens
   ; context_layer_cap_tokens = cap_tokens
-  ; context_layer_kept_tokens = kept_tokens
+  ; context_layer_budgeted_tokens = budgeted_tokens
   ; context_layer_decision = decision
   }
 
@@ -250,13 +261,24 @@ let context_layer_budget_to_json layer =
     ; ("priority", `String layer.context_layer_priority)
     ; ("estimated_tokens", `Int layer.context_layer_estimated_tokens)
     ; ("cap_tokens", `Int layer.context_layer_cap_tokens)
-    ; ("kept_tokens", `Int layer.context_layer_kept_tokens)
-    ; ("decision", `String layer.context_layer_decision)
+    ; ("budgeted_tokens", `Int layer.context_layer_budgeted_tokens)
+    ; ("decision", `String (context_layer_decision_to_string layer.context_layer_decision))
     ]
 
 let preflight_context_window ~(estimated_input_tokens : int) ~(max_context : int)
   : (unit, Agent_sdk.Error.sdk_error) result =
-  if max_context > 0 && estimated_input_tokens > max_context
+  if max_context <= 0
+  then
+    Error
+      (Agent_sdk.Error.Config
+         (Agent_sdk.Error.InvalidConfig
+            { field = "max_context"
+            ; detail =
+                Printf.sprintf
+                  "pre-dispatch context window must be positive, got %d"
+                  max_context
+            }))
+  else if estimated_input_tokens > max_context
   then
     Error
       (Agent_sdk.Error.Api

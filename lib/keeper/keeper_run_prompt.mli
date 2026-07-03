@@ -32,13 +32,18 @@ type context_window_budget =
   ; context_usage_ratio : float
   }
 
+type context_layer_decision =
+  | Within_cap
+  | Over_cap_observed
+  | Empty
+
 type context_layer_budget =
   { context_layer_name : string
   ; context_layer_priority : string
   ; context_layer_estimated_tokens : int
   ; context_layer_cap_tokens : int
-  ; context_layer_kept_tokens : int
-  ; context_layer_decision : string
+  ; context_layer_budgeted_tokens : int
+  ; context_layer_decision : context_layer_decision
   }
 
 val sanitize_user_message : string -> string
@@ -98,8 +103,9 @@ val estimate_context_layer_budget :
   cap_tokens:int ->
   text:string ->
   context_layer_budget
-(** Estimate one prompt/context layer against its deterministic cap and return
-    an auditable decision: [kept], [truncated], or [dropped]. *)
+(** Estimate one prompt/context layer against its deterministic cap for
+    manifest/debug accounting. This function does not mutate the layer text;
+    over-cap layers are reported as [over_cap_observed], not as truncated. *)
 
 val context_layer_budget_to_json : context_layer_budget -> Yojson.Safe.t
 (** JSON projection for runtime manifests and dashboard/debug surfaces. *)
@@ -108,8 +114,9 @@ val preflight_context_window :
   estimated_input_tokens:int ->
   max_context:int ->
   (unit, Agent_sdk.Error.sdk_error) result
-(** Fail closed before provider dispatch when the final pre-call input estimate
-    exceeds the effective runtime/provider context window. *)
+(** Return a typed context-window signal when the final pre-call input estimate
+    exceeds the effective runtime/provider context window. Callers that can use
+    the OAS driver retry/compaction path should defer terminal handling there. *)
 
 val build_turn_context
   :  ctx:Keeper_run_context.run_context

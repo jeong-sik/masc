@@ -308,6 +308,64 @@ max-concurrent = 2
         | None -> fail "expected provider capabilities")
      | _ -> fail "expected one provider")
 
+let kimi_runtime_toml =
+  {|
+[runtime]
+default = "kimi.kimi-for-coding"
+
+[providers.kimi]
+display-name = "Kimi Code Plan"
+protocol = "messages-http"
+endpoint = "https://api.kimi.com/coding"
+
+[providers.kimi.credentials]
+type = "inline"
+value = "test-kimi-key"
+
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 256000
+tools-support = true
+streaming = true
+
+[kimi.kimi-for-coding]
+|}
+
+let kimi_runtime_config_or_fail () =
+  match Runtime_toml.parse_string kimi_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected Kimi runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let test_runtime_adapter_materializes_kimi_messages_http () =
+  let cfg = kimi_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Error msg -> failf "unexpected Kimi messages-http adapter error: %s" msg
+     | Ok provider_cfg ->
+       check string "base url" "https://api.kimi.com/coding" provider_cfg.base_url;
+       check string "request path" "/v1/messages" provider_cfg.request_path;
+       check
+         string
+         "api key"
+         "test-kimi-key"
+         (Llm_provider.Secret.header_value provider_cfg.api_key);
+       (match provider_cfg.kind with
+        | Llm_provider.Provider_config.Kimi -> ()
+        | other ->
+          failf
+            "expected Kimi provider kind, got %s"
+            (Llm_provider.Provider_config.string_of_provider_kind other)))
+  | bindings -> failf "expected one Kimi binding, got %d" (List.length bindings)
+
 let deepseek_runtime_toml =
   {|
 [runtime]
@@ -1165,6 +1223,10 @@ let () =
             "runtime TOML reads uses-messages-caching capability"
             `Quick
             test_runtime_toml_accepts_messages_caching_capability
+        ; test_case
+            "runtime adapter materializes Kimi messages-http provider"
+            `Quick
+            test_runtime_adapter_materializes_kimi_messages_http
         ; test_case
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick

@@ -86,12 +86,34 @@ let archive_indices ~path =
 
 let archive_path ~path index = Printf.sprintf "%s.%d" path index
 
+let rotation_mutex_registry : (string, Stdlib.Mutex.t) Hashtbl.t = Hashtbl.create 16
+let rotation_mutex_registry_mu = Stdlib.Mutex.create ()
+
+let rotation_mutex_for path =
+  Stdlib.Mutex.lock rotation_mutex_registry_mu;
+  Fun.protect
+    ~finally:(fun () -> Stdlib.Mutex.unlock rotation_mutex_registry_mu)
+    (fun () ->
+       match Hashtbl.find_opt rotation_mutex_registry path with
+       | Some m -> m
+       | None ->
+         let m = Stdlib.Mutex.create () in
+         Hashtbl.replace rotation_mutex_registry path m;
+         m)
+;;
+
+let with_rotation_lock ~path f =
+  let m = rotation_mutex_for path in
+  Stdlib.Mutex.lock m;
+  Fun.protect ~finally:(fun () -> Stdlib.Mutex.unlock m) f
+;;
+
 (* Rotate the live segment out when it is at or above [max_segment_bytes].
    The new archive index is [max existing + 1], so a concurrent rotation
-   never clobbers an existing archive; [rename_if_exists] means only one of
-   two racing rotations moves the live inode (the loser sees it gone and
-   no-ops). No lock is held — correctness rests on rename atomicity plus a
-   fresh index — so this stays correct outside an Eio context (tests). *)
+   never clobbers an existing archive. Caller must hold [with_rotation_lock]
+   for [path]: otherwise a racing appender can recreate the live file between
+   another caller's index calculation and [rename_if_exists], causing the
+   second rename to overwrite the archive chosen by the first. *)
 let maybe_rotate ~path ~max_segment_bytes =
   if max_segment_bytes > 0
   then (
@@ -121,13 +143,14 @@ let prune_segments ~path ~max_retained_segments =
 ;;
 
 let append_rotating ~path ~max_segment_bytes ~max_retained_segments json =
-  maybe_rotate ~path ~max_segment_bytes;
-  (* Fresh-fd append (not the fd-cached [Fs_compat.append_jsonl]): a cached
-     writer keyed by the live path would keep writing into a just-renamed
-     archive inode after rotation. [append_file] opens/closes per call and
-     serializes concurrent writers per path, matching the prior append. *)
-  Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
-  prune_segments ~path ~max_retained_segments
+  with_rotation_lock ~path (fun () ->
+    maybe_rotate ~path ~max_segment_bytes;
+    (* Fresh-fd append (not the fd-cached [Fs_compat.append_jsonl]): a cached
+       writer keyed by the live path would keep writing into a just-renamed
+       archive inode after rotation. [append_file] opens/closes per call and
+       serializes concurrent writers per path, matching the prior append. *)
+    Fs_compat.append_file path (Yojson.Safe.to_string json ^ "\n");
+    prune_segments ~path ~max_retained_segments)
 ;;
 
 (* Segment files newest-first: live segment, then archives by descending

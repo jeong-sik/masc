@@ -648,6 +648,19 @@ let row_timestamp line =
   |> Yojson.Safe.Util.to_int
 ;;
 
+let read_lines path =
+  let ic = open_in path in
+  Fun.protect
+    ~finally:(fun () -> close_in_noerr ic)
+    (fun () ->
+       let rec loop acc =
+         match input_line ic with
+         | line -> loop (line :: acc)
+         | exception End_of_file -> List.rev acc
+       in
+       loop [])
+;;
+
 (* (a) The live segment rotates to a numbered archive once it reaches the
    size threshold; the live filename stays stable. *)
 let test_segment_rotates_on_threshold () =
@@ -722,6 +735,37 @@ let test_retention_prunes_old_segments () =
       (List.sort compare (Ide_bridge.For_testing.archive_indices ~path)))
 ;;
 
+let test_concurrent_rotation_preserves_rows () =
+  with_temp_dir (fun base_dir ->
+    let path = Filename.concat base_dir "tool_events.jsonl" in
+    let workers = 8 in
+    let per_worker = 20 in
+    let domains =
+      List.init workers (fun worker ->
+        Domain.spawn (fun () ->
+          for i = 1 to per_worker do
+            let row_id = (worker * 1000) + i in
+            Ide_bridge.For_testing.append_rotating
+              ~path
+              ~max_segment_bytes:1
+              ~max_retained_segments:(workers * per_worker)
+              (tool_row row_id)
+          done))
+    in
+    List.iter Domain.join domains;
+    let timestamps =
+      Ide_bridge.For_testing.segment_paths_newest_first ~path
+      |> List.concat_map read_lines
+      |> List.map row_timestamp
+      |> List.sort_uniq compare
+    in
+    check
+      int
+      "concurrent rotations preserve every appended row"
+      (workers * per_worker)
+      (List.length timestamps))
+;;
+
 (* Integration: [list_events] merges live and archived segments through the
    public API, newest-first. *)
 let test_list_events_reads_across_segments () =
@@ -781,6 +825,8 @@ let () =
             test_tail_read_crosses_boundary
         ; test_case "retention prunes old segments" `Quick
             test_retention_prunes_old_segments
+        ; test_case "concurrent rotations preserve rows" `Quick
+            test_concurrent_rotation_preserves_rows
         ] )
     ; ( "cursor"
       , [ test_case "from hook uses real file and line" `Quick test_cursor_from_hook_uses_real_file_and_line

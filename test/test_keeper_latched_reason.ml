@@ -40,7 +40,8 @@ let round_trippable =
         } )
   ; "stale storm", R.Stale_storm
   ; "provider timeout loop", R.Provider_timeout_loop { consecutive_timeouts = 2 }
-  ; "operator paused", R.Operator_paused { operator_actor = "dashboard:play" }
+  ; "operator paused", R.Operator_paused { operator_actor = R.operator_actor_grpc_directive }
+  ; "dead tombstone", R.Dead_tombstone
   ]
 ;;
 
@@ -61,6 +62,7 @@ let test_wire_parse_fail_closed () =
   ; "completion_contract_violation"
   ; "completion_contract_violation:code=galactic:summary=\"raw text\""
   ; "completion_contract_violation:code=unspecified:summary=raw_text"
+  ; "operator_paused:actor=dashboard:play"
   ]
   |> List.iter (fun wire -> expect_error wire (R.of_wire wire))
 ;;
@@ -87,7 +89,11 @@ let test_stable_json_rejects_unknown_tags () =
            ]));
   expect_error
     "unknown kind"
-    (R.Stable.of_yojson (`Assoc [ "kind", `String "new_future_reason" ]))
+    (R.Stable.of_yojson (`Assoc [ "kind", `String "new_future_reason" ]));
+  expect_error
+    "unknown operator actor"
+    (R.Stable.of_yojson
+       (`Assoc [ "kind", `String "operator_paused"; "actor", `String "dashboard:play" ]))
 ;;
 
 (* ── Polymorphic-variant differentiation via [equal] ────────── *)

@@ -256,6 +256,15 @@ let attention_fields_json (config : Workspace_utils.config) (meta : keeper_meta)
   [ "needs_attention", `Bool needs_attention
   ; "attention_reason", Json_util.string_opt_to_json attention_reason
   ; "next_human_action", Json_util.string_opt_to_json next_human_action
+  ; (* Typed pause reason surfaced as its stable wire form. [attention_reason]
+       above collapses every pause to the single label "paused"; this field
+       preserves {i why} the keeper is latched (operator pause, dead
+       tombstone, runtime latch, …) for the dashboard. [`Null] when no reason
+       was recorded. *)
+    ( "latched_reason"
+    , match meta.latched_reason with
+      | Some reason -> `String (Keeper_latched_reason.to_wire reason)
+      | None -> `Null )
   ]
 ;;
 

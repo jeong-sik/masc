@@ -173,6 +173,7 @@ let start_response_reader
       ~sw
       (router : t)
       (proc : Lsp_process_manager.lsp_process)
+      ~on_exit
       ~(on_notification : client_id:int -> method_:string -> Yojson.Safe.t -> unit)
   =
   let fiber_promise =
@@ -198,7 +199,8 @@ let start_response_reader
           reason;
         reject_all
           router
-          (Printf.sprintf "LSP process %s disconnected: %s" proc.lang_id reason))
+          (Printf.sprintf "LSP process %s disconnected: %s" proc.lang_id reason);
+        Option.iter (fun f -> f ~reason) on_exit)
   in
   Eio.Fiber.fork ~sw (fun () ->
     match Eio.Promise.await fiber_promise with

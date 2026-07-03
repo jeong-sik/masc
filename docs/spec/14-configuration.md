@@ -661,7 +661,7 @@ $MASC_PERSONAS_DIR
 ```
 
 암묵적 secondary search(운영자 home personas, base-path root personas)는 사용하지 않는다.
-Persona, keeper TOML, prompt markdown, runtime, tool_policy는 모두 같은 resolved config root를 기준으로 해석한다.
+Persona, keeper TOML, prompt markdown, runtime은 모두 같은 resolved config root를 기준으로 해석한다. `tool_policy.toml`은 폐기되었고 config-root 판정에 사용하지 않는다.
 
 ### 12.4 Template 변경 반영
 

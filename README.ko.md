@@ -130,11 +130,11 @@ bash /tmp/masc-install.sh --version <release-tag>
 curl -fsSL https://raw.githubusercontent.com/jeong-sik/masc/main/scripts/install.sh | bash
 ```
 
-`$HOME/.local/bin/masc`에 바이너리를 설치하고 기본 설정(`tool_policy.toml`, `runtime.toml`)을 `<base-path>/.masc/config/`에 시드합니다. 제공 바이너리: **macOS arm64**, **Linux x86_64**. 그 외 플랫폼은 소스 빌드를 사용합니다.
+`$HOME/.local/bin/masc`에 바이너리를 설치하고 기동에 필요한 `runtime.toml`을 `<base-path>/.masc/config/`에 시드합니다. 제공 바이너리: **macOS arm64**, **Linux x86_64**. 그 외 플랫폼은 소스 빌드를 사용합니다.
 
 설치 스크립트 요구 도구: `curl`과 기본 Unix 도구(`uname`, `chmod`, `mkdir`, `mktemp`)입니다. `jq`는 `--version` / `MASC_VERSION`을 생략해 GitHub latest release를 조회할 때만 필요합니다. Python/tomllib는 사용하지 않습니다. 재현 가능한 설치가 필요하면 `--version <release-tag>`로 고정하세요.
 
-릴리스 바이너리는 GitHub releases에서 내려받습니다. 선택한 릴리스가 `SHA256SUMS`를 제공하면 설치 스크립트는 다운로드한 바이너리와 seed config(`tool_policy.toml`, `runtime.toml`)를 검증합니다. 기대 항목은 모두 존재해야 하며 값도 일치해야 합니다. 일부 기존 릴리스는 `SHA256SUMS`를 제공하지 않으며, 그런 릴리스는 검증된 바이너리 설치 경로를 사용할 수 없습니다. checksum 파일을 가져오지 못하면 기본값은 실패 종료입니다. 이 경우 아래 source build 경로를 쓰거나, 버리는 로컬 환경이나 air-gapped 설치에서만 `--allow-unverified` 또는 `MASC_ALLOW_UNVERIFIED=1`로 검증을 명시적으로 우회하세요. 이 경우 스크립트가 경고를 출력한 뒤 계속합니다.
+릴리스 바이너리는 GitHub releases에서 내려받습니다. 선택한 릴리스가 `SHA256SUMS`를 제공하면 설치 스크립트는 다운로드한 바이너리와 seed config(`runtime.toml`)를 검증합니다. 기대 항목은 모두 존재해야 하며 값도 일치해야 합니다. 일부 기존 릴리스는 `SHA256SUMS`를 제공하지 않으며, 그런 릴리스는 검증된 바이너리 설치 경로를 사용할 수 없습니다. checksum 파일을 가져오지 못하면 기본값은 실패 종료입니다. 이 경우 아래 source build 경로를 쓰거나, 버리는 로컬 환경이나 air-gapped 설치에서만 `--allow-unverified` 또는 `MASC_ALLOW_UNVERIFIED=1`로 검증을 명시적으로 우회하세요. 이 경우 스크립트가 경고를 출력한 뒤 계속합니다.
 
 > `runtime.toml`이 없거나 `[runtime].default`가 비어 있으면 서버는 `refusing to boot` 로그를 남기고 status 1로 종료합니다 — 환경 기본값 폴백은 없습니다. 기동에 필요한 파일이므로 설치 스크립트가 [`config/runtime.toml`](config/runtime.toml)을 시드합니다. 직접 작성하려면 `[runtime].default = "<provider>.<model>"`와 그에 대응하는 `[provider.model]` runtime binding table을 정의하세요. `[runtime.assignments]`는 선택 사항이며 Keeper별 override에만 씁니다.
 
@@ -195,9 +195,8 @@ cd dashboard && pnpm install && pnpm dev   # vite가 로컬 서버로 프록시
 | 파일 | 역할 |
 |------|------|
 | `runtime.toml` | provider/model 카탈로그 + `[runtime].default`. 기동에 필요: 파일(또는 `[runtime].default`)이 없으면 서버는 `refusing to boot` 로그를 남기고 status 1로 종료합니다 — 환경 기본값 폴백 없음 |
-| `tool_policy.toml` | 설치 스크립트가 시드하는 config-root 마커(레거시). 현재 도구 접근은 레지스트리/디스크립터 기반이라 이 파일 내용은 런타임에 소비되지 않습니다 |
 
-⚠️ **레거시 / 미사용 키**: `tool_policy.toml`은 config-root 마커일 뿐 내용은 런타임에서 읽지 않습니다. `runtime.toml`에 `[autonomous] concurrency`가 있다면 이 역시 죽은 설정입니다 — fleet 크기는 `[bootstrap] autoboot_max` / `max_active_keepers`로 조절합니다.
+⚠️ **레거시 / 미사용 키**: `tool_policy.toml`은 폐기되었으며 시드되지 않고, 부팅 시 읽히지 않으며, config-root 마커로도 쓰이지 않습니다. `runtime.toml`에 `[autonomous] concurrency`가 있다면 이 역시 죽은 설정입니다 — fleet 크기는 `[bootstrap] autoboot_max` / `max_active_keepers`로 조절합니다.
 
 **에이전트를 만들 때**
 

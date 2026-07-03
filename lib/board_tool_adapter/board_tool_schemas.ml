@@ -354,19 +354,22 @@ let tool_post_get : Masc_domain.tool_schema =
                     ; "default", `Int 0
                     ; ( "description"
                       , `String
-                          "Zero-based offset into the comment thread (default: 0). \
-                           Use to paginate through long threads." )
+                          "Zero-based offset into the comment thread (default: 0). Use \
+                           to paginate through long threads." )
                     ] )
               ; ( "comment_limit"
                 , `Assoc
                     [ "type", `String "integer"
                     ; "minimum", `Int 1
-                    ; "maximum", `Int 100
-                    ; "default", `Int 50
+                    ; "maximum", `Int Board.Limits.max_comment_page_limit
+                    ; "default", `Int Board.Limits.default_comment_page_limit
                     ; ( "description"
                       , `String
-                          "Max comments to return (default: 50, max: 100). \
-                           Response includes pagination metadata when truncated." )
+                          (Printf.sprintf
+                             "Max comments to return (default: %d, max: %d). Response \
+                              includes pagination metadata when truncated."
+                             Board.Limits.default_comment_page_limit
+                             Board.Limits.max_comment_page_limit) )
                     ] )
               ] )
         ; "required", `List [ `String "post_id" ]

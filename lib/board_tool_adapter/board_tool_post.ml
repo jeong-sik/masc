@@ -388,7 +388,7 @@ let handle_post_list ~tool_name ~start_time args =
 
 let handle_post_get ~tool_name ~start_time args : Tool_result.result =
   let post_id = get_string args "post_id" "" in
-  match Board_dispatch.get_post_and_comments ~post_id with
+  match Board_dispatch.get_post_and_comments ~post_id () with
   | Error (Board.Post_not_found _) ->
     (* Idempotent: post no longer exists (deleted/expired/TTL).
        Return success so agent tool metrics don't count this as failure.
@@ -406,7 +406,11 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
     let post_str = Board_tool_format.format_post post in
     let total_comments = List.length comments in
     let comment_offset = get_int args "comment_offset" 0 in
-    let comment_limit = max 1 (min (get_int args "comment_limit" 50) 100) in
+    let comment_limit =
+      get_int args "comment_limit" Board.Limits.default_comment_page_limit
+      |> max 1
+      |> min Board.Limits.max_comment_page_limit
+    in
     let clamped_offset = max 0 (min comment_offset total_comments) in
     let sliced =
       List.filteri
@@ -424,8 +428,7 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
           if has_more
           then
             Printf.sprintf
-              "\n[Showing comments %d-%d of %d. Use comment_offset=%d to \
-               see more.]"
+              "\n[Showing comments %d-%d of %d. Use comment_offset=%d to see more.]"
               (clamped_offset + 1)
               (clamped_offset + shown_count)
               total_comments
@@ -434,9 +437,7 @@ let handle_post_get ~tool_name ~start_time args : Tool_result.result =
           then Printf.sprintf "\n[Showing all %d comments.]" total_comments
           else if shown_count = 0
           then
-            Printf.sprintf
-              "\n[Showing comments 0 of %d. No more comments.]"
-              total_comments
+            Printf.sprintf "\n[Showing comments 0 of %d. No more comments.]" total_comments
           else
             Printf.sprintf
               "\n[Showing comments %d-%d of %d. No more comments.]"

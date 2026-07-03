@@ -238,6 +238,9 @@ type t =
   | KeeperRepoMappingRepositoryIdentityMismatch
   | KeeperRepoMappingRepositoryStoreError
   | RawTraceSinkDegraded
+  | WireCaptureResponseSuppressed
+  | WireCaptureWriteFailures
+  | WireCaptureRecordSkipped
 
 val to_string : t -> string
 

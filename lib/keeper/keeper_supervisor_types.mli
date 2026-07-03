@@ -69,7 +69,8 @@ val paused_meta_requires_reconcile_recovery : keeper_meta -> bool
 val paused_meta_auto_resume_due : now:float -> keeper_meta -> bool
 (** True when [meta] is an auto-paused keeper whose self-healing backoff has
     elapsed.  Intentional/operator pauses and reconcile-gated pauses are
-    excluded.  Explicit [auto_resume_after_sec] is preferred; legacy
+    excluded.  Dead-tombstone cleanup pauses are also terminal and never
+    auto-resumed.  Explicit [auto_resume_after_sec] is preferred; legacy
     [Turn_timeout] blocker metadata without that field uses the current initial
     auto-resume backoff so old timeout pauses do not become permanent operator
     pauses.  This predicate deliberately does not inspect runtime health or

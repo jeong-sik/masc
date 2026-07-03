@@ -68,6 +68,11 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (Lsp.resolve_relative ~base "file:///workspace/masc/docs/with%20space.md");
   check
     (option string)
+    "lexical parent segment stays scoped"
+    (Some "server.ml")
+    (Lsp.resolve_relative ~base "file:///workspace/masc/lib/../server.ml");
+  check
+    (option string)
     "sibling prefix is rejected"
     None
     (Lsp.resolve_relative ~base "file:///workspace/masc-other/lib/server.ml");
@@ -75,7 +80,42 @@ let test_file_uri_resolution_is_workspace_scoped () =
     (option string)
     "outside file is rejected"
     None
-    (Lsp.resolve_relative ~base "file:///tmp/outside.ml")
+    (Lsp.resolve_relative ~base "file:///tmp/outside.ml");
+  check
+    (option string)
+    "encoded traversal is rejected after decode"
+    None
+    (Lsp.resolve_relative ~base "file:///workspace/masc/sub%2F..%2F..%2Fetc/passwd")
+;;
+
+let test_file_uri_resolution_rejects_symlink_escape () =
+  let base = Filename.temp_dir "masc-lsp-base-" "" in
+  let outside = Filename.temp_dir "masc-lsp-outside-" "" in
+  let outside_file = Filename.concat outside "secret.ml" in
+  let link = Filename.concat base "link.ml" in
+  Fun.protect
+    ~finally:(fun () ->
+      (try Unix.unlink link with _ -> ());
+      (try Unix.unlink outside_file with _ -> ());
+      (try Unix.rmdir outside with _ -> ());
+      (try Unix.rmdir base with _ -> ()))
+    (fun () ->
+       let oc = open_out outside_file in
+       close_out oc;
+       Unix.symlink outside_file link;
+       check
+         (option string)
+         "symlink target outside workspace rejected"
+         None
+         (Lsp.resolve_relative ~base ("file://" ^ link)))
+;;
+
+let test_dispatch_workers_are_parallelized () =
+  check
+    bool
+    "more than one worker keeps slow LSP init off the read path"
+    true
+    (Lsp.inbound_dispatch_worker_count > 1)
 ;;
 
 (* RFC-0281 Phase 2: [/api/v1/ide/lsp] must be a typed WebSocket-upgrade
@@ -102,6 +142,174 @@ let test_lsp_route_is_ws () =
         fail "/api/v1/ide/lsp route must resolve"))
 ;;
 
+(* --- task-1691: typed LSP degraded-state contract --- *)
+
+let bool_field j key =
+  match member key j with
+  | Some (`Bool b) -> b
+  | _ -> fail (key ^ " must be a bool")
+;;
+
+(* [None] for a JSON null, [Some s] for a string, else fail. *)
+let string_or_null j key =
+  match member key j with
+  | Some (`String s) -> Some s
+  | Some `Null -> None
+  | _ -> fail (key ^ " must be a string or null")
+;;
+
+(* An LSP process failure is surfaced as a typed overlay-only status, not
+   hidden behind an overlay success (the old 9 handlers) nor a JSON-RPC error
+   (old hover). *)
+let test_overlay_only_status_is_typed () =
+  let j = Lsp.lang_status_json ~lang_id:"ocaml" (Lsp.Overlay_only "spawn failed") in
+  check bool "not connected" false (bool_field j "connected");
+  check bool "overlay_only surfaced" true (bool_field j "overlay_only");
+  check
+    (option string)
+    "last_error surfaced"
+    (Some "spawn failed")
+    (string_or_null j "last_error");
+  check
+    (option string)
+    "command reflects the language mapping"
+    (Some "ocamllsp")
+    (string_or_null j "command")
+;;
+
+(* A connected language reports no degradation — distinct from overlay-only so
+   the dashboard can tell a healthy LSP from a fallback. *)
+let test_connected_status_is_typed () =
+  let j = Lsp.lang_status_json ~lang_id:"ocaml" Lsp.Connected in
+  check bool "connected" true (bool_field j "connected");
+  check bool "not overlay_only" false (bool_field j "overlay_only");
+  check
+    (option string)
+    "no last_error while connected"
+    None
+    (string_or_null j "last_error")
+;;
+
+(* A language with no configured LSP reports a null command, still typed as
+   overlay-only rather than pretending to be a full LSP. *)
+let test_unmapped_lang_has_null_command () =
+  let j = Lsp.lang_status_json ~lang_id:"cobol" (Lsp.Overlay_only "no server") in
+  check (option string) "unmapped lang has null command" None (string_or_null j "command");
+  check bool "still typed overlay_only" true (bool_field j "overlay_only")
+;;
+
+(* The snapshot the dashboard receives lists every tracked language, sorted by
+   id for a stable wire order. *)
+let test_status_snapshot_is_sorted_and_complete () =
+  let j =
+    Lsp.status_snapshot_json
+      [ "python", Lsp.Overlay_only "e"; "ocaml", Lsp.Connected ]
+  in
+  let langs =
+    match member "langs" j with
+    | Some (`List l) -> l
+    | _ -> fail "snapshot must expose a langs list"
+  in
+  check int "one entry per tracked language" 2 (List.length langs);
+  let lang_of = function
+    | `Assoc f ->
+      (match List.assoc_opt "lang" f with
+       | Some (`String s) -> s
+       | _ -> fail "entry missing lang")
+    | _ -> fail "entry must be an object"
+  in
+  check (list string) "sorted by lang id" [ "ocaml"; "python" ] (List.map lang_of langs)
+;;
+
+(* --- task-1692: read-only method allowlist + no overlay write edits --- *)
+
+(* Read-only navigation methods that reach the catch-all forwarder are
+   proxied to the language server. *)
+let test_read_methods_forward () =
+  List.iter
+    (fun m ->
+      check
+        bool
+        (m ^ " forwards")
+        true
+        (Lsp.classify_forwarded_method m = Lsp.Forward_read_only))
+    [ "textDocument/signatureHelp"
+    ; "textDocument/typeDefinition"
+    ; "textDocument/implementation"
+    ; "textDocument/declaration"
+    ; "textDocument/semanticTokens/full"
+    ]
+;;
+
+(* Write-adjacent methods are refused so the observation plane never mutates
+   the workspace. *)
+let test_write_and_unknown_methods_rejected () =
+  List.iter
+    (fun m ->
+      check
+        bool
+        (m ^ " rejected")
+        true
+        (Lsp.classify_forwarded_method m = Lsp.Reject_write_adjacent))
+    [ "textDocument/rename"
+    ; "textDocument/prepareRename"
+    ; "textDocument/formatting"
+    ; "textDocument/rangeFormatting"
+    ; "textDocument/onTypeFormatting"
+    ; "textDocument/willSaveWaitUntil"
+    ; "workspace/executeCommand"
+    ; "workspace/applyEdit"
+    ];
+  (match Lsp.classify_forwarded_method "textDocument/totallyMadeUpMethod" with
+   | Lsp.Unknown_forwarded_method method_ ->
+     check string "unknown method preserved" "textDocument/totallyMadeUpMethod" method_
+   | Lsp.Forward_read_only | Lsp.Reject_write_adjacent ->
+     Alcotest.fail "unknown method must stay diagnostic, not coerce")
+;;
+
+let test_unknown_language_is_typed () =
+  match Lsp.resolve_lang "README.unknown_extension_for_lsp" with
+  | Lsp.Unknown_lang -> ()
+  | Lsp.Known_lang lang -> Alcotest.fail ("unexpected known lang: " ^ lang)
+;;
+
+let rec json_contains_key key = function
+  | `Assoc fields ->
+    List.exists (fun (k, v) -> String.equal k key || json_contains_key key v) fields
+  | `List items -> List.exists (json_contains_key key) items
+  | _ -> false
+;;
+
+(* Overlay code actions must not carry a WorkspaceEdit/newText that writes the
+   source buffer; the create affordance is offered through a MASC command
+   instead (a separate write lane). *)
+let test_code_actions_have_no_workspace_edit () =
+  (* code_actions reads the annotation cache, which takes an Eio mutex, so it
+     must run inside an Eio context. A fresh temp dir yields no annotations but
+     still exercises the create action that used to carry the edit. *)
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let base_dir = Filename.temp_dir "masc-lsp-proxy-" "" in
+    Fun.protect
+      ~finally:(fun () -> try Unix.rmdir base_dir with _ -> ())
+      (fun () ->
+         let actions =
+           Lsp_overlay_provider.code_actions
+             ~base_dir
+             ~file_path:"a.ml"
+             ~line:0
+             ~diagnostics:[]
+         in
+         let j = `List actions in
+         check bool "no WorkspaceEdit in code actions" false (json_contains_key "edit" j);
+         check bool "no newText in code actions" false (json_contains_key "newText" j);
+         check
+           bool
+           "create action offered via a command lane"
+           true
+           (json_contains_key "command" j)))
+;;
+
 let () =
   run
     "server_ide_lsp_proxy"
@@ -112,8 +320,30 @@ let () =
             test_workspace_root_initialize_stays_in_base
         ; test_case "file uri resolution is workspace scoped" `Quick
             test_file_uri_resolution_is_workspace_scoped
+        ; test_case "file uri resolution rejects symlink escape" `Quick
+            test_file_uri_resolution_rejects_symlink_escape
+        ; test_case "dispatch workers are parallelized" `Quick
+            test_dispatch_workers_are_parallelized
         ; test_case "/api/v1/ide/lsp is a Ws upgrade route" `Quick
             test_lsp_route_is_ws
+        ] )
+    ; ( "lsp_degraded_status"
+      , [ test_case "LSP failure is a typed overlay_only status" `Quick
+            test_overlay_only_status_is_typed
+        ; test_case "connected status is typed and distinct" `Quick
+            test_connected_status_is_typed
+        ; test_case "unmapped language has null command" `Quick
+            test_unmapped_lang_has_null_command
+        ; test_case "status snapshot is sorted and complete" `Quick
+            test_status_snapshot_is_sorted_and_complete
+        ] )
+    ; ( "lsp_read_only_allowlist"
+      , [ test_case "read-only methods forward" `Quick test_read_methods_forward
+        ; test_case "write/unknown methods are rejected" `Quick
+            test_write_and_unknown_methods_rejected
+        ; test_case "unknown language is typed" `Quick test_unknown_language_is_typed
+        ; test_case "overlay code actions carry no write edit" `Quick
+            test_code_actions_have_no_workspace_edit
         ] )
     ]
 ;;

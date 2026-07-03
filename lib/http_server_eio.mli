@@ -132,6 +132,11 @@ module Response : sig
     -> Httpun.Reqd.t
     -> unit
 
+  (** Empty response.  Default status [`No_content].  Sends no
+      content-type header; always includes [content-length: 0] so
+      keep-alive clients and proxies see an explicit end-of-body. *)
+  val empty : ?status:Httpun.Status.t -> Httpun.Reqd.t -> unit
+
   (** JSON response with optional zstd compression.  Default
       status [`OK].  When [compress = true] (default) AND
       [?request] or the request attached to [reqd] supplies an

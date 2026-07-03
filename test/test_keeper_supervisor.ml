@@ -2744,6 +2744,10 @@ let test_sweep_auto_resumes_after_backoff () =
       let paused_meta =
         { (make_meta name) with
           paused = true;
+          latched_reason =
+            Some
+              (Keeper_latched_reason.Operator_paused
+                 { operator_actor = Keeper_latched_reason.operator_actor_keeper_down });
           auto_resume_after_sec = Some 3600.0;
           updated_at = two_hours_ago;
         }
@@ -2776,6 +2780,8 @@ let test_sweep_auto_resumes_after_backoff () =
            (* auto_resume_after_sec is retained (ready for next pause). *)
            check bool "auto_resume_after_sec retained for next cycle"
              true (Option.is_some m.auto_resume_after_sec);
+           check bool "latched_reason cleared after auto-resume"
+             true (Option.is_none m.latched_reason);
            check bool "last_blocker cleared after auto-resume" true
              (Option.is_none m.runtime.last_blocker)
        | Ok None -> fail "meta missing after auto-resume"

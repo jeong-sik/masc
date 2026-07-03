@@ -49,9 +49,50 @@ val source_header :
 (** [rel_under base safe] returns the path of [safe] relative to [base],
     handling [base = "/"], trailing slashes, and the [safe = base] case
     (returns [""]). Caller must have already enforced the prefix
-    invariant via the internal [safe_path] helper. Exposed for unit
-    testing. *)
+    invariant via {!resolve_workspace_path}. Exposed for unit testing. *)
 val rel_under : string -> string -> string
+
+(** [component_is_confidential name] is [true] when a single path
+    component [name] names a secret or agent-internal store that must not
+    be served by the file read routes nor listed in the file tree
+    ([.git], [.masc]/[.masc-ide], [.env]*, [.ssh], any name containing
+    "credentials"). Single SSOT shared by {!resolve_workspace_path} and
+    {!scan_dir}. Exposed for unit testing. *)
+val component_is_confidential : string -> bool
+
+type path_rejection =
+  | Path_traversal
+      (** [..]/[.] component or a lexical prefix escape. *)
+  | Confidential_component of string
+      (** A path component matched {!component_is_confidential}. *)
+  | Symlink_escape
+      (** A symlink whose real target resolves outside the base. *)
+
+type path_resolution =
+  | Path_ok of string  (** Lexical path contained within the base. *)
+  | Path_rejected of path_rejection
+
+type workspace_file_read_error =
+  | File_not_found
+  | File_not_regular
+  | File_changed_during_open
+  | File_too_large of int
+  | File_read_failed of string
+(** Typed result from the workspace file endpoint's validated read path.
+    [File_changed_during_open] means the lstat/open/fstat identity check
+    did not match, so the route rejects the path without reading it. *)
+
+(** [resolve_workspace_path base requested] resolves [requested] (a
+    forward/back-slash path relative to [base]) into an absolute path
+    contained within [base], or a typed rejection. It rejects parent
+    traversal, confidential components (see {!component_is_confidential}),
+    and symlinks whose real target resolves outside [base]. The returned
+    [Path_ok] path is the lexical path under [base]; symlink containment
+    is verified against the realpath-resolved base without rewriting the
+    returned path, and confidential components are checked on both the
+    requested path and the resolved in-base target. Exposed for unit
+    testing; production callers reach it through {!add_routes}. *)
+val resolve_workspace_path : string -> string -> path_resolution
 
 (** [tree_node_limit_of_query value] applies the workspace tree route's
     [limit] query parameter defaulting and [1, max_tree_node_limit] clamp.
@@ -90,4 +131,19 @@ module For_testing : sig
     ?warn_on_failure:bool -> site:string -> path:string -> exn -> unit
 
   val parse_git_numstat_line : string -> (string * string) option
+
+  type safe_workspace_file
+
+  (** Resolve to both the lexical path used for Git pathspecs and the
+      realpath-resolved target used for file I/O. The concrete fields
+      stay abstract so tests exercise the same read helper as routes. *)
+  val resolve_workspace_file :
+    string -> string -> (safe_workspace_file, path_rejection) result
+
+  (** Read a resolved workspace file through lstat/open/fstat identity
+      checks and a caller-supplied byte ceiling. *)
+  val load_workspace_file_content :
+    ?max_bytes:int ->
+    safe_workspace_file ->
+    (string, workspace_file_read_error) result
 end

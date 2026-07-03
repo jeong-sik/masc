@@ -28,6 +28,10 @@ type submit_request_spec =
   ; board_type : string
   ; board_title : string
   ; board_content : string
+  ; evidence_fields : (string * Yojson.Safe.t) list
+      (* task-1664: [required_artifacts] / [submitted_evidence] JSON fields
+         spliced next to the flat [evidence_refs] so verifiers can tell the
+         contract's demanded artifacts apart from what the agent submitted. *)
   }
 
 let first_line text =
@@ -75,14 +79,23 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
     (match task.contract with
      | Some c -> c.completion_contract
      | None -> []) in
+  (* task-1664: derive the typed required/submitted split from the task (the
+     SSOT), and splice it next to the unchanged flat [evidence_refs] field. *)
+  let evidence_fields =
+    Masc_task_handlers.Tool_task_completion_review.verification_evidence_fields
+      (Masc_task_handlers.Tool_task_completion_review.concrete_verification_evidence
+         ~submitted_evidence_refs:evidence_refs
+         task)
+  in
   let output =
-    `Assoc [
-      ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
-      ("task_title", `String task.title);
-      ("request_kind", `String request_kind);
-      ("request_summary", `String request_summary);
-      ("next_action", `String next_action);
-    ]
+    `Assoc
+      ([ ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
+         ("task_title", `String task.title);
+         ("request_kind", `String request_kind);
+         ("request_summary", `String request_summary);
+         ("next_action", `String next_action);
+       ]
+       @ evidence_fields)
   in
   { criteria
   ; output
@@ -92,6 +105,7 @@ let submit_request_spec ~(config : Workspace.config) ~(task : Masc_domain.task)
   ; board_type
   ; board_title
   ; board_content
+  ; evidence_fields
   }
 
 let warn_contract_gap (task : Masc_domain.task) =
@@ -154,7 +168,7 @@ let delete_verification_request ~(config : Workspace.config) ~verification_id =
 let notify_submit_for_verification ~(config : Workspace.config)
     ~(task : Masc_domain.task) ~assignee ~verification_id ~evidence_refs =
   let spec = submit_request_spec ~config ~task ~assignee ~evidence_refs in
-  let meta_json = `Assoc [
+  let meta_json = `Assoc ([
     ("type", `String spec.board_type);
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
@@ -163,7 +177,7 @@ let notify_submit_for_verification ~(config : Workspace.config)
     ("criteria", `List (List.map Verification.criterion_to_yojson spec.criteria));
     ("request_kind", `String spec.request_kind);
     ("next_action", `String spec.next_action);
-  ] in
+  ] @ spec.evidence_fields) in
   let () =
     match Board_dispatch.create_post
       ~author:"system"
@@ -182,14 +196,14 @@ let notify_submit_for_verification ~(config : Workspace.config)
         "board post failed (task=%s vrf=%s): %s"
         task.id verification_id (Board_types.show_board_error e)
   in
-  Subscriptions.push_event_to_sessions (`Assoc [
+  Subscriptions.push_event_to_sessions (`Assoc ([
     ("type", `String "masc/verification/requested");
     ("task_id", `String task.id);
     ("verification_id", `String verification_id);
     ("worker", `String assignee);
     ("evidence_refs", `List (List.map (fun s -> `String s) evidence_refs));
     ("timestamp", `Float (Time_compat.now ()));
-  ]);
+  ] @ spec.evidence_fields));
   ()
 
 let on_submit_for_verification ~(config : Workspace.config)

@@ -759,15 +759,62 @@ let test_get_post_and_comments_atomic () =
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok _ -> ());
-      match Board_dispatch.get_post_and_comments ~post_id:pid with
+      match Board_dispatch.get_post_and_comments ~post_id:pid () with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok (fetched, comments) ->
           Alcotest.(check string) "post content matches"
             "atomic read body" fetched.content;
           Alcotest.(check int) "comment count" 2 (List.length comments)
 
+let test_get_post_and_comments_pagination_clamps () =
+  match
+    Board_dispatch.create_post ~author:"page-author"
+      ~content:"paged read body" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      for i = 1 to 3 do
+        match
+          Board_dispatch.add_comment ~post_id:pid
+            ~author:(Printf.sprintf "commenter-%d" i)
+            ~content:(Printf.sprintf "comment-%d" i)
+            ()
+        with
+        | Error e -> Alcotest.fail (Board.show_board_error e)
+        | Ok _ -> ()
+      done;
+      (match Board_dispatch.get_post_and_comments ~post_id:pid () with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok (_, comments) ->
+           Alcotest.(check int) "omitted pagination returns all" 3
+             (List.length comments));
+      (match
+         Board_dispatch.get_post_and_comments ~post_id:pid ~comment_offset:(-5)
+           ~comment_limit:(-1) ()
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok (_, comments) ->
+           Alcotest.(check int) "negative pagination clamps to one" 1
+             (List.length comments);
+           let first =
+             match comments with
+             | (comment : Board.comment) :: _ -> comment.content
+             | [] -> Alcotest.fail "expected one clamped comment"
+           in
+           Alcotest.(check string) "negative pagination starts at first" "comment-1"
+             first);
+      match
+        Board_dispatch.get_post_and_comments ~post_id:pid ~comment_offset:2
+          ~comment_limit:999 ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok (_, comments) ->
+          Alcotest.(check int) "over max limit clamps after offset" 1
+            (List.length comments)
+
 let test_get_post_and_comments_missing_post () =
-  match Board_dispatch.get_post_and_comments ~post_id:"never-existed" with
+  match Board_dispatch.get_post_and_comments ~post_id:"never-existed" () with
   | Ok _ -> Alcotest.fail "expected Post_not_found"
   | Error (Board.Post_not_found _) -> ()
   | Error e ->
@@ -1698,6 +1745,8 @@ let () =
         (with_eio test_add_comment_persistence_failure_rolls_back_without_fanout);
       Alcotest.test_case "get_post_and_comments atomic" `Quick
         (with_eio test_get_post_and_comments_atomic);
+      Alcotest.test_case "get_post_and_comments pagination clamps" `Quick
+        (with_eio test_get_post_and_comments_pagination_clamps);
       Alcotest.test_case "get_post_and_comments missing post" `Quick
         (with_eio test_get_post_and_comments_missing_post);
     ];

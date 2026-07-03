@@ -5,10 +5,41 @@
     parent-local state. All callers are internal to the parent
     (verified via grep across lib/ + test/).
 
-    Note: the [classify_*] functions return string failure-class tokens
-    rather than a typed variant. This is verbatim with the
-    pre-extraction code; a typed conversion is RFC-territory because
-    the strings cross many call sites and the dashboard surface. *)
+    The classifier now returns a typed variant instead of string
+    tokens. String serialization is owned by
+    {!docker_failure_class_to_string} so retry policy and telemetry
+    cannot drift when a new class is added or renamed. *)
+
+type docker_failure_class =
+  | Docker_daemon_timeout
+  | Docker_daemon_unavailable
+  | Docker_runtime_error
+  | Image_inspect_timeout
+  | Image_missing
+  | Image_inspect_error
+  | Image_inventory_timeout
+  | Oci_mount_failure
+  | Image_inventory_error
+  | Docker_info_format_error
+  | Image_config_missing
+  | Docker_hardening_error
+  | Image_required_command_missing
+
+let docker_failure_class_to_string = function
+  | Docker_daemon_timeout -> "docker_daemon_timeout"
+  | Docker_daemon_unavailable -> "docker_daemon_unavailable"
+  | Docker_runtime_error -> "docker_runtime_error"
+  | Image_inspect_timeout -> "image_inspect_timeout"
+  | Image_missing -> "image_missing"
+  | Image_inspect_error -> "image_inspect_error"
+  | Image_inventory_timeout -> "image_inventory_timeout"
+  | Oci_mount_failure -> "oci_mount_failure"
+  | Image_inventory_error -> "image_inventory_error"
+  | Docker_info_format_error -> "docker_info_format_error"
+  | Image_config_missing -> "image_config_missing"
+  | Docker_hardening_error -> "docker_hardening_error"
+  | Image_required_command_missing -> "image_required_command_missing"
+;;
 
 let process_status_is_timeout = function
   | Unix.WEXITED 124 -> true
@@ -47,28 +78,28 @@ let docker_output_looks_oci_mount_failure output =
 
 let classify_docker_runtime_failure ~status ~output =
   if process_status_is_timeout status || output_looks_timeout output
-  then "docker_daemon_timeout"
+  then Docker_daemon_timeout
   else if output_looks_docker_daemon_unavailable output
-  then "docker_daemon_unavailable"
-  else "docker_runtime_error"
+  then Docker_daemon_unavailable
+  else Docker_runtime_error
 ;;
 
 let classify_image_inspect_failure ~status ~output =
   if process_status_is_timeout status || output_looks_timeout output
-  then "image_inspect_timeout"
+  then Image_inspect_timeout
   else if output_looks_docker_daemon_unavailable output
-  then "docker_daemon_unavailable"
+  then Docker_daemon_unavailable
   else if output_looks_image_missing output
-  then "image_missing"
-  else "image_inspect_error"
+  then Image_missing
+  else Image_inspect_error
 ;;
 
 let classify_image_inventory_failure ~status ~output =
   if process_status_is_timeout status || output_looks_timeout output
-  then "image_inventory_timeout"
+  then Image_inventory_timeout
   else if docker_output_looks_oci_mount_failure output
-  then "oci_mount_failure"
+  then Oci_mount_failure
   else if output_looks_docker_daemon_unavailable output
-  then "docker_daemon_unavailable"
-  else "image_inventory_error"
+  then Docker_daemon_unavailable
+  else Image_inventory_error
 ;;

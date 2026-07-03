@@ -57,6 +57,7 @@
   (re_export masc.activity_graph)
   ;; Board handler shim removal — tests need direct access to
   ;; Masc_board_handlers for modules no longer re-exported via masc.
+  (re_export masc.masc_board)
   (re_export masc.board_handlers)
   (re_export masc.board_tool_adapter)
   ;; PR #14267 atomic flip moved Cdal_proof / Proof_store / Risk_class /

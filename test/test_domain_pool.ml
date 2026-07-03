@@ -14,19 +14,17 @@ module R = Domain_pool_ref
 
 let test_recommended_domain_count_floor () =
   let n = D.recommended_domain_count () in
-  check bool "floor of 2 holds even on 1-core systems" true (n >= 2)
+  check bool "at least one worker domain" true (n >= 1)
 
-let test_recommended_domain_count_reserves_main () =
-  (* Sanity: on any host with >= 3 recommended domains we expect
-     [recommended_domain_count] to subtract one for the main fiber.
-     On a 1- or 2-core system the floor of 2 dominates and this
-     property reduces to [n >= 2], which the prior test covers. *)
+let test_recommended_domain_count_reserves_scheduler_headroom () =
+  (* Keep the pool below OCaml's recommended domain count so the main Eio
+     scheduler and response finalisation do not compete with a saturated
+     executor pool.  On tiny hosts, preserve one worker domain. *)
   let raw = Domain.recommended_domain_count () in
   let ours = D.recommended_domain_count () in
-  if raw >= 3 then
-    check int "subtract one main domain" (raw - 1) ours
+  if raw >= 3 then check int "subtract scheduler headroom" (raw - 2) ours
   else
-    check bool "floor applies on small hosts" true (ours = 2)
+    check bool "floor applies on small hosts" true (ours = 1)
 
 (* ── create ────────────────────────────────────────────── *)
 
@@ -180,9 +178,9 @@ let test_ref_submits_to_shared_pool () =
 let () =
   Alcotest.run "Domain_pool" [
     "recommended", [
-      test_case "floor 2" `Quick test_recommended_domain_count_floor;
-      test_case "reserves main" `Quick
-        test_recommended_domain_count_reserves_main;
+      test_case "positive floor" `Quick test_recommended_domain_count_floor;
+      test_case "reserves scheduler headroom" `Quick
+        test_recommended_domain_count_reserves_scheduler_headroom;
     ];
     "create", [
       test_case "default count" `Quick test_create_default;

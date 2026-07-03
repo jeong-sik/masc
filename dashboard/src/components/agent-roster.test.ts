@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { html } from 'htm/preact'
 import { render } from 'preact'
 import { act } from 'preact/test-utils'
@@ -1249,8 +1251,173 @@ describe('AgentRoster live-only cards', () => {
     expect(text).toContain('sangsu')
     expect(text).toContain('하트비트')
     expect(text).toContain('6분 전')
-    expect(text).not.toContain('claude-code:auto')
+    // Full model id is surfaced verbatim — the `claude-` prefix is no longer
+    // truncated so multi-provider model names stay distinguishable (audit P1-5).
+    expect(text).toContain('claude-code:auto')
     expect(text).not.toContain('마지막 행동 이후')
     expect(text).not.toContain('최근 모델claude')
+  })
+
+  it('lists live recommended-action attention reasons in the selected keeper aside', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+    fleetCompositeSnapshot.value = {
+      generated_at: 1,
+      count: 1,
+      snapshots: [
+        makeCompositeSnapshot({
+          keeper: 'sangsu',
+          runtime_attention: {
+            state: 'blocked',
+            needs_attention: true,
+            blocked: true,
+            reason: 'runtime candidates exhausted',
+            raw_phase: null,
+            is_live: true,
+            source: 'runtime',
+          },
+          recommended_actions: [
+            {
+              action_type: 'keeper_recover',
+              target_type: 'keeper',
+              target_id: 'sangsu',
+              severity: 'bad',
+              reason: 'Resolve keeper tool-route contract blocker: runtime candidates exhausted',
+            },
+            {
+              action_type: 'keeper_probe',
+              target_type: 'keeper',
+              target_id: 'sangsu',
+              severity: 'warn',
+              reason: 'Inspect keeper tool-route contract blocker: runtime candidates exhausted',
+            },
+            {
+              action_type: 'operator_ping',
+              target_type: 'operator',
+              target_id: null,
+              severity: 'warn',
+              reason: 'operator-only action must not leak into the keeper aside',
+            },
+          ],
+        }),
+      ],
+    }
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const attn = container.querySelector('.fl-attn-list') as HTMLElement
+    expect(attn).not.toBeNull()
+    const items = attn.querySelectorAll('.fl-attn-item')
+    // operator-targeted action is excluded — only keeper-targeted reasons render
+    expect(items.length).toBe(2)
+    expect(container.textContent).toContain('주의 · 2')
+    expect(attn.textContent).toContain('Resolve keeper tool-route contract blocker')
+    expect(attn.textContent).toContain('Inspect keeper tool-route contract blocker')
+    expect(attn.textContent).not.toContain('operator-only action must not leak')
+    // sev dot coding follows the recommended-action severity: recover→bad, probe→warn
+    const sevs = Array.from(items).map(item => item.getAttribute('data-sev'))
+    expect(sevs).toEqual(['bad', 'warn'])
+  })
+
+  it('omits the aside attention list when no live recommended actions target the keeper', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+      } as Keeper,
+    ]
+    fleetCompositeSnapshot.value = {
+      generated_at: 1,
+      count: 1,
+      snapshots: [makeCompositeSnapshot({ keeper: 'sangsu', recommended_actions: [] })],
+    }
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    expect(container.querySelector('.fl-attn-list')).toBeNull()
+    expect(container.textContent).not.toContain('주의 · ')
+  })
+
+  it('surfaces the honest worktree-isolation badge for local-sandbox keepers', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        keeper_id: 'sangsu-uuid-77',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        sandbox_profile: 'local',
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    const badge = row.querySelector('.fl-sandbox') as HTMLElement
+    expect(badge).not.toBeNull()
+    expect(row.textContent).toContain('worktree 격리')
+    // honest label: git worktree isolation is not an OS security boundary
+    expect(badge.getAttribute('title')).toContain('OS sandbox 없음')
+    // the runtime alias / keeper id no longer occupies the row ns slot
+    expect((row.querySelector('.fl-ns') as HTMLElement).textContent).not.toContain('sangsu-uuid-77')
+  })
+
+  it('keeps the keeper id namespace line when no local sandbox profile is present', async () => {
+    agents.value = [makeAgent({ name: 'keeper-sangsu-agent', status: 'active' })]
+    keepers.value = [
+      {
+        name: 'sangsu',
+        agent_name: 'keeper-sangsu-agent',
+        keeper_id: 'sangsu-uuid-77',
+        status: 'active',
+        phase: 'Running',
+        registered: true,
+        keepalive_running: true,
+        sandbox_profile: null,
+      } as Keeper,
+    ]
+
+    await act(async () => {
+      render(html`<${AgentRoster} keeperFilter="keeper-only" />`, container)
+    })
+    await flushUi()
+
+    const row = container.querySelector('[data-testid="keeper-operations-row"]') as HTMLElement
+    expect(row.querySelector('.fl-sandbox')).toBeNull()
+    expect(row.querySelector('.fl-ns')?.textContent).toContain('sangsu-uuid-77')
+  })
+
+  it('vendors the fleet responsive column-shedding and attention-list styles', () => {
+    const css = readFileSync(resolve(__dirname, '../styles/keeper-v2/fleet.css'), 'utf8')
+    expect(css).toContain('@media (max-width: 1320px) and (min-width: 1101px)')
+    expect(css).toContain('@media (max-width: 720px)')
+    expect(css).toContain('.fl-attn-list')
+    expect(css).toContain('.fl-attn-item[data-sev="bad"]')
   })
 })

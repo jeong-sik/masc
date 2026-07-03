@@ -1061,93 +1061,100 @@ let dispatch_message cs msg =
       let params = List.assoc_opt "params" fields |> Option.value ~default:`Null in
       let id = extract_id fields in
       (match method_opt, id with
-       (* Client lifecycle *)
-       | Some "initialize", Some n ->
-         let root_uri =
-           match params with
-           | `Assoc pf ->
-             (match List.assoc_opt "rootUri" pf with
-              | Some (`String u) -> u
-              | _ -> cs.base_path)
-           | _ -> cs.base_path
-         in
-         let root = workspace_root_for_initialize ~base_path:cs.base_path root_uri in
-         cs.workspace_root := root;
-         send_response cs n (initialize_result_json ())
-       | Some "initialized", _ -> ()
-       | Some "shutdown", Some n -> send_response cs n `Null
-       | Some "exit", _ -> disconnect cs
-       (* Typed LSP health for the dashboard (task-1691): per-language
-          connected / overlay_only / command / last_error. *)
-       | Some "masc/lspStatus", Some n -> send_response cs n (current_status_json cs)
-       | Some "masc/lspStatus", None -> ()
-       (* MASC-overlay-aware handlers *)
-       | Some "textDocument/hover", Some n -> handle_hover cs params n
-       | Some "textDocument/codeLens", Some n -> handle_codelens cs params n
-       | Some "textDocument/inlayHint", Some n -> handle_inlay_hint cs params n
-       | Some "textDocument/diagnostic", Some n -> handle_diagnostic cs params n
-       | Some "textDocument/definition", Some n -> handle_definition cs params n
-       | Some "textDocument/references", Some n -> handle_references cs params n
-       | Some "textDocument/completion", Some n -> handle_completion cs params n
-       | Some "textDocument/codeAction", Some n -> handle_code_action cs params n
-       | Some "textDocument/documentSymbol", Some n -> handle_document_symbol cs params n
-       | Some "textDocument/foldingRange", Some n -> handle_folding_range cs params n
-       | Some "textDocument/documentHighlight", Some n -> handle_document_highlight cs params n
-       (* File notifications → forward to appropriate LSP process *)
-       | Some m, _ when String.starts_with ~prefix:"textDocument/did" m ->
-         (match extract_uri params with
-          | Some uri ->
-            (match resolve_relative ~base:cs.base_path uri with
-             | None -> ()
-             | Some relative ->
-               if String.equal m "textDocument/didSave" then
-                 Lsp_overlay_provider.invalidate_cache
-                   ~base_dir:cs.base_path
-                   ~file_path:relative;
-               let lang_id = Lsp_process_manager.lang_of_path relative in
-               if lang_id <> "unknown" then forward_notification cs lang_id m params)
-          | None -> ())
-       (* Other read-only requests with a textDocument URI → forward to LSP.
-          Write-adjacent / unrecognized methods are rejected here (task-1692)
-          rather than forwarded, so the observation plane never mutates the
-          workspace through the language server. *)
-       | Some m, Some n ->
-         (match classify_forwarded_method m with
-          | Reject_write_adjacent ->
-            send_error cs n
-              Mcp_error_code.(to_wire_code Invalid_request)
-              ("Read-only LSP proxy: method not permitted: " ^ m)
-          | Unknown_forwarded_method unknown ->
-            send_error cs n
-              Mcp_error_code.(to_wire_code Method_not_found)
-              ("Read-only LSP proxy: unknown method not permitted: " ^ unknown)
-          | Forward_read_only ->
-            (match extract_uri params with
-             | None ->
-               send_error cs n
-                 Mcp_error_code.(to_wire_code Method_not_found)
-                 ("Unhandled method: " ^ m)
-             | Some uri ->
-               (* Resolve the URI explicitly: an out-of-workspace or malformed
-                  URI ([None]) is rejected here rather than collapsed to a
-                  path, so the forward is only reached for a resolved
-                  in-workspace file. *)
-               (match resolve_relative ~base:cs.base_path uri with
-                | None ->
-                  send_error cs n (-32801) "Path is outside the workspace"
-                | Some relative ->
-                  let lang_id = Lsp_process_manager.lang_of_path relative in
-                  if lang_id <> "unknown"
-                  then forward_request cs lang_id m params n
-                  else send_error cs n (-32801) ("No LSP server for: " ^ relative))))
-       (* Server-initiated notification broadcast *)
-       | Some m, None ->
-         if not (Atomic.get cs.disconnected)
-         then
-           List.iter
-             (fun (_lang_id, proc) ->
-                Lsp_message_router.send_notification cs.router proc ~method_:m ~params)
-             (process_snapshot cs)
+       | Some method_str, id_opt ->
+         (match lsp_method_of_string method_str, id_opt with
+          (* Client lifecycle *)
+          | Some Initialize, Some n ->
+            let root_uri =
+              match params with
+              | `Assoc pf ->
+                (match List.assoc_opt "rootUri" pf with
+                 | Some (`String u) -> u
+                 | _ -> cs.base_path)
+              | _ -> cs.base_path
+            in
+            let root = workspace_root_for_initialize ~base_path:cs.base_path root_uri in
+            cs.workspace_root := root;
+            send_response cs n (initialize_result_json ())
+          | Some Initialized, _ -> ()
+          | Some Shutdown, Some n -> send_response cs n `Null
+          | Some Exit, _ -> disconnect cs
+          (* Typed LSP health for the dashboard (task-1691): per-language
+             connected / overlay_only / command / last_error. *)
+          | Some Masc_lsp_status, Some n -> send_response cs n (current_status_json cs)
+          | Some Masc_lsp_status, None -> ()
+          (* MASC-overlay-aware handlers *)
+          | Some Hover, Some n -> handle_hover cs params n
+          | Some CodeLens, Some n -> handle_codelens cs params n
+          | Some InlayHint, Some n -> handle_inlay_hint cs params n
+          | Some Diagnostic, Some n -> handle_diagnostic cs params n
+          | Some Definition, Some n -> handle_definition cs params n
+          | Some References, Some n -> handle_references cs params n
+          | Some Completion, Some n -> handle_completion cs params n
+          | Some CodeAction, Some n -> handle_code_action cs params n
+          | Some Document_symbol, Some n -> handle_document_symbol cs params n
+          | Some Folding_range, Some n -> handle_folding_range cs params n
+          | Some Document_highlight, Some n -> handle_document_highlight cs params n
+          | _ ->
+            (* File notifications → forward to appropriate LSP process *)
+            if String.starts_with ~prefix:"textDocument/did" method_str
+            then
+              (match extract_uri params with
+               | Some uri ->
+                 (match resolve_relative ~base:cs.base_path uri with
+                  | None -> ()
+                  | Some relative ->
+                    if String.equal method_str "textDocument/didSave"
+                    then
+                      Lsp_overlay_provider.invalidate_cache
+                        ~base_dir:cs.base_path
+                        ~file_path:relative;
+                    let lang_id = Lsp_process_manager.lang_of_path relative in
+                    if lang_id <> "unknown" then forward_notification cs lang_id method_str params)
+               | None -> ())
+            else
+              (match id_opt with
+               | Some n ->
+                 (* Other read-only requests with a textDocument URI → forward to LSP.
+                    Write-adjacent / unrecognized methods are rejected here (task-1692)
+                    rather than forwarded, so the observation plane never mutates the
+                    workspace through the language server. *)
+                 (match classify_forwarded_method method_str with
+                  | Reject_write_adjacent ->
+                    send_error cs n
+                      Mcp_error_code.(to_wire_code Invalid_request)
+                      ("Read-only LSP proxy: method not permitted: " ^ method_str)
+                  | Unknown_forwarded_method unknown ->
+                    send_error cs n
+                      Mcp_error_code.(to_wire_code Method_not_found)
+                      ("Read-only LSP proxy: unknown method not permitted: " ^ unknown)
+                  | Forward_read_only ->
+                    (match extract_uri params with
+                     | None ->
+                       send_error cs n
+                         Mcp_error_code.(to_wire_code Method_not_found)
+                         ("Unhandled method: " ^ method_str)
+                     | Some uri ->
+                       (* Resolve the URI explicitly: an out-of-workspace or malformed
+                          URI ([None]) is rejected here rather than collapsed to a
+                          path, so the forward is only reached for a resolved
+                          in-workspace file. *)
+                       (match resolve_relative ~base:cs.base_path uri with
+                        | None ->
+                          send_error cs n (-32801) "Path is outside the workspace"
+                        | Some relative ->
+                          let lang_id = Lsp_process_manager.lang_of_path relative in
+                          if lang_id <> "unknown"
+                          then forward_request cs lang_id method_str params n
+                          else send_error cs n (-32801) ("No LSP server for: " ^ relative))))
+               | None ->
+                 (* Server-initiated notification broadcast *)
+                 if not (Atomic.get cs.disconnected)
+                 then
+                   List.iter
+                     (fun (_lang_id, proc) ->
+                        Lsp_message_router.send_notification cs.router proc ~method_:method_str ~params)
+                     (process_snapshot cs)))
        (* No method field *)
        | None, Some n -> send_error cs n Mcp_error_code.(to_wire_code Invalid_request) "Missing method field"
        | None, None -> ())

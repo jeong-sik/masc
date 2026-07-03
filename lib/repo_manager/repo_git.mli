@@ -3,6 +3,12 @@ open Repo_manager_types
 val clone : repository:repository -> (unit, string) result
 (** [clone ~repository] clones [repository.url] into [repository.local_path]. *)
 
+val run_git :
+  cwd:string -> ?env:(string * string) list -> string list -> (string list, string) result
+(** [run_git ~cwd args] runs [git -C cwd args] through the repo-manager Git
+    execution wrapper and returns non-empty stdout lines. Callers must pass
+    argv tokens, never shell text. *)
+
 val fetch : repository:repository -> (string list, string) result
 (** [fetch ~repository] fetches all remotes and returns the list of remote
     branch names. *)

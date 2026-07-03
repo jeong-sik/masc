@@ -328,6 +328,12 @@ module Workspace_git : sig
   val local_op_timeout_sec : float
 end
 
+(** {1 Workspace file endpoint limits} *)
+
+module Workspace_file : sig
+  val max_read_bytes : int
+end
+
 (** {1 Shell IR approval policy gate (RFC v5)} *)
 
 module Shell_ir_approval_gate : sig

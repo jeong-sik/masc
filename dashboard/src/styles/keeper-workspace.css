@@ -1611,6 +1611,18 @@ body.kw-resizing { cursor: col-resize; user-select: none; }
   content: ""; flex: 1; height: 1px; background: var(--color-border-divider);
 }
 
+/* Since-last-seen "read up to here" divider. Same hairline layout as the day
+ * divider but accent-toned and normal-case so the unread boundary reads as a
+ * status marker rather than a date. Emitted by ChatTranscript when unreadAfterTs
+ * is set (keeper surfaces only). */
+.kw-unreaddiv {
+  text-transform: none; letter-spacing: 0.04em;
+  color: var(--color-accent-fg);
+}
+.kw-unreaddiv::before, .kw-unreaddiv::after {
+  background: var(--color-accent-fg-dim);
+}
+
 /* ════ C2 — message source badge ════════════════════════════════════
  * Distinguishes non-obvious message provenance (world-state / internal /
  * tool / system) from a plain user/assistant turn. Mirrors the standalone

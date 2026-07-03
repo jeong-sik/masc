@@ -160,6 +160,7 @@
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
   test_keeper_tool_duration_buckets
+  test_keeper_catchup_digest
   test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
@@ -497,6 +498,7 @@
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
   test_keeper_tool_duration_buckets
+  test_keeper_catchup_digest
   test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter

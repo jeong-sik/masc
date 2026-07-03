@@ -93,4 +93,4 @@ let tool_names (result : run_result) = tool_names_of_calls result.tool_calls
 let tool_call_count (result : run_result) = List.length result.tool_calls
 
 (* RFC-0132 PR-2: agent-result surface label = external boundary; redact via SSOT. *)
-let runtime_lane_label = Boundary_redaction.runtime_lane_label
+let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label

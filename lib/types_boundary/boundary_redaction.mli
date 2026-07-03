@@ -16,12 +16,22 @@
 type public_label = private string
 
 val runtime_provider_label : public_label
+(** Redaction label for provider fields at external boundaries.
+    It intentionally serializes to the same public lane as
+    [runtime_model_label], while preserving the source field's meaning at
+    call sites. *)
+
 val runtime_model_label : public_label
+(** Redaction label for model fields at external boundaries.
+    It intentionally serializes to the same public lane as
+    [runtime_provider_label], while preserving the source field's meaning at
+    call sites. *)
 
 val to_string : public_label -> string
 
-(** Redacted lane label ["runtime"] for external observability metric labels
-    ([model] / [model_used]). SSOT consolidating the previously-duplicated
-    [to_string runtime_model_label] expression at five keeper emit sites
+(** Redacted lane label for external observability metric labels
+    ([model] / [model_used]). Callers that serialize labels must use
+    [to_string runtime_lane_label]. SSOT consolidating the previously-duplicated
+    [to_string runtime_model_label] expression at keeper emit sites
     (RFC-0132 §3). *)
-val runtime_lane_label : string
+val runtime_lane_label : public_label

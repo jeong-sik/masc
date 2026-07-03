@@ -12,8 +12,6 @@
     [Keeper_unified_turn.run_keeper_cycle] is the expected caller. *)
 
 module For_testing : sig
-  val runtime_lane_label : string
-
   val budget_exhausted_no_progress_threshold_override
     :  stop_reason:Runtime_agent.stop_reason
     -> strong_evidence:bool

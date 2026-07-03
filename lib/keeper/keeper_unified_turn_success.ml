@@ -6,7 +6,7 @@ module KUM = Keeper_unified_metrics
 open Keeper_meta_contract
 
 (* RFC-0132 PR-2: success-path keeper-facing metric label = external boundary; redact via SSOT. *)
-let runtime_lane_label = Boundary_redaction.runtime_lane_label
+let runtime_lane_label = Boundary_redaction.to_string Boundary_redaction.runtime_lane_label
 
 (* cost_usd is accounted independently of token-count trust (token⊥cost), so the
    turn cost no longer needs a usage-trust classification. *)
@@ -623,8 +623,6 @@ let persist_terminal_turn_meta
 ;;
 
 module For_testing = struct
-  let runtime_lane_label = runtime_lane_label
-
   let budget_exhausted_no_progress_threshold_override =
     budget_exhausted_no_progress_threshold_override
 

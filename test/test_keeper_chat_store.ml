@@ -1255,6 +1255,51 @@ let test_append_turn_redacts_all_supplied_block_strings () =
           (contains_substring json "[REDACTED]")
       | None -> Alcotest.fail "assistant rich blocks missing")
 
+(* Fusion board_post_id/run_id are opaque lookup keys the dashboard uses to
+   lazy-fetch the board post; they are never rendered as text. They must
+   survive redaction byte-for-byte so the fusion linkage stays resolvable,
+   even for an id that happens to embed a value the redactor would otherwise
+   rewrite (a projected keeper secret literal, or a structural secret prefix
+   like [sk-]). Free-form content in the same turn is still redacted. *)
+let test_append_turn_preserves_fusion_lookup_ids () =
+  let base_dir = temp_base_path "keeper-chat-store-fusion-ids" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-fusion-ids" in
+      let root = secret_root_default ~base_dir ~keeper_name in
+      let secret = "fusion-id.secret!" in
+      write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
+      (* Synthetic ids chosen to trigger redaction if the field were not
+         skipped: [board_post_id] embeds the projected secret literal, and
+         [run_id] matches the [sk-] structural prefix. *)
+      let board_post_id = "p-" ^ secret ^ "-board" in
+      let run_id = "sk-run-" ^ secret in
+      K.append_turn
+        ~base_dir
+        ~keeper_name
+        ~user_content:"render"
+        ~user_attachments:[]
+        ~assistant_content:("leak " ^ secret)
+        ~blocks:[ B.Fusion { board_post_id; run_id } ]
+        ();
+      let messages = K.load ~base_dir ~keeper_name in
+      let assistant =
+        List.find
+          (fun (m : K.chat_message) -> K.Role.equal m.role K.Role.Assistant)
+          messages
+      in
+      Alcotest.(check bool) "free-form assistant content still redacted" false
+        (contains_substring assistant.K.content secret);
+      match assistant.K.blocks with
+      | Some [ B.Fusion fusion ] ->
+        Alcotest.(check string) "board_post_id preserved verbatim"
+          board_post_id fusion.board_post_id;
+        Alcotest.(check string) "run_id preserved verbatim" run_id fusion.run_id
+      | Some _ -> Alcotest.fail "expected exactly one fusion block"
+      | None -> Alcotest.fail "assistant fusion block missing")
+
 (* RFC-0233 §7: append_turn stamps the supplied turn_ref on every row of the
    completed turn, it round-trips through load, and to_json_array exposes it
    for the history endpoint. *)
@@ -1480,6 +1525,8 @@ let () =
             test_append_turn_redacts_supplied_thinking_blocks;
           Alcotest.test_case "supplied rich block strings are redacted" `Quick
             test_append_turn_redacts_all_supplied_block_strings;
+          Alcotest.test_case "fusion lookup ids survive redaction" `Quick
+            test_append_turn_preserves_fusion_lookup_ids;
           Alcotest.test_case "assistant history appends trace block" `Quick
             test_to_json_array_appends_trace_block_to_assistant_turn;
         ] );

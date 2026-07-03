@@ -343,10 +343,18 @@ let redact_block redaction = function
       ; meta = redact_string redaction meta
       }
   | Keeper_chat_blocks.Fusion { board_post_id; run_id } ->
-    Keeper_chat_blocks.Fusion
-      { board_post_id = redact_string redaction board_post_id
-      ; run_id = redact_string redaction run_id
-      }
+    (* board_post_id/run_id are opaque, system-generated lookup keys
+       (Board.Post_id.to_string -> "p-<hex>", and the fusion run id), not
+       free-form content. The dashboard fetches the board post by
+       board_post_id and renders its meta_json; these strings are never
+       displayed as text. Redacting a key that is never shown cannot
+       protect a secret — it can only corrupt the fusion linkage so the
+       lazy-fetch by id fails. Skip redaction at the field level: both
+       fields are destructured and reconstructed (not [Fusion _]) so
+       adding a new fusion field breaks compilation and forces a redaction
+       decision. This is a structural exclusion of an id field, not a
+       string-pattern exception. *)
+    Keeper_chat_blocks.Fusion { board_post_id; run_id }
   | Keeper_chat_blocks.Trace { trace } ->
     Keeper_chat_blocks.Trace
       { trace = List.map (redact_trace_step redaction) trace }

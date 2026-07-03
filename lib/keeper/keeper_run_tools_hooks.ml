@@ -380,7 +380,7 @@ let assemble_hooks
                     record_block Prompt_block_id.User_model block;
                     append_ctx ctx block
                 in
-                let ctx =
+                let _ctx =
                   (* Memory OS recall — bounded advisory block rendered from
                      persisted facts/episodes (read side; the write side is
                      the librarian wired in #20897). Opt-in via

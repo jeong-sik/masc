@@ -12,6 +12,8 @@ module KMP = Masc.Keeper_memory_policy
 module KCC = Masc.Keeper_context_core
 module KRT = Masc.Keeper_agent_run_response_text
 module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
+module Keeper_metrics = Masc.Keeper_metrics
+module Metrics = Masc.Otel_metric_store
 module Receipt = Masc.Keeper_execution_receipt
 
 let contains_substring text needle =
@@ -1141,38 +1143,67 @@ let test_replay_capture_omits_blank_response_text () =
        ~suppress_visible_response:false
        ~response_text:"   ")
 
-let test_wire_capture_suppression_reason_preserves_combined_causes () =
-  let reason ~budget_exhausted ~contract_suppresses_visible_response =
-    Option.map
-      Finalize.wire_capture_response_suppression_reason_label
-      (Finalize.wire_capture_response_suppression_reason
+let wire_capture_response_suppressed_metric =
+  Keeper_metrics.(to_string WireCaptureResponseSuppressed)
+
+let metric_value name ~labels =
+  Metrics.metric_value_or_zero name ~labels ()
+;;
+
+let test_wire_capture_suppression_reasons_emit_all_cause_metrics () =
+  let reasons ~budget_exhausted ~contract_suppresses_visible_response =
+    Finalize.wire_capture_response_suppression_reasons
          ~budget_exhausted
-         ~contract_suppresses_visible_response)
+         ~contract_suppresses_visible_response
+    |> List.map Finalize.wire_capture_response_suppression_reason_label
   in
-  Alcotest.(check (option string))
+  Alcotest.(check (list string))
     "no suppression"
-    None
-    (reason
+    []
+    (reasons
        ~budget_exhausted:false
        ~contract_suppresses_visible_response:false);
-  Alcotest.(check (option string))
+  Alcotest.(check (list string))
     "budget exhausted"
-    (Some "budget_exhausted")
-    (reason
+    [ "budget_exhausted" ]
+    (reasons
        ~budget_exhausted:true
        ~contract_suppresses_visible_response:false);
-  Alcotest.(check (option string))
+  Alcotest.(check (list string))
     "completion contract"
-    (Some "completion_contract")
-    (reason
+    [ "completion_contract" ]
+    (reasons
        ~budget_exhausted:false
        ~contract_suppresses_visible_response:true);
-  Alcotest.(check (option string))
-    "both causes preserved"
-    (Some "budget_exhausted_and_completion_contract")
-    (reason
+  Alcotest.(check (list string))
+    "both cause labels preserved"
+    [ "budget_exhausted"; "completion_contract" ]
+    (reasons
        ~budget_exhausted:true
-       ~contract_suppresses_visible_response:true)
+       ~contract_suppresses_visible_response:true);
+  let keeper_name = "wirecap_suppression_metric" in
+  let labels reason = [ ("keeper", keeper_name); ("reason", reason) ] in
+  let budget_labels = labels "budget_exhausted" in
+  let contract_labels = labels "completion_contract" in
+  let budget_before =
+    metric_value wire_capture_response_suppressed_metric ~labels:budget_labels
+  in
+  let contract_before =
+    metric_value wire_capture_response_suppressed_metric ~labels:contract_labels
+  in
+  Finalize.emit_wire_capture_response_suppressed_metrics
+    ~keeper_name
+    (Finalize.wire_capture_response_suppression_reasons
+       ~budget_exhausted:true
+       ~contract_suppresses_visible_response:true);
+  Alcotest.(check (float 0.0001))
+    "budget exhausted metric increments"
+    (budget_before +. 1.0)
+    (metric_value wire_capture_response_suppressed_metric ~labels:budget_labels);
+  Alcotest.(check (float 0.0001))
+    "completion contract metric increments"
+    (contract_before +. 1.0)
+    (metric_value wire_capture_response_suppressed_metric ~labels:contract_labels)
 
 (* ── Continuity NEXT parsing / text round-trip ───────────────────────
    Regression coverage for the parser/renderer asymmetry that let a single
@@ -1367,9 +1398,9 @@ let () =
             `Quick
             test_replay_capture_omits_blank_response_text;
           Alcotest.test_case
-            "wire capture suppression reason preserves combined causes"
+            "wire capture suppression reasons emit all cause metrics"
             `Quick
-            test_wire_capture_suppression_reason_preserves_combined_causes;
+            test_wire_capture_suppression_reasons_emit_all_cause_metrics;
         ] );
       ( "continuity_next",
         [

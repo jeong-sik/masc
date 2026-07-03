@@ -4,6 +4,8 @@
     one redacted dated jsonl with the expected fields. *)
 
 module Wire = Masc.Keeper_wire_capture
+module Keeper_metrics = Masc.Keeper_metrics
+module Metrics = Masc.Otel_metric_store
 
 let flag = "MASC_KEEPER_WIRE_CAPTURE"
 
@@ -54,6 +56,82 @@ let rec find_jsonl dir =
     |> List.concat_map (fun e -> find_jsonl (Filename.concat dir e))
   else if Filename.check_suffix dir ".jsonl" then [ dir ]
   else []
+
+let parse_single_jsonl content =
+  let lines =
+    String.split_on_char '\n' content
+    |> List.filter (fun line -> not (String.equal "" (String.trim line)))
+  in
+  match lines with
+  | [ line ] -> Yojson.Safe.from_string line
+  | _ -> Alcotest.failf "expected exactly one JSONL record, got %d" (List.length lines)
+;;
+
+let read_single_json_record base =
+  let files = find_jsonl base in
+  Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
+  read_file (List.hd files) |> parse_single_jsonl
+;;
+
+let json_member key json = Yojson.Safe.Util.member key json
+
+let json_string key json =
+  match json_member key json with
+  | `String value -> value
+  | other ->
+    Alcotest.failf "field %s must be string, got %s" key (Yojson.Safe.to_string other)
+;;
+
+let check_json_string label key expected json =
+  Alcotest.(check string) label expected (json_string key json)
+;;
+
+let check_json_int label key expected json =
+  match json_member key json with
+  | `Int actual -> Alcotest.(check int) label expected actual
+  | other ->
+    Alcotest.failf "field %s must be int, got %s" key (Yojson.Safe.to_string other)
+;;
+
+let check_json_bool label key expected json =
+  match json_member key json with
+  | `Bool actual -> Alcotest.(check bool) label expected actual
+  | other ->
+    Alcotest.failf "field %s must be bool, got %s" key (Yojson.Safe.to_string other)
+;;
+
+let check_json_null label key json =
+  match json_member key json with
+  | `Null -> ()
+  | other ->
+    Alcotest.failf "%s: field %s must be null, got %s" label key
+      (Yojson.Safe.to_string other)
+;;
+
+let json_list key json =
+  match json_member key json with
+  | `List items -> items
+  | other ->
+    Alcotest.failf "field %s must be list, got %s" key (Yojson.Safe.to_string other)
+;;
+
+let check_json_list_length label key expected json =
+  Alcotest.(check int) label expected (List.length (json_list key json))
+;;
+
+let metric_value name ~labels =
+  Metrics.metric_value_or_zero name ~labels ()
+;;
+
+let check_metric_delta label name ~labels f =
+  let before = metric_value name ~labels in
+  f ();
+  let after = metric_value name ~labels in
+  Alcotest.(check (float 0.0001)) label (before +. 1.0) after
+;;
+
+let write_failures_metric = Keeper_metrics.(to_string WireCaptureWriteFailures)
+let record_skipped_metric = Keeper_metrics.(to_string WireCaptureRecordSkipped)
 
 (* Regression guard: verify in [Keeper_agent_run.run_turn] that the response
    capture happens after normalization and uses the normalized identifier.
@@ -147,30 +225,33 @@ let enabled_writes_redacted () =
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
+    let json = parse_single_jsonl content in
     Alcotest.(check bool) "raw github token is redacted" false
       (contains ~needle:fake_github_token content);
     Alcotest.(check bool) "redaction marker present" true
-      (contains ~needle:"[REDACTED]" content);
-    Alcotest.(check bool) "history_message_count recorded" true
-      (contains ~needle:"\"history_message_count\":2" content);
-    Alcotest.(check bool) "keeper name recorded" true
-      (contains ~needle:"sangsu" content);
-    Alcotest.(check bool) "turn_id recorded" true
-      (contains ~needle:"\"turn_id\":7" content);
-    Alcotest.(check bool) "sdk_turn recorded" true
-      (contains ~needle:"\"sdk_turn\":3" content);
-    Alcotest.(check bool) "assistant role recorded" true
-      (contains ~needle:"\"role\":\"assistant\"" content);
-    Alcotest.(check bool) "user role recorded" true
-      (contains ~needle:"\"role\":\"user\"" content);
-    Alcotest.(check bool) "extra context recorded" true
-      (contains ~needle:"dynamic context" content);
-    Alcotest.(check bool) "replayed history text recorded" true
-      (contains ~needle:"좋아, 연구 시작한다" content);
-    Alcotest.(check bool) "request kind recorded" true
-      (contains ~needle:"\"kind\":\"request\"" content);
-    Alcotest.(check bool) "missing trace_id is null" true
-      (contains ~needle:"\"trace_id\":null" content))
+      (contains ~needle:"[REDACTED]" (json_string "system_prompt" json));
+    check_json_string "request kind recorded" "kind" "request" json;
+    check_json_string "keeper name recorded" "keeper" "sangsu" json;
+    check_json_int "turn_id recorded" "turn_id" 7 json;
+    check_json_int "sdk_turn recorded" "sdk_turn" 3 json;
+    check_json_null "missing trace_id is null" "trace_id" json;
+    check_json_string "extra context recorded" "extra_system_context"
+      "dynamic context" json;
+    check_json_bool "extra context presence recorded"
+      "extra_system_context_present" true json;
+    check_json_string "user message recorded" "user_message" "hello world" json;
+    check_json_int "history_message_count recorded" "history_message_count" 2
+      json;
+    check_json_list_length "history length" "history" 2 json;
+    let history_json = json_list "history" json in
+    (match history_json with
+     | [ assistant; user ] ->
+       check_json_string "assistant role recorded" "role" "assistant" assistant;
+       check_json_string "assistant text recorded" "text"
+         "좋아, 연구 시작한다" assistant;
+       check_json_string "user role recorded" "role" "user" user;
+       check_json_string "user text recorded" "text" "continue" user
+     | _ -> Alcotest.fail "history shape should have been checked above"))
 
 let request_trace_id_emitted () =
   with_flag "1" (fun () ->
@@ -179,16 +260,26 @@ let request_trace_id_emitted () =
     Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
       ~trace_id ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
       ~user_message:"hello" ~history_messages:[] ();
-    let content = read_file (List.hd (find_jsonl base)) in
-    Alcotest.(check bool) "request trace_id string recorded" true
-      (contains ~needle:"\"trace_id\":\"trace-req-abc\"" content))
+    let json = read_single_json_record base in
+    check_json_string "request trace_id string recorded" "trace_id"
+      "trace-req-abc" json)
 
 let request_capture_failure_is_best_effort () =
   with_flag "1" (fun () ->
+    let keeper_name = "wirecap_request_failure_metric" in
+    let turn_id = 31 in
     let root_file = Filename.temp_file "wirecap_root_file" "" in
-    Wire.capture_request ~masc_root:root_file ~keeper_name:"sangsu" ~turn_id:1
-      ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
-      ~user_message:"hello" ~history_messages:[] ())
+    let labels =
+      [ ("keeper", keeper_name)
+      ; ("turn_id", string_of_int turn_id)
+      ; ("site", "request")
+      ]
+    in
+    check_metric_delta "request write failure metric increments"
+      write_failures_metric ~labels (fun () ->
+        Wire.capture_request ~masc_root:root_file ~keeper_name ~turn_id
+          ~sdk_turn:1 ~system_prompt:"sys" ~extra_system_context:None
+          ~user_message:"hello" ~history_messages:[] ()))
 
 let response_disabled_is_noop () =
   with_flag "" (fun () ->
@@ -206,16 +297,32 @@ let response_capture_writes_redacted () =
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
-    Alcotest.(check bool) "response kind recorded" true
-      (contains ~needle:"\"kind\":\"response\"" content);
+    let json = parse_single_jsonl content in
+    check_json_string "response kind recorded" "kind" "response" json;
     Alcotest.(check bool) "raw github token is redacted" false
       (contains ~needle:fake_github_token content);
-    Alcotest.(check bool) "turn_id recorded" true
-      (contains ~needle:"\"turn_id\":9" content);
-    Alcotest.(check bool) "sdk_turn recorded" true
-      (contains ~needle:"\"sdk_turn\":4" content);
-    Alcotest.(check bool) "missing trace_id is null" true
-      (contains ~needle:"\"trace_id\":null" content))
+    Alcotest.(check bool) "redaction marker present" true
+      (contains ~needle:"[REDACTED]" (json_string "response_text" json));
+    check_json_string "keeper name recorded" "keeper" "sangsu" json;
+    check_json_int "turn_id recorded" "turn_id" 9 json;
+    check_json_int "sdk_turn recorded" "sdk_turn" 4 json;
+    check_json_null "missing trace_id is null" "trace_id" json)
+
+let response_capture_failure_is_best_effort () =
+  with_flag "1" (fun () ->
+    let keeper_name = "wirecap_response_failure_metric" in
+    let turn_id = 32 in
+    let root_file = Filename.temp_file "wirecap_response_root_file" "" in
+    let labels =
+      [ ("keeper", keeper_name)
+      ; ("turn_id", string_of_int turn_id)
+      ; ("site", "response")
+      ]
+    in
+    check_metric_delta "response write failure metric increments"
+      write_failures_metric ~labels (fun () ->
+        Wire.capture_response ~masc_root:root_file ~keeper_name ~turn_id
+          ~sdk_turn:1 ~response_text:"ok" ()))
 
 let response_trace_id_emitted () =
   with_flag "1" (fun () ->
@@ -223,9 +330,9 @@ let response_trace_id_emitted () =
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-resp-xyz" in
     Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:2
       ~sdk_turn:1 ~trace_id ~response_text:"ok" ();
-    let content = read_file (List.hd (find_jsonl base)) in
-    Alcotest.(check bool) "response trace_id string recorded" true
-      (contains ~needle:"\"trace_id\":\"trace-resp-xyz\"" content))
+    let json = read_single_json_record base in
+    check_json_string "response trace_id string recorded" "trace_id"
+      "trace-resp-xyz" json)
 
 let capture_prunes_old_files () =
   with_flag "1" (fun () ->
@@ -278,18 +385,35 @@ let capture_skips_when_current_file_cap_would_be_exceeded () =
   with_flag "1" (fun () ->
     with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "512" (fun () ->
       let base = Filename.temp_dir "wirecap_cap" "" in
-      Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:11
+      let keeper_name = "wirecap_cap_metric" in
+      Wire.capture_response ~masc_root:base ~keeper_name ~turn_id:11
         ~sdk_turn:1 ~response_text:"small" ();
       let files = find_jsonl base in
       Alcotest.(check int) "small record written" 1 (List.length files);
       let before = read_file (List.hd files) in
-      Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:12
-        ~sdk_turn:1 ~response_text:(String.make 4096 'x') ();
+      let labels =
+        [ ("keeper", keeper_name)
+        ; ("turn_id", "12")
+        ; ("reason", "current_file_byte_cap")
+        ]
+      in
+      let legacy_labels =
+        [ ("keeper", keeper_name); ("turn_id", "12"); ("reason", "cap") ]
+      in
+      let legacy_before = metric_value record_skipped_metric ~labels:legacy_labels in
+      check_metric_delta "current-file cap skip metric increments"
+        record_skipped_metric ~labels (fun () ->
+          Wire.capture_response ~masc_root:base ~keeper_name ~turn_id:12
+            ~sdk_turn:1 ~response_text:(String.make 4096 'x') ());
       let after = read_file (List.hd files) in
       Alcotest.(check string)
         "oversized record skipped without mutating current day file"
         before
-        after))
+        after;
+      Alcotest.(check (float 0.0001))
+        "legacy cap reason label is not incremented"
+        legacy_before
+        (metric_value record_skipped_metric ~labels:legacy_labels)))
 
 let response_capture_matches_replayed_history_text () =
   with_flag "1" (fun () ->
@@ -395,6 +519,8 @@ let () =
             response_disabled_is_noop;
           Alcotest.test_case "enabled writes redacted jsonl" `Quick
             response_capture_writes_redacted;
+          Alcotest.test_case "write failure is best effort" `Quick
+            response_capture_failure_is_best_effort;
           Alcotest.test_case "capture store prunes old files" `Quick
             capture_prunes_old_files;
           Alcotest.test_case "capture store reloads on retention change" `Quick

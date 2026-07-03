@@ -7,32 +7,44 @@
     common case) inflated a [*_failures_total] series that [Dashboard.ml] sums
     into the operator failure panel.
 
-    This test drives the success path with a writable temp config (write
-    returns [Ok]) and asserts the counter does not move. *)
+    These tests drive both the success path (write returns [Ok]) and a
+    deterministic write failure path (target meta path is a directory). *)
 
 open Alcotest
 open Masc
 
 let () = Server_startup_state.mark_state_ready ~backend_mode:"test"
 
-let temp_dir () =
-  let dir = Filename.temp_file "test_keeper_wmcf_" "" in
-  Unix.unlink dir;
-  Unix.mkdir dir 0o755;
-  dir
-
 let ensure_fs env =
   if not (Fs_compat.has_fs ()) then Fs_compat.set_fs (Eio.Stdenv.fs env)
 
-let cleanup_dir dir =
-  let rec rm path =
-    if Sys.file_exists path then
-      if Sys.is_directory path then (
-        Array.iter (fun name -> rm (Filename.concat path name)) (Sys.readdir path);
-        Unix.rmdir path)
-      else Unix.unlink path
+let temp_dir env suffix =
+  let dir =
+    Filename.concat
+      (Filename.get_temp_dir_name ())
+      (Printf.sprintf "test_keeper_wmcf_%d_%s" (Unix.getpid ()) suffix)
   in
-  try rm dir with _ -> ()
+  if Fs_compat.file_exists dir then Fs_compat.remove_tree dir;
+  Eio.Path.mkdirs ~exists_ok:false ~perm:0o755 Eio.Path.(Eio.Stdenv.fs env / dir);
+  dir
+
+let cleanup_dir = Fs_compat.remove_tree
+
+let with_temp_dir env suffix f =
+  let base_dir = temp_dir env suffix in
+  match f base_dir with
+  | result ->
+    cleanup_dir base_dir;
+    result
+  | exception exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    (try cleanup_dir base_dir with
+     | cleanup_exn ->
+       Printf.eprintf
+         "cleanup failed for %S after test failure: %s\n%!"
+         base_dir
+         (Printexc.to_string cleanup_exn));
+    Printexc.raise_with_backtrace exn bt
 
 let make_meta ~name =
   match
@@ -59,42 +71,79 @@ let cycle_failures_for ~keeper =
       ]
     ()
 
+let keeper_meta_file config name =
+  Filename.concat (Workspace.keepers_runtime_dir config) (name ^ ".json")
+
+let seed_meta_file config m0 =
+  match
+    Keeper_meta_store.write_meta_with_merge
+      ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+      config
+      m0
+  with
+  | Ok () -> ()
+  | Error e -> fail ("seed write failed: " ^ e)
+
+let persist_terminal_turn_meta_for_done ~config ~m0 ~continuity_summary =
+  let (_ : Keeper_meta_contract.keeper_meta) =
+    Keeper_unified_turn_success.For_testing.persist_terminal_turn_meta_for_outcome
+      ~config
+      ~original_meta:m0
+      ~updated_meta:{ m0 with continuity_summary }
+      ~terminal_outcome:Keeper_unified_turn_success.For_testing.Terminal_done
+  in
+  ()
+
 let test_success_path_does_not_increment_failures () =
   Eio_main.run @@ fun env ->
   ensure_fs env;
   Eio.Switch.run @@ fun _sw ->
-  let base_dir = temp_dir () in
-  Fun.protect
-    ~finally:(fun () -> cleanup_dir base_dir)
-    (fun () ->
+  with_temp_dir env "success" (fun base_dir ->
       let config = Workspace.default_config base_dir in
       ignore (Workspace.init config ~agent_name:(Some "operator"));
       let name = "success-cycle" in
       let m0 = make_meta ~name in
       (* Seed the meta file so the merge write has a base version to advance. *)
-      (match
-         Keeper_meta_store.write_meta_with_merge
-           ~merge:Keeper_meta_merge.caller_wins config m0
-       with
-       | Ok () -> ()
-       | Error e -> fail ("seed write failed: " ^ e));
+      seed_meta_file config m0;
       let before = cycle_failures_for ~keeper:name in
       (* Success path: writable temp config -> write_meta returns Ok. *)
-      let (_ : Keeper_meta_contract.keeper_meta) =
-        Keeper_unified_turn_success.For_testing.persist_terminal_turn_meta_for_outcome
-          ~config
-          ~original_meta:m0
-          ~updated_meta:{ m0 with continuity_summary = "cycle ok" }
-          ~terminal_outcome:Keeper_unified_turn_success.For_testing.Terminal_done
-      in
+      persist_terminal_turn_meta_for_done
+        ~config
+        ~m0
+        ~continuity_summary:"cycle ok";
       let after = cycle_failures_for ~keeper:name in
       check (float 0.0001) "WriteMetaCycleFailures unchanged on success cycle"
         before after)
+
+let test_failure_path_increments_failures () =
+  Eio_main.run @@ fun env ->
+  ensure_fs env;
+  Eio.Switch.run @@ fun _sw ->
+  with_temp_dir env "failure" (fun base_dir ->
+      let config = Workspace.default_config base_dir in
+      ignore (Workspace.init config ~agent_name:(Some "operator"));
+      let name = "failure-cycle" in
+      let m0 = make_meta ~name in
+      seed_meta_file config m0;
+      let meta_path = keeper_meta_file config name in
+      Fs_compat.remove_tree meta_path;
+      Eio.Path.mkdirs ~exists_ok:false ~perm:0o755 Eio.Path.(Eio.Stdenv.fs env / meta_path);
+      let before = cycle_failures_for ~keeper:name in
+      persist_terminal_turn_meta_for_done
+        ~config
+        ~m0
+        ~continuity_summary:"cycle write fails";
+      let after = cycle_failures_for ~keeper:name in
+      check (float 0.0001) "WriteMetaCycleFailures increments on failure cycle"
+        (before +. 1.0)
+        after)
 
 let () =
   run "keeper_write_meta_cycle_failures_counter"
     [ ( "emit_location"
       , [ test_case "success cycle does not inflate failures counter" `Quick
             test_success_path_does_not_increment_failures
+        ; test_case "failure cycle increments failures counter" `Quick
+            test_failure_path_increments_failures
         ] )
     ]

@@ -20,8 +20,18 @@ let cleanup_dead_tombstone
   =
   match read_meta ctx.config entry.name with
   | Ok (Some meta) ->
+    let dead_tombstone_terminal_persisted =
+      meta.paused
+      &&
+      match meta.latched_reason with
+      | Some Keeper_latched_reason.Dead_tombstone ->
+        Option.is_none meta.auto_resume_after_sec
+        && Option.is_none meta.runtime.last_blocker
+      | Some _
+      | None -> false
+    in
     let persisted_paused =
-      if meta.paused
+      if dead_tombstone_terminal_persisted
       then true
       else (
         (* #9733: dead tombstone cleanup writes [paused = true] —
@@ -30,12 +40,28 @@ let cleanup_dead_tombstone
              the same merged-CAS retry as the resume + overflow-pause
              paths so a parallel heartbeat write doesn't make this
              write fail and leave the keeper unpaused on disk while
-             the supervisor proceeds to unregister it. *)
+             the supervisor proceeds to unregister it.
+
+             The cleanup owns [paused]/[latched_reason] here, so use
+             [dead_tombstone_cleanup_from_disk] rather than the
+             heartbeat merge: on a CAS retry that re-reads an operator
+             pause, the heartbeat merge would copy the operator reason
+             back over [Dead_tombstone] and still return [Ok ()]. *)
         match
           write_meta_with_merge
-            ~merge:Keeper_meta_merge.heartbeat_fields_from_disk
+            ~merge:Keeper_meta_merge.dead_tombstone_cleanup_from_disk
             ctx.config
-            { meta with paused = true }
+            { meta with
+              paused = true
+            ; (* Record {i why} this meta is paused on disk: a dead-keeper
+                 tombstone, distinct from an operator pause or runtime latch.
+                 Observability only — the unregister/pause behavior below is
+                 unchanged. *)
+              latched_reason = Some Keeper_latched_reason.Dead_tombstone
+            ; auto_resume_after_sec = None
+            ; updated_at = now_iso ()
+            ; runtime = { meta.runtime with last_blocker = None }
+            }
         with
         | Ok () -> true
         | Error err when is_version_conflict_error err ->
@@ -44,7 +70,7 @@ let cleanup_dead_tombstone
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup_cas_race" ]
             ();
           Log.Keeper.warn
-            "%s: dead tombstone cleanup paused write lost CAS race after retries: %s"
+            "%s: dead tombstone cleanup paused/reason write lost CAS race after retries: %s"
             entry.name
             err;
           false
@@ -54,7 +80,7 @@ let cleanup_dead_tombstone
             ~labels:[ "keeper", entry.name; "phase", "dead_cleanup" ]
             ();
           Log.Keeper.warn
-            "%s: dead tombstone cleanup paused write failed: %s"
+            "%s: dead tombstone cleanup paused/reason write failed: %s"
             entry.name
             err;
           false)

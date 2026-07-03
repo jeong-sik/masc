@@ -9,4 +9,4 @@ val resume_keeper_after_reconcile_gate :
   'a Keeper_types_profile.context ->
   Keeper_meta_contract.keeper_meta ->
   unit
-(** Clear the persisted reconcile blocker and resume or relaunch the keeper. *)
+(** Clear the persisted reconcile blocker/latch and resume or relaunch the keeper. *)

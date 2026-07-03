@@ -765,7 +765,9 @@ let run_turn
                                 ~masc_root:(Workspace.masc_root_dir config)
                                 ~keeper_name:meta.name
                                 ~turn_id:manifest_keeper_turn_id
-                                ~response_text)
+                                ~trace_id:meta.runtime.trace_id
+                                ~response_text
+                                ())
                           ())))
                in
        let receipt_result =

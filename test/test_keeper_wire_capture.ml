@@ -126,7 +126,7 @@ let disabled_is_noop () =
     let base = Filename.temp_dir "wirecap_off" "" in
     Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
       ~sdk_turn:0 ~system_prompt:"sys" ~extra_system_context:None
-      ~user_message:"u" ~history_messages:[];
+      ~user_message:"u" ~history_messages:[] ();
     Alcotest.(check (list string))
       "no jsonl written when disabled" [] (find_jsonl base))
 
@@ -143,7 +143,7 @@ let enabled_writes_redacted () =
       ~sdk_turn:3
       ~system_prompt:("token " ^ fake_github_token ^ " end")
       ~extra_system_context:(Some "dynamic context")
-      ~user_message:"hello world" ~history_messages:history;
+      ~user_message:"hello world" ~history_messages:history ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
@@ -168,20 +168,33 @@ let enabled_writes_redacted () =
     Alcotest.(check bool) "replayed history text recorded" true
       (contains ~needle:"좋아, 연구 시작한다" content);
     Alcotest.(check bool) "request kind recorded" true
-      (contains ~needle:"\"kind\":\"request\"" content))
+      (contains ~needle:"\"kind\":\"request\"" content);
+    Alcotest.(check bool) "missing trace_id is null" true
+      (contains ~needle:"\"trace_id\":null" content))
+
+let request_trace_id_emitted () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_req_trace" "" in
+    let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-req-abc" in
+    Wire.capture_request ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
+      ~trace_id ~sdk_turn:0 ~system_prompt:"sys" ~extra_system_context:None
+      ~user_message:"hello" ~history_messages:[] ();
+    let content = read_file (List.hd (find_jsonl base)) in
+    Alcotest.(check bool) "request trace_id string recorded" true
+      (contains ~needle:"\"trace_id\":\"trace-req-abc\"" content))
 
 let request_capture_failure_is_best_effort () =
   with_flag "1" (fun () ->
     let root_file = Filename.temp_file "wirecap_root_file" "" in
     Wire.capture_request ~masc_root:root_file ~keeper_name:"sangsu" ~turn_id:1
       ~sdk_turn:0 ~system_prompt:"sys" ~extra_system_context:None
-      ~user_message:"hello" ~history_messages:[])
+      ~user_message:"hello" ~history_messages:[] ())
 
 let response_disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_off" "" in
     Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
-      ~response_text:"anything";
+      ~response_text:"anything" ();
     Alcotest.(check (list string))
       "no jsonl written when disabled" [] (find_jsonl base))
 
@@ -189,7 +202,7 @@ let response_capture_writes_redacted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_on" "" in
     Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:9
-      ~response_text:("out " ^ fake_github_token ^ " done");
+      ~response_text:("out " ^ fake_github_token ^ " done") ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
@@ -198,7 +211,19 @@ let response_capture_writes_redacted () =
     Alcotest.(check bool) "raw github token is redacted" false
       (contains ~needle:fake_github_token content);
     Alcotest.(check bool) "turn_id recorded" true
-      (contains ~needle:"\"turn_id\":9" content))
+      (contains ~needle:"\"turn_id\":9" content);
+    Alcotest.(check bool) "missing trace_id is null" true
+      (contains ~needle:"\"trace_id\":null" content))
+
+let response_trace_id_emitted () =
+  with_flag "1" (fun () ->
+    let base = Filename.temp_dir "wirecap_resp_trace" "" in
+    let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-resp-xyz" in
+    Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:2
+      ~trace_id ~response_text:"ok" ();
+    let content = read_file (List.hd (find_jsonl base)) in
+    Alcotest.(check bool) "response trace_id string recorded" true
+      (contains ~needle:"\"trace_id\":\"trace-resp-xyz\"" content))
 
 let capture_prunes_old_files () =
   with_flag "1" (fun () ->
@@ -212,7 +237,7 @@ let capture_prunes_old_files () =
         let old_file = Filename.concat old_month "01.jsonl" in
         write_file old_file (String.make 1024 'x');
         Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:10
-          ~response_text:"bounded";
+          ~response_text:"bounded" ();
         Alcotest.(check bool) "old capture file pruned" false
           (Sys.file_exists old_file);
         Alcotest.(check int) "only current capture remains" 1
@@ -223,12 +248,12 @@ let capture_skips_when_current_file_cap_would_be_exceeded () =
     with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "512" (fun () ->
       let base = Filename.temp_dir "wirecap_cap" "" in
       Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:11
-        ~response_text:"small";
+        ~response_text:"small" ();
       let files = find_jsonl base in
       Alcotest.(check int) "small record written" 1 (List.length files);
       let before = read_file (List.hd files) in
       Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:12
-        ~response_text:(String.make 4096 'x');
+        ~response_text:(String.make 4096 'x') ();
       let after = read_file (List.hd files) in
       Alcotest.(check string)
         "oversized record skipped without mutating current day file"
@@ -255,7 +280,8 @@ let response_capture_matches_replayed_history_text () =
       ~masc_root:base
       ~keeper_name:"history_keeper"
       ~turn_id:5
-      ~response_text:history_text;
+      ~response_text:history_text
+      ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
@@ -328,6 +354,8 @@ let () =
             enabled_writes_redacted;
           Alcotest.test_case "write failure is best effort" `Quick
             request_capture_failure_is_best_effort;
+          Alcotest.test_case "trace_id is emitted when provided" `Quick
+            request_trace_id_emitted;
         ] );
       ( "capture_response",
         [
@@ -339,6 +367,8 @@ let () =
             capture_prunes_old_files;
           Alcotest.test_case "current file cap skips oversized record" `Quick
             capture_skips_when_current_file_cap_would_be_exceeded;
+          Alcotest.test_case "trace_id is emitted when provided" `Quick
+            response_trace_id_emitted;
           Alcotest.test_case "captured response matches replayed history text"
             `Quick response_capture_matches_replayed_history_text;
         ] );

@@ -127,7 +127,11 @@ let dispatch
                  tools are operator-only)"
                 name))
     | Mod_agent_timeline ->
-      Tool_agent_timeline.dispatch { Tool_agent_timeline.config; agent_name } ~name ~args
+      Tool_agent_timeline.dispatch
+        ~load_chat:(fun ~agent_name ->
+          Keeper_chat_timeline_source.lines_for
+            ~base_dir:config.base_path ~keeper_name:agent_name)
+        { Tool_agent_timeline.config; agent_name } ~name ~args
     | Mod_schedule ->
       Tool_schedule.dispatch { Tool_schedule.config; agent_name } ~name ~args
     | Mod_misc -> Tool_misc.dispatch { Tool_misc.config; agent_name } ~name ~args

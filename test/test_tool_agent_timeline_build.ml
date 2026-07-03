@@ -103,6 +103,18 @@ let append_chat dir ~user ~assistant =
   Lib.Keeper_chat_store.append_turn ~base_dir:dir ~keeper_name:"testkeeper"
     ~user_content:user ~user_attachments:[] ~assistant_content:assistant ()
 
+(* Build the timeline with the keeper-aware chat reader wired, the way the
+   production dispatch sites do. Exercises the tool -> keeper boundary
+   inversion end to end: [build_timeline] takes only neutral chat lines,
+   [Keeper_chat_timeline_source] supplies them from the chat store. *)
+let build_with_chat dir config ~agent_name =
+  Lib.Tool_agent_timeline.build_timeline
+    ~load_chat:(fun ~agent_name ->
+      Lib.Keeper_chat_timeline_source.lines_for ~base_dir:dir
+        ~keeper_name:agent_name)
+    config ~agent_name ~since_hours:24.0 ~limit:50 ~include_tasks:true
+    ~include_board:false ~include_tool_calls:true
+
 (* A chat turn persisted to .masc/keeper_chat/ must surface as timeline
    "chat" events — the gap task-1647 identified. One event per user /
    assistant line, in structural order (user before assistant) even though
@@ -110,7 +122,7 @@ let append_chat dir ~user ~assistant =
 let test_chat_turn_surfaces () =
   with_dir_config (fun dir config ->
       append_chat dir ~user:"ping" ~assistant:"pong";
-      let json = build config ~agent_name:"testkeeper" in
+      let json = build_with_chat dir config ~agent_name:"testkeeper" in
       check (list string) "user then assistant, structural order preserved"
         [ "user"; "assistant" ]
         (chat_field "role" json);
@@ -126,7 +138,7 @@ let test_chat_ordering_across_turns () =
   with_dir_config (fun dir config ->
       append_chat dir ~user:"Q1" ~assistant:"A1";
       append_chat dir ~user:"Q2" ~assistant:"A2";
-      let json = build config ~agent_name:"testkeeper" in
+      let json = build_with_chat dir config ~agent_name:"testkeeper" in
       check (list string) "turns stay in structural trace order"
         [ "Q1"; "A1"; "Q2"; "A2" ]
         (chat_field "content" json))
@@ -141,7 +153,7 @@ let test_chat_interleaves_with_autonomous () =
            ~payload:(`Assoc [ ("model_used", `String "test-model") ])
            ());
       append_chat dir ~user:"hi" ~assistant:"hello";
-      let json = build config ~agent_name:"testkeeper" in
+      let json = build_with_chat dir config ~agent_name:"testkeeper" in
       let types =
         events_list json |> List.map ev_type |> List.sort_uniq String.compare
       in
@@ -153,13 +165,13 @@ let test_chat_interleaves_with_autonomous () =
 (* A keeper with no chat store yields zero chat events and leaves the six
    existing sources unchanged — the new source is purely additive. *)
 let test_no_chat_no_regression () =
-  with_dir_config (fun _dir config ->
+  with_dir_config (fun dir config ->
       ignore
         (Activity_graph.emit config ~kind:"keeper.turn_completed"
            ~actor:(Activity_graph.entity ~kind:"agent" "keeper-testkeeper-agent")
            ~payload:(`Assoc [ ("model_used", `String "test-model") ])
            ());
-      let json = build config ~agent_name:"testkeeper" in
+      let json = build_with_chat dir config ~agent_name:"testkeeper" in
       check int "no chat store -> zero chat messages" 0
         (summary_int json "chat_messages");
       check int "turn_completed still surfaces" 1

@@ -440,60 +440,53 @@ let turn_completed_events (config : Workspace.config) ~agent_name ~limit :
          })
   |> take limit
 
-(* Collect keeper chat turns from the durable chat store
-   (.masc/keeper_chat/<keeper>.jsonl). That store is the sole record of
-   keeper<->operator conversation turns: the activity-event log the other
-   sources read carries autonomous turns (keeper.turn_completed) but no
-   chat, so before this source a keeper's chat time and actions were
-   absent from the timeline entirely (task-1647). The chat store is keyed
-   directly by the keeper handle, so unlike the activity sources — which
-   persist the full actor id and need [identity_matches] — no fan-out
-   over identity forms is required here.
+(* Neutral projection of one keeper chat line for the timeline. The chat
+   store (.masc/keeper_chat/<keeper>.jsonl) lives in the keeper subsystem,
+   and this tool module must not reference it (RFC-0194 §3 tool -> keeper
+   boundary). So a keeper-aware caller reads the store, drops tool rows and
+   rows without a timestamp, and passes the surviving user/assistant lines
+   in as [chat_line] values via [build_timeline]'s [load_chat]. This module
+   only maps that neutral data into timeline events. *)
+type chat_line = {
+  cl_role : string;  (** "user" | "assistant" *)
+  cl_content : string;
+  cl_ts : float;
+  cl_connector : string option;  (** dashboard | discord | slack | agent | ... *)
+  cl_conversation_id : string option;
+}
 
-   Granularity mirrors [message_events]: one event per user/assistant
-   line. Tool lines are skipped — tool activity is already surfaced by
-   [tool_call_events] from the activity log, and re-emitting the chat
-   store's tool rows would double-count. Rows without a timestamp (legacy
-   pre-ts lines) are skipped because they cannot be placed chronologically,
-   matching [message_events]'s unparsed-ts drop. Ordering within a turn
-   (user before assistant, both sharing one ts) is preserved by the
-   stable sort in [build_timeline]; no timestamp is fabricated. *)
-let chat_events (config : Workspace.config) ~agent_name ~limit :
-    timeline_event list =
-  let rec take n xs =
-    match (n, xs) with
-    | n, _ when n <= 0 -> []
-    | _, [] -> []
-    | n, x :: rest -> x :: take (n - 1) rest
-  in
-  let messages =
-    Keeper_chat_store.load ~base_dir:config.base_path ~keeper_name:agent_name
-  in
-  messages
-  |> List.filter_map (fun (m : Keeper_chat_store.chat_message) ->
-       match (m.role, m.ts) with
-       | Keeper_chat_store.Role.Tool, _ -> None
-       | _, None -> None
-       | role, Some ts ->
-           Some
-             {
-               ts;
-               ts_iso = Masc_domain.iso8601_of_unix_seconds ts;
-               event_type = "chat";
-               detail =
-                 `Assoc
-                   [
-                     ("role", `String (Keeper_chat_store.Role.to_label role));
-                     ("content", `String m.content);
-                     ("source", Json_util.string_opt_to_json m.source);
-                     ( "conversation_id",
-                       Json_util.string_opt_to_json m.conversation_id );
-                   ];
-             })
-  |> take limit
+(* Map keeper chat lines into timeline events. Granularity mirrors
+   [message_events]: one event per user/assistant line. That store is the
+   sole record of keeper<->operator conversation turns — the activity-event
+   log the other sources read carries autonomous turns but no chat, so
+   before this source a keeper's chat time and actions were absent from the
+   timeline entirely (task-1647). Ordering within a turn (user before
+   assistant, which share one ts) is preserved by the stable sort in
+   [build_timeline]; no timestamp is fabricated. *)
+let chat_events (lines : chat_line list) : timeline_event list =
+  List.map
+    (fun (l : chat_line) ->
+      {
+        ts = l.cl_ts;
+        ts_iso = Masc_domain.iso8601_of_unix_seconds l.cl_ts;
+        event_type = "chat";
+        detail =
+          `Assoc
+            [
+              ("role", `String l.cl_role);
+              ("content", `String l.cl_content);
+              ("source", Json_util.string_opt_to_json l.cl_connector);
+              ( "conversation_id",
+                Json_util.string_opt_to_json l.cl_conversation_id );
+            ];
+      })
+    lines
 
-(* Build the full timeline *)
-let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
+(* Build the full timeline. [load_chat] is the keeper-aware chat reader
+   injected by the caller (see [chat_line]); it defaults to producing no
+   chat events so this module never depends on the keeper subsystem. *)
+let build_timeline ?(load_chat = fun ~agent_name:_ -> ([] : chat_line list))
+    (config : Workspace.config) ~agent_name ~since_hours ~limit
     ~include_tasks ~include_board:_ ~include_tool_calls =
   let now = Time_compat.now () in
   let cutoff = now -. (since_hours *. Masc_time_constants.hour) in
@@ -515,7 +508,7 @@ let build_timeline (config : Workspace.config) ~agent_name ~since_hours ~limit
     let turn_evts =
       turn_completed_events config ~agent_name ~limit:200
     in
-    let chat_evts = chat_events config ~agent_name ~limit:200 in
+    let chat_evts = chat_events (load_chat ~agent_name) in
     agent_evts @ task_evts @ msg_evts @ tool_evts @ cdal_evts @ turn_evts
     @ chat_evts
   in
@@ -715,7 +708,7 @@ let schemas : Masc_domain.tool_schema list =
    [~data:json] first-class (drops the [Yojson.Safe.to_string]
    round-trip). *)
 
-let handle_agent_timeline ~tool_name ~start_time (ctx : context) args
+let handle_agent_timeline ?load_chat ~tool_name ~start_time (ctx : context) args
   : Tool_result.result
   =
   let agent_name = get_string args "agent_name" "" in
@@ -732,17 +725,21 @@ let handle_agent_timeline ~tool_name ~start_time (ctx : context) args
     let include_board = get_bool args "include_board" false in
     let include_tool_calls = get_bool args "include_tool_calls" true in
     let json =
-      build_timeline ctx.config ~agent_name ~since_hours ~limit ~include_tasks
-        ~include_board ~include_tool_calls
+      build_timeline ?load_chat ctx.config ~agent_name ~since_hours ~limit
+        ~include_tasks ~include_board ~include_tool_calls
     in
     Tool_result.make_ok ~tool_name ~start_time ~data:json ()
 
-(* Dispatch *)
-let dispatch (ctx : context) ~name ~args : Tool_result.result option =
+(* Dispatch. [load_chat] is threaded to the timeline handler so a
+   keeper-aware caller can supply chat events without this tool module
+   depending on the keeper subsystem. *)
+let dispatch ?load_chat (ctx : context) ~name ~args : Tool_result.result option =
   let start = Time_compat.now () in
   match name with
   | "masc_agent_timeline" ->
-      Some (handle_agent_timeline ~tool_name:name ~start_time:start ctx args)
+      Some
+        (handle_agent_timeline ?load_chat ~tool_name:name ~start_time:start ctx
+           args)
   | _ -> None
 
 (* ================================================================ *)

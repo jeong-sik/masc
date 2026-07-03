@@ -312,6 +312,9 @@ let execute_tool_eio
                      ~args:coerced_args
                  | Mod_agent_timeline ->
                    Tool_agent_timeline.dispatch
+                     ~load_chat:(fun ~agent_name ->
+                       Keeper_chat_timeline_source.lines_for
+                         ~base_dir:config.base_path ~keeper_name:agent_name)
                      { Tool_agent_timeline.config; agent_name }
                      ~name
                      ~args:coerced_args

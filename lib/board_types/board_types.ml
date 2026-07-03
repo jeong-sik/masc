@@ -285,6 +285,8 @@ module Limits = struct
   let max_posts = env_int "MASC_BOARD_MAX_POSTS" 10_000
   let max_comments_per_post = env_int "MASC_BOARD_MAX_COMMENTS_PER_POST" 1_000
   let max_content_length = env_int "MASC_BOARD_MAX_CONTENT_LENGTH" 4_000
+  let default_comment_page_limit = 50
+  let max_comment_page_limit = 100
   let default_ttl_hours = 0    (* 0 = permanent (no expiry) *)
   let automation_ttl_hours = env_int "MASC_BOARD_AUTOMATION_TTL_HOURS" 168
   let max_ttl_hours = env_int "MASC_BOARD_MAX_TTL_HOURS" 720

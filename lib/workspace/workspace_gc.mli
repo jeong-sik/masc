@@ -41,12 +41,18 @@ val cleanup_zombies :
 (** Run the full workspace garbage-collection pass:
     {ol
     {- {!cleanup_zombies} (default thresholds)}
-    {- archive backlog tasks older than [days] days that are not
-       already in a terminal state (default [days = 7], clamped to
-       at least 1)}}
+    {- archive backlog tasks in a terminal state ([Done]/[Cancelled]) older
+       than [days] days (default [days = 7], clamped to at least 1).
+       Non-terminal tasks — including [AwaitingVerification] obligations — are
+       never archived (RFC-0220: an obligation must stay claimable by a
+       verifier)}
+    {- self-heal: restore any non-terminal task a prior buggy pass stranded in
+       [tasks-archive.json] back into the live backlog}}
 
-    Stale tasks are appended to [tasks-archive.json] via
-    {!Workspace_task_id.append_archive_tasks} and the backlog is rewritten
-    with [version + 1].  Returns a multi-line summary string. *)
+    Archived tasks are appended to [tasks-archive.json] via
+    {!Workspace_task_id.append_archive_tasks}; restored tasks are removed from
+    it via {!Workspace_task_id.drop_archive_tasks}.  The backlog is rewritten
+    with [version + 1] when anything changes.  Returns a multi-line summary
+    string. *)
 val gc :
   Workspace_utils_backend_setup.config -> ?days:int -> unit -> string

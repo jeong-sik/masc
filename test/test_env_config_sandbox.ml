@@ -54,13 +54,13 @@ let sandbox_env_names =
   ; "MASC_KEEPER_SHELL_TIMEOUT_DEFAULT_SEC"
   ]
 
-(* String-typed env vars whose default is non-empty.  OCaml 5.4 stdlib
-   has no [Unix.unsetenv], so [Unix.putenv NAME ""] is the closest we
-   can do — but [Env_config_core.get_string ~default] returns the
-   literal "" rather than the default in that case.  Workaround: set
-   each string env to its default literal so [get_string] yields the
-   expected value.  Drift between this table and the .ml will surface
-   in the cross-module consistency test below. *)
+(* String-typed env vars whose default is non-empty. OCaml 5.5 adds
+   [Unix.unsetenv], but the supported 5.4 floor has no equivalent, so
+   [Unix.putenv NAME ""] is the closest we can do — but
+   [Env_config_core.get_string ~default] returns the literal "" rather than the
+   default in that case. Workaround: set each string env to its default literal
+   so [get_string] yields the expected value. Drift between this table and the
+   .ml will surface in the cross-module consistency test below. *)
 let string_env_defaults =
   [ "MASC_KEEPER_SANDBOX_MEMORY", "2g"
   ; "MASC_KEEPER_SANDBOX_TMPFS_SIZE", "256m"

@@ -288,9 +288,9 @@ module KCARO = Keeper_compact_audit_retention_outcome
 
 let env_var = "MASC_COMPACTION_AUDIT_RETENTION_DAYS"
 
-(* OCaml's Unix module lacks portable unsetenv in older stdlib; we test
-   the "unset" path by skipping when the env var leaks in from CI and
-   otherwise pre-asserting None. *)
+(* OCaml 5.5 adds Unix.unsetenv, but the supported 5.4 floor lacks it. We test
+   the "unset" path by skipping when the env var leaks in from CI and otherwise
+   pre-asserting None. *)
 let with_env_unset f =
   match Sys.getenv_opt env_var with
   | Some _ ->

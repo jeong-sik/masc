@@ -108,6 +108,24 @@ type live_turn = {
   started_at : float;
   last_progress_at : float;
   last_progress_kind : string option;
+  selected_model : string option;
+  active_tool_count : int;
+}
+
+type last_skip = {
+  ls_ts : float;
+  ls_reasons : string list;
+}
+
+type livelock = {
+  ll_turn_id : int;
+  ll_attempts : int;
+  ll_first_started_at : float;
+}
+
+type board_cursor = {
+  bc_ts : float;
+  bc_post_id : string option;
 }
 
 type fsm_guard_violation_bucket = {
@@ -133,6 +151,10 @@ type snapshot = {
   is_live : bool;
   live_turn : live_turn option;
   last_outcome : last_outcome option;
+  last_skip : last_skip option;
+  livelock : livelock option;
+  board_cursor : board_cursor;
+  board_wakeups : int;
   fiber_stop_flag : bool;
   fiber_wakeup_flag : bool;
   consecutive_noop_count : int;
@@ -506,6 +528,8 @@ let observe
              started_at = obs.started_at;
              last_progress_at = obs.last_progress_at;
              last_progress_kind = obs.last_progress_kind;
+             selected_model = obs.selected_model;
+             active_tool_count = obs.active_tool_count;
            }
        | None -> None);
     last_outcome =
@@ -519,6 +543,23 @@ let observe
            selected_model = lc.ct_selected_model;
          }
        | None -> None);
+    last_skip =
+      (match entry.last_skip_observation with
+       | Some (ts, reasons) -> Some { ls_ts = ts; ls_reasons = reasons }
+       | None -> None);
+    livelock =
+      (match Atomic.get entry.livelock_state with
+       | Some ll ->
+         Some
+           {
+             ll_turn_id = ll.turn_id;
+             ll_attempts = ll.attempts;
+             ll_first_started_at = ll.first_started_at;
+           }
+       | None -> None);
+    board_cursor =
+      { bc_ts = entry.board_cursor_ts; bc_post_id = entry.board_cursor_post_id };
+    board_wakeups = Keeper_registry.StringMap.cardinal entry.board_wakeups;
     fiber_stop_flag = Atomic.get entry.fiber_stop;
     fiber_wakeup_flag = Atomic.get entry.fiber_wakeup;
     consecutive_noop_count =
@@ -703,6 +744,9 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
           "last_progress_at", `Float live.last_progress_at;
           "last_progress_kind",
             Json_util.string_opt_to_json live.last_progress_kind;
+          "selected_model",
+            Json_util.string_opt_to_json live.selected_model;
+          "active_tool_count", `Int live.active_tool_count;
         ]
       | None -> `Null);
     "last_outcome", (match s.last_outcome with
@@ -717,6 +761,24 @@ let snapshot_to_json (s : snapshot) : Yojson.Safe.t =
             Json_util.string_opt_to_json lo.selected_model;
         ]
       | None -> `Null);
+    "last_skip", (match s.last_skip with
+      | Some ls -> `Assoc [
+          "ts", `Float ls.ls_ts;
+          "reasons", `List (List.map (fun r -> `String r) ls.ls_reasons);
+        ]
+      | None -> `Null);
+    "livelock", (match s.livelock with
+      | Some ll -> `Assoc [
+          "turn_id", `Int ll.ll_turn_id;
+          "attempts", `Int ll.ll_attempts;
+          "first_started_at", `Float ll.ll_first_started_at;
+        ]
+      | None -> `Null);
+    "board_cursor", `Assoc [
+      "ts", `Float s.board_cursor.bc_ts;
+      "post_id", Json_util.string_opt_to_json s.board_cursor.bc_post_id;
+    ];
+    "board_wakeups", `Int s.board_wakeups;
     "fiber_stop_flag", `Bool s.fiber_stop_flag;
     "fiber_wakeup_flag", `Bool s.fiber_wakeup_flag;
     "consecutive_noop_count", `Int s.consecutive_noop_count;

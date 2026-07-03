@@ -315,6 +315,7 @@ let run_turn
       ~generation
       ()
   in
+  let requested_max_tokens = max_tokens in
   let meta = ctx.meta in
   let temperature = ctx.temperature in
   let max_output_ceiling =
@@ -577,6 +578,13 @@ let run_turn
               let keeper_oas_guardrails =
                 keeper_oas_visibility_neutral_guardrails ?guardrails ()
               in
+              let max_tokens_for_runtime ~runtime_id =
+                Keeper_run_context.resolve_max_tokens_for_runtime
+                  ~keeper_name:meta.name
+                  ~runtime_id
+                  ?max_tokens:requested_max_tokens
+                  ()
+              in
               let call_run_named ?raw_trace ~initial_messages () =
                 (* The keeper turn deadline must own the OAS Agent.run switch.
                    Stream/body idle budgets catch liveness gaps; this hard
@@ -616,6 +624,7 @@ let run_turn
                     ~body_timeout_s:timeout_s
                     ~temperature
                     ~max_tokens
+                    ~max_tokens_for_runtime
                     ~accept:
                       Keeper_tool_response.response_has_text_or_tool_progress
                     ~guardrails:keeper_oas_guardrails
@@ -670,15 +679,6 @@ let run_turn
           Agent.run. Post-run episode creation requires an explicit
           flush_incremental call since AfterTurn already fired. *)
                  let text = Agent_sdk.Types.text_of_content result.response.content in
-                 (* Phase O observability (iter-2): pair this turn's response
-                    with the request captured pre-run under the same turn_id, so
-                    the feedback loop (turn N output -> turn N+1 replayed history)
-                    is directly analyzable. No-op unless MASC_KEEPER_WIRE_CAPTURE. *)
-                 Keeper_wire_capture.capture_response
-                   ~masc_root:(Workspace.masc_root_dir config)
-                   ~keeper_name:meta.name
-                   ~turn_id:manifest_keeper_turn_id
-                   ~response_text:text;
                  (* RFC-0132 PR-2: receipt model surface = external boundary; redact via SSOT. *)
                  let model =
                    Boundary_redaction.to_string
@@ -762,6 +762,21 @@ let run_turn
                           ~pre_dispatch_compaction_before_tokens:ctx.pre_dispatch_compaction_before_tokens
                           ~pre_dispatch_compaction_after_tokens:ctx.pre_dispatch_compaction_after_tokens
                           ~raw_response_text:response_text
+                          ~capture_replay_response:
+                            (fun ~response_text ->
+                              (* Phase O observability: capture the exact
+                                 assistant text persisted for next-turn replay,
+                                 after response finalization has applied
+                                 suppression and internal-markup stripping. The
+                                 capture is best-effort and gated by
+                                 MASC_KEEPER_WIRE_CAPTURE. *)
+                              Keeper_wire_capture.capture_response
+                                ~masc_root:(Workspace.masc_root_dir config)
+                                ~keeper_name:meta.name
+                                ~turn_id:manifest_keeper_turn_id
+                                ~trace_id:meta.runtime.trace_id
+                                ~response_text
+                                ())
                           ())))
                in
        let receipt_result =

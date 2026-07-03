@@ -38,6 +38,7 @@ let () =
   Unix.putenv "MASC_BASE_PATH" dir
 
 module AR = Masc.Task.Anti_rationalization
+module CR = Masc.Task.Completion_review
 module Metrics = Masc.Otel_metric_store
 
 let metric = Metrics.metric_anti_rationalization_excuse_pattern
@@ -126,6 +127,88 @@ let test_build_prompt_includes_verification_contract () =
     true
     (contains "Reject if the notes do not provide concrete evidence")
 
+(* task-1664: the done-path anti-rationalization prompt must surface the
+   contract's required_evidence / verify_gate_evidence so a task demanding a
+   concrete artifact (e.g. "PR link") is judged against that requirement rather
+   than approved on narrative notes alone. *)
+let test_build_prompt_includes_required_evidence () =
+  let req =
+    make_request ~notes:"Implemented feature X and ran the suite."
+  in
+  let prompt =
+    AR.build_prompt
+      ~required_evidence:[ "PR link"; "CI run URL" ]
+      ~verify_gate_evidence:[ "coverage report" ]
+      req
+  in
+  let contains needle = String_util.contains_substring prompt needle in
+  Alcotest.(check bool)
+    "required-evidence section appears in prompt"
+    true
+    (contains "<required_evidence>");
+  Alcotest.(check bool)
+    "required_evidence item appears verbatim"
+    true
+    (contains "PR link");
+  Alcotest.(check bool)
+    "second required_evidence item appears verbatim"
+    true
+    (contains "CI run URL");
+  Alcotest.(check bool)
+    "verify_gate_evidence item appears in the same section"
+    true
+    (contains "coverage report");
+  Alcotest.(check bool)
+    "prompt instructs per-item judgement of each evidence artifact"
+    true
+    (contains "Judge every item independently");
+  Alcotest.(check bool)
+    "prompt instructs rejection of missing evidence"
+    true
+    (contains "Reject if any item is missing")
+
+(* Empty contract → no required-evidence section leaks into the prompt. *)
+let test_build_prompt_no_required_evidence_section_without_input () =
+  let req = make_request ~notes:"Implemented feature X end-to-end." in
+  let prompt = AR.build_prompt req in
+  Alcotest.(check bool)
+    "no <required_evidence> tag when no evidence supplied"
+    false
+    (String_util.contains_substring prompt "<required_evidence>")
+
+(* task-1664: the verification request carries the required/submitted split as
+   separate typed fields; this pins the serialization contract (test c). *)
+let test_verification_evidence_roundtrip () =
+  let evidence : CR.verification_evidence =
+    { required_artifacts = [ "PR link"; "CI run URL" ]
+    ; submitted_evidence = [ "https://example/pull/1"; "coverage 92%" ]
+    }
+  in
+  let json = CR.verification_evidence_to_yojson evidence in
+  (* The two roles must be distinct object keys, not one merged list. *)
+  (match json with
+   | `Assoc kvs ->
+     Alcotest.(check bool)
+       "required_artifacts is a distinct field"
+       true
+       (List.mem_assoc "required_artifacts" kvs);
+     Alcotest.(check bool)
+       "submitted_evidence is a distinct field"
+       true
+       (List.mem_assoc "submitted_evidence" kvs)
+   | _ -> Alcotest.fail "verification_evidence must serialize to a JSON object");
+  match CR.verification_evidence_of_yojson json with
+  | Error e -> Alcotest.fail ("roundtrip decode failed: " ^ e)
+  | Ok decoded ->
+    Alcotest.(check (list string))
+      "required_artifacts survives roundtrip"
+      evidence.required_artifacts
+      decoded.required_artifacts;
+    Alcotest.(check (list string))
+      "submitted_evidence survives roundtrip"
+      evidence.submitted_evidence
+      decoded.submitted_evidence
+
 let test_check_contract_rejects_embedded_substrings () =
   let unmet =
     AR.check_contract
@@ -212,6 +295,15 @@ let () =
             `Quick test_build_prompt_no_advisory_section_without_input;
           Alcotest.test_case "verification contract included"
             `Quick test_build_prompt_includes_verification_contract;
+          Alcotest.test_case "required evidence included when supplied"
+            `Quick test_build_prompt_includes_required_evidence;
+          Alcotest.test_case "no required evidence section without input"
+            `Quick test_build_prompt_no_required_evidence_section_without_input;
+        ] );
+      ( "verification_evidence",
+        [
+          Alcotest.test_case "typed split serialization roundtrip"
+            `Quick test_verification_evidence_roundtrip;
         ] );
       ( "contract_check",
         [

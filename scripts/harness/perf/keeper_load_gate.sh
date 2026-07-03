@@ -100,6 +100,7 @@ SERVER_LOG="$RUN_DIR/server.log"
 MOCK_LOG="$RUN_DIR/mock_requests.jsonl"
 MOCK_ERR="$RUN_DIR/mock_stderr.log"
 INJECT_LOG="$RUN_DIR/board_inject.log"
+CURL_ERROR_FILE="$RUN_DIR/curl_errors.log"
 BASE_PATH="$(harness_mktemp_dir "masc-keeperload-base")"
 echo "level_hogs,probes,p50_ms,p95_ms,max_ms,timeouts,turns_during" > "$CSV_FILE"
 
@@ -175,8 +176,12 @@ kill_hogs() { if [[ ${#HOG_PIDS[@]} -gt 0 ]]; then kill "${HOG_PIDS[@]}" 2>/dev/
 
 probe_once() {
   local url="$1" t
-  t="$(curl -sS -o /dev/null -w '%{time_starttransfer}' --max-time "$PROBE_MAX_SEC" "$url" 2>/dev/null)" || t="$PROBE_MAX_SEC"
-  [[ "$t" =~ ^[0-9]+([.][0-9]+)?$ ]] || t="$PROBE_MAX_SEC"
+  if ! t="$(curl -sS -o /dev/null -w '%{time_starttransfer}' --max-time "$PROBE_MAX_SEC" "$url" 2>>"$CURL_ERROR_FILE")"; then
+    printf '%s\n' "$PROBE_MAX_SEC"
+    return
+  fi
+  awk -v v="$t" 'BEGIN { exit !(v ~ /^[0-9]+([.][0-9]+)?$/) }' \
+    || t="$PROBE_MAX_SEC"
   printf '%s\n' "$t"
 }
 

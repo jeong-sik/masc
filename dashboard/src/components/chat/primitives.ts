@@ -7,6 +7,7 @@ import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'pr
 import { ringFocusClasses } from '../common/ring'
 import { collectAttachments } from './attachments'
 import { linkifyHtmlReferences } from './chat-linkify'
+import { UNREAD_DIVIDER_LABEL, unreadDividerAnchorKey } from './unread-divider'
 import { showToast } from '../common/toast'
 import { copyToClipboard } from '../common/copyable-code'
 import { ExternalLink, Mic, Square } from 'lucide-preact'
@@ -2945,6 +2946,24 @@ function buildChatRenderUnits(
   return units
 }
 
+function unitTimestamp(unit: ChatRenderUnit): string | null {
+  const ts = unit.kind === 'entry'
+    ? unit.entry.timestamp
+    : unit.entries[0]?.timestamp ?? (unit.kind === 'turnBundle' ? unit.entry.timestamp : null)
+  return ts ?? null
+}
+
+function unitTimestampMs(unit: ChatRenderUnit): number | null {
+  const ts = unitTimestamp(unit)
+  if (!ts) return null
+  const ms = Date.parse(ts)
+  return Number.isFinite(ms) ? ms : null
+}
+
+function unitKey(unit: ChatRenderUnit): string {
+  return unit.kind === 'entry' ? unit.entry.id : unit.id
+}
+
 function renderChatTranscriptBody(opts: {
   entries: KeeperConversationEntry[]
   showDayDividers: boolean
@@ -2954,10 +2973,17 @@ function renderChatTranscriptBody(opts: {
   showSourceBadge: boolean
   toolOutputsCoveredSinceMs: number | null
   toolOutputsCoveredThroughMs: number | null
+  // Since-last-seen cursor (unix seconds) for the unread divider; null on every
+  // non-keeper chat surface so those transcripts render unchanged.
+  unreadAfterTs: number | null
   action?: ChatTranscriptAction
 }): VNode[] {
-  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, action } = opts
+  const { entries, showDayDividers, groupToolCalls, showMetadata, variant, showSourceBadge, toolOutputsCoveredSinceMs, toolOutputsCoveredThroughMs, unreadAfterTs, action } = opts
   const units = buildChatRenderUnits(entries, groupToolCalls)
+  const unreadAnchorKey = unreadDividerAnchorKey(
+    units.map(unit => ({ key: unitKey(unit), tsMs: unitTimestampMs(unit) })),
+    unreadAfterTs,
+  )
   const out: VNode[] = []
   // Track the last NON-NULL calendar day rather than only the immediately
   // previous entry, so a null-timestamp entry (live placeholder, checkpoint) in
@@ -2965,16 +2991,18 @@ function renderChatTranscriptBody(opts: {
   // second divider for a day already shown above.
   let lastDayKey: string | null = null
   for (const unit of units) {
-    const ts =
-      unit.kind === 'entry'
-        ? unit.entry.timestamp
-        : unit.entries[0]?.timestamp ?? (unit.kind === 'turnBundle' ? unit.entry.timestamp : null)
+    const ts = unitTimestamp(unit)
     if (showDayDividers) {
       const dk = dayKey(ts)
       if (dk && dk !== lastDayKey) {
         out.push(html`<div class="kw-daydiv" key=${`day:${dk}`}>${dayDividerLabel(ts)}</div>`)
         lastDayKey = dk
       }
+    }
+    // Placed after any day divider so the unread line sits closest to the first
+    // unread message.
+    if (unreadAnchorKey !== null && unitKey(unit) === unreadAnchorKey) {
+      out.push(html`<div class="kw-daydiv kw-unreaddiv" key="unread-divider">${UNREAD_DIVIDER_LABEL}</div>`)
     }
     if (unit.kind === 'toolGroup') {
       out.push(html`<${ToolTraceCard} key=${unit.id} tools=${unit.entries} />`)
@@ -3027,6 +3055,8 @@ export function ChatTranscript({
   showSourceBadge = false,
   toolOutputsCoveredSinceMs = null,
   toolOutputsCoveredThroughMs = null,
+  unreadAfterTs = null,
+  onSeenBottom,
   action,
 }: {
   entries: KeeperConversationEntry[]
@@ -3043,11 +3073,22 @@ export function ChatTranscript({
   showSourceBadge?: boolean
   toolOutputsCoveredSinceMs?: number | null
   toolOutputsCoveredThroughMs?: number | null
+  // Since-last-seen cursor (unix seconds) driving the unread divider. Null on
+  // non-keeper surfaces -> no divider.
+  unreadAfterTs?: number | null
+  // Called when the operator has demonstrably caught up (scrolled/pinned to the
+  // bottom, or a new row arrived while pinned, or the tab regained visibility
+  // while pinned). The keeper panel uses it to advance the last-seen cursor.
+  onSeenBottom?: () => void
   action?: ChatTranscriptAction
 }) {
   const scrollerRef = useRef<HTMLDivElement | null>(null)
   const pinnedRef = useRef(true)
   const [unread, setUnread] = useState(false)
+  // Latest onSeenBottom captured in a ref so the scroll/effect callbacks always
+  // fire the current closure without listing it as an effect dependency.
+  const onSeenBottomRef = useRef(onSeenBottom)
+  onSeenBottomRef.current = onSeenBottom
   const lastSignature = useMemo(
     () => entries.map(entry => `${entry.id}:${entry.text.length}:${entry.delivery}:${entry.streamState ?? ''}:${traceStepsSignature(entry)}`).join('|'),
     [entries],
@@ -3074,6 +3115,7 @@ export function ChatTranscript({
     el.scrollTop = el.scrollHeight
     pinnedRef.current = true
     setUnread(false)
+    onSeenBottomRef.current?.()
   }
 
   const handleScroll = () => {
@@ -3082,7 +3124,10 @@ export function ChatTranscript({
     const distance = el.scrollHeight - el.scrollTop - el.clientHeight
     const pinned = distance <= STICK_TO_BOTTOM_THRESHOLD_PX
     pinnedRef.current = pinned
-    if (pinned) setUnread(false)
+    if (pinned) {
+      setUnread(false)
+      onSeenBottomRef.current?.()
+    }
   }
 
   useLayoutEffect(() => {
@@ -3092,10 +3137,26 @@ export function ChatTranscript({
       const snap = () => { el.scrollTop = el.scrollHeight }
       snap()
       requestAnimationFrame(snap)
+      // Bottom-pinned with new content arriving means the operator is watching
+      // it live — advance the cursor so the divider/card do not resurrect it.
+      onSeenBottomRef.current?.()
     } else {
       setUnread(true)
     }
   }, [lastSignature, toolOutputSignature])
+
+  // Advance the cursor when the tab regains visibility while pinned to bottom:
+  // background rows that streamed in are treated as seen only once the operator
+  // could actually see them. Pattern mirrors lib/auto-refresh.ts visibilitychange.
+  useEffect(() => {
+    const onVisible = () => {
+      if (typeof document.visibilityState === 'string' && document.visibilityState !== 'visible') return
+      if (!pinnedRef.current) return
+      onSeenBottomRef.current?.()
+    }
+    document.addEventListener('visibilitychange', onVisible)
+    return () => { document.removeEventListener('visibilitychange', onVisible) }
+  }, [])
 
   const isPrimary = size === 'primary'
   const heightClass = isPrimary
@@ -3133,6 +3194,7 @@ export function ChatTranscript({
               showSourceBadge,
               toolOutputsCoveredSinceMs,
               toolOutputsCoveredThroughMs,
+              unreadAfterTs,
               action,
             })}
       </div>

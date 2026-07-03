@@ -743,6 +743,7 @@ let update_post_with_outcome
       ~content
       ?title
       ?body
+      ?new_author
       ()
   : (post, board_error) Result.t
   =
@@ -769,7 +770,15 @@ let update_post_with_outcome
                     editor_str
                     key
                     owner))
-          else (
+          else
+            let next_author_result =
+              match new_author with
+              | None -> Ok existing.author
+              | Some value -> Agent_id.of_string value
+            in
+            (match next_author_result with
+             | Error e -> Error e
+             | Ok next_author ->
             (* Normalize identically to create, seeded with the existing post's
                meta so a [STATE] block in the edited body merges into [meta_json]
                instead of being dropped. [post_kind] is passed through and the
@@ -805,7 +814,8 @@ let update_post_with_outcome
                 let now = Time_compat.now () in
                 let updated =
                   { existing with
-                    title = normalized_title
+                    author = next_author
+                  ; title = normalized_title
                   ; body = normalized_body
                   ; content = normalized_body
                   ; meta_json = normalized_meta

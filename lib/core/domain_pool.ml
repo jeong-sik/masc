@@ -4,7 +4,7 @@ type t = {
 }
 
 let recommended_domain_count () =
-  max 2 (Domain.recommended_domain_count () - 1)
+  max 1 (Domain.recommended_domain_count () - 2)
 
 let weight_io = 0.05
 let weight_cpu = 1.0

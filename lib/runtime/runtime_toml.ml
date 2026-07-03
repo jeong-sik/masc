@@ -860,6 +860,9 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                 validation. It is still recognized here so a malformed scalar
                 does not get reported as an unknown key first. *)
              section, errs
+           | "lanes" ->
+             (* Parsed by [parse_lanes] after the runtime section is shaped. *)
+             section, errs
            | _ when is_toml_table value ->
              (* [runtime.<profile>] tables are reserved for runtime profiles and
                 intentionally ignored by this parser layer. *)
@@ -871,8 +874,8 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
                    ("runtime." ^ key)
                    (Printf.sprintf
                       "unknown [runtime] key %S; expected default, librarian, \
-                       cross_verifier, media_failover, [runtime.assignments], or \
-                       a table-valued [runtime.<profile>]"
+                       cross_verifier, media_failover, [runtime.lanes], \
+                       [runtime.assignments], or a table-valued [runtime.<profile>]"
                       key) )
         )
         (empty_runtime_section, [])
@@ -882,12 +885,70 @@ let parse_runtime_section (toml : Otoml.t) : (runtime_section, parse_error list)
   | Some _ -> Error (error "runtime" "[runtime] must be a TOML table")
 ;;
 
+(* [\[runtime.lanes.<id>\]] — ordered failover candidate lists. Each lane is a
+   table with [strategy] (only "ordered" supported) and [candidates] (array of
+   runtime ids). Candidate ids are resolved against materialized runtimes at
+   load time, not here, so the parser returns declarations only. *)
+let parse_lane ~(id : string) (tbl : Otoml.t)
+  : (Runtime_schema.lane_decl, parse_error list) result
+  =
+  let path = Printf.sprintf "runtime.lanes.%s" id in
+  let strategy_result =
+    match Otoml.find_opt tbl Otoml.get_string [ "strategy" ] with
+    | None | Some "ordered" -> Ok Runtime_schema.Ordered
+    | Some other ->
+      Error
+        (error
+           (path ^ ".strategy")
+           (Printf.sprintf "unsupported lane strategy %S" other))
+  in
+  let candidate_ids_result =
+    match Otoml.find_opt tbl Fun.id [ "candidates" ] with
+    | None -> Error (error (path ^ ".candidates") "lane candidates is required")
+    | Some value ->
+      (try Ok (Otoml.get_array Otoml.get_string value) with
+       | Otoml.Type_error msg ->
+         Error
+           (error
+              (path ^ ".candidates")
+              (Printf.sprintf
+                 "lane candidates must be an array of string runtime ids; got %s"
+                 msg)))
+  in
+  match strategy_result, candidate_ids_result with
+  | Error e, _ | _, Error e -> Error e
+  | Ok strategy, Ok candidate_ids ->
+    if candidate_ids = []
+    then Error (error path "lane must have at least one candidate")
+    else Ok { Runtime_schema.id; strategy; candidate_ids }
+;;
+
+let parse_lanes (toml : Otoml.t) : (Runtime_schema.lane_decl list, parse_error list) result =
+  match Otoml.find_opt toml Fun.id [ "runtime"; "lanes" ] with
+  | None -> Ok []
+  | Some (Otoml.TomlTable entries | Otoml.TomlInlineTable entries) ->
+    partition_results
+      (List.map
+         (fun (id, value) ->
+            match value with
+            | Otoml.TomlTable _ | Otoml.TomlInlineTable _ -> parse_lane ~id value
+            | _ ->
+              Error
+                (error
+                   (Printf.sprintf "runtime.lanes.%s" id)
+                   "lane must be a table"))
+         entries)
+  | Some _ ->
+    Error (error "runtime.lanes" "[runtime.lanes] must be a table of lane tables")
+;;
+
 let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) result =
   let providers_result = parse_providers toml in
   let models_result = parse_models toml in
   let runtime_section_result = parse_runtime_section toml in
   let assignments_result = parse_keeper_assignments toml in
   let bindings_result = parse_bindings toml in
+  let lanes_result = parse_lanes toml in
   let errs = function Ok _ -> [] | Error errs -> errs in
   let all_errors =
     errs providers_result
@@ -895,6 +956,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     @ errs runtime_section_result
     @ errs assignments_result
     @ errs bindings_result
+    @ errs lanes_result
   in
   if all_errors <> []
   then Error all_errors
@@ -912,6 +974,9 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
     let runtime_section =
       extract_after_all_errors_guard ~label:"runtime" runtime_section_result
     in
+    let lane_decls =
+      extract_after_all_errors_guard ~label:"lanes" lanes_result
+    in
     let pause_threshold = parse_pause_threshold toml in
     Ok
       { Runtime_schema.providers
@@ -924,6 +989,7 @@ let parse_toml (toml : Otoml.t) : (Runtime_schema.config, parse_error list) resu
       ; keeper_assignments
       ; media_failover = runtime_section.media_failover
       ; pause_threshold
+      ; lane_decls
       })
 ;;
 

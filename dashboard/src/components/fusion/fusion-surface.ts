@@ -16,6 +16,7 @@ import { RichContent } from '../common/rich-content'
 import { AgentAvatar } from '../overview/agent-avatar'
 import { FusionRunsPanel } from './fusion-runs-panel'
 import { asRecord, asString, asStringArray } from '../common/normalize'
+import { StatusChip } from '../common/status-chip'
 import { fusionDecisionSpec, type FusionDecisionSpec } from '../v2/fusion-constants'
 import {
   firstString,
@@ -919,6 +920,10 @@ export function FusionSurface() {
           <p class="surf-sub ov-sub">
             masc_fusion 패널 심의 · 심판 종합 · 보드 sink 증거.
           </p>
+          <div class="mt-2 flex flex-wrap items-center gap-2 text-2xs text-[var(--color-fg-muted)]" data-testid="fusion-reality-notice">
+            <${StatusChip} tone="warn" uppercase=${false}>부분 지원<//>
+            <span>보드 sink와 registry 관측을 표시합니다. live JoJ는 judges 패널 구성이 없으면 fail-closed 상태로 남습니다.</span>
+          </div>
         </div>
         <button
           type="button"

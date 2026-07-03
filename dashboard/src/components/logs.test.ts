@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs'
+import { resolve } from 'node:path'
 import { h } from 'preact'
 import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/preact'
 import { afterEach, describe, expect, it, vi } from 'vitest'
@@ -625,5 +627,16 @@ describe('LogViewer kind column', () => {
     expect(kindCell).not.toBeNull()
     expect(kindCell!.getAttribute('data-kind')).toBe('tool')
     expect(kindCell!.textContent).toBe('TOOL')
+  })
+})
+
+describe('logs vendored stylesheet', () => {
+  it('vendors the phone stacked-card layout for the log stream (@640px)', () => {
+    // Rows carry both `v2-logs-*` and the vendored `lg-*` classes, so the
+    // `lg-*`-scoped media block reshapes the real stream, not a dead selector.
+    const css = readFileSync(resolve(__dirname, '../styles/keeper-v2/logs.css'), 'utf8')
+    expect(css).toContain('@media (max-width: 640px)')
+    expect(css).toContain('grid-template-areas')
+    expect(css).toContain('.lg-colhd { display: none; }')
   })
 })

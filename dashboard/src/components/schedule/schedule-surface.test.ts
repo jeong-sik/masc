@@ -111,6 +111,10 @@ describe('ScheduleSurface', () => {
 
     expect(mocks.loadTools).toHaveBeenCalledTimes(1)
     expect(container.querySelector('[data-testid="schedule-surface"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
+      .toContain('관측 전용')
+    expect(container.querySelector('[data-testid="schedule-reality-notice"]')?.textContent)
+      .toContain('keeper turn을 자동 구동하지 않습니다')
     expect(container.textContent).toContain('예약 자동화')
     expect(container.textContent).toContain('예약 자동화 projection 없음')
   })

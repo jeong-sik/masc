@@ -146,6 +146,22 @@ type pause_threshold =
 
 val pause_threshold_default : pause_threshold
 
+(** {1 Lanes}
+
+    Ordered failover candidate lists declared in [runtime.lanes.<id>].
+    Declarations carry opaque runtime ids; [Runtime] resolves them to
+    materialized runtimes at load time. *)
+
+type lane_strategy = Ordered
+[@@deriving show, eq]
+
+type lane_decl =
+  { id : string
+  ; strategy : lane_strategy
+  ; candidate_ids : string list
+  }
+[@@deriving show, eq]
+
 (** {1 Top-level config} *)
 
 type config =
@@ -191,6 +207,10 @@ type config =
   ; pause_threshold : pause_threshold
     (** [\[pause\]] — typed SSOT for keeper pause / regime threshold knobs.
         Missing or wrong-typed values fall back to [pause_threshold_default]. *)
+  ; lane_decls : lane_decl list
+    (** [\[runtime.lanes.<id>\]] — ordered failover candidate lists.
+        Declarations are resolved against materialized runtimes at load time;
+        an unknown candidate id is rejected like [\[runtime\].default]. *)
   }
 [@@deriving show, eq]
 

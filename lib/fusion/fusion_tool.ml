@@ -22,7 +22,7 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
      orchestrator-level Cancelled(handle fork match)
      만 막았고 이 내부 append window는 못 막았다. Denied/Sink_failed/aborted 종료 분기가 모두
      이 함수를 경유하므로 같은 누수의 형제 경로다. *)
-  Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id
+  Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
     ~failure:content ~failure_code ~ok:false ();
   (try
      Keeper_chat_store.append_assistant_message ~base_dir ~keeper_name:keeper ~content ();
@@ -42,7 +42,7 @@ let append_chat_failure ~base_dir ~keeper ~run_id ~failure_code content =
      broadcast/wake도 suspending I/O다. append가 Cancelled를 재전파하면 여기 도달하지 못하나
      (generic append 실패는 warn 후 계속 진행해 도달한다), registry는 위에서 이미 갱신됐으므로
      어느 경우든 가시성은 보존된다. *)
-  Fusion_sink.broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
+  Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
   Fusion_sink.wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
     ~resolved_answer:content ~board_post_id:""
 
@@ -91,12 +91,12 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
       (* RFC-0266 §7: 진행중 가시성을 위해 fork 직전 run을 Running으로 등록한다
          (sink/실패 경로가 Completed로 갱신). 등록은 부수효과 없는 in-memory 기록일
          뿐, 키퍼를 깨우지 않는다(wake는 별개). *)
-      Fusion_run_registry.register_running Fusion_run_registry.global ~run_id ~keeper
+      Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
         ~preset ~started_at:now_unix;
       (* RFC-0266 §7 Phase 4: push the new [Running] card to the dashboard panel
          (no polling). wake-free, broadcast-failure-safe; see
          Fusion_sink.broadcast_run_status. *)
-      Fusion_sink.broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
+      Fusion_sink.broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
       (* out-of-band: fiber fork → 키퍼 턴은 즉시 진행, 결과는 sink가 chat lane에.
          배경 fiber 실패/거부/싱크 실패는 동일한 chat lane에 기록해 started-but-failed
          상태가 남지 않도록 한다. 호출자는 이 fiber가 키퍼 턴보다 오래 살아도록 root
@@ -126,7 +126,7 @@ let handle ~sw ~net ~base_dir ~keeper ~now_unix ~run_id ~policy ~args : string =
              취소/셧다운 캐스케이드를 deadlock시킬 위험이 있으므로 이 경로에선 생략한다 —
              registry가 정확해 다음 HTTP fetch / tab-refresh가 패널을 self-heal한다.
              그 뒤 구조적 취소는 흡수하지 않고 재전파한다 (Eio 규약). *)
-          Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id
+          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
             ~failure:"cancelled: structural cancellation (shutdown or sibling switch failure)"
             ~failure_code:"cancelled" ~ok:false ();
           raise exn

@@ -35,4 +35,9 @@ val to_json : event -> Yojson.Safe.t
 module For_testing : sig
   val reset : unit -> unit
   (** Clear the in-memory log. Only for test isolation. *)
+
+  val capacity : int
+  (** Maximum number of events retained. Equals the internal ring size;
+      exposed so boundary tests reference the single capacity constant
+      instead of duplicating the literal. *)
 end

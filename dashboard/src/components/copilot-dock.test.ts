@@ -362,4 +362,34 @@ describe('CopilotDock', () => {
 
     expect(dock.state.value.keeperId).not.toBe('masc-improver')
   })
+
+  it('drops the runtime namespace from the keeper picker sub and conversation hint', async () => {
+    keepers.value = [
+      { name: 'masc-improver', keeper_id: 'masc-improver', koreanName: 'MASC Improver', status: 'running', phase: 'Running', runtime_id: 'fleet', needs_attention: false, total_turns: 0, context_ratio: 0.2 },
+      { name: 'nick0cave', keeper_id: 'nick0cave', koreanName: 'nick0cave', status: 'running', phase: 'Running', runtime_id: 'ops', needs_attention: false, total_turns: 0, context_ratio: 0.3 },
+    ] as unknown as typeof keepers.value
+    const dock = renderDock()
+    dock.open()
+    await waitFor(() => expect(container.querySelector('[data-testid="copilot-dock-picker"]')).not.toBeNull())
+
+    // conversation hint no longer trails the runtime alias ("· <ns>")
+    const hint = container.querySelector('.dock-idrow-hint') as HTMLElement
+    expect(hint.textContent).toContain('와 대화 중')
+    expect(hint.textContent).not.toContain('·')
+    expect(hint.textContent).not.toContain('fleet')
+    expect(hint.textContent).not.toContain('ops')
+
+    // picker rows show the phase only, not "phase · ns"
+    const picker = container.querySelector('[data-testid="copilot-dock-picker"]') as HTMLButtonElement
+    picker.click()
+    await waitFor(() => expect(container.querySelector('.dock-menu')).not.toBeNull())
+    const subs = Array.from(container.querySelectorAll('.dock-menu-row .sub')).map(s => s.textContent ?? '')
+    expect(subs.length).toBeGreaterThan(0)
+    subs.forEach(s => {
+      expect(s).toContain('Running')
+      expect(s).not.toContain('·')
+      expect(s).not.toContain('fleet')
+      expect(s).not.toContain('ops')
+    })
+  })
 })

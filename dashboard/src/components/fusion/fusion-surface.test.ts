@@ -126,6 +126,10 @@ describe('FusionSurface', () => {
     render(html`<${FusionSurface} />`, container)
 
     expect(container.querySelector('[data-testid="fusion-surface"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="fusion-reality-notice"]')?.textContent)
+      .toContain('부분 지원')
+    expect(container.querySelector('[data-testid="fusion-reality-notice"]')?.textContent)
+      .toContain('fail-closed')
     expect(container.textContent).toContain('fus-1')
     expect(container.textContent).toContain('Which deploy path should we take?')
     expect(container.textContent).toContain('gpt-5')

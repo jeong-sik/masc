@@ -10,11 +10,13 @@ val h2_respond_body :
 val h2_respond_json :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->
+  ?compress:bool ->
   H2.Reqd.t -> string -> unit
 
 val h2_respond_json_value :
   ?status:H2.Status.t ->
   ?extra_headers:(string * string) list ->
+  ?compress:bool ->
   H2.Reqd.t -> Yojson.Safe.t -> unit
 
 val h2_respond_text :

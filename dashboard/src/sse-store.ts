@@ -376,6 +376,17 @@ async function hydrateAfterReconnect(): Promise<void> {
   // the active surface, so an approval that arrived (or resolved) during the
   // gap must be re-fetched on reconnect, not only on the governance surface.
   handleGovernance()
+  // Recover keeper_chat_appended events that fell outside the server replay
+  // buffer while disconnected. The live stream cannot re-deliver them, so the
+  // open conversation panel must re-fetch its transcript. Route and periodic
+  // refreshes deliberately skip this (guard-respecting no-op to avoid polling),
+  // so force it here — reconnect is the only path that knows a gap may exist.
+  // Route-independent: covers the open keeper panel on any tab.
+  void import('./keeper-runtime')
+    .then(mod => { mod.refreshActiveKeeperChatHistory({ force: true }) })
+    .catch(err =>
+      console.warn('[SSE] reconnect keeper chat re-hydration unavailable', err instanceof Error ? err.message : err),
+    )
   void refreshDashboard({ force: true }).catch(err =>
     console.warn('[SSE] reconnect dashboard refresh failed', err instanceof Error ? err.message : err),
   )

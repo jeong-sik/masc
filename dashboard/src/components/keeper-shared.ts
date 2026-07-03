@@ -37,6 +37,17 @@ import {
 } from '../keeper-state'
 import { isDefaultVisibleConversationEntry } from '../keeper-state'
 import {
+  getKeeperLastSeen,
+  advanceKeeperLastSeen,
+  newestConversationEntryUnix,
+} from '../keeper-last-seen'
+import { refreshKeeperCatchupDigest } from '../keeper-digest-actions'
+import { keeperCatchupDigests } from '../keeper-digest-signals'
+import {
+  KeeperCatchupDigestCard,
+  shouldShowKeeperCatchupDigest,
+} from './keeper-catchup-digest-card'
+import {
   enqueueInput,
   clearInputQueue,
   getQueuedMessages,
@@ -515,7 +526,20 @@ export function KeeperConversationPanel({
   // (.masc/keeper_chat/<name>.jsonl) on mount so the conversation
   // survives full page reloads. Once-per-keeper inside the action.
   useEffect(() => {
-    void hydrateKeeperChatHistory(keeperName)
+    // Capture the last-seen cursor BEFORE anything advances it, and fetch the
+    // since-last-seen digest against that frozen baseline. The card and the
+    // unread divider anchor on the server's echoed since_unix, not the live
+    // cursor, so the advance below does not move them mid-visit.
+    const baseline = getKeeperLastSeen(keeperName)
+    if (baseline !== null) void refreshKeeperCatchupDigest(keeperName, baseline)
+    void (async () => {
+      await hydrateKeeperChatHistory(keeperName)
+      // The server transcript is now merged: mark the newest merged entry as
+      // seen so the NEXT visit's baseline is current. First-ever visits (no
+      // prior cursor) also land here, seeding the cursor without a card.
+      const newest = newestConversationEntryUnix(keeperThreads.value[keeperName] ?? [])
+      if (newest !== null) advanceKeeperLastSeen(keeperName, newest)
+    })()
     void resumePendingKeeperChatRequests(keeperName)
   }, [keeperName])
 
@@ -555,6 +579,24 @@ export function KeeperConversationPanel({
     () => filterConversationEntries(visibleThreadWithQueue, searchQuery),
     [visibleThreadWithQueue, searchQuery],
   )
+  // Since-last-seen digest (fetched once on mount against the frozen baseline).
+  // Reading the signal here subscribes the panel so the card appears when the
+  // fetch resolves. Card + divider anchor on digest.since_unix, not the cursor.
+  const catchupDigest = keeperCatchupDigests.value[keeperName] ?? null
+  const digestCard = shouldShowKeeperCatchupDigest(catchupDigest)
+    ? html`<${KeeperCatchupDigestCard} digest=${catchupDigest} />`
+    : null
+  const unreadAfterTs = catchupDigest?.since_unix ?? null
+  const newestEntryTsUnix = useMemo(
+    () => newestConversationEntryUnix(transcriptEntries),
+    [transcriptEntries],
+  )
+  // Advance the cursor to the newest visible entry once the operator has caught
+  // up (ChatTranscript calls this when pinned to bottom / tab visible). Monotonic
+  // and localStorage-guarded, so repeated pinned calls are cheap.
+  const markTranscriptSeen = () => {
+    if (newestEntryTsUnix !== null) advanceKeeperLastSeen(keeperName, newestEntryTsUnix)
+  }
   // Stable action object so the memoized ChatMessageBubble's shallow prop
   // compare can skip unchanged messages — an inline `{ ...onClick }` literal
   // would be a new reference each render and defeat the memo.
@@ -729,6 +771,8 @@ export function KeeperConversationPanel({
             `
           : null}
 
+        ${digestCard ? html`<div class="mx-10 mt-3">${digestCard}</div>` : null}
+
         <div class="kw-thread v2-monitoring-panel">
           <div class="kw-thread-inner v2-monitoring-panel">
             <${ChatTranscript}
@@ -742,6 +786,8 @@ export function KeeperConversationPanel({
               showSourceBadge=${true}
               toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
               toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+              unreadAfterTs=${unreadAfterTs}
+              onSeenBottom=${markTranscriptSeen}
               action=${inspectAction}
             />
           </div>
@@ -865,6 +911,8 @@ export function KeeperConversationPanel({
             `
           : null}
 
+        ${digestCard ? html`<div class="shrink-0">${digestCard}</div>` : null}
+
         <${ChatTranscript}
           entries=${transcriptEntries}
           emptyText=${transcriptEmptyText}
@@ -874,6 +922,8 @@ export function KeeperConversationPanel({
           groupToolCalls=${true}
           toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
           toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+          unreadAfterTs=${unreadAfterTs}
+          onSeenBottom=${markTranscriptSeen}
           action=${inspectAction}
         />
 
@@ -981,6 +1031,7 @@ export function KeeperConversationPanel({
                 </div>
               `
             : null}
+          ${digestCard ? html`<div class="mb-4">${digestCard}</div>` : null}
           <${ChatTranscript}
             entries=${transcriptEntries}
             emptyText=${transcriptEmptyText}
@@ -990,6 +1041,8 @@ export function KeeperConversationPanel({
             groupToolCalls=${true}
             toolOutputsCoveredSinceMs=${toolCallOutputsCoveredSinceMs(keeperName)}
             toolOutputsCoveredThroughMs=${toolCallOutputsCoveredThroughMs(keeperName)}
+            unreadAfterTs=${unreadAfterTs}
+            onSeenBottom=${markTranscriptSeen}
             action=${inspectAction}
           />
         </div>

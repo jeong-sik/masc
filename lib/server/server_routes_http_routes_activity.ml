@@ -90,6 +90,24 @@ let json_ensure_meta_string_field name value = function
   | _non_object ->
       Error "json_ensure_meta_string_field: expected JSON object"
 
+let board_tool_agent_name_from_request request =
+  let hdr name =
+    Option.bind
+      (Httpun.Headers.get request.Httpun.Request.headers name)
+      (fun value ->
+        let trimmed = String.trim value in
+        if String.equal trimmed "" then None else Some trimmed)
+  in
+  match hdr "x-gate-agent" with
+  | Some value -> value
+  | None -> (
+      match hdr "x-masc-agent" with
+      | Some value -> value
+      | None ->
+          (* NDT-OK: same-origin dashboard tool calls may omit agent headers;
+             the sibling board REST bridges already use this dashboard actor fallback. *)
+          "dashboard")
+
 let governance_surface_for_param_key param_key =
   Governance_registry.surfaces
   |> List.find_opt (fun (surface : Governance_registry.surface) ->
@@ -627,6 +645,44 @@ let add_routes ~sw ~clock router =
              let ok = Tool_result.is_success result in
              let msg = Tool_result.message result in
              let status = if ok then `Created else `Bad_request in
+             respond_json_value_with_cors ~status request reqd
+               (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
+           with Eio.Cancel.Cancelled _ as e -> raise e | exn ->
+             respond_json_value_with_cors ~status:`Bad_request request reqd
+               (`Assoc
+                  [
+                    ("ok", `Bool false);
+                    ("message", `String (Printexc.to_string exn));
+                  ])
+         )
+       ) request reqd)
+
+  (* Comment vote — mirrors masc_board_vote. Server re-derives [voter] from the
+     agent header so the client cannot forge the voting identity. *)
+  |> Http.Router.post "/api/v1/tools/masc_board_comment_vote" (fun request reqd ->
+       with_tool_auth ~tool_name:"masc_board_comment_vote"
+         (fun _state _req reqd ->
+         let agent_name = board_tool_agent_name_from_request request in
+         Http.Request.read_body_async reqd (fun body_str ->
+           try
+             let ( let* ) r f =
+               match r with
+               | Ok v -> f v
+               | Error msg ->
+                   respond_json_value_with_cors ~status:`Bad_request request reqd
+                     (`Assoc
+                        [ ("ok", `Bool false); ("message", `String msg) ])
+             in
+             let* args =
+               try Ok (Yojson.Safe.from_string body_str)
+               with Yojson.Json_error msg -> Error ("Invalid JSON: " ^ msg)
+             in
+             let voter = board_actor_author_for_write agent_name in
+             let* args = json_upsert_string_field "voter" voter args in
+             let result = Board_tool.handle_tool "masc_board_comment_vote" args in
+             let ok = Tool_result.is_success result in
+             let msg = Tool_result.message result in
+             let status = if ok then `OK else `Bad_request in
              respond_json_value_with_cors ~status request reqd
                (`Assoc [ ("ok", `Bool ok); ("message", `String msg) ])
            with Eio.Cancel.Cancelled _ as e -> raise e | exn ->

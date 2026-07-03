@@ -5,7 +5,7 @@
 module Summary = Masc.Keeper_memory_llm_summary
 module Metrics = Masc.Otel_metric_store
 module Outcome = Keeper_memory_llm_summary_outcome
-module Boundary = Masc.Boundary_redaction
+module Boundary = Boundary_redaction
 
 let metric = Keeper_metrics.(to_string MemoryLlmSummaryOutcomes)
 let runtime_lane = Masc.Keeper_hooks_oas.runtime_lane_label

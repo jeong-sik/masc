@@ -160,6 +160,7 @@ describe('RuntimeEnvironmentEditor assignments section', () => {
 const sourceWithCapabilities = `[runtime]
 default = "ollama_cloud.minimax-m3"
 librarian = "ollama_cloud.flash-nojson"
+structured_judge = "ollama_cloud.flash-nojson"
 
 [providers.ollama_cloud]
 display-name = "Ollama Cloud"
@@ -189,6 +190,7 @@ streaming = true
 
 [models.flash-nojson.capabilities]
 supports-response-format-json = false
+supports-structured-output = false
 thinking-control-format = "reasoning-effort"
 
 [ollama_cloud.minimax-m3]
@@ -234,6 +236,20 @@ describe('RuntimeEnvironmentEditor capability projection', () => {
 
     const warnings = Array.from(container.querySelectorAll('.rt-warn')).map(node => node.textContent ?? '')
     expect(warnings.some(w => w.includes('JSON 모드 필요') && w.includes('deepseek-v4-flash 미지원'))).toBe(true)
+
+    render(null, container)
+  })
+
+  it('warns on the structured_judge lane for structured output, not JSON mode', () => {
+    // Server contract: [runtime].structured_judge must declare
+    // supports-structured-output, not just JSON mode (lib/runtime/runtime.ml:142-151).
+    const container = document.createElement('div')
+    mountSection(container, 'routing')
+
+    const warnings = Array.from(container.querySelectorAll('.rt-warn')).map(node => node.textContent ?? '')
+    expect(warnings.some(w => w.includes('structured output 필요') && w.includes('deepseek-v4-flash 미지원'))).toBe(true)
+    // and it does not mislabel the structured requirement as a JSON-mode one
+    expect(warnings.every(w => !(w.includes('structured output 필요') && w.includes('JSON 모드')))).toBe(true)
 
     render(null, container)
   })

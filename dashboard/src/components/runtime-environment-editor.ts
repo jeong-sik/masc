@@ -418,19 +418,32 @@ export function RuntimeEnvironmentEditor({
     hint: string,
     value: string,
     onChange: (runtimeId: string) => void,
-    needsJson: boolean,
+    requirement: 'none' | 'json' | 'structured',
   ) {
     const canUnset = lane !== 'default'
     const binding = environment.bindings.find(b => b.id === value)
     const model = binding ? environment.models.find(m => m.id === binding.modelId) : null
-    const hasJsonCap = model ? (typeof model.jsonSupport === 'boolean' ? model.jsonSupport : null) : false
-    const capWarning = needsJson && hasJsonCap === false && model
-      ? html`<span class="rt-warn">JSON 모드 필요 · ${model.apiName} 미지원</span>`
-      : needsJson && hasJsonCap === null && model
-        ? html`<span class="rt-ok">JSON 모드 필요 · 모델 capability 미확인</span>`
-        : needsJson && !model
-          ? html`<span class="rt-ok">JSON 모드 필요 · 모델 capability 미확인</span>`
-          : null
+    // structured_judge requires provider-native structured output, not just JSON
+    // mode: the server rejects a structured_judge runtime whose model does not
+    // declare supports-structured-output (lib/runtime/runtime.ml:142-151, "must
+    // declare structured output, not just JSON mode"). librarian / cross_verifier
+    // need JSON mode (grounding.md). Both read the already-parsed capability off
+    // the model — no /api/v1/providers projection needed.
+    const capValue =
+      !model || requirement === 'none'
+        ? null
+        : requirement === 'structured'
+          ? (typeof model.structuredOutput === 'boolean' ? model.structuredOutput : null)
+          : (typeof model.jsonSupport === 'boolean' ? model.jsonSupport : null)
+    const capLabel = requirement === 'structured' ? 'structured output 필요' : 'JSON 모드 필요'
+    const capWarning =
+      requirement === 'none'
+        ? null
+        : capValue === false && model
+          ? html`<span class="rt-warn">${capLabel} · ${model.apiName} 미지원</span>`
+          : (capValue === null && model) || !model
+            ? html`<span class="rt-ok">${capLabel} · 모델 capability 미확인</span>`
+            : null
 
     return html`
       <div class="rt-lane">
@@ -549,7 +562,7 @@ export function RuntimeEnvironmentEditor({
           '[runtime].default — 배정 없는 keeper가 사용',
           environment.defaultRuntimeId || firstId(environment.bindings),
           updateDefault,
-          false,
+          'none',
         )}
         ${laneRow(
           'librarian',
@@ -557,7 +570,7 @@ export function RuntimeEnvironmentEditor({
           '[runtime].librarian — 턴 후 에피소드 추출, JSON 모드 필요',
           librarianLane,
           runtimeId => updateRoutingLane('librarian', runtimeId),
-          true,
+          'json',
         )}
         ${laneRow(
           'structured_judge',
@@ -565,7 +578,7 @@ export function RuntimeEnvironmentEditor({
           '[runtime].structured_judge — provider-native schema 심판 호출',
           environment.structuredJudgeRuntimeId,
           runtimeId => updateRoutingLane('structured_judge', runtimeId),
-          true,
+          'structured',
         )}
         ${laneRow(
           'cross_verifier',
@@ -573,7 +586,7 @@ export function RuntimeEnvironmentEditor({
           '[runtime].cross_verifier — 반-합리화 평가, JSON 모드 필요',
           crossVerifierLane,
           runtimeId => updateRoutingLane('cross_verifier', runtimeId),
-          true,
+          'json',
         )}
       </div>
 

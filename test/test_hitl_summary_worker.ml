@@ -118,7 +118,9 @@ let test_summary_status_json_encoding () =
 (* ── parse_summary tests ────────────────────────── *)
 
 let test_parse_summary_success () =
-  let parsed = H.For_testing.parse_summary ~model_run_id:"run-test" valid_summary_json in
+  let parsed =
+    H.For_testing.parse_summary ~generated_at:1234567890.0 ~model_run_id:"run-test" valid_summary_json
+  in
   check string "model_run_id" "run-test" parsed.model_run_id;
   check string "context_summary" "A tool request is pending." parsed.context_summary;
   check (list string) "key_questions" [ "Is this safe?" ] parsed.key_questions;
@@ -141,7 +143,7 @@ let test_parse_summary_failure () =
     ; telemetry = None
     }
   in
-  match H.For_testing.summary_of_response response with
+  match H.For_testing.summary_of_response ~generated_at:1234567890.0 response with
   | Ok _ -> fail "expected summary_of_response to return Error"
   | Error reason -> check bool "error reason non-empty" true (String.length reason > 0)
 ;;

@@ -209,10 +209,10 @@ let parse_suggested_option json =
   { label; rationale; estimated_risk_delta }
 ;;
 
-let parse_summary ~model_run_id json =
+let parse_summary ~generated_at ~model_run_id json =
   let open Yojson.Safe.Util in
   { summary_version = 1
-  ; generated_at = Unix.gettimeofday ()
+  ; generated_at
   ; model_run_id
   ; context_summary = json |> member "context_summary" |> to_string
   ; key_questions = json |> member "key_questions" |> convert_each to_string
@@ -222,14 +222,14 @@ let parse_summary ~model_run_id json =
   }
 ;;
 
-let summary_of_response (response : Agent_sdk.Types.api_response) =
+let summary_of_response ~generated_at (response : Agent_sdk.Types.api_response) =
   match
     Agent_sdk_response.structured_json_of_response
       ~schema_name:"hitl_context_summary"
       response
   with
   | Ok json ->
-    (try Ok (parse_summary ~model_run_id:response.id json) with
+    (try Ok (parse_summary ~generated_at ~model_run_id:response.id json) with
      | exn ->
        Error (Printf.sprintf "HITL summary parse failed: %s" (Printexc.to_string exn)))
   | Error detail ->
@@ -237,6 +237,7 @@ let summary_of_response (response : Agent_sdk.Types.api_response) =
 ;;
 
 let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failure () =
+  let generated_at = Time_compat.now () in
   match provider_config with
   | None -> on_failure ~reason:"HITL summary: no provider config available" ~retryable:false
   | Some provider_config ->
@@ -248,7 +249,7 @@ let spawn ~sw ?provider_config ~(entry : pending_approval) ~on_summary ~on_failu
         | Some net ->
           (match call_summary_llm ~sw ~net ~provider_config ~context_bundle () with
            | Ok response ->
-             (match summary_of_response response with
+             (match summary_of_response ~generated_at response with
               | Ok summary -> on_summary summary
               | Error reason -> on_failure ~reason ~retryable:true)
            | Error err ->

@@ -652,14 +652,14 @@ let record_pending (entry : pending_approval) =
   broadcast_pending entry
 ;;
 
-let record_summary_updated (entry : pending_approval) =
+let record_summary_updated ~now (entry : pending_approval) =
   (try
      match get_audit_store ~base_path:entry.audit_base_path () with
      | None -> ()
      | Some store ->
        let json =
          `Assoc
-           [ "ts", `Float (Unix.gettimeofday ())
+           [ "ts", `Float now
            ; "event", `String approval_audit_summary_event
            ; "id", `String entry.id
            ; "summary_status", summary_status_to_yojson entry.summary_status
@@ -721,6 +721,7 @@ let provider_config_for_summary () =
 ;;
 
 let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
+  let now = Time_compat.now () in
   match entry.risk_level with
   | Low -> ()
   | Medium | High | Critical ->
@@ -733,14 +734,14 @@ let spawn_hitl_summary_worker ~sw ~(entry : pending_approval) =
         ; summary_status = Summary_available summary
         });
       match get_pending_entry ~id:entry.id with
-      | Some updated -> record_summary_updated updated
+      | Some updated -> record_summary_updated ~now updated
       | None -> ()
     in
     let on_failure ~reason ~retryable =
       update_pending_entry ~id:entry.id (fun e ->
         { e with summary_status = Summary_failed { reason; retryable } });
       match get_pending_entry ~id:entry.id with
-      | Some updated -> record_summary_updated updated
+      | Some updated -> record_summary_updated ~now updated
       | None -> ()
     in
     match provider_config_for_summary () with

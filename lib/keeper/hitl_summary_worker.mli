@@ -17,9 +17,13 @@ module For_testing : sig
     : entry:Keeper_approval_queue_rules_types.pending_approval -> Yojson.Safe.t
 
   val parse_summary
-    : model_run_id:string -> Yojson.Safe.t -> Keeper_approval_queue_rules_types.hitl_context_summary
+    :  generated_at:float
+    -> model_run_id:string
+    -> Yojson.Safe.t
+    -> Keeper_approval_queue_rules_types.hitl_context_summary
 
   val summary_of_response
-    : Agent_sdk.Types.api_response
+    :  generated_at:float
+    -> Agent_sdk.Types.api_response
     -> (Keeper_approval_queue_rules_types.hitl_context_summary, string) result
 end

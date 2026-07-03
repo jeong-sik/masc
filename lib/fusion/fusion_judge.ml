@@ -126,9 +126,13 @@ let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
   | Agent_sdk.Error.Orchestration _ | Agent_sdk.Error.Internal _ ->
     Agent_sdk.Error.to_string e
 
-(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. [Api (Retry.Timeout _)]
-   를 잡아 [Timeout]으로 propagate하고, 그 외는 [Provider_error]에 사람-가독 detail을
-   보존한다. Non-timeout detail은 표시용이며 재분류에 쓰지 않는다; provider 오류는
+(* [Agent_sdk.Error.sdk_error]를 typed {!judge_failure}로 변환한다. 두 타임아웃 variant를
+   모두 [Timeout]으로 propagate한다: 외곽 실행 래퍼 [Api (Retry.Timeout _)]와
+   provider-level [Provider (Llm_provider.Error.Timeout _)](비스트리밍 sync 경로의
+   connect_timeout이 본문 전체를 바운드해 발생, detail "timeout phase=http_operation").
+   후자는 [Fusion_panel.outcome_of_result]와 대칭으로, 이전에는 [_] catch-all에서
+   [Provider_error]로 오귀속됐다. 그 외는 [Provider_error]에 사람-가독 detail을 보존한다.
+   Non-timeout detail은 표시용이며 재분류에 쓰지 않는다; provider 오류는
    [Llm_provider.Error.to_string] 경로로 렌더해 provider/status/retry/phase metadata를
    유지한다. 이 match가 "to_string 직렬화 → substring 역분류" round-trip 안티패턴의 근본
    해소다: timeout 분류가 컴파일 타입에 묶인다. [prefix]는 호출 context(run 실패 vs
@@ -136,24 +140,43 @@ let sdk_error_detail (e : Agent_sdk.Error.sdk_error) : string =
 let failure_of_sdk_error ~runtime_id ~prefix (e : Agent_sdk.Error.sdk_error) :
     Fusion_types.judge_failure =
   match e with
-  | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _) -> Timeout
+  | Agent_sdk.Error.Api (Agent_sdk.Error.Retry.Timeout _)
+  | Agent_sdk.Error.Provider (Llm_provider.Error.Timeout _) -> Timeout
   | _ ->
     Provider_error
       (prefix ^ Fusion_oas.provider_error_detail ~runtime_id (sdk_error_detail e))
 
+(* 심판 출력 계약은 typed 2-tier다. tier는 OAS capability facts(
+   [validate_output_schema_request])로만 결정하며 provider-name 특례는 없다:
+
+   - Native tier: 모델/엔드포인트가 native structured output을 선언하면 JsonSchema를
+     provider config에 싣는다 (와이어 레벨 강제).
+   - Prompt tier: 선언이 없으면 schema를 싣지 않는다. 계약은 프롬프트가 이미 항상
+     싣고 다니는 [Fusion_judge_parse.expected_json_doc]이 전달하고, 위반은
+     [Fusion_judge_parse.of_string]의 strict 파싱이 [Parse_error]로 fail-loud 한다.
+
+   #22768("native schema or fail before HTTP")은 native 미선언을 빌드 실패로
+   만들었는데, 이는 두 가지 이유로 뒤집는다: (1) capability 사실이 거짓일 수 있음이
+   실측됨(ollama.com cloud는 declared인데 json_schema를 조용히 무시 — 2026-07-02
+   probe), (2) 사실이 참(미지원)일 때 빌드 실패는 해당 preset의 fusion 자체를
+   영구 불능으로 만든다(2026-06-17~06-30 prompt 계약만으로 성공한 run 다수).
+   Prompt tier는 silent downgrade가 아니다 — 결정 시점에 로그로 관측되고, 파싱은
+   여전히 strict다. *)
 let apply_fusion_judge_output_contract provider_cfg =
   let schema = Keeper_structured_output_schema.fusion_judge_output_schema in
   let native_schema_provider_cfg =
     Keeper_structured_output_schema.apply_to_provider_config schema provider_cfg
   in
-  (* The tier is decided by OAS capability facts, never by provider-name
-     special cases: native schema or fail before an HTTP request. *)
   match
     Llm_provider.Provider_config.validate_output_schema_request
       native_schema_provider_cfg
   with
   | Ok () -> Ok native_schema_provider_cfg
-  | Error detail -> Error (Printf.sprintf "fusion.judge.output_schema: %s" detail)
+  | Error detail ->
+    Log.Keeper.info
+      "fusion judge output contract: prompt tier (native schema unavailable: %s)"
+      detail;
+    Ok provider_cfg
 
 (* 합성된 프롬프트를 받아 심판 에이전트를 빌드·실행·파싱한다. [run]/[run_refine]가
    서로 다른 [compose_*]로 만든 프롬프트를 넘기는 공유 본체 — 프롬프트 구성만 다르고
@@ -233,4 +256,5 @@ let run_meta ~sw ~net ~timeout_s ?max_tokens ~judge_system_prompt ~judge_model ~
 
 module For_testing = struct
   let apply_output_contract = apply_fusion_judge_output_contract
+  let failure_of_sdk_error = failure_of_sdk_error
 end

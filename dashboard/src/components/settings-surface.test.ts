@@ -785,7 +785,7 @@ describe('SettingsSurface', () => {
     await fireEvent.click(runtimeNav)
 
     await waitFor(() => {
-      expect(container.querySelector('[data-testid="runtime-default-runtime"]')?.textContent).toBe('rt-a')
+      expect((container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement | null)?.value).toBe('rt-a')
       expect(container.querySelector('[data-testid="runtime-default-model"]')?.textContent).toBe('m1')
       expect(container.querySelector('[data-testid="runtime-settings-config-path"]')?.textContent).toContain('/cfg/runtime.toml')
       const cards = Array.from(container.querySelectorAll('[data-testid="runtime-catalog-card"]'))
@@ -798,7 +798,8 @@ describe('SettingsSurface', () => {
       expect(
         Array.from(container.querySelectorAll('[data-runtime-section]'))
           .map(section => section.getAttribute('data-runtime-section')),
-      ).toEqual(['catalog', 'routing', 'assignments'])
+        // routing/assignments 서브섹션은 전용 Routing 섹션으로 이동했다.
+      ).toEqual(['catalog'])
     })
     expect(container.textContent).not.toContain('oas·seoul-1')
   })
@@ -844,7 +845,7 @@ describe('SettingsSurface', () => {
     expect(container.querySelector('[data-testid="runtime-catalog-fallback"]')).toBeNull()
   })
 
-  it('runtime section shows resolved model routing controls and keeper assignments', async () => {
+  it('routing section shows resolved model routing controls and keeper assignments', async () => {
     stubRuntimeDefaults(
       makeRuntimeDefaults({
         model_routing: {
@@ -858,10 +859,14 @@ describe('SettingsSurface', () => {
     )
     render(html`<${SettingsSurface} />`, container)
 
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="runtime-routing-summary"]')?.textContent).toContain('Librarian')
+      expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
+        .toContain('수동 reroute')
+      expect(container.querySelector('[data-testid="runtime-media-failover-reality"]')?.textContent)
+        .toContain('provider 실패 자동 전환이 아니라')
       expect((container.querySelector('[data-testid="runtime-routing-structured-judge"]') as HTMLSelectElement | null)?.value)
         .toBe('rt-c')
       expect(container.querySelector('[data-testid="runtime-routing-cross-verifier"]')).not.toBeNull()
@@ -888,7 +893,7 @@ describe('SettingsSurface', () => {
       }))
     render(html`<${SettingsSurface} />`, container)
 
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
     await waitFor(() => {
       const select = container.querySelector('[data-testid="runtime-routing-librarian"]') as HTMLSelectElement | null
       expect(select).not.toBeNull()
@@ -906,6 +911,61 @@ describe('SettingsSurface', () => {
         .toBe('rt-b')
     })
     expect(container.querySelector('[data-testid="runtime-routing-message"]')?.textContent).toContain('저장됨')
+  })
+
+  it('routing section exposes a required default lane without an empty option and patches it', async () => {
+    apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.fetchRuntimeDefaults.mockResolvedValue(makeRuntimeDefaults())
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
+    await waitFor(() => {
+      const select = container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement | null
+      expect(select).not.toBeNull()
+      expect(select?.disabled).toBe(false)
+    })
+
+    const select = container.querySelector('[data-testid="runtime-routing-default"]') as HTMLSelectElement
+    const optionValues = Array.from(select.options).map(o => o.value)
+    expect(optionValues).not.toContain('')
+
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'rt-b')
+    })
+  })
+
+  it('runtime section default runtime is a writable selector that patches the default lane', async () => {
+    apiMock.fetchRuntimeDefaults.mockReset()
+    apiMock.fetchRuntimeDefaults.mockResolvedValue(makeRuntimeDefaults())
+    render(html`<${SettingsSurface} />`, container)
+
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    await waitFor(() => {
+      const select = container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement | null
+      expect(select?.tagName).toBe('SELECT')
+      expect(select?.value).toBe('rt-a')
+    })
+
+    const select = container.querySelector('[data-testid="runtime-default-runtime"]') as HTMLSelectElement
+    await fireEvent.input(select, { target: { value: 'rt-b' } })
+    await waitFor(() => {
+      expect(apiMock.patchRuntimeRouting).toHaveBeenCalledWith('default', 'rt-b')
+    })
+  })
+
+  it('groups settings navigation by the keeper-v2 partial IA while keeping live-backed sections', () => {
+    render(html`<${SettingsSurface} />`, container)
+
+    const groups = Array.from(container.querySelectorAll('.set-nav-group'))
+    const labels = groups.map(g => g.textContent ?? '')
+    expect(labels.some(t => t.includes('Keeper 운영'))).toBe(true)
+    expect(labels.some(t => t.includes('연결 · 통합'))).toBe(true)
+    // 디자인이 nav에서 뺀 live-backed 섹션은 유지한다.
+    expect(container.querySelector('[data-testid="settings-nav-mcp"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-display"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-routing"]')).not.toBeNull()
+    expect(container.querySelector('[data-testid="settings-nav-repositories"]')).not.toBeNull()
   })
 
   it('patches ordered media failover from settings', async () => {
@@ -931,7 +991,7 @@ describe('SettingsSurface', () => {
       }))
     render(html`<${SettingsSurface} />`, container)
 
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
     await waitFor(() => {
       const select = container.querySelector('[data-testid="runtime-media-failover-add"]') as HTMLSelectElement | null
       expect(select).not.toBeNull()
@@ -963,7 +1023,7 @@ describe('SettingsSurface', () => {
     )
     render(html`<${SettingsSurface} />`, container)
 
-    await fireEvent.click(container.querySelector('[data-testid="settings-nav-runtime"]') as HTMLElement)
+    await fireEvent.click(container.querySelector('[data-testid="settings-nav-routing"]') as HTMLElement)
 
     await waitFor(() => {
       expect(container.querySelector('[data-testid="routing-assignments-empty"]')).not.toBeNull()

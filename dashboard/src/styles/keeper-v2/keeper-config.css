@@ -91,6 +91,26 @@
 .kcf-paths { display: flex; flex-direction: column; gap: 6px; margin-top: 10px; }
 .kcf-path-eff { font-size: var(--fs-11); color: var(--text-dim); }
 
+/* ── prompt assembly trace (조립 추적) ── */
+.kasm { display: flex; flex-direction: column; gap: 12px; }
+.kasm-legend { display: flex; flex-wrap: wrap; gap: 6px 14px; }
+.kasm-leg { display: inline-flex; align-items: center; gap: 6px; font-size: 10.5px; letter-spacing: 0.04em; color: var(--text-dim); }
+.kasm-leg i { width: 9px; height: 9px; border-radius: 2px; background: var(--c); flex: none; }
+.kasm-stack { display: flex; flex-direction: column; gap: 7px; max-height: 460px; overflow-y: auto; padding-right: 4px; }
+.kasm-seg { border: 1px solid var(--border-soft); border-left: 3px solid var(--c); border-radius: var(--radius-sm); background: color-mix(in oklab, var(--c) 6%, var(--bg-card)); padding: 10px 13px; }
+.kasm-seg.win { box-shadow: inset 0 0 0 1px color-mix(in oklab, var(--c) 32%, transparent); }
+.kasm-seg-h { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; margin-bottom: 6px; }
+.kasm-seg-src { font-family: var(--font-display); font-size: var(--fs-10); letter-spacing: 0.12em; text-transform: uppercase; color: var(--c); font-weight: 600; }
+.kasm-seg-field { font-size: 10.5px; color: var(--text-mid); }
+.kasm-seg-win { font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--volt-ink); background: var(--volt); padding: 2px 7px; border-radius: var(--radius-pill); }
+.kasm-seg-path { margin-left: auto; font-size: 9.5px; color: var(--text-dim); }
+.kasm-seg-text { font-size: 12.5px; line-height: 1.55; color: var(--text-primary); white-space: pre-wrap; }
+.src-base { --c: var(--text-dim); }
+.src-manifest { --c: var(--info); }
+.src-override { --c: var(--volt-strong); }
+.src-goals { --c: var(--status-ok); }
+.src-world { --c: var(--status-warn); }
+
 /* ── tools ── */
 .kcf-tools { display: flex; flex-direction: column; gap: 1px; background: var(--border-soft); border: 1px solid var(--border-soft); border-radius: var(--radius-sm); overflow: hidden; }
 .kcf-tool { display: grid; grid-template-columns: auto 190px 52px 1fr; align-items: center; gap: 12px; padding: 9px 13px; background: var(--bg-card); }
@@ -101,6 +121,9 @@
 .kcf-tool-risk.write { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 36%, transparent); }
 .kcf-tool-risk.lifecycle { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); }
 .kcf-tool-desc { font-size: 11.5px; color: var(--text-dim); }
+.kcf-tool-toggle { width: 20px; height: 20px; display: flex; align-items: center; justify-content: center; padding: 0; border: 1px solid var(--border-main); border-radius: var(--radius-xs); background: none; color: var(--volt); font-size: var(--fs-11); cursor: pointer; transition: border-color .14s ease, background .14s ease; }
+.kcf-tool-toggle:hover { border-color: var(--volt-dim); }
+.kcf-tool.on .kcf-tool-toggle { background: var(--volt); color: var(--bg-deep); border-color: var(--volt); }
 
 /* ── goals picker ── */
 .kcf-goals { display: flex; flex-direction: column; gap: 12px; }

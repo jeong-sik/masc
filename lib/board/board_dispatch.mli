@@ -145,14 +145,16 @@ val create_post :
 
 (** Owner-gated in-place edit of an existing post's title/body.  Returns
     [Unauthorized] when [editor] does not own the post, [Post_not_found] for a
-    missing id, and [Validation_error] for empty/oversized content.  Only the
-    textual content and [updated_at] change. *)
+    missing id, and [Validation_error] for empty/oversized content or invalid
+    [new_author].  When provided by the current owner, [new_author] transfers
+    persisted ownership. *)
 val update_post :
   post_id:string ->
   editor:string ->
   content:string ->
   ?title:string ->
   ?body:string ->
+  ?new_author:string ->
   unit ->
   (Board.post, Board.board_error) Result.t
 
@@ -213,6 +215,9 @@ val get_comments :
 
 val get_post_and_comments :
   post_id:string ->
+  ?comment_offset:int ->
+  ?comment_limit:int ->
+  unit ->
   (Board.post * Board.comment list, Board.board_error) Result.t
 
 val list_comments : ?limit:int -> unit -> Board.comment list

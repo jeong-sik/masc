@@ -745,7 +745,7 @@ let run_heartbeat_loop
      metadata across turns, but per-turn context_injector-local timing
      and tool-call counters are recreated inside run_turn and therefore
      do not accumulate for the full keeper lifecycle. *)
-  let shared_context = Agent_sdk.Context.create ~eio:true () in
+  let shared_context = Agent_sdk.Context.create () in
   (* Mtime-based change detection for keeper meta disk reads.
      Avoids re-parsing the JSON file on every heartbeat cycle when
      no operator has modified it.  Initialized to 0.0 so the first

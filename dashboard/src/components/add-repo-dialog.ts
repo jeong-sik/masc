@@ -3,7 +3,7 @@
 
 import { html } from 'htm/preact'
 import { signal } from '@preact/signals'
-import { post } from '../api/core'
+import { addRepository, type AddRepositoryPayload } from '../api/repositories'
 import { showToast } from './common/toast'
 import { fetchRepositories, showAddRepoDialog } from './repo-sidebar'
 import { X } from 'lucide-preact'
@@ -59,15 +59,15 @@ async function submitAddRepo(): Promise<void> {
   formError.value = null
 
   try {
-    const payload: Record<string, unknown> = {
+    const payload: AddRepositoryPayload = {
       name,
       url,
       default_branch: defaultBranch,
       auto_sync: formAutoSync.value,
       sync_interval: Math.max(60, formSyncInterval.value),
+      ...(localPath ? { local_path: localPath } : {}),
     }
-    if (localPath) payload.local_path = localPath
-    await post('/api/v1/repositories', payload)
+    await addRepository(payload)
     showToast('저장소 등록 완료', 'success')
     closeAddRepoDialog()
     await fetchRepositories()

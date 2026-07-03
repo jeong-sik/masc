@@ -507,7 +507,7 @@ let test_repo_runtime_bindings_resolve_through_oas_catalog () =
       , _librarian
       , _structured_judge
       , _cross_verifier
-      , _media_failover ) ->
+      , _media_failover , _lanes ) ->
     check bool "at least one runtime binding" true (List.length runtimes > 0);
     List.iter
       (fun (runtime : Runtime.t) ->
@@ -580,7 +580,7 @@ let test_repo_runtime_toml_loads () =
       , _librarian
       , structured_judge
       , _cross_verifier
-      , _media_failover ) ->
+      , _media_failover , _lanes ) ->
     check bool "at least one runtime" true (List.length runtimes > 0);
     check string "default runtime" "ollama_cloud.deepseek-v4-flash"
       default.Runtime.id;
@@ -1168,6 +1168,50 @@ let test_runtime_capability_gate_uses_provider_qualified_catalog () =
            check (option bool) "provider-qualified preserve policy" None
              (Runtime.preserve_thinking_of_runtime_id "ollama_cloud.shared")))
 
+let test_runtime_capability_gate_reports_missing_catalog_models () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"other-family\"\n\
+     base = \"openai_chat\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.custom]\n\
+     protocol = \"openai-compatible-http\"\n\
+     endpoint = \"https://custom.example/v1\"\n\
+     \n\
+     [models.sample]\n\
+     api-name = \"missing-family-123\"\n\
+     max-context = 2048\n\
+     \n\
+     [custom.sample]\n\
+     \n\
+     [runtime]\n\
+     default = \"custom.sample\"\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_strict_report ~config_path:path with
+       | Ok () -> fail "missing provider-qualified catalog row should fail strict init"
+       | Error (Runtime.Runtime_config_error msg) ->
+         failf "expected missing catalog report, got config error: %s" msg
+       | Error (Runtime.Missing_catalog_models report) ->
+         check int "one missing runtime" 1 (List.length report.missing_models);
+         let missing = List.hd report.missing_models in
+         check string "runtime id" "custom.sample" missing.runtime_id;
+         check string "provider id" "custom" missing.provider_id;
+         check string "provider label" "openai_compat" missing.provider_label;
+         check string "model id" "missing-family-123" missing.model_id;
+         check bool "diagnostic names OAS catalog file" true
+           (String_util.contains_substring
+              (Runtime.strict_init_error_to_string
+                 (Runtime.Missing_catalog_models report))
+              "oas-models.toml"))
+
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_fake_runtime_model_catalog @@ fun () ->
   let content =
@@ -1201,7 +1245,7 @@ let test_runtime_toml_max_concurrent_flows_to_candidate () =
         , _librarian
         , _structured_judge
         , _cross_verifier
-        , _media_failover ) ->
+        , _media_failover , _lanes ) ->
       let expect id expected =
         match
           List.find_opt (fun (rt : Runtime.t) -> String.equal rt.id id) runtimes
@@ -1266,12 +1310,12 @@ let test_librarian_runtime_routing () =
         , librarian
         , _structured_judge
         , _cross_verifier
-        , _media_failover ) ->
+        , _media_failover , _lanes ) ->
       check (option string) "librarian runtime id" (Some "local.libr") librarian);
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent librarian should load: %s" msg
-    | Ok (_, _, _, librarian, _structured_judge, _cross_verifier, _media_failover) ->
+    | Ok (_, _, _, librarian, _structured_judge, _cross_verifier, _media_failover, _lanes) ->
       check (option string) "librarian unset is None" None librarian);
   with_temp_runtime_toml (base ^ "librarian = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1287,13 +1331,13 @@ let test_librarian_runtime_routing () =
         , _librarian
         , _structured_judge
         , cross_verifier
-        , _media_failover ) ->
+        , _media_failover , _lanes ) ->
       check (option string) "cross_verifier runtime id" (Some "local.libr")
         cross_verifier);
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent cross_verifier should load: %s" msg
-    | Ok (_, _, _, _, _structured_judge, cross_verifier, _media_failover) ->
+    | Ok (_, _, _, _, _structured_judge, cross_verifier, _media_failover, _lanes) ->
       check (option string) "cross_verifier unset is None" None cross_verifier);
   with_temp_runtime_toml (base ^ "cross_verifier = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1337,7 +1381,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml (base ^ "structured_judge = \"local.judge\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "structured_judge routing should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _, _, _) ->
       check
         (option string)
         "structured_judge runtime id"
@@ -1346,7 +1390,7 @@ let test_structured_judge_runtime_routing () =
   with_temp_runtime_toml base (fun path ->
     match Runtime.load_list ~config_path:path with
     | Error msg -> failf "absent structured_judge should load: %s" msg
-    | Ok (_, _, _, _, structured_judge, _, _) ->
+    | Ok (_, _, _, _, structured_judge, _, _, _) ->
       check (option string) "structured_judge unset is None" None structured_judge);
   with_temp_runtime_toml (base ^ "structured_judge = \"local.nope\"\n") (fun path ->
     match Runtime.load_list ~config_path:path with
@@ -1542,6 +1586,9 @@ let () =
           test_case
             "runtime capability gate uses provider-qualified OAS catalog rows"
             `Quick test_runtime_capability_gate_uses_provider_qualified_catalog;
+          test_case
+            "runtime capability gate reports missing catalog models"
+            `Quick test_runtime_capability_gate_reports_missing_catalog_models;
           test_case "atomic runtime getters are consistent after init" `Quick
             test_runtime_atomic_getters_are_consistent_after_init;
           test_case "max-concurrent is optional opt-in" `Quick

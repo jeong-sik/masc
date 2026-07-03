@@ -11,6 +11,10 @@ type risk_level =
   | High
   | Critical
 
+type pending_phase =
+  | Awaiting_operator
+  | Escalated
+
 type pending_approval =
   { id : string
   ; keeper_name : string
@@ -31,6 +35,7 @@ type pending_approval =
   ; selected_model : string option
   ; disposition : string option
   ; disposition_reason : string option
+  ; phase : pending_phase
   ; audit_base_path : string
   ; resolver : Agent_sdk.Hooks.approval_decision Eio.Promise.u option
   ; on_resolution : (Agent_sdk.Hooks.approval_decision -> unit) option
@@ -93,6 +98,17 @@ let risk_level_of_string = function
   | "medium" -> Some Medium
   | "high" -> Some High
   | "critical" -> Some Critical
+  | _ -> None
+;;
+
+let pending_phase_to_string = function
+  | Awaiting_operator -> "awaiting_operator"
+  | Escalated -> "escalated"
+;;
+
+let pending_phase_of_string = function
+  | "awaiting_operator" -> Some Awaiting_operator
+  | "escalated" -> Some Escalated
   | _ -> None
 ;;
 

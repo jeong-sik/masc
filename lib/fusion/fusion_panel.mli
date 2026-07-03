@@ -16,12 +16,15 @@
       모델들을 에이전트로 빌드한다 (그룹마다 다를 수 있음 = 이종). 모든 그룹의
       에이전트를 하나의 [Async_agent.all]에 union으로 던진다.
     - [web_tools]가 true인 그룹은 web_search/web_fetch 도구를 주입한다.
-    - 패널 에이전트는 [fusion.panel.output_schema] provider-native structured output
-      contract를 요청한다. 응답은 string [answer] 필드를 가진 JSON object여야 하며,
-      free-text/invalid JSON/missing answer는 [Failed]로 격리된다.
+    - 패널 답변 계약은 free text다: 응답의 visible text 전체(trim)가 답변이 된다.
+      빈 텍스트만 [Failed Empty_response]. JSON envelope를 요구하지 않는다 —
+      단일 문자열에 envelope는 정보 이득 0에 provider가 schema를 무시하면 패널이
+      전멸하는 실패 클래스만 추가했다 (2026-07-01 사고, 구현부 주석 참조).
     - [max_tool_calls]: 0이면 무제한, 양수면 에이전트 [max_turns]로 근approximate.
     - [outer_timeout_s]: 전체 fan-out을 감싸는 [Masc_oas_bridge.run_safe] 구조적
-      타임아웃(보통 그룹 timeout 중 max). 타임아웃 시 빌드된 모델은 [Failed Timeout].
+      타임아웃. 웨이브 직렬화를 반영해 [Fusion_policy.panel_outer_timeout_of
+      ~max_fibers]로 산출한 값을 넘겨야 한다. 타임아웃 시 빌드된 모델은
+      [Failed Timeout].
     - 빌드 실패·실행 실패·빈 응답은 [Failed]로 격리되어 다른 패널을 죽이지 않는다.
     - 반환 순서: 빌드 실패분 먼저, 그 다음 실행 결과(그룹순 × 그룹내 모델순). *)
 val run
@@ -40,8 +43,4 @@ module For_testing : sig
     -> model:string
     -> (Agent_sdk.Types.api_response, Agent_sdk.Error.sdk_error) result
     -> Fusion_types.panel_outcome
-
-  val apply_output_contract
-    :  Llm_provider.Provider_config.t
-    -> (Llm_provider.Provider_config.t, string) result
 end

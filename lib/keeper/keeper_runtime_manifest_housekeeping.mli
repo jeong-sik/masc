@@ -3,6 +3,8 @@ type event_kind =
     Turn_started
   | Phase_gate_decided
   | Runtime_routed
+  | Runtime_completed
+  | Runtime_failed
   | Pre_dispatch_blocked
   | Provider_lane_resolved
   | Provider_attempt_started

@@ -3,7 +3,7 @@
 (using menhir 3.0)
 
 (name masc)
-(version 0.19.54)
+(version 0.19.55)
 
 (generate_opam_files true)
 (implicit_transitive_deps false)
@@ -55,13 +55,13 @@
   ; (upstream piaf 0.2.0 missing conf-libssl dependency on macOS arm64).
   (piaf (>= 0.2.0))
   (eio-ssl (>= 0.3.0))
-  ;; Pinned to OAS v0.208.12+ so MASC consumes the default-unbounded
-  ;; agent turn budget, explicit resume-time thinking-policy precedence (#2412),
-  ;; RFC-OAS-029 provider capability
-  ;; fields, canonical stream/tool surfaces, typed tool-call/reasoning
-  ;; projection, MiniMax adaptive thinking + split-reasoning stream (#2347),
-  ;; and fail-closed provider parser hardening.
-  (agent_sdk (>= 0.208.12))
+  ;; Pinned to OAS v0.208.14+ so MASC consumes parse-time base preset
+  ;; validation (oas#2433), the classifier-free provider path (oas#2446),
+  ;; per-model catalog rows on Custom_registered (oas#2447), non-blocking
+  ;; Eio.Mutex wire capture with bounded growth (oas#2449/#2448), redaction
+  ;; hardening for large media payloads (oas#2444), and the non-local
+  ;; default fallback provider (oas#2442).
+  (agent_sdk (>= 0.208.14))
   (uri (>= 4.4))
   (tls (>= 2.0))
   (tls-eio (>= 2.0))

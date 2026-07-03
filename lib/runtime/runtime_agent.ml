@@ -197,6 +197,19 @@ let request_runtime_fields_on_base_config
     ~(base : Llm_provider.Provider_config.t)
     (req_config : Llm_provider.Provider_config.t)
   =
+  let response_format, output_schema =
+    match req_config.response_format, req_config.output_schema with
+    | Agent_sdk.Types.Off, None -> base.response_format, base.output_schema
+    | _, Some schema ->
+      let response_format = Agent_sdk.Types.JsonSchema schema in
+      ( response_format
+      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
+    | Agent_sdk.Types.JsonMode, None -> Agent_sdk.Types.JsonMode, None
+    | Agent_sdk.Types.JsonSchema schema, None ->
+      let response_format = Agent_sdk.Types.JsonSchema schema in
+      ( response_format
+      , Llm_provider.Provider_config.output_schema_of_response_format response_format )
+  in
   { base with
     max_tokens = req_config.max_tokens;
     temperature = req_config.temperature;
@@ -211,8 +224,17 @@ let request_runtime_fields_on_base_config
     tool_stream = req_config.tool_stream;
     tool_choice = req_config.tool_choice;
     disable_parallel_tool_use = req_config.disable_parallel_tool_use;
-    response_format = req_config.response_format;
-    output_schema = req_config.output_schema;
+    (* structured output 계약은 [supports_tool_choice_override]와 같은
+       "요청이 의견을 낼 때만 요청 우선" 병합이다. OAS Agent의 요청 config는
+       [Agent_sdk.Provider.config](라우팅 삼중항)에서 파생되어 schema 필드를
+       구조적으로 운반할 수 없으므로 언제나 [Off]/[None]으로 도착한다 — 이를
+       무조건 복사하면 base(빌드 시 validate까지 통과한 schema-carrying config)의
+       계약이 와이어 직전에 조용히 증발한다. 실제로 #22768 이후 fusion judge/panel,
+       verifier, dashboard judge 등 모든 Keeper_structured_output_schema 소비자의
+       native schema가 HTTP body에 실린 적이 없었다 (2026-07-02 hop-by-hop 추적,
+       masc#23003 후속). [Off]/[None] = 무의견 → base 유지; 요청이 명시하면 요청 우선. *)
+    response_format;
+    output_schema;
     cache_system_prompt = req_config.cache_system_prompt;
     supports_tool_choice_override =
       (match req_config.supports_tool_choice_override with
@@ -753,6 +775,23 @@ let decide_modality_reroute_for_runtime ~(assigned : Runtime.t)
       (required_modalities_for_run_with_checkpoint ~checkpoint_messages ~initial_messages
          ~goal_blocks:blocks)
     ~candidates:(media_reroute_candidates ~exclude:assigned.Runtime.id)
+
+let decide_modality_reroute_for_runtime_candidates ~(assigned : Runtime.t)
+    ~(candidates : Runtime.t list)
+    ?(checkpoint_messages = [])
+    ?(initial_messages = [])
+    (blocks : Agent_sdk.Types.content_block list) : reroute_decision =
+  decide_modality_reroute
+    ~assigned_caps:(input_capabilities_of_runtime assigned)
+    ~required_modalities:
+      (required_modalities_for_run_with_checkpoint ~checkpoint_messages
+         ~initial_messages ~goal_blocks:blocks)
+    ~candidates:
+      (candidates
+       |> List.filter (fun (runtime : Runtime.t) ->
+         not (String.equal runtime.Runtime.id assigned.Runtime.id))
+       |> List.map (fun (runtime : Runtime.t) ->
+         runtime.Runtime.id, input_capabilities_of_runtime runtime))
 
 module For_testing = struct
   let request_runtime_fields_on_base_config =

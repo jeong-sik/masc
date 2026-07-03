@@ -238,6 +238,12 @@ type judge_failure =
   | Build_error of string  (** Fusion_oas.build_agent 실패 *)
   | Parse_error of string  (** Fusion_judge_parse.of_string 파싱 실패 *)
   | Budget_exceeded of string  (** wave budget 초과로 심판 실행 전 SKIP *)
+  | Panels_unavailable of skip_reason
+      (** 패널 정족수 미달로 심판이 실행조차 되지 않음. 2026-07-01 사고에서 이
+          사유가 [Internal_error] 문자열로 압축돼 모든 keeper-가시 표면이 패널
+          전멸을 "judge failed"로 오귀속했다 — 진단 주체(키퍼)가 judge 메커니즘을
+          의심하게 만든 원인. typed로 분리해 failure_code/헤드라인이 패널 실패를
+          패널 실패로 말하게 한다. *)
   | Internal_error of string  (** all_fail_error fallback / 미분류 *)
 [@@deriving yojson, show, eq]
 

@@ -47,9 +47,9 @@ let with_temp_dir prefix f =
 let restore_env name = function
   | Some value -> Unix.putenv name value
   | None ->
-      (* This OCaml Unix module does not expose [unsetenv]. Config_dir_resolver
-         normalizes empty env values to [None], so this restores the effective
-         resolver state for these tests. *)
+      (* OCaml 5.5 adds [Unix.unsetenv], but the supported 5.4 floor used here
+         does not expose it. Config_dir_resolver normalizes empty env values to
+         [None], so this restores the effective resolver state for these tests. *)
       Unix.putenv name ""
 
 let with_empty_personas_dir f =

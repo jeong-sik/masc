@@ -9,6 +9,20 @@ let tool_ok ?(tool_name = "") message =
   Tool_result.make_ok ~tool_name ~start_time:0.0 ~data:(`String message) ()
 ;;
 
+let test_schema tool =
+  { Masc_domain.name = tool
+  ; description = "test tool " ^ tool
+  ; input_schema =
+      `Assoc
+        [ "type", `String "object"; "properties", `Assoc []; "required", `List [] ]
+  }
+;;
+
+let register_test_tool ~tool_name ~handler =
+  Tool_dispatch.register ~tool_name ~handler;
+  Tool_dispatch.register_module_tag ~schemas:[ test_schema tool_name ] ~tag:Mod_misc
+;;
+
 let str_contains haystack needle =
   let hlen = String.length haystack in
   let nlen = String.length needle in
@@ -203,9 +217,8 @@ let test_message_json_roundtrip () =
 
 let test_dispatch_structured () =
   (* Register a test handler *)
-  Tool_dispatch.register ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
+  register_test_tool ~tool_name:"__test_tool" ~handler:(fun ~name ~args:_ ->
     Some (tool_ok ~tool_name:name {|{"result":"ok"}|}));
-  Tool_dispatch.register_name_tag ~tool_name:"__test_tool" ~tag:Mod_misc;
   let token =
     match Tool_dispatch.mint_token ~name:"__test_tool" with
     | Ok t -> t

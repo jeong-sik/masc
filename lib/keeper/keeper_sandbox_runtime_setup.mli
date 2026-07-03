@@ -5,19 +5,24 @@ val docker_image_missing_next_action : string
 val run_docker_argv_with_status :
   summary:string ->
   timeout_sec:float -> string list -> Unix.process_status * string
-type classified_error = { message : string; failure_class : string; }
+type classified_error = {
+  message : string;
+  failure_class : Keeper_sandbox_runtime_classify.docker_failure_class;
+}
 val process_status_is_timeout : Unix.process_status -> bool
 val lower_contains : string -> string -> bool
 val output_looks_docker_daemon_unavailable : string -> bool
 val output_looks_image_missing : string -> bool
 val output_looks_timeout : string -> bool
 val docker_output_looks_oci_mount_failure : string -> bool
-val classify_docker_runtime_failure :
-  status:Unix.process_status -> output:string -> string
+val classify_docker_info_failure :
+  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
+val classify_docker_run_failure :
+  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
 val classify_image_inspect_failure :
-  status:Unix.process_status -> output:string -> string
+  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
 val classify_image_inventory_failure :
-  status:Unix.process_status -> output:string -> string
+  status:Unix.process_status -> output:string -> Keeper_sandbox_runtime_classify.docker_failure_class
 val docker_run_looks_daemon_pressure :
   status:Unix.process_status -> output:string -> bool
 val docker_info_security_options_with_class :

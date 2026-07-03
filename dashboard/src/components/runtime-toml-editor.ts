@@ -167,9 +167,13 @@ function stopOverlayContentClick(event: MouseEvent) {
 
 export interface RuntimeTomlEditorProps {
   onClose?: () => void
+  /** Called after a successful backend write (raw save, routing patch, or
+   *  assignment patch). Use this in parent surfaces that also display derived
+   *  runtime state so they can re-fetch and stay in sync with the editor. */
+  onSaved?: () => void
 }
 
-export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
+export function RuntimeTomlEditor({ onClose, onSaved }: RuntimeTomlEditorProps = {}) {
   const textareaRef = useRef<HTMLTextAreaElement | null>(null)
   const lineGutterRef = useRef<HTMLPreElement | null>(null)
   const [loadState, setLoadState] = useState<LoadState>('loading')
@@ -203,6 +207,8 @@ export function RuntimeTomlEditor({ onClose }: RuntimeTomlEditorProps = {}) {
     } catch (err: unknown) {
       setNotice('적용됨')
       setError(`대시보드 런타임 갱신 실패: ${errorToString(err)}`)
+    } finally {
+      onSaved?.()
     }
   }
 

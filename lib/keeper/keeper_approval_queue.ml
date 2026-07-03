@@ -417,6 +417,8 @@ module For_testing = struct
   ;;
 
   let first_cmd_token = first_cmd_token
+
+  let get_pending_entry ~id = SMap.find_opt id (Atomic.get pending)
 end
 
 let action_key_of_input ~tool_name ~(input : Yojson.Safe.t) =
@@ -510,10 +512,34 @@ let create_entry
   ; selected_model
   ; disposition
   ; disposition_reason
+  ; phase = Awaiting_operator
   ; audit_base_path
   ; resolver
   ; on_resolution
   }
+;;
+
+let update_pending_phase ~id phase =
+  atomic_update pending (fun map ->
+    match SMap.find_opt id map with
+    | None -> map
+    | Some entry ->
+      let entry' = { entry with phase } in
+      SMap.add id entry' map);
+  match SMap.find_opt id (Atomic.get pending) with
+  | Some entry when entry.phase = phase -> Some entry
+  | Some entry ->
+    Log.Keeper.warn
+      "approval_queue: update_pending_phase id=%s phase race current=%s expected=%s"
+      id
+      (pending_phase_to_string entry.phase)
+      (pending_phase_to_string phase);
+    None
+  | None ->
+    Log.Keeper.warn
+      "approval_queue: update_pending_phase id=%s not found"
+      id;
+    None
 ;;
 
 let pending_entry_json_fields
@@ -528,6 +554,7 @@ let pending_entry_json_fields
   ; "action_key", `String entry.action_key
   ; "sandbox_target", `String entry.sandbox_target
   ; "risk_level", `String (risk_level_to_string entry.risk_level)
+  ; "phase", `String (pending_phase_to_string entry.phase)
   ; "requested_at", `Float entry.requested_at
   ; "waiting_s", `Float (Unix.gettimeofday () -. entry.requested_at)
   ; "turn_id", Json_util.int_opt_to_json entry.turn_id
@@ -749,7 +776,7 @@ let sort_entries_by_requested_at entries =
 
 let default_noncritical_approval_timeout_s = 600.0
 
-let default_critical_approval_escalation_after_s = 3600.0
+let default_critical_approval_escalation_after_s = 1800.0
 
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.
@@ -885,6 +912,9 @@ let submit_and_await
            ?selected_model
            ~audit_disposition:(Approval_escalated reason)
            ();
+         (match update_pending_phase ~id Escalated with
+          | Some escalated_entry -> broadcast_pending escalated_entry
+          | None -> ());
          (* Escalated — keep waiting for operator, do not reject *)
          Eio.Promise.await promise)
     | None, _ -> Eio.Promise.await promise

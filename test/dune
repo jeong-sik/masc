@@ -55,6 +55,7 @@
   test_tool_agent_timeline_name_match
   test_keeper_idle_threshold_contract
   test_provider_tool_support_caps
+  test_runtime_request_config_merge
   test_keeper_context_layers
   test_keeper_hooks_oas_introspection
   test_board_activity_cache
@@ -120,6 +121,7 @@
   test_attempt_state
   test_runtime_attempt_fsm
   test_keeper_turn_driver_accept
+  test_keeper_turn_driver_failover
   test_domain_pool
   test_sse
   test_graphql_api
@@ -159,6 +161,7 @@
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
   test_keeper_tool_duration_buckets
+  test_keeper_catchup_digest
   test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
@@ -251,6 +254,7 @@
   test_keeper_secret_projection
   test_keeper_secret_redaction
   test_keeper_toml
+  test_runtime_missing_catalog_report
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
@@ -358,7 +362,8 @@
   test_event_log
   test_relation_materializer
   test_keeper_behavior_trace
-  test_keeper_wire_capture)
+  test_keeper_wire_capture
+  test_board_rest_routes)
  (modules
   test_keeper_lifecycle_gate
   test_keeper_lifecycle_global_gate
@@ -389,6 +394,7 @@
   test_tool_agent_timeline_name_match
   test_keeper_idle_threshold_contract
   test_provider_tool_support_caps
+  test_runtime_request_config_merge
   test_keeper_context_layers
   test_keeper_hooks_oas_introspection
   test_board_activity_cache
@@ -455,6 +461,7 @@
   test_attempt_state
   test_runtime_attempt_fsm
   test_keeper_turn_driver_accept
+  test_keeper_turn_driver_failover
   test_domain_pool
   test_sse
   test_graphql_api
@@ -494,6 +501,7 @@
   test_keeper_hooks_oas_log_shape
   test_keeper_idle_metric
   test_keeper_tool_duration_buckets
+  test_keeper_catchup_digest
   test_keeper_memory_summary_label_redaction
   test_keeper_tool_use_failure_counter
   test_keeper_compaction_outcome_counter
@@ -586,6 +594,7 @@
   test_keeper_secret_projection
   test_keeper_secret_redaction
   test_keeper_toml
+  test_runtime_missing_catalog_report
   test_runtime_toml_overrides
   test_runtime_provider_auth_headers
   test_dashboard_runtime_probe_nonblocking
@@ -698,7 +707,8 @@
   test_event_log
   test_relation_materializer
   test_keeper_behavior_trace
-  test_keeper_wire_capture)
+  test_keeper_wire_capture
+  test_board_rest_routes)
  (libraries masc_test_deps multimodal))
 
 ; Operator snapshot cache: stale-while-revalidate + background refresh.
@@ -801,6 +811,13 @@
  (name test_fusion_adaptive_timeout)
  (modules test_fusion_adaptive_timeout)
  (libraries masc_test_deps masc.fusion_core))
+
+; RFC-0266 §7 Phase D — fusion run registry persistence: JSONL append + replay.
+
+(test
+ (name test_fusion_run_registry_persist)
+ (modules test_fusion_run_registry_persist)
+ (libraries alcotest fs_compat yojson masc.fusion_core))
 
 ; RFC-0207: per-keeper LLM runtime routing (persona [model] selection + driver fail-fast).
 
@@ -1926,6 +1943,8 @@
 
 (include stanzas/test_keeper_identity_drift_counter.inc)
 
+(include stanzas/test_keeper_composite_live_turn_surface.inc)
+
 (include stanzas/test_keeper_runtime_manifest_completeness.inc)
 
 (include stanzas/test_keeper_runtime_manifest_clock_separation.inc)
@@ -2033,6 +2052,8 @@
 (include stanzas/test_keeper_approval_queue_rules_types.inc)
 
 (include stanzas/test_keeper_approval_queue_rules.inc)
+
+(include stanzas/test_keeper_approval_queue.inc)
 
 (include stanzas/test_keeper_toml_parser.inc)
 

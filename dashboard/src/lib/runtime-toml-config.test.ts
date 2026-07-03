@@ -379,12 +379,81 @@ sangsu = "runpod_mtp.qwen"
     expect(next).not.toContain('max-context =')
   })
 
-  it('extracts json-support from model config', () => {
-    const sourceWithJson = `${sourceText}\n[models.structured]\njson-support = true\n`
-    const env = parseRuntimeTomlEnvironment(sourceWithJson)
+  it('reads model capabilities from the nested [models.<id>.capabilities] section', () => {
+    const sourceWithCaps = `${sourceText}
+[models.structured]
+api-name = "structured-v1"
+max-context = 200000
+tools-support = true
+thinking-support = true
+streaming = true
+
+[models.structured.capabilities]
+supports-tool-choice = true
+supports-response-format-json = true
+supports-structured-output = false
+supports-multimodal-inputs = true
+thinking-control-format = "reasoning-effort"
+`
+    const env = parseRuntimeTomlEnvironment(sourceWithCaps)
 
     const structuredModel = env.models.find(m => m.id === 'structured')
-    expect(structuredModel?.jsonSupport).toBe(true)
+    expect(structuredModel).toMatchObject({
+      jsonSupport: true,
+      toolChoice: true,
+      structuredOutput: false,
+      multimodal: true,
+      thinkingControlFormat: 'reasoning-effort',
+    })
+  })
+
+  it('treats absent capability keys as unknown (null), never a fabricated false', () => {
+    // qwen in the base fixture declares no [models.qwen.capabilities] section.
+    const env = parseRuntimeTomlEnvironment(sourceText)
+    const qwen = env.models.find(m => m.id === 'qwen')
+    expect(qwen).toMatchObject({
+      jsonSupport: null,
+      toolChoice: null,
+      structuredOutput: null,
+      multimodal: null,
+      thinkingControlFormat: null,
+    })
+  })
+
+  it('derives multimodal from supports-image-input when the multimodal key is absent', () => {
+    const source = `${sourceText}
+[models.vision]
+api-name = "vision-v1"
+
+[models.vision.capabilities]
+supports-image-input = true
+`
+    const env = parseRuntimeTomlEnvironment(source)
+    expect(env.models.find(m => m.id === 'vision')?.multimodal).toBe(true)
+  })
+
+  it('reads per-M binding prices when declared, and leaves them null otherwise', () => {
+    const priced = parseRuntimeTomlEnvironment(
+      sourceText.replace('keep-alive = "10m"', 'keep-alive = "10m"\nprice-input = 0.14\nprice-output = 0.28'),
+    )
+    const pricedBinding = priced.bindings.find(b => b.id === 'runpod_mtp.qwen')
+    expect(pricedBinding?.priceInput).toBe(0.14)
+    expect(pricedBinding?.priceOutput).toBe(0.28)
+
+    const bare = parseRuntimeTomlEnvironment(sourceText)
+    const bareBinding = bare.bindings.find(b => b.id === 'runpod_mtp.qwen')
+    expect(bareBinding?.priceInput).toBeNull()
+    expect(bareBinding?.priceOutput).toBeNull()
+  })
+
+  it('writes the JSON capability to the nested capabilities section using the server SSOT key', () => {
+    const next = setRuntimeTomlModelField(sourceText, 'qwen', 'json-support', true)
+    expect(next).toContain('[models.qwen.capabilities]')
+    expect(next).toContain('supports-response-format-json = true')
+    // the legacy top-level key the server ignored must not be written
+    expect(next).not.toContain('json-support = true')
+    // and it round-trips back through the parser
+    expect(parseRuntimeTomlEnvironment(next).models.find(m => m.id === 'qwen')?.jsonSupport).toBe(true)
   })
 
   it('creates a brand-new provider from fields set on a not-yet-existing id', () => {

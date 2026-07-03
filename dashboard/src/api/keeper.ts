@@ -27,6 +27,7 @@ import type {
   FleetCompositeSnapshot,
 } from './schemas/keeper-composite'
 import type { KeeperChatHistoryMessage } from './schemas/keeper-chat-history'
+import type { KeeperCatchupDigest } from './schemas/keeper-catchup-digest'
 import type {
   KeeperTransition,
   KeeperTransitionsResponse,
@@ -37,6 +38,10 @@ export type {
   KeeperCompositeInvariants,
   KeeperCompositeMeasurement,
   KeeperLastOutcome,
+  KeeperLiveTurn,
+  KeeperLastSkip,
+  KeeperLivelock,
+  KeeperBoardCursor,
   KeeperCompositeExecution,
   KeeperRuntimeAttention,
   KeeperSecretProjection,
@@ -671,6 +676,32 @@ export async function fetchKeeperChatHistory(
   return data
     .map(safeParseKeeperChatHistoryMessage)
     .filter((m): m is KeeperChatHistoryMessage => m !== null)
+}
+
+// Since-last-seen catch-up digest for one keeper. `sinceUnix` is the operator's
+// per-keeper last-seen cursor (unix seconds). The whole payload is decoded and
+// thrown on drift (unlike chat history's tolerant per-row drop) so a malformed
+// digest can never render a wrong count. Same raw-fetch + jsonHeaders()
+// convention as fetchKeeperChatHistory; the valibot schema is imported lazily
+// to keep it out of the initial bundle.
+export async function fetchKeeperCatchupDigest(
+  keeperName: string,
+  sinceUnix: number,
+): Promise<KeeperCatchupDigest> {
+  const resp = await fetch(
+    `/api/v1/keepers/${encodeURIComponent(keeperName)}/digest?since_unix=${encodeURIComponent(String(sinceUnix))}`,
+    { headers: jsonHeaders() },
+  )
+  if (!resp.ok) {
+    throw new Error(`fetchKeeperCatchupDigest: HTTP ${resp.status} ${resp.statusText}`)
+  }
+  const data: unknown = await resp.json()
+  const { parseKeeperCatchupDigest } = await import('./schemas/keeper-catchup-digest')
+  const digest = parseKeeperCatchupDigest(data)
+  if (!digest) {
+    throw new Error('fetchKeeperCatchupDigest: invalid digest payload')
+  }
+  return digest
 }
 
 // --- Keeper observability API ---

@@ -271,7 +271,7 @@ let test_emit_board_failure_is_best_effort () =
     let keeper = "bad/keeper" in
     let run_id = Printf.sprintf "fus-board-fail-%d" (Random.bits ()) in
     let resolved_answer = "BOARD-BEST-EFFORT-ANSWER" in
-    Fusion_run_registry.register_running Fusion_run_registry.global ~run_id ~keeper
+    Fusion_run_registry.register_running (Fusion_run_registry.global ()) ~run_id ~keeper
       ~preset:"unit-test" ~started_at:1.0;
     let result =
       Fusion_sink.emit ~base_dir ~keeper ~run_id ~question:"q" ~panel:[]
@@ -279,11 +279,11 @@ let test_emit_board_failure_is_best_effort () =
         ~judge_usage:Fusion_types.zero_usage
     in
     check bool "board failure does not fail emit" true (Result.is_ok result);
-    (match Fusion_run_registry.get Fusion_run_registry.global ~run_id with
+    (match Fusion_run_registry.get (Fusion_run_registry.global ()) ~run_id with
      | Some run ->
        (match run.Fusion_run_registry.status with
-        | Fusion_run_registry.Completed { ok = true } -> ()
-        | Fusion_run_registry.Completed { ok = false } ->
+        | Fusion_run_registry.Completed { ok = true; _ } -> ()
+        | Fusion_run_registry.Completed { ok = false; _ } ->
           fail "fusion run should complete with ok=true"
         | Fusion_run_registry.Running -> fail "fusion run should not remain running")
      | None -> fail "fusion run should remain visible");

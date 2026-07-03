@@ -79,6 +79,12 @@ let should_resume_merge
     || stop_reason_requests_resume_merge stop_reason
 ;;
 
+let replay_response_text_for_capture ~suppress_visible_response ~response_text =
+  if suppress_visible_response || String.trim response_text = ""
+  then None
+  else Some response_text
+;;
+
 let rec messages_prefix_equal expected actual =
   match expected, actual with
   | [], _ -> true
@@ -227,6 +233,7 @@ module For_testing = struct
 
   let checkpoint_for_replay_persistence = checkpoint_for_replay_persistence
   let should_resume_merge = should_resume_merge
+  let replay_response_text_for_capture = replay_response_text_for_capture
 end
 
 let finalize
@@ -256,6 +263,7 @@ let finalize
     ~pre_dispatch_compaction_before_tokens
     ~pre_dispatch_compaction_after_tokens
     ~raw_response_text
+    ~capture_replay_response
     () =
   let budget_exhausted =
     Keeper_agent_run_response_text.stop_reason_is_turn_budget_exhausted
@@ -330,25 +338,30 @@ let finalize
     ()
   in
   receipt_response_text_present_ref := raw_response_text_present;
+  let replay_response_text =
+    replay_response_text_for_capture ~suppress_visible_response ~response_text
+  in
   let assistant_msg =
-    if suppress_visible_response || String.trim response_text = ""
-    then None
-    else
-      Some
-        (Agent_sdk.Types.make_message
+    Option.map
+      (fun replay_response_text ->
+         Agent_sdk.Types.make_message
            ~role:Agent_sdk.Types.Assistant
            ~metadata:
              [ ( Keeper_memory_policy.replay_metadata_key
                , Keeper_memory_policy.replay_metadata_of_snapshot
                    state_snapshot )
              ]
-           [ Agent_sdk.Types.Text response_text ])
+           [ Agent_sdk.Types.Text replay_response_text ])
+      replay_response_text
   in
-  Option.iter
-    (Keeper_context_runtime.persist_message
+  (match replay_response_text, assistant_msg with
+   | Some response_text, Some assistant_msg ->
+     Keeper_context_runtime.persist_message
        ~source:history_assistant_source
-       session)
-    assistant_msg;
+       session
+       assistant_msg;
+     capture_replay_response ~response_text
+   | _ -> ());
   let saved_checkpoint_result =
     match result.checkpoint with
     | Some checkpoint ->

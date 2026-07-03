@@ -541,6 +541,7 @@ let test_runtime_adapter_keeps_auth_out_of_headers () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -575,6 +576,7 @@ let test_runtime_adapter_filters_toml_auth_headers () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -610,6 +612,7 @@ let provider_cfg () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; lane_decls = []
     }
   in
   match Runtime_adapter.binding_to_provider_config cfg runpod_binding with
@@ -690,6 +693,7 @@ let runtime_or_fail ?(provider = runpod_provider) () =
     ; keeper_assignments = []
     ; media_failover = []
     ; pause_threshold = Runtime_schema.pause_threshold_default
+    ; lane_decls = []
     }
   in
   match Runtime.of_binding cfg runpod_binding with
@@ -949,7 +953,7 @@ let test_runtime_agent_context_uses_configured_turn_budget () =
     ; response_format = Agent_sdk.Types.default_config.response_format
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create ~eio:false ()
+    ; context = Agent_sdk.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }
@@ -989,7 +993,7 @@ let test_runtime_agent_context_preserves_unbounded_resume_budget () =
     ; response_format = Agent_sdk.Types.default_config.response_format
     ; thinking_budget = None
     ; cache_system_prompt = false
-    ; context = Agent_sdk.Context.create ~eio:false ()
+    ; context = Agent_sdk.Context.create_sync ()
     ; mcp_sessions = []
     ; working_context = None
     }

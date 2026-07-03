@@ -22,11 +22,12 @@
    than silently collapsing [2] into [1].
 
    It is keeper-independent: it bypasses [Fusion_orchestrator.run] (gate +
-   hourly budget + keeper chat-lane sink) and calls [Fusion_panel.run] and
+   keeper chat-lane sink) and calls [Fusion_panel.run] and
    [Fusion_judge.run] directly. Bypassing the orchestrator avoids the sink
    side effect (which writes a transcript to a keeper chat lane and, for a
    synthetic keeper, can return [Sink_failed] and discard the computed panel
-   and judge results) and the shared hourly budget counter.
+   and judge results). (An hourly budget counter used to be listed here; it
+   was removed in PR #22051 and no invocation rate limit exists.)
 
    The baseline and the self-consistency arm reuse [Fusion_panel.run] so the
    call path is identical to a panel member: the arms differ only in model set
@@ -175,12 +176,13 @@ let run_harness ~sw ~net ~(policy : Fusion_policy.t) ~(preset : Fusion_policy.pr
     prompt;
 
   let run_panel ~max_fibers ~models =
+    let groups = [ { g0 with Fusion_policy.models } ] in
     Masc.Fusion_panel.run
       ~sw
       ~net
       ~max_fibers
-      ~outer_timeout_s:g0.Fusion_policy.timeout_s
-      ~groups:[ { g0 with Fusion_policy.models } ]
+      ~outer_timeout_s:(Fusion_policy.panel_outer_timeout_of ~max_fibers groups)
+      ~groups
       ~prompt
       ()
   in
@@ -381,6 +383,15 @@ let () =
   Eio_main.run @@ fun env ->
   Mirage_crypto_rng_unix.use_default ();
   Time_compat.set_clock (Eio.Stdenv.clock env);
+  (* Register the ambient Eio clock the agent runtime resolves via
+     [Process_eio.get_clock]. Without this, any runtime config that sets
+     [stream_idle_timeout_s] fails closed at agent build time ("no clock
+     resolvable ... refusing to run with a silently disarmed stream idle
+     timeout") and every panel/judge call aborts before the first request. *)
+  Process_eio.init
+    ~cwd_default:(Eio.Stdenv.fs env)
+    ~proc_mgr:(Eio.Stdenv.process_mgr env)
+    ~clock:(Eio.Stdenv.clock env);
   Eio.Switch.run @@ fun sw ->
   let net = Eio.Stdenv.net env in
   (* Capture the Eio handles the OAS/fusion call path reads via

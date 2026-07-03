@@ -323,12 +323,38 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
     (* board post — 패널 답변 전체 + 심판 종합을 쿼리 가능한 구조화 증거(meta_json)로.
        사용자는 대시보드 board에서 상세를 본다. chat lane *서사*를 board로 옮긴 것이
        RFC §8.1 대비 변경점(키퍼 observation 도배 방지). 실패는 [Error]로 orchestrator에. *)
+    (* 실패한 패널의 per-panel 사유 요약. 실패 headline/chat이 이걸 나르지 않으면
+       사유는 meta_json에만 남는데, 키퍼 도구(masc_board_post_get)는 title/body만
+       렌더하므로 키퍼가 원인에 도달할 tool-reachable 경로가 없다 (2026-07-01:
+       "0 of 3 panels answered"만 보고 judge 메커니즘 고장으로 오진, 수 시간 소모). *)
+    let failed_panel_lines =
+      panel
+      |> List.filter_map (fun (o : Fusion_types.panel_outcome) ->
+             match o with
+             | Fusion_types.Answered _ -> None
+             | Fusion_types.Failed { failed_model; reason } ->
+               Some
+                 (Printf.sprintf "- %s: %s" failed_model
+                    (Fusion_oas.panel_failure_text reason)))
+    in
+    let render_failure f =
+      let base =
+        Printf.sprintf "%s: %s"
+          (Fusion_types.judge_failure_tag f)
+          (Fusion_types.judge_failure_text f)
+      in
+      match failed_panel_lines with
+      | [] -> base
+      | lines -> base ^ "\n" ^ String.concat "\n" lines
+    in
     let board_headline =
       match judge with
       | Ok j ->
         Printf.sprintf "Fusion deliberation (run %s): %s" run_id
           (render_decision j.Fusion_types.decision)
-      | Error _ -> Printf.sprintf "Fusion deliberation (run %s): judge failed" run_id
+      | Error f ->
+        Printf.sprintf "Fusion deliberation (run %s) failed — %s" run_id
+          (render_failure f)
     in
     let meta_json =
       Some
@@ -374,39 +400,48 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
        [Fusion] block을 함께 첨부해 대시보드가 결론 카드를 패널/심판 상세로 펼치게 한다.
        block은 content가 아니므로 키퍼 observation(recent_direct_conversation, role/content만
        읽음)을 도배하지 않는다 → librarian은 메인 chat 결론(content)을 fact로 추출하고,
-       사용자만 카드 상세를 본다(강결합 없는 통합). judge 실패 시에는 메인 흐름을
-       오염시키지 않으려 결론을 남기지 않는다(board에는 실패도 증거로 남는다). *)
+       사용자만 카드 상세를 본다(강결합 없는 통합).
+
+       judge 실패도 결론이다: 실패 사유(+ per-panel 사유)를 같은 lane에 남긴다.
+       이전에는 "메인 흐름 비오염"을 이유로 실패 시 아무것도 남기지 않았는데,
+       그 결과 (a) wake 일회성 preview가 유일한 사유 전달 채널이 됐고(비-Running
+       키퍼면 조용히 유실 — keeper_keepalive_signal은 Running만 깨움), (b) 키퍼가
+       실패 원인을 조회할 수 있는 durable 표면이 없어 폴링·오진을 유발했다
+       (2026-07-01 사고). denied/sink_failed/aborted가 이미 같은 메인 lane에
+       남는 것(fusion_tool.append_chat_failure)과도 정합. *)
     let chat_lane_result =
-      match judge with
-      | Ok j ->
-        let content =
+      let content =
+        match judge with
+        | Ok j ->
           Printf.sprintf "Fusion deliberation (run %s) — %s\n\n%s" run_id
             (render_decision j.Fusion_types.decision)
             j.Fusion_types.resolved_answer
-        in
-        let blocks =
-          match board_result with
-          | Ok (post : Board.post) ->
-            Some
-              [ Keeper_chat_blocks.Fusion
-                  { board_post_id = Board.Post_id.to_string post.id; run_id }
-              ]
-          | Error _ -> None
-          (* board 생성 실패 시 카드 링크를 생략하되 결론은 남긴다(키퍼가 인지). *)
-        in
-        (* .mli 계약: chat store append 예외 시 [Error msg]를 반환한다. unit 버전은
-           실패를 삼켜 emit이 Ok를 반환했었다(silent drop). [_result] 변형으로 실패를
-           surface한다. 성공한 경우에만 broadcast한다. *)
-        (match
-           Keeper_chat_store.append_assistant_message_result ~base_dir
-             ~keeper_name:keeper ~content ?blocks ()
-         with
-         | Ok () ->
-           Keeper_chat_broadcast.chat_appended ~keeper_name:keeper
-             ~source:"fusion" ~content ();
-           Ok ()
-         | Error _ as e -> e)
-      | Error _ -> Ok ()
+        | Error f ->
+          Printf.sprintf "Fusion deliberation (run %s) failed — %s" run_id
+            (render_failure f)
+      in
+      let blocks =
+        match board_result with
+        | Ok (post : Board.post) ->
+          Some
+            [ Keeper_chat_blocks.Fusion
+                { board_post_id = Board.Post_id.to_string post.id; run_id }
+            ]
+        | Error _ -> None
+        (* board 생성 실패 시 카드 링크를 생략하되 결론은 남긴다(키퍼가 인지). *)
+      in
+      (* .mli 계약: chat store append 예외 시 [Error msg]를 반환한다. unit 버전은
+         실패를 삼켜 emit이 Ok를 반환했었다(silent drop). [_result] 변형으로 실패를
+         surface한다. 성공한 경우에만 broadcast한다. *)
+      match
+        Keeper_chat_store.append_assistant_message_result ~base_dir
+          ~keeper_name:keeper ~content ?blocks ()
+      with
+      | Ok () ->
+        Keeper_chat_broadcast.chat_appended ~keeper_name:keeper
+          ~source:"fusion" ~content ();
+        Ok ()
+      | Error _ as e -> e
     in
     (* RFC-0266 (개정, board best-effort): completion 여부는 *키퍼가 결론을 받았는가*
        (chat lane)로 판정한다. board post는 증거 카드일 뿐이므로 그 생성 실패는 fatal이
@@ -430,17 +465,26 @@ let emit ~base_dir ~keeper ~run_id ~question ~panel ~judge ~judges ~judge_usage 
              (Board.show_board_error e);
            ""
        in
-       let ok, resolved_answer =
-         match judge with
-         | Ok j -> true, j.Fusion_types.resolved_answer
-         | Error e ->
-           false, Printf.sprintf "judge failed: %s" (Fusion_types.judge_failure_text e)
-       in
-       (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake 직전 무조건 호출. *)
-       Fusion_run_registry.mark_completed Fusion_run_registry.global ~run_id ~ok;
-       broadcast_run_status ~registry:Fusion_run_registry.global ~run_id;
-       wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok
-         ~resolved_answer ~board_post_id;
+       (* RFC-0266 §7: registry를 Completed로 갱신(가시성). wake 직전 무조건 호출.
+          실패 시 사유/태그를 함께 기록해 masc_fusion_status·SSE가 opaque
+          "failed"가 되지 않게 한다. *)
+       (match judge with
+        | Ok j ->
+          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+            ~ok:true ();
+          broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+          wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:true
+            ~resolved_answer:j.Fusion_types.resolved_answer ~board_post_id
+        | Error e ->
+          Fusion_run_registry.mark_completed (Fusion_run_registry.global ()) ~run_id
+            ~failure:(Fusion_types.judge_failure_text e)
+            ~failure_code:(Fusion_types.judge_failure_tag e)
+            ~ok:false ();
+          broadcast_run_status ~registry:(Fusion_run_registry.global ()) ~run_id;
+          wake_keeper_on_fusion_completion ~base_dir ~keeper ~run_id ~ok:false
+            ~resolved_answer:
+              (Printf.sprintf "fusion run failed — %s" (render_failure e))
+            ~board_post_id);
        Ok ())
   with
   | Eio.Cancel.Cancelled _ as exn -> raise exn

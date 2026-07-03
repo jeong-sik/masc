@@ -68,6 +68,36 @@ let build_base_system_prompt
     ~home_ground:config.base_path
     ()
 
+let max_tokens_fallback ~keeper_name profile_defaults () =
+  match
+    Keeper_types_profile.unified_max_tokens_override_of_oas_env
+      ~keeper_name
+      profile_defaults.oas_env
+  with
+  | Some value -> value
+  | None -> 8192
+
+let resolve_max_tokens_for_runtime_with_profile ~keeper_name ~profile_defaults
+      ?max_tokens ~runtime_id ()
+  =
+  match max_tokens with
+  | Some t ->
+    Runtime_inference.cap_max_tokens_to_runtime_ceiling
+      ~runtime_id
+      ~source:"caller_override"
+      t
+  | None ->
+    Runtime_inference.resolve_max_tokens
+      ~runtime_id
+      ~fallback:(max_tokens_fallback ~keeper_name profile_defaults)
+
+let resolve_max_tokens_for_runtime ~keeper_name ~runtime_id ?max_tokens () =
+  let profile_defaults =
+    Keeper_types_profile.load_keeper_profile_defaults keeper_name
+  in
+  resolve_max_tokens_for_runtime_with_profile
+    ~keeper_name ~profile_defaults ?max_tokens ~runtime_id ()
+
 let prepare_run_context
       ~(config : Workspace.config)
       ~(meta : keeper_meta)
@@ -101,26 +131,12 @@ let prepare_run_context
         ~runtime_id ~fallback:(fun () -> 0.3)
   in
   let max_tokens =
-    match max_tokens with
-    | Some t ->
-      Runtime_inference.cap_max_tokens_to_runtime_ceiling
-        ~runtime_id
-        ~source:"caller_override"
-        t
-    | None ->
-      Runtime_inference.resolve_max_tokens
-        ~runtime_id
-          (* 8192 allows complex multi-tool reasoning per turn.
-           Cloudflare tunnel 100s is no longer a constraint with
-           streaming responses. *)
-        ~fallback:(fun () ->
-          match
-            Keeper_types_profile.unified_max_tokens_override_of_oas_env
-              ~keeper_name:meta.name
-              profile_defaults.oas_env
-          with
-          | Some value -> value
-          | None -> 8192)
+    resolve_max_tokens_for_runtime_with_profile
+      ~keeper_name:meta.name
+      ~profile_defaults
+      ?max_tokens
+      ~runtime_id
+      ()
   in
   (* 0b. Create context injector for temporal awareness *)
   let injector_config = Masc_context_injector.default_config () in
@@ -128,7 +144,7 @@ let prepare_run_context
   let shared_context =
     match shared_context with
     | Some ctx -> ctx
-    | None -> Agent_sdk.Context.create ~eio:true ()
+    | None -> Agent_sdk.Context.create ()
   in
   (* 1. Ensure session directory tree exists *)
   let session_dir =

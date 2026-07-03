@@ -914,6 +914,18 @@ supports-multimodal-inputs = false
 [ollama.gemma4-26b-a4b-qat]
 max-concurrent = 1
 
+# ── Runtime lanes (ordered failover) ─────────────────────────────────
+# A lane is an ordered list of runtime candidates. When a keeper is assigned
+# to a lane, the turn attempts candidates in order until one succeeds or the
+# lane is exhausted. Lanes are resolved at config load; unknown candidate ids
+# abort startup. Only the "ordered" strategy is implemented today.
+[runtime.lanes.default]
+strategy = "ordered"
+candidates = [
+  "ollama_cloud.deepseek-v4-flash",
+  "deepseek.deepseek-v4-pro",
+]
+
 # ── Keeper assignments ──────────────────────────────────────────────
 # Keepers are assigned to a model by provider.model key. Unassigned
 # keepers fall back to [runtime].default. Per-keeper overrides in the
@@ -925,6 +937,8 @@ max-concurrent = 1
 # judge/evaluator lanes ([runtime].cross_verifier and [fusion].judge).
 [runtime.assignments]
 nick0cave = "ollama.gemma4-26b-a4b-qat"
+# example: route a test keeper through the failover lane
+# canary = "default"
 
 # ── Discord ──────────────────────────────────────────────────────────
 # Trigger policy controls which inbound Discord events the bot responds to.

@@ -234,6 +234,8 @@ let ensure_task_contract_for_verification ?contract ~title ~description () =
   let required_evidence =
     if base.required_evidence <> []
     then base.required_evidence
+    else if base.verify_gate_evidence <> []
+    then base.verify_gate_evidence
     else default_verification_evidence_refs
   in
   let verify_gate_evidence =

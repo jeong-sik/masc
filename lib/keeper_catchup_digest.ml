@@ -8,11 +8,21 @@ let digest_items_cap = 20
    payload out without limit; the digest reports at most this many failures. *)
 let read_errors_cap = 50
 
-(* Retention SSOT is MASC_JSONL_RETENTION_DAYS (default 30d); look-back is
-   clamped to this window plus slack so a far-past cursor cannot fan the
-   day-file scan out unboundedly. Beyond it the counts are a lower bound and
-   the echoed [since_unix] lets the client detect it. *)
-let max_scan_days = 40
+let jsonl_retention_env = "MASC_JSONL_RETENTION_DAYS"
+let default_jsonl_retention_days = 30
+
+(* Retention SSOT is MASC_JSONL_RETENTION_DAYS, read the same way as startup
+   and periodic pruning. The digest still uses the default when pruning is
+   disabled with a non-positive value; otherwise an old cursor could trigger
+   an unbounded synchronous scan from a dashboard read. *)
+let jsonl_retention_scan_days () =
+  let days =
+    Safe_ops.get_env_int_logged
+      jsonl_retention_env
+      ~default:default_jsonl_retention_days
+  in
+  if days > 0 then days else default_jsonl_retention_days
+;;
 
 (* Termination guard for the backward chat paging loop: each page walks at
    most one [Keeper_chat_store] window older, so this bounds the walk. *)
@@ -88,9 +98,15 @@ type lifecycle =
   ; items : lifecycle_item list
   }
 
+type truncation_cause =
+  | Chat_page_cap
+  | Chat_retention_window
+  | Jsonl_retention_window
+  | Crash_scan_cap
+
 type source_coverage =
   { lower_bound : bool
-  ; reason : string option
+  ; causes : truncation_cause list
   }
 
 type coverage =
@@ -194,14 +210,14 @@ let read_jsonl_file ~errs ~label ~path ~f =
 ;;
 
 (* Iterate day-partitioned files [dir/YYYY-MM/DD.jsonl] whose UTC day is in
-   [[since_unix, now_unix]] (look-back clamped to {!max_scan_days}). A missing
+   [[since_unix, now_unix]] (look-back clamped to [scan_days]). A missing
    day-file is zero activity, not an error. Day indexing off [ts /. 86400] is
    month/year-boundary safe because 86400 divides UTC days exactly and the
    epoch is UTC midnight. *)
-let fold_day_partitioned ~errs ~label ~dir ~since_unix ~now_unix ~f =
+let fold_day_partitioned ~errs ~label ~dir ~since_unix ~now_unix ~scan_days ~f =
   let day_seconds = 86400. in
   let clamped_since =
-    Float.max since_unix (now_unix -. (float_of_int max_scan_days *. day_seconds))
+    Float.max since_unix (now_unix -. (float_of_int scan_days *. day_seconds))
   in
   let day_index ts = int_of_float (Float.floor (ts /. day_seconds)) in
   let path_of_day d =
@@ -307,6 +323,8 @@ let read_chat ~base_dir ~keeper_name ~since ~errs =
 
 let build ~base_path ~keeper_name ~since_unix ~now_unix =
   let errs = ref [] in
+  let scan_days = jsonl_retention_scan_days () in
+  let retention_start = now_unix -. (float_of_int scan_days *. Masc_time_constants.day) in
   let identity_of candidate =
     Tool_agent_timeline.identity_matches ~agent_name:keeper_name candidate
   in
@@ -321,6 +339,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
   let chat, chat_truncated =
     read_chat ~base_dir:base_path ~keeper_name ~since:since_unix ~errs
   in
+  let chat_retention_truncated = since_unix < retention_start in
   (* turns.completed — keeper-local turn-records *)
   let completed = ref 0 in
   let turns_day_truncated =
@@ -330,6 +349,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       ~dir:(keeper_local Common.Keeper_turn_records)
       ~since_unix
       ~now_unix
+      ~scan_days
       ~f:(fun json ->
         match json_num_field "ts" json with
         | Some ts when ts > since_unix -> incr completed
@@ -364,6 +384,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       ~dir:(Filename.concat masc_dir activity_events_dirname)
       ~since_unix
       ~now_unix
+      ~scan_days
       ~f:(fun json ->
         match Activity_graph.event_of_yojson json with
         | None -> ()
@@ -400,6 +421,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       ~dir:(Filename.concat masc_dir audit_dirname)
       ~since_unix
       ~now_unix
+      ~scan_days
       ~f:(fun json ->
         match Audit_log.entry_of_json_r json with
         | Error _ ->
@@ -459,6 +481,7 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       ~dir:(Filename.concat masc_dir transition_audit_dirname)
       ~since_unix
       ~now_unix
+      ~scan_days
       ~f:(fun json ->
         match
           Safe_ops.json_string_opt "keeper" json, Safe_ops.json_member_opt "record" json
@@ -490,45 +513,21 @@ let build ~base_path ~keeper_name ~since_unix ~now_unix =
       false
   in
   let coverage =
-    let day_reason =
-      Some (Printf.sprintf "scan window clamped to %d days" max_scan_days)
-    in
-    let chat_reason =
-      Some (Printf.sprintf "chat page cap (%d pages) reached before since_unix" chat_page_cap)
-    in
-    let crash_reason =
-      Some (Printf.sprintf "crash scan capped at %d events" crash_scan_max)
-    in
+    let source causes = { lower_bound = causes <> []; causes } in
     { chat =
-        { lower_bound = chat_truncated
-        ; reason = if chat_truncated then chat_reason else None
-        }
+        source
+          ((if chat_truncated then [ Chat_page_cap ] else [])
+           @ if chat_retention_truncated then [ Chat_retention_window ] else [])
     ; turns =
-        { lower_bound = turns_day_truncated || crash_truncated
-        ; reason =
-            (match turns_day_truncated, crash_truncated with
-             | true, true ->
-               Some
-                 (Printf.sprintf
-                    "turn scan window clamped to %d days and crash scan capped at %d events"
-                    max_scan_days
-                    crash_scan_max)
-             | true, false -> day_reason
-             | false, true -> crash_reason
-             | false, false -> None)
-        }
+        source
+          ((if turns_day_truncated then [ Jsonl_retention_window ] else [])
+           @ if crash_truncated then [ Crash_scan_cap ] else [])
     ; tasks =
-        { lower_bound = audit_truncated
-        ; reason = if audit_truncated then day_reason else None
-        }
+        source (if audit_truncated then [ Jsonl_retention_window ] else [])
     ; board =
-        { lower_bound = activity_truncated
-        ; reason = if activity_truncated then day_reason else None
-        }
+        source (if activity_truncated then [ Jsonl_retention_window ] else [])
     ; lifecycle =
-        { lower_bound = transition_truncated
-        ; reason = if transition_truncated then day_reason else None
-        }
+        source (if transition_truncated then [ Jsonl_retention_window ] else [])
     }
   in
   { keeper = keeper_name
@@ -574,10 +573,17 @@ let lifecycle_item_to_json (i : lifecycle_item) =
   `Assoc [ "kind", `String i.kind; "ts", `Float i.ts ]
 ;;
 
+let truncation_cause_to_wire = function
+  | Chat_page_cap -> "chat_page_cap"
+  | Chat_retention_window -> "chat_retention_window"
+  | Jsonl_retention_window -> "jsonl_retention_window"
+  | Crash_scan_cap -> "crash_scan_cap"
+;;
+
 let source_coverage_to_json (c : source_coverage) : Yojson.Safe.t =
   `Assoc
     [ "lower_bound", `Bool c.lower_bound
-    ; "reason", (match c.reason with Some r -> `String r | None -> `Null)
+    ; "causes", `List (List.map (fun c -> `String (truncation_cause_to_wire c)) c.causes)
     ]
 ;;
 

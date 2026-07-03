@@ -22,11 +22,11 @@ function makeDigest(sinceUnix: number): KeeperCatchupDigest {
     board: { posted: 0, commented: 0, voted: 0 },
     lifecycle: { paused_now: false, pause_events: 0, resume_events: 0, items: [] },
     coverage: {
-      chat: { lower_bound: false, reason: null },
-      turns: { lower_bound: false, reason: null },
-      tasks: { lower_bound: false, reason: null },
-      board: { lower_bound: false, reason: null },
-      lifecycle: { lower_bound: false, reason: null },
+      chat: { lower_bound: false, causes: [] },
+      turns: { lower_bound: false, causes: [] },
+      tasks: { lower_bound: false, causes: [] },
+      board: { lower_bound: false, causes: [] },
+      lifecycle: { lower_bound: false, causes: [] },
     },
     read_errors: [],
   }

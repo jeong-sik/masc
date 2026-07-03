@@ -57,6 +57,8 @@ let str_contains ~needle haystack =
   nl = 0 || go 0
 ;;
 
+let has_cause cause coverage = List.exists (( = ) cause) coverage.D.causes
+
 (* ── store paths (mirror Common.*_from_base_path) ────────────────── *)
 
 let masc base = Filename.concat base ".masc"
@@ -366,14 +368,14 @@ let test_chat_page_cap_is_fail_visible () =
       true
       coverage.D.chat.lower_bound;
     Alcotest.(check bool)
-      "coverage.chat reason present"
+      "coverage.chat page-cap cause present"
       true
-      (Option.is_some coverage.D.chat.reason))
+      (has_cause D.Chat_page_cap coverage.D.chat))
 ;;
 
 let test_scan_window_clamp_is_coverage_visible () =
   with_workspace (fun base ->
-    (* since_unix is beyond max_scan_days, so every day-partitioned source is
+    (* since_unix is beyond the retention scan window, so every source is
        clamped even though the stores are missing (missing = zero activity). The
        coverage flags, not read_errors, carry the truncation signal. *)
     let since_old = now_unix -. (50. *. day) in
@@ -383,7 +385,15 @@ let test_scan_window_clamp_is_coverage_visible () =
     Alcotest.(check bool) "coverage.tasks lower_bound true" true coverage.D.tasks.lower_bound;
     Alcotest.(check bool) "coverage.board lower_bound true" true coverage.D.board.lower_bound;
     Alcotest.(check bool) "coverage.lifecycle lower_bound true" true coverage.D.lifecycle.lower_bound;
-    Alcotest.(check bool) "chat not scanned, lower_bound false" false coverage.D.chat.lower_bound;
+    Alcotest.(check bool) "coverage.chat lower_bound true" true coverage.D.chat.lower_bound;
+    Alcotest.(check bool)
+      "coverage.chat carries retention-window cause"
+      true
+      (has_cause D.Chat_retention_window coverage.D.chat);
+    Alcotest.(check bool)
+      "coverage.turns carries retention-window cause"
+      true
+      (has_cause D.Jsonl_retention_window coverage.D.turns);
     Alcotest.(check bool) "no read_errors for missing stores" true (read_errors = []))
 ;;
 
@@ -448,6 +458,17 @@ let test_to_json_shape () =
         ; "coverage"
         ; "read_errors"
         ]
+      ;
+      (match List.assoc_opt "coverage" fields with
+       | Some (`Assoc coverage_fields) ->
+         (match List.assoc_opt "chat" coverage_fields with
+          | Some (`Assoc chat_fields) ->
+            Alcotest.(check bool)
+              "coverage.chat causes present"
+              true
+              (List.mem_assoc "causes" chat_fields)
+          | _ -> Alcotest.fail "coverage.chat must be an object")
+       | _ -> Alcotest.fail "coverage must be an object")
     | _ -> Alcotest.fail "to_json must be a JSON object")
 ;;
 

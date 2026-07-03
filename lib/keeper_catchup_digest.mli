@@ -62,15 +62,22 @@ type lifecycle =
   ; items : lifecycle_item list
   }
 
+type truncation_cause =
+  | Chat_page_cap
+  | Chat_retention_window
+  | Jsonl_retention_window
+  | Crash_scan_cap
+
 type source_coverage =
   { lower_bound : bool
-  ; reason : string option
+  ; causes : truncation_cause list
   }
 
 (** Per-source coverage flags. A [lower_bound = true] means the corresponding
     count may be incomplete because scanning stopped before the requested
-    [since_unix] (e.g. page cap or look-back window clamp). [reason] is present
-    when the count is a lower bound and absent otherwise. *)
+    [since_unix] (e.g. page cap, retention window clamp, crash scan cap).
+    [causes] is a closed set of machine tags for the client to render without
+    parsing backend prose. *)
 type coverage =
   { chat : source_coverage
   ; turns : source_coverage
@@ -120,8 +127,9 @@ val build :
     - [lifecycle]: durable transition-audit [operator_pause]/[operator_resume]
       records, plus [paused_now] from the keeper meta.
 
-    Look-back is clamped to the JSONL retention window; beyond it the counts
-    are a lower bound. The [coverage] field exposes per-source lower-bound
-    flags and reasons so the client can render truncation warnings without
-    inferring them from [since_unix]. Failures append to [read_errors]; a
-    missing store is zero, not a failure. *)
+    Look-back is clamped to [MASC_JSONL_RETENTION_DAYS] (default 30d), matching
+    the JSONL pruning policy; beyond it the counts are a lower bound. The
+    [coverage] field exposes per-source lower-bound flags and machine-tagged
+    causes so the client can render truncation warnings without inferring them
+    from [since_unix]. Failures append to [read_errors]; a missing store is
+    zero, not a failure. *)

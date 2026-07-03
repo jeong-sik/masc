@@ -20,6 +20,7 @@ import {
   number,
   object,
   optional,
+  picklist,
   safeParse,
   string,
   type InferOutput,
@@ -72,9 +73,16 @@ const KeeperCatchupDigestLifecycleSchema = object({
   items: array(KeeperCatchupDigestLifecycleItemSchema),
 })
 
+const KeeperCatchupDigestCoverageCauseSchema = picklist([
+  'chat_page_cap',
+  'chat_retention_window',
+  'jsonl_retention_window',
+  'crash_scan_cap',
+])
+
 const KeeperCatchupDigestSourceCoverageSchema = object({
   lower_bound: boolean(),
-  reason: optional(nullable(string())),
+  causes: optional(array(KeeperCatchupDigestCoverageCauseSchema)),
 })
 
 const KeeperCatchupDigestCoverageSchema = object({
@@ -99,6 +107,7 @@ export const KeeperCatchupDigestSchema = object({
 })
 
 export type KeeperCatchupDigest = InferOutput<typeof KeeperCatchupDigestSchema>
+export type KeeperCatchupDigestCoverageCause = InferOutput<typeof KeeperCatchupDigestCoverageCauseSchema>
 export type KeeperCatchupDigestTaskItem = InferOutput<typeof KeeperCatchupDigestTaskItemSchema>
 export type KeeperCatchupDigestLifecycleItem = InferOutput<typeof KeeperCatchupDigestLifecycleItemSchema>
 

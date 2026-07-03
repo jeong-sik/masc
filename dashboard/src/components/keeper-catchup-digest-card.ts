@@ -1,5 +1,8 @@
 import { html } from 'htm/preact'
-import type { KeeperCatchupDigest } from '../api/schemas/keeper-catchup-digest'
+import type {
+  KeeperCatchupDigest,
+  KeeperCatchupDigestCoverageCause,
+} from '../api/schemas/keeper-catchup-digest'
 import { KEEPER_DIGEST_MIN_ACTIVITY } from '../config/constants'
 
 // Total count of new activity across every category since the operator's
@@ -30,22 +33,30 @@ function coverageHasLowerBound(
   return Object.values(coverage).some(source => source.lower_bound)
 }
 
+const COVERAGE_CAUSE_LABELS: Record<KeeperCatchupDigestCoverageCause, string> = {
+  chat_page_cap: '채팅 페이지 상한에 도달',
+  chat_retention_window: '채팅 보존 기간 밖',
+  jsonl_retention_window: '보존 기간 밖',
+  crash_scan_cap: '크래시 이벤트 상한에 도달',
+}
+
 function coverageWarnings(digest: KeeperCatchupDigest): string[] {
-  const warnings: string[] = []
-  const push = (
-    label: string,
-    source: { lower_bound: boolean; reason?: string | null },
-  ) => {
-    if (source.lower_bound) {
-      warnings.push(`${label}: ${source.reason ?? '일부 누락 가능'}`)
-    }
-  }
-  push('채팅', digest.coverage.chat)
-  push('턴', digest.coverage.turns)
-  push('태스크', digest.coverage.tasks)
-  push('보드', digest.coverage.board)
-  push('일시정지/재개', digest.coverage.lifecycle)
-  return warnings
+  const sources: ReadonlyArray<readonly [
+    string,
+    KeeperCatchupDigest['coverage']['chat'],
+  ]> = [
+    ['채팅', digest.coverage.chat],
+    ['턴', digest.coverage.turns],
+    ['태스크', digest.coverage.tasks],
+    ['보드', digest.coverage.board],
+    ['일시정지/재개', digest.coverage.lifecycle],
+  ]
+  return sources
+    .filter(([, source]) => source.lower_bound)
+    .map(([label, source]) => {
+      const causeLabels = (source.causes ?? []).map(cause => COVERAGE_CAUSE_LABELS[cause])
+      return `${label}: ${causeLabels.length > 0 ? causeLabels.join(', ') : '일부 누락 가능'}`
+    })
 }
 
 // The card renders when there is genuine new activity, when a source read
@@ -97,6 +108,7 @@ function digestChips(digest: KeeperCatchupDigest): DigestChip[] {
 // server echoed — independent of the live cursor.
 export function KeeperCatchupDigestCard({ digest }: { digest: KeeperCatchupDigest }) {
   const chips = digestChips(digest)
+  const coverageWarningItems = coverageWarnings(digest)
   return html`
     <div
       data-keeper-catchup-digest
@@ -134,10 +146,10 @@ export function KeeperCatchupDigestCard({ digest }: { digest: KeeperCatchupDiges
             </div>
           `
         : null}
-      ${coverageWarnings(digest).length > 0
+      ${coverageWarningItems.length > 0
         ? html`
             <div class="mt-2 rounded-[var(--r-1)] border border-[var(--warn-20)] bg-[var(--warn-10)] px-2 py-1 text-2xs leading-relaxed text-[var(--warn-bright)]">
-              일부 저장소가 생략되어 카운트가 하한값일 수 있습니다: ${coverageWarnings(digest).join('; ')}
+              일부 저장소가 생략되어 카운트가 하한값일 수 있습니다: ${coverageWarningItems.join('; ')}
             </div>
           `
         : null}

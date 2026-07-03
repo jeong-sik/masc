@@ -423,14 +423,10 @@ let run_named
     dedupe_runtimes_preserve_order (first_runtime :: remaining_runtimes)
   in
   let assigned_runtime_context_window =
-    match Runtime.max_context_of_runtime_id first_candidate_id with
-    | Some value -> Some value
-    | None -> Some first_candidate.Runtime.model.max_context
+    Some (Runtime.max_context_of_runtime first_candidate)
   in
   let first_runtime_context_window =
-    match Runtime.max_context_of_runtime_id first_runtime_id with
-    | Some value -> value
-    | None -> first_runtime.Runtime.model.max_context
+    Runtime.max_context_of_runtime first_runtime
   in
   let* first_context_window_rebudget =
     resolve_context_window_tokens_after_runtime_selection
@@ -554,9 +550,7 @@ let run_named
           ()
       in
       let final_runtime_context_window =
-        match Runtime.max_context_of_runtime_id attempt_runtime_id with
-        | Some value -> value
-        | None -> runtime.Runtime.model.max_context
+        Runtime.max_context_of_runtime runtime
       in
       let context_window_rebudget_res =
         resolve_context_window_tokens_after_runtime_selection

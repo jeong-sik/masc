@@ -523,14 +523,6 @@ let assemble_hooks
                 in
                 (match runtime_manifest_context, runtime_manifest_append with
                  | Some manifest_context, Some append_manifest ->
-                   let string_opt_to_json = function
-                     | Some value -> `String value
-                     | None -> `Null
-                   in
-                   let int_opt_to_json = function
-                     | Some value -> `Int value
-                     | None -> `Null
-                   in
                    let post_tool_context =
                      last_tool_results <> []
                    in
@@ -558,16 +550,13 @@ let assemble_hooks
                                ; ( "prompt_block_count",
                                    `Int (List.length acc.prompt_blocks) )
                                ; ( "extra_system_context_digest",
-                                   string_opt_to_json
+                                   Json_util.string_opt_to_json
                                      acc.extra_system_context_digest )
                                ; ( "extra_system_context_computed_size",
-                                   int_opt_to_json
-                                     acc.extra_system_context_size )
-                               ; ( "extra_system_context_injected_size",
-                                   int_opt_to_json
+                                   Json_util.int_opt_to_json
                                      acc.extra_system_context_size )
                                ; ( "extra_system_context_estimated_tokens",
-                                   int_opt_to_json
+                                   Json_util.int_opt_to_json
                                      extra_system_context_estimated_tokens )
                                ; ( "hook_extra_system_context_estimated_tokens",
                                    `Int hook_extra_system_context_estimated_tokens )

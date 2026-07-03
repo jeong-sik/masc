@@ -206,6 +206,11 @@ val is_local_runtime_id : string -> bool option
 (** Locality classification for a configured runtime id, or [None] when the
     runtime id is not currently materialized. *)
 
+val max_context_of_runtime : t -> int
+(** Effective input context window for a materialized runtime.  This applies the
+    same provider-cap clamp as [max_context_of_runtime_id] without re-resolving
+    the runtime id. *)
+
 val max_context_of_runtime_id : string -> int option
 (** Effective input context window for the materialized runtime [id], or [None]
     when the id is not configured.  Budgeting callers use this to size a

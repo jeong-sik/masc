@@ -1052,10 +1052,12 @@ let test_runtime_agent_context_resume_patches_stale_response_format_to_base_cont
     }
   in
   let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  let expected_response_format =
+    provider_cfg_with_schema.Llm_provider.Provider_config.response_format
+  in
   check bool "resume patches checkpoint response_format to base JsonSchema" true
-    (match prepared.patched_checkpoint.Agent_sdk.Checkpoint.response_format with
-     | Agent_sdk.Types.JsonSchema s -> Yojson.Safe.equal s resume_schema
-     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonMode -> false)
+    (prepared.patched_checkpoint.Agent_sdk.Checkpoint.response_format
+     = expected_response_format)
 
 let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   let tool =

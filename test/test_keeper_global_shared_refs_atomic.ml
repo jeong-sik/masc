@@ -93,6 +93,7 @@ let compact_policy_meta () =
 let test_pre_compact_context_window_uses_working_context () =
   let open Masc in
   let recorded_window = ref None in
+  let recorded_is_local_model = ref None in
   let restore () =
     Keeper_compact_policy.register_record_pre_compact
       (fun ~keeper_name:_ ~context_ratio:_ ~message_count:_ ~token_count:_
@@ -105,6 +106,7 @@ let test_pre_compact_context_window_uses_working_context () =
          (fun ~keeper_name ~context_ratio ~message_count ~token_count
            ~strategies ~context_window ~is_local_model ~trigger ->
             recorded_window := Some context_window;
+            recorded_is_local_model := Some is_local_model;
             Some
               { Keeper_compact_policy.timestamp = 1.0
               ; keeper_name
@@ -135,7 +137,10 @@ let test_pre_compact_context_window_uses_working_context () =
          (Keeper_compact_policy.compaction_decision_applied decision);
        check (option int) "pre-compact event uses ctx max_tokens"
          (Some 131_072)
-         !recorded_window)
+         !recorded_window;
+       check (option bool) "uninitialized runtime locality is telemetry only"
+         (Some false)
+         !recorded_is_local_model)
 ;;
 
 let test_meta_store_hook () =

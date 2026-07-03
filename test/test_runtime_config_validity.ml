@@ -1154,6 +1154,7 @@ let test_runtime_locality_uses_provider_schema () =
      endpoint = \"https://api.example.com/v1\"\n\
      \n\
      [providers.remote.credentials]\n\
+     type = \"env\"\n\
      key = \"REMOTE_API_KEY\"\n\
      \n\
      [models.chat]\n\

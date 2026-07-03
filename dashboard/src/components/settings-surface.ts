@@ -856,6 +856,14 @@ export function SettingsSurface() {
     await refreshRuntimeConfigConsumers()
   }
 
+  async function handleRuntimeTomlSaved(): Promise<void> {
+    try {
+      await refreshRuntimeSettingsSnapshot()
+    } catch (err) {
+      console.warn('[Settings] runtime settings refresh failed after editor save:', err)
+    }
+  }
+
   async function applyRuntimeRoutingPatch(lane: RuntimeRoutingLane, runtimeId: string | null): Promise<void> {
     if (runtimeRoutingStatus === 'saving') return
     setRuntimeRoutingStatus('saving')
@@ -1195,7 +1203,7 @@ export function SettingsSurface() {
             `}
 
             ${sec === 'runtimes' && html`
-              <${RuntimeTomlEditor} />
+              <${RuntimeTomlEditor} onSaved=${handleRuntimeTomlSaved} />
             `}
 
             ${sec === 'prompts' && html`

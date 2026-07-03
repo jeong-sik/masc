@@ -14,9 +14,9 @@ the categorization roadmap. Newly-added typed getters in
 `lib/config/env_config_*.ml` must carry nearby `@category` and
 `@ops_class` tags; existing knobs remain in the backfill lane.
 
-**Total**: 364 unique knobs across 9 modules.
+**Total**: 365 unique knobs across 9 modules.
 
-**Typed getter classification**: 49/220 tagged (`operator`: 49, `algorithm`: 0, `unclassified`: 171).
+**Typed getter classification**: 50/221 tagged (`operator`: 50, `algorithm`: 0, `unclassified`: 171).
 
 ## Env_config_core (27 knobs; typed classification 3/8)
 
@@ -212,7 +212,7 @@ the categorization roadmap. Newly-added typed getters in
 |---|---|---|---|---|---|
 | `MASC_OAS_BRIDGE_TIMEOUT_DEFAULT_SEC` | string_literal | n/a | n/a | 69 |  |
 
-## Env_config_runtime (100 knobs; typed classification 4/80)
+## Env_config_runtime (101 knobs; typed classification 5/81)
 
 | Env var | Kind | Category | Ops class | Line | Doc |
 |---|---|---|---|---|---|
@@ -284,7 +284,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_SESSION_MAX_AGE_SEC` | typed:float | unclassified | unclassified | 36 | Maximum session age before cleanup (seconds) |
 | `MASC_SESSION_RATE_LIMIT_WINDOW_SEC` | typed:float | unclassified | unclassified | 40 | Rate limit window (seconds) |
 | `MASC_SESSION_SSE_GRACE_PERIOD_SEC` | typed:float | unclassified | unclassified | 45 | Grace period after SSE disconnect before reaping transport session (seconds). Prevents "Unknown Mcp-Session-Id" error... |
-| `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` | feature_flag | n/a | n/a | 874 | Enable the Shell IR approval policy gate. Default: true (RFC-0254 — the autonomous policy is a strict safety improv... |
+| `MASC_SHELL_IR_APPROVAL_GATE_ENABLED` | feature_flag | n/a | n/a | 876 | Enable the Shell IR approval policy gate. Default: true (RFC-0254 — the autonomous policy is a strict safety improv... |
 | `MASC_SIDECAR_CONTROL_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 807 | Subprocess timeout (seconds) for sidecar control commands — [stop], [tail], and similar quick housekeeping operatio... |
 | `MASC_SIDECAR_RECONCILE_BACKOFF_SEC` | typed:float | unclassified | unclassified | 795 | Backoff window (seconds) between repeated same-generation [running + unavailable] start dispatches. Default: 30 (matc... |
 | `MASC_SIDECAR_SCHEMA_TIMEOUT_SEC` | typed:float | unclassified | unclassified | 823 | Subprocess timeout (seconds) for sidecar Python schema generation. Wraps [Process_eio.run_argv_with_status] at [serve... |
@@ -311,6 +311,7 @@ the categorization roadmap. Newly-added typed getters in
 | `MASC_WEB_SEARCH_RATE_LIMIT_MAX_CALLS` | typed:int | unclassified | unclassified | 503 |  |
 | `MASC_WEB_SEARCH_RATE_LIMIT_WINDOW_SEC` | typed:float | unclassified | unclassified | 499 |  |
 | `MASC_WEB_SEARCH_TIMEOUT_SEC` | typed:int | unclassified | unclassified | 491 |  |
+| `MASC_WORKSPACE_FILE_MAX_READ_BYTES` | typed:int | Policies | operator | 868 | Maximum bytes served by the IDE workspace file endpoint in one response. The route rejects larger files instead of materializing them in... |
 | `MASC_WORKSPACE_GIT_LOCAL_OP_TIMEOUT_SEC` | typed:float | Timeouts | operator | 858 | Budget (seconds) for local-only git operations under [Masc_exec.Exec_gate.run_argv*] in {!Workspace_git}: [rev-parse]... |
 | `MASC_WS_ENABLED` | feature_flag | n/a | n/a | 265 | Whether WebSocket transport is enabled. Default: true. Accessor-shaped reader; listener lifecycle is still decided at... |
 | `MASC_WS_PORT` | string_literal | n/a | n/a | 261 | WebSocket server port. Default: 8937. |

@@ -1,8 +1,8 @@
 (** Reconcile-gate resume path, extracted from
     [keeper_supervisor.ml] (godfile decomp).
 
-    [resume_keeper_after_reconcile_gate] clears the [paused] flag and
-    [runtime.last_blocker] on the latest disk meta, writes back through
+    [resume_keeper_after_reconcile_gate] clears the [paused] flag,
+    [latched_reason], and [runtime.last_blocker] on the latest disk meta, writes back through
     [Keeper_meta_merge.heartbeat_fields_from_disk] to avoid stealing
     concurrent heartbeat writes (cf. #9733), resets the keeper's
     livelock/turn-failure state, dispatches [Operator_resume], and
@@ -37,6 +37,7 @@ let resume_keeper_after_reconcile_gate
   let resumed_meta =
     { latest_meta with
       paused = false
+    ; latched_reason = None
     ; updated_at = now_iso ()
     ; runtime = { latest_meta.runtime with last_blocker = None }
     }

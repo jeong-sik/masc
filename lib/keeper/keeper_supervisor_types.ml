@@ -117,6 +117,13 @@ let paused_meta_requires_reconcile_recovery (meta : keeper_meta) =
   | None -> false
 ;;
 
+let paused_meta_latched_terminal_pause (meta : keeper_meta) =
+  match meta.latched_reason with
+  | Some Keeper_latched_reason.Dead_tombstone -> true
+  | Some _
+  | None -> false
+;;
+
 let paused_meta_legacy_auto_resume_after_sec (meta : keeper_meta) =
   match meta.runtime.last_blocker with
   | Some { klass = Turn_timeout; _ } ->
@@ -169,7 +176,9 @@ let next_auto_resume_after_sec ~initial_sec ~max_sec previous =
 ;;
 
 let paused_meta_auto_resume_due ~now (meta : keeper_meta) =
-  if (not meta.paused) || paused_meta_requires_reconcile_recovery meta
+  if (not meta.paused)
+     || paused_meta_requires_reconcile_recovery meta
+     || paused_meta_latched_terminal_pause meta
   then false
   else
     match paused_meta_effective_auto_resume_after_sec meta with

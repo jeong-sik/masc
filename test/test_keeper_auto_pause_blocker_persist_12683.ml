@@ -689,6 +689,12 @@ let test_direct_success_clears_no_progress_pause () =
               { rt with last_blocker = Some blocker }))
            with
            paused = true
+         ; latched_reason =
+             Some
+               (Masc.Keeper_latched_reason.No_progress_loop
+                  { consecutive_idle_cycles = 3
+                  ; detector_kind = `Consecutive_no_progress
+                  })
          }
        in
        Masc.Keeper_registry.clear ();
@@ -721,6 +727,11 @@ let test_direct_success_clears_no_progress_pause () =
            meta
        in
        check bool "direct success resumes no-progress pause" false recovered_meta.paused;
+       check
+         bool
+         "direct success clears stale latched reason"
+         true
+         (Option.is_none recovered_meta.latched_reason);
        (match recovered_meta.runtime.last_blocker with
         | None -> ()
         | Some _ -> fail "expected direct success to clear no_progress meta blocker");
@@ -730,6 +741,11 @@ let test_direct_success_clears_no_progress_pause () =
            "registry meta resumed"
            false
            entry.Masc.Keeper_registry.meta.paused;
+         check
+           bool
+           "registry meta latch cleared"
+           true
+           (Option.is_none entry.Masc.Keeper_registry.meta.latched_reason);
          (match entry.Masc.Keeper_registry.last_failure_reason with
          | None -> ()
          | Some _ -> fail "expected direct success to clear no_progress failure reason")

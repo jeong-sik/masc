@@ -162,14 +162,56 @@ let json_response_with_source_and_base ~status ~source ~base_path req reqd json 
 
 let is_digit c = c >= '0' && c <= '9'
 
-(* RFC-0128 §4.6 — [.masc-ide/] is keeper metadata about the
-   workspace, not workspace content. Listing it in the file tree
-   exposes the agent's annotation store to the user IDE as a regular
-   directory, which is a leak observed on 2026-05-17 against
-   [?repo_id=masc]. *)
-let excluded_dirs =
-  [ ".git"; "node_modules"; "_build"; ".obsidian"; "__pycache__";
-    ".masc"; ".masc-ide"; ".worktrees"; ".cache"; ".tmp"; "dist"; "build" ]
+(* Confidentiality SSOT (task-1734). A single path component is
+   confidential when serving or listing it leaks secrets (.env,
+   credentials, .ssh) or the agent's internal state (.git config URLs,
+   .masc*/ stores). Both guards read this one list so they cannot drift:
+   the file read routes reject any request whose path contains a
+   confidential component (see [resolve_workspace_path]) and the tree
+   listing hides the same components (see [scan_dir]). Anything blocked
+   from reads is therefore also hidden from the tree.
+
+   RFC-0128 §4.6 — [.masc-ide/] is keeper metadata about the workspace,
+   not workspace content; listing it exposed the agent's annotation
+   store to the IDE (leak observed 2026-05-17 against [?repo_id=masc]).
+   The [.masc] prefix rule below subsumes both [.masc] and [.masc-ide]. *)
+type confidential_rule =
+  | Name_equals of string
+  | Name_prefix of string
+  | Name_contains of string
+
+let confidential_rules =
+  [ Name_equals ".git"
+  ; Name_prefix Common.masc_dirname (* ".masc" — SSOT #9571; subsumes .masc-ide *)
+  ; Name_prefix ".env"
+  ; Name_equals ".ssh"
+    (* [Name_contains] over-blocks names such as [credentials_guide.md];
+       for a secret denylist over-blocking is the safe direction, since a
+       false negative would serve a real credentials file. *)
+  ; Name_contains "credentials"
+  ]
+
+(* Case-insensitive matching: a case-insensitive filesystem (APFS,
+   default macOS) resolves [.ENV] to [.env], so a case-sensitive denylist
+   would be bypassable by varying case. On a case-sensitive filesystem
+   this over-blocks a distinctly-cased non-secret, which is the safe
+   direction for a secret denylist. Rule literals are already lowercase. *)
+let component_is_confidential component =
+  List.exists
+    (fun rule ->
+      match rule with
+      | Name_equals s -> String.equal (String.lowercase_ascii component) s
+      | Name_prefix s -> String_util.starts_with_ci ~prefix:s component
+      | Name_contains s -> String_util.contains_substring_ci component s)
+    confidential_rules
+
+(* Directories excluded from the tree only to reduce noise. These are
+   NOT confidential — reads under them are allowed. Confidential entries
+   are hidden separately via [component_is_confidential] so the read
+   guard and the tree stay in sync from the single SSOT above. *)
+let tree_noise_dirs =
+  [ "node_modules"; "_build"; ".obsidian"; "__pycache__";
+    ".worktrees"; ".cache"; ".tmp"; "dist"; "build" ]
 
 let default_tree_node_limit = 750
 let max_tree_node_limit = 2000
@@ -233,18 +275,164 @@ let tree_node_limit_of_query = function
             if is_negative then 1 else max_tree_node_limit)
   | None -> default_tree_node_limit
 
-let safe_path base requested =
+(* Resolve symlinks in [path], tolerating a non-existent final component
+   so a deleted file (still shown by [git diff]) and a missing file
+   (which must reach the route's 404) resolve to a lexical path instead
+   of raising. Mirrors the existing-prefix realpath idiom in
+   [Eval_calibration]; kept local to avoid a server -> eval_calibration
+   dependency. *)
+let rec resolve_existing_prefix path =
+  try Fs_compat.realpath path with
+  | Unix.Unix_error _ | Invalid_argument _ | Sys_error _ ->
+    let parent = Filename.dirname path in
+    if String.equal parent path then path
+    else
+      Filename.concat (resolve_existing_prefix parent) (Filename.basename path)
+
+let path_within ~base candidate =
+  String.equal candidate base
+  ||
+  let base_slash =
+    let n = String.length base in
+    if n > 0 && base.[n - 1] = '/' then base else base ^ "/"
+  in
+  String.starts_with ~prefix:base_slash candidate
+
+let components_under ~base candidate =
+  if String.equal candidate base then []
+  else
+    let base_slash =
+      let n = String.length base in
+      if n > 0 && base.[n - 1] = '/' then base else base ^ "/"
+    in
+    if String.starts_with ~prefix:base_slash candidate
+    then
+      String.sub candidate (String.length base_slash) (String.length candidate - String.length base_slash)
+      |> String.split_on_char '/'
+      |> List.filter (fun part -> not (String.equal part ""))
+    else []
+
+type path_rejection =
+  | Path_traversal
+  | Confidential_component of string
+  | Symlink_escape
+
+type path_resolution =
+  | Path_ok of string
+  | Path_rejected of path_rejection
+
+type workspace_file = {
+  lexical_path : string;
+  resolved_base : string;
+  resolved_path : string;
+}
+
+type workspace_file_read_error =
+  | File_not_found
+  | File_not_regular
+  | File_changed_during_open
+  | File_too_large of int
+  | File_read_failed of string
+
+let workspace_file_read_max_bytes = Env_config_runtime.Workspace_file.max_read_bytes
+
+(* Resolve [requested] (a slash-separated path relative to [base]) into
+   an absolute path guaranteed to stay within [base], or a typed
+   rejection. Guards, in order:
+   1. parent traversal ([..]/[.]) or a lexical prefix escape,
+   2. a confidential component (secret denylist SSOT), and
+   3. a symlink whose real target resolves outside [base] (B2).
+   [resolve_workspace_file] carries both paths: the lexical path under
+   [base] for Git pathspecs, and the realpath-resolved target for file
+   I/O.  The compatibility wrapper [resolve_workspace_path] preserves
+   the older lexical [Path_ok] contract used by tests and callers that
+   only need admission control. *)
+let resolve_workspace_file base requested =
   let requested = String.map (fun c -> if c = '\\' then '/' else c) requested in
   let parts = String.split_on_char '/' requested in
-  let is_dangerous p = p = ".." || p = "." in
-  if List.exists is_dangerous parts then base
+  let is_traversal p = String.equal p ".." || String.equal p "." in
+  if List.exists is_traversal parts then Error Path_traversal
   else
-    let full = List.fold_left (fun acc p -> Filename.concat acc p) base parts in
-    if String.starts_with ~prefix:base full then full else base
+    match List.find_opt component_is_confidential parts with
+    | Some c -> Error (Confidential_component c)
+    | None ->
+      let full = List.fold_left (fun acc p -> Filename.concat acc p) base parts in
+      if not (path_within ~base full) then
+        Error Path_traversal
+      else
+        let resolved_base = resolve_existing_prefix base in
+        let resolved_full = resolve_existing_prefix full in
+        if not (path_within ~base:resolved_base resolved_full) then
+          Error Symlink_escape
+        else
+          match
+            components_under ~base:resolved_base resolved_full
+            |> List.find_opt component_is_confidential
+          with
+          | Some c -> Error (Confidential_component c)
+          | None ->
+            Ok
+              {
+                lexical_path = full;
+                resolved_base;
+                resolved_path = resolved_full;
+              }
+
+let resolve_workspace_path base requested =
+  match resolve_workspace_file base requested with
+  | Ok file -> Path_ok file.lexical_path
+  | Error rejection -> Path_rejected rejection
+
+let run_blocking_file_io f =
+  try Eio_unix.run_in_systhread ~label:"workspace-file-read" f with
+  | Stdlib.Effect.Unhandled _ -> f ()
+
+let same_file_identity a b =
+  a.Unix.st_dev = b.Unix.st_dev
+  && a.Unix.st_ino = b.Unix.st_ino
+
+let read_fd_to_string fd len =
+  let buf = Bytes.create len in
+  let rec loop offset =
+    if offset >= len then Bytes.unsafe_to_string buf
+    else
+      let n = Unix.read fd buf offset (len - offset) in
+      if n = 0 then Bytes.sub_string buf 0 offset
+      else loop (offset + n)
+  in
+  loop 0
+
+let load_workspace_file_content ?(max_bytes = workspace_file_read_max_bytes) file =
+  run_blocking_file_io (fun () ->
+    try
+      let before_open = Unix.lstat file.resolved_path in
+      match before_open.Unix.st_kind with
+      | Unix.S_REG ->
+        let fd =
+          Unix.openfile file.resolved_path [ Unix.O_RDONLY; Unix.O_CLOEXEC ] 0
+        in
+        Fun.protect
+          ~finally:(fun () -> try Unix.close fd with Unix.Unix_error _ -> ())
+          (fun () ->
+            let after_open = Unix.fstat fd in
+            if
+              (not (same_file_identity before_open after_open))
+              || after_open.Unix.st_kind <> Unix.S_REG
+            then Error File_changed_during_open
+            else if after_open.Unix.st_size > max_bytes then
+              Error (File_too_large after_open.Unix.st_size)
+            else Ok (read_fd_to_string fd after_open.Unix.st_size))
+      | Unix.S_DIR | Unix.S_CHR | Unix.S_BLK | Unix.S_FIFO | Unix.S_SOCK | Unix.S_LNK ->
+        Error File_not_regular
+    with
+    | Unix.Unix_error (Unix.ENOENT, _, _) -> Error File_not_found
+    | Unix.Unix_error _ as exn -> Error (File_read_failed (Printexc.to_string exn))
+    | Sys_error msg -> Error (File_read_failed msg))
 
 (* Strip [base] (and the following separator) from [safe]. Handles
    [base = "/"], trailing slash on [base], and [safe = base] (returns "").
-   Assumes [safe_path] has already enforced the prefix invariant. *)
+   Assumes [resolve_workspace_path] has already enforced the prefix
+   invariant. *)
 let rel_under base safe =
   if safe = base then ""
   else
@@ -329,7 +517,8 @@ let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc di
       | _ when remaining <= 0 -> (acc, 0)
       | f :: rest ->
         if f = "." || f = ".." then fold acc remaining rest
-        else if List.mem f excluded_dirs then fold acc remaining rest
+        else if component_is_confidential f || List.mem f tree_noise_dirs then
+          fold acc remaining rest
         else
           let full = Filename.concat dir f in
           let is_dir =
@@ -338,7 +527,10 @@ let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc di
               ~site:"tree_is_directory"
               ~path:full
               ~default:false
-              (fun () -> Sys.is_directory full)
+              (fun () ->
+                 match Unix.lstat full with
+                 | { Unix.st_kind = Unix.S_LNK; _ } -> false
+                 | _ -> Sys.is_directory full)
           in
           let rel = rel_under base full in
           let has_children = is_dir && depth < max_depth in
@@ -364,36 +556,15 @@ let scan_dir ?diff_by_path ~base ~depth ~max_depth ~max_nodes acc dir =
 
 (* --- Git helpers --- *)
 
-let git_run ~cwd args =
-  let argv = "git" :: "-C" :: cwd :: "--no-optional-locks" :: args in
-  let raw_source = String.concat " " (List.map Filename.quote argv) in
-  try
-    let (status, out) =
-      Masc_exec.Exec_gate.run_argv_with_status
-        ~actor:(Masc_exec.Agent_id.of_string "system/workspace_api")
-        ~raw_source
-        ~summary:"workspace api git command"
-
-        argv
-    in
-    match status with
-    | Unix.WEXITED 0 -> Some (String.trim out)
-    | _ -> None
-  with
-  | Eio.Cancel.Cancelled _ as e -> raise e
-  | exn ->
+let git_run_lines ~cwd args =
+  match Repo_git.run_git ~cwd ("--no-optional-locks" :: args) with
+  | Ok lines -> lines
+  | Error msg ->
       observe_workspace_route_failure
         ~site:"git_run"
         ~path:cwd
-        exn;
-      None
-
-let git_run_lines ~cwd args =
-  match git_run ~cwd args with
-  | None -> []
-  | Some out ->
-    String.split_on_char '\n' out
-    |> List.filter (fun l -> l <> "")
+        (Failure msg);
+      []
 
 let diff_badge_of_numstat ~added ~deleted =
   match int_of_string_opt added, int_of_string_opt deleted with
@@ -432,16 +603,15 @@ let git_diff_badges ~base =
    route handlers distinguish "command errored / invalid ref" from
    "command succeeded with no output". *)
 let git_run_lines_or_error ~cwd args =
-  match git_run ~cwd args with
-  | None -> Error "git command failed"
-  | Some out ->
-    Ok (String.split_on_char '\n' out
-        |> List.filter (fun l -> l <> ""))
+  Repo_git.run_git ~cwd ("--no-optional-locks" :: args)
 
 module For_testing = struct
   let sanitize_log_value = sanitize_log_value
   let observe_workspace_route_failure = observe_workspace_route_failure
   let parse_git_numstat_line = parse_git_numstat_line
+  type safe_workspace_file = workspace_file
+  let resolve_workspace_file = resolve_workspace_file
+  let load_workspace_file_content = load_workspace_file_content
 end
 
 (* --- Blame parsing: collect per-line then group adjacent same-author ranges --- *)
@@ -651,24 +821,29 @@ let add_routes router =
            match Uri.get_query_param uri "path" with
            | None -> json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            | Some p ->
-               let path = safe_path base p in
-               if path = base then
-                 json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-               else if Sys.file_exists path && not (Sys.is_directory path) then
-                 try
-                   let content = Fs_compat.load_file path in
+             (match resolve_workspace_file base p with
+              | Error _ ->
+                (* Uniform [Invalid path] for traversal, confidential, and
+                   symlink-escape rejections: a distinct message would let
+                   a caller probe which paths are secret or exist. *)
+                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+              | Ok file ->
+                (match load_workspace_file_content file with
+                 | Ok content ->
                    let json = `Assoc [("ok", `Bool true); ("content", `String content)] in
                    json_response_with_source ~status:`OK ~source request reqd json
-                 with
-                 | Eio.Cancel.Cancelled _ as e -> raise e
-                 | exn ->
-                     observe_workspace_route_failure
-                       ~site:"file_read"
-                       ~path
-                       exn;
-                     json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file")
-               else
-                 json_response ~status:`Not_found request reqd (json_error "File not found"))
+                 | Error File_not_found | Error File_not_regular ->
+                   json_response ~status:`Not_found request reqd (json_error "File not found")
+                 | Error File_changed_during_open ->
+                   json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+                 | Error (File_too_large _) ->
+                   json_response ~status:`Payload_too_large request reqd (json_error "File too large")
+                 | Error (File_read_failed msg) ->
+                   observe_workspace_route_failure
+                     ~site:"file_read"
+                     ~path:file.lexical_path
+                     (Failure msg);
+                   json_response ~status:`Internal_server_error request reqd (json_error "Failed to read file"))))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/blame" (fun request reqd ->
@@ -684,28 +859,29 @@ let add_routes router =
            if file_path = "" then
              json_response ~status:`Bad_request request reqd (json_error "Missing path parameter")
            else
-             let safe = safe_path base file_path in
-             if safe = base then
-               json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-             else if not (Sys.file_exists safe) then
-               json_response ~status:`Not_found request reqd (json_error "File not found")
-             else
-               let rel = rel_under base safe in
-               (* Blame keeps the original silent-empty contract: a file
-                  that exists in the working tree but is not yet tracked
-                  in HEAD (newly added, .gitignore'd, etc.) is a valid
-                  caller scenario, and surfacing git's non-zero exit as
-                  4xx would break it. The end-of-options separator still
-                  blocks `-L1,9999`-style argv injection. *)
-               match git_run_lines ~cwd:base
-                       ["blame"; "--porcelain"; "--"; rel]
-               with
-               | [] ->
-                 json_response_with_source ~status:`OK ~source request reqd (`List [])
-               | lines ->
-                 let entries = parse_blame_porcelain lines in
-                 let grouped = group_blame_entries rel entries in
-                 json_response_with_source ~status:`OK ~source request reqd (`List grouped))
+             (match resolve_workspace_file base file_path with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+              | Ok safe ->
+                if not (Sys.file_exists safe.resolved_path) then
+                  json_response ~status:`Not_found request reqd (json_error "File not found")
+                else
+                  let rel = rel_under base safe.lexical_path in
+                  (* Blame keeps the original silent-empty contract: a file
+                     that exists in the working tree but is not yet tracked
+                     in HEAD (newly added, .gitignore'd, etc.) is a valid
+                     caller scenario, and surfacing git's non-zero exit as
+                     4xx would break it. The end-of-options separator still
+                     blocks `-L1,9999`-style argv injection. *)
+                  (match git_run_lines ~cwd:base
+                           ["blame"; "--porcelain"; "--"; rel]
+                   with
+                   | [] ->
+                     json_response_with_source ~status:`OK ~source request reqd (`List [])
+                   | lines ->
+                     let entries = parse_blame_porcelain lines in
+                     let grouped = group_blame_entries rel entries in
+                     json_response_with_source ~status:`OK ~source request reqd (`List grouped))))
          request reqd)
 
   |> Http.Router.get "/api/v1/git/diff" (fun request reqd ->
@@ -730,22 +906,22 @@ let add_routes router =
                json_response ~status:`Bad_request request reqd
                  (json_error "Invalid base_ref")
              else
-             let safe = safe_path base file_path in
-             if safe = base then
-               json_response ~status:`Bad_request request reqd (json_error "Invalid path")
-             else
-               let rel = rel_under base safe in
-               match git_run_lines_or_error ~cwd:base
-                       ["diff"; base_ref; "--"; rel]
-               with
-               | Error _ ->
-                 json_response ~status:`Bad_request request reqd
-                   (json_error "git diff failed")
-               | Ok [] ->
-                 json_response_with_source ~status:`OK ~source request reqd
-                   (`Assoc [("unified", `List []); ("has_changes", `Bool false)])
-               | Ok diff_lines ->
-                 let unified = parse_unified_diff diff_lines in
-                 let json = `Assoc [("unified", `List unified); ("has_changes", `Bool true)] in
-                 json_response_with_source ~status:`OK ~source request reqd json)
+             (match resolve_workspace_file base file_path with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd (json_error "Invalid path")
+              | Ok safe ->
+                let rel = rel_under base safe.lexical_path in
+                (match git_run_lines_or_error ~cwd:base
+                         ["diff"; base_ref; "--"; rel]
+                 with
+                 | Error _ ->
+                   json_response ~status:`Bad_request request reqd
+                     (json_error "git diff failed")
+                 | Ok [] ->
+                   json_response_with_source ~status:`OK ~source request reqd
+                     (`Assoc [("unified", `List []); ("has_changes", `Bool false)])
+                 | Ok diff_lines ->
+                   let unified = parse_unified_diff diff_lines in
+                   let json = `Assoc [("unified", `List unified); ("has_changes", `Bool true)] in
+                   json_response_with_source ~status:`OK ~source request reqd json)))
          request reqd)

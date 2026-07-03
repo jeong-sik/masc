@@ -44,6 +44,7 @@ type parsed_keeper_state =
   ; ps_continuity_summary : string
   ; ps_active_goal_ids : string list
   ; ps_paused : bool
+  ; ps_latched_reason : Keeper_latched_reason.t option
   ; ps_auto_resume_after_sec : float option
   ; ps_autoboot_enabled : bool
   ; ps_current_task_id : Keeper_id.Task_id.t option
@@ -78,11 +79,13 @@ val parse_last_continuity_update_ts :
   continuity_summary:string -> Yojson.Safe.t -> float
 
 (** Parse the keeper state slice. [trace_id] / [trace_history]
-    are threaded from the identity step. *)
+    are threaded from the identity step; [keeper_name] is used for
+    observability when a persisted [latched_reason] is malformed. *)
 val parse_keeper_state :
   Yojson.Safe.t ->
   trace_id:Keeper_id.Trace_id.t ->
   trace_history:string list ->
+  keeper_name:string ->
   parsed_keeper_state
 
 (** Top-level parser: project a persisted JSON document to a

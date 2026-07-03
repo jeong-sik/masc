@@ -504,6 +504,7 @@ let start
                let _reader =
                  Lsp_message_router.start_response_reader
                    ~sw:lsp_sw lsp_router proc
+                   ~on_exit:None
                    ~on_notification:(fun ~client_id:_ ~method_:_ _params -> ())
                in
                (* Send initialize request with timeout. *)

@@ -29,4 +29,18 @@ module For_testing : sig
       (the [masc/lspStatus] response/notification payload), languages sorted
       by id for a stable wire order. *)
   val status_snapshot_json : (string * health) list -> Yojson.Safe.t
+
+  (** Disposition of a catch-all forwarded LSP method (task-1692).
+      [Forward_read_only] methods are proxied to the language server;
+      [Reject_write_adjacent] (rename / formatting / executeCommand /
+      applyEdit / unrecognized) are refused so the observation plane stays
+      read-only. *)
+  type disposition =
+    | Forward_read_only
+    | Reject_write_adjacent
+
+  (** [classify_forwarded_method m] is the read-only allowlist decision for a
+      method reaching the catch-all forwarder. Default-deny: only listed read
+      methods forward. *)
+  val classify_forwarded_method : string -> disposition
 end

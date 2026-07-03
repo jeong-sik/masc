@@ -412,6 +412,44 @@ let forward_notification cs lang_id method_ params =
   | Ok proc -> Lsp_message_router.send_notification cs.router proc ~method_ ~params
 ;;
 
+(* Read-only method allowlist for the catch-all forwarder (task-1692). The
+   observation plane must never forward a write-adjacent request — rename,
+   any formatting, executeCommand, applyEdit, willSaveWaitUntil — to the
+   language server. The overlay methods handled explicitly above (hover,
+   codeAction, ...) are all read-only and never reach the catch-all; this
+   closes the "forward any other textDocument request" hole.
+
+   Default-deny by a typed variant, not a string-prefix classifier: only a
+   listed read method forwards, so a new or unrecognized method is rejected
+   rather than silently passed through, and adding a method forces an explicit
+   classification (RFC-0194 / workaround §2 — no substring allowlist). *)
+type method_disposition =
+  | Forward_read_only
+  | Reject_write_adjacent
+
+let classify_forwarded_method = function
+  | "textDocument/signatureHelp"
+  | "textDocument/declaration"
+  | "textDocument/typeDefinition"
+  | "textDocument/implementation"
+  | "textDocument/documentColor"
+  | "textDocument/colorPresentation"
+  | "textDocument/documentLink"
+  | "textDocument/selectionRange"
+  | "textDocument/linkedEditingRange"
+  | "textDocument/moniker"
+  | "textDocument/prepareCallHierarchy"
+  | "textDocument/prepareTypeHierarchy"
+  | "textDocument/semanticTokens/full"
+  | "textDocument/semanticTokens/full/delta"
+  | "textDocument/semanticTokens/range" -> Forward_read_only
+  (* Everything else — textDocument/rename, prepareRename, formatting,
+     rangeFormatting, onTypeFormatting, willSaveWaitUntil,
+     workspace/executeCommand, workspace/applyEdit, and any unrecognized
+     method — is denied. *)
+  | _ -> Reject_write_adjacent
+;;
+
 (** Handle textDocument/codeLens — merge LSP response with MASC overlays. *)
 let handle_codelens cs params id =
   match extract_uri params with
@@ -887,18 +925,35 @@ let dispatch_message cs msg =
             let lang_id = Lsp_process_manager.lang_of_path relative in
             if lang_id <> "unknown" then forward_notification cs lang_id m params
           | None -> ())
-       (* Other requests with textDocument URI → forward to LSP *)
+       (* Other read-only requests with a textDocument URI → forward to LSP.
+          Write-adjacent / unrecognized methods are rejected here (task-1692)
+          rather than forwarded, so the observation plane never mutates the
+          workspace through the language server. *)
        | Some m, Some n ->
-         (match extract_uri params with
-          | Some uri ->
-            let relative =
-              resolve_relative ~base:cs.base_path uri |> Option.value ~default:""
-            in
-            let lang_id = Lsp_process_manager.lang_of_path relative in
-            if lang_id <> "unknown"
-            then forward_request cs lang_id m params n
-            else send_error cs n (-32801) ("No LSP server for: " ^ relative)
-          | None -> send_error cs n Mcp_error_code.(to_wire_code Method_not_found) ("Unhandled method: " ^ m))
+         (match classify_forwarded_method m with
+          | Reject_write_adjacent ->
+            send_error cs n
+              Mcp_error_code.(to_wire_code Invalid_request)
+              ("Read-only LSP proxy: method not permitted: " ^ m)
+          | Forward_read_only ->
+            (match extract_uri params with
+             | None ->
+               send_error cs n
+                 Mcp_error_code.(to_wire_code Method_not_found)
+                 ("Unhandled method: " ^ m)
+             | Some uri ->
+               (* Resolve the URI explicitly: an out-of-workspace or malformed
+                  URI ([None]) is rejected here rather than collapsed to a
+                  path, so the forward is only reached for a resolved
+                  in-workspace file. *)
+               (match resolve_relative ~base:cs.base_path uri with
+                | None ->
+                  send_error cs n (-32801) "Path is outside the workspace"
+                | Some relative ->
+                  let lang_id = Lsp_process_manager.lang_of_path relative in
+                  if lang_id <> "unknown"
+                  then forward_request cs lang_id m params n
+                  else send_error cs n (-32801) ("No LSP server for: " ^ relative))))
        (* Server-initiated notification broadcast *)
        | Some m, None ->
          Eio.Mutex.use_rw ~protect:true cs.spawn_mutex (fun () ->
@@ -1011,4 +1066,11 @@ module For_testing = struct
 
   let lang_status_json = lang_status_json
   let status_snapshot_json = status_snapshot_json
+
+  (* task-1692: read-only method allowlist for the catch-all forwarder. *)
+  type disposition = method_disposition =
+    | Forward_read_only
+    | Reject_write_adjacent
+
+  let classify_forwarded_method = classify_forwarded_method
 end

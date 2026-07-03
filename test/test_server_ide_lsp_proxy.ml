@@ -181,6 +181,82 @@ let test_status_snapshot_is_sorted_and_complete () =
   check (list string) "sorted by lang id" [ "ocaml"; "python" ] (List.map lang_of langs)
 ;;
 
+(* --- task-1692: read-only method allowlist + no overlay write edits --- *)
+
+(* Read-only navigation methods that reach the catch-all forwarder are
+   proxied to the language server. *)
+let test_read_methods_forward () =
+  List.iter
+    (fun m ->
+      check
+        bool
+        (m ^ " forwards")
+        true
+        (Lsp.classify_forwarded_method m = Lsp.Forward_read_only))
+    [ "textDocument/signatureHelp"
+    ; "textDocument/typeDefinition"
+    ; "textDocument/implementation"
+    ; "textDocument/declaration"
+    ; "textDocument/semanticTokens/full"
+    ]
+;;
+
+(* Write-adjacent methods — and, by default-deny, any unrecognized method —
+   are refused so the observation plane never mutates the workspace. *)
+let test_write_and_unknown_methods_rejected () =
+  List.iter
+    (fun m ->
+      check
+        bool
+        (m ^ " rejected")
+        true
+        (Lsp.classify_forwarded_method m = Lsp.Reject_write_adjacent))
+    [ "textDocument/rename"
+    ; "textDocument/prepareRename"
+    ; "textDocument/formatting"
+    ; "textDocument/rangeFormatting"
+    ; "textDocument/onTypeFormatting"
+    ; "textDocument/willSaveWaitUntil"
+    ; "workspace/executeCommand"
+    ; "workspace/applyEdit"
+    ; (* default-deny: an unknown method is rejected, not passed through *)
+      "textDocument/totallyMadeUpMethod"
+    ]
+;;
+
+let rec json_contains_key key = function
+  | `Assoc fields ->
+    List.exists (fun (k, v) -> String.equal k key || json_contains_key key v) fields
+  | `List items -> List.exists (json_contains_key key) items
+  | _ -> false
+;;
+
+(* Overlay code actions must not carry a WorkspaceEdit/newText that writes the
+   source buffer; the create affordance is offered through a MASC command
+   instead (a separate write lane). *)
+let test_code_actions_have_no_workspace_edit () =
+  (* code_actions reads the annotation cache, which takes an Eio mutex, so it
+     must run inside an Eio context. A non-existent base yields no annotations
+     but still exercises the create action that used to carry the edit. *)
+  Eio_main.run (fun env ->
+    Fs_compat.set_fs (Eio.Stdenv.fs env);
+    let actions =
+      Lsp_overlay_provider.code_actions
+        ~base_dir:"/tmp/x"
+        ~file_path:"a.ml"
+        ~line:0
+        ~diagnostics:[]
+    in
+    let j = `List actions in
+    check bool "no WorkspaceEdit in code actions" false (json_contains_key "edit" j);
+    check bool "no newText in code actions" false (json_contains_key "newText" j);
+    check
+      bool
+      "create action offered via a command lane"
+      true
+      (json_contains_key "command" j))
+;;
+
 let () =
   run
     "server_ide_lsp_proxy"
@@ -203,6 +279,13 @@ let () =
             test_unmapped_lang_has_null_command
         ; test_case "status snapshot is sorted and complete" `Quick
             test_status_snapshot_is_sorted_and_complete
+        ] )
+    ; ( "lsp_read_only_allowlist"
+      , [ test_case "read-only methods forward" `Quick test_read_methods_forward
+        ; test_case "write/unknown methods are rejected" `Quick
+            test_write_and_unknown_methods_rejected
+        ; test_case "overlay code actions carry no write edit" `Quick
+            test_code_actions_have_no_workspace_edit
         ] )
     ]
 ;;

@@ -515,6 +515,12 @@ let run_turn
           tool_context_estimate.estimated_input_tokens_with_tools
         ~max_context
     in
+    (* Pre-dispatch context-window estimate is intentionally observational:
+       the definitive ledger includes [extra_system_context] injected by
+       [before_turn_params] hooks, which has not run yet. If the request is
+       still over budget after hooks, we rely on the OAS/driver's
+       [oas_auto_context_overflow_retry] path to compact and retry rather
+       than hard-failing here and bypassing that recovery path. *)
     let pre_dispatch_context_window_error =
       match
         Keeper_run_prompt.preflight_context_window

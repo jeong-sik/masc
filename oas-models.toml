@@ -116,6 +116,7 @@ supports_extended_thinking = true
 supports_reasoning_budget = true
 thinking_control_format = "thinking_object"
 supports_response_format_json = true
+supports_structured_output = false
 supports_native_streaming = true
 supports_caching = true
 supports_prompt_caching = false

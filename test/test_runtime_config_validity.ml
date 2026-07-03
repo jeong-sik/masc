@@ -664,7 +664,25 @@ let test_repo_runtime_toml_loads () =
      | Some runtime ->
        check (option (float 0.0)) "DeepSeek keeps OAS connect timeout default"
          None
-         runtime.provider_config.connect_timeout_s);
+         runtime.provider_config.connect_timeout_s;
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "DeepSeek Pro structured output disabled" false
+            caps.supports_structured_output
+        | None -> fail "expected DeepSeek Pro capabilities"));
+    (match
+       List.find_opt
+         (fun (runtime : Runtime.t) ->
+            String.equal runtime.id "deepseek.deepseek-v4-flash")
+         runtimes
+     with
+     | None -> fail "expected DeepSeek Flash runtime in seed"
+     | Some runtime ->
+       (match runtime.model.capabilities with
+        | Some caps ->
+          check bool "DeepSeek Flash structured output disabled" false
+            caps.supports_structured_output
+        | None -> fail "expected DeepSeek Flash capabilities"));
     (match
        List.find_opt
          (fun (runtime : Runtime.t) ->

@@ -486,8 +486,14 @@ let to_oas_approval_callback ~config ~governance_level ~keeper_name ?meta ?clock
         let risk_level = queue_risk_level risk in
         let base_path = (config : Workspace.config).base_path in
         let always_approve =
-          Option.bind meta (fun (m : Keeper_meta_contract.keeper_meta) -> m.always_approve)
-          |> Option.value ~default:false
+          match meta with
+          | Some (m : Keeper_meta_contract.keeper_meta) ->
+            (match m.always_approve with
+             | Some enabled -> enabled
+             | None -> false)
+          | None ->
+            (* No keeper meta means no persisted operator always-approve policy. *)
+            false
         in
         let rule_match =
           (* Hard forbidden returned early; only soft forbidden may be

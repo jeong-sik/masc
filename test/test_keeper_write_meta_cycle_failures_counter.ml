@@ -32,7 +32,19 @@ let cleanup_dir = Fs_compat.remove_tree
 
 let with_temp_dir env suffix f =
   let base_dir = temp_dir env suffix in
-  Fun.protect ~finally:(fun () -> cleanup_dir base_dir) (fun () -> f base_dir)
+  match f base_dir with
+  | result ->
+    cleanup_dir base_dir;
+    result
+  | exception exn ->
+    let bt = Printexc.get_raw_backtrace () in
+    (try cleanup_dir base_dir with
+     | cleanup_exn ->
+       Printf.eprintf
+         "cleanup failed for %S after test failure: %s\n%!"
+         base_dir
+         (Printexc.to_string cleanup_exn));
+    Printexc.raise_with_backtrace exn bt
 
 let make_meta ~name =
   match

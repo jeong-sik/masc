@@ -1455,8 +1455,17 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
       // one draft, two views. Toggling only rewrites tool_access membership; the
       // server (set_policy) still validates every name (RFC-0273 fail-closed) and
       // the denylist keeps its own control, so no execution-gating claim is implied.
+      //
+      // Empty tool_access is NOT "every tool off": keeper_tool_policy.ml expands an
+      // empty allowlist to the full candidate universe (runtime gates on
+      // candidate-minus-denylist). So in that mode the grid shows every tool as ON
+      // and read-only — an enabled toggle would silently narrow [] (all candidates)
+      // to a single explicit candidate. The operator opts into an explicit allowlist
+      // via the textarea below, at which point the grid becomes interactive.
+      const allCandidatesMode = accessDeduped.length === 0
       const accessSet = new Set(accessDeduped)
       const toggleToolAccess = (name: string) => {
+        if (allCandidatesMode) return
         const next = new Set(accessDeduped)
         if (next.has(name)) next.delete(name)
         else next.add(name)
@@ -1473,9 +1482,14 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
         ` : toolState.status === 'error' ? html`
           <div class="text-2xs text-[var(--color-status-err)] mb-2 px-1">도구 목록 로드 실패: ${toolState.message}</div>
         ` : toolState.status === 'loaded' && toolState.data.length > 0 ? html`
+          ${allCandidatesMode ? html`
+            <div class="text-2xs text-[var(--color-fg-muted)] mb-2 px-1" role="note" data-testid="tool-all-candidates-note">
+              빈 tool_access — 전체 후보 도구 허용 (실행 차단은 denylist). 개별 도구를 제한하려면 아래 tool_access 목록에 이름을 입력해 명시적 허용목록으로 전환하세요.
+            </div>
+          ` : null}
           <div class="kcf-tools mb-3" role="group" aria-label="tool_access 후보 도구">
             ${toolState.data.map((tool) => {
-              const on = accessSet.has(tool.name)
+              const on = allCandidatesMode || accessSet.has(tool.name)
               return html`
                 <div key=${tool.name} class=${`kcf-tool ${on ? 'on' : ''}`}>
                   <button
@@ -1483,6 +1497,8 @@ export function KeeperConfigPanel({ keeperName, onClose }: { keeperName: string;
                     class="kcf-tool-toggle"
                     role="switch"
                     aria-checked=${on ? 'true' : 'false'}
+                    aria-disabled=${allCandidatesMode ? 'true' : 'false'}
+                    disabled=${allCandidatesMode}
                     aria-label=${`${tool.name} ${on ? '켜짐' : '꺼짐'}`}
                     onClick=${() => { toggleToolAccess(tool.name) }}
                   >${on ? '✓' : ''}</button>

@@ -1340,6 +1340,41 @@ describe('KeeperConfigPanel', () => {
       deny: ['Execute'],
     })
   })
+
+  it('preserves an empty tool_access as all-candidates — grid is read-only, toggle is a no-op', async () => {
+    mocks.setKeeperToolPolicy.mockClear()
+    const base = makeKeeperConfig()
+    mocks.fetchKeeperConfig.mockResolvedValueOnce(
+      makeKeeperConfig({ tools: { ...base.tools, tool_access: [] } }),
+    )
+    render(html`<${KeeperConfigPanel} keeperName="keeper-sangsu" />`, container)
+    await flush()
+    await flush()
+
+    selectKcfTab(container, '실행 정책')
+    await flush()
+    await flush() // tool inventory resolves
+
+    // empty tool_access = all candidates: banner shown, every tool ON (not all-off),
+    // and every toggle disabled so it cannot silently narrow [] to one explicit tool.
+    expect(container.querySelector('[data-testid="tool-all-candidates-note"]')).not.toBeNull()
+    const toggles = Array.from(container.querySelectorAll('.kcf-tool-toggle')) as HTMLButtonElement[]
+    expect(toggles.length).toBe(3)
+    expect(toggles.every((t) => t.getAttribute('aria-checked') === 'true')).toBe(true)
+    expect(toggles.every((t) => t.disabled)).toBe(true)
+
+    // a click on the read-only grid must not mutate the draft (stays empty → [])
+    toggles[0]!.dispatchEvent(new MouseEvent('click', { bubbles: true }))
+    await flush()
+    const accessTa = container.querySelector('textarea[aria-label="tool_access"]') as HTMLTextAreaElement
+    expect(accessTa.value).toBe('')
+
+    // and the save button stays disabled because nothing changed (no accidental narrow)
+    const saveButton = Array.from(container.querySelectorAll('button')).find((b) =>
+      b.textContent?.includes('정책 저장'),
+    ) as HTMLButtonElement
+    expect(saveButton.disabled).toBe(true)
+  })
 })
 
 describe('filterGoalOptions', () => {

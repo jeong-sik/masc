@@ -741,7 +741,7 @@ let sort_entries_by_requested_at entries =
 
 let default_noncritical_approval_timeout_s = 600.0
 
-let default_critical_approval_escalation_after_s = 3600.0
+let default_critical_approval_escalation_after_s = 1800.0
 
 (** Submit a tool call for approval and suspend the calling fiber.
     Returns the operator's decision when the promise is resolved.

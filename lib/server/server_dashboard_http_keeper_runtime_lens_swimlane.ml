@@ -145,6 +145,8 @@ let event_lane = function
   | Keeper_runtime_manifest.Turn_finished ->
     "keeper"
   | Keeper_runtime_manifest.Runtime_routed
+  | Keeper_runtime_manifest.Runtime_completed
+  | Keeper_runtime_manifest.Runtime_failed
   | Keeper_runtime_manifest.Provider_lane_resolved ->
     "masc_policy_runtime"
   | Keeper_runtime_manifest.Provider_attempt_started

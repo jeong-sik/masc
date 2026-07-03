@@ -143,6 +143,82 @@ let test_update_post_rejects_non_owner () =
       | Error e ->
           Alcotest.fail ("expected Unauthorized, got " ^ Board.show_board_error e))
 
+let test_update_post_transfers_author_by_owner () =
+  match
+    Board_dispatch.create_post ~author:"transfer-owner"
+      ~content:"transfer original body" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"transfer-owner"
+          ~content:"transfer updated body" ~new_author:"transfer-next" ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok updated -> (
+          Alcotest.(check string) "author transferred" "transfer-next"
+            (Board.Agent_id.to_string updated.author);
+          Alcotest.(check string) "content updated during transfer"
+            "transfer updated body" updated.content;
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "transferred author persisted"
+                "transfer-next"
+                (Board.Agent_id.to_string fetched.author)))
+
+let test_update_post_rejects_non_owner_transfer () =
+  match
+    Board_dispatch.create_post ~author:"transfer-owner"
+      ~content:"non-owner transfer original" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"transfer-intruder"
+          ~content:"hijacked transfer body" ~new_author:"transfer-intruder" ()
+      with
+      | Ok _ -> Alcotest.fail "non-owner transfer must be rejected"
+      | Error (Board.Unauthorized _) -> (
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "original author preserved"
+                "transfer-owner"
+                (Board.Agent_id.to_string fetched.author);
+              Alcotest.(check string) "original content preserved"
+                "non-owner transfer original" fetched.content)
+      | Error e ->
+          Alcotest.fail ("expected Unauthorized, got " ^ Board.show_board_error e))
+
+let test_update_post_rejects_invalid_new_author () =
+  match
+    Board_dispatch.create_post ~author:"transfer-owner"
+      ~content:"invalid transfer original" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post -> (
+      let pid = Board.Post_id.to_string post.id in
+      match
+        Board_dispatch.update_post ~post_id:pid ~editor:"transfer-owner"
+          ~content:"invalid transfer body" ~new_author:"not a valid author" ()
+      with
+      | Ok _ -> Alcotest.fail "invalid new_author must be rejected"
+      | Error (Board.Validation_error _) -> (
+          match Board_dispatch.get_post ~post_id:pid with
+          | Error e -> Alcotest.fail (Board.show_board_error e)
+          | Ok fetched ->
+              Alcotest.(check string) "author preserved after invalid transfer"
+                "transfer-owner"
+                (Board.Agent_id.to_string fetched.author);
+              Alcotest.(check string) "content preserved after invalid transfer"
+                "invalid transfer original" fetched.content)
+      | Error e ->
+          Alcotest.fail
+            ("expected Validation_error, got " ^ Board.show_board_error e))
+
 let test_update_post_missing_id () =
   match
     Board_dispatch.update_post ~post_id:"missing-post-id-zzz" ~editor:"any-agent"
@@ -683,15 +759,62 @@ let test_get_post_and_comments_atomic () =
        with
        | Error e -> Alcotest.fail (Board.show_board_error e)
        | Ok _ -> ());
-      match Board_dispatch.get_post_and_comments ~post_id:pid with
+      match Board_dispatch.get_post_and_comments ~post_id:pid () with
       | Error e -> Alcotest.fail (Board.show_board_error e)
       | Ok (fetched, comments) ->
           Alcotest.(check string) "post content matches"
             "atomic read body" fetched.content;
           Alcotest.(check int) "comment count" 2 (List.length comments)
 
+let test_get_post_and_comments_pagination_clamps () =
+  match
+    Board_dispatch.create_post ~author:"page-author"
+      ~content:"paged read body" ~post_kind:Board.Human_post ()
+  with
+  | Error e -> Alcotest.fail (Board.show_board_error e)
+  | Ok post ->
+      let pid = Board.Post_id.to_string post.id in
+      for i = 1 to 3 do
+        match
+          Board_dispatch.add_comment ~post_id:pid
+            ~author:(Printf.sprintf "commenter-%d" i)
+            ~content:(Printf.sprintf "comment-%d" i)
+            ()
+        with
+        | Error e -> Alcotest.fail (Board.show_board_error e)
+        | Ok _ -> ()
+      done;
+      (match Board_dispatch.get_post_and_comments ~post_id:pid () with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok (_, comments) ->
+           Alcotest.(check int) "omitted pagination returns all" 3
+             (List.length comments));
+      (match
+         Board_dispatch.get_post_and_comments ~post_id:pid ~comment_offset:(-5)
+           ~comment_limit:(-1) ()
+       with
+       | Error e -> Alcotest.fail (Board.show_board_error e)
+       | Ok (_, comments) ->
+           Alcotest.(check int) "negative pagination clamps to one" 1
+             (List.length comments);
+           let first =
+             match comments with
+             | (comment : Board.comment) :: _ -> comment.content
+             | [] -> Alcotest.fail "expected one clamped comment"
+           in
+           Alcotest.(check string) "negative pagination starts at first" "comment-1"
+             first);
+      match
+        Board_dispatch.get_post_and_comments ~post_id:pid ~comment_offset:2
+          ~comment_limit:999 ()
+      with
+      | Error e -> Alcotest.fail (Board.show_board_error e)
+      | Ok (_, comments) ->
+          Alcotest.(check int) "over max limit clamps after offset" 1
+            (List.length comments)
+
 let test_get_post_and_comments_missing_post () =
-  match Board_dispatch.get_post_and_comments ~post_id:"never-existed" with
+  match Board_dispatch.get_post_and_comments ~post_id:"never-existed" () with
   | Ok _ -> Alcotest.fail "expected Post_not_found"
   | Error (Board.Post_not_found _) -> ()
   | Error e ->
@@ -1577,6 +1700,12 @@ let () =
         (with_eio test_update_post_by_owner);
       Alcotest.test_case "update rejects non-owner" `Quick
         (with_eio test_update_post_rejects_non_owner);
+      Alcotest.test_case "update transfers author by owner" `Quick
+        (with_eio test_update_post_transfers_author_by_owner);
+      Alcotest.test_case "update rejects non-owner transfer" `Quick
+        (with_eio test_update_post_rejects_non_owner_transfer);
+      Alcotest.test_case "update rejects invalid new_author" `Quick
+        (with_eio test_update_post_rejects_invalid_new_author);
       Alcotest.test_case "update missing id" `Quick
         (with_eio test_update_post_missing_id);
       Alcotest.test_case "update rejects empty content" `Quick
@@ -1616,6 +1745,8 @@ let () =
         (with_eio test_add_comment_persistence_failure_rolls_back_without_fanout);
       Alcotest.test_case "get_post_and_comments atomic" `Quick
         (with_eio test_get_post_and_comments_atomic);
+      Alcotest.test_case "get_post_and_comments pagination clamps" `Quick
+        (with_eio test_get_post_and_comments_pagination_clamps);
       Alcotest.test_case "get_post_and_comments missing post" `Quick
         (with_eio test_get_post_and_comments_missing_post);
     ];

@@ -47,10 +47,10 @@ let make_config_root root =
   write_file (Filename.concat config "runtime.toml") "";
   config
 
-(* OCaml stdlib lacks Unix.unsetenv; putenv name "" is only an
-   approximation. Code that treats [""] as missing is fine, but
-   Sys.getenv_opt (or Option.is_some checks on it) still sees the
-   variable as present, so tests must not assume true unset semantics. *)
+(* OCaml 5.5 adds Unix.unsetenv, but the supported 5.4 floor lacks it; putenv
+   name "" is only an approximation. Code that treats [""] as missing is fine,
+   but Sys.getenv_opt (or Option.is_some checks on it) still sees the variable
+   as present, so tests must not assume true unset semantics. *)
 let with_env name value f =
   let previous = Sys.getenv_opt name in
   (match value with

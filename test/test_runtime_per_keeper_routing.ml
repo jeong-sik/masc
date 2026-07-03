@@ -209,6 +209,33 @@ max-concurrent = 1
   |}
 ;;
 
+let runtime_config_messages_http =
+  {|
+[runtime]
+default = "kimi.kimi-for-coding"
+
+[runtime.assignments]
+ramarama = "kimi.kimi-for-coding"
+
+[providers.kimi]
+display-name = "Kimi Code Plan"
+protocol = "messages-http"
+endpoint = "https://example.invalid/kimi"
+
+[providers.kimi.credentials]
+type = "inline"
+value = "test-kimi-key"
+
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 256000
+tools-support = true
+streaming = true
+
+[kimi.kimi-for-coding]
+|}
+;;
+
 let runtime_structured_judge_model_catalog =
   {|
 [[models]]
@@ -257,6 +284,29 @@ let with_runtime_file f =
 
 let with_runtime_initialized f =
   with_runtime_file (fun _path -> f ())
+;;
+
+let test_messages_http_runtime_loads_and_assignment_resolves () =
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content runtime_route_model_catalog @@ fun () ->
+       with_temp_dir "runtime-messages-http" @@ fun dir ->
+       let path = Filename.concat dir "runtime.toml" in
+       write_file path runtime_config_messages_http;
+       match Runtime.init_default ~config_path:path with
+       | Error msg ->
+         Alcotest.failf "messages-http runtime init_default failed: %s" msg
+       | Ok () ->
+         Alcotest.(check string)
+           "ramarama assignment resolves to kimi.kimi-for-coding"
+           "kimi.kimi-for-coding"
+           (KMC.runtime_id_of_meta (make_meta "ramarama"));
+         Alcotest.(check bool)
+           "messages-http runtime is materialized"
+           true
+           (List.mem "kimi.kimi-for-coding" (Runtime.get_runtime_ids ())))
 ;;
 
 (* ---- the per-keeper selection actually reaches the dispatcher ---- *)
@@ -1206,6 +1256,10 @@ let () =
             "runtime_id API arg is not rejected as a removed keeper arg"
             `Quick
             test_runtime_id_tool_arg_is_not_removed_keeper_arg
+        ; Alcotest.test_case
+            "messages-http provider loads and keeper assignment resolves"
+            `Quick
+            test_messages_http_runtime_loads_and_assignment_resolves
         ] )
     ; ( "driver lookup"
       , [ Alcotest.test_case

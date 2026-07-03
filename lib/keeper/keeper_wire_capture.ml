@@ -9,15 +9,42 @@ let redact = Llm_provider.Secret_redactor.redact_string
    serialise on a per-day file rather than one global blob. *)
 let wire_capture_dir masc_root = Filename.concat masc_root "wire-capture"
 
+(** Cache [Dated_jsonl.t] handles per MASC root so the diagnostic harness does
+    not recreate the store (and re-scan/re-prune) on every request/response
+    capture. The cache is keyed by the effective root path and invalidated when
+    retention or byte-budget configuration changes. *)
+type store_entry =
+  { store : Dated_jsonl.t
+  ; retention_days : int
+  ; max_bytes : int
+  }
+
+let store_cache : (string, store_entry) Hashtbl.t = Hashtbl.create 16
+let store_cache_mu = Stdlib.Mutex.create ()
+
+let store_for ~masc_root =
+  let retention_days = Env_config_keeper.KeeperWireCapture.retention_days () in
+  let max_bytes = Env_config_keeper.KeeperWireCapture.max_bytes () in
+  Stdlib.Mutex.protect store_cache_mu (fun () ->
+    match Hashtbl.find_opt store_cache masc_root with
+    | Some entry
+      when entry.retention_days = retention_days && entry.max_bytes = max_bytes ->
+      entry.store
+    | _ ->
+      let store =
+        Dated_jsonl.create
+          ~base_dir:(wire_capture_dir masc_root)
+          ~retention_days
+          ~max_bytes
+          ()
+      in
+      Hashtbl.replace store_cache masc_root { store; retention_days; max_bytes };
+      store)
+;;
+
 let write_payload ~masc_root (payload : Yojson.Safe.t) =
   let max_bytes = Env_config_keeper.KeeperWireCapture.max_bytes () in
-  let store =
-    Dated_jsonl.create
-      ~base_dir:(wire_capture_dir masc_root)
-      ~retention_days:(Env_config_keeper.KeeperWireCapture.retention_days ())
-      ~max_bytes
-      ()
-  in
+  let store = store_for ~masc_root in
   if
     not
       (Dated_jsonl.append_if_current_file_fits

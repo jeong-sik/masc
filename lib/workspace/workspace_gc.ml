@@ -255,7 +255,25 @@ let gc config ?(days=7) () =
   in
   results := zombie_str :: !results;
 
-  (* 2. Archive stale tasks (older than N days, not completed) *)
+  (* 2. Archive terminal tasks (Done/Cancelled) older than N days, and
+        self-heal any non-terminal task a prior buggy GC pass stranded in the
+        archive.
+
+        Only terminal states are archive-eligible.  masc_transition and the
+        dashboard verification resolve path read the *live* backlog only, so
+        archiving a non-terminal task strands it: an AwaitingVerification
+        obligation can no longer be approved/rejected and a Claimed/InProgress
+        task can no longer be released, with no unarchive path.  RFC-0220
+        requires an AwaitingVerification obligation to stay claimable by a
+        verifier.  Live incident: task-1537 (submitted 2026-06-29) was orphaned
+        into tasks-archive.json for days because the old [not is_done]
+        predicate archived every non-[Done] task, including
+        AwaitingVerification.
+
+        Archive-eligibility is decided by [task_status_is_terminal] — an
+        exhaustive match over [task_status] with no [_] catch-all, so adding a
+        new status forces a compile-time decision there rather than silently
+        defaulting to "archive". *)
   let cutoff_time =
     let now = Time_compat.now () in
     now -. (float_of_int days *. 24. *. 60. *. 60.)
@@ -266,27 +284,69 @@ let gc config ?(days=7) () =
   let stale_count = ref 0 in
   let archived_tasks = ref [] in
   let kept_tasks = List.filter (fun task ->
-    let is_done = Masc_domain.task_status_is_done task.task_status in
+    let is_terminal = Masc_domain.task_status_is_terminal task.task_status in
     let is_old = task.created_at < cutoff_iso in
-    if is_old && not is_done then begin
+    if is_old && is_terminal then begin
       incr stale_count;
       archived_tasks := task :: !archived_tasks;
-      false  (* Remove stale task *)
+      false  (* Archive: terminal and older than the cutoff. *)
     end else
-      true   (* Keep task *)
+      true   (* Keep: recent, or non-terminal at any age. *)
   ) backlog.tasks in
 
-  if !stale_count > 0 then begin
-    append_archive_tasks config (List.rev !archived_tasks);
+  (* Self-healing restore: recover non-terminal obligations a prior pass
+     mis-archived.  Restore only ids not already live so a crash between the
+     backlog write and the archive drop below cannot duplicate a task. *)
+  let orphaned = read_orphaned_nonterminal_tasks config in
+  let live_ids = List.map (fun (t : task) -> t.id) kept_tasks in
+  let restored =
+    List.filter (fun (t : task) -> not (List.mem t.id live_ids)) orphaned
+  in
+  let restore_count = List.length restored in
+
+  (* Backlog first: on a crash before the archive is rewritten below, the
+     restored task survives in both stores and the next GC pass dedups it. *)
+  if !stale_count > 0 || restore_count > 0 then begin
     let new_backlog = {
-      tasks = kept_tasks;
+      tasks = kept_tasks @ restored;
       last_updated = now_iso ();
       version = backlog.version + 1;
     } in
-    write_backlog config new_backlog;
-    results := Printf.sprintf "Archived %d stale task(s) (older than %d days)" !stale_count days :: !results
-  end else
-    results := Printf.sprintf "No stale tasks (threshold: %d days)" days :: !results;
+    write_backlog config new_backlog
+  end;
+  if !stale_count > 0 then append_archive_tasks config (List.rev !archived_tasks);
+  (* Drop every orphaned non-terminal entry from the archive, including any that
+     was already live (a pure duplicate). *)
+  if orphaned <> [] then
+    drop_archive_tasks config ~ids:(List.map (fun (t : task) -> t.id) orphaned);
+  List.iter (fun (t : task) ->
+    let status = Masc_domain.task_status_to_string t.task_status in
+    log_event config (`Assoc [
+      ("type", `String "task_restored_from_archive");
+      ("task_id", `String t.id);
+      ("status", `String status);
+      ("ts", `String (now_iso ()));
+    ]);
+    (Atomic.get Workspace_hooks.activity_emit_fn)
+      config
+      ~actor:Workspace_hooks.{ kind = "system"; id = "keeper-gc" }
+      ~subject:Workspace_hooks.{ kind = "task"; id = t.id }
+      ~kind:"task.restored_from_archive"
+      ~payload:(`Assoc [ ("status", `String status) ])
+      ~tags:[ "gc"; "self_heal"; "rfc-0220" ]
+      ()
+  ) restored;
+  (if !stale_count > 0 then
+     results :=
+       Printf.sprintf "Archived %d terminal task(s) (older than %d days)" !stale_count days
+       :: !results
+   else
+     results :=
+       Printf.sprintf "No terminal tasks to archive (threshold: %d days)" days :: !results);
+  if restore_count > 0 then
+    results :=
+      Printf.sprintf "Restored %d non-terminal task(s) from archive" restore_count
+      :: !results;
 
   (* 3. Cleanup old messages - but preserve messages referencing open tasks *)
   let messages_path = messages_dir config in

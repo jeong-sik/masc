@@ -4,6 +4,7 @@ import {
   judgeRoleLabel,
   judgeNodeTokenLabel,
   judgeNodeIdentity,
+  judgeNodeElapsedLabel,
 } from './fusion-judge-format'
 import type { FusionJudgeNode } from '../../lib/fusion-meta'
 
@@ -21,14 +22,27 @@ describe('judgeShapeLabel', () => {
 })
 
 describe('judgeRoleLabel', () => {
-  it('maps the known closed backend roles', () => {
+  it('maps every role of the closed six-role backend enum', () => {
     expect(judgeRoleLabel('first')).toBe('1차')
     expect(judgeRoleLabel('meta')).toBe('메타')
     expect(judgeRoleLabel('refine')).toBe('재검토')
     expect(judgeRoleLabel('single')).toBe('단일')
+    // staged JoJ reducers — previously fell through to the raw latin role string
+    expect(judgeRoleLabel('stage_meta')).toBe('단계 심판')
+    expect(judgeRoleLabel('final_meta')).toBe('최종 심판')
   })
   it('falls through to the raw string for an unanticipated role', () => {
     expect(judgeRoleLabel('arbiter')).toBe('arbiter')
+  })
+})
+
+describe('judgeNodeElapsedLabel', () => {
+  it('returns null when the node carries no timing', () => {
+    expect(judgeNodeElapsedLabel(node({}))).toBeNull()
+  })
+  it('formats the elapsed seconds to one decimal', () => {
+    expect(judgeNodeElapsedLabel(node({ failed: true, elapsedS: 4.12 }))).toBe('4.1s')
+    expect(judgeNodeElapsedLabel(node({ failed: true, elapsedS: 0 }))).toBe('0.0s')
   })
 })
 

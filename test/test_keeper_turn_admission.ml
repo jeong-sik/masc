@@ -219,6 +219,99 @@ let test_cancelled_waiter_leaves_queue () =
     Eio.Promise.resolve set_release ())
 ;;
 
+let test_autonomous_yields_to_parked_chat () =
+  reset ();
+  Printf.printf "Test 8: autonomous lane yields to a parked chat request\n%!";
+  (* No slot has been created, so nothing can be waiting. *)
+  check
+    "chat_waiting is false before any turn"
+    (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name));
+  Eio.Switch.run (fun sw ->
+    let started, set_started = Eio.Promise.create () in
+    let release, set_release = Eio.Promise.create () in
+    let parked_ran = ref false in
+    (* Holder: an in-flight chat turn occupying the slot. *)
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
+          Eio.Promise.resolve set_started ();
+          Eio.Promise.await release)
+      with
+      | `Ran () -> ()
+      | `Rejected _ -> check "holder chat admitted on a free slot" false);
+    Eio.Promise.await started;
+    (* Parked waiter: a second chat request queued behind the holder. [fork]
+       runs it to its first suspension — the [Eio.Mutex.lock] park — so by the
+       time [fork] returns the waiter is counted in [waiting]. *)
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
+          parked_ran := true)
+      with
+      | `Ran () -> ()
+      | `Rejected _ -> check "parked chat is not rejected below the cap" false);
+    check
+      "chat_waiting reports the parked chat"
+      (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name);
+    (match Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () -> ()) with
+     | `Busy _ -> check "run_if_free yields (Busy) while a chat is parked" true
+     | `Ran () -> check "run_if_free must not admit while a chat is parked" false);
+    check
+      "parked chat has not run while the holder is in flight"
+      (not !parked_ran);
+    Eio.Promise.resolve set_release ());
+  (* The switch exits only after the parked chat drained; nothing waits now. *)
+  check
+    "chat_waiting is false after the queue drains"
+    (not (Keeper_turn_admission.chat_waiting ~base_path ~keeper_name))
+;;
+
+let test_idle_loop_yields_to_parked_chat () =
+  reset ();
+  Printf.printf
+    "Test 9: an idle autonomous loop exits on a parked chat so the chat admits\n%!";
+  let autonomous_exited_via_yield = ref false in
+  let chat_ran = ref false in
+  Eio.Switch.run (fun sw ->
+    let autonomous_admitted, set_autonomous_admitted = Eio.Promise.create () in
+    (* Autonomous holder: a bounded idle loop modelling the OAS agent loop's
+       per-turn-boundary exit check. Each iteration yields (a turn boundary)
+       and inspects [chat_waiting]; a parked chat ends the loop early, the
+       admission slot releases, and the chat admits by direct handoff. This
+       harnesses the admission-level contract; the SDK-level [exit_condition]
+       wiring in [Keeper_agent_run] drives the real loop the same way. *)
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Keeper_turn_admission.run_if_free ~base_path ~keeper_name (fun () ->
+          Eio.Promise.resolve set_autonomous_admitted ();
+          let rec idle_turns n =
+            if n <= 0
+            then () (* idle budget spent without a chat: ordinary loop end *)
+            else if Keeper_turn_admission.chat_waiting ~base_path ~keeper_name
+            then autonomous_exited_via_yield := true (* graceful early exit *)
+            else (
+              Eio.Fiber.yield ();
+              idle_turns (n - 1))
+          in
+          idle_turns 1000)
+      with
+      | `Ran () -> ()
+      | `Busy _ -> check "autonomous lane admits on a free slot" false);
+    Eio.Promise.await autonomous_admitted;
+    (* Chat parks behind the in-flight autonomous turn. *)
+    Eio.Fiber.fork ~sw (fun () ->
+      match
+        Keeper_turn_admission.run_serialized ~base_path ~keeper_name (fun () ->
+          chat_ran := true)
+      with
+      | `Ran () -> ()
+      | `Rejected _ -> check "parked chat is not rejected below the cap" false));
+  check
+    "idle loop exited early because a chat was waiting"
+    !autonomous_exited_via_yield;
+  check "parked chat admitted after the autonomous turn yielded" !chat_ran
+;;
+
 let () =
   Eio_main.run @@ fun _env ->
   test_free_slot_admits ();
@@ -228,6 +321,8 @@ let () =
   test_waiting_cap_rejects ();
   test_exception_releases_slot ();
   test_cancelled_waiter_leaves_queue ();
+  test_autonomous_yields_to_parked_chat ();
+  test_idle_loop_yields_to_parked_chat ();
   if !failures > 0
   then (
     Printf.printf "FAILED: %d check(s)\n%!" !failures;

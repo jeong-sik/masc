@@ -92,6 +92,7 @@ import './styles/keeper-v2/runtime.css'
 // Non-prototype: harmonizes the re-mounted operational cluster (.v2-top-ops) to
 // the statchip pill shape. Loaded last so it wins on shape (see file header).
 import './styles/keeper-v2/ops-cluster.css'
+import './styles/keeper-v2/prompt-book.css'
 
 // ── CSS SSOT removal scope (PR #22081 review P1) ──
 // `styles/craft-v2.css` (loaded via the *-v2.css glob above) is NOT yet removable:

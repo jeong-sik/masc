@@ -17,6 +17,12 @@ type stop_reason =
       { turns_used : int
       ; tool_name : string option
       }
+  | Yielded_to_chat_waiting of { turns_used : int }
+    (* The autonomous lane's OAS run stopped at a turn boundary because a
+       dashboard/connector chat request was parked on the keeper's turn slot.
+       Progress is checkpointed and the keeper resumes on the next cycle — the
+       same disposition as [MutationBoundaryReached], but a distinct reason so
+       receipts do not conflate an on-demand yield with a budget/mutation stop. *)
 
 type config =
   { name : string

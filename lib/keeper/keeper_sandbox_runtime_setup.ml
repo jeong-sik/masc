@@ -71,15 +71,15 @@ let output_looks_image_missing = Keeper_sandbox_runtime_classify.output_looks_im
 let output_looks_timeout = Keeper_sandbox_runtime_classify.output_looks_timeout
 let docker_output_looks_oci_mount_failure =
   Keeper_sandbox_runtime_classify.docker_output_looks_oci_mount_failure
-let classify_docker_runtime_failure =
-  Keeper_sandbox_runtime_classify.classify_docker_runtime_failure
+let classify_docker_info_failure = Keeper_sandbox_runtime_classify.classify_docker_info_failure
+let classify_docker_run_failure = Keeper_sandbox_runtime_classify.classify_docker_run_failure
 let classify_image_inspect_failure =
   Keeper_sandbox_runtime_classify.classify_image_inspect_failure
 let classify_image_inventory_failure =
   Keeper_sandbox_runtime_classify.classify_image_inventory_failure
 
 let docker_run_looks_daemon_pressure ~status ~output =
-  match classify_docker_runtime_failure ~status ~output with
+  match classify_docker_run_failure ~status ~output with
   | Keeper_sandbox_runtime_classify.Docker_daemon_unavailable -> true
   | _ -> false
 
@@ -100,7 +100,7 @@ let docker_info_security_options_with_class ~timeout_sec =
           Printf.sprintf
             "docker info failed while validating sandbox runtime: %s"
             (Exec_policy.truncate_for_log out)
-      ; failure_class = classify_docker_runtime_failure ~status:st ~output:out
+      ; failure_class = classify_docker_info_failure ~status:st ~output:out
       }
   else (
     try

@@ -5,6 +5,7 @@
     [COMPACT_THRESHOLD]. *)
 
 open Ide_annotation_types
+module String_set = Set.Make (String)
 
 let store_path ~base_dir = Ide_paths.store_path ~base_dir
 
@@ -76,18 +77,34 @@ let load_all_partition ~base_dir partition =
   let path = annotations_file_for ~base_dir partition in
   if not (Sys.file_exists path)
   then []
-  else
-    Fs_compat.fold_jsonl_lines
-      ~init:[]
-      ~f:(fun acc ~line_no:_ j ->
-        if is_tombstone j
-        then acc
-        else (
-          match annotation_of_json j with
-          | Ok a -> a :: acc
-          | Error _ -> acc))
-      path
-    |> List.rev
+  else (
+    (* task-1744: a tombstone must suppress the earlier annotation line
+       that shares its id. That decision cannot be made mid-fold, since
+       the tombstone may appear after its target in the append-only log,
+       so one pass collects both the live annotations and the set of
+       tombstoned ids and the suppression is applied afterwards. This
+       makes [list]/[compact] honour the "tombstoned entries are
+       excluded" contract instead of only dropping the marker lines. The
+       annotations file is small (live store on the order of KB), so a
+       single O(n) read plus an O(n log n) filter is adequate; no
+       tail-read optimisation is needed here. *)
+    let annotations, tombstoned =
+      Fs_compat.fold_jsonl_lines
+        ~init:([], String_set.empty)
+        ~f:(fun (acc, tombstoned) ~line_no:_ j ->
+          if is_tombstone j
+          then (
+            match annotation_id j with
+            | Some id -> acc, String_set.add id tombstoned
+            | None -> acc, tombstoned)
+          else (
+            match annotation_of_json j with
+            | Ok a -> a :: acc, tombstoned
+            | Error _ -> acc, tombstoned))
+        path
+    in
+    List.rev annotations
+    |> List.filter (fun (a : annotation) -> not (String_set.mem a.id tombstoned)))
 ;;
 
 let write_all_partition ~base_dir partition annotations =

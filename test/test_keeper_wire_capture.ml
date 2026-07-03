@@ -194,7 +194,7 @@ let response_disabled_is_noop () =
   with_flag "" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_off" "" in
     Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:1
-      ~response_text:"anything" ();
+      ~sdk_turn:2 ~response_text:"anything" ();
     Alcotest.(check (list string))
       "no jsonl written when disabled" [] (find_jsonl base))
 
@@ -202,7 +202,7 @@ let response_capture_writes_redacted () =
   with_flag "1" (fun () ->
     let base = Filename.temp_dir "wirecap_resp_on" "" in
     Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:9
-      ~response_text:("out " ^ fake_github_token ^ " done") ();
+      ~sdk_turn:4 ~response_text:("out " ^ fake_github_token ^ " done") ();
     let files = find_jsonl base in
     Alcotest.(check int) "exactly one jsonl written" 1 (List.length files);
     let content = read_file (List.hd files) in
@@ -212,6 +212,8 @@ let response_capture_writes_redacted () =
       (contains ~needle:fake_github_token content);
     Alcotest.(check bool) "turn_id recorded" true
       (contains ~needle:"\"turn_id\":9" content);
+    Alcotest.(check bool) "sdk_turn recorded" true
+      (contains ~needle:"\"sdk_turn\":4" content);
     Alcotest.(check bool) "missing trace_id is null" true
       (contains ~needle:"\"trace_id\":null" content))
 
@@ -220,7 +222,7 @@ let response_trace_id_emitted () =
     let base = Filename.temp_dir "wirecap_resp_trace" "" in
     let trace_id = Keeper_id.For_testing.unsafe_trace_id_of_string "trace-resp-xyz" in
     Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:2
-      ~trace_id ~response_text:"ok" ();
+      ~sdk_turn:0 ~trace_id ~response_text:"ok" ();
     let content = read_file (List.hd (find_jsonl base)) in
     Alcotest.(check bool) "response trace_id string recorded" true
       (contains ~needle:"\"trace_id\":\"trace-resp-xyz\"" content))
@@ -237,7 +239,7 @@ let capture_prunes_old_files () =
         let old_file = Filename.concat old_month "01.jsonl" in
         write_file old_file (String.make 1024 'x');
         Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:10
-          ~response_text:"bounded" ();
+          ~sdk_turn:1 ~response_text:"bounded" ();
         Alcotest.(check bool) "old capture file pruned" false
           (Sys.file_exists old_file);
         Alcotest.(check int) "only current capture remains" 1
@@ -263,12 +265,12 @@ let capture_cache_reloads_when_retention_changes () =
       write_file old_file (String.make 1024 'x');
       with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "30" (fun () ->
         Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:20
-          ~response_text:"cache warmup" ());
+          ~sdk_turn:1 ~response_text:"cache warmup" ());
       Alcotest.(check bool) "old capture retained by warm cache" true
         (Sys.file_exists old_file);
       with_env "MASC_KEEPER_WIRE_CAPTURE_RETENTION_DAYS" "1" (fun () ->
         Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:21
-          ~response_text:"cache reload" ());
+          ~sdk_turn:1 ~response_text:"cache reload" ());
       Alcotest.(check bool) "old capture pruned after retention change" false
         (Sys.file_exists old_file)))
 
@@ -277,12 +279,12 @@ let capture_skips_when_current_file_cap_would_be_exceeded () =
     with_env "MASC_KEEPER_WIRE_CAPTURE_MAX_BYTES" "512" (fun () ->
       let base = Filename.temp_dir "wirecap_cap" "" in
       Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:11
-        ~response_text:"small" ();
+        ~sdk_turn:1 ~response_text:"small" ();
       let files = find_jsonl base in
       Alcotest.(check int) "small record written" 1 (List.length files);
       let before = read_file (List.hd files) in
       Wire.capture_response ~masc_root:base ~keeper_name:"sangsu" ~turn_id:12
-        ~response_text:(String.make 4096 'x') ();
+        ~sdk_turn:1 ~response_text:(String.make 4096 'x') ();
       let after = read_file (List.hd files) in
       Alcotest.(check string)
         "oversized record skipped without mutating current day file"
@@ -309,6 +311,7 @@ let response_capture_matches_replayed_history_text () =
       ~masc_root:base
       ~keeper_name:"history_keeper"
       ~turn_id:5
+      ~sdk_turn:2
       ~response_text:history_text
       ();
     let files = find_jsonl base in

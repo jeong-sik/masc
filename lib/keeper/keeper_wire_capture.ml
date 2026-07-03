@@ -42,7 +42,7 @@ let store_for ~masc_root =
       store)
 ;;
 
-let write_payload ~masc_root (payload : Yojson.Safe.t) =
+let write_payload ~masc_root ~keeper_name ~turn_id (payload : Yojson.Safe.t) =
   let max_bytes = Env_config_keeper.KeeperWireCapture.max_bytes () in
   let store = store_for ~masc_root in
   if
@@ -51,18 +51,34 @@ let write_payload ~masc_root (payload : Yojson.Safe.t) =
          store
          ~max_current_file_bytes:max_bytes
          payload)
-  then
+  then (
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WireCaptureRecordSkipped)
+      ~labels:
+        [ ("keeper", keeper_name)
+        ; ("turn_id", string_of_int turn_id)
+        ; ("reason", "cap")
+        ]
+      ();
     Log.Keeper.warn
       "keeper_wire_capture: skipped record because current day file would exceed %d \
        bytes under %s"
       max_bytes
-      (Dated_jsonl.base_dir store)
+      (Dated_jsonl.base_dir store))
 
-let best_effort ~masc_root f =
+let best_effort ~masc_root ~keeper_name ~turn_id f =
   let base_dir = wire_capture_dir masc_root in
   try f () with
   | Eio.Cancel.Cancelled _ as e -> raise e
   | exn ->
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WireCaptureWriteFailures)
+      ~labels:
+        [ ("keeper", keeper_name)
+        ; ("turn_id", string_of_int turn_id)
+        ; ("site", "write_payload")
+        ]
+      ();
     Log.Keeper.error "keeper_wire_capture: write failed to %s: %s" base_dir
       (Printexc.to_string exn)
 
@@ -74,7 +90,7 @@ let capture_request ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
     ~extra_system_context ~user_message ~history_messages ?trace_id () =
   if not (enabled ()) then ()
   else
-    best_effort ~masc_root (fun () ->
+    best_effort ~masc_root ~keeper_name ~turn_id (fun () ->
       let history =
         List.map
           (fun (m : Agent_sdk.Types.message) ->
@@ -104,12 +120,13 @@ let capture_request ~masc_root ~keeper_name ~turn_id ~sdk_turn ~system_prompt
           ; ("history", `List history)
           ]
       in
-      write_payload ~masc_root payload)
+      write_payload ~masc_root ~keeper_name ~turn_id payload)
 
-let capture_response ~masc_root ~keeper_name ~turn_id ~response_text ?trace_id () =
+let capture_response ~masc_root ~keeper_name ~turn_id ~sdk_turn ~response_text
+    ?trace_id () =
   if not (enabled ()) then ()
   else
-    best_effort ~masc_root (fun () ->
+    best_effort ~masc_root ~keeper_name ~turn_id (fun () ->
       let payload : Yojson.Safe.t =
         `Assoc
           [ ("ts", `String (Masc_domain.now_iso ()))
@@ -120,7 +137,8 @@ let capture_response ~masc_root ~keeper_name ~turn_id ~response_text ?trace_id (
             , match trace_id with
               | Some t -> `String (Keeper_id.Trace_id.to_string t)
               | None -> `Null )
+          ; ("sdk_turn", `Int sdk_turn)
           ; ("response_text", `String (redact response_text))
           ]
       in
-      write_payload ~masc_root payload)
+      write_payload ~masc_root ~keeper_name ~turn_id payload)

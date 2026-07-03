@@ -292,6 +292,16 @@ let finalize
       "suppressing keeper-visible response for completion_contract_result=%s"
       (Keeper_execution_receipt.completion_contract_result_to_string
          completion_contract_result);
+  if suppress_visible_response
+  then
+    Otel_metric_store.inc_counter
+      Keeper_metrics.(to_string WireCaptureResponseSuppressed)
+      ~labels:
+        [ ("keeper", meta.name)
+        ; ( "reason"
+          , if budget_exhausted then "budget_exhausted" else "completion_contract" )
+        ]
+      ();
   let reported_state_snapshot =
     reported_state_snapshot_from_checkpoint result.checkpoint
   in

@@ -140,9 +140,16 @@
 .mem-store-row:first-child { border-top: 0; }
 .mem-kind { flex: none; align-self: flex-start; font-family: var(--font-ui); font-size: var(--fs-10); letter-spacing: 0.04em; padding: 2px 8px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); color: var(--text-dim); white-space: nowrap; }
 .mem-kind.fact { color: var(--volt-strong); border-color: var(--volt-dim); }
-.mem-kind.decision { color: var(--info); border-color: color-mix(in oklab, var(--info) 35%, transparent); }
-.mem-kind.pattern { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 35%, transparent); }
+.mem-kind.code { color: var(--info); border-color: color-mix(in oklab, var(--info) 35%, transparent); }
+.mem-kind.validated { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 35%, transparent); }
+.mem-kind.lesson { color: var(--accent-bone, var(--volt-strong)); border-color: color-mix(in oklab, var(--volt) 30%, transparent); }
 .mem-kind.pref { color: var(--text-mid); }
+.mem-kind.preference { color: var(--text-mid); }
+.mem-kind.goal { color: var(--volt-strong); border-color: var(--volt-dim); }
+.mem-kind.constraint { color: var(--info); border-color: color-mix(in oklab, var(--info) 32%, transparent); }
+.mem-kind.blocker { color: var(--status-bad); border-color: color-mix(in oklab, var(--status-bad) 40%, transparent); }
+.mem-kind.ephemeral { color: var(--text-dim); border-style: dashed; }
+.mem-kind.unknown { color: var(--text-dim); }
 .mem-kind.entity { color: var(--status-warn); border-color: color-mix(in oklab, var(--status-warn) 35%, transparent); }
 .mem-store-main { min-width: 0; flex: 1; }
 .mem-store-text { font-size: 12.5px; line-height: 1.5; color: var(--text-primary); text-wrap: pretty; }
@@ -151,8 +158,12 @@
 .mem-store-why { margin-top: 5px; font-size: 10.5px; color: var(--text-dim); line-height: 1.4; }
 .mem-more { margin-top: 9px; width: 100%; border: 1px solid var(--border-main); border-radius: var(--radius-sm); background: var(--bg-sunken); color: var(--text-mid); font-family: var(--font-ui); font-size: var(--fs-11); padding: 7px 10px; cursor: pointer; transition: 0.14s; }
 .mem-more:hover { border-color: var(--volt-dim); color: var(--volt); }
-.mem-sal { position: relative; width: 54px; height: 5px; border-radius: 3px; background: var(--bg-sunken); overflow: hidden; flex: none; }
-.mem-sal > span { position: absolute; left: 0; top: 0; bottom: 0; background: var(--volt); border-radius: 3px; }
+/* TTL / current badge — replaces the deleted salience bar (RFC-0247) */
+.mem-ttl { flex: none; font-size: 9.5px; letter-spacing: 0.04em; padding: 1px 7px; border-radius: var(--radius-pill); border: 1px solid var(--border-main); }
+.mem-ttl.current { color: var(--status-ok); border-color: color-mix(in oklab, var(--status-ok) 36%, transparent); }
+.mem-ttl.expired { color: var(--text-dim); border-style: dashed; }
+.mem-leg-tag { margin-left: 6px; font-size: 8.5px; letter-spacing: 0.06em; text-transform: uppercase; color: var(--status-ok); border: 1px solid color-mix(in oklab, var(--status-ok) 32%, transparent); border-radius: var(--radius-xs); padding: 0 4px; }
+.mem-tl-range { display: block; margin-top: 3px; font-size: 9.5px; color: var(--text-dim); }
 
 /* ── recall timeline — keeper-v2/styles/memory.css:69-82 ── */
 .mem-timeline { display: flex; flex-direction: column; }
@@ -163,6 +174,7 @@
 .mem-op.recall { color: var(--info); }
 .mem-op.inject { color: var(--status-ok); }
 .mem-op.pin { color: var(--volt-strong); }
+.mem-op.summarize { color: var(--info); }
 .mem-op.compact { color: var(--status-warn); }
 .mem-op.evict { color: var(--text-dim); }
 .mem-tl-text { color: var(--text-mid); min-width: 0; line-height: 1.45; }
@@ -177,7 +189,7 @@
 .mem-stat .k { display: block; margin-top: 3px; font-family: var(--font-ui); font-size: 9.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-dim); }
 
 .mem-kinds-dist { display: flex; flex-direction: column; gap: 7px; }
-.mem-kd-row { display: grid; grid-template-columns: 72px 1fr 28px; gap: 10px; align-items: center; }
+.mem-kd-row { display: grid; grid-template-columns: minmax(92px, max-content) 1fr 28px; gap: 10px; align-items: center; }
 .mem-kd-bar { height: 7px; background: var(--bg-sunken); border-radius: 3px; overflow: hidden; }
 .mem-kd-bar > span { display: block; height: 100%; background: var(--volt); border-radius: 3px; }
 .mem-kd-n { font-size: var(--fs-11); color: var(--text-mid); text-align: right; }

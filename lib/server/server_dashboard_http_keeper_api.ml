@@ -100,6 +100,10 @@ let memory_os_episode_json ~now (episode : Keeper_memory_os_types.episode) =
     ; "current", `Bool (memory_os_episode_is_current ~now episode)
     ; "terminal_marker", json_string_opt episode.terminal_marker
     ; "claim_count", `Int (List.length episode.claims)
+    ; ( "source_turn_range"
+      , match episode.source_turn_range with
+        | Some (lo, hi) -> `Assoc [ "lo", `Int lo; "hi", `Int hi ]
+        | None -> `Null )
     ; "summary", `String episode.episode_summary
     ]
 ;;

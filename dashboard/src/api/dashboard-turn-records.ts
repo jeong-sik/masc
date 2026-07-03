@@ -92,6 +92,9 @@ export type MemoryOsEpisodeSummary = {
   current: boolean
   terminal_marker: string | null
   claim_count: number
+  // Inclusive [lo, hi] absolute-turn span the episode compacted, or null when the
+  // record carries none (memory_os_episode_json → Keeper_memory_os_types.episode.source_turn_range).
+  source_turn_range: readonly [number, number] | null
   summary: string
 }
 
@@ -387,6 +390,17 @@ function decodeTurnRecordRow(raw: unknown): TurnRecordRow | null {
   }
 }
 
+// Decode the { lo, hi } object memory_os_episode_json emits for a present range,
+// or null (server sends `Null`, or the field is malformed/absent). Never guesses
+// a span — an incomplete pair collapses to null rather than a fabricated bound.
+function decodeSourceTurnRange(raw: unknown): readonly [number, number] | null {
+  if (!isRecord(raw)) return null
+  const lo = asNumber(raw.lo)
+  const hi = asNumber(raw.hi)
+  if (lo == null || hi == null) return null
+  return [lo, hi]
+}
+
 function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
   if (!isRecord(raw)) return null
   const trace_id = asString(raw.trace_id)
@@ -404,6 +418,7 @@ function decodeMemoryOsEpisode(raw: unknown): MemoryOsEpisodeSummary | null {
     current: asBoolean(raw.current, true) ?? true,
     terminal_marker: asNullableString(raw.terminal_marker),
     claim_count: asNumber(raw.claim_count, 0) ?? 0,
+    source_turn_range: decodeSourceTurnRange(raw.source_turn_range),
     summary,
   }
 }

@@ -80,6 +80,7 @@ function turnRecordsPayload() {
             current: true,
             terminal_marker: 'handoff_complete',
             claim_count: 4,
+            source_turn_range: { lo: 1, hi: 28 },
             summary: '리텐션 코호트 정의를 정리하고 amplitude 쿼리를 표로 캐시함.',
           },
           {
@@ -399,6 +400,50 @@ describe('MemoryInspector — one-keeper scope (real data)', () => {
     await waitFor(() => expect(container.textContent).toContain('리텐션 코호트 정의'))
     expect(container.textContent).toContain('terminal=handoff_complete')
     expect(container.textContent).toContain('4 claims')
+    // source_turn_range projected → episode subtitle shows the compacted turn span.
+    expect(container.querySelector('.mem-tl-range')?.textContent).toBe('turn 1–28')
+    expect(container.textContent).toContain('turn 1–28')
+  })
+
+  it('omits the turn-range subtitle for an episode without source_turn_range (no fabrication)', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    // switch to the 진단/증거 lane where the range-less fallback episode is shown.
+    const diagnosticBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '진단/증거 1')
+    fireEvent.click(diagnosticBtn!)
+    const fallbackRow = [...container.querySelectorAll('.mem-store-row')].find(r =>
+      (r.textContent ?? '').includes('librarian parse fallback'))
+    expect(fallbackRow).toBeTruthy()
+    expect(fallbackRow?.querySelector('.mem-tl-range')).toBeFalsy()
+  })
+
+  it('marks memory-os prompt blocks with a legend tag and renders a current TTL pill', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    // The legend tag marks only the memory contribution blocks (memory_os_recall).
+    const memLegRow = [...container.querySelectorAll('.mem-leg')].find(r => r.querySelector('.mem-leg-tag'))
+    expect(memLegRow?.textContent).toContain('메모리 회상')
+    // a non-memory block (동적 컨텍스트) carries no tag.
+    const ctxLegRow = [...container.querySelectorAll('.mem-leg')].find(r =>
+      (r.querySelector('.mem-leg-lbl')?.textContent ?? '').includes('동적 컨텍스트'))
+    expect(ctxLegRow).toBeTruthy()
+    expect(ctxLegRow?.querySelector('.mem-leg-tag')).toBeFalsy()
+    // current fact renders a TTL pill, not the removed plain mono span.
+    expect(container.querySelector('.mem-ttl.current')).toBeTruthy()
+  })
+
+  it('renders an expired TTL pill for a fact past valid_until once expanded to all rows', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    const allBtn = [...container.querySelectorAll('.mem-filter')].find(b => b.textContent === '전체 3')
+    fireEvent.click(allBtn!)
+    const expiredRow = [...container.querySelectorAll('.mem-store-row')].find(r =>
+      (r.textContent ?? '').includes('amplitude 캐시는 만료됨'))
+    expect(expiredRow?.querySelector('.mem-ttl.expired')).toBeTruthy()
+    expect(expiredRow?.querySelector('.mem-ttl.current')).toBeFalsy()
   })
 
   it('shows an explicit empty state when memory_os is absent (no fabrication)', async () => {
@@ -496,6 +541,60 @@ describe('MemoryInspector — scope toggle', () => {
     expect(dotClassFor('nick0cave')).toContain('ok')
     expect(dotClassFor('qa-king')).toContain('idle')
     expect(dotClassFor('drifter')).toContain('bad')
+  })
+
+  it('renders a fleet category distribution over real fact.category', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    fireEvent.click([...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!)
+    await waitFor(() => expect(container.querySelector('.mem-kd-row')).toBeTruthy())
+    expect(container.textContent).toContain('category별 분포')
+    // 6 keepers × { constraint, fact, Speculation(unknown) } → 3 distinct category rows.
+    const kdRows = [...container.querySelectorAll('.mem-kd-row')]
+    expect(kdRows.length).toBe(3)
+    const labels = kdRows.map(r => r.querySelector('.mem-kind')?.textContent ?? '')
+    expect(labels.some(l => l.includes('제약'))).toBe(true)
+    expect(labels.some(l => l.includes('사실'))).toBe(true)
+    expect(labels.some(l => l.includes('Speculation'))).toBe(true) // raw unknown label preserved
+    const constraintRow = kdRows.find(r => (r.querySelector('.mem-kind')?.textContent ?? '').includes('제약'))
+    expect(constraintRow?.querySelector('.mem-kd-n')?.textContent).toBe('6')
+  })
+
+  it('renders a fleet-wide recent facts list labelled by keeper (not salience-sorted)', async () => {
+    stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    fireEvent.click([...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!)
+    await waitFor(() => expect(container.textContent).toContain('최근 확인된 사실 · 전체'))
+    const recentSection = [...container.querySelectorAll('.turn-sec')].find(sec =>
+      (sec.querySelector('h4')?.textContent ?? '').includes('최근 확인된 사실'))
+    expect(recentSection).toBeTruthy()
+    const rows = [...recentSection!.querySelectorAll('.mem-store-row')]
+    // bounded fleet slice (AGGREGATE_RECENT_FACTS_LIMIT = 8)
+    expect(rows.length).toBe(8)
+    // each row is labelled by its owning keeper via srcOverride — a real roster id.
+    const srcLabels = rows.map(r => r.querySelector('.mem-src')?.textContent ?? '')
+    expect(srcLabels.every(label => DEFAULT_MEMORY_KEEPERS.some(k => k.id === label))).toBe(true)
+    expect(container.textContent).toContain('salience 정렬 아님')
+  })
+
+  it('switches to the individual view for the clicked aggregate keeper row (onPick)', async () => {
+    const fetchMock = stubFetch()
+    const { container } = renderInspector()
+    await waitFor(() => expect(container.querySelector('.mem-bar')).toBeTruthy())
+    fireEvent.click([...container.querySelectorAll('.mem-scope button')].find(b => b.textContent === '전체')!)
+    await waitFor(() =>
+      expect(container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)').length)
+        .toBe(DEFAULT_MEMORY_KEEPERS.length))
+    const targetRow = [...container.querySelectorAll('.mem-table .mem-tr:not(.mem-th)')].find(r =>
+      (r.querySelector('.mem-td-id .mono')?.textContent ?? '') === 'sangsu')
+    expect(targetRow).toBeTruthy()
+    fireEvent.click(targetRow!)
+    // pick → one scope bound to the clicked keeper, which loads its own turn-records.
+    await waitFor(() => expect(container.querySelector('.tid')?.textContent).toBe('sangsu'))
+    expect(fetchMock.mock.calls.some(call =>
+      String(call[0]).includes('/api/v1/keepers/sangsu/turn-records?limit=24'))).toBe(true)
   })
 })
 

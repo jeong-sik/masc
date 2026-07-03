@@ -1300,6 +1300,123 @@ let test_append_turn_preserves_fusion_lookup_ids () =
       | Some _ -> Alcotest.fail "expected exactly one fusion block"
       | None -> Alcotest.fail "assistant fusion block missing")
 
+(* Read-boundary redaction: rows written before this PR (or by any path that
+   bypasses the write-boundary redactors) must still have caller-supplied
+   blocks and audio scrubbed before they are served by [load] / [to_json_array]. *)
+let test_load_redacts_legacy_raw_blocks_and_audio () =
+  let base_dir = temp_base_path "keeper-chat-store-legacy-blocks-audio-redact" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-legacy-blocks-audio-redact" in
+      let root = secret_root_default ~base_dir ~keeper_name in
+      let secret = "legacy-blocks-audio.secret!" in
+      write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
+      let path = chat_path ~base_dir ~keeper_name in
+      let audio_json =
+        `Assoc
+          [ ("token", `String "voice-token-legacy")
+          ; ("mime", `String "audio/mpeg")
+          ; ("message_text", `String ("caption " ^ secret))
+          ; ("audio_url", `String ("https://cdn.example.com/audio?sig=" ^ secret))
+          ]
+      in
+      let blocks_json =
+        B.blocks_to_yojson
+          [ B.Text { html = "paragraph " ^ secret }
+          ; B.Code { cap = None; html = "code " ^ secret; source = None }
+          ]
+      in
+      let row =
+        `Assoc
+          [ ("role", `String "assistant")
+          ; ("content", `String ("content " ^ secret))
+          ; ("ts", `Float 1.0)
+          ; ("audio", audio_json)
+          ; ("blocks", blocks_json)
+          ]
+      in
+      write_file path (Yojson.Safe.to_string row ^ "\n");
+      let messages = K.load ~base_dir ~keeper_name in
+      match messages with
+      | [ msg ] ->
+        Alcotest.(check bool) "legacy content redacted on load" false
+          (contains_substring msg.K.content secret);
+        (match msg.K.audio with
+         | Some audio ->
+           Alcotest.(check bool) "legacy audio message_text redacted on load" false
+             (contains_substring audio.message_text secret);
+           Alcotest.(check bool) "legacy audio audio_url redacted on load" false
+             (match audio.audio_url with
+              | Some url -> contains_substring url secret
+              | None -> false))
+         | None -> Alcotest.fail "legacy audio missing");
+        Alcotest.(check bool) "legacy blocks redacted on load" false
+          (match msg.K.blocks with
+           | Some blocks ->
+             contains_substring (Yojson.Safe.to_string (B.blocks_to_yojson blocks)) secret
+           | None -> true);
+        let json = K.to_json_array messages in
+        let s = Yojson.Safe.to_string json in
+        Alcotest.(check bool) "to_json_array hides legacy secret" false
+          (contains_substring s secret);
+        Alcotest.(check bool) "redaction marker present in served payload" true
+          (contains_substring s "[REDACTED]")
+      | messages ->
+        Alcotest.failf "expected 1 message, got %d" (List.length messages))
+
+(* Write-boundary redaction: assistant-initiated messages can carry a synthesized
+   voice clip; [message_text] and [audio_url] are caller/free-form surfaces and
+   must be scrubbed before [encode_line] persists them. *)
+let test_append_assistant_message_redacts_audio () =
+  let base_dir = temp_base_path "keeper-chat-store-assistant-audio-redact" in
+  Fun.protect
+    ~finally:(fun () -> try remove_tree base_dir with _ -> ())
+    (fun () ->
+      with_env "MASC_SECRET_DIR" "" @@ fun () ->
+      let keeper_name = "keeper-chat-assistant-audio-redact" in
+      let root = secret_root_default ~base_dir ~keeper_name in
+      let secret = "assistant-audio.secret!" in
+      write_file (Filename.concat (Filename.concat root "env") "GH_TOKEN") secret;
+      K.append_assistant_message ~base_dir ~keeper_name
+        ~content:("spoken " ^ secret)
+        ~audio:
+          { K.token = "voice-token-redact"
+          ; audio_url = Some ("https://cdn.example.com/audio?sig=" ^ secret)
+          ; mime = "audio/mpeg"
+          ; duration_sec = Some 1.23
+          ; message_text = "caption " ^ secret
+          ; device_id = Some "device-1"
+          ; expired = false
+          }
+        ();
+      let raw = read_file (chat_path ~base_dir ~keeper_name) in
+      Alcotest.(check bool) "assistant content secret not persisted" false
+        (contains_substring raw secret);
+      Alcotest.(check bool) "assistant audio_url secret not persisted" false
+        (contains_substring raw ("https://cdn.example.com/audio?sig=" ^ secret));
+      Alcotest.(check bool) "assistant audio message_text secret not persisted" false
+        (contains_substring raw ("caption " ^ secret));
+      Alcotest.(check bool) "redaction marker persisted" true
+        (contains_substring raw "[REDACTED]");
+      let messages = K.load ~base_dir ~keeper_name in
+      match messages with
+      | [ msg ] ->
+        Alcotest.(check bool) "loaded assistant content redacted" false
+          (contains_substring msg.K.content secret);
+        (match msg.K.audio with
+         | Some audio ->
+           Alcotest.(check bool) "loaded audio message_text redacted" false
+             (contains_substring audio.message_text secret);
+           Alcotest.(check bool) "loaded audio audio_url redacted" false
+             (match audio.audio_url with
+              | Some url -> contains_substring url secret
+              | None -> false))
+         | None -> Alcotest.fail "loaded audio missing")
+      | messages ->
+        Alcotest.failf "expected 1 message, got %d" (List.length messages))
+
 (* RFC-0233 §7: append_turn stamps the supplied turn_ref on every row of the
    completed turn, it round-trips through load, and to_json_array exposes it
    for the history endpoint. *)
@@ -1527,6 +1644,10 @@ let () =
             test_append_turn_redacts_all_supplied_block_strings;
           Alcotest.test_case "fusion lookup ids survive redaction" `Quick
             test_append_turn_preserves_fusion_lookup_ids;
+          Alcotest.test_case "legacy raw blocks and audio redacted on load" `Quick
+            test_load_redacts_legacy_raw_blocks_and_audio;
+          Alcotest.test_case "assistant message audio redacted on append" `Quick
+            test_append_assistant_message_redacts_audio;
           Alcotest.test_case "assistant history appends trace block" `Quick
             test_to_json_array_appends_trace_block_to_assistant_turn;
         ] );

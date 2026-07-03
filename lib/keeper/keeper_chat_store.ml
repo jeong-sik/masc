@@ -365,13 +365,23 @@ let redact_block redaction = function
 let redact_blocks redaction =
   Option.map (List.map (redact_block redaction))
 
+let redact_audio redaction a =
+  { a with
+    audio_url = Option.map (redact_string redaction) a.audio_url;
+    message_text = redact_string redaction a.message_text;
+  }
+
 let redact_message redaction msg =
   let attachments =
     Option.map (List.map (redact_attachment redaction)) msg.attachments
   in
+  let blocks = redact_blocks redaction msg.blocks in
+  let audio = Option.map (redact_audio redaction) msg.audio in
   { msg with
     content = Keeper_secret_redaction.redact_text redaction msg.content;
     attachments;
+    blocks;
+    audio;
   }
 
 let opt_string_field key = function
@@ -631,6 +641,7 @@ let append_assistant_message_result ~base_dir ~keeper_name ~(content : string)
     let redaction = redaction_for ~base_dir ~keeper_name in
     let content = Keeper_secret_redaction.redact_text redaction content in
     let blocks = redact_blocks redaction blocks in
+    let audio = Option.map (redact_audio redaction) audio in
     let path = chat_path ~base_dir ~keeper_name in
     let ts = Time_compat.now () in
     let line =

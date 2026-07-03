@@ -130,5 +130,15 @@ let rec redact_json_exact t = function
   | `List items -> `List (List.map (redact_json_exact t) items)
   | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as json -> json
 
+let rec redact_json_keys t = function
+  | `String _ as value -> value
+  | `Assoc fields ->
+      `Assoc
+        (List.map
+           (fun (key, value) -> redact_text t key, redact_json_keys t value)
+           fields)
+  | `List items -> `List (List.map (redact_json_keys t) items)
+  | (`Null | `Bool _ | `Int _ | `Intlit _ | `Float _) as value -> value
+
 let redact_json t json =
   json |> redact_json_exact t |> Observability_redact.redact_json_strings

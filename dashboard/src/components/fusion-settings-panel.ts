@@ -20,6 +20,7 @@ import {
   type FusionSettings,
   type FusionSettingsParseIssue,
 } from '../lib/fusion-settings'
+import { readFusionPresetView } from '../lib/fusion-preset-view'
 import { refreshRuntimeConfigConsumers } from '../lib/runtime-config-refresh'
 
 type EditorState = 'loading' | 'idle' | 'saving' | 'saved' | 'error'
@@ -213,6 +214,20 @@ export function FusionSettingsPanel() {
   const str = (e: Event) => (e.target as HTMLInputElement).value
   const checked = (e: Event) => (e.target as HTMLInputElement).checked
 
+  // Read-only view of the active preset's composition (panel models · judge ·
+  // timeouts · max_tool_calls), parsed from the same runtime.toml source the
+  // editor already loaded. Shown only when the default_preset resolves to a real
+  // [fusion.presets.<preset>] table that actually declares panel models — a
+  // preset with no panel has no composition worth displaying. The editor scalars
+  // above stay writable.
+  const presetView = readFusionPresetView(source, draft.defaultPreset)
+  // Flat preset with panel models → full read-only card. Grouped preset
+  // ([[...panels]] array-of-tables) → fail-visible note (a single flat card
+  // cannot represent N groups without silently dropping some).
+  const showPresetView = presetView !== null && !presetView.grouped && presetView.panel.length > 0
+  const showGroupedNote = presetView !== null && presetView.grouped
+  const timeoutLabel = (value: number | null): string => (value === null ? '—' : `${value}s`)
+
   return html`
     <div class="set-fusion-editor" data-testid="fusion-settings-editor">
       <label class="set-line">
@@ -240,6 +255,34 @@ export function FusionSettingsPanel() {
         ${state === 'saved' && html`<span class="set-ok" data-testid="fusion-settings-saved">${savedMessage}</span>`}
         ${state === 'error' && html`<span class="set-err" data-testid="fusion-settings-error">${error}</span>`}
       </div>
+      ${showGroupedNote && presetView
+        ? html`
+            <div class="set-sub-h">${presetView.preset} 프리셋</div>
+            <div class="set-hint" data-testid="fusion-preset-grouped">
+              그룹형 패널 구성 · ${presetView.groupCount}개 그룹 (<span class="mono">[[fusion.presets.${presetView.preset}.panels]]</span>) · 미리보기 미지원
+            </div>
+          `
+        : null}
+      ${showPresetView && presetView
+        ? html`
+            <div class="set-sub-h">${presetView.preset} 프리셋</div>
+            <div class="set-fus-preset" data-testid="fusion-preset-view">
+              <div class="set-fus-lane">
+                <div class="set-fus-lane-h">panel · ${presetView.panel.length}</div>
+                ${presetView.panel.map(id => html`<div key=${id} class="set-fus-model mono" data-testid="fusion-preset-panel-model">${id}</div>`)}
+              </div>
+              <div class="set-fus-lane">
+                <div class="set-fus-lane-h" data-testid="fusion-preset-judge-lane-h">judge${presetView.judgeGroupCount > 0 ? ` · 메타 (1차 심판 ${presetView.judgeGroupCount} · judge-of-judges)` : ''}</div>
+                ${presetView.judge
+                  ? html`<div class="set-fus-model judge mono" data-testid="fusion-preset-judge">${presetView.judge}</div>`
+                  : html`<div class="set-fus-model judge mono" data-testid="fusion-preset-judge">미지정</div>`}
+              </div>
+            </div>
+            <div class="set-mcp-detail mono" data-testid="fusion-preset-timing" style=${{ marginTop: 10 }}>
+              panel_timeout ${timeoutLabel(presetView.panelTimeoutS)} · judge_timeout ${timeoutLabel(presetView.judgeTimeoutS)} · max_tool_calls_per_panel ${presetView.maxToolCallsPerPanel ?? '—'} (0 = 무제한)
+            </div>
+          `
+        : null}
     </div>
   `
 }

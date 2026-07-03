@@ -405,6 +405,18 @@ let test_keeper_msg_async_timeout_is_terminal_error () =
     Alcotest.fail "expected timeout request to remain pollable"
 ;;
 
+let test_keeper_msg_async_default_timeout_uses_turn_timeout () =
+  let expected = Keeper_runtime_resolved.turn_timeout_sec () in
+  Alcotest.(check (float 0.0001))
+    "default async worker timeout"
+    expected
+    (Keeper_msg_async.For_testing.effective_timeout_sec ());
+  Alcotest.(check (float 0.0001))
+    "explicit async worker timeout wins"
+    42.0
+    (Keeper_msg_async.For_testing.effective_timeout_sec ~timeout_sec:42.0 ())
+;;
+
 let test_keeper_msg_async_gc_removes_stale_terminal_disk_record () =
   with_eio_env
   @@ fun env ->
@@ -690,6 +702,10 @@ let () =
             "timeout is terminal error"
             `Quick
             test_keeper_msg_async_timeout_is_terminal_error
+        ; test_case
+            "default timeout follows keeper turn timeout"
+            `Quick
+            test_keeper_msg_async_default_timeout_uses_turn_timeout
         ; test_case
             "gc removes stale terminal disk record"
             `Quick

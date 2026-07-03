@@ -63,7 +63,8 @@ val decide :
   unit ->
   governance_decision
 (** Evaluate a tool call against governance policy and return a decision.
-    - development: allow non-hard-forbidden calls while HITL is enabled, audit High+Critical
+    - development: allow Low/Medium/High while HITL is enabled, audit High+Critical,
+      but always confirm hard-forbidden calls
     - production: confirm Critical, audit Medium+
     - enterprise: confirm High+Critical, audit all
     - paranoid: confirm Medium+High+Critical, audit all

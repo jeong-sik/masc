@@ -540,6 +540,8 @@ let test_risk_payload_beats_low_override () =
 (* ── Governance Level Decision Tests ────────────────────────── *)
 
 let test_development_confirms_critical () =
+  (* Hard-forbidden gate is unconditional: even development must confirm
+     Critical-risk tools rather than allowing silent auto-approval. *)
   let d = Gp.decide ~governance_level:"development"
     ~tool_name:"masc_delete_workspace" ~input:`Null () in
   (match d.action with
@@ -674,6 +676,8 @@ let setup () =
   Tool_dispatch.clear_hooks ()
 
 let test_hook_development_blocks_critical () =
+  (* The front-door pre_hook uses decide without keeper meta, but the
+     unconditional hard-forbidden gate still blocks Critical risk. *)
   Eio_main.run @@ fun env ->
   Fs_compat.set_fs (Eio.Stdenv.fs env);
   setup ();
@@ -685,7 +689,10 @@ let test_hook_development_blocks_critical () =
   let hook = Gp.make_pre_hook ~config ~governance_level:"development" () in
   let result = hook ~name:"__gov_test_delete" ~args:`Null in
   (match result with
-   | Tool_dispatch.Reject _ -> ()
+   | Tool_dispatch.Reject r ->
+     Alcotest.(check bool) "blocked" false (Tool_result.is_success r);
+     let status = Yojson.Safe.Util.((Tool_result.data r) |> member "status" |> to_string) in
+     Alcotest.(check string) "awaiting_approval" "awaiting_approval" status
    | Tool_dispatch.Pass ->
      Alcotest.fail "development should block hard-forbidden critical"
    | Tool_dispatch.Proceed _ ->

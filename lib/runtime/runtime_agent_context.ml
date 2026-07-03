@@ -303,16 +303,21 @@ let builder_without_approval
     else builder
   in
   let builder =
-    match config.compact_ratio with
-    | Some ratio ->
-      (match config.context_window_tokens with
-       | Some window ->
-         Agent_sdk.Builder.with_context_thresholds
-           ~compact_ratio:ratio
-           ~context_window_tokens:window
-           builder
-       | None -> Agent_sdk.Builder.with_context_thresholds ~compact_ratio:ratio builder)
-    | None -> builder
+    match config.context_window_tokens with
+    | Some window ->
+      let compact_ratio =
+        Option.value
+          ~default:Agent_sdk.Types.default_context_compact_ratio
+          config.compact_ratio
+      in
+      Agent_sdk.Builder.with_context_thresholds
+        ~compact_ratio
+        ~context_window_tokens:window
+        builder
+    | None ->
+      (match config.compact_ratio with
+       | Some ratio -> Agent_sdk.Builder.with_context_thresholds ~compact_ratio:ratio builder
+       | None -> builder)
   in
   let builder =
     Agent_sdk.Builder.with_auto_context_overflow_retry

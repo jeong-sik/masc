@@ -116,7 +116,7 @@ function buildGoalDossierProps(node: GoalTreeNode): GoalDossierProps {
       ['승인 대기', String(node.pending_approval_count)],
       ['검증 대기', String(node.pending_verification_count)],
       ['인프라 위험', String(node.infra_risk_count)],
-      ['목표 달성', node.attainment.attainment_pct == null ? '미측정' : `${node.attainment.attainment_pct}%`],
+      ['목표 달성', attainmentValueLabel(node.attainment)],
     ],
   }
 }
@@ -616,7 +616,19 @@ function ConvergenceBar({ pct, size = 'md' }: { pct: number; size?: 'sm' | 'md' 
   `
 }
 
+// Task-derived attainment_pct must not read as a metric result when the goal
+// declares a metric that no evaluator measures (task-1743): show "미평가"
+// rather than a percentage. Distinct from "미측정" (no task data at all).
+export function attainmentValueLabel(attainment: GoalTreeNode['attainment']): string {
+  if (attainment.metric_evaluation === 'unevaluated') return '미평가'
+  if (attainment.attainment_pct == null) return '미측정'
+  return `${attainment.attainment_pct}%`
+}
+
 function attainmentTone(attainment: GoalTreeNode['attainment']): 'default' | 'ok' | 'warn' | 'bad' {
+  // A declared-but-unevaluated metric is never "attained": the pct is
+  // task-derived, so surface it as attention (warn), not success (ok).
+  if (attainment.metric_evaluation === 'unevaluated') return 'warn'
   if (attainment.state === 'attained') return 'ok'
   if (attainment.state === 'unmeasured') return 'warn'
   if (attainment.state === 'not_started') return 'bad'
@@ -633,8 +645,7 @@ function attainmentClass(attainment: GoalTreeNode['attainment']): string {
 }
 
 function attainmentLabel(attainment: GoalTreeNode['attainment']): string {
-  if (attainment.attainment_pct == null) return '달성 미측정'
-  return `달성 ${attainment.attainment_pct}%`
+  return `달성 ${attainmentValueLabel(attainment)}`
 }
 
 function GoalAttainmentChip({ attainment }: { attainment: GoalTreeNode['attainment'] }) {
@@ -1502,7 +1513,7 @@ function GoalDetailPanel({
         ` : null}
 
         <div class="grid grid-cols-[repeat(auto-fit,minmax(140px,1fr))] gap-3">
-          <${DetailMetric} label="목표 달성" value=${selectedNode.attainment.attainment_pct == null ? '미측정' : `${selectedNode.attainment.attainment_pct}%`} tone=${attainmentTone(selectedNode.attainment)} />
+          <${DetailMetric} label="목표 달성" value=${attainmentValueLabel(selectedNode.attainment)} tone=${attainmentTone(selectedNode.attainment)} />
           <${DetailMetric} label="작업" value=${`${selectedNode.task_done_count}/${selectedNode.task_count}`} tone=${selectedNode.task_done_count === selectedNode.task_count && selectedNode.task_count > 0 ? 'ok' : 'default'} />
           <${DetailMetric} label="연결된 키퍼" value=${selectedNode.linked_keeper_names.length} />
           <${DetailMetric} label="승인 대기" value=${selectedNode.pending_approval_count} tone=${selectedNode.pending_approval_count > 0 ? 'warn' : 'default'} />

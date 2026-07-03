@@ -45,10 +45,11 @@
   (re_export masc.otel_genai)
   (re_export masc.otel_metrics)
   (re_export masc.otel_spans)
-  (re_export otel_metric_test_store)
+  (re_export masc.otel_metric_store)
   (re_export masc.telemetry_coverage_gap)
   (re_export masc.telemetry_unified)
   (re_export masc.telemetry_unified_source)
+  (re_export masc.types_boundary)
   (re_export masc.voice_bridge_core)
   (re_export masc.voice_config)
   (re_export masc.voice_runtime_overlay)
@@ -201,9 +202,3 @@
   (re_export otoml)
   (re_export yojson)
   (re_export zstd)))
-
-(library
- (name otel_metric_test_store)
- (wrapped false)
- (modules otel_metric_store)
- (libraries masc.otel_metric_store))

@@ -20,3 +20,8 @@ val redact_text : t -> string -> string
 
 val redact_json : t -> Yojson.Safe.t -> Yojson.Safe.t
 (** Redact all string leaves in a JSON value, preserving shape. *)
+
+val redact_json_keys : t -> Yojson.Safe.t -> Yojson.Safe.t
+(** Redact string literals that appear as JSON object keys. Values are left
+    untouched so this can be composed with {!redact_json} for full key+value
+    coverage without duplicating the traversal. *)

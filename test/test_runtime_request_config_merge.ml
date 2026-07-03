@@ -136,6 +136,28 @@ let test_both_opinionless_stays_off () =
   check bool "no output_schema anywhere stays None" true
     (Option.is_none merged.Llm_provider.Provider_config.output_schema)
 
+let test_base_json_mode_survives_opinionless_request () =
+  let base =
+    let cfg =
+      Llm_provider.Provider_config.make
+        ~kind:Llm_provider.Provider_config.Anthropic
+        ~model_id:"claude-test"
+        ~base_url:"https://api.anthropic.test"
+        ()
+    in
+    { cfg with
+      Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonMode
+    ; output_schema = None
+    }
+  in
+  let merged = merge ~base (request_without_opinion ()) in
+  check bool "base JsonMode survives request Off" true
+    (match merged.Llm_provider.Provider_config.response_format with
+     | Agent_sdk.Types.JsonMode -> true
+     | Agent_sdk.Types.Off | Agent_sdk.Types.JsonSchema _ -> false);
+  check bool "base output_schema None survives request None" true
+    (Option.is_none merged.Llm_provider.Provider_config.output_schema)
+
 (* Mismatched request-side response_format/output_schema pairs must be
    normalized by the merge rather than propagated to the wire.  A request can
    only express a schema opinion through [output_schema] or an explicit
@@ -212,6 +234,8 @@ let () =
             test_request_output_schema_normalizes_response_format
         ; test_case "both opinionless stays Off" `Quick
             test_both_opinionless_stays_off
+        ; test_case "base JsonMode survives opinionless request" `Quick
+            test_base_json_mode_survives_opinionless_request
         ] )
     ; ( "response_format/output_schema mismatch normalization"
       , [ test_case "Off + Some schema" `Quick

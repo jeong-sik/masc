@@ -308,6 +308,156 @@ max-concurrent = 2
         | None -> fail "expected provider capabilities")
      | _ -> fail "expected one provider")
 
+let kimi_runtime_toml =
+  {|
+[runtime]
+default = "kimi.kimi-for-coding"
+
+[providers.kimi]
+display-name = "Kimi Code Plan"
+protocol = "messages-http"
+endpoint = "https://example.invalid/kimi"
+
+[providers.kimi.credentials]
+type = "inline"
+value = "test-kimi-key"
+
+[models.kimi-for-coding]
+api-name = "kimi-for-coding"
+max-context = 256000
+tools-support = true
+streaming = true
+
+[kimi.kimi-for-coding]
+|}
+
+let kimi_runtime_config_or_fail () =
+  match Runtime_toml.parse_string kimi_runtime_toml with
+  | Ok cfg -> cfg
+  | Error errors ->
+    failf
+      "expected Kimi runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+
+let test_runtime_adapter_materializes_kimi_messages_http () =
+  let cfg = kimi_runtime_config_or_fail () in
+  match cfg.bindings with
+  | [ binding ] ->
+    (match Runtime_adapter.binding_to_provider_config cfg binding with
+     | Error msg -> failf "unexpected Kimi messages-http adapter error: %s" msg
+     | Ok provider_cfg ->
+       check string "base url" "https://example.invalid/kimi" provider_cfg.base_url;
+       check string "request path" "/v1/messages" provider_cfg.request_path;
+       check
+         string
+         "api key"
+         "test-kimi-key"
+         (Llm_provider.Secret.header_value provider_cfg.api_key);
+       (match provider_cfg.kind with
+        | Llm_provider.Provider_config.Kimi -> ()
+        | other ->
+          failf
+            "expected Kimi provider kind, got %s"
+            (Llm_provider.Provider_config.string_of_provider_kind other)))
+  | bindings -> failf "expected one Kimi binding, got %d" (List.length bindings)
+
+let unregistered_messages_http_toml =
+  {|
+[runtime]
+default = "local.model"
+
+[providers.local]
+display-name = "Local Messages API"
+protocol = "messages-http"
+endpoint = "https://example.invalid/messages"
+
+[models.model]
+api-name = "model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[local.model]
+|}
+
+let incompatible_messages_http_toml =
+  {|
+[runtime]
+default = "openai.model"
+
+[providers.openai]
+display-name = "OpenAI over wrong protocol"
+protocol = "messages-http"
+endpoint = "https://api.openai.example/v1/messages"
+
+[models.model]
+api-name = "model"
+max-context = 8192
+tools-support = true
+streaming = true
+
+[openai.model]
+|}
+
+let test_runtime_adapter_rejects_unregistered_messages_http () =
+  match Runtime_toml.parse_string unregistered_messages_http_toml with
+  | Error errors ->
+    failf
+      "expected unregistered messages-http runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Ok provider_cfg ->
+          failf
+            "unregistered messages-http provider must fail closed, got kind %s"
+            (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+        | Error _ -> ())
+     | bindings -> failf "expected one local binding, got %d" (List.length bindings))
+
+let test_runtime_adapter_rejects_incompatible_messages_http_kind () =
+  match Runtime_toml.parse_string incompatible_messages_http_toml with
+  | Error errors ->
+    failf
+      "expected incompatible messages-http runtime TOML to parse: %s"
+      (String.concat
+         "; "
+         (List.map
+            (fun (err : Runtime_toml.parse_error) ->
+               Printf.sprintf "%s: %s" err.path err.message)
+            errors))
+  | Ok cfg ->
+    (match cfg.bindings with
+     | [ binding ] ->
+       (match Runtime_adapter.binding_to_provider_config cfg binding with
+        | Ok provider_cfg ->
+          failf
+            "incompatible messages-http provider must fail closed, got kind %s"
+            (Llm_provider.Provider_config.string_of_provider_kind provider_cfg.kind)
+        | Error msg ->
+          check
+            bool
+            "error names messages compatibility policy"
+            true
+            (String_util.contains_substring msg "messages-compatible");
+          check
+            bool
+            "error names provider"
+            true
+            (String_util.contains_substring msg "openai"))
+     | bindings -> failf "expected one OpenAI binding, got %d" (List.length bindings))
+
 let deepseek_runtime_toml =
   {|
 [runtime]
@@ -1002,6 +1152,63 @@ let test_runtime_agent_context_preserves_unbounded_resume_budget () =
   check int "resume preserves unbounded turn budget" 0
     prepared.agent_config.max_turns
 
+let test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract () =
+  let resume_schema : Yojson.Safe.t =
+    `Assoc
+      [ ("type", `String "object")
+      ; ("properties", `Assoc [ ("answer", `Assoc [("type", `String "string")]) ])
+      ; ("required", `List [ `String "answer" ])
+      ]
+  in
+  let provider_cfg_with_schema =
+    let base = provider_cfg () in
+    { base with
+      Llm_provider.Provider_config.response_format = Agent_sdk.Types.JsonSchema resume_schema
+    ; output_schema = Some resume_schema
+    }
+  in
+  let config =
+    Runtime_agent.default_config
+      ~name:"oas-runpod_mtp.qwen"
+      ~provider_cfg:provider_cfg_with_schema
+      ~system_prompt:""
+      ~tools:[]
+  in
+  let checkpoint =
+    { Agent_sdk.Checkpoint.version = Agent_sdk.Checkpoint.checkpoint_version
+    ; session_id = "session"
+    ; agent_name = "oas-runpod_mtp.qwen"
+    ; model = "qwen"
+    ; system_prompt = Some ""
+    ; messages = []
+    ; usage = Agent_sdk.Types.empty_usage
+    ; turn_count = 3
+    ; created_at = 0.0
+    ; tools = []
+    ; tool_choice = None
+    ; disable_parallel_tool_use = false
+    ; temperature = Some 0.3
+    ; top_p = None
+    ; top_k = None
+    ; min_p = None
+    ; enable_thinking = None
+    ; preserve_thinking = None
+    ; response_format = Agent_sdk.Types.Off
+    ; thinking_budget = None
+    ; cache_system_prompt = false
+    ; context = Agent_sdk.Context.create_sync ()
+    ; mcp_sessions = []
+    ; working_context = None
+    }
+  in
+  let prepared = Runtime_agent_context.prepare_resume ~config ~checkpoint in
+  let expected_response_format =
+    provider_cfg_with_schema.Llm_provider.Provider_config.response_format
+  in
+  check bool "resume patches checkpoint response_format to base JsonSchema" true
+    (prepared.patched_checkpoint.Agent_sdk.Checkpoint.response_format
+     = expected_response_format)
+
 let test_runtime_agent_context_leaves_tool_choice_unset_with_tools () =
   let tool =
     Agent_sdk.Tool.create
@@ -1166,6 +1373,18 @@ let () =
             `Quick
             test_runtime_toml_accepts_messages_caching_capability
         ; test_case
+            "runtime adapter materializes Kimi messages-http provider"
+            `Quick
+            test_runtime_adapter_materializes_kimi_messages_http
+        ; test_case
+            "runtime adapter rejects unregistered messages-http provider"
+            `Quick
+            test_runtime_adapter_rejects_unregistered_messages_http
+        ; test_case
+            "runtime adapter rejects incompatible messages-http registry kind"
+            `Quick
+            test_runtime_adapter_rejects_incompatible_messages_http_kind
+        ; test_case
             "runtime TOML accepts DeepSeek reasoning effort"
             `Quick
             test_runtime_toml_accepts_deepseek_reasoning_effort_capability
@@ -1217,6 +1436,10 @@ let () =
             "runtime agent context preserves unbounded resume budget"
             `Quick
             test_runtime_agent_context_preserves_unbounded_resume_budget
+        ; test_case
+            "runtime agent context resume patches stale response_format to base contract"
+            `Quick
+            test_runtime_agent_context_resume_patches_stale_response_format_to_base_contract
         ; test_case
             "runtime agent context leaves tool_choice unset with tools"
             `Quick

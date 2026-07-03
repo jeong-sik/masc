@@ -426,8 +426,10 @@ let forward_notification cs lang_id method_ params =
 type method_disposition =
   | Forward_read_only
   | Reject_write_adjacent
+  | Unknown_forwarded_method of string
 
-let classify_forwarded_method = function
+let classify_forwarded_method method_ =
+  match method_ with
   | "textDocument/signatureHelp"
   | "textDocument/declaration"
   | "textDocument/typeDefinition"
@@ -445,9 +447,17 @@ let classify_forwarded_method = function
   | "textDocument/semanticTokens/range" -> Forward_read_only
   (* Everything else — textDocument/rename, prepareRename, formatting,
      rangeFormatting, onTypeFormatting, willSaveWaitUntil,
-     workspace/executeCommand, workspace/applyEdit, and any unrecognized
-     method — is denied. *)
-  | _ -> Reject_write_adjacent
+     workspace/executeCommand, workspace/applyEdit — is denied explicitly.
+     Unrecognized methods preserve their wire spelling for diagnostics. *)
+  | "textDocument/rename"
+  | "textDocument/prepareRename"
+  | "textDocument/formatting"
+  | "textDocument/rangeFormatting"
+  | "textDocument/onTypeFormatting"
+  | "textDocument/willSaveWaitUntil"
+  | "workspace/executeCommand"
+  | "workspace/applyEdit" -> Reject_write_adjacent
+  | unknown -> Unknown_forwarded_method unknown
 ;;
 
 (** Handle textDocument/codeLens — merge LSP response with MASC overlays. *)
@@ -935,6 +945,10 @@ let dispatch_message cs msg =
             send_error cs n
               Mcp_error_code.(to_wire_code Invalid_request)
               ("Read-only LSP proxy: method not permitted: " ^ m)
+          | Unknown_forwarded_method unknown ->
+            send_error cs n
+              Mcp_error_code.(to_wire_code Method_not_found)
+              ("Read-only LSP proxy: unknown method not permitted: " ^ unknown)
           | Forward_read_only ->
             (match extract_uri params with
              | None ->
@@ -1071,6 +1085,7 @@ module For_testing = struct
   type disposition = method_disposition =
     | Forward_read_only
     | Reject_write_adjacent
+    | Unknown_forwarded_method of string
 
   let classify_forwarded_method = classify_forwarded_method
 end

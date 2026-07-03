@@ -201,8 +201,8 @@ let test_read_methods_forward () =
     ]
 ;;
 
-(* Write-adjacent methods — and, by default-deny, any unrecognized method —
-   are refused so the observation plane never mutates the workspace. *)
+(* Write-adjacent methods are refused so the observation plane never mutates
+   the workspace. *)
 let test_write_and_unknown_methods_rejected () =
   List.iter
     (fun m ->
@@ -219,9 +219,12 @@ let test_write_and_unknown_methods_rejected () =
     ; "textDocument/willSaveWaitUntil"
     ; "workspace/executeCommand"
     ; "workspace/applyEdit"
-    ; (* default-deny: an unknown method is rejected, not passed through *)
-      "textDocument/totallyMadeUpMethod"
-    ]
+    ];
+  (match Lsp.classify_forwarded_method "textDocument/totallyMadeUpMethod" with
+   | Lsp.Unknown_forwarded_method method_ ->
+     check string "unknown method preserved" "textDocument/totallyMadeUpMethod" method_
+   | Lsp.Forward_read_only | Lsp.Reject_write_adjacent ->
+     Alcotest.fail "unknown method must stay diagnostic, not coerce")
 ;;
 
 let rec json_contains_key key = function

@@ -33,14 +33,16 @@ module For_testing : sig
   (** Disposition of a catch-all forwarded LSP method (task-1692).
       [Forward_read_only] methods are proxied to the language server;
       [Reject_write_adjacent] (rename / formatting / executeCommand /
-      applyEdit / unrecognized) are refused so the observation plane stays
-      read-only. *)
+      applyEdit) are refused so the observation plane stays read-only;
+      [Unknown_forwarded_method] preserves unclassified wire methods for
+      diagnostics before the caller rejects them. *)
   type disposition =
     | Forward_read_only
     | Reject_write_adjacent
+    | Unknown_forwarded_method of string
 
   (** [classify_forwarded_method m] is the read-only allowlist decision for a
       method reaching the catch-all forwarder. Default-deny: only listed read
-      methods forward. *)
+      methods forward, while unknown wire strings remain visible. *)
   val classify_forwarded_method : string -> disposition
 end

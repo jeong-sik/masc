@@ -475,6 +475,9 @@ let realpath_scoped_relative ~base relative =
 ;;
 
 let workspace_root_for_initialize ~base_path root_uri =
+  (* [path_of_file_uri] returns a [string] (not [string option]); the previous
+     [Option.bind candidate] did not type-check and left main uncompilable
+     after #23070. Match the string directly. *)
   let candidate = root_uri |> path_of_file_uri in
   (* [path_of_file_uri] returns a plain [string], so match on it directly rather
      than [Option.bind] (which expects a [string option]). *)

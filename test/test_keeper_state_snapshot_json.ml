@@ -12,7 +12,7 @@ module KMP = Masc.Keeper_memory_policy
 module KCC = Masc.Keeper_context_core
 module KRT = Masc.Keeper_agent_run_response_text
 module Finalize = Masc.Keeper_agent_run_finalize_response.For_testing
-module Keeper_metrics = Masc.Keeper_metrics
+module Keeper_metrics = Keeper_metrics
 module Metrics = Masc.Otel_metric_store
 module Receipt = Masc.Keeper_execution_receipt
 

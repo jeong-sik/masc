@@ -5,7 +5,7 @@ module Workspace = Masc.Workspace
 module Tool_dispatch = Tool_dispatch
 module Tool_result = Tool_result
 module Keeper_meta_contract = Masc.Keeper_meta_contract
-module Keeper_types_profile = Keeper_types_profile
+module Keeper_types_profile = Masc.Keeper_types_profile
 module Keeper_id = Keeper_id
 module AQ = Masc.Keeper_approval_queue
 

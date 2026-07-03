@@ -428,7 +428,7 @@ let list_posts ?(visibility_filter = None) ?hearth ?author_filter ?exclude_autho
         | Trending | Recent | Updated | Discussed -> true
       in
       let fetch_limit =
-        if needs_full_scan then Board.Limits.max_posts else max limit 200
+        if needs_full_scan then Board.Limits.max_posts else max limit 500
       in
       let posts =
         if needs_full_scan then

@@ -171,6 +171,64 @@ let test_panel_outcome_types_per_agent_timeout () =
   | other ->
     fail ("expected typed Timeout, got: " ^ Fusion_types.show_panel_outcome other)
 
+(* provider-level 타임아웃도 typed [Timeout]으로 분류된다. connect_timeout(비스트리밍 sync
+   경로가 본문 전체를 바운드, detail "timeout phase=http_operation")은
+   [Provider (Llm_provider.Error.Timeout _)] variant로 나오는데, [Api (Retry.Timeout _)]
+   외곽 래퍼와 다른 arm이라 이전엔 [Provider_error] catch-all로 오귀속됐다. reason_code가
+   board/대시보드에 "timeout"으로 나가는지 함께 핀한다. *)
+let test_panel_outcome_types_provider_timeout () =
+  let timeout_error =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.Timeout
+         { provider = "ollama"
+         ; timeout_phase = None
+         ; detail = "timeout phase=http_operation"
+         })
+  in
+  match
+    Fusion_panel.For_testing.outcome_of_result ~panelist:"panel-a"
+      ~model:"provider.model" (Error timeout_error)
+  with
+  | Fusion_types.Failed
+      { failed_model = "panel-a"; reason = Fusion_types.Timeout as reason } ->
+    check string "reason_code surfaces as timeout" "timeout"
+      (Fusion_oas.panel_failure_code reason)
+  | other ->
+    fail ("expected typed Timeout, got: " ^ Fusion_types.show_panel_outcome other)
+
+(* 심판 분류기도 두 타임아웃 variant([Api (Retry.Timeout _)] 외곽 래퍼 +
+   [Provider (Llm_provider.Error.Timeout _)] provider-level)를 [Timeout]으로 매핑하고,
+   비-타임아웃 provider 오류는 [Provider_error]로 보존한다 —
+   [Fusion_panel.outcome_of_result]와 대칭. 과분류(모든 provider 오류를 Timeout으로)를
+   막기 위해 5xx가 provider_error로 남는지도 핀한다. *)
+let test_judge_failure_classifies_timeouts () =
+  let classify e =
+    Fusion_judge.For_testing.failure_of_sdk_error ~runtime_id:"provider.model"
+      ~prefix:"judge run failed: " e
+  in
+  let api_timeout =
+    Agent_sdk.Error.Api (Agent_sdk.Retry.Timeout { message = "120s"; phase = None })
+  in
+  let provider_timeout =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.Timeout
+         { provider = "ollama"
+         ; timeout_phase = None
+         ; detail = "timeout phase=http_operation"
+         })
+  in
+  let provider_5xx =
+    Agent_sdk.Error.Provider
+      (Llm_provider.Error.ServerError
+         { provider = "ollama"; code = 503; transient = true; detail = "unavailable" })
+  in
+  check string "outer Api timeout -> timeout tag" "timeout"
+    (Fusion_types.judge_failure_tag (classify api_timeout));
+  check string "provider-level timeout -> timeout tag" "timeout"
+    (Fusion_types.judge_failure_tag (classify provider_timeout));
+  check string "non-timeout provider error stays provider_error" "provider_error"
+    (Fusion_types.judge_failure_tag (classify provider_5xx))
+
 let test_attach_usage_on_success () =
   match Fusion_judge.attach_usage (Ok sample_synthesis) sample_usage with
   | Ok (_synthesis, usage) ->
@@ -276,6 +334,12 @@ let () =
             test_panel_outcome_rejects_empty_answer
         ; test_case "types per-agent timeout" `Quick
             test_panel_outcome_types_per_agent_timeout
+        ; test_case "types provider-level timeout" `Quick
+            test_panel_outcome_types_provider_timeout
+        ] )
+    ; ( "judge_failure_classification"
+      , [ test_case "maps both timeout variants, keeps provider errors" `Quick
+            test_judge_failure_classifies_timeouts
         ] )
     ; ( "attach_usage"
       , [ test_case "success carries usage" `Quick test_attach_usage_on_success

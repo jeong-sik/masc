@@ -120,4 +120,10 @@ module For_testing : sig
   val apply_output_contract
     :  Llm_provider.Provider_config.t
     -> (Llm_provider.Provider_config.t, string) result
+
+  val failure_of_sdk_error
+    :  runtime_id:string
+    -> prefix:string
+    -> Agent_sdk.Error.sdk_error
+    -> Fusion_types.judge_failure
 end

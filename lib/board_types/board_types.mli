@@ -213,6 +213,10 @@ module Limits : sig
   val max_posts : int
   val max_comments_per_post : int
   val max_content_length : int
+  val default_comment_page_limit : int
+  (** Default number of comments returned by [masc_board_post_get]. *)
+  val max_comment_page_limit : int
+  (** Maximum comments returned by one [masc_board_post_get] page. *)
   val default_ttl_hours : int
   (** [0] — permanent (no expiry). *)
   val automation_ttl_hours : int

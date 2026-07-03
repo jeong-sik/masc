@@ -79,8 +79,9 @@ type path_resolution =
     and symlinks whose real target resolves outside [base]. The returned
     [Path_ok] path is the lexical path under [base]; symlink containment
     is verified against the realpath-resolved base without rewriting the
-    returned path. Exposed for unit testing; production callers reach it
-    through {!add_routes}. *)
+    returned path, and confidential components are checked on both the
+    requested path and the resolved in-base target. Exposed for unit
+    testing; production callers reach it through {!add_routes}. *)
 val resolve_workspace_path : string -> string -> path_resolution
 
 (** [tree_node_limit_of_query value] applies the workspace tree route's

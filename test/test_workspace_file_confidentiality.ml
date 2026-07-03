@@ -191,6 +191,17 @@ let test_symlink_escape_via_dir_rejected () =
           (is_symlink_escape got)))
 ;;
 
+let test_symlink_to_confidential_target_rejected () =
+  with_temp_dir (fun base ->
+    touch (Filename.concat base ".env");
+    Unix.symlink (Filename.concat base ".env") (Filename.concat base "public_link");
+    let got = W.resolve_workspace_path base "public_link" in
+    check
+      string
+      "in-base symlink to confidential target rejected"
+      "rejected:confidential:.env" (resolution_tag got))
+;;
+
 let test_internal_symlink_allowed () =
   with_temp_dir (fun base ->
     (* A symlink pointing back inside the workspace stays allowed: it is a
@@ -237,6 +248,24 @@ let test_denylist_matches_tree_hidden () =
       (List.exists (fun p -> p = "lib" || p = "lib/main.ml") ps))
 ;;
 
+let test_tree_does_not_follow_symlinked_dir_escape () =
+  with_temp_dir (fun base ->
+    let outside_dir = Filename.temp_file "ide-file-conf-tree-dir" "" in
+    Sys.remove outside_dir;
+    Unix.mkdir outside_dir 0o700;
+    Fun.protect
+      ~finally:(fun () -> rm_rf outside_dir)
+      (fun () ->
+        touch (Filename.concat outside_dir "outside_secret_name");
+        Unix.symlink outside_dir (Filename.concat base "link");
+        let ps =
+          paths (W.scan_dir ~base ~depth:0 ~max_depth:3 ~max_nodes:500 [] base)
+        in
+        check bool "symlink entry itself can be listed" true (List.mem "link" ps);
+        check bool "tree does not recurse into escaped symlink dir" false
+          (List.mem "link/outside_secret_name" ps)))
+;;
+
 let test_noise_dirs_not_confidential () =
   (* Noise dirs are hidden from the tree but are NOT secrets: a read under
      them is allowed, so [component_is_confidential] must stay false for
@@ -265,10 +294,18 @@ let () =
             "escape through symlinked dir rejected"
             `Quick
             test_symlink_escape_via_dir_rejected
+        ; test_case
+            "in-base symlink to confidential target rejected"
+            `Quick
+            test_symlink_to_confidential_target_rejected
         ; test_case "internal symlink allowed" `Quick test_internal_symlink_allowed
         ] )
     ; ( "SSOT consistency"
       , [ test_case "denylist matches tree hidden" `Quick test_denylist_matches_tree_hidden
+        ; test_case
+            "tree does not follow escaped symlink dirs"
+            `Quick
+            test_tree_does_not_follow_symlinked_dir_escape
         ; test_case "noise dirs are not confidential" `Quick test_noise_dirs_not_confidential
         ] )
     ]

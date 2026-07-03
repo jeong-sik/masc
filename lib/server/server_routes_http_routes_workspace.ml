@@ -298,6 +298,20 @@ let path_within ~base candidate =
   in
   String.starts_with ~prefix:base_slash candidate
 
+let components_under ~base candidate =
+  if String.equal candidate base then []
+  else
+    let base_slash =
+      let n = String.length base in
+      if n > 0 && base.[n - 1] = '/' then base else base ^ "/"
+    in
+    if String.starts_with ~prefix:base_slash candidate
+    then
+      String.sub candidate (String.length base_slash) (String.length candidate - String.length base_slash)
+      |> String.split_on_char '/'
+      |> List.filter (fun part -> not (String.equal part ""))
+    else []
+
 type path_rejection =
   | Path_traversal
   | Confidential_component of string
@@ -315,8 +329,8 @@ type path_resolution =
    3. a symlink whose real target resolves outside [base] (B2).
    [Path_ok] carries the *lexical* path under [base] (not the realpath)
    so callers can still derive git-relative paths against the lexical
-   [base]; symlink safety is enforced by the resolved-path containment
-   check, not by rewriting the returned path. *)
+     [base]; symlink safety is enforced by the resolved-path containment
+     check, not by rewriting the returned path. *)
 let resolve_workspace_path base requested =
   let requested = String.map (fun c -> if c = '\\' then '/' else c) requested in
   let parts = String.split_on_char '/' requested in
@@ -327,14 +341,20 @@ let resolve_workspace_path base requested =
     | Some c -> Path_rejected (Confidential_component c)
     | None ->
       let full = List.fold_left (fun acc p -> Filename.concat acc p) base parts in
-      if not (String.starts_with ~prefix:base full) then
+      if not (path_within ~base full) then
         Path_rejected Path_traversal
-      else if
-        path_within
-          ~base:(resolve_existing_prefix base)
-          (resolve_existing_prefix full)
-      then Path_ok full
-      else Path_rejected Symlink_escape
+      else
+        let resolved_base = resolve_existing_prefix base in
+        let resolved_full = resolve_existing_prefix full in
+        if not (path_within ~base:resolved_base resolved_full) then
+          Path_rejected Symlink_escape
+        else
+          match
+            components_under ~base:resolved_base resolved_full
+            |> List.find_opt component_is_confidential
+          with
+          | Some c -> Path_rejected (Confidential_component c)
+          | None -> Path_ok full
 
 (* Strip [base] (and the following separator) from [safe]. Handles
    [base = "/"], trailing slash on [base], and [safe = base] (returns "").
@@ -434,7 +454,10 @@ let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc di
               ~site:"tree_is_directory"
               ~path:full
               ~default:false
-              (fun () -> Sys.is_directory full)
+              (fun () ->
+                 match Unix.lstat full with
+                 | { Unix.st_kind = Unix.S_LNK; _ } -> false
+                 | _ -> Sys.is_directory full)
           in
           let rel = rel_under base full in
           let has_children = is_dir && depth < max_depth in

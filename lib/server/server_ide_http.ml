@@ -72,6 +72,43 @@ let resolve_partition_for_query ~state ~uri =
 let json_error message = `Assoc [ "ok", `Bool false; "error", `String message ]
 let json_ok data = `Assoc [ "ok", `Bool true; "data", data ]
 
+(* task-1736 (IDE Observation Plane v2, axis B3) — bind an annotation
+   mutation's keeper_id to the authenticated identity.
+
+   Before B3 the POST/DELETE handlers read keeper_id from a
+   client-controlled request body field / query param. Because
+   GET /api/v1/ide/annotations echoes keeper_id back in
+   [Ide_annotation_types.annotation_to_json], any reader could copy
+   another keeper's id and then forge annotations under that id
+   (create) or satisfy the [a.keeper_id = keeper_id] ownership check in
+   [Ide_annotations.delete] (delete). The acting keeper is now derived
+   from the token-bound auth identity threaded by
+   [Server_auth.with_token_permission_auth].
+
+   [requested] is the caller-supplied keeper_id (body field or query
+   param). It is advisory only:
+     - absent / blank  -> use the authenticated identity
+     - equal           -> use the authenticated identity (explicit, allowed)
+     - differs         -> reject as an impersonation attempt
+
+   Rejecting (rather than silently overriding) a mismatch keeps a buggy
+   or malicious client from believing it wrote as some other keeper. *)
+let bind_mutation_keeper_id ~auth_identity ~requested :
+  (string, string) result =
+  match requested with
+  | None -> Ok auth_identity
+  | Some raw ->
+    let requested = String.trim raw in
+    if requested = "" || String.equal requested auth_identity
+    then Ok auth_identity
+    else
+      Error
+        (Printf.sprintf
+           "keeper_id %S does not match authenticated identity %S"
+           requested
+           auth_identity)
+;;
+
 let parse_positive_int_query ?(default = 50) ?(max_value = 200) uri name =
   match Uri.get_query_param uri name with
   | Some s ->
@@ -301,8 +338,13 @@ let add_routes router =
       request
       reqd)
   |> Http.Router.post "/api/v1/ide/annotations" (fun request reqd ->
-    with_public_read
-      (fun state req reqd ->
+    (* task-1736 B3: annotation creation is a mutation. It requires a
+       token-bound write identity ([CanBroadcast], the keeper write
+       tier) instead of [with_public_read], and the acting keeper is the
+       resolved [auth_identity] rather than a caller-chosen field. *)
+    with_token_permission_auth
+      ~permission:Masc_domain.CanBroadcast
+      (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
          (* RFC-0128 §4.2 PR-8: partition storage lives under the
             *server* base_path (single .masc-ide/ tree), not the
@@ -338,62 +380,75 @@ let add_routes router =
              ( find_string "file_path"
              , find_int "line_start"
              , find_int "line_end"
-             , find_string "keeper_id"
              , find_string "content" )
            with
-           | Some file_path, Some line_start, Some line_end, Some keeper_id, Some content
-             ->
-             let kind_str = Option.value (find_string "kind") ~default:"Comment" in
-             let kind =
-               match Ide_annotations.annotation_kind_of_string kind_str with
-               | Some k -> k
-               | None -> Comment
-             in
-             let goal_id = find_string "goal_id" in
-             let task_id = find_string "task_id" in
-             let board_post_id = find_string "board_post_id" in
-             let comment_id = find_string "comment_id" in
-             let pr_id = find_string "pr_id" in
-             let git_ref = find_string "git_ref" in
-             let log_id = find_string "log_id" in
-             let session_id = find_string "session_id" in
-             let operation_id = find_string "operation_id" in
-             let worker_run_id = find_string "worker_run_id" in
-             let partition = resolve_partition_for_query ~state ~uri in
+           | Some file_path, Some line_start, Some line_end, Some content ->
+             (* task-1736 B3: keeper_id is bound to the authenticated
+                identity. A body-supplied keeper_id is advisory and must
+                match, otherwise the create is rejected as impersonation. *)
              (match
-                Ide_annotations.create
-                  ~base_dir:base
-                  ~partition
-                  ~keeper_id
-                  ~file_path
-                  ~line_start
-                  ~line_end
-                  ~kind
-                  ~content
-                  ?goal_id
-                  ?task_id
-                  ?board_post_id
-                  ?comment_id
-                  ?pr_id
-                  ?git_ref
-                  ?log_id
-                  ?session_id
-                  ?operation_id
-                  ?worker_run_id
-                  ()
+                bind_mutation_keeper_id
+                  ~auth_identity
+                  ~requested:(find_string "keeper_id")
               with
-              | Ok annotation ->
-                Http.Response.json_value
-                  ~status:`Created
-                  ~request
-                  (json_ok (Ide_annotation_types.annotation_to_json annotation))
-                  reqd
               | Error msg ->
                 Http.Response.json_value
-                  ~status:`Bad_request
+                  ~status:`Forbidden
                   ~request
                   (json_error msg)
-                  reqd)
+                  reqd
+              | Ok keeper_id ->
+                let kind_str = Option.value (find_string "kind") ~default:"Comment" in
+                let kind =
+                  match Ide_annotations.annotation_kind_of_string kind_str with
+                  | Some k -> k
+                  | None -> Comment
+                in
+                let goal_id = find_string "goal_id" in
+                let task_id = find_string "task_id" in
+                let board_post_id = find_string "board_post_id" in
+                let comment_id = find_string "comment_id" in
+                let pr_id = find_string "pr_id" in
+                let git_ref = find_string "git_ref" in
+                let log_id = find_string "log_id" in
+                let session_id = find_string "session_id" in
+                let operation_id = find_string "operation_id" in
+                let worker_run_id = find_string "worker_run_id" in
+                let partition = resolve_partition_for_query ~state ~uri in
+                (match
+                   Ide_annotations.create
+                     ~base_dir:base
+                     ~partition
+                     ~keeper_id
+                     ~file_path
+                     ~line_start
+                     ~line_end
+                     ~kind
+                     ~content
+                     ?goal_id
+                     ?task_id
+                     ?board_post_id
+                     ?comment_id
+                     ?pr_id
+                     ?git_ref
+                     ?log_id
+                     ?session_id
+                     ?operation_id
+                     ?worker_run_id
+                     ()
+                 with
+                 | Ok annotation ->
+                   Http.Response.json_value
+                     ~status:`Created
+                     ~request
+                     (json_ok (Ide_annotation_types.annotation_to_json annotation))
+                     reqd
+                 | Error msg ->
+                   Http.Response.json_value
+                     ~status:`Bad_request
+                     ~request
+                     (json_error msg)
+                     reqd))
            | _ ->
              Http.Response.json_value
                ~status:`Bad_request
@@ -403,8 +458,16 @@ let add_routes router =
       request
       reqd)
   |> Http.Router.any "/api/v1/ide/annotations/:id" (fun request reqd ->
-    with_public_read
-      (fun state _req reqd ->
+    (* task-1736 B3: deletion is a mutation. It requires a token-bound
+       write identity ([CanBroadcast]) instead of [with_public_read], and
+       ownership is enforced against the resolved [auth_identity] rather
+       than a caller-supplied query param. Because [Ide_annotations.delete]
+       only removes an annotation whose stored keeper_id equals the passed
+       keeper_id, binding keeper_id to auth_identity makes it structurally
+       impossible to delete another keeper's annotation. *)
+    with_token_permission_auth
+      ~permission:Masc_domain.CanBroadcast
+      (fun state auth_identity _req reqd ->
          let uri = Uri.of_string request.target in
          (* RFC-0128 §4.2 PR-8: partition storage lives under the
             *server* base_path (single .masc-ide/ tree), not the
@@ -423,28 +486,40 @@ let add_routes router =
            | Some s when s <> "" -> s
            | _ -> ""
          in
-         let keeper_id =
+         let requested_keeper_id =
            match Uri.get_query_param uri "keeper_id" with
-           | Some k when k <> "" -> k
-           | _ -> ""
+           | Some k when String.trim k <> "" -> Some (String.trim k)
+           | _ -> None
          in
-         if id = "" || keeper_id = ""
+         if id = ""
          then
            Http.Response.json_value
              ~status:`Bad_request
              ~request
-             (json_error "Missing id or keeper_id")
+             (json_error "Missing id")
              reqd
          else (
-           let partition = resolve_partition_for_query ~state ~uri in
-           match Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id () with
-           | Ok () -> Http.Response.json ~status:`No_content ~request "{}" reqd
+           match
+             bind_mutation_keeper_id ~auth_identity ~requested:requested_keeper_id
+           with
            | Error msg ->
              Http.Response.json_value
                ~status:`Forbidden
                ~request
                (json_error msg)
-               reqd))
+               reqd
+           | Ok keeper_id ->
+             let partition = resolve_partition_for_query ~state ~uri in
+             (match
+                Ide_annotations.delete ~base_dir:base ~partition ~id ~keeper_id ()
+              with
+              | Ok () -> Http.Response.json ~status:`No_content ~request "{}" reqd
+              | Error msg ->
+                Http.Response.json_value
+                  ~status:`Forbidden
+                  ~request
+                  (json_error msg)
+                  reqd)))
       request
       reqd)
   |> Http.Router.get "/api/v1/ide/regions" (fun request reqd ->
@@ -760,3 +835,7 @@ let add_routes router =
       request
       reqd)
 ;;
+
+module For_testing = struct
+  let bind_mutation_keeper_id = bind_mutation_keeper_id
+end

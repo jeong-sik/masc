@@ -19,3 +19,12 @@
 module Http = Http_server_eio
 
 val add_routes : Http.Router.t -> Http.Router.t
+
+module For_testing : sig
+  val bind_mutation_keeper_id :
+    auth_identity:string -> requested:string option -> (string, string) result
+  (** task-1736 B3 — resolve the acting keeper_id for an annotation
+      mutation. Returns the [auth_identity] when [requested] is absent,
+      blank, or equal; returns [Error] when [requested] names a
+      different keeper (rejected as impersonation). *)
+end

@@ -83,7 +83,7 @@ let task_context config ~task_id acc =
         let index = Workspace_goal_index.build_task_goal_index_for_config config in
         match Hashtbl.find_opt index task_id with
         | Some (g :: _) -> Some g
-        | _ -> None
+        | Some [] | None -> None
       in
       `Assoc
         [ "task_id", `String task_id

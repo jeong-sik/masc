@@ -205,22 +205,15 @@ let estimate_tool_schema_context
       estimated_input_tokens + tool_schema_tokens
   }
 
-let hook_block_already_accounted_in_preflight = function
-  | Prompt_block_id.Dynamic_context | Prompt_block_id.Temporal_summary -> true
-  | Prompt_block_id.Persona
-  | Prompt_block_id.Continuity
-  | Prompt_block_id.Claimed_task_nudge
-  | Prompt_block_id.Retry_nudge
-  | Prompt_block_id.Memory_os_recall
-  | Prompt_block_id.User_model
-  | Prompt_block_id.Connected_surface
-  | Prompt_block_id.Other _ ->
-    false
+let prompt_block_accounted_in_preflight ~preflight_accounted_blocks block =
+  List.exists (Prompt_block_id.equal block) preflight_accounted_blocks
 
-let estimate_unaccounted_extra_system_context_tokens blocks =
+let estimate_unaccounted_extra_system_context_tokens
+      ~(preflight_accounted_blocks : Prompt_block_id.t list)
+      blocks =
   List.fold_left
     (fun acc (block, text) ->
-       if hook_block_already_accounted_in_preflight block
+       if prompt_block_accounted_in_preflight ~preflight_accounted_blocks block
        then acc
        else acc + Keeper_context_core_accessors.estimate_char_tokens text)
     0
@@ -235,10 +228,12 @@ let estimate_extra_system_context_tokens = function
   | None -> 0
   | Some text -> Keeper_context_core_accessors.estimate_char_tokens text
 
-let estimate_preflight_accounted_extra_system_context_tokens blocks =
+let estimate_preflight_accounted_extra_system_context_tokens
+      ~(preflight_accounted_blocks : Prompt_block_id.t list)
+      blocks =
   List.fold_left
     (fun acc (block, text) ->
-       if hook_block_already_accounted_in_preflight block
+       if prompt_block_accounted_in_preflight ~preflight_accounted_blocks block
        then acc + Keeper_context_core_accessors.estimate_char_tokens text
        else acc)
     0
@@ -254,13 +249,16 @@ let assembled_extra_system_context
 
 let estimate_unaccounted_assembled_extra_context_tokens
       ~(existing_extra_system_context : string option)
+      ~(preflight_accounted_blocks : Prompt_block_id.t list)
       ~(included_blocks : (Prompt_block_id.t * string) list) =
   let assembled_tokens =
     assembled_extra_system_context ~existing_extra_system_context ~included_blocks
     |> estimate_extra_system_context_tokens
   in
   let preflight_accounted_tokens =
-    estimate_preflight_accounted_extra_system_context_tokens included_blocks
+    estimate_preflight_accounted_extra_system_context_tokens
+      ~preflight_accounted_blocks
+      included_blocks
   in
   max 0 (assembled_tokens - preflight_accounted_tokens)
 
@@ -284,12 +282,14 @@ let budget_extra_system_context
       ~(estimated_input_tokens_with_tools : int)
       ~(max_context : int)
       ~(existing_extra_system_context : string option)
+      ~(preflight_accounted_blocks : Prompt_block_id.t list)
       ~(blocks : (Prompt_block_id.t * string) list)
   : extra_system_context_budget =
   let post_hook_estimate included_blocks =
     estimated_input_tokens_with_tools
     + estimate_unaccounted_assembled_extra_context_tokens
         ~existing_extra_system_context
+        ~preflight_accounted_blocks
         ~included_blocks
   in
   let initial_estimate = post_hook_estimate [] in
@@ -318,7 +318,9 @@ let budget_extra_system_context
   let included_blocks = List.rev included_rev in
   let skipped_blocks = List.rev skipped_rev in
   let hook_extra_system_context_estimated_tokens =
-    estimate_unaccounted_extra_system_context_tokens included_blocks
+    estimate_unaccounted_extra_system_context_tokens
+      ~preflight_accounted_blocks
+      included_blocks
   in
   let post_hook_estimated_input_tokens =
     post_hook_estimate included_blocks

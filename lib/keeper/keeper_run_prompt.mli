@@ -98,23 +98,28 @@ val estimate_tool_schema_context :
     prompt/history estimate. This matches OAS' default full-schema disclosure. *)
 
 val estimate_unaccounted_extra_system_context_tokens :
+  preflight_accounted_blocks:Prompt_block_id.t list ->
   (Prompt_block_id.t * string) list -> int
 (** Estimate the hook-injected [extra_system_context] blocks that were not
-    already included in the pre-dispatch prompt estimate. *)
+    already included in the pre-dispatch prompt estimate. The caller supplies
+    [preflight_accounted_blocks] from the actual turn prompt assembly ledger;
+    this function does not maintain an internal prompt-block allowlist. *)
 
 val budget_extra_system_context :
   estimated_input_tokens_with_tools:int ->
   max_context:int ->
   existing_extra_system_context:string option ->
+  preflight_accounted_blocks:Prompt_block_id.t list ->
   blocks:(Prompt_block_id.t * string) list ->
   extra_system_context_budget
 (** Rebuild [extra_system_context] from typed prompt blocks while keeping
     hook-only additions inside the effective context window. The post-hook
     estimate is derived from the assembled [extra_system_context] string so
     separators and existing hook context are accounted. Blocks already
-    represented in the pre-dispatch prompt estimate are subtracted from that
-    assembled estimate to avoid double-counting; blocks that would exceed the
-    remaining window are omitted and reported in [skipped_blocks]. *)
+    represented in the pre-dispatch prompt estimate, as supplied by
+    [preflight_accounted_blocks], are subtracted from that assembled estimate to
+    avoid double-counting; blocks that would exceed the remaining window are
+    omitted and reported in [skipped_blocks]. *)
 
 val context_window_budget :
   estimated_input_tokens:int -> max_context:int -> context_window_budget

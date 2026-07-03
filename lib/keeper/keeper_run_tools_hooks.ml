@@ -273,13 +273,22 @@ let assemble_hooks
                 let record_block block text =
                   recorded_blocks := (block, text) :: !recorded_blocks
                 in
+                let preflight_accounted_blocks = ref [] in
+                let record_preflight_accounted_block block text =
+                  record_block block text;
+                  preflight_accounted_blocks := block :: !preflight_accounted_blocks
+                in
                 (if String.trim dynamic_context <> ""
                  then
-                   record_block Prompt_block_id.Dynamic_context dynamic_context);
+                   record_preflight_accounted_block
+                     Prompt_block_id.Dynamic_context
+                     dynamic_context);
                 (match Masc_context_injector.render_temporal_summary shared_context with
                  | None -> ()
                  | Some temporal ->
-                   record_block Prompt_block_id.Temporal_summary temporal);
+                   record_preflight_accounted_block
+                     Prompt_block_id.Temporal_summary
+                     temporal);
                 (match acc.meta.current_task_id with
                   | Some task_id ->
                     let last_tool_names =
@@ -380,6 +389,8 @@ let assemble_hooks
                     ~max_context
                     ~existing_extra_system_context:
                       current_params.extra_system_context
+                    ~preflight_accounted_blocks:
+                      (List.rev !preflight_accounted_blocks)
                     ~blocks:(List.rev !recorded_blocks)
                 in
                 let ctx = extra_system_context_budget.extra_system_context in

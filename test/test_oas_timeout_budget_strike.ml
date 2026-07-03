@@ -464,6 +464,8 @@ let test_hook_context_estimate_skips_base_prompt_layers () =
     "only hook-only blocks are added to the post-hook estimate"
     expected
     (Keeper_run_prompt.estimate_unaccounted_extra_system_context_tokens
+       ~preflight_accounted_blocks:
+         [ Prompt_block_id.Dynamic_context; Prompt_block_id.Temporal_summary ]
        [ Prompt_block_id.Dynamic_context, dynamic
        ; Prompt_block_id.Temporal_summary, temporal
        ; Prompt_block_id.Retry_nudge, retry
@@ -476,6 +478,7 @@ let test_extra_system_context_budget_skips_over_window_hook_blocks () =
       ~estimated_input_tokens_with_tools:90
       ~max_context:100
       ~existing_extra_system_context:None
+      ~preflight_accounted_blocks:[ Prompt_block_id.Dynamic_context ]
       ~blocks:
         [ Prompt_block_id.Dynamic_context, String.make 400 'd'
         ; Prompt_block_id.Retry_nudge, String.make 400 'r'
@@ -514,6 +517,7 @@ let test_extra_system_context_budget_accounts_assembled_overhead () =
       ~estimated_input_tokens_with_tools:10
       ~max_context:1_000
       ~existing_extra_system_context:None
+      ~preflight_accounted_blocks:[ Prompt_block_id.Dynamic_context ]
       ~blocks:
         [ Prompt_block_id.Dynamic_context, dynamic
         ; Prompt_block_id.User_model, hook_only

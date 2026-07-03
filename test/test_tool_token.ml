@@ -100,7 +100,18 @@ let test_dispatch_with_token () =
   let tool = "__test_token_dispatch" in
   Tool_dispatch.register ~tool_name:tool
     ~handler:(fun ~name ~args:_ -> Some (tool_ok ~tool_name:name ("dispatched:" ^ name)));
-  Tool_dispatch.register_name_tag ~tool_name:tool ~tag:Mod_misc;
+  (* Register a schema (not just a tag) so the tool clears the input-schema
+     validation pre-hook that Mcp_server_eio installs at module load. An
+     empty-object schema dispatched with no args passes validation, so this
+     keeps the test focused on token dispatch while matching production, where
+     every dispatchable tool carries a schema. *)
+  Tool_dispatch.register_module_tag
+    ~schemas:
+      [ { Masc_domain.name = tool
+        ; description = "test dispatch tool"
+        ; input_schema = `Assoc [ "type", `String "object" ]
+        } ]
+    ~tag:Mod_misc;
   match Tool_dispatch.mint_token ~name:tool with
   | Error e -> fail e
   | Ok token ->

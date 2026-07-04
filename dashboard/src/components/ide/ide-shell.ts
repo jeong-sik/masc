@@ -49,6 +49,7 @@ import { dashboardWsConnected, dashboardWsSseFallbackActive } from '../../dashbo
 import type { Repository } from '../../api/repositories'
 import type { WorkspaceSource } from '../../api/workspace-source'
 import { KeeperBadge } from '../keeper-badge'
+import type { WorkspaceFetchIssue } from './ide-data-workspace-store'
 import {
   parseActive,
   serializeActive,
@@ -57,7 +58,7 @@ import {
 type ViewTab = IdeEditorView
 type IdeFocus = 'review'
 type IdeRightRailTab = 'context' | 'activity' | 'cursors'
-type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok'
+type IdeStatusbarChipTone = 'brass' | 'ghost' | 'info' | 'ok' | 'warn'
 type IdeConnectionTone = 'ok' | 'warn'
 
 export interface IdeStatusbarChip {
@@ -151,6 +152,7 @@ interface IdeStatusbarInput {
   readonly activeRepositoryId?: string | null
   readonly workspaceSource?: WorkspaceSource
   readonly workspaceBasePath?: string | null
+  readonly workspaceIssues?: ReadonlyArray<WorkspaceFetchIssue>
   readonly dashboardConnected?: boolean
 }
 
@@ -395,6 +397,39 @@ function statusbarTelemetryLabelFromFocus(focus: IdeContextFocus | null | undefi
   return first ? `Telemetry ${first}` : undefined
 }
 
+function workspaceIssueLabel(issue: WorkspaceFetchIssue): string {
+  switch (issue.kind) {
+    case 'repositories':
+      return 'repos'
+    case 'tree':
+      return 'tree'
+    case 'file':
+      return issue.file_path ? `file ${shortStatusbarPath(issue.file_path)}` : 'file'
+    case 'regions':
+      return 'regions'
+    case 'blame':
+      return 'blame'
+    case 'diff':
+      return 'diff'
+    case 'annotations':
+      return 'annotations'
+  }
+}
+
+function workspaceIssueTitle(issues: ReadonlyArray<WorkspaceFetchIssue>): string {
+  return issues
+    .map(issue => {
+      const scope = [
+        issue.file_path ? `file=${issue.file_path}` : null,
+        issue.repo_id ? `repo=${issue.repo_id}` : null,
+        issue.keeper ? `keeper=${issue.keeper}` : null,
+      ].filter((part): part is string => part !== null)
+      const scoped = scope.length > 0 ? ` (${scope.join(', ')})` : ''
+      return `${workspaceIssueLabel(issue)}${scoped}: ${issue.message}`
+    })
+    .join('\n')
+}
+
 function addStatusbarChip(
   chips: IdeStatusbarChip[],
   id: string,
@@ -421,6 +456,7 @@ export function deriveIdeStatusbarModel({
   activeRepositoryId,
   workspaceSource,
   workspaceBasePath = null,
+  workspaceIssues = [],
   dashboardConnected = false,
 }: IdeStatusbarInput): IdeStatusbarModel {
   const chips: IdeStatusbarChip[] = []
@@ -436,6 +472,14 @@ export function deriveIdeStatusbarModel({
 
   const layerLabel = statusbarLayerLabel(activeLayers)
   addStatusbarChip(chips, 'layers', layerLabel ?? undefined, 'info', layerLabel ? `Active layers: ${layerLabel}` : '')
+  const issueLabels = [...new Set(workspaceIssues.map(workspaceIssueLabel))]
+  addStatusbarChip(
+    chips,
+    'workspace-fetch',
+    issueLabels.length > 0 ? `IDE fetch degraded ${issueLabels.join('/')}` : undefined,
+    'warn',
+    workspaceIssueTitle(workspaceIssues),
+  )
   if (terminalOpen) addStatusbarChip(chips, 'terminal', 'terminal', 'info', 'Execute output drawer open')
   if (findOpen) addStatusbarChip(chips, 'find', 'find', 'ghost', 'Current-file find panel open')
   if (railsCollapsed) addStatusbarChip(chips, 'rails', 'rails hidden', 'ghost', 'IDE side rails hidden')
@@ -773,6 +817,10 @@ export function IdeShell() {
     workspaceStore.workspaceBasePath,
     workspaceStore.subscribeWorkspaceBasePath,
   )
+  const workspaceIssues = useSubscribedValue(
+    workspaceStore.workspaceIssues,
+    workspaceStore.subscribeWorkspaceIssues,
+  )
   const [activeFilePath, setActiveFilePath] = useState(activeIdeFile.value)
 
   useEffect(() => {
@@ -888,6 +936,7 @@ export function IdeShell() {
     activeRepositoryId,
     workspaceSource,
     workspaceBasePath,
+    workspaceIssues,
     dashboardConnected: dashboardRuntimeConnected(),
   })
 

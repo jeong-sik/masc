@@ -101,9 +101,11 @@ const dashboardFetchHandlers: ReadonlyArray<[
   () => Response,
 ]> = [
   [/\/api\/v1\/workspace\/tree/, () => jsonResponse([])],
-  [/\/api\/v1\/workspace\/file/, () => jsonResponse({ ok: false, content: '' })],
+  [/\/api\/v1\/workspace\/file/, () => jsonResponse({ ok: true, content: '{}', language: 'json' })],
   [/\/api\/v1\/git\/blame/, () => jsonResponse([])],
   [/\/api\/v1\/git\/diff/, () => jsonResponse({ unified: [] })],
+  [/\/api\/v1\/ide\/regions/, () => jsonResponse({ ok: true, data: [] })],
+  [/\/api\/v1\/ide\/annotations/, () => jsonResponse({ ok: true, data: [] })],
   [/\/state-diagram/, () => jsonResponse({
     keeper: 'sangsu',
     current_phase: 'observe',
@@ -116,6 +118,17 @@ function dashboardFetchMock(input: RequestInfo | URL): Promise<Response> {
   const handler = dashboardFetchHandlers.find(([pattern]) => pattern.test(url))
   if (!handler) throw new Error(`Unmocked fetch URL: ${url}`)
   return Promise.resolve(handler[1]())
+}
+
+function dashboardFetchMockWithFailure(
+  pattern: RegExp,
+  error: Error,
+): (input: RequestInfo | URL) => Promise<Response> {
+  return (input: RequestInfo | URL): Promise<Response> => {
+    const url = String(input)
+    if (pattern.test(url)) return Promise.reject(error)
+    return dashboardFetchMock(input)
+  }
 }
 
 describe('IdeShell', () => {
@@ -477,6 +490,31 @@ describe('IdeShell', () => {
       'Telemetry turn-42',
       'Keeper sangsu',
     ])
+  })
+
+  it('surfaces workspace fetch failures in the IDE statusbar', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(dashboardFetchMockWithFailure(
+        /\/api\/v1\/git\/diff/,
+        new Error('diff endpoint unavailable'),
+      )),
+    )
+    route.value = {
+      tab: 'code',
+      params: { section: 'ide-shell', view: 'source', file: 'lib/runtime.ml' },
+      postId: null,
+    }
+
+    render(h(IdeShell, {}), container)
+
+    const chip = await waitFor(() => {
+      const found = container.querySelector('[data-testid="ide-statusbar-chip-workspace-fetch"]')
+      expect(found).not.toBeNull()
+      return found!
+    })
+    expect(chip.textContent).toBe('IDE fetch degraded diff')
+    expect(chip.getAttribute('title')).toContain('diff endpoint unavailable')
   })
 
   it('focuses active keeper breadcrumb chips into routeable code and keeper context', async () => {

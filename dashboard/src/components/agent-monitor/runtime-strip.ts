@@ -16,7 +16,10 @@ import {
   loadRuntimeCatalog,
   runtimeCatalogState,
 } from '../../lib/runtime-catalog-resource'
-import { runtimeCatalogSnapshotFacts } from '../../lib/runtime-provider-summary'
+import {
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogSnapshotFacts,
+} from '../../lib/runtime-provider-summary'
 
 function ctxBarClass(ratio: number | null | undefined): string {
   if (ratio == null) return ''
@@ -45,12 +48,15 @@ export function AgentRuntimeStrip({ name }: { name: string }) {
   const catalog = catalogState?.status === 'loaded' ? catalogState.data : []
   const runtimeEntry = runtime ? findRuntimeCatalogEntry(catalog, runtime.value) : null
   const runtimeFacts = runtimeEntry ? runtimeCatalogSnapshotFacts(runtimeEntry) : null
+  const effectiveCapabilities = runtimeEntry ? runtimeCatalogEffectiveCapabilities(runtimeEntry) : null
+  const runtimeSpecFacts = [runtimeFacts, effectiveCapabilities].filter((value): value is string => Boolean(value))
+  const runtimeSpecSummary = runtimeSpecFacts.length > 0 ? runtimeSpecFacts.join(' · ') : null
   const runtimeSpecState = runtime
-    ? runtimeFacts
+    ? runtimeSpecSummary
       ?? (catalogState?.status === 'error' ? 'catalog unavailable' : null)
       ?? (catalogState?.status === 'loaded' && runtimeEntry === null ? 'catalog entry missing' : null)
     : null
-  const runtimeSpecTitle = runtimeFacts
+  const runtimeSpecTitle = runtimeSpecSummary
     ?? (catalogState?.status === 'error' ? catalogState.message : runtimeSpecState)
 
   return html`

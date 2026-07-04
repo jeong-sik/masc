@@ -72,6 +72,27 @@ export async function fetchWorkspaceTree(
   }
 }
 
+/**
+ * Fetch the immediate children (one level) of a workspace directory for
+ * lazy on-expand tree loading. Mirrors fetchWorkspaceTree's node shape but
+ * returns only the given directory's direct entries; the server anchors each
+ * node's path/parent/depth to the whole workspace tree so the client can merge
+ * them into the existing flat node array. Path is validated server-side with
+ * the same traversal/confidential/symlink guards as fetchWorkspaceFile.
+ */
+export function fetchWorkspaceChildren(
+  path: string,
+  opts: WorkspaceApiOptions = {},
+): Promise<ReadonlyArray<FileTreeNode>> {
+  const params = new URLSearchParams()
+  params.set('path', path)
+  appendWorkspaceParams(params, opts)
+  return get<ReadonlyArray<FileTreeNode>>(
+    `/api/v1/workspace/children?${params.toString()}`,
+    opts,
+  )
+}
+
 export function fetchWorkspaceFile(
   path: string,
   opts: WorkspaceApiOptions = {},

@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest'
-import { selectPreferredIdeRepositoryId } from './ide-data-workspace-store'
+import {
+  sameWorkspaceTreeIdentity,
+  selectPreferredIdeRepositoryId,
+  workspaceTreeIdentity,
+} from './ide-data-workspace-store'
 import type { Repository } from '../../api/repositories'
 
 function repo(
@@ -149,5 +153,35 @@ describe('selectPreferredIdeRepositoryId', () => {
     // After self-healing excludes llama-cpp:
     const excluded = new Set(['llama-cpp'])
     expect(selectPreferredIdeRepositoryId(repositories, null, excluded)).toBe('workspace-a')
+  })
+})
+
+describe('workspaceTreeIdentity', () => {
+  it('treats the same source and base path as the same workspace', () => {
+    const left = workspaceTreeIdentity({ kind: 'repository', repoId: 'masc' }, '/repo/masc')
+    const right = workspaceTreeIdentity({ kind: 'repository', repoId: 'masc' }, '/repo/masc')
+
+    expect(sameWorkspaceTreeIdentity(left, right)).toBe(true)
+  })
+
+  it('does not collapse distinct repository sources into one refresh identity', () => {
+    const left = workspaceTreeIdentity({ kind: 'repository', repoId: 'masc' }, '/repo/masc')
+    const right = workspaceTreeIdentity({ kind: 'repository', repoId: 'oas' }, '/repo/oas')
+
+    expect(sameWorkspaceTreeIdentity(left, right)).toBe(false)
+  })
+
+  it('does not preserve lazy children across keeper source switches', () => {
+    const left = workspaceTreeIdentity({ kind: 'playground', keeper: 'alpha' }, '/keepers/alpha')
+    const right = workspaceTreeIdentity({ kind: 'playground', keeper: 'beta' }, '/keepers/beta')
+
+    expect(sameWorkspaceTreeIdentity(left, right)).toBe(false)
+  })
+
+  it('uses basePath as part of project-source identity', () => {
+    const left = workspaceTreeIdentity({ kind: 'project' }, '/Users/dancer/me')
+    const right = workspaceTreeIdentity({ kind: 'project' }, '/Users/dancer/me/workspace/yousleepwhen/masc')
+
+    expect(sameWorkspaceTreeIdentity(left, right)).toBe(false)
   })
 })

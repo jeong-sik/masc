@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+import { describe, expect, it, vi } from 'vitest'
 import { createFileTreeStore, summarizeFileTreeDiffs, type FileTreeNode } from './file-tree-store'
 
 const SAMPLE: ReadonlyArray<FileTreeNode> = [
@@ -223,4 +223,244 @@ function generateBigTree(target: number): ReadonlyArray<FileTreeNode> {
   }
 
   return nodes
+}
+
+function dir(path: string, depth: number, parent: string | null): FileTreeNode {
+  return { path, label: path.split('/').pop() ?? path, depth, parent, hasChildren: true, diff: null, keeperId: null, hueIndex: null }
+}
+function file(path: string, depth: number, parent: string | null): FileTreeNode {
+  return { path, label: path.split('/').pop() ?? path, depth, parent, hasChildren: false, diff: null, keeperId: null, hueIndex: null }
+}
+
+describe('createFileTreeStore lazy children loading', () => {
+  // Mirrors the empirically-confirmed `project` workspace source: root-only
+  // directories with no children present, each expandable via loadChildren.
+  const ROOT_ONLY: ReadonlyArray<FileTreeNode> = [
+    dir('lib', 0, ''),
+    dir('dashboard', 0, ''),
+    file('README.md', 0, ''),
+  ]
+
+  it('does not treat seed-present children as a completeness proof', async () => {
+    const loadChildren = vi.fn(async (): Promise<FileTreeNode[]> => [
+      file('lib/main.ml', 1, 'lib'),
+      file('lib/missing-from-bounded-scan.ml', 1, 'lib'),
+    ])
+    const s = createFileTreeStore({ loadChildren })
+    // 'lib' has a child present in the bounded seed, but the server cap may
+    // have cut the directory before all siblings were returned. The store must
+    // not mark it loaded until the authoritative lazy children fetch completes.
+    s.seed([dir('lib', 0, ''), file('lib/main.ml', 1, 'lib')])
+
+    expect(s.isExpanded('lib')).toBe(true)
+    expect(s.isChildrenLoaded('lib')).toBe(false)
+    await flushMicrotasks()
+
+    expect(loadChildren).toHaveBeenCalledWith('lib')
+    expect(s.isChildrenLoaded('lib')).toBe(true)
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/main.ml',
+      'lib/missing-from-bounded-scan.ml',
+    ])
+  })
+
+  it('fetches on expand when a partial seed child set is still not loaded', async () => {
+    const loadChildren = vi.fn(async (): Promise<FileTreeNode[]> => [
+      file('lib/main.ml', 1, 'lib'),
+      file('lib/other.ml', 1, 'lib'),
+    ])
+    const s = createFileTreeStore({ loadChildren })
+    s.seed([dir('lib', 0, ''), file('lib/main.ml', 1, 'lib')])
+    s.collapse('lib')
+
+    s.expand('lib')
+    await flushMicrotasks()
+
+    expect(loadChildren).toHaveBeenCalledTimes(1)
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/main.ml',
+      'lib/other.ml',
+    ])
+  })
+
+  it('treats a root-only directory as not-loaded and fetches its children on expand', async () => {
+    const loadChildren = vi.fn(async (path: string): Promise<FileTreeNode[]> =>
+      path === 'lib'
+        ? [dir('lib/server', 1, 'lib'), file('lib/main.ml', 1, 'lib')]
+        : [],
+    )
+    const s = createFileTreeStore({ loadChildren })
+    s.seed(ROOT_ONLY)
+
+    expect(s.isChildrenLoaded('lib')).toBe(false)
+    s.expand('lib')
+    await flushMicrotasks()
+
+    expect(loadChildren).toHaveBeenCalledWith('lib')
+    expect(s.isChildrenLoaded('lib')).toBe(true)
+    // Children are merged and now visible under the expanded 'lib'.
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/server',
+      'lib/main.ml',
+      'dashboard',
+      'README.md',
+    ])
+  })
+
+  it('does not re-fetch a directory whose children were already loaded', async () => {
+    const loadChildren = vi.fn(async (): Promise<FileTreeNode[]> => [file('lib/main.ml', 1, 'lib')])
+    const s = createFileTreeStore({ loadChildren })
+    s.seed(ROOT_ONLY)
+
+    await s.loadChildren('lib')
+    await s.loadChildren('lib')
+    s.collapse('lib')
+    s.expand('lib')
+    await flushMicrotasks()
+
+    expect(loadChildren).toHaveBeenCalledTimes(1)
+  })
+
+  it('coalesces concurrent expands into a single in-flight fetch', async () => {
+    let resolveFetch: (nodes: FileTreeNode[]) => void = () => {}
+    const loadChildren = vi.fn(
+      () => new Promise<FileTreeNode[]>(resolve => { resolveFetch = resolve }),
+    )
+    const s = createFileTreeStore({ loadChildren })
+    s.seed(ROOT_ONLY)
+
+    const first = s.loadChildren('lib')
+    const second = s.loadChildren('lib')
+    expect(s.isChildrenLoading('lib')).toBe(true)
+    resolveFetch([file('lib/main.ml', 1, 'lib')])
+    await Promise.all([first, second])
+
+    expect(loadChildren).toHaveBeenCalledTimes(1)
+    expect(s.isChildrenLoading('lib')).toBe(false)
+    expect(s.isChildrenLoaded('lib')).toBe(true)
+  })
+
+  it('leaves a directory not-loaded after a failed fetch so a later expand retries', async () => {
+    const loadChildren = vi.fn()
+      .mockRejectedValueOnce(new Error('network'))
+      .mockResolvedValueOnce([file('lib/main.ml', 1, 'lib')])
+    const s = createFileTreeStore({ loadChildren })
+    s.seed(ROOT_ONLY)
+
+    await s.loadChildren('lib')
+    expect(s.isChildrenLoaded('lib')).toBe(false)
+    expect(s.isChildrenLoading('lib')).toBe(false)
+
+    await s.loadChildren('lib')
+    expect(s.isChildrenLoaded('lib')).toBe(true)
+    expect(loadChildren).toHaveBeenCalledTimes(2)
+  })
+
+  it('is inert without a configured loader (backward compatible)', async () => {
+    const s = createFileTreeStore()
+    s.seed(ROOT_ONLY)
+    await s.loadChildren('lib')
+    expect(s.isChildrenLoaded('lib')).toBe(false)
+    expect(s.nodeCount()).toBe(ROOT_ONLY.length)
+  })
+
+  it('recomputes load state on re-seed so a repo switch does not leak it', async () => {
+    const loadChildren = vi.fn(async (): Promise<FileTreeNode[]> => [file('lib/main.ml', 1, 'lib')])
+    const s = createFileTreeStore({ loadChildren })
+    s.seed([dir('lib', 0, ''), file('lib/main.ml', 1, 'lib')])
+    await flushMicrotasks()
+    expect(s.isChildrenLoaded('lib')).toBe(true)
+
+    // New repo: 'lib' is now a root-only leaf-dir with no children present.
+    s.seed(ROOT_ONLY)
+    expect(s.isChildrenLoaded('lib')).toBe(false)
+  })
+})
+
+describe('createFileTreeStore live refresh (reconcile)', () => {
+  const ROOT_ONLY: ReadonlyArray<FileTreeNode> = [
+    dir('lib', 0, ''),
+    dir('dashboard', 0, ''),
+    file('README.md', 0, ''),
+  ]
+
+  it('preserves expansion and lazily-loaded children across a same-workspace refresh', async () => {
+    const loadChildren = vi.fn(async (path: string): Promise<FileTreeNode[]> =>
+      path === 'lib' ? [dir('lib/server', 1, 'lib'), file('lib/main.ml', 1, 'lib')] : [],
+    )
+    const s = createFileTreeStore({ loadChildren })
+    s.seed(ROOT_ONLY)
+    s.expand('lib')
+    await flushMicrotasks()
+    // Precondition: lib is expanded and its lazily-loaded children are visible.
+    expect(s.isExpanded('lib')).toBe(true)
+    expect(s.visibleNodes().map(n => n.path)).toContain('lib/server')
+
+    // A keeper edit triggers a live refresh: the bounded rescan returns the
+    // same root-only tree (no 'lib' children). reconcile must keep the tree
+    // the operator has open, unlike seed which would collapse it.
+    s.reconcile(ROOT_ONLY)
+
+    expect(s.isExpanded('lib')).toBe(true)
+    expect(s.isChildrenLoaded('lib')).toBe(true)
+    expect(s.visibleNodes().map(n => n.path)).toEqual([
+      'lib',
+      'lib/server',
+      'lib/main.ml',
+      'dashboard',
+      'README.md',
+    ])
+  })
+
+  it('applies fresh diffs on refresh while keeping the tree open', () => {
+    const s = createFileTreeStore()
+    s.seed(SAMPLE)
+    s.expand('runtime/runtime')
+    expect(s.diffSummary().additions).toBe(14 + 3 + 8)
+
+    // router.ts gained more additions in the fresh scan.
+    const fresh = SAMPLE.map(n =>
+      n.path === 'runtime/runtime/router.ts' ? { ...n, diff: '+40' } : n,
+    )
+    s.reconcile(fresh)
+
+    expect(s.isExpanded('runtime/runtime')).toBe(true)
+    expect(s.diffSummary().additions).toBe(40 + 3 + 8)
+  })
+
+  it('drops stale children when a workspace switch (seed) lands mid-fetch', async () => {
+    // Gate the first fetch so a seed can interleave before it resolves.
+    let releaseFirst: (nodes: FileTreeNode[]) => void = () => {}
+    const first = new Promise<FileTreeNode[]>(resolve => {
+      releaseFirst = resolve
+    })
+    const loadChildren = vi.fn(() => first)
+    const s = createFileTreeStore({ loadChildren })
+    s.seed(ROOT_ONLY)
+
+    const pending = s.loadChildren('lib') // captures generation, awaits `first`
+    // Workspace switch before the fetch resolves.
+    s.seed([dir('src', 0, ''), file('README.md', 0, '')])
+    // The stale fetch now resolves with the previous workspace's children.
+    releaseFirst([dir('lib/server', 1, 'lib'), file('lib/main.ml', 1, 'lib')])
+    await pending
+    await flushMicrotasks()
+
+    // The generation guard must have dropped the stale merge: no 'lib' node
+    // leaked into the new workspace, and 'lib' is not marked loaded.
+    const paths = s.visibleNodes().map(n => n.path)
+    expect(paths).not.toContain('lib/server')
+    expect(paths).not.toContain('lib/main.ml')
+    expect(s.isChildrenLoaded('lib')).toBe(false)
+    expect(s.isChildrenLoading('lib')).toBe(false)
+  })
+})
+
+async function flushMicrotasks(): Promise<void> {
+  for (let i = 0; i < 4; i += 1) {
+    await Promise.resolve()
+  }
 }

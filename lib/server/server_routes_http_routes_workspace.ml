@@ -533,7 +533,13 @@ let rec scan_dir_bounded ?diff_by_path ~base ~depth ~max_depth ~remaining acc di
                  | _ -> Sys.is_directory full)
           in
           let rel = rel_under base full in
-          let has_children = is_dir && depth < max_depth in
+          (* With /api/v1/workspace/children lazy-loading a directory's entries
+             on first expand, a directory is expandable regardless of the
+             initial scan depth. Decoupling [has_children] from
+             [depth < max_depth] keeps the chevron on boundary directories; the
+             recursion guard below stays depth-bounded, so the initial scan
+             shape is unchanged and only the boundary display flag flips. *)
+          let has_children = is_dir in
           let parent = if depth = 0 then "" else Filename.dirname rel in
           let node = file_tree_node ~diff_by_path
               ~path:rel ~label:f ~depth ~parent ~has_children in
@@ -811,6 +817,74 @@ let add_routes router =
            in
            json_response_with_source_and_base
              ~status:`OK ~source ~base_path:base request reqd json)
+         request reqd)
+
+  |> Http.Router.get "/api/v1/workspace/children" (fun request reqd ->
+       (* Lazy tree: return exactly one level of a directory's entries so the
+          IDE can expand deep trees on demand instead of relying on the single
+          bounded /tree snapshot (which, for the [project] workspace source, is
+          root-only). [base] stays the whole workspace base and only [dir] is
+          the subpath, so each node's path/parent/depth stay anchored to the
+          whole tree and merge into the client's flat node array. *)
+       with_public_read
+         (fun state _req reqd ->
+           let uri = Uri.of_string request.target in
+           let base, source = resolve_workspace_base ~state ~uri in
+           match Uri.get_query_param uri "path" with
+           | None ->
+             json_response ~status:`Bad_request request reqd
+               (json_error "Missing path parameter")
+           | Some requested ->
+             (* Same admission control as /file, /blame, /diff: uniform
+                [Invalid path] on traversal / confidential / symlink escape so a
+                caller cannot probe which subpaths exist or are secret. *)
+             (match resolve_workspace_file base requested with
+              | Error _ ->
+                json_response ~status:`Bad_request request reqd
+                  (json_error "Invalid path")
+              | Ok file ->
+                let max_nodes =
+                  tree_node_limit_of_query (Uri.get_query_param uri "limit")
+                in
+                (* A rel path with N non-empty segments sits at depth N-1, so
+                   its children are at depth N. Passing ~depth = ~max_depth =
+                   child_depth reads exactly one level (the recursion guard
+                   [depth < max_depth] is false), while [rel_under base] keeps
+                   path/parent anchored to the whole tree. *)
+                let child_depth =
+                  rel_under base file.lexical_path
+                  |> String.split_on_char '/'
+                  |> List.filter (fun s -> not (String.equal s ""))
+                  |> List.length
+                in
+                let cache_key =
+                  Printf.sprintf "workspace:children:%s:%s:%d:%d"
+                    base file.lexical_path child_depth max_nodes
+                in
+                let json =
+                  Dashboard_cache.get_or_compute cache_key
+                    ~ttl:Server_dashboard_http_core_cache.realtime_cache_ttl_s
+                    (fun () ->
+                       Domain_pool_ref.submit_io_or_inline (fun () ->
+                         let is_dir =
+                           workspace_or_default
+                             ~warn_on_failure:false
+                             ~site:"children_is_directory"
+                             ~path:file.lexical_path
+                             ~default:false
+                             (fun () -> Sys.is_directory file.lexical_path)
+                         in
+                         if not is_dir then `List []
+                         else
+                           let nodes =
+                             scan_dir ~base ~depth:child_depth
+                               ~max_depth:child_depth ~max_nodes []
+                               file.lexical_path
+                           in
+                           `List (List.rev nodes)))
+                in
+                json_response_with_source_and_base
+                  ~status:`OK ~source ~base_path:base request reqd json))
          request reqd)
 
   |> Http.Router.get "/api/v1/workspace/file" (fun request reqd ->

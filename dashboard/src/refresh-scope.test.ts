@@ -15,6 +15,7 @@ describe('routeWantsRefreshTarget', () => {
     expect(routeWantsRefreshTarget(current, 'board')).toBe(false)
     expect(routeWantsRefreshTarget(current, 'activity')).toBe(false)
     expect(routeWantsRefreshTarget(current, 'fusion')).toBe(false)
+    expect(routeWantsRefreshTarget(current, 'ide')).toBe(false)
   })
 
   it('matches execution-backed routes without broadening fleet-health defaults', () => {
@@ -44,5 +45,16 @@ describe('routeWantsRefreshTarget', () => {
     expect(routeWantsRefreshTarget(route('board'), 'fusion')).toBe(false)
     expect(routeWantsRefreshTarget(route('workspace', { section: 'board' }), 'fusion')).toBe(false)
     expect(routeWantsRefreshTarget(route('monitoring', { section: 'agents' }), 'fusion')).toBe(false)
+  })
+
+  it('keeps the IDE live refresh scoped to the code surface', () => {
+    // The workspace store is an app-lifetime singleton, so its SSE-driven
+    // refresh must fire only on the code surface — otherwise keeper edits would
+    // refetch the tree/diff while the user is on another tab.
+    expect(routeWantsRefreshTarget(route('code'), 'ide')).toBe(true)
+    expect(routeWantsRefreshTarget(route('code', { section: 'source' }), 'ide')).toBe(true)
+    expect(routeWantsRefreshTarget(route('overview'), 'ide')).toBe(false)
+    expect(routeWantsRefreshTarget(route('keepers', { keeper: 'sangsu' }), 'ide')).toBe(false)
+    expect(routeWantsRefreshTarget(route('fusion'), 'ide')).toBe(false)
   })
 })

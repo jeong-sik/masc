@@ -106,6 +106,19 @@ export function registerActivityRefresh(fn: () => void): () => void {
   }
 }
 
+// IDE workspace live-refresh subscribers. The app-lifetime workspace-store
+// singleton registers here so a keeper's file edits / tool runs refresh the
+// tree/diff/file view without a re-navigation. A Set (not a single slot)
+// keeps parity with registerActivityRefresh and tolerates a test store being
+// registered alongside a production one during suite overlap.
+const _refreshIdeFns = new Set<() => void>()
+export function registerIdeWorkspaceRefresh(fn: () => void): () => void {
+  _refreshIdeFns.add(fn)
+  return () => {
+    _refreshIdeFns.delete(fn)
+  }
+}
+
 let _refreshBoardHearthsFn: (() => void) | null = null
 export function registerBoardHearthsRefresh(fn: () => void): () => void {
   _refreshBoardHearthsFn = fn
@@ -198,6 +211,9 @@ const REFRESH_FNS: Record<RefreshTarget, () => void> = {
     for (const fn of _refreshActivityFns) fn()
   },
   fusion:    () => { void refreshFusionRuns() },
+  ide:       () => {
+    for (const fn of _refreshIdeFns) fn()
+  },
 }
 
 function scheduleTargetRefresh(
@@ -215,6 +231,31 @@ function scheduleBoardHearthsRefresh(delayMs = SSE_DEFAULT_DEBOUNCE_MS): void {
   scheduleRefresh('board-hearths', () => {
     _refreshBoardHearthsFn?.()
   }, delayMs)
+}
+
+// SSE events after which a keeper may have changed workspace files: tool runs
+// (which include Edit/Write) and turn completion (a coarser backstop that also
+// catches edits whose per-call event was coalesced). All already reach the
+// dashboard live; the IDE just never listened. keeper_tool_call already exists
+// in the FIXED_SSE_EVENT_TYPES allowlist (schemas/sse.ts) and is broadcast by
+// lib/keeper_tools_oas_handler_telemetry.ml.
+const IDE_WORKSPACE_REFRESH_EVENTS = new Set([
+  'keeper_tool_call',
+  'keeper_tool_skipped',
+  'keeper_turn_complete',
+])
+
+/**
+ * Fire the IDE workspace-store's live refresh, debounced and scoped to the
+ * `code` surface. The store re-fetches tree/diff/file/blame/annotations from
+ * the same HTTP endpoints it already uses; these are idempotent (server is the
+ * SSOT), so a coalesced refresh is safe. Off the code tab this is a no-op, so
+ * the singleton store does not fetch in the background.
+ */
+function scheduleIdeWorkspaceRefresh(): void {
+  if (_refreshIdeFns.size === 0) return
+  if (!routeWantsRefreshTarget(route.value, 'ide')) return
+  scheduleRefresh('ide-workspace', REFRESH_FNS.ide)
 }
 
 // --- Named handlers for complex events ---
@@ -505,6 +546,10 @@ export function routeServerPushEvent(event: SSEEvent): void {
 
   if (KEEPER_LIFECYCLE_EVENTS.has(normalizeMascEventType(routedType))) {
     handleKeeperLifecycle(event)
+  }
+
+  if (IDE_WORKSPACE_REFRESH_EVENTS.has(normalizeMascEventType(routedType))) {
+    scheduleIdeWorkspaceRefresh()
   }
 
   const approvalRefreshEvent =

@@ -9,6 +9,7 @@ import {
 } from '../../api/repositories'
 import {
   fetchWorkspaceFile,
+  fetchWorkspaceChildren,
   fetchGitBlame,
   fetchGitDiff,
   fetchWorkspaceTree,
@@ -33,6 +34,7 @@ import {
   fetchIdeAnnotations,
   type IdeAnnotation,
 } from '../../api/ide'
+import { registerIdeWorkspaceRefresh } from '../../sse-store'
 
 export interface IdeDataWorkspaceStore {
   readonly documentStore: CodeDocumentStore
@@ -55,9 +57,48 @@ export interface IdeDataWorkspaceStore {
   readonly dispose: () => void
 }
 
+export interface WorkspaceTreeIdentity {
+  readonly source: WorkspaceSource
+  readonly basePath: string | null
+}
+
 function firstFilePath(nodes: ReadonlyArray<{ readonly path: string; readonly hasChildren: boolean }>): string | null {
   const firstFile = nodes.find(node => !node.hasChildren)
   return firstFile?.path ?? null
+}
+
+export function workspaceTreeIdentity(
+  source: WorkspaceSource,
+  basePath: string | null,
+): WorkspaceTreeIdentity {
+  return { source, basePath }
+}
+
+export function sameWorkspaceTreeIdentity(
+  left: WorkspaceTreeIdentity | null,
+  right: WorkspaceTreeIdentity,
+): boolean {
+  if (left === null) return false
+  if (left.basePath !== right.basePath) return false
+  const leftSource = left.source
+  const rightSource = right.source
+  if (leftSource.kind !== rightSource.kind) return false
+  switch (leftSource.kind) {
+    case 'project':
+      return true
+    case 'repository':
+      return rightSource.kind === 'repository' && leftSource.repoId === rightSource.repoId
+    case 'repository_missing':
+      return rightSource.kind === 'repository_missing' && leftSource.repoId === rightSource.repoId
+    case 'repository_unknown':
+      return rightSource.kind === 'repository_unknown' && leftSource.repoId === rightSource.repoId
+    case 'playground':
+      return rightSource.kind === 'playground' && leftSource.keeper === rightSource.keeper
+    case 'playground_missing':
+      return rightSource.kind === 'playground_missing' && leftSource.keeper === rightSource.keeper
+    case 'keeper_unknown':
+      return rightSource.kind === 'keeper_unknown' && leftSource.keeper === rightSource.keeper
+  }
 }
 
 function isManagedMirrorRepository(repository: Repository): boolean {
@@ -114,7 +155,6 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     content: '',
   })
   const ownershipStore = createKeeperLineOwnershipStore(activeIdeFile.value)
-  const fileTreeStore = createFileTreeStore()
 
   const diffRowsSignal = signal<ReadonlyArray<UnifiedDiffRow>>([])
   const workspaceSourceSignal = signal<WorkspaceSource>({ kind: 'project' })
@@ -123,10 +163,29 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
   const activeRepositoryIdSignal = signal<string | null>(null)
   const annotationsSignal = signal<ReadonlyArray<IdeAnnotation>>([])
 
+  // Lazy tree: expanding a directory fetches its immediate children on demand.
+  // The loader reads the current keeper/repo at call time (not capture time),
+  // so it stays correct across repo/keeper switches. Diff badges are omitted on
+  // lazily-loaded nodes (server does not compute them per-subtree); they refresh
+  // on the next full tree load.
+  const fileTreeStore = createFileTreeStore({
+    loadChildren: (path: string) =>
+      fetchWorkspaceChildren(path, {
+        keeper: activeKeeperName.value || undefined,
+        repoId: activeRepositoryIdSignal.value,
+      }),
+  })
+
   /** Track repo IDs that returned unreachable workspace sources, to avoid re-selecting them. */
   const unreachableRepoIds = new Set<string>()
 
   let abortController = new AbortController()
+  // Identity of the workspace source the file tree was last seeded for.
+  // A matching identity means the next fetch is a live refresh of the same
+  // workspace, so the tree is reconciled (expansion + lazily-loaded children
+  // preserved) rather than re-seeded. Include the source payload and basePath
+  // so keeper/repo/fallback switches cannot retain stale lazy children.
+  let lastTreeIdentity: WorkspaceTreeIdentity | null = null
 
   const applyRepositories = (repositories: ReadonlyArray<Repository>): void => {
     const current = activeRepositoryIdSignal.value
@@ -151,8 +210,15 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       repositoriesSignal.value = []
     })
 
-  // React to file / keeper changes
-  const disposeEffect = effect(() => {
+  // Fetch the workspace snapshot for the current file/keeper/repo/task.
+  //
+  // Called two ways: reactively via the effect() below (on navigation-signal
+  // changes) and imperatively via the live SSE refresh (when a keeper edits
+  // files — see registerIdeWorkspaceRefresh). Both share `abortController`, so
+  // the latest call always wins and a live refresh cannot race a navigation
+  // refresh to stale data. The fetches are idempotent (server is SSOT), so a
+  // coalesced live+nav refresh is safe.
+  const runWorkspaceFetches = (): void => {
     const filePath = activeIdeFile.value
     const keeper = activeKeeperName.value
     const repoId = activeRepositoryIdSignal.value
@@ -171,7 +237,15 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
     // Load file tree (independent of active file — needed to suggest first file)
     fetchWorkspaceTree(2, opts).then(({ nodes, source, basePath }) => {
       if (signal.aborted) return
-      fileTreeStore.seed(nodes)
+      // Same source + base path ⇒ live refresh: keep the operator's expansion
+      // and any lazily-loaded children. A change ⇒ workspace switch: reset.
+      const treeIdentity = workspaceTreeIdentity(source, basePath)
+      if (sameWorkspaceTreeIdentity(lastTreeIdentity, treeIdentity)) {
+        fileTreeStore.reconcile(nodes)
+      } else {
+        fileTreeStore.seed(nodes)
+      }
+      lastTreeIdentity = treeIdentity
       workspaceSourceSignal.value = source
       workspaceBasePathSignal.value = basePath
 
@@ -244,7 +318,20 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       if (signal.aborted) return
       annotationsSignal.value = annotations
     }).catch(() => {})
+  }
+
+  // Re-run fetches on navigation-signal changes. Reading the signals
+  // synchronously inside runWorkspaceFetches registers them as effect
+  // dependencies (activeIdeFile, activeKeeperName, activeRepositoryId,
+  // selectedTask), so the effect re-fires exactly when they change.
+  const disposeEffect = effect(() => {
+    runWorkspaceFetches()
   })
+
+  // Live updates: refresh the workspace snapshot when a keeper edits files or
+  // completes a turn. The sse-store dispatch is debounced and scoped to the
+  // code surface, so this does not fetch while the user is on another tab.
+  const unregisterLiveRefresh = registerIdeWorkspaceRefresh(runWorkspaceFetches)
 
   return {
     documentStore,
@@ -279,6 +366,7 @@ export function createIdeDataWorkspaceStore(): IdeDataWorkspaceStore {
       annotationsSignal.subscribe(listener),
     dispose: () => {
       abortController.abort()
+      unregisterLiveRefresh()
       disposeEffect()
       ownershipStore.dispose()
     },

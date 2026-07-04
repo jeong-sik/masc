@@ -8,20 +8,19 @@ code-repo tasks claimed by design, monitoring, or offline-oriented keepers.
 The target failure modes are anti-patterns #4 (claim-chain), #5 (false
 force-release), #8 (re-claim cycle), and #11 (meta-anti-pattern).
 
-This is an admission-control design, not a provider/OAS behavior change.
+This is a future admission-control design, not a provider/OAS behavior change.
 
 ## Current Anchors
 
 The claim path already has useful gates:
 
 - `lib/keeper/keeper_tool_task_runtime.ml` handles keeper-visible
-  `keeper_task_claim` and applies goal scope plus WIP admission before calling
-  workspace claim functions.
+  `keeper_task_claim` and applies goal scope before calling workspace claim
+  functions.
 - `lib/keeper/keeper_runtime_contract.ml` resolves `active_goal_ids` into a
   claim `task_filter`, with explicit fallback reporting when scope widens.
 - `lib/workspace/workspace_task_schedule.mli` exposes `claim_next_r` with
-  `task_filter`, `admission_filter`, and `allow_scope_fallback`.
-- `lib/keeper/keeper_wip_admission.ml` prevents active WIP scope collisions.
+  `task_filter` and `allow_scope_fallback`.
 - `lib/task/tool_task_handlers.ml` handles the generic MCP claim/claim-next
   surfaces and must stay consistent with the keeper-visible path.
 - `Masc_domain.task` already carries `files`, `contract`, `created_by`,
@@ -61,7 +60,7 @@ must not be the only gate for code-vs-non-code assignment.
 
 A claim is admitted only when both are true:
 
-- the task is in the keeper's current goal/WIP scope, including any explicitly
+- the task is in the keeper's current goal scope, including any explicitly
   logged scope fallback
 - the keeper profile has execution capability for the task affordance
 
@@ -105,15 +104,15 @@ the classifier that the keeper permanently owns the domain.
 Prefer a small pure module first, then wire it into both claim surfaces:
 
 - New module candidate: `lib/keeper/keeper_claim_filter.ml`
-- Inputs: `keeper_meta`, `Masc_domain.task`, task-goal index, current active WIP
+- Inputs: `keeper_meta`, `Masc_domain.task`, task-goal index
 - Output: `Admit | Reject of workflow_rejection_payload`
-- Keeper path: call it in `lib/keeper/keeper_tool_task_runtime.ml` inside the
-  existing `wip_admission_filter` / explicit-claim path.
+- Keeper path: call it in `lib/keeper/keeper_tool_task_runtime.ml` after goal
+  scope resolution and before either explicit or next-task claim.
 - Generic MCP path: keep `lib/task/tool_task_handlers.ml` behavior aligned, or
   document why that surface intentionally bypasses keeper-profile admission.
 - Scheduling path: keep using `Workspace.claim_next_r` filters; do not move
   keeper-specific policy into `Workspace` unless the policy is expressed as a
-  generic `task_filter` or `admission_filter`.
+  generic `task_filter`.
 
 ## Tests
 
@@ -125,8 +124,8 @@ Prefer a small pure module first, then wire it into both claim surfaces:
 - explicit operator override admits only the named keeper/task pair
 - repeated bounce returns structured workflow rejection, not a generic invalid
   transition
-- regression check that `active_goal_ids` and WIP admission still run before or
-  alongside claim-affordance rejection
+- regression check that `active_goal_ids` scope and scope-fallback observation
+  still run before or alongside claim-affordance rejection
 
 ## Non-goals
 

@@ -245,7 +245,7 @@ implementation_prs: []             # [14181, 14550] 형식 (정수). RFC body �
 | 0242 | Continuity state as system-of-record (retire the prose summary filter) | Draft | 2eed0aa224 2026-06-21 | - |
 | 0243 | Memory OS confidence mutability via write-side fact upsert | Draft | 2eed0aa224 2026-06-21 | - |
 | 0244 | Memory OS recall: turn-seeded deterministic lexical retrieval, with provenanc... | Draft | 2eed0aa224 2026-06-21 | - |
-| 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Draft | 2eed0aa224 2026-06-21 | - |
+| 0245 | Exempt goalless tasks from the per-goal WIP claim cap | Withdrawn | 2eed0aa224 2026-06-21 | - |
 | 0246 | Wake-cascade Recovery Tombstone | Draft | 2eed0aa224 2026-06-21 | - |
 | 0247 | Memory OS purge + LLM-judgment rebuild — implementation plan (phase of RFC-0247) | Draft | 2eed0aa224 2026-06-21 | - |
 | 0248 | Announce-as-data — typed observation provenance for board activity | Draft | 2eed0aa224 2026-06-21 | - |

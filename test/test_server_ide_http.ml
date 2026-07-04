@@ -253,6 +253,23 @@ let test_post_cursors_rejects_invalid_focus_mode () =
       (json_string_member "invalid focus_mode response" "error" json))
 ;;
 
+let test_post_cursors_rejects_negative_column () =
+  with_ide_server (fun ~base_path ~state:_ ~router ->
+    let token = create_worker_token base_path "alice" in
+    let body = {|{"file_path":"lib/a.ml","line":7,"column":-1}|} in
+    let request =
+      http_request ~meth:`POST ~path:"/api/v1/ide/cursors" ~body ~token:(Some token) ()
+    in
+    let response = dispatch router request in
+    check_status "POST cursor with negative column returns 400" 400 response;
+    let json = response |> response_body |> Yojson.Safe.from_string in
+    check
+      string
+      "negative column error"
+      "column must be >= 0"
+      (json_string_member "negative column response" "error" json))
+;;
+
 let test_post_cursors_persists_valid_focus_mode () =
   with_ide_server (fun ~base_path ~state:_ ~router ->
     let token = create_worker_token base_path "alice" in
@@ -408,6 +425,8 @@ let () =
             test_post_cursors_rejects_client_keeper_id
         ; test_case "POST cursor rejects invalid focus_mode" `Quick
             test_post_cursors_rejects_invalid_focus_mode
+        ; test_case "POST cursor rejects negative column" `Quick
+            test_post_cursors_rejects_negative_column
         ; test_case "POST cursor persists valid focus_mode" `Quick
             test_post_cursors_persists_valid_focus_mode
         ; test_case "POST annotation requires auth" `Quick

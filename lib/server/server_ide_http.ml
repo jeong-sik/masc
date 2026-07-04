@@ -770,14 +770,22 @@ let add_routes router =
              (match find_string "file_path", find_int "line" with
               | Some file_path, Some line when line >= 1 ->
                 let column = find_int "column" in
-                let source =
-                  match find_string "source" with
-                  | Some source -> source
-                  | None ->
-                    (* DET-OK: absent source preserves legacy cursor telemetry. *)
-                    "editor"
-                in
-                (match cursor_focus_mode_field json with
+                (match column with
+                 | Some value when value < 0 ->
+                   Http.Response.json_value
+                     ~status:`Bad_request
+                     ~request
+                     (json_error "column must be >= 0")
+                     reqd
+                 | _ ->
+                   let source =
+                     match find_string "source" with
+                     | Some source -> source
+                     | None ->
+                       (* DET-OK: absent source preserves legacy cursor telemetry. *)
+                       "editor"
+                   in
+                   (match cursor_focus_mode_field json with
                  | Error msg ->
                    Http.Response.json_value
                      ~status:`Bad_request
@@ -825,7 +833,7 @@ let add_routes router =
                            ~status:`Internal_server_error
                            ~request
                            (json_error msg)
-                           reqd)))
+                           reqd))))
               | _ ->
                 Http.Response.json_value
                   ~status:`Bad_request

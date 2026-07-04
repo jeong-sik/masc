@@ -664,18 +664,26 @@ let run ~sw ~env ~host ~port ~base_path ~make_routes ~make_request_handler
          create_server_state) and before any runtime name resolution.
 
          fail-fast: a missing config path or a missing/broken [runtime].default
-         is fatal — the server cannot route turns without a default Runtime, so
-         booting into a half-configured state only defers the failure to the
-         first turn (runtime→Runtime vision: no silent fallback). *)
+         is fatal — the server cannot route turns without a default Runtime.
+         The OAS capability-catalog gate may degrade only by removing
+         uncatalogued runtimes from the active routing set; it never dispatches
+         through OAS provider_default. *)
       (match Runtime.config_path () with
        | Some config_path ->
-         (match Runtime.init_default_strict_report ~config_path with
-          | Ok () ->
+         (match Runtime.init_default_degraded_report ~config_path with
+          | Ok Runtime.Initialized ->
             Log.Server.info "Runtime default initialized: %s"
+              (Runtime.get_default_runtime_id ())
+          | Ok (Runtime.Initialized_degraded degradation) ->
+            Log.Server.warn
+              "Runtime default initialized in degraded catalog mode: %s"
+              (Runtime.startup_degradation_to_string degradation);
+            Log.Server.warn
+              "Runtime degraded effective default: %s"
               (Runtime.get_default_runtime_id ())
           | Error err ->
             Log.Server.error
-              "Runtime.init_default_strict failed (fatal, refusing to boot): %s"
+              "Runtime.init_default_degraded failed (fatal, refusing to boot): %s"
               (Runtime.strict_init_error_to_string err);
             exit 1)
        | None ->

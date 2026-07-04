@@ -1358,6 +1358,93 @@ let test_runtime_capability_gate_reports_missing_catalog_models () =
                  (Runtime.Missing_catalog_models report))
               "oas-models.toml"))
 
+let test_server_degraded_init_disables_uncatalogued_runtimes () =
+  let catalog =
+    "[[models]]\n\
+     id_prefix = \"good\"\n\
+     base = \"ollama\"\n\
+     max_context_tokens = 1024\n"
+  in
+  let runtime_toml =
+    "[providers.ollama]\n\
+     protocol = \"ollama-http\"\n\
+     endpoint = \"http://127.0.0.1:11434\"\n\
+     \n\
+     [models.good]\n\
+     api-name = \"good\"\n\
+     max-context = 1024\n\
+     \n\
+     [models.missing]\n\
+     api-name = \"missing-from-oas-catalog\"\n\
+     max-context = 1024\n\
+     \n\
+     [ollama.good]\n\
+     \n\
+     [ollama.missing]\n\
+     \n\
+     [runtime]\n\
+     default = \"ollama.missing\"\n\
+     librarian = \"ollama.missing\"\n\
+     media_failover = [\"ollama.missing\", \"ollama.good\"]\n\
+     \n\
+     [runtime.assignments]\n\
+     keeper_a = \"ollama.missing\"\n\
+     keeper_b = \"ollama.good\"\n\
+     \n\
+     [runtime.lanes.safe]\n\
+     candidates = [\"ollama.missing\", \"ollama.good\"]\n"
+  in
+  let snapshot = Runtime.For_testing.snapshot () in
+  Fun.protect
+    ~finally:(fun () -> Runtime.For_testing.restore snapshot)
+    (fun () ->
+       with_model_catalog_content catalog @@ fun () ->
+       with_temp_runtime_toml runtime_toml @@ fun path ->
+       match Runtime.init_default_degraded_report ~config_path:path with
+       | Error err ->
+         failf
+           "server degraded init should keep a catalog-known runtime alive: %s"
+           (Runtime.strict_init_error_to_string err)
+       | Ok Runtime.Initialized -> fail "expected degraded startup outcome"
+       | Ok (Runtime.Initialized_degraded degradation) ->
+         check string "configured default"
+           "ollama.missing"
+           degradation.configured_default_runtime_id;
+         check string "effective default"
+           "ollama.good"
+           degradation.effective_default_runtime_id;
+         check (list string) "active runtime ids"
+           [ "ollama.good" ]
+           (Runtime.get_runtime_ids ());
+         check (option string) "dropped assignment falls back to default"
+           None
+           (Runtime.runtime_id_for_keeper "keeper_a");
+         check (option string) "catalog-known assignment preserved"
+           (Some "ollama.good")
+           (Runtime.runtime_id_for_keeper "keeper_b");
+         check (option string) "librarian route dropped"
+           None
+           (Runtime.librarian_runtime_id ());
+         check (list string) "media failover keeps known ids only"
+           [ "ollama.good" ]
+           (Runtime.media_failover ());
+         (match Runtime.get_lane_by_id "safe" with
+          | None -> fail "lane should remain with its known candidate"
+          | Some lane ->
+            check (list string) "lane candidates keep known ids only"
+              [ "ollama.good" ]
+              (Runtime_lane.ordered_candidates lane));
+         check bool "runtime records startup degradation" true
+           (Runtime.startup_degraded ());
+         let json =
+           Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ())
+         in
+         let rendered = Yojson.Safe.to_string json in
+         check bool "json is operator-visible degraded" true
+           (String_util.contains_substring rendered "\"status\":\"degraded\"");
+         check bool "json names disabled runtime" true
+           (String_util.contains_substring rendered "ollama.missing"))
+
 let test_runtime_toml_max_concurrent_flows_to_candidate () =
   with_fake_runtime_model_catalog @@ fun () ->
   let content =
@@ -1737,6 +1824,9 @@ let () =
           test_case
             "runtime capability gate reports missing catalog models"
             `Quick test_runtime_capability_gate_reports_missing_catalog_models;
+          test_case
+            "server degraded init disables uncatalogued runtimes"
+            `Quick test_server_degraded_init_disables_uncatalogued_runtimes;
           test_case
             "runtime assignment rejects commented disabled binding"
             `Quick test_runtime_assignment_rejects_commented_disabled_binding;

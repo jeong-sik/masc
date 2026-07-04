@@ -1977,6 +1977,8 @@ let runtime_inventory_json () =
     [ "updated_at", `String (Masc_domain.now_iso ())
     ; "source", `String runtime_inventory_source
     ; "config_path", Json_util.string_opt_to_json (Runtime.config_path ())
+    ; ( "startup_degradation"
+      , Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()) )
     ; ( "summary"
       , `Assoc
           [ "providers", `Int (runtime_unique_count provider_ids)

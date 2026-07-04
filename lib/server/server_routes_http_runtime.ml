@@ -345,6 +345,8 @@ let make_health_probe_fields ?(listener = "http/1.1") ?full_health_url
       ("uptime", `String (health_uptime_string uptime_secs));
       ("sse_clients", `Int (Sse.client_count ()));
       ("startup", Server_startup_state.to_yojson ());
+      ("runtime_startup_degradation",
+       Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ()));
       ("subsystems", Subsystem_health.to_yojson ());
       ("logs", Log.Ring.summary_json ());
       ("gc", quick_gc_json ());
@@ -420,7 +422,8 @@ let health_status_rank = Health_status.rank_string
 let max_health_status = Health_status.max_string
 
 let full_health_operator_summary ~keeper_fleet_safety
-    ~keeper_identity_drift_json ~reaction_ledger_json ~keeper_config_schema_status
+    ~keeper_identity_drift_json ~reaction_ledger_json ~runtime_startup_degradation_json
+    ~keeper_config_schema_status
     ~keeper_config_schema_blocking ~keeper_config_schema_terminal_reason
     ~keeper_config_operator_action_required ~lazy_task_boot_guard_fires_total =
   let status = ref "ok" in
@@ -455,6 +458,8 @@ let full_health_operator_summary ~keeper_fleet_safety
   note_status "keeper_identity_drift" keeper_identity_drift_json
     (assoc_string_opt "terminal_reason" keeper_identity_drift_json);
   note_status "keeper_reaction_ledger" reaction_ledger_json None;
+  note_status "runtime_startup_degradation" runtime_startup_degradation_json
+    (assoc_string_opt "terminal_reason" runtime_startup_degradation_json);
   status := max_health_status !status keeper_config_schema_status;
   if keeper_config_operator_action_required || keeper_config_schema_blocking
   then
@@ -599,12 +604,16 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     int_of_float
       (Otel_metric_store.metric_total "masc_lazy_task_boot_guard_fired_total")
   in
+  let runtime_startup_degradation_json =
+    Runtime.startup_degradation_to_yojson (Runtime.startup_degradation ())
+  in
   let keeper_config_operator_action_required = keeper_config_schema_blocking in
   let overall_status, operator_action_required, operator_action_reasons =
     full_health_operator_summary
       ~keeper_fleet_safety
       ~keeper_identity_drift_json
       ~reaction_ledger_json
+      ~runtime_startup_degradation_json
       ~keeper_config_schema_status:
         (if keeper_config_schema_blocking then "blocked" else "ok")
       ~keeper_config_schema_blocking
@@ -631,6 +640,7 @@ let make_health_json ?(listener = "http/1.1") ?section_timings_ref request =
     ("uptime", `String (health_uptime_string uptime_secs));
     ("sse_clients", `Int (Sse.client_count ()));
     ("startup", Server_startup_state.to_yojson ());
+    ("runtime_startup_degradation", runtime_startup_degradation_json);
     ("subsystems", Subsystem_health.to_yojson ());
     (* Server log visibility belongs on the first health probe too.  Keep the
        payload cheap and redacted: only ring counters, latest metadata, and

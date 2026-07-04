@@ -716,26 +716,34 @@ let ingest_cursor_event
     ()
   =
   let column = Option.value column ~default:0 in
-  let focus_mode = Option.value focus_mode ~default:"editing" in
-  let timestamp_ms = now_ms () in
-  let json =
-    cursor_event_json
-      ~keeper_id
-      ~file_path
-      ~line
-      ~column
-      ?selection_end
-      ~focus_mode
-      ~last_update:timestamp_ms
-      ~tool_name:source
-      ~turn_id:""
-      ()
+  let focus_mode =
+    match focus_mode with
+    | None -> Some "editing"
+    | Some mode when valid_focus_mode mode -> Some mode
+    | Some _ -> None
   in
-  (try append_cursor ~base_dir:base_path ~partition:default_partition json
-   with exn ->
-     Printf.eprintf
-       "Ide_bridge.ingest_cursor_event error: %s\n%!"
-       (Printexc.to_string exn))
+  match focus_mode with
+  | None -> ()
+  | Some focus_mode ->
+    let timestamp_ms = now_ms () in
+    let json =
+      cursor_event_json
+        ~keeper_id
+        ~file_path
+        ~line
+        ~column
+        ?selection_end
+        ~focus_mode
+        ~last_update:timestamp_ms
+        ~tool_name:source
+        ~turn_id:""
+        ()
+    in
+    (try append_cursor ~base_dir:base_path ~partition:default_partition json
+     with exn ->
+       Printf.eprintf
+         "Ide_bridge.ingest_cursor_event error: %s\n%!"
+         (Printexc.to_string exn))
 ;;
 ;;
 

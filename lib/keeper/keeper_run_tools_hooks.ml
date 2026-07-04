@@ -190,9 +190,30 @@ let assemble_hooks
              | Some t -> Keeper_id.Task_id.to_string t
              | None -> "turn-" ^ string_of_int (List.length acc.tool_calls)
            in
+           (* task-1733: resolve the partition from the tool's actual edited
+              file (input.path / input.file_path), not [config.base_path].
+              base_path is the .masc project root, which almost always resolves
+              to the orphan partition; the edited file is what carries the
+              registered-repo attribution. Falls back to base_path only when the
+              tool input names no file (e.g. non-filesystem tools). *)
+           let tool_file_path =
+             let non_empty_string = function
+               | `String p when String.trim p <> "" -> Some p
+               | _ -> None
+             in
+             match non_empty_string (Yojson.Safe.Util.member "path" input) with
+             | Some p -> p
+             | None ->
+               (match
+                  non_empty_string (Yojson.Safe.Util.member "file_path" input)
+                with
+                | Some p -> p
+                | None -> config.base_path)
+           in
            let partition, _ =
              Keeper_tool_filesystem_runtime.resolve_partition_for_write
-               ~base_dir:config.base_path ~kind:"tool_event" ~file_path:config.base_path
+               ~base_dir:config.base_path ~kind:"tool_event"
+               ~file_path:tool_file_path
            in
            Agent_observation.emit_tool_event
              { base_path = config.base_path

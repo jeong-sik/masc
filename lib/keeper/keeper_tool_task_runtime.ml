@@ -244,60 +244,6 @@ let no_eligible_blocker_summary
 ;;
 
 
-let wip_admission_kind = "claim_wip_admission"
-
-let wip_admission_action =
-  "finish_or_release_existing_wip_before_claiming_more"
-;;
-
-let wip_admission_scope_note =
-  "This is a WIP claim-admission cap, not a request to create a new repo; do not create unrelated repos to bypass it."
-;;
-
-let wip_admission_rejection_json
-      (task_id, (rejection : Keeper_wip_admission.rejection))
-  =
-  `Assoc
-    [ "task_id", `String task_id
-    ; "reason", `String (Keeper_wip_admission.reject_reason_to_string rejection.reason)
-    ; "axis", `String (Keeper_wip_admission.reject_reason_axis rejection.reason)
-    ; "cap_kind", `String "wip_claim_admission"
-    ; "action", `String wip_admission_action
-    ; "scope_note", `String wip_admission_scope_note
-    ; "current", `Int rejection.current
-    ; "limit", `Int rejection.limit
-    ; "scope_key", `String rejection.scope_key
-    ]
-;;
-
-let wip_admission_rejection_action = function
-  | [] -> None
-  | (task_id, (rejection : Keeper_wip_admission.rejection)) :: _ ->
-    Some
-      (Printf.sprintf
-         "WIP admission rejected task %s: %s current=%d limit=%d scope=%s. ACTION: finish/release existing WIP in this scope before claiming more. %s"
-         task_id
-         (Keeper_wip_admission.reject_reason_to_string rejection.reason)
-         rejection.current
-         rejection.limit
-         rejection.scope_key
-         wip_admission_scope_note)
-;;
-
-let wip_admission_result_fields rejections =
-  match rejections with
-  | [] -> []
-  | rejections ->
-    [ ( "wip_admission"
-      , `Assoc
-          [ "kind", `String wip_admission_kind
-          ; "action", `String wip_admission_action
-          ; "rejected_count", `Int (List.length rejections)
-          ; "rejections", `List (List.map wip_admission_rejection_json rejections)
-            ] )
-      ]
-;;
-
 let stale_claim_release_fields releases =
   match releases with
   | [] -> []
@@ -525,65 +471,29 @@ let handle_keeper_task_tool
       | exception (Eio.Cancel.Cancelled _ as e) -> raise e
       | exception exn -> Error (Printexc.to_string exn)
     in
-    let wip_rejections = ref [] in
-    let task_goal_index = Workspace_goal_index.build_task_goal_index_for_config config in
-    let remember_wip_rejection task_id rejection =
-      if not (List.exists (fun (existing_id, _) -> String.equal existing_id task_id) !wip_rejections)
-      then wip_rejections := (task_id, rejection) :: !wip_rejections
-    in
-    let wip_admission_filter ~active_tasks task =
-      let active_items =
-        Keeper_wip_admission.active_items_of_tasks ~task_goal_index active_tasks
-      in
-      let scope =
-        Keeper_wip_admission.scope_of_task ~task_goal_index task
-      in
-      match Keeper_wip_admission.decide active_items ~scope with
-      | Keeper_wip_admission.Admit _ -> true
-      | Keeper_wip_admission.Reject rejection ->
-        remember_wip_rejection task.id rejection;
-        false
-    in
     let requested_task_id =
       Safe_ops.json_string ~default:"" "task_id" args |> String.trim
     in
     let explicit_claim_result () =
       let tasks = Workspace.get_tasks_raw config in
-      let claim_specific task =
-        let active_tasks =
-          List.filter
-            (fun (active : Masc_domain.task) ->
-               not (String.equal active.id requested_task_id))
-            tasks
-        in
-        if not (wip_admission_filter ~active_tasks task)
-        then
-          Workspace.Claim_next_no_eligible
-            { excluded_count = 1
-            ; blocked_count = 0
-            ; verification_blocked_count = 0
-            ; scope_excluded_count = 0
-            ; explicit_excluded_count = 1
-            ; claim_pool_candidate_count = 1
+      let claim_specific (task : Masc_domain.task) =
+        match
+          Workspace.claim_task_r
+            config
+            ~agent_name:meta.agent_name
+            ~task_id:requested_task_id
+            ()
+        with
+        | Ok outcome ->
+          Workspace.Claim_next_claimed
+            { task_id = requested_task_id
+            ; title = task.title
+            ; priority = task.priority
+            ; released_task_id = None
+            ; message = outcome.message
+            ; scope_widened = false
             }
-        else (
-          match
-            Workspace.claim_task_r
-              config
-              ~agent_name:meta.agent_name
-              ~task_id:requested_task_id
-              ()
-          with
-          | Ok outcome ->
-            Workspace.Claim_next_claimed
-              { task_id = requested_task_id
-              ; title = task.title
-              ; priority = task.priority
-              ; released_task_id = None
-              ; message = outcome.message
-              ; scope_widened = false
-              }
-          | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e))
+        | Error e -> Workspace.Claim_next_error (Masc_domain.masc_error_to_string e)
       in
       match
         List.find_opt
@@ -601,7 +511,6 @@ let handle_keeper_task_tool
         else
           Workspace.claim_next_r config ~agent_name:meta.agent_name
             ~task_filter:claim_goal_scope.task_filter
-            ~admission_filter:wip_admission_filter
             ~allow_scope_fallback:true
             ()
       in
@@ -610,7 +519,7 @@ let handle_keeper_task_tool
         | Error err ->
           Workspace.Claim_next_error
             (Printf.sprintf
-               "stale-claim release failed before WIP admission: %s"
+               "stale-claim release failed before claim: %s"
                err)
         | Ok _ -> claim_after_stale_release ()
       in
@@ -619,20 +528,19 @@ let handle_keeper_task_tool
       | Ok releases -> releases
       | Error _ -> []
     in
-      let wip_rejections = List.rev !wip_rejections in
     let auto_started_ok = ref false in
     let harness_completed = ref false in
     (match result with
      | Workspace.Claim_next_claimed { task_id; scope_widened; _ } ->
        sync_keeper_meta_current_task ~config ~meta ~task_id;
        (* Make the scope override visible: this is a claim outside the keeper's
-          active_goal_ids, taken because no in-scope task was admission-eligible
+          active_goal_ids, taken because no in-scope task was eligible
           (schedule-level fallback). Silent widening would let operators misread
           the keeper's scope. *)
        if scope_widened then
          Log.Keeper.info ~keeper_name:meta.name
            "goal-scope widened to all_tasks for claim of %s: no in-scope task was \
-            admission-eligible (active_goal_ids=[%s])"
+            eligible (active_goal_ids=[%s])"
            task_id
            (String.concat ", " meta.active_goal_ids);
        (* Guard: claim_next_r returns existing active tasks via Existing_claim
@@ -729,10 +637,7 @@ let handle_keeper_task_tool
           ; _
           } ->
         let action =
-          match wip_admission_rejection_action wip_rejections with
-          | Some rejection -> rejection
-          | None ->
-            no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count
+          no_eligible_action_for_claim_scope claim_goal_scope ~excluded_count
         in
         Printf.sprintf
           "No eligible tasks%s. %s %s"
@@ -847,7 +752,6 @@ let handle_keeper_task_tool
               | None -> [])
            @ claimed_task_fields
          @ stale_claim_release_fields stale_claim_releases
-           @ wip_admission_result_fields wip_rejections
            @
          match accountability_warning with
          | Some warning -> [ ("routing_warning", `String warning) ]

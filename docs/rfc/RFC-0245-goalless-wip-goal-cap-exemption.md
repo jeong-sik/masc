@@ -1,9 +1,9 @@
 ---
 rfc: "0245"
 title: "Exempt goalless tasks from the per-goal WIP claim cap"
-status: Draft
+status: Withdrawn
 created: 2026-06-15
-updated: 2026-06-15
+updated: 2026-07-04
 author: vincent
 supersedes: []
 superseded_by: null
@@ -11,13 +11,25 @@ related: ["0034", "0067", "0124", "0153"]
 implementation_prs: []
 ---
 
+## 0. Withdrawal
+
+This draft is withdrawn in favor of PR #23158. The chosen direction is to
+retire the keeper WIP cap gate entirely instead of preserving that gate with a
+special goalless-task exemption.
+
+The live claim contract after PR #23158 is:
+
+- keeper-visible claims resolve goal scope through the runtime contract;
+- `Workspace.claim_next_r` accepts a generic `task_filter` plus explicit
+  `allow_scope_fallback` reporting;
+- no keeper claim path performs a per-goal/goalless WIP-cap decision.
+
 ## 1. Motivation
 
-`lib/keeper/keeper_wip_admission.ml` gates `keeper_task_claim` with four caps
-(`default_caps`): global 16, per-repo 6, **per-goal 3**, per-category 4. Per
-`docs/design/claim-filter-design.md:24`, the module's purpose is to
-*"prevent active WIP scope collisions"* — i.e. stop multiple keepers from
-working the **same goal/repo** at once (merge conflicts, duplicated work).
+Historically, the keeper WIP-cap gate guarded `keeper_task_claim` with four
+caps (`default_caps`): global 16, per-repo 6, **per-goal 3**, per-category 4.
+Its purpose was to prevent active WIP scope collisions: stop multiple keepers
+from working the **same goal/repo** at once (merge conflicts, duplicated work).
 
 The per-goal cap buckets active WIP by `goal_key`:
 
@@ -55,6 +67,9 @@ goalless bucket should never have been a per-goal collision group.
 
 ## 2. Proposal
 
+This proposal is no longer the accepted implementation direction; see
+§0. The historical proposal was:
+
 Exempt the `goal_id = None` case from the per-goal cap. The global, per-repo,
 and per-category caps continue to apply to goalless WIP, so blast-radius
 backpressure is retained.
@@ -74,17 +89,17 @@ Exhaustive `Some`/`None` match (no catch-all), per the FSM/match discipline in
 
 ## 3. Non-Goals
 
+These were the non-goals of the withdrawn proposal:
+
 - Changing the per-goal cap **value** (3) or making it config-driven — separate.
 - Per-keeper (vs fleet-wide) WIP accounting — separate; this RFC keeps the
   existing fleet-wide semantics for the caps that still apply.
-- Removing the WIP gate entirely — rejected: the per-goal/per-repo collision
-  caps address real, recurring parallel-keeper conflicts in this fleet.
 - Forcing every task to carry a `goal_id` (which would also eliminate the
   `<none>` bucket) — a larger process change, out of scope.
 
 ## 4. Verification
 
-`test/test_keeper_wip_admission.ml` adds:
+The withdrawn proposal expected dedicated WIP-cap unit coverage for:
 
 - `goalless task exempt from goal cap` — `max_per_goal=1`, one goalless active
   item, goalless claim **admits** (would reject pre-change).

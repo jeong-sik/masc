@@ -64,12 +64,10 @@ val claim_next_r
   -> agent_name:string
   -> ?exclude_task_ids:string list
   -> ?task_filter:(Masc_domain.task -> bool)
-  -> ?admission_filter:
-       (active_tasks:Masc_domain.task list -> Masc_domain.task -> bool)
   -> ?allow_scope_fallback:bool
-       (** When [true] and no goal-scoped task is admission-eligible, widen the
-           claim pool to all_tasks (admission still enforced). Result carries
-           [scope_widened = true]. Default [false] preserves the hard scope. *)
+       (** When [true] and no goal-scoped task passes [task_filter], widen the
+           claim pool to all_tasks. Result carries [scope_widened = true].
+           Default [false] preserves the hard scope. *)
   -> unit
   -> Masc_domain.claim_next_result
 

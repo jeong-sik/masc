@@ -6,11 +6,14 @@ import type {
   DashboardConfigResolutionItem,
   DashboardRuntimeDiagnostic,
   DashboardRuntimeProbeResponse,
+  DashboardRuntimeProviderProbe,
+  DashboardRuntimeProviderSnapshot,
   DashboardRuntimeResolution,
   KeeperRuntimeResolved,
   KeeperRuntimeField,
 } from '../../api/dashboard'
 import { fetchDashboardRuntimeProbe } from '../../api/dashboard'
+import type { AsyncState } from '../../lib/async-state'
 import { MISSING_DATA_DASH, errorToString } from '../../lib/format-string'
 import { Btn } from '../btn'
 import { SectionCard } from '../common/card'
@@ -18,6 +21,18 @@ import { StatusChip } from '../common/status-chip'
 import { CopyIdButton } from '../common/copy-id-button'
 import { TextInput } from '../common/input'
 import { formatNumber } from '../../lib/format-number'
+import {
+  findRuntimeCatalogEntry,
+  loadRuntimeCatalog,
+  runtimeCatalogState,
+} from '../../lib/runtime-catalog-resource'
+import {
+  runtimeCatalogDeclaredSpec,
+  runtimeCatalogEffectiveCapabilities,
+  runtimeCatalogParameterPolicy,
+  runtimeCatalogRequestConfig,
+  runtimeCatalogSnapshotFacts,
+} from '../../lib/runtime-provider-summary'
 
 function ConfigCard({
   class: cx,
@@ -347,6 +362,42 @@ function providerProbeLabel(status: string | null | undefined, reachable: boolea
   }
 }
 
+function runtimeProbeCatalogEntry(
+  catalog: readonly DashboardRuntimeProviderSnapshot[],
+  probe: DashboardRuntimeProviderProbe,
+): DashboardRuntimeProviderSnapshot | null {
+  if (probe.runtime_id) {
+    const entry = findRuntimeCatalogEntry(catalog, probe.runtime_id)
+    if (entry) return entry
+  }
+  const providerId = probe.provider_id?.trim()
+  if (!providerId) return null
+  return catalog.find(entry => {
+    const ids = [entry.provider_id, entry.provider]
+    return ids.some(id => id?.trim() === providerId)
+  }) ?? null
+}
+
+function runtimeProbeCatalogStatus(
+  state: AsyncState<DashboardRuntimeProviderSnapshot[]>,
+  probe: DashboardRuntimeProviderProbe,
+): string {
+  if (state.status === 'idle' || state.status === 'loading') return `catalog ${state.status}`
+  if (state.status === 'error') return `catalog error: ${state.message}`
+  return `catalog missing for ${probe.runtime_id ?? probe.provider_id ?? '(unknown runtime)'}`
+}
+
+function runtimeProbeCatalogRows(entry: DashboardRuntimeProviderSnapshot): readonly (readonly [string, string])[] {
+  const rows: Array<readonly [string, string | null]> = [
+    ['snapshot', runtimeCatalogSnapshotFacts(entry)],
+    ['effective', runtimeCatalogEffectiveCapabilities(entry)],
+    ['request', runtimeCatalogRequestConfig(entry)],
+    ['declared', runtimeCatalogDeclaredSpec(entry)],
+    ['policy', runtimeCatalogParameterPolicy(entry)],
+  ]
+  return rows.filter((row): row is readonly [string, string] => typeof row[1] === 'string' && row[1].trim() !== '')
+}
+
 const KEEPER_RUNTIME_ROWS: Array<{
   key: keyof KeeperRuntimeResolved
   label: string
@@ -472,6 +523,7 @@ function RuntimeProbePanel() {
 
   useEffect(() => {
     void load(false)
+    loadRuntimeCatalog()
   }, [])
 
   const probe = state.value.data?.probe
@@ -481,6 +533,11 @@ function RuntimeProbePanel() {
   const providerProbes = probe?.providers ?? []
   const providerSummary = probe?.summary ?? null
   const isProviderProbe = providerProbes.length > 0
+  const catalog = runtimeCatalogState.value
+  const catalogEntries = catalog.status === 'loaded' ? catalog.data : []
+  const catalogSummary = catalog.status === 'loaded'
+    ? `${catalogEntries.length} runtime specs`
+    : catalog.status
 
   return html`
     <${ConfigCard} class="mt-4 px-4 py-4">
@@ -532,9 +589,13 @@ function RuntimeProbePanel() {
                     <${RuntimeMetaRow} label="failed" value=${String(providerSummary?.failed ?? 0)} />
                     <${RuntimeMetaRow} label="skipped" value=${String(providerSummary?.skipped ?? 0)} />
                     <${RuntimeMetaRow} label="default runtime" value=${providerSummary?.default_runtime_id ?? MISSING_DATA_DASH} />
+                    <${RuntimeMetaRow} label="provider catalog" value=${catalogSummary} />
                   </div>
                   <div class="mt-3 flex flex-col gap-2">
-                    ${providerProbes.map(item => html`
+                    ${providerProbes.map(item => {
+                      const catalogEntry = runtimeProbeCatalogEntry(catalogEntries, item)
+                      const catalogRows = catalogEntry ? runtimeProbeCatalogRows(catalogEntry) : []
+                      return html`
                       <div class="v2-lab-row rounded-[var(--r-1)] border border-[var(--color-border-default)] bg-[var(--color-bg-hover)] px-3 py-2">
                         <div class="flex flex-wrap items-center justify-between gap-2">
                           <div class="min-w-0">
@@ -549,8 +610,27 @@ function RuntimeProbePanel() {
                         ${item.error
                           ? html`<div class="mt-2 text-2xs text-[var(--rose-fg)]">${item.error}</div>`
                           : null}
+                        ${catalogRows.length > 0
+                          ? html`
+                            <div
+                              class="mt-2 grid gap-1 border-t border-[var(--color-border-default)]/60 pt-2 text-2xs"
+                              data-testid="runtime-probe-catalog-spec"
+                            >
+                              ${catalogRows.map(([label, value]) => html`
+                                <div class="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-2">
+                                  <span class="text-[var(--color-fg-muted)]">${label}</span>
+                                  <span class="min-w-0 break-words font-mono text-[var(--color-fg-secondary)]" title=${value}>${value}</span>
+                                </div>
+                              `)}
+                            </div>
+                          `
+                          : html`
+                            <div class="mt-2 text-2xs text-[var(--color-fg-muted)]" data-testid="runtime-probe-catalog-status">
+                              ${runtimeProbeCatalogStatus(catalog, item)}
+                            </div>
+                          `}
                       </div>
-                    `)}
+                    `})}
                   </div>
                 `
               : html`

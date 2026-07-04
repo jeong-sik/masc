@@ -4,14 +4,11 @@ module Admission = Masc.Keeper_wip_admission
 module Task_runtime = Masc.Keeper_tool_task_runtime
 module U = Yojson.Safe.Util
 
-(* Cap-mechanism tests pass a concrete repo string; wrap it as [Some] so the
-   per-repo cap is exercised. [task_repo] resolves real tasks to [None] (no repo
-   attribution in the task model), covered separately below. *)
-let scope ?goal_id ?(category = Admission.Fix) repo =
-  { Admission.repo = Some repo; goal_id; category }
+let scope ?goal_id ?(category = Admission.Fix) () =
+  { Admission.goal_id; category }
 
-let item ?goal_id ?(category = Admission.Fix) repo id =
-  { Admission.id; scope = scope ?goal_id ~category repo }
+let item ?goal_id ?(category = Admission.Fix) id =
+  { Admission.id; scope = scope ?goal_id ~category () }
 
 let task ?(status = Masc_domain.Todo) ?(title = "fix: task") id =
   { Masc_domain.id
@@ -31,14 +28,13 @@ let task ?(status = Masc_domain.Todo) ?(title = "fix: task") id =
 
 let caps =
   { Admission.max_global = Some 10
-  ; max_per_repo = Some 2
   ; max_per_goal = Some 1
   ; max_per_category = Some 3
   }
 
 let test_admits_below_caps () =
-  let active = [ item ~goal_id:"goal-a" "repo-a" "one" ] in
-  match Admission.decide ~caps active ~scope:(scope ~goal_id:"goal-b" "repo-a") with
+  let active = [ item ~goal_id:"goal-a" "one" ] in
+  match Admission.decide ~caps active ~scope:(scope ~goal_id:"goal-b" ()) with
   | Admission.Admit { active_count_after_admit } ->
     check int "active after admit" 2 active_count_after_admit
   | Reject rejection ->
@@ -46,24 +42,9 @@ let test_admits_below_caps () =
       (Printf.sprintf "unexpected reject: %s"
          (Admission.reject_reason_to_string rejection.reason))
 
-let test_rejects_repo_cap_before_goal_cap () =
-  let active =
-    [ item ~goal_id:"goal-a" "repo-a" "one"
-    ; item ~goal_id:"goal-b" "repo-a" "two"
-    ]
-  in
-  match Admission.decide ~caps active ~scope:(scope ~goal_id:"goal-c" "repo-a") with
-  | Admission.Admit _ -> fail "expected repo cap rejection"
-  | Reject rejection ->
-    check string "reason" "repo_cap"
-      (Admission.reject_reason_to_string rejection.reason);
-    check int "current" 2 rejection.current;
-    check int "limit" 2 rejection.limit;
-    check string "scope key" "repo:repo-a" rejection.scope_key
-
 let test_rejects_goal_cap () =
-  let active = [ item ~goal_id:"goal-a" "repo-a" "one" ] in
-  match Admission.decide ~caps active ~scope:(scope ~goal_id:"goal-a" "repo-b") with
+  let active = [ item ~goal_id:"goal-a" "one" ] in
+  match Admission.decide ~caps active ~scope:(scope ~goal_id:"goal-a" ()) with
   | Admission.Admit _ -> fail "expected goal cap rejection"
   | Reject rejection ->
     check string "reason" "goal_cap"
@@ -71,16 +52,16 @@ let test_rejects_goal_cap () =
     check string "axis" "goal" (Admission.reject_reason_axis rejection.reason);
     check string "scope key" "goal:goal-a" rejection.scope_key
 
-let test_rejects_category_cap_across_repos () =
+let test_rejects_category_cap () =
   let active =
-    [ item ~goal_id:"goal-a" ~category:Admission.Refactor "repo-a" "one"
-    ; item ~goal_id:"goal-b" ~category:Admission.Refactor "repo-b" "two"
-    ; item ~goal_id:"goal-c" ~category:Admission.Refactor "repo-c" "three"
+    [ item ~goal_id:"goal-a" ~category:Admission.Refactor "one"
+    ; item ~goal_id:"goal-b" ~category:Admission.Refactor "two"
+    ; item ~goal_id:"goal-c" ~category:Admission.Refactor "three"
     ]
   in
   match
     Admission.decide ~caps active
-      ~scope:(scope ~goal_id:"goal-d" ~category:Admission.Refactor "repo-d")
+      ~scope:(scope ~goal_id:"goal-d" ~category:Admission.Refactor ())
   with
   | Admission.Admit _ -> fail "expected category cap rejection"
   | Reject rejection ->
@@ -90,21 +71,21 @@ let test_rejects_category_cap_across_repos () =
 
 let test_active_counts_surface_all_axes () =
   let active =
-    [ item ~goal_id:"goal-a" ~category:Admission.Fix "repo-a" "one"
-    ; item ~goal_id:"goal-b" ~category:Admission.Docs "repo-a" "two"
-    ; item ~goal_id:"goal-a" ~category:Admission.Fix "repo-b" "three"
+    [ item ~goal_id:"goal-a" ~category:Admission.Fix "one"
+    ; item ~goal_id:"goal-b" ~category:Admission.Docs "two"
+    ; item ~goal_id:"goal-a" ~category:Admission.Fix "three"
     ]
   in
-  let counts = Admission.active_counts ~scope:(scope ~goal_id:"goal-a" "repo-a") active in
+  let counts = Admission.active_counts ~scope:(scope ~goal_id:"goal-a" ()) active in
   check (list (pair string int)) "counts"
-    [ "global", 3; "repo:repo-a", 2; "goal:goal-a", 2; "category:fix", 2 ]
+    [ "global", 3; "goal:goal-a", 2; "category:fix", 2 ]
     counts
 
 let test_decision_json_rejects_with_scope_key () =
   let decision =
     Admission.decide
       ~caps:{ caps with max_global = Some 0 }
-      [] ~scope:(scope "repo-a")
+      [] ~scope:(scope ())
   in
   let json = Admission.decision_to_json decision in
   check string "reason" "global_cap"
@@ -114,7 +95,7 @@ let test_decision_json_rejects_with_scope_key () =
   check string "scope key" "global"
     Yojson.Safe.Util.(json |> member "scope_key" |> to_string)
 
-let test_scope_of_task_has_no_repo_uses_goal_and_title_category () =
+let test_scope_of_task_uses_goal_and_title_category () =
   let task_goal_index = Hashtbl.create 1 in
   Hashtbl.replace task_goal_index "task-001" ["goal-a"];
   let scope =
@@ -124,32 +105,8 @@ let test_scope_of_task_has_no_repo_uses_goal_and_title_category () =
          ~title:"refactor(keeper): split claim gate"
          "task-001")
   in
-  (* The task model carries no repo, so the scope resolves to [None] — exempt
-     from the per-repo cap rather than collapsed into a fleet-wide bucket. *)
-  check (option string) "repo" None scope.repo;
   check (option string) "goal" (Some "goal-a") scope.goal_id;
   check string "category" "refactor" (Admission.category_to_string scope.category)
-
-let test_repoless_tasks_exempt_from_repo_cap () =
-  (* Regression guard for the WIP-cap collapse: many repoless ([None]) tasks must
-     NOT share a single fleet-wide repo bucket. With [max_per_repo = Some 2] and
-     three already-active repoless items, a fourth repoless task still admits
-     (only the global cap bounds it). Before the fix, [task_repo] returned a
-     shared fallback string, so this rejected with repo_cap once 2 were active. *)
-  let active =
-    [ { Admission.id = "one"; scope = { Admission.repo = None; goal_id = None; category = Admission.Fix } }
-    ; { Admission.id = "two"; scope = { Admission.repo = None; goal_id = None; category = Admission.Docs } }
-    ; { Admission.id = "three"; scope = { Admission.repo = None; goal_id = None; category = Admission.Chore } }
-    ]
-  in
-  let repoless_scope = { Admission.repo = None; goal_id = None; category = Admission.Ci } in
-  match Admission.decide ~caps active ~scope:repoless_scope with
-  | Admission.Admit { active_count_after_admit } ->
-    check int "active after admit" 4 active_count_after_admit
-  | Reject rejection ->
-    fail
-      (Printf.sprintf "repoless task should be exempt from repo cap, got %s"
-         (Admission.reject_reason_to_string rejection.reason))
 
 let temp_dir () =
   let dir = Filename.temp_file "test_keeper_wip_admission_" "" in
@@ -431,8 +388,8 @@ let test_goalless_task_exempt_from_goal_cap () =
      when the goalless ([None]) bucket is at/over [max_per_goal]. With
      max_per_goal=1 and one goalless active item, the old behavior rejected;
      the exemption must now admit. *)
-  let active = [ item "repo-a" "one" ] in
-  match Admission.decide ~caps active ~scope:(scope "repo-b") with
+  let active = [ item "one" ] in
+  match Admission.decide ~caps active ~scope:(scope ()) with
   | Admission.Admit { active_count_after_admit } ->
     check int "active after admit" 2 active_count_after_admit
   | Reject rejection ->
@@ -441,18 +398,18 @@ let test_goalless_task_exempt_from_goal_cap () =
          (Admission.reject_reason_to_string rejection.reason))
 
 let test_goalless_tasks_never_goal_capped () =
-  (* RFC-0245: many goalless active items, each in a distinct repo/category so
-     only the per-goal cap could fire — it must not, because goalless tasks
-     share no goal scope to collide on. *)
+  (* RFC-0245: many goalless active items, each in a distinct category so only
+     the per-goal cap could fire — it must not, because goalless tasks share no
+     goal scope to collide on. *)
   let active =
-    [ item ~category:Admission.Fix "repo-a" "one"
-    ; item ~category:Admission.Docs "repo-b" "two"
-    ; item ~category:Admission.Refactor "repo-c" "three"
+    [ item ~category:Admission.Fix "one"
+    ; item ~category:Admission.Docs "two"
+    ; item ~category:Admission.Refactor "three"
     ]
   in
   match
     Admission.decide ~caps active
-      ~scope:(scope ~category:Admission.Test "repo-d")
+      ~scope:(scope ~category:Admission.Test ())
   with
   | Admission.Admit _ -> ()
   | Reject rejection ->
@@ -464,11 +421,11 @@ let test_goalless_still_bounded_by_global_cap () =
   (* RFC-0245 non-goal: exempting goalless from the *goal* cap must NOT remove
      the global blast-radius cap. With max_global=1 and one active item, a
      goalless claim is still rejected — by global_cap, not goal_cap. *)
-  let active = [ item "repo-a" "one" ] in
+  let active = [ item "one" ] in
   match
     Admission.decide
       ~caps:{ caps with max_global = Some 1 }
-      active ~scope:(scope "repo-b")
+      active ~scope:(scope ())
   with
   | Admission.Admit _ -> fail "expected global cap rejection for goalless claim"
   | Reject rejection ->
@@ -489,7 +446,6 @@ let with_env name value f =
 
 let wip_env_keys =
   [ "MASC_KEEPER_WIP_MAX_GLOBAL"
-  ; "MASC_KEEPER_WIP_MAX_PER_REPO"
   ; "MASC_KEEPER_WIP_MAX_PER_GOAL"
   ; "MASC_KEEPER_WIP_MAX_PER_CATEGORY"
   ]
@@ -504,7 +460,6 @@ let test_default_caps_unset_uses_historical_defaults () =
   else (
     let c = Admission.default_caps () in
     check (option int) "max_global default" (Some 16) c.Admission.max_global;
-    check (option int) "max_per_repo default" (Some 12) c.max_per_repo;
     check (option int) "max_per_goal default" (Some 3) c.max_per_goal;
     check (option int) "max_per_category default" (Some 4) c.max_per_category)
 
@@ -515,10 +470,10 @@ let test_default_caps_positive_env_override () =
   check (option int) "other axes untouched" (Some 3) c.max_per_goal
 
 let test_default_caps_disable_via_zero_and_negative () =
-  with_env "MASC_KEEPER_WIP_MAX_PER_REPO" "0" @@ fun () ->
+  with_env "MASC_KEEPER_WIP_MAX_GLOBAL" "0" @@ fun () ->
   with_env "MASC_KEEPER_WIP_MAX_PER_GOAL" "-1" @@ fun () ->
   let c = Admission.default_caps () in
-  check (option int) "per_repo disabled by 0" None c.Admission.max_per_repo;
+  check (option int) "global disabled by 0" None c.Admission.max_global;
   check (option int) "per_goal disabled by negative (clamped to 0)" None c.max_per_goal
 
 let test_default_caps_unparseable_keeps_default () =
@@ -543,19 +498,14 @@ let () =
   run "Keeper_wip_admission"
     [ ( "caps"
       , [ test_case "admits below caps" `Quick test_admits_below_caps
-        ; test_case "rejects repo cap before goal cap" `Quick
-            test_rejects_repo_cap_before_goal_cap
         ; test_case "rejects goal cap" `Quick test_rejects_goal_cap
-        ; test_case "rejects category cap across repos" `Quick
-            test_rejects_category_cap_across_repos
+        ; test_case "rejects category cap" `Quick test_rejects_category_cap
         ; test_case "active counts surface all axes" `Quick
             test_active_counts_surface_all_axes
         ; test_case "decision JSON rejects with scope key" `Quick
             test_decision_json_rejects_with_scope_key
-        ; test_case "task scope has no repo, uses goal and title category" `Quick
-            test_scope_of_task_has_no_repo_uses_goal_and_title_category
-        ; test_case "repoless tasks exempt from repo cap" `Quick
-            test_repoless_tasks_exempt_from_repo_cap
+        ; test_case "task scope uses goal and title category" `Quick
+            test_scope_of_task_uses_goal_and_title_category
           ; test_case "keeper_task_claim reports other keepers WIP cap" `Quick
               test_keeper_task_claim_reports_other_keepers_wip_cap
         ; test_case "keeper_task_claim releases stale owners before WIP admission"

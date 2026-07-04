@@ -94,7 +94,7 @@ let test_partition_resolution_uses_project_root_for_masc_base_path () =
     (match Repo_store.save_all ~base_path [ sample_repo ] with
      | Ok () -> ()
      | Error msg -> fail ("repo save failed: " ^ msg));
-    let config = Workspace.default_config (Filename.concat base_path ".masc") in
+    let config = Masc.Workspace.default_config (Filename.concat base_path ".masc") in
     let partition, rel_path =
       Masc.Keeper_run_tools_hooks.observation_partition_for_tool_input
         ~config
